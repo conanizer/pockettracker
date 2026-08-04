@@ -20,6 +20,12 @@ constexpr int BOX_X   = (DESIGN_W - BOX_W) / 2;   // 30
 constexpr int INNER_X = BOX_X + 10;               // 40
 constexpr int CELL_W  = 80;
 
+// The one place the grid's height meets the screen it has to fit on. Derived rather than a copied
+// row count: the same bound written as a number in fx_helper.h read `rows <= 6` long after the box
+// had room for more than twice that, which turns "add an effect" into a redesign it never was.
+static_assert(box_h(FX_GRID_FULL.rows) <= DESIGN_H,
+              "the FX helper grid is taller than the screen — its last row would draw outside the box");
+
 // The ONE backdrop constant (canvas.h) — the shell matches it in the letterbox bars / bezel gap (B4),
 // so this must be the shared value, not a hand-copied 0xCC000000 that could drift and reveal a seam.
 constexpr Argb BACKDROP = MODAL_BACKDROP;

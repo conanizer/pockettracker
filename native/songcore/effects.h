@@ -85,6 +85,21 @@ constexpr int FX_CCD      = 0x2A;  // CCD  instrument CC slot D
 constexpr int FX_VTR      = 0x2B;  // VTR  this track's mixer fader (00-FF)
 constexpr int FX_VMV      = 0x2C;  // VMV  the master fader (00-FF), global
 
+// ─── The automation pair ──────────────────────────────────────────────────────────────────────────
+//
+// AUS opens a ramp on the effect in the slot to its LEFT and carries the CURVE; AUF, on a later step
+// of the same phrase and track, carries the DESTINATION. The pairing rule, which parameters can be
+// ramped and why, all live in `automation.h` — this file only names the two codes.
+//
+// ⚠️ **NEITHER APPEARS IN `resolve_step_params` BELOW, AND THAT IS THE DESIGN RATHER THAN AN
+// OMISSION.** Resolution folds three slots into one bundle last-wins and throws the slot NUMBER away.
+// AUS's whole meaning is positional — "the automatable effect nearest to my left" — so a resolved
+// bundle cannot express it, and giving it a field would be a field whose value could not answer the
+// question. Pairing reads the step's slots directly (`find_ramps`), and both codes fall through
+// resolution's default no-op arm exactly as ARP / CHA / RND do.
+constexpr int FX_AUS      = 0x2D;  // AUS  automation start: xx = curve (00 ease-in, 80 linear, FF ease-out)
+constexpr int FX_AUF      = 0x2E;  // AUF  automation finish: xx = destination value
+
 /** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
 inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
@@ -104,6 +119,7 @@ inline std::string effect_name(int code) {
         case FX_PAN: return "PAN"; case FX_RSEND: return "REV"; case FX_DSEND: return "DEL";
         case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
+        case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
         case FX_MPG: return "MPG"; case FX_MPB: return "MPB";
         case FX_CCA: return "CCA"; case FX_CCB: return "CCB";
         case FX_CCC: return "CCC"; case FX_CCD: return "CCD";
@@ -117,7 +133,7 @@ inline std::string effect_name(int code) {
 // MPG joins the 0x7F group and does not merely follow it: a MIDI program number IS seven bits, so a
 // cell that let you type FF would be a cell whose top half sends something else (`& 0x7F` folds 0x80
 // back onto program 0). MPB stays 0xFF — it is the wide 14-bit value's top byte, not a 7-bit one.
-inline int effect_value_max(int effect_type) {
+inline constexpr int effect_value_max(int effect_type) {
     return (effect_type == FX_TBL || effect_type == FX_GRV ||
             effect_type == FX_EQN || effect_type == FX_EQM ||
             effect_type == FX_MPG) ? 127 : 255;
@@ -139,6 +155,8 @@ inline constexpr int EFFECT_TYPES[] = {
     FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM,
     // The mixer faders, beside the other things that act on the bus rather than the note
     FX_VTR, FX_VMV,
+    // The automation pair, last of the non-MIDI effects — they act on another slot, not on a bus
+    FX_AUS, FX_AUF,
     // The MIDI commands (see the static_assert below — they must stay the LAST six)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
 };

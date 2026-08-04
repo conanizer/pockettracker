@@ -57,27 +57,10 @@ inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi
 // hex_to_float MOVED to model.h (MIDI phase E) — the MIDI-in router needs it and has no business
 // including the sequencer, exactly as note_to_midi moved for the UI. Callers here are unchanged.
 
-// Indexed FX access on a PhraseStep (model.h keeps the flat fx{1,2,3}{Type,Value}) — mirrors
-// PhraseStep.fx / fxType / setFx / setFxValue.
-inline int  step_fx_type(const PhraseStep& s, int slot) {
-    return slot == 1 ? s.fx1Type : slot == 2 ? s.fx2Type : slot == 3 ? s.fx3Type : 0;
-}
-inline int  step_fx_value(const PhraseStep& s, int slot) {
-    return slot == 1 ? s.fx1Value : slot == 2 ? s.fx2Value : slot == 3 ? s.fx3Value : 0;
-}
-inline void step_set_fx(PhraseStep& s, int slot, int type, int value) {
-    if (slot == 1) { s.fx1Type = type; s.fx1Value = value; }
-    else if (slot == 2) { s.fx2Type = type; s.fx2Value = value; }
-    else if (slot == 3) { s.fx3Type = type; s.fx3Value = value; }
-}
-inline void step_set_fx_value(PhraseStep& s, int slot, int value) {
-    if (slot == 1) s.fx1Value = value;
-    else if (slot == 2) s.fx2Value = value;
-    else if (slot == 3) s.fx3Value = value;
-}
-inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
-// `chain_is_empty` moved to model.h in phase C — the MIDI clock's SPP has to measure a song row with
-// the same ruler this scheduler does. See the note there.
+// `step_fx_type` / `step_fx_value` / `step_set_fx` / `step_set_fx_value` / `step_empty` live in
+// model.h beside PhraseStep, and `chain_is_empty` with them — a step's slot indexing and a chain
+// row's emptiness are both read by layers that have no business including the sequencer. See the
+// notes there.
 
 enum class PlaybackMode { STOPPED, PHRASE, CHAIN, SONG };
 

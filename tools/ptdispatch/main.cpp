@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "audio-engine.h"
+#include "songcore/automation.h"   // §47 — the AUS/AUF pairing, which is pure and has no other home
 #include "songcore/host.h"
 #include "songcore/wav_writer.h"   // the cue-point round trip (S6b)
 #include "ui/app_state.h"
@@ -5143,14 +5144,26 @@ int main() {
         ok(state.fxHelper.isOpen, "MIDI GATE [no-midi]: (setup) A+UP opens the FX picker");
         eq(state.fxHelper.grid.count, songcore::EFFECT_TYPE_COUNT_NO_MIDI,
            "⭐⭐ MIDI GATE [no-midi]: the picker holds the same effects the cell can be stepped to");
-        eq(state.fxHelper.grid.rows, 5, "MIDI GATE [no-midi]: …in five rows, not six");
+        // ⚠️ The row counts are PINS and they move whenever EFFECT_TYPES grows — 5/6 held while the
+        // lists were 30/36, 6/7 holds at 32/38. The stable claim is the one below them: hiding the
+        // MIDI six really does cost the picker a row, which is the whole reason the count is a
+        // parameter. Both are kept — the pin makes an accidental re-shape loud, the difference makes
+        // a deliberate one a one-line update.
+        const int rowsNoMidi = state.fxHelper.grid.rows;
+        eq(rowsNoMidi, 6, "MIDI GATE [no-midi]: …in six rows");
         state.fxHelper = FxHelperState{};
 
         state.caps = PlatformCaps::sdl(true);
         dispatch.on_a_up();
         eq(state.fxHelper.grid.count, songcore::EFFECT_TYPE_COUNT,
            "MIDI GATE [midi]: the picker holds every effect (the control)");
-        eq(state.fxHelper.grid.rows, 6, "MIDI GATE [midi]: …in six rows");
+        const int rowsMidi = state.fxHelper.grid.rows;
+        std::printf("       [info] FX picker rows: %d effects in %d rows / %d hidden-MIDI in %d\n",
+                    songcore::EFFECT_TYPE_COUNT, rowsMidi,
+                    songcore::EFFECT_TYPE_COUNT_NO_MIDI, rowsNoMidi);
+        eq(rowsMidi, 7, "MIDI GATE [midi]: …in seven rows");
+        eq(rowsMidi - rowsNoMidi, 1,
+           "MIDI GATE: hiding the MIDI six costs the picker exactly one row");
         state.fxHelper = FxHelperState{};
 
         // Leave the harness as it was found.
@@ -5479,6 +5492,295 @@ int main() {
                         flat.before > 0 ? 100.0 * afterVmv.before / flat.before : 0.0);
             ok(afterVmv.before > flat.before * 0.90,
                "⚠️ VMV: stop() restored the authored MASTER fader too");
+        }
+    }
+
+    // ── 47. AUS / AUF — THE PAIRING RULE, AND THE REGISTRY IT READS ──────────────────────────────
+    //
+    // Pairing is a pure function over a phrase (songcore/automation.h) and nothing else in this tree
+    // can see it: it emits no events, so ptplay has nothing to compare; it makes no sound, so
+    // ptrender has nothing to measure; and it is not a cell, so ptinput never runs it. Every claim
+    // below is therefore hand-derived from the rule as written, and the two halves are each other's
+    // control — a `find_ramps` that always returned nothing would pass every "inert" check on its
+    // own, and does not survive being asked for the ramps that ARE there.
+    {
+        using songcore::AUTOMATABLE_PARAMS;
+        using songcore::find_ramps;
+        using songcore::RampSpec;
+
+        auto fx = [](songcore::Phrase& ph, int step, int slot, int type, int value) {
+            songcore::step_set_fx(ph.steps[static_cast<size_t>(step)], slot, type, value);
+        };
+
+        // A ramp as one printable token — every field that decides what the emitter will do with it.
+        auto spec_str = [](const RampSpec& r) {
+            char b[192];
+            std::snprintf(b, sizeof b, "%s cc%d %s %d-%d %02X>%02X curve %02X slots %d/%d",
+                          songcore::effect_name(r.fxCode).c_str(), static_cast<int>(r.ccId),
+                          r.global ? "global" : "track", r.ausStep, r.aufStep,
+                          r.startByte, r.destByte, r.curveByte, r.paramSlot, r.ausSlot);
+            return std::string(b);
+        };
+        auto specs_str = [&](const std::vector<RampSpec>& v) {
+            if (v.empty()) return std::string("(none)");
+            std::string s;
+            for (const RampSpec& r : v) { if (!s.empty()) s += " | "; s += spec_str(r); }
+            return s;
+        };
+
+        // ── (a) the registry — read OUT of the table, never re-typed beside it ─────────────────────
+        {
+            std::string reg;
+            int         globals = 0;
+            for (const songcore::AutomatableParam& p : AUTOMATABLE_PARAMS) {
+                reg += songcore::effect_name(p.fxCode) + "=" + std::to_string(static_cast<int>(p.ccId)) + " ";
+                if (p.global) ++globals;
+            }
+            std::printf("       [info] automatable params: %s\n", reg.c_str());
+            // The CC ids are the ones the PER-STEP effects already emit (scheduler.h STEP 2.3) — a
+            // ramp is the same event more often, so a wrong id here is a ramp that moves nothing.
+            eqs(reg, "VOL=7 PAN=10 REV=91 DEL=93 VTR=132 VMV=133 ",
+                "AUTO: the registry names each parameter's existing CC id");
+            eq(globals, 1, "AUTO: exactly one entry is global — the master fader belongs to no track");
+            const songcore::AutomatableParam* vmv = songcore::automatable_param(songcore::FX_VMV);
+            const bool vmvGlobal = vmv != nullptr && vmv->global;
+            ok(vmvGlobal, "AUTO: ...and it is VMV — track-scoped, the external gate would eat it");
+            // ⚠️ The gate asserted in BOTH directions: a lookup that returned a row for everything
+            // would pass every check above.
+            ok(songcore::automatable_param(songcore::FX_PSL) == nullptr,
+               "AUTO: (control) an effect with no absolute CC path is NOT automatable");
+
+            int typable = 0;
+            for (const songcore::AutomatableParam& p : AUTOMATABLE_PARAMS)
+                if (songcore::EFFECT_TYPES[songcore::effect_type_index(p.fxCode)] == p.fxCode) ++typable;
+            eq(typable, songcore::AUTOMATABLE_PARAM_COUNT,
+               "AUTO: every automatable effect is one the user can actually type");
+        }
+
+        // ── (b) the two new codes, and the lists that must never drift from them ───────────────────
+        {
+            eqs(songcore::effect_name(songcore::FX_AUS), "AUS", "AUS: has a name");
+            eqs(songcore::effect_name(songcore::FX_AUF), "AUF", "AUF: has a name");
+            ok(songcore::effect_type_index(songcore::FX_AUS) > 0 &&
+                   songcore::effect_type_index(songcore::FX_AUF) > 0,
+               "AUS/AUF: both are in EFFECT_TYPES — an effect missing from it is one nobody can type");
+            eq(static_cast<int>(effect_descriptions().size()), songcore::EFFECT_TYPE_COUNT,
+               "FX HELPER: one description per effect");
+
+            // ⭐ The alignment, derived from BOTH lists rather than eyeballed: entry i must open with
+            // the name of effect i. An insert that shifts one list and not the other is otherwise a
+            // silent mislabel — the picker documents PAN while the cursor commits BCK.
+            int         aligned = 0;
+            std::string firstBad;
+            for (int i = 0; i < songcore::EFFECT_TYPE_COUNT; ++i) {
+                const std::string        want  = songcore::effect_name(songcore::EFFECT_TYPES[i]) + ":";
+                const std::vector<std::string>& lines = effect_descriptions()[static_cast<size_t>(i)];
+                if (!lines.empty() && lines[0].rfind(want, 0) == 0) { ++aligned; continue; }
+                if (firstBad.empty())
+                    firstBad = std::to_string(i) + " wants " + want +
+                               ", reads " + (lines.empty() ? "(empty)" : lines[0]);
+            }
+            if (!firstBad.empty()) std::printf("       [info] first misaligned description: %s\n", firstBad.c_str());
+            eq(aligned, songcore::EFFECT_TYPE_COUNT,
+               "FX HELPER: every description opens with its own effect's name");
+        }
+
+        // ── (c) the curve — hand-derived, and the family is continuous through the middle ─────────
+        {
+            using songcore::automation_shape;
+            using songcore::automation_value_byte;
+
+            std::printf("       [info] curve 00/80/FF at t=0.5 over 00->FF: %d / %d / %d\n",
+                        automation_value_byte(0x00, 0xFF, 0x00, 0.5),
+                        automation_value_byte(0x00, 0xFF, 0x80, 0.5),
+                        automation_value_byte(0x00, 0xFF, 0xFF, 0.5));
+
+            eq(automation_value_byte(0x00, 0xFF, 0x80, 0.0), 0x00, "CURVE: linear starts AT the start byte");
+            eq(automation_value_byte(0x00, 0xFF, 0x80, 1.0), 0xFF, "CURVE: ...and arrives AT the destination");
+            eq(automation_value_byte(0x00, 0xFF, 0x80, 0.5), 128,  "CURVE: linear is half way at half time");
+            eq(automation_value_byte(0x00, 0xFF, 0x00, 0.5), 32,
+               "CURVE: ease-in is a cubic — 0.5^3 of the way at half time");
+            eq(automation_value_byte(0x00, 0xFF, 0xFF, 0.5), 223,
+               "CURVE: ease-out is its mirror — 1 - 0.5^3");
+            eq(automation_value_byte(0xFF, 0x00, 0x80, 0.5), 128, "CURVE: a DESCENDING ramp is the same arithmetic");
+
+            // ⚠️ Measured in the SHAPE, not the byte: either side of 0x80 differs from linear by less
+            // than half a byte at t=0.5, so the quantised value cannot see the blend at all. The
+            // metric has to match the claim, and the claim is about the curve.
+            const double below = automation_shape(0x7F, 0.5);
+            const double mid   = automation_shape(0x80, 0.5);
+            const double above = automation_shape(0x81, 0.5);
+            std::printf("       [info] shape at t=0.5, curve 7F/80/81: %.6f / %.6f / %.6f\n", below, mid, above);
+            ok(mid == 0.5, "CURVE: 80 is EXACTLY linear, not merely close to it");
+            ok(below < mid && mid < above,
+               "⭐ CURVE: the family is monotonic in the curve byte — 7F leans towards ease-in, 81 "
+               "towards ease-out, in both directions off the same anchor");
+
+            // Every curve byte, not just the three anchors: a ramp that overshoots its destination or
+            // starts somewhere other than where the author typed is a bug at any shape.
+            int endsExact = 0, monotonic = 0;
+            for (int c = 0; c <= 0xFF; ++c) {
+                if (automation_shape(c, 0.0) == 0.0 && automation_shape(c, 1.0) == 1.0) ++endsExact;
+                bool up = true;
+                int  prev = -1;
+                for (int k = 0; k <= 96; ++k) {
+                    const int b = automation_value_byte(0x00, 0xFF, c, k / 96.0);
+                    if (b < prev || b < 0 || b > 255) up = false;
+                    prev = b;
+                }
+                if (up) ++monotonic;
+            }
+            eq(endsExact, 256, "CURVE: every shape hits 0 and 1 exactly at the ends");
+            eq(monotonic, 256, "CURVE: ...and none of them backtracks or leaves 00-FF on the way");
+        }
+
+        // ── (d) THE PAIR OF FIXTURES THAT ARE EACH OTHER'S CONTROL ─────────────────────────────────
+        //
+        // One phrase, one cell apart. Without the pair there is nothing to find; with it there is
+        // exactly one ramp. A `find_ramps` stuck at either answer fails one of these two.
+        {
+            songcore::Phrase quiet;
+            fx(quiet, 0, 1, songcore::FX_VOLUME, 0x00);
+            const std::vector<RampSpec> before = find_ramps(quiet);
+            std::printf("       [info] pairing: VOL alone -> %zu ramp(s); + AUS/AUF -> ", before.size());
+            eq(static_cast<int>(before.size()), 0,
+               "PAIRING: (control) a VOL with no AUS beside it declares no ramp");
+
+            songcore::Phrase ph = quiet;
+            fx(ph, 0, 2, songcore::FX_AUS, 0x80);
+            fx(ph, 8, 1, songcore::FX_AUF, 0xFF);
+            const std::vector<RampSpec> after = find_ramps(ph);
+            std::printf("%zu\n", after.size());
+            eq(static_cast<int>(after.size()), 1, "PAIRING: the canonical pair declares exactly one ramp");
+            if (after.size() == 1)
+                eqs(spec_str(after[0]), "VOL cc7 track 0-8 00>FF curve 80 slots 1/2",
+                    "⭐ PAIRING: VOL 00 + AUS 80 on step 0, AUF FF on step 8 — every field of it");
+        }
+
+        // ── (e) look-left: which effect a curve attaches to ───────────────────────────────────────
+        {
+            // Skips over a non-automatable effect to reach the nearest one that is.
+            songcore::Phrase skip;
+            fx(skip, 0, 1, songcore::FX_VOLUME, 0x20);
+            fx(skip, 0, 2, songcore::FX_PSL,    0x40);
+            fx(skip, 0, 3, songcore::FX_AUS,    0x00);
+            fx(skip, 4, 1, songcore::FX_AUF,    0xF0);
+            const std::vector<RampSpec> a = find_ramps(skip);
+            std::printf("       [info] look-left over PSL: %s\n", specs_str(a).c_str());
+            eqs(specs_str(a), "VOL cc7 track 0-4 20>F0 curve 00 slots 1/3",
+                "LOOK-LEFT: a non-automatable effect in between is stepped over, not paired with");
+
+            // NEAREST, not first: two automatable effects, the closer one wins.
+            songcore::Phrase near;
+            fx(near, 0, 1, songcore::FX_VOLUME, 0x20);
+            fx(near, 0, 2, songcore::FX_PAN,    0x30);
+            fx(near, 0, 3, songcore::FX_AUS,    0x80);
+            fx(near, 4, 1, songcore::FX_AUF,    0xC0);
+            const std::vector<RampSpec> b = find_ramps(near);
+            std::printf("       [info] look-left with two candidates: %s\n", specs_str(b).c_str());
+            eqs(specs_str(b), "PAN cc10 track 0-4 30>C0 curve 80 slots 2/3",
+                "LOOK-LEFT: the NEAREST automatable effect to the left wins, and the ramp starts at ITS byte");
+
+            // Nothing automatable to the left at all — the guard the design names.
+            songcore::Phrase bare;
+            fx(bare, 0, 1, songcore::FX_PSL, 0x40);
+            fx(bare, 0, 2, songcore::FX_AUS, 0x80);
+            fx(bare, 4, 1, songcore::FX_AUF, 0xFF);
+            eqs(specs_str(find_ramps(bare)), "(none)",
+               "LOOK-LEFT: an AUS with nothing automatable to its left is INERT — a curve alone names "
+               "no parameter, and guessing one would move something nobody pointed at");
+
+            // ⚠️ …and being inert means inert: it must not close or replace a ramp already open.
+            songcore::Phrase survives;
+            fx(survives, 0, 1, songcore::FX_VOLUME, 0x10);
+            fx(survives, 0, 2, songcore::FX_AUS,    0x80);
+            fx(survives, 2, 1, songcore::FX_PSL,    0x40);
+            fx(survives, 2, 2, songcore::FX_AUS,    0x00);   // inert — PSL is not automatable
+            fx(survives, 8, 1, songcore::FX_AUF,    0xFF);
+            eqs(specs_str(find_ramps(survives)), "VOL cc7 track 0-8 10>FF curve 80 slots 1/2",
+                "LOOK-LEFT: an inert AUS leaves an OPEN ramp alone — it does not silently take it over");
+        }
+
+        // ── (f) opening and closing: last AUS wins, first AUF closes ──────────────────────────────
+        {
+            songcore::Phrase reopen;
+            fx(reopen, 0, 1, songcore::FX_VOLUME, 0x10);
+            fx(reopen, 0, 2, songcore::FX_AUS,    0x80);
+            fx(reopen, 2, 1, songcore::FX_PAN,    0x20);
+            fx(reopen, 2, 2, songcore::FX_AUS,    0x00);
+            fx(reopen, 8, 1, songcore::FX_AUF,    0xFF);
+            eqs(specs_str(find_ramps(reopen)), "PAN cc10 track 2-8 20>FF curve 00 slots 1/2",
+                "PAIRING: a second AUS REPLACES the open ramp — last-wins, as the FX slots already are");
+
+            songcore::Phrase twoEnds;
+            fx(twoEnds, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(twoEnds, 0, 2, songcore::FX_AUS,    0x80);
+            fx(twoEnds, 4, 1, songcore::FX_AUF,    0x40);
+            fx(twoEnds, 8, 1, songcore::FX_AUF,    0xFF);
+            eqs(specs_str(find_ramps(twoEnds)), "VOL cc7 track 0-4 00>40 curve 80 slots 1/2",
+                "PAIRING: the FIRST AUF closes, and the second one has no open ramp to end");
+
+            // Two complete ramps in one phrase, in the order they open.
+            songcore::Phrase pairPair;
+            fx(pairPair, 0,  1, songcore::FX_VOLUME, 0x00);
+            fx(pairPair, 0,  2, songcore::FX_AUS,    0x80);
+            fx(pairPair, 4,  1, songcore::FX_AUF,    0xFF);
+            fx(pairPair, 8,  1, songcore::FX_PAN,    0xFF);
+            fx(pairPair, 8,  2, songcore::FX_AUS,    0xFF);
+            fx(pairPair, 12, 1, songcore::FX_AUF,    0x00);
+            eqs(specs_str(find_ramps(pairPair)),
+                "VOL cc7 track 0-4 00>FF curve 80 slots 1/2 | PAN cc10 track 8-12 FF>00 curve FF slots 1/2",
+                "PAIRING: two ramps in one phrase come back in the order they open");
+        }
+
+        // ── (g) the spans that are not spans ──────────────────────────────────────────────────────
+        {
+            songcore::Phrase orphanEnd;
+            fx(orphanEnd, 4, 1, songcore::FX_AUF, 0xFF);
+            eqs(specs_str(find_ramps(orphanEnd)), "(none)", "PAIRING: an AUF with no open AUS is inert");
+
+            songcore::Phrase orphanStart;
+            fx(orphanStart, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(orphanStart, 0, 2, songcore::FX_AUS,    0x80);
+            eqs(specs_str(find_ramps(orphanStart)), "(none)",
+                "PAIRING: an AUS the phrase never closes is inert — pairing does not cross into the "
+                "next phrase, which the lookahead has not scheduled yet");
+
+            // ⚠️ Slot order inside a step is not a time order, so a same-step AUF describes a span
+            // with no duration. It is inert, and the AUS stays open for a real one.
+            songcore::Phrase sameStep;
+            fx(sameStep, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(sameStep, 0, 2, songcore::FX_AUS,    0x80);
+            fx(sameStep, 0, 3, songcore::FX_AUF,    0xFF);
+            eqs(specs_str(find_ramps(sameStep)), "(none)",
+                "PAIRING: an AUF on the AUS's OWN step is inert — a zero-length span has nothing to "
+                "interpolate across");
+
+            songcore::Phrase sameThenLater = sameStep;
+            fx(sameThenLater, 6, 1, songcore::FX_AUF, 0xC0);
+            eqs(specs_str(find_ramps(sameThenLater)), "VOL cc7 track 0-6 00>C0 curve 80 slots 1/2",
+                "PAIRING: ...and the AUS it did not close is still open for the next real AUF");
+        }
+
+        // ── (h) entering a phrase part-way through, and the global lane ───────────────────────────
+        {
+            songcore::Phrase mid;
+            fx(mid, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(mid, 0, 2, songcore::FX_AUS,    0x80);
+            fx(mid, 8, 1, songcore::FX_AUF,    0xFF);
+            eqs(specs_str(find_ramps(mid, 0)), "VOL cc7 track 0-8 00>FF curve 80 slots 1/2",
+                "START ROW: (control) from row 0 the ramp is there to be found");
+            eqs(specs_str(find_ramps(mid, 4)), "(none)",
+                "START ROW: a phrase entered BELOW its AUS runs no ramp — the step that opens it "
+                "never plays, so neither does the fade");
+
+            songcore::Phrase master;
+            fx(master, 0, 1, songcore::FX_VMV, 0xFF);
+            fx(master, 0, 2, songcore::FX_AUS, 0x80);
+            fx(master, 8, 1, songcore::FX_AUF, 0x00);
+            eqs(specs_str(find_ramps(master)), "VMV cc133 global 0-8 FF>00 curve 80 slots 1/2",
+                "⭐ PAIRING: a master fade carries the GLOBAL lane out of the registry — on the track "
+                "lane the external-routing gate would swallow it");
         }
     }
 

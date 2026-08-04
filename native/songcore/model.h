@@ -230,6 +230,32 @@ struct PhraseStep {
     int  fx3Type = 0x00, fx3Value = 0x00;
 };
 
+// Indexed FX access on a PhraseStep — the flat fx{1,2,3}{Type,Value} fields read as a 1..3 slot
+// array. Mirrors PhraseStep.fx / fxType / setFx / setFxValue.
+//
+// ⚠️ They live beside the struct rather than in the sequencer that walks it, for the reason
+// `chain_is_empty` does: two layers now index a step's slots. The scheduler folds them last-wins and
+// throws the slot NUMBER away; `automation.h` pairs AUS with the effect to its LEFT and therefore
+// cannot. A second copy of the indexing would be two things that agree until the day one gains a
+// fourth slot.
+inline int  step_fx_type(const PhraseStep& s, int slot) {
+    return slot == 1 ? s.fx1Type : slot == 2 ? s.fx2Type : slot == 3 ? s.fx3Type : 0;
+}
+inline int  step_fx_value(const PhraseStep& s, int slot) {
+    return slot == 1 ? s.fx1Value : slot == 2 ? s.fx2Value : slot == 3 ? s.fx3Value : 0;
+}
+inline void step_set_fx(PhraseStep& s, int slot, int type, int value) {
+    if (slot == 1) { s.fx1Type = type; s.fx1Value = value; }
+    else if (slot == 2) { s.fx2Type = type; s.fx2Value = value; }
+    else if (slot == 3) { s.fx3Type = type; s.fx3Value = value; }
+}
+inline void step_set_fx_value(PhraseStep& s, int slot, int value) {
+    if (slot == 1) s.fx1Value = value;
+    else if (slot == 2) s.fx2Value = value;
+    else if (slot == 3) s.fx3Value = value;
+}
+inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
+
 struct Phrase {
     int id = 0;
     std::vector<PhraseStep> steps = std::vector<PhraseStep>(16);  // Array<PhraseStep>(16)

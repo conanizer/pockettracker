@@ -33,18 +33,18 @@ inline constexpr int FX_GRID_COLS = 6;
  * The COUNT is a parameter because a build with the MIDI surfaces hidden (platform_caps.h `midi`)
  * shows the first songcore::EFFECT_TYPE_COUNT_NO_MIDI effects and needs one row fewer. Everything
  * else is derived from it, so the two shapes are the same code with a different number in it:
- * 36 effects → six full rows, 30 → five full rows.
+ * 38 effects → six full rows and a partial seventh, 32 → five and a partial sixth.
  *
- * ⚠️ A LAST ROW THAT DOES NOT FILL IS CENTRED, AND ITS EDGE CELLS ARE UNREACHABLE. With four left
- * over the columns are 1..4 and 0 and 5 hold nothing. Every navigation function has a case for it,
- * and they are not decoration: land on last-row column 0 and the highlight sits on a cell holding no
- * effect, so releasing A would commit the index one below the row's first — an effect the user never
- * pointed at.
+ * ⚠️ A LAST ROW THAT DOES NOT FILL IS CENTRED, AND ITS EDGE CELLS ARE UNREACHABLE. With two left
+ * over the columns are 2..3 and 0, 1, 4 and 5 hold nothing. Every navigation function has a case for
+ * it, and they are not decoration: land on last-row column 0 and the highlight sits on a cell holding
+ * no effect, so releasing A would commit the index one below the row's first — an effect the user
+ * never pointed at.
  *
- * ⚠️ BOTH SHIPPING COUNTS CURRENTLY DIVIDE BY SIX EXACTLY (36 and 30), so neither exercises that
- * path. The centring code is live, reachable the moment one more effect exists, and invisible to any
- * check driven from the real counts — so `ptinput` additionally drives SYNTHETIC counts with a
- * partial last row. Do not conclude from a green app that it works.
+ * ⚠️ Both shipping counts exercise that path today, and neither did when the count last changed —
+ * 36 and 30 both divided by six exactly, and the centring code was live, reachable and covered by
+ * nothing. `ptinput` therefore also drives SYNTHETIC counts, one per remainder, so the coverage does
+ * not come and go with the length of EFFECT_TYPES. Do not conclude from a green app that it works.
  */
 struct FxGrid {
     int count        = songcore::EFFECT_TYPE_COUNT;  // visible effects
@@ -72,9 +72,10 @@ struct FxGrid {
 // grid the app actually uses is decided ONCE, by InputDispatcher::visible_effect_type_count().
 inline constexpr FxGrid FX_GRID_FULL = FxGrid::of(songcore::EFFECT_TYPE_COUNT);
 
-// The box the overlay draws is sized from `rows` (modules/fx_helper_overlay.cpp), and a grid taller
-// than the screen would draw its last row outside its own box. Six rows is the tallest that fits.
-static_assert(FX_GRID_FULL.rows <= 6, "the FX helper box has room for six rows — see fx_helper_overlay.cpp");
+// The box the overlay draws is sized from `rows`, so a grid taller than the screen would draw its
+// last row outside it. The ceiling is asserted where the height and the screen are both in scope —
+// `box_h` in modules/fx_helper_overlay.cpp — rather than as a number copied to here, which is how it
+// came to read `<= 6` while the real geometry fits more than twice that.
 
 struct FxCell {
     int row = 0;
@@ -202,18 +203,20 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 27 EQM */ {"EQM: Master/mixer EQ slot", "xx=EQ preset slot (00-7F)", "holds till next EQM", "resets to mixer EQ on stop"},
         /* 28 VTR */ {"VTR: Track mixer fader", "xx=level (00=silent FF=max)", "replaces the MIXER fader", "resets to the MIXER on stop"},
         /* 29 VMV */ {"VMV: Master mixer fader", "xx=level (00=silent FF=max)", "replaces the MASTER fader", "resets to the MIXER on stop"},
-        /* 30 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 31 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        /* 30 AUS */ {"AUS: Automation start", "xx=curve 00=IN 80=LIN FF=OUT", "ramps the FX slot to its left", "to the value of the next AUF"},
+        /* 31 AUF */ {"AUF: Automation finish", "xx=destination value", "ends the ramp an AUS opened", "same phrase and track only"},
+        /* 32 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 33 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
         // ⚠️ **NO APOSTROPHE AND NO SEMICOLON IN A DESCRIPTION** — the font has neither glyph and draws
         // a BLANK, so "instrument's" renders as "INSTRUMENT S". It is silent: the string is right, the
         // width is right, only the pixels are wrong, and these lines are the only long prose in the UI.
         // ⚠️ Pre-existing, not new: BCK's "sampler; toggle live to scratch" has always drawn as
         // "SAMPLER  TOGGLE…". Caught by ptshot — the one tool here that looks at pixels. Stick to
         // letters, digits, and `: = - ( ) . /`, all of which are proven by the entries above.
-        /* 32 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 33 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 34 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 35 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 34 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 35 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 36 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 37 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

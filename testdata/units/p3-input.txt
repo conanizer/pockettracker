@@ -268,71 +268,71 @@ EDIT scr=PHRASE col=3 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=INSTRUMENT_R
 EDIT scr=PHRASE col=3 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=INSTRUMENT_REF|+-><....|16|0|127|1|16|-1|0|- act=SET:0 step=3.5:33:00:16/FF:1F/80:07/7F
 EDIT scr=PHRASE col=3 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=INSTRUMENT_REF|+-><....|16|0|127|1|16|-1|0|- act=SET:32 step=3.5:33:20:16/FF:1F/80:07/7F
 EDIT scr=PHRASE col=3 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=INSTRUMENT_REF|+-><....|16|0|127|1|16|-1|0|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=-1.0:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=-1.0:7F:00:2A/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=0.4:7F:00:2A/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=0.0:00:7F:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=0.0:00:7F:2A/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=7.9:40:05:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=7.9:40:05:2A/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=11.3:01:01:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=11.3:01:01:2A/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=SET:2 step=0.4:7F:00:04/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=SET:0 step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=SET:14 step=0.4:7F:00:15/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=SET:12 step=0.4:7F:00:12/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=SET:14 step=0.4:7F:00:15/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=SET:12 step=0.4:7F:00:12/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|1|- act=SET:28 step=0.4:7F:00:2B/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|1|- act=SET:26 step=0.4:7F:00:23/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:1D/FF:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=0.4:7F:00:2A/00:1D/FF:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:00/00:0B/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=0.4:7F:00:2A/00:00/00:0B/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:00/00:24/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 step=0.4:7F:00:2A/00:00/00:24/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=A => ctx=EFFECT_TYPE|+-..D...|15|0|35|1|16|255|1|- act=SET:16 step=3.5:33:10:19/FF:1F/80:07/7F
-EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_TYPE|+-..D...|15|0|35|1|16|255|1|- act=SET:14 step=3.5:33:10:15/FF:1F/80:07/7F
-EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_TYPE|+-..D...|15|0|35|1|16|255|1|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_TYPE|+-..D...|15|0|35|1|16|255|1|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_TYPE|+-..D...|15|0|35|1|16|255|1|- act=DELETE step=3.5:33:10:00/00:1F/80:07/7F
+EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=-1.0:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=-1.0:7F:00:2A/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=-1.0:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=0.4:7F:00:2A/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=0.0:00:7F:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=0.0:00:7F:2A/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.0:00:7F:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=7.9:40:05:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=7.9:40:05:2A/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=7.9:40:05:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=11.3:01:01:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=11.3:01:01:2A/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=11.3:01:01:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=SET:2 step=0.4:7F:00:04/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=SET:0 step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:03/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=SET:14 step=0.4:7F:00:15/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=SET:12 step=0.4:7F:00:12/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=SET:14 step=0.4:7F:00:15/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=SET:12 step=0.4:7F:00:12/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:14/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|1|- act=SET:28 step=0.4:7F:00:2B/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|1|- act=SET:26 step=0.4:7F:00:23/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:24/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|1|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:1D/FF:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=0.4:7F:00:2A/00:1D/FF:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:00/00:0B/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=0.4:7F:00:2A/00:00/00:0B/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:0B/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 step=0.4:7F:00:03/00:00/00:24/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 step=0.4:7F:00:2A/00:00/00:24/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=4 step=0.4:7F:00:00/00:00/00:24/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=A => ctx=EFFECT_TYPE|+-..D...|15|0|37|1|16|255|1|- act=SET:16 step=3.5:33:10:19/FF:1F/80:07/7F
+EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_TYPE|+-..D...|15|0|37|1|16|255|1|- act=SET:14 step=3.5:33:10:15/FF:1F/80:07/7F
+EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_TYPE|+-..D...|15|0|37|1|16|255|1|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
+EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_TYPE|+-..D...|15|0|37|1|16|255|1|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
+EDIT scr=PHRASE col=4 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_TYPE|+-..D...|15|0|37|1|16|255|1|- act=DELETE step=3.5:33:10:00/00:1F/80:07/7F
 EDIT scr=PHRASE col=5 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|1|- act=SET:1 step=-1.0:7F:00:00/01:00/00:00/00
 EDIT scr=PHRASE col=5 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|1|- act=SET:255 step=-1.0:7F:00:00/FF:00/00:00/00
 EDIT scr=PHRASE col=5 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|1|- act=SET:240 step=-1.0:7F:00:00/F0:00/00:00/00
@@ -398,71 +398,71 @@ EDIT scr=PHRASE col=5 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_VALUE
 EDIT scr=PHRASE col=5 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_VALUE|+-><....|255|0|255|1|16|255|1|- act=SET:239 step=3.5:33:10:16/EF:1F/80:07/7F
 EDIT scr=PHRASE col=5 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_VALUE|+-><....|255|0|255|1|16|255|1|- act=SET:15 step=3.5:33:10:16/0F:1F/80:07/7F
 EDIT scr=PHRASE col=5 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_VALUE|+-><....|255|0|255|1|16|255|1|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=-1.0:7F:00:00/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=-1.0:7F:00:00/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:00/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:00/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.0:00:7F:00/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.0:00:7F:00/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=7.9:40:05:00/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=7.9:40:05:00/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=11.3:01:01:00/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=11.3:01:01:00/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:03/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:03/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:14/7F:03/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:14/7F:2A/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:14/00:03/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:14/00:2A/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:24/7F:03/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:24/7F:2A/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|20|0|35|1|16|255|2|- act=SET:21 step=0.4:7F:00:00/00:1E/FF:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|20|0|35|1|16|255|2|- act=SET:19 step=0.4:7F:00:00/00:1C/FF:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|20|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|20|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|20|0|35|1|16|255|2|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:00/00:03/00:0B/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:00/00:2A/00:0B/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 step=0.4:7F:00:00/00:03/00:24/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 step=0.4:7F:00:00/00:2A/00:24/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=A => ctx=EFFECT_TYPE|+-..D...|22|0|35|1|16|255|2|- act=SET:23 step=3.5:33:10:16/FF:22/80:07/7F
-EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_TYPE|+-..D...|22|0|35|1|16|255|2|- act=SET:21 step=3.5:33:10:16/FF:1E/80:07/7F
-EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_TYPE|+-..D...|22|0|35|1|16|255|2|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_TYPE|+-..D...|22|0|35|1|16|255|2|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_TYPE|+-..D...|22|0|35|1|16|255|2|- act=DELETE step=3.5:33:10:16/FF:00/00:07/7F
+EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=-1.0:7F:00:00/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=-1.0:7F:00:00/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=-1.0:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:00/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:00/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.0:00:7F:00/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.0:00:7F:00/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.0:00:7F:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=7.9:40:05:00/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=7.9:40:05:00/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=7.9:40:05:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=11.3:01:01:00/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=11.3:01:01:00/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=11.3:01:01:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:03/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:03/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:03/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:14/7F:03/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:14/7F:2A/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:14/00:03/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:14/00:2A/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:14/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:24/7F:03/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:24/7F:2A/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:24/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|20|0|37|1|16|255|2|- act=SET:21 step=0.4:7F:00:00/00:1E/FF:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|20|0|37|1|16|255|2|- act=SET:19 step=0.4:7F:00:00/00:1C/FF:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|20|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|20|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|20|0|37|1|16|255|2|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:00/00:03/00:0B/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:00/00:2A/00:0B/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:0B/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 step=0.4:7F:00:00/00:03/00:24/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 step=0.4:7F:00:00/00:2A/00:24/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=6 step=0.4:7F:00:00/00:00/00:24/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=A => ctx=EFFECT_TYPE|+-..D...|22|0|37|1|16|255|2|- act=SET:23 step=3.5:33:10:16/FF:22/80:07/7F
+EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_TYPE|+-..D...|22|0|37|1|16|255|2|- act=SET:21 step=3.5:33:10:16/FF:1E/80:07/7F
+EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_TYPE|+-..D...|22|0|37|1|16|255|2|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
+EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_TYPE|+-..D...|22|0|37|1|16|255|2|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
+EDIT scr=PHRASE col=6 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_TYPE|+-..D...|22|0|37|1|16|255|2|- act=DELETE step=3.5:33:10:16/FF:00/00:07/7F
 EDIT scr=PHRASE col=7 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|2|- act=SET:1 step=-1.0:7F:00:00/00:00/01:00/00
 EDIT scr=PHRASE col=7 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|2|- act=SET:255 step=-1.0:7F:00:00/00:00/FF:00/00
 EDIT scr=PHRASE col=7 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|2|- act=SET:240 step=-1.0:7F:00:00/00:00/F0:00/00
@@ -528,71 +528,71 @@ EDIT scr=PHRASE col=7 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_VALUE
 EDIT scr=PHRASE col=7 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_VALUE|+-><....|128|0|255|1|16|255|2|- act=SET:112 step=3.5:33:10:16/FF:1F/70:07/7F
 EDIT scr=PHRASE col=7 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_VALUE|+-><....|128|0|255|1|16|255|2|- act=SET:144 step=3.5:33:10:16/FF:1F/90:07/7F
 EDIT scr=PHRASE col=7 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_VALUE|+-><....|128|0|255|1|16|255|2|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=-1.0:7F:00:00/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=-1.0:7F:00:00/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.4:7F:00:00/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.4:7F:00:00/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.0:00:7F:00/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.0:00:7F:00/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=7.9:40:05:00/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=7.9:40:05:00/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=7.9:40:05:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=11.3:01:01:00/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=11.3:01:01:00/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=11.3:01:01:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.4:7F:00:03/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.4:7F:00:03/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.4:7F:00:14/7F:00/00:03/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.4:7F:00:14/7F:00/00:2A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.4:7F:00:14/00:00/00:03/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.4:7F:00:14/00:00/00:2A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.4:7F:00:24/7F:00/00:03/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.4:7F:00:24/7F:00/00:2A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 step=0.4:7F:00:00/00:1D/FF:03/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 step=0.4:7F:00:00/00:1D/FF:2A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=A => ctx=EFFECT_TYPE|+-..D...|8|0|35|1|16|255|3|- act=SET:9 step=0.4:7F:00:00/00:00/00:0F/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=B => ctx=EFFECT_TYPE|+-..D...|8|0|35|1|16|255|3|- act=SET:7 step=0.4:7F:00:00/00:00/00:0A/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|8|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|8|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|8|0|35|1|16|255|3|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=A => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|3|- act=SET:28 step=0.4:7F:00:00/00:00/00:2B/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=B => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|3|- act=SET:26 step=0.4:7F:00:00/00:00/00:23/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
-EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|27|0|35|1|16|255|3|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
-EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=A => ctx=EFFECT_TYPE|+-..D...|4|0|35|1|16|255|3|- act=SET:5 step=3.5:33:10:16/FF:1F/80:08/7F
-EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_TYPE|+-..D...|4|0|35|1|16|255|3|- act=SET:3 step=3.5:33:10:16/FF:1F/80:05/7F
-EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_TYPE|+-..D...|4|0|35|1|16|255|3|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_TYPE|+-..D...|4|0|35|1|16|255|3|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
-EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_TYPE|+-..D...|4|0|35|1|16|255|3|- act=DELETE step=3.5:33:10:16/FF:1F/80:00/00
+EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=-1.0:7F:00:00/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=-1.0:7F:00:00/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=-1.0:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=-1.0:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.4:7F:00:00/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.4:7F:00:00/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.0:00:7F:00/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.0:00:7F:00/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.0:00:7F:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.0:00:7F:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=7.9:40:05:00/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=7.9:40:05:00/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=7.9:40:05:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=7.9:40:05:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=11.3:01:01:00/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=11.3:01:01:00/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=11.3:01:01:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=11.3:01:01:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.4:7F:00:03/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.4:7F:00:03/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:03/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:03/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.4:7F:00:14/7F:00/00:03/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.4:7F:00:14/7F:00/00:2A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:14/7F:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.4:7F:00:14/00:00/00:03/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.4:7F:00:14/00:00/00:2A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:14/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:14/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.4:7F:00:24/7F:00/00:03/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.4:7F:00:24/7F:00/00:2A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:24/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:24/7F:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 step=0.4:7F:00:00/00:1D/FF:03/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 step=0.4:7F:00:00/00:1D/FF:2A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:1D/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:1D/FF:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=A => ctx=EFFECT_TYPE|+-..D...|8|0|37|1|16|255|3|- act=SET:9 step=0.4:7F:00:00/00:00/00:0F/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=B => ctx=EFFECT_TYPE|+-..D...|8|0|37|1|16|255|3|- act=SET:7 step=0.4:7F:00:00/00:00/00:0A/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|8|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|8|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:0B/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:0B/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|8|0|37|1|16|255|3|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=A => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|3|- act=SET:28 step=0.4:7F:00:00/00:00/00:2B/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=B => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|3|- act=SET:26 step=0.4:7F:00:00/00:00/00:23/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|3|- act=NONE step=0.4:7F:00:00/00:00/00:24/00
+EDIT scr=PHRASE col=8 step=0.4:7F:00:00/00:00/00:24/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|27|0|37|1|16|255|3|- act=DELETE step=0.4:7F:00:00/00:00/00:00/00
+EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=A => ctx=EFFECT_TYPE|+-..D...|4|0|37|1|16|255|3|- act=SET:5 step=3.5:33:10:16/FF:1F/80:08/7F
+EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=B => ctx=EFFECT_TYPE|+-..D...|4|0|37|1|16|255|3|- act=SET:3 step=3.5:33:10:16/FF:1F/80:05/7F
+EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=AL => ctx=EFFECT_TYPE|+-..D...|4|0|37|1|16|255|3|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
+EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=AR => ctx=EFFECT_TYPE|+-..D...|4|0|37|1|16|255|3|- act=NONE step=3.5:33:10:16/FF:1F/80:07/7F
+EDIT scr=PHRASE col=8 step=3.5:33:10:16/FF:1F/80:07/7F btn=AB => ctx=EFFECT_TYPE|+-..D...|4|0|37|1|16|255|3|- act=DELETE step=3.5:33:10:16/FF:1F/80:00/00
 EDIT scr=PHRASE col=9 step=-1.0:7F:00:00/00:00/00:00/00 btn=A => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|3|- act=SET:1 step=-1.0:7F:00:00/00:00/00:00/01
 EDIT scr=PHRASE col=9 step=-1.0:7F:00:00/00:00/00:00/00 btn=B => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|3|- act=SET:255 step=-1.0:7F:00:00/00:00/00:00/FF
 EDIT scr=PHRASE col=9 step=-1.0:7F:00:00/00:00/00:00/00 btn=AL => ctx=EFFECT_VALUE|+-><....|0|0|255|1|16|255|3|- act=SET:240 step=-1.0:7F:00:00/00:00/00:00/F0
@@ -1099,46 +1099,46 @@ EDIT scr=TABLE col=2 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=HEX_BYTE|+-><D...
 EDIT scr=TABLE col=2 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=HEX_BYTE|+-><D...|16|0|255|1|16|-1|0|- act=SET:0 trow=18:0:03/31:23/00:1B/88
 EDIT scr=TABLE col=2 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=HEX_BYTE|+-><D...|16|0|255|1|16|-1|0|- act=SET:32 trow=18:32:03/31:23/00:1B/88
 EDIT scr=TABLE col=2 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=HEX_BYTE|+-><D...|16|0|255|1|16|-1|0|- act=DELETE trow=18:-1:03/31:23/00:1B/88
-EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 trow=00:-1:03/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 trow=00:-1:2A/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 trow=00:0:03/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 trow=00:0:2A/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 trow=01:255:03/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 trow=01:255:2A/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 trow=80:64:03/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 trow=80:64:2A/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 trow=FF:-1:03/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 trow=FF:-1:2A/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=SET:14 trow=0C:127:15/7F:00/00:00/00
-EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=SET:12 trow=0C:127:12/7F:00/00:00/00
-EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|13|0|35|1|16|255|1|- act=DELETE trow=0C:127:00/00:00/00:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:1 trow=00:-1:03/00:08/FF:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=SET:35 trow=00:-1:2A/00:08/FF:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|1|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=A => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=SET:2 trow=18:16:04/31:23/00:1B/88
-EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=SET:0 trow=18:16:00/31:23/00:1B/88
-EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=EFFECT_TYPE|+-..D...|1|0|35|1|16|255|1|- act=DELETE trow=18:16:00/00:23/00:1B/88
+EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 trow=00:-1:03/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 trow=00:-1:2A/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 trow=00:0:03/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 trow=00:0:2A/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:0:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 trow=01:255:03/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 trow=01:255:2A/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=01:255:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 trow=80:64:03/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 trow=80:64:2A/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=80:64:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 trow=FF:-1:03/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 trow=FF:-1:2A/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=FF:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=SET:14 trow=0C:127:15/7F:00/00:00/00
+EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=SET:12 trow=0C:127:12/7F:00/00:00/00
+EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=3 trow=0C:127:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|13|0|37|1|16|255|1|- act=DELETE trow=0C:127:00/00:00/00:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:1 trow=00:-1:03/00:08/FF:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=SET:37 trow=00:-1:2A/00:08/FF:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=3 trow=00:-1:00/00:08/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|1|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=A => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=SET:2 trow=18:16:04/31:23/00:1B/88
+EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=SET:0 trow=18:16:00/31:23/00:1B/88
+EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=NONE trow=18:16:03/31:23/00:1B/88
+EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=NONE trow=18:16:03/31:23/00:1B/88
+EDIT scr=TABLE col=3 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=EFFECT_TYPE|+-..D...|1|0|37|1|16|255|1|- act=DELETE trow=18:16:00/00:23/00:1B/88
 EDIT scr=TABLE col=4 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:1 trow=00:-1:00/01:00/00:00/00
 EDIT scr=TABLE col=4 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:255 trow=00:-1:00/FF:00/00:00/00
 EDIT scr=TABLE col=4 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:240 trow=00:-1:00/F0:00/00:00/00
@@ -1179,46 +1179,46 @@ EDIT scr=TABLE col=4 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=HEX_BYTE|+-><....
 EDIT scr=TABLE col=4 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=HEX_BYTE|+-><....|49|0|255|1|16|-1|0|- act=SET:33 trow=18:16:03/21:23/00:1B/88
 EDIT scr=TABLE col=4 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=HEX_BYTE|+-><....|49|0|255|1|16|-1|0|- act=SET:65 trow=18:16:03/41:23/00:1B/88
 EDIT scr=TABLE col=4 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=HEX_BYTE|+-><....|49|0|255|1|16|-1|0|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 trow=00:-1:00/00:03/00:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 trow=00:-1:00/00:2A/00:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 trow=00:0:00/00:03/00:00/00
-EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 trow=00:0:00/00:2A/00:00/00
-EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 trow=01:255:00/00:03/00:00/00
-EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 trow=01:255:00/00:2A/00:00/00
-EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 trow=80:64:00/00:03/00:00/00
-EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 trow=80:64:00/00:2A/00:00/00
-EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 trow=FF:-1:00/00:03/00:00/00
-EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 trow=FF:-1:00/00:2A/00:00/00
-EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:1 trow=0C:127:14/7F:03/00:00/00
-EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=SET:35 trow=0C:127:14/7F:2A/00:00/00
-EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|2|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|5|0|35|1|16|255|2|- act=SET:6 trow=00:-1:00/00:09/FF:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|5|0|35|1|16|255|2|- act=SET:4 trow=00:-1:00/00:07/FF:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|5|0|35|1|16|255|2|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|5|0|35|1|16|255|2|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|5|0|35|1|16|255|2|- act=DELETE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=A => ctx=EFFECT_TYPE|+-..D...|26|0|35|1|16|255|2|- act=SET:27 trow=18:16:03/31:24/00:1B/88
-EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=EFFECT_TYPE|+-..D...|26|0|35|1|16|255|2|- act=SET:25 trow=18:16:03/31:21/00:1B/88
-EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=EFFECT_TYPE|+-..D...|26|0|35|1|16|255|2|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=EFFECT_TYPE|+-..D...|26|0|35|1|16|255|2|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=EFFECT_TYPE|+-..D...|26|0|35|1|16|255|2|- act=DELETE trow=18:16:03/31:00/00:1B/88
+EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 trow=00:-1:00/00:03/00:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 trow=00:-1:00/00:2A/00:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 trow=00:0:00/00:03/00:00/00
+EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 trow=00:0:00/00:2A/00:00/00
+EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=00:0:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 trow=01:255:00/00:03/00:00/00
+EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 trow=01:255:00/00:2A/00:00/00
+EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=01:255:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 trow=80:64:00/00:03/00:00/00
+EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 trow=80:64:00/00:2A/00:00/00
+EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=80:64:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 trow=FF:-1:00/00:03/00:00/00
+EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 trow=FF:-1:00/00:2A/00:00/00
+EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=FF:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:1 trow=0C:127:14/7F:03/00:00/00
+EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=SET:37 trow=0C:127:14/7F:2A/00:00/00
+EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=5 trow=0C:127:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|2|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-..D...|5|0|37|1|16|255|2|- act=SET:6 trow=00:-1:00/00:09/FF:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-..D...|5|0|37|1|16|255|2|- act=SET:4 trow=00:-1:00/00:07/FF:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-..D...|5|0|37|1|16|255|2|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-..D...|5|0|37|1|16|255|2|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=5 trow=00:-1:00/00:08/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-..D...|5|0|37|1|16|255|2|- act=DELETE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=A => ctx=EFFECT_TYPE|+-..D...|26|0|37|1|16|255|2|- act=SET:27 trow=18:16:03/31:24/00:1B/88
+EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=EFFECT_TYPE|+-..D...|26|0|37|1|16|255|2|- act=SET:25 trow=18:16:03/31:21/00:1B/88
+EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=EFFECT_TYPE|+-..D...|26|0|37|1|16|255|2|- act=NONE trow=18:16:03/31:23/00:1B/88
+EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=EFFECT_TYPE|+-..D...|26|0|37|1|16|255|2|- act=NONE trow=18:16:03/31:23/00:1B/88
+EDIT scr=TABLE col=5 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=EFFECT_TYPE|+-..D...|26|0|37|1|16|255|2|- act=DELETE trow=18:16:03/31:00/00:1B/88
 EDIT scr=TABLE col=6 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:1 trow=00:-1:00/00:00/01:00/00
 EDIT scr=TABLE col=6 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:255 trow=00:-1:00/00:00/FF:00/00
 EDIT scr=TABLE col=6 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:240 trow=00:-1:00/00:00/F0:00/00
@@ -1259,46 +1259,46 @@ EDIT scr=TABLE col=6 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=HEX_BYTE|+-><....
 EDIT scr=TABLE col=6 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=HEX_BYTE|+-><....|0|0|127|1|16|-1|0|- act=SET:112 trow=18:16:03/31:23/70:1B/88
 EDIT scr=TABLE col=6 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=HEX_BYTE|+-><....|0|0|127|1|16|-1|0|- act=SET:16 trow=18:16:03/31:23/10:1B/88
 EDIT scr=TABLE col=6 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=HEX_BYTE|+-><....|0|0|127|1|16|-1|0|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=00:-1:00/00:00/00:03/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=00:-1:00/00:00/00:2A/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=00:0:00/00:00/00:03/00
-EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=00:0:00/00:00/00:2A/00
-EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:0:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=01:255:00/00:00/00:03/00
-EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=01:255:00/00:00/00:2A/00
-EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=01:255:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=80:64:00/00:00/00:03/00
-EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=80:64:00/00:00/00:2A/00
-EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=80:64:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=FF:-1:00/00:00/00:03/00
-EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=FF:-1:00/00:00/00:2A/00
-EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=FF:-1:00/00:00/00:00/00
-EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=0C:127:14/7F:00/00:03/00
-EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=0C:127:14/7F:00/00:2A/00
-EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=0C:127:14/7F:00/00:00/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:1 trow=00:-1:00/00:08/FF:03/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=SET:35 trow=00:-1:00/00:08/FF:2A/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|35|1|16|255|3|- act=NONE trow=00:-1:00/00:08/FF:00/00
-EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=A => ctx=EFFECT_TYPE|+-..D...|18|0|35|1|16|255|3|- act=SET:19 trow=18:16:03/31:23/00:1C/88
-EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=EFFECT_TYPE|+-..D...|18|0|35|1|16|255|3|- act=SET:17 trow=18:16:03/31:23/00:1A/88
-EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=EFFECT_TYPE|+-..D...|18|0|35|1|16|255|3|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=EFFECT_TYPE|+-..D...|18|0|35|1|16|255|3|- act=NONE trow=18:16:03/31:23/00:1B/88
-EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=EFFECT_TYPE|+-..D...|18|0|35|1|16|255|3|- act=DELETE trow=18:16:03/31:23/00:00/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=00:-1:00/00:00/00:03/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=00:-1:00/00:00/00:2A/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=00:0:00/00:00/00:03/00
+EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=00:0:00/00:00/00:2A/00
+EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=00:0:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:0:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=01:255:00/00:00/00:03/00
+EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=01:255:00/00:00/00:2A/00
+EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=01:255:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=01:255:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=80:64:00/00:00/00:03/00
+EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=80:64:00/00:00/00:2A/00
+EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=80:64:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=80:64:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=FF:-1:00/00:00/00:03/00
+EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=FF:-1:00/00:00/00:2A/00
+EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=FF:-1:00/00:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=FF:-1:00/00:00/00:00/00
+EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=0C:127:14/7F:00/00:03/00
+EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=0C:127:14/7F:00/00:2A/00
+EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=7 trow=0C:127:14/7F:00/00:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=0C:127:14/7F:00/00:00/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=A => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:1 trow=00:-1:00/00:08/FF:03/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=B => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=SET:37 trow=00:-1:00/00:08/FF:2A/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=AL => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=AR => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=7 trow=00:-1:00/00:08/FF:00/00 btn=AB => ctx=EFFECT_TYPE|+-......|0|0|37|1|16|255|3|- act=NONE trow=00:-1:00/00:08/FF:00/00
+EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=A => ctx=EFFECT_TYPE|+-..D...|18|0|37|1|16|255|3|- act=SET:19 trow=18:16:03/31:23/00:1C/88
+EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=B => ctx=EFFECT_TYPE|+-..D...|18|0|37|1|16|255|3|- act=SET:17 trow=18:16:03/31:23/00:1A/88
+EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=AL => ctx=EFFECT_TYPE|+-..D...|18|0|37|1|16|255|3|- act=NONE trow=18:16:03/31:23/00:1B/88
+EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=AR => ctx=EFFECT_TYPE|+-..D...|18|0|37|1|16|255|3|- act=NONE trow=18:16:03/31:23/00:1B/88
+EDIT scr=TABLE col=7 trow=18:16:03/31:23/00:1B/88 btn=AB => ctx=EFFECT_TYPE|+-..D...|18|0|37|1|16|255|3|- act=DELETE trow=18:16:03/31:23/00:00/00
 EDIT scr=TABLE col=8 trow=00:-1:00/00:00/00:00/00 btn=A => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:1 trow=00:-1:00/00:00/00:00/01
 EDIT scr=TABLE col=8 trow=00:-1:00/00:00/00:00/00 btn=B => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:255 trow=00:-1:00/00:00/00:00/FF
 EDIT scr=TABLE col=8 trow=00:-1:00/00:00/00:00/00 btn=AL => ctx=HEX_BYTE|+-><....|0|0|255|1|16|-1|0|- act=SET:240 trow=00:-1:00/00:00/00:00/F0
@@ -21614,72 +21614,72 @@ CLIP scr=TABLE op=cut-paste name=roundtrip src=0,1,2,8 dst=6,1 => SUCCESS:24 inf
 # FXH — the 6x5 grid. Its last row is CENTRED (cols 1..4); cols 0 and 5 there are
 # empty and unreachable, and every move that could land on them rounds inward.
 FXH open=0 moves=- => row=0 col=0 idx=0 code=00
-FXH open=0 moves=U => row=5 col=0 idx=30 code=25
+FXH open=0 moves=U => row=6 col=2 idx=36 code=29
 FXH open=0 moves=D => row=1 col=0 idx=6 code=09
 FXH open=0 moves=L => row=0 col=5 idx=5 code=08
 FXH open=0 moves=R => row=0 col=1 idx=1 code=03
-FXH open=0 moves=U,U => row=4 col=0 idx=24 code=20
+FXH open=0 moves=U,U => row=5 col=2 idx=32 code=25
 FXH open=0 moves=D,D => row=2 col=0 idx=12 code=12
 FXH open=0 moves=L,L => row=0 col=4 idx=4 code=07
 FXH open=0 moves=R,R => row=0 col=2 idx=2 code=04
 FXH open=0 moves=D,D,D,D => row=4 col=0 idx=24 code=20
 FXH open=0 moves=D,D,D,D,L => row=4 col=5 idx=29 code=2C
 FXH open=0 moves=D,D,D,D,R,R,R,R => row=4 col=4 idx=28 code=2B
-FXH open=0 moves=U,L => row=5 col=5 idx=35 code=2A
-FXH open=0 moves=U,R,R,R,R,R => row=5 col=5 idx=35 code=2A
+FXH open=0 moves=U,L => row=6 col=3 idx=37 code=2A
+FXH open=0 moves=U,R,R,R,R,R => row=6 col=3 idx=37 code=2A
 FXH open=0 moves=D,D,D,D,U => row=3 col=0 idx=18 code=1B
-FXH open=0 moves=D,D,D,D,D => row=5 col=0 idx=30 code=25
+FXH open=0 moves=D,D,D,D,D => row=5 col=0 idx=30 code=2D
 FXH open=0 moves=R,R,R,R,R,R => row=0 col=0 idx=0 code=00
 FXH open=1 moves=- => row=0 col=1 idx=1 code=03
-FXH open=1 moves=U => row=5 col=1 idx=31 code=26
+FXH open=1 moves=U => row=6 col=2 idx=36 code=29
 FXH open=1 moves=D => row=1 col=1 idx=7 code=0A
 FXH open=1 moves=L => row=0 col=0 idx=0 code=00
 FXH open=1 moves=R => row=0 col=2 idx=2 code=04
-FXH open=1 moves=U,U => row=4 col=1 idx=25 code=21
+FXH open=1 moves=U,U => row=5 col=2 idx=32 code=25
 FXH open=1 moves=D,D => row=2 col=1 idx=13 code=14
 FXH open=1 moves=L,L => row=0 col=5 idx=5 code=08
 FXH open=1 moves=R,R => row=0 col=3 idx=3 code=05
 FXH open=1 moves=D,D,D,D => row=4 col=1 idx=25 code=21
 FXH open=1 moves=D,D,D,D,L => row=4 col=0 idx=24 code=20
 FXH open=1 moves=D,D,D,D,R,R,R,R => row=4 col=5 idx=29 code=2C
-FXH open=1 moves=U,L => row=5 col=0 idx=30 code=25
-FXH open=1 moves=U,R,R,R,R,R => row=5 col=0 idx=30 code=25
+FXH open=1 moves=U,L => row=6 col=3 idx=37 code=2A
+FXH open=1 moves=U,R,R,R,R,R => row=6 col=3 idx=37 code=2A
 FXH open=1 moves=D,D,D,D,U => row=3 col=1 idx=19 code=1C
-FXH open=1 moves=D,D,D,D,D => row=5 col=1 idx=31 code=26
+FXH open=1 moves=D,D,D,D,D => row=5 col=1 idx=31 code=2E
 FXH open=1 moves=R,R,R,R,R,R => row=0 col=1 idx=1 code=03
 FXH open=5 moves=- => row=0 col=5 idx=5 code=08
-FXH open=5 moves=U => row=5 col=5 idx=35 code=2A
+FXH open=5 moves=U => row=6 col=3 idx=37 code=2A
 FXH open=5 moves=D => row=1 col=5 idx=11 code=11
 FXH open=5 moves=L => row=0 col=4 idx=4 code=07
 FXH open=5 moves=R => row=0 col=0 idx=0 code=00
-FXH open=5 moves=U,U => row=4 col=5 idx=29 code=2C
+FXH open=5 moves=U,U => row=5 col=3 idx=33 code=26
 FXH open=5 moves=D,D => row=2 col=5 idx=17 code=1A
 FXH open=5 moves=L,L => row=0 col=3 idx=3 code=05
 FXH open=5 moves=R,R => row=0 col=1 idx=1 code=03
 FXH open=5 moves=D,D,D,D => row=4 col=5 idx=29 code=2C
 FXH open=5 moves=D,D,D,D,L => row=4 col=4 idx=28 code=2B
 FXH open=5 moves=D,D,D,D,R,R,R,R => row=4 col=3 idx=27 code=24
-FXH open=5 moves=U,L => row=5 col=4 idx=34 code=29
-FXH open=5 moves=U,R,R,R,R,R => row=5 col=4 idx=34 code=29
+FXH open=5 moves=U,L => row=6 col=2 idx=36 code=29
+FXH open=5 moves=U,R,R,R,R,R => row=6 col=2 idx=36 code=29
 FXH open=5 moves=D,D,D,D,U => row=3 col=5 idx=23 code=22
-FXH open=5 moves=D,D,D,D,D => row=5 col=5 idx=35 code=2A
+FXH open=5 moves=D,D,D,D,D => row=5 col=5 idx=35 code=28
 FXH open=5 moves=R,R,R,R,R,R => row=0 col=5 idx=5 code=08
 FXH open=6 moves=- => row=1 col=0 idx=6 code=09
 FXH open=6 moves=U => row=0 col=0 idx=0 code=00
 FXH open=6 moves=D => row=2 col=0 idx=12 code=12
 FXH open=6 moves=L => row=1 col=5 idx=11 code=11
 FXH open=6 moves=R => row=1 col=1 idx=7 code=0A
-FXH open=6 moves=U,U => row=5 col=0 idx=30 code=25
+FXH open=6 moves=U,U => row=6 col=2 idx=36 code=29
 FXH open=6 moves=D,D => row=3 col=0 idx=18 code=1B
 FXH open=6 moves=L,L => row=1 col=4 idx=10 code=10
 FXH open=6 moves=R,R => row=1 col=2 idx=8 code=0B
-FXH open=6 moves=D,D,D,D => row=5 col=0 idx=30 code=25
-FXH open=6 moves=D,D,D,D,L => row=5 col=5 idx=35 code=2A
-FXH open=6 moves=D,D,D,D,R,R,R,R => row=5 col=4 idx=34 code=29
+FXH open=6 moves=D,D,D,D => row=5 col=0 idx=30 code=2D
+FXH open=6 moves=D,D,D,D,L => row=5 col=5 idx=35 code=28
+FXH open=6 moves=D,D,D,D,R,R,R,R => row=5 col=4 idx=34 code=27
 FXH open=6 moves=U,L => row=0 col=5 idx=5 code=08
 FXH open=6 moves=U,R,R,R,R,R => row=0 col=5 idx=5 code=08
 FXH open=6 moves=D,D,D,D,U => row=4 col=0 idx=24 code=20
-FXH open=6 moves=D,D,D,D,D => row=0 col=0 idx=0 code=00
+FXH open=6 moves=D,D,D,D,D => row=6 col=2 idx=36 code=29
 FXH open=6 moves=R,R,R,R,R,R => row=1 col=0 idx=6 code=09
 FXH open=17 moves=- => row=2 col=5 idx=17 code=1A
 FXH open=17 moves=U => row=1 col=5 idx=11 code=11
@@ -21690,13 +21690,13 @@ FXH open=17 moves=U,U => row=0 col=5 idx=5 code=08
 FXH open=17 moves=D,D => row=4 col=5 idx=29 code=2C
 FXH open=17 moves=L,L => row=2 col=3 idx=15 code=16
 FXH open=17 moves=R,R => row=2 col=1 idx=13 code=14
-FXH open=17 moves=D,D,D,D => row=0 col=5 idx=5 code=08
-FXH open=17 moves=D,D,D,D,L => row=0 col=4 idx=4 code=07
-FXH open=17 moves=D,D,D,D,R,R,R,R => row=0 col=3 idx=3 code=05
+FXH open=17 moves=D,D,D,D => row=6 col=3 idx=37 code=2A
+FXH open=17 moves=D,D,D,D,L => row=6 col=2 idx=36 code=29
+FXH open=17 moves=D,D,D,D,R,R,R,R => row=6 col=3 idx=37 code=2A
 FXH open=17 moves=U,L => row=1 col=4 idx=10 code=10
 FXH open=17 moves=U,R,R,R,R,R => row=1 col=4 idx=10 code=10
-FXH open=17 moves=D,D,D,D,U => row=5 col=5 idx=35 code=2A
-FXH open=17 moves=D,D,D,D,D => row=1 col=5 idx=11 code=11
+FXH open=17 moves=D,D,D,D,U => row=5 col=3 idx=33 code=26
+FXH open=17 moves=D,D,D,D,D => row=0 col=3 idx=3 code=05
 FXH open=17 moves=R,R,R,R,R,R => row=2 col=5 idx=17 code=1A
 FXH open=23 moves=- => row=3 col=5 idx=23 code=22
 FXH open=23 moves=U => row=2 col=5 idx=17 code=1A
@@ -21704,84 +21704,84 @@ FXH open=23 moves=D => row=4 col=5 idx=29 code=2C
 FXH open=23 moves=L => row=3 col=4 idx=22 code=1F
 FXH open=23 moves=R => row=3 col=0 idx=18 code=1B
 FXH open=23 moves=U,U => row=1 col=5 idx=11 code=11
-FXH open=23 moves=D,D => row=5 col=5 idx=35 code=2A
+FXH open=23 moves=D,D => row=5 col=5 idx=35 code=28
 FXH open=23 moves=L,L => row=3 col=3 idx=21 code=1E
 FXH open=23 moves=R,R => row=3 col=1 idx=19 code=1C
-FXH open=23 moves=D,D,D,D => row=1 col=5 idx=11 code=11
-FXH open=23 moves=D,D,D,D,L => row=1 col=4 idx=10 code=10
-FXH open=23 moves=D,D,D,D,R,R,R,R => row=1 col=3 idx=9 code=0F
+FXH open=23 moves=D,D,D,D => row=0 col=3 idx=3 code=05
+FXH open=23 moves=D,D,D,D,L => row=0 col=2 idx=2 code=04
+FXH open=23 moves=D,D,D,D,R,R,R,R => row=0 col=1 idx=1 code=03
 FXH open=23 moves=U,L => row=2 col=4 idx=16 code=19
 FXH open=23 moves=U,R,R,R,R,R => row=2 col=4 idx=16 code=19
-FXH open=23 moves=D,D,D,D,U => row=0 col=5 idx=5 code=08
-FXH open=23 moves=D,D,D,D,D => row=2 col=5 idx=17 code=1A
+FXH open=23 moves=D,D,D,D,U => row=6 col=3 idx=37 code=2A
+FXH open=23 moves=D,D,D,D,D => row=1 col=3 idx=9 code=0F
 FXH open=23 moves=R,R,R,R,R,R => row=3 col=5 idx=23 code=22
 FXH open=24 moves=- => row=4 col=0 idx=24 code=20
 FXH open=24 moves=U => row=3 col=0 idx=18 code=1B
-FXH open=24 moves=D => row=5 col=0 idx=30 code=25
+FXH open=24 moves=D => row=5 col=0 idx=30 code=2D
 FXH open=24 moves=L => row=4 col=5 idx=29 code=2C
 FXH open=24 moves=R => row=4 col=1 idx=25 code=21
 FXH open=24 moves=U,U => row=2 col=0 idx=12 code=12
-FXH open=24 moves=D,D => row=0 col=0 idx=0 code=00
+FXH open=24 moves=D,D => row=6 col=2 idx=36 code=29
 FXH open=24 moves=L,L => row=4 col=4 idx=28 code=2B
 FXH open=24 moves=R,R => row=4 col=2 idx=26 code=23
-FXH open=24 moves=D,D,D,D => row=2 col=0 idx=12 code=12
-FXH open=24 moves=D,D,D,D,L => row=2 col=5 idx=17 code=1A
-FXH open=24 moves=D,D,D,D,R,R,R,R => row=2 col=4 idx=16 code=19
+FXH open=24 moves=D,D,D,D => row=1 col=2 idx=8 code=0B
+FXH open=24 moves=D,D,D,D,L => row=1 col=1 idx=7 code=0A
+FXH open=24 moves=D,D,D,D,R,R,R,R => row=1 col=0 idx=6 code=09
 FXH open=24 moves=U,L => row=3 col=5 idx=23 code=22
 FXH open=24 moves=U,R,R,R,R,R => row=3 col=5 idx=23 code=22
-FXH open=24 moves=D,D,D,D,U => row=1 col=0 idx=6 code=09
-FXH open=24 moves=D,D,D,D,D => row=3 col=0 idx=18 code=1B
+FXH open=24 moves=D,D,D,D,U => row=0 col=2 idx=2 code=04
+FXH open=24 moves=D,D,D,D,D => row=2 col=2 idx=14 code=15
 FXH open=24 moves=R,R,R,R,R,R => row=4 col=0 idx=24 code=20
 FXH open=25 moves=- => row=4 col=1 idx=25 code=21
 FXH open=25 moves=U => row=3 col=1 idx=19 code=1C
-FXH open=25 moves=D => row=5 col=1 idx=31 code=26
+FXH open=25 moves=D => row=5 col=1 idx=31 code=2E
 FXH open=25 moves=L => row=4 col=0 idx=24 code=20
 FXH open=25 moves=R => row=4 col=2 idx=26 code=23
 FXH open=25 moves=U,U => row=2 col=1 idx=13 code=14
-FXH open=25 moves=D,D => row=0 col=1 idx=1 code=03
+FXH open=25 moves=D,D => row=6 col=2 idx=36 code=29
 FXH open=25 moves=L,L => row=4 col=5 idx=29 code=2C
 FXH open=25 moves=R,R => row=4 col=3 idx=27 code=24
-FXH open=25 moves=D,D,D,D => row=2 col=1 idx=13 code=14
-FXH open=25 moves=D,D,D,D,L => row=2 col=0 idx=12 code=12
-FXH open=25 moves=D,D,D,D,R,R,R,R => row=2 col=5 idx=17 code=1A
+FXH open=25 moves=D,D,D,D => row=1 col=2 idx=8 code=0B
+FXH open=25 moves=D,D,D,D,L => row=1 col=1 idx=7 code=0A
+FXH open=25 moves=D,D,D,D,R,R,R,R => row=1 col=0 idx=6 code=09
 FXH open=25 moves=U,L => row=3 col=0 idx=18 code=1B
 FXH open=25 moves=U,R,R,R,R,R => row=3 col=0 idx=18 code=1B
-FXH open=25 moves=D,D,D,D,U => row=1 col=1 idx=7 code=0A
-FXH open=25 moves=D,D,D,D,D => row=3 col=1 idx=19 code=1C
+FXH open=25 moves=D,D,D,D,U => row=0 col=2 idx=2 code=04
+FXH open=25 moves=D,D,D,D,D => row=2 col=2 idx=14 code=15
 FXH open=25 moves=R,R,R,R,R,R => row=4 col=1 idx=25 code=21
 FXH open=26 moves=- => row=4 col=2 idx=26 code=23
 FXH open=26 moves=U => row=3 col=2 idx=20 code=1D
-FXH open=26 moves=D => row=5 col=2 idx=32 code=27
+FXH open=26 moves=D => row=5 col=2 idx=32 code=25
 FXH open=26 moves=L => row=4 col=1 idx=25 code=21
 FXH open=26 moves=R => row=4 col=3 idx=27 code=24
 FXH open=26 moves=U,U => row=2 col=2 idx=14 code=15
-FXH open=26 moves=D,D => row=0 col=2 idx=2 code=04
+FXH open=26 moves=D,D => row=6 col=2 idx=36 code=29
 FXH open=26 moves=L,L => row=4 col=0 idx=24 code=20
 FXH open=26 moves=R,R => row=4 col=4 idx=28 code=2B
-FXH open=26 moves=D,D,D,D => row=2 col=2 idx=14 code=15
-FXH open=26 moves=D,D,D,D,L => row=2 col=1 idx=13 code=14
-FXH open=26 moves=D,D,D,D,R,R,R,R => row=2 col=0 idx=12 code=12
+FXH open=26 moves=D,D,D,D => row=1 col=2 idx=8 code=0B
+FXH open=26 moves=D,D,D,D,L => row=1 col=1 idx=7 code=0A
+FXH open=26 moves=D,D,D,D,R,R,R,R => row=1 col=0 idx=6 code=09
 FXH open=26 moves=U,L => row=3 col=1 idx=19 code=1C
 FXH open=26 moves=U,R,R,R,R,R => row=3 col=1 idx=19 code=1C
-FXH open=26 moves=D,D,D,D,U => row=1 col=2 idx=8 code=0B
-FXH open=26 moves=D,D,D,D,D => row=3 col=2 idx=20 code=1D
+FXH open=26 moves=D,D,D,D,U => row=0 col=2 idx=2 code=04
+FXH open=26 moves=D,D,D,D,D => row=2 col=2 idx=14 code=15
 FXH open=26 moves=R,R,R,R,R,R => row=4 col=2 idx=26 code=23
 FXH open=27 moves=- => row=4 col=3 idx=27 code=24
 FXH open=27 moves=U => row=3 col=3 idx=21 code=1E
-FXH open=27 moves=D => row=5 col=3 idx=33 code=28
+FXH open=27 moves=D => row=5 col=3 idx=33 code=26
 FXH open=27 moves=L => row=4 col=2 idx=26 code=23
 FXH open=27 moves=R => row=4 col=4 idx=28 code=2B
 FXH open=27 moves=U,U => row=2 col=3 idx=15 code=16
-FXH open=27 moves=D,D => row=0 col=3 idx=3 code=05
+FXH open=27 moves=D,D => row=6 col=3 idx=37 code=2A
 FXH open=27 moves=L,L => row=4 col=1 idx=25 code=21
 FXH open=27 moves=R,R => row=4 col=5 idx=29 code=2C
-FXH open=27 moves=D,D,D,D => row=2 col=3 idx=15 code=16
-FXH open=27 moves=D,D,D,D,L => row=2 col=2 idx=14 code=15
-FXH open=27 moves=D,D,D,D,R,R,R,R => row=2 col=1 idx=13 code=14
+FXH open=27 moves=D,D,D,D => row=1 col=3 idx=9 code=0F
+FXH open=27 moves=D,D,D,D,L => row=1 col=2 idx=8 code=0B
+FXH open=27 moves=D,D,D,D,R,R,R,R => row=1 col=1 idx=7 code=0A
 FXH open=27 moves=U,L => row=3 col=2 idx=20 code=1D
 FXH open=27 moves=U,R,R,R,R,R => row=3 col=2 idx=20 code=1D
-FXH open=27 moves=D,D,D,D,U => row=1 col=3 idx=9 code=0F
-FXH open=27 moves=D,D,D,D,D => row=3 col=3 idx=21 code=1E
+FXH open=27 moves=D,D,D,D,U => row=0 col=3 idx=3 code=05
+FXH open=27 moves=D,D,D,D,D => row=2 col=3 idx=15 code=16
 FXH open=27 moves=R,R,R,R,R,R => row=4 col=3 idx=27 code=24
 
 # SORT — the file browser's listing order. The browser has no cursor context and no
