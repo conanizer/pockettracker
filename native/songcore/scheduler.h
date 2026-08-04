@@ -43,6 +43,7 @@
 #include "model.h"
 #include "timing.h"
 #include "effects.h"
+#include "automation.h"
 #include "rng.h"
 #include "router.h"
 
@@ -523,6 +524,10 @@ class Sequencer {
     struct ScheduleStepResult {
         bool noteScheduled = false;
         bool hopTriggered = false;
+        // The frame the step's note-on was scheduled at, or -1. Carried out because an AUS/AUF ramp
+        // tick that lands ON a note-on reaches the voice the note REPLACES — the same hazard STEP
+        // 2.3's `voiceFxFrame` +1 exists for, and the ramp cannot see the LAT that moved the note.
+        int64_t noteFrame = -1;
     };
 
     // Snapshot taken just BEFORE scheduling a phrase, so notify_data_changed() can roll the buffer
@@ -604,6 +609,24 @@ class Sequencer {
         int effectiveStartRow = clampi(startRow, 0, 15);
         int64_t frameOffset = 0;
 
+        // ─── The ramps this phrase declares (AUS/AUF — automation.h) ─────────────────────────────
+        //
+        // Pairing is pure and frame-free: it answers WHICH SPANS the phrase declares, in step indices,
+        // and the walk below turns each into events using the duration it is already holding for the
+        // step it is standing on. That is why a groove-warped step costs nothing here, and why a HOP
+        // truncates a fade for free — the walk ends, and no tick was ever emitted ahead of it.
+        //
+        // `effectiveStartRow` is passed through: a phrase entered BELOW its AUS runs no ramp at all,
+        // because the step that opens it never plays.
+        const std::vector<RampSpec> ramps = find_ramps(phrase, effectiveStartRow);
+        // Where each ramp has got to — the last byte it emitted, seeded with the authored start value
+        // because the start effect's own per-step event has already said it. Both ends of an ease curve
+        // hold the same byte for many ticks, and a CC repeating what the last one said is a bus record,
+        // a queue slot and a golden row spent on nothing.
+        std::vector<int> rampLastByte;
+        rampLastByte.reserve(ramps.size());
+        for (const RampSpec& r : ramps) rampLastByte.push_back(r.startByte);
+
         for (int stepIndex = effectiveStartRow; stepIndex < 16; ++stepIndex) {
             const PhraseStep& step = phrase.steps[stepIndex];
 
@@ -639,6 +662,13 @@ class Sequencer {
 
             ScheduleStepResult stepResult = scheduleStepWithEffects(step, targetFrame, stepDuration, trackId,
                                                                     transposeSemitones, trackState, stepIndex);
+            // AFTER the step's own events, and inside the same iteration: a ramp is emitted as the walk
+            // passes over it, never ahead of it. The HOP check below is what makes that matter — a fade
+            // baked into frames the transport then jumps away from would go on moving the parameter
+            // after the phrase had ended.
+            if (!ramps.empty())
+                emit_ramp_ticks(ramps, rampLastByte, stepIndex, targetFrame, stepDuration, trackId,
+                                stepResult.noteFrame);
             rowsScheduled++;
             frameOffset += stepDuration;
             if (currentGrooveActive) localGrooveStep++;
@@ -652,6 +682,74 @@ class Sequencer {
 
         if (anyGrooveActive) trackState.grooveStep = localGrooveStep;
         return SchedulePhraseResult{rowsScheduled, false, false, frameOffset};
+    }
+
+    // ─── AUS / AUF — a declared span, emitted as the walk crosses it ────────────────────────────────
+    //
+    // A ramp is nothing but the parameter's own CC, emitted more often (automation.h): one event per
+    // tic, at the byte the curve holds there, sent over the same `byte / 255` the per-step effect
+    // already sends. So every value a fade produces is a member of the same 256-value set the goldens
+    // already contain, and nothing below the seam has to agree about a float.
+    //
+    // ⭐ **`t` IS MEASURED IN STEPS, NOT FRAMES**, and that is what makes the emitter groove-proof
+    // without looking ahead. Position is `(stepsSoFar + tic/12) / span`, so a fade has covered an exact
+    // fraction of its distance at every step boundary whatever the groove did to the lengths in
+    // between — written across eight steps, it arrives with the note on the eighth, on any groove.
+    // Normalising over the span's total FRAMES instead would need the durations of steps the walk has
+    // not reached yet, and would leave the value at every intermediate boundary depending on the swing.
+    //
+    // A step is twelve tics however long it is: `stepDuration / TICS_PER_STEP` is the same warped
+    // frames-per-tic LAT and KIL offset by, so the fade sits on the grid the rest of the step sits on.
+    void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<int>& lastByte,
+                         int stepIndex, int64_t targetFrame, int64_t stepDuration, int trackId,
+                         int64_t noteFrame) {
+        const int64_t framesPerTic = stepDuration / TICS_PER_STEP;
+
+        // A parameter scheduled on a note's own frame reaches the voice that note is REPLACING — the
+        // reason STEP 2.3 releases its per-note effects one frame late. A tic that happens to coincide
+        // takes the same +1; the rest stay exactly on the tic grid. `noteFrame` rather than the step
+        // frame, because LAT may have moved the note somewhere else in the step entirely.
+        auto place = [noteFrame](int64_t frame) { return frame == noteFrame ? frame + 1 : frame; };
+
+        for (size_t i = 0; i < ramps.size(); ++i) {
+            const RampSpec& r = ramps[i];
+            if (stepIndex < r.ausStep || stepIndex > r.aufStep) continue;
+            const int lane = r.global ? TRACK_GLOBAL : trackId;
+
+            // ⚠️ VTR/VMV REPLACE the mixer fader and hold, so the host puts the authored value back on
+            // stop() — and the flag telling it to is otherwise set only by the per-step effect. That is
+            // not enough here: pairing reads the AUTHORED step, so a CHA that zeroes the slot the ramp
+            // took its start value from leaves a fade moving a fader nothing will restore. Keyed on the
+            // CC the ramp actually sends, which is the thing that moves it.
+            if (r.ccId == CC_TRACK_VOL || r.ccId == CC_MASTER_VOL) mixerVolActive_ = true;
+
+            // The arrival carries the destination byte the author typed, not an interpolation that
+            // happens to round to it.
+            if (stepIndex == r.aufStep) {
+                if (r.destByte != lastByte[i]) {
+                    router_.cc(place(targetFrame), lane, r.ccId, r.destByte / 255.0f);
+                    lastByte[i] = r.destByte;
+                }
+                continue;
+            }
+
+            // ⚠️ Tic 0 of the AUS step belongs to the START EFFECT, which emits it itself — or, on a
+            // step that triggers a note, carries it in the note-on's own gain or pan. A ramp opening on
+            // top of that is a second write of the same value at best, and under LAT — which moves the
+            // authored one later into the step — a fade that starts before the value it fades FROM has
+            // been set. So the ramp does not claim the step's first tic. (Which of the two wins when a
+            // ramp crosses a step that writes the same parameter is still open; E1c pins it.)
+            const int firstTic = (stepIndex == r.ausStep) ? 1 : 0;
+            const int span     = r.aufStep - r.ausStep;   // > 0 — a zero-length span never pairs
+            for (int tic = firstTic; tic < TICS_PER_STEP; ++tic) {
+                const double t = (static_cast<double>(stepIndex - r.ausStep) +
+                                  tic / static_cast<double>(TICS_PER_STEP)) / static_cast<double>(span);
+                const int b = automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
+                if (b == lastByte[i]) continue;
+                router_.cc(place(targetFrame + tic * framesPerTic), lane, r.ccId, b / 255.0f);
+                lastByte[i] = b;
+            }
+        }
     }
 
     // CHA gate + RND/RNL randomize, evaluated before effect resolution. The byte-exact goldens are
@@ -1113,7 +1211,7 @@ class Sequencer {
             }
         }
 
-        return ScheduleStepResult{noteScheduled, hopTriggered};
+        return ScheduleStepResult{noteScheduled, hopTriggered, scheduledNoteFrame};
     }
 
     void scheduleArpeggioNotes(int64_t targetFrame, int64_t stepDuration, int trackId, TrackState& trackState,

@@ -38,6 +38,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -5781,6 +5782,419 @@ int main() {
             eqs(specs_str(find_ramps(master)), "VMV cc133 global 0-8 FF>00 curve 80 slots 1/2",
                 "⭐ PAIRING: a master fade carries the GLOBAL lane out of the registry — on the track "
                 "lane the external-routing gate would swallow it");
+        }
+    }
+
+    // ── 48. AUS / AUF — THE EMISSION ────────────────────────────────────────────────────────────
+    //
+    // §47 proved which spans a phrase DECLARES. This is what the scheduler does with one. A ramp is the
+    // parameter's own CC emitted per tic (`emit_ramp_ticks`, scheduler.h), so the entire fade rides in
+    // the event stream and every value in it can be read back — which is the whole reason the dense-CC
+    // architecture was chosen over an engine-side interpolator whose correctness would live in the
+    // audio and nowhere else.
+    //
+    // Driven through the real Sequencer with a recorder on the bus. `playPhrase` schedules exactly one
+    // pass and nothing polls afterwards, so the recording is one phrase's worth of events, not a loop's.
+    //
+    // ⚠️ Every count and every byte below is hand-derived from the RULE, in the comment beside it. The
+    // emitter must not be able to certify itself by being asked what it did.
+    {
+        struct Rec : songcore::IMidiConsumer {
+            struct Cc { int64_t frame; int track; int param; int valueByte; };
+            std::vector<Cc>      ccs;
+            std::vector<int64_t> notes;
+            void consume(const songcore::Event& ev) override {
+                if (ev.type == songcore::EV_NOTE_ON) { notes.push_back(ev.frame); return; }
+                if (ev.type != songcore::EV_CC) return;
+                float v = 0.0f;
+                std::memcpy(&v, &ev.cc.valueBits, sizeof v);
+                // ⭐ Back to the byte an author would have typed, derived from the float that was
+                // really emitted — never from the byte the emitter believed it was sending.
+                ccs.push_back({ev.frame, ev.track, ev.cc.param,
+                               static_cast<int>(std::lround(v * 255.0f))});
+            }
+            void on_play(const std::string&, const std::string&, int64_t, int, int) override {}
+            void on_stop() override {}
+        };
+        struct Run { std::vector<Rec::Cc> ccs; std::vector<int64_t> notes; bool mixerActive; };
+
+        const int64_t fps = songcore::frames_per_step(120, 44100);
+        const int64_t fpt = fps / songcore::TICS_PER_STEP;
+
+        auto play = [&](auto&& build) -> Run {
+            songcore::Project p = songcore::make_default_project();
+            p.tempo = 120;
+            build(p);
+            Rec                 rec;
+            songcore::MidiRouter r(&rec);
+            songcore::Sequencer  s(r, p, 44100);
+            s.set_clock(0);
+            s.playPhrase(0);
+            return Run{rec.ccs, rec.notes, s.mixer_vol_active()};
+        };
+        auto only = [](const std::vector<Rec::Cc>& v, int param) {
+            std::vector<Rec::Cc> out;
+            for (const Rec::Cc& c : v) if (c.param == param) out.push_back(c);
+            return out;
+        };
+        auto value_at = [](const std::vector<Rec::Cc>& v, int64_t frame) {
+            for (const Rec::Cc& c : v) if (c.frame == frame) return c.valueByte;
+            return -1;
+        };
+        auto fx = [](songcore::Phrase& ph, int step, int slot, int type, int value) {
+            songcore::step_set_fx(ph.steps[static_cast<size_t>(step)], slot, type, value);
+        };
+
+        // ── (a) THE CANONICAL RAMP, AND THE SAME PHRASE WITHOUT ITS AUS ───────────────────────────
+        //
+        // `VOL 00 · AUS 80` on step 0, `AUF FF` on step 8, and NO notes anywhere — so every CC_VOLUME
+        // in the recording came from this one path and there is nothing else to subtract.
+        //
+        // Hand-derived: the span is 8 steps = 96 tic positions from step 0 tic 0 to step 8 tic 0. Tic 0
+        // of the AUS step is the authored `VOL 00` writing itself; tics 1-95 are the ramp; step 8 tic 0
+        // is the arrival. Linear across 00-FF moves the byte 255/96 = 2.66 per tic, so no two
+        // consecutive tics round alike and the de-dup drops nothing — 1 + 95 + 1 = 97 events.
+        const Run canon = play([&](songcore::Project& p) {
+            fx(p.phrases[0], 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(p.phrases[0], 0, 2, songcore::FX_AUS,    0x80);
+            fx(p.phrases[0], 8, 1, songcore::FX_AUF,    0xFF);
+        });
+        const std::vector<Rec::Cc> lin = only(canon.ccs, songcore::CC_VOLUME);
+
+        // The control FIRST: the identical phrase with the AUS cell empty. One event — the `VOL 00`
+        // the author typed — and no fade. A recorder that saw nothing, or a scheduler that emitted a
+        // ramp for every VOL in the song, fails here rather than passing quietly under (a).
+        const Run flat = play([&](songcore::Project& p) {
+            fx(p.phrases[0], 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(p.phrases[0], 8, 1, songcore::FX_AUF,    0xFF);
+        });
+        std::printf("       [info] CC_VOLUME events: no AUS %zu, with AUS %zu\n",
+                    only(flat.ccs, songcore::CC_VOLUME).size(), lin.size());
+        eq(static_cast<int>(only(flat.ccs, songcore::CC_VOLUME).size()), 1,
+           "RAMP: (control) VOL with no AUS beside it emits its ONE per-step event and nothing else");
+        eq(static_cast<int>(lin.size()), 97,
+           "⭐ RAMP: the authored write + 95 tics + the arrival — every tic of the span, none twice");
+
+        if (lin.size() == 97) {
+            eq(lin[0].valueByte, 0x00, "RAMP: the first event is the authored start value");
+            eq(static_cast<int>(lin[0].frame), 0, "RAMP: …on the AUS step's own frame");
+            // round(255 × 1/96) = 2.66 → 3, one tic into step 0.
+            eq(lin[1].valueByte, 3, "RAMP: the ramp's first tic is one 96th of the way, rounded");
+            eq(static_cast<int>(lin[1].frame), static_cast<int>(fpt), "RAMP: …one tic after it");
+            // Global tic 48 is step 4 tic 0: t = 0.5, and linear at half time is half way.
+            eq(value_at(lin, 4 * fps), 128, "RAMP: half way along the span, at half the distance");
+            eq(lin[96].valueByte, 0xFF, "RAMP: it arrives at the destination byte the author typed");
+
+            // ⭐ THE TIC GRID RESTARTS EVERY STEP — the property that makes the emitter groove-proof.
+            // The arrival is on the AUF STEP's frame (8 × 5512), not 96 tics of 5512/12 from the start
+            // (96 × 459), and the truncating division puts 32 frames between those two answers.
+            std::printf("       [info] arrival at frame %lld; step 8 begins at %lld, 96 tics span %lld\n",
+                        static_cast<long long>(lin[96].frame), static_cast<long long>(8 * fps),
+                        static_cast<long long>(96 * fpt));
+            eq(static_cast<int>(lin[96].frame), static_cast<int>(8 * fps),
+               "⭐ RAMP: the arrival lands on the AUF STEP's frame, not on a tic grid extrapolated "
+               "from the start of the span");
+
+            // Nothing backtracks, and no step of the fade is bigger than the 2.66 bytes per tic the
+            // arithmetic allows — a ramp that jumped would be audible as a step rather than a fade.
+            int rises = 0, biggest = 0;
+            for (size_t i = 1; i < lin.size(); ++i) {
+                const int d = lin[i].valueByte - lin[i - 1].valueByte;
+                if (d > 0) ++rises;
+                if (d > biggest) biggest = d;
+            }
+            eq(rises, 96, "RAMP: every event moves the value UP — an ascending fade never backtracks");
+            eq(biggest, 3, "RAMP: …and never by more than the 255/96 the span allows");
+        }
+
+        // ── (b) THE CURVE THE AUTHOR TYPED IS THE CURVE THE BUS CARRIES ───────────────────────────
+        //
+        // §47 checked `automation_shape` as arithmetic. This checks that the emitter reads AUS's byte
+        // at all: three phrases differing in one cell, measured at the same frame, half way along.
+        {
+            auto curved = [&](int curve) {
+                return play([&](songcore::Project& p) {
+                    fx(p.phrases[0], 0, 1, songcore::FX_VOLUME, 0x00);
+                    fx(p.phrases[0], 0, 2, songcore::FX_AUS,    curve);
+                    fx(p.phrases[0], 8, 1, songcore::FX_AUF,    0xFF);
+                });
+            };
+            const std::vector<Rec::Cc> in  = only(curved(0x00).ccs, songcore::CC_VOLUME);
+            const std::vector<Rec::Cc> out = only(curved(0xFF).ccs, songcore::CC_VOLUME);
+            std::printf("       [info] value at half time — ease-in %d, linear %d, ease-out %d\n",
+                        value_at(in, 4 * fps), 128, value_at(out, 4 * fps));
+            eq(value_at(in,  4 * fps), 32,  "CURVE ON THE BUS: ease-in is 0.5³ of the way at half time");
+            eq(value_at(out, 4 * fps), 223, "CURVE ON THE BUS: ease-out is its mirror");
+
+            // ⭐ THE DE-DUP, MEASURED WHERE IT ACTUALLY BITES. A cubic leaves its start slowly: tic n
+            // holds round(255·(n/96)³), which is still 0 at n=12 (0.498) and first reaches 1 at n=13
+            // (0.633). So after the authored `VOL 00` at frame 0 the ease-in ramp says NOTHING for
+            // twelve tics, and its first word is one tic into step 1 — a dozen bus records, queue
+            // slots and golden rows saved on every fade, and the ear cannot tell the difference
+            // because there is none to tell.
+            std::printf("       [info] ease-in: %zu events vs the linear's %zu; first RAMP event at "
+                        "frame %lld (step 1 tic 1 = %lld)\n", in.size(), lin.size(),
+                        in.size() < 2 ? -1LL : static_cast<long long>(in[1].frame),
+                        static_cast<long long>(fps + fpt));
+            ok(in.size() < lin.size(),
+               "DE-DUP: a cubic's flat start collapses — the same span costs fewer events than linear");
+            if (in.size() >= 2) {
+                eq(static_cast<int>(in[0].frame), 0,
+                   "DE-DUP: (control) the authored start value is still written, at frame 0");
+                eq(static_cast<int>(in[1].frame), static_cast<int>(fps + fpt),
+                   "DE-DUP: …and the first thing the ramp itself says is at tic 13, not tic 1");
+                eq(in[1].valueByte, 1, "DE-DUP: …the first byte that is no longer the start value");
+            }
+        }
+
+        // ── (c) ⭐⭐ A GROOVE MOVES THE FRAMES AND MUST NOT MOVE THE VALUES ────────────────────────
+        //
+        // The design decision this whole emitter turns on: `t` is measured in STEPS, not frames. So a
+        // fade written across eight steps has covered exactly k/8 of its distance when step k plays,
+        // whatever the groove did to the lengths in between — it arrives WITH the note it was written
+        // under. Normalising over the span's total frames instead would need a pre-scan of durations
+        // the walk has not reached, and would leave every intermediate value depending on the swing.
+        //
+        // ⚠️ The step boundaries are read out of the NOTE frames, not recomputed from the groove: a
+        // check that derived the frames the same way the emitter does could only ever agree with it.
+        {
+            auto swung = [&](bool groove) {
+                return play([&](songcore::Project& p) {
+                    if (groove) {
+                        p.grooves[0].steps[0] = 14;   // long-short, so no two steps are the same length
+                        p.grooves[0].steps[1] = 10;
+                    }
+                    for (int s = 0; s < 16; ++s) {
+                        p.phrases[0].steps[static_cast<size_t>(s)].note       = songcore::Note::C4();
+                        p.phrases[0].steps[static_cast<size_t>(s)].instrument = 0;
+                    }
+                    fx(p.phrases[0], 0, 1, songcore::FX_VOLUME, 0x00);
+                    fx(p.phrases[0], 0, 2, songcore::FX_AUS,    0x80);
+                    fx(p.phrases[0], 8, 1, songcore::FX_AUF,    0xFF);
+                });
+            };
+            const Run even = swung(false);
+            const Run bent = swung(true);
+
+            // The control that the groove is doing anything at all. Without it, "the values match" is
+            // a claim about two identical runs.
+            const bool gotNotes = even.notes.size() >= 9 && bent.notes.size() >= 9;
+            ok(gotNotes, "GROOVE: (control) both takes scheduled a note on every step of the span");
+            if (gotNotes) {
+                const int64_t evenGap = even.notes[1] - even.notes[0];
+                const int64_t bent1   = bent.notes[1] - bent.notes[0];
+                const int64_t bent2   = bent.notes[2] - bent.notes[1];
+                std::printf("       [info] step lengths — no groove %lld/%lld, groove %lld/%lld\n",
+                            static_cast<long long>(evenGap),
+                            static_cast<long long>(even.notes[2] - even.notes[1]),
+                            static_cast<long long>(bent1), static_cast<long long>(bent2));
+                ok(bent1 != bent2 && bent1 != evenGap,
+                   "GROOVE: (control) the groove really warped the steps — they are no longer equal, "
+                   "nor equal to the ungrooved length");
+
+                // A parameter written on a note's own frame reaches the voice the note replaces, so the
+                // emitter offsets a coinciding tic by one — the same +1 STEP 2.3 uses. Read at that
+                // frame, hand-derived: round(255 · k/8) for k = 1..8.
+                const int want[8] = {32, 64, 96, 128, 159, 191, 223, 255};
+                std::string gotEven, gotBent;
+                for (int k = 1; k <= 8; ++k) {
+                    gotEven += std::to_string(value_at(only(even.ccs, songcore::CC_VOLUME),
+                                                       even.notes[static_cast<size_t>(k)] + 1)) + " ";
+                    gotBent += std::to_string(value_at(only(bent.ccs, songcore::CC_VOLUME),
+                                                       bent.notes[static_cast<size_t>(k)] + 1)) + " ";
+                }
+                std::string wantStr;
+                for (int k = 0; k < 8; ++k) wantStr += std::to_string(want[k]) + " ";
+                std::printf("       [info] value at each step boundary — even %s| swung %s| want %s\n",
+                            gotEven.c_str(), gotBent.c_str(), wantStr.c_str());
+                eqs(gotEven, wantStr,
+                    "GROOVE: (control) ungrooved, the fade is k/8 of the way at step k");
+                eqs(gotBent, wantStr,
+                    "⭐⭐ GROOVE: and SWUNG it is the same k/8 at every step — the groove moved the "
+                    "frames and left the values exactly where the author wrote them");
+            }
+        }
+
+        // ── (d) A MASTER FADE RIDES THE GLOBAL LANE ───────────────────────────────────────────────
+        //
+        // Same asymmetry §46 proved for the per-step VMV: track-scoped, EngineConsumer's external
+        // routing gate is entitled to swallow it. The ramp reads the lane out of the registry rather
+        // than assuming the carrying track's.
+        {
+            const Run master = play([&](songcore::Project& p) {
+                fx(p.phrases[0], 0, 1, songcore::FX_VMV, 0xFF);
+                fx(p.phrases[0], 0, 2, songcore::FX_AUS, 0x80);
+                fx(p.phrases[0], 8, 1, songcore::FX_AUF, 0x00);
+            });
+            const std::vector<Rec::Cc> mv = only(master.ccs, songcore::CC_MASTER_VOL);
+            int onGlobal = 0, falls = 0;
+            for (size_t i = 0; i < mv.size(); ++i) {
+                if (mv[i].track == songcore::TRACK_GLOBAL) ++onGlobal;
+                if (i > 0 && mv[i].valueByte < mv[i - 1].valueByte) ++falls;
+            }
+            std::printf("       [info] master fade: %zu events, %d on TRACK_GLOBAL, last byte %d\n",
+                        mv.size(), onGlobal, mv.empty() ? -1 : mv.back().valueByte);
+            eq(static_cast<int>(mv.size()), 97, "MASTER FADE: the same 97 events, on the master CC");
+            eq(onGlobal, static_cast<int>(mv.size()),
+               "⭐ MASTER FADE: every one of them on TRACK_GLOBAL — on the track lane the external "
+               "gate would eat the fade on exactly the tracks it is most often written under");
+            eq(falls, 96, "MASTER FADE: a descending fade descends at every event");
+            if (!mv.empty()) eq(mv.back().valueByte, 0x00, "MASTER FADE: …and arrives at silence");
+        }
+
+        // ── (e) THE FADER RESTORE SURVIVES A CHA THAT ATE THE START EFFECT ────────────────────────
+        //
+        // ⚠️ VTR/VMV REPLACE the mixer fader and hold, so the host puts the authored value back on
+        // stop() — and the flag that asks it to was set only by the PER-STEP effect. Pairing reads the
+        // AUTHORED step, so `CHA 01` (probability 0, target slot 1: always fails, always zeroes slot 1)
+        // is a phrase where the ramp runs and the per-step VTR never happens. Without the emitter's own
+        // arm that is a song which fades a fader down and leaves it there, on the next play too.
+        {
+            const Run eaten = play([&](songcore::Project& p) {
+                fx(p.phrases[0], 0, 1, songcore::FX_VTR, 0x40);
+                fx(p.phrases[0], 0, 2, songcore::FX_AUS, 0x80);
+                fx(p.phrases[0], 0, 3, songcore::FX_CHA, 0x01);
+                fx(p.phrases[0], 8, 1, songcore::FX_AUF, 0xFF);
+            });
+            const std::vector<Rec::Cc> tv = only(eaten.ccs, songcore::CC_TRACK_VOL);
+            std::printf("       [info] CHA-eaten VTR: %zu track-fader events, first at frame %lld, "
+                        "restore armed %s\n", tv.size(),
+                        tv.empty() ? -1LL : static_cast<long long>(tv[0].frame),
+                        eaten.mixerActive ? "yes" : "no");
+            ok(!tv.empty(), "CHA+VTR: the ramp still runs — pairing reads the step the author wrote");
+            ok(!tv.empty() && tv[0].frame != 0,
+               "CHA+VTR: (control) the PER-STEP VTR really was eaten — nothing at the step's own frame");
+            ok(eaten.mixerActive,
+               "⭐ CHA+VTR: the fader restore is armed anyway, because the emitter arms it from the CC "
+               "it sends rather than from an effect that may not have survived the step");
+
+            // ⚠️ The gate in BOTH directions — otherwise "armed" is just a flag that is always true.
+            ok(!canon.mixerActive,
+               "CHA+VTR: (control) a VOL fade touches no fader and arms no restore");
+        }
+
+        // ── (f) AND IT IS AUDIBLE — THE FADE MEASURED IN THE RENDERED AUDIO ───────────────────────
+        //
+        // Everything above is the event stream. None of it says the engine did anything with it: 97
+        // correct CCs landing on a parameter nothing applies is a fade nobody hears. So: a looping tone
+        // at a full fader, `VTR FF · AUS 80` on step 0 and `AUF 00` on step 8, measured as RMS over the
+        // middle half of each of the eight steps.
+        //
+        // ⭐ The want is DERIVED, not eyeballed. Over a window where the gain runs linearly from g1 to
+        // g2 the RMS is A·√((g1² + g1g2 + g2²)/3) — the mean of a square over a linear ramp — so the
+        // predicted ratio to the flat take is that expression, from the fade the author WROTE and not
+        // from anything the emitter produced.
+        //
+        // ⚠️ WHAT THIS INSTRUMENT CANNOT SEE: a one-BLOCK apply lag. `processAudioBlock` snapshots the
+        // fader once above its frame loop, so an apply arm writing only the member lands 256 frames (6
+        // ms) late — 4.6% of a step, which moves these ratios by well under one part in a hundred and
+        // is far inside the tolerance below. Both arms write the snapshot as well as the member
+        // (audio-engine.cpp); nothing here would notice if one stopped.
+        {
+            auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+            engine->setDeviceSampleRate(44100);
+            songcore::SongcoreHost ahost(engine.get(), 44100);
+
+            const fs::path tone = tree.root / "Samples" / "austone.wav";
+            {
+                std::vector<float> pcm(44100 / 2);
+                for (size_t i = 0; i < pcm.size(); ++i) {
+                    const double t = static_cast<double>(i) / 44100.0;
+                    pcm[i] = static_cast<float>(0.6 * std::sin(2.0 * 3.14159265358979 * 440.0 * t));
+                }
+                songcore::write_wav_mono(tone.generic_string(), pcm, 44100);
+            }
+
+            // Eight RMS readings, one per step of the span, over the middle half of each — far enough
+            // from both boundaries that neither the note's attack nor a declick can straddle one.
+            auto measure = [&](bool withAus) {
+                songcore::Project& p = ahost.edit_project();
+                p = songcore::make_default_project();
+                p.tempo        = 120;
+                p.masterVolume = 0xFF;
+                ahost.load_sample(0, tone.generic_string());
+                p.instruments[0].loopMode = "fwd";   // ⚠️ a STRING; `= 1` assigns a char and does nothing
+                p.instruments[0].volume   = 0xFF;
+                p.tracks[0].volume = 0xFF;
+                p.tracks[0].chainRefs.assign(256, -1);
+                p.tracks[0].chainRefs[0]  = 0;
+                p.chains[0].phraseRefs[0] = 0;
+                songcore::PhraseStep& n = p.phrases[0].steps[0];
+                n.note = songcore::Note::C4();  n.instrument = 0;  n.volume = 0x7F;
+                // The fader is written at the value it already holds, so the only thing that can move
+                // the level is the fade itself.
+                fx(p.phrases[0], 0, 1, songcore::FX_VTR, 0xFF);
+                if (withAus) {
+                    fx(p.phrases[0], 0, 2, songcore::FX_AUS, 0x80);
+                    fx(p.phrases[0], 8, 1, songcore::FX_AUF, 0x00);
+                }
+                ahost.push_params();
+                ahost.play_song(0);
+
+                constexpr int       BLK = 256;
+                std::vector<float>  buf(static_cast<size_t>(BLK) * 2);
+                std::vector<double> sum(8, 0.0);
+                std::vector<int64_t> cnt(8, 0);
+                for (int64_t f = 0; f < fps * 8; f += BLK) {
+                    ahost.poll();
+                    engine->processLiveBlock(buf.data(), BLK, 2, 44100.0f);
+                    for (int i = 0; i < BLK; ++i) {
+                        const int64_t frame = f + i;
+                        const int64_t k     = frame / fps;
+                        if (k > 7) continue;
+                        const int64_t off = frame - k * fps;
+                        if (off < fps / 4 || off >= 3 * fps / 4) continue;
+                        const double v = buf[static_cast<size_t>(i) * 2];
+                        sum[static_cast<size_t>(k)] += v * v;
+                        cnt[static_cast<size_t>(k)]++;
+                    }
+                }
+                ahost.stop();
+                std::vector<double> rms(8, 0.0);
+                for (int k = 0; k < 8; ++k)
+                    if (cnt[static_cast<size_t>(k)])
+                        rms[static_cast<size_t>(k)] = std::sqrt(sum[static_cast<size_t>(k)] /
+                                                     static_cast<double>(cnt[static_cast<size_t>(k)]));
+                return rms;
+            };
+
+            const std::vector<double> level = measure(false);   // the control, FIRST
+            const std::vector<double> fade  = measure(true);
+
+            // The control: the same eight windows with no AUS must be FLAT. A tone that decays, a voice
+            // that gets stolen or a sample that runs out looks exactly like a fade otherwise.
+            double lowest = 1e9;
+            for (int k = 0; k < 8; ++k) lowest = std::min(lowest, level[static_cast<size_t>(k)] / level[0]);
+            std::printf("       [info] fade control (no AUS), 8 step windows:");
+            for (int k = 0; k < 8; ++k) std::printf(" %.4f", level[static_cast<size_t>(k)]);
+            std::printf("  (lowest %.0f%% of the first)\n", 100.0 * lowest);
+            ok(level[0] > 0.02, "FADE: (control) the tone is sounding — the measurement can fail");
+            ok(lowest > 0.95,
+               "⚠️ FADE: (control) with no AUS the level is FLAT across all eight windows — a drop here "
+               "would mean the fade below is measuring the tone");
+
+            int    inBand = 0;
+            double worst  = 0.0;
+            std::string got, want;
+            for (int k = 0; k < 8; ++k) {
+                const double g1 = 1.0 - (k + 0.25) / 8.0;      // gain at the window's start
+                const double g2 = 1.0 - (k + 0.75) / 8.0;      // …and at its end
+                const double predicted = std::sqrt((g1 * g1 + g1 * g2 + g2 * g2) / 3.0);
+                const double measured  = fade[static_cast<size_t>(k)] / level[static_cast<size_t>(k)];
+                char b[32];
+                std::snprintf(b, sizeof b, " %.3f", measured);  got  += b;
+                std::snprintf(b, sizeof b, " %.3f", predicted); want += b;
+                const double err = std::fabs(measured - predicted);
+                if (err > worst) worst = err;
+                if (err < 0.05) ++inBand;
+            }
+            std::printf("       [info] fade, per step —\n                got %s\n               want %s"
+                        "  (worst error %.3f)\n", got.c_str(), want.c_str(), worst);
+            eq(inBand, 8,
+               "⭐⭐ FADE: the rendered level follows the authored curve through all eight steps — the "
+               "ratio is derived from the AUDIO and the want from the ramp the author wrote");
+            ok(fade[7] < fade[0] * 0.15,
+               "FADE: …and by the last step of the span it has fallen to a sixteenth of where it began");
         }
     }
 
