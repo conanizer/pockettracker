@@ -75,6 +75,15 @@ static void ok(bool cond, const std::string& what) {
     }
 }
 
+/** As above, plus what the reading actually was — for checks whose number is the evidence. */
+static void ok(bool cond, const std::string& what, const std::string& detail) {
+    ++checks;
+    if (!cond) {
+        ++failures;
+        std::printf("  [FAIL] %s\n         %s\n", what.c_str(), detail.c_str());
+    }
+}
+
 static void eq(int got, int want, const std::string& what) {
     ++checks;
     if (got != want) {
@@ -6195,6 +6204,1112 @@ int main() {
                "ratio is derived from the AUDIO and the want from the ramp the author wrote");
             ok(fade[7] < fade[0] * 0.15,
                "FADE: …and by the last step of the span it has fallen to a sixteenth of where it began");
+        }
+    }
+
+    // ── 49. AUS / AUF — THE EDGES ───────────────────────────────────────────────────────────────
+    //
+    // §47 proved which spans a phrase DECLARES, §48 what the walk emits across one. This is everything
+    // that happens TO a fade: a HOP out from under it, a step that writes the parameter it is moving, a
+    // LAT that moves that write later into the step, dice on one of its cells, a STOP half way through,
+    // and a save/load round trip. Every one of them is a case a song will really contain.
+    //
+    // ⚠️ Hand-derived from the rule, in the comment beside each check, for the same reason §48 is: a
+    // golden regenerated from this emitter cannot disagree with it.
+    {
+        struct Rec : songcore::IMidiConsumer {
+            struct Cc { int64_t frame; int track; int param; int valueByte; };
+            std::vector<Cc>      ccs;
+            std::vector<int64_t> notes;
+            void consume(const songcore::Event& ev) override {
+                if (ev.type == songcore::EV_NOTE_ON) { notes.push_back(ev.frame); return; }
+                if (ev.type != songcore::EV_CC) return;
+                float v = 0.0f;
+                std::memcpy(&v, &ev.cc.valueBits, sizeof v);
+                ccs.push_back({ev.frame, ev.track, ev.cc.param,
+                               static_cast<int>(std::lround(v * 255.0f))});
+            }
+            void on_play(const std::string&, const std::string&, int64_t, int, int) override {}
+            void on_stop() override {}
+        };
+
+        const int64_t fps = songcore::frames_per_step(120, 44100);
+        const int64_t fpt = fps / songcore::TICS_PER_STEP;
+
+        // One phrase, one pass, one recording — `playPhrase` schedules exactly once and nothing polls
+        // afterwards. The seed is taken because §49(d) needs two runs whose dice differ.
+        auto play = [&](auto&& build, uint64_t seed = 1) {
+            songcore::Project p = songcore::make_default_project();
+            p.tempo = 120;
+            build(p);
+            Rec                  rec;
+            songcore::MidiRouter r(&rec);
+            songcore::Sequencer  s(r, p, 44100);
+            s.seed_rng(seed);
+            s.set_clock(0);
+            s.playPhrase(0);
+            return rec.ccs;
+        };
+        auto only = [](const std::vector<Rec::Cc>& v, int param) {
+            std::vector<Rec::Cc> out;
+            for (const Rec::Cc& c : v) if (c.param == param) out.push_back(c);
+            return out;
+        };
+        auto value_at = [](const std::vector<Rec::Cc>& v, int64_t frame) {
+            for (const Rec::Cc& c : v) if (c.frame == frame) return c.valueByte;
+            return -1;
+        };
+        auto count_at = [](const std::vector<Rec::Cc>& v, int64_t frame) {
+            int n = 0;
+            for (const Rec::Cc& c : v) if (c.frame == frame) ++n;
+            return n;
+        };
+        // The whole fade as one comparable token: every event but the ones at `skipFrame`, which is how
+        // a run carrying a RANDOM write is compared against one that is not.
+        auto stream = [](const std::vector<Rec::Cc>& v, int64_t skipFrame) {
+            std::string out;
+            for (const Rec::Cc& c : v) {
+                if (c.frame == skipFrame) continue;
+                out += std::to_string(c.frame) + ":" + std::to_string(c.valueByte) + " ";
+            }
+            return out;
+        };
+        auto fx = [](songcore::Phrase& ph, int step, int slot, int type, int value) {
+            songcore::step_set_fx(ph.steps[static_cast<size_t>(step)], slot, type, value);
+        };
+        // The canonical §48 phrase, which several of the checks below vary by one cell.
+        auto canonical = [&](songcore::Project& p) {
+            fx(p.phrases[0], 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(p.phrases[0], 0, 2, songcore::FX_AUS,    0x80);
+            fx(p.phrases[0], 8, 1, songcore::FX_AUF,    0xFF);
+        };
+
+        // ── (a) A HOP OUT OF THE PHRASE TRUNCATES THE FADE ────────────────────────────────────────
+        //
+        // The reason nothing is ever emitted ahead of the walk. A fade baked into frames as soon as the
+        // span was found would go on moving the parameter after the transport had jumped somewhere
+        // else — and a HOP can be CHA-gated, so whether it happens is not knowable at pairing time.
+        //
+        // Hand-derived, HOP on step 4 of a 0→8 span: the authored `VOL 00` at frame 0, then step 0's
+        // tics 1-11 (11), steps 1-3 whole (36) and step 4 whole (12) = 60 events. The last is step 4
+        // tic 11 — t = (4 + 11/12)/8 = 59/96, so round(255 · 59/96) = 157 — at 4·5512 + 11·459 = 27097.
+        // Nothing at or after step 5, and the destination byte is never reached.
+        {
+            const std::vector<Rec::Cc> cut = only(play([&](songcore::Project& p) {
+                canonical(p);
+                fx(p.phrases[0], 4, 2, songcore::FX_HOP, 0x04);
+            }), songcore::CC_VOLUME);
+            const std::vector<Rec::Cc> whole = only(play(canonical), songcore::CC_VOLUME);
+
+            int beyond = 0, arrived = 0;
+            for (const Rec::Cc& c : cut) {
+                if (c.frame >= 5 * fps) ++beyond;
+                if (c.valueByte == 0xFF) ++arrived;
+            }
+            std::printf("       [info] HOP on step 4: %zu events (whole phrase %zu), last %d at frame "
+                        "%lld; step 5 begins at %lld\n", cut.size(), whole.size(),
+                        cut.empty() ? -1 : cut.back().valueByte,
+                        cut.empty() ? -1LL : static_cast<long long>(cut.back().frame),
+                        static_cast<long long>(5 * fps));
+            eq(static_cast<int>(whole.size()), 97,
+               "HOP: (control) the same phrase with no HOP fades all the way — 97 events");
+            eq(static_cast<int>(cut.size()), 60,
+               "⭐ HOP: the walk ends on step 4 and takes the fade with it — the AUS step's eleven "
+               "tics, three whole steps, and the hop step's twelve");
+            eq(beyond, 0, "HOP: …and NOTHING is scheduled past the step the transport jumped from");
+            eq(arrived, 0, "HOP: …so the ramp never arrives at its destination byte");
+            if (!cut.empty()) {
+                eq(cut.back().valueByte, 157, "HOP: the last value is the curve at step 4 tic 11");
+                eq(static_cast<int>(cut.back().frame), static_cast<int>(4 * fps + 11 * fpt),
+                   "HOP: …on that tic's own frame");
+            }
+
+            // The other half of the same claim: what the NEXT pass does. A phrase re-entered below its
+            // AUS declares no ramp at all, because the step that opens one never plays — which is why
+            // `schedulePhrase` passes its start row into pairing rather than pairing the whole phrase.
+            songcore::Project p = songcore::make_default_project();
+            canonical(p);
+            eq(static_cast<int>(find_ramps(p.phrases[0], 5).size()), 0,
+               "HOP: a phrase re-entered BELOW its AUS declares no ramp — the hop target does not "
+               "resume a fade it never opened");
+            eq(static_cast<int>(find_ramps(p.phrases[0], 0).size()), 1,
+               "HOP: (control) the same phrase from the top declares one");
+        }
+
+        // ── (b) ⭐⭐ A STEP THAT WRITES THE PARAMETER OWNS ITS OWN FRAME ───────────────────────────
+        //
+        // `VOL 40` on step 4 of a 00→FF fade is contradictory
+        // authoring, but it must still be DEFINED, and "they are both events at one frame, the ramp is
+        // emitted second" is not a definition: the param queue is a `std::priority_queue` whose
+        // comparator looks at the target frame and NOTHING else (note-queue.h), so a tie is resolved by
+        // heap order — which is deterministic, and unreadable from the grid. The emitter therefore
+        // yields the frame the step writes on and resumes at the next tic, leaving one write per frame.
+        {
+            const std::vector<Rec::Cc> mid = only(play([&](songcore::Project& p) {
+                canonical(p);
+                fx(p.phrases[0], 4, 1, songcore::FX_VOLUME, 0x40);
+            }), songcore::CC_VOLUME);
+
+            std::printf("       [info] VOL 40 mid-fade: %zu events; at frame %lld there are %d, value "
+                        "%d; next tic %d\n", mid.size(), static_cast<long long>(4 * fps),
+                        count_at(mid, 4 * fps), value_at(mid, 4 * fps), value_at(mid, 4 * fps + fpt));
+            // 97 again, differently made: the ramp gives up step 4's tic 0 (which would have said 128)
+            // and the author's own write takes that frame instead.
+            eq(static_cast<int>(mid.size()), 97,
+               "MID-WRITE: the fade costs the same 97 events — one tic yielded, one cell written");
+            eq(count_at(mid, 4 * fps), 1,
+               "⭐⭐ MID-WRITE: exactly ONE update is due at that frame, so nothing has to break a tie");
+            eq(value_at(mid, 4 * fps), 0x40,
+               "⭐ MID-WRITE: …and it is the byte the AUTHOR typed, not the curve's 128");
+            // t = (4 + 1/12)/8 = 49/96 → round(255 · 49/96) = 130. The fade resumes where it would have
+            // been anyway: yielding costs a tic of the curve, not the curve.
+            eq(value_at(mid, 4 * fps + fpt), 130,
+               "MID-WRITE: the ramp resumes on the next tic, at the value the curve holds there");
+
+            // ⭐⭐ WHY IT YIELDS — MEASURED ON THE QUEUE THAT WOULD OTHERWISE HAVE DECIDED.
+            ScheduledParamUpdate a{4 * fps, 0, 0, 0.25f};
+            ScheduledParamUpdate b{4 * fps, 0, 0, 0.50f};
+            const bool tie = !(a > b) && !(b > a);
+            ok(tie,
+               "⭐⭐ COLLISION: two updates due at one frame are EQUIVALENT under the queue's ordering "
+               "— it compares the target frame and nothing else, so which one is applied LAST is the "
+               "heap's business and not the author's");
+            ParamUpdateQueue q;
+            for (int i = 1; i <= 6; ++i) q.schedule({4 * fps, i, 0, 0.0f});
+            std::vector<ScheduledParamUpdate> drained;
+            q.drainUntil(4 * fps, drained);
+            std::string order;
+            for (const ScheduledParamUpdate& u : drained) order += std::to_string(u.trackId) + " ";
+            std::printf("       [info] six updates at one frame, scheduled 1 2 3 4 5 6 → applied %s\n",
+                        order.c_str());
+            eq(static_cast<int>(drained.size()), 6,
+               "COLLISION: (control) the probe queue really drained all six at that frame");
+        }
+
+        // ── (c) LAT MOVES THE STEP'S WRITE, AND THE RAMP FOLLOWS IT ───────────────────────────────
+        //
+        // LAT pushes a step's note and its own FX writes `xx` tics into the step. On the AUS step that
+        // is the value the fade starts FROM arriving late, and a ramp that opened at tic 1 regardless
+        // would spend six tics fading away from a number that had not been set yet — and then be
+        // knocked back to it. The emitter yields to where the write LANDED, so with `LAT 06` the fade
+        // simply opens at tic 7.
+        //
+        // Hand-derived: the authored `VOL 00` at 6·459 = 2754; the ramp's first word at tic 7 = 3213,
+        // t = (7/12)/8 = 7/96, round(255 · 7/96) = 19. Five tics on the AUS step instead of eleven, so
+        // 1 + 5 + 84 + 1 = 91 events.
+        {
+            const std::vector<Rec::Cc> late = only(play([&](songcore::Project& p) {
+                canonical(p);
+                fx(p.phrases[0], 0, 3, songcore::FX_LAT, 0x06);
+            }), songcore::CC_VOLUME);
+            const std::vector<Rec::Cc> prompt = only(play(canonical), songcore::CC_VOLUME);
+
+            int before = 0;
+            for (const Rec::Cc& c : late) if (c.frame < 6 * fpt) ++before;
+            std::printf("       [info] LAT 06 on the AUS step: %zu events (no LAT %zu); first at frame "
+                        "%lld (LAT'd write at %lld), second at %lld value %d\n", late.size(),
+                        prompt.size(), late.empty() ? -1LL : static_cast<long long>(late[0].frame),
+                        static_cast<long long>(6 * fpt),
+                        late.size() < 2 ? -1LL : static_cast<long long>(late[1].frame),
+                        late.size() < 2 ? -1 : late[1].valueByte);
+            eq(static_cast<int>(prompt[1].frame), static_cast<int>(fpt),
+               "LAT: (control) with no LAT the fade's first word is one tic in");
+            eq(before, 0,
+               "⭐⭐ LAT: NOTHING is emitted before the authored start value the fade fades FROM — "
+               "the ramp yields to where LAT put the write, not to where the step began");
+            eq(static_cast<int>(late.size()), 91,
+               "LAT: six of the AUS step's tics belong to the step, so the fade costs 91 not 97");
+            if (late.size() >= 2) {
+                eq(static_cast<int>(late[0].frame), static_cast<int>(6 * fpt),
+                   "LAT: the take opens with the authored write, at the frame LAT moved it to");
+                eq(late[0].valueByte, 0x00, "LAT: …carrying the start value");
+                eq(static_cast<int>(late[1].frame), static_cast<int>(7 * fpt),
+                   "LAT: and the ramp opens on the tic after it");
+                eq(late[1].valueByte, 19, "LAT: …at the value the curve holds there");
+            }
+
+            // …and the note-collision guard follows a LAT'd note too, which is why the emitter is given
+            // the note's frame rather than the step's. Step 2 carries a note and `LAT 06`, so the note
+            // lands at 2·5512 + 6·459 = 13778 — where the ramp's tic 6 would also have landed.
+            // t = (2 + 6/12)/8 = 2.5/8 → round(255 · 0.3125) = 80.
+            const std::vector<Rec::Cc> knock = only(play([&](songcore::Project& p) {
+                canonical(p);
+                fx(p.phrases[0], 2, 1, songcore::FX_LAT, 0x06);
+                p.phrases[0].steps[2].note       = songcore::Note::C4();
+                p.phrases[0].steps[2].instrument = 0;
+            }), songcore::CC_VOLUME);
+            const int64_t moved = 2 * fps + 6 * fpt;
+            std::printf("       [info] LAT'd note at frame %lld: value there %d, one frame later %d\n",
+                        static_cast<long long>(moved), value_at(knock, moved),
+                        value_at(knock, moved + 1));
+            eq(value_at(knock, moved), -1,
+               "LAT: a tic coinciding with a LAT-MOVED note is not left on the note's own frame, "
+               "where it would reach the voice the note replaces");
+            eq(value_at(knock, moved + 1), 80,
+               "⭐ LAT: …it takes the frame after it — the guard is keyed on where the note WENT");
+        }
+
+        // ── (d) DICE ON AN AUTOMATION SLOT CANNOT MOVE THE FADE ───────────────────────────────────
+        //
+        // Pairing reads the AUTHORED step, before CHA/RND/RNL, so a fade never joins the
+        // non-reproducible set (`tools/ptnondet` is a static scan and would not catch it if it did).
+        // That is a claim about the emitted stream, and the only way to make it fail is to roll real
+        // dice — so both runs below randomise, with different seeds, and the fade is compared between
+        // them.
+        {
+            // R1 — RND in the START VALUE's column. `lastColFxType[1]` is VOL from step 0, so step 4
+            // becomes `VOL <random>`: a real, random, explicit write, which by (b) owns its own frame.
+            // Everything else must be the fade, byte for byte, on both seeds.
+            auto rolled = [&](uint64_t seed) {
+                return only(play([&](songcore::Project& p) {
+                    canonical(p);
+                    fx(p.phrases[0], 4, 1, songcore::FX_RND, 0x0F);
+                }, seed), songcore::CC_VOLUME);
+            };
+            const std::vector<Rec::Cc> r1 = rolled(11);
+            const std::vector<Rec::Cc> r2 = rolled(4242);
+            const std::vector<Rec::Cc> base = only(play(canonical), songcore::CC_VOLUME);
+
+            std::printf("       [info] RND on the start column: seed 11 wrote %d at frame %lld, seed "
+                        "4242 wrote %d; %zu/%zu events, %d at that frame\n", value_at(r1, 4 * fps),
+                        static_cast<long long>(4 * fps), value_at(r2, 4 * fps), r1.size(), r2.size(),
+                        count_at(r1, 4 * fps));
+            // ⭐⭐ The yield reads the EFFECTIVE step, and this is the case that says so: nothing in the
+            // grid says `VOL` on step 4 — the cell says RND — so an emitter that yielded to the
+            // AUTHORED step would leave the ramp's own tic 0 at this frame beside the random write, and
+            // the heap above would pick which of the two the fader ends on.
+            eq(count_at(r1, 4 * fps), 1,
+               "⭐⭐ RND: a write CONJURED by the dice owns its frame exactly as a typed one does — the "
+               "ramp yields to what the step really wrote, not to what is printed in the grid");
+            ok(value_at(r1, 4 * fps) != value_at(r2, 4 * fps),
+               "⭐ RND: (control) the dice really rolled — the two seeds wrote different bytes, so a "
+               "fade that agreed with them both is agreeing about something");
+            eqs(stream(r1, 4 * fps), stream(r2, 4 * fps),
+               "⭐⭐ RND: and every OTHER event is identical across the two seeds — the fade is not "
+               "randomised by a random cell beside it");
+            eqs(stream(r1, 4 * fps), stream(base, 4 * fps),
+               "RND: …and it is the same fade the phrase without the dice emits");
+
+            // R2 — RND in the AUS column itself. `lastColFxType[2]` is AUS, so step 4's slot 2 becomes
+            // `AUS <random>` in the EFFECTIVE step — a second span opening mid-fade with a random
+            // curve, if anything read it. Pairing does not, so the stream is the one (b) measured.
+            const std::vector<Rec::Cc> curveDice = only(play([&](songcore::Project& p) {
+                canonical(p);
+                fx(p.phrases[0], 4, 1, songcore::FX_VOLUME, 0x40);
+                fx(p.phrases[0], 4, 2, songcore::FX_RND,    0x8F);
+            }, 7), songcore::CC_VOLUME);
+            // The control is the same phrase with that cell AUTHORED rather than rolled: the last AUS
+            // wins, so the span becomes 4→8 from 0x40 and the first eight steps carry no fade at all —
+            // 2 authored writes + 11 tics + 36 + the arrival = 50. If pairing ever read the effective
+            // step, the run above would read 50 too.
+            const std::vector<Rec::Cc> curveReal = only(play([&](songcore::Project& p) {
+                canonical(p);
+                fx(p.phrases[0], 4, 1, songcore::FX_VOLUME, 0x40);
+                fx(p.phrases[0], 4, 2, songcore::FX_AUS,    0x80);
+            }), songcore::CC_VOLUME);
+            std::printf("       [info] AUS column: rolled %zu events, the same cell AUTHORED %zu\n",
+                        curveDice.size(), curveReal.size());
+            eq(static_cast<int>(curveDice.size()), 97,
+               "⭐⭐ RND: a random AUS in the effective step opens nothing — pairing reads the step the "
+               "author wrote");
+            eq(static_cast<int>(curveReal.size()), 50,
+               "RND: (control) the same cell TYPED does open a second span, and the count moves — "
+               "which is what the check above would have read had pairing looked at the wrong step");
+        }
+
+        // ── (e) A STOP HALF WAY THROUGH A FADE PUTS THE FADER BACK ────────────────────────────────
+        //
+        // STOP is one of the channels the guardrails name as structurally invisible: no event carries
+        // it and no trace records it. A fade makes it worse than the per-step VTR §46 checked — the
+        // queue is holding EIGHT STEPS of fader updates when the transport stops, so "the fader is
+        // restored" and "the fade stopped moving it" are two claims, and the second one only shows up
+        // on the NEXT play.
+        //
+        // ⚠️ As in §46(c), the replay must not push params: `push_mixer` would put the fader back by
+        // itself and the check would pass on a build that restores nothing.
+        {
+            auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+            engine->setDeviceSampleRate(44100);
+            songcore::SongcoreHost shost(engine.get(), 44100);
+
+            const fs::path tone = tree.root / "Samples" / "stoptone.wav";
+            {
+                std::vector<float> pcm(44100 / 2);
+                for (size_t i = 0; i < pcm.size(); ++i) {
+                    const double t = static_cast<double>(i) / 44100.0;
+                    pcm[i] = static_cast<float>(0.6 * std::sin(2.0 * 3.14159265358979 * 440.0 * t));
+                }
+                songcore::write_wav_mono(tone.generic_string(), pcm, 44100);
+            }
+
+            auto build = [&](bool withAus) {
+                songcore::Project& p = shost.edit_project();
+                p = songcore::make_default_project();
+                p.tempo        = 120;
+                p.masterVolume = 0xFF;
+                shost.load_sample(0, tone.generic_string());
+                p.instruments[0].loopMode = "fwd";   // ⚠️ a STRING; `= 1` assigns a char
+                p.instruments[0].volume   = 0xFF;
+                p.tracks[0].volume = 0xFF;
+                p.tracks[0].chainRefs.assign(256, -1);
+                p.tracks[0].chainRefs[0]  = 0;
+                p.chains[0].phraseRefs[0] = 0;
+                songcore::PhraseStep& n = p.phrases[0].steps[0];
+                n.note = songcore::Note::C4();  n.instrument = 0;  n.volume = 0x7F;
+                fx(p.phrases[0], 0, 1, songcore::FX_VTR, 0xFF);   // written at the value it already holds
+                if (withAus) {
+                    fx(p.phrases[0], 0, 2, songcore::FX_AUS, 0x80);
+                    fx(p.phrases[0], 8, 1, songcore::FX_AUF, 0x00);
+                }
+                shost.push_params();
+            };
+            // Play `steps` steps and stop THERE — half way down the fade, with the rest of it already
+            // queued. RMS over the middle half of step 0 and of the last step played.
+            auto play_steps = [&](int steps) {
+                shost.play_song(0);
+                constexpr int      BLK = 256;
+                std::vector<float> buf(static_cast<size_t>(BLK) * 2);
+                double  s0 = 0.0, sN = 0.0;
+                int64_t n0 = 0, nN = 0;
+                for (int64_t f = 0; f < fps * steps; f += BLK) {
+                    shost.poll();
+                    engine->processLiveBlock(buf.data(), BLK, 2, 44100.0f);
+                    for (int i = 0; i < BLK; ++i) {
+                        const int64_t frame = f + i;
+                        const int64_t k     = frame / fps;
+                        const int64_t off   = frame - k * fps;
+                        if (off < fps / 4 || off >= 3 * fps / 4) continue;
+                        const double v = buf[static_cast<size_t>(i) * 2];
+                        if (k == 0)          { s0 += v * v; ++n0; }
+                        if (k == steps - 1)  { sN += v * v; ++nN; }
+                    }
+                }
+                shost.stop();
+                return std::pair<double, double>{ n0 ? std::sqrt(s0 / static_cast<double>(n0)) : 0.0,
+                                                  nN ? std::sqrt(sN / static_cast<double>(nN)) : 0.0 };
+            };
+
+            build(false);
+            const auto flat = play_steps(4);
+            std::printf("       [info] STOP control (no AUS): step 0 %.5f → step 3 %.5f (%.0f%%)\n",
+                        flat.first, flat.second,
+                        flat.first > 0 ? 100.0 * flat.second / flat.first : 0.0);
+            ok(flat.first > 0.02, "STOP: (control) the tone is sounding — the measurement can fail");
+            ok(flat.second > flat.first * 0.95,
+               "STOP: (control) with no AUS the level is flat over the four steps played");
+
+            build(true);
+            const auto cutShort = play_steps(4);
+            // Derived from the fade the author wrote: over the middle half of step k the gain runs
+            // 1−(k+0.25)/8 → 1−(k+0.75)/8, and the RMS of a linear gain is √((g1²+g1g2+g2²)/3).
+            const double want0 = std::sqrt((0.96875 * 0.96875 + 0.96875 * 0.90625 + 0.90625 * 0.90625) / 3.0);
+            const double want3 = std::sqrt((0.59375 * 0.59375 + 0.59375 * 0.53125 + 0.53125 * 0.53125) / 3.0);
+            const double got0 = flat.first  > 0 ? cutShort.first  / flat.first  : 0.0;
+            const double got3 = flat.second > 0 ? cutShort.second / flat.second : 0.0;
+            std::printf("       [info] fade at the moment of STOP: step 0 %.3f (want %.3f), step 3 "
+                        "%.3f (want %.3f)\n", got0, want0, got3, want3);
+            ok(std::fabs(got0 - want0) < 0.05 && std::fabs(got3 - want3) < 0.05,
+               "⭐ STOP: (control) the fade really was running when the transport stopped — the level "
+               "at step 3 is where the authored curve says, not where step 0 was");
+
+            // Now clear all three cells THROUGH THE PROJECT and replay without pushing anything: the
+            // second play writes no fader of its own, so only stop() can have put it back — and if a
+            // single queued ramp tic had survived, the level would sag instead.
+            {
+                songcore::Project& p = shost.edit_project();
+                songcore::step_set_fx(p.phrases[0].steps[0], 1, songcore::FX_NONE, 0x00);
+                songcore::step_set_fx(p.phrases[0].steps[0], 2, songcore::FX_NONE, 0x00);
+                songcore::step_set_fx(p.phrases[0].steps[8], 1, songcore::FX_NONE, 0x00);
+            }
+            const auto after = play_steps(4);     // ⚠️ no push_params
+            std::printf("       [info] STOP restore (no re-push): control %.5f → after a stopped fade "
+                        "%.5f / %.5f (%.0f%% / %.0f%%)\n", flat.first, after.first, after.second,
+                        flat.first > 0 ? 100.0 * after.first / flat.first : 0.0,
+                        flat.second > 0 ? 100.0 * after.second / flat.second : 0.0);
+            ok(after.first > flat.first * 0.90,
+               "⚠️⚠️ STOP: stop() restored the authored fader after a fade was cut off half way — "
+               "with no push between the plays, nothing else can have");
+            ok(after.second > flat.second * 0.90,
+               "⚠️ STOP: …and it STAYED there — none of the five steps of fade still queued when the "
+               "transport stopped was applied to the next song");
+        }
+
+        // ── (f) A FADE SURVIVES SAVE AND LOAD ─────────────────────────────────────────────────────
+        //
+        // AUS/AUF are two new int FX codes in fields `project_io` has always written as ints, so this
+        // should be free — which is exactly why it is asserted rather than assumed (§6). ⚠️ Comparing
+        // two event streams is blind to a writer and a reader that dropped the cells in the same way,
+        // so the anchor is the BYTES ON DISK: the codes have to be there, as the numbers 45 and 46.
+        {
+            const fs::path saved = tree.root / "Projects" / "AUSROUND.ptp";
+            std::error_code ec;
+            fs::create_directories(tree.root / "Projects", ec);
+
+            songcore::Project original = songcore::make_default_project();
+            original.tempo = 120;
+            canonical(original);
+            {
+                const std::string blob = songcore::serialize_project(original);
+                std::ofstream f(saved, std::ios::binary | std::ios::trunc);
+                f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
+            }
+            std::ifstream in(saved, std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            const bool hasAus = text.find("\"fx2Type\": 45") != std::string::npos;
+            const bool hasAuf = text.find("\"fx1Type\": 46") != std::string::npos;
+            std::printf("       [info] .ptp on disk: %zu bytes, AUS(45) %s, AUF(46) %s\n", text.size(),
+                        hasAus ? "present" : "MISSING", hasAuf ? "present" : "MISSING");
+            ok(hasAus && hasAuf,
+               "⭐⭐ ROUND TRIP: the two codes are on disk as the NUMBERS 45 and 46 — the anchor "
+               "outside the comparison, without which a writer and a reader that both dropped them "
+               "would agree perfectly");
+
+            songcore::Project back = songcore::parse_project(songcore::json::parse(text));
+            songcore::normalize_and_migrate(back);
+            const std::vector<Rec::Cc> before = only(play(canonical), songcore::CC_VOLUME);
+            const std::vector<Rec::Cc> reload = only(play([&](songcore::Project& p) { p = back; }),
+                                                     songcore::CC_VOLUME);
+            std::printf("       [info] round trip: %zu events before, %zu after\n",
+                        before.size(), reload.size());
+            eq(static_cast<int>(reload.size()), 97,
+               "ROUND TRIP: (control) the reloaded project fades at all — 97 events, not 0 and not 1");
+            eqs(stream(reload, -1), stream(before, -1),
+               "⭐ ROUND TRIP: …and every frame and byte of it is the fade the saved project emitted");
+        }
+    }
+
+    // ── 50. AUS / AUF — THE GRID SAYS WHICH CELLS ARE DOING NOTHING ─────────────────────────────
+    //
+    // Look-left pairing is positional, so an AUS that opens a ramp and an AUS that opens nothing are
+    // the same three characters in the same column. §47 proved `find_ramps` tells them apart; this is
+    // the claim that the PHRASE EDITOR does — an unused AUS or AUF draws in the empty colour, which is
+    // the author's only warning that a fade they believe they wrote is inert.
+    //
+    // Two halves, because a predicate is not a pixel. (a) hand-derived cases against
+    // `automation_cell_active`; (b) the screen RENDERED through the real TrackerLayout, with the
+    // colour read back out of the canvas inside each cell's own rectangle.
+    {
+        using songcore::automation_cell_active;
+        using songcore::find_ramps;
+        using songcore::RampSpec;
+
+        auto fx = [](songcore::Phrase& ph, int step, int slot, int type, int value) {
+            songcore::step_set_fx(ph.steps[static_cast<size_t>(step)], slot, type, value);
+        };
+
+        // ── (a) the predicate — one phrase per way of writing a dead cell ──────────────────────────
+        {
+            // The canonical pair, plus an unrelated effect further down: both automation cells are
+            // used, and the two cells that are nobody's business stay out of it.
+            songcore::Phrase live;
+            fx(live, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(live, 0, 2, songcore::FX_AUS,    0x80);
+            fx(live, 4, 1, songcore::FX_AUF,    0xFF);
+            fx(live, 9, 3, songcore::FX_PSL,    0x40);
+            const std::vector<RampSpec> lr = find_ramps(live);
+            ok(automation_cell_active(lr, songcore::FX_AUS, 0, 2), "CELL: a paired AUS is active");
+            ok(automation_cell_active(lr, songcore::FX_AUF, 4, 1),
+               "CELL: ...and so is the AUF that closed it");
+            ok(automation_cell_active(lr, songcore::FX_VOLUME, 0, 1),
+               "CELL: (control) the start effect is an ordinary VOL, never dimmed by pairing");
+            ok(automation_cell_active(lr, songcore::FX_PSL, 9, 3),
+               "CELL: (control) an effect that is neither AUS nor AUF is active wherever it sits");
+
+            // Inert 1 — nothing automatable to the AUS's left. The commonest way to break the
+            // positional coupling: delete the VOL and the curve beside it names no parameter.
+            songcore::Phrase bare = live;
+            songcore::step_set_fx(bare.steps[0], 1, songcore::FX_NONE, 0);
+            const std::vector<RampSpec> br = find_ramps(bare);
+            eq(static_cast<int>(br.size()), 0,
+               "CELL: (control) with the start effect gone the phrase declares no ramp at all");
+            ok(!automation_cell_active(br, songcore::FX_AUS, 0, 2),
+               "CELL: an AUS with nothing automatable to its left is inert");
+            ok(!automation_cell_active(br, songcore::FX_AUF, 4, 1),
+               "CELL: ...and the AUF that had nothing to close goes with it");
+
+            // Inert 2 — no AUF anywhere after it.
+            songcore::Phrase unclosed = live;
+            songcore::step_set_fx(unclosed.steps[4], 1, songcore::FX_NONE, 0);
+            ok(!automation_cell_active(find_ramps(unclosed), songcore::FX_AUS, 0, 2),
+               "CELL: an AUS the phrase never closes is inert");
+
+            // Inert 3 — the AUF shares the AUS's step. A span with no duration has nothing to
+            // interpolate across, so it neither closes nor opens, and BOTH cells say so.
+            songcore::Phrase sameStep;
+            fx(sameStep, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(sameStep, 0, 2, songcore::FX_AUS,    0x80);
+            fx(sameStep, 0, 3, songcore::FX_AUF,    0xFF);
+            const std::vector<RampSpec> sr = find_ramps(sameStep);
+            ok(!automation_cell_active(sr, songcore::FX_AUS, 0, 2) &&
+                   !automation_cell_active(sr, songcore::FX_AUF, 0, 3),
+               "CELL: an AUF on the AUS's own step dims both — it closes nothing and leaves nothing open");
+
+            // Last AUS wins, so the replaced one moved nothing and dims while the winner does not.
+            songcore::Phrase replaced;
+            fx(replaced, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(replaced, 0, 2, songcore::FX_AUS,    0x80);
+            fx(replaced, 4, 1, songcore::FX_PAN,    0x20);
+            fx(replaced, 4, 2, songcore::FX_AUS,    0x00);
+            fx(replaced, 8, 1, songcore::FX_AUF,    0xFF);
+            const std::vector<RampSpec> rr = find_ramps(replaced);
+            eq(static_cast<int>(rr.size()), 1,
+               "CELL: (control) two AUS and one AUF still declare exactly one ramp");
+            ok(!automation_cell_active(rr, songcore::FX_AUS, 0, 2),
+               "⭐ CELL: the REPLACED AUS dims — last-wins means the first one moved nothing");
+            ok(automation_cell_active(rr, songcore::FX_AUS, 4, 2),
+               "CELL: ...and the one that won does not");
+
+            // ⭐ Two AUF on one step: the FIRST closes. Telling them apart is the whole reason
+            // RampSpec carries `aufSlot` — on the step alone both cells would read active.
+            songcore::Phrase twoAuf;
+            fx(twoAuf, 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(twoAuf, 0, 2, songcore::FX_AUS,    0x80);
+            fx(twoAuf, 4, 1, songcore::FX_AUF,    0xFF);
+            fx(twoAuf, 4, 2, songcore::FX_AUF,    0x40);
+            const std::vector<RampSpec> tr = find_ramps(twoAuf);
+            const int closedBy = tr.empty() ? -1 : tr[0].aufSlot;
+            std::printf("       [info] two AUF on one step: %zu ramp(s), closed by slot %d\n",
+                        tr.size(), closedBy);
+            eq(closedBy, 1, "CELL: the FIRST AUF on a step is the one that closes");
+            ok(automation_cell_active(tr, songcore::FX_AUF, 4, 1), "CELL: ...so slot 1 is active");
+            ok(!automation_cell_active(tr, songcore::FX_AUF, 4, 2),
+               "⭐ CELL: ...and the second AUF beside it is inert, which only aufSlot can see");
+        }
+
+        // ── (b) THE PIXELS — the same claim, drawn ────────────────────────────────────────────────
+        //
+        // ⚠️ A predicate nothing draws is a setting that round-trips. So: render the PHRASE screen
+        // through the real TrackerLayout and census the colours inside each cell's own rectangle.
+        //
+        // The rectangles are hand-derived from phrase_editor.cpp's column arithmetic — a second copy,
+        // deliberately, so that moving a column breaks this loudly rather than silently relocating the
+        // check with it. ⚠️ And every box carries its own positive control: the LIT colour must be
+        // found there when the cell is live, which is what stops a box aimed at empty background from
+        // passing by finding nothing.
+        {
+            constexpr int MODULE_X  = SIDE_SPACER;                              // layout.cpp: moduleX
+            constexpr int ROW0_Y    = EDITOR_Y + ROW_HEIGHT + 14 + ROW_HEIGHT;  // draw_row's dataRowY
+            constexpr int FX1_NAME  = MODULE_X + 205;   // 10 +(30+10)+(45+20)+(30+15)+(30+15)
+            constexpr int FX2_NAME  = MODULE_X + 305;   // ...+(45+10)+(30+15)
+            constexpr int FX2_VALUE = MODULE_X + 360;
+            constexpr int NAME_W    = 3 * CHAR_W;       // three glyphs: the ink, not the column pitch
+            constexpr int VALUE_W   = 2 * CHAR_W;
+
+            auto count_in = [](const Canvas& c, int x0, int y0, int w, int h, Argb want) {
+                int n = 0;
+                for (int yy = y0; yy < y0 + h; ++yy)
+                    for (int xx = x0; xx < x0 + w; ++xx)
+                        if (c.pixels()[static_cast<size_t>(yy) * DESIGN_W + static_cast<size_t>(xx)] == want)
+                            ++n;
+                return n;
+            };
+
+            const Theme t = theme_classic();
+            songcore::Project proj = songcore::make_default_project();
+
+            AppState st;
+            st.project       = &proj;
+            st.caps          = PlatformCaps::sdl(true);
+            st.currentScreen = ScreenType::PHRASE;
+            st.currentPhrase = 0;
+            st.cursorRow     = 15;   // parked on the last row's step NUMBER, so no cell under test is
+            st.cursorColumn  = 0;    // ever the cursor cell — that draws in textCursor whatever it holds
+            st.theme         = t;
+
+            TrackerLayout layout;
+            Canvas        litCanvas, deadCanvas;
+
+            // The two phrases differ in ONE cell: whether step 0 slot 1 carries the VOL the AUS looks
+            // left for. Every glyph under test is at the same coordinate in both, so a difference in
+            // the census is the dimming and cannot be a difference in what was drawn where.
+            proj.phrases[0] = songcore::Phrase{};
+            fx(proj.phrases[0], 0, 1, songcore::FX_VOLUME, 0x00);
+            fx(proj.phrases[0], 0, 2, songcore::FX_AUS,    0x80);
+            fx(proj.phrases[0], 4, 1, songcore::FX_AUF,    0xFF);
+            fx(proj.phrases[0], 8, 1, songcore::FX_PAN,    0x40);
+            layout.draw(litCanvas, st);
+
+            songcore::step_set_fx(proj.phrases[0].steps[0], 1, songcore::FX_NONE, 0);
+            layout.draw(deadCanvas, st);
+
+            struct Box { const char* what; int x; int y; int w; };
+            const Box ausName  {"the AUS name",  FX2_NAME,  ROW0_Y,              NAME_W};
+            const Box ausValue {"the AUS value", FX2_VALUE, ROW0_Y,              VALUE_W};
+            const Box aufName  {"the AUF name",  FX1_NAME,  ROW0_Y + 4 * ROW_HEIGHT, NAME_W};
+            const Box panName  {"the PAN name",  FX1_NAME,  ROW0_Y + 8 * ROW_HEIGHT, NAME_W};
+
+            for (const Box& b : {ausName, ausValue, aufName, panName}) {
+                const Argb litColour = (b.w == NAME_W) ? t.textTitle : t.textParam;
+                const int  litLit    = count_in(litCanvas,  b.x, b.y, b.w, ROW_HEIGHT, litColour);
+                const int  litDim    = count_in(litCanvas,  b.x, b.y, b.w, ROW_HEIGHT, t.textEmpty);
+                const int  deadLit   = count_in(deadCanvas, b.x, b.y, b.w, ROW_HEIGHT, litColour);
+                const int  deadDim   = count_in(deadCanvas, b.x, b.y, b.w, ROW_HEIGHT, t.textEmpty);
+                std::printf("       [info] %-14s paired: %3d lit / %3d dim   unpaired: %3d lit / %3d dim\n",
+                            b.what, litLit, litDim, deadLit, deadDim);
+
+                // The positive control on the box itself, in both renders: whichever colour the cell
+                // is drawn in, SOME ink of the pair must land inside these bounds.
+                ok(litLit + litDim > 0 && deadLit + deadDim > 0,
+                   std::string("PIXELS: (control) ") + b.what + " box actually contains the glyphs");
+            }
+
+            // PAN is the untouched cell in both renders: it is what says the dim is aimed rather than
+            // a screen that went dark.
+            const int panLit = count_in(deadCanvas, panName.x, panName.y, panName.w, ROW_HEIGHT, t.textTitle);
+            ok(panLit > 0,
+               "PIXELS: (control) an unrelated effect stays LIT when the AUS beside it goes inert");
+
+            const int ausLitInPaired   = count_in(litCanvas,  ausName.x, ausName.y, NAME_W, ROW_HEIGHT, t.textTitle);
+            const int ausDimInPaired   = count_in(litCanvas,  ausName.x, ausName.y, NAME_W, ROW_HEIGHT, t.textEmpty);
+            const int ausLitInUnpaired = count_in(deadCanvas, ausName.x, ausName.y, NAME_W, ROW_HEIGHT, t.textTitle);
+            const int ausDimInUnpaired = count_in(deadCanvas, ausName.x, ausName.y, NAME_W, ROW_HEIGHT, t.textEmpty);
+            ok(ausLitInPaired > 0 && ausDimInPaired == 0,
+               "PIXELS: a paired AUS is drawn in the LIT colour, with no empty-coloured ink in the cell");
+            ok(ausLitInUnpaired == 0 && ausDimInUnpaired > 0,
+               "⭐⭐ PIXELS: ...and the SAME cell, with only the VOL beside it removed, is drawn "
+               "ENTIRELY in the empty colour — the dim reaches the canvas");
+
+            const int valDimInUnpaired = count_in(deadCanvas, ausValue.x, ausValue.y, VALUE_W, ROW_HEIGHT, t.textEmpty);
+            const int valLitInPaired   = count_in(litCanvas,  ausValue.x, ausValue.y, VALUE_W, ROW_HEIGHT, t.textParam);
+            ok(valLitInPaired > 0 && valDimInUnpaired > 0,
+               "PIXELS: the curve byte dims with its name — an FX cell is a pair, not two cells");
+
+            const int aufLitInPaired   = count_in(litCanvas,  aufName.x, aufName.y, NAME_W, ROW_HEIGHT, t.textTitle);
+            const int aufDimInUnpaired = count_in(deadCanvas, aufName.x, aufName.y, NAME_W, ROW_HEIGHT, t.textEmpty);
+            ok(aufLitInPaired > 0 && aufDimInUnpaired > 0,
+               "PIXELS: the AUF four steps below dims too — the cell that broke is not the cell that shows it");
+        }
+    }
+
+    // ── 51. AUS / AUF ACROSS A CHAIN ────────────────────────────────────────────────────────────
+    //
+    // A phrase is sixteen steps, so everything §47–§50 proved was about fades no longer than a bar.
+    // The AUF may now sit in a LATER PHRASE of the same chain, which is what makes "fade the intro in
+    // over four bars" writable at all.
+    //
+    // ⚠️ Hand-derived, like §47 and §48: every want below is arithmetic done in the comment beside it,
+    // from the rule rather than from a run of the emitter.
+    //
+    // The fixture throughout is a four-row chain of four DIFFERENT phrases, with `VTR 00 · AUS 80` on
+    // step 0 of the first and `AUF FF` on step 15 of the last — the user's four-bar volume ramp. The
+    // span is therefore 3·16 + 15 = 63 steps, and that number is what every check below turns on.
+    {
+        auto fx = [](songcore::Phrase& ph, int step, int slot, int type, int value) {
+            songcore::step_set_fx(ph.steps[static_cast<size_t>(step)], slot, type, value);
+        };
+        // Chain 0 plays phrases 0,1,2,3 on rows 0-3. The ramp opens on phrase 0 step 0 and closes on
+        // phrase 3 step 15.
+        auto four_bar = [&](songcore::Project& p) {
+            for (int row = 0; row < 4; ++row) p.chains[0].phraseRefs[row] = row;
+            fx(p.phrases[0],  0, 1, songcore::FX_VTR, 0x00);
+            fx(p.phrases[0],  0, 2, songcore::FX_AUS, songcore::AUS_CURVE_LINEAR);
+            fx(p.phrases[3], 15, 1, songcore::FX_AUF, 0xFF);
+        };
+
+        songcore::Project p = songcore::make_default_project();
+        p.tempo = 120;
+        four_bar(p);
+
+        // ── (a) THE PAIRING SEES PAST THE END OF THE PHRASE ──────────────────────────────────────
+        //
+        // The same four calls a scheduler makes, one per chain row. Row by row the span is the SAME
+        // 63 steps, and only the offset into it moves — 0, 16, 32, 48 — because `stepOffset` is
+        // re-derived from (chain, chainRow) rather than accumulated.
+        {
+            const int wantOffset[4] = {0, 16, 32, 48};
+            for (int row = 0; row < 4; ++row) {
+                const std::vector<songcore::RampSpec> rs =
+                    songcore::find_ramps_in_chain(p, p.chains[0], row);
+                std::printf("       [info] chain row %d: %zu ramp(s)", row, rs.size());
+                if (rs.size() == 1)
+                    std::printf("  span=%d stepOffset=%d ausStep=%d aufStep=%d",
+                                rs[0].span, rs[0].stepOffset, rs[0].ausStep, rs[0].aufStep);
+                std::printf("\n");
+
+                ok(rs.size() == 1,
+                   "CHAIN-RAMP: row " + std::to_string(row) + " sees the four-bar ramp",
+                   "got " + std::to_string(rs.size()) + " ramps, want 1");
+                if (rs.size() != 1) continue;
+                const songcore::RampSpec& r = rs[0];
+                // 3 full phrases (48 steps) from the AUS's phrase to the AUF's, plus 15 steps into it.
+                ok(r.span == 63,
+                   "CHAIN-RAMP: row " + std::to_string(row) + " measures the span as 63 steps",
+                   "got " + std::to_string(r.span) + ", want 63 (3 phrases of 16, plus 15)");
+                ok(r.stepOffset == wantOffset[row],
+                   "CHAIN-RAMP: row " + std::to_string(row) + " is " +
+                       std::to_string(wantOffset[row]) + " steps into it",
+                   "got stepOffset " + std::to_string(r.stepOffset));
+                // The AUS cell belongs to row 0 and the AUF cell to row 3; every other row is one the
+                // span merely crosses, and says so with −1 at both ends.
+                ok(r.ausStep == (row == 0 ? 0 : -1),
+                   "CHAIN-RAMP: row " + std::to_string(row) + " reports the AUS " +
+                       (row == 0 ? "on step 0" : "as belonging to another phrase"),
+                   "got ausStep " + std::to_string(r.ausStep));
+                ok(r.aufStep == (row == 3 ? 15 : -1),
+                   "CHAIN-RAMP: row " + std::to_string(row) + " reports the AUF " +
+                       (row == 3 ? "on step 15" : "as belonging to another phrase"),
+                   "got aufStep " + std::to_string(r.aufStep));
+                ok(r.fxCode == songcore::FX_VTR && r.startByte == 0x00 && r.destByte == 0xFF,
+                   "CHAIN-RAMP: row " + std::to_string(row) +
+                       " carries the parameter and both end bytes across the boundary",
+                   "got fx " + std::to_string(r.fxCode) + " " + std::to_string(r.startByte) +
+                       "->" + std::to_string(r.destByte));
+            }
+        }
+
+        // ── (b) THE CONTROL: THE SAME PHRASES, PAIRED ONE AT A TIME ──────────────────────────────
+        //
+        // `find_ramps` on each phrase alone is the OLD answer, and it must still be the old answer:
+        // an AUS with no AUF in its own phrase declares nothing. Without this, (a) could be passing
+        // because the pairing had started accepting anything.
+        {
+            for (int row = 0; row < 4; ++row) {
+                const std::vector<songcore::RampSpec> rs = songcore::find_ramps(p.phrases[row]);
+                ok(rs.empty(),
+                   "CHAIN-RAMP: (control) phrase " + std::to_string(row) +
+                       " on its own declares no ramp — the span is the CHAIN's, not the phrase's",
+                   "got " + std::to_string(rs.size()) + " ramps from the per-phrase pairing");
+            }
+        }
+
+        // ── (c) AND THE FADE COMES OUT OF THE SCHEDULER, ACROSS ALL FOUR PHRASES ─────────────────
+        //
+        // Pairing is one thing and emission another. Play the chain and record every CC_TRACK_VOL: the
+        // fade must be monotonic, must start at 00 and arrive at exactly FF, and — the point of the
+        // whole exercise — must still be climbing after the first phrase has ended.
+        {
+            struct Rec : songcore::IMidiConsumer {
+                struct Cc { int64_t frame; int param; int valueByte; };
+                std::vector<Cc> ccs;
+                void consume(const songcore::Event& ev) override {
+                    if (ev.type != songcore::EV_CC) return;
+                    float v = 0.0f;
+                    std::memcpy(&v, &ev.cc.valueBits, sizeof v);
+                    ccs.push_back({ev.frame, ev.cc.param, static_cast<int>(std::lround(v * 255.0f))});
+                }
+                void on_play(const std::string&, const std::string&, int64_t, int, int) override {}
+                void on_stop() override {}
+            };
+            Rec                  rec;
+            songcore::MidiRouter r(&rec);
+            songcore::Sequencer  s(r, p, 44100);
+            s.set_clock(0);
+            s.playChain(0);
+            // playChain schedules only the first row; the lookahead brings in the rest. Pump it far
+            // enough to cover all four phrases, then some.
+            for (int64_t f = 0; f <= songcore::frames_per_step(120, 44100) * 16 * 5;
+                 f += songcore::frames_per_step(120, 44100)) {
+                s.set_clock(f);
+                s.updatePlaybackBuffer();
+            }
+
+            // ⚠️ CHAIN mode LOOPS: `findNextNonEmptyChainRow` wraps, so the chain plays again and the
+            // fade legitimately restarts from 00. Everything below is about ONE pass — the window is
+            // part of the metric, and without this bound "monotonic" is false for a working ramp and
+            // "arrives at FF" reads whatever the second pass had got to when the pump stopped.
+            const int64_t fps         = songcore::frames_per_step(120, 44100);
+            const int64_t chainEnd    = fps * 16 * 4;   // four phrases of sixteen steps
+            const int64_t phrase1End  = fps * 16;       // where the FIRST phrase stops
+            std::vector<Rec::Cc> vol;
+            for (const Rec::Cc& c : rec.ccs)
+                if (c.param == songcore::CC_TRACK_VOL && c.frame < chainEnd) vol.push_back(c);
+            int afterFirstPhrase = 0;
+            for (const Rec::Cc& c : vol) if (c.frame >= phrase1End) ++afterFirstPhrase;
+            bool monotonic = true;
+            for (size_t i = 1; i < vol.size(); ++i)
+                if (vol[i].valueByte < vol[i - 1].valueByte) monotonic = false;
+
+            std::printf("       [info] four-bar VTR fade: %zu events, %d of them after the first "
+                        "phrase ended; first=%d last=%d\n",
+                        vol.size(), afterFirstPhrase,
+                        vol.empty() ? -1 : vol.front().valueByte,
+                        vol.empty() ? -1 : vol.back().valueByte);
+
+            ok(!vol.empty(), "CHAIN-RAMP: the chain emits a track-volume fade at all",
+               "no CC_TRACK_VOL events came out of the scheduler");
+            // ⭐ The one that could not be true before: a phrase boundary no longer ends the fade.
+            ok(afterFirstPhrase > 0,
+               "⭐⭐ CHAIN-RAMP: the fade goes on past the end of the phrase that opened it — a ramp "
+               "is no longer capped at one bar",
+               "every one of the " + std::to_string(vol.size()) + " events landed inside the first "
+               "phrase, so the span is still being clipped at the phrase boundary");
+
+            // ⚠️ EACH OF THE FOUR PHRASES SEPARATELY, because "past the first phrase" is far weaker
+            // than it sounds: the LAST phrase owns the AUF and would go on emitting even if the two in
+            // the middle — the ones the span merely crosses, which is the whole new case — emitted
+            // nothing at all. A control that clipped exactly those left this section green but for one
+            // check until these four existed.
+            int perPhrase[4] = {0, 0, 0, 0};
+            for (const Rec::Cc& c : vol) {
+                const int64_t idx = c.frame / phrase1End;
+                if (idx >= 0 && idx < 4) ++perPhrase[static_cast<size_t>(idx)];
+            }
+            std::printf("       [info] events per phrase: %d %d %d %d\n",
+                        perPhrase[0], perPhrase[1], perPhrase[2], perPhrase[3]);
+            for (int i = 0; i < 4; ++i)
+                ok(perPhrase[i] > 0,
+                   "CHAIN-RAMP: phrase " + std::to_string(i) + " of the four carries part of the fade",
+                   "phrase " + std::to_string(i) + " got no events — a span is being clipped at a "
+                   "boundary it should cross");
+            // A linear 00→FF over 63 steps passes through all 256 bytes, and the de-dup removes only
+            // repeats, so the pass must contain every one of them exactly once.
+            ok(static_cast<int>(vol.size()) == 256,
+               "CHAIN-RAMP: the pass emits all 256 bytes of a linear fade, de-duped to one each",
+               "got " + std::to_string(vol.size()) + " events, want 256");
+            ok(monotonic,
+               "CHAIN-RAMP: a linear 00→FF fade never goes backwards, boundaries included",
+               "the fade steps DOWN somewhere — the most likely cause is stepOffset restarting at a "
+               "phrase boundary instead of carrying on");
+            // The arrival carries the byte the author typed, on the AUF's own step.
+            ok(!vol.empty() && vol.back().valueByte == 0xFF,
+               "CHAIN-RAMP: it arrives at exactly the destination byte, four phrases later",
+               "ends at " + std::to_string(vol.empty() ? -1 : vol.back().valueByte) + ", want 255");
+            // Hand-derived: at the START of phrase 2 the ramp is 16 steps into 63, and linear, so it
+            // holds round(255·16/63) = round(64.76) = 65. The first event at or after that frame is
+            // the one standing on that boundary.
+            int atBoundary = -1;
+            for (const Rec::Cc& c : vol) if (c.frame >= phrase1End) { atBoundary = c.valueByte; break; }
+            ok(atBoundary >= 63 && atBoundary <= 67,
+               "CHAIN-RAMP: at the second phrase's first step the fade reads ~65 — 16 steps of 63, "
+               "hand-derived, not recorded",
+               "reads " + std::to_string(atBoundary) + ", want round(255*16/63) = 65 ± 2");
+        }
+
+        // ── (d) THE CHAIN IS THE BOUNDARY, AND IT HOLDS ──────────────────────────────────────────
+        //
+        // An AUF in a later phrase pairs; an AUS whose chain simply ends does not. Same fixture with
+        // the AUF deleted: nothing anywhere in the chain declares a ramp, and in particular the walk
+        // does not run off the end into whatever chain 1 happens to hold.
+        {
+            songcore::Project q = songcore::make_default_project();
+            q.tempo = 120;
+            four_bar(q);
+            songcore::step_set_fx(q.phrases[3].steps[15], 1, songcore::FX_NONE, 0);
+            int total = 0;
+            for (int row = 0; row < 4; ++row)
+                total += static_cast<int>(songcore::find_ramps_in_chain(q, q.chains[0], row).size());
+            ok(total == 0,
+               "CHAIN-RAMP: an AUS the chain never closes stays inert — the chain is the boundary",
+               "got " + std::to_string(total) + " ramps with the AUF removed");
+        }
+
+        // ── (e) A SECOND AUS BEFORE THE AUF REPLACES THE FIRST, ACROSS PHRASES TOO ───────────────
+        //
+        // The last-wins rule is not a within-phrase rule; it is the rule. Put a second `VTR 40 · AUS`
+        // on phrase 2, and the ramp that reaches the AUF must be THAT one — 1·16+15 = 31 steps long,
+        // starting from 0x40, and phrase 0's AUS must declare nothing at all.
+        {
+            songcore::Project q = songcore::make_default_project();
+            q.tempo = 120;
+            four_bar(q);
+            fx(q.phrases[2], 0, 1, songcore::FX_VTR, 0x40);
+            fx(q.phrases[2], 0, 2, songcore::FX_AUS, songcore::AUS_CURVE_LINEAR);
+
+            const std::vector<songcore::RampSpec> row0 = songcore::find_ramps_in_chain(q, q.chains[0], 0);
+            const std::vector<songcore::RampSpec> row2 = songcore::find_ramps_in_chain(q, q.chains[0], 2);
+            std::printf("       [info] second AUS on phrase 2: row 0 sees %zu, row 2 sees %zu\n",
+                        row0.size(), row2.size());
+            ok(row0.empty(),
+               "CHAIN-RAMP: a later AUS replaces an open one across a phrase boundary — the first "
+               "declares nothing",
+               "row 0 still declares " + std::to_string(row0.size()) + " ramp(s)");
+            ok(row2.size() == 1 && row2[0].span == 31 && row2[0].startByte == 0x40,
+               "CHAIN-RAMP: ...and the span that survives is the SECOND one, 31 steps from 0x40",
+               row2.empty() ? "row 2 declares nothing"
+                            : "span " + std::to_string(row2[0].span) + " from " +
+                                  std::to_string(row2[0].startByte));
+        }
+
+        // ── (f) AN EMPTY CHAIN ROW COSTS NO STEPS ────────────────────────────────────────────────
+        //
+        // The scheduler skips an empty row without scheduling anything, so counting it would drift the
+        // fade against the notes. Move the AUF's phrase from row 3 to row 4 and leave row 3 empty: the
+        // span must stay 63, not become 79.
+        {
+            songcore::Project q = songcore::make_default_project();
+            q.tempo = 120;
+            four_bar(q);
+            q.chains[0].phraseRefs[3] = -1;
+            q.chains[0].phraseRefs[4] = 3;
+            const std::vector<songcore::RampSpec> rs = songcore::find_ramps_in_chain(q, q.chains[0], 0);
+            std::printf("       [info] with row 3 empty and the AUF phrase on row 4: span %s\n",
+                        rs.empty() ? "(no ramp)" : std::to_string(rs[0].span).c_str());
+            ok(rs.size() == 1 && rs[0].span == 63,
+               "CHAIN-RAMP: an empty chain row contributes no steps to the span",
+               rs.empty() ? "no ramp declared"
+                          : "span " + std::to_string(rs[0].span) + ", want 63 (79 means the empty "
+                            "row was counted as a phrase)");
+        }
+
+        // ── (g) AND THE EDITOR DRAWS IT LIVE ─────────────────────────────────────────────────────
+        //
+        // §50 made an inert AUS/AUF draw in the empty colour. A cross-chain span turns that guarantee
+        // round: the danger is no longer the grid claiming a fade the scheduler will not play, but the
+        // grid DENYING one it will — phrase 0's AUS has no AUF anywhere in its own sixteen steps, and
+        // pairing it alone would dim a cell that is doing its job.
+        //
+        // ⚠️ The pixels, not the predicate, for §50's reason: a predicate nothing draws is a setting
+        // that round-trips. Two renders of the SAME screen differing in one cell three phrases away —
+        // so any change in the census is the dimming, and cannot be a difference in what was drawn.
+        {
+            constexpr int MODULE_X  = SIDE_SPACER;
+            constexpr int ROW0_Y    = EDITOR_Y + ROW_HEIGHT + 14 + ROW_HEIGHT;
+            constexpr int FX2_NAME  = MODULE_X + 305;
+            constexpr int NAME_W    = 3 * CHAR_W;
+
+            auto count_in = [](const Canvas& c, int x0, int y0, int w, int h, Argb want) {
+                int n = 0;
+                for (int yy = y0; yy < y0 + h; ++yy)
+                    for (int xx = x0; xx < x0 + w; ++xx)
+                        if (c.pixels()[static_cast<size_t>(yy) * DESIGN_W + static_cast<size_t>(xx)] == want)
+                            ++n;
+                return n;
+            };
+
+            const Theme t = theme_classic();
+            songcore::Project proj = songcore::make_default_project();
+            proj.tempo = 120;
+            four_bar(proj);
+
+            AppState st;
+            st.project       = &proj;
+            st.caps          = PlatformCaps::sdl(true);
+            st.currentScreen = ScreenType::PHRASE;
+            st.currentPhrase = 0;      // the phrase carrying the AUS
+            st.currentChain  = 0;      // ...reached from the chain that also carries the AUF
+            st.cursorRow     = 15;
+            st.cursorColumn  = 0;
+            st.theme         = t;
+
+            TrackerLayout layout;
+            Canvas        liveCanvas, deadCanvas;
+            layout.draw(liveCanvas, st);
+            // The one cell that changes, and it is in a DIFFERENT PHRASE from every pixel measured.
+            songcore::step_set_fx(proj.phrases[3].steps[15], 1, songcore::FX_NONE, 0);
+            layout.draw(deadCanvas, st);
+
+            const int liveLit = count_in(liveCanvas, FX2_NAME, ROW0_Y, NAME_W, ROW_HEIGHT, t.textTitle);
+            const int liveDim = count_in(liveCanvas, FX2_NAME, ROW0_Y, NAME_W, ROW_HEIGHT, t.textEmpty);
+            const int deadLit = count_in(deadCanvas, FX2_NAME, ROW0_Y, NAME_W, ROW_HEIGHT, t.textTitle);
+            const int deadDim = count_in(deadCanvas, FX2_NAME, ROW0_Y, NAME_W, ROW_HEIGHT, t.textEmpty);
+            std::printf("       [info] the AUS on phrase 0, AUF three phrases away: closed %d lit / "
+                        "%d dim   AUF deleted %d lit / %d dim\n", liveLit, liveDim, deadLit, deadDim);
+
+            ok(liveLit + liveDim > 0 && deadLit + deadDim > 0,
+               "CHAIN-RAMP: (control) the AUS box really contains the glyphs in both renders",
+               "the box found no ink — it is aimed at background and would pass on anything");
+            ok(liveLit > 0 && liveDim == 0,
+               "⭐⭐ PIXELS: an AUS closed by an AUF three phrases down the CHAIN draws LIT — the "
+               "editor no longer denies a fade the scheduler will play",
+               "the cell has " + std::to_string(liveDim) + " empty-coloured pixels: the editor is "
+               "still pairing within the phrase and calling a working cross-chain span dead");
+            ok(deadLit == 0 && deadDim > 0,
+               "PIXELS: ...and deleting that far-away AUF dims it again — the chain is what is being "
+               "read, not the phrase",
+               "with no AUF anywhere in the chain the cell still reads " + std::to_string(deadLit) +
+                   " lit pixels");
+        }
+
+        // ── (h) A PHRASE HAS NO SINGLE CONTEXT, AND THE EDITOR MUST NOT NEED ONE ──────────────────
+        //
+        // (g) drew a phrase placed at exactly one chain row, reached from the chain it sits in — the
+        // one arrangement in which "the row showing this phrase" is a question with an answer. Two
+        // arrangements a user reaches in a minute are not:
+        //
+        //   • the same phrase placed at TWO rows of the chain — two walks, two different spans;
+        //   • the phrase opened while the CHAIN screen is parked on some other chain.
+        //
+        // Both draw the same sixteen steps, so the cell is live if ANY of its contexts uses it. Each
+        // half carries its own control: delete the far-away AUF and the cell must go dark again.
+        {
+            constexpr int MODULE_X = SIDE_SPACER;
+            constexpr int ROW0_Y   = EDITOR_Y + ROW_HEIGHT + 14 + ROW_HEIGHT;
+            constexpr int FX2_NAME = MODULE_X + 305;
+            constexpr int NAME_W   = 3 * CHAR_W;
+
+            auto count_in = [](const Canvas& c, int x0, int y0, int w, int h, Argb want) {
+                int n = 0;
+                for (int yy = y0; yy < y0 + h; ++yy)
+                    for (int xx = x0; xx < x0 + w; ++xx)
+                        if (c.pixels()[static_cast<size_t>(yy) * DESIGN_W + static_cast<size_t>(xx)] == want)
+                            ++n;
+                return n;
+            };
+
+            const Theme t = theme_classic();
+
+            // Draws the PHRASE screen on phrase 0 and reports the AUS name cell as (lit, dim).
+            auto census = [&](songcore::Project& proj, int viewChain, int& lit, int& dim) {
+                AppState st;
+                st.project       = &proj;
+                st.caps          = PlatformCaps::sdl(true);
+                st.currentScreen = ScreenType::PHRASE;
+                st.currentPhrase = 0;
+                st.currentChain  = viewChain;
+                st.cursorRow     = 15;
+                st.cursorColumn  = 0;
+                st.theme         = t;
+                TrackerLayout layout;
+                Canvas        c;
+                layout.draw(c, st);
+                lit = count_in(c, FX2_NAME, ROW0_Y, NAME_W, ROW_HEIGHT, t.textTitle);
+                dim = count_in(c, FX2_NAME, ROW0_Y, NAME_W, ROW_HEIGHT, t.textEmpty);
+            };
+
+            // The AUS phrase placed TWICE: rows 0-4 are phrases 0,0,1,2,3, so the AUS opens at
+            // absolute step 0, is replaced by its own second instance at 16, and that one is what the
+            // AUF closes. One cell, two walks, and it is live in the second.
+            {
+                songcore::Project proj = songcore::make_default_project();
+                four_bar(proj);
+                proj.chains[0].phraseRefs[4] = 3;
+                proj.chains[0].phraseRefs[3] = 2;
+                proj.chains[0].phraseRefs[2] = 1;
+                proj.chains[0].phraseRefs[1] = 0;
+
+                int twiceLit = 0, twiceDim = 0, goneLit = 0, goneDim = 0;
+                census(proj, 0, twiceLit, twiceDim);
+                songcore::step_set_fx(proj.phrases[3].steps[15], 1, songcore::FX_NONE, 0);
+                census(proj, 0, goneLit, goneDim);
+                std::printf("       [info] the AUS phrase placed at two chain rows: %d lit / %d dim   "
+                            "AUF deleted %d lit / %d dim\n", twiceLit, twiceDim, goneLit, goneDim);
+
+                ok(twiceLit + twiceDim > 0 && goneLit + goneDim > 0,
+                   "CHAIN-RAMP: (control) the AUS box contains the glyphs in both renders");
+                ok(twiceLit > 0 && twiceDim == 0,
+                   "⭐⭐ PIXELS: an AUS in a phrase the chain plays TWICE draws LIT — a cell with two "
+                   "walks behind it is live if either one uses it",
+                   "the cell has " + std::to_string(twiceDim) + " empty-coloured pixels: a second "
+                   "placement of the phrase made the editor give up and pair within it");
+                ok(goneLit == 0 && goneDim > 0,
+                   "PIXELS: ...and with the AUF gone it dims, so neither walk was pairing it",
+                   "still " + std::to_string(goneLit) + " lit pixels with no AUF in the chain");
+            }
+
+            // The same span, opened from a chain the phrase is not in. Where the user navigated from
+            // is not part of the answer.
+            {
+                songcore::Project proj = songcore::make_default_project();
+                four_bar(proj);
+
+                int awayLit = 0, awayDim = 0, goneLit = 0, goneDim = 0;
+                census(proj, 7, awayLit, awayDim);
+                songcore::step_set_fx(proj.phrases[3].steps[15], 1, songcore::FX_NONE, 0);
+                census(proj, 7, goneLit, goneDim);
+                std::printf("       [info] the same AUS, viewed while parked on chain 07: %d lit / "
+                            "%d dim   AUF deleted %d lit / %d dim\n", awayLit, awayDim, goneLit, goneDim);
+
+                ok(awayLit + awayDim > 0 && goneLit + goneDim > 0,
+                   "CHAIN-RAMP: (control) the AUS box contains the glyphs in both renders");
+                ok(awayLit > 0 && awayDim == 0,
+                   "PIXELS: the AUS draws LIT with the CHAIN screen parked on an unrelated chain — "
+                   "the editor finds the walks from the phrase, not from the navigation",
+                   "the cell has " + std::to_string(awayDim) + " empty-coloured pixels");
+                ok(goneLit == 0 && goneDim > 0,
+                   "PIXELS: ...and dims when the AUF goes, from that same unrelated chain",
+                   "still " + std::to_string(goneLit) + " lit pixels with no AUF in the chain");
+            }
         }
     }
 

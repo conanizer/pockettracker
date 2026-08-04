@@ -125,18 +125,35 @@ inline int automation_value_byte(int startByte, int destByte, int curveByte, dou
 
 // ─── The pairing ─────────────────────────────────────────────────────────────────────────────────
 
-/** One declared ramp: which parameter, over which steps, from which byte to which, on what curve. */
+/**
+ * One declared ramp, as seen from ONE phrase of the walk.
+ *
+ * A span may cross phrase boundaries (`find_ramps_in_chain`), so the fields divide into two kinds:
+ * `span`/`stepsBefore` describe the WHOLE ramp and are what the curve is evaluated against, while
+ * `ausStep`/`aufStep` and the slots are about THIS phrase and go to −1 when the corresponding end is
+ * in a different one. A ramp confined to a single phrase has `stepsBefore == 0` and
+ * `span == aufStep − ausStep`, which is what `find_ramps` produces on its own.
+ */
 struct RampSpec {
     int     fxCode    = FX_NONE;
     uint8_t ccId      = 0;
     bool    global    = false;
-    int     ausStep   = -1;   // the step carrying AUS — the ramp's first step
-    int     aufStep   = -1;   // the step carrying the AUF that closed it
+    int     ausStep   = -1;   // the step carrying AUS, or −1: the ramp opened in an earlier phrase
+    int     aufStep   = -1;   // the step carrying the AUF, or −1: it arrives in a later phrase
     int     paramSlot = 0;    // 1-3: the slot AUS read its start value from
     int     ausSlot   = 0;    // 1-3: where AUS itself sits
+    int     aufSlot   = 0;    // 1-3: where the AUF that closed it sits
     int     startByte = 0;
     int     destByte  = 0;
     int     curveByte = AUS_CURVE_LINEAR;
+
+    // The span, in steps, over the whole ramp — the denominator `t` is measured against, and never
+    // zero for a ramp that paired.
+    int     span       = 0;
+    // Add this phrase's step index to it for the steps elapsed since the AUS. It is NEGATIVE for the
+    // phrase the AUS sits in (exactly −ausStep, so the sum is the familiar `stepIndex − ausStep`) and
+    // positive once the ramp has crossed a boundary — one signed number instead of two cases.
+    int     stepOffset = 0;
 };
 
 /**
@@ -195,14 +212,224 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
                     break;
                 }
             } else if (type == FX_AUF && isOpen && stepIndex > open.ausStep) {
-                open.aufStep  = stepIndex;
-                open.destByte = step_fx_value(step, slot);
+                open.aufStep    = stepIndex;
+                open.aufSlot    = slot;
+                open.destByte   = step_fx_value(step, slot);
+                open.span       = open.aufStep - open.ausStep;
+                open.stepOffset = -open.ausStep;   // see RampSpec: elapsed = stepOffset + stepIndex
                 out.push_back(open);
                 isOpen = false;
             }
         }
     }
     return out;
+}
+
+// ─── Pairing across a chain ──────────────────────────────────────────────────────────────────────
+//
+// A phrase is 16 steps, which at any useful tempo is a bar or less — so a fade written the way
+// `find_ramps` pairs it can never be longer than a bar, and "fade this in over the four bars of the
+// intro" is not expressible at all. The AUF is allowed to sit in a LATER PHRASE OF THE SAME CHAIN,
+// which is what the walk below works out.
+//
+// ⚠️ **THE CHAIN IS THE BOUNDARY, AND IT IS A REAL ONE.** Pairing stops at the end of the chain: a
+// chain is the unit a track repeats and re-enters, and a span that ran past it would have to survive
+// the song moving to a different chain, a chain played from two song rows at once, and CHAIN mode's
+// wrap back to row 0. Sixteen rows of sixteen steps is 256 steps of ramp, which is the length of the
+// thing anyone has asked for.
+//
+// ⭐⭐ **IT IS RE-DERIVED ON EVERY CALL, NOT CARRIED IN `TrackState`.** The obvious implementation
+// leaves the open AUS in the track's state and lets successive `schedulePhrase` calls advance it, and
+// it is wrong in three ways at once, all of them invisible until they are not: `notify_data_changed`
+// rolls the lookahead back to an earlier chain row WITHOUT rewinding `TrackState` (see the checkpoint
+// ring), so a live edit would jump the fade forward by a phrase; a chain re-entered from a later song
+// row would inherit the previous one's open ramp; and the same phrase scheduled twice would advance it
+// twice. Deriving the whole picture from (chain, chainRow) each time makes every one of those
+// questions unaskable — the same reason the emitter measures `t` in steps rather than accumulating
+// frames.
+
+/**
+ * Every ramp playing over the phrase at `chainRow`, whether it opened there or in an earlier row.
+ *
+ * Spans are returned as this phrase sees them: `ausStep` is −1 when the AUS is behind us, `aufStep`
+ * is −1 when the AUF is ahead, and `stepsBefore` says how far along the ramp already was when this
+ * phrase began. `startRow` is the HOP entry point and applies only to ramps opening in THIS phrase —
+ * a phrase entered below its own AUS runs no ramp, exactly as `find_ramps` has it, while one entered
+ * below a step a ramp from an earlier row is merely passing through is unaffected.
+ *
+ * ⚠️ Empty chain rows contribute NO steps, matching the traversal: the scheduler skips them without
+ * scheduling anything, so counting them would drift the fade against the notes.
+ *
+ * ⚠️ **THE WALK IS THE AUTHORED ONE, AND A HOP CAN MAKE THE REAL ONE SHORTER.** A HOP inside the span
+ * ends its phrase early, so fewer steps play than this counted and the fade is a little further along
+ * than the step count says when the next phrase picks it up. It still starts at the start byte and
+ * still arrives at the destination on the AUF's own step — the error is in the middle and bounded by
+ * the steps the HOP skipped. Reading the real traversal instead is not available: the HOP itself can
+ * be CHA-gated, so how far the phrase gets is not knowable until it has been walked, which is the
+ * same reason nothing is ever emitted ahead of the walk.
+ */
+inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const Chain& chain,
+                                                 int chainRow, int startRow = 0) {
+    std::vector<RampSpec> out;
+    if (chainRow < 0 || chainRow >= 16) return out;
+
+    // Absolute step of each row's step 0, in the chain's own walk. −1 marks a row that is never
+    // played and therefore has no position at all.
+    int rowAbs[16];
+    int walked = 0;
+    for (int row = 0; row < 16; ++row) {
+        const int phraseId = chain.phraseRefs[row];
+        const bool played = !chain_is_empty(chain, row) && phraseId >= 0 &&
+                            phraseId < static_cast<int>(project.phrases.size());
+        rowAbs[row] = played ? walked : -1;
+        if (played) walked += 16;
+    }
+    if (rowAbs[chainRow] < 0) return out;
+
+    const int hereAbs = rowAbs[chainRow];
+    const int hereEnd = hereAbs + 15;
+
+    // One pass over the whole chain, in playing order, pairing exactly as `find_ramps` does within a
+    // phrase — the rules do not change, only how far the walk can see. Absolute step indices keep the
+    // two ends comparable across rows.
+    RampSpec open;
+    bool     isOpen    = false;
+    int      openAbs   = 0;   // absolute step the open AUS sits on
+    int      openRow   = -1;  // and the row, so a HOP entry can be applied to the right phrase
+
+    for (int row = 0; row < 16; ++row) {
+        if (rowAbs[row] < 0) continue;
+        const Phrase& phrase = project.phrases[static_cast<size_t>(chain.phraseRefs[row])];
+        const int steps = static_cast<int>(phrase.steps.size());
+        for (int stepIndex = 0; stepIndex < steps && stepIndex < 16; ++stepIndex) {
+            const PhraseStep& step = phrase.steps[static_cast<size_t>(stepIndex)];
+            const int absStep = rowAbs[row] + stepIndex;
+            for (int slot = 1; slot <= 3; ++slot) {
+                const int type = step_fx_type(step, slot);
+
+                if (type == FX_AUS) {
+                    // A HOP into this phrase below the AUS means the step never plays, so the ramp is
+                    // never declared. Only applies to the phrase actually being entered.
+                    if (row == chainRow && stepIndex < startRow) continue;
+                    for (int left = slot - 1; left >= 1; --left) {
+                        const AutomatableParam* p = automatable_param(step_fx_type(step, left));
+                        if (p == nullptr) continue;
+                        open           = RampSpec{};
+                        open.fxCode    = p->fxCode;
+                        open.ccId      = p->ccId;
+                        open.global    = p->global;
+                        open.paramSlot = left;
+                        open.ausSlot   = slot;
+                        open.startByte = step_fx_value(step, left);
+                        open.curveByte = step_fx_value(step, slot);
+                        openAbs        = absStep;
+                        openRow        = row;
+                        isOpen         = true;
+                        break;
+                    }
+                } else if (type == FX_AUF && isOpen && absStep > openAbs) {
+                    const int aufAbs = absStep;
+                    isOpen = false;
+                    // Only the part of the chain this phrase can see is any of its business.
+                    if (aufAbs < hereAbs || openAbs > hereEnd) break;
+                    RampSpec r   = open;
+                    r.destByte   = step_fx_value(step, slot);
+                    r.span       = aufAbs - openAbs;
+                    r.stepOffset = hereAbs - openAbs;
+                    r.ausStep    = (openRow == chainRow) ? openAbs - hereAbs : -1;
+                    r.aufStep    = (row == chainRow)     ? aufAbs  - hereAbs : -1;
+                    r.aufSlot    = (row == chainRow)     ? slot              : 0;
+                    if (r.ausStep < 0) r.ausSlot = 0;    // the AUS cell is not in this phrase
+                    out.push_back(r);
+                    break;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// ─── Which cells of ONE phrase a ramp uses — the question the editor asks ────────────────────────
+//
+// The editor draws a phrase, and a phrase has no single playing context: the same sixteen steps may
+// sit at several rows of a chain, in several chains, in neither. A ramp, meanwhile, is a property of
+// a CHAIN WALK. So the cell question — *is this AUS doing anything?* — is answered over EVERY context
+// the project plays the phrase in, and the cell is live if any one of them uses it.
+//
+// ⚠️ **THE UNION IS THE HONEST ANSWER, AND ASKING ONE CONTEXT IS NOT.** Dimming means "you wrote
+// something inert"; a cell live in one of its contexts is not inert, and saying so would send the
+// author hunting a bug in a fade that plays. The imprecision runs the other way instead — a cell live
+// in one chain draws live everywhere, which is the most an editor with one cell and many contexts can
+// say without lying.
+
+/**
+ * The AUS/AUF cells of one phrase that a ramp really uses, indexed `[step][slot]` with slots 1-3.
+ *
+ * Filled from `RampSpec`s, whose `ausStep`/`aufStep` are already −1 for an end living in ANOTHER
+ * phrase — so marking is safe to do with the specs of any row, and folding several rows together is
+ * exactly the union above.
+ */
+struct RampCells {
+    bool used[16][4] = {};
+
+    void mark(const std::vector<RampSpec>& ramps) {
+        for (const RampSpec& r : ramps) {
+            if (r.ausStep >= 0 && r.ausStep < 16 && r.ausSlot >= 1 && r.ausSlot <= 3)
+                used[r.ausStep][r.ausSlot] = true;
+            if (r.aufStep >= 0 && r.aufStep < 16 && r.aufSlot >= 1 && r.aufSlot <= 3)
+                used[r.aufStep][r.aufSlot] = true;
+        }
+    }
+
+    /**
+     * Does this FX cell take part in a ramp?
+     *
+     * Only AUS and AUF can answer no — every other effect stands on its own, so a cell carrying one
+     * is active by definition and the caller may ask about any slot. The three ways to write an AUS
+     * that does nothing (nothing automatable to its left, no AUF after it, an AUF sharing its step)
+     * and the two ways to write an inert AUF (no ramp open, or a second AUF after one already closed)
+     * all reduce to the same thing: the pairing did not use this cell.
+     */
+    bool active(int fxType, int stepIndex, int slot) const {
+        if (fxType != FX_AUS && fxType != FX_AUF) return true;
+        if (stepIndex < 0 || stepIndex >= 16 || slot < 1 || slot > 3) return false;
+        return used[stepIndex][slot];
+    }
+};
+
+/**
+ * Every AUS/AUF cell of phrase `phraseId` that a ramp uses, over every chain row that plays it.
+ *
+ * A phrase no chain references has no walk to be read in, and falls back to pairing within itself —
+ * which is what an author writing a phrase before placing it should see.
+ *
+ * ⚠️ Asks `find_ramps_in_chain` rather than re-deriving the rules, so an editor drawing this cannot
+ * claim a fade the emitter will not play — they are reading one answer, not two implementations of
+ * it. That is also why the whole phrase is answered in ONE pass and handed to the caller as a mask:
+ * per-cell scanning would put a chain walk under every glyph.
+ */
+inline RampCells find_ramp_cells(const Project& project, int phraseId) {
+    RampCells cells;
+    if (phraseId < 0 || phraseId >= static_cast<int>(project.phrases.size())) return cells;
+
+    bool placed = false;
+    for (const Chain& chain : project.chains) {
+        for (int row = 0; row < 16; ++row) {
+            if (chain.phraseRefs[static_cast<size_t>(row)] != phraseId) continue;
+            placed = true;
+            cells.mark(find_ramps_in_chain(project, chain, row));
+        }
+    }
+    if (!placed) cells.mark(find_ramps(project.phrases[static_cast<size_t>(phraseId)]));
+    return cells;
+}
+
+/** `RampCells::active` for a caller that already holds one context's spans. */
+inline bool automation_cell_active(const std::vector<RampSpec>& ramps, int fxType,
+                                   int stepIndex, int slot) {
+    RampCells cells;
+    cells.mark(ramps);
+    return cells.active(fxType, stepIndex, slot);
 }
 
 }  // namespace songcore

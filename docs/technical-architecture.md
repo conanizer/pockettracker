@@ -86,6 +86,7 @@ native/                            The portable program
 │   ├── project_ops.h                Compact, transitive table walks, slot surgery
 │   ├── timing.h                     frames_per_step / _tic, groove timing, transpose
 │   ├── effects.h                    Effect codes, names, EFFECT_TYPES, resolve_step_params
+│   ├── automation.h                 AUS/AUF: the automatable registry, the curve, the pairing
 │   ├── traversal.h                  Song walks, collect_used_instruments
 │   ├── rng.h                        PCG32, seeded and bounded like kotlin.random
 │   ├── event.h                      The event schema (versioned, frozen)
@@ -182,15 +183,24 @@ the **only** place the note and parameter queues drain. A second drain point is 
 ### Signal path
 
 ```
-  voice ─► instrument chain (Crush → Drive → Filter) ─► instrument EQ ─┬─► track
-                                                                       ├─► reverb send bus
-                                                                       └─► delay send bus
-                        track mixer ─► master EQ ─► OTT | DUST ─► Limiter ─► out
+  voice ─► instrument chain (Crush → Drive → Filter) ─► instrument EQ ─┬─► track fader ─┐
+                                                                       ├─► reverb bus ─┤
+                                                                       └─► delay bus ──┤
+                                                                                       ▼
+                                    out ◄─ Limiter ◄─ OTT | DUST ◄─ master EQ ◄─ MASTER FADER
 ```
 
 Reverb and delay are **send buses**, not inserts: a per-note or per-instrument send amount feeds
 them, and the delay can additionally feed the reverb. Both have their own input EQ. `-1` is the
 documented bypass value for every EQ slot.
+
+Note where the two faders sit relative to that tap. A send is **pre-fader with respect to the track
+fader** and post-everything on the instrument, so pulling a track down leaves its tails alone. The
+**master fader is downstream of the returns** — it multiplies the summed bus, dry and wet together,
+which is what makes it a master rather than a dry-mix gain. ⚠️ It is therefore one multiply over the
+whole block and not a per-voice gain: `VMV` and a `VTR`/`VMV` automation ramp both move it through the
+parameter queue, which drains once per block, so a per-voice application would buy no extra
+resolution and would silently exclude the returns.
 
 ### Voices
 
@@ -221,6 +231,36 @@ randomization, and emits **events** rather than engine calls.
 
 Timing is frame-based: `frames_per_step` and `frames_per_tic` derive from the tempo, and grooves
 change a step's length per position. Everything downstream is stamped in frames.
+
+### Parameter automation
+
+`AUS` opens a ramp on the automatable effect in the slot to its **left**, taking that cell's value as
+the start and its own as the curve; `AUF`, on a later step, carries the destination. The value is
+interpolated in the authored 0–255 byte domain by a polynomial — `+ − ×` only, for the determinism
+reason above — and emitted **once per tic** as the parameter's own `EV_CC`.
+
+That last point is what keeps automation cheap. A ramp is not a new kind of event: it is the CC the
+per-step effect already emits, emitted more often. So a parameter becomes automatable by paying the
+price of live control at all — a CC id, an arm in `EngineConsumer::consume`, a queued apply on the
+audio thread — plus a row in `automation.h`'s registry, and no `SCHEMA_VERSION` bump. Today's rows are
+`VOL`, `PAN`, `REV`, `DEL`, `VTR` and `VMV`; the set is that table, not a property of the feature.
+
+Pairing lives in `automation.h` and is **pure**: it answers "which spans does this walk declare", in
+step indices, and never touches frames, tics, grooves or the transport. The emitter already holds each
+step's real duration as it walks, so a groove-warped span costs it nothing.
+
+A span may cross phrases, and **the chain is the boundary** — a chain is the unit a track repeats and
+re-enters, so pairing that ran past it would have to survive a chain played from two song rows at once
+and CHAIN mode's wrap. ⚠️ The open ramp is **re-derived from `(chain, chainRow)` on every call**, never
+carried in `TrackState`: a live edit rolls the lookahead back without rewinding track state, a chain
+re-entered from a later song row would inherit the previous one's open ramp, and a phrase scheduled
+twice would advance it twice. Deriving makes all three unaskable.
+
+The PHRASE editor draws an `AUS`/`AUF` cell that no ramp uses **dimmed**, and it asks the same pairing
+code the emitter does, so the grid can neither claim a fade that will not play nor deny one that will.
+A phrase has no single playing context — it may sit at several chain rows, in several chains, in none —
+so the editor unions the answer over every chain row that plays it (`find_ramp_cells`) and falls back
+to pairing within the phrase only for a phrase no chain references.
 
 ### Determinism
 

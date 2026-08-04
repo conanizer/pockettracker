@@ -127,6 +127,11 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ps.selectionMode  = s.selection_mode();
                 ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ps.theme          = t;
+                // An AUS/AUF span may run into a later phrase of the chain, so whether such a cell is
+                // live is a question about the chain walks this phrase appears in. The editor finds
+                // them itself, from the phrase's id — where the user happens to have navigated from
+                // is not the answer, since a phrase placed at two rows has two of them.
+                ps.project        = &p;
                 phraseEditor_.draw(c, moduleX, EDITOR_Y, ps);
                 break;
             }

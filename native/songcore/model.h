@@ -254,6 +254,10 @@ inline void step_set_fx_value(PhraseStep& s, int slot, int value) {
     else if (slot == 2) s.fx2Value = value;
     else if (slot == 3) s.fx3Value = value;
 }
+/** True when any of the three slots carries `type` — the AUTHORED step, before CHA/RND touch it. */
+inline bool step_has_fx(const PhraseStep& s, int type) {
+    return s.fx1Type == type || s.fx2Type == type || s.fx3Type == type;
+}
 inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
 
 struct Phrase {

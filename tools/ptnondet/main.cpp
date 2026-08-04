@@ -119,6 +119,10 @@ static const std::vector<Expect> GOLDENS = {
     {"g6-params",    true,  "event golden"},
     {"g7-audio",     true,  "THE AUDIO GOLDEN — ptrender asserts two renders of it are BYTE-IDENTICAL"},
     {"g8-random",    false, "the random golden — ptrandom measures its distributions"},
+    // A fade is the one thing nobody wants dice on, and `find_ramps` reads the AUTHORED step to keep
+    // it that way. This is that decision asserted where it can be seen: the automation fixture stays
+    // on the reproducible side, and would leave it the moment a ramp read a randomised cell.
+    {"g9-automation", true, "the automation fixture — ptrender byte-compares its fade live vs rendered"},
 };
 
 int main(int argc, char** argv) {

@@ -294,7 +294,7 @@ class Sequencer {
             int transposeSemitones = chain_transpose_semitones(chain, firstRow);
             SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_, 0,
                                                     transposeSemitones + project_transpose_semitones(*project_),
-                                                    framesPerStep, 0);
+                                                    framesPerStep, 0, &chain, firstRow);
             chainRowStartFrames_.emplace_back(firstRow, playbackStartFrame_);
             nextFrameToSchedule_ += r.framesScheduled;
             nextChainRowToSchedule_ = firstRow + 1;
@@ -375,7 +375,8 @@ class Sequencer {
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                     SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_, 0,
-                                                            transposeSemitones, framesPerStep, effectiveStartRow);
+                                                            transposeSemitones, framesPerStep, effectiveStartRow,
+                                                            &chain, nextRow);
                     chainRowStartFrames_.emplace_back(nextRow, nextFrameToSchedule_);
                     nextFrameToSchedule_ += r.framesScheduled;
                     nextChainRowToSchedule_ = (nextRow + 1) % 16;
@@ -428,7 +429,8 @@ class Sequencer {
                                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                                     SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_,
                                                                             trackId, transposeSemitones, framesPerStep,
-                                                                            effectiveStartRow);
+                                                                            effectiveStartRow, &chain,
+                                                                            nextSongChainRowToSchedule_);
                                     put_song_position(nextSongRowToSchedule_, nextSongChainRowToSchedule_,
                                                       nextFrameToSchedule_);
                                     scheduledAny = true;
@@ -503,7 +505,8 @@ class Sequencer {
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                     SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], currentFrame, trackId,
-                                                            transposeSemitones, framesPerStep, effectiveStartRow);
+                                                            transposeSemitones, framesPerStep, effectiveStartRow,
+                                                            &chain, chainRow);
                     scheduledAny = true;
                     if (r.framesScheduled > maxFramesScheduled) maxFramesScheduled = r.framesScheduled;
                 }
@@ -528,6 +531,19 @@ class Sequencer {
         // tick that lands ON a note-on reaches the voice the note REPLACES — the same hazard STEP
         // 2.3's `voiceFxFrame` +1 exists for, and the ramp cannot see the LAT that moved the note.
         int64_t noteFrame = -1;
+        // STEP 2.3's `voiceFxFrame` — the frame this step's own live FX writes landed on, LAT and the
+        // note-on offset included. A ramp crossing a step that writes the same parameter yields every
+        // tic up to it, and the ramp cannot work out where it went: LAT is unclamped, and whether the
+        // write took the +1 depends on whether the note survived CHA.
+        int64_t fxFrame = -1;
+        // The step AFTER CHA/RND/RNL — the slots as they were actually written, which is the only thing
+        // that can tell a crossing ramp whether it has to yield the frame above.
+        //
+        // ⚠️ Pairing still reads the AUTHORED step (automation.h), and the two are asking different
+        // questions. Whether a fade EXISTS, and between which bytes, must not depend on dice. Whether
+        // some frame inside it is already spoken for is a question about what was really emitted — and
+        // a `RND` that turns into a VOL is as real a write as a typed one.
+        PhraseStep effectiveStep;
     };
 
     // Snapshot taken just BEFORE scheduling a phrase, so notify_data_changed() can roll the buffer
@@ -593,8 +609,13 @@ class Sequencer {
         return attempts >= 16 ? -1 : row;
     }
 
+    // `chain`/`chainRow` are the phrase's place in the chain being played, and they exist for AUS/AUF
+    // alone: a fade may run from one phrase into a later one of the same chain, and the pairing needs
+    // to see past the phrase in hand to know how long the span is. PHRASE mode passes nullptr and gets
+    // the per-phrase pairing, which is the same answer whenever a span does not cross a boundary.
     SchedulePhraseResult schedulePhrase(const Phrase& phrase, int64_t startFrame, int trackId,
-                                        int transposeSemitones, int64_t framesPerStep, int startRow) {
+                                        int transposeSemitones, int64_t framesPerStep, int startRow,
+                                        const Chain* chain = nullptr, int chainRow = 0) {
         const Project& project = *project_;
         int scheduledNotes = 0;
         int rowsScheduled = 0;
@@ -618,14 +639,32 @@ class Sequencer {
         //
         // `effectiveStartRow` is passed through: a phrase entered BELOW its AUS runs no ramp at all,
         // because the step that opens it never plays.
-        const std::vector<RampSpec> ramps = find_ramps(phrase, effectiveStartRow);
-        // Where each ramp has got to — the last byte it emitted, seeded with the authored start value
-        // because the start effect's own per-step event has already said it. Both ends of an ease curve
-        // hold the same byte for many ticks, and a CC repeating what the last one said is a bus record,
-        // a queue slot and a golden row spent on nothing.
+        //
+        // With a chain in hand the pairing can see the whole chain, so a span may open here and close
+        // several phrases later, or simply pass through this one — `find_ramps_in_chain` re-derives
+        // that from (chain, chainRow) every time rather than carrying an open ramp in `TrackState`
+        // (automation.h says why that matters).
+        const std::vector<RampSpec> ramps =
+            chain ? find_ramps_in_chain(project, *chain, chainRow, effectiveStartRow)
+                  : find_ramps(phrase, effectiveStartRow);
+        // Where each ramp has got to — the last byte it emitted. Both ends of an ease curve hold the
+        // same byte for many ticks, and a CC repeating what the last one said is a bus record, a queue
+        // slot and a golden row spent on nothing.
+        //
+        // The seed is the byte the curve held one tic BEFORE this phrase's first, which is the same
+        // expression in both cases and needs no branch: where the AUS is in this phrase `stepOffset` is
+        // −ausStep, so the position comes out at or below zero, the shape clamps to 0 and the seed is
+        // the authored start byte the start effect has already emitted. Where the phrase is one the
+        // span is crossing, it is the byte the previous phrase signed off on — so the fade continues
+        // instead of restating itself at every boundary.
         std::vector<int> rampLastByte;
         rampLastByte.reserve(ramps.size());
-        for (const RampSpec& r : ramps) rampLastByte.push_back(r.startByte);
+        for (const RampSpec& r : ramps) {
+            const double seedT = (static_cast<double>(r.stepOffset) * TICS_PER_STEP - 1.0) /
+                                 (static_cast<double>(r.span) * TICS_PER_STEP);
+            rampLastByte.push_back(
+                automation_value_byte(r.startByte, r.destByte, r.curveByte, seedT));
+        }
 
         for (int stepIndex = effectiveStartRow; stepIndex < 16; ++stepIndex) {
             const PhraseStep& step = phrase.steps[stepIndex];
@@ -667,8 +706,8 @@ class Sequencer {
             // baked into frames the transport then jumps away from would go on moving the parameter
             // after the phrase had ended.
             if (!ramps.empty())
-                emit_ramp_ticks(ramps, rampLastByte, stepIndex, targetFrame, stepDuration, trackId,
-                                stepResult.noteFrame);
+                emit_ramp_ticks(ramps, rampLastByte, stepResult.effectiveStep, stepIndex, targetFrame,
+                                stepDuration, trackId, stepResult.noteFrame, stepResult.fxFrame);
             rowsScheduled++;
             frameOffset += stepDuration;
             if (currentGrooveActive) localGrooveStep++;
@@ -701,8 +740,8 @@ class Sequencer {
     // A step is twelve tics however long it is: `stepDuration / TICS_PER_STEP` is the same warped
     // frames-per-tic LAT and KIL offset by, so the fade sits on the grid the rest of the step sits on.
     void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<int>& lastByte,
-                         int stepIndex, int64_t targetFrame, int64_t stepDuration, int trackId,
-                         int64_t noteFrame) {
+                         const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
+                         int64_t stepDuration, int trackId, int64_t noteFrame, int64_t fxFrame) {
         const int64_t framesPerTic = stepDuration / TICS_PER_STEP;
 
         // A parameter scheduled on a note's own frame reaches the voice that note is REPLACING — the
@@ -713,7 +752,11 @@ class Sequencer {
 
         for (size_t i = 0; i < ramps.size(); ++i) {
             const RampSpec& r = ramps[i];
-            if (stepIndex < r.ausStep || stepIndex > r.aufStep) continue;
+            // −1 at either end means that end is in a DIFFERENT phrase of the chain: before the AUS is
+            // "not yet" only when the AUS is here, and past the AUF is "already arrived" only when the
+            // AUF is here. A phrase the span merely crosses matches neither and emits all sixteen steps.
+            if (r.ausStep >= 0 && stepIndex < r.ausStep) continue;
+            if (r.aufStep >= 0 && stepIndex > r.aufStep) continue;
             const int lane = r.global ? TRACK_GLOBAL : trackId;
 
             // ⚠️ VTR/VMV REPLACE the mixer fader and hold, so the host puts the authored value back on
@@ -723,27 +766,52 @@ class Sequencer {
             // CC the ramp actually sends, which is the thing that moves it.
             if (r.ccId == CC_TRACK_VOL || r.ccId == CC_MASTER_VOL) mixerVolActive_ = true;
 
+            // ⚠️⚠️ **A STEP THAT WRITES THIS PARAMETER ITSELF OWNS THE FRAME IT WRITES ON — THE RAMP
+            // YIELDS, AND RESUMES AFTER IT.** The AUS step is the obvious case (its start effect writes
+            // the byte the ramp fades FROM, or carries it in the note-on's own gain or pan), but any
+            // step of the span may write the same parameter again, and the two must not be queued at
+            // one frame: `ScheduledParamUpdate`'s comparator looks at the target frame and nothing else
+            // (note-queue.h), so which of two updates due at the same frame is applied LAST is decided
+            // by the heap, not by the order they were emitted — and nothing on the grid says which cell
+            // the author will hear. Yielding leaves exactly one write per frame, so the question cannot
+            // be asked.
+            //
+            // ⭐ It yields to where the write ACTUALLY LANDED (`fxFrame`) rather than to a second
+            // derivation of it: LAT moves the write deeper into the step and is unclamped, and it takes
+            // a further frame when a note-on survived the step. A ramp doing that arithmetic again is
+            // two copies of STEP 2.1 + 2.3 that agree until one of them changes.
+            //
+            // ⚠️ Read off the EFFECTIVE step, which is where this parts company with pairing: the frame
+            // has to be yielded to the write that really happened, so a `RND` that turned into a VOL
+            // takes its frame and a `CHA` that ate one gives it back. On the AUS step, a start effect
+            // eaten by CHA hands the ramp a tic whose value is the start byte it is already holding —
+            // so the de-dup drops it, and the eaten case emits exactly what it did before.
+            const bool ownsStep = step_has_fx(effectiveStep, r.fxCode);
+
             // The arrival carries the destination byte the author typed, not an interpolation that
-            // happens to round to it.
+            // happens to round to it. It stays on its own step — that is what makes a fade written
+            // across eight steps land WITH the note on the eighth — so where the step also writes the
+            // parameter it takes the frame after that write rather than the next tic.
             if (stepIndex == r.aufStep) {
                 if (r.destByte != lastByte[i]) {
-                    router_.cc(place(targetFrame), lane, r.ccId, r.destByte / 255.0f);
+                    router_.cc(place(ownsStep ? fxFrame + 1 : targetFrame), lane, r.ccId,
+                               r.destByte / 255.0f);
                     lastByte[i] = r.destByte;
                 }
                 continue;
             }
 
-            // ⚠️ Tic 0 of the AUS step belongs to the START EFFECT, which emits it itself — or, on a
-            // step that triggers a note, carries it in the note-on's own gain or pan. A ramp opening on
-            // top of that is a second write of the same value at best, and under LAT — which moves the
-            // authored one later into the step — a fade that starts before the value it fades FROM has
-            // been set. So the ramp does not claim the step's first tic. (Which of the two wins when a
-            // ramp crosses a step that writes the same parameter is still open; E1c pins it.)
-            const int firstTic = (stepIndex == r.ausStep) ? 1 : 0;
-            const int span     = r.aufStep - r.ausStep;   // > 0 — a zero-length span never pairs
+            int firstTic = 0;
+            if (ownsStep)
+                while (firstTic < TICS_PER_STEP && targetFrame + firstTic * framesPerTic <= fxFrame)
+                    ++firstTic;
             for (int tic = firstTic; tic < TICS_PER_STEP; ++tic) {
-                const double t = (static_cast<double>(stepIndex - r.ausStep) +
-                                  tic / static_cast<double>(TICS_PER_STEP)) / static_cast<double>(span);
+                // `stepOffset + stepIndex` is the steps elapsed since the AUS, whether that AUS is in
+                // this phrase (the offset is −ausStep and this is the old `stepIndex − ausStep`) or
+                // several phrases back. `span` is the whole ramp, so a fade written across four
+                // phrases is one curve, not four.
+                const double t = (static_cast<double>(r.stepOffset + stepIndex) +
+                                  tic / static_cast<double>(TICS_PER_STEP)) / static_cast<double>(r.span);
                 const int b = automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
                 if (b == lastByte[i]) continue;
                 router_.cc(place(targetFrame + tic * framesPerTic), lane, r.ccId, b / 255.0f);
@@ -963,6 +1031,8 @@ class Sequencer {
         }
 
         int64_t scheduledNoteFrame = noteScheduled ? effectiveTargetFrame : -1;
+        // STEP 2.3's frame, hoisted: it is also what a crossing ramp yields to (ScheduleStepResult).
+        const int64_t voiceFxFrame = (hasNote && !skipNote) ? effectiveTargetFrame + 1 : effectiveTargetFrame;
 
         // KIL: soft note-off at the sample-accurate kill frame (with LAT + KIL-offset latency)
         if (params.killAtFrame.has_value()) {
@@ -975,7 +1045,6 @@ class Sequencer {
         // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM)
         {
             bool triggeredNote = hasNote && !skipNote;
-            int64_t voiceFxFrame = triggeredNote ? effectiveTargetFrame + 1 : effectiveTargetFrame;
             if (!triggeredNote && params.panValue.has_value())
                 router_.cc(effectiveTargetFrame, trackId, CC_PAN, *params.panValue / 255.0f);
             if (params.reverbSendValue.has_value())
@@ -1211,7 +1280,8 @@ class Sequencer {
             }
         }
 
-        return ScheduleStepResult{noteScheduled, hopTriggered, scheduledNoteFrame};
+        return ScheduleStepResult{noteScheduled, hopTriggered, scheduledNoteFrame, voiceFxFrame,
+                                  effectiveStep};
     }
 
     void scheduleArpeggioNotes(int64_t targetFrame, int64_t stepDuration, int trackId, TrackState& trackState,

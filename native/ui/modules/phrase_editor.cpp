@@ -37,16 +37,26 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
     c.draw_text("FX2", fx2NameX, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
     c.draw_text("FX3", fx3NameX, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
+    // Asked once and read three times a row: an AUS/AUF cell no ramp uses draws dimmed (draw_row).
+    // It is the pairing the emitter itself runs, over every chain row that plays this phrase, so the
+    // grid can neither show a fade the scheduler will not play nor deny one it will — an AUS whose
+    // AUF is three phrases further down the chain is doing its job, and dimming it would be a lie in
+    // the other direction.
+    songcore::RampCells rampCells;
+    if (s.project) rampCells = songcore::find_ramp_cells(*s.project, s.phrase.id);
+    else           rampCells.mark(songcore::find_ramps(s.phrase));
+
     for (int i = 0; i < static_cast<int>(s.phrase.steps.size()); ++i) {
-        draw_row(c, x, y, i, s.phrase.steps[static_cast<size_t>(i)], s, stepX, noteX, volX, instX,
-                 fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
+        draw_row(c, x, y, i, s.phrase.steps[static_cast<size_t>(i)], s, rampCells, stepX, noteX,
+                 volX, instX, fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
     }
 }
 
 void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const PhraseStep& step,
-                                  const PhraseEditorState& s, int stepX, int noteX, int volX,
-                                  int instX, int fx1NameX, int fx1ValueX, int fx2NameX,
-                                  int fx2ValueX, int fx3NameX, int fx3ValueX) const {
+                                  const PhraseEditorState& s,
+                                  const songcore::RampCells& rampCells, int stepX,
+                                  int noteX, int volX, int instX, int fx1NameX, int fx1ValueX,
+                                  int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const {
     const Theme& t = s.theme;
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
@@ -77,15 +87,23 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     draw_cell(c, hex2(step.volume),     volX,  textY, cur(2), sel(2), noteEmpty, t.textParam, t);
     draw_cell(c, hex2(step.instrument), instX, textY, cur(3), sel(3), noteEmpty, t.textParam, t);
 
-    const bool fx1Empty = (step.fx1Type == 0x00);
-    draw_cell(c, effect_name(step.fx1Type), fx1NameX,  textY, cur(4), sel(4), fx1Empty, t.textTitle, t);
-    draw_cell(c, hex2(step.fx1Value),       fx1ValueX, textY, cur(5), sel(5), fx1Empty, t.textParam, t);
-    const bool fx2Empty = (step.fx2Type == 0x00);
-    draw_cell(c, effect_name(step.fx2Type), fx2NameX,  textY, cur(6), sel(6), fx2Empty, t.textTitle, t);
-    draw_cell(c, hex2(step.fx2Value),       fx2ValueX, textY, cur(7), sel(7), fx2Empty, t.textParam, t);
-    const bool fx3Empty = (step.fx3Type == 0x00);
-    draw_cell(c, effect_name(step.fx3Type), fx3NameX,  textY, cur(8), sel(8), fx3Empty, t.textTitle, t);
-    draw_cell(c, hex2(step.fx3Value),       fx3ValueX, textY, cur(9), sel(9), fx3Empty, t.textParam, t);
+    // An FX pair dims when the slot is unset — and an AUS/AUF cell dims when no ramp uses it, which
+    // is the only place the editor says that a fade the author thought they wrote is not one. Both
+    // reach draw_cell through the one flag, because an inert cell does exactly what an unset cell
+    // does: nothing.
+    const auto fxDim = [&](int type, int slot) {
+        return type == 0x00 || !rampCells.active(type, index, slot);
+    };
+
+    const bool fx1Dim = fxDim(step.fx1Type, 1);
+    draw_cell(c, effect_name(step.fx1Type), fx1NameX,  textY, cur(4), sel(4), fx1Dim, t.textTitle, t);
+    draw_cell(c, hex2(step.fx1Value),       fx1ValueX, textY, cur(5), sel(5), fx1Dim, t.textParam, t);
+    const bool fx2Dim = fxDim(step.fx2Type, 2);
+    draw_cell(c, effect_name(step.fx2Type), fx2NameX,  textY, cur(6), sel(6), fx2Dim, t.textTitle, t);
+    draw_cell(c, hex2(step.fx2Value),       fx2ValueX, textY, cur(7), sel(7), fx2Dim, t.textParam, t);
+    const bool fx3Dim = fxDim(step.fx3Type, 3);
+    draw_cell(c, effect_name(step.fx3Type), fx3NameX,  textY, cur(8), sel(8), fx3Dim, t.textTitle, t);
+    draw_cell(c, hex2(step.fx3Value),       fx3ValueX, textY, cur(9), sel(9), fx3Dim, t.textParam, t);
 }
 
 CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) const {

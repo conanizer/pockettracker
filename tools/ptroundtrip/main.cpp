@@ -71,10 +71,11 @@ int main(int argc, char** argv) {
     std::string testdata = (argc > 1) ? argv[1] : "testdata";
 
     // Every golden project. g7-audio carries the EQ presets, mod slots and filter settings no other
-    // project serializes; g8-random carries the CHA/RND/RNL effect codes, which no other one does.
+    // project serializes; g8-random carries the CHA/RND/RNL effect codes, and g9-automation the
+    // AUS/AUF pair — an effect code the writer has never been asked to put on paper before.
     const std::vector<std::string> golden = {
         "g1-basics", "g2-timing", "g3-retrig", "g4-pitch", "g5-structure", "g6-params",
-        "g7-audio", "g8-random",
+        "g7-audio", "g8-random", "g9-automation",
     };
 
     int failures = 0;

@@ -23,6 +23,7 @@
 
 #include <functional>
 
+#include "songcore/automation.h"
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
@@ -42,6 +43,12 @@ struct PhraseEditorState {
 
     /** How far up songcore::EFFECT_TYPES an FX-type cell may be stepped — see cc::effect_type. */
     int effectTypeCount = songcore::EFFECT_TYPE_COUNT;
+
+    // The project this phrase belongs to, for AUS/AUF alone. A ramp may run from one phrase into a
+    // later one of the same chain, so whether an AUS/AUF cell is doing anything is a question about
+    // the CHAIN WALKS the phrase appears in, not about the phrase in front of you — and the phrase's
+    // own id is what finds them (`find_ramp_cells`). Without it the editor pairs within the phrase.
+    const songcore::Project* project = nullptr;
 };
 
 /** What `handle_input` did — the edits the caller must echo to the engine (note preview, etc.). */
@@ -74,9 +81,9 @@ public:
 
 private:
     void draw_row(Canvas& c, int x, int y, int index, const songcore::PhraseStep& step,
-                  const PhraseEditorState& s, int stepX, int noteX, int volX, int instX,
-                  int fx1NameX, int fx1ValueX, int fx2NameX, int fx2ValueX, int fx3NameX,
-                  int fx3ValueX) const;
+                  const PhraseEditorState& s, const songcore::RampCells& rampCells,
+                  int stepX, int noteX, int volX, int instX, int fx1NameX, int fx1ValueX,
+                  int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const;
 };
 
 }  // namespace pt::ui

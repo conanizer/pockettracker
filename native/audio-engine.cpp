@@ -1427,7 +1427,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float volRoute = voice.prevModDestValues[PARAM_VOL]
                            + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
             float trackVol = (voice.trackId >= 0 && voice.trackId < 8) ? trackVolSnapshot[voice.trackId] : 1.0f;
-            float masterVol = masterVolSnapshot;
             float antiClick = voice.antiClickFade();
 
             // Sample fetch + per-voice chain is the ONLY mono/stereo difference; a mono
@@ -1467,6 +1466,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             // ── SHARED TAIL: sends → global gain → fade-out → pan ────────────────
+            //
+            // The send tap sits ABOVE the track fader, so a send is PRE-FADER with respect to the
+            // mixer and POST-fader with respect to everything on the instrument (VOL, the phrase `V`
+            // column, VOL mods). Pulling a track down therefore leaves its reverb and delay tails at
+            // full level, by design. ⚠️ The MASTER fader is NOT in this list — it multiplies the summed
+            // bus below, after the returns come back, so it is the one fader that carries the tails
+            // with it (the volume chain the manual documents ends at a real master).
             float scalar = finalVol * volRoute;
             procL *= scalar;
             procR *= scalar;
@@ -1480,7 +1486,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 dlySendBufR[i] += procR * panR * voice.delaySend;
             }
 
-            float globalMul = trackVol * masterVol * antiClick;
+            float globalMul = trackVol * antiClick;
             procL *= globalMul;
             procR *= globalMul;
 
@@ -1569,8 +1575,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     {
         // sfBuf (per-track SF render, MAX_BLOCK frames * 2 channels) is an engine member; it is
         // memset per use below before each tsf render.
-        float masterVol = masterVolSnapshot;
-
         for (int t = 0; t < SF_VOICE_COUNT; t++) {
             SoundfontVoice& sv = sfVoices[t];
             if (!sv.isActive) continue;
@@ -1699,10 +1703,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float trackPeakL = 0.0f, trackPeakR = 0.0f;
             if (octaWanted) trackWasActive[t] = true;  // OCTA capture only
             for (int i = 0; i < numFrames; i++) {
-                float outL = sfBuf[i * 2]     * masterVol;
-                float outR = sfBuf[i * 2 + 1] * masterVol;
-                // Meter post-masterVolume to match the sampler path (framePeaksPerTrackL above), so SF
-                // and sampler track meters read the same when master ≠ FF.
+                float outL = sfBuf[i * 2];
+                float outR = sfBuf[i * 2 + 1];
+                // Pre-master, like the sampler path's sampleL/sampleR — the master fader is applied to
+                // the summed bus below, and the meters and OCTA accumulators are scaled by it there.
                 trackPeakL = fmaxf(trackPeakL, fabsf(outL));
                 trackPeakR = fmaxf(trackPeakR, fabsf(outR));
                 if (stemsMode == 0 || t == stemsMode - 1) {
@@ -1743,8 +1747,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) trackHasVoice[t] = trackWasActive[t];
         for (int i = 0; i < numFrames; i++) {
             for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
+                // × masterVolSnapshot because the accumulators are filled pre-master: OCTA shows what
+                // leaves the master fader, so a master fade takes the scopes down with it.
                 trackWaveformBuffer[t][trackWaveformIndex] =
-                    (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f;
+                    (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f * masterVolSnapshot;
             }
             trackWaveformIndex = (trackWaveformIndex + 1) % WAVEFORM_SIZE;
         }
@@ -1797,6 +1803,38 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
+    // ─── THE MASTER FADER — one multiply over the summed bus, dry AND returns ────────────────────
+    //
+    // ⚠️ It lives HERE, and not with the per-voice gains, because a fader that only scales the dry
+    // path is not a master: fading to 00 would leave the reverb and delay returns at full level,
+    // playing on over a silent mix. The volume chain the manual documents (instrument VOL × phrase V ×
+    // track fader × master) ends at this line, and only this line is downstream of the send returns.
+    //
+    // Placed before masterChain, which is where it has always been relative to the master EQ, bus FX
+    // and limiter — the limiter still sees a post-fader signal, so pulling the master down still backs
+    // it off rather than being squashed flat by it.
+    //
+    // One multiply for the whole block is not an approximation of the per-voice one it replaces: the
+    // param queue drains completely (above the mix loops), so masterVolSnapshot already held a single
+    // value for the entire block. A VMV ramp moves the fader once per block either way.
+    //
+    // The meters and visualiser accumulators were filled pre-master and are scaled to match, so every
+    // reading stays post-master as it was.
+    //
+    // The `!= 1.0f` skip is an optimisation and nothing more — multiplying by exactly 1.0f is the
+    // identity in IEEE 754, so a project at the default master FF takes the same samples either way.
+    if (masterVolSnapshot != 1.0f) {
+        for (int i = 0; i < numFrames * channelCount; i++) output[i] *= masterVolSnapshot;
+        for (int t = 0; t < 8; t++) {
+            framePeaksPerTrackL[t] *= masterVolSnapshot;
+            framePeaksPerTrackR[t] *= masterVolSnapshot;
+        }
+        frameSendPeakRevL *= masterVolSnapshot;
+        frameSendPeakRevR *= masterVolSnapshot;
+        frameSendPeakDelL *= masterVolSnapshot;
+        frameSendPeakDelR *= masterVolSnapshot;
+    }
+
     // Master chain: master EQ → bus FX (OTT or DUST) → limiter
     // Stems mode bypasses EQ and bus FX; only limiter is applied.
     if (stemsMode == 0)
@@ -1809,7 +1847,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
         if (lock.owns_lock()) {
             for (int i = 0; i < numFrames; i++) {
-                instrSpectrumBuffer[instrSpectrumWriteIdx] = instrSpectrumTempL[i];
+                // × masterVolSnapshot: the accumulator is filled pre-master (see the fader above), and
+                // this curve has always been drawn post-master.
+                instrSpectrumBuffer[instrSpectrumWriteIdx] = instrSpectrumTempL[i] * masterVolSnapshot;
                 instrSpectrumWriteIdx = (instrSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
             }
         }

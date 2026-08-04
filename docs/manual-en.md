@@ -426,6 +426,14 @@ Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex)
 > [!WARNING]
 > Some effects (**ARP**, **RPT**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
 
+The mixer faders written from a phrase (**VTR**, **VMV**) persist differently: they are not attached to a
+note at all, so nothing cancels them but the next `VTR`/`VMV` — and stopping playback, which puts the
+faders back to the values on the MIXER screen.
+
+**AUS** and **AUF** are the only effects the grid can draw **dimmed**, in the colour of an empty cell.
+That means the pair did not come out: the fade will not play, and §21 lists the reasons. A pair that
+works stays lit even when its two halves are in different phrases of the same chain.
+
 ---
 
 ## 10. INSTRUMENT Screen
@@ -487,6 +495,18 @@ Instrument VOL × Phrase V column × Track volume (Mixer) × Master volume (Mixe
 
 > [!NOTE]
 > If a note is unexpectedly silent, check all four stages of the volume chain: instrument VOL, phrase V column, track volume in MIXER, and master volume. Any one of them being `00` will silence the output.
+
+**Where the reverb and delay sends sit in that chain.** A send is tapped after the instrument's own
+volume — instrument VOL, the phrase `V` column and any VOL modulation — but *before* the track fader.
+So turning a track down in the MIXER thins the dry signal while leaving its reverb and delay tails
+where they were, which is the usual way to push a part back into the space rather than out of it.
+
+The **master** fader is the exception, and works the way a master should: the send returns are summed
+into the mix before it, so master volume takes the reverb and delay down with everything else. Pulling
+the master to `00` really does end in silence, tails included.
+
+The last two stages can also be written from a phrase: `VTR` replaces the track fader and `VMV` the
+master one for as long as the song is playing (§21).
 
 ### Slice playback
 
@@ -843,6 +863,14 @@ Each track column shows a peak meter and a volume value (`00`–`FF`, `80` = 0 d
 The **master column** has two additional rows above the volume:
 - **REV** — return gain for the reverb send bus (`00`–`FF`)
 - **DEL** — return gain for the delay send bus (`00`–`FF`)
+
+The master volume is applied to everything below it — the eight tracks **and** the reverb and delay
+returns — so pulling MST down takes the tails with it.
+
+Both kinds of fader can also be moved from a phrase while the song plays: `VTR` writes the fader of the
+track it is on, `VMV` writes the master (§21), and `AUS`/`AUF` fade either of them smoothly. The numbers
+on this screen keep showing what you typed — they are where playback *starts*, and stopping puts the
+faders back there.
 
 ### Volume scale
 
@@ -1368,6 +1396,89 @@ automate the master EQ across a song (e.g. a filter-sweep build-up).
 
 ---
 
+### VTR `XX` — Track Fader
+
+Sets the MIXER fader of **the track this effect sits on** to `XX` (`00`–`FF`). It moves the whole track,
+every voice on it — not just the note on this step. The reverb and delay sends are tapped *above* the
+fader, so a track faded out with `VTR` leaves its tails ringing.
+
+It **replaces** the fader rather than scaling it, exactly as `VOL` replaces the instrument's volume, and
+it **persists** until the next `VTR` on that track. The MIXER screen keeps showing the value you typed
+there: the fader on screen is where the song *starts*, `VTR` is where the song has moved it to. Stopping
+playback puts the fader back.
+
+There is one `VTR`, and it always means the track it is written on — to move another track's fader, write
+it in a phrase playing on that track.
+
+---
+
+### VMV `XX` — Master Fader
+
+Sets the **master** fader to `XX` (`00`–`FF`) — the whole mix, including the reverb and delay returns.
+Like `VTR` it replaces rather than scales, persists until the next `VMV`, and is restored when playback
+stops.
+
+It belongs to no track, so it works from any of them: a `VMV` on track 8 fades the same master fader as a
+`VMV` on track 1. Written on a track playing an **external** (MIDI) instrument it still moves the master —
+unlike the per-note effects, which such a track does not send to the internal engine.
+
+---
+
+### AUS `XX` — Automation Start · AUF `XX` — Automation Finish
+
+`AUS` and `AUF` are a **pair**, and together they fade a parameter smoothly from one value to another
+instead of stepping it once per row.
+
+Write the parameter at its **starting value**, put `AUS` in the slot **to its right**, and put `AUF` on a
+**later step** carrying the value to arrive at:
+
+```
+STEP  FX1      FX2      FX3
+00    VOL 00   AUS 80            ← start at 00, linear
+08             AUF FF            ← arrive at FF eight steps later
+```
+
+`AUS`'s value is the **curve**, not a level:
+
+| Value | Shape |
+|---|---|
+| `00` | ease-in — slow to leave, fast to arrive |
+| `80` | linear |
+| `FF` | ease-out — fast to leave, slow to arrive |
+
+Anything between blends towards the neighbouring shape, so `40` is a gentle ease-in and `C0` a gentle
+ease-out.
+
+**What can be ramped.** `AUS` automates the nearest automatable effect **to its left on the same step**,
+skipping any that are not:
+
+| Effect | What fades |
+|---|---|
+| `VOL` | the step volume |
+| `PAN` | the stereo position |
+| `REV` | the reverb send |
+| `DEL` | the delay send |
+| `VTR` | this track's fader |
+| `VMV` | the master fader |
+
+In `VOL 20  PSL 40  AUS 00`, the `AUS` ramps the `VOL` — `PSL` is not automatable, so it is passed over.
+
+**A fade may cross phrases.** The `AUF` can sit in a **later phrase of the same chain**, which is how a
+fade longer than one phrase is written — up to the sixteen rows of the chain. It does **not** cross into
+the next chain: pairing stops at the end of the chain the `AUS` was written in.
+
+**When nothing happens.** A cell that is not part of a working pair is drawn **dimmed**, the same way an
+empty cell is. That is the editor telling you the fade will not play. The reasons are:
+
+- `AUS` with nothing automatable to its left, or with no `AUF` after it in the chain;
+- `AUF` on the **same step** as its `AUS` — the pair needs a later step to have any duration;
+- a second `AUF` after the pair has already closed;
+- a second `AUS` before an `AUF`, which replaces the first one — the last `AUS` wins, pairs do not nest.
+
+One ramp runs at a time on a track, so to fade two parameters at once, write them on two tracks.
+
+---
+
 ### MPG `XX` — MIDI Program Change
 
 Sends a MIDI **program change** to `XX` (`00`–`7F`) on the channel of the instrument playing this track.
@@ -1566,6 +1677,18 @@ Rather than duplicating a phrase at a different pitch, set the TSP column in the
 1. Open INSTRUMENT for your pad, then MODS (R+UP).
 2. MOD1: TYPE=AHD, DEST=VOLUME, ATK=`40`, HOLD=`20`, DEC=`60`.
 3. Every note now has a volume envelope shaping its amplitude.
+
+### Fading a track in over four bars
+
+1. On the CHAIN screen, put four phrases on rows `00`–`03`.
+2. Open the phrase on row `00`. On step `00` write `VTR 00` in FX1 and `AUS 80` in FX2 — the track
+   fader starts silent, on a linear curve.
+3. Open the phrase on row `03`. On step `0F` write `AUF FF` — the fader arrives at full over the whole
+   four bars.
+4. Both cells stay lit: the pair works across the chain. Delete the `AUF` and the `AUS` dims, because
+   there is nothing to fade towards.
+
+Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a reverb send.
 
 ### Using the sample editor for sliced breaks
 
@@ -1894,6 +2017,10 @@ Open with **A** (or SELECT) on an EQ cell.
 | DEL | Delay Send | `XX` | Per-note delay send level |
 | EQN | EQ (note) | `XX` | Per-note EQ preset slot (00–7F) |
 | EQM | EQ (mixer) | `XX` | Master EQ preset slot; holds till next EQM, resets on stop |
+| VTR | Track Fader | `XX` | This track's MIXER fader; replaces it, **persists**, restored on stop |
+| VMV | Master Fader | `XX` | The master fader, from any track; replaces it, **persists**, restored on stop |
+| AUS | Automation Start | `XX` = curve | Fades the automatable effect to its LEFT (00=ease-in 80=linear FF=ease-out) |
+| AUF | Automation Finish | `XX` | Destination value; a later step, may be a later phrase of the same chain |
 | MPG | MIDI Program | `XX` | Program change (00–7F) on the instrument's MIDI channel |
 | MPB | MIDI Bend | `XX` | Absolute pitch bend (00=down 80=centre FF=up); external only |
 | CCA | MIDI CC A | `XX` | Value for the controller in the instrument's CC A row |
