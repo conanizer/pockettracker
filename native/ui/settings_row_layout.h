@@ -241,7 +241,7 @@ enum class ProjectRow {
     COMPACT   = 5,   // SEQ | INST
     SYSTEM    = 6,   // SETTINGS >
     MIDI      = 7,   // MIDI >     — only where the MIDI surfaces are authorable
-    EXIT      = 8,   // QUIT >     — only where the process can be handed back to a launcher
+    EXIT      = 8,   // EXIT       — only where the process can be handed back to a launcher
 };
 
 // ⚠️ A ROW'S NUMBER IS ITS IDENTITY. `p3-input` records 4410 PROJECT cases by row number, the cursor
@@ -327,17 +327,20 @@ inline int project_row_max_column(ProjectRow row) {
     }
 }
 
-/** Group gaps: after TRANSPOSE (the values end) and after COMPACT (the actions end). Kotlin's. */
+/**
+ * Group gaps: after TRANSPOSE (the values end), after COMPACT (the actions end), and after MIDI —
+ * the last one setting the way OUT apart from the two doors into a sub-screen above it.
+ */
 inline bool project_row_gap_after(ProjectRow row) {
-    return row == ProjectRow::TRANSPOSE || row == ProjectRow::COMPACT;
+    return row == ProjectRow::TRANSPOSE || row == ProjectRow::COMPACT || row == ProjectRow::MIDI;
 }
 
 /**
  * How far down the panel a PROJECT row is drawn, in pixels from the first row's top.
  *
- * A hidden row contributes NOTHING — unlike SETTINGS, where a hidden row still pays its group gap.
- * The difference is not a policy choice: the gaps here fall after TRANSPOSE and COMPACT, and neither
- * of those is ever hidden, so there is no gap to preserve and closing the space is simply right.
+ * A hidden row contributes NOTHING — neither its height nor its gap — unlike SETTINGS, where a hidden
+ * row still pays its gap. That is what a build with no MIDI row wants: the gap exists to separate MIDI
+ * from EXIT, so with MIDI gone there is nothing left to separate and EXIT closes up under SYSTEM.
  */
 inline int project_row_offset_y(ProjectRow target, const PlatformCaps& caps, int rowHeight) {
     int y = 0;

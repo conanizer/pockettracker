@@ -30,7 +30,7 @@
 # There is no gptokeyb mode that injects nothing - PortMaster's own docs confirm it - so the only
 # fix is not to run it.
 #
-# Quitting is the app's own job and always was: SETTINGS -> EXIT (it asks first if the song is
+# Quitting is the app's own job and always was: PROJECT -> EXIT (it asks first if the song is
 # dirty), and a SIGTERM from the launcher is caught and autosaved either way (Phase 3 S10).
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}

@@ -20,7 +20,7 @@ the audio device and the input come from SDL.
 | SELECT | The screen's context action (SELECT+A renames a file in the browser) |
 | START | Play / stop |
 
-There is no exit hotkey: quit from **SETTINGS → EXIT**. It asks first if the song has unsaved
+There is no exit hotkey: quit from **PROJECT → EXIT**. It asks first if the song has unsaved
 changes. If the launcher or a flat battery kills the app instead, the work is autosaved and
 offered back the next time you start.
 

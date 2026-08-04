@@ -87,6 +87,16 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
                     on_cell(row, 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
     };
 
+    // ── A DOOR row: MIDI, EXIT — the button alone, no label ──────────────────────────────────────
+    // The button already names where it goes, so a label beside it says the word twice. It still sits
+    // in the VALUE column, level with SETTINGS > above it, because the cursor lands on column 1 here
+    // exactly as it does on a labelled row.
+    const auto door_row = [&](ProjectRow row, const char* button) {
+        row_bg(row);
+        c.draw_text(button, valueX, rowY(row) + TEXT_PADDING,
+                    on_cell(row, 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    };
+
     // ── A button row: PROJECT, EXPORT, COMPACT ───────────────────────────────────────────────────
     const auto button_row = [&](ProjectRow row, const char* name,
                                 std::initializer_list<const char*> options) {
@@ -153,12 +163,12 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // Not a device capability the way a touchscreen is — a machine with no port simply enumerates
     // none, which the OUTPUT row has a word for. It is gated on the build instead: this row is the
     // only way to reach the MIDI screen, so hiding it is what makes the surfaces unauthorable.
-    if (hasMidi) param_row(ProjectRow::MIDI, "MIDI", "MIDI >");
+    if (hasMidi) door_row(ProjectRow::MIDI, "MIDI >");
 
     // ── EXIT — the shell only ────────────────────────────────────────────────────────────────────
-    // Android apps never exit; a handheld launcher needs the process back (port plan §5). Drawn like
-    // SYSTEM because it is the same kind of thing: a row whose whole content is what A does on it.
-    if (hasExit) param_row(ProjectRow::EXIT, "EXIT", "QUIT >");
+    // Android apps never exit; a handheld launcher needs the process back (port plan §5). No trailing
+    // '>' unlike the two doors above it: this one leaves the app rather than opening a screen.
+    if (hasExit) door_row(ProjectRow::EXIT, "EXIT");
 
     // ── USED RAM — a read-only info line, NOT a cursor row ───────────────────────────────────────
     // Integer math in tenths of a MB, as Kotlin does it, to dodge the locale decimal separator.
