@@ -300,6 +300,17 @@ class SongcoreHost {
         if (engine_ && seq_.eqm_active() && seq_.has_live_project()) {
             engine_->setMasterEqSlot(project_.masterEqSlot);
         }
+        // The mixer faders VTR/VMV moved, for the identical reason and in the identical window: they
+        // REPLACE the authored value and nothing later puts it back, so without this the engine keeps
+        // whatever the song faded to while the MIXER screen still draws what the user typed — and the
+        // next PLAY starts from the wrong level. Also BEFORE the queues are cleared, so a queued fader
+        // move due after the stop cannot land on top of the restore.
+        if (engine_ && seq_.mixer_vol_active() && seq_.has_live_project()) {
+            const int tracks = static_cast<int>(project_.tracks.size());
+            for (int i = 0; i < 8 && i < tracks; ++i)
+                engine_->setTrackVolume(i, hex_to_float(project_.tracks[static_cast<size_t>(i)].volume));
+            engine_->setMasterVolume(hex_to_float(project_.masterVolume));
+        }
         sync_clock();
         seq_.stop();
         // The transport ends: every note the cable is holding, ended NOW (not queued — the queue is

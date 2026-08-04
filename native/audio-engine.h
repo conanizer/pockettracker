@@ -259,6 +259,8 @@ public:
     void scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart);  // BCK
     void scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot);              // EQN xx
     void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
+    void scheduleTrackVolume(int64_t targetFrame, int trackId, float volume);          // VTR xx
+    void scheduleMasterVolume(int64_t targetFrame, float volume);                      // VMV xx
 
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
@@ -295,6 +297,11 @@ public:
 
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
+
+    // The same two writes with no log line — what the VTR/VMV queue arms call from the audio thread.
+    // See the comment above their definitions for why the split exists.
+    void applyTrackVolume(int trackId, float volume);
+    void applyMasterVolume(float volume);
 
     // ===================================
     // EQ METHODS

@@ -33,13 +33,18 @@ inline constexpr int FX_GRID_COLS = 6;
  * The COUNT is a parameter because a build with the MIDI surfaces hidden (platform_caps.h `midi`)
  * shows the first songcore::EFFECT_TYPE_COUNT_NO_MIDI effects and needs one row fewer. Everything
  * else is derived from it, so the two shapes are the same code with a different number in it:
- * 34 effects → six rows with four centred in the last, 28 → five rows with four centred.
+ * 36 effects → six full rows, 30 → five full rows.
  *
- * ⚠️ THE LAST ROW IS CENTRED AND ITS EDGE CELLS ARE UNREACHABLE. Whatever does not fill a whole row
- * is drawn centred, so with four left over the columns are 1..4 and 0 and 5 hold nothing. Every
- * navigation function has a case for it, and they are not decoration: land on last-row column 0 and
- * the highlight sits on a cell holding no effect, so releasing A would commit the index one below the
- * row's first — an effect the user never pointed at.
+ * ⚠️ A LAST ROW THAT DOES NOT FILL IS CENTRED, AND ITS EDGE CELLS ARE UNREACHABLE. With four left
+ * over the columns are 1..4 and 0 and 5 hold nothing. Every navigation function has a case for it,
+ * and they are not decoration: land on last-row column 0 and the highlight sits on a cell holding no
+ * effect, so releasing A would commit the index one below the row's first — an effect the user never
+ * pointed at.
+ *
+ * ⚠️ BOTH SHIPPING COUNTS CURRENTLY DIVIDE BY SIX EXACTLY (36 and 30), so neither exercises that
+ * path. The centring code is live, reachable the moment one more effect exists, and invisible to any
+ * check driven from the real counts — so `ptinput` additionally drives SYNTHETIC counts with a
+ * partial last row. Do not conclude from a green app that it works.
  */
 struct FxGrid {
     int count        = songcore::EFFECT_TYPE_COUNT;  // visible effects
@@ -195,18 +200,20 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 25 DEL */ {"DEL: Per-note delay send", "xx=send amount (00-FF)", "this note only"},
         /* 26 EQN */ {"EQN: Per-note EQ slot", "xx=EQ preset slot (00-7F)", "this note only"},
         /* 27 EQM */ {"EQM: Master/mixer EQ slot", "xx=EQ preset slot (00-7F)", "holds till next EQM", "resets to mixer EQ on stop"},
-        /* 28 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 29 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        /* 28 VTR */ {"VTR: Track mixer fader", "xx=level (00=silent FF=max)", "replaces the MIXER fader", "resets to the MIXER on stop"},
+        /* 29 VMV */ {"VMV: Master mixer fader", "xx=level (00=silent FF=max)", "replaces the MASTER fader", "resets to the MIXER on stop"},
+        /* 30 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 31 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
         // ⚠️ **NO APOSTROPHE AND NO SEMICOLON IN A DESCRIPTION** — the font has neither glyph and draws
         // a BLANK, so "instrument's" renders as "INSTRUMENT S". It is silent: the string is right, the
         // width is right, only the pixels are wrong, and these lines are the only long prose in the UI.
         // ⚠️ Pre-existing, not new: BCK's "sampler; toggle live to scratch" has always drawn as
         // "SAMPLER  TOGGLE…". Caught by ptshot — the one tool here that looks at pixels. Stick to
         // letters, digits, and `: = - ( ) . /`, all of which are proven by the entries above.
-        /* 30 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 31 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 32 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 33 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 32 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 33 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 34 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 35 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

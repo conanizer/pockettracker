@@ -5307,6 +5307,181 @@ int main() {
            "⭐⭐ LIVE EDIT: the edit is audible on the NEXT phrase, not after the 2-phrase lookahead");
     }
 
+    // ── 46. VTR / VMV MOVE THE MIXER FADERS, AND stop() PUTS THEM BACK ───────────────────────────
+    //
+    // Nothing else in this tree can see any of this. The traces stop at the bus, so ptplay proves only
+    // that a CC was EMITTED — not that the fader moved, and certainly not that it moved back. And the
+    // restore lives in the one channel the guardrails name as structurally invisible: STOP. So this is
+    // rendered audio, with the level measured on both sides of every claim.
+    //
+    // ⚠️ THE WHOLE SECTION WOULD PASS BY CONSTRUCTION WITHOUT ITS CONTROL. "The level dropped after
+    // step 4" is also what a sample running out, a voice being stolen, or an envelope closing looks
+    // like. The control is the SAME project with the VTR cell cleared: if that also drops, the check is
+    // measuring the tone and not the effect.
+    {
+        auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+        engine->setDeviceSampleRate(44100);
+        songcore::SongcoreHost vhost(engine.get(), 44100);
+
+        // A LOOPING tone, so the level is flat for as long as we care to measure and any drop we see is
+        // something the engine did rather than the sample ending.
+        const fs::path tone = tree.root / "Samples" / "vtrtone.wav";
+        {
+            std::vector<float> pcm(44100 / 2);
+            for (size_t i = 0; i < pcm.size(); ++i) {
+                const double t = static_cast<double>(i) / 44100.0;
+                pcm[i] = static_cast<float>(0.6 * std::sin(2.0 * 3.14159265358979 * 440.0 * t));
+            }
+            songcore::write_wav_mono(tone.generic_string(), pcm, 44100);
+        }
+
+        const int64_t fps = songcore::frames_per_step(120, 44100);
+
+        // One render, parameterised by what the phrase carries. Returns the RMS of a window WELL
+        // before the effect step and one well after it, so a ramp or a declick cannot straddle either.
+        // ⚠️ The windows deliberately start a step late — E4's "discard one window, measure the next".
+        struct Levels { double before, after; };
+
+        // Play the loaded project and measure. Split out of `render` because the STOP check below must
+        // replay WITHOUT re-pushing params — see (c).
+        auto play_and_measure = [&]() -> Levels {
+            vhost.play_song(0);
+            constexpr int      BLK = 256;
+            std::vector<float> buf(static_cast<size_t>(BLK) * 2);
+            double  sumB = 0.0, sumA = 0.0;
+            int64_t nB = 0, nA = 0;
+            for (int64_t f = 0; f < fps * 8; f += BLK) {
+                vhost.poll();
+                engine->processLiveBlock(buf.data(), BLK, 2, 44100.0f);
+                for (int i = 0; i < BLK; ++i) {
+                    const double  v     = buf[static_cast<size_t>(i) * 2];
+                    const int64_t frame = f + i;
+                    if (frame >= fps * 1 && frame < fps * 3) { sumB += v * v; ++nB; }
+                    if (frame >= fps * 5 && frame < fps * 7) { sumA += v * v; ++nA; }
+                }
+            }
+            vhost.stop();
+            return Levels{ nB ? std::sqrt(sumB / static_cast<double>(nB)) : 0.0,
+                           nA ? std::sqrt(sumA / static_cast<double>(nA)) : 0.0 };
+        };
+
+        auto render = [&](int fxType, int fxValue, int fxTrack, bool externalOnFxTrack) -> Levels {
+            songcore::Project& p = vhost.edit_project();
+            p = songcore::make_default_project();
+            p.tempo        = 120;
+            p.masterVolume = 0xFF;
+
+            vhost.load_sample(0, tone.generic_string());
+            p.instruments[0].loopMode = "fwd";   // ⚠️ a STRING; `= 1` assigns a char and does nothing
+            p.instruments[0].volume   = 0xC0;
+
+            // Track 0 SOUNDS, at a full authored fader — so a drop has somewhere to fall from.
+            p.tracks[0].volume = 0xFF;
+            p.tracks[0].chainRefs.assign(256, -1);
+            p.tracks[0].chainRefs[0]  = 0;
+            p.chains[0].phraseRefs[0] = 0;
+            songcore::PhraseStep& n = p.phrases[0].steps[0];
+            n.note = songcore::Note::C4();  n.instrument = 0;  n.volume = 0x7F;
+
+            if (fxType != songcore::FX_NONE) {
+                if (fxTrack == 0) {
+                    p.phrases[0].steps[4].fx1Type  = fxType;
+                    p.phrases[0].steps[4].fx1Value = fxValue;
+                } else {
+                    // The effect rides ANOTHER track, on its own chain and phrase. Used for the
+                    // EXTERNAL case: that track makes no sound here, and must still move the master.
+                    p.tracks[fxTrack].volume = 0xFF;
+                    p.tracks[fxTrack].chainRefs.assign(256, -1);
+                    p.tracks[fxTrack].chainRefs[0] = 1;
+                    p.chains[1].phraseRefs[0]      = 1;
+                    p.phrases[1].steps[4].fx1Type  = fxType;
+                    p.phrases[1].steps[4].fx1Value = fxValue;
+                    if (externalOnFxTrack) {
+                        // The gate reads the instrument the TRACK is playing, so the phrase needs a
+                        // note to name one.
+                        p.instruments[1].instrumentType = songcore::InstrumentType::EXTERNAL;
+                        songcore::PhraseStep& x = p.phrases[1].steps[0];
+                        x.note = songcore::Note::C4();  x.instrument = 1;  x.volume = 0x7F;
+                    }
+                }
+            }
+
+            vhost.push_params();
+            return play_and_measure();
+        };
+
+        // ── (a) the CONTROL, run FIRST so a broken harness cannot hide behind a passing claim ─────
+        const Levels flat = render(songcore::FX_NONE, 0, 0, false);
+        std::printf("       [info] VTR control (no effect): before %.5f → after %.5f (%.0f%%)\n",
+                    flat.before, flat.after, flat.before > 0 ? 100.0 * flat.after / flat.before : 0.0);
+        ok(flat.before > 0.02, "VTR: (control) the tone is actually sounding — the test can fail");
+        ok(flat.after > flat.before * 0.90,
+           "⚠️ VTR: (control) with NO effect the level is FLAT across the same two windows — a drop "
+           "below would mean the checks under it measure the tone, not the fader");
+
+        // ── (b) VTR 40 — a quarter of the authored FF ─────────────────────────────────────────────
+        const Levels cut = render(songcore::FX_VTR, 0x40, 0, false);
+        const double ratio = cut.before > 0 ? cut.after / cut.before : 0.0;
+        std::printf("       [info] VTR 40 on a FF fader: before %.5f → after %.5f (%.1f%%, want ~25%%)\n",
+                    cut.before, cut.after, 100.0 * ratio);
+        ok(cut.before > 0.02, "VTR: the tone sounds before the effect step");
+        ok(ratio > 0.18 && ratio < 0.32,
+           "⭐ VTR: the track fader really moved to 0x40/0xFF — the RATIO is derived from the "
+           "rendered audio, not from the byte that was typed");
+
+        // ── (c) STOP PUTS THE AUTHORED FADER BACK — the blind channel ─────────────────────────────
+        //
+        // ⚠️⚠️ THE FIRST VERSION OF THIS CHECK WAS VACUOUS AND ONLY THE CONTROL SAID SO. It replayed
+        // through `render`, which opens with `push_params()` — and push_mixer re-pushes both faders. So
+        // the level came back whether stop() restored anything or not, and deleting the restore in
+        // host.h left the whole section ALL GREEN.
+        //
+        // The fix is to replay WITHOUT pushing: `play_song` deliberately does not push params (host.h),
+        // so the only thing that can put the fader back between these two plays is stop() itself. The
+        // VTR cell is cleared through the project so the second play has no effect of its own.
+        {
+            songcore::Project& p = vhost.edit_project();
+            p.phrases[0].steps[4].fx1Type  = songcore::FX_NONE;
+            p.phrases[0].steps[4].fx1Value = 0x00;
+            const Levels afterCut = play_and_measure();     // ⚠️ no push_params
+            std::printf("       [info] VTR restore (no re-push): control %.5f → after a VTR song %.5f "
+                        "(%.0f%%)\n", flat.before, afterCut.before,
+                        flat.before > 0 ? 100.0 * afterCut.before / flat.before : 0.0);
+            ok(afterCut.before > flat.before * 0.90,
+               "⚠️⚠️ VTR: stop() RESTORED the authored fader — with no push_params between the two "
+               "plays, nothing else can have");
+            ok(afterCut.after > flat.before * 0.90,
+               "VTR: …and it stayed restored for the whole of the next song");
+        }
+
+        // ── (d) VMV FROM AN EXTERNAL TRACK STILL MOVES THE MASTER ─────────────────────────────────
+        //
+        // The asymmetry claimed in event.h / engine_consumer.h: VTR is track-scoped and the external
+        // routing gate is allowed to swallow it, while VMV rides TRACK_GLOBAL precisely so the gate
+        // cannot. Track 1 plays an EXTERNAL instrument and carries the VMV; track 0 is what we hear.
+        const Levels ext = render(songcore::FX_VMV, 0x40, 1, true);
+        const double extRatio = ext.before > 0 ? ext.after / ext.before : 0.0;
+        std::printf("       [info] VMV 40 from an EXTERNAL track: before %.5f → after %.5f (%.1f%%)\n",
+                    ext.before, ext.after, 100.0 * extRatio);
+        ok(ext.before > 0.02, "VMV: track 0 sounds while track 1 runs an external instrument");
+        ok(extRatio > 0.18 && extRatio < 0.32,
+           "⭐⭐ VMV: the MASTER fader moved from a track the engine consumer does not own — route it "
+           "on the track lane instead of TRACK_GLOBAL and the external gate eats it silently");
+
+        // …and the same restore, for the master this time — again with no push between the plays.
+        {
+            songcore::Project& p = vhost.edit_project();
+            p.phrases[1].steps[4].fx1Type  = songcore::FX_NONE;
+            p.phrases[1].steps[4].fx1Value = 0x00;
+            const Levels afterVmv = play_and_measure();     // ⚠️ no push_params
+            std::printf("       [info] VMV restore (no re-push): control %.5f → after a VMV song %.5f "
+                        "(%.0f%%)\n", flat.before, afterVmv.before,
+                        flat.before > 0 ? 100.0 * afterVmv.before / flat.before : 0.0);
+            ok(afterVmv.before > flat.before * 0.90,
+               "⚠️ VMV: stop() restored the authored MASTER fader too");
+        }
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;

@@ -153,6 +153,25 @@ constexpr uint8_t CC_DELAY_SEND  = 93;  // scheduleVoiceDelaySend  (authored byt
 // resolves or drops it explicitly (midi_out.h `cc_event`, engine_consumer.h `EV_CC`).
 constexpr uint8_t CC_SLOT_A = 128, CC_SLOT_B = 129, CC_SLOT_C = 130, CC_SLOT_D = 131;
 
+// ─── ENGINE-ONLY CC ids — the mixer faders (VTR / VMV) ───────────────────────────────────────────
+//
+// The same above-127 namespace, used for the opposite reason: a slot id is a letter waiting to become
+// a controller number, while these two never become one at all. They name a fader on THIS engine's
+// mixer, and MIDI 1.0 has no controller for either (CC 7 is the channel volume the phrase already
+// drives, and master volume is a SysEx). So the two consumers deliberately disagree about them, and
+// that disagreement is derived rather than written twice: `resolve_cc_param` (model.h) maps anything
+// above 127 that is not a slot to −1, so `midi_out.h` drops them from the wire for free, while
+// `engine_consumer.h` returns a literal id unresolved and matches them.
+//
+// ⚠️ Neither may ever reach a `& 0x7F` — 132 masks to CC 4 (foot controller), 133 to CC 5.
+//
+// ⚠️ CC_MASTER_VOL rides TRACK_GLOBAL, like EQM. That is not cosmetic: a track-scoped record is
+// swallowed by `EngineConsumer`'s external-routing gate when the track's instrument routes out, and
+// the master fader belongs to no track, so a VMV typed on an EXTERNAL track's phrase must still move
+// it. (CC_TRACK_VOL is genuinely track-scoped and IS gated — see engine_consumer.h.)
+constexpr uint8_t CC_TRACK_VOL  = 132;  // scheduleTrackVolume  (authored byte /255)
+constexpr uint8_t CC_MASTER_VOL = 133;  // scheduleMasterVolume (authored byte /255), TRACK_GLOBAL
+
 /** Slot index 0-3 for CC_SLOT_A..D, or -1 for a literal controller number. */
 constexpr int cc_slot_index(uint8_t param) {
     return (param >= CC_SLOT_A && param <= CC_SLOT_D) ? param - CC_SLOT_A : -1;

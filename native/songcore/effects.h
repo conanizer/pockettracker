@@ -71,6 +71,20 @@ constexpr int FX_CCB      = 0x28;  // CCB  instrument CC slot B
 constexpr int FX_CCC      = 0x29;  // CCC  instrument CC slot C
 constexpr int FX_CCD      = 0x2A;  // CCD  instrument CC slot D
 
+// ─── The mixer faders, as effects ─────────────────────────────────────────────────────────────────
+//
+// ⚠️ **VTR REPLACES THE TRACK'S FADER, IT DOES NOT SCALE IT** — the same relationship Vxx has with the
+// instrument volume, and the reason is that one byte cannot carry both. The MIXER screen keeps drawing
+// the AUTHORED value throughout: the number you are editing must be the number you typed, so the fader
+// on screen is where the song STARTS and VTR is where the song has moved it to.
+//
+// ⚠️ Which makes the restore on stop() load-bearing rather than tidy. These write engine state that no
+// later event puts back, so without it a song that fades out leaves the engine at the faded level, the
+// MIXER lies about it, and the next PLAY starts quiet. `Sequencer::mixer_vol_active()` is the flag and
+// `SongcoreHost::stop()` is the restore — the shape `eqmActive_` already uses, for the same reason.
+constexpr int FX_VTR      = 0x2B;  // VTR  this track's mixer fader (00-FF)
+constexpr int FX_VMV      = 0x2C;  // VMV  the master fader (00-FF), global
+
 /** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
 inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
@@ -89,6 +103,7 @@ inline std::string effect_name(int code) {
         case FX_PVX: return "PVX"; case FX_PIT: return "PIT"; case FX_SLI: return "SLI";
         case FX_PAN: return "PAN"; case FX_RSEND: return "REV"; case FX_DSEND: return "DEL";
         case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
+        case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_MPG: return "MPG"; case FX_MPB: return "MPB";
         case FX_CCA: return "CCA"; case FX_CCB: return "CCB";
         case FX_CCC: return "CCC"; case FX_CCD: return "CCD";
@@ -108,17 +123,23 @@ inline int effect_value_max(int effect_type) {
             effect_type == FX_MPG) ? 127 : 255;
 }
 
-// The cycle order of the FX-type column, and the reading order of the FX helper grid — mirrors
-// EffectProcessor.EFFECT_TYPES exactly, including the trailing send/EQ group that the helper draws
-// as a centred last row. This is a UI-facing list (an FX column stores an INDEX into it, and A+UP
-// steps that index), but it lives here beside the codes and the names because those three must never
-// drift: an entry added to the effects without an entry here is an effect no one can type.
+// The cycle order of the FX-type column, and the reading order of the FX helper grid. This is a
+// UI-facing list (an FX column stores an INDEX into it, and A+UP steps that index), but it lives here
+// beside the codes and the names because those three must never drift: an entry added to the effects
+// without an entry here is an effect no one can type.
+//
+// ⚠️ INSERTING HERE IS SAFE AND APPENDING A CODE IS THE RULE — they are different lists. A `.ptp`
+// stores the effect CODE (`PhraseStep::fxNType`), and the index is only ever a live cursor value
+// (cursor.h converts to it, phrase_editor.cpp converts back), so re-ordering this array cannot change
+// what a saved cell means. What it DOES move is the picker's grid and `ptinput`'s navigation golden.
 inline constexpr int EFFECT_TYPES[] = {
     FX_NONE, FX_ARC, FX_CHA, FX_LAT, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
     FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
     FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI,
     FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM,
-    // Last grid row (centred): the four CC-slot commands (MIDI phase D)
+    // The mixer faders, beside the other things that act on the bus rather than the note
+    FX_VTR, FX_VMV,
+    // The MIDI commands (see the static_assert below — they must stay the LAST six)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
 };
 inline constexpr int EFFECT_TYPE_COUNT = static_cast<int>(sizeof(EFFECT_TYPES) / sizeof(int));
@@ -183,6 +204,8 @@ struct ResolvedStepParams {
     std::optional<int> bckValue;
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
+    std::optional<int> trackVolValue;   // VTR (authored byte)
+    std::optional<int> masterVolValue;  // VMV (authored byte)
     // MIDI phase D. `ccSlotValue[i]` is slot A..D's authored 00-FF byte; the controller NUMBER it
     // moves is the instrument's, resolved consumer-side (see the FX_CCA note above).
     std::optional<int> midiProgram;                    // MPG
@@ -231,6 +254,8 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_BCK:    p.bckValue = value; break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
+            case FX_VTR:    p.trackVolValue = value; break;
+            case FX_VMV:    p.masterVolValue = value; break;
             case FX_TBL:    p.tableOverride = value; break;
             case FX_THO:    p.tableHopTarget = value; break;
             case FX_GRV:    p.grooveId = value; break;

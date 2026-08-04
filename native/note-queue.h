@@ -217,6 +217,13 @@ enum ParamUpdateAction {
     PARAM_UPDATE_REVERSE,         // active sampler voice: reverse=(value!=0); value2!=0 → snap pos to new-dir boundary [BCK]
     PARAM_UPDATE_EQ_SLOT,         // active voice: apply eqPresets[(int)value] to chain.eq ((int)value<0 = bypass) [EQN]
     PARAM_UPDATE_MASTER_EQ,       // global: apply master EQ preset (int)value ((int)value<0 = bypass) [EQM]
+    // ⚠️ THE MIXER FADERS ARE THE ONLY TWO ACTIONS THAT TOUCH NO VOICE, and their apply arms carry a
+    // trap the others do not: processAudioBlock SNAPSHOTS trackVolumes[]/masterVolume once, above the
+    // frame loop, and the hot loops read the snapshot. Writing only the member would apply a whole
+    // block late — audible as a ramp that lags, and invisible to anything that only reads back the
+    // member. Both arms write the member AND the in-scope snapshot.
+    PARAM_UPDATE_TRACK_VOL,       // mixer: trackVolumes[trackId] = value          [VTR]
+    PARAM_UPDATE_MASTER_VOL,      // mixer: masterVolume = value (global)          [VMV]
 };
 
 // Scheduled parameter update (e.g. Vxx on empty step — update phraseVol at exact frame)

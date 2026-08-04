@@ -25,6 +25,8 @@
 //     (SC-2: only the POSITION rolls back, never TrackState — the state smear is today's behavior);
 //   * eqm_active() — setMasterEqSlot is not a bus event, so the master-EQ restore on stop() is the
 //     host's job; the flag tells it whether an EQM ran (PlaybackController.eqmActive).
+//   * mixer_vol_active() — the same shape for VTR/VMV, which REPLACE the mixer faders and hold. The
+//     CCs themselves ARE bus events and are goldened; what is not an event is putting the faders back.
 // Random FX (CHA/RND/RNL/ARP-RANDOM) are excluded from the goldens (SC-1) — a stream seeded from the
 // wall clock has no byte-comparable golden, on either engine. They are therefore the one part of the
 // spine measured statistically instead: rng.h holds the generator and the reasoning, and
@@ -260,6 +262,11 @@ class Sequencer {
     // (which clears it) and restores project.masterEqSlot — mirroring PlaybackController.stop(),
     // including its guard: no restore when currentProject_ is null (the render path owns its own).
     bool eqm_active() const { return eqmActive_; }
+
+    // True once a VTR or VMV has moved a mixer fader this session — read by the host on the same
+    // BEFORE-stop() edge as eqm_active(), to push the project's faders back.
+    bool mixer_vol_active() const { return mixerVolActive_; }
+
     bool has_live_project() const { return currentProject_ != nullptr; }
 
     // ── transport starts ──
@@ -331,7 +338,10 @@ class Sequencer {
         chainRowStartFrames_.clear();
         songPositionStartFrames_.clear();
         checkpoints_.clear();
-        eqmActive_ = false;   // the host reads eqm_active() BEFORE calling stop() to restore the master EQ
+        // Both flags are read BEFORE the host calls stop(), which is what restores the master EQ and
+        // the mixer faders — clearing them here is what makes the next session start clean.
+        eqmActive_ = false;
+        mixerVolActive_ = false;
         nextSongChainRowToSchedule_ = 0;
         // Full per-track reset: playback is a pure function of the project (see PlaybackController.stop).
         for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
@@ -895,6 +905,19 @@ class Sequencer {
                 router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
             if (params.eqnSlot.has_value())
                 router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
+            // The mixer faders. They REPLACE the authored fader and hold until the next VTR/VMV — so,
+            // exactly like EQM below, the host puts the project's value back on stop().
+            if (params.trackVolValue.has_value()) {
+                router_.cc(voiceFxFrame, trackId, CC_TRACK_VOL, *params.trackVolValue / 255.0f);
+                mixerVolActive_ = true;
+            }
+            if (params.masterVolValue.has_value()) {
+                // TRACK_GLOBAL, not `trackId` — the master fader belongs to no track, and riding the
+                // track lane would let EngineConsumer's external gate swallow it (event.h).
+                router_.cc(effectiveTargetFrame, TRACK_GLOBAL, CC_MASTER_VOL,
+                           *params.masterVolValue / 255.0f);
+                mixerVolActive_ = true;
+            }
             if (params.eqmSlot.has_value()) {
                 // Master/mixer EQ — global, persists until the next EQM; the host restores the mixer
                 // value on stop() (PlaybackController.eqmActive).
@@ -1228,6 +1251,7 @@ class Sequencer {
     std::vector<std::pair<std::pair<int, int>, int64_t>>
         songPositionStartFrames_;                                          // ((songRow, chainRow) → startFrame), insertion-ordered
     bool eqmActive_ = false;
+    bool mixerVolActive_ = false;
 
     // Per-retrigger additive volume delta for RPT (Rxy), indexed by ramp nibble. Same constants as
     // PlaybackController.REPEAT_RAMP_DELTAS (single source of the ramp curve).

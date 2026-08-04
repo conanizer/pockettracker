@@ -1631,6 +1631,36 @@ static int check_fx_grid_invariants() {
                   << FxGrid::of(songcore::EFFECT_TYPE_COUNT_NO_MIDI).rows << "\n";
         ++failures;
     }
+
+    // ⚠️ THE TWO REAL COUNTS BOTH DIVIDE BY SIX EXACTLY (36 and 30), so every check above runs on a
+    // FULL last row and the centred partial-row path — the one whose edge cells are unreachable, and
+    // the only part of this file that can commit an effect the user never pointed at — is exercised by
+    // NOTHING. That is not hypothetical: it is one appended effect away from shipping, and it USED to
+    // be the real shape (34 effects, four centred). Drive it from synthetic counts so the coverage does
+    // not come and go with the length of EFFECT_TYPES.
+    //
+    // One count per possible remainder, so `firstCol`/`lastCol` are asymmetric in some of them.
+    for (int remainder = 1; remainder < FX_GRID_COLS; ++remainder) {
+        const int count = 4 * FX_GRID_COLS + remainder;
+        const FxGrid g  = FxGrid::of(count);
+        const std::string label = "synthetic-" + std::to_string(count);
+        failures += check_fx_grid_invariants(g, label.c_str());
+
+        // …and prove the case is the one intended: a partial last row, with dead edge cells. A
+        // synthetic grid that silently came out full would run the same code as the two above and
+        // report green for the path it exists to cover.
+        if (g.lastRowCount != remainder || g.lastRowCount >= FX_GRID_COLS ||
+            (g.firstCol == 0 && g.lastCol == FX_GRID_COLS - 1)) {
+            std::cerr << "[FAIL] fx-grid [" << label << "]: not a partial last row — lastRowCount="
+                      << g.lastRowCount << " cols=" << g.firstCol << ".." << g.lastCol << "\n";
+            ++failures;
+        }
+    }
+    std::cerr << "[info] fx-grid: real counts " << FX_GRID_FULL.count << "/"
+              << songcore::EFFECT_TYPE_COUNT_NO_MIDI << " (last rows "
+              << FX_GRID_FULL.lastRowCount << "/"
+              << FxGrid::of(songcore::EFFECT_TYPE_COUNT_NO_MIDI).lastRowCount
+              << "), plus " << (FX_GRID_COLS - 1) << " synthetic partial-row grids\n";
     return failures;
 }
 

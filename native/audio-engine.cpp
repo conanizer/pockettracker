@@ -971,6 +971,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     setMasterEqSlot((int)upd.value);
                     break;
                 }
+                // ⚠️ BOTH FADER ARMS WRITE THE SNAPSHOT AS WELL AS THE MEMBER. The snapshot above is
+                // what the mix loops below actually read; the member is what survives to the next
+                // block. Write one and the fader moves a block late, write the other and it moves for
+                // one block and springs back.
+                case PARAM_UPDATE_TRACK_VOL: {            // VTR — this track's mixer fader
+                    if (upd.trackId >= 0 && upd.trackId < 8) {
+                        applyTrackVolume(upd.trackId, upd.value);
+                        trackVolSnapshot[upd.trackId] = upd.value;
+                    }
+                    break;
+                }
+                case PARAM_UPDATE_MASTER_VOL: {           // VMV — the master fader (global)
+                    applyMasterVolume(upd.value);
+                    masterVolSnapshot = upd.value;
+                    break;
+                }
                 default: {                                // PARAM_UPDATE_MOD_SOURCE — Vxx phraseVol
                     for (int v = 0; v < MAX_VOICES; v++) {
                         if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
@@ -2367,7 +2383,13 @@ void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
     }
 }
 
-void AudioEngine::setTrackVolume(int trackId, float volume) {
+// ⚠️ THE TWO apply* HELPERS EXIST BECAUSE VTR/VMV REACH THE SAME FADERS FROM THE AUDIO THREAD, and
+// the difference that forces the split is the LOGD below them: `processAudioBlock` contains no log
+// call at all (audio-defs.h states it as an invariant), and a ramp emitting one CC per tick would put
+// an fprintf on the audio thread a hundred times a second whenever POCKETTRACKER_LOG is set. So the
+// setters are the helpers plus a log line, and the queue arms call the helpers directly — one copy of
+// what "set this fader" means, rather than the SF-cache rule written out twice.
+void AudioEngine::applyTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
     { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
     SoundfontVoice& sv = sfVoices[trackId];
@@ -2378,13 +2400,32 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
         tsf* h = soundfonts[slot].handle;
         if (h) tsf_channel_set_volume(h, trackId, sv.noteVolume * volume);
     }
+}
+
+void AudioEngine::applyMasterVolume(float volume) {
+    std::lock_guard<std::mutex> lock(volumeMutex);
+    masterVolume = volume;
+}
+
+void AudioEngine::setTrackVolume(int trackId, float volume) {
+    if (trackId < 0 || trackId >= 8) return;
+    applyTrackVolume(trackId, volume);
     LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
 }
 
 void AudioEngine::setMasterVolume(float volume) {
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    masterVolume = volume;
+    applyMasterVolume(volume);
     LOGD("🔊 Master volume set to %.2f", volume);
+}
+
+// The sample-accurate faces of the same two faders — what a VTR / VMV effect schedules. VMV is global
+// and carries no track, so it borrows the queue's `trackId` field as -1 the way EQM does.
+void AudioEngine::scheduleTrackVolume(int64_t targetFrame, int trackId, float volume) {
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, volume, PARAM_UPDATE_TRACK_VOL, 0.0f });
+}
+
+void AudioEngine::scheduleMasterVolume(int64_t targetFrame, float volume) {
+    paramUpdateQueue.schedule({ targetFrame, -1, 0, volume, PARAM_UPDATE_MASTER_VOL, 0.0f });
 }
 
 void AudioEngine::setOttDepth(int depth) {
