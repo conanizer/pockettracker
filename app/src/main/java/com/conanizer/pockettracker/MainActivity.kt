@@ -15,6 +15,7 @@ import android.view.WindowManager
 import androidx.annotation.Keep
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import com.conanizer.pockettracker.input.PadClassifier
 import com.conanizer.pockettracker.input.VirtualButton
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.platform.android.ButtonSoundManager
@@ -293,29 +294,43 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * **Called from native (`shell/android-main.cpp`) to decide the touch vs FULL layout** — the SDL
-     * analogue of `DeviceAdapter.hasPhysicalGameButtons()`, and a straight copy of its logic so the two
-     * activities answer identically. Returns true iff a REAL game controller is attached; the shared shell
-     * then draws the on-screen gamepad + PORTRAIT2 skin only when this is false and the hardware is a
-     * touchscreen.
+     * **Called from native (`shell/android-main.cpp`) to decide the touch vs FULL layout.** True iff a
+     * real game controller is attached; the shared shell draws the on-screen gamepad + PORTRAIT2 skin
+     * only when this is false and the hardware is a touchscreen.
      *
      * ⚠️ **THIS EXISTS BECAUSE SDL AND ANDROID DISAGREE ABOUT WHAT A CONTROLLER IS.** SDL's
-     * `isDeviceSDLJoystick` opens any device with a GAMEPAD *or a bare DPAD* source, so the Android
-     * emulator's built-in keyboard (`qwerty2`, sources `KEYBOARD | DPAD`, keylayout mapping `BUTTON_A`)
-     * registers as a full game controller — `SdlInput::controller_count()` reads 1 and the app wrongly
-     * drops the touch UI (fullscreen frame, empty LAYOUT row). Android's `SOURCE_GAMEPAD`/`SOURCE_JOYSTICK`
-     * flag is the only thing that tells the keyboard from a pad, and it is a Java-only API. ⚠️ Called by
-     * name over JNI, so `@Keep` plus an explicit `proguard-rules.pro` `-keep` guard it against R8, which
-     * now runs on this class in release (`src/main`).
+     * `isDeviceSDLJoystick` opens any device with a GAMEPAD *or a bare DPAD* source, so the emulator's
+     * built-in keyboard registers as a full game controller — `SdlInput::controller_count()` reads 1 and
+     * the app wrongly drops the touch UI (fullscreen frame, empty LAYOUT row). The tests that tell a pad
+     * from an impostor are Java-only, which is why the shell asks over JNI at all; they live in
+     * [PadClassifier], which also explains why the `sources` bitmask alone is not one of them.
+     *
+     * ⚠️ Called by name over JNI, so `@Keep` plus an explicit `proguard-rules.pro` `-keep` guard it
+     * against R8, which runs on this class in release (`src/main`).
      */
+    @Keep
+    fun hasPhysicalGameButtons(): Boolean {
+        for (deviceId in InputDevice.getDeviceIds()) {
+            val device  = InputDevice.getDevice(deviceId) ?: continue
+            val verdict = PadClassifier.classify(device)
+            if (verdict.isPad) {
+                Log.i(TAG, "physical game buttons: '${device.name}' (${verdict.reason})")
+                return true
+            }
+        }
+        return false
+    }
+
     /**
-     * Everything `hasPhysicalGameButtons()` looked at, as text, plus the device identity — the payload
+     * Everything [hasPhysicalGameButtons] looked at, as text, plus the device identity — the payload
      * of a "it opened without the on-screen buttons" report.
      *
-     * ⚠️ **UNCONDITIONAL, and that is the point.** `hasPhysicalGameButtons()` logs only when it FINDS a
+     * ⚠️ **UNCONDITIONAL, and that is the point.** [hasPhysicalGameButtons] logs only when it FINDS a
      * pad, so a wrong `true` and a device that was never enumerated look identical from outside: the
-     * one state that needs explaining is the one that leaves no record. This lists every device with its
-     * raw `sources` bitmask, so a verdict can be re-derived from the report rather than trusted.
+     * one state that needs explaining is the one that leaves no record. Every device is listed with its
+     * raw `sources` bitmask AND the per-device reason [PadClassifier] decided on — the same call the
+     * verdict itself is made of, so the two cannot drift — and a device that claims to be a pad and is
+     * not says so, with its evidence, on its own line.
      *
      * ⚠️ Returned as a STRING rather than logged here, so native can `printf` it through the stdout
      * pipe — which is what tees it into `pockettracker-log.txt`, the copy a user can actually send.
@@ -345,43 +360,10 @@ class MainActivity : SDLActivity() {
                 .append(" keyboard=").append((s and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD)
                 .append(" virtual=").append(d.isVirtual)
                 .append("  '").append(d.name).append("'\n")
+            sb.append("input:            -> ").append(PadClassifier.classify(d).reason).append('\n')
         }
         sb.append("input:   hasPhysicalGameButtons() = ").append(hasPhysicalGameButtons())
         return sb.toString()
-    }
-
-    @Keep
-    fun hasPhysicalGameButtons(): Boolean {
-        for (deviceId in InputDevice.getDeviceIds()) {
-            val device = InputDevice.getDevice(deviceId) ?: continue
-
-            // The emulator UI pseudo-device — not a real controller. DeviceAdapter skips it by name too.
-            if (device.name == "Virtual") continue
-
-            val sources = device.sources
-
-            // A real pad advertises GAMEPAD (face buttons) or JOYSTICK (axes). A bare DPAD/KEYBOARD does
-            // NOT count — which is exactly what excludes the emulator's qwerty2.
-            val hasGamepad  = (sources and InputDevice.SOURCE_GAMEPAD)  == InputDevice.SOURCE_GAMEPAD
-            val hasJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
-            if (hasGamepad || hasJoystick) {
-                Log.i(TAG, "physical game buttons: '${device.name}' (gamepad/joystick source)")
-                return true
-            }
-
-            // A keyboard-classed device whose NAME says it is a controller (some Xbox pads report as
-            // keyboards) — the same name rescue DeviceAdapter applies.
-            val isKeyboard = (sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
-            if (isKeyboard) {
-                val lowerName = device.name.lowercase()
-                if (lowerName.contains("xbox") || lowerName.contains("controller") ||
-                    lowerName.contains("gamepad")) {
-                    Log.i(TAG, "physical game buttons: '${device.name}' (keyboard-named controller)")
-                    return true
-                }
-            }
-        }
-        return false
     }
 
     // ── EXTERNAL MIDI out (MIDI plan phase B2b) ────────────────────────────────────────────────────
