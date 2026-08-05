@@ -722,11 +722,15 @@ int main() {
         state.settings.lastSampleFolder.clear();
     }
 
-    // ── 7c. config.json redirects a LOAD browse — DEBUG only (v0.9.4 D2b) ─────────────────────────
+    // ── 7c. config.json redirects a LOAD browse — every platform, every build ─────────────────────
     //
-    // The user's hand-edited config.json sets where a load browse STARTS per category. Debug-gated (like
-    // OVERLAY/TRACE), applied only where the folder exists. Tests the parse AND the consumer (browser_dir
-    // + open_file_browser), not just the read.
+    // The user's hand-edited config.json sets where a load browse STARTS per category, applied only
+    // where the folder exists. Tests the parse AND the consumer (browser_dir + open_file_browser), not
+    // just the read.
+    //
+    // ⚠️ The debug gate this used to assert is GONE (v0.9.4 → release). The assertion below that a
+    // RELEASE build honours the override is the load-bearing one: it is the direction that used to
+    // fail, so it is the one that proves the gate was actually removed rather than just renamed.
     {
         const std::string samples = fs_impl.samples_directory();
         const std::string kicks   = (tree.root / "Samples" / "Kicks").generic_string();
@@ -743,10 +747,10 @@ int main() {
         ok(!cfg.soundfonts.has_value(), "D2b: an absent key stays unset (→ default)");
         state.folderConfig = cfg;
 
-        // DEBUG build: the override wins where it is a real directory, and flows through the browser.
+        // The override wins where it is a real directory, and flows through the browser.
         state.caps = PlatformCaps::sdl(true);   // debug = true
         eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES), kicks,
-            "D2b: on a debug build, browser_dir(SAMPLES) is the config override");
+            "D2b: browser_dir(SAMPLES) is the config override");
         dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
                                    dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES),
                                    sample_extensions());
@@ -761,10 +765,13 @@ int main() {
         eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SOUNDFONTS), fs_impl.soundfonts_directory(),
             "D2b: an unset category keeps its built-in default");
 
-        // RELEASE build: the whole feature is gated off.
+        // RELEASE build: the override applies there too — the point of un-gating it. Asserted against
+        // `kicks` and NOT against `samples`, so a silently-reinstated debug gate fails here loudly
+        // rather than passing by looking like the default it was always going to return.
         state.caps = PlatformCaps::sdl(false);  // debug = false
-        eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES), samples,
-            "D2b: on a release build the override is ignored (debug-gated)");
+        eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES), kicks,
+            "D2b: a RELEASE build honours the override too (no debug gate)");
+        ok(kicks != samples, "D2b: …and the two paths differ, so that assertion can fail");
 
         // Restore the shared state so the blocks below are unaffected.
         state.folderConfig = FolderConfig{};
@@ -782,7 +789,14 @@ int main() {
         std::error_code ec;
         fs::remove(tree.root / "config.json", ec);   // start from no file
 
-        ok(seed_folder_config_template(fs_impl), "D2b: seeds a template when config.json is absent");
+        // The shell hands the seeder its LIVE key map; ptdispatch has no SDL, so it stands in a small
+        // one. What is under test here is the template's SHAPE — that it carries what it is given and
+        // that it round-trips — not the shell's particular defaults.
+        KeyboardBindings kb;
+        kb[Button::A] = std::vector<std::string>{"K", "Return"};
+        kb[Button::B] = std::vector<std::string>{"J", "Escape"};
+
+        ok(seed_config_template(fs_impl, kb), "D2b: seeds a template when config.json is absent");
         ok(fs_impl.file_exists(fs_impl.config_path()), "D2b: …and the file now exists on disk");
 
         // It parses back, and every category is present and pointed at its current default directory.
@@ -801,11 +815,112 @@ int main() {
             std::ofstream f(tree.root / "config.json", std::ios::trunc);
             f << "{ \"folders\": { \"samples\": \"/my/edited/path\" } }";
         }
-        ok(!seed_folder_config_template(fs_impl), "D2b: a second seed does nothing (file present)");
+        ok(!seed_config_template(fs_impl, kb), "D2b: a second seed does nothing (file present)");
         FolderConfig afterEdit{};
         load_folder_config(fs_impl, afterEdit);
         ok(afterEdit.samples.has_value() && *afterEdit.samples == "/my/edited/path",
            "D2b: …the user's hand-edit survives — the app never rewrites config.json");
+
+        fs::remove(tree.root / "config.json", ec);
+    }
+
+    // ── 7f. config.json's `controller` and `keyboard` sections ────────────────────────────────────
+    //
+    // The two INPUT sections (`ui/input_config.h`). Everything here is the PORTABLE half — the JSON
+    // shape, the button vocabulary, replace-vs-inherit, every rejection. Resolving a key NAME to an
+    // `SDL_Keycode` is the shell's job and cannot be reached from here; what this pins is that the
+    // strings arrive intact and that a malformed file cannot move a default.
+    {
+        std::error_code ec;
+        const auto      write_config = [&](const char* body) {
+            std::ofstream f(tree.root / "config.json", std::ios::trunc);
+            f << body;
+        };
+
+        // ── The `controller.abxy` round trip, asserted in BOTH directions ──
+        // The default and the override are separate assertions on purpose: a parse that silently
+        // returned NINTENDO for everything would pass a one-sided check, and a parse that ignored the
+        // key entirely would pass the other. Only both together measure the key.
+        {
+            write_config(R"({ "controller": { "abxy": "nintendo" } })");
+            InputConfig                     cfg;
+            std::vector<InputConfigWarning> warnings;
+            ok(load_input_config(fs_impl, cfg, warnings), "7f: config.json with only a controller section parses");
+            const bool isNintendo = (cfg.abxy == AbxyLayout::NINTENDO);
+            ok(isNintendo, "7f: abxy = \"nintendo\" is read");
+            ok(warnings.empty(), "7f: …and a valid value warns about nothing");
+        }
+        {
+            write_config(R"({ "controller": { "abxy": "xbox" } })");
+            InputConfig                     cfg;
+            std::vector<InputConfigWarning> warnings;
+            load_input_config(fs_impl, cfg, warnings);
+            const bool isXbox = (cfg.abxy == AbxyLayout::XBOX);
+            ok(isXbox, "7f: abxy = \"xbox\" is read (the other direction)");
+        }
+        {
+            // A file with no controller section leaves the default standing — the no-op case, which is
+            // what every existing user's file looks like.
+            write_config(R"({ "folders": { "samples": "/x" } })");
+            InputConfig                     cfg;
+            std::vector<InputConfigWarning> warnings;
+            load_input_config(fs_impl, cfg, warnings);
+            const bool isAuto = (cfg.abxy == AbxyLayout::AUTO);
+            ok(isAuto, "7f: an absent controller section leaves abxy at AUTO");
+            ok(warnings.empty(), "7f: …and says nothing about a section that is simply not there");
+        }
+        {
+            // A value nobody accepts must be REPORTED, not silently swallowed — the whole reason
+            // `warnings` is an out-parameter rather than a discarded bool.
+            write_config(R"({ "controller": { "abxy": "x360" } })");
+            InputConfig                     cfg;
+            std::vector<InputConfigWarning> warnings;
+            load_input_config(fs_impl, cfg, warnings);
+            const bool isAuto = (cfg.abxy == AbxyLayout::AUTO);
+            ok(isAuto, "7f: an unrecognised abxy falls back to AUTO");
+            const size_t warned = warnings.size();
+            ok(warned == 1, "7f: …and warns exactly once about it");
+            if (warned != 1) std::printf("      got %zu warnings, want 1\n", warned);
+        }
+
+        // ── The `keyboard` section ──
+        {
+            write_config(R"({ "keyboard": { "A": ["Z", "Return"], "SELECT": [], "NOPE": ["Q"],
+                                            "B": "not-an-array" } })");
+            InputConfig                     cfg;
+            std::vector<InputConfigWarning> warnings;
+            load_input_config(fs_impl, cfg, warnings);
+
+            // A listed button REPLACES: the names arrive verbatim and in order.
+            const auto& a = cfg.keyboard[Button::A];
+            ok(a.has_value(), "7f: a listed button is present");
+            const size_t aCount = a ? a->size() : 0;
+            ok(aCount == 2, "7f: …with both of its key names");
+            if (aCount != 2) std::printf("      got %zu names, want 2\n", aCount);
+            if (aCount == 2) {
+                eqs((*a)[0], "Z", "7f: …the first name, verbatim");
+                eqs((*a)[1], "Return", "7f: …and the second, in file order");
+            }
+
+            // `[]` is UNBOUND, and is deliberately distinguishable from "not listed".
+            const auto& sel = cfg.keyboard[Button::SELECT];
+            ok(sel.has_value(), "7f: a button listed as [] is PRESENT (listed), not absent");
+            ok(sel && sel->empty(), "7f: …and empty — it unbinds rather than inheriting");
+
+            // Not listed at all → nullopt → the shell keeps its defaults.
+            ok(!cfg.keyboard[Button::START].has_value(),
+               "7f: an unlisted button stays unset, so its defaults stand");
+
+            // A bad button name and a non-array value are each rejected AND reported.
+            ok(!cfg.keyboard[Button::B].has_value(),
+               "7f: a non-array value does not become a binding");
+            const size_t warned = warnings.size();
+            ok(warned == 2, "7f: the unknown button and the non-array are BOTH reported");
+            if (warned != 2) {
+                std::printf("      got %zu warnings, want 2:\n", warned);
+                for (const InputConfigWarning& w : warnings) std::printf("        %s\n", w.text.c_str());
+            }
+        }
 
         fs::remove(tree.root / "config.json", ec);
     }

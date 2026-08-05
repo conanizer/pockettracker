@@ -31,11 +31,12 @@
 22. [Modulation Reference](#22-modulation-reference)
 23. [File Management](#23-file-management)
 24. [Workflow Tips](#24-workflow-tips)
-25. [Appendix A: Hex Quick Reference](#appendix-a-hexadecimal-quick-reference)
-26. [Appendix B: Note Names](#appendix-b-note-names)
-27. [Appendix C: Instrument Slots](#appendix-c-instrument-slots)
-28. [Appendix D: Controls Cheat Sheet](#appendix-d-controls-cheat-sheet)
-29. [Appendix E: Parameter Reference — units & ranges](#appendix-e-parameter-reference--units--ranges)
+25. [Configuration File (config.json)](#25-configuration-file-configjson)
+26. [Appendix A: Hex Quick Reference](#appendix-a-hexadecimal-quick-reference)
+27. [Appendix B: Note Names](#appendix-b-note-names)
+28. [Appendix C: Instrument Slots](#appendix-c-instrument-slots)
+29. [Appendix D: Controls Cheat Sheet](#appendix-d-controls-cheat-sheet)
+30. [Appendix E: Parameter Reference — units & ranges](#appendix-e-parameter-reference--units--ranges)
 
 ---
 
@@ -1712,6 +1713,129 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 3. On row 0, use A+UP/DOWN on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO).
 4. Move down to any color row, then LEFT/RIGHT to select R/G/B, and A+UP/DOWN to adjust.
 5. When you are happy with the look, move back to row 0, move RIGHT to SAVE, and press A.
+
+---
+
+## 25. Configuration File (config.json)
+
+Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in your
+PocketTracker folder, next to `settings.json`, and covers three of them: **your controller's button
+layout**, **your keyboard bindings**, and **which folder a load browse opens at**.
+
+The two files are opposites. `settings.json` is written by the app whenever you change something on
+the SETTINGS screen. **`config.json` is yours** — the app reads it once at startup and never writes to
+it again.
+
+**Finding it.** The app creates a starter copy on first launch, filled in with everything at its
+current value. So the file already shows you the exact shape and spelling of every option, and as
+seeded it changes nothing. Open it in any text editor, change what you want, and **restart the app**.
+
+Every key is optional. Delete a line to go back to the built-in default. A missing, empty or
+malformed file costs you nothing — the defaults simply stand.
+
+### Controller button layout
+
+```json
+"controller": { "abxy": "auto" }
+```
+
+| Value | Meaning |
+|---|---|
+| `auto` | **Default.** Trust the controller's own report. |
+| `nintendo` | The button printed **A** is the **right** one in the ABXY cluster. |
+| `xbox` | The button printed **A** is the **bottom** one. |
+
+Most controllers report their buttons correctly and `auto` is right — a handheld's built-in pad and a
+real Switch Pro controller both work with nothing configured.
+
+The exception is a pad that misreports itself. Many third-party controllers, and **8BitDo pads in
+XInput mode in particular**, tell the computer they are Xbox 360 controllers. Their buttons are
+printed the Nintendo way round, but the app is told the Xbox layout, and the result is unmistakable:
+**A and B do each other's jobs** (as do X and Y).
+
+Set `"abxy": "nintendo"` and both pairs swap back together.
+
+This can't be detected automatically — the controller is answering the question wrongly, and nothing
+downstream can tell. That is why it's a setting.
+
+> **On a handheld:** PortMaster already offers an x360/nintendo choice that does the same thing. Use
+> one or the other. Setting **both** swaps twice and leaves you exactly where you started.
+
+### Keyboard bindings
+
+Relevant on the Windows and Linux desktop builds. The defaults are:
+
+```json
+"keyboard": {
+  "DPAD_UP":    ["W", "Up"],
+  "DPAD_DOWN":  ["S", "Down"],
+  "DPAD_LEFT":  ["A", "Left"],
+  "DPAD_RIGHT": ["D", "Right"],
+  "A":      ["K", "Return"],
+  "B":      ["J", "Escape"],
+  "L":      ["U"],
+  "R":      ["I"],
+  "SELECT": ["Left Shift"],
+  "START":  ["Space"]
+}
+```
+
+Those ten names are the complete set. Each takes a list of keys of any length.
+
+**A button you list replaces its defaults. A button you leave out keeps them.** This matters when you
+want a key that's already in use: to put `K` somewhere else you must also rebind `A`, or `K` stays
+attached to it. To free a button entirely, list it as `[]`.
+
+**Key names** are SDL's, and their spelling is not guessable — some are spaced and some are not.
+Copy them from here:
+
+| | |
+|---|---|
+| Letters, digits | `"K"` `"Z"` `"1"` — always capitalised |
+| Modifiers | `"Left Shift"` `"Right Shift"` `"Left Ctrl"` `"Right Ctrl"` `"Left Alt"` `"Left GUI"` |
+| Editing | `"Return"` `"Escape"` `"Space"` `"Tab"` `"Backspace"` `"Insert"` `"Delete"` |
+| Arrows | `"Up"` `"Down"` `"Left"` `"Right"` |
+| Navigation | `"Home"` `"End"` `"PageUp"` `"PageDown"` — note: **no space** |
+| Locks etc. | `"CapsLock"` `"PrintScreen"` — also no space |
+| Function | `"F1"` … `"F12"` |
+| Keypad | `"Keypad 0"` … `"Keypad 9"`, `"Keypad Enter"`, `"Keypad +"` — these **do** have a space |
+
+If you're unsure, the starter file the app wrote is the reliable reference: anything appearing there
+is known to work.
+
+**If a rebind doesn't seem to happen, read the app's log.** An unrecognised key name is reported by
+name and skipped; that one binding is lost and nothing else is. `"Ctrl"` is the usual culprit — it
+has to be `"Left Ctrl"` or `"Right Ctrl"`.
+
+Binding the same key to two buttons isn't rejected, but only one of them will fire. Avoid it.
+
+On Android the hardware **Back** key is always **B**, whatever this section says — so a file you
+edited on a desktop can't leave you unable to back out of a screen on a phone.
+
+### Default folders
+
+```json
+"folders": {
+  "samples":     "/path/to/your/samples",
+  "soundfonts":  "...",
+  "instruments": "...",
+  "projects":    "...",
+  "themes":      "..."
+}
+```
+
+Sets the folder each **load** browse starts in. If your samples live somewhere outside the
+PocketTracker folder, this saves climbing out of it every time.
+
+A path that doesn't exist is ignored, and that category quietly falls back to its default — a typo or
+a folder you've since moved costs one convenience, never a broken file browser.
+
+This changes only where browsing **starts**. It does not move where anything is **saved** — renders,
+exports and sample-editor saves keep their own folders.
+
+> **Related:** the SETTINGS screen's **FOLDER** row (`REMEMBER` / `REFRESH`) is a separate, smaller
+> convenience — with `REMEMBER`, a sample load reopens at the folder you last loaded a sample from,
+> for that session. It takes priority over `folders.samples` once you've loaded something.
 
 ---
 

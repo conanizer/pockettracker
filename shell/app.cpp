@@ -461,21 +461,36 @@ int run(const AppConfig& cfg) {
     if (ui::load_settings(filesystem, state.settings, state.theme))
         std::printf("settings: %s\n", filesystem.settings_path().c_str());
 
-    // ── config.json — hand-edited default browse folders (D2b), DEBUG builds only ──────────────────
-    // Read once, gated on the debug cap so it is inert on release exactly like the OVERLAY/TRACE rows.
-    // No file is the common case and no error; a present one is announced, and its overrides only take
-    // effect where the folder actually exists (input_dispatcher::browser_dir checks is_directory).
+    // ── config.json — the hand-edited configuration file ──────────────────────────────────────────
+    //
+    // Read once at boot, on EVERY platform and in every build. It was debug-gated while the shape was
+    // being tested in 0.9.4; from this release the gate is gone from the read, the seed and the
+    // dispatcher alike, so a file that works on Windows works identically on Android and on a handheld.
     //
     // Seed a starter template FIRST (only when the file is absent — it never clobbers the user's), so the
     // feature is discoverable: the app used to never create the file, so there was nothing to find or
-    // edit. The freshly-seeded template lists every category at its default path, ready to be pointed
-    // elsewhere; the load right after picks it up (its overrides equal the defaults, so no behaviour
-    // changes until the user edits it).
-    if (state.caps.debug) {
-        if (ui::seed_folder_config_template(filesystem))
-            std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
-        if (ui::load_folder_config(filesystem, state.folderConfig))
-            std::printf("config:   %s\n", filesystem.config_path().c_str());
+    // edit. The template states every section at its current value, so the file as seeded changes
+    // nothing; the loads right after pick it up.
+    //
+    // ⚠️ The keyboard defaults are handed to the seeder BY the input layer rather than restated in it —
+    // pt-ui cannot name an SDL key, and a template that lies about your current bindings is worse than
+    // no template. This is the whole reason `default_keyboard_bindings()` exists.
+    if (ui::seed_config_template(filesystem, SdlInput::default_keyboard_bindings()))
+        std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
+
+    // `folders` → the dispatcher's browse start dirs. Its overrides only take effect where the folder
+    // actually exists (input_dispatcher::browser_dir checks is_directory).
+    if (ui::load_folder_config(filesystem, state.folderConfig))
+        std::printf("config:   %s\n", filesystem.config_path().c_str());
+
+    // `controller` + `keyboard` → this shell's own input layer. Every rejection is printed: a
+    // hand-edited file that looks applied and is not is the most expensive way for this to fail.
+    {
+        ui::InputConfig                     inputCfg;
+        std::vector<ui::InputConfigWarning> warnings;
+        ui::load_input_config(filesystem, inputCfg, warnings);
+        for (const ui::InputConfigWarning& w : warnings) std::printf("config:   %s\n", w.text.c_str());
+        input.apply_input_config(inputCfg);
     }
 
     // Resolve the PERSISTED skin id (a stable string, `portrait_skin`) to the runtime index the SETTINGS

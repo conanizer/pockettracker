@@ -1,50 +1,166 @@
 #include "sdl-input.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
+
+using pt::ui::AbxyLayout;
+using pt::ui::button_name;
+using pt::ui::KeyboardBindings;
 
 namespace {
 
-/** Keyboard → button. Copied key-for-key from InputMapper's `keyboardMapping`. */
-bool key_to_button(SDL_Keycode k, Button& out) {
-    switch (k) {
-        // D-pad: WASD (the PC-gamer cluster) and the arrow keys
-        case SDLK_w: case SDLK_UP:    out = Button::DPAD_UP;    return true;
-        case SDLK_s: case SDLK_DOWN:  out = Button::DPAD_DOWN;  return true;
-        case SDLK_a: case SDLK_LEFT:  out = Button::DPAD_LEFT;  return true;
-        case SDLK_d: case SDLK_RIGHT: out = Button::DPAD_RIGHT; return true;
+/**
+ * The built-in keyboard map. Copied key-for-key from InputMapper's `keyboardMapping`.
+ *
+ * A TABLE rather than the switch it used to be, because it now has a second reader: the config.json
+ * starter template is generated from it (`default_keyboard_bindings`), so what the file tells the user
+ * their keys are is derived from the same rows the app dispatches through. A switch can be read by the
+ * compiler and by a human, and by nothing else.
+ *
+ * Order matters in one narrow way: `default_keyboard_bindings` emits each button's names in the order
+ * they appear here, so the primary key of a pair should come first — the template reads as
+ * `"A": ["K", "Return"]`, which is the order a user thinks in.
+ */
+struct KeyDefault {
+    SDL_Keycode key;
+    Button      button;
+};
 
-        // Face buttons: right-hand home row, plus Enter/Escape
-        case SDLK_k: case SDLK_RETURN: out = Button::A; return true;
-        case SDLK_j: case SDLK_ESCAPE: out = Button::B; return true;
+constexpr KeyDefault KEY_DEFAULTS[] = {
+    // D-pad: WASD (the PC-gamer cluster) and the arrow keys
+    {SDLK_w, Button::DPAD_UP},    {SDLK_UP,    Button::DPAD_UP},
+    {SDLK_s, Button::DPAD_DOWN},  {SDLK_DOWN,  Button::DPAD_DOWN},
+    {SDLK_a, Button::DPAD_LEFT},  {SDLK_LEFT,  Button::DPAD_LEFT},
+    {SDLK_d, Button::DPAD_RIGHT}, {SDLK_RIGHT, Button::DPAD_RIGHT},
 
-        // Shoulders: the keys above the face buttons
-        case SDLK_u: out = Button::L_SHIFT; return true;
-        case SDLK_i: out = Button::R_SHIFT; return true;
+    // Face buttons: right-hand home row, plus Enter/Escape
+    {SDLK_k, Button::A}, {SDLK_RETURN, Button::A},
+    {SDLK_j, Button::B}, {SDLK_ESCAPE, Button::B},
 
-        // System
-        case SDLK_LSHIFT: out = Button::SELECT; return true;
-        case SDLK_SPACE:  out = Button::START;  return true;
+    // Shoulders: the keys above the face buttons
+    {SDLK_u, Button::L_SHIFT},
+    {SDLK_i, Button::R_SHIFT},
 
-        // ⚠️ **ANDROID'S BACK BUTTON, AND WITHOUT THIS LINE IT CLOSES THE APP MID-EDIT** (C4).
-        //
-        // It arrives as an ordinary key once `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` is set — see
-        // android-main.cpp, which is where the trap has to be armed, because the UNTRAPPED default is
-        // `SDLActivity.onBackPressed()` finishing the activity out from under the frame loop.
-        //
-        // B, not SELECT and not a quit: B is already this app's universal cancel — it closes the file
-        // browser, aborts the keyboard, leaves the EQ and theme editors — so the gesture a phone user
-        // arrives with maps onto the verb the UI already has. The app is still leavable by Home (the
-        // watcher in app.cpp saves) and by PROJECT > EXIT (`PlatformCaps::sdl().appExit`).
-        //
-        // Harmless on every other platform: no desktop keyboard produces AC_BACK.
-        case SDLK_AC_BACK: out = Button::B; return true;
+    // System
+    {SDLK_LSHIFT, Button::SELECT},
+    {SDLK_SPACE,  Button::START},
+};
 
-        default: return false;
+/** SDL returns NULL for an enum it does not recognise, and "%s" with NULL is UB. Never trust it. */
+const char* or_unknown(const char* s) { return s ? s : "?"; }
+
+/** The always-repeatable buttons. B joins them only under `set_b_repeatable` — see press(). */
+bool is_dpad(Button b) {
+    return b == Button::DPAD_UP || b == Button::DPAD_DOWN || b == Button::DPAD_LEFT ||
+           b == Button::DPAD_RIGHT;
+}
+
+}  // namespace
+
+SdlInput::SdlInput() {
+    keyMap_.reserve(std::size(KEY_DEFAULTS));
+    for (const KeyDefault& d : KEY_DEFAULTS) keyMap_.emplace_back(d.key, d.button);
+}
+
+KeyboardBindings SdlInput::default_keyboard_bindings() {
+    KeyboardBindings out;
+    for (const KeyDefault& d : KEY_DEFAULTS) {
+        auto& slot = out[d.button];
+        if (!slot) slot.emplace();
+        slot->emplace_back(or_unknown(SDL_GetKeyName(d.key)));
+    }
+    return out;
+}
+
+void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
+    abxy_ = cfg.abxy;
+    if (abxy_ != AbxyLayout::AUTO) {
+        std::printf("config:   controller abxy = %s\n", pt::ui::abxy_name(abxy_));
+    }
+
+    // ⚠️ ONE SUMMARY LINE, NOT ONE PER BUTTON, and the count is what makes it worth printing.
+    //
+    // The seeded template lists all ten buttons at their defaults, so the common case is "every button
+    // present, nothing actually different". Ten lines saying `rebound` for that is worse than silence:
+    // it claims a change on every launch of an untouched install, and a log that cries wolf is a log
+    // nobody reads on the launch that matters. Which key produced which button is the INPUT TRACE's
+    // job (`set_trace`), and it answers it per press, live.
+    int bound = 0, skipped = 0;
+
+    for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
+        const Button b     = static_cast<Button>(i);
+        const auto&  names = cfg.keyboard[b];
+        if (!names) continue;   // not listed → keeps its defaults
+        ++bound;
+
+        // REPLACE, not merge — the header's contract, and the only way to free a key that is in the
+        // way. An empty list therefore leaves the button unbound, which is what `[]` plainly says.
+        keyMap_.erase(std::remove_if(keyMap_.begin(), keyMap_.end(),
+                                     [b](const std::pair<SDL_Keycode, Button>& e) {
+                                         return e.second == b;
+                                     }),
+                      keyMap_.end());
+
+        for (const std::string& name : *names) {
+            const SDL_Keycode k = SDL_GetKeyFromName(name.c_str());
+            if (k == SDLK_UNKNOWN) {
+                // ⚠️ Reported, never silently skipped. See the header: the failure mode this prevents
+                // is a user re-reading their own correct-looking JSON for an hour.
+                std::printf("config:   keyboard.%s: \"%s\" is not an SDL key name — skipped\n",
+                            button_name(b), name.c_str());
+                ++skipped;
+                continue;
+            }
+            keyMap_.emplace_back(k, b);
+        }
+    }
+
+    // Unconditional whenever the section was present at all — a component whose correct behaviour is
+    // silence cannot be told from one that never ran. `skipped` is on the same line as the count so a
+    // partially-applied file announces itself rather than hiding behind a plausible-looking total.
+    if (bound > 0) {
+        std::printf("config:   keyboard: %d button(s) from config.json, %d key name(s) rejected\n",
+                    bound, skipped);
     }
 }
 
-/** Controller → button. */
-bool pad_to_button(Uint8 b, Button& out) {
+bool SdlInput::key_to_button(SDL_Keycode k, Button& out) const {
+    // ⚠️ **ANDROID'S BACK BUTTON, AND WITHOUT THIS LINE IT CLOSES THE APP MID-EDIT** (C4).
+    //
+    // It arrives as an ordinary key once `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` is set — see
+    // android-main.cpp, which is where the trap has to be armed, because the UNTRAPPED default is
+    // `SDLActivity.onBackPressed()` finishing the activity out from under the frame loop.
+    //
+    // B, not SELECT and not a quit: B is already this app's universal cancel — it closes the file
+    // browser, aborts the keyboard, leaves the EQ and theme editors — so the gesture a phone user
+    // arrives with maps onto the verb the UI already has. The app is still leavable by Home (the
+    // watcher in app.cpp saves) and by PROJECT > EXIT (`PlatformCaps::sdl().appExit`).
+    //
+    // ⚠️ HARD-WIRED, AHEAD OF THE CONFIGURABLE MAP, AND DELIBERATELY NOT IN `KEY_DEFAULTS` — so it is
+    // neither listed in the starter template nor removable by rebinding B. A user who rebinds B on the
+    // desktop build has no idea they are also holding the only way to back out of a screen on Android;
+    // config.json must not be able to brick a platform it was not edited on.
+    //
+    // Harmless on every other platform: no desktop keyboard produces AC_BACK.
+    if (k == SDLK_AC_BACK) { out = Button::B; return true; }
+
+    for (const std::pair<SDL_Keycode, Button>& e : keyMap_) {
+        if (e.first == k) { out = e.second; return true; }
+    }
+    return false;
+}
+
+bool SdlInput::pad_to_button(Uint8 b, Button& out) const {
+    // Which face-button pair means A. See `ui/input_config.h` for why this is a user setting and not
+    // something SDL can answer: with NINTENDO the pad's labels run the other way round, so the pair
+    // that means A is the one SDL is calling B/Y.
+    //
+    // ⚠️ BOTH PAIRS SWAP TOGETHER. Swapping only A↔B would leave the X/Y aliases below still pointing
+    // the old way, so two of the four face buttons would quietly keep the wrong meaning — the exact
+    // half-fix that reads as "it works now" until someone uses the other two buttons.
+    const bool nintendo = (abxy_ == AbxyLayout::NINTENDO);
+
     switch (b) {
         case SDL_CONTROLLER_BUTTON_DPAD_UP:    out = Button::DPAD_UP;    return true;
         case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  out = Button::DPAD_DOWN;  return true;
@@ -54,8 +170,12 @@ bool pad_to_button(Uint8 b, Button& out) {
         // X and Y are aliased onto A and B on purpose: the physical face-button layout differs
         // across the handhelds this ships to, and a four-button app that only listens to two of them
         // is one bad SDL mapping away from being unusable. The port plan asks for exactly this.
-        case SDL_CONTROLLER_BUTTON_A: case SDL_CONTROLLER_BUTTON_X: out = Button::A; return true;
-        case SDL_CONTROLLER_BUTTON_B: case SDL_CONTROLLER_BUTTON_Y: out = Button::B; return true;
+        case SDL_CONTROLLER_BUTTON_A: case SDL_CONTROLLER_BUTTON_X:
+            out = nintendo ? Button::B : Button::A;
+            return true;
+        case SDL_CONTROLLER_BUTTON_B: case SDL_CONTROLLER_BUTTON_Y:
+            out = nintendo ? Button::A : Button::B;
+            return true;
 
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  out = Button::L_SHIFT; return true;
         case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: out = Button::R_SHIFT; return true;
@@ -69,35 +189,6 @@ bool pad_to_button(Uint8 b, Button& out) {
         default: return false;
     }
 }
-
-/** The always-repeatable buttons. B joins them only under `set_b_repeatable` — see press(). */
-bool is_dpad(Button b) {
-    return b == Button::DPAD_UP || b == Button::DPAD_DOWN || b == Button::DPAD_LEFT ||
-           b == Button::DPAD_RIGHT;
-}
-
-/** SDL returns NULL for an enum it does not recognise, and "%s" with NULL is UB. Never trust it. */
-const char* or_unknown(const char* s) { return s ? s : "?"; }
-
-/** Names for the trace only. Indexed by Button, so it must track the enum's order. */
-const char* button_name(Button b) {
-    switch (b) {
-        case Button::DPAD_UP:    return "DPAD_UP";
-        case Button::DPAD_DOWN:  return "DPAD_DOWN";
-        case Button::DPAD_LEFT:  return "DPAD_LEFT";
-        case Button::DPAD_RIGHT: return "DPAD_RIGHT";
-        case Button::A:          return "A";
-        case Button::B:          return "B";
-        case Button::L_SHIFT:    return "L";
-        case Button::R_SHIFT:    return "R";
-        case Button::SELECT:     return "SELECT";
-        case Button::START:      return "START";
-        case Button::COUNT:      break;
-    }
-    return "?";
-}
-
-}  // namespace
 
 void SdlInput::open_controllers() {
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {

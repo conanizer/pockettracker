@@ -26,9 +26,11 @@
 #include <SDL.h>
 
 #include "ui/buttons.h"
+#include "ui/input_config.h"
 
 #include <cstdint>
 #include <deque>
+#include <utility>
 #include <vector>
 
 // The button model is `pt::ui`'s (C0.1). Named unqualified here because every file in this directory
@@ -42,9 +44,38 @@ using pt::ui::ButtonMods;
 
 class SdlInput {
 public:
+    SdlInput();
+
     /** Open every attached controller. Safe to call with none — a dev box is keyboard-only. */
     void open_controllers();
     void close_controllers();
+
+    /**
+     * The built-in keyboard map, as key NAMES — what `config.json`'s `keyboard` section is seeded from.
+     *
+     * ⭐ It walks the same `KEY_DEFAULTS` table `key_to_button` dispatches through, so the template
+     * cannot claim a binding the app does not have. A hand-written second copy in the seeder would be
+     * true on the day it was written and wrong on the first day someone moved a key — and the one thing
+     * a starter template must be is TRUE, because a user edits it in place rather than replacing it.
+     *
+     * Names come from `SDL_GetKeyName`, so they round-trip through the `SDL_GetKeyFromName` that reads
+     * them back. `SDLK_AC_BACK` is deliberately absent — see `apply_input_config`.
+     */
+    static pt::ui::KeyboardBindings default_keyboard_bindings();
+
+    /**
+     * Apply config.json's `controller` and `keyboard` sections.
+     *
+     * Call ONCE at boot, before the first event. Anything the config does not mention keeps its
+     * built-in value, so this is safe to call with a default-constructed `InputConfig` (the no-file
+     * case) and does nothing.
+     *
+     * ⚠️ An unresolvable key name is REPORTED on stdout and skipped, never silently dropped. A
+     * hand-edited file that looks applied and is not is the most expensive way for this to fail: the
+     * user re-reads their own correct-looking JSON instead of the one line that says `Ctrl` is not a
+     * key name. The app's log is the only channel that can tell them.
+     */
+    void apply_input_config(const pt::ui::InputConfig& cfg);
 
     /**
      * Print one line per input event: what SDL delivered, and what this class did with it — a Button,
@@ -127,6 +158,12 @@ private:
     void press(Button b, uint64_t now_ms);
     void release(Button b);
 
+    /** Keycode → button, against the LIVE map (defaults, as edited by config.json). */
+    bool key_to_button(SDL_Keycode k, Button& out) const;
+
+    /** Controller button → button, honouring the configured face-button layout. */
+    bool pad_to_button(Uint8 b, Button& out) const;
+
     /** The modifiers as they stand right now — stamped onto each event as it is queued. */
     ButtonMods mods_now() const;
 
@@ -155,6 +192,21 @@ private:
     bool bRepeatable_ = false;
 
     bool trace_ = false;
+
+    /**
+     * The live keyboard map: seeded from `KEY_DEFAULTS`, then per-button REPLACED by config.json.
+     *
+     * A flat vector rather than a `map`, and scanned linearly, because it holds ~14 entries and is
+     * touched once per key event — the lookup is not where a frame goes. First match wins, so binding
+     * one key to two buttons resolves to whichever was registered first rather than firing both; that
+     * is stated in the manual, and it is the only sane reading of an ambiguous file.
+     */
+    std::vector<std::pair<SDL_Keycode, Button>> keyMap_;
+
+    /** Which way round the pad's face buttons are printed. See `ui/input_config.h` — AUTO is right on
+     *  every platform whose pad SDL can classify, which is every platform except a desktop with a
+     *  third-party pad in XInput mode. */
+    pt::ui::AbxyLayout abxy_ = pt::ui::AbxyLayout::AUTO;
 
     std::deque<ButtonEvent>     queue_;
     std::vector<SDL_GameController*> controllers_;

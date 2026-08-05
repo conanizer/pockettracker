@@ -2934,9 +2934,11 @@ void InputDispatcher::on_start() {
 // ─── Opening and closing the browser ─────────────────────────────────────────────────────────────
 
 std::string InputDispatcher::browser_dir(BrowserDir cat) {
-    // D2b: a debug-only config.json override per category, else the built-in default. The FileSystem
-    // getters create-on-first-use, so `def` is always a real directory; the override is used only when
-    // it, too, exists on disk (a typo or a deleted folder falls back rather than opening on nothing).
+    // A config.json override per category, else the built-in default. The FileSystem getters
+    // create-on-first-use, so `def` is always a real directory; the override is used only when it, too,
+    // exists on disk (a typo or a deleted folder falls back rather than opening on nothing).
+    //
+    // No debug gate: config.json ships on every platform's release from v0.9.4 (`ui/folder_config.h`).
     const std::optional<std::string>* ov = nullptr;
     std::string                       def;
     switch (cat) {
@@ -2946,7 +2948,7 @@ std::string InputDispatcher::browser_dir(BrowserDir cat) {
         case BrowserDir::PROJECTS:    ov = &s_.folderConfig.projects;    def = fs_.projects_directory();    break;
         case BrowserDir::THEMES:      ov = &s_.folderConfig.themes;      def = fs_.themes_directory();      break;
     }
-    if (s_.caps.debug && ov && ov->has_value() && fs_.is_directory(**ov)) return **ov;
+    if (ov && ov->has_value() && fs_.is_directory(**ov)) return **ov;
     return def;
 }
 

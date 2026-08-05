@@ -2,7 +2,7 @@
 
 PocketTracker uses a hybrid input system combining M8's editing precision with LGPT's dual-modifier approach. The generic input handler ensures consistent behavior across all screens.
 
-**Last Updated:** 2026-06-22
+**Last Updated:** 2026-08-05
 
 ---
 
@@ -34,6 +34,12 @@ START:    START button or BACK
 ```
 
 Both keyboard and gamepad work simultaneously.
+
+### Changing any of it — `config.json`
+
+Every binding above is a default, and all of them can be changed by hand in `config.json` in your
+PocketTracker folder. The app writes a starter copy on first launch and then never touches the file
+again, so what you edit stays edited. See **[Configuration file](#configuration-file)** below.
 
 ---
 
@@ -216,6 +222,106 @@ L + R + SELECT          Return to project/file screen       (planned)
 L + R + A               Create snapshot                     (planned)
 L + R + B               Recall snapshot                     (planned)
 ```
+
+---
+
+## Configuration file
+
+`config.json` sits next to `settings.json` in your PocketTracker folder. The two are opposites:
+`settings.json` is written by the app from the SETTINGS screen, while **`config.json` is yours** — the
+app reads it at startup and never rewrites it.
+
+On first launch the app writes a starter copy listing every option at its current value, so the file
+is a working example rather than something you have to compose from scratch. Editing it takes effect
+on the next launch. Every key is optional; delete a line to go back to the built-in default. A file
+that is missing, empty or invalid costs you nothing — the defaults simply stand.
+
+### `controller` — face-button layout
+
+```json
+"controller": { "abxy": "auto" }
+```
+
+| Value | Meaning |
+|---|---|
+| `auto` | **Default.** Trust the controller's own report. |
+| `nintendo` | The button printed **A** is the **right** one in the ABXY cluster. |
+| `xbox` | The button printed **A** is the **bottom** one. |
+
+**When you need this.** SDL normally reports face buttons *by label*, so a built-in handheld pad or a
+real Switch Pro controller is already correct on `auto` — there is nothing to configure and never was.
+
+The exception is a pad that misreports what it is. Many third-party controllers — **8BitDo pads in
+XInput mode are the common case** — enumerate as an Xbox 360 controller, so the labels the app is told
+about are Xbox's positional ones while the plastic under your thumb says something else. The symptom
+is unmistakable: **A and B are swapped**, and so are X and Y. Set `"abxy": "nintendo"` and both pairs
+move together.
+
+No amount of probing can detect this, because the pad is answering the question wrongly — that is why
+it is a setting and not automatic.
+
+> **On a handheld:** PortMaster has its own x360/nintendo option that does the same job one layer
+> lower. Use one or the other. Setting **both** applies the swap twice and puts you back where you
+> started.
+
+### `keyboard` — key bindings
+
+```json
+"keyboard": {
+  "A":     ["K", "Return"],
+  "B":     ["J", "Escape"],
+  "DPAD_UP":    ["W", "Up"],
+  "DPAD_DOWN":  ["S", "Down"],
+  "DPAD_LEFT":  ["A", "Left"],
+  "DPAD_RIGHT": ["D", "Right"],
+  "L":      ["U"],
+  "R":      ["I"],
+  "SELECT": ["Left Shift"],
+  "START":  ["Space"]
+}
+```
+
+Button names are exactly the ten above. Each maps to a list of keys, and a key list can be any length.
+
+**A button listed here replaces its defaults; a button left out keeps them.** That matters when you
+want a key that is already taken: binding `K` to something else only works if you also rebind `A`,
+because otherwise `K` is still nailed to it. Listing a button as `[]` unbinds it entirely.
+
+Key names are SDL's, and the spelling is not guessable — `"Left Shift"` is spaced but `"PageUp"` is
+not. Letters and digits are capitalised (`"K"`, `"Z"`, `"1"`); then `"Left Shift"`, `"Right Ctrl"`,
+`"Left Alt"`, `"Return"`, `"Escape"`, `"Space"`, `"Tab"`, `"Backspace"`, `"Insert"`, `"Delete"`, the
+arrows `"Up"` / `"Down"` / `"Left"` / `"Right"`, `"Home"` / `"End"` / `"PageUp"` / `"PageDown"`,
+`"CapsLock"`, `"F1"`–`"F12"`, and `"Keypad 0"`–`"Keypad 9"` / `"Keypad Enter"`. The full table is in
+the manual (§25); the starter file the app writes is the reliable reference.
+
+**A name the app does not recognise is reported in its log and skipped** — that one binding is lost,
+nothing else is. If a rebind seems not to have happened, the log says why. (`"Ctrl"` is a common
+miss; it is `"Left Ctrl"` or `"Right Ctrl"`.)
+
+Binding one key to two different buttons is not rejected, but only one of them will fire. Don't.
+
+**Scope:** the keyboard section is read on every desktop and handheld build. It is naturally inert on
+a device with no keyboard. On Android the hardware **Back** key stays wired to **B** regardless of
+what this section says, so a config file edited on a desktop cannot strand you on a phone.
+
+### `folders` — where a load browse starts
+
+```json
+"folders": {
+  "samples":     "/path/to/your/samples",
+  "soundfonts":  "...",
+  "instruments": "...",
+  "projects":    "...",
+  "themes":      "..."
+}
+```
+
+Sets the folder each **load** browse opens at, so samples kept outside the PocketTracker folder don't
+mean climbing out of it every time. A path that doesn't exist is ignored and that category falls back
+to its default — a typo costs you one convenience, never a broken browser.
+
+This does **not** change where anything is saved. Renders, exports and sample-editor saves keep their
+own folders.
 
 ---
 
