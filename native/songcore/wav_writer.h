@@ -58,7 +58,9 @@ class WavStreamWriter {
         if (!file_) return;
         uint8_t header[44];
         build_header(header, 0);
-        std::fwrite(header, 1, sizeof(header), file_);   // placeholder sizes, patched in finish()
+        // placeholder sizes, patched in finish(). A card with no room for 44 bytes has none for a
+        // render either, so this fails as "could not open" and the caller never starts rendering.
+        if (std::fwrite(header, 1, sizeof(header), file_) != sizeof(header)) close_and_remove();
     }
 
     ~WavStreamWriter() { abort(); }
@@ -81,7 +83,15 @@ class WavStreamWriter {
             buf_[static_cast<size_t>(i) * 2 + 0] = static_cast<uint8_t>(u & 0xFF);
             buf_[static_cast<size_t>(i) * 2 + 1] = static_cast<uint8_t>((u >> 8) & 0xFF);
         }
-        std::fwrite(buf_.data(), 1, buf_.size(), file_);
+        // ⚠️ **THE COUNT IS CHECKED AND THE FAILURE IS STICKY**, because this returns `void`: a render
+        // is the app's largest write by far, so a card filling up mid-song lands HERE, and there is no
+        // return value for it to travel out on. Unrecorded, every later append would keep failing
+        // silently and `finish()` would patch a header over a short file and rename it into place as a
+        // finished render. `frames_written()` counts frames actually ON DISK, so it stays truthful too.
+        if (std::fwrite(buf_.data(), 1, buf_.size(), file_) != buf_.size()) {
+            writeFailed_ = true;
+            return;
+        }
         framesWritten_ += frames;
     }
 
@@ -91,7 +101,9 @@ class WavStreamWriter {
         if (!file_) return false;
 
         const int64_t dataSize = framesWritten_ * bytes_per_frame();
-        if (dataSize > static_cast<int64_t>(INT32_MAX) - 44) {
+        // `writeFailed_` first: an append that could not be written makes every byte count below a lie,
+        // and the only honest outcome is to drop the temp and say so.
+        if (writeFailed_ || dataSize > static_cast<int64_t>(INT32_MAX) - 44) {
             close_and_remove();
             return false;
         }
@@ -103,8 +115,17 @@ class WavStreamWriter {
             close_and_remove();
             return false;
         }
-        std::fclose(file_);
+
+        // ⚠️ **`fclose` IS A WRITE — it flushes whatever stdio still holds, so it is the last place a
+        // full card can report itself, and for a render that fits inside one buffer it is the ONLY
+        // place.** Unchecked, the rename below publishes a short file as a finished render. The handle
+        // is dead whichever way it went, so `file_` is cleared before anything else can touch it.
+        const bool closed = (std::fclose(file_) == 0);
         file_ = nullptr;
+        if (!closed) {
+            std::remove(tmpPath_.c_str());
+            return false;
+        }
 
         std::remove(path_.c_str());   // rename() fails on an existing target on Windows
         if (std::rename(tmpPath_.c_str(), path_.c_str()) != 0) {
@@ -172,6 +193,9 @@ class WavStreamWriter {
     std::FILE* file_     = nullptr;
     int64_t  framesWritten_ = 0;
     std::vector<uint8_t> buf_;   // reused across chunks — no per-chunk allocation
+    // Sticky: set by any short write, read by finish(). `append_interleaved` returns void, so this is
+    // the only way a mid-render disk failure reaches the one function that reports success.
+    bool     writeFailed_ = false;
 };
 
 // ─── The sample editor's writer: whole buffers, plus the `cue ` chunk ────────────────────────────
@@ -198,8 +222,13 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
     std::FILE* f = std::fopen(tmp.c_str(), "wb");
     if (!f) return false;
     const size_t written = bytes.empty() ? 0 : std::fwrite(bytes.data(), 1, bytes.size(), f);
-    const bool   ok      = (written == bytes.size());
-    std::fclose(f);
+    // ⚠️ **BOTH CHECKED, AND `fclose` UNCONDITIONALLY FIRST.** The count alone only sees what stdio had
+    // already pushed out; a sample small enough to sit inside one buffer reports a full write and
+    // reaches the disk for the first time in this flush, so a full card surfaces here or nowhere.
+    // Closing on its own line rather than as the second operand of the `&&` is what keeps it
+    // unconditional — short-circuiting past it on a short write would leak the handle.
+    const bool   flushed = (std::fclose(f) == 0);
+    const bool   ok      = (written == bytes.size()) && flushed;
     if (!ok) {
         std::remove(tmp.c_str());
         return false;

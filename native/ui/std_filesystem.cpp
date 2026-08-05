@@ -249,7 +249,21 @@ bool StdFileSystem::write_bytes(const std::string& path, const void* data, size_
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f) return false;
         if (len > 0) f.write(static_cast<const char*>(data), static_cast<std::streamsize>(len));
-        if (!f) return false;
+
+        // ⚠️ **CLOSED HERE AND CHECKED AFTERWARDS — never left to the destructor**, or the dance above
+        // protects against a power cut and not against a FULL DISK, which on a handheld is the likelier
+        // half. `write` can only report a failure that has already surfaced, and a payload smaller than
+        // the stream buffer reaches the disk for the FIRST time in this flush — so `~ofstream` is where
+        // ENOSPC arrives, and it swallows the error. Unchecked, a full card looks like a clean save:
+        // the stream is bad, nobody asks, and the rename below puts a truncated (often empty) file
+        // where the user's whole project was, with `true` returned. Dropping the temp on the way out
+        // also frees the space the next attempt needs.
+        f.close();
+        if (!f) {
+            std::error_code ignored;
+            fs::remove(tmp, ignored);
+            return false;
+        }
     }
 
     fs::rename(tmp, path, ec);
