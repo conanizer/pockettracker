@@ -47,6 +47,12 @@ namespace pt::ui {
  * coming from it — exactly as Android carries it across a theme change.
  *
  * Returns false when there was no file to read. That is not an error: it is the first launch.
+ *
+ * ⚠️ It also returns false when the file IS there and will not read or will not parse, and those two
+ * are not the same event — the second discards settings the user had, which the quit-time save then
+ * overwrites. A caller that cares must ask the filesystem itself (`app.cpp` does); this signature
+ * cannot tell them apart. Widening it to an outcome enum belongs with the SAF work, which makes
+ * reading this file a new kind of failure and will revisit the seam anyway.
  */
 bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme);
 

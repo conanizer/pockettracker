@@ -18,7 +18,7 @@
 //     directly — one layer BELOW this function — so every assertion it makes starts after the
 //     question this file answers. A block whose own comment says "the order of these checks IS the
 //     specification" had no coverage of that order at all, on either side: Kotlin's
-//     `handleButtonAction` is equally untooled (testdata/README.md §3 names it as an uncovered hole),
+//     `handleButtonAction` is equally untooled (tools/testdata/README.md §3 names it as an uncovered hole),
 //     which is why there is no golden to compare against and `tools/ptmapper` asserts instead.
 //
 // The template parameter is what fixes the second one, and it costs nothing: `Dispatcher` is

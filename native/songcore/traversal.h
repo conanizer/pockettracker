@@ -10,7 +10,7 @@
 // collector (which counts muted tracks as used and gathers more ref kinds).
 //
 // SongTraversal.kt is the executable spec. tools/ptresolve proves collect_used_instruments against a
-// JVM golden over the real /testdata projects.
+// JVM golden over the real /tools/testdata projects.
 
 #include <functional>
 #include <set>
@@ -32,11 +32,11 @@ inline void for_each_step_in_song_range(const Project& project, int start_row, i
             if (!include_muted && track.mute) continue;
             if (row >= static_cast<int>(track.chainRefs.size())) continue;
             int chainId = track.chainRefs[row];
-            if (chainId < 0 || chainId > 255) continue;
+            if (chainId < 0 || chainId >= static_cast<int>(project.chains.size())) continue;
             const Chain& chain = project.chains[chainId];
-            for (int slot = 0; slot <= 15; ++slot) {
-                int phraseId = chain.phraseRefs[slot];
-                if (phraseId < 0 || phraseId > 255) continue;
+            for (int slot = 0; slot < CHAIN_ROWS; ++slot) {
+                int phraseId = chain_phrase_ref(chain, slot);
+                if (phraseId < 0) continue;
                 for (const PhraseStep& step : project.phrases[phraseId].steps) action(step);
             }
         }

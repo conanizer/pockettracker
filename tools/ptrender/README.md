@@ -78,7 +78,7 @@ false-positive at that scale.
 
 ## The golden media
 
-`testdata/golden/` holds three synthesized files — see `make-golden-media.cpp`, which is their
+`tools/testdata/golden/` holds three synthesized files — see `make-golden-media.cpp`, which is their
 provenance and regenerates them. The six original goldens have referenced them all along
 (`golden/kick.wav`, `golden/pad.wav`, `golden/test.sf2`); the files simply never existed, which is why
 those projects are described as "silent by design". Each is shaped to exercise a path:
@@ -114,7 +114,7 @@ the rendered WAVs in the output directory, so a failure can be *listened to*, no
 
 Exit 0 = all green, 1 = any failure.
 
-Regenerate the fingerprints after an intentional DSP change: delete `testdata/renders/`, re-run, and
+Regenerate the fingerprints after an intentional DSP change: delete `tools/testdata/renders/`, re-run, and
 commit the new numbers **with** the change that moved them.
 
 ⚠️ `AudioEngine` **must be heap-allocated**. Its per-block DSP scratch, spectrum rings and 256-slot

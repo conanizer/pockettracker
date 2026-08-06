@@ -29,18 +29,24 @@ std::string at_or_unknown(const std::vector<std::string>& list, int index) {
 
 }  // namespace
 
-std::vector<std::string> mod_row_labels(ModType type) {
+const std::vector<std::string>& mod_row_labels(ModType type) {
+    static const std::vector<std::string> kNone{"TYPE"};
+    static const std::vector<std::string> kAhd{"TYPE", "DEST", "AMT", "ATK", "HOLD", "DEC"};
+    static const std::vector<std::string> kAdsr{"TYPE", "DEST", "AMT", "ATK", "DEC", "SUS", "REL"};
+    static const std::vector<std::string> kLfo{"TYPE", "DEST", "AMT", "OSC", "TRIG", "FREQ"};
+    static const std::vector<std::string> kTracking{"TYPE", "DEST", "AMT", "ATK", "DEC"};
+    static const std::vector<std::string> kScalar{"TYPE", "DEST", "AMT"};
     switch (type) {
-        case ModType::NONE:     return {"TYPE"};
-        case ModType::AHD:      return {"TYPE", "DEST", "AMT", "ATK", "HOLD", "DEC"};
-        case ModType::ADSR:     return {"TYPE", "DEST", "AMT", "ATK", "DEC", "SUS", "REL"};
-        case ModType::LFO:      return {"TYPE", "DEST", "AMT", "OSC", "TRIG", "FREQ"};
-        case ModType::DRUM:     return {"TYPE", "DEST", "AMT", "ATK", "HOLD", "DEC"};
-        case ModType::TRIG:     return {"TYPE", "DEST", "AMT", "ATK", "DEC", "SUS", "REL"};
-        case ModType::TRACKING: return {"TYPE", "DEST", "AMT", "ATK", "DEC"};
-        case ModType::SCALAR:   return {"TYPE", "DEST", "AMT"};
+        case ModType::NONE:     return kNone;
+        case ModType::AHD:      return kAhd;
+        case ModType::ADSR:     return kAdsr;
+        case ModType::LFO:      return kLfo;
+        case ModType::DRUM:     return kAhd;    // DRUM shares AHD's rows
+        case ModType::TRIG:     return kAdsr;   // TRIG shares ADSR's rows
+        case ModType::TRACKING: return kTracking;
+        case ModType::SCALAR:   return kScalar;
     }
-    return {"TYPE"};
+    return kNone;
 }
 
 std::string mod_row_value(const ModSlot& slot, int row_index, int slot_index) {
@@ -131,7 +137,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
 
             const auto draw_side = [&](const ModSlot& slot, int rows, int side, int nameX, int valX) {
                 if (rowIdx >= rows) return;   // this slot is shallower than the pair — nothing here
-                const std::vector<std::string> labels = mod_row_labels(slot.type);
+                const std::vector<std::string>& labels = mod_row_labels(slot.type);
                 const std::string label = (rowIdx < static_cast<int>(labels.size()))
                                               ? labels[static_cast<size_t>(rowIdx)]
                                               : std::string();

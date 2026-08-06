@@ -55,7 +55,7 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
     c.stroke_rect(BOX_X, BOX_Y, BOX_W, BOX_H, t.textTitle);
 
     // ── The effect's documentation: up to four lines ──────────────────────────────────────────────
-    const std::vector<std::string> desc = fx_description_lines(s);
+    const std::vector<std::string>& desc = fx_description_lines(s);
     int textY = BOX_Y + 8;
     for (int i = 0; i < 4; ++i) {
         if (i >= static_cast<int>(desc.size())) break;  // Kotlin's `?: break` — a short entry stops

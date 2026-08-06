@@ -98,6 +98,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
             es.caller        = s.eq.caller;
             es.spectrum      = s.eqSpectrum;
             es.spectrumCount = s.eqSpectrumCount;
+            es.sampleRate    = static_cast<float>(s.eqSampleRate);
             es.theme         = t;
             eq_.draw(c, moduleX, EDITOR_Y, es);
         } else if (s.themeEditor.isOpen) {
@@ -276,15 +277,13 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
             }
 
             case ScreenType::MIDI: {
-                MidiState ms{p, s.settings};
-                ms.cursorRow    = s.midiCursorRow;
-                ms.cursorColumn = s.midiCursorColumn;
-                // The port list, exactly as the dispatcher enumerated it on the way in — the same
+                // The port lists, exactly as the dispatcher enumerated them on the way in — the same
                 // "text the module paints but does not own" arrangement the DEVICE rows above use, and
                 // for the same reason: only the platform can name what an index means.
-                ms.deviceNames   = s.midiDeviceNames;
+                MidiState ms{p, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
+                ms.cursorRow    = s.midiCursorRow;
+                ms.cursorColumn = s.midiCursorColumn;
                 ms.deviceIndex   = s.midiDeviceIndex;
-                ms.inDeviceNames = s.midiInDeviceNames;
                 ms.inDeviceIndex = s.midiInDeviceIndex;
                 ms.statusText    = s.midiStatusText;
                 ms.caps          = s.caps;

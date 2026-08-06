@@ -18,11 +18,12 @@
 // leaves the file behind asks the user to recover work they have already safely stored — and trains
 // them to dismiss the one prompt in the app that exists to save their song.
 //
-// ── ⚠️ IT IS WRITTEN THROUGH `FileSystem::write_file`, NOT `SongcoreHost::save_project_file` ──────
+// ── ⚠️ IT IS WRITTEN THROUGH `FileSystem::write_file`, AND NOTHING ELSE MAY WRITE IT ─────────────
 //
-// And that is not a stylistic preference — it is the reason the temp-file dance exists at all.
-// `write_file` writes `<path>.tmp` and renames it over the target (StdFileSystem::write_bytes,
-// AndroidFileSystem.writeFile); `save_project_file` is a plain `ofstream` with `trunc`.
+// That is not a stylistic preference — it is the reason the temp-file dance exists at all.
+// `write_file` writes `<path>.tmp`, checks the close, and only then renames it over the target
+// (StdFileSystem::write_bytes, AndroidFileSystem.writeFile). A plain `ofstream` opened with `trunc`
+// destroys the old file at open time and cannot report a failure that surfaces at the flush.
 //
 // **The autosave is the file where that difference bites hardest, because it is written precisely
 // when the machine is about to die.** The SIGTERM flush runs with a launcher's SIGKILL possibly
@@ -30,10 +31,6 @@
 // halfway does not merely fail to save the new work — it has already TRUNCATED the previous, good
 // autosave in order to fail. That is strictly worse than never having written at all, and it turns
 // the one file whose job is to survive a bad death into the one file guaranteed not to.
-//
-// (⚠️ S10 found the same hole in PROJECT → SAVE and in the TEMPLATE, which had been going through
-// `save_project_file` since S7 — so the interface promised atomicity, Android delivered it, and the
-// port's own two save paths quietly opted out. Fixed with this; see ui/project_actions.cpp.)
 //
 // ── WHAT HAS NO TWIN ─────────────────────────────────────────────────────────────────────────────
 //

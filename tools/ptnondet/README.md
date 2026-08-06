@@ -23,7 +23,7 @@ any KT-vs-C++ render comparison.** If it reports anything, the comparison is mea
 draw from different generators, and even one engine rendered twice will differ.
 
 ```
-$ ptnondet testdata/device/DNB_TEST.ptp
+$ ptnondet tools/testdata/device/DNB_TEST.ptp
 project "DNB_TEST"  tempo=162
 
   RANDOM FX   phrase 03 step 06 FX1 = CHA 40  (chance gate)

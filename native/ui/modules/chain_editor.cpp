@@ -75,6 +75,11 @@ ChainInputResult ChainEditorModule::handle_input(songcore::Chain& chain, int cur
     ChainInputResult r;
     const size_t     row = static_cast<size_t>(cursor_row);
 
+    // Both fields, because DELETE clears the transpose with the ref and column 2 can leave a
+    // transpose on a row whose ref is empty — so a DELETE there really does change something.
+    const int beforeRef       = chain.phraseRefs[row];
+    const int beforeTranspose = chain.transposeValues[row];
+
     switch (action.type) {
         case ActionType::SET_VALUE:
             if (cursor_column == 1) {
@@ -112,7 +117,11 @@ ChainInputResult ChainEditorModule::handle_input(songcore::Chain& chain, int cur
             break;
     }
 
-    r.modified = (action.type != ActionType::NONE);
+    // ⚠️ A before/after answer, not "an action was dispatched" — see SongEditorModule::handle_input
+    // for why a phrase-ref cell dispatches DELETE while already empty, and what a phantom dirty flag
+    // costs (a phantom "unsaved work?" on EXIT, then a phantom RECOVER WORK? at the next launch).
+    r.modified = (chain.phraseRefs[row] != beforeRef) ||
+                 (chain.transposeValues[row] != beforeTranspose);
     return r;
 }
 

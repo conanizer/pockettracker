@@ -7,7 +7,7 @@
 //
 //   * app/src/test/.../trace/S5ConsumerGoldenTest.kt drives the REAL Kotlin AudioEngine.scheduleNote
 //     over a matrix of instruments and seam arguments, recording the exact engine calls it makes,
-//     into testdata/units/s5-consumer.txt (floats as raw binary32 bits — nothing passes by being close);
+//     into tools/testdata/units/s5-consumer.txt (floats as raw binary32 bits — nothing passes by being close);
 //   * this tool re-parses each case's INPUTS, runs them through the C++ consumer's note path
 //     (native/songcore/engine_consumer.h's plan_note_on, instantiated on a recorder instead of the
 //     AudioEngine), and byte-compares the call sequence it produces.
@@ -172,7 +172,7 @@ static ModDest mod_dest_of(const std::string& n) {
 }
 
 int main(int argc, char** argv) {
-    const std::string path = (argc > 1) ? argv[1] : "testdata/units/s5-consumer.txt";
+    const std::string path = (argc > 1) ? argv[1] : "tools/testdata/units/s5-consumer.txt";
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         std::cerr << "cannot open " << path << "\n";

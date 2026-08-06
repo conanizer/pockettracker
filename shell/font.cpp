@@ -217,18 +217,6 @@ void Font::draw_text(const std::string& text, int x_left, int y_top, float px, s
     }
 }
 
-int Font::measure(const std::string& text, float px) const {
-    int         w   = 0;
-    const char* s   = text.c_str();
-    const char* end = s + text.size();
-    while (s < end) {
-        std::uint32_t cp = 0;
-        s += utf8_next(s, end, cp);
-        w += rast_.glyph(cp, px).advance;
-    }
-    return w;
-}
-
 void Font::draw_arrow(Arrow dir, const SDL_Rect& box, std::uint32_t rgb) {
     if (renderer_ == nullptr || box.w <= 0 || box.h <= 0) return;
     const GlyphTex& a = arrow_tex(dir);

@@ -8,7 +8,7 @@ cmake --build tools/build --config Release
 ctest --test-dir tools/build -R p3-input --output-on-failure -C Release
 ```
 
-It reads `testdata/units/p3-input.txt` — emitted by the JVM `P3InputGoldenTest` from the **real**
+It reads `tools/testdata/units/p3-input.txt` — emitted by the JVM `P3InputGoldenTest` from the **real**
 Kotlin `InputController`, the five screen modules, `ClipboardManager` and `FxHelperOverlay` — and for
 every `<inputs> => <outputs>` line it re-parses the inputs, recomputes the right-hand side through the
 C++ port (`native/ui/{cursor,selection,clipboard,fx_helper}.h` + `native/ui/modules/*`), and
@@ -85,7 +85,7 @@ opening only if the dispatcher starts regressing.
 
 ## Regenerating the golden
 
-Deliberate change to the Kotlin input layer → delete `testdata/units/p3-input.txt`, run
+Deliberate change to the Kotlin input layer → delete `tools/testdata/units/p3-input.txt`, run
 `./gradlew :app:testDebugUnitTest --tests "*P3InputGoldenTest"`, review the diff, commit. `ptinput`
 then holds C++ to the new behaviour. Left in place, the JVM test byte-compares instead and names the
 first line that drifted.

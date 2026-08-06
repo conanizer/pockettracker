@@ -57,7 +57,20 @@ int ReverbSc::Init(float sr)
     n_bytes = 0;
     for(i = 0; i < 8; i++)
     {
-        if(n_bytes > DSY_REVERBSC_MAX_SIZE)
+        /* ⚠️ PT: the bound must cover the WRITE, not just the running total.
+         *
+         * `n_bytes` counts BYTES while `buf` is `float*` and `InitDelayLine` zeroes `buffer_size`
+         * FLOATS, so each line is placed four times further into `aux_` than it needs and the last
+         * one writes past wherever `n_bytes` has reached. Upstream's test at the top of the loop
+         * therefore admits an iteration whose write does not fit: at 96 kHz the fifth line starts at
+         * float 98,272 — inside the array — and runs to 106,210, which is 7,274 floats (29 KB) past
+         * the end, straight into the rest of the AudioEngine object. Then `Init` returns 1 with
+         * `delay_lines_[5..7].buf` never assigned, and the first `Process` dereferences three
+         * indeterminate pointers.
+         *
+         * Testing `n_bytes + <this line's floats>` refuses the rate BEFORE the overrun instead of
+         * after it. The placement is untouched, so nothing changes at 44.1 or 48 kHz. */
+        if(n_bytes + DelayLineMaxSamples(sr, 1, i) > DSY_REVERBSC_MAX_SIZE)
             return 1;
         delay_lines_[i].buf = (aux_) + n_bytes;
         InitDelayLine(&delay_lines_[i], i);

@@ -9,7 +9,8 @@ bool autosave_exists(FileSystem& fs) {
 }
 
 bool autosave_write(const songcore::SongcoreHost& host, FileSystem& fs) {
-    // ⚠️ `fs.write_file`, NOT `host.save_project_file` — the temp+rename is the point. See lifecycle.h.
+    // ⚠️ `fs.write_file` — the temp+rename is the point, and this is the file it matters most for.
+    // See lifecycle.h.
     return fs.write_file(fs.autosave_file_path(), songcore::serialize_project(host.project()));
 }
 

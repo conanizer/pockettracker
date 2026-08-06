@@ -34,10 +34,24 @@ public:
     AudioEngine();
     ~AudioEngine();
 
-    // Cache the backend's device sample rate. Set once by the platform shell (OboeAudioEngine) when the
-    // stream opens, then read by getSampleRate() and the scheduler-thread pitch/tic math — so the core
-    // never has to reach into a platform stream object for it.
-    void setDeviceSampleRate(int sr) { deviceSampleRate.store(sr, std::memory_order_relaxed); }
+    /**
+     * Cache the backend's device sample rate. Set by the platform shell when the stream opens, then
+     * read by getSampleRate() and the scheduler-thread pitch/tic math — so the core never has to
+     * reach into a platform stream object for it.
+     *
+     * ⚠️ **It also re-initialises the send and master buses when the rate is not the one they were
+     * built at**, and that is the whole reason this is not a one-line store. The reverb, delay,
+     * master EQ, OTT and DUST all bake the sample rate into their coefficients at `reset(sr)`, and
+     * the constructor has no device to ask — so a 48 kHz output would otherwise run five effect
+     * modules computed for 44.1 kHz, with a synced delay writing 22050 samples where a beat is
+     * 24000. (The render path escaped it: `prepare_render` resets at the real rate.)
+     *
+     * ⚠️ **The buses are at FACTORY defaults afterwards — the caller must re-push the project's FX.**
+     * At boot the shell already does: the stream opens before the project is pushed, and
+     * `push_params()` follows. Call this BEFORE the stream is unpaused; the audio callback must not
+     * be running.
+     */
+    void setDeviceSampleRate(int sr);
 
     void loadSample(int id, const float* data, int length);
     void loadSampleStereo(int id, const float* left, const float* right, int length);
@@ -163,7 +177,9 @@ public:
     void pitchShiftSample(int id, float semitones);
     // Destructive time-stretch: ratio > 1 = longer/slower, < 1 = shorter/faster. SOLA algorithm.
     void timeStretchSample(int id, float ratio);
-    // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE. fxValue 0-255.
+    // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE, 3=EQ.
+    // ⚠️ `fxValue` is 0-255 for the first three (the effect's amount) but an EQ PRESET SLOT for type 3
+    // — a different quantity in the same parameter, which is why the type has to be read first.
     void applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain = 0);
     // Zero-crossing search near `frame`. dir>0 = forward only, dir<0 = backward only, dir==0 = nearest
     // (both ways); returns `frame` if none within searchRadius. Directional keeps marker snapping
@@ -176,8 +192,14 @@ public:
     // ===================================
     // CORE AUDIO PROCESSING BLOCK
     // ===================================
-    // ALL audio DSP lives here. processLiveBlock and renderOffline are thin wrappers.
+    // ALL REAL-TIME audio DSP lives here. processLiveBlock and renderOffline are thin wrappers.
     // Rule: NEVER add audio processing logic directly to processLiveBlock or renderOffline.
+    //
+    // ⚠️ "Real-time" is the whole of the claim, and the word is load-bearing. There is OFFLINE DSP
+    // elsewhere — sample-editor.cpp runs OTT, DUST, DRIVE, the EQ, the limiter, a SOLA time-stretch
+    // and a resampler on the UI thread, and transient-detector.cpp and computeSpectrumFFT run FFTs.
+    // Read as "all DSP, anywhere", this line hides them: anything that protects the audio thread
+    // (flush-to-zero, for one) has to be armed on those paths separately, and they do arm it.
     void processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate);
 
     // ===================================
@@ -185,7 +207,7 @@ public:
     // ===================================
     // The platform shell (OboeAudioEngine::onAudioReady) hands its raw output buffer here. This does
     // everything the old onAudioReady did MINUS the Oboe glue: flush-to-zero, clear the buffer, bail to
-    // silence during offline render, chunk into MAX_BLOCK processAudioBlock calls, then capture the
+    // silence during offline render, chunk into PROCESS_SUBBLOCK processAudioBlock calls, then capture the
     // oscilloscope/spectrum/peak data. Backend-agnostic — no DSP lives in the callback shell.
     void processLiveBlock(float* output, int numFrames, int channelCount, float sampleRate);
 
@@ -308,7 +330,11 @@ public:
     // ===================================
 
     // Set one band of an EQ preset slot (hex params converted to Hz/dB/Q internally).
-    // slot: 0-127, band: 0-2, type: 0=off 1=loShelf 2=bell 3=hiShelf
+    // slot: 0-127, band: 0-2, type: 0=OFF 1=LOSHELF 2=LOWCUT 3=BELL 4=HISHELF 5=HICUT
+    // ⚠️ A band type's NUMBER is its identity — it is stored in the project file, passed here verbatim
+    // and branched on by EqBandModule::setParams. LOWCUT and HICUT were appended, so the members are
+    // NOT in the order a reader would guess from the names. The one definition is eq-module.h; the
+    // UI's list at eq_editor.cpp agrees with it. Append, never insert.
     // freqHex: 00-FF → 20–20kHz log, gainHex: 0-240 → −12.0..+12.0 dB (0.1 dB/step), qHex: 00-FF → 0.1–10 log
     void setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex);
 
@@ -446,13 +472,25 @@ public:
     void setStemsMode(int mode) { stemsMode = mode; }
 
 private:
-    // Maximum frames processAudioBlock can handle in one call — all its per-block buffers
-    // (send buses, OCTA accumulators, sfBuf) are sized to this. Callers with potentially
-    // larger blocks (processLiveBlock, renderOffline) must chunk.
-    static constexpr int MAX_BLOCK = 1024;
+    /**
+     * Flush-to-Zero: the engine's denormal protection, and not any compile flag.
+     *
+     * ⚠️ **PER-THREAD, because FPCR/FPSCR/MXCSR are thread-local registers** — so it is not enough
+     * that "the audio thread arms it". EVERY entry point that runs DSP must call it first, on
+     * whatever thread it happens to be on. That includes the offline sample-editor operations, which
+     * run the same OTT, DUST, EQ and limiter code on the UI thread: a fade-out tail decays smoothly
+     * into the denormal range and stays there, at 10-100x the per-sample cost, which on a handheld is
+     * a frozen screen with no progress indication.
+     *
+     * Repeat calls are free — a `thread_local` flag makes it a no-op after the first.
+     */
+    static void setFlushToZeroForCurrentThread();
 
-    // ⚠️ THE GRANULARITY AT WHICH EVENTS ARE RESOLVED — and it is a CORRECTNESS constant, not a
-    // buffer bound. processAudioBlock applies a block's note-ons inside one pass: each retrigger
+    // ⚠️ THE GRANULARITY AT WHICH EVENTS ARE RESOLVED, and the size of every per-block buffer.
+    // The two are ONE constant on purpose: the correctness limit is the tighter of the pair, so a
+    // separate, larger buffer cap could only ever describe a call nothing is allowed to make.
+    //
+    // The correctness half. processAudioBlock applies a block's note-ons inside one pass: each retrigger
     // fades the previous same-track voice and takes a new slot, but a faded voice only frees up as
     // it is MIXED. So when several same-track retriggers land in ONE block they pile up slots,
     // exhaust the voice pool, and get recycled — i.e. notes are silently DROPPED.
@@ -464,12 +502,21 @@ private:
     // 4457/53, 512 → 4158/277, 940 → 3680/421 (17% of the retriggers gone, gaps up to 26 ms).
     // renderOffline always chunked at 256, which is why the EXPORT was correct while live playback
     // pulsed. Both paths now chunk here, so what you hear is what you export.
+    //
+    // The buffer half. Every per-block scratch member below is a fixed array of this many frames,
+    // indexed by `numFrames`, so processAudioBlock rejects a larger block rather than overrun them.
+    // Both shipped wrappers chunk here and nothing else calls it — the reader who will is the future
+    // ALSA/JACK backend this header invites, and that reader calls processAudioBlock directly.
     static constexpr int PROCESS_SUBBLOCK = 256;
 
     // Device output sample rate, cached from the platform backend (see setDeviceSampleRate). Defaults to
     // 44100 so getSampleRate()/pitch math stay correct if read before the stream opens — matches every
     // other 44100 fallback in the engine. Atomic: written by the shell thread, read by the scheduler.
     std::atomic<int> deviceSampleRate{44100};
+
+    // The rate the send and master buses were last built at. Only setDeviceSampleRate touches it, and
+    // only to notice that a re-init is owed — the coefficients are the buses' own, not readable back.
+    int effectsSampleRate = 44100;
 
     Voice voices[MAX_VOICES];
     float* samples[256];
@@ -632,14 +679,14 @@ private:
     // render (isOfflineRendering gate) and the render thread is then its sole caller — the same
     // single-caller invariant the voices[]/framePeaks members rely on. Each is (re)initialised every
     // block; nothing persists across blocks.
-    float revSendBufL[MAX_BLOCK], revSendBufR[MAX_BLOCK];   // panned reverb-send sum
-    float dlySendBufL[MAX_BLOCK], dlySendBufR[MAX_BLOCK];   // panned delay-send sum
-    float revWetL[MAX_BLOCK], revWetR[MAX_BLOCK];           // reverb wet output
-    float dlyWetL[MAX_BLOCK], dlyWetR[MAX_BLOCK];           // delay wet output
-    float instrSpectrumTempL[MAX_BLOCK];                   // mono sum of a monitored instrument's voices
-    float sfBuf[MAX_BLOCK * 2];                             // per-track SF render (interleaved stereo)
-    float trackWaveAccumL[TRACK_WAVEFORM_COUNT][MAX_BLOCK]; // OCTA per-track accumulators
-    float trackWaveAccumR[TRACK_WAVEFORM_COUNT][MAX_BLOCK];
+    float revSendBufL[PROCESS_SUBBLOCK], revSendBufR[PROCESS_SUBBLOCK];   // panned reverb-send sum
+    float dlySendBufL[PROCESS_SUBBLOCK], dlySendBufR[PROCESS_SUBBLOCK];   // panned delay-send sum
+    float revWetL[PROCESS_SUBBLOCK], revWetR[PROCESS_SUBBLOCK];           // reverb wet output
+    float dlyWetL[PROCESS_SUBBLOCK], dlyWetR[PROCESS_SUBBLOCK];           // delay wet output
+    float instrSpectrumTempL[PROCESS_SUBBLOCK];                           // mono sum of a monitored instrument's voices
+    float sfBuf[PROCESS_SUBBLOCK * 2];                                    // per-track SF render (interleaved stereo)
+    float trackWaveAccumL[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];        // OCTA per-track accumulators
+    float trackWaveAccumR[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];
     bool  trackWasActive[TRACK_WAVEFORM_COUNT];             // OCTA: lane had a non-fading voice this block
 
     // Downsampling for oscilloscope (capture every Nth sample)

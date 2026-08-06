@@ -49,7 +49,7 @@ Because `pt-ui` has no display dependency, a screen can be drawn with no window 
 `tools/ptshot` does, and a green ptshot is the standing proof that the seam is real:
 
 ```sh
-tools/build/ptshot testdata/g1-basics.ptp phrase.png --screen=PHRASE --cursor=3,1 --scale=2
+tools/build/ptshot tools/testdata/g1-basics.ptp phrase.png --screen=PHRASE --cursor=3,1 --scale=2
 ```
 
 ## The UI edits the live project
@@ -187,7 +187,7 @@ Three decisions worth knowing:
 ## Run
 
 ```sh
-shell/build/pockettracker-sdl testdata/g7-audio.ptp testdata
+shell/build/pockettracker-sdl tools/testdata/g7-audio.ptp tools/testdata
 ```
 
 `g7-audio` is the golden project built for the DSP rather than the sequencer — both send buses, the
@@ -198,7 +198,7 @@ SoundFont voice and a resampled stereo pad — so if it sounds right, most of th
 pockettracker-sdl <project.ptp> [media-base-dir]
 ```
 
-`media-base-dir` defaults to the project's own directory. Portable projects (the `/testdata`
+`media-base-dir` defaults to the project's own directory. Portable projects (the `/tools/testdata`
 goldens, anything the Linux build ships) store sample paths **relative** to the project file; a
 project saved on a device stores absolute paths, and both resolve correctly
 (`engine_setup.h: resolve_media_path`).

@@ -127,9 +127,9 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::VISUALIZER, "VISUALIZER", names[static_cast<size_t>(index)]);
     }
 
-    // ⚠️ THEME shows the name and a ">" — the arrow is the promise that A opens something. It does
-    // not yet: the theme editor is its own module (port plan §10, Phase 3), and until it lands this
-    // row is inert, exactly as every EQ cell in the app dials a slot number it cannot yet open.
+    // THEME shows the name and a ">" — the arrow is the promise that A opens something, and it does:
+    // the theme editor is its own module (theme_editor.cpp), opened by InputDispatcher and drawn over
+    // this one.
     param_row(SettingsRow::THEME, "THEME", s.themeName + " >");
 
     // TEMPLATE is a BUTTON row, like PROJECT's — two options, no value.

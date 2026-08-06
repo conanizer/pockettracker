@@ -11,7 +11,7 @@
 // band, and a random arpeggio always played the root. Nothing we owned looked here.
 //
 // So this tool compares DISTRIBUTIONS, against the ones measured from the real Kotlin implementation
-// and recorded in testdata/units/s7-random.txt (by app/src/test/.../S7RandomGoldenTest.kt, which is
+// and recorded in tools/testdata/units/s7-random.txt (by app/src/test/.../S7RandomGoldenTest.kt, which is
 // where the observables and their laws are documented). Two claims, and the split is the whole design:
 //
 //   n= and support=   EXACT, byte-compared against the golden. `n` is how many draws a render makes
@@ -267,7 +267,7 @@ static bool read_file(const std::string& path, std::string& out) {
 }
 
 int main(int argc, char** argv) {
-    std::string testdata = (argc > 1) ? argv[1] : "testdata";
+    std::string testdata = (argc > 1) ? argv[1] : "tools/testdata";
 
     // ── the golden, measured from the real Kotlin sequencer ──
     std::string goldenText;

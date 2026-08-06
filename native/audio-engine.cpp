@@ -38,8 +38,15 @@ AudioEngine::AudioEngine() {
     globalFrameCounter.store(0, std::memory_order_relaxed);
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;  // vary RND/DRNK per app session
 
-    // Pre-size the per-block drain buffers so the audio thread never reallocates them at
-    // runtime. A single ~23 ms block only ever holds a handful of events (a few tracks × retrigs).
+    // Pre-size the per-block drain buffers. A single ~23 ms block only ever holds a handful of
+    // events (a few tracks × retrigs), and 64 covers a dense AUS/AUF ramp across all eight.
+    //
+    // ⚠️ It is a typical bound, not a hard one, and `drainUntil` uses push_back — so this is "the
+    // audio thread almost never allocates", not "never". The bound is not a property of the block:
+    // `drainUntil` takes everything scheduled at or before the block end, INCLUDING anything already
+    // overdue, so a stall or a resume after a long pause can cross it. The cost is one `operator new`
+    // inside the callback, once, after which the capacity persists. Said out loud rather than left to
+    // read as a guarantee.
     noteBatch.reserve(64);
     killBatch.reserve(64);
     paramBatch.reserve(64);
@@ -56,9 +63,21 @@ AudioEngine::AudioEngine() {
         instrSpectrumBuffer[i] = 0.0f;
     }
     spectrumWriteIdx = delaySpectrumWriteIdx = reverbSpectrumWriteIdx = instrSpectrumWriteIdx = 0;
-    reverbSend.reset(44100.0f);
-    delaySend.reset(44100.0f);
-    masterChain.reset();
+    // The buses need valid coefficients before any audio, and there is no device yet to ask — so they
+    // are built at the fallback rate and REBUILT by setDeviceSampleRate the moment the shell learns
+    // the real one. `effectsSampleRate` records which rate this was, so that call knows what is owed.
+    const float defaultRate = static_cast<float>(effectsSampleRate);
+    reverbSend.reset(defaultRate);
+    delaySend.reset(defaultRate);
+    masterChain.reset(defaultRate);
+}
+
+void AudioEngine::setDeviceSampleRate(int sr) {
+    if (sr <= 0) return;
+    deviceSampleRate.store(sr, std::memory_order_relaxed);
+    if (sr == effectsSampleRate) return;
+    effectsSampleRate = sr;
+    resetEffectState();   // reads getSampleRate(), i.e. the value just stored
 }
 
 AudioEngine::~AudioEngine() {
@@ -583,11 +602,10 @@ int AudioEngine::getSampleRate() {
     return deviceSampleRate.load(std::memory_order_relaxed);
 }
 
-// Flush-to-Zero eliminates denormal CPU stalls (10-100x slowdowns in reverb/delay/EQ
-// feedback tails). Must be set per-thread — FPCR/FPSCR/MXCSR are thread-local registers.
-// This helper (not any compile flag) is the engine's denormal protection; every audio
-// entry point (processLiveBlock, renderOffline) calls it first.
-static void setFlushToZeroForCurrentThread() {
+// Flush-to-Zero eliminates denormal CPU stalls (10-100x slowdowns in reverb/delay/EQ feedback
+// tails). See the declaration in audio-engine.h for why it is a member rather than a file-static:
+// the offline sample-editor paths run the same DSP on the UI thread and must arm it too.
+void AudioEngine::setFlushToZeroForCurrentThread() {
     thread_local bool done = false;
     if (done) return;
     done = true;
@@ -825,6 +843,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // stereo streams (the Oboe builder requests it; renderOffline is fixed at 2). Guard —
     // one silent block — rather than write past a mono buffer if a future backend drifts.
     if (channelCount != 2) return;
+    // And the same guard for the block SIZE, for the same reason. Every per-block member below —
+    // the send buses, the OCTA accumulators, sfBuf — is a fixed PROCESS_SUBBLOCK array indexed by
+    // `numFrames`. Both shipped wrappers chunk at PROCESS_SUBBLOCK so nothing reaches this today;
+    // the reader who will is the future ALSA/JACK backend audio-engine.h invites, and that reader
+    // calls this function directly. ⚠️ A block larger than this would also resolve events too
+    // coarsely — see the constant. Silence is the safe answer to both.
+    if (numFrames > PROCESS_SUBBLOCK) return;
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
 
@@ -841,7 +866,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     }
     trackVolSnapshot[PREVIEW_LANE] = 1.0f;  // preview lane has no mixer fader — neutral volume
 
-    // Zero only the [0,numFrames) slice actually used (not the full MAX_BLOCK arrays), and
+    // Zero only the [0,numFrames) slice actually used (not the full PROCESS_SUBBLOCK arrays), and
     // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
     // Also skip all visualizer capture during offline WAV export: the live stream is silent so the
     // scopes already read flat, and OCTA would otherwise snapshot random mid-render frames that only
@@ -854,8 +879,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     // Per-block scratch (send buses, OCTA accumulators, instrument-spectrum sum) lives on the engine
     // object, not the audio-thread stack — declared in the header. (Re)initialised here every block;
-    // MAX_BLOCK is the class cap and processLiveBlock/renderOffline chunk larger requests, so only
-    // [0,numFrames) is ever touched.
+    // PROCESS_SUBBLOCK is the class cap and processLiveBlock/renderOffline chunk larger requests, so
+    // only [0,numFrames) is ever touched.
     memset(revSendBufL, 0, frameBytes); memset(revSendBufR, 0, frameBytes);
     memset(dlySendBufL, 0, frameBytes); memset(dlySendBufR, 0, frameBytes);
 
@@ -1047,13 +1072,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // No per-track clone creation — tsf_load_memory() never runs on the audio thread.
             if (note.isSoundfont) {
                 int t = note.trackId;
+                // ⚠️ The handle is NOT tested here. It is a non-atomic pointer the JNI/UI thread can
+                // null at any moment, and reading it without the slot mutex is a race whose answer
+                // may already be stale by the next line. `triggerNote` reads it under the lock and
+                // says whether the note started; that answer is the one worth having, and the whole
+                // block below belongs to a note that did start.
                 if (t >= 0 && t < SF_VOICE_COUNT &&
-                    note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS &&
-                    soundfonts[note.sfSlot].handle != nullptr) {
+                    note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS) {
 
                     SoundfontVoice& sv = sfVoices[t];
                     float trkVol = trackVolSnapshot[t];
-                    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
                     // This instrument's ADSR override (applied atomically inside triggerNote, before
                     // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
                     int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
@@ -1061,9 +1089,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         const SfEnvOverride& eo = sfEnvOverrides[note.sampleId];
                         eAtk = eo.atk; eDec = eo.dec; eSus = eo.sus; eRel = eo.rel;
                     }
-                    sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
-                                   note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t,
-                                   eAtk, eDec, eSus, eRel);
+                    if (!sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
+                                        note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t,
+                                        eAtk, eDec, eSus, eRel)) {
+                        LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)",
+                             note.sfSlot, note.trackId);
+                        continue;   // …and the voice keeps whatever it was already playing
+                    }
+                    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
                     sv.isReleasingOnly = false;
                     sv.resetPitchState();
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
@@ -1131,7 +1164,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                          note.sfSlot, t, note.sfBank, note.sfPreset,
                          note.midiNote, note.midiVelocity, note.volume);
                 } else {
-                    LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)", note.sfSlot, note.trackId);
+                    LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (out of range)", note.sfSlot, note.trackId);
                 }
                 continue;  // Skip voice pool processing
             }
@@ -1239,7 +1272,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     voices[v].instrId = note.sampleId;
                     voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
 
-                    // pslDuration is already in audio frames (converted by AudioEngine.kt).
+                    // pslDuration is already in audio frames — songcore/voice_derive.h multiplies the
+                    // authored tick count by framesPerTic before the note reaches the queue.
                     if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
                         voices[v].pitchOffset = note.pslInitialOffset;
                         float totalFrames = fmaxf(1.0f, note.pslDuration);
@@ -1249,7 +1283,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         LOGT("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
                              note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
                     }
-                    // pbnRate is already in semitones/frame (converted by AudioEngine.kt).
+                    // pbnRate is already in semitones/frame — songcore/voice_derive.h divides the
+                    // authored per-step rate by framesPerStep before the note reaches the queue.
                     if (fabsf(note.pbnRate) > 0.0001f) {
                         voices[v].pitchSlideRate = note.pbnRate;
                         voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
@@ -1573,7 +1608,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     } // sampleEditMutex try_lock scope
 
     {
-        // sfBuf (per-track SF render, MAX_BLOCK frames * 2 channels) is an engine member; it is
+        // sfBuf (per-track SF render, PROCESS_SUBBLOCK frames * 2 channels) is an engine member; it is
         // memset per use below before each tsf render.
         for (int t = 0; t < SF_VOICE_COUNT; t++) {
             SoundfontVoice& sv = sfVoices[t];
@@ -1871,7 +1906,7 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         return;
     }
 
-    // ⚠️ Chunk at PROCESS_SUBBLOCK, not MAX_BLOCK, and the difference is AUDIBLE — see the constant.
+    // ⚠️ Chunk at PROCESS_SUBBLOCK — the difference from a device-sized block is AUDIBLE, see the constant.
     // A device hands us whatever its period is (the Flip's ALSA: 940 frames; Oboe: 192-960), and
     // processing that in one pass resolves a block's note-ons too coarsely: same-track retriggers
     // sharing a block exhaust the voice pool and get dropped. renderOffline has always chunked at
@@ -2081,13 +2116,24 @@ int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
 
     // Parse the SF2 into a single master TSF handle. All tracks share it via MIDI channels — no
     // per-track clones, which would cost 8× the file size in RAM and stall the audio callback.
-    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-    soundfonts[slot].handle = tsf_load_filename(path);
-    if (!soundfonts[slot].handle) {
+    //
+    // ⚠️ **THE PARSE HAPPENS OUTSIDE THE SLOT MUTEX, and that is the point of the local.**
+    // `tsf_load_filename` reads and allocates a whole SF2 — tens to hundreds of milliseconds — and
+    // the audio thread takes this same mutex two or three times per active SoundFont voice per
+    // block. Holding it across the parse makes a load and a dropout the same event. The mutex is
+    // taken only to PUBLISH the finished pointer, which is a store.
+    tsf* loaded = tsf_load_filename(path);
+    if (!loaded) {
         LOGE("❌ Failed to parse soundfont: %s", path);
         return -1;
     }
-    tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, getSampleRate(), 0.0f);
+    // Configured before publication, for the same reason: a voice that sees the handle must see it
+    // ready. `tsf_set_output` is not a read the audio thread can be racing, because nothing else has
+    // the pointer yet.
+    tsf_set_output(loaded, TSF_STEREO_INTERLEAVED, getSampleRate(), 0.0f);
+
+    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+    soundfonts[slot].handle = loaded;
     soundfonts[slot].instrumentId = instrumentId;
     soundfonts[slot].filePath = path;
     soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest
@@ -2637,8 +2683,8 @@ void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
     setFlushToZeroForCurrentThread();
     for (int i = 0; i < numFrames * 2; i++) output[i] = 0.0f;
 
-    // The same granularity live playback now uses — the two must not drift apart, or the export
-    // stops matching what you heard. See PROCESS_SUBBLOCK. (Value unchanged: this was already 256.)
+    // The same granularity live playback uses — the two must not drift apart, or the export stops
+    // matching what you heard. See PROCESS_SUBBLOCK.
     int rendered = 0;
     while (rendered < numFrames) {
         int chunk = std::min(PROCESS_SUBBLOCK, numFrames - rendered);

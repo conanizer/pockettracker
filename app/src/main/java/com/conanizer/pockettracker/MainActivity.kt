@@ -275,7 +275,9 @@ class MainActivity : SDLActivity() {
         soundOn: Boolean, soundVolume: Int,
         vibroOn: Boolean, vibroPower: Int
     ) {
-        val vb = VirtualButton.values().getOrNull(button) ?: return
+        // `entries`, not `values()`: this runs on every press AND every release, and values() hands
+        // back a fresh defensive copy of the array each call.
+        val vb = VirtualButton.entries.getOrNull(button) ?: return
 
         buttonSound?.let { s ->
             s.enabled = soundOn

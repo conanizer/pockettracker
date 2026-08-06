@@ -11,7 +11,7 @@
 // instrument, silently, while doing the obvious thing on a sampler beside it.
 //
 // It is not in `ptdispatch` because it needs a REAL .sf2, and ptdispatch is deliberately the one tool
-// with no /testdata argument. It is not in `ptvoice` because that tool goldens the note DERIVATION
+// with no /tools/testdata argument. It is not in `ptvoice` because that tool goldens the note DERIVATION
 // (what the seam is handed), and this claim is about what happens to a voice per block AFTER the note
 // exists — a different subject, one block below.
 //
@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     // ⚠️ A MISSING FIXTURE IS A FAILURE, NEVER A SKIP. A compare-if-present check certifies anything
-    // once the file is gone (testdata/README.md's standing rule); load_soundfont reports it below.
+    // once the file is gone (tools/testdata/README.md's standing rule); load_soundfont reports it below.
     const std::string sf2 = argv[1];
 
     double onMin = 0, onMax = 0, offMin = 0, offMax = 0;

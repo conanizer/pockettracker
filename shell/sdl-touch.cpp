@@ -26,24 +26,6 @@ void fill(SDL_Renderer* r, const SDL_Rect& rc, uint32_t rgb) {
     SDL_RenderFillRect(r, &rc);
 }
 
-// For the trace only.
-const char* bname(Button b) {
-    switch (b) {
-        case Button::DPAD_UP:    return "DPAD_UP";
-        case Button::DPAD_DOWN:  return "DPAD_DOWN";
-        case Button::DPAD_LEFT:  return "DPAD_LEFT";
-        case Button::DPAD_RIGHT: return "DPAD_RIGHT";
-        case Button::A:          return "A";
-        case Button::B:          return "B";
-        case Button::L_SHIFT:    return "L";
-        case Button::R_SHIFT:    return "R";
-        case Button::SELECT:     return "SELECT";
-        case Button::START:      return "START";
-        case Button::COUNT:      break;
-    }
-    return "?";
-}
-
 }  // namespace
 
 void SdlTouch::layout(const SDL_Rect& frame, int outW, int outH) {
@@ -112,7 +94,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
             input.touch_press(b, now_ms);
             emit_feedback(b, /*down=*/true);
             finger_[t.fingerId] = b;
-            if (trace_) std::printf("input:   TOUCH DOWN  %4d,%-4d       -> %s\n", px, py, bname(b));
+            if (trace_) std::printf("input:   TOUCH DOWN  %4d,%-4d       -> %s\n", px, py, pt::ui::button_name(b));
         } else if (trace_) {
             // ⚠️ The load-bearing trace line: a tap that hits nothing says so, so "the buttons don't
             // work" can be told from "the tap landed in a gap" from "no touch event arrived at all".
@@ -123,7 +105,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
         if (it != finger_.end()) {
             input.touch_release(it->second);
             emit_feedback(it->second, /*down=*/false);
-            if (trace_) std::printf("input:   TOUCH UP                    -> %s\n", bname(it->second));
+            if (trace_) std::printf("input:   TOUCH UP                    -> %s\n", pt::ui::button_name(it->second));
             finger_.erase(it);
         }
     } else if (e.type == SDL_FINGERMOTION) {
@@ -139,7 +121,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
                 emit_feedback(it->second, /*down=*/false);
                 if (trace_)
                     std::printf("input:   TOUCH SLIDE-OFF             -> %s released\n",
-                                bname(it->second));
+                                pt::ui::button_name(it->second));
                 finger_.erase(it);
             }
         }

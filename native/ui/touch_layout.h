@@ -25,7 +25,7 @@
 // A touch layout is two computations wearing one coat, and the two are checked by DIFFERENT means:
 //
 //   SIZES     — "each arrow is X px square, spacers are 0.2X" — plain arithmetic. `left`/`right`/
-//               `portrait`/`portrait2` below, and it is what `testdata/units/touch-layout.txt`
+//               `portrait`/`portrait2` below, and it is what `tools/testdata/units/touch-layout.txt`
 //               (the B2 golden) pins, byte-for-byte, through `tools/pttouch`.
 //   POSITIONS — "the UP arrow lands at x=253, y=305 inside its box" — produced on Android by COMPOSE's
 //               measure/layout pass (Column/Row + Arrangement.Center). It exists in no Kotlin file, so

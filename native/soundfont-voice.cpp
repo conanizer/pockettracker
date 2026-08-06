@@ -1,5 +1,21 @@
 // TinySoundFont — single-header SF2/SF3 renderer (MIT license)
 // NOTE: TSF_IMPLEMENTATION must be defined in exactly one .cpp file
+
+// ⚠️ **THIS INCLUDE IS WHAT MAKES `.sf3` DECODE, AND IT MUST COME FIRST.** An SF3's `smpl` chunk
+// holds Ogg Vorbis frames, and both of tsf's paths for them — `tsf_decode_sf3_samples` and
+// `tsf_decode_ogg` — sit behind `#ifdef STB_VORBIS_INCLUDE_STB_VORBIS_H`, which is stb_vorbis's own
+// include guard. Without it those two functions are never compiled, and tsf's `#else` arm has no
+// format check: it converts the chunk in place as raw 16-bit PCM, so an `.sf3` LOADS and then
+// renders noise. `.sf3` is offered by the browser and documented, so the file must be decodable.
+//
+// Declarations only. stb_vorbis is compiled as its own C translation unit (see CMakeLists.txt), so
+// STB_VORBIS_HEADER_ONLY avoids a second copy of the implementation, and extern "C" makes these C++
+// references resolve against the C-compiled symbols. Same shape as audio-decoders.cpp.
+extern "C" {
+#define STB_VORBIS_HEADER_ONLY
+#include "vendor/stb_vorbis/stb_vorbis.c"
+}
+
 #define TSF_IMPLEMENTATION
 #include "vendor/tsf/tsf.h"
 
@@ -115,20 +131,24 @@ void SoundfontVoice::setMidiNote(int midiNote) {
     activeNote = midiNote;
 }
 
-void SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
+bool SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
                                  float noteVol, float trkVol, float pan,
                                  int bank, int preset, int trackId,
                                  int envAtk, int envDec, int envSus, int envRel) {
+    // Hold the slot mutex for the whole trigger: the handle must be read inside the lock
+    // (loadSoundfont eviction can tsf_close it concurrently), and the channel setup below
+    // mutates TSF state that must not interleave with a close.
+    //
+    // ⚠️ The lock is taken BEFORE any member is written, so a slot whose handle has gone leaves this
+    // voice untouched rather than half-retargeted at a note that never sounds.
+    std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
+    tsf* h = soundfonts[slot].handle;
+    if (!h) return false;
+
     sfSlot      = slot;
     _trackId    = trackId;
     noteVolume  = noteVol;
     trackVolume = trkVol;
-    // Hold the slot mutex for the whole trigger: the handle must be read inside the lock
-    // (loadSoundfont eviction can tsf_close it concurrently), and the channel setup below
-    // mutates TSF state that must not interleave with a close.
-    std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-    tsf* h = soundfonts[slot].handle;
-    if (!h) return;
     // Hard-kill all TSF voices on this channel — no release-tail overlap.
     // New note on same track = voice-steal (immediate cut), matching sampler behavior.
     // noteOff() / KIL effect preserves TSF release; this path does not.
@@ -151,6 +171,7 @@ void SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
     tsf_channel_note_on(h, _trackId, midiNote, midiVelocity / 127.0f);
     activeNote = midiNote;
     isActive   = true;
+    return true;
 }
 
 void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {

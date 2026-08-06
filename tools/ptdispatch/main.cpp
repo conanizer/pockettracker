@@ -47,6 +47,8 @@
 #include <vector>
 
 #include "audio-engine.h"
+// §53 drives ReverbSc STANDALONE — inside AudioEngine its overrun is intra-object and invisible.
+#include "effects/primitives/daisysp/reverbsc.h"
 #include "songcore/automation.h"   // §47 — the AUS/AUF pairing, which is pure and has no other home
 #include "songcore/host.h"
 #include "songcore/wav_writer.h"   // the cue-point round trip (S6b)
@@ -2510,7 +2512,7 @@ int main() {
         // vacuously against 0.0 — which is exactly the trap S6a named about the filesystem and S6b about
         // the engine. So the fixture is SYNTHESIZED rather than borrowed: a 1 kHz sine, decaying, mono at
         // the render's own rate. A formula is the better fixture (S6b's argument for the golden media),
-        // and it keeps ptdispatch self-contained — it is the one tool with no /testdata argument.
+        // and it keeps ptdispatch self-contained — it is the one tool with no /tools/testdata argument.
         //
         // 1 kHz matters: it must sit WELL ABOVE the 20 Hz corner the HICUT is dialled to, so that a
         // working low-pass has to gut it. A sine at 30 Hz would survive the filter and the check would
@@ -3578,7 +3580,7 @@ int main() {
     {
         // ⚠️ THE FIXTURE MUST BE SHORTER THAN ONE STEP (0.125 s at 120 BPM) or every note runs into the
         // next, the voice never goes idle, and §29b's energy stops being a count of what FIRED. It is
-        // synthesized rather than borrowed, as §24's is: ptdispatch is the one tool with no /testdata.
+        // synthesized rather than borrowed, as §24's is: ptdispatch is the one tool with no /tools/testdata.
         const int      rate     = 44100;
         const fs::path tonePath = tree.root / "Samples" / "stoptone.wav";
         {
@@ -7426,6 +7428,189 @@ int main() {
                    "still " + std::to_string(goneLit) + " lit pixels with no AUF in the chain");
             }
         }
+    }
+
+    // ── 52. A CHAIN ROW IS 0..15 AND ITS PHRASE REF NAMES A PHRASE ──────────────────────────────
+    //
+    // Both bounds live in `chain_phrase_ref` (model.h). This section is here rather than in a unit
+    // test of that function because the thing worth proving is that the SCHEDULER goes through it:
+    // the failure is a read past a 16-element vector whose result is then used as an unbounded index
+    // into the 256-phrase pool, and it emits no signal at all — the same project plays correctly or
+    // corrupts depending on what the adjacent heap word happens to hold.
+    //
+    // Each check below fails for a reason none of the others would: the control proves the harness
+    // reaches the scheduler, then the row bound, the ref bound above the pool, the same bound from
+    // the other side, and the array-length bound that neither of those two covers.
+    {
+        struct Notes : songcore::IMidiConsumer {
+            int noteOns = 0;
+            void consume(const songcore::Event& ev) override {
+                if (ev.type == songcore::EV_NOTE_ON) ++noteOns;
+            }
+            void on_play(const std::string&, const std::string&, int64_t, int, int) override {}
+            void on_stop() override {}
+        };
+        // One chain, one phrase of one note, placed on `row`; `ref` overrides what the row holds and
+        // `refCount` truncates the array. Returns the NoteOns a full pass of the chain emits.
+        auto play_row = [](int row, int ref, int refCount) {
+            songcore::Project p = songcore::make_default_project();
+            p.tempo = 120;
+            const int usedRef = (ref < 0) ? 7 : ref;
+            // ⚠️ The note goes in the phrase the REF names, not in a fixed one: with the note parked
+            // in phrase 7 the in-pool ref 255 played nothing — not because the bound was wrong but
+            // because phrase 255 was empty, which is a check that cannot fail for its stated reason.
+            p.phrases[static_cast<size_t>(usedRef < songcore::POOL_PHRASES ? usedRef : 7)]
+                .steps[0].note = songcore::Note::C4();
+            p.chains[0].phraseRefs[static_cast<size_t>(row)] = usedRef;
+            // ⚠️ shrink_to_fit, not resize alone: resize leaves the 16-element allocation in place,
+            // so the rows past the new end still read allocated memory and the short-array case
+            // cannot fail — a check that passes by construction.
+            if (refCount >= 0) {
+                p.chains[0].phraseRefs.resize(static_cast<size_t>(refCount));
+                p.chains[0].phraseRefs.shrink_to_fit();
+            }
+            Notes                rec;
+            songcore::MidiRouter r(&rec);
+            songcore::Sequencer  s(r, p, 44100);
+            s.set_clock(0);
+            s.playChain(0);
+            // One pump per step over four phrase-lengths: playChain schedules only the row it starts
+            // on, and the wrap that C1 is about happens on the very first lookahead poll.
+            const int64_t fps = songcore::frames_per_step(120, 44100);
+            for (int64_t f = 0; f <= fps * 16 * 4; f += fps) { s.set_clock(f); s.updatePlaybackBuffer(); }
+            return rec.noteOns;
+        };
+
+        const int atRow0  = play_row(0,  -1, -1);
+        const int atRow15 = play_row(15, -1, -1);
+        const int refHigh = play_row(0,  9999, -1);
+        const int refEdge = play_row(0,  songcore::POOL_PHRASES - 1, -1);
+        const int shortArr = play_row(0, -1, 3);
+        std::printf("       [info] note-ons per pass — row 0: %d   row 15: %d   ref 9999: %d   "
+                    "ref 255: %d   3-element phraseRefs: %d\n",
+                    atRow0, atRow15, refHigh, refEdge, shortArr);
+
+        ok(atRow0 > 0, "CHAIN-BOUNDS: (control) a chain whose phrase sits on row 0 plays it",
+           "the harness emitted no note at all, so nothing below is measuring the scheduler");
+        // ⭐ The one that could not be true before: playChain leaves nextChainRowToSchedule_ at 16
+        // when it starts on the last row, and the poll that follows read phraseRefs[16].
+        eq(atRow15, atRow0,
+           "⭐⭐ CHAIN-BOUNDS: a chain whose only phrase sits on the LAST row plays exactly as one on "
+           "row 0 — the wrap is the same wrap");
+        eq(refHigh, 0, "CHAIN-BOUNDS: a phrase ref past the end of the pool schedules nothing");
+        // The other direction, so the check above is measuring the pool edge and not "any ref that
+        // is not 7 plays nothing".
+        ok(refEdge > 0, "CHAIN-BOUNDS: ...while the last ref IN the pool still plays",
+           "ref " + std::to_string(songcore::POOL_PHRASES - 1) + " emitted no note, so the bound is "
+           "in the wrong place");
+        eq(shortArr, atRow0,
+           "CHAIN-BOUNDS: a chain whose phraseRefs array is shorter than 16 plays the rows it has");
+    }
+
+    // ── 53. A RATE THE REVERB'S DELAY LINES CANNOT HOLD IS REFUSED BEFORE IT IS WRITTEN ─────────
+    //
+    // `setDeviceSampleRate` re-initialises the send and master buses at the device's real rate,
+    // because their coefficients bake it in and the constructor has no device to ask. That makes a
+    // rate ReverbSc cannot hold REACHABLE for the first time: it carves eight delay lines out of one
+    // fixed array, and at 96 kHz the fifth line was written 7,274 floats past the end of it before
+    // its own guard fired.
+    //
+    // ⚠️⚠️ **THE ENGINE IS THE WRONG PLACE TO DRIVE THIS FROM, AND THAT IS THE WHOLE REASON THIS
+    // SECTION LOOKS LIKE IT DOES.** `aux_` is the last member of ReverbSc, but ReverbSc sits inside
+    // the 1.4 MB AudioEngine allocation — so the overrun lands on OTHER MEMBERS OF THE SAME OBJECT.
+    // It is inside the malloc region, so a sanitizer says nothing, the audio still comes out finite,
+    // and the only symptom is engine state quietly zeroed. Driven through `AudioEngine` this section
+    // passed on a tree with the bug in it. A STANDALONE ReverbSc puts `aux_` at the end of its own
+    // allocation, where the overrun is a plain heap-buffer-overflow.
+    //
+    // ⚠️ So **ASan is the instrument here**, and it must be a standalone object: under
+    // `-fsanitize=address` the 96 kHz line aborts on a tree without the fix. The two assertions below
+    // pin the CONTRACT — the ceiling is real and 48 kHz is under it — and are honestly not the
+    // discriminator: a tree with the bug returns the same two numbers, having corrupted memory first.
+    {
+        auto rv = std::make_unique<daisysp::ReverbSc>();
+        const int at48 = rv->Init(48000.0f);
+        const int at96 = rv->Init(96000.0f);
+        std::printf("       [info] ReverbSc::Init — 48000 Hz: %d   96000 Hz: %d   (0 = accepted)\n",
+                    at48, at96);
+
+        eq(at48, 0, "RATE: (control) ReverbSc accepts 48 kHz — its delay lines fit");
+        ok(at96 != 0,
+           "⭐ RATE: ReverbSc REFUSES 96 kHz rather than overrunning its delay-line array",
+           "got " + std::to_string(at96) + ", want non-zero: the rate was accepted, so the fifth "
+           "delay line was written past the end of aux_");
+    }
+
+    // ── 54. A+B ON AN ALREADY-EMPTY CELL DOES NOT DIRTY THE PROJECT ─────────────────────────────
+    //
+    // A chain-ref and a phrase-ref cell report `canDelete` while EMPTY — `cc::chain_ref` hands
+    // `hex_byte` a 0 in place of the -1 sentinel, so `is_empty` is `0 == -1`. That is Kotlin's
+    // behaviour and 90 golden cases in `p3-input.txt` pin it, so the cell stays as it is and the
+    // modules answer honestly instead: `modified` is a before/after comparison rather than "an action
+    // was dispatched".
+    //
+    // ⚠️ This is the escape hatch, not the budget: the failure emits NO signal. Nothing on screen
+    // changes — the cell was empty and stays empty. What changes is the dirty counter, and from there
+    // EXIT asks about unsaved work nobody did and the autosave lands three seconds later, so the next
+    // launch offers RECOVER WORK? for a project that was only looked at.
+    {
+        const auto dirty_after_a_b = [&](ScreenType screen, bool cellEmpty, bool transposeOnEmptyRow) {
+            songcore::SongcoreHost h(nullptr, 44100);   // no engine: a document edit never needed one
+            AppState               st;
+            st.project       = &h.edit_project();
+            st.caps          = PlatformCaps::sdl(true);
+            st.currentScreen = screen;
+            InputDispatcher d(st, h, fs_impl);
+
+            if (screen == ScreenType::SONG) {
+                st.cursorColumn = 1;   // on SONG the column IS the track, 1-based
+                st.cursorRow    = 0;
+                // ⚠️ `chainRefs` starts EMPTY (`mutableListOf()`), and a row past the end never
+                // reaches the DELETE arm at all — so the empty case must be a row that EXISTS and
+                // holds -1, or it passes by construction without the write ever being attempted.
+                h.edit_project().tracks[0].chainRefs.assign(1, cellEmpty ? -1 : 0x05);
+            } else {
+                st.currentChain   = 0;
+                st.cursorRow      = 0;
+                st.cursorColumn   = 1;
+                if (!cellEmpty) h.edit_project().chains[0].phraseRefs[0] = 0x05;
+                // An empty row CAN carry a transpose — column 2 writes it without touching the ref —
+                // and DELETE clears both, so there the press really does change something.
+                if (transposeOnEmptyRow) h.edit_project().chains[0].transposeValues[0] = 0x7F;
+            }
+
+            const int before = st.projectVersion;
+            d.on_a_b();
+            return st.projectVersion != before;
+        };
+
+        const bool songEmpty  = dirty_after_a_b(ScreenType::SONG,  /*cellEmpty=*/true,  false);
+        const bool songFilled = dirty_after_a_b(ScreenType::SONG,  /*cellEmpty=*/false, false);
+        const bool chainEmpty = dirty_after_a_b(ScreenType::CHAIN, /*cellEmpty=*/true,  false);
+        const bool chainFille = dirty_after_a_b(ScreenType::CHAIN, /*cellEmpty=*/false, false);
+        const bool chainTrans = dirty_after_a_b(ScreenType::CHAIN, /*cellEmpty=*/true,  true);
+        std::printf("       [info] A+B dirties the project? SONG empty:%d filled:%d   "
+                    "CHAIN empty:%d filled:%d empty-with-transpose:%d\n",
+                    songEmpty, songFilled, chainEmpty, chainFille, chainTrans);
+
+        // The enabled half of the gate, in both screens: without these two, "nothing got dirty" would
+        // pass on a rig where A+B reaches nothing at all.
+        ok(songFilled, "DIRTY: (control) A+B on a FILLED song cell dirties the project",
+           "the delete did not register, so the two checks below are measuring a dead gesture");
+        ok(chainFille, "DIRTY: (control) A+B on a FILLED chain row dirties the project",
+           "the delete did not register, so the check below is measuring a dead gesture");
+        // ⭐ The pair that could not be true before.
+        ok(!songEmpty, "⭐⭐ DIRTY: A+B on an ALREADY EMPTY song cell leaves the project clean",
+           "writing -1 over -1 counted as an edit: EXIT will ask about unsaved work and the autosave "
+           "will arm, so the next launch offers RECOVER WORK? for work nobody did");
+        ok(!chainEmpty, "⭐ DIRTY: ...and the same on an empty chain row",
+           "writing -1 over -1 counted as an edit on the CHAIN screen");
+        // Fails for a reason none of the others would: the ref is empty both sides, and only the
+        // TRANSPOSE moved — so a before/after that watched the ref alone would call this clean.
+        ok(chainTrans,
+           "DIRTY: an empty chain row that carried a TRANSPOSE is dirtied — DELETE clears that too",
+           "the transpose was cleared and the project stayed clean, so the comparison is watching "
+           "the phrase ref alone");
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

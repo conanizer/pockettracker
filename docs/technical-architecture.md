@@ -53,10 +53,12 @@ filesystem root — and nothing else.
 and meters. Every screen module takes plain pointers, and a null pointer draws silence — which is
 what lets a headless tool render any screen with no engine in the process.
 
-**Android has no Kotlin UI.** `app/src/main/java` is a six-file shim: `MainActivity` (an
+**Android has no Kotlin UI.** `app/src/main/java` is a seven-file shim: `MainActivity` (an
 `SDLActivity` subclass that owns the splash, permissions and settings import), the virtual button
-skin's sound and haptic managers, and the two MIDI device managers. Everything a user sees is drawn
-by `pt-ui` into a software framebuffer.
+skin's sound and haptic managers, the two MIDI device managers, `PadClassifier` (decides whether an
+attached device is a real controller, which picks the touch UI or the full layout), and
+`VirtualButton` (the enum whose ordinals the JNI feedback call passes, mirroring `ui/buttons.h`).
+Everything a user sees is drawn by `pt-ui` into a software framebuffer.
 
 ---
 
@@ -132,9 +134,10 @@ shell/                             The only SDL in the tree
 ├── portmaster/                    Launch script and PortMaster metadata
 └── build-linux.sh, build-windows.ps1, build-portmaster.sh, Dockerfile.portmaster
 
-app/                               Android: manifest, resources, and a six-file Kotlin shim
+app/                               Android: manifest, resources, and a seven-file Kotlin shim
 tools/                             Conformance tools — see below
-testdata/                          Golden projects, traces, unit corpora, synthesized media
+└── testdata/                      Golden projects, traces, unit corpora, synthesized media
+docs/                              The manual, this document, and the licence notices
 ```
 
 ---

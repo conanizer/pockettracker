@@ -13,6 +13,7 @@ static const int HOP_SIZE = 256;
 
 int AudioEngine::detectTransients(int id, int sensitivity, int* outMarkers, int maxMarkers) {
     if (id < 0 || id >= 256 || !samples[id] || maxMarkers <= 0) return 0;
+    setFlushToZeroForCurrentThread();   // an FFT per hop, on the UI thread — see the declaration
 
     const int length = sampleLengths[id];
     if (length < FFT_SIZE) return 0;

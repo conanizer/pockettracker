@@ -22,7 +22,10 @@ struct MasterChain {
     int   masterFx  = 0;
     float dustDepth = 0.f;
 
-    void reset(float sampleRate = 44100.0f) {
+    // ⚠️ No default rate. Every module below bakes it into its coefficients, so a reset that can be
+    // called without one is a reset that can be silently wrong — which is how the buses spent the
+    // whole of live playback at 44100 on a 48 kHz device.
+    void reset(float sampleRate) {
         ott.reset(sampleRate);
         dust.prepare(sampleRate, 512, 2);
         dust.reset();

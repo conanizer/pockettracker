@@ -17,7 +17,7 @@ songcore migration, and this tool closes it.
 
 `app/src/test/.../trace/S5ConsumerGoldenTest.kt` drives the **real** Kotlin `AudioEngine.scheduleNote`
 over a matrix of instruments and seam arguments, with a backend that records the exact engine calls it
-produces, into `testdata/units/s5-consumer.txt` — floats as raw binary32 bits, so nothing passes by
+produces, into `tools/testdata/units/s5-consumer.txt` — floats as raw binary32 bits, so nothing passes by
 being merely close.
 
 ptvoice re-parses each case's inputs, runs them through the C++ note path
@@ -58,11 +58,11 @@ ctest --test-dir tools/build --output-on-failure -C Release
 
 This tool alone is the **`s5-consumer`** test — `ctest --test-dir tools/build -R s5-consumer
 --output-on-failure` — or invoke the built binary directly with the golden file as `argv[1]`
-(`ptvoice testdata/units/s5-consumer.txt`).
+(`ptvoice tools/testdata/units/s5-consumer.txt`).
 
 Exit 0 = all green, 1 = any mismatch; a failure prints the Kotlin line and the C++ line side by side.
 
-Regenerate the golden after an intentional Kotlin change: delete `testdata/units/s5-consumer.txt`,
+Regenerate the golden after an intentional Kotlin change: delete `tools/testdata/units/s5-consumer.txt`,
 run `gradlew :app:testDebugUnitTest`, re-run ptvoice.
 
 ## What it does NOT cover

@@ -75,7 +75,7 @@ int Skin::load(SDL_Renderer* renderer, const std::string& theme, bool log) {
         if (log) std::printf("skin:    %-28s %dx%d ok\n", kFilenames[i], img.width, img.height);
     }
 
-    if (log) std::printf("skin:    theme '%s' — %d/%d pieces loaded\n", theme.c_str(), count_,
+    if (log) std::printf("skin:    theme '%s' - %d/%d pieces loaded\n", theme.c_str(), count_,
                          static_cast<int>(SkinPiece::COUNT));
     return count_;
 }

@@ -9,7 +9,7 @@
 #
 # i.e. the port does not start at all, and the log says nothing a user could act on. The failure
 # arrives one clone later than the mistake, on someone else's machine, which is what makes it worth
-# a file. (Same rule and same reasoning as testdata/.gitattributes and native/songcore's: EOL
+# a file. (Same rule and same reasoning as tools/testdata/.gitattributes and native/songcore's: EOL
 # conversion follows the ARTIFACT, not the directory.)
 *.sh text eol=lf
 

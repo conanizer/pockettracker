@@ -40,6 +40,27 @@ inline void appendBlock(const float* interleaved, int frames, int channels,
     }
 }
 
+// Reserve the finished length before decoding, so a decode is ONE allocation per channel instead of a
+// geometric growth series. It matters more than it looks: at every regrow the old and new buffers are
+// both live, so the L channel alone peaks near 3x its final size — on top of the 2x the sample slot
+// already costs when loadSampleStereo copies these out (audio-engine.cpp documents that 2x and accepts
+// it; the growth churn is a third copy nobody costed).
+//
+// `frames <= 0` means the container did not say, and growth takes over exactly as before.
+//
+// ⚠️ THE CAP IS NOT A LENGTH LIMIT ON SAMPLES — nothing here refuses to decode a longer file, and the
+// vector grows past it normally. It bounds what a *header* can make us allocate before a single byte
+// of audio is decoded: FLAC's frame count is a 36-bit field, so a corrupt-but-parseable header can ask
+// for hundreds of GB and turn a file that loads today into an uncaught bad_alloc. 30M frames is ~10
+// minutes of 48 kHz stereo — already past what a 512 MB handheld can hold resident.
+inline void reserveOutput(int64_t frames, int channels, std::vector<float>& L, std::vector<float>& R) {
+    constexpr int64_t kMaxReserveFrames = 30'000'000;
+    if (frames <= 0) return;
+    const size_t n = static_cast<size_t>(frames < kMaxReserveFrames ? frames : kMaxReserveFrames);
+    L.reserve(n);
+    if (channels >= 2) R.reserve(n);
+}
+
 // minimp4 reads the container sequentially through this callback. We hand it the whole file already in
 // memory (a sample is a few MB), so the "read" is a bounds-checked memcpy. Return 0 on success, non-zero
 // on failure — the convention minimp4 checks (`if (read_callback(...)) error`).
@@ -62,6 +83,10 @@ bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float
     sampleRate = (int)mp3.sampleRate;
     if (channels < 1) { drmp3_uninit(&mp3); return false; }
 
+    // DRMP3_UINT64_MAX means "no Xing/LAME header, length unknown" — reserveOutput ignores it.
+    if (mp3.totalPCMFrameCount != DRMP3_UINT64_MAX)
+        reserveOutput((int64_t)mp3.totalPCMFrameCount, channels, outL, outR);
+
     const drmp3_uint64 CHUNK = 8192;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
     drmp3_uint64 got;
@@ -81,6 +106,8 @@ bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<floa
     const int channels = (int)flac->channels;
     sampleRate = (int)flac->sampleRate;
     if (channels < 1) { drflac_close(flac); return false; }
+
+    reserveOutput((int64_t)flac->totalPCMFrameCount, channels, outL, outR);
 
     const drflac_uint64 CHUNK = 8192;
     std::vector<float> block((size_t)CHUNK * channels);
@@ -107,6 +134,9 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
     sampleRate = (int)info.sample_rate;
     if (channels < 1) { stb_vorbis_close(v); return false; }
 
+    // 0 when the stream length is not derivable (stb_vorbis returns 0 rather than an error).
+    reserveOutput((int64_t)stb_vorbis_stream_length_in_samples(v), channels, outL, outR);
+
     const int CHUNK = 4096;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
     int got;
@@ -128,6 +158,9 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     const int channels = op_channel_count(of, -1);
     sampleRate = 48000;  // Opus always decodes at 48 kHz regardless of the original rate
     if (channels < 1) { op_free(of); return false; }
+
+    // Negative on error, or for a link-index total the stream cannot give — reserveOutput ignores it.
+    reserveOutput((int64_t)op_pcm_total(of, -1), channels, outL, outR);
 
     // op_read_float wants room for >= 120 ms/channel (5760 frames at 48 kHz); use a generous chunk.
     const int CHUNK = 11520;  // frames
@@ -234,6 +267,14 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
         const bool  keepStereo = declaredCh >= 2 && stride >= 2;
         const int   frames     = (int)(fi.samples / (unsigned)stride);
         const float* p         = (const float*)pcm;
+
+        // Reserve on the FIRST decoded packet rather than up front, because the container gives a
+        // packet count and not an output length: an AAC packet is 1024 frames, or 2048 once SBR
+        // doubles it, and only a decoded frame says which this stream is. Every later packet is the
+        // same size, so `sample_count x this one` is the whole file. Also the earliest point the L/R
+        // decision (keepStereo) is known.
+        if (outL.empty())
+            reserveOutput((int64_t)tr->sample_count * frames, keepStereo ? 2 : 1, outL, outR);
         for (int i = 0; i < frames; i++) {
             outL.push_back(p[(size_t)i * stride]);            // ch0 → L (a mono duplicate's ch0 == ch1)
             if (keepStereo) outR.push_back(p[(size_t)i * stride + 1]);  // ch1 → R only for real stereo

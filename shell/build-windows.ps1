@@ -101,7 +101,8 @@ Copy-Item (Join-Path $PSScriptRoot 'windows\README.txt') (Join-Path $app 'README
 # breach in the artifact, which is the only thing a user ever receives.
 $lic = Join-Path $app 'licenses'
 Copy-Item (Join-Path $repo 'LICENSE')                                    (Join-Path $lic 'LICENSE')
-Copy-Item (Join-Path $repo 'licenses\THIRD-PARTY-NOTICES.md')            $lic
+Copy-Item (Join-Path $repo 'docs\licenses\THIRD-PARTY-NOTICES.md')       $lic
+Copy-Item (Join-Path $repo 'CREDITS.md')                                 (Join-Path $lic 'CREDITS.md')
 Copy-Item (Join-Path $repo 'native\vendor\ogg\COPYING')                  (Join-Path $lic 'libogg-COPYING')
 Copy-Item (Join-Path $repo 'native\vendor\opus\COPYING')                 (Join-Path $lic 'libopus-COPYING')
 Copy-Item (Join-Path $repo 'native\vendor\opus\LICENSE_PLEASE_READ.txt') (Join-Path $lic 'libopus-LICENSE_PLEASE_READ.txt')
@@ -111,7 +112,7 @@ Copy-Item (Join-Path $repo 'native\vendor\opus\LICENSE_PLEASE_READ.txt') (Join-P
 # not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
 # desktop build, the OFL's "must accompany the font" clause is already satisfied rather than newly
 # breached.
-Copy-Item (Join-Path $repo 'licenses\OFL-1.1-LinuxBiolinum.txt')         (Join-Path $lic 'OFL-1.1-LinuxBiolinum.txt')
+Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-LinuxBiolinum.txt')    (Join-Path $lic 'OFL-1.1-LinuxBiolinum.txt')
 
 # ⚠️ SDL's licence comes out of the SOURCE THAT WAS ACTUALLY COMPILED, not from a copy kept in this
 # repo. FetchContent put it in the build tree, so the licence that ships is the licence of the code
@@ -277,6 +278,7 @@ try {
                           'PocketTracker/README.txt',
                           'PocketTracker/licenses/LICENSE',
                           'PocketTracker/licenses/THIRD-PARTY-NOTICES.md',
+                          'PocketTracker/licenses/CREDITS.md',
                           'PocketTracker/licenses/SDL2-LICENSE.txt',
                           'PocketTracker/licenses/libogg-COPYING',
                           'PocketTracker/licenses/libopus-COPYING',

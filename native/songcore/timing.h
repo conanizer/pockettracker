@@ -46,10 +46,12 @@ inline int byte_to_signed_semitones(int b) {
     return v < 0x80 ? v : v - 256;
 }
 
-// Chain per-row transpose (Chain.getTransposeSemitones(index)); index assumed 0..15, as the callers
-// guarantee.
+// Chain per-row transpose (Chain.getTransposeSemitones(index)). Out-of-range rows transpose by
+// nothing: `transposeValues` is the same shape as `phraseRefs` and is parsed the same way, so it can
+// be shorter than CHAIN_ROWS in a hand-edited or half-written file. See `chain_phrase_ref`.
 inline int chain_transpose_semitones(const Chain& chain, int index) {
-    return byte_to_signed_semitones(chain.transposeValues[index]);
+    if (index < 0 || index >= static_cast<int>(chain.transposeValues.size())) return 0;
+    return byte_to_signed_semitones(chain.transposeValues[static_cast<size_t>(index)]);
 }
 
 // Project-wide transpose (Project.getTransposeSemitones()).

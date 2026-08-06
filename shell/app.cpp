@@ -370,7 +370,7 @@ int run(const AppConfig& cfg) {
     const char* inputTrace = SDL_getenv("POCKETTRACKER_INPUT_TRACE");
     if (inputTrace && inputTrace[0] == '1') {
         input.set_trace(true);
-        std::printf("input:   TRACE ON — every event prints, with what it mapped to (or did not)\n");
+        std::printf("input:   TRACE ON - every event prints, with what it mapped to (or did not)\n");
     }
 
     input.open_controllers();
@@ -458,8 +458,19 @@ int run(const AppConfig& cfg) {
     // ── settings.json ────────────────────────────────────────────────────────────────────────────
     // SharedPreferences, as a file. No file = first launch = the factory settings, which is not an
     // error and gets no complaint.
-    if (ui::load_settings(filesystem, state.settings, state.theme))
+    //
+    // ⚠️ But `load_settings` returns the same `false` for "no file" and "the file is there and would
+    // not read or would not parse", and the second one silently DISCARDS the user's settings — the
+    // quit-time save then writes the defaults over what was there. Asking the filesystem separately
+    // is what tells the two apart, so the one case worth a complaint gets one.
+    if (ui::load_settings(filesystem, state.settings, state.theme)) {
         std::printf("settings: %s\n", filesystem.settings_path().c_str());
+    } else if (filesystem.file_exists(filesystem.settings_path())) {
+        std::fprintf(stderr,
+                     "warning: %s exists but could not be read or parsed - starting on the factory "
+                     "settings, and they will be saved over it at quit\n",
+                     filesystem.settings_path().c_str());
+    }
 
     // ── config.json — the hand-edited configuration file ──────────────────────────────────────────
     //

@@ -124,7 +124,7 @@ oboe::DataCallbackResult OboeAudioEngine::onAudioReady(
         void* audioData,
         int32_t numFrames) {
     // Pure Oboe glue: forward the device buffer to the portable core. All DSP, the offline-render
-    // gate, chunking to MAX_BLOCK, and the visualizer/peak capture live in processLiveBlock.
+    // gate, chunking to PROCESS_SUBBLOCK, and the visualizer/peak capture live in processLiveBlock.
     core->processLiveBlock(static_cast<float*>(audioData), numFrames,
                            audioStream->getChannelCount(),
                            (float)audioStream->getSampleRate());

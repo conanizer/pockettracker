@@ -3,10 +3,15 @@
 
 // ─── .ptp / .pti reader + writer + migrate/normalize ────────────────────────────────────────────
 //
-// The C++ twin of FileController.kt's project I/O. Reads with nlohmann/json (tolerant of unknown
-// keys, like kotlinx ignoreUnknownKeys=true); writes with a hand-rolled emitter that reproduces
-// kotlinx.serialization's pretty-print output BYTE-FOR-BYTE so a project saved by either side is
-// identical (Linux-port plan §4.4). Proven by tools/ptroundtrip against /testdata/*.ptp.
+// Reads with nlohmann/json (tolerant of unknown keys); writes with a hand-rolled emitter that
+// reproduces kotlinx.serialization's pretty-print output BYTE-FOR-BYTE. Proven by tools/ptroundtrip
+// against tools/testdata/*.ptp.
+//
+// ⚠️ WHY BYTE-EXACT, now that this is the only writer there is: every .ptp a user already has was
+// written to this layout, and the goldens are byte-compared against it. Loosening the emitter does not
+// break a READER — nlohmann is whitespace-agnostic and every existing project would still load — but
+// it moves nine goldens and turns ptroundtrip's byte-identity into a structural compare. That is a
+// deliberate format decision, not a cleanup, and it is not free.
 //
 // The kotlinx output contract we replicate (verified against the golden .ptp files, 2026-07):
 //   * Json { prettyPrint = true; ignoreUnknownKeys = true }  → encodeDefaults defaults to FALSE.
@@ -106,6 +111,14 @@ inline Chain parse_chain(const json& j, int index) {
     Chain c(get_int(j, "id", index));
     c.phraseRefs      = parse_int_array(j, "phraseRefs",      c.phraseRefs);
     c.transposeValues = parse_int_array(j, "transposeValues", c.transposeValues);
+    // ⚠️ A chain has exactly CHAIN_ROWS rows, and the CHAIN editor indexes both arrays directly with
+    // a cursor row. `parse_int_array` returns whatever length the JSON held, and `normalize_project`
+    // repairs pool sizes rather than the arrays inside a Chain — so a hand-edited or half-written
+    // file could hand the editor a three-element array. Brought back to shape here, at the one place
+    // a Chain enters the program. (The scheduler does not rely on this: `chain_phrase_ref` bounds
+    // itself, because a Chain also reaches it from a test fixture that never parsed anything.)
+    c.phraseRefs.resize(CHAIN_ROWS, -1);
+    c.transposeValues.resize(CHAIN_ROWS, 0);
     return c;
 }
 

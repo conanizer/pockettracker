@@ -21,7 +21,12 @@ endif()
 # ─── Vendored Opus decode stack (libogg + libopus + opusfile) ──────────────────────────────────
 # Native Opus decoding so .opus / Opus-in-Ogg samples don't depend on the device's MediaCodec, which
 # is broken or absent for Opus on several target ROMs (LineageOS + GammaOS both failed). Decode-only
-# in practice — the linker drops the unused encoder via --gc-sections. libogg/libopus build through
+# in practice, and free: nothing references a symbol `opus_encoder.o` defines, so the linker never
+# pulls that member out of the archive at all. ⚠️ This is archive member SELECTION, not --gc-sections
+# — it needs no flags and happens on every toolchain, which is why the encoder is absent from the
+# desktop binary too (`opus_encode`: 0 symbols there). --gc-sections is a separate and much larger
+# win over the objects that WERE linked; shell/CMakeLists.txt measures it.
+# libogg/libopus build through
 # their own CMake (static, no programs/tests, float). opusfile has no CMake of its own, so it's built
 # here from just its file-decode sources: no http.c (no OpenSSL) and no config.h (HTTP compiles out).
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -328,15 +333,9 @@ endif()
 # deleting it is the convergence.
 #
 # ✅ **C3 GAVE THIS ARCHIVE A LINKER** — `pockettracker-sdl` at the bottom of this file. Android now
-# COMPILES pt-ui *and* SHIPS it, inside that .so. The C2-era warning below is kept because it is
-# still true of the mechanism and is the reason the CI check exists, but the specific claim it opens
-# with ("nothing links this archive") is no longer the state of the tree.
+# COMPILES pt-ui *and* SHIPS it, inside that .so.
 #
-# ⚠️ The shipped app still draws its screens in Compose: the SDL activity is debug-only through
-# phases C and D, because the moment the app becomes an SDLActivity, touch stops working and touch is
-# Phase D. Two activities, one APK, deliberately — see the pockettracker-sdl block.
-#
-# ⚠️⚠️ BUT `assembleDebug` DOES NOT BUILD THIS TARGET, AND DELETING THE GATE DID NOT MAKE IT.
+# ⚠️⚠️ `assembleDebug` DOES NOT BUILD THIS TARGET, AND NO GATE IS WHAT STOPS IT.
 # Measured, not assumed: with the gate gone, `:app:externalNativeBuildDebug` printed BUILD SUCCESSFUL
 # and "5 actionable tasks: 5 executed" in 29 seconds having compiled pt-ui ZERO times. AGP fills the
 # `{LIST_OF_TARGETS_TO_BUILD}` placeholder in its ninja command with the targets it can PACKAGE — the
@@ -447,14 +446,10 @@ endif()
 # to give the archive a consumer that AGP has to build because it packages the result. That is this
 # `.so`, and pt-ui arrives inside it as an ordinary link-time dependency.
 #
-# ⚠️ **TWO APPS IN ONE APK, DELIBERATELY, FOR THE LENGTH OF PHASES C AND D.** `libpockettracker.so`
-# above keeps the Compose app running through the JNI facade, and this library is the SDL app beside
-# it. The plan requires it: the moment the app becomes an SDLActivity, Compose is gone and touch does
-# not work — and touch is Phase D. Release ships the Compose activity until Phase D is device-proven;
-# this one is debug-only (see the manifest). Phase E deletes the first and this becomes the app.
-#
-# The two never coexist in one process: they are separate activities, each constructing its own
-# engine and its own OboeAudioEngine. Nothing here is a singleton.
+# ⚠️ **THIS LIBRARY IS THE APP**, on every build type — the manifest declares one activity and it is
+# an SDLActivity. `libpockettracker.so` above is the engine alone; it is a real DT_NEEDED of this one,
+# not a second app and not dead weight, which is why it is legitimately older than this after a build
+# that touched only the shell.
 if(ANDROID)
     set(PT_SHELL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../shell")
 

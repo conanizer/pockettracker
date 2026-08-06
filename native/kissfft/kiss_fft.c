@@ -3,7 +3,7 @@
  *  This file is part of KISS FFT - https://github.com/mborgerding/kissfft
  *
  *  SPDX-License-Identifier: BSD-3-Clause
- *  See licenses/THIRD-PARTY-NOTICES.md for the full licence text.
+ *  See docs/licenses/THIRD-PARTY-NOTICES.md for the full licence text.
  */
 
 #include "_kiss_fft_guts.h"

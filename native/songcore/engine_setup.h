@@ -273,7 +273,7 @@ inline std::string resolve_case_insensitive(const std::string& path) {
     return have.string();
 }
 
-// Project media paths are absolute on device, but a portable project (the /testdata goldens, anything
+// Project media paths are absolute on device, but a portable project (the /tools/testdata goldens, anything
 // the Linux build ships) stores them RELATIVE to the project file. Absolute wins; relative resolves
 // against base_dir. Deliberately not <filesystem>: it drags in a separate link library on some
 // toolchains, for a job that is one string concat.

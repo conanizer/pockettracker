@@ -117,10 +117,17 @@ struct SoundfontVoice : public IAudioVoice {
     // ── Audio-thread-only methods (no lock needed) ──────────────────────────
 
     // Trigger a new note. Called from processAudioBlock (audio thread).
-    // noteVol = instrument × phrase volume (from Kotlin).
+    // noteVol = instrument × phrase volume.
     // trkVol  = current track mixer volume (fetched from trackVolumes[] at call site).
     // TSF channel volume = noteVol * trkVol so per-track mixing works on the shared handle.
-    void triggerNote(int slot, int midiNote, int midiVelocity,
+    //
+    // ⚠️ **RETURNS FALSE WHEN THE SLOT'S HANDLE IS GONE, AND THE CALLER MUST HONOUR IT.** Only this
+    // function reads the handle under the slot mutex, so only this function can answer; anything the
+    // caller checked beforehand is a hint that may already be stale. On false NOTHING has been
+    // written — the voice is left exactly as it was, still sounding whatever it was sounding, which
+    // is the point: the eighty lines of chain/envelope/mod setup that follow a trigger belong to the
+    // note that actually started.
+    bool triggerNote(int slot, int midiNote, int midiVelocity,
                      float noteVol, float trkVol, float pan,
                      int bank, int preset, int trackId,
                      int envAtk, int envDec, int envSus, int envRel);

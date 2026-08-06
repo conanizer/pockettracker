@@ -12,11 +12,24 @@
 struct ReverbModule {
     daisysp::ReverbSc reverb;
     EqModule          inputEq;
-    float             sampleRate = 44100.0f;
+    float             sampleRate = 44100.0f;   // the rate the delay lines were actually built at
+
+    // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array and refuses a rate whose lines
+    // will not fit — about 48 kHz is the ceiling. Its refusal leaves three buffer pointers
+    // indeterminate, so the return value is not optional: `Process` would dereference them.
+    //
+    // A device above the ceiling gets a reverb built at the ceiling instead: shorter and brighter
+    // than intended, which is the same compromise the whole engine ran on before the buses learned
+    // the device rate at all, and much better than no reverb. `sampleRate` records what was really
+    // used, so nobody reads it as the device rate.
+    static constexpr float MAX_SUPPORTED_RATE = 48000.0f;
 
     void reset(float sr) {
         sampleRate = sr;
-        reverb.Init(sr);
+        if (reverb.Init(sr) != 0) {
+            sampleRate = MAX_SUPPORTED_RATE;
+            reverb.Init(MAX_SUPPORTED_RATE);
+        }
         reverb.SetFeedback(0x60 / 255.0f);
         reverb.SetLpFreq(200.0f * powf(100.0f, 0x80 / 255.0f));
         inputEq.reset(sr);

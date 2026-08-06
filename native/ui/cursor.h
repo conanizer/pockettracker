@@ -14,6 +14,7 @@
 // The selection machinery (CELL/ROW/SCREEN multi-tap, expand, clipboard) is the other half of
 // InputController and lands with the dispatcher; only the parts a single editable cell needs are here.
 
+#include <algorithm>
 #include <limits>
 #include <string>
 #include <vector>
@@ -514,7 +515,14 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
         case CursorValueType::INSTRUMENT_REF:
         case CursorValueType::TOGGLE_BINARY:
         case CursorValueType::TOGGLE_TERNARY: {
-            const int range = ctx.maxValue - ctx.minValue + 1;
+            // ⚠️ `std::max(1, …)`, or an inverted range makes both loops spin forever with no
+            // output — in the one function EVERY editable cell in the application runs through.
+            // `maxValue < minValue` comes from a factory handed a count of zero
+            // (`toggle_ternary` with an empty list, `index_cycle(…, 0)`, `effect_type(…, 0)`); no
+            // live caller does that today, so this is a trap rather than a bug. It is derived here
+            // rather than guarded at the factories because `enum_cycle` already guards itself and
+            // three siblings do not — the hazard was seen once and answered at one call site.
+            const int range = std::max(1, ctx.maxValue - ctx.minValue + 1);
             int       v     = current + signed_step;
             while (v > ctx.maxValue) v -= range;
             while (v < ctx.minValue) v += range;

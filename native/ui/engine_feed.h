@@ -75,6 +75,10 @@ private:
             eqPolledMs_           = 0;
             return;
         }
+        // The rate goes with the spectrum, not on the 50 ms budget: the response curve is redrawn
+        // from it on any frame, and it is one int.
+        state.eqSampleRate = host.sample_rate();
+
         if (eqPolledMs_ != 0 && now_ms - eqPolledMs_ < EQ_POLL_MS) return;
         eqPolledMs_ = now_ms;
 

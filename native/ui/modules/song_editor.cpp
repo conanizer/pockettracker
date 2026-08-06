@@ -96,6 +96,14 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
         while (static_cast<int>(track.chainRefs.size()) <= cursor_row) track.chainRefs.push_back(-1);
     };
 
+    // A row past the end of the list reads as empty, which is what it is.
+    const auto ref_at_cursor = [&] {
+        return cursor_row < static_cast<int>(track.chainRefs.size())
+                   ? track.chainRefs[static_cast<size_t>(cursor_row)]
+                   : -1;
+    };
+    const int before = ref_at_cursor();
+
     switch (action.type) {
         case ActionType::SET_VALUE:
             grow_to_cursor();
@@ -121,7 +129,15 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
             break;
     }
 
-    r.modified = (action.type != ActionType::NONE);
+    // ⚠️ **`modified` IS A BEFORE/AFTER ANSWER, NOT "AN ACTION WAS DISPATCHED"**, and the difference
+    // is not cosmetic. A chain-ref cell reports `canDelete` even when it is EMPTY: `cc::chain_ref`
+    // hands `hex_byte` a 0 in place of the -1 sentinel, so `is_empty` is computed as `0 == -1`. That
+    // is Kotlin's behaviour and the golden pins it in 90 cases, so it is the cell that stays and this
+    // that changes. A+B on an empty cell therefore dispatches DELETE and writes -1 over -1 — and
+    // derived from the action's TYPE that read as an edit, bumping the dirty counter: EXIT then asks
+    // about unsaved work nobody did, and three seconds later the autosave lands, so the next launch
+    // offers RECOVER WORK? for a project the user only looked at.
+    r.modified = (ref_at_cursor() != before);
     return r;
 }
 

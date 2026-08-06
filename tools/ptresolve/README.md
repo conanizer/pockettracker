@@ -9,12 +9,12 @@ Phase 1 **S3** (`linux-port-plan.md` §4.3):
   duration composition).
 - `native/songcore/effects.h` — `resolveStepParams` + the `ResolvedStepParams` bundle + the `FX_*`
   codes.
-- `native/songcore/traversal.h` — `collectUsedInstruments` (loads the real `/testdata` `.ptp`
+- `native/songcore/traversal.h` — `collectUsedInstruments` (loads the real `/tools/testdata` `.ptp`
   projects through the S2 reader).
 
 ## How it proves parity
 
-The JVM `S3UnitGoldenTest` emits `testdata/units/s3-units.txt` from the **real Kotlin functions** —
+The JVM `S3UnitGoldenTest` emits `tools/testdata/units/s3-units.txt` from the **real Kotlin functions** —
 one `<inputs> => <outputs>` line per case (a matrix of tempos/sample-rates, grooves, transpose
 bytes, an FX sweep over every resolvable effect, multi-slot last-wins cases, and
 `collectUsedInstruments` over the golden projects). ptresolve re-parses each line's **inputs**,
@@ -41,6 +41,6 @@ ctest --test-dir tools/build --output-on-failure -C Release
 
 This tool alone is the **`s3-pure-units`** test — `ctest --test-dir tools/build -R s3-pure-units
 --output-on-failure` — or invoke the built binary directly with the goldens directory as `argv[1]`
-(`ptresolve testdata`).
+(`ptresolve tools/testdata`).
 
 Exit code `0` = all green, `1` = any mismatch. Expected output ends in `ALL GREEN`.

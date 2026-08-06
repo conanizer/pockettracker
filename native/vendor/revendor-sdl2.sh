@@ -91,7 +91,7 @@ cp -a "$WORK/src/cmake"   "$DEST/cmake"
 #
 # The first eight are the templates CMakeLists.txt configure_file()s — a missing one is a configure
 # error even though nothing installs from this tree. The last four are licence and provenance:
-# LICENSE.txt is the zlib text licenses/THIRD-PARTY-NOTICES.md points at, and the other three are
+# LICENSE.txt is the zlib text docs/licenses/THIRD-PARTY-NOTICES.md points at, and the other three are
 # how a reader finds out what this directory is without leaving the repo.
 SDL_TOP_FILES="
 CMakeLists.txt
@@ -130,7 +130,7 @@ cp -a "$WORK/src/android-project/app/src/main/java/org/libsdl/app/." \
 
 # ⚠️ Verbatim bytes, no EOL conversion. This repo runs core.autocrlf=true, which would rewrite every
 # line ending on checkout and make "is the vendored copy still upstream's?" unanswerable on Windows.
-# Same rule and same reason as native/songcore/.gitattributes and testdata/.gitattributes: a tree
+# Same rule and same reason as native/songcore/.gitattributes and tools/testdata/.gitattributes: a tree
 # that is byte-compared must never be EOL-converted. The comparison this protects is at the bottom
 # of this script, and it is the only thing standing between a corrupted vendor drop and a build that
 # looks fine until it does not.
@@ -153,7 +153,7 @@ script with a new tag; to change what is copied, edit the script.
 | upstream | https://github.com/libsdl-org/SDL |
 | tag | \`$TAG\` |
 | commit | \`$SDL_COMMIT\` |
-| licence | zlib — \`LICENSE.txt\`, and \`licenses/THIRD-PARTY-NOTICES.md\` at the repo root |
+| licence | zlib — \`LICENSE.txt\`, and \`docs/licenses/THIRD-PARTY-NOTICES.md\` |
 
 ## Why this exists at all
 
@@ -248,5 +248,5 @@ echo "  Java android/.../SDLActivity.java          -> $J_VER"
 [ "$C_VER" = "$J_VER" ] || { echo "FAIL: C/Java version mismatch in a single upstream checkout - that should be impossible"; exit 1; }
 echo "  tree verified byte-identical to upstream (minus the documented prunes)"
 echo
-echo "next: update the SDL2 section of licenses/THIRD-PARTY-NOTICES.md if the version changed,"
+echo "next: update the SDL2 section of docs/licenses/THIRD-PARTY-NOTICES.md if the version changed,"
 echo "      then rebuild the APK and check libSDL2.so is in it."

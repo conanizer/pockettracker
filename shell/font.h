@@ -65,8 +65,11 @@ public:
      */
     void draw_text(const std::string& text, int x_left, int y_top, float px, uint32_t rgb);
 
-    /** Total advance width of `text` at `px`, for a caller that wants to centre rather than offset. */
-    int measure(const std::string& text, float px) const;
+    // ⚠️ There is deliberately NO measure()/text-width helper here. The one that existed rasterized
+    // every glyph through Rasterizer::glyph() — the full stbtt_MakeGlyphBitmap path, bypassing the
+    // cache glyph_tex() uses — to compute an advance it then threw away, so calling it per frame to
+    // centre a label would rasterize the whole string per frame. If a caller needs a width, add one
+    // that sums glyph_tex(...).advance and inherits the cache.
 
     /** The baseline drop below the text top at `px` — a Compose `Text` places its first baseline here. */
     int ascent_px(float px) const { return rast_.ascent_px(px); }

@@ -11,10 +11,10 @@
 //
 // ── SCOPE: every screen the app has ──────────────────────────────────────────────────────────────
 //
-// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), MIXER, EFFECTS (S5), the FILE
-// BROWSER with the QWERTY KEYBOARD overlay behind it (S6a), the SAMPLE EDITOR (S6b), PROJECT and
-// SETTINGS with the confirm dialog (S7) — and, since S8, the EQ EDITOR overlay behind all five of the
-// EQ cells. Nothing in the Kotlin dispatcher is now unported except the THEME editor.
+// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS, MIXER, EFFECTS, the FILE BROWSER
+// with the QWERTY KEYBOARD overlay behind it, the SAMPLE EDITOR, PROJECT and SETTINGS with the confirm
+// dialog, the EQ EDITOR overlay behind all five EQ cells, the MIDI screen, and the THEME editor.
+// Every screen the app has is dispatched from here; there is no second input path.
 //
 // ── ⚠️ THE MODAL RULE, which arrives with S6a and grows a third member in S8 ─────────────────────
 //
@@ -576,17 +576,10 @@ class InputDispatcher {
     bool on_globals_screen() const;
 
     /**
-     * INSTRUMENT row 0: A+UP/DOWN toggles SAMPLER↔SOUNDFONT.
+     * INSTRUMENT row 0, A+UP/DOWN on the TYPE cell: switch outright if the slot is EMPTY, else put the
+     * CONFIRM DIALOG in front of it — the toggle drops the loaded source, since a sampler has no use
+     * for an .sf2 and vice versa.
      *
-     * ⚠️ Kotlin puts a CONFIRM DIALOG in front of this whenever a source is already loaded, because the
-     * toggle DROPS that source (a sampler has no use for an .sf2 and vice versa). There is no dialog
-     * system in the port yet, so the guard is enforced the only other way that is honest: the toggle is
-     * REFUSED on a slot that has a source, with a status message saying so. Clear the slot (A+B in the
-     * pool) and it toggles. That is stricter than Android, never destructive, and it lands its proper
-     * confirm dialog with the rest of the modal system.
-     */
-    /**
-     * A+UP/DOWN on the TYPE cell: switch outright if the slot is empty, else ASK (S7's dialog).
      * `delta` is the direction — +1 for A+UP, −1 for A+DOWN — and it rides through the dialog in
      * `ConfirmDialogState::arg`, because with three types the two buttons no longer mean the same.
      */
@@ -626,14 +619,16 @@ class InputDispatcher {
      * even the keyboard — so it is checked FIRST, ahead of the keyboard and the browser both, and it
      * is the one guard that simply RETURNS rather than redirecting.
      *
-     * ⚠️ The check appears at the top of all 28 handlers, and the exceptions are exactly three:
+     * ⚠️ The check appears at the top of every handler but three, and the exceptions are exactly
      * `on_button_a` and `on_button_b`, which ARE the answer, and `on_stop_preview`, which silences a
      * ringing audition (a dialog raised over an INSTRUMENT audition must not leave the note hanging —
      * and silencing a note is not an edit). ptdispatch asserts the rest: with a confirm up, every
-     * other button is inert. That assertion is the real guarantee here, not the code shape — Kotlin's
-     * own comment on this predicate warns that "every new show*Dialog-style modal state MUST be added"
-     * to it, and a rule that has to be remembered 28 times is a rule that will eventually be forgotten
-     * once.
+     * other button is inert. **That assertion is the real guarantee here, not the code shape** —
+     * Kotlin's own comment on this predicate warns that "every new show*Dialog-style modal state MUST
+     * be added" to it, and a rule that has to be remembered at every new handler is a rule that will
+     * eventually be forgotten once. (No count in prose: a number maintained by hand goes stale
+     * silently — this one had said 28 for a while when it was 30 — and the check already holds the
+     * claim that matters.)
      */
     bool confirm_open() const { return s_.confirm.is_open(); }
 

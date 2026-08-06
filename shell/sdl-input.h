@@ -118,8 +118,9 @@ public:
 
     bool is_held(Button b) const { return held_[static_cast<size_t>(b)]; }
 
-    /** Drop all held state and any repeat in flight (window focus loss — a stuck modifier
-     *  silently reroutes every later DPAD press into the wrong combo). Kotlin's `InputMapper.reset()`. */
+    /** Window focus loss: drop any repeat in flight and RELEASE every held button (a stuck modifier
+     *  silently reroutes every later DPAD press into the wrong combo, and a release the consumers
+     *  never see leaves the FX-helper overlay up forever). Kotlin's `InputMapper.reset()`. */
     void reset();
 
     /**

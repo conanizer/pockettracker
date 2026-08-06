@@ -2,7 +2,7 @@
 
 A host tool (no device / NDK) that proves the C++ songcore serializer is **byte-for-byte
 compatible** with the Kotlin `kotlinx.serialization` output. It reads each golden `.ptp` from
-`/testdata`, runs the real load path (`parse → normalize → migrate`), re-serializes, and compares
+`/tools/testdata`, runs the real load path (`parse → normalize → migrate`), re-serializes, and compares
 to the **original bytes**. Any difference is schema drift and is reported with the exact offset +
 context. Also checks the `.pti` (`InstrumentPreset`) reader/writer via write→read→write idempotence.
 
@@ -29,6 +29,6 @@ ctest --test-dir tools/build --output-on-failure -C Release
 
 This tool alone is the **`s2-project-io`** test — `ctest --test-dir tools/build -R s2-project-io
 --output-on-failure` — or invoke the built binary directly with the goldens directory as `argv[1]`
-(`ptroundtrip testdata`).
+(`ptroundtrip tools/testdata`).
 
 Exit code `0` = all green, `1` = any mismatch. Expected output ends in `ALL GREEN`.

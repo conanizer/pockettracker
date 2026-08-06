@@ -11,7 +11,7 @@
 //
 // The hit-rect LAYOUT's SIZE half is pure arithmetic and was recorded from the real Kotlin —
 // `TouchLayoutMetrics`, which `VirtualControls.kt`'s four composables call — into
-// `testdata/units/touch-layout.txt` during Phase B2, precisely so the port could be checked rather
+// `tools/testdata/units/touch-layout.txt` during Phase B2, precisely so the port could be checked rather
 // than trusted. This mode is the checker:
 //
 //   * B2's TouchLayoutGoldenTest wrote each case's INPUTS and Kotlin's computed OUTPUTS to the golden

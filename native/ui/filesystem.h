@@ -111,17 +111,22 @@ class FileSystem {
 
     // ── The app's own files ──────────────────────────────────────────────────────────────────────
     //
-    // Three files that belong to the APP rather than to the user, and none of them is ever listed by
-    // the browser. S6a left two of them out with the note "they land with PROJECT"; the template did,
-    // and the autosave lands here, with the lifecycle work that gives SETTINGS its RESUME row back.
+    // Files that belong to the APP rather than to the user, and none of them is ever listed by the
+    // browser. Every one is a real path on every platform — there is no SharedPreferences path and no
+    // key-value store behind any of them.
 
     /** The song TEMPLATE: what the app boots into. SETTINGS → TEMPLATE writes and deletes it. */
     virtual std::string template_project_path() = 0;
 
-    /** Where the shell keeps `settings.json`. On Android the answer is SharedPreferences, not a path. */
+    /**
+     * Where the shell keeps `settings.json` — a real file on every platform, Android included, where
+     * it is `<root>/settings.json` under the Documents/PocketTracker root `StdFileSystem` is rooted at.
+     * (`MainActivity.importLegacySettings` writes exactly that file, having migrated the values OUT of
+     * SharedPreferences.)
+     */
     virtual std::string settings_path() = 0;
 
-    /** The user's hand-edited `config.json` (v0.9.4 D2b) — default browse folders, read on debug boot. */
+    /** The user's hand-edited `config.json` — default browse folders, read on debug boot. */
     virtual std::string config_path() = 0;
 
     /**

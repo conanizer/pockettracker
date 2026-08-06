@@ -25,9 +25,14 @@
     -->
     <uses-feature android:name="android.software.midi" android:required="false" />
 
+    <!--
+      No android:largeHeap. It raises the ART heap ceiling, and this app barely uses one: the whole
+      Java heap is the 32 UI click clips (3.5 MB) plus a 78 KB dex, while a loaded project with eight
+      tracks of samples is ~99 MB of NATIVE heap — the engine, the decoders and tsf — which largeHeap
+      cannot raise by a byte. Measured on the release build rather than assumed.
+    -->
     <application
         android:allowBackup="true"
-        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

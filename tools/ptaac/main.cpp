@@ -8,7 +8,7 @@
 //
 // ── The independent invariant ──────────────────────────────────────────────────────────────────
 // AAC is LOSSY, so there is no byte-exact golden to compare against — and that is the point of this
-// harness's design. The fixtures under testdata/audio/ were encoded by ffmpeg (an encoder wholly
+// harness's design. The fixtures under tools/testdata/audio/ were encoded by ffmpeg (an encoder wholly
 // independent of FAAD2) from PURE SINE TONES of KNOWN frequency:
 //
 //   * tone_stereo.m4a   L = 440 Hz, R = 660 Hz, 44100 Hz, 2 s, AAC-LC — channels, channel ORDER, rate
@@ -19,8 +19,8 @@
 // at the frequency the tone was BORN with, in the CHANNEL it was born in. That catches the failures
 // that matter — a dead decoder (silence), a channel swap (L/R energy crossed), a wrong sample rate (a
 // shifted detected pitch), and a broken normalization (samples outside [-1,1]). DELETING a fixture is
-// a hard error (exit 2), never a vacuous pass. Regenerate via testdata/audio/make-audio-fixtures.sh
-// and testdata/README.md §6.
+// a hard error (exit 2), never a vacuous pass. Regenerate via tools/testdata/audio/make-audio-fixtures.sh
+// and tools/testdata/README.md §6.
 //
 // Links the engine static lib (decodeMp4File lives in audio-decoders.cpp, which pulls faad2 + minimp4)
 // exactly as ptrender links it.

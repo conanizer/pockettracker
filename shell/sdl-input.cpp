@@ -107,7 +107,7 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
             if (k == SDLK_UNKNOWN) {
                 // ⚠️ Reported, never silently skipped. See the header: the failure mode this prevents
                 // is a user re-reading their own correct-looking JSON for an hour.
-                std::printf("config:   keyboard.%s: \"%s\" is not an SDL key name — skipped\n",
+                std::printf("config:   keyboard.%s: \"%s\" is not an SDL key name - skipped\n",
                             button_name(b), name.c_str());
                 ++skipped;
                 continue;
@@ -228,7 +228,7 @@ void SdlInput::press(Button b, uint64_t now_ms) {
         // A press arriving for a button already down is therefore not noise: on a handheld, where one
         // physical button should produce exactly one press, it means SOMETHING ELSE is pressing too.
         if (trace_) {
-            std::printf("input:              ^ ABSORBED: %s was already held — a SECOND source pressed it\n",
+            std::printf("input:              ^ ABSORBED: %s was already held - a SECOND source pressed it\n",
                         button_name(b));
         }
         return;
@@ -340,6 +340,32 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
             }
             break;
 
+        case SDL_CONTROLLERDEVICEREMOVED: {
+            // ⚠️ **A REMOVED PAD SENDS NO BUTTON-UPS, so every button it had down stays "held"** —
+            // and `mods_now()` reads A, B, L, R and SELECT straight out of `held_`. A wireless pad
+            // going to sleep with L down turns every later D-pad press into a screen change, and on a
+            // fullscreen handheld the only way out is to background the app. `reset()` releases them
+            // properly; it is the same repair focus loss needs, for the same reason.
+            //
+            // ⚠️ And the handle must be CLOSED and dropped, not just forgotten: `controller_count()`
+            // is what `compute_has_pad()` falls back to on every platform but Android, so a list that
+            // only ever grows means the on-screen controls never come back on a touch device — and a
+            // pad unplugged and replugged N times leaks N handles until quit.
+            //
+            // `e.cdevice.which` is an INSTANCE id on removal (a joystick index only on ADDED), so the
+            // handle is found by asking each open controller for its own instance id.
+            for (auto it = controllers_.begin(); it != controllers_.end(); ++it) {
+                SDL_Joystick* js = SDL_GameControllerGetJoystick(*it);
+                if (js && SDL_JoystickInstanceID(js) == e.cdevice.which) {
+                    SDL_GameControllerClose(*it);
+                    controllers_.erase(it);
+                    break;
+                }
+            }
+            reset();
+            break;
+        }
+
         case SDL_WINDOWEVENT:
             // Focus loss eats the KEYUPs, and a modifier that is stuck "held" reroutes every later
             // DPAD press into the wrong combo. Kotlin hit the identical bug through Compose
@@ -376,7 +402,18 @@ bool SdlInput::poll(ButtonEvent& out) {
 }
 
 void SdlInput::reset() {
-    for (bool& h : held_) h = false;
+    // ⚠️ **A HELD BUTTON IS RELEASED, NOT MERELY FORGOTTEN.** A release is not bookkeeping — it is an
+    // event consumers act on, and the FX-helper overlay's ONLY close is `on_a_released()`. Dropping it
+    // leaves a full-screen picker up that B cannot dismiss and that `any_modal_open()` does not cover,
+    // so the D-pad goes on moving the cursor invisibly behind the backdrop and the A press that
+    // finally closes it commits the held effect code into whatever cell the cursor reached. The
+    // mapper's two deferred-single latches discharge on a release too.
+    //
+    // Emitted HERE rather than repaired at each consumer, so a consumer written later gets it for
+    // free — and through `release()` itself, so a synthesised release is indistinguishable from the
+    // key-up that focus loss ate, repeat cancellation included.
+    queue_.clear();   // this frame's presses belong to a window that no longer has focus
+    for (size_t i = 0; i < static_cast<size_t>(Button::COUNT); ++i)
+        if (held_[i]) release(static_cast<Button>(i));
     repeatActive_ = false;
-    queue_.clear();
 }

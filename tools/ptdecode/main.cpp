@@ -6,13 +6,13 @@
 // that the build went green).
 //
 // ── The independent invariant ──────────────────────────────────────────────────────────────────
-// The fixtures under testdata/images/ were produced with GDI+ (System.Drawing) — an encoder wholly
+// The fixtures under tools/testdata/images/ were produced with GDI+ (System.Drawing) — an encoder wholly
 // independent of BOTH stb_image AND ptshot's hand-rolled PNG writer. PNG stores STRAIGHT (non-
 // premultiplied) alpha and stb_image applies no gamma on the 8-bit path, so a decoded pixel equals
 // exactly what the generator drew. The EXPECTED values here are the generator's own formulas,
 // hardcoded — not read back from a golden — so a broken decoder cannot regenerate its way to green,
 // and DELETING a fixture is a hard error (exit 2), never a vacuous pass. How the fixtures were made:
-// testdata/images/make-image-fixtures.ps1 (the generator) and testdata/README.md §4.
+// tools/testdata/images/make-image-fixtures.ps1 (the generator) and tools/testdata/README.md §4.
 //
 //   * rgb_3x2.png     PNG colour type 2 (RGB, no alpha)      — geometry + channel order
 //   * rgba_2x2.png    PNG colour type 6 (RGBA)               — the alpha path, varied alpha

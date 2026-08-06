@@ -229,9 +229,11 @@ class SongcoreHost {
     // changes address, so the Sequencer's pointer into it stays valid even mid-playback (the Kotlin
     // sequencer likewise reads the one live Project object, seeing edits as they land).
     //
-    // Whole-project push, not the §7 per-item diffs: the parser already exists and is proven, and a
-    // wrong diff is a silent desync. The cost (a ~440 KB blob for a full pool) is paid on play and on
-    // edit-while-playing; if that hitches on device, the diff verbs are the documented next step.
+    // Whole-project push, not per-item diffs: the parser already exists and is proven, and a wrong
+    // diff is a silent desync. ⚠️ The cost — ~440 KB of JSON for a full pool, measured at 2.2 MB peak
+    // and 7 ms to parse — is paid only by a caller that pushes a serialized blob. The SDL shell does
+    // not: it edits the live document in place (see edit_project below), so this is the JNI path's
+    // price alone.
     bool push_project(const std::string& blob) {
         // allow_exceptions=false: a malformed blob must leave the previous project intact, not throw
         // across the JNI boundary (and it keeps songcore compilable with exceptions off).
@@ -421,9 +423,24 @@ class SongcoreHost {
     // ⚠️ It also WRITES to the project: a WAV's `cue ` chunk is where its slice boundaries live, and
     // loading the audio is what learns them (S6b). See load_project_media.
     MediaLoadResult load_media(const std::string& baseDir) {
-        if (!engine_) return MediaLoadResult();
-        return load_project_media(*engine_, project_, baseDir, appRoot_, routing_);
+        lastMediaLoad_ = MediaLoadResult();
+        if (!engine_) return lastMediaLoad_;
+        lastMediaLoad_ = load_project_media(*engine_, project_, baseDir, appRoot_, routing_);
+        return lastMediaLoad_;
     }
+
+    /**
+     * What the most recent `load_media` found. Recorded HERE rather than returned by every path that
+     * loads media, because two of them — `load_project_file` and `clean_inst` — do the load as one
+     * step of a fixed sequence and have their own return values; a caller that had to remember to ask
+     * for the count is a caller that will not.
+     *
+     * ⚠️ It matters because a failed sample load is otherwise INVISIBLE on the two platforms with no
+     * console. The instrument simply plays silence. This is also where an out-of-memory sample lands
+     * on a 512 MB device, and it is a handled, non-crashing path — the care is wasted if nobody says
+     * so.
+     */
+    const MediaLoadResult& last_media_load() const { return lastMediaLoad_; }
 
     /**
      * THIS install's app root — the folder Samples/, Soundfonts/… live directly under. The SDL shell
@@ -596,14 +613,14 @@ class SongcoreHost {
         return true;
     }
 
-    /** Serialize the live project to a .ptp. The bytes are kotlinx-exact (project_io.h, S2). */
-    bool save_project_file(const std::string& path) const {
-        const std::string blob = serialize_project(project_);
-        std::ofstream f(path, std::ios::binary | std::ios::trunc);
-        if (!f) return false;
-        f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
-        return f.good();
-    }
+    // ⚠️ **songcore WRITES NO USER FILE, and that is deliberate rather than an omission.** Every
+    // path that saves something a user would miss — the `.ptp`, the autosave, the template, a
+    // `.pti` — goes through `ui::FileSystem::write_file`, which writes a temp and renames it over
+    // the target and checks the close. songcore cannot depend on `ui::FileSystem` (it has to keep
+    // compiling for the NDK, where *where files live* is the host's problem), so the write belongs
+    // one layer up, in `ui/project_actions.cpp` and `ui/lifecycle.cpp`. A truncating `ofstream`
+    // writer sitting here is a trap for the next caller: it destroys the previous file at open time
+    // and cannot report a failure that only surfaces at the flush.
 
     // ── PROJECT screen: NEW, and the two COMPACTs ────────────────────────────────────────────────
     //
@@ -671,16 +688,6 @@ class SongcoreHost {
         if (!load_instrument_soundfont(engine_, project_, id, path, routing_)) return false;
         push_instrument(id);
         return true;
-    }
-
-    /** Write instrument `id` (and its table, if it has content) as a .pti. */
-    bool save_instrument_preset(int id, const std::string& path) const {
-        const InstrumentPreset ip = make_instrument_preset(project_, id);
-        const std::string blob = serialize_instrument_preset(ip);
-        std::ofstream f(path, std::ios::binary | std::ios::trunc);
-        if (!f) return false;
-        f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
-        return f.good();
     }
 
     /**
@@ -1208,6 +1215,7 @@ class SongcoreHost {
 
     AudioEngine* engine_ = nullptr;
     int sampleRate_ = 44100;
+    MediaLoadResult lastMediaLoad_{};   // see last_media_load()
 
     Project project_ = make_default_project();
     std::string projectSha_ = "-";

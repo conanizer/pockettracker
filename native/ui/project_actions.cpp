@@ -12,24 +12,26 @@ namespace pt::ui {
 namespace {
 
 /**
- * ⚠️ **A `.ptp` IS WRITTEN THROUGH THE FileSystem, NOT THROUGH `SongcoreHost::save_project_file`** —
- * and S10 is the session that noticed the two had drifted.
+ * ⚠️ **EVERY FILE A USER WOULD MISS IS WRITTEN THROUGH `FileSystem::write_file`** — the `.ptp` here,
+ * the autosave and the template, and the `.pti` at the bottom of this file.
  *
- * `FileSystem::write_file` writes `<path>.tmp` and renames it over the target. Its own doc comment
- * says why, and it is not hypothetical on the hardware this port is aimed at: *"a device that loses
- * power — or a user who pulls the SD card — mid-save must not be left with a half-written project
- * where the whole one used to be."* Android has done exactly that since the beginning
- * (`AndroidFileSystem.writeFile`), and Kotlin's `FileController.saveProject` goes through it.
+ * `write_file` writes `<path>.tmp`, checks the close, and only then renames it over the target. Its
+ * own doc comment says why, and it is not hypothetical on the hardware this port is aimed at: *"a
+ * device that loses power — or a user who pulls the SD card — mid-save must not be left with a
+ * half-written project where the whole one used to be."*
  *
- * `SongcoreHost::save_project_file` is a plain `ofstream` opened with `trunc`, and it is right for
- * songcore to have one: songcore must keep compiling for the NDK, where *where files live* is scoped
- * storage and Kotlin's problem, so it cannot depend on `ui::FileSystem`. But **pt-ui can**, and since
- * S7 it had been calling the truncating writer anyway — so the port promised atomicity in the
- * interface, inherited it from Android in the implementation, and then quietly opted out of it in the
- * only two places a user's song is ever written.
+ * The alternative a writer reaches for — an `ofstream` opened with `trunc` — fails two ways at once:
+ * it destroys the previous file the moment it opens, and `f.good()` after the last `write` is read
+ * *before* the destructor flushes, so a payload smaller than the stream buffer never reaches the
+ * disk at all and the call still returns true. It belongs to no layer of this app.
  *
- * The failure needs no imagination and no tool could have seen it: every check in the ladder asserts
- * the file LANDS and PARSES, which it does. None of them cuts the power halfway through.
+ * ⚠️ songcore deliberately provides no such writer, and that is why the write lives up here: songcore
+ * must keep compiling for the NDK, where *where files live* is the host's problem, so it cannot
+ * depend on `ui::FileSystem`. **pt-ui can.**
+ *
+ * The failure needs no imagination and no tool in the ladder could have seen it: every check asserts
+ * the file LANDS and PARSES, which it does. None of them cuts the power halfway through, and none
+ * fills the card.
  */
 bool write_project(const songcore::SongcoreHost& host, FileSystem& fs, const std::string& path) {
     return fs.write_file(path, songcore::serialize_project(host.project()));
@@ -161,8 +163,19 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
             if (progress) progress((static_cast<float>(from) + p) / static_cast<float>(total));
         };
 
-        host.render_song_range_to_wav(bounds.startRow, bounds.endRow, path, opts,
-                                      progress ? slice : std::function<void(float)>());
+        const songcore::RenderStats stats =
+            host.render_song_range_to_wav(bounds.startRow, bounds.endRow, path, opts,
+                                          progress ? slice : std::function<void(float)>());
+
+        // ⚠️ Stop at the first pass that fails, and say how many landed. A stems set is one
+        // full-length WAV per active track — the largest write this app makes — so the reason a pass
+        // fails is almost always a card with no room, and every later pass would spend minutes
+        // filling it further before failing too. The count is the useful part: it names how many of
+        // the files now in the folder are complete.
+        if (!stats.ok || stats.totalFrames <= 0)
+            return ActionResult{false, done == 0 ? "STEMS FAILED"
+                                                 : "STEMS: " + std::to_string(done) + " OF " +
+                                                       std::to_string(total)};
         ++done;
     }
 
@@ -247,6 +260,12 @@ int create_resampled_instrument(songcore::SongcoreHost& host, const std::string&
 }
 
 // ─── The song TEMPLATE ───────────────────────────────────────────────────────────────────────────
+
+bool save_instrument_preset(const songcore::SongcoreHost& host, FileSystem& fs, int id,
+                            const std::string& path) {
+    return fs.write_file(path, songcore::serialize_instrument_preset(
+                                   songcore::make_instrument_preset(host.project(), id)));
+}
 
 ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs) {
     if (!write_project(host, fs, fs.template_project_path()))

@@ -8,7 +8,7 @@
 // the project by transport position exactly as the Kotlin scheduler does — grooves, HOP, RPT/ARP
 // grids, LAT, KIL, pitch mods, per-note/mixer FX — and emits the identical event stream through the
 // MidiRouter seam (router.h), which the trace writer serializes for the byte-for-byte conformance
-// check against /testdata/traces (event-schema §6).
+// check against /tools/testdata/traces (event-schema §6).
 //
 // PlaybackController.kt is the executable spec; every method, branch, and float expression here
 // mirrors it, including the historically-crossed velGain/volGain wiring and the intentional groove
@@ -290,7 +290,7 @@ class Sequencer {
         chainRowStartFrames_.clear();
         int firstRow = findNextNonEmptyChainRow(0, chain);
         if (firstRow >= 0) {
-            int phraseId = chain.phraseRefs[firstRow];
+            int phraseId = chain_phrase_ref(chain, firstRow);
             int transposeSemitones = chain_transpose_semitones(chain, firstRow);
             SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_, 0,
                                                     transposeSemitones + project_transpose_semitones(*project_),
@@ -368,7 +368,7 @@ class Sequencer {
                 }
                 int nextRow = findNextNonEmptyChainRow(nextChainRowToSchedule_, chain);
                 if (nextRow >= 0) {
-                    int phraseId = chain.phraseRefs[nextRow];
+                    int phraseId = chain_phrase_ref(chain, nextRow);
                     int transposeSemitones = chain_transpose_semitones(chain, nextRow)
                                              + project_transpose_semitones(project);
                     save_checkpoint(Checkpoint{nextFrameToSchedule_, nextRow});
@@ -422,7 +422,7 @@ class Sequencer {
                             if (chainId >= 0 && chainId < 256) {
                                 const Chain& chain = project.chains[chainId];
                                 if (!chain_is_empty(chain, nextSongChainRowToSchedule_)) {
-                                    int phraseId = chain.phraseRefs[nextSongChainRowToSchedule_];
+                                    int phraseId = chain_phrase_ref(chain, nextSongChainRowToSchedule_);
                                     int transposeSemitones = chain_transpose_semitones(chain, nextSongChainRowToSchedule_)
                                                              + project_transpose_semitones(project);
                                     int hopStartRow = trackState.consumeHopTarget();
@@ -497,9 +497,8 @@ class Sequencer {
                     int chainId = track.chainRefs[songRow];
                     if (chainId < 0 || chainId >= 256) continue;
                     const Chain& chain = project.chains[chainId];
-                    if (chain_is_empty(chain, chainRow)) continue;
-                    int phraseId = chain.phraseRefs[chainRow];
-                    if (phraseId < 0 || phraseId >= 256) continue;
+                    int phraseId = chain_phrase_ref(chain, chainRow);
+                    if (phraseId < 0) continue;
                     int transposeSemitones = chain_transpose_semitones(chain, chainRow)
                                              + project_transpose_semitones(project);
                     int hopStartRow = trackState.consumeHopTarget();
@@ -599,14 +598,21 @@ class Sequencer {
                 c.end());
     }
 
+    // The next row at or after `startRow` that has a phrase in it, wrapping; -1 if the chain is
+    // empty. The result is always a valid row, so `chain_phrase_ref` on it is never -1.
+    //
+    // ⚠️ `startRow` is normalised HERE rather than at the callers, because "a chain row is
+    // 0..CHAIN_ROWS-1" is this function's own rule and two callers already disagreed about it once:
+    // playChain advances past the row it scheduled without a modulo, so a chain whose first phrase
+    // sits on the last row hands this function CHAIN_ROWS. Deriving the wrap here means the next
+    // caller cannot reintroduce it.
     int findNextNonEmptyChainRow(int startRow, const Chain& chain) {
-        int row = startRow;
-        int attempts = 0;
-        while (chain_is_empty(chain, row) && attempts < 16) {
-            row = (row + 1) % 16;
-            attempts++;
+        const int seed = ((startRow % CHAIN_ROWS) + CHAIN_ROWS) % CHAIN_ROWS;
+        for (int i = 0; i < CHAIN_ROWS; ++i) {
+            const int row = (seed + i) % CHAIN_ROWS;
+            if (!chain_is_empty(chain, row)) return row;
         }
-        return attempts >= 16 ? -1 : row;
+        return -1;
     }
 
     // `chain`/`chainRow` are the phrase's place in the chain being played, and they exist for AUS/AUF

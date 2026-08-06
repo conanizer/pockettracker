@@ -40,7 +40,10 @@ import java.util.concurrent.Executors
  *
  * Adding more variants (just drop more files) is automatically picked up.
  * Up to 10 variants per event type are scanned. 16-, 24- and 32-bit-float PCM WAVs
- * (mono or stereo) are supported; the shipped clicks are 48 kHz / stereo / 24-bit.
+ * (mono or stereo) are supported; the shipped clicks are 48 kHz / stereo / 16-bit. ⚠️ Bit depth here
+ * is a PACKAGING choice and nothing else: every arm decodes to the same FloatArray, so a deeper
+ * format costs APK bytes (24-bit was +50 % on 2.8 MB of clips) and saves no resident heap at all.
+ * What DOES move the 3.5 MB these occupy in RAM is the channel count and the frame count.
  *
  * Button release cuts the in-progress press sound for that specific button,
  * while other simultaneously-held buttons are unaffected.

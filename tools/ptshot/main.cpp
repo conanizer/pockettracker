@@ -795,7 +795,7 @@ int main(int argc, char** argv) {
     //
     // The one screen ptshot points at the DISK, and it has to: the browser's whole content is a
     // listing, and a synthetic one (the `--demo` approach the mixer and the visualizer take) would be
-    // drawing a picture of a fixture rather than of the module. Point it at `testdata/golden` and it
+    // drawing a picture of a fixture rather than of the module. Point it at `tools/testdata/golden` and it
     // draws the three files S6b synthesised; point it at a folder of your own samples and it draws
     // those. `--browser-mode=delete` arms the confirm; `--browser-select=N` paints a live multi-select.
     StdFileSystem browserFs(".");

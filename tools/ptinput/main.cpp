@@ -7,7 +7,7 @@
 //   * native/ui/fx_helper.h       — the effect-picker grid
 //   * native/ui/modules/*         — each editor's cursor_context() and handle_input()
 //
-// It reads testdata/units/p3-input.txt (emitted by the JVM P3InputGoldenTest from the REAL Kotlin
+// It reads tools/testdata/units/p3-input.txt (emitted by the JVM P3InputGoldenTest from the REAL Kotlin
 // InputController + screen modules + ClipboardManager), and for every `<inputs> => <outputs>` line it
 // re-parses the inputs, recomputes the RHS in C++, and byte-compares against the golden RHS.
 //
@@ -1668,7 +1668,7 @@ static int check_fx_grid_invariants() {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: ptinput <testdata/units/p3-input.txt>\n";
+        std::cerr << "usage: ptinput <tools/testdata/units/p3-input.txt>\n";
         return 2;
     }
     const std::string goldenPath = argv[1];

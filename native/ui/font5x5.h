@@ -43,9 +43,10 @@ inline constexpr uint32_t CP_ARROW_UP    = 0x2191;
 inline constexpr uint32_t CP_ARROW_RIGHT = 0x2192;
 inline constexpr uint32_t CP_ARROW_DOWN  = 0x2193;
 
-// ELLIPSIS (v0.9.4 C1): a single 5×5 glyph — three dots on the baseline — so a "text clipped here"
-// marker costs ONE column, not the two that ".." took. Used by the qwerty scroll window and the
-// browser/name truncations. Keyed by U+2026 (…), decoded from UTF-8 by Canvas::draw_text.
+// ELLIPSIS: a single 5×5 glyph — three dots on the baseline — so a "text clipped here" marker costs
+// ONE column instead of the two a ".." takes. That one column is the whole reason it is in an
+// otherwise-ASCII table. Keyed by U+2026 (…), decoded from UTF-8 by Canvas::draw_text; the qwerty
+// scroll window uses it.
 inline constexpr Glyph    GLYPH_ELLIPSIS{{0b00000, 0b00000, 0b00000, 0b00000, 0b10101}};
 inline constexpr uint32_t CP_ELLIPSIS = 0x2026;
 

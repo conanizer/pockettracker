@@ -158,14 +158,14 @@ dependencies {
 // PocketTracker is GPL-3.0-or-later and statically links a dozen third-party components, so their
 // notices have to travel with the BINARY and not merely with the source tree that built it — GPL-3.0
 // §4 and BSD-3-Clause both word the obligation around what the recipient of the ARTIFACT receives.
-// The Windows zip, the Linux tarball and the PortMaster zip each stage these three files into a
-// `licenses/` folder beside the executable. The APK is the one artifact that has no "beside the
-// executable", and it carried none of them.
+// The Windows zip, the Linux tarball and the PortMaster zip each stage this set into a `licenses/`
+// folder beside the executable. The APK is the one artifact with no "beside the executable", so the
+// same set goes into `assets/licenses/`.
 //
-// They are COPIED from the repo root at build time rather than checked in under `src/main/assets/`,
-// so `licenses/THIRD-PARTY-NOTICES.md` stays the single source of truth and no second copy exists to
-// drift from it. Assets — unlike `res/` — are untouched by `isShrinkResources`, so the release APK
-// keeps all three.
+// They are COPIED at build time rather than checked in under `src/main/assets/`, so
+// `docs/licenses/THIRD-PARTY-NOTICES.md` stays the single source of truth and no second copy exists
+// to drift from it. Assets — unlike `res/` — are untouched by `isShrinkResources`, so the release APK
+// keeps every one.
 //
 // ⚠️ The wiring is `addGeneratedSourceDirectory`, NOT `sourceSets.assets.srcDir(...)` plus a
 // hand-written `dependsOn`: it makes the asset-merge task consume this task's output directory by
@@ -174,10 +174,22 @@ dependencies {
 // ⚠️ Nothing READS these files — they are payload, and their whole job is to exist. So a missing one
 // breaks no build and throws nothing at run time: it would ship silently, and a green build is no
 // evidence at all. The only evidence is the finished APK, which the release build verifies by reading
-// all three back out of it and comparing the bytes (a truncated copy unzips just as cleanly).
+// every one back out of it and comparing the bytes (a truncated copy unzips just as cleanly).
 abstract class StageLicenseAssets : DefaultTask() {
-    /** The repo-root files to ship, taken verbatim. */
-    @get:InputFiles abstract val notices: ConfigurableFileCollection
+    /**
+     * Name the file gets in the artifact -> its repo-relative source path.
+     *
+     * ⚠️ The destination name is declared rather than taken from the source file, because two of the
+     * sources are both called `COPYING` (`native/vendor/ogg/` and `native/vendor/opus/`) and would
+     * overwrite each other in one output directory. Repo-relative, not absolute, so the value is a
+     * portable task input.
+     */
+    @get:Input abstract val payload: MapProperty<String, String>
+
+    /** The same sources again, so a change to a licence's CONTENT re-runs the task. */
+    @get:InputFiles abstract val sources: ConfigurableFileCollection
+
+    @get:Internal abstract val repoRoot: DirectoryProperty
 
     /** Becomes `assets/` in the APK, so the files land under `assets/licenses/`. */
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
@@ -185,23 +197,37 @@ abstract class StageLicenseAssets : DefaultTask() {
     @TaskAction
     fun stage() {
         val dir = outputDir.get().asFile.resolve("licenses")
-        // Wipe first: an entry dropped from `notices` must leave the APK too, and Gradle's stale-output
+        // Wipe first: an entry dropped from `payload` must leave the APK too, and Gradle's stale-output
         // cleanup does not reach inside a directory this task wrote by hand.
         dir.deleteRecursively()
         dir.mkdirs()
-        notices.forEach { src -> src.copyTo(dir.resolve(src.name), overwrite = true) }
+        val root = repoRoot.get().asFile
+        payload.get().forEach { (name, rel) -> root.resolve(rel).copyTo(dir.resolve(name), overwrite = true) }
     }
 }
 
+// The set every artifact ships. The three desktop packaging scripts stage exactly this, from exactly
+// these sources, into a `licenses/` folder beside the executable — keep them in step.
+//
+// Everything after the first three is cited BY PATH inside THIRD-PARTY-NOTICES.md, and shipping the
+// citation without the text leaves a dangling pointer for anyone holding only the artifact — the
+// breach the notices file exists to prevent. The two vendored `COPYING` files come from the SOURCE
+// THAT WAS COMPILED rather than a copy kept elsewhere in the repo, so the licence that ships is the
+// licence of the code that shipped, by construction, and no second copy can drift.
+val licensePayload = mapOf(
+    "LICENSE"                         to "LICENSE",                                    // GPL-3.0-or-later — PocketTracker's own
+    "THIRD-PARTY-NOTICES.md"          to "docs/licenses/THIRD-PARTY-NOTICES.md",       // every statically linked component
+    "CREDITS.md"                      to "CREDITS.md",                                 // the Gradle-resolved Android dependencies
+    "OFL-1.1-LinuxBiolinum.txt"       to "docs/licenses/OFL-1.1-LinuxBiolinum.txt",    // Linux Biolinum font
+    "libogg-COPYING"                  to "native/vendor/ogg/COPYING",                  // BSD-3-Clause
+    "libopus-COPYING"                 to "native/vendor/opus/COPYING",                 // BSD-3-Clause
+    "libopus-LICENSE_PLEASE_READ.txt" to "native/vendor/opus/LICENSE_PLEASE_READ.txt", // upstream's patent note
+)
+
 val stageLicenseAssets = tasks.register<StageLicenseAssets>("stageLicenseAssets") {
-    notices.from(
-        rootProject.file("LICENSE"),                         // GPL-3.0-or-later — PocketTracker's own
-        rootProject.file("licenses/THIRD-PARTY-NOTICES.md"), // every statically linked component
-        rootProject.file("CREDITS.md"),                      // the Gradle-resolved Android dependencies
-        // The notices file cites this one by path for the Linux Biolinum font, so shipping the
-        // citation without the text would leave a dangling pointer for anyone holding only the APK.
-        rootProject.file("licenses/OFL-1.1-LinuxBiolinum.txt"),
-    )
+    payload.set(licensePayload)
+    sources.from(licensePayload.values.map { rootProject.file(it) })
+    repoRoot.set(rootProject.layout.projectDirectory)
     outputDir.set(layout.buildDirectory.dir("generated/licenseAssets"))
 }
 

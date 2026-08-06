@@ -120,15 +120,24 @@ install -m 755 "$BIN" "$STAGE/PocketTracker"
 
 mkdir -p "$STAGE/licenses"
 cp "$SRC/LICENSE"                                  "$STAGE/licenses/LICENSE"
-cp "$SRC/licenses/THIRD-PARTY-NOTICES.md"          "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
+cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"     "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
 cp "$SRC/CREDITS.md"                               "$STAGE/licenses/CREDITS.md"
+
+# libogg and libopus are BSD-3-Clause, whose binary-redistribution clause requires their conditions
+# and disclaimer to travel with the binary — and this tarball contains both. They come from the
+# VENDORED SOURCE THAT WAS COMPILED, not from a copy kept elsewhere in the repo, so the licence that
+# ships is the licence of the code that shipped, by construction. build-windows.ps1 and
+# build-portmaster.sh take them from the same place.
+cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/licenses/libogg-COPYING"
+cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/licenses/libopus-COPYING"
+cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/licenses/libopus-LICENSE_PLEASE_READ.txt"
 
 # The OFL text ships even though this package bundles no font. THIRD-PARTY-NOTICES.md, which does
 # ship, cites licenses/OFL-1.1-LinuxBiolinum.txt by path — a notices file pointing at a file that is
 # not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
 # desktop build, the OFL's "must accompany the font" clause is already satisfied rather than newly
 # breached.
-cp "$SRC/licenses/OFL-1.1-LinuxBiolinum.txt"        "$STAGE/licenses/OFL-1.1-LinuxBiolinum.txt"
+cp "$SRC/docs/licenses/OFL-1.1-LinuxBiolinum.txt"        "$STAGE/licenses/OFL-1.1-LinuxBiolinum.txt"
 
 cat > "$STAGE/README.txt" <<EOF
 PocketTracker $VERSION — Linux (x86-64)
@@ -171,7 +180,9 @@ tar tzf "$TARBALL"
 echo
 echo "read back out of the tarball:"
 for NEEDED in "PocketTracker" "README.txt" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" \
-              "licenses/CREDITS.md" "licenses/OFL-1.1-LinuxBiolinum.txt"; do
+              "licenses/CREDITS.md" "licenses/OFL-1.1-LinuxBiolinum.txt" \
+              "licenses/libogg-COPYING" "licenses/libopus-COPYING" \
+              "licenses/libopus-LICENSE_PLEASE_READ.txt"; do
     # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
     # tar exit 2, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
     # line below, with tar's own reason already swallowed by 2>/dev/null. The operator would get a

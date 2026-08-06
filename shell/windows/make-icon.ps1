@@ -4,7 +4,7 @@
 #
 # The .ico is COMMITTED — this script is not part of any build, and CI never runs it. It exists so
 # the icon is a derived artifact with a stated source rather than a binary someone once dropped in
-# the tree, which is the same reason `licenses/THIRD-PARTY-NOTICES.md` is the source of truth for
+# the tree, which is the same reason `docs/licenses/THIRD-PARTY-NOTICES.md` is the source of truth for
 # the notices instead of a folder of files.
 #
 # The source is logo-app.png — the full-bleed device-shot mark (the rainbow grille + "pocket

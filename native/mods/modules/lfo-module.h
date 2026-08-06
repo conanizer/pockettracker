@@ -17,9 +17,10 @@
 //
 // SCALAR (type=6): constant output equal to mod.amount — not modelled here.
 // It is a degenerate LFO that never oscillates. It is handled as its own short
-// branch in mod-runner.h. Whether type=6 should instead be a dedicated
-// ModSourceId (static per-note scalar, like MOD_SRC_VELOCITY) is unresolved;
-// left as-is until the feature is actually used. — TODO: revisit before shipping.
+// branch in mod-runner.h. ⚠️ Open design question, deliberately not a TODO: whether
+// type=6 should instead be a dedicated ModSourceId (a static per-note scalar, like
+// MOD_SRC_VELOCITY). Changing it renumbers a stored type, so it needs a format
+// decision, not a tidy-up — and nothing yet asks for it.
 inline void tickLFO(VoiceModSlot& mod, int numFrames, float sr, float rMult) {
     if (mod.lfoTrigMode == 2 || mod.stage == 4) return;  // HOLD / finished ONCE: value frozen
 

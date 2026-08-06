@@ -21,7 +21,7 @@ layout is two computations wearing one coat:
 
 ## SIZES — `pttouch <golden>`
 
-Phase B2 recorded the sizes from the real Kotlin into `testdata/units/touch-layout.txt`, while Kotlin
+Phase B2 recorded the sizes from the real Kotlin into `tools/testdata/units/touch-layout.txt`, while Kotlin
 was still there to answer. `app/src/test/.../trace/TouchLayoutGoldenTest.kt` drives the real
 `TouchLayoutMetrics` over a matrix that brackets the reachable box sizes and straddles the one branch
 in the file (`boxRatio < patternRatio`, pinned from both sides plus the exact tie), across every real

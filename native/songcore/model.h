@@ -38,6 +38,22 @@
 
 namespace songcore {
 
+// ─── pool sizes ─────────────────────────────────────────────────────────────────────────────────
+
+// Canonical pool sizes (single source, mirrors TrackerData.kt). Declared above the structs so the
+// members and the accessors below can both spell them.
+constexpr int POOL_PHRASES     = 256;
+constexpr int POOL_CHAINS      = 256;
+constexpr int POOL_TRACKS      = 8;
+constexpr int POOL_INSTRUMENTS = 128;
+constexpr int POOL_TABLES      = 128;
+constexpr int POOL_GROOVES     = 128;
+constexpr int POOL_EQPRESETS   = 128;
+
+// Rows in one chain, and steps in one phrase. Fixed by the screen geometry, not by a pool.
+constexpr int CHAIN_ROWS  = 16;
+constexpr int PHRASE_ROWS = 16;
+
 // ─── small helpers ────────────────────────────────────────────────────────────────────────────
 
 // lower 8 bits as 2-digit UPPERCASE hex — mirrors TrackerData.Int.toHex2().
@@ -275,6 +291,21 @@ struct Chain {
     explicit Chain(int id_) : id(id_) {}
 };
 
+// The phrase a chain row names, or -1 for "there is nothing to play here".
+//
+// ⚠️ Every bound on a chain row lives in this one function, because each one is a property of the
+// DATA rather than of any caller: a chain has CHAIN_ROWS rows, its arrays may be shorter than that
+// (`parse_int_array` returns whatever length the JSON held, and normalize_project repairs pool
+// sizes, not the arrays inside a Chain), and a ref outside the phrase pool names no phrase. A `.ptp`
+// is a file users copy between devices, hand-edit, and recover from a half-written autosave, so a
+// ref of 9999 is reachable without the editor ever producing one — and the value then goes straight
+// into `project.phrases[ref]`.
+inline int chain_phrase_ref(const Chain& c, int row) {
+    if (row < 0 || row >= CHAIN_ROWS || row >= static_cast<int>(c.phraseRefs.size())) return -1;
+    const int ref = c.phraseRefs[static_cast<size_t>(row)];
+    return (ref >= 0 && ref < POOL_PHRASES) ? ref : -1;
+}
+
 // A chain row with no phrase in it. `-1` is the pool's "empty value" everywhere (never 0, never 0xFF).
 //
 // ⚠️ Lives HERE, not in scheduler.h where it was written, because two different layers now decide
@@ -282,7 +313,10 @@ struct Chain {
 // (midi_clock.h, which tells a drum machine where the playhead landed). A second copy of the
 // predicate would be two things that agree until the day they do not — and a Song Position Pointer
 // computed from a different notion of "empty" than the scheduler's is a number that matches nothing.
-inline bool chain_is_empty(const Chain& c, int index) { return c.phraseRefs[index] == -1; }
+//
+// A row whose ref points outside the pool is empty for the same reason: it names no phrase, so
+// nothing can be scheduled from it, so no layer may count it as length.
+inline bool chain_is_empty(const Chain& c, int index) { return chain_phrase_ref(c, index) < 0; }
 
 struct TableRow {
     int transpose = 0x00;
@@ -524,8 +558,7 @@ struct Project {
     // carried to another machine keeps its routing and its sync intent and re-picks its cables.
     int  midiSyncOut = 0;               // 0 OFF | 1 CLOCK | 2 TRANSPORT | 3 CLOCK+TRANSPORT (phase C)
     bool midiSendProgramChange = true;
-    // 8 = POOL_TRACKS, spelled as a literal only because that constant is declared below this struct.
-    std::vector<int> midiInputChannels = std::vector<int>(8, -1);   // per-track input channel, phase E
+    std::vector<int> midiInputChannels = std::vector<int>(POOL_TRACKS, -1);  // per-track input channel
 };
 
 struct InstrumentPreset {
@@ -533,15 +566,6 @@ struct InstrumentPreset {
     Instrument instrument;
     std::optional<std::vector<TableRow>> tableRows;  // null
 };
-
-// Canonical pool sizes (single source, mirrors TrackerData.kt).
-constexpr int POOL_PHRASES     = 256;
-constexpr int POOL_CHAINS      = 256;
-constexpr int POOL_TRACKS      = 8;
-constexpr int POOL_INSTRUMENTS = 128;
-constexpr int POOL_TABLES      = 128;
-constexpr int POOL_GROOVES     = 128;
-constexpr int POOL_EQPRESETS   = 128;
 
 // A fresh default Project — the exact object graph kotlinx builds from `Project()`. Note the one
 // factory-vs-field-default divergence: instrument.sampleId is set to the slot index here.

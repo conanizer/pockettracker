@@ -136,51 +136,13 @@ The desktop builds read a gamepad through SDL, and also map the keyboard. See [`
 | [`docs/input-system.md`](docs/input-system.md) | Complete controls reference |
 | [`docs/features.md`](docs/features.md) | Feature overview |
 | [`docs/technical-architecture.md`](docs/technical-architecture.md) | Architecture overview |
+| [`docs/building.md`](docs/building.md) | Building from source, and running the tests |
 
 ---
 
 ## Building from source
 
-The engine, the sequencer and the whole UI are portable C++17 under `native/`; each platform adds a thin shell around them.
-
-### Android
-
-A standard Android + NDK project — the native side builds via CMake as part of the normal Gradle build:
-
-1. Clone the repo and open it in a recent **Android Studio**.
-2. Let Gradle sync; it provisions the SDK and the pinned **NDK `27.0.12077973`**.
-3. Run the **app** configuration on a device/emulator, or build an APK with `./gradlew assembleDebug`.
-
-Debug builds need no signing setup — release builds fall back to the debug key when `keystore.properties` is absent.
-
-### Linux / Windows desktop
-
-Needs CMake and a C++17 compiler. SDL2 is used from the system if present, and fetched and built if not.
-
-```bash
-cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
-cmake --build shell/build
-```
-
-The redistributable packages are built by `shell/build-linux.sh` and `shell/build-windows.ps1`, which additionally verify the artifact and read the finished archive back out.
-
-### PortMaster (aarch64 handheld)
-
-Cross-compiled inside a container, which is the glibc floor every Tier-1 CFW is at or above — a host cross compiler produces a binary no handheld can load:
-
-```bash
-docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
-docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
-```
-
-### Tests
-
-The conformance tools under `tools/` are one CMake project wired to ctest. They compare the C++ engine, sequencer, input layer and renderer against recorded goldens and hand-written invariants:
-
-```bash
-cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
-ctest --test-dir tools/build --output-on-failure
-```
+The engine, the sequencer and the whole UI are portable C++17 under `native/`; each platform adds a thin shell around them. Full instructions for all four platforms, plus the test suite: [`docs/building.md`](docs/building.md).
 
 ---
 
@@ -200,7 +162,7 @@ Full attributions, licenses, and DSP algorithm references: [`CREDITS.md`](CREDIT
 
 **Third-party license notices** for everything compiled into the audio engine — the code that ships
 in both the Android app and the Linux handheld port — are reproduced in full in
-[`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md).
+[`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md).
 
 ---
 
@@ -214,7 +176,7 @@ Full license text: [`LICENSE`](LICENSE).
 
 PocketTracker statically links several third-party components, each under its own license (BSD-3-Clause,
 MIT, LGPL-2.1, zlib, and public-domain dedications). Their copyright notices and license terms are
-reproduced in [`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md).
+reproduced in [`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md).
 
 That file, the GPL text and [`CREDITS.md`](CREDITS.md) ship **inside every release artifact**, not just
 in this repository — `licenses/` in the Windows zip, the Linux tarball and the PortMaster zip, and

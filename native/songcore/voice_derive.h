@@ -11,7 +11,7 @@
 // The conformance trace stops at the router, ABOVE all of this (event-schema §6), so none of it is
 // covered by the 32 golden traces. Left inside the consumer, calling AudioEngine directly, it would
 // be verifiable only by ear on a device. As pure functions it gets the same measuring stick S3 gave
-// resolve_step_params: a JVM golden (S5ConsumerGoldenTest → testdata/units/s5-consumer.txt) records
+// resolve_step_params: a JVM golden (S5ConsumerGoldenTest → tools/testdata/units/s5-consumer.txt) records
 // what the REAL Kotlin code derives, and tools/ptvoice re-derives it here and byte-compares — floats
 // as raw binary32 bits, so "close enough" cannot pass.
 //

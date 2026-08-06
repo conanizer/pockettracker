@@ -9,6 +9,8 @@
 //   soundfont-voice.cpp — TSF_IMPLEMENTATION + SoundfontVoice method bodies
 //   audio-engine.h    — AudioEngine class declaration
 //   audio-engine.cpp  — AudioEngine method bodies + sfVoices[8] definition
-//   jni-bridge.cpp    — static engine* + all JNIEXPORT functions
+//
+// The engine is driven from `native/songcore/` (the host/consumer seam) and from the SDL shell; it has
+// no JNI surface of its own.
 //
 // DO NOT add code here. This file is intentionally empty.

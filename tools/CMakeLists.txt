@@ -8,7 +8,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #
 # One tool per layer of the songcore port (linux-port-plan.md §4.3), each comparing C++ output
 # against a golden recorded from the REAL Kotlin implementation. The JVM tests under
-# app/src/test/.../trace/ WRITE /testdata; these READ it back:
+# app/src/test/.../trace/ WRITE /tools/testdata; these READ it back:
 #
 #   ptroundtrip   S2   .ptp/.pti I/O            the eight golden projects re-serialize byte-for-byte
 #   ptresolve     S3   timing / FX / traversal  288 unit cases       (units/s3-units.txt)
@@ -106,7 +106,7 @@ endfunction()
 
 enable_testing()
 
-set(PT_TESTDATA "${CMAKE_CURRENT_SOURCE_DIR}/../testdata")
+set(PT_TESTDATA "${CMAKE_CURRENT_SOURCE_DIR}/testdata")
 
 foreach(tool ptroundtrip ptresolve ptplay ptvoice ptrandom ptnondet)
     add_executable(${tool} ${tool}/main.cpp)
@@ -183,7 +183,7 @@ pt_ieee_exact(pttouch)
 # reaching for SDL or the engine stops THIS target linking and names the file. It exists because a
 # dependency vendored but never called is dead code (the C1 lesson): this proves the decoder actually
 # decodes, against PNG fixtures made by GDI+ — an encoder independent of both stb_image and ptshot's
-# own PNG writer. See ptdecode/main.cpp's header and testdata/images/.
+# own PNG writer. See ptdecode/main.cpp's header and tools/testdata/images/.
 add_executable(ptdecode ptdecode/main.cpp ../shell/image.cpp)
 pt_ieee_exact(ptdecode)   # 8-bit PNG decode is integer; kept so the -fno-fast-math rule cannot be lost
 target_include_directories(ptdecode PRIVATE
@@ -208,7 +208,7 @@ target_include_directories(ptfont PRIVATE
 # decodeMp4File actually decodes, against .m4a fixtures encoded by ffmpeg — an encoder independent of
 # FAAD2 — from pure sine tones of known frequency. AAC is lossy, so the invariant is the TONE, not a
 # byte-golden: the check is energy-at-the-right-frequency-in-the-right-channel. A missing fixture is a
-# hard error (exit 2). See ptaac/main.cpp's header and testdata/audio/.
+# hard error (exit 2). See ptaac/main.cpp's header and tools/testdata/audio/.
 add_executable(ptaac ptaac/main.cpp)
 pt_ieee_exact(ptaac)   # tolerance-based (not a bit-golden); kept so the -fno-fast-math rule cannot be lost
 target_link_libraries(ptaac PRIVATE pockettracker)
@@ -224,7 +224,7 @@ pt_ieee_exact(ptdispatch)
 target_link_libraries(ptdispatch PRIVATE pt-ui)
 
 # ptsfpan — does a MOD reach a SOUNDFONT voice's PAN? A separate tool rather than a ptdispatch section
-# because it needs a real .sf2, and ptdispatch is the one tool with no /testdata argument. The SF and
+# because it needs a real .sf2, and ptdispatch is the one tool with no /tools/testdata argument. The SF and
 # sampler voices are modulated in different places, and only the sampler's had ever been measured.
 add_executable(ptsfpan ptsfpan/main.cpp)
 pt_ieee_exact(ptsfpan)
@@ -358,7 +358,7 @@ add_test(NAME d-touch-layout   COMMAND pttouch     "${PT_TESTDATA}/units/touch-l
 add_test(NAME d-touch-positions COMMAND pttouch    --positions)
 # The PNG decoder (D2), proven on fixtures from an INDEPENDENT encoder (GDI+). A missing fixtures dir
 # is a hard error (exit 2), never a vacuous pass — deleting the fixtures cannot certify a broken
-# decoder. See ptdecode's header and testdata/images/.
+# decoder. See ptdecode's header and tools/testdata/images/.
 add_test(NAME d-image-decode    COMMAND ptdecode    "${PT_TESTDATA}/images")
 # The button-font rasterizer (D), proven on the exact CFF/OTTO helvetica_regular.otf the APK ships. An
 # absolute path to the shipped asset, so a deleted/renamed font is a hard read failure (exit 2), never a

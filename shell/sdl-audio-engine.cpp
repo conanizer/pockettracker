@@ -29,8 +29,8 @@ uint64_t now_ns() {
 }
 
 // Frames per callback. 512 @ 44.1 kHz ≈ 11.6 ms — the same order as Oboe's low-latency burst on
-// device, and well under the engine's MAX_BLOCK (processLiveBlock chunks anyway, so this is a
-// latency choice, never a correctness one). Handhelds may want more; that is a Phase 4 dial.
+// device. It is ABOVE the engine's PROCESS_SUBBLOCK and that is fine: processLiveBlock chunks to it,
+// so this number is a latency choice and never a correctness one. Handhelds may want more.
 constexpr int FRAMES_PER_CALLBACK = 512;  // device rounds up to its own period (940 on the Flip) regardless
 
 // What we ask for. The device is free to say otherwise — see openStream.
@@ -50,7 +50,7 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
 
     // Pure SDL glue — the exact mirror of OboeAudioEngine::onAudioReady. processLiveBlock does
     // everything: sets flush-to-zero, CLEARS the buffer (SDL does not hand us a zeroed one), bails
-    // to silence during an offline render, chunks into MAX_BLOCK processAudioBlock calls, and
+    // to silence during an offline render, chunks into PROCESS_SUBBLOCK processAudioBlock calls, and
     // captures the oscilloscope/spectrum/peak data.
     //
     // ── DIAGNOSTIC (env POCKETTRACKER_AUDIO_PROFILE=1): time the real-time work against the callback

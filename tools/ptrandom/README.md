@@ -27,8 +27,8 @@ played the root. Nothing we owned was looking.
 ## What it checks
 
 `app/src/test/.../trace/S7RandomGoldenTest.kt` drives the **real** Kotlin `PlaybackController` over
-`testdata/g8-random.ptp` for 300 renders, histograms every random draw, and writes
-`testdata/units/s7-random.txt`. ptrandom does the same in C++ and compares. The claim is split in two,
+`tools/testdata/g8-random.ptp` for 300 renders, histograms every random draw, and writes
+`tools/testdata/units/s7-random.txt`. ptrandom does the same in C++ and compares. The claim is split in two,
 and the split is the whole design:
 
 | | compared | how | catches |
@@ -88,12 +88,12 @@ ctest --test-dir tools/build --output-on-failure -C Release
 ```
 
 This tool alone is the **`s7-random`** test — `ctest --test-dir tools/build -R s7-random
---output-on-failure` — or invoke the binary directly with /testdata as `argv[1]`.
+--output-on-failure` — or invoke the binary directly with /tools/testdata as `argv[1]`.
 
 Exit 0 = all green, 1 = any mismatch; a failure names the observable and prints the Kotlin line against
 the C++ one.
 
-Regenerate the golden after an intentional Kotlin change: delete `testdata/units/s7-random.txt`, run
+Regenerate the golden after an intentional Kotlin change: delete `tools/testdata/units/s7-random.txt`, run
 `gradlew :app:testDebugUnitTest`, re-run ptrandom.
 
 ⚠️ `RENDERS`, `PHRASE_REPEATS` and `SAMPLE_RATE` are duplicated in `main.cpp` and

@@ -219,6 +219,12 @@ void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
+    // ⚠️ An INVERTED window is reachable: `sampleStart` and `sampleEnd` are two independent free
+    // 0-255 cells with nothing constraining one against the other, and the editor seeds its
+    // selection from them. `endFrame - startFrame` is int and `sizeof(float)` is size_t, so a
+    // negative length converts to ~2^64 and the memset walks off the buffer. The guard belongs here
+    // rather than at the call sites, as it does in the four siblings above.
+    if (startFrame >= endFrame) return;
     std::memset(samples[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
     if (samplesRight[id])
         std::memset(samplesRight[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
@@ -229,6 +235,9 @@ void AudioEngine::reverseSample(int id, int startFrame, int endFrame) {
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
+    // ⚠️ Same inverted window as silenceRegion. `std::reverse(first, last)` with `first > last`
+    // never reaches `first == last`, so it swaps outward from both ends of the buffer.
+    if (startFrame >= endFrame) return;
     std::reverse(samples[id] + startFrame, samples[id] + endFrame);
     if (samplesRight[id])
         std::reverse(samplesRight[id] + startFrame, samplesRight[id] + endFrame);
@@ -500,6 +509,7 @@ void AudioEngine::applyRateMode(int id, int factor) {
 
 void AudioEngine::pitchShiftSample(int id, float semitones) {
     if (id < 0 || id >= 256 || !samples[id] || semitones == 0.0f) return;
+    setFlushToZeroForCurrentThread();
 
     auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
@@ -534,6 +544,7 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
 void AudioEngine::timeStretchSample(int id, float ratio) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
     if (ratio > 0.999f && ratio < 1.001f) return;
+    setFlushToZeroForCurrentThread();
 
     auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
@@ -563,6 +574,10 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
 
 void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
+    // ⚠️ The UI thread runs OTT, DUST, the EQ and the limiter's 0.00002-alpha peak tracker below —
+    // the same feedback-tail DSP the audio thread arms FTZ for. A fade-out decays into the denormal
+    // range and stays there for the rest of the buffer, at 10-100x per sample, with the screen frozen.
+    setFlushToZeroForCurrentThread();
 
     auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 

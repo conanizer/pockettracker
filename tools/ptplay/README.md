@@ -15,7 +15,7 @@ zone-C Kotlin sequencing rewritten as shared C++ in songcore Phase 1 **S4**
 
 ## How it proves parity
 
-The JVM `GoldenTraceTest` recorded the goldens in `/testdata` from the **real Kotlin sequencer**
+The JVM `GoldenTraceTest` recorded the goldens in `/tools/testdata` from the **real Kotlin sequencer**
 through the `EventTrace` tap: the project `.ptp` files plus one trace per (project, sample rate,
 mode) — render + live `SONG`/`CHAIN`/`PHRASE`, at 44100 and 48000 Hz. ptplay loads those same
 `.ptp` files, drives the C++ `Sequencer` through the **identical** modes and clock cadence as the
@@ -49,7 +49,7 @@ ctest --test-dir tools/build --output-on-failure -C Release
 
 This tool alone is the **`s4-golden-traces`** test — `ctest --test-dir tools/build -R s4-golden-traces
 --output-on-failure` — or invoke the built binary directly with the goldens directory as `argv[1]`
-(`ptplay testdata`).
+(`ptplay tools/testdata`).
 
 Exit code `0` = all green, `1` = any mismatch. Expected output ends in `ALL GREEN` (32 traces:
 6 projects × 2 sample rates × render + their live modes). A mismatch reports the first divergent

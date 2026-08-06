@@ -111,14 +111,14 @@ aarch64-linux-gnu-strip "$BIN"
 # binary that contains them, not just with the source tree that built it. A missing one is a licence
 # breach in the artifact, which is the only thing a user ever receives.
 #
-# ⚠️ This shipped THREE notices for a binary containing ELEVEN components until the Phase 5 sweep
-# (2026-07-19). Two were not merely unshipped but missing from the source tree as well: KissFFT
-# arrived with its copyright banner stripped (BSD-3-Clause requires it in source AND binary
-# redistributions), and opusfile was vendored without the COPYING its every header points at.
-# `licenses/THIRD-PARTY-NOTICES.md` is now the single source of truth — add a component there in the
-# same commit that vendors it.
+# ⚠️ A vendored component can arrive with its own notice already missing — KissFFT's copyright banner
+# was stripped from the source it was copied from, and opusfile carries no COPYING at all despite
+# every one of its headers pointing at one. So `docs/licenses/THIRD-PARTY-NOTICES.md` is the single
+# source of truth, and reproduces the text inline where upstream gave us no file to ship. Add a
+# component there in the same commit that vendors it; the check further down enforces it.
 cp "$SRC/LICENSE"                                       "$STAGE/pockettracker/licenses/LICENSE"
-cp "$SRC/licenses/THIRD-PARTY-NOTICES.md"               "$STAGE/pockettracker/licenses/"
+cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"          "$STAGE/pockettracker/licenses/"
+cp "$SRC/CREDITS.md"                                    "$STAGE/pockettracker/licenses/CREDITS.md"
 cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/pockettracker/licenses/libogg-COPYING"
 cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/pockettracker/licenses/libopus-COPYING"
 cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/licenses/libopus-LICENSE_PLEASE_READ.txt"
@@ -128,7 +128,7 @@ cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/li
 # not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
 # handheld build, the OFL's "must accompany the font" clause is already satisfied rather than newly
 # breached.
-cp "$SRC/licenses/OFL-1.1-LinuxBiolinum.txt"            "$STAGE/pockettracker/licenses/OFL-1.1-LinuxBiolinum.txt"
+cp "$SRC/docs/licenses/OFL-1.1-LinuxBiolinum.txt"       "$STAGE/pockettracker/licenses/OFL-1.1-LinuxBiolinum.txt"
 ls -1 "$STAGE/pockettracker/licenses/"
 
 echo
@@ -233,8 +233,8 @@ unzip -l "$OUT/pockettracker.zip"
 # ships. Same discipline as verifying the launch script's CR bytes out of the archive.
 echo
 echo "licences, read back out of the zip:"
-for L in LICENSE THIRD-PARTY-NOTICES.md libogg-COPYING libopus-COPYING libopus-LICENSE_PLEASE_READ.txt \
-         OFL-1.1-LinuxBiolinum.txt; do
+for L in LICENSE THIRD-PARTY-NOTICES.md CREDITS.md libogg-COPYING libopus-COPYING \
+         libopus-LICENSE_PLEASE_READ.txt OFL-1.1-LinuxBiolinum.txt; do
     # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
     # unzip exit 11, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
     # line below, so the package is rejected without ever naming the file that is missing. Absent and

@@ -120,25 +120,23 @@ jobs:
 
           exit $FAIL
 
-      # ─── pt-ui compiles with the NDK, and does NOT ship yet (convergence plan C2) ──────────────
+      # ─── pt-ui compiles with the NDK, and is NEVER PACKAGED AS ITS OWN .so ─────────────────────
       #
-      # C2 deleted the `if(NOT ANDROID)` gate the whole Linux port was written behind. That deletion
-      # is real in the CMake model and VACUOUS in the build: AGP fills its ninja command with the
-      # targets it can PACKAGE plus their transitive dependencies, and pt-ui is a static archive
-      # nothing links until C3 — so `assembleDebug` reports BUILD SUCCESSFUL having compiled none of
-      # it. (Measured, not assumed: 29 seconds, "5 actionable tasks: 5 executed", zero pt-ui objects.
-      # The independent witness is libSDL2main.a, unbuilt since C1 for exactly the same reason, while
-      # libogg/libopus/libopusfile.a are built because the packaged libpockettracker.so links them.)
+      # ⚠️ A target being in the CMake model does not mean a build compiles it. AGP fills its ninja
+      # command with the targets it can PACKAGE plus their transitive dependencies — so a static
+      # archive nothing links is reported BUILD SUCCESSFUL having been compiled zero times, and the
+      # independent witness for that is libSDL2main.a, which is never built, while
+      # libogg/libopus/libopusfile.a are, because the packaged .so links them.
       #
       # So the target is named explicitly, per ABI, against AGP's OWN configure directory — which is
       # what makes this the shipping toolchain, STL, API level and flags rather than a second
-      # configuration free to drift from them. This step REPLACES the A5 canary job and strictly
-      # widens it: A5 compiled one ABI, standalone, Release; this compiles both shipping ABIs in the
-      # configuration that ships. ⚠️ Do not "simplify" it into externalNativeBuild.cmake.targets —
-      # that field is a whitelist and would silently stop packaging the first .so somebody forgets.
+      # configuration free to drift from them. ⚠️ Do not "simplify" it into
+      # externalNativeBuild.cmake.targets — that field is a whitelist and would silently stop
+      # packaging the first .so somebody forgets.
       #
-      # The second half is the invariant C2 must not break: pt-ui is COMPILED and NOT PACKAGED.
-      - name: Compile pt-ui with the shipping NDK configuration (convergence C2)
+      # The second half is the invariant: pt-ui is COMPILED and NOT PACKAGED. It reaches the app
+      # inside libpockettracker-sdl.so, never beside it.
+      - name: Compile pt-ui with the shipping NDK configuration
         run: |
           # ⚠️ Explicit per-check failure, and every verdict prints the number it rests on — the C1
           # lesson: a step whose pass is the absence of an error cannot tell a working build from a
@@ -281,10 +279,67 @@ jobs:
 
       # The Kotlin unit tests (the JVM golden recorders — P3InputGoldenTest, GoldenTraceTest, and the
       # S3/S5/S7 suites) were deleted in convergence Phase E along with the Kotlin sequencer and UI they
-      # drove. There is no `./gradlew test` step any more: the committed /testdata goldens are now a
+      # drove. There is no `./gradlew test` step any more: the committed /tools/testdata goldens are now a
       # C++ regression net, exercised by the `songcore` job below against tools/pt*. See Phase B in
-      # docs/internal/convergence-plan.md and testdata/README.md for the conformance→regression
+      # docs/internal/convergence-plan.md and tools/testdata/README.md for the conformance→regression
       # reclassification; the recorders themselves are preserved at tag `kotlin-golden-source`.
+
+      # ─── THE JNI KEEP RULES, IN THE ONLY BUILD THAT CAN BREAK THEM ────────────────────────────
+      #
+      # ⚠️ **EVERY OTHER CHECK IN THIS JOB READS A DEBUG APK, AND DEBUG NEVER RUNS R8**
+      # (`isMinifyEnabled` is release-only). So the SDL DEX assertion above passes by construction —
+      # it greps an unminified DEX for a class name — and a keep rule deleted, misspelled or simply
+      # not added for a new callback would be invisible here and fatal on a user's device. That is
+      # the exact bug class that killed every render in the first v0.9.3 APK.
+      #
+      # No keystore is needed: `signingConfig` falls back to the debug key when keystore.properties
+      # is absent (app/build.gradle.kts), so this builds a genuinely minified APK in CI.
+      #
+      # ⚠️ The names are extracted FROM proguard-rules.pro, never typed here — a list maintained in
+      # two places is a list that will disagree — and the count is asserted before anything is
+      # compared, so a parse that quietly matched nothing cannot report success.
+      - name: Build release APK and assert the JNI keep rules survived R8
+        run: |
+          set -u
+          ./gradlew assembleRelease --no-daemon
+          FAIL=0
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          echo "apk: $APK"
+
+          # The members pinned on MainActivity, taken from the rules file itself.
+          awk '/^-keepclassmembers class com\.conanizer\.pockettracker\.MainActivity \{/{f=1;next} \
+               f&&/^\}/{f=0} f' app/proguard-rules.pro \
+            | sed 's/(.*//' | awk '{print $NF}' | grep -v '^$' > /tmp/kept.txt
+          WANT=$(wc -l < /tmp/kept.txt)
+          echo "keep rules parsed: $WANT"
+          [ "$WANT" -ge 13 ] || { echo "FAIL  parsed only $WANT names out of proguard-rules.pro"; exit 1; }
+
+          rm -rf /tmp/dexchk && mkdir -p /tmp/dexchk
+          unzip -o -q "$APK" 'classes*.dex' -d /tmp/dexchk
+
+          # ⚠️ ONE grep pattern for BOTH halves. The control below is only evidence that R8 ran in
+          # this build if it is measured exactly the way the kept names are.
+          present=0
+          while read -r n; do
+            if cat /tmp/dexchk/classes*.dex | grep -a -q -F "$n"; then
+              present=$((present+1))
+            else
+              echo "FAIL  kept member missing from the release DEX: $n"; FAIL=1
+            fi
+          done < /tmp/kept.txt
+          echo "kept members present: $present of $WANT"
+
+          # THE CONTROL, and without it "13 of 13 present" is equally true of a DEX R8 never touched.
+          # These five are private members of the same class with no keep rule; R8 must have renamed
+          # every one of them.
+          survived=0
+          for n in appRoot hideSystemBars importLegacySettings visualizerIndex requestAllFilesAccess; do
+            if cat /tmp/dexchk/classes*.dex | grep -a -q -F "$n"; then
+              echo "FAIL  (control) non-kept private member survived R8: $n"; survived=$((survived+1)); FAIL=1
+            fi
+          done
+          echo "non-kept members surviving: $survived of 5 (want 0 — proves R8 renamed in this build)"
+          exit $FAIL
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -294,7 +349,7 @@ jobs:
           retention-days: 7
 
   # The C++ conformance suite — and since convergence Phase E deleted the Kotlin sequencer, the SOLE
-  # regression net for the /testdata goldens. It compares tools/pt{roundtrip,resolve,play,voice,render}
+  # regression net for the /tools/testdata goldens. It compares tools/pt{roundtrip,resolve,play,voice,render}
   # against the committed goldens (which the JVM recorders produced, preserved at tag
   # kotlin-golden-source). The question these goldens answer changed with Phase B: it was "does the C++
   # match the Kotlin original?" and is now "does today's C++ still do what the recorded C++ did?". No
@@ -332,8 +387,11 @@ jobs:
       # cannot be: its DSP uses transcendentals and is built with -ffast-math on arm. It asserts
       # determinism (the same binary, twice), health, and an energy fingerprint with a 1 dB
       # tolerance. tools/ptrender/README.md explains why that is the strongest honest claim.
+      # ⚠️ `--no-tests=error` is not decoration. Plain `ctest` prints "No tests were found!!!" and
+      # exits 0, so a job whose test list vanished — a renamed data path, a target that stopped being
+      # registered — reports success. Measured on the pinned CMake 3.22.1, not assumed.
       - name: Compare the C++ port against the Kotlin goldens
-        run: ctest --test-dir tools/build --output-on-failure -C Release
+        run: ctest --test-dir tools/build --output-on-failure --no-tests=error -C Release
 
       # The rendered WAVs, so a fingerprint failure on a runner you cannot reach can be listened to.
       - name: Upload the rendered audio

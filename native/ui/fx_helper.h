@@ -221,11 +221,18 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
     return d;
 }
 
-/** The lines for the highlighted effect. Kotlin's `getOrElse { listOf("---", "No effect") }`. */
-inline std::vector<std::string> fx_description_lines(const FxHelperState& s) {
+/**
+ * The lines for the highlighted effect, or a two-line placeholder when the cursor is off the table.
+ *
+ * By reference into `effect_descriptions()`'s static, because the picker redraws this every frame it
+ * is up and the 2-4 description lines are past SSO. The out-of-range arm needs a static of its own to
+ * have something to bind to.
+ */
+inline const std::vector<std::string>& fx_description_lines(const FxHelperState& s) {
+    static const std::vector<std::string> kNone{"---", "No effect"};
     const auto& all = effect_descriptions();
     const int   i   = s.cursor_index();
-    if (i < 0 || i >= static_cast<int>(all.size())) return {"---", "No effect"};
+    if (i < 0 || i >= static_cast<int>(all.size())) return kNone;
     return all[static_cast<size_t>(i)];
 }
 

@@ -5,7 +5,7 @@
 - **Source:** https://github.com/nothings/stb — `stb_image.h`
 - **Pinned commit:** `31c1ad37456438565541f4919958214b6e762fb4` (fetched 2026-07-21).
 - **Licence:** dual — public domain (Unlicense) **or** MIT, at your option. The full statement is
-  at the end of the header. Notice recorded in `licenses/THIRD-PARTY-NOTICES.md`.
+  at the end of the header. Notice recorded in `docs/licenses/THIRD-PARTY-NOTICES.md`.
 
 ## Why it is here, and where it may be used
 

@@ -46,6 +46,24 @@ struct MidiState {
     /** OUTPUT and OFFSET live in the settings — they describe this machine's cable. */
     const SettingsValues& settings;
 
+    /**
+     * The port lists, ALWAYS with "OFF" at index 0 — the dispatcher builds them by asking the platform
+     * and prepending that entry, so the module never has to special-case "no device" as a separate
+     * state. Empty is impossible; a machine with no ports still gets `{"OFF"}`, which is where
+     * `AppState` starts them.
+     *
+     * ⚠️ IN AND OUT ARE TWO SEPARATE LISTS AND MUST NOT BE COLLAPSED INTO ONE. A machine's MIDI inputs
+     * and outputs are different sets, indexed independently, and a port that is both (loopMIDI, a
+     * keyboard with a thru) sits at a different index in each. `midi-out-base` and `midi-in-base` are
+     * separate enumerators for that reason, and this is the same fact reaching the screen.
+     *
+     * By reference like `project` and `settings` above, and for the same reason: this struct is
+     * rebuilt on every frame the screen is up AND on every button press, so a by-value list is two
+     * vector allocations plus one per port name, at 60 Hz, for data the module only reads.
+     */
+    const std::vector<std::string>& deviceNames;
+    const std::vector<std::string>& inDeviceNames;
+
     int cursorRow    = 0;   // a MidiRow
     /**
      * 1 on every row but IN CH, where it is 1..`MIDI_IN_MAP_COLUMNS` — one per track. Column 0 is the
@@ -53,21 +71,9 @@ struct MidiState {
      */
     int cursorColumn = 1;
 
-    /**
-     * The port lists, ALWAYS with "OFF" at index 0 — the dispatcher builds them by asking the platform
-     * and prepending that entry, so the module never has to special-case "no device" as a separate
-     * state. Empty is impossible; a machine with no ports still gets `{"OFF"}`.
-     *
-     * ⚠️ IN AND OUT ARE TWO SEPARATE LISTS AND MUST NOT BE COLLAPSED INTO ONE. A machine's MIDI inputs
-     * and outputs are different sets, indexed independently, and a port that is both (loopMIDI, a
-     * keyboard with a thru) sits at a different index in each. `midi-out-base` and `midi-in-base` are
-     * separate enumerators for that reason, and this is the same fact reaching the screen.
-     */
-    std::vector<std::string> deviceNames{"OFF"};
-    int                      deviceIndex = 0;
-
-    std::vector<std::string> inDeviceNames{"OFF"};
-    int                      inDeviceIndex = 0;
+    /** Indices into the two lists above. */
+    int deviceIndex   = 0;
+    int inDeviceIndex = 0;
 
     /** A one-shot readout under the actions — "PANIC SENT", "TEST SENT", "NO PORT". */
     std::string statusText{};

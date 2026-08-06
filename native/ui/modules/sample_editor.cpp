@@ -439,7 +439,12 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
         if (eX > sX) c.fill_rect(sX, y, eX - sX, WAVEFORM_H, with_alpha(t.textCursor, 0.1f));
     };
 
-    /** A slice boundary. The two bounding the CURRENT slice are lit; the rest are dim. */
+    /**
+     * A slice boundary. ⚠️ The two bounding the CURRENT slice are drawn in the DIMMER colour
+     * (`textEmpty`) and the rest in the brighter `textParam` — which reads backwards, and is
+     * deliberate: it matches every built-in theme's palette and the behaviour users have. Swapping
+     * them is a UX change, not a bug fix.
+     */
     auto boundary = [&](int64_t frame, bool active) {
         const float mXf = frame_x(static_cast<float>(frame));
         if (mXf < static_cast<float>(wfLeft) || mXf > static_cast<float>(wfRight)) return;

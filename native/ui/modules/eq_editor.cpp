@@ -13,7 +13,11 @@ namespace {
 
 constexpr float kPi         = 3.14159265358979323846f;
 constexpr double kPiD       = 3.14159265358979323846;
-constexpr float kSampleRate = 44100.0f;
+// The rate used when nobody has told the editor one — same fallback as AudioEngine's own. ⚠️ It is
+// only a fallback: the plotted curve must be computed at the rate the ENGINE's bands were built at,
+// or the picture on the one screen whose job is showing you the shape is not the shape you have.
+// Bilinear warping is worst near Nyquist and this panel's axis runs to 20 kHz.
+constexpr float kDefaultSampleRate = 44100.0f;
 
 /**
  * ⚠️ THE CANVAS HAS FOUR PRIMITIVES AND NONE OF THEM IS A LINE (canvas.h), and the EQ editor is the
@@ -256,11 +260,13 @@ int EqModule::freq_to_pixel(float freq) {
     return std::min(WIDTH - 1, std::max(0, p));
 }
 
-float EqModule::combined_gain_db(const std::vector<songcore::EqBand>& bands, float freq) {
+float EqModule::combined_gain_db(const std::vector<songcore::EqBand>& bands, float freq,
+                                 float sampleRate) {
+    if (sampleRate <= 0.0f) sampleRate = kDefaultSampleRate;
     float total = 0.0f;
     for (const songcore::EqBand& b : bands) {
         if (b.type == 0) continue;  // OFF
-        total += band_gain_db(b, freq, kSampleRate);
+        total += band_gain_db(b, freq, sampleRate);
     }
     return std::min(VIS_DB, std::max(-VIS_DB, total));
 }
@@ -347,12 +353,14 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     if (s.slotIndex >= 0 && s.slotIndex < static_cast<int>(s.project.eqPresets.size())) {
         const songcore::EqPreset& preset = s.project.eqPresets[static_cast<size_t>(s.slotIndex)];
 
+        // The cache is keyed on slot and band content only — not on the sample rate — because the
+        // audio device opens exactly once, so `s.sampleRate` cannot change under a cached curve.
         const long long hash = bands_content_hash(preset.bands);
         if (curveCacheSlot_ != s.slotIndex || curveCacheHash_ != hash) {
             for (int xi = 0; xi < WIDTH; ++xi) {
                 const float normX = static_cast<float>(xi) / static_cast<float>(WIDTH - 1);
                 const float freq  = 20.0f * std::pow(1000.0f, normX);
-                curveCacheDb_[xi] = combined_gain_db(preset.bands, freq);
+                curveCacheDb_[xi] = combined_gain_db(preset.bands, freq, s.sampleRate);
             }
             curveCacheSlot_ = s.slotIndex;
             curveCacheHash_ = hash;

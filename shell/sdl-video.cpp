@@ -95,7 +95,7 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
                         SDL_GetError());
         }
     } else {
-        std::printf("video:   window icon: embedded PNG did not decode — keeping SDL's default\n");
+        std::printf("video:   window icon: embedded PNG did not decode - keeping SDL's default\n");
     }
 #endif
 
@@ -174,7 +174,7 @@ void SdlVideo::describe() const {
     // that is not a whole multiple of 640x480 — what is NOT expected is the frame overhanging the
     // output, which means the window outgrew the screen and the edges of the UI are simply gone.
     if (d.w > outW || d.h > outH) {
-        std::printf("video:   ⚠️ the frame is LARGER than the display — edges are cut off\n");
+        std::printf("video:   WARNING: the frame is LARGER than the display - edges are cut off\n");
     } else if (d.w < outW || d.h < outH) {
         std::printf("video:   letterbox: %dpx horizontal, %dpx vertical bars\n", (outW - d.w) / 2,
                     (outH - d.h) / 2);

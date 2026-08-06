@@ -246,9 +246,14 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
 /**
  * Write a 16-bit PCM WAV, optionally with a `cue ` chunk marking slice boundaries.
  *
- * `left` and `right` must be the same length (frames). `channels` is 1 (write `left` only) or 2
- * (interleave both) — the CALLER decides which, because only it knows the editor's SOURCE mode:
- * a stereo sample saved as SOURCE=LEFT is a mono file, and one saved as SOURCE=STEREO is not.
+ * `channels` is 1 (write `left` only) or 2 (interleave both) — the CALLER decides which, because only
+ * it knows the editor's SOURCE mode: a stereo sample saved as SOURCE=LEFT is a mono file, and one
+ * saved as SOURCE=STEREO is not.
+ *
+ * ⚠️ `right` is READ ONLY WHEN `channels == 2`, and the length check applies only then. A mono caller
+ * passes an empty vector rather than a copy of `left`: the copy existed solely to satisfy a length
+ * check that had no business running on a channel the writer never touches, and on the downmix path
+ * it was a second full-length duplicate of an already-duplicated buffer.
  *
  * The chunk order is RIFF / fmt / data / cue, which is where Kotlin puts the cue chunk (after the
  * audio, not before it) — and a byte-compared golden pins it, so it is not free to drift.
@@ -256,7 +261,7 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
 inline bool write_wav(const std::string& path, const std::vector<float>& left,
                       const std::vector<float>& right, int sampleRate,
                       const std::vector<int>& cuePoints = {}, int channels = 2) {
-    if (left.size() != right.size()) return false;
+    if (channels == 2 && left.size() != right.size()) return false;
 
     const int64_t frames        = static_cast<int64_t>(left.size());
     const int     numChannels   = (channels < 1) ? 1 : (channels > 2 ? 2 : channels);

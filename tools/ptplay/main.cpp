@@ -6,10 +6,10 @@
 //   * native/songcore/router.h        — the MIDI event bus/router seam (Event records)
 //   * native/songcore/trace_writer.h  — the schema-v1 conformance-trace serializer
 //
-// For each golden project it loads the /testdata .ptp (the SAME files the JVM GoldenTraceTest
+// For each golden project it loads the /tools/testdata .ptp (the SAME files the JVM GoldenTraceTest
 // generated), drives the C++ Sequencer through the exact same modes/cadence as the Kotlin
 // TraceHarness (render + live SONG/CHAIN/PHRASE at 44100 and 48000), and compares the produced
-// trace against /testdata/traces/<project>.<sr>.<mode>.trace after the event-schema §4 canonical
+// trace against /tools/testdata/traces/<project>.<sr>.<mode>.trace after the event-schema §4 canonical
 // sort (frame, track, rank) — the same comparator TraceCompare.kt applies for cross-implementation
 // runs. Any mismatch is a sequencing-parity bug, reported at the first divergent canonical line.
 //
@@ -185,7 +185,7 @@ static std::string live_tag(const LiveMode& m) {
 }
 
 int main(int argc, char** argv) {
-    std::string testdata = (argc > 1) ? argv[1] : "testdata";
+    std::string testdata = (argc > 1) ? argv[1] : "tools/testdata";
 
     int total = 0, failures = 0, missing = 0;
 

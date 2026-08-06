@@ -5,7 +5,7 @@
 **Vendored:** 2026-07-27, for the mp4/AAC in-place sample decoder (convergence media-unification).
 **Licence:** GPL-2.0-or-later (see `COPYING`). Compatible with PocketTracker's GPL-3.0 — this is
 *why* FAAD2 was chosen over fdk-aac (whose licence FSF considers GPL-incompatible). Recorded in
-`licenses/THIRD-PARTY-NOTICES.md`.
+`docs/licenses/THIRD-PARTY-NOTICES.md`.
 
 ## What is vendored, and what is not
 

@@ -79,9 +79,9 @@ const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz (note sta
 const int KILL_FADE_SAMPLES = 256;
 
 // ===================================
-// EFFECT TYPE CONSTANTS (must match EffectProcessor.kt)
-// Only effects processed by the C++ table engine are listed here.
-// Phrase-level effects (ARP/ARC/REP/etc.) are handled entirely in Kotlin.
+// EFFECT TYPE CONSTANTS — ⚠️ must match native/songcore/effects.h, which is where an effect's code is
+// defined and where the UI, the file format and the scheduler all read it from. Only effects the C++
+// TABLE engine processes are listed here; the phrase-level ones (ARP/ARC/REP/…) are songcore's.
 // ===================================
 const int FX_HOP    = 0x08;  // Hxx - Table hop (repeat-count jump, FF = stop table)
 const int FX_TIC    = 0x09;  // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)

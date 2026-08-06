@@ -346,12 +346,10 @@ CursorContext InputDispatcher::cursor_context() const {
         }
 
         case ScreenType::MIDI: {
-            MidiState ms{*s_.project, s_.settings};
+            MidiState ms{*s_.project, s_.settings, s_.midiDeviceNames, s_.midiInDeviceNames};
             ms.cursorRow      = s_.midiCursorRow;
             ms.cursorColumn   = s_.midiCursorColumn;
-            ms.deviceNames    = s_.midiDeviceNames;
             ms.deviceIndex    = s_.midiDeviceIndex;
-            ms.inDeviceNames  = s_.midiInDeviceNames;
             ms.inDeviceIndex  = s_.midiInDeviceIndex;
             ms.caps           = s_.caps;
             return midi_.cursor_context(ms);
@@ -927,21 +925,12 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
 // Both sets are named after what they are, and both names are right.
 
 /**
- * The INSTRUMENT screen's TYPE row. See the header for why this refuses rather than asking.
+ * A+UP/DOWN on the INSTRUMENT screen's TYPE cell. Switching a slot's type FREES whatever source it
+ * holds — a sampler has no use for an .sf2 and vice versa — so a loaded slot is asked about through
+ * the confirm dialog first, and only an EMPTY slot switches outright.
  *
- * The refusal is not timidity — SAMPLER↔SOUNDFONT is the one edit on this screen that DESTROYS
- * something (the old type's source is freed; a sampler has no use for an .sf2 and vice versa). Kotlin
- * puts a confirm dialog in front of it for exactly that reason. Silently dropping a loaded sample
- * because the user nudged A+UP one row too far is the worst of the three options; refusing with a
- * message is the honest one until the modal system lands.
- */
-/**
- * A+UP/DOWN on the TYPE cell. Switching a slot's type FREES whatever source it holds, so a loaded
- * slot has to be asked about first.
- *
- * ⚠️ S4 shipped this REFUSING to switch a loaded slot at all ("CLEAR SLOT FIRST") — stricter than
- * Android, never destructive, and explicitly parked until there was a dialog to ask with. There is
- * one now (S7), so the divergence closes: the question gets asked, and the answer is honoured.
+ * ⚠️ Silently dropping a loaded sample because the user nudged A+UP one row too far is the failure
+ * this shape exists to prevent. The dialog is the guard; do not add a path around it.
  */
 void InputDispatcher::request_instrument_type_toggle(int delta) {
     const Instrument& ins =
@@ -1840,8 +1829,13 @@ void InputDispatcher::confirm_accept() {
             // until the project was saved and opened again. See SongcoreHost::clean_inst.
             host_.clean_inst(fs_.samples_directory());
             mark_modified();
-            s_.statusMessage = "INST CLEANED";
-            s_.statusSuccess = true;
+            {
+                // The reload can fail the same way a project load can — see load_project_done.
+                const int failed = host_.last_media_load().failed;
+                s_.statusMessage =
+                    failed > 0 ? "CLEANED: " + std::to_string(failed) + " MISSING" : "INST CLEANED";
+                s_.statusSuccess = (failed == 0);
+            }
             break;
 
         case ConfirmDialogState::Kind::NEW_PROJECT:
@@ -1982,8 +1976,15 @@ void InputDispatcher::load_project_done(const std::string& path) {
     reset_editing_context();
 
     close_file_browser();
-    s_.statusMessage = "LOADED";
-    s_.statusSuccess = true;
+
+    // ⚠️ **A SAMPLE THAT DID NOT LOAD LEAVES ITS INSTRUMENT SILENT AND SAYS NOTHING OTHERWISE.** The
+    // launch path prints a warning to stderr; the two platforms this port is aimed at have no console
+    // to print it to, so without this the only symptom is a track that does not sound. It is also
+    // where an out-of-memory sample lands on a 512 MB device — a path that handles the failure
+    // correctly and then had nowhere to report it.
+    const int failed = host_.last_media_load().failed;
+    s_.statusMessage = failed > 0 ? "LOADED: " + std::to_string(failed) + " MISSING" : "LOADED";
+    s_.statusSuccess = (failed == 0);
 }
 
 void InputDispatcher::export_song(bool stems) {
@@ -2219,6 +2220,18 @@ void InputDispatcher::boot_midi_port() {
     s_.midiStatusText.clear();                     // boot news is the console's job, not the screen's
 }
 
+// Resolve a SAVED NAME against the list that exists right now. Not found → 0 → OFF, and that rule is
+// the whole reason the setting is a name and not an index: an index would silently come back pointing
+// at whatever port took its place. One definition for all four call sites (both directions of both
+// the OUT and IN pairs) so the not-found rule cannot be spelled differently in one of them.
+//
+// Index 0 is "OFF" and is never a device, so the search starts at 1.
+static int resolve_port_index(const std::vector<std::string>& names, const std::string& want) {
+    for (size_t i = 1; i < names.size(); ++i)
+        if (names[i] == want) return static_cast<int>(i);
+    return 0;
+}
+
 void InputDispatcher::refresh_midi_devices() {
     s_.midiDeviceNames.assign(1, "OFF");   // index 0, always — the module never handles "no device"
 
@@ -2227,24 +2240,13 @@ void InputDispatcher::refresh_midi_devices() {
         for (int i = 0; i < n; ++i) s_.midiDeviceNames.push_back(s_.midiOut->device_name(i));
     }
 
-    // Resolve the SAVED NAME against the list that exists right now. Not found → OFF. That is the
-    // whole reason the setting is a name: an index would silently name whatever port took its place.
-    s_.midiDeviceIndex = 0;
-    for (size_t i = 1; i < s_.midiDeviceNames.size(); ++i) {
-        if (s_.midiDeviceNames[i] == s_.settings.midiOutDevice) {
-            s_.midiDeviceIndex = static_cast<int>(i);
-            break;
-        }
-    }
+    s_.midiDeviceIndex = resolve_port_index(s_.midiDeviceNames, s_.settings.midiOutDevice);
 }
 
 void InputDispatcher::apply_midi_device() {
     // Re-resolve first: `settings.midiOutDevice` is the choice, `midiDeviceIndex` is where that choice
     // sits in the list the screen is drawing, and the module just changed the former.
-    int wanted = 0;
-    for (size_t i = 1; i < s_.midiDeviceNames.size(); ++i) {
-        if (s_.midiDeviceNames[i] == s_.settings.midiOutDevice) { wanted = static_cast<int>(i); break; }
-    }
+    const int wanted = resolve_port_index(s_.midiDeviceNames, s_.settings.midiOutDevice);
     s_.midiDeviceIndex = wanted;
 
     if (!s_.midiOut) { s_.midiStatusText = "NO MIDI BACKEND"; return; }
@@ -2296,20 +2298,11 @@ void InputDispatcher::refresh_midi_in_devices() {
         for (int i = 0; i < n; ++i) s_.midiInDeviceNames.push_back(s_.midiIn->device_name(i));
     }
 
-    s_.midiInDeviceIndex = 0;
-    for (size_t i = 1; i < s_.midiInDeviceNames.size(); ++i) {
-        if (s_.midiInDeviceNames[i] == s_.settings.midiInDevice) {
-            s_.midiInDeviceIndex = static_cast<int>(i);
-            break;
-        }
-    }
+    s_.midiInDeviceIndex = resolve_port_index(s_.midiInDeviceNames, s_.settings.midiInDevice);
 }
 
 void InputDispatcher::apply_midi_in_device() {
-    int wanted = 0;
-    for (size_t i = 1; i < s_.midiInDeviceNames.size(); ++i) {
-        if (s_.midiInDeviceNames[i] == s_.settings.midiInDevice) { wanted = static_cast<int>(i); break; }
-    }
+    const int wanted = resolve_port_index(s_.midiInDeviceNames, s_.settings.midiInDevice);
     s_.midiInDeviceIndex = wanted;
 
     if (!s_.midiIn) { s_.midiStatusText = "NO MIDI BACKEND"; return; }
@@ -3339,7 +3332,7 @@ void InputDispatcher::qwerty_apply() {
         case QwertyContext::INSTRUMENT_SAVE: {
             const std::string name = text.empty() ? "PRESET" : text;
             const std::string path = k.contextExtra + "/" + name + ".pti";
-            if (host_.save_instrument_preset(s_.currentInstrument, path)) {
+            if (save_instrument_preset(host_, fs_, s_.currentInstrument, path)) {
                 s_.statusMessage = "SAVED: " + name;
                 s_.statusSuccess = true;
             } else {
@@ -3538,6 +3531,15 @@ void InputDispatcher::init_sample_editor_state() {
     if (se.totalFrames > 0) {
         se.selectionStart = (static_cast<int64_t>(ins.sampleStart) * se.totalFrames) / 255;
         se.selectionEnd   = (static_cast<int64_t>(ins.sampleEnd) * se.totalFrames) / 255;
+        // ⚠️ START and END are two independent free 0-255 cells, so an INVERTED window is typeable
+        // and arrives here as `start > end`. It opens on the WHOLE sample, which is not a repair
+        // chosen here — it is what `Voice::trigger` already does with the same pair, so the editor
+        // shows the region the engine plays. Drawn as-is it would show no selection at all (the
+        // waveform lights `>= start && < end`), which reads as "nothing selected".
+        if (se.selectionStart >= se.selectionEnd) {
+            se.selectionStart = 0;
+            se.selectionEnd   = se.totalFrames;
+        }
     } else {
         se.selectionStart = 0;
         se.selectionEnd   = 0;

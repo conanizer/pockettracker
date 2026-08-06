@@ -96,6 +96,16 @@ ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
  */
 int create_resampled_instrument(songcore::SongcoreHost& host, const std::string& wavPath);
 
+/**
+ * INSTRUMENT → SAVE PRESET. Instrument `id`, and its table if that has content, as a `.pti`.
+ *
+ * ⚠️ Through `FileSystem::write_file` for exactly the reason a `.ptp` is — see `write_project` in
+ * the .cpp. It lives here rather than in songcore because that is where the FileSystem is: songcore
+ * has to keep compiling for the NDK and cannot depend on `ui::FileSystem`.
+ */
+bool save_instrument_preset(const songcore::SongcoreHost& host, FileSystem& fs, int id,
+                            const std::string& path);
+
 /** SETTINGS → TEMPLATE → SAVE. The current project becomes what the app boots into. */
 ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs);
 

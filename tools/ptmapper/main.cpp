@@ -7,7 +7,7 @@
 //   • `ptdispatch` calls `d.on_l_b_a()` and friends DIRECTLY. Every assertion it makes begins after
 //     the matrix has already decided; swap two arms below and it stays all green.
 //   • `ptinput` is lower still — it drives the modules' `handle_input`, two layers down.
-//   • Kotlin's `InputMapper.handleButtonAction` has no test either (testdata/README.md §3 lists it as
+//   • Kotlin's `InputMapper.handleButtonAction` has no test either (tools/testdata/README.md §3 lists it as
 //     uncovered on BOTH sides), which is why this file cannot be a conformance tool.
 //
 // ⚠️ **SO THIS IS ptdispatch'S KIND OF TOOL, NOT ptplay'S: hand-written assertions, no golden.** It

@@ -12,8 +12,9 @@
 // plain fields and the two halves become one struct. The FIELD NAMES are kept, because the Kotlin
 // files are the executable spec for the port and a reviewer must be able to read them side by side.
 //
-// ⚠️ This struct GROWS with each session of the Phase 3 port. What is here now is what the screens
-// that exist now read. It is not a design that got smaller — it is a design that has not arrived yet.
+// ⚠️ EVERYTHING A FRAME READS IS IN HERE, and that is the design rather than an accident of size: the
+// draw path takes this struct and nothing else, so a field that is not here cannot reach the screen.
+// A new screen adds its fields here; it does not get state of its own.
 
 #include "screen.h"
 #include "songcore/model.h"
@@ -357,6 +358,11 @@ struct AppState {
      */
     const float* eqSpectrum      = nullptr;
     int          eqSpectrumCount = 0;
+
+    // The engine's device rate, for the EQ editor's response curve — it must plot at the rate the
+    // bands were built at. Fed alongside the spectrum by engine_feed.h, since both are the engine
+    // telling the UI something the document does not carry.
+    int          eqSampleRate    = 44100;
 
     // ── The THEME EDITOR (S9) ────────────────────────────────────────────────────────────────────
     //

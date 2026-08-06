@@ -25,7 +25,7 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 Each library keeps its own license. PocketTracker as a whole is distributed under GPL-3.0-or-later (see [`LICENSE`](LICENSE)).
 
 **Full notices for everything compiled into the audio engine — the code that ships in both the APK
-and the Linux port — are in [`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md),**
+and the Linux port — are in [`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md),**
 which is the single source of truth and travels inside the release artifact.
 
 **Oboe and the two AndroidX rows are Gradle-resolved rather than compiled from `native/`**, so they
@@ -34,7 +34,8 @@ the binary, and naming it here does not do that — **the full Apache-2.0 text i
 which is why the notices cover them too despite not being engine code.
 
 This file ships beside the notices in every artifact rather than only in the repo —
-`assets/licenses/CREDITS.md` in the APK, `licenses/CREDITS.md` in the Linux tarball.
+`assets/licenses/CREDITS.md` in the APK, and `licenses/CREDITS.md` in the Windows zip, the Linux
+tarball and the PortMaster zip.
 
 > **Note on DaisySP:** it is not uniformly MIT. Of the eight files PocketTracker compiles, five are
 > MIT (`svf`, `overdrive`, `decimator`, `limiter`, `crossfade`) and **three are LGPL-2.1** —

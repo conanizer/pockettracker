@@ -348,7 +348,7 @@ static bool render_project(SongcoreHost& host, const std::string& testdata, cons
         return false;
     }
 
-    // The golden projects store their media paths RELATIVE to /testdata ("golden/kick.wav"), which is
+    // The golden projects store their media paths RELATIVE to /tools/testdata ("golden/kick.wav"), which is
     // what makes them portable; base_dir resolves them. A device project stores absolute paths, and
     // resolve_media_path() honours those unchanged.
     const MediaLoadResult media = host.load_media(testdata);
@@ -527,7 +527,7 @@ static void check_fingerprint(const std::string& path, const std::string& name,
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
-    const std::string testdata = (argc > 1) ? argv[1] : "testdata";
+    const std::string testdata = (argc > 1) ? argv[1] : "tools/testdata";
     const std::string outDir   = (argc > 2) ? argv[2] : ".";
 
     std::cout << "== songcore S6b render conformance (the real engine, no app) ==\n";

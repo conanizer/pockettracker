@@ -1,7 +1,9 @@
 # ─── The by-name JNI callbacks from native into Kotlin (convergence Phase E) ──────────────────
 #
-# The shared C++ shell calls exactly thirteen Kotlin methods on MainActivity by name, resolving each with
-# GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp, shell/midi-in-android.cpp):
+# The shared C++ shell calls these Kotlin methods on MainActivity by name, resolving each with
+# GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp, shell/midi-in-android.cpp).
+# ⚠️ No count in prose — this comment carried three different ones at once. The list below IS the
+# count, and CI reads it out of this file rather than out of a sentence.
 #     onButtonFeedback(IZZIZI)V     — routes a virtual-button press to the sound/haptic managers
 #     hasPhysicalGameButtons()Z     — the SOURCE_GAMEPAD check SDL's looser C joystick API cannot make
 #     describeInputDevices()L…/String; — the same enumeration as TEXT, printed at boot into the log file
@@ -19,7 +21,7 @@
 #     midiInOpenDevice(I)Z          — │ OPPOSITE filter — see MidiInManager.kt. The last one is a READ
 #     midiInCloseDevice()V          — │ because the native side POLLS this port once a frame rather
 #     midiInRead([B)I               — ┘ than being called from the MIDI service's binder thread.
-# so all twelve NAMES are part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
+# Every NAME above is part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
 # the JNI facade) kill every render in a release APK. MainActivity now runs R8 in release, having left

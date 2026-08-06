@@ -4,7 +4,7 @@
 **File:** `minimp4.h` (single header, 3502 lines)
 **Vendored:** 2026-07-27, for the mp4/AAC in-place sample decoder (convergence media-unification).
 **Licence:** CC0-1.0 / public domain (see the header comment). Recorded in
-`licenses/THIRD-PARTY-NOTICES.md`.
+`docs/licenses/THIRD-PARTY-NOTICES.md`.
 
 Single-header, drops into the existing `dr_mp3` vendor style: the implementation is compiled exactly
 once, inside `audio-decoders.cpp`, by defining `MINIMP4_IMPLEMENTATION` before the include. Only the

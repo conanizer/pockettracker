@@ -56,11 +56,13 @@ struct ScheduledNote {
     int noteOctave;          // Octave of note (0-9) for TICFC mode
     int notePitch;           // Pitch of note (0-11, C=0) for TICFE mode
 
-    // Pitch modulation parameters — applied at note trigger
-    // These are applied when the note triggers, allowing per-note pitch effects
+    // Pitch modulation parameters — applied at note trigger, allowing per-note pitch effects.
+    // ⚠️ UNITS: songcore/voice_derive.h converts PSL and PBN out of the tick/step domain the FX cells
+    // are authored in BEFORE they reach this queue (`pslDur * framesPerTic`, `pbnRate / framesPerStep`).
+    // What arrives here is already per-FRAME, and the engine applies it without further scaling.
     float pslInitialOffset;  // PSL: Initial pitch offset in semitones (0 = no PSL)
-    float pslDuration;       // PSL: Slide duration in ticks (0 = no slide)
-    float pbnRate;           // PBN: Semitones per tick (0 = no bend)
+    float pslDuration;       // PSL: Slide duration in FRAMES (0 = no slide)
+    float pbnRate;           // PBN: Semitones per FRAME (0 = no bend)
     float vibratoSpeed;      // PVB/PVX: LFO speed in Hz (0 = no vibrato)
     float vibratoDepth;      // PVB/PVX: Depth in semitones (0 = no vibrato)
 
@@ -278,7 +280,10 @@ public:
 
 // Pre-converted EQ band params (Hz/dB/Q) — populated by setInstrumentEqSlot().
 struct EqBandData {
-    int   type   = 0;       // 0=off 1=loShelf 2=bell 3=hiShelf
+    // ⚠️ 0=OFF 1=LOSHELF 2=LOWCUT 3=BELL 4=HISHELF 5=HICUT. The number IS the identity (it is what the
+    // project file stores), and LOWCUT/HICUT were appended — so this is not the order the names
+    // suggest. Defined once in effects/modules/eq-module.h; append there, never insert.
+    int   type   = 0;
     float freqHz = 1000.0f; // 20–20000 Hz
     float gainDb = 0.0f;    // −12..+12 dB
     float q      = 1.0f;    // 0.1–10.0

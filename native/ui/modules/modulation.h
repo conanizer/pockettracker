@@ -57,8 +57,14 @@ inline const std::vector<songcore::ModType>& user_mod_types() {
     return v;
 }
 
-/** The row labels for a slot of this type. Its size is `mod_slot_row_count`. */
-std::vector<std::string> mod_row_labels(songcore::ModType type);
+/**
+ * The row labels for a slot of this type. Its size is `mod_slot_row_count`.
+ *
+ * By reference to a static, like `user_mod_types` above and every other vocabulary in the tree: the
+ * MODS screen calls this once per row per slot per side, up to 28 times a frame, for eight tables
+ * that never change.
+ */
+const std::vector<std::string>& mod_row_labels(songcore::ModType type);
 
 /**
  * The value a row displays. `slot_index` (0..3) is needed for one reason only: a slot that modulates

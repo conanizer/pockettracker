@@ -1,7 +1,7 @@
 // ptroundtrip — songcore .ptp / .pti conformance harness (host tool, no device/NDK).
 //
 // Proves the C++ songcore serializer is byte-for-byte compatible with the Kotlin
-// kotlinx.serialization output: it reads each golden .ptp from /testdata, runs the real load path
+// kotlinx.serialization output: it reads each golden .ptp from /tools/testdata, runs the real load path
 // (parse → normalize → migrate) and re-serializes, then compares to the ORIGINAL bytes. Any
 // difference is a schema-drift bug and is reported with the exact offset + context.
 //
@@ -68,7 +68,7 @@ static void report_diff(const std::string& a, const std::string& b) {
 }
 
 int main(int argc, char** argv) {
-    std::string testdata = (argc > 1) ? argv[1] : "testdata";
+    std::string testdata = (argc > 1) ? argv[1] : "tools/testdata";
 
     // Every golden project. g7-audio carries the EQ presets, mod slots and filter settings no other
     // project serializes; g8-random carries the CHA/RND/RNL effect codes, and g9-automation the

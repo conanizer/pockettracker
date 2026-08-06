@@ -9,7 +9,7 @@ script with a new tag; to change what is copied, edit the script.
 | upstream | https://github.com/libsdl-org/SDL |
 | tag | `release-2.30.9` |
 | commit | `c98c4fbff6d8f3016a3ce6685bf8f43433c3efcc` |
-| licence | zlib — `LICENSE.txt`, and `licenses/THIRD-PARTY-NOTICES.md` at the repo root |
+| licence | zlib — `LICENSE.txt`, and `docs/licenses/THIRD-PARTY-NOTICES.md` |
 
 ## Why this exists at all
 

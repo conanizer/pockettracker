@@ -12,7 +12,7 @@ project("pockettracker-sdl" LANGUAGES C CXX)
 #
 #   cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
 #   cmake --build shell/build --config Release
-#   shell/build/pockettracker-sdl testdata/g7-audio.ptp testdata
+#   shell/build/pockettracker-sdl tools/testdata/g7-audio.ptp tools/testdata
 #
 # Pass CMAKE_BUILD_TYPE explicitly, as above. The usual "default to Release if it is empty" guard is
 # not portable: MSVC's platform module pre-seeds CMAKE_BUILD_TYPE to Debug (via CMAKE_BUILD_TYPE_INIT)
@@ -63,6 +63,34 @@ message(STATUS "PocketTracker ${PT_VERSION} (from app/build.gradle.kts)")
 # both would be one instruction with two spellings.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# ─── Dead-code stripping — the handheld's biggest free win ─────────────────────────────────────
+#
+# gcc and clang neither section-split nor GC by default, so without these every unreferenced function
+# in the engine, pt-ui, SDL2 and the whole vendored decoder stack is resident on a 512 MB device.
+#
+# ⚠️⚠️ DIRECTORY SCOPE IS THE POINT, and it is why this sits ABOVE the two add_subdirectory calls
+# below rather than beside the per-target flags further down. --gc-sections discards unreferenced
+# SECTIONS; without -ffunction-sections/-fdata-sections on the code being GC'd, a whole .o is one
+# section and there is nothing to discard. Measured on gcc 13.3/x86-64 Release, same tree, one flag
+# flip apart: per-target on `pockettracker-sdl` alone is 2,933,600 → 2,860,176 B (−2.5 %, the shell's
+# own TUs only); at directory scope it is 2,933,600 → 2,569,704 B (−12.4 %). The libraries are where
+# the dead code is. ⚠️ The percentage is not portable to the PortMaster aarch64 toolchain; the
+# direction is structural and holds everywhere.
+#
+# ⚠️ This is the ONE exception to the "PER-TARGET, never add_compile_options()" rule stated at the
+# IEEE-exactness block below, and the reason the rule does not cover it: that rule protects the
+# ENGINE's own -ffast-math policy from being countermanded by a directory-scope FLOATING-POINT flag.
+# Section splitting is numerically inert — it decides where the compiler puts each function and datum,
+# never what it computes — so it can be inherited by targets entitled to their own fp policy.
+# Anything affecting arithmetic still belongs on a target and nowhere else.
+#
+# MSVC needs nothing (/OPT:REF is its Release default). Apple's ld64 spells it -dead_strip and is
+# untested here, so it is excluded rather than guessed at.
+if(NOT MSVC AND NOT APPLE)
+    add_compile_options(-ffunction-sections -fdata-sections)
+    add_link_options(-Wl,--gc-sections)
 endif()
 
 # ─── The engine, as a host static lib ──────────────────────────────────────────────────────────
@@ -142,25 +170,6 @@ add_executable(pockettracker-sdl
         ${PT_WIN_RESOURCES}
 )
 
-# ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────
-#
-# This is copied from tools/CMakeLists.txt on purpose, and it is the least obvious line in this file.
-# app.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target's translation
-# units. Its float params (velGain/volGain/pan, PSL/PBN/vibrato rates) are the ones the conformance
-# traces compare as raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c`
-# into an fma BY DEFAULT, -ffast-math or not, which rounds once where the JVM rounds twice.
-#
-# ⚠️ PER-TARGET is what keeps this correct across the C0.2 split: the flags below apply to every TU in
-# `pockettracker-sdl`, so moving the host include from main.cpp to app.cpp did not move the guarantee.
-# A future Android entry point linking app.cpp must restate it in ITS build (the APK's own
-# native/CMakeLists.txt already does, for songcore-jni.cpp, for exactly this reason).
-#
-# Without this, the handheld build would quietly sequence differently from the APK the goldens were
-# recorded against, on the exact architecture we ship to, and nothing in this directory would say so.
-#
-# PER-TARGET, never add_compile_options(): a directory-scope flag would be inherited by everything
-# under add_subdirectory(../native) — the engine and the whole vendored decoder stack — and would
-# countermand the ENGINE's own -ffast-math policy, which it is entitled to make for itself.
 # winmm — `midiOutShortMsg` and friends (midi-out-winmm.cpp). In every Windows install; no package,
 # no COM, no manifest capability.
 if(WIN32)
@@ -183,6 +192,27 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     target_link_libraries(pockettracker-sdl PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 endif()
 
+# ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────
+#
+# This is copied from tools/CMakeLists.txt on purpose, and it is the least obvious setting in this
+# file. app.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target's translation
+# units. Its float params (velGain/volGain/pan, PSL/PBN/vibrato rates) are the ones the conformance
+# traces compare as raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c`
+# into an fma BY DEFAULT, -ffast-math or not, which rounds once where the JVM rounds twice.
+#
+# ⚠️ PER-TARGET is what keeps this correct across the C0.2 split: the flags below apply to every TU in
+# `pockettracker-sdl`, so moving the host include from main.cpp to app.cpp did not move the guarantee.
+# A future Android entry point linking app.cpp must restate it in ITS build (the APK's own
+# native/CMakeLists.txt already does, for songcore-jni.cpp, for exactly this reason).
+#
+# Without this, the handheld build would quietly sequence differently from the APK the goldens were
+# recorded against, on the exact architecture we ship to, and nothing in this directory would say so.
+#
+# PER-TARGET, never add_compile_options(): a directory-scope flag would be inherited by everything
+# under add_subdirectory(../native) — the engine and the whole vendored decoder stack — and would
+# countermand the ENGINE's own -ffast-math policy, which it is entitled to make for itself. That is a
+# rule about ARITHMETIC, not about scope for its own sake: the section-splitting flags above are set
+# at directory scope deliberately, because they cannot change a result. See the note there.
 if(MSVC)
     target_compile_options(pockettracker-sdl PRIVATE /fp:precise)
     # ⚠️ The manifest embedded by the .rc above is the ONLY one. MSVC's linker synthesises its own
@@ -193,6 +223,7 @@ if(MSVC)
 else()
     target_compile_options(pockettracker-sdl PRIVATE -fno-fast-math -ffp-contract=off)
 endif()
+
 
 # pt-ui is the portable UI — the screen modules, the software canvas, the 5×5 font, the cursor-context
 # system (native/ui/). It links `pockettracker` itself, so this one line brings the engine, songcore

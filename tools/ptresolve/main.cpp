@@ -3,9 +3,9 @@
 // Proves the C++ ports of the sequencer's *pure* pieces are equivalent to the Kotlin originals:
 //   * native/songcore/timing.h    — framesPerStep, framesPerTic, byteToSignedSemitones, groove math
 //   * native/songcore/effects.h   — resolveStepParams + the ResolvedStepParams bundle
-//   * native/songcore/traversal.h — collectUsedInstruments (loads the real /testdata .ptp projects)
+//   * native/songcore/traversal.h — collectUsedInstruments (loads the real /tools/testdata .ptp projects)
 //
-// It reads testdata/units/s3-units.txt (emitted by the JVM S3UnitGoldenTest from the REAL Kotlin
+// It reads tools/testdata/units/s3-units.txt (emitted by the JVM S3UnitGoldenTest from the REAL Kotlin
 // functions), and for every `<inputs> => <outputs>` line it re-parses the inputs, recomputes the
 // RHS in C++, and byte-compares against the golden RHS. Any mismatch is a parity bug, reported with
 // the offending line. This is where the framesPerStep double-rounding and the binary32 `volume`
@@ -213,7 +213,7 @@ static std::string recompute(const Line& ln, const std::string& testdata, std::s
 }
 
 int main(int argc, char** argv) {
-    std::string testdata = (argc > 1) ? argv[1] : "testdata";
+    std::string testdata = (argc > 1) ? argv[1] : "tools/testdata";
     std::string goldenPath = testdata + "/units/s3-units.txt";
 
     std::string text;

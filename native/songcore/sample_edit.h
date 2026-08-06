@@ -185,7 +185,13 @@ void preview_instrument_dry(Engine& engine, const Instrument& ins, int slotId, f
 
 // ─── SAVE and CHOP ───────────────────────────────────────────────────────────────────────────────
 
-/** The channel buffers a save will write, and how many of them the WAV gets. */
+/**
+ * The channel buffers a save will write, and how many of them the WAV gets.
+ *
+ * ⚠️ `right` is EMPTY unless `channels == 2`. Three of the four SOURCE modes write one channel, and
+ * filling `right` with a copy of `left` for them would double the peak of a buffer that is already
+ * the full length of the sample — see `write_wav`, which reads `right` only for a stereo file.
+ */
 struct SaveChannels {
     std::vector<float> left;
     std::vector<float> right;
@@ -218,31 +224,29 @@ SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool 
 
     if (!hasStereo) {
         out.left     = pull_left();
-        out.right    = out.left;
         out.channels = 1;
         return out;
     }
 
     switch (sourceMode) {
         case 0:   // LEFT → mono
-            out.left  = pull_left();
-            out.right = out.left;
+            out.left = pull_left();
             break;
         case 1:   // RIGHT → mono
-            out.left  = pull_right();
-            out.right = out.left;
+            out.left = pull_right();
             break;
         case 2:   // STEREO → the only two-channel save
             out.left  = pull_left();
             out.right = pull_right();
             break;
         default: {   // MONO → downmix
-            const std::vector<float> l = pull_left();
+            std::vector<float> l = pull_left();
             const std::vector<float> r = pull_right();
-            std::vector<float> m(l.size());
-            for (size_t i = 0; i < l.size(); ++i) m[i] = (l[i] + r[i]) / 2.0f;
-            out.left  = m;
-            out.right = m;
+            // In place, into the buffer already holding L: the downmix is the one path that would
+            // otherwise hold five full-length copies at once (l, r, the mix, and a copy into each
+            // output). Moving rather than assigning keeps it at two.
+            for (size_t i = 0; i < l.size() && i < r.size(); ++i) l[i] = (l[i] + r[i]) / 2.0f;
+            out.left = std::move(l);
             break;
         }
     }

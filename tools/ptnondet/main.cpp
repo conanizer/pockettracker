@@ -126,7 +126,7 @@ static const std::vector<Expect> GOLDENS = {
 };
 
 int main(int argc, char** argv) {
-    std::string arg = (argc > 1) ? argv[1] : "testdata";
+    std::string arg = (argc > 1) ? argv[1] : "tools/testdata";
 
     // ── diagnostic mode: one .ptp, tell me everything ──
     if (ends_with(arg, ".ptp")) {

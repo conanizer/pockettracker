@@ -6,7 +6,7 @@
 - **Source:** https://github.com/nothings/stb — `stb_truetype.h`
 - **Pinned commit:** `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (fetched 2026-07-22).
 - **Licence:** dual — public domain (Unlicense) **or** MIT, at your option. The full statement is at
-  the end of the header. Notice recorded in `licenses/THIRD-PARTY-NOTICES.md`, the same slot stb_image
+  the end of the header. Notice recorded in `docs/licenses/THIRD-PARTY-NOTICES.md`, the same slot stb_image
   uses.
 
 ## Why it is here, and where it may be used

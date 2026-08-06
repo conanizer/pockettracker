@@ -96,6 +96,13 @@ struct EqState {
     const float* spectrum      = nullptr;
     int          spectrumCount = 0;
 
+    /**
+     * The rate the ENGINE's EQ bands were built at, so the plotted curve is the curve the audio has.
+     * `EqBandModule::reset(sr)` takes the device rate; a plot at a literal 44100 disagrees with it on
+     * every device that is not 44.1 kHz, worst near Nyquist — and this panel's axis runs to 20 kHz.
+     */
+    float sampleRate = 44100.0f;
+
     Theme theme = theme_classic();
 };
 
@@ -184,7 +191,8 @@ private:
     static int freq_to_pixel(float freq);
 
     /** The three bands' combined gain at one frequency, clamped to the panel's ±VIS_DB. */
-    static float combined_gain_db(const std::vector<songcore::EqBand>& bands, float freq);
+    static float combined_gain_db(const std::vector<songcore::EqBand>& bands, float freq,
+                                  float sampleRate);
 
     // ── The response-curve cache (see draw) ──────────────────────────────────────────────────────
     //

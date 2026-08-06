@@ -12,7 +12,7 @@
 //   SDL_Init / SDL_Quit, here                SDL_Init here too; SDLActivity owns the surface, not this
 //   SdlAudioEngine                           OboeAudioEngine  ← the whole of C3's audio work
 //   default_app_root() + StdFileSystem       the root from Java + StdFileSystem (⚠️ C5, see below)
-//   PlatformCaps::sdl(debug), console on     PlatformCaps::sdl(debug) for now (⚠️ C6 replaces it)
+//   PlatformCaps::sdl(debug), console on     PlatformCaps::converged(...) — see where it is set below
 //
 // ⚠️ **NO `SDL_MAIN_HANDLED` HERE, AND THAT IS THE OPPOSITE OF `main.cpp`.** SDL_main.h defines
 // `SDL_MAIN_NEEDED` on `__ANDROID__` and with it `#define main SDL_main`, so the `main` below is
@@ -270,6 +270,15 @@ void redirect_stdio_to_logcat(const std::string& appRoot) {
 
     int pfd[2];
     if (pipe(pfd) != 0) return;  // No console is a degraded bring-up, not a failure to launch.
+
+    // ⚠️ **KEEP THE ORIGINALS, because the redirect has to be UNDOABLE.** If the pump does not start,
+    // stdout is a pipe with nobody reading it: the banner plus the once-a-second status line fills
+    // the 64 KB buffer in minutes and the next `printf` blocks the SDL thread **forever** — an app
+    // that hangs with no log, no crash and nothing to attribute it to. The `pipe()` failure above
+    // already decided what the acceptable degradation is, and this is how that path reaches it too.
+    const int savedOut = dup(STDOUT_FILENO);
+    const int savedErr = dup(STDERR_FILENO);
+
     dup2(pfd[1], STDOUT_FILENO);
     dup2(pfd[1], STDERR_FILENO);
     close(pfd[1]);
@@ -277,7 +286,18 @@ void redirect_stdio_to_logcat(const std::string& appRoot) {
     pthread_t t;
     if (pthread_create(&t, nullptr, log_pump, reinterpret_cast<void*>((intptr_t)pfd[0])) == 0) {
         pthread_detach(t);
+        if (savedOut >= 0) close(savedOut);
+        if (savedErr >= 0) close(savedErr);
+        return;
     }
+
+    // The pump never ran. Put the descriptors back and drop the pipe, so writing to stdout is
+    // harmless again — degraded to "no console", not to a deadlock.
+    if (savedOut >= 0) { dup2(savedOut, STDOUT_FILENO); close(savedOut); }
+    if (savedErr >= 0) { dup2(savedErr, STDERR_FILENO); close(savedErr); }
+    close(pfd[0]);
+    __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                        "log pump thread did not start - console goes to logcat only");
 }
 
 }  // namespace

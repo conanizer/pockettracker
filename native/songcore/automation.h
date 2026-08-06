@@ -275,14 +275,12 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
 
     // Absolute step of each row's step 0, in the chain's own walk. −1 marks a row that is never
     // played and therefore has no position at all.
-    int rowAbs[16];
+    int rowAbs[CHAIN_ROWS];
     int walked = 0;
-    for (int row = 0; row < 16; ++row) {
-        const int phraseId = chain.phraseRefs[row];
-        const bool played = !chain_is_empty(chain, row) && phraseId >= 0 &&
-                            phraseId < static_cast<int>(project.phrases.size());
+    for (int row = 0; row < CHAIN_ROWS; ++row) {
+        const bool played = chain_phrase_ref(chain, row) >= 0;
         rowAbs[row] = played ? walked : -1;
-        if (played) walked += 16;
+        if (played) walked += PHRASE_ROWS;
     }
     if (rowAbs[chainRow] < 0) return out;
 
@@ -297,9 +295,9 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
     int      openAbs   = 0;   // absolute step the open AUS sits on
     int      openRow   = -1;  // and the row, so a HOP entry can be applied to the right phrase
 
-    for (int row = 0; row < 16; ++row) {
+    for (int row = 0; row < CHAIN_ROWS; ++row) {
         if (rowAbs[row] < 0) continue;
-        const Phrase& phrase = project.phrases[static_cast<size_t>(chain.phraseRefs[row])];
+        const Phrase& phrase = project.phrases[static_cast<size_t>(chain_phrase_ref(chain, row))];
         const int steps = static_cast<int>(phrase.steps.size());
         for (int stepIndex = 0; stepIndex < steps && stepIndex < 16; ++stepIndex) {
             const PhraseStep& step = phrase.steps[static_cast<size_t>(stepIndex)];
@@ -414,8 +412,8 @@ inline RampCells find_ramp_cells(const Project& project, int phraseId) {
 
     bool placed = false;
     for (const Chain& chain : project.chains) {
-        for (int row = 0; row < 16; ++row) {
-            if (chain.phraseRefs[static_cast<size_t>(row)] != phraseId) continue;
+        for (int row = 0; row < CHAIN_ROWS; ++row) {
+            if (chain_phrase_ref(chain, row) != phraseId) continue;
             placed = true;
             cells.mark(find_ramps_in_chain(project, chain, row));
         }
