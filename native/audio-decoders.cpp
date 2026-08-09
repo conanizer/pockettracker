@@ -1,5 +1,6 @@
 #include "audio-decoders.h"
-#include "audio-defs.h"   // LOGD/LOGE (portable shim)
+#include "audio-defs.h"     // LOGD/LOGE (portable shim)
+#include "byte_source.h"    // pt_fopen — every open below goes through it
 
 #define DR_MP3_IMPLEMENTATION
 #include "vendor/dr_mp3/dr_mp3.h"
@@ -27,9 +28,27 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 
+// Descriptor duplication for the Opus path below, which is the only decoder that takes an fd.
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace ptdec {
 
 namespace {
+
+#if defined(_WIN32)
+inline int  ptFileno(FILE* f) { return _fileno(f); }   // MSVC deprecates the unprefixed spellings
+inline int  ptDup(int fd)     { return _dup(fd); }
+inline void ptClose(int fd)   { _close(fd); }
+#else
+inline int  ptFileno(FILE* f) { return fileno(f); }
+inline int  ptDup(int fd)     { return dup(fd); }
+inline void ptClose(int fd)   { close(fd); }
+#endif
+
 // Deinterleave a freshly-decoded float block into L (always) and R (only when channels >= 2).
 // For >2 channels keep ch0/ch1 and drop the rest — same downmix the old Kotlin extractor used.
 inline void appendBlock(const float* interleaved, int frames, int channels,
@@ -61,6 +80,48 @@ inline void reserveOutput(int64_t frames, int channels, std::vector<float>& L, s
     if (channels >= 2) R.reserve(n);
 }
 
+// ─── stdio over a FILE*, for the two decoders that have no FILE* entry point ─────────────────────
+//
+// dr_mp3 and dr_flac open a stream through a read/seek/tell triple; their `*_open_file` twins are
+// the same triple plus an `fopen` they own. We need the open to be `pt_fopen`, so the triple comes
+// here and the `_file` variants are unused.
+//
+// ⚠️ **`drmp3_uninit` / `drflac_close` will NOT close a handle they did not open** — both decide by
+// comparing the read callback against their own stdio one, so with these installed the `fclose` is
+// ours, on every path including the failed open.
+//
+// The two triples are byte-identical in body and cannot be shared: each library declares its own
+// `bool32`, `int64` and seek-origin types, and a cast between the function-pointer types would be
+// undefined behaviour rather than a saving.
+int64_t stdioTell(FILE* f) {
+#if defined(_MSC_VER)
+    return _ftelli64(f);   // MSVC's ftell is a long, i.e. 32-bit even on x64
+#else
+    return (int64_t)ftello(f);
+#endif
+}
+int stdioWhence(bool cur, bool end) { return cur ? SEEK_CUR : (end ? SEEK_END : SEEK_SET); }
+
+size_t       mp3OnRead(void* ud, void* out, size_t n) { return std::fread(out, 1, n, (FILE*)ud); }
+drmp3_bool32 mp3OnSeek(void* ud, int offset, drmp3_seek_origin origin) {
+    return std::fseek((FILE*)ud, offset,
+                      stdioWhence(origin == DRMP3_SEEK_CUR, origin == DRMP3_SEEK_END)) == 0;
+}
+drmp3_bool32 mp3OnTell(void* ud, drmp3_int64* cursor) {
+    *cursor = (drmp3_int64)stdioTell((FILE*)ud);
+    return DRMP3_TRUE;
+}
+
+size_t        flacOnRead(void* ud, void* out, size_t n) { return std::fread(out, 1, n, (FILE*)ud); }
+drflac_bool32 flacOnSeek(void* ud, int offset, drflac_seek_origin origin) {
+    return std::fseek((FILE*)ud, offset,
+                      stdioWhence(origin == DRFLAC_SEEK_CUR, origin == DRFLAC_SEEK_END)) == 0;
+}
+drflac_bool32 flacOnTell(void* ud, drflac_int64* cursor) {
+    *cursor = (drflac_int64)stdioTell((FILE*)ud);
+    return DRFLAC_TRUE;
+}
+
 // minimp4 reads the container sequentially through this callback. We hand it the whole file already in
 // memory (a sample is a few MB), so the "read" is a bounds-checked memcpy. Return 0 on success, non-zero
 // on failure — the convention minimp4 checks (`if (read_callback(...)) error`).
@@ -74,14 +135,18 @@ int mp4ReadCb(int64_t offset, void* buffer, size_t size, void* token) {
 }  // namespace
 
 bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+    FILE* f = pt_fopen(path, "rb");
+    if (!f) { LOGE("decodeMp3File: cannot open %s", path); return false; }
+
     drmp3 mp3;
-    if (!drmp3_init_file(&mp3, path, nullptr)) {
-        LOGE("decodeMp3File: drmp3_init_file failed: %s", path);
+    if (!drmp3_init(&mp3, mp3OnRead, mp3OnSeek, mp3OnTell, nullptr, f, nullptr)) {
+        LOGE("decodeMp3File: drmp3_init failed: %s", path);
+        std::fclose(f);
         return false;
     }
     const int channels = (int)mp3.channels;
     sampleRate = (int)mp3.sampleRate;
-    if (channels < 1) { drmp3_uninit(&mp3); return false; }
+    if (channels < 1) { drmp3_uninit(&mp3); std::fclose(f); return false; }
 
     // DRMP3_UINT64_MAX means "no Xing/LAME header, length unknown" — reserveOutput ignores it.
     if (mp3.totalPCMFrameCount != DRMP3_UINT64_MAX)
@@ -93,19 +158,24 @@ bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float
     while ((got = drmp3_read_pcm_frames_f32(&mp3, CHUNK, block.data())) > 0)
         appendBlock(block.data(), (int)got, channels, outL, outR);
     drmp3_uninit(&mp3);
+    std::fclose(f);
     LOGD("decodeMp3File: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
 
 bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
-    drflac* flac = drflac_open_file(path, nullptr);
+    FILE* f = pt_fopen(path, "rb");
+    if (!f) { LOGE("decodeFlacFile: cannot open %s", path); return false; }
+
+    drflac* flac = drflac_open(flacOnRead, flacOnSeek, flacOnTell, f, nullptr);
     if (!flac) {
-        LOGE("decodeFlacFile: drflac_open_file failed: %s", path);
+        LOGE("decodeFlacFile: drflac_open failed: %s", path);
+        std::fclose(f);
         return false;
     }
     const int channels = (int)flac->channels;
     sampleRate = (int)flac->sampleRate;
-    if (channels < 1) { drflac_close(flac); return false; }
+    if (channels < 1) { drflac_close(flac); std::fclose(f); return false; }
 
     reserveOutput((int64_t)flac->totalPCMFrameCount, channels, outL, outR);
 
@@ -115,18 +185,26 @@ bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<floa
     while ((got = drflac_read_pcm_frames_f32(flac, CHUNK, block.data())) > 0)
         appendBlock(block.data(), (int)got, channels, outL, outR);
     drflac_close(flac);
+    std::fclose(f);
     LOGD("decodeFlacFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
 
 bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+    FILE* f = pt_fopen(path, "rb");
+    if (!f) { LOGE("decodeOggFile: cannot open %s", path); return false; }
+
+    // ⚠️ **The handle transfers exclusively.** With close_on_free set, stb_vorbis owns `f` from here
+    // — it closes it in `stb_vorbis_close` AND on a failed open — and it is corrupted by a seek from
+    // anyone else, so nothing below may touch `f` again. This is what `stb_vorbis_open_filename`
+    // does with its own `fopen`, minus the `fopen`.
     int err = 0;
-    stb_vorbis* v = stb_vorbis_open_filename(path, &err, nullptr);
+    stb_vorbis* v = stb_vorbis_open_file(f, /*close_handle_on_close=*/1, &err, nullptr);
     if (!v) {
         // err is a STBVorbisError; common ones: 1=need_more_data, 2=invalid_api_mixing,
         // 33=ogg_skeleton_not_supported, 34=unexpected_eof. An Opus-in-Ogg file fails here (stb_vorbis
         // decodes Vorbis only, not Opus).
-        LOGE("decodeOggFile: stb_vorbis_open_filename failed (err=%d): %s", err, path);
+        LOGE("decodeOggFile: stb_vorbis_open_file failed (err=%d): %s", err, path);
         return false;
     }
     stb_vorbis_info info = stb_vorbis_get_info(v);
@@ -149,10 +227,27 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
 }
 
 bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+    FILE* f = pt_fopen(path, "rb");
+    if (!f) { LOGE("decodeOpusFile: cannot open %s", path); return false; }
+
+    // ⚠️ **opusfile is the one consumer that wants a DESCRIPTOR, not a `FILE*`** — `op_fdopen` builds
+    // its own stdio wrapper around the fd and owns it from then on. So the descriptor is duplicated
+    // and our handle closed immediately: two `FILE*`s over one fd would each close it.
+    const int fd = ptDup(ptFileno(f));
+    std::fclose(f);
+    if (fd < 0) { LOGE("decodeOpusFile: dup failed: %s", path); return false; }
+
+    OpusFileCallbacks cb;
+    void* stream = op_fdopen(&cb, fd, "rb");
+    if (!stream) { ptClose(fd); LOGE("decodeOpusFile: op_fdopen failed: %s", path); return false; }
+
     int err = 0;
-    OggOpusFile* of = op_open_file(path, &err);
+    // On failure opusfile does NOT take the stream — closing it is ours, through the callbacks it
+    // just filled in (which is what `op_open_file` does internally on the same path).
+    OggOpusFile* of = op_open_callbacks(stream, &cb, nullptr, 0, &err);
     if (!of) {
-        LOGE("decodeOpusFile: op_open_file failed (err=%d): %s", err, path);
+        cb.close(stream);
+        LOGE("decodeOpusFile: op_open_callbacks failed (err=%d): %s", err, path);
         return false;
     }
     const int channels = op_channel_count(of, -1);
@@ -181,8 +276,8 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
     // stream, so buffering the file up front is both simplest and what its read callback wants; a
     // container sample is a few MB. (The convergence plan's OOM guard is a UI-level length warning on
     // the LOAD path, not this decoder's job — a container that fits in a sample is small.)
-    FILE* f = std::fopen(path, "rb");
-    if (!f) { LOGE("decodeMp4File: fopen failed: %s", path); return false; }
+    FILE* f = pt_fopen(path, "rb");
+    if (!f) { LOGE("decodeMp4File: cannot open %s", path); return false; }
     std::fseek(f, 0, SEEK_END);
     long fsize = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);

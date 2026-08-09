@@ -194,6 +194,9 @@ endif()
 # TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only; native-audio.cpp is a stub.
 set(ENGINE_CORE_SOURCES
         songcore/schema-check.cpp
+        # The single definition of the file-open hook every layer above resolves against. It is a
+        # .cpp and not a header inline for a linkage reason byte_source.h states in full.
+        byte_source.cpp
         soundfont-voice.cpp
         sample-editor.cpp
         audio-engine.cpp

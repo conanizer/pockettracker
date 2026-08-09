@@ -7,6 +7,7 @@
 #include "mods/modules/vibrato-module.h"
 #include "effects/primitives/sola-stretch.h"
 #include "audio-decoders.h"
+#include "byte_source.h"   // pt_fopen — the WAV reader and the soundfont loader open through it
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -21,6 +22,22 @@
 // Definition of the per-track soundfont voice array (extern declared in audio-engine.h):
 // song tracks 0-7 + the preview lane (track 8).
 SoundfontVoice sfVoices[SF_VOICE_COUNT];
+
+namespace {
+// The `tsf_stream` pair loadSoundfont hands to tsf_load — the same one tsf builds inside
+// tsf_load_filename, which is unused here because the open must be pt_fopen's. `read` returns the
+// byte count, `skip` returns 1 on success and 0 on error, per tsf.h.
+//
+// Declared `void*` rather than `FILE*`: tsf's own pair takes FILE* and is cast into the struct at
+// the call site, which is a call through a mismatched function-pointer type. Taking void* and
+// casting inside costs nothing and is the same shape the dr_libs callbacks use.
+int sfStreamRead(void* f, void* ptr, unsigned int size) {
+    return (int)std::fread(ptr, 1, size, (FILE*)f);
+}
+int sfStreamSkip(void* f, unsigned int count) {
+    return std::fseek((FILE*)f, (long)count, SEEK_CUR) == 0;
+}
+}  // namespace
 
 AudioEngine::AudioEngine() {
     for (int i = 0; i < 256; i++) {
@@ -281,7 +298,7 @@ static inline float decodeWavSample(const uint8_t* p, int audioFormat, int bitsP
 int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     if (id < 0 || id >= 256 || !path) return 0;
 
-    FILE* f = fopen(path, "rb");
+    FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("loadSampleFromWavFile: cannot open %s", path); return 0; }
 
     // RIFF/WAVE header (12 bytes).
@@ -2118,11 +2135,23 @@ int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
     // per-track clones, which would cost 8× the file size in RAM and stall the audio callback.
     //
     // ⚠️ **THE PARSE HAPPENS OUTSIDE THE SLOT MUTEX, and that is the point of the local.**
-    // `tsf_load_filename` reads and allocates a whole SF2 — tens to hundreds of milliseconds — and
-    // the audio thread takes this same mutex two or three times per active SoundFont voice per
-    // block. Holding it across the parse makes a load and a dropout the same event. The mutex is
-    // taken only to PUBLISH the finished pointer, which is a store.
-    tsf* loaded = tsf_load_filename(path);
+    // `tsf_load` reads and allocates a whole SF2 — tens to hundreds of milliseconds — and the audio
+    // thread takes this same mutex two or three times per active SoundFont voice per block. Holding
+    // it across the parse makes a load and a dropout the same event. The mutex is taken only to
+    // PUBLISH the finished pointer, which is a store.
+    //
+    // `tsf_load` over a `FILE*` rather than `tsf_load_filename`, so the open goes through pt_fopen
+    // like every other one. It is the same stream tsf builds for itself in `tsf_load_filename` —
+    // sequential reads and forward skips only, so the SF2 still streams and peak RAM is the parsed
+    // soundfont, not the file on top of it.
+    FILE* sf = pt_fopen(path, "rb");
+    if (!sf) {
+        LOGE("❌ Cannot open soundfont: %s", path);
+        return -1;
+    }
+    tsf_stream sfStream = { sf, &sfStreamRead, &sfStreamSkip };
+    tsf* loaded = tsf_load(&sfStream);
+    std::fclose(sf);
     if (!loaded) {
         LOGE("❌ Failed to parse soundfont: %s", path);
         return -1;

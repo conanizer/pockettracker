@@ -29,10 +29,11 @@
 // be substituted in a host test without an interface or a virtual call.
 
 #include <filesystem>   // resolve_case_insensitive — Android storage is case-insensitive, the SD card is not
-#include <fstream>      // path_exists — an <fstream> probe (see resolve_media_path)
+#include <cstdio>
 #include <string>
 #include <vector>
 
+#include "../byte_source.h"  // pt_fopen — path_exists probes through the same opener as a real load
 #include "model.h"
 #include "scheduler.h"    // hex_to_float (VolumeUtils.hexToFloat)
 #include "traversal.h"    // collect_used_instruments
@@ -177,14 +178,21 @@ struct MediaLoadResult {
     int failed = 0;
 };
 
-// A cheap "is this file actually here?" — an <fstream> open probe, NOT <filesystem>, so it stays inside
-// the no-extra-link-library rule the path helpers below keep. Used only to decide whether an absolute
-// path needs relocating; a false negative (a file that exists but cannot be opened) at worst re-roots to
-// the same-or-a-worse guess, and the load fails either way, so it costs nothing it did not already cost.
+// A cheap "is this file actually here?" — an open probe, NOT <filesystem>, so it stays inside the
+// no-extra-link-library rule the path helpers below keep. Used only to decide whether an absolute path
+// needs relocating; a false negative (a file that exists but cannot be opened) at worst re-roots to the
+// same-or-a-worse guess, and the load fails either way, so it costs nothing it did not already cost.
+//
+// ⚠️ **The probe goes through pt_fopen, and this is the site where getting that wrong is SILENT.**
+// Every other opener reports a failure. This one only answers a question, and a "no" here sends
+// resolve_media_path off to re-root a path that was already correct: the project loads, the
+// instrument is empty, and nothing anywhere says so.
 inline bool path_exists(const std::string& path) {
     if (path.empty()) return false;
-    std::ifstream f(path, std::ios::binary);
-    return f.good();
+    FILE* f = pt_fopen(path.c_str(), "rb");
+    if (!f) return false;
+    std::fclose(f);
+    return true;
 }
 
 // The app-root-relative tail of an absolute media path authored under ANOTHER install — the portable

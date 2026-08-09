@@ -37,6 +37,8 @@
 #include <string>
 #include <vector>
 
+#include "../byte_source.h"   // pt_fopen — the one opener below the UI
+
 namespace songcore {
 
 // ─── float → int16, the one conversion both writers share ───────────────────────────────────────
@@ -54,7 +56,7 @@ class WavStreamWriter {
   public:
     WavStreamWriter(const std::string& path, int sampleRate, int channels = 2)
         : path_(path), tmpPath_(path + ".tmp"), sampleRate_(sampleRate), channels_(channels) {
-        file_ = std::fopen(tmpPath_.c_str(), "wb");
+        file_ = pt_fopen(tmpPath_.c_str(), "wb");
         if (!file_) return;
         uint8_t header[44];
         build_header(header, 0);
@@ -219,7 +221,7 @@ inline void wav_put_tag(std::vector<uint8_t>& b, const char* tag) {
 /** Write `bytes` to `path` via "<path>.tmp" + rename, so a failed write leaves no partial file. */
 inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>& bytes) {
     const std::string tmp = path + ".tmp";
-    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    std::FILE* f = pt_fopen(tmp.c_str(), "wb");
     if (!f) return false;
     const size_t written = bytes.empty() ? 0 : std::fwrite(bytes.data(), 1, bytes.size(), f);
     // ⚠️ **BOTH CHECKED, AND `fclose` UNCONDITIONALLY FIRST.** The count alone only sees what stdio had
@@ -350,7 +352,7 @@ inline bool write_wav_mono(const std::string& path, const std::vector<float>& sa
 inline std::vector<int> read_cue_points(const std::string& path) {
     std::vector<int> frames;
 
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = pt_fopen(path.c_str(), "rb");
     if (!f) return frames;
 
     auto close_and_return = [&](std::vector<int> out) {

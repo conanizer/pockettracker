@@ -34,6 +34,7 @@
 #include <functional>
 
 #include "../audio-engine.h"
+#include "../byte_source.h"   // pt_read_file — the .ptp and .pti reads
 #include "engine_consumer.h"
 #include "engine_setup.h"
 #include "midi_in.h"
@@ -593,15 +594,19 @@ class SongcoreHost {
     // (S4) finally have company: those two could empty a slot, and nothing could fill one.
     //
     // All of them take a path and none of them take a FileSystem: songcore reads and writes files
-    // directly (project_io.h has always parsed a blob; the engine has always opened a .wav), and the
-    // `ui::FileSystem` abstraction exists for the BROWSER — for listing, sorting, renaming — which is a
-    // UI concern. Two layers, each doing its own job.
+    // directly (project_io.h parses a blob; the engine opens a .wav), and the `ui::FileSystem`
+    // abstraction exists for the BROWSER — for listing, sorting, renaming — which is a UI concern.
+    // Two layers, each doing its own job.
+    //
+    // The *opening* still funnels: `pt_read_file` and `pt_fopen` (native/byte_source.h) are the one
+    // place a path string becomes a handle, for songcore and the engine alike. That is a different
+    // seam from `ui::FileSystem` and deliberately narrower — it knows nothing about names, parents
+    // or listings, which is what lets songcore keep depending on it and not on the UI.
 
     /** Replace the project from a .ptp on disk: parse → push → load its media → push its params. */
     bool load_project_file(const std::string& path, const std::string& baseDir) {
-        std::ifstream f(path, std::ios::binary);
-        if (!f) return false;
-        std::string blob((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::string blob;
+        if (!pt_read_file(path.c_str(), blob)) return false;
         if (!push_project(blob)) return false;
 
         // ⚠️ The three calls that must follow a push, in this order, or the project you loaded is not
@@ -696,9 +701,8 @@ class SongcoreHost {
      * whose sample has moved should still give you back its filter and its mod slots).
      */
     bool load_instrument_preset(int id, const std::string& path) {
-        std::ifstream f(path, std::ios::binary);
-        if (!f) return false;
-        std::string blob((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::string blob;
+        if (!pt_read_file(path.c_str(), blob)) return false;
 
         json j = json::parse(blob, /*cb=*/nullptr, /*allow_exceptions=*/false);
         if (j.is_discarded() || !j.is_object()) return false;
