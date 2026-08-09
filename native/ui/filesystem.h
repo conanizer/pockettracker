@@ -119,10 +119,13 @@ class FileSystem {
     virtual std::string template_project_path() = 0;
 
     /**
-     * Where the shell keeps `settings.json` — a real file on every platform, Android included, where
-     * it is `<root>/settings.json` under the Documents/PocketTracker root `StdFileSystem` is rooted at.
-     * (`MainActivity.importLegacySettings` writes exactly that file, having migrated the values OUT of
-     * SharedPreferences.)
+     * Where the shell keeps `settings.json` — a real file on every platform. There is no key-value
+     * store behind it anywhere; `MainActivity.importLegacySettings` writes this very file, having
+     * migrated the values out of SharedPreferences once.
+     *
+     * ⚠️ It is read at BOOT, before any of the user's storage is known to be reachable, which is why
+     * Android answers with an app-private path rather than one inside the media tree. See
+     * `StdFileSystem`'s two-root constructor for the whole of that argument.
      */
     virtual std::string settings_path() = 0;
 
@@ -140,10 +143,9 @@ class FileSystem {
      *
      * ⚠️ It must therefore be somewhere the browser CANNOT see — a `.ptp` in `Projects/` would be
      * offered as a normal project to load, and deleting it from under the recovery prompt would be a
-     * button press away. Android gets this for free (app-private `filesDir`, which scoped storage
-     * keeps out of Documents); here it sits in the ROOT, beside `template.ptp` and `settings.json`,
-     * which is the same argument those two already made: the root is the app's, and the six
-     * sub-directories are the user's.
+     * button press away. Android gets this for free from app-private storage; elsewhere it sits in the
+     * root beside `template.ptp` and `settings.json`, which is the same argument those two already
+     * made: the root is the app's, and the six sub-directories are the user's.
      */
     virtual std::string autosave_file_path() = 0;
 

@@ -352,6 +352,14 @@ int run(const AppConfig& cfg) {
     filesystem.themes_directory();
     std::printf("files:   %s\n", cfg.appRoot.c_str());
 
+    // ⚠️ The app's OWN files need not live in the tree just named — on Android they do not, because
+    // settings/template/autosave are read at boot and the media tree may not be readable then. Say so,
+    // and say it by comparing the path the filesystem actually returns against the one the old
+    // single-root layout would have produced: a platform that later changes its mind cannot leave this
+    // line asserting something stale, and there is no flag to keep in step.
+    if (filesystem.settings_path() != cfg.appRoot + "/settings.json")
+        std::printf("files:   app files: %s\n", filesystem.settings_path().c_str());
+
     SdlVideo video;
     if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H, /*fullscreen=*/false,
                     /*resizable=*/cfg.windowed)) {

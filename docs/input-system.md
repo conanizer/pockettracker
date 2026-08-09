@@ -227,9 +227,9 @@ L + R + B               Recall snapshot                     (planned)
 
 ## Configuration file
 
-`config.json` sits next to `settings.json` in your PocketTracker folder. The two are opposites:
-`settings.json` is written by the app from the SETTINGS screen, while **`config.json` is yours** — the
-app reads it at startup and never rewrites it.
+`config.json` sits in your PocketTracker folder, beside the `Projects` and `Samples` directories. It is
+the opposite of `settings.json`: that one is written by the app from the SETTINGS screen, while
+**`config.json` is yours** — the app reads it at startup and never rewrites it.
 
 On first launch the app writes a starter copy listing every option at its current value, so the file
 is a working example rather than something you have to compose from scratch. Editing it takes effect

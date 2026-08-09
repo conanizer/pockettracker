@@ -24,6 +24,7 @@ import com.conanizer.pockettracker.platform.android.MidiOutManager
 import org.json.JSONObject
 import org.libsdl.app.SDLActivity
 import java.io.File
+import java.io.IOException
 
 /**
  * PocketTracker's Android entry point: an `SDLActivity` subclass. Convergence Phase E.
@@ -31,10 +32,10 @@ import java.io.File
  * This is the whole of the Android-only surface now. The ~15,000-line Compose UI, the input
  * dispatcher and the JNI audio facade are gone, replaced by the shared C++ SDL shell (`shell/`,
  * `native/ui/`) that already drives Windows and the Linux handhelds. All this class still does is the
- * handful of jobs that are genuinely Java's: point SDL at the native libraries and the app root, own
- * the splash screen and the immersive / edge-to-edge window, ask for storage permission, run the
- * one-shot settings import (C6), and route button feedback (sound/haptics) back from the shell over
- * one JNI hook.
+ * handful of jobs that are genuinely Java's: point SDL at the native libraries and the two roots, own
+ * the splash screen and the immersive / edge-to-edge window, ask for storage permission, run the two
+ * one-shot migrations (settings values out of SharedPreferences, app files out of shared storage), and
+ * route button feedback (sound/haptics) back from the shell over one JNI hook.
  *
  * ⚠️ It began life as `SdlActivity` in `src/debug/` — the second, debug-only activity the app carried
  * beside Compose through phases C and D, so touch could be developed without breaking the shipped UI
@@ -89,14 +90,24 @@ class MainActivity : SDLActivity() {
      *
      * The path matches what `AndroidFileSystem.kt` has always used, which is what makes this activity
      * open the SAME projects the Compose app does rather than a parallel empty world.
+     *
+     * ⚠️ **argv[2] is a SECOND root, and it is not the same directory.** The media tree above is user
+     * storage the app may be refused; `filesDir` is app-private, needs no permission, and cannot be
+     * revoked. `settings.json`, `template.ptp` and `autosave.ptp` are read during the native boot,
+     * before the user has been asked for anything, so they live there — see `StdFileSystem`'s two-root
+     * constructor for the argument, and [migrateAppFilesToPrivateStorage] for the users who already
+     * have those three files in the tree. `config.json` is deliberately NOT one of them: it is the one
+     * file the user hand-edits, and app-private storage is reachable only over adb.
      */
-    override fun getArguments(): Array<String> = arrayOf(appRoot())
+    override fun getArguments(): Array<String> = arrayOf(appRoot(), privateRoot())
 
     private fun appRoot(): String =
         File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
             "PocketTracker"
         ).absolutePath
+
+    private fun privateRoot(): String = filesDir.absolutePath
 
     /**
      * Hide the status and navigation bars (immersive sticky) — **C4, and NOT cosmetic.**
@@ -180,7 +191,8 @@ class MainActivity : SDLActivity() {
         // C3 logged it and left the granting to the Compose activity. C4 asks.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val granted = Environment.isExternalStorageManager()
-            Log.i(TAG, "MANAGE_EXTERNAL_STORAGE granted=$granted  appRoot=${appRoot()}")
+            Log.i(TAG, "MANAGE_EXTERNAL_STORAGE granted=$granted  appRoot=${appRoot()}  " +
+                       "privateRoot=${privateRoot()}")
             if (!granted) requestAllFilesAccess()
         }
 
@@ -210,8 +222,14 @@ class MainActivity : SDLActivity() {
         }
 
         // ⚠️ BEFORE `super.onCreate()` for a harder reason than the two above: that call starts the
-        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. Anything this writes after
-        // that point is a file the app has already read past.
+        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. Anything either of these
+        // writes after that point is a file the app has already read past.
+        //
+        // ⚠️ AND IN THIS ORDER. The relocation moves an existing `settings.json` into `filesDir`;
+        // `importLegacySettings` then finds it there and correctly leaves it alone. Reversed, the
+        // import would see an empty `filesDir`, write factory-plus-prefs values into it, and the
+        // relocation would then decline to overwrite them with the user's real file.
+        migrateAppFilesToPrivateStorage()
         importLegacySettings()
 
         // The feedback managers, before super.onCreate() starts the SDL thread that calls back into
@@ -508,7 +526,10 @@ class MainActivity : SDLActivity() {
             return
         }
 
-        val target = File(appRoot(), "settings.json")
+        // ⚠️ `filesDir`, not the media tree: this must write the file the native side will READ, and
+        // that moved with [migrateAppFilesToPrivateStorage]. A migration that writes to the old
+        // location is a migration whose output nothing opens.
+        val target = File(filesDir, "settings.json")
 
         // ⚠️ An existing settings.json WINS, and the version is still stamped. During phases C and D
         // this activity has already been run by hand, so a settings.json is sitting there with values
@@ -593,6 +614,83 @@ class MainActivity : SDLActivity() {
         }
     }
 
+    /**
+     * **The one-time relocation of the app's own files out of shared storage.**
+     *
+     * `settings.json`, `template.ptp` and `autosave.ptp` used to sit in `Documents/PocketTracker/`
+     * beside the user's six folders. They now live in [filesDir]; this copies an existing user's three
+     * across on the first launch after the update, while the storage permission is still granted.
+     *
+     * ⚠️⚠️ **IT MUST SHIP A RELEASE BEFORE THE PERMISSION IS DROPPED.** Removing
+     * `MANAGE_EXTERNAL_STORAGE` from the manifest auto-revokes it on update, so a build that both drops
+     * the permission and migrates would find the old files already unreadable — and a user's settings,
+     * their song template and any unsaved work would be gone with no way back. That is the whole reason
+     * this is a phase of its own rather than part of the SAF switch.
+     *
+     * ⚠️ **VERSIONED, exactly as [importLegacySettings] is versioned, and for the same reason**: the
+     * obvious guard is *"filesDir has no settings.json → migrate"*, which gets one chance and is spent
+     * the moment the app writes its first settings file. A counter can be bumped for a fourth file
+     * later; an artifact check cannot.
+     *
+     * ⚠️ **Not stamped when the permission is absent, and that distinction is load-bearing.** Without
+     * All-files access the old directory reads as empty, which is indistinguishable from a fresh
+     * install with nothing to migrate — so stamping there would silently spend the migration on a
+     * user who is one Settings toggle away from having files to move. Unstamped, the next launch
+     * retries; the cost is three `File.exists` calls.
+     *
+     * ⚠️ **The originals are left where they are.** They are already invisible to the browser, which
+     * lists only the six sub-directories, so they cost three small files and nothing else — and a
+     * one-shot migration has no second chance to undo a delete it should not have made.
+     */
+    private fun migrateAppFilesToPrivateStorage() {
+        val prefs = getSharedPreferences("pockettracker_ui", MODE_PRIVATE)
+        val done  = prefs.getInt(APP_FILES_MIGRATION_KEY, 0)
+        if (done >= APP_FILES_MIGRATION_VERSION) {
+            Log.i(TAG, "app-file migration: already at v$done, nothing to do")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            Log.i(TAG, "app-file migration: no All-files access - deferring, NOT marking done")
+            return
+        }
+
+        try {
+            var copied = 0
+            var kept   = 0
+            var absent = 0
+            for (name in APP_FILES_TO_RELOCATE) {
+                val dst = File(filesDir, name)
+                if (dst.exists()) { kept++; continue }      // a newer build already wrote one: it wins
+                val src = File(appRoot(), name)
+                if (!src.isFile) { absent++; continue }
+
+                src.copyTo(dst, overwrite = false)
+
+                // ⚠️ Read the SIZE BACK OFF THE DESTINATION rather than trusting copyTo to have thrown.
+                // A short copy — a full data partition is the realistic one — leaves a file that exists,
+                // parses as truncated JSON and takes the user's settings with it. Dropping the partial
+                // and failing the whole migration leaves the original intact and the version unstamped,
+                // so the next launch tries again.
+                if (dst.length() != src.length()) {
+                    val short = dst.length()
+                    dst.delete()
+                    throw IOException("$name copied ${short}B of ${src.length()}B")
+                }
+                copied++
+            }
+
+            prefs.edit().putInt(APP_FILES_MIGRATION_KEY, APP_FILES_MIGRATION_VERSION).apply()
+            Log.i(TAG, "app-file migration: $copied copied, $kept already present, $absent not there " +
+                       "-> ${filesDir.absolutePath}, marked v$APP_FILES_MIGRATION_VERSION")
+        } catch (e: Exception) {
+            // Not stamped, and deliberately not fatal — [importLegacySettings]'s reasoning verbatim:
+            // losing a migration costs the user their settings, crashing on the way in costs them the
+            // app, and this line is the only thing that says which happened.
+            Log.e(TAG, "app-file migration FAILED - retrying next launch: ${e.message}", e)
+        }
+    }
+
     /** `VisualizerType`'s ordinal, which is what settings.json stores. The order is the enum's, and it
      *  is the same list in `AppTheme.kt`, `theme.h` and `settings_store.cpp`'s VISUALIZER_COUNT. */
     private fun visualizerIndex(name: String): Int = when (name) {
@@ -655,6 +753,24 @@ class MainActivity : SDLActivity() {
          */
         const val SETTINGS_IMPORT_VERSION = 2
         const val IMPORT_VERSION_KEY = "settings_import_version"
+
+        /**
+         * Its own counter, separate from [SETTINGS_IMPORT_VERSION]: the two migrations answer different
+         * questions ("where do the values come from" and "where does the file live") and a user can
+         * legitimately be done with one and not the other. Bump this — and add to
+         * [APP_FILES_TO_RELOCATE] — if a fourth app file ever has to move.
+         *
+         * **v1** — `settings.json`, `template.ptp` and `autosave.ptp` out of `Documents/PocketTracker/`.
+         */
+        const val APP_FILES_MIGRATION_VERSION = 1
+        const val APP_FILES_MIGRATION_KEY = "app_files_migration_version"
+
+        /**
+         * ⚠️ `config.json` is NOT here, and its absence is a decision (see [getArguments]): it is the
+         * one app file the user hand-edits, and `filesDir` is reachable only over adb. It stays in the
+         * media tree.
+         */
+        val APP_FILES_TO_RELOCATE = arrayOf("settings.json", "template.ptp", "autosave.ptp")
 
         /** The Compose default for the skin pref (`DeviceSkin.AMIGA_DARK.id`), read when the user never
          *  chose one — the shell's own fallback for an unknown id is the same skin (device_skin.h). */

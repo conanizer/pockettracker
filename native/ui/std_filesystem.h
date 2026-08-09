@@ -28,9 +28,33 @@ class StdFileSystem : public FileSystem {
      * The shell picks it (see `default_app_root()` below); a tool points it at a temp directory. That
      * is the whole of the platform-specific part of files, and it is one string.
      */
-    explicit StdFileSystem(std::string root) : root_(std::move(root)) {}
+    explicit StdFileSystem(std::string root) : StdFileSystem(root, root) {}
+
+    /**
+     * The two-root form: `root` is the user's media tree, `private_root` is where the app's own
+     * `settings.json`, `template.ptp` and `autosave.ptp` live.
+     *
+     * ⚠️ **They differ on Android alone, and only because the media tree there is not guaranteed to be
+     * readable at boot.** Those three files are read before the UI exists — before any folder has been
+     * granted, and on a fresh install there is no granted folder at all. A settings file that cannot be
+     * read at boot is one that gets overwritten with the factory defaults at quit, which is precisely
+     * the failure `load_settings`'s two-meaning `false` was built to distinguish. So Android hands in
+     * `context.filesDir`: app-private, needs no permission, and survives the media tree being absent,
+     * unreadable or revoked.
+     *
+     * ⚠️ **`config.json` stays under `root`, not here**, and that is a decision rather than an
+     * oversight: it is the one app file the *user* hand-edits, and app-private storage is reachable
+     * only over adb. `load_folder_config` already treats "no file" as its common case, so a media tree
+     * that is not there yet reads exactly like a config that was never written.
+     *
+     * Every non-Android caller passes the same string twice — the one-argument constructor above — and
+     * behaves identically to a build that had never heard of a private root.
+     */
+    StdFileSystem(std::string root, std::string private_root)
+        : root_(std::move(root)), privateRoot_(std::move(private_root)) {}
 
     const std::string& root() const { return root_; }
+    const std::string& private_root() const { return privateRoot_; }
 
     // ── The app's directories ───────────────────────────────────────────────────────────────────
     std::string projects_directory() override    { return ensure_dir("Projects"); }
@@ -43,17 +67,17 @@ class StdFileSystem : public FileSystem {
 
     // ── The app's own files ─────────────────────────────────────────────────────────────────────
     //
-    // All three sit in the ROOT, not in a sub-directory: they are the app's, not the user's, and the
-    // six folders above are what a user sees when the SD card goes into a card reader. (A PortMaster
-    // launch script points the root at CONFDIR on the card, so all three survive an app update.)
+    // None of the four sits in a sub-directory: they are the app's, not the user's, and the six folders
+    // above are what a user sees when the SD card goes into a card reader. (A PortMaster launch script
+    // points both roots at CONFDIR on the card, so all four survive an app update.)
     //
     // ⚠️ The autosave especially: a `.ptp` inside `Projects/` would be listed by the browser, offered
     // as a project to LOAD, and deletable with SELECT+B — and its whole meaning is "nobody put this
     // here on purpose". See FileSystem::autosave_file_path.
-    std::string template_project_path() override { return root_ + "/template.ptp"; }
-    std::string settings_path() override         { return root_ + "/settings.json"; }
+    std::string template_project_path() override { return privateRoot_ + "/template.ptp"; }
+    std::string settings_path() override         { return privateRoot_ + "/settings.json"; }
     std::string config_path() override           { return root_ + "/config.json"; }
-    std::string autosave_file_path() override    { return root_ + "/autosave.ptp"; }
+    std::string autosave_file_path() override    { return privateRoot_ + "/autosave.ptp"; }
 
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────
     bool read_file(const std::string& path, std::string& out) override;
@@ -74,7 +98,8 @@ class StdFileSystem : public FileSystem {
   private:
     std::string ensure_dir(const char* sub);
 
-    std::string root_;
+    std::string root_;         // the user's media tree: the seven folders, and config.json
+    std::string privateRoot_;  // the app's own three files; equal to root_ off Android
 };
 
 // ─── Path helpers — Kotlin's java.io.File accessors, exactly ─────────────────────────────────────

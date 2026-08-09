@@ -7,11 +7,11 @@
 //
 //   main.cpp (desktop/handheld)              android-main.cpp (this file)
 //   ─────────────────────────────────────    ──────────────────────────────────────────────────────
-//   argv: project, media dir, app root       argv: the app root, handed down by SDLActivity
+//   argv: project, media dir, app root       argv: app root, then filesDir — both from SDLActivity
 //   SIGTERM/SIGINT → a flag the loop polls   nothing (⚠️ C4 — see the terminate_requested note below)
 //   SDL_Init / SDL_Quit, here                SDL_Init here too; SDLActivity owns the surface, not this
 //   SdlAudioEngine                           OboeAudioEngine  ← the whole of C3's audio work
-//   default_app_root() + StdFileSystem       the root from Java + StdFileSystem (⚠️ C5, see below)
+//   default_app_root(), one root twice       two roots from Java: media tree + app-private files
 //   PlatformCaps::sdl(debug), console on     PlatformCaps::converged(...) — see where it is set below
 //
 // ⚠️ **NO `SDL_MAIN_HANDLED` HERE, AND THAT IS THE OPPOSITE OF `main.cpp`.** SDL_main.h defines
@@ -317,6 +317,18 @@ int main(int argc, char** argv) {
         appRoot = kFallbackAppRoot;
     }
 
+    // ⚠️ **argv[2] IS `context.filesDir`, AND IT IS NOT A SECOND COPY OF THE ROOT.** `settings.json`,
+    // `template.ptp` and `autosave.ptp` are read during the boot below — before the user has been
+    // asked for anything — while the media tree above is storage the app may not be allowed to read at
+    // all. Settings that cannot be read at boot are settings the quit-time save writes defaults over,
+    // so those three live in app-private storage, which needs no permission and cannot be revoked.
+    // `config.json` deliberately stays in the media tree; see `StdFileSystem`'s two-root constructor.
+    //
+    // Missing, this falls back to the media root and the app behaves exactly as it did before the
+    // split — which is also what every desktop and PortMaster build does, one argument shorter.
+    const std::string privateRoot =
+        (argc > 2 && argv[2] && argv[2][0]) ? std::string(argv[2]) : appRoot;
+
     redirect_stdio_to_logcat(appRoot);
 
     // ⚠️ **THE BACK BUTTON, TRAPPED BEFORE SDL_Init (C4).** Untrapped, Android's back runs
@@ -371,7 +383,7 @@ int main(int argc, char** argv) {
     // Framework, `std::filesystem` is off the table regardless of what this spike measures, because
     // SAF is a Java-only API — the answer would then be the same second implementation, arrived at
     // for a different reason. The seam is what makes both outcomes cheap.
-    ui::StdFileSystem filesystem(appRoot);
+    ui::StdFileSystem filesystem(appRoot, privateRoot);
 
     ptshell::AppConfig cfg;
     cfg.engine     = engine.get();

@@ -1719,12 +1719,13 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 ## 25. Configuration File (config.json)
 
 Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in your
-PocketTracker folder, next to `settings.json`, and covers three of them: **your controller's button
-layout**, **your keyboard bindings**, and **which folder a load browse opens at**.
+PocketTracker folder, beside the `Projects` and `Samples` directories, and covers three of them:
+**your controller's button layout**, **your keyboard bindings**, and **which folder a load browse
+opens at**.
 
-The two files are opposites. `settings.json` is written by the app whenever you change something on
-the SETTINGS screen. **`config.json` is yours** — the app reads it once at startup and never writes to
-it again.
+It is the opposite of `settings.json`, which the app writes whenever you change something on the
+SETTINGS screen. **`config.json` is yours** — the app reads it once at startup and never writes to it
+again.
 
 **Finding it.** The app creates a starter copy on first launch, filled in with everything at its
 current value. So the file already shows you the exact shape and spelling of every option, and as
