@@ -45,12 +45,10 @@ So what is left in here is only, and exactly, the shell:
 Both audio backends do the same one thing in their callback: hand the device buffer to
 `AudioEngine::processLiveBlock()`. **No DSP may ever be added to either.**
 
-Because `pt-ui` has no display dependency, a screen can be drawn with no window at all — which is what
-`tools/ptshot` does, and a green ptshot is the standing proof that the seam is real:
-
-```sh
-tools/build/ptshot tools/testdata/g1-basics.ptp phrase.png --screen=PHRASE --cursor=3,1 --scale=2
-```
+Because `pt-ui` has no display dependency, a screen can be drawn with no window at all: a host program
+that implements `Canvas`'s four primitives over a plain pixel buffer gets any screen of any project as
+an image, with no SDL and no engine. That is what keeps the seam honest — the day the UI reaches for
+SDL, such a program stops linking.
 
 ## The UI edits the live project
 
@@ -87,8 +85,9 @@ cmake --build shell/build --config Release
 ```
 
 Pass `CMAKE_BUILD_TYPE` explicitly. The usual "default to Release if it's empty" guard is not
-portable — MSVC's platform module pre-seeds it to `Debug` while GCC/Clang leave it unset — and here,
-unlike the conformance tools, a Debug engine may not keep up with a real-time audio callback.
+portable — MSVC's platform module pre-seeds it to `Debug` while GCC/Clang leave it unset — and a Debug
+engine may not keep up with a real-time audio callback. Offline consumers of the same engine can
+afford Debug; this target cannot.
 
 **On this Windows box specifically**, CMake 3.22 (the one in the Android SDK) predates the installed
 Visual Studio, so it cannot generate for it. Use Ninja, from a `vcvars64` shell:
@@ -186,22 +185,21 @@ Three decisions worth knowing:
 
 ## Run
 
-```sh
-shell/build/pockettracker-sdl tools/testdata/g7-audio.ptp tools/testdata
+```
+pockettracker-sdl [project.ptp] [media-base-dir] [app-root]
 ```
 
-`g7-audio` is the golden project built for the DSP rather than the sequencer — both send buses, the
-master bus (OTT, limiter, master EQ), a per-instrument EQ, drive, a resonant filter under an LFO, a
-SoundFont voice and a resampled stereo pad — so if it sounds right, most of the engine is right.
+⚠️ **Every argument is optional, and on the shipping target there are none**: PortMaster launches a
+port by running its `.sh`, which invokes this binary bare. With no project the app opens the same
+blank document NEW PROJECT makes, and the file browser is how a handheld user reaches their songs.
+`app-root` is where `Projects/ Samples/ Soundfonts/ Instruments/` live and defaults to
+`$POCKETTRACKER_HOME`, else the platform's own location.
 
-```
-pockettracker-sdl <project.ptp> [media-base-dir]
-```
-
-`media-base-dir` defaults to the project's own directory. Portable projects (the `/tools/testdata`
-goldens, anything the Linux build ships) store sample paths **relative** to the project file; a
-project saved on a device stores absolute paths, and both resolve correctly
-(`engine_setup.h: resolve_media_path`).
+`media-base-dir` defaults to the project's own directory. A **portable** project — anything the Linux
+build ships — stores sample paths **relative** to the project file, while a project saved on a device
+stores absolute paths; both resolve correctly (`engine_setup.h: resolve_media_path`). The second
+argument is the root those relative paths are resolved against, so it is only needed when a project
+and its media have been separated.
 
 ### Environment
 
@@ -258,9 +256,8 @@ axes, both vary per CFW, and neither can be verified without a device (Phase 4 b
   a *correctness* requirement, not an optimisation choice. `main.cpp` includes `songcore/host.h`, so
   the **sequencer** is compiled into this target — and aarch64 clang contracts `a + b*c` into an fma
   **by default**, which rounds once where the JVM rounds twice. Without those flags the handheld
-  build would quietly sequence differently from the APK the conformance goldens were recorded
-  against, on the exact architecture we ship to. `tools/CMakeLists.txt` states the same rule for the
-  same reason; see event-schema §5/§6.
+  build would quietly sequence differently from the APK, on the exact architecture we ship to. Every
+  target that compiles songcore carries the same two flags for the same reason.
 - **`SDL_RENDERER_ACCELERATED` means *require*, not *prefer*.** `SDL_CreateRenderer` FAILS outright
   when no driver offers acceleration — so asking for it unconditionally means the app does not start
   on exactly the devices the port plan warns about (TrimUI's GE8300, whose 32-bit GL blobs are

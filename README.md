@@ -136,13 +136,13 @@ The desktop builds read a gamepad through SDL, and also map the keyboard. See [`
 | [`docs/input-system.md`](docs/input-system.md) | Complete controls reference |
 | [`docs/features.md`](docs/features.md) | Feature overview |
 | [`docs/technical-architecture.md`](docs/technical-architecture.md) | Architecture overview |
-| [`docs/building.md`](docs/building.md) | Building from source, and running the tests |
+| [`docs/building.md`](docs/building.md) | Building from source |
 
 ---
 
 ## Building from source
 
-The engine, the sequencer and the whole UI are portable C++17 under `native/`; each platform adds a thin shell around them. Full instructions for all four platforms, plus the test suite: [`docs/building.md`](docs/building.md).
+The engine, the sequencer and the whole UI are portable C++17 under `native/`; each platform adds a thin shell around them. Full instructions for all four platforms: [`docs/building.md`](docs/building.md).
 
 ---
 

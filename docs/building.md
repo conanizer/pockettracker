@@ -55,20 +55,12 @@ docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmas
 
 ## Tests
 
-The conformance tools under `tools/` are one CMake project wired to ctest. They compare the engine,
-sequencer, input layer and renderer against recorded goldens and hand-written invariants:
+The engine, sequencer, input layer and renderer are covered by a suite of headless tools that compare
+them against recorded goldens and hand-written invariants. That suite is developed separately and is
+not part of this repository, so `git clone` gives you the application and everything needed to build
+it, and no test target.
 
-```bash
-cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
-ctest --test-dir tools/build --output-on-failure
-```
-
-Two of the tools exercise ALSA and so exist only on Linux — expect **21 tests on Linux and 19 on
-Windows**. A lower count than that means tests are not being discovered, not that they passed.
-
-The tools are also useful on their own:
-
-| Tool | What it does |
-|---|---|
-| `ptrender` | Renders a project to WAV offline, using the same engine the app plays with |
-| `ptnondet` | Reports whether a project renders reproducibly — random effects and some LFO shapes make it not |
+What CI runs here is the build itself, on every platform: the Android APK (debug and a minified
+release, whose DEX is checked for the JNI keep rules), and the SDL shell on both Linux and Windows —
+which covers both branches of `shell/CMakeLists.txt`'s SDL2 lookup, the system library and the
+built-from-source one.

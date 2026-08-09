@@ -12,13 +12,14 @@ project("pockettracker-sdl" LANGUAGES C CXX)
 #
 #   cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
 #   cmake --build shell/build --config Release
-#   shell/build/pockettracker-sdl tools/testdata/g7-audio.ptp tools/testdata
+#   shell/build/pockettracker-sdl                 # no argument: a blank document
 #
 # Pass CMAKE_BUILD_TYPE explicitly, as above. The usual "default to Release if it is empty" guard is
 # not portable: MSVC's platform module pre-seeds CMAKE_BUILD_TYPE to Debug (via CMAKE_BUILD_TYPE_INIT)
-# while GCC/Clang leave it unset, so the guard silently never fires on Windows — and here, unlike the
-# conformance tools, that is not merely slow: a Debug engine may not keep up with a real-time audio
-# callback. (native/CMakeLists.txt forces -O2 even in Debug on GCC/Clang for exactly this reason.)
+# while GCC/Clang leave it unset, so the guard silently never fires on Windows — and here that is not
+# merely slow: a Debug engine may not keep up with a real-time audio callback, which an offline
+# consumer of the same engine never has to. (native/CMakeLists.txt forces -O2 even in Debug on
+# GCC/Clang for exactly this reason.)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -19,8 +19,8 @@ How PocketTracker is built. This document describes the system as it currently w
 9. [Input Layer](#input-layer)
 10. [Rendering and Export](#rendering-and-export)
 11. [Platform Shells](#platform-shells)
-12. [The Conformance Tools](#the-conformance-tools)
-13. [Build and Test](#build-and-test)
+12. [Built to Be Measured](#built-to-be-measured)
+13. [Build](#build)
 14. [Coding Conventions](#coding-conventions)
 
 ---
@@ -135,8 +135,6 @@ shell/                             The only SDL in the tree
 └── build-linux.sh, build-windows.ps1, build-portmaster.sh, Dockerfile.portmaster
 
 app/                               Android: manifest, resources, and a seven-file Kotlin shim
-tools/                             Conformance tools — see below
-└── testdata/                      Golden projects, traces, unit corpora, synthesized media
 docs/                              The manual, this document, and the licence notices
 ```
 
@@ -267,8 +265,8 @@ to pairing within the phrase only for a phrase no chain references.
 
 ### Determinism
 
-The floats have to be bit-identical across compilers and architectures, because the conformance
-tools compare raw binary32 bits:
+The floats have to be bit-identical across compilers and architectures, because the event stream is
+compared as raw binary32 bits:
 
 - `note_tables.h` bakes all 132 note frequencies and 256 detune values as constants rather than
   computing `pow()` at runtime.
@@ -276,8 +274,8 @@ tools compare raw binary32 bits:
   defaults to contracting `a + b*c` into an FMA, which would silently change the last bits.
 
 Random effects (CHA, RND, RNL, random-mode ARP), `oscShape >= 8` RND/DRNK LFOs, and DUST on the
-master bus are clock-seeded and therefore **not** byte-reproducible. `tools/ptnondet` answers
-"can this project be byte-compared at all?" and should be run before any A/B.
+master bus are clock-seeded and therefore **not** byte-reproducible. Whether a given project can be
+byte-compared at all is a property of the project, and has to be answered before any A/B.
 
 ---
 
@@ -451,41 +449,32 @@ must be installed *before* `SDL_Init`.
 
 ---
 
-## The Conformance Tools
+## Built to Be Measured
 
-`tools/` holds hand-written tools that compare the program against recorded goldens and stated
-invariants. They are the reason this codebase can be refactored: every layer has something pointed
-at it, and each tool sees something the others structurally cannot.
+Most of the structure described above exists so that each layer can be driven and compared from
+outside, with no window, no audio device and no Android. That property is a design constraint, not a
+side effect, and three consequences of it are load-bearing.
 
-| Tool | What it measures |
-|---|---|
-| `ptroundtrip` | `.ptp` / `.pti` serialization, byte-for-byte |
-| `ptresolve` | Timing, effect resolution, song traversal — unit by unit |
-| `ptplay` | The **event stream**, against 36 golden traces |
-| `ptvoice` | The **engine calls** a note produces — which no trace can see |
-| `ptrender` | Audio: determinism, health, a tolerance fingerprint, and `live == render` |
-| `ptrandom` | Random effects: draw counts and support sets exactly, distributions statistically |
-| `ptnondet` | Whether a project is byte-comparable at all |
-| `ptinput` | What a **button press does**: the cursor context, the action, **and the resulting cell** |
-| `ptdispatch` | The dispatcher wiring — screen changes, modals, files, lifecycle |
-| `ptshot` | **Pixels**: any screen of any project to a PNG, with no window and no engine |
-| `ptmidi`, `ptmidiin` | The MIDI serializer, parser and router |
-| `ptalsa`, `ptalsain` | The ALSA backends, driven through a fake `libasound` (Linux only) |
-| `ptmapper`, `pttouch`, `ptfont`, `ptdecode`, `ptaac` | Input mapping, touch layout, font raster, decoders |
+**Every layer can be driven headlessly.** `pt-ui` links nothing platform-specific — no SDL, no POSIX,
+no window — so a whole screen can be rendered to a pixel buffer by a plain host program. The day the
+UI reaches for SDL, that stops linking, which is the point. The sequencer publishes events rather
+than calling the engine, so the event stream can be captured without any audio at all. And
+`renderOffline` runs the same `processAudioBlock` the live callback does, so rendered and played
+audio are the same computation.
 
-Two things about them are load-bearing:
+**Events and engine calls are byte-exact; audio is not.** Measured, not argued: gcc/x86-64 differs
+from MSVC/x86-64 in 9.7% of samples by at most 5 LSB of 32767, and clang/arm64 with fast-math differs
+in 17.0% by at most 16 LSB. Both are inaudible, and neither can be made to go away without giving up
+`-ffast-math` in the DSP. So exact claims are made about the event stream and the engine calls a note
+produces, and audio is compared as a tolerance fingerprint.
 
-**Audio cannot be byte-compared across toolchains.** Measured, not argued: gcc/x86-64 differs from
-MSVC/x86-64 in 9.7% of samples by at most 5 LSB of 32767; clang/arm64 with fast-math differs in 17.0%
-by at most 16 LSB. Both are inaudible. So audio goldens are a tolerance fingerprint, and the
-byte-exact claims are made about *events* and *engine calls* instead.
-
-**`ptshot` is the standing proof that `pt-ui` is platform-free.** The day the UI reaches for SDL,
-ptshot stops linking.
+**Nothing above the engine touches a file directly.** `native/ui/filesystem.h` is a 20-method pure
+interface, string-typed; module logic never sees a file handle. That is what lets the file browser be
+driven against a temporary directory on a desktop.
 
 ---
 
-## Build and Test
+## Build
 
 ### Android
 
@@ -510,17 +499,6 @@ cmake --build shell/build
 ```
 
 `CMAKE_BUILD_TYPE` explicitly: a Debug engine may not keep up with a real-time audio callback.
-
-### Tests
-
-```
-cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
-ctest --test-dir tools/build --output-on-failure
-```
-
-Twenty tests on Linux, eighteen on Windows — `ptalsa` and `ptalsain` are Linux-only. CI runs them on
-gcc/x86-64, MSVC/x86-64 and clang/arm64, which **is** the test rather than redundancy: the
-floating-point guarantees the whole ladder rests on are only real if the compilers agree.
 
 ### Packaging
 
