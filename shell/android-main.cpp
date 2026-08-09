@@ -33,6 +33,7 @@
 
 #include "app.h"
 #include "button_feedback.h"
+#include "saf-filesystem.h"    // the SAF ui::FileSystem (SAF migration P3); Android-only by construction
 #include "midi-in-android.h"    // the MIDI INPUT port  (MIDI plan E5);  compiles to nothing elsewhere
 #include "midi-out-android.h"   // the EXTERNAL MIDI port (MIDI plan B2b); compiles to nothing elsewhere
 
@@ -385,11 +386,30 @@ int main(int argc, char** argv) {
     // for a different reason. The seam is what makes both outcomes cheap.
     ui::StdFileSystem filesystem(appRoot, privateRoot);
 
+    // ⚠️ **argv[3] IS SCAFFOLDING WITH A KNOWN DEATH DATE (SAF migration P3).** `--es storage saf` on
+    // the launch intent picks the SAF filesystem instead of the one above, so a single build can be
+    // driven down both storage paths and compared while MANAGE_EXTERNAL_STORAGE is still granted —
+    // which is the only way to tell "SAF works" from "the media tree was readable all along". Absent,
+    // and on every launcher tap, this is empty and nothing below changes.
+    //
+    // ⚠️ Constructed HERE so it outlives `run()`, like the feedback sink and both MIDI ports. P4
+    // deletes this block and `MainActivity.getArguments()`'s third element together.
+    const std::string     storageMode = (argc > 3 && argv[3]) ? std::string(argv[3]) : std::string();
+    ptshell::SafFileSystem safFilesystem(privateRoot);
+
     ptshell::AppConfig cfg;
     cfg.engine     = engine.get();
     cfg.audio      = &audio;
     cfg.appRoot    = appRoot;
     cfg.filesystem = &filesystem;
+
+    if (storageMode == "saf") {
+        safFilesystem.install_open_hook();
+        cfg.filesystem = &safFilesystem;
+        // The COUNT, not a yes/no: an empty browser under a granted folder and an empty browser under
+        // no folder at all are different failures, and this line is what tells them apart.
+        std::printf("saf:     STORAGE MODE = saf, %d granted folder(s)\n", safFilesystem.root_count());
+    }
 
     // No command line, so no project and no media dir of its own: the app opens the blank document
     // NEW PROJECT makes and the file browser is how the user reaches their songs — exactly as the

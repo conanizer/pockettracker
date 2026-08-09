@@ -360,6 +360,16 @@ int run(const AppConfig& cfg) {
     if (filesystem.settings_path() != cfg.appRoot + "/settings.json")
         std::printf("files:   app files: %s\n", filesystem.settings_path().c_str());
 
+    // ⚠️ **THE COUNT, not just the path.** Every other line of this banner is satisfied by a storage
+    // backend that resolves a directory and then lists nothing — the browser comes up empty and looks
+    // exactly like an empty folder. One number tells the two apart, and it is the same reason
+    // `media: N loaded, M failed` prints a number rather than "media ok".
+    {
+        const std::string projects = filesystem.projects_directory();
+        std::printf("files:   projects: %s (%zu entries)\n", projects.c_str(),
+                    filesystem.list_files(projects).size());
+    }
+
     SdlVideo video;
     if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H, /*fullscreen=*/false,
                     /*resizable=*/cfg.windowed)) {

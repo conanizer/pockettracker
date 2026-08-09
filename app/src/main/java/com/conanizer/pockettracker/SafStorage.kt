@@ -1,0 +1,203 @@
+package com.conanizer.pockettracker
+
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.util.Log
+import java.security.MessageDigest
+
+/**
+ * The Storage Access Framework primitives, and nothing else.
+ *
+ * `ContentResolver` and `DocumentsContract` are Java-only APIs, so the C++ `SafFileSystem` cannot
+ * reach them; this class is the platform residue it calls through. It is deliberately DUMB — it
+ * queries, reads and creates single documents and knows nothing about `pt://` paths, the seven app
+ * folders, or which tree is the app's home. All of that is derivation, and derivation lives in C++
+ * where it is one implementation for every future host rather than a second one written in Kotlin.
+ *
+ * ⚠️ **Every public method here is resolved BY NAME over JNI** (through the wrappers on
+ * `MainActivity`, which is the object native holds). They carry `@Keep` there and an explicit rule in
+ * `proguard-rules.pro`, per the standing rule — a release-only rename is invisible until a release
+ * build.
+ */
+class SafStorage(private val context: Context) {
+
+    /** A granted tree: its derived id, what to call it on screen, and the document URI of its root. */
+    data class Root(val id: String, val displayName: String, val docUri: String)
+
+    /**
+     * The granted trees, ordered by id.
+     *
+     * ⚠️ **The ORDER `getPersistedUriPermissions()` returns is not guaranteed**, which is exactly why
+     * the id cannot be an index into it. Sorting by the derived id makes this list stable across
+     * boots without storing anything.
+     */
+    fun roots(): List<Root> {
+        val out = ArrayList<Root>()
+        for (p in context.contentResolver.persistedUriPermissions) {
+            if (!p.isReadPermission) continue
+            val tree = p.uri
+            val docId = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: continue
+            val docUri = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
+            out += Root(rootId(tree), displayNameOf(docUri, docId), docUri.toString())
+        }
+        out.sortBy { it.id }
+
+        // The impossible case, made observable rather than silently resolving to whichever tree came
+        // first. 48 bits against a 512-grant ceiling is ~5e-10, and "never" is not a reason to
+        // resolve a collision arbitrarily.
+        for (i in 1 until out.size) {
+            if (out[i].id == out[i - 1].id) {
+                Log.e(TAG, "saf: ROOT ID COLLISION ${out[i].id} - " +
+                        "'${out[i - 1].displayName}' and '${out[i].displayName}' are indistinguishable")
+            }
+        }
+        return out
+    }
+
+    /**
+     * The id of a granted tree: 12 hex characters of SHA-256 over the persisted tree URI.
+     *
+     * ⭐ Derived, never stored — so the id→tree mapping is re-derivable from the grant list on any
+     * boot, in any order, and there is no table to migrate or to fall out of sync. See
+     * `saf-migration-plan.md` §5b for the three candidates this beat.
+     */
+    private fun rootId(tree: Uri): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(tree.toString().toByteArray())
+            .take(6)
+            .joinToString("") { "%02x".format(it) }
+
+    /** What the roots directory shows for a tree: the provider's display name, else the tail of its id. */
+    private fun displayNameOf(docUri: Uri, docId: String): String {
+        queryRow(docUri, DocumentsContract.Document.COLUMN_DISPLAY_NAME)?.let {
+            if (it.isNotEmpty()) return clean(it)
+        }
+        // `primary:Documents/PocketTracker` → `PocketTracker`. A provider that answers neither is
+        // still listed, under something, rather than dropped from the browser.
+        return clean(docId.substringAfterLast('/').substringAfterLast(':').ifEmpty { "ROOT" })
+    }
+
+    fun rootCount(): Int = roots().size
+
+    /** `<id>\t<displayName>\t<docUri>`, or "" for an index that is no longer there. */
+    fun rootInfo(index: Int): String {
+        val r = roots().getOrNull(index) ?: return ""
+        return "${r.id}\t${r.displayName}\t${r.docUri}"
+    }
+
+    /**
+     * Every child of a directory document, in ONE query.
+     *
+     * One record per line: `docUri \t name \t isDir(0|1) \t size \t lastModified`. The whole listing
+     * crosses JNI as a single string because the alternative — a call per child, or a call per field
+     * — is what makes a 200-entry sample folder feel slow, and `filesystem.h` is explicit that the
+     * sort keys are read once at build time rather than re-`stat`ed inside the comparator.
+     */
+    fun listChildren(dirDocUri: String): String {
+        val dir = Uri.parse(dirDocUri)
+        val childrenUri = runCatching {
+            DocumentsContract.buildChildDocumentsUriUsingTree(dir, DocumentsContract.getDocumentId(dir))
+        }.getOrNull() ?: return ""
+
+        val sb = StringBuilder()
+        runCatching {
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_SIZE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                ), null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0) ?: continue
+                    val name = clean(c.getString(1) ?: continue)
+                    val isDir = c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                    val size = if (c.isNull(3)) 0L else c.getLong(3)
+                    val modified = if (c.isNull(4)) 0L else c.getLong(4)
+                    val childUri = DocumentsContract.buildDocumentUriUsingTree(dir, id)
+                    sb.append(childUri).append('\t').append(name).append('\t')
+                        .append(if (isDir) '1' else '0').append('\t')
+                        .append(size).append('\t').append(modified).append('\n')
+                }
+            }
+        }.onFailure { Log.w(TAG, "saf: listChildren failed on $dirDocUri: $it") }
+        return sb.toString()
+    }
+
+    /**
+     * ⚠️ The record separators are structural, so a display name may not contain them.
+     * Android forbids `/` in a display name but says nothing about a tab; a name carrying one would
+     * shift every later field by a column. Replaced rather than rejected — a file with an odd name
+     * should still be listed.
+     */
+    private fun clean(s: String): String =
+        if (s.indexOf('\t') < 0 && s.indexOf('\n') < 0) s else s.replace('\t', ' ').replace('\n', ' ')
+
+    /** Whole document → bytes, or null. The C++ side turns it into the `std::string` the seam wants. */
+    fun readFile(docUri: String): ByteArray? = runCatching {
+        context.contentResolver.openInputStream(Uri.parse(docUri))?.use { it.readBytes() }
+    }.getOrElse {
+        Log.w(TAG, "saf: readFile failed on $docUri: $it")
+        null
+    }
+
+    /**
+     * An OS descriptor for a document, or -1. This is what `pt_fopen`'s hook returns.
+     *
+     * ⚠️ **`detachFd()`, never `getFd()`** — `byte_source.h` states that ownership transfers to the
+     * caller, which wraps it in a `FILE*` and `fclose`s it. Handing back a descriptor the
+     * `ParcelFileDescriptor` still tracks means it is closed twice, and the second close lands on
+     * whatever unrelated file has since been given that number.
+     */
+    fun openFd(docUri: String, mode: String): Int = runCatching {
+        context.contentResolver.openFileDescriptor(Uri.parse(docUri), mode)?.detachFd() ?: -1
+    }.getOrElse {
+        Log.w(TAG, "saf: openFd($mode) failed on $docUri: $it")
+        -1
+    }
+
+    /** Create a sub-directory document, returning its URI — or the EXISTING one if the name is taken. */
+    fun createDir(parentDocUri: String, name: String): String {
+        // ⚠️ `createDocument` with a name that exists does NOT fail — providers de-duplicate, so
+        // asking twice yields `Projects` and `Projects (1)`. The seven app folders are created on
+        // first use on every launch, so this path runs constantly and must find before it creates.
+        findChild(parentDocUri, name)?.let { return it }
+        return runCatching {
+            DocumentsContract.createDocument(
+                context.contentResolver, Uri.parse(parentDocUri),
+                DocumentsContract.Document.MIME_TYPE_DIR, name
+            )?.toString() ?: ""
+        }.getOrElse {
+            Log.w(TAG, "saf: createDir('$name') failed under $parentDocUri: $it")
+            ""
+        }
+    }
+
+    /** The child of `parentDocUri` whose display name is `name`, or null. */
+    private fun findChild(parentDocUri: String, name: String): String? {
+        for (line in listChildren(parentDocUri).lineSequence()) {
+            if (line.isEmpty()) continue
+            val fields = line.split('\t')
+            if (fields.size >= 2 && fields[1] == name) return fields[0]
+        }
+        return null
+    }
+
+    /** One column of a single document, or null. */
+    private fun queryRow(docUri: Uri, column: String): String? = runCatching {
+        context.contentResolver.query(docUri, arrayOf(column), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null
+        }
+    }.getOrNull()
+
+    private companion object {
+        // The same tag the rest of the Kotlin half logs under; `MainActivity`'s own is private to it.
+        // ⚠️ `PocketTrackerSDL` is the KOTLIN tag — the native side logs under `PocketTracker`, and a
+        // logcat filter on the wrong one reports a working migration as never having run.
+        const val TAG = "PocketTrackerSDL"
+    }
+}

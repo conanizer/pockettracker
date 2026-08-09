@@ -99,7 +99,21 @@ class MainActivity : SDLActivity() {
      * have those three files in the tree. `config.json` is deliberately NOT one of them: it is the one
      * file the user hand-edits, and app-private storage is reachable only over adb.
      */
-    override fun getArguments(): Array<String> = arrayOf(appRoot(), privateRoot())
+    /**
+     * ⚠️ **argv[3] is SCAFFOLDING WITH A KNOWN DEATH DATE (SAF migration P3).** It selects which
+     * `ui::FileSystem` the shell constructs, so one build can be driven down both the old media-tree
+     * path and the new SAF one and the two compared while `MANAGE_EXTERNAL_STORAGE` is still granted:
+     *
+     *     adb shell am start -n …/.MainActivity --es storage saf
+     *
+     * Absent — every normal launch, including every launcher icon tap — this is empty and the shell
+     * takes the `StdFileSystem` branch it has always taken. It is an intent extra rather than a
+     * SETTINGS row because the row would be real UI work for something P4 deletes, and rather than a
+     * `config.json` key because that file lives in the very tree SAF may not have granted yet.
+     * **P4 removes this argument and the branch below it together.**
+     */
+    override fun getArguments(): Array<String> =
+        arrayOf(appRoot(), privateRoot(), intent?.getStringExtra("storage") ?: "")
 
     private fun appRoot(): String =
         File(
@@ -463,6 +477,42 @@ class MainActivity : SDLActivity() {
     fun midiInCloseDevice() {
         midiIn?.close()
     }
+
+    // ── Storage Access Framework (SAF migration P3) ──────────────────────────────────────────────
+    //
+    // `ContentResolver` and `DocumentsContract` are Java-only, so `shell/saf-filesystem.cpp` reaches
+    // them through these six. Each is a one-line delegate to [SafStorage], which holds the whole of
+    // the SAF knowledge; nothing here decides anything.
+    //
+    // ⚠️ `@Keep` AND an explicit `proguard-rules.pro` rule, exactly as the thirteen above — the count
+    // in that file is the count, and CI reads it from there rather than from a sentence.
+
+    private val safStorage: SafStorage by lazy { SafStorage(this) }
+
+    /** How many folders the user has granted. Zero is the fresh-install state, not an error. */
+    @Keep
+    fun safRootCount(): Int = safStorage.rootCount()
+
+    /** `<id>\t<displayName>\t<docUri>` for granted tree [index], or "" if it is gone. */
+    @Keep
+    fun safRootInfo(index: Int): String = safStorage.rootInfo(index)
+
+    /** Every child of a directory document in one query — see [SafStorage.listChildren] for the format. */
+    @Keep
+    fun safListChildren(dirDocUri: String): String = safStorage.listChildren(dirDocUri)
+
+    /** Whole document → bytes, or null. */
+    @Keep
+    fun safReadFile(docUri: String): ByteArray? = safStorage.readFile(docUri)
+
+    /** An OS descriptor the caller OWNS (`detachFd`), or -1. This is `pt_fopen`'s hook. */
+    @Keep
+    fun safOpenFd(docUri: String, mode: String): Int = safStorage.openFd(docUri, mode)
+
+    /** Create (or find) a sub-directory document, returning its URI or "". */
+    @Keep
+    fun safCreateDir(parentDocUri: String, name: String): String =
+        safStorage.createDir(parentDocUri, name)
 
     /**
      * Move whatever has arrived since the last frame into [out]; returns how many bytes.

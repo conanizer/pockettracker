@@ -21,6 +21,12 @@
 #     midiInOpenDevice(I)Z          — │ OPPOSITE filter — see MidiInManager.kt. The last one is a READ
 #     midiInCloseDevice()V          — │ because the native side POLLS this port once a frame rather
 #     midiInRead([B)I               — ┘ than being called from the MIDI service's binder thread.
+#     safRootCount()I               — ┐ the Storage Access Framework seam (SAF migration P3).
+#     safRootInfo(I)L…/String;      — │ ContentResolver/DocumentsContract are Java-only, so these six
+#     safListChildren(L…;)L…/String;— │ are the whole of it. ⚠️ `safOpenFd` is `pt_fopen`'s resolver:
+#     safReadFile(L…;)[B            — │ a rename would make every sample under a granted folder
+#     safOpenFd(L…;L…;)I            — │ fail to open, with the browser still listing it — which
+#     safCreateDir(L…;L…;)L…/String;— ┘ reads as a corrupt file rather than as a stripped method.
 # Every NAME above is part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
@@ -44,6 +50,12 @@
     boolean midiInOpenDevice(int);
     void midiInCloseDevice();
     int midiInRead(byte[]);
+    int safRootCount();
+    java.lang.String safRootInfo(int);
+    java.lang.String safListChildren(java.lang.String);
+    byte[] safReadFile(java.lang.String);
+    int safOpenFd(java.lang.String, java.lang.String);
+    java.lang.String safCreateDir(java.lang.String, java.lang.String);
 }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────
