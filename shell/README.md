@@ -1,45 +1,35 @@
 # The SDL shell — `pockettracker-sdl`
 
-**Linux-port plan Phase 2 (the sound) + Phase 3 (the UI).** A build of PocketTracker with no Kotlin in
-it: it opens an audio device, hands songcore a `.ptp`, draws the tracker, and plays it.
+The shell PocketTracker runs on. It opens an audio device, hands songcore a `.ptp`, draws the tracker,
+and plays it — on Windows, Linux, the handhelds and Android alike.
 
-> ⚠️ **This directory was `linux/` until convergence C0.3.** It was named for the platform that made
-> it necessary, and it stopped being true in the same phase that made it matter: `platform_caps.h`
-> had already argued the point for its own reasons (its profile is `sdl()`, not `linux()`), and
-> convergence Phase C gives Android this same shell. Windows has shipped out of here since A3.
->
-> Since C0.2 the split inside the directory says the same thing: **`app.{h,cpp}` is the shared shell**
-> — the boot sequence, the frame loop, the teardown, identical on every platform — and **`main.cpp` is
-> the desktop/handheld residue** beside it (argv, the signal handler, `SDL_Init`/`SDL_Quit`, and the
-> choice of audio backend, root and caps). C1's Android entry point is a second file next to
-> `main.cpp` linking the same `app.cpp`.
+**`app.{h,cpp}` is the shared shell**: the boot sequence, the frame loop, the teardown, identical on
+every platform. Beside it sit the two entry points that supply what only the platform knows —
+`main.cpp` for desktop and handheld (argv, the signal handler, `SDL_Init`/`SDL_Quit`) and
+`android-main.cpp` for Android — both linking the same `app.cpp`.
 
 ## Why this directory is small
 
 Almost nothing here is new code, and that is the point.
 
 Everything that decides how a song *sounds* — the sequencer, effect resolution, voices, modulation,
-the whole DSP chain, the offline render — is the same C++ the Android APK ships, reached through
-exactly one class:
+the whole DSP chain, the offline render — is reached through exactly one class:
 
 ```
 songcore::SongcoreHost          native/songcore/host.h
 ```
 
-which is the same class `songcore-jni.cpp` marshals for Android. Since Phase 3, everything that
-decides how the app *looks* is shared too: `pt-ui` (`native/ui/`) draws every screen into a 640×480
-framebuffer and contains no SDL, no POSIX and no window.
+Everything that decides how the app *looks* is shared too: `pt-ui` (`native/ui/`) draws every screen
+into a 640×480 framebuffer and contains no SDL, no POSIX and no window.
 
-So what is left in here is only, and exactly, the shell:
+So the platforms differ in exactly three things, and this directory is where those three live:
 
-| | Android | shell/SDL |
+| | Android | desktop · handheld |
 |---|---|---|
-| Audio backend | `native/oboe-audio-engine.cpp` | `shell/sdl-audio-engine.cpp` (both are an `AudioBackend`, C0.2) |
-| Video / window | Compose `Canvas` | `shell/sdl-video.cpp` |
-| Input source | `InputMapper` (Android keys) | `shell/sdl-input.cpp` — the physical half only |
-| Combo matrix | `InputMapper.handleButtonAction` | `native/ui/button_mapper.h` — **shared** since C0.1 |
-| Entry point | `native/songcore-jni.cpp` (JNI) | `shell/main.cpp` |
-| Boot · frame loop · exit | `PixelPerfectRenderer` | `shell/app.cpp` — **shared** since C0.2 |
+| Entry point | `shell/android-main.cpp` | `shell/main.cpp` |
+| Audio backend | `native/oboe-audio-engine.cpp` | `shell/sdl-audio-engine.cpp` |
+| Filesystem | `shell/saf-filesystem.cpp` — the app holds no storage permission | `native/ui/std_filesystem.cpp` |
+| Video · input · frame loop | *shared* — `sdl-video.cpp`, `sdl-input.cpp`, `app.cpp` | *the same files* |
 | **Engine · songcore · UI** | **shared — the same files** | **shared — the same files** |
 
 Both audio backends do the same one thing in their callback: hand the device buffer to
@@ -55,22 +45,6 @@ SDL, such a program stops linking.
 There is exactly **one** `Project` in the process: the one `SongcoreHost` owns and the `Sequencer`
 reads. The UI edits it in place through `host.edit_project()`, so an edit is live the instant it is
 made, and there is no second copy to desync.
-
-(Android needs a second copy — Compose requires an observable object graph to recompose against — and
-pushes the whole thing down to songcore as a JSON blob whenever it changes. There is no Kotlin here,
-so there is no reason to pay for that round trip on every keystroke.)
-
-## What is *not* here yet
-
-**Most of the screens.** One is real (PHRASE). The rest draw the "COMING SOON" placeholder that the
-Android app itself used while its own screens were being written, and they land session by session:
-the other grid editors and the oscilloscope/navigation furniture, then the full input dispatcher
-(`AppInputDispatcher` is ~3200 lines of Kotlin — the combos, selection, clipboard and screen
-navigation all live there), then instruments, mixer, files and settings.
-
-Also missing, and deliberately so: the POSIX filesystem layer, `settings.json` prefs, `.ptt` theme
-loading, SIGTERM autosave and the EXIT action. The app currently takes its project on the command
-line and quits with F10 or the window close button.
 
 ## Build
 
@@ -89,14 +63,13 @@ portable — MSVC's platform module pre-seeds it to `Debug` while GCC/Clang leav
 engine may not keep up with a real-time audio callback. Offline consumers of the same engine can
 afford Debug; this target cannot.
 
-**On this Windows box specifically**, CMake 3.22 (the one in the Android SDK) predates the installed
-Visual Studio, so it cannot generate for it. Use Ninja, from a `vcvars64` shell:
+**On a Windows box where CMake predates the installed Visual Studio** it cannot generate for it. Use
+Ninja, from a `vcvars64` shell:
 
 ```bat
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-set CMBIN=%LOCALAPPDATA%\Android\Sdk\cmake\3.22.1\bin
-%CMBIN%\cmake -S shell -B shell\build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=%CMBIN%\ninja.exe
-%CMBIN%\cmake --build shell\build
+call "C:\Program Files (x86)\Microsoft Visual Studio\<ver>\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+cmake -S shell -B shell\build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build shell\build
 ```
 
 Linux needs SDL2's dev package (`apt install libsdl2-dev`) to use the system one, or it will fetch.
@@ -146,8 +119,8 @@ Two decisions worth knowing before changing anything here:
   device as `undefined symbol`.
 - **The launch script must never run `gptokeyb`.** The shell reads the pad itself *and* reads the
   keyboard, so gptokeyb's injected keystrokes arrive as a second, disagreeing copy of every press —
-  its default `start = enter` against `sdl-input.cpp`'s `Enter -> Button::A` made START insert a
-  chain and stopped playback from stopping. The full table is at the top of `portmaster/`
+  its default `start = enter` against `sdl-input.cpp`'s `Enter -> Button::A` makes START insert a
+  chain and stops playback from stopping. The full table is at the top of `portmaster/`
   `PocketTracker.sh`, and `build-portmaster.sh` fails the build if it reappears.
 
 ### The Windows package
@@ -180,8 +153,8 @@ Three decisions worth knowing:
   the imports are gone.
 - **The icon is a resource, and that is also the window icon.** SDL takes the first `RT_GROUP_ICON`
   out of the exe when no hint is set, so there is no `SDL_SetWindowIcon` call and no PNG decoder in
-  the C++ tree — which convergence D2 does not want pulled forward. `shell/windows/make-icon.ps1`
-  regenerates the `.ico` from `docs/images/logo-plain.png`; no build runs it.
+  the C++ tree. `shell/windows/make-icon.ps1` regenerates the `.ico` from
+  `docs/images/logo-plain.png`; no build runs it.
 
 ## Run
 
@@ -197,7 +170,7 @@ blank document NEW PROJECT makes, and the file browser is how a handheld user re
 
 `media-base-dir` defaults to the project's own directory. A **portable** project — anything the Linux
 build ships — stores sample paths **relative** to the project file, while a project saved on a device
-stores absolute paths; both resolve correctly (`engine_setup.h: resolve_media_path`). The second
+stores absolute ones; both resolve correctly (`engine_setup.h: resolve_media_path`). The second
 argument is the root those relative paths are resolved against, so it is only needed when a project
 and its media have been separated.
 
@@ -209,19 +182,13 @@ and its media have been separated.
 | `POCKETTRACKER_LOG` | **`=1` turns the engine's `LOGD` chatter back on.** Off by default. |
 | `POCKETTRACKER_AUDIO_PROFILE` | the audio-callback profiler (`sdl-audio-engine.cpp`). |
 
-⚠️ **`POCKETTRACKER_LOG` is off by default and that is a deliberate reversal (2026-07-20).** On
-Android `LOGD` is a debug-priority line nobody sees; off Android there is no logcat, so the same 35
-call sites went straight to stderr — meaning the shipped desktop console filled with
+⚠️ **`POCKETTRACKER_LOG` is off by default**, because off Android there is no logcat and the same 35
+`LOGD` call sites go straight to stderr — which fills a shipped desktop console with
 `[D/NativeAudio] 🔊 Track 0 volume set to 1.00` on every boot, emoji mojibaked on any non-UTF-8
-console. **The PortMaster build had always done this too**; it went unnoticed because a handheld's
-stderr goes nowhere anyone looks. During a bring-up, set the variable — that is what it is for.
-`LOGE` is **not** gated: an error is not spam, and the console is only worth keeping if a user can
-paste it back.
+console. During a bring-up, set the variable — that is what it is for. `LOGE` is **not** gated: an
+error is not spam, and the console is only worth keeping if a user can paste it back.
 
 ### Controls
-
-The keyboard map is copied key-for-key from the Android one (`InputMapper.keyboardMapping`), so
-muscle memory transfers and a bug report about "the K key" means the same thing on both builds.
 
 | Key | Button | |
 |---|---|---|
@@ -232,6 +199,9 @@ muscle memory transfers and a bug report about "the K key" means the same thing 
 | `LShift` | SELECT | |
 | `Space` | START | play / stop |
 | `F10` | — | quit (**dev only** — not a real button; the handheld's EXIT action lands with the PROJECT screen) |
+
+Every one of these is rebindable through `config.json`'s `keyboard` section; the table above is what
+the app seeds into a fresh one.
 
 Editing is the standard tracker gesture set, and it is driven entirely by the cursor's *context*
 (`native/ui/cursor.h`) rather than by which screen is up:
@@ -244,30 +214,26 @@ Editing is the standard tracker gesture set, and it is driven entirely by the cu
 | **A**+**B** | delete the value — or reset it to its default, for cells that cannot be empty |
 
 A gamepad works too (`SDL_GameController`): D-pad, A/B (X and Y aliased onto them), the shoulders,
-BACK = SELECT and START. The L2/R2 triggers and the analog stick are **not** mapped yet — both are
-axes, both vary per CFW, and neither can be verified without a device (Phase 4 bring-up).
+BACK = SELECT and START. `config.json`'s `controller` section overrides the face-button layout for a
+pad that misreports itself. The L2/R2 triggers and the analog stick are **not** mapped — both are
+axes and both vary per CFW.
 
 ## Three things that will bite you
 
 - **`AudioEngine` must be heap-allocated.** Its per-block DSP scratch, spectrum rings and 256-slot
   table pool are members and blow a 1 MB stack instantly (`0xC00000FD`). `main.cpp` uses
-  `make_unique`; so does ptrender, for the same reason.
+  `make_unique`.
 - **This target is compiled `-fno-fast-math -ffp-contract=off`** (`/fp:precise` on MSVC), and that is
   a *correctness* requirement, not an optimisation choice. `main.cpp` includes `songcore/host.h`, so
   the **sequencer** is compiled into this target — and aarch64 clang contracts `a + b*c` into an fma
-  **by default**, which rounds once where the JVM rounds twice. Without those flags the handheld
-  build would quietly sequence differently from the APK, on the exact architecture we ship to. Every
-  target that compiles songcore carries the same two flags for the same reason.
+  **by default**, which rounds once where a separate multiply and add round twice. Without those
+  flags the handheld build would quietly sequence differently from the APK, on the exact architecture
+  we ship to. Every target that compiles songcore carries the same two flags for the same reason.
 - **`SDL_RENDERER_ACCELERATED` means *require*, not *prefer*.** `SDL_CreateRenderer` FAILS outright
   when no driver offers acceleration — so asking for it unconditionally means the app does not start
-  on exactly the devices the port plan warns about (TrimUI's GE8300, whose 32-bit GL blobs are
-  missing; any CFW booted without a GPU driver). `sdl-video.cpp` therefore tries accelerated+vsync,
+  on exactly the devices the port has to run on (TrimUI's GE8300, whose 32-bit GL blobs are missing;
+  any CFW booted without a GPU driver). `sdl-video.cpp` therefore tries accelerated+vsync,
   then accelerated, then **anything** — and the software renderer that catches the fall is not a
   degraded mode: blitting one 640×480 texture is trivial on a CPU, which is *why* the UI draws into a
   framebuffer instead of using shaders. Without vsync, `present()` also has to pace the frame itself
   or the loop spins a core flat.
-
-## Next
-
-Phase 3 continues — the remaining screen modules, the input dispatcher, the filesystem/prefs layer.
-Phase 4 — the handheld bring-up. Phase 5 — PortMaster packaging.

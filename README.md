@@ -162,8 +162,8 @@ PocketTracker is built on excellent open-source work — Oboe, DaisySP, TinySoun
 
 Full attributions, licenses, and DSP algorithm references: [`CREDITS.md`](CREDITS.md).
 
-**Third-party license notices** for everything compiled into the audio engine — the code that ships
-in both the Android app and the Linux handheld port — are reproduced in full in
+**Third-party license notices** for everything compiled into PocketTracker — the audio engine and the
+SDL shell alike, across all four packages — are reproduced in full in
 [`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md).
 
 ---

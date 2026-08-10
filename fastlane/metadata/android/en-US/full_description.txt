@@ -7,7 +7,7 @@ Features:
 * SoundFont (SF2) instrument support
 * Sample editor: trim, chop, slice, time-stretch (SOLA), pitch-shift, destructive FX
 * Sample from video: extract audio from screen recordings (MP4/MKV/WebM)
-* 26 step effects: arpeggio, retrigger, pitch slides, vibrato, chance/randomize, tables, grooves and more
+* 31 step effects: arpeggio, retrigger, pitch slides, vibrato, chance/randomize, tables, grooves, mixer-fader automation and more
 * Per-instrument modulation: AHD/ADSR envelopes and LFOs with 10 destinations
 * Mixer with per-track sends, true dBFS meters, reverb and delay send buses
 * Master bus with OTT-style multiband compression or DUST lo-fi chain, plus limiter

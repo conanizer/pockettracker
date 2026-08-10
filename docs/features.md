@@ -37,6 +37,10 @@ Write these into any phrase step to shape how a note plays:
 - **Table override** — switch which table an instrument follows
 - **Groove assign** — set groove pattern per track from a phrase step
 - **Tick rate** — control how fast the instrument table advances
+- **Effect automation** — mark a start and a finish step and the value between them glides, on a
+  choice of curve; the span may cross into a later phrase of the same chain
+- **Track and master faders** — move a mixer fader from a phrase step; the move persists as the song
+  plays on, and stopping restores what the mixer had
 
 ## Instrument Tables
 

@@ -32,7 +32,7 @@ The main screens sit side by side on one row: **SONG · CHAIN · PHRASE · INSTR
 
 ## 3. Get some samples onto your device
 
-PocketTracker ships with **no bundled sounds** — every instrument slot starts empty, and you fill them with your own files. Copy a few one-shot samples (a kick, a snare, a hi-hat to start) into the `Samples/` folder inside the folder you granted above. Anything outside it works too — press **B** in the browser until you reach the top, and `ADD FOLDER...` will grant PocketTracker a second folder anywhere on the device.
+PocketTracker ships with **no bundled sounds** — every instrument slot starts empty, and you fill them with your own files. Copy a few one-shot samples (a kick, a snare, a hi-hat to start) into the `Samples/` folder inside the folder you granted above. Anything outside it works too — climb to the top of the browser with **R+LEFT**, and `ADD FOLDER...` will grant PocketTracker a second folder anywhere on the device.
 
 Supported sample formats: **WAV**, MP3, FLAC, OGG, Opus, M4A. **SoundFont (SF2)** files work too, and give you multi-sampled instruments from a single file. Any free sample pack or SF2 from the internet is fine.
 

@@ -98,8 +98,8 @@ Electrosmith's own code. Verified by reading the banner of each compiled file:
 **On the LGPL-2.1 three:** PocketTracker as a whole is GPL-3.0-or-later. LGPL-2.1 **§3** expressly
 permits applying "the ordinary GNU General Public License" version 2 "or any later version" to a
 given copy of the library, so these three are distributed here under **GPL-3.0-or-later**, and the
-`LICENSE` text shipped beside this file is their governing text. There is no compatibility problem —
-but the attribution above is required and was previously absent.
+`LICENSE` text shipped beside this file is their governing text. There is no compatibility problem,
+but the attribution above is required.
 
 The five MIT files are covered by the MIT text below.
 
@@ -205,7 +205,7 @@ Used for: native AAC decoding of ISO-BMFF container samples — `.m4a` / `.mp4` 
 over fdk-aac**, whose licence the FSF considers GPL-incompatible. GPL-2.0-**or-later** may be used
 under GPL-3.0, so it is compatible with PocketTracker's own GPL-3.0 licence (`LICENSE`). FAAD2 is
 **statically linked into the `pockettracker` engine library**, so it ships in **every** artifact — the
-Compose APK, the SDL APK `.so`, the PortMaster zip and the Windows zip alike. As with all of
+APK, the PortMaster zip and the Windows zip alike. As with all of
 PocketTracker, complete corresponding source is available under the project's GPL-3.0 terms.
 `COPYING` additionally states that non-GPL use requires a separate commercial licence from the
 authors; PocketTracker's use is GPL, so that clause does not apply here.
@@ -230,9 +230,10 @@ Used for: decoding the touch-skin, CRT-overlay and theme PNGs (`native/vendor/st
 v2.30). Copyright (c) 2017 Sean Barrett. The full dual-licence statement is at the end of that file.
 
 ⚠️ **Shell-side, not in the engine** — the same footnote the SDL2 section carries. `stb_image` is
-compiled into the SDL *shell* (`shell/image.cpp`), so it ships in the **PortMaster** and **Windows**
-packages and, from convergence C3, in the APK's SDL-app `.so` — but it is **not** linked into the
-`pockettracker` engine library and so is absent from the shipping Compose APK. It is under
+compiled into the SDL *shell* (`shell/image.cpp`), so it ships in **every** artifact — the
+**PortMaster** and **Windows** packages, and the APK's SDL-app `.so`. It is **not** linked into the
+`pockettracker` engine library, but every artifact runs the shell, so that distinction does not
+change what is distributed. It is under
 `native/vendor/` only because that is where the licence guard looks; see
 `native/vendor/stb_image/PT-VENDORING.md`. The dual grant carries no reproduce-in-binary obligation
 (the public-domain arm has no conditions at all), but the notice is recorded here regardless — the
@@ -247,9 +248,10 @@ Used for: rasterizing the PORTRAIT2 device skin's button-label glyphs from the a
 dual-licence statement is at the end of that file.
 
 ⚠️ **Shell-side, not in the engine** — the same footnote stb_image carries. `stb_truetype` is
-compiled into the SDL *shell* (`shell/font_raster.cpp`), so it ships in the **PortMaster** and
-**Windows** packages and, from convergence C3, in the APK's SDL-app `.so` — but it is **not** linked
-into the `pockettracker` engine library and so is absent from the shipping Compose APK. It is under
+compiled into the SDL *shell* (`shell/font_raster.cpp`), so it ships in **every** artifact — the
+**PortMaster** and **Windows** packages, and the APK's SDL-app `.so`. It is **not** linked into the
+`pockettracker` engine library, but every artifact runs the shell, so that distinction does not
+change what is distributed. It is under
 `native/vendor/` only because that is where the licence guard looks; see
 `native/vendor/stb_truetype/PT-VENDORING.md`. The dual grant carries no reproduce-in-binary
 obligation (the public-domain arm has no conditions at all), but the notice is recorded here
@@ -325,12 +327,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## SDL2 — zlib licence (**shipped on Windows and in the APK**, linked-not-shipped on the handhelds)
 
-⚠️ **The answer differs per artifact, and it has now changed twice.** This section used to say
-flatly that PocketTracker ships no SDL2 binary. That was true of every artifact that existed when it
-was written; the Windows desktop package (convergence plan A3) made it false on 2026-07-20, and
-convergence C1 made it false again the same day for the APK — which is the same shape as the P5-S1
-finding both times: the notices were accurate about the *source tree* and wrong about the thing a
-user actually receives.
+⚠️ **The answer differs per artifact**, so "does PocketTracker ship an SDL2 binary?" has no single
+answer — and the question that binds is always about the thing a user actually receives, not about
+the source tree.
 
 | artifact | how SDL2 is linked | ships an SDL2 binary? |
 |---|---|---|
@@ -345,24 +344,22 @@ in this repo — the licence that ships is then the licence of the code that shi
 ⚠️ **On the APK's obligation specifically:** zlib's three conditions bind *source* distributions
 (clause 3 is "may not be removed or altered from any **source** distribution"); unlike the
 BSD-3-Clause components in this file, it imposes no reproduce-in-binary-form requirement. So
-shipping `libSDL2.so` in the APK does **not** enlarge the open finding that the APK shows a user no
-notices at all — that finding is driven by libogg/libopus/opusfile/KissFFT, and it is still open.
-Stated rather than assumed, because "we now ship one more library" is the kind of change that looks
-like it must have made a compliance problem worse.
+shipping `libSDL2.so` in the APK adds no obligation beyond the notice recorded here. The APK carries
+this file, `LICENSE`, `CREDITS.md` and the OFL text as `assets/licenses/`; no in-app screen displays
+them. Stated rather than assumed, because "we now ship one more library" is the kind of change that
+looks like it must have made a compliance problem worse.
 
-⚠️ **The vendor-directory guard was blind to this and now is not — but only on one side.**
-`build-portmaster.sh` derives its component list from `native/vendor/*/` precisely so that vendoring
-a library and forgetting its notice fails the build. Until C1, SDL2 was *fetched* at configure time
-and had never been in `native/vendor/`, so it was invisible to that mechanism and `build-windows.ps1`
-had to check for the SDL notice **by name**, as a special case. C1 puts `native/vendor/SDL2/` in the
-tree, so the derived guard now covers it — including, over-inclusively, in the PortMaster zip, which
-links SDL rather than shipping it (see the note at that loop). **The Windows special case stays**:
-that build takes its SDL from FetchContent, not from `native/vendor/`, so for *that* artifact the
-guard is still structurally blind.
+⚠️ **The vendor-directory guard covers SDL2 on one side only.** `build-portmaster.sh` derives its
+component list from `native/vendor/*/` precisely so that vendoring a library and forgetting its
+notice fails the build, and `native/vendor/SDL2/` is in the tree, so the derived guard covers it —
+including, over-inclusively, in the PortMaster zip, which links SDL rather than shipping it (see the
+note at that loop). **The Windows build is the exception**: it takes its SDL from FetchContent, not
+from `native/vendor/`, so the derived guard is structurally blind there and `build-windows.ps1`
+checks for the SDL notice **by name**.
 
-Used for: window, renderer, audio output, gamepad and keyboard input (`shell/`, and the Android
-shell from convergence C1). **Two versions, deliberately** — different linkage models get different
-version policies:
+Used for: window, renderer, audio output, gamepad and keyboard input — the whole of `shell/`, on
+every platform including Android. **Two versions, deliberately** — different linkage models get
+different version policies:
 
 | | version | why |
 |---|---|---|

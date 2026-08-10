@@ -16,7 +16,12 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | [skoomaDust](https://github.com/skoomabwoy/skoomaDust) | GPL-3.0 | Lo-fi effect chain; includes APComp FET compressor by Alain Paul (BSD-3-Clause) |
 | [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3 / dr_flac) | Public domain (MIT-0) | Native MP3 / FLAC decoding |
 | [stb_vorbis](https://github.com/nothings/stb) | Public domain (MIT) | Native OGG Vorbis decoding |
-| [libopus / opusfile](https://opus-codec.org/) | BSD-3-Clause | Native Opus decoding |
+| [libogg / libopus / opusfile](https://opus-codec.org/) | BSD-3-Clause | Native Opus decoding |
+| [FAAD2](https://github.com/knik0/faad2) | GPL-2.0-or-later | AAC decoding — the audio track of `.m4a` and `.mp4` |
+| [minimp4](https://github.com/lieff/minimp4) | CC0-1.0 (public domain) | ISO-BMFF container demuxing that feeds FAAD2 |
+| [stb_image](https://github.com/nothings/stb) | Public domain (MIT) | Decoding theme, touch-skin and CRT-overlay PNGs |
+| [stb_truetype](https://github.com/nothings/stb) | Public domain (MIT) | Rasterizing the touch skin's button-label glyphs |
+| [Linux Biolinum](https://www.dafont.com/linux-biolinum.font) | SIL OFL 1.1 | The arrow glyphs on the touch control layout |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Parsing `.ptp` / `.pti` project + instrument JSON |
 | [SDL2](https://www.libsdl.org/) | zlib | Window, renderer, audio device, controller and keyboard input on every platform |
 | [AndroidX Core-KTX](https://developer.android.com/jetpack/androidx/releases/core) | Apache 2.0 | Window-insets handling in the Android launcher activity |
@@ -24,9 +29,9 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 
 Each library keeps its own license. PocketTracker as a whole is distributed under GPL-3.0-or-later (see [`LICENSE`](LICENSE)).
 
-**Full notices for everything compiled into the audio engine — the code that ships in both the APK
-and the Linux port — are in [`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md),**
-which is the single source of truth and travels inside the release artifact.
+**Full notices for everything compiled into PocketTracker — the audio engine and the SDL shell alike,
+across all four packages — are in [`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md),**
+which is the single source of truth and travels inside every release artifact.
 
 **Oboe and the two AndroidX rows are Gradle-resolved rather than compiled from `native/`**, so they
 exist only in the APK. Apache-2.0 §4(a) requires that a copy of the License reach anyone who receives

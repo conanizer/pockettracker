@@ -318,10 +318,10 @@ drew them as something else would misrepresent the file on disk.
 Project
 ├── name, tempo, transpose
 ├── song[256][8]          chain references per row per track   (-1 = empty)
-├── chains[128]           16 phrase slots + a transpose each
-├── phrases[128]          16 steps: note, volume, instrument, 3 × (FX type, FX value)
+├── chains[256]           16 phrase slots + a transpose each
+├── phrases[256]          16 steps: note, volume, instrument, 3 × (FX type, FX value)
 ├── tables[128]           16 rows: transpose, volume, 3 × (FX type, FX value)
-├── grooves[32]           16 step lengths in tics
+├── grooves[128]          16 step lengths in tics
 ├── instruments[128]      sampler | SoundFont | external
 ├── eqPresets[128]        the shared EQ slot bank
 ├── mixer, master bus, reverb, delay
@@ -340,16 +340,17 @@ note-on on an empty instrument is still a valid *event*; the consumer is what dr
 | `.ptp` | A project. JSON, pretty-printed, defaults omitted. |
 | `.pti` | A single instrument preset — any type, including external. |
 | `settings.json` | Device and app settings. Shared shape across platforms. |
-| `config.json` | Optional folder overrides for the file browser. |
+| `config.json` | Optional overrides: the browser's folders, the gamepad's face-button layout, and the keyboard bindings. |
 | `.ptt` | A theme. |
 
 `project_io.h` emits **byte-exact** JSON: the field order, the pretty-printing and the
-default-omission rules are all pinned, and eight golden projects round-trip byte-for-byte in CI. Any
-new serialized field must be default-guarded or those goldens break.
+default-omission rules are all pinned, and a set of golden projects round-trips byte-for-byte under
+the headless test suite (developed separately — see [`building.md`](building.md)). Any new serialized
+field must be default-guarded or those goldens break.
 
 ### Storage
 
-Everything the app does to a disk goes through one interface, `ui/filesystem.h` — twenty methods,
+Everything the app does to a disk goes through one interface, `ui/filesystem.h` — twenty-three methods,
 string-typed paths, `FileInfo` structs. Screen modules never see a file handle, which is what lets a
 headless tool drive the file browser against a temp directory. There are two implementations:
 `StdFileSystem` (portable C++17 `<filesystem>`, used by Windows, Linux and PortMaster) and
@@ -385,16 +386,19 @@ to the app's root unless written as absolute paths, so the file means the same t
 
 640×480, drawn into a software framebuffer with four primitives. The shell scales the finished frame.
 
-**Sixteen screens**, reached by R+DPAD over a twelve-cell navigation grid plus sub-screens:
+**Sixteen screens** (`ui/screen.h`). Twelve of them sit on the R+DPAD navigation grid; four are
+reached from a row on another screen:
 
 | | |
 |---|---|
-| Grid editors | SONG, CHAIN, PHRASE, TABLE, GROOVE |
-| Instruments | INSTRUMENT, INST.POOL, MODS |
-| Mix | MIXER, EFFECTS |
-| Sample | SAMPLE EDITOR |
-| Sub-screens | PROJECT → SETTINGS, PROJECT → MIDI, THEME editor, EQ editor |
-| Overlays | file browser, qwerty keyboard, FX helper, confirm dialog |
+| Grid — main row | SONG, CHAIN, PHRASE, INSTRUMENT, TABLE |
+| Grid — column rows | PROJECT, GROOVE, SCALE, MODS, INST.POOL |
+| Grid — shared rows | MIXER, EFFECTS |
+| Reached from a row | FILE BROWSER, SETTINGS, SAMPLE EDITOR, MIDI |
+
+Five more surfaces are **overlays** rather than screens — they draw over whatever is up and do not
+change `currentScreen`: the THEME editor, the EQ editor, the qwerty keyboard, the FX helper and the
+confirm dialog.
 
 Screen geometry lives in **one table per screen** that the cursor walks and the module draws. Where
 rows are conditional (SETTINGS, PROJECT), a row's **number is its identity** — hidden rows are
@@ -501,7 +505,7 @@ in 17.0% by at most 16 LSB. Both are inaudible, and neither can be made to go aw
 `-ffast-math` in the DSP. So exact claims are made about the event stream and the engine calls a note
 produces, and audio is compared as a tolerance fingerprint.
 
-**Nothing above the engine touches a file directly.** `native/ui/filesystem.h` is a 20-method pure
+**Nothing above the engine touches a file directly.** `native/ui/filesystem.h` is a 23-method pure
 interface, string-typed; module logic never sees a file handle. That is what lets the file browser be
 driven against a temporary directory on a desktop.
 

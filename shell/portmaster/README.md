@@ -39,8 +39,8 @@ ports/pockettracker/data/
 ```
 
 The folders are created the first time you launch, so you can pull the card and drop files
-straight in. The layout matches the Android app's `Documents/PocketTracker/`, so a folder copied
-off a phone works as-is.
+straight in. The layout is the same one the Android app uses inside its home folder, so a folder
+copied off a phone works as-is.
 
 ## Requirements
 

@@ -36,7 +36,7 @@ questions a report otherwise needs a back-and-forth for.
 |---|---|
 | Device | e.g. Miyoo Flip, Samsung Galaxy S21 |
 | Android version | e.g. Android 13 |
-| PocketTracker version | e.g. 1.0.0 |
+| PocketTracker version | e.g. 0.9.4 — it is in the name of the file you downloaded |
 | Physical buttons? | Yes / No |
 
 ## Additional context
