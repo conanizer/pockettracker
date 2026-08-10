@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
     cfg.filesystem = &filesystem;
 
     if (storageMode == "saf") {
-        safFilesystem.install_open_hook();
+        safFilesystem.install_file_hooks();
         cfg.filesystem = &safFilesystem;
         // The COUNT, not a yes/no: an empty browser under a granted folder and an empty browser under
         // no folder at all are different failures, and this line is what tells them apart.

@@ -463,8 +463,8 @@ if(ANDROID)
     add_library(pockettracker-sdl SHARED
             "${PT_SHELL_DIR}/app.cpp"
             "${PT_SHELL_DIR}/android-main.cpp"
-            "${PT_SHELL_DIR}/saf-filesystem.cpp" # the SAF ui::FileSystem (SAF migration P3): six JNI
-                                                 # up-calls, and pt_fopen's resolver for pt:// paths
+            "${PT_SHELL_DIR}/saf-filesystem.cpp" # the SAF ui::FileSystem (SAF migration P3): ten JNI
+                                                 # up-calls, and byte_source.h's three hooks for pt:// paths
             "${PT_SHELL_DIR}/image.cpp"        # PNG decode (convergence D2): the one stb_image impl TU
             "${PT_SHELL_DIR}/assets.cpp"       # the asset seam (convergence D7): SDL_RWFromFile → APK assets
             "${PT_SHELL_DIR}/skin.cpp"         # the touch-skin textures (convergence D1)

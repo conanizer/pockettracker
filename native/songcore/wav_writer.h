@@ -29,7 +29,12 @@
 // that nothing can read back is not half a feature, it is a feature that silently loses data.
 //
 // Both writers write to "<path>.tmp" and rename on completion, so a failed or cancelled write never
-// leaves a half-written .wav behind (the same atomic pattern AndroidFileSystem uses).
+// leaves a half-written .wav behind (the same atomic pattern the UI's own filesystem uses).
+//
+// ⚠️ **That dance is three operations, not one, and all three go through `byte_source.h`.** The open
+// is `pt_fopen`, but the "drop the stale target" and "publish the temp" steps are `pt_remove` and
+// `pt_rename` — a `std::remove` here would be handed a string libc cannot see on a host whose
+// storage is URI-addressed, and the render would write its temp perfectly and then never appear.
 
 #include <cstdint>
 #include <cstdio>
@@ -37,7 +42,7 @@
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"   // pt_fopen — the one opener below the UI
+#include "../byte_source.h"   // pt_fopen / pt_remove / pt_rename — the one file seam below the UI
 
 namespace songcore {
 
@@ -125,13 +130,16 @@ class WavStreamWriter {
         const bool closed = (std::fclose(file_) == 0);
         file_ = nullptr;
         if (!closed) {
-            std::remove(tmpPath_.c_str());
+            pt_remove(tmpPath_.c_str());
             return false;
         }
 
-        std::remove(path_.c_str());   // rename() fails on an existing target on Windows
-        if (std::rename(tmpPath_.c_str(), path_.c_str()) != 0) {
-            std::remove(tmpPath_.c_str());
+        // ⚠️ The target goes FIRST, and it is not only Windows that needs it: `rename()` fails on an
+        // existing target there, and a SAF `renameDocument` onto a taken name DE-DUPLICATES rather
+        // than failing — which leaves the old render beside a `song (1).wav`.
+        pt_remove(path_.c_str());
+        if (pt_rename(tmpPath_.c_str(), path_.c_str()) != 0) {
+            pt_remove(tmpPath_.c_str());
             return false;
         }
         return true;
@@ -154,7 +162,7 @@ class WavStreamWriter {
             std::fclose(file_);
             file_ = nullptr;
         }
-        std::remove(tmpPath_.c_str());
+        pt_remove(tmpPath_.c_str());
     }
 
     // The standard 44-byte RIFF/fmt/data header — the same layout Kotlin's WavStreamWriter wrote.
@@ -232,12 +240,12 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
     const bool   flushed = (std::fclose(f) == 0);
     const bool   ok      = (written == bytes.size()) && flushed;
     if (!ok) {
-        std::remove(tmp.c_str());
+        pt_remove(tmp.c_str());
         return false;
     }
-    std::remove(path.c_str());   // rename() fails on an existing target on Windows
-    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
-        std::remove(tmp.c_str());
+    pt_remove(path.c_str());   // see WavStreamWriter::finish — the target must go before the rename
+    if (pt_rename(tmp.c_str(), path.c_str()) != 0) {
+        pt_remove(tmp.c_str());
         return false;
     }
     return true;

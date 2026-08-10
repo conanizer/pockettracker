@@ -63,15 +63,19 @@ class SafFileSystem : public pt::ui::FileSystem {
     explicit SafFileSystem(std::string private_root);
 
     /**
-     * Install this filesystem as `pt_fopen`'s resolver, so the thirteen direct opens below the UI can
-     * open a `pt://` string. Called once, by the shell, immediately after construction.
+     * Install this filesystem as `byte_source.h`'s resolver, so the direct file operations below the
+     * UI can act on a `pt://` string. Called once, by the shell, immediately after construction.
      *
-     * ⚠️ **The hook is a plain function pointer with no user-data argument** (`byte_source.h`), so the
-     * instance has to be reachable from a free function — hence the single-instance pointer this
+     * All three hooks go in together, which is `byte_source.h`'s rule and not a convenience: a
+     * render opens its temp through `pt_fopen` and then publishes it with `pt_remove`+`pt_rename`,
+     * so a host that installed only the opener would write every byte correctly and produce no file.
+     *
+     * ⚠️ **The hooks are plain function pointers with no user-data argument** (`byte_source.h`), so
+     * the instance has to be reachable from free functions — hence the single-instance pointer this
      * installs. One `SafFileSystem` per process is the only shape the app has ever needed; a second
-     * one would silently steal the hook, so constructing two is logged.
+     * one would silently steal the hooks, so constructing two is logged.
      */
-    void install_open_hook();
+    void install_file_hooks();
 
     /** True when at least one folder has been granted. False is the fresh-install state, not a fault. */
     bool has_grant();
@@ -127,6 +131,19 @@ class SafFileSystem : public pt::ui::FileSystem {
      * is the second thing §5a's composable paths bought, after the browser's "..".
      */
     int open_fd(const std::string& path, const char* mode);
+
+    /**
+     * `std::remove` and `std::rename` for a `pt://` path — 0 on success, the libc convention, because
+     * the call sites are the ones that used to call libc. Public because the hook trampolines do.
+     *
+     * ⚠️ **These are NOT `delete_path` and `rename_file`.** Those two implement the *interface*, whose
+     * rename takes a BASE name, sanitises it and re-attaches the source's extension — the browser's
+     * contract. A temp file being published is not a user typing a name: publishing `song.wav.tmp` as
+     * `song.wav` through that contract re-attaches `.tmp`, arrives back at the name it started from,
+     * and is then refused as a clobber. Same provider call underneath, different contract above.
+     */
+    int hook_remove(const std::string& path);
+    int hook_rename(const std::string& from, const std::string& to);
 
   private:
     struct Root {

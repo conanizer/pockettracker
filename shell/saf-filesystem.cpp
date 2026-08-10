@@ -99,11 +99,11 @@ std::string call_string(const char* name, const char* sig, const std::string& a,
 
 }  // namespace
 
-// ─── construction, and the hook ──────────────────────────────────────────────────────────────────
+// ─── construction, and the hooks ─────────────────────────────────────────────────────────────────
 
-// ⚠️ `PtOpenHook` is a bare function pointer with no user-data argument (byte_source.h), so the
-// instance has to be reachable from a free function. One per process is the only shape this app has
-// ever needed; a second construction is logged rather than left to steal the hook silently.
+// ⚠️ The hooks are bare function pointers with no user-data argument (byte_source.h), so the
+// instance has to be reachable from free functions. One per process is the only shape this app has
+// ever needed; a second construction is logged rather than left to steal the hooks silently.
 SafFileSystem* g_instance = nullptr;
 
 SafFileSystem::SafFileSystem(std::string private_root) : priv_(private_root, private_root) {}
@@ -113,15 +113,30 @@ extern "C" int saf_open_hook_trampoline(const char* path, const char* mode) {
     return g_instance->open_fd(path, mode);
 }
 
-void SafFileSystem::install_open_hook() {
+extern "C" int saf_remove_hook_trampoline(const char* path) {
+    if (!g_instance || !path) return -1;
+    return g_instance->hook_remove(path);
+}
+
+extern "C" int saf_rename_hook_trampoline(const char* from, const char* to) {
+    if (!g_instance || !from || !to) return -1;
+    return g_instance->hook_rename(from, to);
+}
+
+void SafFileSystem::install_file_hooks() {
     if (g_instance && g_instance != this) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                            "saf: a second SafFileSystem is taking the open hook - the first one's "
+                            "saf: a second SafFileSystem is taking the file hooks - the first one's "
                             "URIs will stop resolving");
     }
     g_instance = this;
-    pt_set_open_hook(&saf_open_hook_trampoline);
-    std::printf("saf:     pt_fopen hook installed\n");
+
+    PtFileHooks hooks;
+    hooks.open   = &saf_open_hook_trampoline;
+    hooks.remove = &saf_remove_hook_trampoline;
+    hooks.rename = &saf_rename_hook_trampoline;
+    pt_set_file_hooks(hooks);
+    std::printf("saf:     pt_fopen/pt_remove/pt_rename hooks installed\n");
 }
 
 // ─── roots ───────────────────────────────────────────────────────────────────────────────────────
@@ -480,10 +495,60 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
     }
 
     // See the header: the create is derivable because a `pt://` path is composable. `ensure_file` is
-    // find-or-create, and the "wt" below is what makes the found case an overwrite rather than a patch.
+    // find-or-create, and the "t" below is what makes the found case an overwrite rather than a patch.
     const std::string uri = write ? ensure_file(path) : resolve(path);
     if (uri.empty()) return -1;
-    return open_uri_fd(uri, write ? "wt" : "r");
+
+    // ⚠️ **"rwt", not "wt", and the extra "r" is load-bearing.** The only thing that opens a `pt://`
+    // path for writing is `WavStreamWriter`, which streams a render past the point of no return and
+    // then SEEKS BACK TO ZERO to patch the RIFF header with the length it turned out to be. "rwt" is
+    // the mode a backward seek over a provider descriptor was measured on; a write-only descriptor
+    // has never been asked to do it here. `write_bytes` does not come through this path — it opens
+    // "wt" for a single forward pass, which is all it needs.
+    return open_uri_fd(uri, write ? "rwt" : "r");
+}
+
+// ─── the remove and rename hooks ─────────────────────────────────────────────────────────────────
+
+int SafFileSystem::hook_remove(const std::string& path) {
+    if (!is_pt_path(path)) return -1;   // a plain path never reaches here — pt_remove took libc's branch
+    return delete_path(path) ? 0 : -1;
+}
+
+int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
+    // `pt_rename` refuses a mixed pair, so both ends are `pt://` by the time this is called.
+    if (!is_pt_path(from) || !is_pt_path(to)) return -1;
+
+    // A different parent is a MOVE, and `move_file` already knows how to ask the provider for one and
+    // how to fall back when it will not. Nothing below the UI renames across directories today — the
+    // two writers publish `<path>.tmp` onto `<path>` — so this arm is the general answer, not the
+    // exercised one.
+    if (parent_path(from) != parent_path(to)) return move_file(from, to) ? 0 : -1;
+
+    const std::string name = leaf_name(to);
+    if (name.empty()) return -1;
+
+    const std::string uri = resolve(from);
+    if (uri.empty()) return -1;
+
+    // ⚠️ The target must be gone, exactly as in `write_bytes`: `renameDocument` onto a taken name
+    // de-duplicates the way `createDocument` does. Both callers already `pt_remove` the target first,
+    // so this is the belt to that pair of braces — and it is cheap, because `resolve` on a name the
+    // caller just deleted answers out of a listing this class invalidated when it deleted it.
+    const std::string targetUri = resolve(to);
+    if (!targetUri.empty()) {
+        delete_uri(targetUri);
+        forget(to);
+    }
+
+    const std::string renamed = call_string("safRename",
+                                            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                                            uri, &name);
+    forget(from);
+    if (renamed.empty()) return -1;
+    uriCache_[to] = renamed;
+    invalidate(parent_path(to));
+    return 0;
 }
 
 // ─── writing ─────────────────────────────────────────────────────────────────────────────────────
