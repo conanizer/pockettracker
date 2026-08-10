@@ -46,7 +46,21 @@ android {
         externalNativeBuild {
             cmake {
                 // Use shared STL to match Oboe's requirements
-                arguments += listOf("-DANDROID_STL=c++_shared")
+                //
+                // ⚠️ A device with 16 KB memory pages (Android 15+) REFUSES TO LOAD a shared object
+                // whose LOAD segments are aligned to 4 KB, so without the second argument the app
+                // does not start there at all — and Android 16 already names the three offenders in
+                // a dialog on launch. It expands to `-Wl,-z,max-page-size=16384` (NDK r27's
+                // android-legacy.toolchain.cmake), and it is spelled as the NDK's own option rather
+                // than as raw linker flags so the NDK keeps owning what the value is.
+                //
+                // Only the libraries CMake builds here need it: `libc++_shared.so` and `liboboe.so`
+                // arrive prebuilt and already aligned. The APK's own 16 KB zip alignment is AGP's
+                // and needs nothing — `zipalign -c -P 16` is what says so.
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
+                )
             }
         }
     }
