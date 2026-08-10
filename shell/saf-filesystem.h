@@ -123,6 +123,17 @@ class SafFileSystem : public pt::ui::FileSystem {
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────
     bool read_file(const std::string& path, std::string& out) override;
     std::vector<pt::ui::FileInfo> list_files(const std::string& directory) override;
+
+    /**
+     * The one implementation that has something to forget — see `ui::FileSystem::forget_listing`.
+     *
+     * ⚠️ It is `forget`, not `invalidate`: a directory that may have changed from OUTSIDE this app
+     * may have had a child DELETED, and that child's URI stays in `uriCache_` under a name the fresh
+     * listing no longer mentions. A surviving child heals itself (the re-list overwrites its URI); a
+     * departed one does not, and resolves to a document the provider has already destroyed.
+     */
+    void forget_listing(const std::string& directory) override;
+
     bool file_exists(const std::string& path) override;
     bool is_directory(const std::string& path) override;
     std::string parent_path(const std::string& path) override;

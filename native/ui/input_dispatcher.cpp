@@ -2985,11 +2985,21 @@ void InputDispatcher::close_file_browser() {
 }
 
 void InputDispatcher::refresh_browser() {
+    FileBrowserState& b = s_.fileBrowser;
+
+    // ⚠️ **A RE-LIST IS NOT A RE-READ UNLESS THE FILESYSTEM IS TOLD TO FORGET.** `SafFileSystem`
+    // serves a cached listing and drops that cache only on this app's own writes, so without this
+    // line a refresh hands back exactly what is already on screen — and a file that arrived from a
+    // PC, a download or a file manager stays invisible until the next launch.
+    //
+    // Here rather than at the five call sites, so that adding a sixth cannot forget it. A no-op on
+    // every implementation that caches nothing, which is all of them but Android's.
+    fs_.forget_listing(b.currentDirectory);
+
     // Re-list in place and KEEP THE CURSOR where it was — a refresh is not a navigation. Deleting the
     // twentieth file in a folder should leave you on the twentieth row, not throw you back to the
     // first. It has to be CLAMPED, though: the list may have got shorter, and a cursor past the end of
-    // it is the "cursor vanishes" bug S2 found on the screen changes (nothing draws highlighted).
-    FileBrowserState& b = s_.fileBrowser;
+    // it draws nothing highlighted — the row the user was on simply vanishes.
     rebuild_items(b, fs_);
 
     const int last = static_cast<int>(b.items.size()) - 1;

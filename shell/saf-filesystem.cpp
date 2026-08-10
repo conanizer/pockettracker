@@ -279,8 +279,12 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
     // exactly that reason.** A grant can arrive while the app is running — that is what `ADD FOLDER…`
     // does — and a cached listing would show the user's new folder missing from the very screen they
     // granted it on. It costs one JNI call plus one per grant, on a screen reached by navigating
-    // rather than per frame. Every other directory is cached; those change only when this app changes
-    // them, and `forget`/`invalidate` are what say so.
+    // rather than per frame.
+    //
+    // Every other directory is cached, and `forget`/`invalidate` are what declare an entry stale.
+    // ⚠️ Not only this app's own writes: a file can arrive from a PC, a download or a file manager
+    // while the browser is on the directory, so `forget_listing` — the browser's refresh — is the
+    // other caller, and the reason the cache is not simply keyed on what we mutated.
     if (dirPath == kRootsPath) {
         for (const Root& r : roots(/*refresh=*/true)) {
             pt::ui::FileInfo fi;
@@ -457,6 +461,10 @@ std::vector<pt::ui::FileInfo> SafFileSystem::list_files(const std::string& direc
     if (!is_pt_path(directory)) return priv_.list_files(directory);
     const std::vector<pt::ui::FileInfo>* l = listing(directory);
     return l ? *l : std::vector<pt::ui::FileInfo>();
+}
+
+void SafFileSystem::forget_listing(const std::string& directory) {
+    if (is_pt_path(directory)) forget(directory);
 }
 
 bool SafFileSystem::file_exists(const std::string& path) {

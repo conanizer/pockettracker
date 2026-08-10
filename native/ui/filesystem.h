@@ -169,6 +169,23 @@ class FileSystem {
     /** Entries in `directory`, unsorted and unfiltered. Empty if it does not exist or cannot be read. */
     virtual std::vector<FileInfo> list_files(const std::string& directory) = 0;
 
+    /**
+     * Discard whatever is remembered about `directory`, so the next `list_files` asks the source of
+     * truth again. Cheap enough to call unconditionally; a directory that was never listed is fine.
+     *
+     * ⚠️ **The default is a no-op because most implementations remember nothing.** `StdFileSystem`
+     * walks the directory on every call and is therefore always current. Android's `SafFileSystem`
+     * caches, because a listing there is a content-provider query per entry — and a cache dropped
+     * only by this app's own writes cannot see a file that arrived from a file manager, a download
+     * or a PC. Those exist, so a listing needs a way to be declared stale by something other than a
+     * write.
+     *
+     * ⚠️ It is the BROWSER'S REFRESH that calls this, not navigation. Walking into a folder is
+     * allowed to be cheap; a refresh is the one gesture that means *the world may have moved
+     * underneath me*.
+     */
+    virtual void forget_listing(const std::string& directory) { (void)directory; }
+
     virtual bool file_exists(const std::string& path) = 0;
     virtual bool is_directory(const std::string& path) = 0;
 
