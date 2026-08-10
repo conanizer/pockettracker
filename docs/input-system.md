@@ -1,8 +1,8 @@
 # Input System
 
-PocketTracker uses a hybrid input system combining M8's editing precision with LGPT's dual-modifier approach. The generic input handler ensures consistent behavior across all screens.
-
-**Last Updated:** 2026-08-05
+PocketTracker uses a hybrid input system combining M8's editing precision with LGPT's dual-modifier
+approach. One generic input handler serves every screen, so the same kind of value behaves the same
+way wherever you meet it.
 
 ---
 
@@ -22,24 +22,31 @@ SELECT:   Left Shift
 START:    Spacebar
 ```
 
-### Physical Gamepad (Android Handhelds)
+### Physical Gamepad
 
 ```
 D-PAD:    Physical D-pad
 A/B:      A and B face buttons (X/Y also map to A/B)
-L/R:      L1/L2 shoulder buttons (both map to L)
-          R1/R2 shoulder buttons (both map to R)
-SELECT:   SELECT or MENU button
-START:    START button or BACK
+L/R:      L1 / R1 shoulder buttons
+SELECT:   SELECT (SDL's "back" button)
+START:    START
 ```
 
-Both keyboard and gamepad work simultaneously.
+**L2/R2 and the analog sticks are not mapped.** Everything the app does is reachable from the ten
+buttons above, and a trigger or a drifting stick therefore does nothing rather than something
+surprising.
+
+On Android the hardware **Back** key is always **B**, whatever else you rebind — B is the app's
+universal cancel, so Back closes the file browser, aborts the keyboard and leaves an editor.
+
+Keyboard and gamepad work simultaneously.
 
 ### Changing any of it — `config.json`
 
-Every binding above is a default, and all of them can be changed by hand in `config.json` in your
-PocketTracker folder. The app writes a starter copy on first launch and then never touches the file
-again, so what you edit stays edited. See **[Configuration file](#configuration-file)** below.
+Every binding above is a default. The face-button layout and all ten key bindings can be changed by
+hand in `config.json` in your PocketTracker folder; the app writes a starter copy on first launch and
+then never touches the file again. See **[the manual, section 25](manual-en.md#25-configuration-file-configjson)**
+for the schema, the key-name spellings and the 8BitDo/XInput case that makes A and B swap.
 
 ---
 
@@ -47,8 +54,10 @@ again, so what you edit stays edited. See **[Configuration file](#configuration-
 
 **Modifier roles:**
 - **A button** = "Edit this value" (hold for increment/decrement)
-- **L button** = "Edit context" (clipboard, selection, item navigation)
-- **R button** = "Navigate screens" (screen grid, clone, playback modes)
+- **B button** = "Which item am I looking at" (previous/next phrase, chain, instrument…)
+- **L button** = "Clipboard and selection"
+- **R button** = "Navigate screens"
+- **SELECT** = "Context action" — opens whatever the cursor is sitting on
 
 This creates a consistent, learnable pattern where:
 - You don't memorize different controls per screen
@@ -68,12 +77,16 @@ This creates a consistent, learnable pattern where:
 
 ### Basic Actions
 - **A button** - Insert value on empty cell
-- **B button** - Cancel / Back to previous screen
-- **SELECT** - Quick delete (screen-specific behavior)
+- **B button** - Cancel / back / copy a selection
+- **SELECT** - Context action: opens the sub-screen the cursor is on (SAMPLE EDITOR, EQ EDITOR, the
+  name keyboard), closes those overlays again, and toggles delay SYNC on the EFFECTS TIME row.
+  ⚠️ SELECT does **not** delete — clearing a value is always **A + B**.
 - **START** - Play/Stop sequencer
 
 ### Key Repeat
 - Hold D-PAD, A+DPAD, or B+DPAD for continuous input (400ms delay, 100ms interval)
+- The modifiers are re-read as the repeat fires, so pressing A while UP is already repeating turns a
+  cursor move into a value edit without letting go.
 
 ---
 
@@ -90,7 +103,13 @@ Hold A and press directions to edit values:
 - **A + LEFT** - Decrement by 16 (hex) or 12 semitones (notes)
 
 ### Delete
-- **A + B** - Delete/clear value at cursor
+- **A + B** - Delete the value at the cursor, or reset it to its default where the cell cannot be
+  empty (PAN, DRIVE, the sends…)
+
+### Insert
+- **A** on an empty cell inserts the **last-edited** chain/phrase.
+- **A, A** (a double-tap inside 300 ms) inserts the next **unused** one instead — the fast way to
+  start a fresh phrase.
 
 ---
 
@@ -98,33 +117,50 @@ Hold A and press directions to edit values:
 
 The tracker automatically adjusts behavior based on what you're editing:
 
-| Type | Range | Small Step | Large Step | Wrapping |
+| Type | Range | Small Step | Large Step | Past the end |
 |------|-------|-----------|-----------|----------|
-| HEX_BYTE | 00-FF | 1 | 16 | Yes (FF+1=00) |
-| PHRASE_REF | 00-FF | 1 | 16 | Yes |
-| CHAIN_REF | 00-FF | 1 | 16 | Yes |
-| VOLUME | 00-FF | 1 | 16 | Yes |
-| SEMITONE_OFFSET | 00-FF | 1 semitone | 12 semitones | Yes |
-| NOTE | C-0 to G-9 | 1 semitone | 12 semitones | No (clamps) |
-| HEX_NIBBLE | 0-F | 1 | - | Yes |
+| HEX_BYTE | 00-FF | 1 | 16 | Wraps (FF+1=00) |
+| PHRASE_REF | 00-FF | 1 | 16 | Wraps |
+| CHAIN_REF | 00-FF | 1 | 16 | Wraps |
+| INSTRUMENT_REF | 00-7F | 1 | 16 | Wraps |
+| VOLUME | 00-7F | 1 | 16 | Wraps |
+| SEMITONE_OFFSET | 00-FF | 1 semitone | 12 semitones | Wraps |
+| NOTE | C-0 to G-9 | 1 semitone | 12 semitones | Clamps |
+| HEX_NIBBLE | 0-F | 1 | 4 | Clamps |
+| EFFECT_TYPE | the effect list | 1 | 1 | Wraps |
+| EFFECT_VALUE | 00-FF (per effect) | 1 | 16 | Wraps |
+| GAIN (EQ, dB) | −12.0 … +12.0 | 0.1 dB | 1.0 dB | Clamps |
+| FREQ (EQ, Hz) | 20 Hz … 20 kHz | 1 | 16 | Clamps |
+| CHARACTER | A-Z 0-9 _ - space | 1 | 1 | Wraps |
+| TOGGLE | the option list | 1 | 1 | Wraps |
+
+The split is deliberate: discrete values **wrap**, so a four-button device can dial one in by holding
+a direction. Continuous physical units — EQ gain in dB, EQ frequency in Hz — **clamp**, because
+wrapping +12 dB round to −12 dB would be a trap rather than a convenience. HEX_NIBBLE clamps for the
+same reason: holding A+UP on CRUSH stops at F instead of quietly undoing what you were dialling in.
 
 ---
 
 ## R + Direction (Screen Navigation)
 
-Hold R and press directions to navigate the 5x5 screen grid:
+Hold R and press directions to navigate the 5×5 screen grid:
 
-```
-Row 0:         -      SCALE   INST_POOL  (INST)*
-Row 1:     PROJECT   GROOVE     MODS     PROJECT
-Row 2:      SONG     CHAIN    PHRASE   INSTRUMENT  TABLE
-Row 3:     MIXER     MIXER    MIXER      MIXER     MIXER
-Row 4:    EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
-```
+|  | col 0 | col 1 | col 2 | col 3 | col 4 |
+|---|---|---|---|---|---|
+| **row 0** | | | SCALE | INST.POOL | |
+| **row 1** | PROJECT | PROJECT | GROOVE | MODS | PROJECT |
+| **row 2** | SONG | CHAIN | PHRASE | INSTRUMENT | TABLE |
+| **row 3** | MIXER | MIXER | MIXER | MIXER | MIXER |
+| **row 4** | EFFECTS | EFFECTS | EFFECTS | EFFECTS | EFFECTS |
 
-- Main screens (SONG/CHAIN/PHRASE/INSTRUMENT/TABLE) are on Row 2
-- PROJECT, MIXER, EFFECTS span multiple columns
-- `(INST)*` is a contextual fast-jump cell shown only while on INST_POOL (see below)
+- The main screens (SONG/CHAIN/PHRASE/INSTRUMENT/TABLE) are row 2, and R+LEFT/RIGHT walks along it.
+- PROJECT, MIXER and EFFECTS are shared: they sit in every column and have none of their own, so
+  R+UP out of MIXER returns you to the main-row screen you entered from.
+- Row 0 and row 1 are column-specific — R+UP from PHRASE reaches GROOVE and then SCALE, R+UP from
+  INSTRUMENT reaches MODS and then INST.POOL.
+
+**R elsewhere:** in the file browser **R+LEFT** goes up one directory level. In the QWERTY overlay
+**R+LEFT/RIGHT** scrolls the text cursor, accelerating from 1 to 4 characters per repeat.
 
 ### Instrument Pool fast-jump (INST_POOL ↔ INSTRUMENT)
 
@@ -152,10 +188,16 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 
 ---
 
-## L + Direction (Context Navigation)
+## B + Direction (Item Navigation)
 
-- **L + LEFT** - Previous chain/phrase/instrument (depending on screen)
-- **L + RIGHT** - Next chain/phrase/instrument
+Hold B and press directions to change *which* item the screen is showing, without leaving it:
+
+| Control | Action |
+|---------|--------|
+| **B + LEFT / RIGHT** | Previous / next phrase, chain, instrument, table or groove — whichever the screen edits |
+| **B + LEFT / RIGHT** (EQ EDITOR) | Previous / next EQ preset slot |
+| **B + UP / DOWN** (SONG) | Page up / down 16 rows |
+| **B + UP / DOWN** (INST.POOL) | Jump ±16 slots |
 
 ---
 
@@ -163,17 +205,51 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 
 | Control | Action |
 |---------|--------|
-| **L+B** | Enter/cycle selection mode (CELL -> ROW -> SCREEN) |
+| **L+B** | Enter selection mode; tap again inside 500 ms to widen it (CELL -> ROW -> SCREEN) |
 | **D-PAD (in selection)** | Expand/contract selection |
 | **B (in selection)** | Copy + exit |
 | **L+A (in selection)** | Cut (copy + delete) + exit |
 | **L+A (outside selection)** | Paste at cursor |
 | **A+B (in selection)** | Delete (no clipboard) + exit |
-| **L alone** | Cancel selection (no copy) |
+| **L+B+A** | Deep-clone the chain/phrase under the cursor into free slots |
+| **L+R** | Leave selection mode — the copy buffer survives. Pressed *outside* a selection it clears the buffer instead, which is how you dismiss the clipboard readout in the top strip. |
 
 **Screens supported:** PHRASE, CHAIN, SONG, TABLE
 
 **Selection increment:** A+DPAD applies to all selected rows in active column.
+
+---
+
+## File Browser
+
+| Control | Action |
+|---------|--------|
+| **D-PAD UP/DOWN** | Move through files and folders |
+| **A** | Load the file / enter the folder |
+| **A** on `..` | Up one directory level |
+| **R+LEFT** | Up one directory level |
+| **B** | Close the browser |
+| **START** | Preview the highlighted audio file |
+| **SELECT+A** | Rename the file or folder under the cursor (opens the keyboard) |
+| **SELECT+B** | Delete it — arms an `A=YES B=NO` confirm; nothing is deleted on the press itself |
+| **SELECT+R** | Create a folder here (opens the keyboard) |
+| **L+B** | Start a file selection; tap again inside 500 ms to select all |
+| **B (in selection)** | Copy the selected files |
+| **L+A (in selection)** | Cut the selected files |
+| **L+A (outside selection)** | Paste them here |
+| **L+R** | Cancel the file selection |
+
+**On Android's granted-folders list** (the top of the browser, `pt://roots`), the three SELECT chords
+mean something else, because a granted folder is a *permission* rather than a file: rename, delete and
+create-here are all refused there, and the top bar says so.
+
+| | |
+|---|---|
+| **SELECT+A** | Make the folder under the cursor the home folder — where the app keeps `Projects/`, `Samples/` and the rest. Arms an `A=YES B=NO` confirm. Nothing on disk moves. |
+| **SELECT+B** | Forget it: hand the access back to Android and drop the row. Arms the same confirm. ⚠️ Not a delete — no file is touched, and re-granting the folder restores it. |
+
+The folder in use is drawn `(HOME)`; one whose directory no longer exists is drawn `(MISSING)` and is
+never chosen as the home.
 
 ---
 
@@ -183,146 +259,59 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 
 ```
 A                       Insert value on empty / Enter edit mode
+A, A                    Insert the next UNUSED chain/phrase (double-tap, 300 ms)
 A + UP                  Increment by small step (+1)
 A + DOWN                Decrement by small step (-1)
 A + RIGHT               Increment by large step (+16 or +12)
 A + LEFT                Decrement by large step (-16 or -12)
-A + B                   Delete / Clear value
-B                       Cancel / Exit / Back
-SELECT                  Quick delete (context-aware)
+A + B                   Delete value / reset it to its default
+B                       Cancel / Exit / Back / Copy a selection
+SELECT                  Context action (open or close what the cursor is on)
 START                   Play / Stop
 ```
 
-### Tier 2: L Modifier (Edit & Clipboard)
+### Tier 2: B Modifier (Item Navigation)
+
+```
+B + LEFT/RIGHT          Previous / next phrase, chain, instrument, table, groove
+B + UP/DOWN             Page the SONG screen / jump 16 instrument slots
+```
+
+### Tier 3: L Modifier (Selection & Clipboard)
 
 ```
 L + A                   Paste (outside selection) / Cut (in selection)
-L + B                   Enter selection mode / Cycle mode
+L + B                   Enter selection mode / widen it
 L + B + A               Clone current item (deep clone)
-L + LEFT/RIGHT          Navigate to prev/next chain or phrase
-L + UP/DOWN             Jump to next/prev populated row
+L + R                   Leave selection mode / clear the copy buffer
 ```
 
-### Tier 3: R Modifier (Navigation)
+### Tier 4: R Modifier (Navigation)
 
 ```
 R + UP/DOWN/LEFT/RIGHT  Navigate between screens
+R + LEFT                Up one directory (file browser)
+R + LEFT/RIGHT          Scroll the text cursor (QWERTY overlay)
 ```
 
-### Planned (placeholders in code, not yet wired)
-
-These combinations exist as TODO stubs in `ButtonHandlers.kt` but are currently no-ops. They're listed
-here so they aren't mistaken for working controls:
+### Tier 5: SELECT Modifier (File management)
 
 ```
-L + START               Play all tracks from beginning      (planned)
-R + START               Play from current cursor position   (planned)
-R + B                   Reset value to default              (planned)
-L + R + SELECT          Return to project/file screen       (planned)
-L + R + A               Create snapshot                     (planned)
-L + R + B               Recall snapshot                     (planned)
+SELECT + A              Rename                  (file browser)
+SELECT + B              Delete, with a confirm  (file browser)
+SELECT + R              New folder              (file browser)
 ```
 
----
+### Reserved chords
 
-## Configuration file
+These are deliberately **consumed and do nothing**, so that holding a modifier cannot fire an edit
+underneath it. They are listed so they aren't mistaken for broken controls:
 
-`config.json` sits in your PocketTracker folder, beside the `Projects` and `Samples` directories. It is
-the opposite of `settings.json`: that one is written by the app from the SETTINGS screen, while
-**`config.json` is yours** — the app reads it at startup and never rewrites it.
-
-The app writes a starter copy listing every option at its current value — on first launch, or on
-Android on the first launch after you grant it a folder — so the file is a working example rather
-than something you have to compose from scratch. Editing it takes effect
-on the next launch. Every key is optional; delete a line to go back to the built-in default. A file
-that is missing, empty or invalid costs you nothing — the defaults simply stand.
-
-### `controller` — face-button layout
-
-```json
-"controller": { "abxy": "auto" }
 ```
-
-| Value | Meaning |
-|---|---|
-| `auto` | **Default.** Trust the controller's own report. |
-| `nintendo` | The button printed **A** is the **right** one in the ABXY cluster. |
-| `xbox` | The button printed **A** is the **bottom** one. |
-
-**When you need this.** SDL normally reports face buttons *by label*, so a built-in handheld pad or a
-real Switch Pro controller is already correct on `auto` — there is nothing to configure and never was.
-
-The exception is a pad that misreports what it is. Many third-party controllers — **8BitDo pads in
-XInput mode are the common case** — enumerate as an Xbox 360 controller, so the labels the app is told
-about are Xbox's positional ones while the plastic under your thumb says something else. The symptom
-is unmistakable: **A and B are swapped**, and so are X and Y. Set `"abxy": "nintendo"` and both pairs
-move together.
-
-No amount of probing can detect this, because the pad is answering the question wrongly — that is why
-it is a setting and not automatic.
-
-> **On a handheld:** PortMaster has its own x360/nintendo option that does the same job one layer
-> lower. Use one or the other. Setting **both** applies the swap twice and puts you back where you
-> started.
-
-### `keyboard` — key bindings
-
-```json
-"keyboard": {
-  "A":     ["K", "Return"],
-  "B":     ["J", "Escape"],
-  "DPAD_UP":    ["W", "Up"],
-  "DPAD_DOWN":  ["S", "Down"],
-  "DPAD_LEFT":  ["A", "Left"],
-  "DPAD_RIGHT": ["D", "Right"],
-  "L":      ["U"],
-  "R":      ["I"],
-  "SELECT": ["Left Shift"],
-  "START":  ["Space"]
-}
+R + A, R + B, R + START           R is held to change screens
+L + START                         START must not toggle playback mid-chord
+L + R + A, L + R + B, L + R + SELECT
 ```
-
-Button names are exactly the ten above. Each maps to a list of keys, and a key list can be any length.
-
-**A button listed here replaces its defaults; a button left out keeps them.** That matters when you
-want a key that is already taken: binding `K` to something else only works if you also rebind `A`,
-because otherwise `K` is still nailed to it. Listing a button as `[]` unbinds it entirely.
-
-Key names are SDL's, and the spelling is not guessable — `"Left Shift"` is spaced but `"PageUp"` is
-not. Letters and digits are capitalised (`"K"`, `"Z"`, `"1"`); then `"Left Shift"`, `"Right Ctrl"`,
-`"Left Alt"`, `"Return"`, `"Escape"`, `"Space"`, `"Tab"`, `"Backspace"`, `"Insert"`, `"Delete"`, the
-arrows `"Up"` / `"Down"` / `"Left"` / `"Right"`, `"Home"` / `"End"` / `"PageUp"` / `"PageDown"`,
-`"CapsLock"`, `"F1"`–`"F12"`, and `"Keypad 0"`–`"Keypad 9"` / `"Keypad Enter"`. The full table is in
-the manual (§25); the starter file the app writes is the reliable reference.
-
-**A name the app does not recognise is reported in its log and skipped** — that one binding is lost,
-nothing else is. If a rebind seems not to have happened, the log says why. (`"Ctrl"` is a common
-miss; it is `"Left Ctrl"` or `"Right Ctrl"`.)
-
-Binding one key to two different buttons is not rejected, but only one of them will fire. Don't.
-
-**Scope:** the keyboard section is read on every desktop and handheld build. It is naturally inert on
-a device with no keyboard. On Android the hardware **Back** key stays wired to **B** regardless of
-what this section says, so a config file edited on a desktop cannot strand you on a phone.
-
-### `folders` — where a load browse starts
-
-```json
-"folders": {
-  "samples":     "/path/to/your/samples",
-  "soundfonts":  "...",
-  "instruments": "...",
-  "projects":    "...",
-  "themes":      "..."
-}
-```
-
-Sets the folder each **load** browse opens at, so samples kept outside the PocketTracker folder don't
-mean climbing out of it every time. A path that doesn't exist is ignored and that category falls back
-to its default — a typo costs you one convenience, never a broken browser.
-
-This does **not** change where anything is saved. Renders, exports and sample-editor saves keep their
-own folders.
 
 ---
 
@@ -332,19 +321,22 @@ own folders.
 
 Instead of checking which screen we're on, the system checks **what type of data the cursor is on**.
 
-**Key files:**
-- `CursorContext.kt` - Data structures for cursor context (value type, capabilities, bounds)
-- `InputHandler.kt` - Generic input handling logic
-- `ButtonHandlers.kt` - Input mapping and combination detection
+Each screen module implements `cursor_context(state)`, which answers "the cursor is on a NOTE, it is
+empty, it can be inserted, its range is 12..127, a small step is 1 and a large step is 12". One
+generic handler turns button presses into actions from that answer alone, so every screen gets
+increment / decrement / fast-step / delete / insert for free.
 
-Each screen module implements `getCursorContext(state)` which returns the appropriate context for the current cursor position. The generic input handler then uses that context to determine behavior.
+**Key files:**
+- `native/ui/cursor.h` — the value types, capabilities, stepping rules and the five button→action functions
+- `native/ui/button_mapper.h` — the combo matrix: which of the ~30 named handlers a press means
+- `native/ui/input_dispatcher.{h,cpp}` — what each handler does
+- `shell/sdl-input.cpp` — the only platform-specific part: SDL keys and pad buttons → the ten buttons
 
 ### Adding Input to a New Screen
 
-1. Create `getCursorContext(state)` method in your module
-2. Return appropriate `CursorContextFactory` for each cursor position
-3. Wire up handlers via `handleInput()`
-4. All A+direction and A+B combos work automatically
+1. Return a `CursorContext` from your module's `cursor_context(state)` for each cursor position
+2. Use the `cc::` factories (`hex_byte`, `note`, `toggle_ternary`, …) rather than filling the struct
+3. All A+direction and A+B combos then work automatically
 
 ---
 
@@ -360,7 +352,6 @@ PocketTracker takes the best of both systems:
 | Selection mode cycling | M8 | More flexible |
 | L + A for paste | LGPT | Simpler than SHIFT+EDIT |
 | R + directions for screen nav | LGPT | Logical separation |
-| Jump to populated | LGPT | Great for sparse patterns |
 
 ### Sources
 - [M8 Tracker Shortcuts](https://gist.github.com/devin-dominguez/587720c9ab71b2d9f3c4bd48d9c812ca)

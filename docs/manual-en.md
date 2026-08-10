@@ -81,9 +81,23 @@ Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/
 Anything already in the folder is left exactly as it is — so if you have used PocketTracker before, pick your existing `Documents/PocketTracker` and every project, sample and theme is where it was.
 
 > [!TIP]
-> You can add more folders at any time. Press **B** in the browser until you reach the top and you will see every folder you have granted, with `ADD FOLDER...` at the end — that is how you reach a sample library, an SD card or a video in DCIM that lives outside your home folder. The **first** folder you choose stays the home one; adding others never moves your projects.
+> You can add more folders at any time. Climb to the top of the browser — **R+LEFT**, or **A** on the `..` row, repeated until it stops — and you will see every folder you have granted, with `ADD FOLDER...` at the end — that is how you reach a sample library, an SD card or a video in DCIM that lives outside your home folder. Adding a folder never moves your projects: the home folder only changes when you change it yourself.
 
 Android will not let any app be granted a whole volume (`Internal storage`) or the `Download` folder itself. Pick a real folder — `Documents/PocketTracker` is a tidy choice.
+
+### Changing your home folder, and dropping one
+
+That top-level list of granted folders is a screen with two gestures of its own, shown on its top bar whenever the cursor is on a folder:
+
+| | |
+|---|---|
+| **SELECT + A** | **Make this the home folder.** The app's six sub-folders move to it — meaning it starts *looking* in the new place; nothing on disk is moved or copied. Confirm with **A**. |
+| **SELECT + B** | **Forget this folder.** Hands the access back to Android and removes the row. Confirm with **A**. |
+
+The folder currently in use is marked `(HOME)`. One whose directory has been deleted or unplugged since you granted it is marked `(MISSING)` — the app will not use a missing folder as its home, and `SELECT + B` is how you clear the row.
+
+> [!IMPORTANT]
+> **FORGET is not DELETE.** It gives up a permission; every file in the folder stays exactly where it is, and you can grant the same folder again at any time. Nothing in this list can delete your files — `SELECT + B` means DELETE on ordinary files and folders, but on a granted folder it can only ever mean forget.
 
 ### Sample files
 
@@ -296,9 +310,14 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 | L + A (in selection) | Cut (copy + clear), exit selection mode |
 | L + A (outside selection) | Paste clipboard at cursor |
 | A + B (in selection) | Delete selection (no clipboard), exit selection mode |
-| L alone | Cancel selection (nothing copied) |
+| L + B + A | Deep-clone the chain or phrase under the cursor into the next free slot |
+| L + R | Leave selection mode (nothing copied) |
 
 **Selection increment:** In selection mode, **A + UP/DOWN** increments or decrements all selected values simultaneously.
+
+**Clearing the clipboard:** the copy buffer deliberately survives leaving a selection — you can select
+again by accident without losing what you copied. Press **L + R** when you are *not* selecting to clear
+it, which is also how you dismiss the clipboard readout in the top strip.
 
 **Selection modes:**
 - **CELL** — single cell under cursor
@@ -571,8 +590,12 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 |---|---|
 | D-pad UP/DOWN | Move through files / folders |
 | A | Load file or enter folder |
-| B | Go up one directory level |
+| A on `..` | Go up one directory level |
+| R + LEFT | Go up one directory level |
+| B | Close the browser |
 | START | Preview highlighted audio (WAV / MP3 / FLAC / OGG / OPUS / M4A) or video file |
+
+The browser can also manage files — see [section 23](#23-file-management).
 
 Compressed audio (MP3 / FLAC / OGG / Opus / M4A) loads as a sample too — it decodes in place, with no
 WAV written. Video files are instead **converted** to a WAV in the Samples folder. See §23 →
@@ -951,7 +974,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). See [Appendix E](#appendix-e-parameter-reference--units--ranges). |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **SELECT** on this row to switch between the two. See [Appendix E](#appendix-e-parameter-reference--units--ranges). |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
 | EQ | Press A (or SELECT) to open the EQ EDITOR for the delay return. |
@@ -1059,7 +1082,7 @@ WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's ho
 > **CLEAN SEQ** and **CLEAN INST** are **permanent** — there is no undo. Save your project before running them, in case you remove something you still needed.
 
 > [!TIP]
-> **WAV MIX** renders faster than real-time. A 3-minute song typically exports in a few seconds. The status line shows the output filename when done.
+> **EXPORT → MIX** renders faster than real-time. A 3-minute song typically exports in a few seconds. The status line shows the output filename when done.
 
 ---
 
@@ -1073,11 +1096,11 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 |---|---|---|
 | LAYOUT | FULLSCREEN / T.LAND / AMIGA PORT | UI layout mode. FULLSCREEN = no virtual controls (physical buttons only). T.LAND adds on-screen buttons in landscape; AMIGA PORT is a themed retro portrait skin for 20:9 phones. |
 | SCALING | INT / BILINEAR | Screen scaling algorithm. INT = crisp pixel-perfect integer scaling. BILINEAR = smooth subpixel scaling. |
-| OVERLAY | file name / OFF (+ STR) | Screen-overlay PNG drawn over the tracker (e.g. CRT scanlines), cycled from `assets/overlays/`. The **STR** sub-column to its right sets opacity (`00`–`FF`). |
 | BTN SOUND | ON / OFF (+ VOL) | Play a click sound on button press. The **VOL** sub-column to its right sets click volume (`00`–`FF`). |
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
+| FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 25). |
 | NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
@@ -1085,6 +1108,11 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | RESUME | ASK / AUTO | What happens to unsaved work after the app is killed in the background. **ASK** shows a "RECOVER WORK?" prompt on the next launch; **AUTO** silently restores the autosave (use on ROMs that kill the app when backgrounded, e.g. Miyoo Flip / Ayaneo). |
 
 Layout and scaling mode are persisted across app restarts. The auto-detected layout on startup depends on whether physical gamepad buttons are detected.
+
+**Not every row is on every device.** LAYOUT, BTN SOUND and BTN VIBRO configure a touchscreen and its
+virtual buttons, so they appear on Android and not on the Windows, Linux or handheld builds — where
+there are no on-screen buttons to sound, shake or lay out. The rest are the same everywhere. A row
+that would configure nothing is not shown rather than shown and inert.
 
 > [!TIP]
 > **NOTE PREV** is especially useful when building melodies — you can hear each note as you place it without needing to start playback.
@@ -1502,6 +1530,18 @@ One ramp runs at a time on a track, so to fade two parameters at once, write the
 
 ---
 
+### The six MIDI effects — not available in this release
+
+> ⚠️ **MPG, MPB and CCA–CCD cannot be entered in this version, and neither can the EXTERNAL
+> instrument type they belong to.** They are absent from the effect picker and from the FX column's
+> range, and TYPE on the INSTRUMENT screen cycles between SAMPLER and SOUNDFONT only.
+>
+> They are documented here because a project file can still *contain* them — one written by a future
+> version, or by a build with MIDI turned on — and PocketTracker displays such a step as what it is
+> rather than disguising it. A song that uses them will show them and will not send them.
+>
+> The six are described below so that a step you did not write is explicable.
+
 ### MPG `XX` — MIDI Program Change
 
 Sends a MIDI **program change** to `XX` (`00`–`7F`) on the channel of the instrument playing this track.
@@ -1596,6 +1636,41 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 Throughout this section `<home>` is PocketTracker's home folder: on Android the folder you granted it
 (section 2), and elsewhere the `PocketTracker` folder the app keeps beside itself.
 
+### Managing files in the browser
+
+You do not need a separate file manager. Any file browser — the one PROJECT → LOAD opens, or the one
+the INSTRUMENT SAMPLE field opens — can rename, delete, move and copy, using **SELECT** and **L** as
+modifiers.
+
+| Input | Action |
+|---|---|
+| SELECT + A | Rename the file or folder under the cursor. A keyboard opens with the current name. |
+| SELECT + B | Delete it. An `A=YES  B=NO` confirm appears first — nothing is deleted on the press itself. |
+| SELECT + R | Create a folder here. A keyboard opens for the name. |
+
+**Moving and copying several files** works like the tracker's own copy/paste:
+
+1. **L + B** starts a selection at the cursor. Tap **L + B** again inside half a second to select
+   everything in the folder.
+2. **D-pad UP/DOWN** stretches the selection.
+3. **B** copies the selected files, or **L + A** cuts them. Either way the selection ends and the
+   status line reports how many files are on the clipboard.
+4. Navigate to the destination folder and press **L + A** to paste. A cut **moves** the files; a copy
+   **duplicates** them.
+
+**L + R** cancels a selection without copying anything.
+
+Two details worth knowing:
+
+- **A paste never overwrites.** If the destination already holds a file of that name, the new one
+  arrives as `kick_2.wav`, `kick_3.wav`, and so on.
+- **A cut clipboard is spent once pasted** — the originals have moved. A copied one survives, so you
+  can paste the same files into several folders in a row.
+
+> [!TIP]
+> On Android the destination can be any folder you have granted, including one on an SD card — so
+> this is also how you move a project or a sample between two granted folders.
+
 ### Project files
 
 - Format: `.ptp` (JSON with version field; old projects are migrated automatically on load)
@@ -1640,7 +1715,7 @@ sample — handy for grabbing a sound straight from a clip without a separate co
 - Format: 16-bit stereo WAV, 44100 Hz
 - Location: `<home>/Renders/`
 - Filenames: `ProjectName_0001.wav`, `_0002.wav`, … (auto-incremented)
-- Triggered from: PROJECT screen → WAV MIX
+- Triggered from: PROJECT screen → EXPORT → MIX
 
 ### Theme files
 
@@ -1738,7 +1813,7 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 1. Build your complete song.
 2. Navigate to PROJECT screen.
-3. Move cursor to WAV MIX and press **A**. The song renders offline — a status message shows the output filename when done.
+3. Move cursor to EXPORT, select MIX and press **A**. The song renders offline — a status message shows the output filename when done.
 
 ### Customizing your theme
 
@@ -1870,12 +1945,21 @@ means the same thing.
 **A path beginning with `/` (or a Windows drive, `C:\Music`) is used exactly as written**, so a
 sample library that lives nowhere near PocketTracker is still one line away.
 
-A folder that doesn't exist is ignored, and that category quietly falls back to its default — a typo or
-a folder you've since moved costs one convenience, never a broken file browser.
+A folder that doesn't exist — or that this device cannot read — is ignored, and that category quietly
+falls back to its default. A typo, a folder you've since moved, or a config file carried over from
+another machine costs one convenience, never a broken file browser.
+
+**A path written under someone else's PocketTracker folder still works.** If the file came off another
+device, or was written before this one moved its home folder, a value like
+`/storage/emulated/0/Documents/PocketTracker/Samples` is matched up to its `PocketTracker/` part and
+re-read against *your* home folder — the same thing that happens to the sample paths inside a project
+you copy between devices. Only the part below `PocketTracker/` is kept, so a folder that was never
+inside one falls back to the default instead of being guessed at.
 
 > **On Android**, a folder outside your home folder has to be granted before the app can see it —
 > `ADD FOLDER...` at the top of the browser (section 2). Reaching one that way is easier than naming
-> it here, because the granted path is not something you can type.
+> it here: the granted path is not something you can type, and a plain `/storage/emulated/0/...` path
+> is not readable at all unless it is inside the folder you granted.
 
 This changes only where browsing **starts**. It does not move where anything is **saved** — renders,
 exports and sample-editor saves keep their own folders.
@@ -1990,7 +2074,9 @@ All 128 slots (00–7F) start empty in a new project. There are no bundled defau
 | L + A *(outside selection)* | Paste at cursor |
 | A + B *(in selection)* | Delete selection (no clipboard), exit |
 | A + UP / DOWN *(in selection)* | Increment / decrement all selected values |
-| L | Cancel selection |
+| L + B + A | Deep-clone the chain / phrase under the cursor |
+| L + R *(in selection)* | Leave selection mode; the copy buffer survives |
+| L + R *(outside selection)* | Clear the copy buffer |
 
 ---
 
@@ -2014,8 +2100,17 @@ All 128 slots (00–7F) start empty in a new project. There are no bundled defau
 |---|---|
 | D-pad UP / DOWN | Move through files / folders |
 | A | Load file / enter folder |
-| B | Go up one directory level |
+| A on `..`, or R + LEFT | Go up one directory level |
+| B | Close the browser |
 | START | Preview highlighted WAV |
+| SELECT + A | Rename |
+| SELECT + B | Delete (asks first) |
+| SELECT + R | New folder |
+| L + B | Start a file selection (tap again: select all) |
+| B *(in selection)* | Copy the selected files |
+| L + A *(in selection)* | Cut them |
+| L + A *(outside selection)* | Paste them here |
+| L + R | Cancel the file selection |
 
 ---
 
@@ -2192,6 +2287,12 @@ Open with **A** (or SELECT) on an EQ cell.
 | VMV | Master Fader | `XX` | The master fader, from any track; replaces it, **persists**, restored on stop |
 | AUS | Automation Start | `XX` = curve | Fades the automatable effect to its LEFT (00=ease-in 80=linear FF=ease-out) |
 | AUF | Automation Finish | `XX` | Destination value; a later step, may be a later phrase of the same chain |
+
+The six below **cannot be entered in this release** — they are shown only when a project file already
+contains them:
+
+| FX | Name | Value | Effect |
+|---|---|---|---|
 | MPG | MIDI Program | `XX` | Program change (00–7F) on the instrument's MIDI channel |
 | MPB | MIDI Bend | `XX` | Absolute pitch bend (00=down 80=centre FF=up); external only |
 | CCA | MIDI CC A | `XX` | Value for the controller in the instrument's CC A row |
