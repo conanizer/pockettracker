@@ -124,6 +124,7 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
         it.sortName     = to_lower(e.name);
         it.size         = e.size;
         it.lastModified = e.lastModified;
+        it.isRoot       = e.isRoot;   // a granted tree: walk in, but no file operation may touch it
 
         if (e.isDirectory) {
             it.kind        = BrowserItem::Kind::FOLDER;
@@ -274,12 +275,32 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         const BrowserItem* item = s.current();
         hint = "DELETE " + clip_name(item ? item->displayName : "", 16) + "? A=YES B=NO";
         hintColor = 0xFFFF0000;
+    } else if (s.mode == BrowserMode::SET_HOME) {
+        const BrowserItem* item = s.current();
+        // Not red: it destroys nothing and is undone by choosing another tree. It IS a confirm, though
+        // — it moves where every one of the app's folders is looked for.
+        hint = "HOME FOLDER? " + clip_name(item ? item->displayName : "", 14) + " A=YES B=NO";
+        hintColor = t.textTitle;
+    } else if (s.mode == BrowserMode::FORGET_ROOT) {
+        const BrowserItem* item = s.current();
+        // ⚠️ **The word is FORGET and it must never read as DELETE** — this hands back a permission and
+        // removes a row; every file in the folder stays. Not red for exactly that reason: the red bar
+        // in this app means "something is about to be destroyed".
+        hint = "FORGET " + clip_name(item ? item->displayName : "", 15) + "? A=YES B=NO";
+        hintColor = t.textTitle;
     } else if (s.selectionMode) {
         hint      = "B=COPY L+A=CUT L+B=ALL L+R=CANCEL";
         hintColor = t.rowSelection;
     } else if (!s.fileClipboard.empty()) {
         hint      = "L+A=PASTE  " + s.clipboard_info();
         hintColor = t.textTitle;
+    } else if (const BrowserItem* item = s.current(); item && item->isRoot) {
+        // ⭐ **On a granted tree all three of those chords are refused**, so advertising them there
+        // would name three things that do nothing and hide the one thing that works. The row's own
+        // kind decides what the bar says, which is also how a user discovers the gesture at all —
+        // there is no settings row for it, and no other screen mentions a home folder.
+        hint      = "SEL+A=SET HOME  SEL+B=FORGET";
+        hintColor = t.textParam;
     } else {
         hint      = "SEL+A=RENAME SEL+B=DEL SEL+R=NEW";
         hintColor = t.textParam;
@@ -332,8 +353,12 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
 
         if (isCursor) c.draw_text(">", x + 10, rowY + TEXT_PADDING, t.textCursor, CHAR_SPACING, FONT_SCALE);
 
-        c.draw_text(clip_name(item.displayName, 20), x + 30, rowY + TEXT_PADDING, textColor,
-                    CHAR_SPACING, FONT_SCALE);
+        // ⚠️ **20 is the FILE limit and it exists because of the size column at x+370** — a granted
+        // tree has no size and no date, so nothing is under it to run into, and clipping one at 20 cut
+        // off the `(HOME)` / `(MISSING)` marker that is the whole reason those rows say anything.
+        // Derived from the row's own kind rather than from a second constant nobody would keep in step.
+        c.draw_text(clip_name(item.displayName, item.isRoot ? 32 : 20), x + 30, rowY + TEXT_PADDING,
+                    textColor, CHAR_SPACING, FONT_SCALE);
 
         if (item.kind == BrowserItem::Kind::FILE) {
             c.draw_text(item.sizeText, x + 370, rowY + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);

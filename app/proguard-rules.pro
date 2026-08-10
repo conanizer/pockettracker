@@ -22,7 +22,7 @@
 #     midiInCloseDevice()V          — │ because the native side POLLS this port once a frame rather
 #     midiInRead([B)I               — ┘ than being called from the MIDI service's binder thread.
 #     safRootCount()I               — ┐ the Storage Access Framework seam (SAF migration P3).
-#     safRootInfo(I)L…/String;      — │ ContentResolver/DocumentsContract are Java-only, so these ten
+#     safRootInfo(I)L…/String;      — │ ContentResolver/DocumentsContract are Java-only, so these twelve
 #     safListChildren(L…;)L…/String;— │ are the whole of it. ⚠️ `safOpenFd` is `pt_fopen`'s resolver:
 #     safReadFile(L…;)[B            — │ a rename would make every sample under a granted folder
 #     safOpenFd(L…;L…;)I            — │ fail to open, with the browser still listing it — which
@@ -37,6 +37,11 @@
 #                                   —   folders to whichever tree sorts lowest; a rename of
 #                                   —   `safRequestRoot` leaves ADD FOLDER… as a row that does nothing,
 #                                   —   which on a fresh install is the whole app.
+#     safSetHomeRoot(L…;)Z          —   the user CHOOSING the home tree (SEL+A in the roots directory).
+#                                   —   ⚠️ A rename leaves the choice permanently stuck on the first
+#                                   —   folder ever granted, which is the state it exists to escape —
+#                                   —   and the row still says it worked, because a missing method and
+#                                   —   a refusal are the same `false`.
 # Every NAME above is part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
@@ -71,6 +76,8 @@
     java.lang.String safRename(java.lang.String, java.lang.String);
     java.lang.String safMove(java.lang.String, java.lang.String, java.lang.String);
     java.lang.String safHomeRootId();
+    boolean safSetHomeRoot(java.lang.String);
+    boolean safForgetRoot(java.lang.String);
     boolean safRequestRoot();
 }
 

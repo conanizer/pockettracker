@@ -66,6 +66,21 @@ struct FileInfo {
      */
     bool        isAction = false;
 
+    /**
+     * ⚠️ **A GRANTED TREE, not a folder inside one** — Android's `pt://<root-id>` rows, the children of
+     * the virtual roots directory. It is a directory and you walk into it exactly like one, but it is
+     * not the app's to rename, delete, move or copy: what is behind it is a *permission*, revoked in
+     * the system's own settings and nowhere else.
+     *
+     * ⚠️⚠️ **`delete_path` on one resolves to the tree's OWN document**, so SELECT+B + A on such a row
+     * would remove the user's whole PocketTracker folder. The browser refuses every file operation on
+     * the strength of this flag (`BrowserItem::is_pseudo`), not by recognising a path — the same rule,
+     * and the same reason, as `isAction` above. `StdFileSystem` never sets it.
+     *
+     * It is also what `FileSystem::set_home_directory` accepts, and the only kind of row that offers it.
+     */
+    bool        isRoot = false;
+
     /** "mysong.ptp" → "mysong". Folders and extension-less files return the name unchanged. */
     std::string name_without_extension() const {
         if (extension.empty() || name.size() <= extension.size() + 1) return name;
@@ -205,6 +220,40 @@ class FileSystem {
      * Not pure: an implementation that produces no action entries can never be asked to run one.
      */
     virtual bool activate(const std::string& path) { (void)path; return false; }
+
+    /**
+     * Make `path` — a row carrying `FileInfo::isRoot` — the directory the app's own folders live under
+     * from now on, PERSISTENTLY. False = refused, or this platform has no such choice to make.
+     *
+     * ⚠️ **The seven accessors answer differently the moment this returns true**, so a caller holding a
+     * derived path (a media base dir, an app root, a cached browse directory) is holding a stale one and
+     * must re-ask. Everything already on disk stays exactly where it is: this moves where the app
+     * LOOKS, never any files.
+     *
+     * ⚠️ It exists because on Android the choice is otherwise **unrecoverable**: the first folder a user
+     * grants becomes the home and stays it, and a user who granted the wrong one had no way back except
+     * clearing the app's data. Nothing derives the home from the grant set, and nothing may — see
+     * `SafStorage.homeRootId` for why a computed answer moves a user's songs the day they grant a second
+     * folder.
+     *
+     * Not pure: a platform whose root is a fixed location has nothing to set, and says so by refusing.
+     */
+    virtual bool set_home_directory(const std::string& path) { (void)path; return false; }
+
+    /**
+     * Give up the access `path` — an `isRoot` row — was granted with. False = refused, or this platform
+     * grants nothing to give up.
+     *
+     * ⚠️ **This DELETES NOTHING.** It drops a permission; every file stays where it is, and the user can
+     * grant the same folder again. It is the counterpart to `activate`'s ADD FOLDER…, and without it a
+     * grant is permanent: Android keeps a persisted permission after the folder behind it is deleted, so
+     * a row that opens on nothing would otherwise sit in the browser for the life of the install with no
+     * gesture able to remove it.
+     *
+     * ⚠️ Giving up the HOME leaves the app to pick another; the implementation must not leave a stored
+     * home naming a grant that no longer exists.
+     */
+    virtual bool revoke_access(const std::string& path) { (void)path; return false; }
 
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────
     /**

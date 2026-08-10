@@ -1,6 +1,7 @@
 #include "ui/folder_config.h"
 
-#include "byte_source.h"   // pt_path_is_uri — ONE rule about what a URI is, shared with pt_fopen
+#include "byte_source.h"        // pt_path_is_uri — ONE rule about what a URI is, shared with pt_fopen
+#include "songcore/media_path.h"  // app_root_relative_tail — the SAME re-rooting a sample path gets
 #include "vendor/nlohmann/json.hpp"
 
 namespace pt::ui {
@@ -35,14 +36,42 @@ std::string strip_root(const std::string& path, const std::string& root) {
 
 std::string resolve_folder_override(const std::string& value, const std::string& media_root) {
     if (value.empty() || media_root.empty()) return value;
-
-    // The same absolute test `resolve_media_path` makes, plus the scheme predicate `pt_fopen` uses.
-    // A Windows drive (`C:\…`) has no `//` and so is not a URI — it is caught by the third clause.
-    const bool verbatim = value[0] == '/' || value[0] == '\\' ||
-                          (value.size() > 1 && value[1] == ':') || pt_path_is_uri(value.c_str());
-    if (verbatim) return value;
-
+    // The same absolute test `resolve_media_path` makes, through the same function — a Windows drive
+    // (`C:\…`) has no `//` and so is not a URI, and is caught by its drive-letter clause.
+    if (songcore::path_is_absolute(value)) return value;
     return media_root + "/" + value;
+}
+
+std::string resolve_browse_dir(FileSystem& fs, const std::optional<std::string>& value,
+                               const std::string& def) {
+    if (!value || value->empty()) return def;
+
+    // The root is DERIVED from this category's own default rather than named, so pt-ui never learns
+    // whether a root is a path or a granted-tree id.
+    const std::string root = fs.parent_path(def);
+    const std::string dir  = resolve_folder_override(*value, root);
+
+    // ⚠️⚠️ **A PATH OF THE WRONG KIND IS UNREACHABLE HOWEVER GOOD `is_directory` SAYS IT LOOKS, and
+    // that is not hypothetical — it is the bug this function exists for.** Under SAF the app holds no
+    // storage permission, yet `stat("/storage/emulated/0/Documents/PocketTracker/Projects")` still
+    // SUCCEEDS while listing it is denied: `is_directory` answered yes, the browser opened on the
+    // user's own config value, and every one of their sixteen projects was invisible. A plain path
+    // cannot be read through a granted tree and a `pt://` path cannot be read through libc, so the
+    // kinds must match before the answer means anything.
+    const bool same_kind = pt_path_is_uri(dir.c_str()) == pt_path_is_uri(root.c_str());
+    if (same_kind && fs.is_directory(dir)) return dir;
+
+    // Authored under ANOTHER install's root — a config carried off a phone, or written before this
+    // device's root became a granted tree. Re-rooted through the very function a project's absolute
+    // sample paths go through, so a config and the samples it points at cannot disagree about where
+    // the app's folders are. Empty tail = a folder genuinely outside the app tree: keep the default
+    // rather than invent a location.
+    const std::string tail = songcore::app_root_relative_tail(dir);
+    if (!tail.empty()) {
+        const std::string rerooted = root + "/" + tail;
+        if (fs.is_directory(rerooted)) return rerooted;
+    }
+    return def;
 }
 
 bool load_folder_config(FileSystem& fs, FolderConfig& out) {
@@ -92,7 +121,8 @@ bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaul
     j["_README_folders"] =
         "Where a LOAD browse STARTS for each category. A plain name is inside your PocketTracker folder "
         "(\"Samples\", \"Samples/Packs\"); an absolute path (\"/mnt/sdcard/Music\", \"C:\\\\Music\") is "
-        "used as given. A folder that does not exist is ignored. This does not change where anything is "
+        "used as given. A folder this device cannot read is ignored, and one written under another "
+        "device's PocketTracker folder is re-read against yours. This does not change where anything is "
         "SAVED.";
     j["folders"] = {
         {"samples",     strip_root(fs.samples_directory(),     mediaRoot)},

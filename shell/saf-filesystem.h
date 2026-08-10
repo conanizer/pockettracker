@@ -149,6 +149,26 @@ class SafFileSystem : public pt::ui::FileSystem {
      */
     bool activate(const std::string& path) override;
 
+    /**
+     * `ui::FileSystem::set_home_directory` — persist `pt://<root-id>` as the tree the seven app folders
+     * live under, and make the accessors answer from it immediately.
+     *
+     * ⚠️ **The choice is Java's to STORE** (`SafStorage.setHomeRoot`, the same pref `homeRootId` reads),
+     * so there is one home and not two opinions about it. Refuses anything that is not a granted tree,
+     * and refuses a tree whose folder is gone — storing that would put the app straight into the state
+     * the liveness test exists to leave.
+     */
+    bool set_home_directory(const std::string& path) override;
+
+    /**
+     * `ui::FileSystem::revoke_access` — release the persisted permission on `pt://<root-id>`.
+     *
+     * ⚠️ **Deletes nothing.** It is the only way to remove a granted folder from the roots listing, and
+     * the only way to clear one whose directory no longer exists — Android keeps the grant forever
+     * otherwise, so a `(MISSING)` row would be permanent.
+     */
+    bool revoke_access(const std::string& path) override;
+
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────
     //
     // ⚠️ A PLAIN path still goes to the inner `StdFileSystem`, which is what keeps `settings.json`,
@@ -190,10 +210,20 @@ class SafFileSystem : public pt::ui::FileSystem {
         std::string id;
         std::string name;
         std::string docUri;
+        /** ⚠️ A GRANT OUTLIVES ITS FOLDER — see `SafStorage.Root.live`. False = the document is gone. */
+        bool        live = true;
     };
 
     /** The granted trees, refreshed from Java. Cheap and re-read rather than cached across a launch. */
     const std::vector<Root>& roots(bool refresh = false);
+
+    /**
+     * Is `path` a granted tree itself (`pt://<id>`), rather than something inside one?
+     *
+     * ⚠️ The mutating methods refuse on this: `resolve` turns such a path into the tree's OWN root
+     * document, so a delete or a move at that level takes the user's whole folder with it.
+     */
+    bool is_granted_tree(const std::string& path);
 
     /** `pt://<id>/a/b` → the document URI, or "" if any segment is missing. Caches what it learns. */
     std::string resolve(const std::string& path);

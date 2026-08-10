@@ -31,7 +31,7 @@ import java.io.File
  * `native/ui/`) that already drives Windows and the Linux handhelds. All this class still does is the
  * handful of jobs that are genuinely Java's: point SDL at the native libraries and the two roots, own
  * the splash screen and the immersive / edge-to-edge window, serve the Storage Access Framework (the
- * folder picker and the ten [SafStorage] delegates), run the one-shot SharedPreferences → settings.json
+ * folder picker and the twelve [SafStorage] delegates), run the one-shot SharedPreferences → settings.json
  * import, and route button feedback (sound/haptics) back from the shell over one JNI hook.
  *
  * ⚠️ **It asks for NO permission, and the manifest declares none but `VIBRATE`.** Storage is a folder
@@ -458,7 +458,7 @@ class MainActivity : SDLActivity() {
     // ── Storage Access Framework (SAF migration P3) ──────────────────────────────────────────────
     //
     // `ContentResolver` and `DocumentsContract` are Java-only, so `shell/saf-filesystem.cpp` reaches
-    // them through these ten. Each is a one-line delegate to [SafStorage], which holds the whole of
+    // them through these twelve. Each is a one-line delegate to [SafStorage], which holds the whole of
     // the SAF knowledge; nothing here decides anything.
     //
     // ⚠️ `@Keep` AND an explicit `proguard-rules.pro` rule, exactly as the thirteen above — the count
@@ -470,13 +470,21 @@ class MainActivity : SDLActivity() {
     @Keep
     fun safRootCount(): Int = safStorage.rootCount()
 
-    /** `<id>\t<displayName>\t<docUri>` for granted tree [index], or "" if it is gone. */
+    /** `<id>\t<displayName>\t<docUri>\t<live 0|1>` for granted tree [index], or "" if it is gone. */
     @Keep
     fun safRootInfo(index: Int): String = safStorage.rootInfo(index)
 
-    /** The id of the tree the app's seven folders live in; "" when nothing is granted. */
+    /** The id of the tree the app's seven folders live in; "" when nothing usable is granted. */
     @Keep
     fun safHomeRootId(): String = safStorage.homeRootId()
+
+    /** Make granted tree [id] the home root — the user picking it in the browser. False = refused. */
+    @Keep
+    fun safSetHomeRoot(id: String): Boolean = safStorage.setHomeRoot(id)
+
+    /** Release the grant on tree [id] — FORGET FOLDER. Deletes nothing; drops a permission. */
+    @Keep
+    fun safForgetRoot(id: String): Boolean = safStorage.forgetRoot(id)
 
     /**
      * **ADD FOLDER… — open the system folder picker.** True = it is on screen, NOT that a folder was

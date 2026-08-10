@@ -30,8 +30,9 @@
 //                  "projects": "...", "themes": "..." } }
 // Every key is OPTIONAL. An absent key → that category keeps its default. An empty string, a
 // non-string value, a missing "folders" object, or an unparseable file → the same: defaults stand. A
-// path that does not exist on disk is ignored AT USE (the dispatcher checks is_directory), so a typo or
-// a folder that has since been deleted costs one category's convenience, never a broken browser.
+// value that does not name a directory this filesystem can READ is ignored AT USE
+// (`resolve_browse_dir`), so a typo, a deleted folder, or a path from another install costs one
+// category's convenience, never a browser that opens on nothing.
 //
 // ⚠️ **A VALUE IS ROOT-RELATIVE UNLESS IT IS ABSOLUTE** — `resolve_folder_override` below, and it is
 // one rule on every platform rather than an Android arm. `"samples": "Samples"` is what the template
@@ -66,18 +67,36 @@ struct FolderConfig {
 bool load_folder_config(FileSystem& fs, FolderConfig& out);
 
 /**
- * A `folders` value → the directory to browse. ABSOLUTE (`/mnt/sd/Packs`, `C:\Music`, `\\server\x`) or
- * a URI (`pt://<id>/Samples`) is used VERBATIM; anything else is joined onto `media_root`.
+ * A `folders` value → the path it names. ABSOLUTE (`/mnt/sd/Packs`, `C:\Music`, `\\server\x`) or a URI
+ * (`pt://<id>/Samples`) is taken VERBATIM; anything else is joined onto `media_root`.
  *
- * This is `resolve_media_path`'s rule (songcore/engine_setup.h) applied to a second file, and it is
- * deliberately the same one: a project's sample paths and a config's browse paths are both "a place,
- * written by a human or by an earlier install, that has to mean something on THIS device".
+ * ⚠️ This is only the STRING half. It answers "what place does this value name?", never "can that place
+ * be read here?" — `resolve_browse_dir` is the whole rule, and the browser must call that one.
  *
  * `media_root` empty ⇒ the value is returned unchanged, which is the answer on a platform that has no
- * root to be relative to yet (Android before a folder is granted). The caller still checks
- * `is_directory`, so an unresolvable value costs one category's convenience and nothing else.
+ * root to be relative to yet (Android before a folder is granted).
  */
 std::string resolve_folder_override(const std::string& value, const std::string& media_root);
+
+/**
+ * The directory a LOAD browse should actually START in for one category: the override when it names a
+ * directory this filesystem can reach, the same value RE-ROOTED when it was authored under another
+ * install's app root, else `def` — which the FileSystem accessors create on first use and is therefore
+ * always real.
+ *
+ * ⚠️⚠️ **`is_directory` ALONE IS NOT THE TEST, and believing it was is what made a user's whole song
+ * library disappear.** On Android the app holds no storage permission, and a plain
+ * `/storage/emulated/0/…` path there is `stat`-able but not listable — so the override was accepted and
+ * the browser opened on a directory that could only ever draw as empty. The kind of path (URI vs plain)
+ * has to match the root's before `is_directory` means anything.
+ *
+ * ⭐ The re-rooting is `resolve_media_path`'s (songcore/media_path.h), through the same
+ * `app_root_relative_tail`, because a project's sample paths and a config's browse paths are the same
+ * problem — "a place, written by a human or by an earlier install, that has to mean something on THIS
+ * device" — and two answers to it would put a project's samples somewhere the browser will not open.
+ */
+std::string resolve_browse_dir(FileSystem& fs, const std::optional<std::string>& value,
+                               const std::string& def);
 
 /**
  * Write a STARTER config.json when none exists, so the feature is DISCOVERABLE — the app used not to

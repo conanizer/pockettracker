@@ -189,12 +189,18 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
         if (e.threw()) { if (r) e.env->DeleteLocalRef(r); continue; }
         const std::string info = e.take(r);
 
-        // `<id>\t<name>\t<docUri>` — a row with a missing field is skipped rather than half-read.
+        // `<id>\t<name>\t<docUri>\t<live>` — a row with a missing field is skipped rather than
+        // half-read. ⚠️ The liveness flag is the LAST field and its absence must not be read as "dead":
+        // an older shape would then declare every tree gone. A row that does not carry it is skipped
+        // like any other malformed one.
         const size_t t1 = info.find('\t');
         if (t1 == std::string::npos) continue;
         const size_t t2 = info.find('\t', t1 + 1);
         if (t2 == std::string::npos) continue;
-        roots_.push_back(Root{info.substr(0, t1), info.substr(t1 + 1, t2 - t1 - 1), info.substr(t2 + 1)});
+        const size_t t3 = info.find('\t', t2 + 1);
+        if (t3 == std::string::npos) continue;
+        roots_.push_back(Root{info.substr(0, t1), info.substr(t1 + 1, t2 - t1 - 1),
+                              info.substr(t2 + 1, t3 - t2 - 1), info[t3 + 1] == '1'});
     }
 
     // ⚠️ Asked ONCE per load rather than per `ensure_dir` call — the seven app folders ask for
@@ -220,16 +226,33 @@ std::string SafFileSystem::home_root_path() {
     if (r.empty()) return kRootsPath;
 
     // The designated home, persisted on the Java side so that granting a SECOND folder cannot move the
-    // app's seven directories. The fallback is the lowest id — deterministic, and reachable only if
-    // Java answered "" for a non-empty grant list, i.e. if something is wrong rather than absent.
+    // app's seven directories. ⚠️ It must still be LIVE: a grant survives the deletion of its folder,
+    // so "the id is in the list" is not "the tree is there" — and a dead home makes every accessor
+    // below answer "" for as long as the grant exists, which is forever. Java applies the same test and
+    // re-stamps, so the two agree; this one is what makes the C++ side safe on its own.
     if (!homeId_.empty()) {
         for (const Root& root : r)
-            if (root.id == homeId_) return std::string(kScheme) + root.id;
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "saf: home root '%s' is not in the grant list - falling back to '%s'",
-                            homeId_.c_str(), r.front().id.c_str());
+            if (root.id == homeId_ && root.live) return std::string(kScheme) + root.id;
     }
-    return std::string(kScheme) + r.front().id;
+
+    // The fallback is the lowest LIVE id — deterministic, and reached when Java answered "" for a
+    // non-empty grant list, or when the home it named has just gone.
+    for (const Root& root : r) {
+        if (!root.live) continue;
+        if (!homeId_.empty())
+            __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                "saf: home root '%s' is gone or unreadable - falling back to '%s'",
+                                homeId_.c_str(), root.id.c_str());
+        return std::string(kScheme) + root.id;
+    }
+
+    // Granted, and not one of them resolves — a card pulled out, or every folder deleted. The roots
+    // directory is the honest answer: it says what IS granted and offers ADD FOLDER…, where "" would
+    // be a browser with no rows and no explanation.
+    __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                        "saf: %d granted folder(s) and NONE of them resolve - the documents are gone",
+                        static_cast<int>(r.size()));
+    return kRootsPath;
 }
 
 // ─── path arithmetic — the whole point of §5a ────────────────────────────────────────────────────
@@ -289,8 +312,18 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
         for (const Root& r : roots(/*refresh=*/true)) {
             pt::ui::FileInfo fi;
             fi.path        = std::string(kScheme) + r.id;
-            fi.name        = r.name;
             fi.isDirectory = true;
+            fi.isRoot      = true;   // ⚠️ not a folder: no rename, no delete, and SEL+A means SET HOME
+
+            // ⭐ **The two things a user cannot otherwise find out, said on the row itself.** Which tree
+            // the app's folders are in was invisible before there was a way to change it, and a grant
+            // whose folder has been deleted is otherwise an ordinary-looking row that opens on nothing.
+            // The name is the only channel the roots directory has — these entries have no size, no
+            // date and nothing behind them to inspect.
+            fi.name = r.name;
+            if (!r.live)                 fi.name += " (MISSING)";
+            else if (r.id == homeId_)    fi.name += " (HOME)";
+
             out.push_back(fi);
             uriCache_[fi.path] = r.docUri;
         }
@@ -418,6 +451,62 @@ bool SafFileSystem::activate(const std::string& path) {
     // foreground and the roots listing is never cached, so the new tree is simply there.
     std::printf("saf:     ADD FOLDER - picker %s\n", launched ? "launched" : "COULD NOT BE OPENED");
     return launched;
+}
+
+bool SafFileSystem::set_home_directory(const std::string& path) {
+    // Only a granted tree can be a home. `pt://roots` is not one, and neither is a folder inside a
+    // tree: the home is what the seven app folders are created directly under, and a grant is the unit
+    // Android hands out and the unit it can take away.
+    if (!is_granted_tree(path)) return false;
+
+    const std::string id = path.substr(kSchemeLen);
+    Env e;
+    if (!e.ok()) return false;
+    jmethodID m = e.method("safSetHomeRoot", "(Ljava/lang/String;)Z");
+    if (!m) return false;
+    jstring jid = e.str(id);
+    const bool set = e.env->CallBooleanMethod(e.activity, m, jid) == JNI_TRUE;
+    const bool bad = e.threw();
+    e.env->DeleteLocalRef(jid);
+    if (bad || !set) return false;
+
+    // ⚠️ **`homeId_` is read once per roots load, so without this the seven accessors keep answering
+    // the OLD tree** — the choice would be persisted, correct on the next launch, and inert on this
+    // one. `refresh` also re-reads the grant list, which is cheap here (one gesture, not a frame).
+    roots(/*refresh=*/true);
+
+    // ⚠️ And the roots listing itself is now wrong: it carries the "(HOME)" marker, which has just
+    // moved. It is the one listing served from the cache only until something says otherwise.
+    invalidate(kRootsPath);
+
+    std::printf("saf:     home folder is now %s\n", path.c_str());
+    return true;
+}
+
+bool SafFileSystem::revoke_access(const std::string& path) {
+    if (!is_granted_tree(path)) return false;
+
+    const std::string id = path.substr(kSchemeLen);
+    Env e;
+    if (!e.ok()) return false;
+    jmethodID m = e.method("safForgetRoot", "(Ljava/lang/String;)Z");
+    if (!m) return false;
+    jstring jid = e.str(id);
+    const bool gone = e.env->CallBooleanMethod(e.activity, m, jid) == JNI_TRUE;
+    const bool bad  = e.threw();
+    e.env->DeleteLocalRef(jid);
+    if (bad || !gone) return false;
+
+    // ⚠️ The tree's whole sub-tree of cached URIs is dead the moment the permission is: every one of
+    // them names a document this process may no longer open. `forget` also drops the roots listing,
+    // because `parent_path(pt://<id>)` IS the roots path.
+    forget(path);
+    roots(/*refresh=*/true);   // re-read the grant list, and the home with it — Java may have cleared it
+    invalidate(kRootsPath);
+
+    std::printf("saf:     forgot %s (%d granted folder(s) left)\n", path.c_str(),
+                static_cast<int>(roots_.size()));
+    return true;
 }
 
 std::string SafFileSystem::config_path() {
@@ -687,8 +776,19 @@ bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_
     return true;
 }
 
+bool SafFileSystem::is_granted_tree(const std::string& path) {
+    return is_pt_path(path) && path != kRootsPath && parent_path(path) == kRootsPath;
+}
+
 bool SafFileSystem::delete_path(const std::string& path) {
     if (!is_pt_path(path)) return priv_.delete_path(path);
+
+    // ⚠️⚠️ **A GRANTED TREE IS NOT THE APP'S TO DELETE, and `resolve` would hand over the document that
+    // IS the user's folder.** `pt://<id>` resolves to the tree's own root document, so this call
+    // deleted `Documents/PocketTracker` — every project, sample and render in it — and reported
+    // success. The browser refuses it a row earlier (`FileInfo::isRoot`); this is the same refusal
+    // below the UI, because "the only caller is careful" is not a property anything enforces.
+    if (is_granted_tree(path)) return false;
 
     const std::string uri = resolve(path);
     if (uri.empty()) return false;
@@ -699,6 +799,7 @@ bool SafFileSystem::delete_path(const std::string& path) {
 
 bool SafFileSystem::rename_file(const std::string& path, const std::string& new_base_name) {
     if (!is_pt_path(path)) return priv_.rename_file(path, new_base_name);
+    if (is_granted_tree(path)) return false;   // see delete_path — the tree itself is the user's
 
     // Byte-for-byte `StdFileSystem::rename_file`'s rule, through the shared `path_sanitize`: keep the
     // extension unless the typed name already ends in it, and never clobber.
@@ -778,6 +879,7 @@ bool SafFileSystem::copy_tree(const std::string& from, const std::string& to) {
 
 bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
     if (!is_pt_path(from) && !is_pt_path(to)) return priv_.move_file(from, to);
+    if (is_granted_tree(from)) return false;   // see delete_path — and a move ends in a delete
 
     // Same tree, both ends SAF: ask the provider to move the document, which costs nothing and keeps
     // the bytes where they are. "" means it will not — a missing FLAG_SUPPORTS_MOVE, or two different

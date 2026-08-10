@@ -25,11 +25,19 @@ import java.security.MessageDigest
 class SafStorage(private val context: Context) {
 
     /**
-     * A granted tree: its derived id, what to call it on screen, the document URI of its root, and
-     * the persisted TREE uri the id was derived from — which is the handle [homeRootId] stores,
-     * because it is the authoritative one and the id is only a function of it.
+     * A granted tree: its derived id, what to call it on screen, the document URI of its root, the
+     * persisted TREE uri the id was derived from — which is the handle [homeRootId] stores, because it
+     * is the authoritative one and the id is only a function of it — and whether the folder behind the
+     * grant is still THERE.
+     *
+     * ⚠️⚠️ **A GRANT OUTLIVES ITS FOLDER.** Delete the directory, unmount the card, and
+     * `getPersistedUriPermissions()` still returns the grant forever — nothing revokes it but the user.
+     * Every id, name and URI below is still perfectly well-formed; only [live] says the document is
+     * gone. Without it a dead grant can be chosen as the home root and stay chosen, and then every app
+     * folder resolves to nothing with nothing anywhere saying why.
      */
-    data class Root(val id: String, val displayName: String, val docUri: String, val treeUri: String)
+    data class Root(val id: String, val displayName: String, val docUri: String, val treeUri: String,
+                    val live: Boolean)
 
     /**
      * The granted trees, ordered by id.
@@ -45,7 +53,8 @@ class SafStorage(private val context: Context) {
             val tree = p.uri
             val docId = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: continue
             val docUri = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
-            out += Root(rootId(tree), displayNameOf(docUri, docId), docUri.toString(), tree.toString())
+            out += Root(rootId(tree), displayNameOf(docUri, docId), docUri.toString(), tree.toString(),
+                        isLive(docUri))
         }
         out.sortBy { it.id }
 
@@ -74,6 +83,20 @@ class SafStorage(private val context: Context) {
             .take(6)
             .joinToString("") { "%02x".format(it) }
 
+    /**
+     * Is the document behind this grant still there?
+     *
+     * ⚠️ **Asked about `COLUMN_DOCUMENT_ID`, NOT about the display name.** Every document has an id, so
+     * a missing row means the document is gone; a missing *name* means only that the provider does not
+     * offer one, which [displayNameOf] deliberately tolerates. Answering this from the name query would
+     * declare a perfectly good tree dead because its provider is terse.
+     *
+     * A provider that throws (`FileNotFoundException` is the usual one for a deleted document) is the
+     * same answer as an empty cursor, which is why both fall through `runCatching` to false.
+     */
+    private fun isLive(docUri: Uri): Boolean =
+        queryRow(docUri, DocumentsContract.Document.COLUMN_DOCUMENT_ID) != null
+
     /** What the roots directory shows for a tree: the provider's display name, else the tail of its id. */
     private fun displayNameOf(docUri: Uri, docId: String): String {
         queryRow(docUri, DocumentsContract.Document.COLUMN_DISPLAY_NAME)?.let {
@@ -100,23 +123,48 @@ class SafStorage(private val context: Context) {
      * the other way round: a stored id could not survive a change in how ids are derived, and could
      * not be matched back to a grant except by re-deriving every id anyway.
      *
-     * **First grant wins, and it keeps winning until it is revoked.** A home that is no longer in the
-     * list (the user withdrew the folder, or wiped the app's storage) falls back to the lowest id and
-     * re-stamps, which is the only moment this value ever changes on its own.
+     * **First grant wins, and it keeps winning until it stops being usable.** A home that is no longer
+     * in the list, or whose folder has been DELETED underneath the grant, falls back to the lowest LIVE
+     * id and re-stamps — the only moment this value changes without [setHomeRoot] being called.
+     *
+     * ⚠️⚠️ **The liveness test is the whole point of the second condition, and "is its id still in the
+     * grant list?" is NOT that test.** A grant survives its folder; a dead home therefore matched, kept
+     * winning, and made every accessor answer "" — a browser with no entries and no way out, on every
+     * launch. Being in the list is necessary and not sufficient.
      */
     fun homeRootId(): String {
-        val list = roots()
-        if (list.isEmpty()) return ""
+        val live = roots().filter { it.live }
+        if (live.isEmpty()) return ""
 
         val prefs  = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val stored = prefs.getString(HOME_TREE_KEY, null)
-        list.firstOrNull { it.treeUri == stored }?.let { return it.id }
+        live.firstOrNull { it.treeUri == stored }?.let { return it.id }
 
-        val chosen = list.first()
+        val chosen = live.first()
         prefs.edit().putString(HOME_TREE_KEY, chosen.treeUri).apply()
         Log.i(TAG, "saf: home root = pt://${chosen.id} '${chosen.displayName}' " +
-                   if (stored == null) "(first grant)" else "(previous home $stored is gone)")
+                   if (stored == null) "(first grant)" else "(previous home $stored is gone or empty)")
         return chosen.id
+    }
+
+    /**
+     * Designate the granted tree `id` as the home root — the user's own choice, replacing whatever the
+     * first-grant rule picked. True iff it was stored.
+     *
+     * ⭐ **Stores the TREE URI, exactly as [homeRootId] reads it**, so the two cannot disagree about
+     * what a home is; the id is only how the UI names one. A dead tree is refused rather than stored,
+     * because storing it would put the app straight into the state the liveness test exists to leave.
+     */
+    fun setHomeRoot(id: String): Boolean {
+        val root = roots().firstOrNull { it.id == id } ?: return false
+        if (!root.live) {
+            Log.w(TAG, "saf: refusing pt://$id '${root.displayName}' as home - its folder is gone")
+            return false
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(HOME_TREE_KEY, root.treeUri).apply()
+        Log.i(TAG, "saf: home root = pt://$id '${root.displayName}' (chosen by the user)")
+        return true
     }
 
     /**
@@ -171,10 +219,39 @@ class SafStorage(private val context: Context) {
         }
     }
 
-    /** `<id>\t<displayName>\t<docUri>`, or "" for an index that is no longer there. */
+    /**
+     * Release the grant on tree `id` — the user dropping a folder they added. True iff it was released.
+     *
+     * ⚠️ **Nothing is deleted; a permission is.** The folder and everything in it stay exactly where
+     * they are, and granting it again restores the same id (the id is a function of the tree URI).
+     *
+     * ⚠️ **The stored home is cleared when it was THIS tree**, and that is not tidiness: a stored home
+     * naming a grant that no longer exists is precisely the state [homeRootId]'s fallback has to guess
+     * its way out of. Clearing it makes the next call a clean first-grant choice instead.
+     */
+    fun forgetRoot(id: String): Boolean {
+        val root = roots().firstOrNull { it.id == id } ?: return false
+        return runCatching {
+            context.contentResolver.releasePersistableUriPermission(
+                Uri.parse(root.treeUri),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (prefs.getString(HOME_TREE_KEY, null) == root.treeUri) {
+                prefs.edit().remove(HOME_TREE_KEY).apply()
+            }
+            Log.i(TAG, "saf: forgot pt://$id '${root.displayName}' (${rootCount()} left)")
+            true
+        }.getOrElse {
+            Log.w(TAG, "saf: releasePersistableUriPermission failed on ${root.treeUri}: $it")
+            false
+        }
+    }
+
+    /** `<id>\t<displayName>\t<docUri>\t<live 0|1>`, or "" for an index that is no longer there. */
     fun rootInfo(index: Int): String {
         val r = roots().getOrNull(index) ?: return ""
-        return "${r.id}\t${r.displayName}\t${r.docUri}"
+        return "${r.id}\t${r.displayName}\t${r.docUri}\t${if (r.live) 1 else 0}"
     }
 
     /**

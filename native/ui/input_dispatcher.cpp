@@ -2563,8 +2563,9 @@ void InputDispatcher::on_button_b() {
     if (on_browser()) {
         FileBrowserState& fb = s_.fileBrowser;
 
-        // B is the NO of "A=YES B=NO" — it disarms the delete rather than leaving the browser, which is
-        // what makes SELECT+B safe to press by accident.
+        // B is the NO of "A=YES B=NO" — it disarms whatever is armed rather than leaving the browser,
+        // which is what makes SELECT+B and SELECT+A safe to press by accident. Written against the
+        // MODE and not against DELETE, so a third one cannot be added and left with no way out.
         if (fb.mode != BrowserMode::NORMAL) { fb.mode = BrowserMode::NORMAL; return; }
 
         // Inside a file selection, B COPIES it — the same gesture as B over a grid selection below.
@@ -2928,8 +2929,8 @@ void InputDispatcher::on_start() {
 
 std::string InputDispatcher::browser_dir(BrowserDir cat) {
     // A config.json override per category, else the built-in default. The FileSystem getters
-    // create-on-first-use, so `def` is always a real directory; the override is used only when it, too,
-    // exists on disk (a typo or a deleted folder falls back rather than opening on nothing).
+    // create-on-first-use, so `def` is always a real, readable directory — which is what makes it a
+    // safe answer whenever the override cannot be honoured.
     //
     // No debug gate: config.json ships on every platform's release from v0.9.4 (`ui/folder_config.h`).
     const std::optional<std::string>* ov = nullptr;
@@ -2941,15 +2942,11 @@ std::string InputDispatcher::browser_dir(BrowserDir cat) {
         case BrowserDir::PROJECTS:    ov = &s_.folderConfig.projects;    def = fs_.projects_directory();    break;
         case BrowserDir::THEMES:      ov = &s_.folderConfig.themes;      def = fs_.themes_directory();      break;
     }
-    if (ov && ov->has_value()) {
-        // ⚠️ The value is ROOT-RELATIVE unless it is absolute (`ui/folder_config.h`), and the root is
-        // derived from THIS category's own default rather than named — the seven app folders are direct
-        // children of it on every platform, so its parent IS the media root, and pt-ui never has to
-        // know whether that root is a path or a granted-tree id.
-        const std::string dir = resolve_folder_override(**ov, fs_.parent_path(def));
-        if (fs_.is_directory(dir)) return dir;
-    }
-    return def;
+    // ⚠️ The whole rule lives in `resolve_browse_dir`, NOT here: the value is root-relative unless it is
+    // absolute, an override authored under another install's root is re-rooted onto ours, and one that
+    // cannot be read on this platform falls back to `def`. Inlining any part of that here is how the
+    // config and a project's sample paths would start disagreeing about where the app's folders are.
+    return ov ? resolve_browse_dir(fs_, *ov, def) : def;
 }
 
 void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
@@ -3069,6 +3066,59 @@ void InputDispatcher::browser_confirm() {
             b.statusSuccess = true;
         } else {
             b.statusMessage = "DELETE FAILED";
+            b.statusSuccess = false;
+        }
+        return;
+    }
+
+    // SET_HOME mode: A is the YES of "A=YES B=NO", armed by SELECT+A on a granted tree.
+    if (b.mode == BrowserMode::SET_HOME) {
+        const BrowserItem* item = b.current();
+        b.mode = BrowserMode::NORMAL;
+        if (!item || !item->isRoot) return;
+
+        const std::string name = item->displayName;
+        if (fs_.set_home_directory(item->path)) {
+            // ⚠️ **The two derived roots have to move WITH it, or the app looks in the new tree and
+            // resolves media against the old one.** Both were read from the filesystem once, at boot
+            // (`AppConfig::mediaBaseDir` and `SongcoreHost::set_app_root`), and neither is re-asked:
+            // a project's RELATIVE sample paths join onto the first, and an absolute path authored
+            // elsewhere re-roots onto the second. Derived here from an accessor rather than from the
+            // row, so pt-ui never has to know what a platform's root string looks like.
+            const std::string root = fs_.parent_path(fs_.samples_directory());
+            set_media_base_dir(root);
+            host_.set_app_root(root);
+
+            refresh_browser();
+            b.statusMessage = "HOME FOLDER: " + name;
+            b.statusSuccess = true;
+        } else {
+            b.statusMessage = "COULD NOT SET HOME FOLDER";
+            b.statusSuccess = false;
+        }
+        return;
+    }
+
+    // FORGET_ROOT mode: A is the YES of "A=YES B=NO", armed by SELECT+B on a granted tree.
+    if (b.mode == BrowserMode::FORGET_ROOT) {
+        const BrowserItem* item = b.current();
+        b.mode = BrowserMode::NORMAL;
+        if (!item || !item->isRoot) return;
+
+        const std::string name = item->displayName;
+        if (fs_.revoke_access(item->path)) {
+            // ⚠️ The home may have been THIS tree, in which case the filesystem has just chosen another
+            // — so the derived roots are re-asked here exactly as they are after a home change, and for
+            // the same reason. An accessor answers the truth; a value read at boot does not.
+            const std::string root = fs_.parent_path(fs_.samples_directory());
+            set_media_base_dir(root);
+            host_.set_app_root(root);
+
+            refresh_browser();
+            b.statusMessage = "FORGOT: " + name;
+            b.statusSuccess = true;
+        } else {
+            b.statusMessage = "COULD NOT FORGET IT";
             b.statusSuccess = false;
         }
         return;
@@ -3270,6 +3320,19 @@ void InputDispatcher::on_select_a() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
+
+    // ⭐ **On a granted TREE the three file chords are all meaningless, so SELECT+A means the one thing
+    // that row CAN offer: make this the folder the app keeps its own directories in.** Before this
+    // there was no way to change it at all — Android's first grant won permanently, and a user who
+    // granted the wrong folder had to clear the app's data to get out of it. Armed, never immediate:
+    // A confirms, B cancels, exactly as SELECT+B's delete does.
+    if (item && item->isRoot) {
+        s_.fileBrowser.mode = BrowserMode::SET_HOME;
+        s_.fileBrowser.statusMessage.clear();
+        s_.fileBrowser.statusSuccess = true;
+        return;
+    }
+
     if (!item || item->is_pseudo()) return;   // ".." and ADD FOLDER… are not files and have no name
 
     const bool  dir   = (item->kind == BrowserItem::Kind::FOLDER);
@@ -3291,6 +3354,19 @@ void InputDispatcher::on_select_b() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
+
+    // ⚠️ **On a granted TREE this is FORGET, not DELETE, and the difference is everything the row is.**
+    // `delete_path("pt://<id>")` resolves to the granted folder's own document — the user's whole
+    // PocketTracker directory. What SELECT+B can honestly offer here is handing the PERMISSION back,
+    // which removes the row and touches not one file. It is also the only way to clear a folder that
+    // has been deleted from under its grant: Android keeps such a grant for the life of the install.
+    if (item && item->isRoot) {
+        s_.fileBrowser.mode = BrowserMode::FORGET_ROOT;
+        s_.fileBrowser.statusMessage.clear();
+        s_.fileBrowser.statusSuccess = true;
+        return;
+    }
+
     if (!item || item->is_pseudo()) return;
 
     // ARM the confirm; never delete on this press. The top bar becomes "DELETE <name>? A=YES B=NO".

@@ -99,21 +99,38 @@ struct BrowserItem {
     int64_t     size         = 0;
     int64_t     lastModified = 0;
 
+    /** A granted tree in Android's roots directory — see `FileInfo::isRoot`. Walk in, nothing else. */
+    bool isRoot = false;
+
     bool is_parent() const { return kind == Kind::PARENT; }
 
     /**
-     * ".." and `ADD FOLDER…` — the rows with nothing on disk behind them.
+     * ".." , `ADD FOLDER…` and a granted TREE — the rows no file operation may touch.
      *
      * ⚠️ **Rename, delete, select, copy and cut all refuse on THIS, not on `is_parent()`.** Those six
      * sites were written when ".." was the only such row; a second one that had to be remembered at
      * each of them would be wrong at whichever was missed, and nothing would say so until a user
      * pressed SELECT+B on it. One predicate, below the sites.
+     *
+     * ⚠️⚠️ **A tree row is here for a harsher reason than the other two.** The first two have nothing
+     * behind them; a tree has EVERYTHING behind it — `delete_path("pt://<id>")` resolves to the granted
+     * folder's own document, so SELECT+B and A on that row removed the user's entire PocketTracker
+     * directory and said `DELETED`. Unlike them it is still a place you walk into, so the flag is a
+     * field rather than another `Kind`.
      */
-    bool is_pseudo() const { return kind == Kind::PARENT || kind == Kind::ACTION; }
+    bool is_pseudo() const { return kind == Kind::PARENT || kind == Kind::ACTION || isRoot; }
 };
 
 /** NORMAL browses; DELETE is the "A=YES B=NO" confirm over the row under the cursor. */
-enum class BrowserMode { NORMAL, DELETE };
+/**
+ * NORMAL browses; the other three are arm-then-confirm states where A is YES and B is NO.
+ *
+ * ⚠️ **SET_HOME and FORGET_ROOT are APPENDED**, per the project's rule about enum members — a member's
+ * position is its identity. Both are confirms rather than immediate actions: one changes where every
+ * app folder is looked for, the other hands back an access permission, and neither should be reachable
+ * by one keypress on a row the user was only trying to open.
+ */
+enum class BrowserMode { NORMAL, DELETE, SET_HOME, FORGET_ROOT };
 
 struct FileBrowserState {
     std::string              currentDirectory;
