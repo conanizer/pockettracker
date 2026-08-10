@@ -1,5 +1,6 @@
 #include "ui/folder_config.h"
 
+#include "byte_source.h"   // pt_path_is_uri — ONE rule about what a URI is, shared with pt_fopen
 #include "vendor/nlohmann/json.hpp"
 
 namespace pt::ui {
@@ -17,7 +18,32 @@ std::optional<std::string> get_folder(const json& folders, const char* key) {
     return v;
 }
 
+/**
+ * The relative tail of `path` under `root`, or `path` unchanged when it is not under it.
+ *
+ * ⚠️ DERIVED from the accessor rather than hard-coded as "Samples", so a platform whose default for a
+ * category is NOT a direct child of the root seeds a value that still means what it says. The template
+ * has one job — to be true.
+ */
+std::string strip_root(const std::string& path, const std::string& root) {
+    if (root.empty() || path.size() <= root.size() + 1) return path;
+    if (path.compare(0, root.size(), root) != 0 || path[root.size()] != '/') return path;
+    return path.substr(root.size() + 1);
+}
+
 }  // namespace
+
+std::string resolve_folder_override(const std::string& value, const std::string& media_root) {
+    if (value.empty() || media_root.empty()) return value;
+
+    // The same absolute test `resolve_media_path` makes, plus the scheme predicate `pt_fopen` uses.
+    // A Windows drive (`C:\…`) has no `//` and so is not a URI — it is caught by the third clause.
+    const bool verbatim = value[0] == '/' || value[0] == '\\' ||
+                          (value.size() > 1 && value[1] == ':') || pt_path_is_uri(value.c_str());
+    if (verbatim) return value;
+
+    return media_root + "/" + value;
+}
 
 bool load_folder_config(FileSystem& fs, FolderConfig& out) {
     std::string blob;
@@ -40,6 +66,9 @@ bool load_folder_config(FileSystem& fs, FolderConfig& out) {
 
 bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaults) {
     const std::string path = fs.config_path();
+    // ⚠️ Empty is Android with nothing granted yet: there is no tree to seed INTO, and the write would
+    // fail anyway. Saying so here rather than letting it fail keeps "no config yet" one condition.
+    if (path.empty()) return false;
     if (fs.file_exists(path)) return false;   // the user's file — never rewrite it (header contract)
 
     // Every key pre-filled with what the app is doing RIGHT NOW, so the user sees the schema AND a real,
@@ -53,15 +82,24 @@ bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaul
         "rewrites it. Every key is optional — delete a line to use the built-in default. Values below "
         "are the defaults, so the file as seeded changes nothing.";
 
+    // ⭐ **Seeded ROOT-RELATIVE, and that is what makes the file portable.** The values below are what
+    // the app is doing right now, written the way a human would write them ("Samples") rather than as
+    // the absolute path the accessor returned — which on Android is a granted-tree id nobody can type
+    // and which stops meaning anything the day the home folder changes. The root is DERIVED from an
+    // accessor, not named, so pt-ui never has to know what a platform's root string looks like.
+    const std::string mediaRoot = fs.parent_path(fs.samples_directory());
+
     j["_README_folders"] =
-        "Where a LOAD browse STARTS for each category. A path that does not exist is ignored. This does "
-        "not change where anything is SAVED.";
+        "Where a LOAD browse STARTS for each category. A plain name is inside your PocketTracker folder "
+        "(\"Samples\", \"Samples/Packs\"); an absolute path (\"/mnt/sdcard/Music\", \"C:\\\\Music\") is "
+        "used as given. A folder that does not exist is ignored. This does not change where anything is "
+        "SAVED.";
     j["folders"] = {
-        {"samples",     fs.samples_directory()},
-        {"soundfonts",  fs.soundfonts_directory()},
-        {"instruments", fs.instruments_directory()},
-        {"projects",    fs.projects_directory()},
-        {"themes",      fs.themes_directory()},
+        {"samples",     strip_root(fs.samples_directory(),     mediaRoot)},
+        {"soundfonts",  strip_root(fs.soundfonts_directory(),  mediaRoot)},
+        {"instruments", strip_root(fs.instruments_directory(), mediaRoot)},
+        {"projects",    strip_root(fs.projects_directory(),    mediaRoot)},
+        {"themes",      strip_root(fs.themes_directory(),      mediaRoot)},
     };
 
     j["_README_controller"] =

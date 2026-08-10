@@ -2941,7 +2941,14 @@ std::string InputDispatcher::browser_dir(BrowserDir cat) {
         case BrowserDir::PROJECTS:    ov = &s_.folderConfig.projects;    def = fs_.projects_directory();    break;
         case BrowserDir::THEMES:      ov = &s_.folderConfig.themes;      def = fs_.themes_directory();      break;
     }
-    if (ov && ov->has_value() && fs_.is_directory(**ov)) return **ov;
+    if (ov && ov->has_value()) {
+        // ⚠️ The value is ROOT-RELATIVE unless it is absolute (`ui/folder_config.h`), and the root is
+        // derived from THIS category's own default rather than named — the seven app folders are direct
+        // children of it on every platform, so its parent IS the media root, and pt-ui never has to
+        // know whether that root is a path or a granted-tree id.
+        const std::string dir = resolve_folder_override(**ov, fs_.parent_path(def));
+        if (fs_.is_directory(dir)) return dir;
+    }
     return def;
 }
 
@@ -2993,6 +3000,22 @@ void InputDispatcher::refresh_browser() {
     b.scroll = std::max(0, std::min(b.scroll, std::max(0, last - BROWSER_VISIBLE_ROWS + 1)));
 }
 
+void InputDispatcher::refresh_browser_on_foreground() {
+    // ⚠️ Guarded on the SCREEN, not on the browser's state: `fileBrowser` keeps its directory and its
+    // cursor after `close_file_browser`, so re-listing unconditionally would re-read a directory
+    // nobody is looking at on every Home-and-back — and on Android that listing is a query per entry
+    // over a content provider.
+    if (s_.currentScreen != ScreenType::FILE_BROWSER) return;
+
+    // ⚠️ NOT while a modal is up. The DELETE confirm names the row under the cursor, and a refresh can
+    // move what is under the cursor — so a listing rebuilt behind the prompt would leave "DELETE X?"
+    // on screen with the cursor now on Y, and A would delete Y. The browser is re-read on the next
+    // gesture instead; a stale listing is a cosmetic problem, a mislabelled confirm is not.
+    if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
+
+    refresh_browser();
+}
+
 // ─── The browser's cursor ────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::browser_move_cursor(int delta, bool page) {
@@ -3027,7 +3050,7 @@ void InputDispatcher::browser_confirm() {
     if (b.mode == BrowserMode::DELETE) {
         const BrowserItem* item = b.current();
         b.mode = BrowserMode::NORMAL;
-        if (!item || item->is_parent()) return;
+        if (!item || item->is_pseudo()) return;
 
         const std::string name = item->displayName;
         if (fs_.delete_path(item->path)) {
@@ -3045,6 +3068,22 @@ void InputDispatcher::browser_confirm() {
     if (!item) return;
 
     if (item->is_parent()) { navigate_to_parent(b, fs_); return; }
+
+    // An ACTION is not a place, it is a thing to do, and the filesystem owns what it means.
+    //
+    // ⚠️ **NO refresh on the way out, and that is not an omission.** `activate` starts something it
+    // does not wait for — the one action there is opens Android's folder picker — so a listing rebuilt
+    // here would be rebuilt from a world that has not changed yet. What catches up is
+    // `refresh_browser_on_foreground()`, when the app comes back.
+    if (item->kind == BrowserItem::Kind::ACTION) {
+        const std::string label = item->displayName;
+        if (!fs_.activate(item->path)) {
+            b.statusMessage = label + " FAILED";
+            b.statusSuccess = false;
+        }
+        return;
+    }
+
     if (item->kind == BrowserItem::Kind::FOLDER) { navigate_to_folder(b, fs_, item->path); return; }
 
     // ── It is a FILE, and what happens now is the whole reason the browser was opened ────────────
@@ -3163,7 +3202,7 @@ std::vector<std::string> InputDispatcher::browser_selected_paths() const {
     const int hi = std::max(b.selectionAnchor, b.cursor);
     for (int i = lo; i <= hi; ++i) {
         const BrowserItem* item = b.item_at(i);
-        if (item && !item->is_parent()) out.push_back(item->path);
+        if (item && !item->is_pseudo()) out.push_back(item->path);
     }
     return out;
 }
@@ -3221,7 +3260,7 @@ void InputDispatcher::on_select_a() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
-    if (!item || item->is_parent()) return;   // ".." is not a file and cannot be renamed
+    if (!item || item->is_pseudo()) return;   // ".." and ADD FOLDER… are not files and have no name
 
     const bool  dir   = (item->kind == BrowserItem::Kind::FOLDER);
     const std::string ext = to_lower(item->extension);
@@ -3242,7 +3281,7 @@ void InputDispatcher::on_select_b() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
-    if (!item || item->is_parent()) return;
+    if (!item || item->is_pseudo()) return;
 
     // ARM the confirm; never delete on this press. The top bar becomes "DELETE <name>? A=YES B=NO".
     s_.fileBrowser.mode          = BrowserMode::DELETE;

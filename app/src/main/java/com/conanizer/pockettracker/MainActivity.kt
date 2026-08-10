@@ -1,11 +1,9 @@
 package com.conanizer.pockettracker
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.provider.Settings
 import android.util.Log
 import android.view.InputDevice
 import android.view.View
@@ -24,7 +22,6 @@ import com.conanizer.pockettracker.platform.android.MidiOutManager
 import org.json.JSONObject
 import org.libsdl.app.SDLActivity
 import java.io.File
-import java.io.IOException
 
 /**
  * PocketTracker's Android entry point: an `SDLActivity` subclass. Convergence Phase E.
@@ -33,9 +30,13 @@ import java.io.IOException
  * dispatcher and the JNI audio facade are gone, replaced by the shared C++ SDL shell (`shell/`,
  * `native/ui/`) that already drives Windows and the Linux handhelds. All this class still does is the
  * handful of jobs that are genuinely Java's: point SDL at the native libraries and the two roots, own
- * the splash screen and the immersive / edge-to-edge window, ask for storage permission, run the two
- * one-shot migrations (settings values out of SharedPreferences, app files out of shared storage), and
- * route button feedback (sound/haptics) back from the shell over one JNI hook.
+ * the splash screen and the immersive / edge-to-edge window, serve the Storage Access Framework (the
+ * folder picker and the ten [SafStorage] delegates), run the one-shot SharedPreferences → settings.json
+ * import, and route button feedback (sound/haptics) back from the shell over one JNI hook.
+ *
+ * ⚠️ **It asks for NO permission, and the manifest declares none but `VIBRATE`.** Storage is a folder
+ * the user grants from the system picker; see the manifest's own note for why adding one back would
+ * buy nothing.
  *
  * ⚠️ It began life as `SdlActivity` in `src/debug/` — the second, debug-only activity the app carried
  * beside Compose through phases C and D, so touch could be developed without breaking the shipped UI
@@ -44,9 +45,8 @@ import java.io.IOException
  * comments below that cite `MainActivity.kt:<line>` refer to that now-deleted Compose activity as the
  * prior art each behaviour was learned from.
  *
- * ⚠️ **C4 added the three things C3 deliberately left out**, and two of them are not here at all —
- * which is the point. The permission request and the system bars are Java's, so they are below. The
- * lifecycle is NOT: the autosave/settings flush is a `SDL_AddEventWatch` watcher in `shell/app.cpp`,
+ * ⚠️ **The system bars are Java's, so they are below; the lifecycle is NOT** — the autosave/settings
+ * flush is a `SDL_AddEventWatch` watcher in `shell/app.cpp`,
  * shared with every other platform, because `SDL_APP_WILLENTERBACKGROUND` fires on the NATIVE thread
  * inside the frame loop's own `SDL_PollEvent` — not on this thread. The back button is likewise
  * split: the hint is armed in `shell/android-main.cpp` and the key is mapped in `shell/sdl-input.cpp`.
@@ -79,41 +79,28 @@ class MainActivity : SDLActivity() {
     )
 
     /**
-     * The app root, resolved HERE because only Java can resolve it.
+     * The two roots the shell is booted with.
      *
-     * ⚠️ `ui::default_app_root()` on the C++ side walks `POCKETTRACKER_HOME` → `XDG_DATA_HOME` →
-     * `HOME` and every one of them misses on Android — it would fall through to a RELATIVE path and
-     * put the user's songs beside whatever the process's cwd happens to be. That is exactly the A1
-     * bug, which was found on Windows for the same reason. `Environment` is the only thing that
-     * knows the real answer on this device and this OS version, so it answers, and
-     * `android-main.cpp` takes it as argv[1].
+     * **argv[1] — the media root.** ⚠️ **It is NOT where the user's files are any more.** The
+     * projects, samples and renders live in whatever folder the user granted, reached over SAF, and
+     * this process has no permission to read `Documents/PocketTracker` at all. What still consumes
+     * argv[1] is the console log's destination and `resolve_media_path`'s base for a project that
+     * stores its sample paths RELATIVE — see `shell/android-main.cpp`, which is where both of those
+     * are handed on.
      *
-     * The path matches what `AndroidFileSystem.kt` has always used, which is what makes this activity
-     * open the SAME projects the Compose app does rather than a parallel empty world.
+     * ⚠️ It is resolved HERE rather than in C++ because `ui::default_app_root()` walks
+     * `POCKETTRACKER_HOME` → `XDG_DATA_HOME` → `HOME`, all three of which miss on Android: it would
+     * fall through to a RELATIVE path, i.e. beside whatever the process's cwd happens to be. That is
+     * character-for-character the A1 bug, found on Windows for the same reason.
      *
-     * ⚠️ **argv[2] is a SECOND root, and it is not the same directory.** The media tree above is user
-     * storage the app may be refused; `filesDir` is app-private, needs no permission, and cannot be
-     * revoked. `settings.json`, `template.ptp` and `autosave.ptp` are read during the native boot,
-     * before the user has been asked for anything, so they live there — see `StdFileSystem`'s two-root
-     * constructor for the argument, and [migrateAppFilesToPrivateStorage] for the users who already
-     * have those three files in the tree. `config.json` is deliberately NOT one of them: it is the one
-     * file the user hand-edits, and app-private storage is reachable only over adb.
+     * **argv[2] — `filesDir`, and it is not a second copy of the first.** `settings.json`,
+     * `template.ptp` and `autosave.ptp` are read during the native boot, before any picker can have
+     * run, so they live in app-private storage: no permission, and nothing the user can revoke.
+     * `config.json` is deliberately NOT one of them — it is the one file the user hand-edits, and
+     * `filesDir` is reachable over adb alone, so it sits in the granted tree beside their work
+     * (`SafFileSystem::config_path`).
      */
-    /**
-     * ⚠️ **argv[3] is SCAFFOLDING WITH A KNOWN DEATH DATE (SAF migration P3).** It selects which
-     * `ui::FileSystem` the shell constructs, so one build can be driven down both the old media-tree
-     * path and the new SAF one and the two compared while `MANAGE_EXTERNAL_STORAGE` is still granted:
-     *
-     *     adb shell am start -n …/.MainActivity --es storage saf
-     *
-     * Absent — every normal launch, including every launcher icon tap — this is empty and the shell
-     * takes the `StdFileSystem` branch it has always taken. It is an intent extra rather than a
-     * SETTINGS row because the row would be real UI work for something P4 deletes, and rather than a
-     * `config.json` key because that file lives in the very tree SAF may not have granted yet.
-     * **P4 removes this argument and the branch below it together.**
-     */
-    override fun getArguments(): Array<String> =
-        arrayOf(appRoot(), privateRoot(), intent?.getStringExtra("storage") ?: "")
+    override fun getArguments(): Array<String> = arrayOf(appRoot(), privateRoot())
 
     private fun appRoot(): String =
         File(
@@ -194,21 +181,17 @@ class MainActivity : SDLActivity() {
         // same colour and the handover has no seam in it.
         installSplashScreen()
 
-        // ⚠️ Without MANAGE_EXTERNAL_STORAGE the C++ `StdFileSystem` cannot see /storage/emulated/0
-        // and the file browser comes up EMPTY — which looks exactly like "C5's spike says
-        // std::filesystem does not work on Android", the single most important open question phase C
-        // answered. A wrong answer there would have been recorded as an architectural fact and cost
-        // `AndroidFileSystem.kt` its deletion in Phase E. So the state is still LOGGED beside the
-        // result, which is this project's standing rule for instruments — read this line before
-        // believing an empty browser.
+        // ⚠️ **NOTHING IS ASKED FOR HERE, AND THE LINE THAT SAYS SO IS UNCONDITIONAL.** Storage is
+        // reached through the folder the user grants in the picker, and a browser that comes up on
+        // ADD FOLDER… alone is the correct fresh-install state rather than a permission failure —
+        // which are two things that look identical from outside. `safRootCount()` is what tells them
+        // apart, so the count is logged at the moment the shell is about to be handed the roots.
         //
-        // C3 logged it and left the granting to the Compose activity. C4 asks.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val granted = Environment.isExternalStorageManager()
-            Log.i(TAG, "MANAGE_EXTERNAL_STORAGE granted=$granted  appRoot=${appRoot()}  " +
-                       "privateRoot=${privateRoot()}")
-            if (!granted) requestAllFilesAccess()
-        }
+        // ⚠️ The COUNT and not `homeRootId()`: that one STAMPS the first grant as the home on its way
+        // past, and a log line has no business changing persisted state. The shell prints the home in
+        // its own banner, from the call that legitimately makes the choice.
+        Log.i(TAG, "storage: SAF, ${safStorage.rootCount()} granted folder(s), " +
+                   "privateRoot=${privateRoot()}")
 
         // ⚠️⚠️ **EDGE-TO-EDGE, AND `hideSystemBars()` ALONE DOES NOT DO IT — MEASURED, NOT ASSUMED.**
         // The first C4 build hid the bars and the window STAYED 1280x904: `dumpsys` reported
@@ -236,14 +219,8 @@ class MainActivity : SDLActivity() {
         }
 
         // ⚠️ BEFORE `super.onCreate()` for a harder reason than the two above: that call starts the
-        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. Anything either of these
-        // writes after that point is a file the app has already read past.
-        //
-        // ⚠️ AND IN THIS ORDER. The relocation moves an existing `settings.json` into `filesDir`;
-        // `importLegacySettings` then finds it there and correctly leaves it alone. Reversed, the
-        // import would see an empty `filesDir`, write factory-plus-prefs values into it, and the
-        // relocation would then decline to overwrite them with the user's real file.
-        migrateAppFilesToPrivateStorage()
+        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. A settings file written
+        // after that point is one the app has already read past.
         importLegacySettings()
 
         // The feedback managers, before super.onCreate() starts the SDL thread that calls back into
@@ -497,6 +474,65 @@ class MainActivity : SDLActivity() {
     @Keep
     fun safRootInfo(index: Int): String = safStorage.rootInfo(index)
 
+    /** The id of the tree the app's seven folders live in; "" when nothing is granted. */
+    @Keep
+    fun safHomeRootId(): String = safStorage.homeRootId()
+
+    /**
+     * **ADD FOLDER… — open the system folder picker.** True = it is on screen, NOT that a folder was
+     * granted; the grant lands in [onActivityResult] and the native side never waits for it.
+     *
+     * ⚠️⚠️ **CALLED FROM THE SDL THREAD, AND `startActivityForResult` IS THE UI THREAD'S.** So it is
+     * posted — and waited for, but only for the LAUNCH, which is microseconds. Waiting for the user's
+     * ANSWER would be the bug: `SDL_APP_WILLENTERBACKGROUND` is delivered to the SDL thread inside its
+     * own `SDL_PollEvent` (see the watcher in `shell/app.cpp`), so a thread parked in a picker is a
+     * session whose autosave and settings flush never run for as long as the folder chooser is up —
+     * and that is precisely when Android is most likely to kill this process for memory.
+     *
+     * ⚠️ The wait is BOUNDED rather than indefinite. SDLActivity blocks the UI thread on the SDL
+     * thread in `surfaceDestroyed`, so the two can be aimed at each other for an instant during a
+     * rotation; two seconds turns that into a `false` and a status line instead of a hang.
+     */
+    @Keep
+    fun safRequestRoot(): Boolean {
+        val launched = java.util.concurrent.atomic.AtomicBoolean(false)
+        val done     = java.util.concurrent.CountDownLatch(1)
+        runOnUiThread {
+            try {
+                launched.set(safStorage.requestRoot(this, REQ_ADD_ROOT))
+            } finally {
+                // ⚠️ In a `finally`: a throw on the UI thread that never counted down would park the
+                // SDL thread for the full timeout on every press.
+                done.countDown()
+            }
+        }
+        if (!done.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            Log.w(TAG, "saf: folder picker did not launch within 2s - UI thread busy?")
+        return launched.get()
+    }
+
+    /**
+     * The picker's answer.
+     *
+     * ⚠️ `super` first and unconditionally: `SDLActivity` has its own result handling, and swallowing
+     * a result that was never ours is the kind of break that shows up as an unrelated feature dying.
+     *
+     * Nothing is pushed to native here. The grant is persisted, and the browser picks it up when the
+     * app returns to the foreground — the roots directory is never cached, so re-listing IS the
+     * refresh (`shell/saf-filesystem.cpp`).
+     */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_ADD_ROOT) return
+        if (resultCode != RESULT_OK || data?.data == null) {
+            // Cancelling is a normal answer, not a failure: the user is returned to the roots
+            // directory with the same ADD FOLDER… row they pressed, which is §7's own requirement.
+            Log.i(TAG, "saf: folder picker cancelled (result=$resultCode)")
+            return
+        }
+        safStorage.takeGrant(data.data)
+    }
+
     /** Every child of a directory document in one query — see [SafStorage.listChildren] for the format. */
     @Keep
     fun safListChildren(dirDocUri: String): String = safStorage.listChildren(dirDocUri)
@@ -594,9 +630,9 @@ class MainActivity : SDLActivity() {
             return
         }
 
-        // ⚠️ `filesDir`, not the media tree: this must write the file the native side will READ, and
-        // that moved with [migrateAppFilesToPrivateStorage]. A migration that writes to the old
-        // location is a migration whose output nothing opens.
+        // ⚠️ `filesDir`, and it is the same place `SafFileSystem::settings_path` reads from: this must
+        // write the file the native side will OPEN. A migration whose output nothing opens is a
+        // migration that silently did not happen.
         val target = File(filesDir, "settings.json")
 
         // ⚠️ An existing settings.json WINS, and the version is still stamped. During phases C and D
@@ -682,83 +718,6 @@ class MainActivity : SDLActivity() {
         }
     }
 
-    /**
-     * **The one-time relocation of the app's own files out of shared storage.**
-     *
-     * `settings.json`, `template.ptp` and `autosave.ptp` used to sit in `Documents/PocketTracker/`
-     * beside the user's six folders. They now live in [filesDir]; this copies an existing user's three
-     * across on the first launch after the update, while the storage permission is still granted.
-     *
-     * ⚠️⚠️ **IT MUST SHIP A RELEASE BEFORE THE PERMISSION IS DROPPED.** Removing
-     * `MANAGE_EXTERNAL_STORAGE` from the manifest auto-revokes it on update, so a build that both drops
-     * the permission and migrates would find the old files already unreadable — and a user's settings,
-     * their song template and any unsaved work would be gone with no way back. That is the whole reason
-     * this is a phase of its own rather than part of the SAF switch.
-     *
-     * ⚠️ **VERSIONED, exactly as [importLegacySettings] is versioned, and for the same reason**: the
-     * obvious guard is *"filesDir has no settings.json → migrate"*, which gets one chance and is spent
-     * the moment the app writes its first settings file. A counter can be bumped for a fourth file
-     * later; an artifact check cannot.
-     *
-     * ⚠️ **Not stamped when the permission is absent, and that distinction is load-bearing.** Without
-     * All-files access the old directory reads as empty, which is indistinguishable from a fresh
-     * install with nothing to migrate — so stamping there would silently spend the migration on a
-     * user who is one Settings toggle away from having files to move. Unstamped, the next launch
-     * retries; the cost is three `File.exists` calls.
-     *
-     * ⚠️ **The originals are left where they are.** They are already invisible to the browser, which
-     * lists only the six sub-directories, so they cost three small files and nothing else — and a
-     * one-shot migration has no second chance to undo a delete it should not have made.
-     */
-    private fun migrateAppFilesToPrivateStorage() {
-        val prefs = getSharedPreferences("pockettracker_ui", MODE_PRIVATE)
-        val done  = prefs.getInt(APP_FILES_MIGRATION_KEY, 0)
-        if (done >= APP_FILES_MIGRATION_VERSION) {
-            Log.i(TAG, "app-file migration: already at v$done, nothing to do")
-            return
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            Log.i(TAG, "app-file migration: no All-files access - deferring, NOT marking done")
-            return
-        }
-
-        try {
-            var copied = 0
-            var kept   = 0
-            var absent = 0
-            for (name in APP_FILES_TO_RELOCATE) {
-                val dst = File(filesDir, name)
-                if (dst.exists()) { kept++; continue }      // a newer build already wrote one: it wins
-                val src = File(appRoot(), name)
-                if (!src.isFile) { absent++; continue }
-
-                src.copyTo(dst, overwrite = false)
-
-                // ⚠️ Read the SIZE BACK OFF THE DESTINATION rather than trusting copyTo to have thrown.
-                // A short copy — a full data partition is the realistic one — leaves a file that exists,
-                // parses as truncated JSON and takes the user's settings with it. Dropping the partial
-                // and failing the whole migration leaves the original intact and the version unstamped,
-                // so the next launch tries again.
-                if (dst.length() != src.length()) {
-                    val short = dst.length()
-                    dst.delete()
-                    throw IOException("$name copied ${short}B of ${src.length()}B")
-                }
-                copied++
-            }
-
-            prefs.edit().putInt(APP_FILES_MIGRATION_KEY, APP_FILES_MIGRATION_VERSION).apply()
-            Log.i(TAG, "app-file migration: $copied copied, $kept already present, $absent not there " +
-                       "-> ${filesDir.absolutePath}, marked v$APP_FILES_MIGRATION_VERSION")
-        } catch (e: Exception) {
-            // Not stamped, and deliberately not fatal — [importLegacySettings]'s reasoning verbatim:
-            // losing a migration costs the user their settings, crashing on the way in costs them the
-            // app, and this line is the only thing that says which happened.
-            Log.e(TAG, "app-file migration FAILED - retrying next launch: ${e.message}", e)
-        }
-    }
-
     /** `VisualizerType`'s ordinal, which is what settings.json stores. The order is the enum's, and it
      *  is the same list in `AppTheme.kt`, `theme.h` and `settings_store.cpp`'s VISUALIZER_COUNT. */
     private fun visualizerIndex(name: String): Int = when (name) {
@@ -769,41 +728,6 @@ class MainActivity : SDLActivity() {
         "SPECTRUM"       -> 4
         "SPECTRUM_PEAKS" -> 5
         else             -> 0
-    }
-
-    /**
-     * Send the user to the All files access settings page.
-     *
-     * ⚠️ There is no runtime-permission dialog for `MANAGE_EXTERNAL_STORAGE` — it is granted only
-     * through Settings, so this is a `startActivity`, not a permission request, and it cannot be
-     * answered inline. `READ_MEDIA_AUDIO` and friends are deliberately NOT requested here: they
-     * govern MediaStore, and nothing in the SDL build goes through MediaStore. The native
-     * `std::filesystem` path this port rests on is governed by All files access alone.
-     *
-     * ⚠️ Both intents, in order, and the fallback is not theoretical — `MainActivity` carries the
-     * same pair because some custom ROMs (/e/OS was the one that bit us) do not expose the
-     * app-specific page at all. If neither resolves, the app still runs; the browser is just empty
-     * and the log above says why.
-     *
-     * ⚠️ Called BEFORE `super.onCreate()`, i.e. before the SDL thread exists. Settings comes up over
-     * us and the activity is immediately paused — which is fine, and is in fact the first real
-     * exercise of C4's background watcher, on a blank document where every step of it is a no-op.
-     */
-    private fun requestAllFilesAccess() {
-        Log.i(TAG, "requesting MANAGE_EXTERNAL_STORAGE - the file browser is empty without it")
-        try {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                    .setData(Uri.parse("package:$packageName"))
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "app-specific All-files-access page unavailable: ${e.message}")
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-            } catch (e2: Exception) {
-                Log.e(TAG, "All-files-access settings unavailable entirely: ${e2.message}")
-            }
-        }
     }
 
     private companion object {
@@ -822,26 +746,11 @@ class MainActivity : SDLActivity() {
         const val SETTINGS_IMPORT_VERSION = 2
         const val IMPORT_VERSION_KEY = "settings_import_version"
 
-        /**
-         * Its own counter, separate from [SETTINGS_IMPORT_VERSION]: the two migrations answer different
-         * questions ("where do the values come from" and "where does the file live") and a user can
-         * legitimately be done with one and not the other. Bump this — and add to
-         * [APP_FILES_TO_RELOCATE] — if a fourth app file ever has to move.
-         *
-         * **v1** — `settings.json`, `template.ptp` and `autosave.ptp` out of `Documents/PocketTracker/`.
-         */
-        const val APP_FILES_MIGRATION_VERSION = 1
-        const val APP_FILES_MIGRATION_KEY = "app_files_migration_version"
-
-        /**
-         * ⚠️ `config.json` is NOT here, and its absence is a decision (see [getArguments]): it is the
-         * one app file the user hand-edits, and `filesDir` is reachable only over adb. It stays in the
-         * media tree.
-         */
-        val APP_FILES_TO_RELOCATE = arrayOf("settings.json", "template.ptp", "autosave.ptp")
-
         /** The Compose default for the skin pref (`DeviceSkin.AMIGA_DARK.id`), read when the user never
          *  chose one — the shell's own fallback for an unknown id is the same skin (device_skin.h). */
         const val DEFAULT_SKIN_ID = "amiga-2"
+
+        /** [safRequestRoot]'s `startActivityForResult` code, matched in [onActivityResult]. */
+        const val REQ_ADD_ROOT = 1001
     }
 }

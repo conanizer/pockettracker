@@ -54,7 +54,7 @@ and meters. Every screen module takes plain pointers, and a null pointer draws s
 what lets a headless tool render any screen with no engine in the process.
 
 **Android has no Kotlin UI.** `app/src/main/java` is a seven-file shim: `MainActivity` (an
-`SDLActivity` subclass that owns the splash, permissions and settings import), the virtual button
+`SDLActivity` subclass that owns the splash, the folder grants and the settings import), the virtual button
 skin's sound and haptic managers, the two MIDI device managers, `PadClassifier` (decides whether an
 attached device is a real controller, which picks the touch UI or the full layout), and
 `VirtualButton` (the enum whose ordinals the JNI feedback call passes, mirroring `ui/buttons.h`).
@@ -347,6 +347,38 @@ note-on on an empty instrument is still a valid *event*; the consumer is what dr
 default-omission rules are all pinned, and eight golden projects round-trip byte-for-byte in CI. Any
 new serialized field must be default-guarded or those goldens break.
 
+### Storage
+
+Everything the app does to a disk goes through one interface, `ui/filesystem.h` — twenty methods,
+string-typed paths, `FileInfo` structs. Screen modules never see a file handle, which is what lets a
+headless tool drive the file browser against a temp directory. There are two implementations:
+`StdFileSystem` (portable C++17 `<filesystem>`, used by Windows, Linux and PortMaster) and
+`SafFileSystem` (Android).
+
+**Android declares no storage permission at all.** `/storage/emulated/0` is unreadable to the process,
+and the only way to a user's files is a folder they hand over through the system picker
+(`ACTION_OPEN_DOCUMENT_TREE`). The browser's virtual `pt://roots` directory lists every granted folder
+plus an `ADD FOLDER…` action row; the first folder granted is persisted as the home root, so granting a
+second one never relocates the app's six directories.
+
+**Paths stay composable, and the document URI is an implementation detail.** The interface assumes
+paths compose — the browser's `..` is a string trim, a rename builds its target as `parent / name` — and
+a SAF document URI is an opaque handle with no derivable parent or child. So `SafFileSystem` addresses
+files as `pt://<root-id>/Projects/song.ptp`, where `<root-id>` is a hash of the granted tree's URI, and
+resolves that to a document URI internally. The id is derived rather than stored, so it re-derives from
+the grant list on any boot in any order.
+
+**A second seam sits below the UI**, because samples, SoundFonts, projects and the WAV writer open
+paths directly rather than through the interface. `byte_source.h` provides `pt_fopen`, `pt_remove` and
+`pt_rename`: a plain path takes libc's branch, a URI is handed to a host-installed hook. The decision is
+derived from the string, once, below every call site — not repeated at each of them. On every platform
+but Android no hook is installed and all three are a rename of the libc call.
+
+Three files — `settings.json`, `template.ptp` and the crash-recovery autosave — live in app-private
+storage on Android, because they are read at boot before any folder can have been granted. `config.json`
+stays in the granted tree: it is the one file the user hand-edits, and its `folders` values are relative
+to the app's root unless written as absolute paths, so the file means the same thing on every device.
+
 ---
 
 ## UI Layer
@@ -424,7 +456,8 @@ Export modes: full mix, per-track stems, and resampling a song selection into a 
 | Audio | Oboe | SDL2 | SDL2 | SDL2 |
 | SDL2 | vendored, built in | **the device's own** | system | vendored, static |
 | MIDI | Android MIDI (JNI) | ALSA (dlopen) | ALSA (dlopen) | winmm |
-| App root | `Documents/PocketTracker` | the port's `data/` | `$XDG_DATA_HOME/PocketTracker` | `Documents\PocketTracker` |
+| App root | a folder the user grants | the port's `data/` | `$XDG_DATA_HOME/PocketTracker` | `Documents\PocketTracker` |
+| Storage | Storage Access Framework | `std::filesystem` | `std::filesystem` | `std::filesystem` |
 | Exit | — (the launcher owns it) | PROJECT → EXIT | PROJECT → EXIT | PROJECT → EXIT |
 
 **PortMaster links the device's libSDL2, deliberately.** The CFW patched that copy for the hardware's

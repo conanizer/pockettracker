@@ -1113,6 +1113,14 @@ int run(const AppConfig& cfg) {
                 std::fflush(stdout);
             }
 
+            // ⚠️ **A redraw is not a re-read, and the file browser needs the second one.** The arm
+            // above puts the same pixels back on a surface the platform took away; it does not ask the
+            // disk anything. While we were in the background the directory on screen may have been
+            // changed by a file manager or a download — and on Android by this app's own ADD FOLDER…,
+            // which grants through a picker activity and therefore ALWAYS lands while we are the
+            // backgrounded one. Inert on desktop: SDL sends this event on Android and iOS only.
+            if (e.type == SDL_APP_DIDENTERFOREGROUND) dispatch.refresh_browser_on_foreground();
+
             if (e.type == SDL_QUIT) {
                 // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
                 // built with HAVE_SIGNAL_H and nobody set SDL_NO_SIGNAL_HANDLERS — SDL's own SIGINT /

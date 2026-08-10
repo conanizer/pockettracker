@@ -1,18 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Storage permissions for reading/writing samples and projects -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32"
-        tools:ignore="ScopedStorage" />
-    <!-- For Android 13+ (API 33+), use granular media permissions -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <!-- For Android 11+ (API 30+), request full file access to see files copied from other devices -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
+    <!--
+        ⚠️ **NO STORAGE PERMISSION OF ANY KIND, AND THAT IS THE DESIGN.** The app reaches the user's
+        projects and samples through the Storage Access Framework: the user grants a folder from the
+        system picker (ADD FOLDER… in the browser's roots directory), the grant is persisted with
+        `takePersistableUriPermission`, and `shell/saf-filesystem.cpp` is the whole of the access.
+        A granted tree needs no `uses-permission` line, which is precisely the property SAF is for.
+
+        Its own three files (`settings.json`, `template.ptp`, `autosave.ptp`) are read during the
+        native boot, before any picker can have run, and live in `filesDir` — app-private, permission
+        -free and unrevokable.
+
+        ⚠️ Adding any of the four back (READ_/WRITE_EXTERNAL_STORAGE, READ_MEDIA_AUDIO,
+        MANAGE_EXTERNAL_STORAGE) would not make anything work: nothing in the tree calls MediaStore,
+        and nothing constructs a media-tree `StdFileSystem` any more. It would only re-open the
+        F-Droid review finding this migration answers.
+    -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--

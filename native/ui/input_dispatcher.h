@@ -328,8 +328,11 @@ class InputDispatcher {
 
     /**
      * The directory a LOAD browser should START in for `cat` (D2b): the user's config.json override when
-     * this is a DEBUG build, config.json set that category, and the override is a real directory —
-     * otherwise the built-in FileSystem default. Public so `ptdispatch` can drive it directly.
+     * that category is set and the override RESOLVES to a real directory — otherwise the built-in
+     * FileSystem default. Public so `ptdispatch` can drive it directly.
+     *
+     * ⚠️ An override is root-relative unless it is absolute (`ui/folder_config.h`
+     * `resolve_folder_override`), so what this returns is not necessarily what config.json says.
      *
      * ⚠️ The single resolution point, so D2a (remember-last-folder) and D2b compose: open_file_browser
      * compares the requested dir against `browser_dir(SAMPLES)`, so a D2b override still reads as "a
@@ -403,6 +406,22 @@ class InputDispatcher {
      * calls live in the one function that can never do one without the other.
      */
     void boot_midi_in_port();
+
+    /**
+     * The app has come back to the front — re-list the file browser if that is what is on screen.
+     * A no-op on every other screen, and on a listing nothing has changed under.
+     *
+     * ⚠️ **It exists because the app is not the only writer.** The directory on screen belongs to the
+     * user, and while PocketTracker was in the background a file manager, a download or a sync client
+     * may have changed it — but the case it was written for is the app's own: Android's folder picker
+     * is another activity, so `ADD FOLDER…` necessarily grants while this one is backgrounded, and the
+     * roots directory the user granted from is stale the moment they return to it.
+     *
+     * ⚠️ Inert on desktop by construction rather than by `#ifdef`, the same way the background-flush
+     * watcher is: SDL sends `SDL_APP_DIDENTERFOREGROUND` on Android and iOS only, so nothing calls this
+     * anywhere else. The cursor is kept and clamped — a refresh is not a navigation.
+     */
+    void refresh_browser_on_foreground();
 
   private:
     AppState&               s_;

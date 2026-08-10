@@ -1,6 +1,8 @@
 package com.conanizer.pockettracker
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
@@ -22,8 +24,12 @@ import java.security.MessageDigest
  */
 class SafStorage(private val context: Context) {
 
-    /** A granted tree: its derived id, what to call it on screen, and the document URI of its root. */
-    data class Root(val id: String, val displayName: String, val docUri: String)
+    /**
+     * A granted tree: its derived id, what to call it on screen, the document URI of its root, and
+     * the persisted TREE uri the id was derived from — which is the handle [homeRootId] stores,
+     * because it is the authoritative one and the id is only a function of it.
+     */
+    data class Root(val id: String, val displayName: String, val docUri: String, val treeUri: String)
 
     /**
      * The granted trees, ordered by id.
@@ -39,7 +45,7 @@ class SafStorage(private val context: Context) {
             val tree = p.uri
             val docId = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: continue
             val docUri = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
-            out += Root(rootId(tree), displayNameOf(docUri, docId), docUri.toString())
+            out += Root(rootId(tree), displayNameOf(docUri, docId), docUri.toString(), tree.toString())
         }
         out.sortBy { it.id }
 
@@ -79,6 +85,91 @@ class SafStorage(private val context: Context) {
     }
 
     fun rootCount(): Int = roots().size
+
+    /**
+     * The id of the tree the app's seven folders live in — the HOME root — or "" if nothing is granted.
+     *
+     * ⚠️⚠️ **This is the one piece of SAF state that is STORED rather than derived, and it has to be.**
+     * Everything else about a root comes back out of `getPersistedUriPermissions()` on demand, which is
+     * what makes ids re-derivable in any order on any boot. The home CHOICE cannot work that way: any
+     * rule computed from the grant set — lowest id, first returned, newest — moves the app's Projects,
+     * Samples and Renders folders the day the user grants a second, unrelated folder. The user would
+     * see their songs vanish, and nothing would have gone wrong.
+     *
+     * ⭐ **The TREE URI is stored, not the id**, because the id is a function of the tree URI and not
+     * the other way round: a stored id could not survive a change in how ids are derived, and could
+     * not be matched back to a grant except by re-deriving every id anyway.
+     *
+     * **First grant wins, and it keeps winning until it is revoked.** A home that is no longer in the
+     * list (the user withdrew the folder, or wiped the app's storage) falls back to the lowest id and
+     * re-stamps, which is the only moment this value ever changes on its own.
+     */
+    fun homeRootId(): String {
+        val list = roots()
+        if (list.isEmpty()) return ""
+
+        val prefs  = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val stored = prefs.getString(HOME_TREE_KEY, null)
+        list.firstOrNull { it.treeUri == stored }?.let { return it.id }
+
+        val chosen = list.first()
+        prefs.edit().putString(HOME_TREE_KEY, chosen.treeUri).apply()
+        Log.i(TAG, "saf: home root = pt://${chosen.id} '${chosen.displayName}' " +
+                   if (stored == null) "(first grant)" else "(previous home $stored is gone)")
+        return chosen.id
+    }
+
+    /**
+     * Fire the system folder picker. True = it is on screen; the GRANT arrives later, in
+     * [takeGrant].
+     *
+     * ⚠️ **Must be called on the UI thread** — `startActivityForResult` is an Activity call and this
+     * one is reached from the SDL thread, so [MainActivity.safRequestRoot] posts it and waits only for
+     * the launch. See `ui::FileSystem::activate` for why it must not wait for the answer.
+     *
+     * ⚠️ Android forbids granting a volume root or `Download` itself, and the picker is a TOUCH flow in
+     * an app that is otherwise 100 % D-pad. Both are owned regressions of the SAF migration, not
+     * surprises — `saf-migration-plan.md` §7.
+     */
+    fun requestRoot(activity: Activity, requestCode: Int): Boolean {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        // Open AT the app's own folder rather than at Recents, so the common answer is one tap.
+        // ⚠️ A HINT ONLY — a provider may ignore it, and it is API 29+. Nothing depends on it landing.
+        runCatching {
+            DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE_AUTHORITY, "primary:Documents/PocketTracker")
+        }.onSuccess { intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
+
+        return runCatching {
+            activity.startActivityForResult(intent, requestCode)
+            true
+        }.getOrElse {
+            // A device with no documents provider at all. The browser says so on its status line
+            // rather than looking like a button that does nothing.
+            Log.e(TAG, "saf: no activity can handle ACTION_OPEN_DOCUMENT_TREE: $it")
+            false
+        }
+    }
+
+    /**
+     * Persist the grant the picker returned. False = the user cancelled, or it could not be taken.
+     *
+     * ⚠️ **Without `takePersistableUriPermission` the grant dies with the activity**, and the next
+     * launch finds nothing — which presents as "the browser is empty again", not as a permission
+     * error, so it is the one line here that must never be lost.
+     */
+    fun takeGrant(tree: Uri?): Boolean {
+        if (tree == null) return false
+        return runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                tree, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            Log.i(TAG, "saf: took grant $tree -> pt://${rootId(tree)} (${rootCount()} granted)")
+            true
+        }.getOrElse {
+            Log.e(TAG, "saf: takePersistableUriPermission failed on $tree: $it")
+            false
+        }
+    }
 
     /** `<id>\t<displayName>\t<docUri>`, or "" for an index that is no longer there. */
     fun rootInfo(index: Int): String {
@@ -270,5 +361,13 @@ class SafStorage(private val context: Context) {
         // ⚠️ `PocketTrackerSDL` is the KOTLIN tag — the native side logs under `PocketTracker`, and a
         // logcat filter on the wrong one reports a working migration as never having run.
         const val TAG = "PocketTrackerSDL"
+
+        /** `MainActivity`'s prefs file, shared so the migration counters and this sit in one place. */
+        const val PREFS = "pockettracker_ui"
+
+        /** The persisted TREE uri of the home root. See [homeRootId] for why it is the uri, not the id. */
+        const val HOME_TREE_KEY = "saf_home_tree_uri"
+
+        const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
     }
 }

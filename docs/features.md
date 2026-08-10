@@ -95,8 +95,8 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Rename files (SELECT+A to enter rename with on-screen QWERTY)
 - Delete files and folders (SELECT+B with confirmation)
 - On-screen QWERTY keyboard for naming projects and files
-- Projects saved as .ptp files in /Documents/PocketTracker/Projects/
-- Instruments saved as .pti files in /Documents/PocketTracker/Instruments/
+- Projects saved as .ptp files in `Projects/`, inside PocketTracker's home folder
+- Instruments saved as .pti files in `Instruments/`, beside it
 - Samples stored wherever you put them; paths stored in the project
 - File move — move files and folders to a different location from within the browser
 

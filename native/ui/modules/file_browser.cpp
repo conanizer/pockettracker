@@ -100,9 +100,23 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
 
     std::vector<FileInfo> entries = fs.list_files(directory);
 
+    std::vector<BrowserItem> actions;
     std::vector<BrowserItem> folders;
     std::vector<BrowserItem> files;
     for (const FileInfo& e : entries) {
+        // An ACTION row before the hidden-file test and before the extension filter, because it is
+        // neither: it has no extension to pass a filter and no file to be hidden. It is drawn
+        // verbatim — no brackets, no stem — because its name is a sentence the user reads.
+        if (e.isAction) {
+            BrowserItem act;
+            act.kind        = BrowserItem::Kind::ACTION;
+            act.path        = e.path;
+            act.displayName = e.name;
+            act.sortName    = to_lower(e.name);
+            actions.push_back(std::move(act));
+            continue;
+        }
+
         if (!e.name.empty() && e.name[0] == '.') continue;   // hidden — `showHidden` is never true
 
         BrowserItem it;
@@ -132,17 +146,22 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
     std::stable_sort(folders.begin(), folders.end(), by_name);
     std::stable_sort(files.begin(), files.end(), by_name);
 
+    // The actions sit directly under "..", above every real entry, and are NOT sorted with them: they
+    // are how you leave this directory, not things in it.
+    items.insert(items.end(), actions.begin(), actions.end());
     items.insert(items.end(), folders.begin(), folders.end());
     items.insert(items.end(), files.begin(), files.end());
     return items;
 }
 
 void sort_items(std::vector<BrowserItem>& items, FileSortMode mode) {
-    // ".." is pinned; folders and files are sorted as two separate groups and re-concatenated.
-    std::vector<BrowserItem> parent, folders, files;
+    // ".." and the actions are pinned, in the order build_item_list produced them; folders and files
+    // are sorted as two separate groups and re-concatenated.
+    std::vector<BrowserItem> pinned, folders, files;
     for (BrowserItem& it : items) {
         switch (it.kind) {
-            case BrowserItem::Kind::PARENT: parent.push_back(std::move(it)); break;
+            case BrowserItem::Kind::PARENT:
+            case BrowserItem::Kind::ACTION: pinned.push_back(std::move(it)); break;
             case BrowserItem::Kind::FOLDER: folders.push_back(std::move(it)); break;
             case BrowserItem::Kind::FILE:   files.push_back(std::move(it)); break;
         }
@@ -185,7 +204,7 @@ void sort_items(std::vector<BrowserItem>& items, FileSortMode mode) {
     apply(files);
 
     items.clear();
-    items.insert(items.end(), std::make_move_iterator(parent.begin()), std::make_move_iterator(parent.end()));
+    items.insert(items.end(), std::make_move_iterator(pinned.begin()), std::make_move_iterator(pinned.end()));
     items.insert(items.end(), std::make_move_iterator(folders.begin()), std::make_move_iterator(folders.end()));
     items.insert(items.end(), std::make_move_iterator(files.begin()), std::make_move_iterator(files.end()));
 }
@@ -302,6 +321,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         } else {
             switch (item.kind) {
                 case BrowserItem::Kind::PARENT: textColor = COLOR_PARENT; break;
+                case BrowserItem::Kind::ACTION: textColor = COLOR_ACTION; break;
                 case BrowserItem::Kind::FOLDER: textColor = COLOR_FOLDER; break;
                 case BrowserItem::Kind::FILE:
                     textColor = ext_matches(item.extension, video_extensions()) ? COLOR_VIDEO

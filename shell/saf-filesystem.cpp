@@ -21,6 +21,11 @@ constexpr const char* kScheme   = "pt://";
 constexpr size_t      kSchemeLen = 5;
 constexpr const char* kRootsPath = "pt://roots";
 
+// The ACTION row in the roots directory. ⭐ It cannot collide with a granted tree: the children of
+// `pt://roots` are `pt://<id>`, never `pt://roots/<anything>`, so this string names nothing else that
+// can exist.
+constexpr const char* kAddRootPath = "pt://roots/add";
+
 bool is_pt_path(const std::string& s) {
     return s.compare(0, kSchemeLen, kScheme) == 0;
 }
@@ -97,6 +102,23 @@ std::string call_string(const char* name, const char* sig, const std::string& a,
     return e.take(r);
 }
 
+/**
+ * A NO-ARGUMENT String method.
+ *
+ * ⚠️ **Not `call_string` with an empty string.** That one always builds a jstring and passes it, and
+ * handing an argument to a `()Ljava/lang/String;` signature is undefined behaviour, not an ignored
+ * extra — the same class of mistake as reading a `Z` return through `CallObjectMethod`.
+ */
+std::string call_string0(const char* name) {
+    Env e;
+    if (!e.ok()) return std::string();
+    jmethodID m = e.method(name, "()Ljava/lang/String;");
+    if (!m) return std::string();
+    jobject r = e.env->CallObjectMethod(e.activity, m);
+    if (e.threw()) { if (r) e.env->DeleteLocalRef(r); return std::string(); }
+    return e.take(r);
+}
+
 }  // namespace
 
 // ─── construction, and the hooks ─────────────────────────────────────────────────────────────────
@@ -145,6 +167,7 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
     if (rootsLoaded_ && !refresh) return roots_;
     rootsLoaded_ = true;
     roots_.clear();
+    homeId_.clear();
 
     int count = 0;
     {
@@ -173,6 +196,12 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
         if (t2 == std::string::npos) continue;
         roots_.push_back(Root{info.substr(0, t1), info.substr(t1 + 1, t2 - t1 - 1), info.substr(t2 + 1)});
     }
+
+    // ⚠️ Asked ONCE per load rather than per `ensure_dir` call — the seven app folders ask for
+    // themselves on every browser open, and this is a JNI round trip plus a SharedPreferences read.
+    // Java also STAMPS its choice when it answers, so the question and the persistence are one act.
+    homeId_ = call_string0("safHomeRootId");
+
     return roots_;
 }
 
@@ -182,10 +211,24 @@ int SafFileSystem::root_count() { return static_cast<int>(roots().size()); }
 
 std::string SafFileSystem::home_root_path() {
     const auto& r = roots();
-    if (r.empty()) return std::string();
-    // Java already sorted by id; taking the lowest is what makes the choice stable across boots.
-    // ⚠️ Scaffolding: granting a second tree whose id sorts lower would move the app's folders. A
-    // designated home root persisted in settings.json is owed before P4 — saf-migration-plan.md §5b.
+    // ⚠️ **`pt://roots`, not "", when nothing is granted — and the difference is the whole no-folder
+    // state.** The seven accessors below feed `browser_dir`, so returning "" opens the browser on a
+    // listing with no entries and no "..", which is a dead end the user cannot leave. Returning the
+    // roots directory opens them on `ADD FOLDER…`: §7's "NO FOLDER SELECTED — press A to choose" is a
+    // directory with one row rather than a browser mode nothing else knows about. Writes still fail,
+    // because every mutating method already refuses the roots path.
+    if (r.empty()) return kRootsPath;
+
+    // The designated home, persisted on the Java side so that granting a SECOND folder cannot move the
+    // app's seven directories. The fallback is the lowest id — deterministic, and reachable only if
+    // Java answered "" for a non-empty grant list, i.e. if something is wrong rather than absent.
+    if (!homeId_.empty()) {
+        for (const Root& root : r)
+            if (root.id == homeId_) return std::string(kScheme) + root.id;
+        __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                            "saf: home root '%s' is not in the grant list - falling back to '%s'",
+                            homeId_.c_str(), r.front().id.c_str());
+    }
     return std::string(kScheme) + r.front().id;
 }
 
@@ -230,13 +273,16 @@ std::string SafFileSystem::resolve(const std::string& path) {
 }
 
 const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& dirPath) {
-    auto hit = listCache_.find(dirPath);
-    if (hit != listCache_.end()) return &hit->second;
-
     std::vector<pt::ui::FileInfo> out;
 
+    // ⚠️ **THE ROOTS DIRECTORY IS NEVER SERVED FROM THE CACHE, and it is checked BEFORE the lookup for
+    // exactly that reason.** A grant can arrive while the app is running — that is what `ADD FOLDER…`
+    // does — and a cached listing would show the user's new folder missing from the very screen they
+    // granted it on. It costs one JNI call plus one per grant, on a screen reached by navigating
+    // rather than per frame. Every other directory is cached; those change only when this app changes
+    // them, and `forget`/`invalidate` are what say so.
     if (dirPath == kRootsPath) {
-        for (const Root& r : roots()) {
+        for (const Root& r : roots(/*refresh=*/true)) {
             pt::ui::FileInfo fi;
             fi.path        = std::string(kScheme) + r.id;
             fi.name        = r.name;
@@ -244,10 +290,23 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
             out.push_back(fi);
             uriCache_[fi.path] = r.docUri;
         }
+
+        // ⭐ The way OUT of the empty state is a row IN it. With nothing granted this is the only entry
+        // in the only directory the browser can be on, so "NO FOLDER SELECTED — press A to choose" and
+        // the fix for it are the same screen, and the browser needs no state to know that.
+        pt::ui::FileInfo add;
+        add.path     = kAddRootPath;
+        add.name     = "ADD FOLDER...";   // the 5x5 font has no ellipsis glyph; three dots is the glyph
+        add.isAction = true;
+        out.push_back(add);
+
         auto& slot = listCache_[dirPath];
         slot = std::move(out);
         return &slot;
     }
+
+    auto hit = listCache_.find(dirPath);
+    if (hit != listCache_.end()) return &hit->second;
 
     const std::string dirUri = resolve(dirPath);
     if (dirUri.empty()) return nullptr;
@@ -300,7 +359,10 @@ void SafFileSystem::invalidate(const std::string& dirPath) {
 
 std::string SafFileSystem::ensure_dir(const char* sub) {
     const std::string home = home_root_path();
-    if (home.empty()) return std::string();   // nothing granted — the browser shows the empty state
+    // Nothing granted: the browser opens on the roots directory, which is the ADD FOLDER… row. There
+    // is no tree to create `Projects` in yet, and `resolve` refuses the roots path, so returning it
+    // unchanged is what makes every accessor answer "the place where you choose a place".
+    if (home == kRootsPath) return home;
 
     std::string cur = home;
     const std::string subs(sub);
@@ -336,12 +398,33 @@ std::string SafFileSystem::instruments_directory() { return ensure_dir("Instrume
 std::string SafFileSystem::soundfonts_directory()  { return ensure_dir("Soundfonts"); }
 std::string SafFileSystem::themes_directory()      { return ensure_dir("Themes"); }
 
+bool SafFileSystem::activate(const std::string& path) {
+    if (path != kAddRootPath) return false;
+
+    Env e;
+    if (!e.ok()) return false;
+    jmethodID m = e.method("safRequestRoot", "()Z");
+    if (!m) return false;
+    const bool launched = e.env->CallBooleanMethod(e.activity, m) == JNI_TRUE;
+    if (e.threw()) return false;
+
+    // ⚠️ **`launched` is "the picker is on screen", NOT "a folder was granted".** The grant lands in
+    // the activity's `onActivityResult`, which cannot run until this thread has gone back to its own
+    // loop and let the process be backgrounded. Nothing here waits for it; the browser re-lists on
+    // foreground and the roots listing is never cached, so the new tree is simply there.
+    std::printf("saf:     ADD FOLDER - picker %s\n", launched ? "launched" : "COULD NOT BE OPENED");
+    return launched;
+}
+
 std::string SafFileSystem::config_path() {
     const std::string home = home_root_path();
     // ⚠️ Empty when nothing is granted, and that is correct rather than a degradation:
     // `load_folder_config` treats "no file" as its common case, so "no tree yet" reads exactly like
     // "no config was ever written" — which is the argument that kept this file in the tree at all.
-    return home.empty() ? std::string() : home + "/config.json";
+    // ⚠️ The no-grant answer from `home_root_path` is the ROOTS path, not "": `pt://roots/config.json`
+    // is a document under a directory that does not exist, so the test has to be for the roots path
+    // rather than for emptiness.
+    return home == kRootsPath ? std::string() : home + "/config.json";
 }
 
 // ─── reading ─────────────────────────────────────────────────────────────────────────────────────
@@ -499,12 +582,12 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
     const std::string uri = write ? ensure_file(path) : resolve(path);
     if (uri.empty()) return -1;
 
-    // ⚠️ **"rwt", not "wt", and the extra "r" is load-bearing.** The only thing that opens a `pt://`
-    // path for writing is `WavStreamWriter`, which streams a render past the point of no return and
-    // then SEEKS BACK TO ZERO to patch the RIFF header with the length it turned out to be. "rwt" is
-    // the mode a backward seek over a provider descriptor was measured on; a write-only descriptor
-    // has never been asked to do it here. `write_bytes` does not come through this path — it opens
-    // "wt" for a single forward pass, which is all it needs.
+    // ⚠️ **"rwt", not "wt", and the extra "r" is load-bearing.** `WavStreamWriter` streams a render past
+    // the point of no return and then SEEKS BACK TO ZERO to patch the RIFF header with the length it
+    // turned out to be. "rwt" is the mode a backward seek over a provider descriptor was measured on; a
+    // write-only descriptor has never been asked to do it here. (The other writer through this path is
+    // the log tee, which only ever appends to its own handle.) `write_bytes` does not come through here
+    // — it opens "wt" for a single forward pass, which is all it needs.
     return open_uri_fd(uri, write ? "rwt" : "r");
 }
 

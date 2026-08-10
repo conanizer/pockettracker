@@ -81,6 +81,8 @@ https://github.com/conanizer/pockettracker
 
 **Manual:** download `PocketTracker-<version>.apk` and open it on your device (allow "install from unknown sources" if asked).
 
+PocketTracker requests **no permissions**. On first run, open a file browser and press **A** on the `ADD FOLDER...` row — Android's folder picker opens, and the folder you choose is where your projects, samples and renders live. See the [quick-start guide](docs/quick-start-guide.md).
+
 ### Linux handheld (PortMaster)
 
 For aarch64 CFW handhelds. Nothing extra is needed — no BIOS, no runtime, no gptokeyb.

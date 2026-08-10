@@ -198,6 +198,12 @@ inline bool path_exists(const std::string& path) {
 // The app-root-relative tail of an absolute media path authored under ANOTHER install — the portable
 // part naming where UNDER the app root a file lives ("Samples/Pads/kick.wav"), with the foreign root
 // stripped. Empty when the path is under no recognisable app sub-tree (a sample the user kept elsewhere).
+//
+// ⭐ **A URI is deliberately NOT excluded, and anchor 2 is why.** Android's paths are `pt://<root-id>/…`
+// where the id is derived from the granted tree URI — so re-granting the same folder, or moving the home
+// root, leaves a project full of absolute paths that name a tree this device no longer has. Those still
+// carry "/Samples/", so they re-root onto the current home exactly as a phone-authored plain path does.
+// The anchor only ever runs on a path that has already failed to open (see resolve_media_path).
 inline std::string app_root_relative_tail(const std::string& path) {
     // 1) An Android phone hard-codes its root to ".../PocketTracker" (AndroidFileSystem), so everything
     //    after the LAST "/PocketTracker/" is exactly the tail. This is the case a user copying a project
@@ -234,10 +240,15 @@ inline std::string to_lower_ascii(std::string s) {
 //
 // ⭐ It returns IMMEDIATELY when the exact path exists — which is every host-tool/golden case (their paths
 // match the disk exactly) — so nothing there moves, and the only directory listing ever done is on a real
-// miss. This is the one place songcore reaches for <filesystem>; it is never instantiated on Android
-// (load_project_media has no caller there), so the APK neither runs nor links it.
+// miss. This is the one place songcore reaches for <filesystem>.
+//
+// ⚠️ **A URI IS NOT A `std::filesystem::path` AND IS RETURNED UNTOUCHED.** `fs::exists("pt://…")` is
+// false, so without this the walk below would split the URI on its own slashes, fail to find "pt:" in the
+// process's current directory, and return the path anyway — the right answer reached by listing a
+// directory that has nothing to do with the file. Case drift is a disk property; a document provider
+// resolves its own names.
 inline std::string resolve_case_insensitive(const std::string& path) {
-    if (path.empty()) return path;
+    if (path.empty() || pt_path_is_uri(path.c_str())) return path;
     namespace fs = std::filesystem;
     std::error_code ec;
     if (fs::exists(fs::path(path), ec)) return path;   // exact hit — the overwhelmingly common case
@@ -301,8 +312,13 @@ inline std::string resolve_case_insensitive(const std::string& path) {
 inline std::string resolve_media_path(const std::string& path, const std::string& base_dir,
                                       const std::string& app_root) {
     if (path.empty()) return path;
+    // ⚠️ **A URI IS ABSOLUTE**, and none of the three character tests below says so: `pt://…` starts
+    // with a letter and its second character is not ':'. Missed, it reads as RELATIVE and is joined onto
+    // the base dir — `pt://home/pt://other/Samples/kick.wav`, a string that resolves nowhere, from a
+    // project that named its sample perfectly well.
     const bool absolute = path[0] == '/' || path[0] == '\\' ||
-                          (path.size() > 1 && path[1] == ':');   // C:\… on Windows
+                          (path.size() > 1 && path[1] == ':') ||   // C:\… on Windows
+                          pt_path_is_uri(path.c_str());
 
     std::string resolved = (!absolute && !base_dir.empty()) ? base_dir + "/" + path : path;
 

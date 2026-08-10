@@ -3,9 +3,11 @@
 // ─── FileSystem, on the Storage Access Framework ─────────────────────────────────────────────────
 //
 // The Android implementation of `ui/filesystem.h`, and the second one to exist — `StdFileSystem` is
-// the portable one every other platform uses and continues to use here on every non-SAF launch. The
-// seam has been abstract since S6a precisely so that the worst case is a second implementation
-// rather than a redesign; this is that second implementation.
+// the portable one every other platform uses. The seam has been abstract since S6a precisely so that
+// the worst case is a second implementation rather than a redesign; this is that second
+// implementation, and on Android it is the only one: the app declares no storage permission, so
+// `/storage/emulated/0` is unreadable to the process and a granted tree is the only way to a user's
+// files.
 //
 // ── What a PATH is here, and why it is not a document URI ────────────────────────────────────────
 //
@@ -50,9 +52,8 @@ namespace ptshell {
 /**
  * The `ui::FileSystem` backed by a granted SAF tree.
  *
- * Constructed only when the shell is asked for it (argv[3] == "saf"); every other launch keeps the
- * `StdFileSystem` it has always had. ⚠️ It OWNS an inner `StdFileSystem` for the app-private files,
- * which is what keeps settings working on a device that has granted nothing at all.
+ * ⚠️ It OWNS an inner `StdFileSystem` for the app-private files, which is what keeps settings,
+ * template and autosave working on a device that has granted nothing at all.
  */
 class SafFileSystem : public pt::ui::FileSystem {
   public:
@@ -83,6 +84,23 @@ class SafFileSystem : public pt::ui::FileSystem {
     /** How many folders are granted. Printed at boot, because 0 and "granted but empty" differ. */
     int root_count();
 
+    /**
+     * The tree the seven app folders live in — `pt://<root-id>`, or `pt://roots` when nothing is
+     * granted (which is what puts the browser on the roots directory, i.e. on the one row that can fix
+     * that).
+     *
+     * ⚠️ **The choice is Java's and it is PERSISTED there** (`SafStorage.homeRootId`), because it must
+     * not move when the grant SET changes: the id is derived from the tree URI, so granting a second
+     * folder whose id happens to sort lower would otherwise relocate every app folder the user has.
+     * Read once per roots load into `homeId_`, and falls back to the lowest id if Java answers "" —
+     * which is the answer that says "nothing granted", so the fallback is a control, not a policy.
+     *
+     * ⚠️ Public because it is THE ANDROID MEDIA ROOT and two things above this class need it: what a
+     * project's relative sample paths resolve against (`AppConfig::mediaBaseDir`), and where the log
+     * file goes. Neither can be derived from `config_path()`, which answers "" with no grant.
+     */
+    std::string home_root_path();
+
     // ── The app's directories ───────────────────────────────────────────────────────────────────
     std::string projects_directory() override;
     std::string samples_directory() override;
@@ -108,6 +126,17 @@ class SafFileSystem : public pt::ui::FileSystem {
     bool file_exists(const std::string& path) override;
     bool is_directory(const std::string& path) override;
     std::string parent_path(const std::string& path) override;
+
+    /**
+     * The one ACTION entry: `ADD FOLDER…` in the roots directory, which fires
+     * `ACTION_OPEN_DOCUMENT_TREE`.
+     *
+     * ⚠️ **Returns as soon as the intent is away.** The grant arrives in the activity's
+     * `onActivityResult`, which cannot run until this process's SDL thread has let go — see
+     * `ui::FileSystem::activate` for why waiting here would cost the session its autosave. The new
+     * root shows up because the roots listing is never cached and the browser re-lists on foreground.
+     */
+    bool activate(const std::string& path) override;
 
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────
     //
@@ -192,14 +221,12 @@ class SafFileSystem : public pt::ui::FileSystem {
     /** Recursive copy, for the move/copy fallbacks. `to` must not exist; folders copy as folders. */
     bool copy_tree(const std::string& from, const std::string& to);
 
-    /** The tree the seven app folders live in: the lowest root-id. "" when nothing is granted. */
-    std::string home_root_path();
-
     void invalidate(const std::string& dirPath);
 
     pt::ui::StdFileSystem priv_;   // the app-private files, and every plain path that reaches here
 
     std::vector<Root> roots_;
+    std::string       homeId_;        // filled with roots_, from Java; "" = nothing granted
     bool              rootsLoaded_ = false;
 
     std::unordered_map<std::string, std::string>                 uriCache_;   // pt:// path → doc URI

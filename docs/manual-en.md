@@ -62,35 +62,57 @@ PocketTracker stores everything in a single project file (`.ptp`). Sounds come f
 1. Download the latest `.apk` from the project releases page.
 2. On your Android device, enable **Install from unknown sources** in Settings → Security.
 3. Open the downloaded `.apk` and tap **Install**.
-4. On first launch the app may ask for **All Files Access** permission (Android 11+). Grant it — this is required to read and write project and sample files.
+4. Launch the app and choose a folder for it to work in — see below. PocketTracker asks for **no permissions at all**.
 
-> [!IMPORTANT]
-> If you deny the All Files Access permission, PocketTracker cannot load samples, save projects, or export WAV files. If you accidentally denied it, go to Android Settings → Apps → PocketTracker → Permissions and grant it manually.
+### Choosing your folder
+
+PocketTracker holds no storage permission, so it can only see folders you hand it. The first time you open a file browser — **PROJECT → LOAD**, or **LOAD** on the INSTRUMENT screen — it opens on a list with a single row:
+
+```
+> ADD FOLDER...
+```
+
+Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its six sub-folders inside it the moment it needs them:
+
+```
+Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/
+```
+
+Anything already in the folder is left exactly as it is — so if you have used PocketTracker before, pick your existing `Documents/PocketTracker` and every project, sample and theme is where it was.
+
+> [!TIP]
+> You can add more folders at any time. Press **B** in the browser until you reach the top and you will see every folder you have granted, with `ADD FOLDER...` at the end — that is how you reach a sample library, an SD card or a video in DCIM that lives outside your home folder. The **first** folder you choose stays the home one; adding others never moves your projects.
+
+Android will not let any app be granted a whole volume (`Internal storage`) or the `Download` folder itself. Pick a real folder — `Documents/PocketTracker` is a tidy choice.
 
 ### Sample files
 
-PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files to device storage and load them from the **INSTRUMENT** screen using the file browser. SF2 files are loaded the same way.
+PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files into a folder you have granted, and load them from the **INSTRUMENT** screen using the file browser. SF2 files are loaded the same way.
 
 ### Project files
+
+Below, `<home>` is the folder you chose above.
 
 Projects are saved as `.ptp` files in:
 
 ```
-/Documents/PocketTracker/Projects/
+<home>/Projects/
 ```
 
 WAV exports are saved to:
 
 ```
-/Documents/PocketTracker/Renders/
+<home>/Renders/
 ```
 
 Resampled instruments and CHOP exports are saved to:
 
 ```
-/Documents/PocketTracker/Samples/Resampled/
-/Documents/PocketTracker/Samples/Chops/{name}/
+<home>/Samples/Resampled/
+<home>/Samples/Chops/{name}/
 ```
+
+On Linux, Windows and PortMaster handhelds there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same six sub-folders live in it.
 
 ---
 
@@ -1031,7 +1053,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 | CLEAN INST | Remove unused instruments (with confirmation dialog). |
 | SETTINGS | Open the SETTINGS screen (press A). |
 
-WAV exports are saved to `/Documents/PocketTracker/Renders/` with auto-incremented filenames (`ProjectName_0001.wav`). Stems are written to a per-project subfolder — `Renders/ProjectName/ProjectName_1.wav`, `_2.wav`, … — plus `_reverb.wav` / `_delay.wav` when those sends are in use.
+WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's home folder (section 2) — with auto-incremented filenames (`ProjectName_0001.wav`). Stems are written to a per-project subfolder — `Renders/ProjectName/ProjectName_1.wav`, `_2.wav`, … — plus `_reverb.wav` / `_delay.wav` when those sends are in use.
 
 > [!WARNING]
 > **CLEAN SEQ** and **CLEAN INST** are **permanent** — there is no undo. Save your project before running them, in case you remove something you still needed.
@@ -1571,10 +1593,13 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 
 ## 23. File Management
 
+Throughout this section `<home>` is PocketTracker's home folder: on Android the folder you granted it
+(section 2), and elsewhere the `PocketTracker` folder the app keeps beside itself.
+
 ### Project files
 
 - Format: `.ptp` (JSON with version field; old projects are migrated automatically on load)
-- Location: `/Documents/PocketTracker/Projects/`
+- Location: `<home>/Projects/`
 - Save: PROJECT screen → SAVE
 - Load: PROJECT screen → LOAD
 
@@ -1600,7 +1625,7 @@ sample — handy for grabbing a sound straight from a clip without a separate co
   file → **A**. A keyboard appears, pre-filled with `<filename>_audio`; edit the name if you like, then
   confirm.
 - **What happens:** the first audio track is extracted, **saved as a WAV** in
-  `/Documents/PocketTracker/Samples/` (stereo preserved, at the file's own sample rate) and loaded into
+  `<home>/Samples/` (stereo preserved, at the file's own sample rate) and loaded into
   the current instrument. The status line shows `CONVERTED: <NAME>.WAV`.
 - Because a real WAV is written, the instrument gets a normal, reusable sample file and reopens without
   re-decoding — the key difference from compressed audio (MP3 / FLAC / OGG / M4A), which is decoded in
@@ -1613,7 +1638,7 @@ sample — handy for grabbing a sound straight from a clip without a separate co
 ### WAV exports
 
 - Format: 16-bit stereo WAV, 44100 Hz
-- Location: `/Documents/PocketTracker/Renders/`
+- Location: `<home>/Renders/`
 - Filenames: `ProjectName_0001.wav`, `_0002.wav`, … (auto-incremented)
 - Triggered from: PROJECT screen → WAV MIX
 
@@ -1632,16 +1657,25 @@ Created via Selection Resampling:
 4. Choose YES — selected tracks render offline to a WAV file.
 5. A new instrument is created in the first empty slot with the rendered audio.
 
-Output: `/Documents/PocketTracker/Samples/Resampled/Resample_0001.wav`, …
+Output: `<home>/Samples/Resampled/Resample_0001.wav`, …
 
 ### CHOP exports
 
 When slice markers are set in the SAMPLE EDITOR, use CHOP to export each slice as a separate WAV:
 
-Output: `/Documents/PocketTracker/Samples/Chops/{instrument_name}/`
+Output: `<home>/Samples/Chops/{instrument_name}/`
 
 > [!NOTE]
 > CHOP exports do not automatically load into instrument slots. After chopping, open the INSTRUMENT screen and use the file browser to load the individual slice files onto new instruments.
+
+### The log file
+
+- Location: `<home>/pockettracker-log.txt`
+- One session, rewritten each launch, capped at 512 KB
+
+Plain text, and readable on the device itself. It records the whole start-up — which folders were
+found, how many samples loaded, which controller was detected — which is exactly what a bug report
+needs and what is hardest to describe from memory. If something is wrong, attach this file.
 
 ---
 
@@ -1718,8 +1752,8 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 ## 25. Configuration File (config.json)
 
-Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in your
-PocketTracker folder, beside the `Projects` and `Samples` directories, and covers three of them:
+Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in
+PocketTracker's home folder, beside the `Projects` and `Samples` directories, and covers three of them:
 **your controller's button layout**, **your keyboard bindings**, and **which folder a load browse
 opens at**.
 
@@ -1727,8 +1761,8 @@ It is the opposite of `settings.json`, which the app writes whenever you change 
 SETTINGS screen. **`config.json` is yours** — the app reads it once at startup and never writes to it
 again.
 
-**Finding it.** The app creates a starter copy on first launch, filled in with everything at its
-current value. So the file already shows you the exact shape and spelling of every option, and as
+**Finding it.** The app creates a starter copy filled in with everything at its current value — on
+first launch, or on Android on the first launch after you have granted it a folder to live in. So the file already shows you the exact shape and spelling of every option, and as
 seeded it changes nothing. Open it in any text editor, change what you want, and **restart the app**.
 
 Every key is optional. Delete a line to go back to the built-in default. A missing, empty or
@@ -1817,19 +1851,31 @@ edited on a desktop can't leave you unable to back out of a screen on a phone.
 
 ```json
 "folders": {
-  "samples":     "/path/to/your/samples",
-  "soundfonts":  "...",
-  "instruments": "...",
-  "projects":    "...",
-  "themes":      "..."
+  "samples":     "Samples",
+  "soundfonts":  "Soundfonts",
+  "instruments": "Instruments",
+  "projects":    "Projects",
+  "themes":      "Themes"
 }
 ```
 
 Sets the folder each **load** browse starts in. If your samples live somewhere outside the
 PocketTracker folder, this saves climbing out of it every time.
 
-A path that doesn't exist is ignored, and that category quietly falls back to its default — a typo or
+**A plain name is inside your PocketTracker folder**, and can be several levels deep:
+`"samples": "Samples/Packs/Breaks"` starts a sample load two folders down. This is how the starter
+file is written, and it is what makes the file portable — copy it to another device and it still
+means the same thing.
+
+**A path beginning with `/` (or a Windows drive, `C:\Music`) is used exactly as written**, so a
+sample library that lives nowhere near PocketTracker is still one line away.
+
+A folder that doesn't exist is ignored, and that category quietly falls back to its default — a typo or
 a folder you've since moved costs one convenience, never a broken file browser.
+
+> **On Android**, a folder outside your home folder has to be granted before the app can see it —
+> `ADD FOLDER...` at the top of the browser (section 2). Reaching one that way is easier than naming
+> it here, because the granted path is not something you can type.
 
 This changes only where browsing **starts**. It does not move where anything is **saved** — renders,
 exports and sample-editor saves keep their own folders.

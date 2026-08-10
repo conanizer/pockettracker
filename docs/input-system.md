@@ -231,8 +231,9 @@ L + R + B               Recall snapshot                     (planned)
 the opposite of `settings.json`: that one is written by the app from the SETTINGS screen, while
 **`config.json` is yours** — the app reads it at startup and never rewrites it.
 
-On first launch the app writes a starter copy listing every option at its current value, so the file
-is a working example rather than something you have to compose from scratch. Editing it takes effect
+The app writes a starter copy listing every option at its current value — on first launch, or on
+Android on the first launch after you grant it a folder — so the file is a working example rather
+than something you have to compose from scratch. Editing it takes effect
 on the next launch. Every key is optional; delete a line to go back to the built-in default. A file
 that is missing, empty or invalid costs you nothing — the defaults simply stand.
 

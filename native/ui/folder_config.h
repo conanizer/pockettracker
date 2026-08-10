@@ -32,6 +32,14 @@
 // non-string value, a missing "folders" object, or an unparseable file → the same: defaults stand. A
 // path that does not exist on disk is ignored AT USE (the dispatcher checks is_directory), so a typo or
 // a folder that has since been deleted costs one category's convenience, never a broken browser.
+//
+// ⚠️ **A VALUE IS ROOT-RELATIVE UNLESS IT IS ABSOLUTE** — `resolve_folder_override` below, and it is
+// one rule on every platform rather than an Android arm. `"samples": "Samples"` is what the template
+// seeds and what a user can type, read and carry to another device; `"samples": "/mnt/sd/Packs"` still
+// means exactly that. The rule exists because on Android the app's root is a granted-tree id
+// (`pt://a1b2c3d4e5f6/…`) that nobody can type, discover or move between devices — a starter file full
+// of those is a document that only describes the machine it was written on, and it goes stale the day
+// the home folder changes.
 
 #include "ui/filesystem.h"
 #include "ui/input_config.h"
@@ -56,6 +64,20 @@ struct FolderConfig {
  * defaults stand. A present, valid file fills only the keys it carries.
  */
 bool load_folder_config(FileSystem& fs, FolderConfig& out);
+
+/**
+ * A `folders` value → the directory to browse. ABSOLUTE (`/mnt/sd/Packs`, `C:\Music`, `\\server\x`) or
+ * a URI (`pt://<id>/Samples`) is used VERBATIM; anything else is joined onto `media_root`.
+ *
+ * This is `resolve_media_path`'s rule (songcore/engine_setup.h) applied to a second file, and it is
+ * deliberately the same one: a project's sample paths and a config's browse paths are both "a place,
+ * written by a human or by an earlier install, that has to mean something on THIS device".
+ *
+ * `media_root` empty ⇒ the value is returned unchanged, which is the answer on a platform that has no
+ * root to be relative to yet (Android before a folder is granted). The caller still checks
+ * `is_directory`, so an unresolvable value costs one category's convenience and nothing else.
+ */
+std::string resolve_folder_override(const std::string& value, const std::string& media_root);
 
 /**
  * Write a STARTER config.json when none exists, so the feature is DISCOVERABLE — the app used not to

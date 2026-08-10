@@ -20,7 +20,15 @@ What should have happened.
 
 ## Actual behavior
 
-What actually happened. Include any error messages or logcat output if available.
+What actually happened. Include any error messages if available.
+
+## Log file
+
+PocketTracker writes a log of each session to `pockettracker-log.txt` in its home folder — the folder
+you granted it on Android, or the `PocketTracker` folder beside the app elsewhere. It is a plain text
+file you can open or attach from the device itself, and it records the whole start-up: which folders
+were found, which samples loaded, which controller was detected. Attaching it answers most of the
+questions a report otherwise needs a back-and-forth for.
 
 ## Device info
 

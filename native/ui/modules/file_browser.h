@@ -47,6 +47,7 @@ inline constexpr int BROWSER_VISIBLE_ROWS = 19;
 inline constexpr Argb COLOR_FOLDER = 0xFF88CCFF;  // light blue
 inline constexpr Argb COLOR_VIDEO  = 0xFFFFBB55;  // amber — a container we can show but not load
 inline constexpr Argb COLOR_PARENT = 0xFFFFAA88;  // orange — ".."
+inline constexpr Argb COLOR_ACTION = 0xFF88FF88;  // green — a row that DOES something, not one that is
 
 /**
  * Containers the browser can COLOUR but NOT load — audio-in, but no decoder for them. Since the
@@ -82,7 +83,9 @@ inline const std::vector<std::string>& soundfont_extensions() {
 }
 
 struct BrowserItem {
-    enum class Kind { PARENT, FOLDER, FILE };
+    /** ⚠️ ACTION is APPENDED, per the project's rule about enum members: a member's position is its
+     *  identity, and inserting one renumbers every value written against the old order. */
+    enum class Kind { PARENT, FOLDER, FILE, ACTION };
 
     Kind        kind = Kind::FILE;
     std::string path;         // absolute
@@ -97,6 +100,16 @@ struct BrowserItem {
     int64_t     lastModified = 0;
 
     bool is_parent() const { return kind == Kind::PARENT; }
+
+    /**
+     * ".." and `ADD FOLDER…` — the rows with nothing on disk behind them.
+     *
+     * ⚠️ **Rename, delete, select, copy and cut all refuse on THIS, not on `is_parent()`.** Those six
+     * sites were written when ".." was the only such row; a second one that had to be remembered at
+     * each of them would be wrong at whichever was missed, and nothing would say so until a user
+     * pressed SELECT+B on it. One predicate, below the sites.
+     */
+    bool is_pseudo() const { return kind == Kind::PARENT || kind == Kind::ACTION; }
 };
 
 /** NORMAL browses; DELETE is the "A=YES B=NO" confirm over the row under the cursor. */
@@ -131,9 +144,17 @@ struct FileBrowserState {
     }
     const BrowserItem* current() const { return item_at(cursor); }
 
-    /** The first row a selection may start on — 1 when a ".." is pinned at the top, else 0. */
+    /**
+     * The first row a selection may start on: the pinned rows are at the top, so it is the index of
+     * the first real entry.
+     *
+     * ⚠️ **Counted, not "1 if there is a `..`".** With two pinned kinds a hard-coded 1 lets a
+     * selection start ON the second one — and the selection is what B copies and L+A pastes.
+     */
     int first_selectable() const {
-        return (!items.empty() && items[0].is_parent()) ? 1 : 0;
+        int i = 0;
+        while (i < static_cast<int>(items.size()) && items[static_cast<size_t>(i)].is_pseudo()) ++i;
+        return i;
     }
 
     /** True when `index` falls inside the live anchor..cursor range. */

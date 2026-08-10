@@ -31,6 +31,12 @@
 #     safDelete(L…;)Z               — │ one: SAVE reports "SAVE FAILED" and the user's edits are still
 #     safRename(L…;L…;)L…/String;   — │ only in RAM, so the failure arrives at the moment the work is
 #     safMove(L…;L…;L…;)L…/String;  — ┘ least recoverable.
+#     safHomeRootId()L…/String;     — ┐ which granted tree the app's seven folders live in (P4a), and
+#                                   — │ the way into the first one. ⚠️ A rename of `safHomeRootId`
+#     safRequestRoot()Z             — ┘ answers "" for a device that HAS a grant, which sends the seven
+#                                   —   folders to whichever tree sorts lowest; a rename of
+#                                   —   `safRequestRoot` leaves ADD FOLDER… as a row that does nothing,
+#                                   —   which on a fresh install is the whole app.
 # Every NAME above is part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
@@ -64,6 +70,8 @@
     boolean safDelete(java.lang.String);
     java.lang.String safRename(java.lang.String, java.lang.String);
     java.lang.String safMove(java.lang.String, java.lang.String, java.lang.String);
+    java.lang.String safHomeRootId();
+    boolean safRequestRoot();
 }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────

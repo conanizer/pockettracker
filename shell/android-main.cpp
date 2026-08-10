@@ -11,6 +11,7 @@
 //   SIGTERM/SIGINT → a flag the loop polls   nothing (⚠️ C4 — see the terminate_requested note below)
 //   SDL_Init / SDL_Quit, here                SDL_Init here too; SDLActivity owns the surface, not this
 //   SdlAudioEngine                           OboeAudioEngine  ← the whole of C3's audio work
+//   StdFileSystem over the app root          SafFileSystem — the app holds no storage permission
 //   default_app_root(), one root twice       two roots from Java: media tree + app-private files
 //   PlatformCaps::sdl(debug), console on     PlatformCaps::converged(...) — see where it is set below
 //
@@ -27,13 +28,13 @@
 #include <SDL.h>
 
 #include "audio-engine.h"
+#include "byte_source.h"       // pt_fopen — the log file's tee follows the app into a granted tree
 #include "oboe-audio-engine.h"
 #include "ui/platform_caps.h"
-#include "ui/std_filesystem.h"
 
 #include "app.h"
 #include "button_feedback.h"
-#include "saf-filesystem.h"    // the SAF ui::FileSystem (SAF migration P3); Android-only by construction
+#include "saf-filesystem.h"    // the ONLY ui::FileSystem here; Android-only by construction
 #include "midi-in-android.h"    // the MIDI INPUT port  (MIDI plan E5);  compiles to nothing elsewhere
 #include "midi-out-android.h"   // the EXTERNAL MIDI port (MIDI plan B2b); compiles to nothing elsewhere
 
@@ -44,6 +45,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace ui = pt::ui;
@@ -72,8 +74,8 @@ constexpr const char* kFallbackAppRoot = "/storage/emulated/0/Documents/PocketTr
 // my crash file?". On Android they go to a stdout that is `/dev/null` unless somebody has set
 // `log.redirect-stdio`, which needs root on most devices. So the two lessons this project has already
 // paid for both apply here and neither is satisfied by default: `main.cpp`'s `setvbuf` note (a
-// buffered stdout loses everything when the process is killed, which is how a bring-up ends) and P4a's
-// (an instrument that is not pointed at the thing tells you nothing about it).
+// buffered stdout loses everything when the process is killed, which is how a bring-up ends), and that
+// an instrument not pointed at the thing tells you nothing about it.
 //
 // Twenty lines of pipe-and-pump fixes both, and it is platform residue in the strictest sense —
 // nothing above this file knows it happened.
@@ -81,15 +83,49 @@ constexpr const char* kFallbackAppRoot = "/storage/emulated/0/Documents/PocketTr
 // ⚠️ **AND THE SAME LINES GO TO A FILE, because logcat is unreachable to the person who has the bug.**
 // Reading logcat needs a PC, developer mode and USB debugging; a user reporting "it opened without the
 // on-screen buttons" has none of those, and that report is about the boot itself — the one moment
-// nobody can be talked through capturing live. So the pump tees into `<appRoot>/pockettracker-log.txt`,
-// which the user reaches with any file manager and attaches to a mail. It is TRUNCATED at start (a
-// session log, not a history) and capped, so it cannot grow into the user's storage.
-FILE*  g_logFile     = nullptr;   // pump thread only, after the pump starts; null = logcat alone
-size_t g_logFileSize = 0;
-constexpr size_t kLogFileCap = 512 * 1024;
+// nobody can be talked through capturing live. So the pump tees into `pockettracker-log.txt`, which the
+// user reaches with any file manager and attaches to a mail. It is TRUNCATED at start (a session log,
+// not a history) and capped, so it cannot grow into the user's storage.
+//
+// ⚠️⚠️ **IT IS WRITTEN TWICE OVER, TO TWO DIFFERENT PLACES, AND BOTH ARE REQUIRED.** The app holds no
+// storage permission, so at the moment the first line is written the only directory it can certainly
+// write to is `filesDir` — which the user cannot reach. The granted tree, which they CAN reach, does not
+// exist yet on a fresh install and is not known until the filesystem has asked Java for it, several
+// screens of boot later. So the log opens in `filesDir` at once and RELOCATES into the granted tree as
+// soon as there is one, replaying everything written so far (`relocate_log_file`). Neither half alone
+// satisfies the requirement this file has to meet — that a user with no PC can find it and attach it
+// to a mail — and the app is unusable until a folder is granted anyway, so the reachable copy always
+// covers the sessions that can have a bug worth reporting.
+//
+// ⚠️ `getExternalFilesDir()` is not the answer to this and never was: Android 11+ hides `Android/data`
+// from the system picker and from most file managers, so it is PC-reachable and device-unreachable —
+// the wrong half of the problem.
+std::mutex  g_logMutex;           // g_logFile is swapped on the SDL thread and written on the pump's
+FILE*       g_logFile     = nullptr;   // null = logcat alone
+size_t      g_logFileSize = 0;
+std::string g_logPath;            // what g_logFile is open on; "" = nothing open
+constexpr size_t      kLogFileCap  = 512 * 1024;
+constexpr const char* kLogFileName = "pockettracker-log.txt";
+
+// Everything written so far, held so the relocation can carry it across.
+//
+// ⚠️ **IN MEMORY AND NOT RE-READ OFF THE FIRST FILE, because of the pump.** The lines the relocation
+// most needs to carry are the ones printed microseconds before it (`saf: N granted folder(s)`), and
+// those are still in the pipe: the pump thread turns them into writes whenever it is scheduled. Reading
+// the file back would race that and drop exactly the lines that say why the boot went the way it did.
+// Appended under the same lock as the write, so a line is either in here (and carried) or arrives after
+// the swap (and goes straight to the new file) — never neither, never both.
+std::string      g_logCarry;
+bool             g_logCarrying = true;
+constexpr size_t kLogCarryCap  = 64 * 1024;   // the boot is a few KB; this is slack, not a budget
 
 void log_line(const char* s) {
     __android_log_write(ANDROID_LOG_INFO, kLogTag, s);
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    if (g_logCarrying && g_logCarry.size() < kLogCarryCap) {
+        g_logCarry.append(s);
+        g_logCarry.push_back('\n');
+    }
     if (!g_logFile || g_logFileSize >= kLogFileCap) return;
     // ⚠️ Flushed per line, for main.cpp's `setvbuf` reason exactly: a buffer that dies with the
     // process takes the boot with it, and the boot is what this file exists to record.
@@ -100,6 +136,40 @@ void log_line(const char* s) {
     std::fflush(g_logFile);
     if (g_logFileSize >= kLogFileCap)
         std::fprintf(g_logFile, "--- log capped at %zu bytes ---\n", kLogFileCap);
+}
+
+/** The destination is settled — stop carrying and give the buffer back. */
+void log_carry_done() {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    g_logCarrying = false;
+    std::string().swap(g_logCarry);
+}
+
+// Move the tee into `dir` (a granted `pt://` tree), carrying everything already written across.
+// Returns the path it is now writing to, or "" if it could not move — in which case the first
+// destination still stands and is still being written to.
+//
+// ⚠️ **Through `pt_fopen`, so it must run AFTER the hooks are installed** — `std::fopen` cannot see a
+// `pt://` string, and a silent failure here is precisely the failure this function exists to end.
+//
+// ⚠️ The `filesDir` copy is NOT deleted, and not truncated either. On the run where the relocation is
+// itself what went wrong it is the only copy there is, and it is bounded by the same cap.
+std::string relocate_log_file(const std::string& dir) {
+    const std::string path = dir + "/" + kLogFileName;
+
+    FILE* next = pt_fopen(path.c_str(), "w");
+    if (!next) return std::string();
+
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    if (!g_logCarry.empty()) std::fwrite(g_logCarry.data(), 1, g_logCarry.size(), next);
+    std::fflush(next);
+    if (g_logFile) std::fclose(g_logFile);
+    g_logFile     = next;
+    g_logPath     = path;
+    g_logFileSize = g_logCarry.size();
+    g_logCarrying = false;
+    std::string().swap(g_logCarry);
+    return path;
 }
 
 void* log_pump(void* arg) {
@@ -215,8 +285,6 @@ bool android_has_physical_gamepad() {
     return result;
 }
 
-// `appRoot` may be empty — then the tee is skipped and logcat is the only sink, which is the
-// pre-existing behaviour rather than a failure.
 // ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
 //
 // ⚠️ **THE ONE THING A LAYOUT BUG REPORT NEEDS, AND THE ONE THING NOTHING RECORDED.** `useTouch` is
@@ -255,18 +323,22 @@ void android_log_input_devices() {
     env->DeleteLocalRef(activity);
 }
 
-void redirect_stdio_to_logcat(const std::string& appRoot) {
+// `privateRoot` is `context.filesDir` — the ONE directory this process can certainly write to before
+// any folder has been granted, which is why the tee starts there and moves later. Empty skips the file
+// entirely and leaves logcat as the only sink: a degraded bring-up, not a failure to launch.
+void redirect_stdio_to_logcat(const std::string& privateRoot) {
     // Unbuffered for the same reason main.cpp is: a buffer that dies with the process takes the only
     // record of the boot with it.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
     // Opened BEFORE the pump starts, so the very first banner line is already teed. A failure here
-    // (no permission yet, no such directory) leaves the pointer null and costs nothing.
-    if (!appRoot.empty()) {
-        const std::string path = appRoot + "/pockettracker-log.txt";
+    // leaves the pointer null and costs nothing.
+    if (!privateRoot.empty()) {
+        const std::string path = privateRoot + "/" + kLogFileName;
         g_logFile     = std::fopen(path.c_str(), "w");
         g_logFileSize = 0;
+        if (g_logFile) g_logPath = path;
     }
 
     int pfd[2];
@@ -304,10 +376,10 @@ void redirect_stdio_to_logcat(const std::string& appRoot) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // ⚠️ THE ROOT IS RESOLVED FIRST, and the redirect follows it — not the other way round. The pump
-    // tees the console into `<appRoot>/pockettracker-log.txt`, so it has to know the root before the
-    // first line is written or the banner lands in logcat alone. The two lines below use
-    // `__android_log_print` directly and so do not need the redirect to be up.
+    // ⚠️ THE ROOTS ARE RESOLVED FIRST, and the redirect follows them — not the other way round. The pump
+    // tees the console into a file, so it has to know where before the first line is written or the
+    // banner lands in logcat alone. The lines below use `__android_log_print` directly and so do not
+    // need the redirect to be up.
     // argv[0] is the application name SDLActivity supplies; the root is the first real argument.
     std::string appRoot = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : std::string();
     if (appRoot.empty()) {
@@ -330,7 +402,12 @@ int main(int argc, char** argv) {
     const std::string privateRoot =
         (argc > 2 && argv[2] && argv[2][0]) ? std::string(argv[2]) : appRoot;
 
-    redirect_stdio_to_logcat(appRoot);
+    // ⚠️ **THE PRIVATE ROOT, NOT THE MEDIA ROOT** — the media tree is unreadable and unwritable to this
+    // process until a folder is granted, so a tee aimed at it opens nothing and says nothing. That is
+    // measured, not supposed: the device says so as `MediaProvider: Permission to access file … is
+    // denied` — under MediaProvider's own logcat tag, and NOTHING under ours. See
+    // `relocate_log_file` for the other half — this destination is the one the user cannot reach.
+    redirect_stdio_to_logcat(privateRoot);
 
     // ⚠️ **THE BACK BUTTON, TRAPPED BEFORE SDL_Init (C4).** Untrapped, Android's back runs
     // `SDLActivity.onBackPressed()` → `finish()`, which closes the activity out from under the frame
@@ -371,52 +448,67 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ⚠️ **THIS LINE IS C5's SPIKE, ANSWERED BY RUNNING RATHER THAN BY READING.** The open question
-    // the plan wanted settled in week one is whether `std::filesystem` can reach
-    // `/storage/emulated/0` from native code with MANAGE_EXTERNAL_STORAGE granted. `StdFileSystem` is
-    // the same implementation the desktop uses, so if the file browser lists projects on device the
-    // answer is yes and `AndroidFileSystem.kt` (324 lines) dies with the rest of the Kotlin in Phase
-    // E; if it does not, this one line becomes a JNI-backed `pt::ui::FileSystem` and NOTHING ELSE IN
-    // THE TREE CHANGES — the interface has been abstract since S6a precisely so that the worst case
-    // is a second implementation rather than a redesign.
+    // ⚠️ **THE STORAGE ACCESS FRAMEWORK IS THE ONLY WAY TO USER FILES ON THIS PLATFORM**, because the
+    // app declares no storage permission at all: `/storage/emulated/0` is unreadable to this process,
+    // so a `StdFileSystem` over the media tree would list nothing whatever `std::filesystem` can do.
+    // The seam has been abstract since S6a precisely so the answer to that is a second implementation
+    // rather than a redesign, and this is it. It still OWNS a `StdFileSystem` over `privateRoot` for
+    // `settings.json`, `template.ptp` and `autosave.ptp` — read during the boot below, long before a
+    // picker can have run.
     //
-    // ⚠️ And that is also the SAF contingency. If the fdroiddata review forces Storage Access
-    // Framework, `std::filesystem` is off the table regardless of what this spike measures, because
-    // SAF is a Java-only API — the answer would then be the same second implementation, arrived at
-    // for a different reason. The seam is what makes both outcomes cheap.
-    ui::StdFileSystem filesystem(appRoot, privateRoot);
+    // ⚠️ Constructed HERE so it outlives `run()`, like the feedback sink and both MIDI ports.
+    //
+    // ⚠️ **The hooks go in before anything can open a file.** They are what lets `pt_fopen`,
+    // `pt_remove` and `pt_rename` — the direct file calls below the UI, in the decoders and the WAV
+    // writer — act on a `pt://` path. Un-installed, a render writes every byte correctly and produces
+    // no file.
+    ptshell::SafFileSystem filesystem(privateRoot);
+    filesystem.install_file_hooks();
 
-    // ⚠️ **argv[3] IS SCAFFOLDING WITH A KNOWN DEATH DATE (SAF migration P3).** `--es storage saf` on
-    // the launch intent picks the SAF filesystem instead of the one above, so a single build can be
-    // driven down both storage paths and compared while MANAGE_EXTERNAL_STORAGE is still granted —
-    // which is the only way to tell "SAF works" from "the media tree was readable all along". Absent,
-    // and on every launcher tap, this is empty and nothing below changes.
-    //
-    // ⚠️ Constructed HERE so it outlives `run()`, like the feedback sink and both MIDI ports. P4
-    // deletes this block and `MainActivity.getArguments()`'s third element together.
-    const std::string     storageMode = (argc > 3 && argv[3]) ? std::string(argv[3]) : std::string();
-    ptshell::SafFileSystem safFilesystem(privateRoot);
+    // The COUNT, not a yes/no, and unconditional: an empty browser under a granted folder and an
+    // empty browser under no grant at all are different failures with the same appearance, and this
+    // is the line that tells them apart. Zero is the fresh-install state — the browser opens on the
+    // roots directory, whose one row is ADD FOLDER….
+    std::printf("saf:     %d granted folder(s)\n", filesystem.root_count());
+
+    // ⚠️ **THE MEDIA ROOT IS THE GRANTED TREE, AND `appRoot` IS NOT IT.** argv[1] is still
+    // `Documents/PocketTracker` — a directory this process cannot read a byte of. Everything below that
+    // used to take it is asking "where does this install keep Samples/, Soundfonts/, Renders/?", and on
+    // this platform the answer is the home tree. `pt://roots` when nothing is granted, which is honest:
+    // there is no media root yet, and every path built on it fails to open rather than resolving to
+    // somewhere wrong.
+    const std::string mediaRoot = filesystem.home_root_path();
+
+    // ⚠️ **The log moves NOW, and not one line earlier**: it goes through `pt_fopen`, which cannot
+    // resolve a `pt://` path until `install_file_hooks` has run. Unconditional either way — a log with
+    // no reachable destination and a log that is working look identical from inside the app, which is
+    // exactly how `pockettracker-log.txt` came to be dead for a whole phase with nothing saying so.
+    {
+        const std::string moved = filesystem.has_grant() ? relocate_log_file(mediaRoot) : std::string();
+        if (moved.empty()) log_carry_done();   // it stays where it is; give the carry buffer back
+
+        if (!moved.empty())
+            std::printf("log:     %s\n", moved.c_str());
+        else if (!g_logPath.empty())
+            std::printf("log:     %s (app-private - grant a folder for a copy you can reach)\n",
+                        g_logPath.c_str());
+        else
+            std::printf("log:     logcat only - no file could be opened\n");
+    }
 
     ptshell::AppConfig cfg;
     cfg.engine     = engine.get();
     cfg.audio      = &audio;
-    cfg.appRoot    = appRoot;
+    cfg.appRoot    = mediaRoot;
     cfg.filesystem = &filesystem;
-
-    if (storageMode == "saf") {
-        safFilesystem.install_file_hooks();
-        cfg.filesystem = &safFilesystem;
-        // The COUNT, not a yes/no: an empty browser under a granted folder and an empty browser under
-        // no folder at all are different failures, and this line is what tells them apart.
-        std::printf("saf:     STORAGE MODE = saf, %d granted folder(s)\n", safFilesystem.root_count());
-    }
 
     // No command line, so no project and no media dir of its own: the app opens the blank document
     // NEW PROJECT makes and the file browser is how the user reaches their songs — exactly as the
     // shipping handheld target already behaves (PortMaster invokes the binary with no arguments).
-    // ⚠️ mediaBaseDir is never empty: an empty base resolves relative sample paths against the
-    // process's cwd, and the app root is where Samples/ actually lives.
-    cfg.mediaBaseDir = appRoot;
+    // ⚠️ mediaBaseDir is what a project's RELATIVE sample paths resolve against, so it has to be the
+    // tree the samples are actually in. Pointed at the plain media root it named a directory the app
+    // cannot open, and a portable project would have come back looking correct and playing silence.
+    cfg.mediaBaseDir = mediaRoot;
 
     // ⚠️ **`converged()`, NOT `sdl()` OR `android()` — the profile the converged Android app RUNS.**
     // Its three device rows (touch layouts, BTN SOUND/VIBRO, the CRT overlay) are all on because

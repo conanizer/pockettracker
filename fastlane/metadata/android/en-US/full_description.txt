@@ -15,6 +15,6 @@ Features:
 * Interface color themes, a theme editor and multiple top-bar visualizers
 * Low-latency native audio engine (Oboe); runs well on 1 GB RAM devices
 
-Note: the app asks for "All files access" (MANAGE_EXTERNAL_STORAGE) so its built-in file browser can load samples and projects from anywhere on your storage, including files copied over from a PC.
+Storage: PocketTracker requests no permissions. The first time you open its file browser it offers a single "ADD FOLDER..." row, which opens Android's own folder picker; the folder you choose becomes its home and is where projects, samples and renders live. You can grant it further folders at any time from the top of the browser, so a sample library anywhere on the device — or a video copied over from a PC — is reachable without giving the app access to everything.
 
 Requires Android 8.0+ on a 64-bit device (arm64-v8a or x86_64).

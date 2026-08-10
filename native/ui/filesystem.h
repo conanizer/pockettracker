@@ -53,6 +53,19 @@ struct FileInfo {
     int64_t     size         = 0;     // bytes; 0 for folders
     int64_t     lastModified = 0;     // ms since the epoch, as java.io.File.lastModified() reports it
 
+    /**
+     * ⚠️ **An ACTION, not a thing on disk.** Opening the row DOES something (`FileSystem::activate`)
+     * and there is nothing behind it to rename, delete, select, copy or cut — the browser refuses all
+     * of those on the strength of this flag rather than by recognising a path, so a second action can
+     * never be added and forgotten at one of those six sites.
+     *
+     * `list_files` is the only thing that can produce one. The one that exists is Android's
+     * `ADD FOLDER…` in the virtual roots directory, which fires the system folder picker;
+     * `StdFileSystem` never sets it, so every other platform simply has no such row and needs no
+     * `#ifdef` to say so.
+     */
+    bool        isAction = false;
+
     /** "mysong.ptp" → "mysong". Folders and extension-less files return the name unchanged. */
     std::string name_without_extension() const {
         if (extension.empty() || name.size() <= extension.size() + 1) return name;
@@ -161,6 +174,20 @@ class FileSystem {
 
     /** The parent of `path`, or "" when it has none (i.e. `path` is a filesystem root). */
     virtual std::string parent_path(const std::string& path) = 0;
+
+    /**
+     * Run the ACTION entry at `path` (see `FileInfo::isAction`). False = nothing was started.
+     *
+     * ⚠️ **It has NOT necessarily finished when this returns.** The one implementation fires Android's
+     * folder picker, which is a separate activity: this returns as soon as the intent is away, and the
+     * grant lands seconds later, minutes later, or never. Waiting here would be worse than useless —
+     * `SDL_APP_WILLENTERBACKGROUND` is delivered on the thread that calls this, inside its own
+     * `SDL_PollEvent`, so a thread parked in a picker is a session whose autosave never runs for as
+     * long as the user is picking. The listing catches up through the browser's foreground refresh.
+     *
+     * Not pure: an implementation that produces no action entries can never be asked to run one.
+     */
+    virtual bool activate(const std::string& path) { (void)path; return false; }
 
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────
     /**

@@ -10,7 +10,7 @@ From a fresh install to a playing beat in about ten minutes. This guide covers t
 
 **Manual:** download the latest `.apk` from the [releases page](https://github.com/conanizer/pockettracker/releases), open it on your device, and tap **Install** (allow "install from unknown sources" if asked).
 
-On first launch PocketTracker asks for **All Files Access**. Grant it — without it the app cannot load samples or save projects. If you accidentally denied it: Android Settings → Apps → PocketTracker → Permissions.
+PocketTracker asks for **no permissions**. Instead, the first time you open a file browser it shows one row — `ADD FOLDER...` — and pressing **A** on it opens Android's folder picker. The folder you choose becomes PocketTracker's home, and it creates `Projects/`, `Samples/`, `Renders/`, `Soundfonts/`, `Instruments/` and `Themes/` inside it. `Documents/PocketTracker` is a tidy choice; if you have used PocketTracker before, choose that same folder and everything is where you left it.
 
 ---
 
@@ -32,7 +32,7 @@ The main screens sit side by side on one row: **SONG · CHAIN · PHRASE · INSTR
 
 ## 3. Get some samples onto your device
 
-PocketTracker ships with **no bundled sounds** — every instrument slot starts empty, and you fill them with your own files. Copy a few one-shot samples (a kick, a snare, a hi-hat to start) to anywhere on your device's storage — `Documents/PocketTracker/Samples/` is a tidy place for them.
+PocketTracker ships with **no bundled sounds** — every instrument slot starts empty, and you fill them with your own files. Copy a few one-shot samples (a kick, a snare, a hi-hat to start) into the `Samples/` folder inside the folder you granted above. Anything outside it works too — press **B** in the browser until you reach the top, and `ADD FOLDER...` will grant PocketTracker a second folder anywhere on the device.
 
 Supported sample formats: **WAV**, MP3, FLAC, OGG, Opus, M4A. **SoundFont (SF2)** files work too, and give you multi-sampled instruments from a single file. Any free sample pack or SF2 from the internet is fine.
 
@@ -104,7 +104,7 @@ That's a complete, playing song structure. Drums on track 1; put a bassline chai
 2. Cursor on **NAME**, press **A** to name the project.
 3. Cursor on **SAVE**, press **A**.
 
-Projects are saved as `.ptp` files in `/Documents/PocketTracker/Projects/`. When your track is finished, **EXPORT — MIX** on the same screen renders it to a WAV in `/Documents/PocketTracker/Renders/`.
+Projects are saved as `.ptp` files in `Projects/`, inside the folder you granted. When your track is finished, **EXPORT — MIX** on the same screen renders it to a WAV in `Renders/`.
 
 ---
 
