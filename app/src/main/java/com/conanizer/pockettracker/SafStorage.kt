@@ -177,6 +177,77 @@ class SafStorage(private val context: Context) {
         }
     }
 
+    /**
+     * Create a FILE document under `parentDocUri`, returning its URI — or the EXISTING one if the
+     * name is taken, exactly as [createDir] does for folders.
+     *
+     * ⚠️ **Find before create, for the same reason folders do**: `createDocument` de-duplicates rather
+     * than failing, so asking twice for `song.ptp` yields `song.ptp` and `song.ptp (1)` and the second
+     * save would land in a file the browser shows beside the first. The C++ side then opens the
+     * returned URI `"wt"`, which truncates — so create-or-find plus truncate is a whole overwrite.
+     *
+     * The MIME type is deliberately `application/octet-stream` for everything. A provider is free to
+     * infer a better one from the extension, and the app never reads it back: `list_files` decides
+     * "is this a directory?" from `MIME_TYPE_DIR` alone, and the browser's own filter is the
+     * extension. Guessing a type per suffix would be a second, worse copy of `path_extension`.
+     */
+    fun createFile(parentDocUri: String, name: String): String {
+        findChild(parentDocUri, name)?.let { return it }
+        return runCatching {
+            DocumentsContract.createDocument(
+                context.contentResolver, Uri.parse(parentDocUri), "application/octet-stream", name
+            )?.toString() ?: ""
+        }.getOrElse {
+            Log.w(TAG, "saf: createFile('$name') failed under $parentDocUri: $it")
+            ""
+        }
+    }
+
+    /** Delete a document. A directory goes with everything under it, as `deleteFileOrFolder` does. */
+    fun deleteDoc(docUri: String): Boolean = runCatching {
+        DocumentsContract.deleteDocument(context.contentResolver, Uri.parse(docUri))
+    }.getOrElse {
+        Log.w(TAG, "saf: deleteDoc failed on $docUri: $it")
+        false
+    }
+
+    /**
+     * Rename a document, returning its URI afterwards — or "" on failure.
+     *
+     * ⚠️ **The URI may CHANGE**, because a provider is free to encode the display name into the
+     * document id (`ExternalStorageProvider` does exactly that: `primary:Documents/a.ptp`). The
+     * returned value is the authority on where the document now is; the old string is dead. A provider
+     * that renames in place returns null having succeeded, so null falls back to the original URI
+     * rather than being read as a failure — the two are told apart by the exception, not by the return.
+     */
+    fun renameDoc(docUri: String, newName: String): String = runCatching {
+        DocumentsContract.renameDocument(context.contentResolver, Uri.parse(docUri), newName)
+            ?.toString() ?: docUri
+    }.getOrElse {
+        Log.w(TAG, "saf: renameDoc('$newName') failed on $docUri: $it")
+        ""
+    }
+
+    /**
+     * Move a document between two directory documents, returning its new URI — or "" if the provider
+     * will not do it.
+     *
+     * ⚠️ "" is NOT necessarily an error: `moveDocument` requires the source to carry
+     * `FLAG_SUPPORTS_MOVE`, which a provider may simply not offer, and it throws where a document
+     * crosses providers. The C++ side treats "" as "fall back to copy + delete" rather than as a
+     * failed move — which is the same shape `StdFileSystem::move_file` already has for a `rename(2)`
+     * that fails across filesystems.
+     */
+    fun moveDoc(docUri: String, fromParentDocUri: String, toParentDocUri: String): String = runCatching {
+        DocumentsContract.moveDocument(
+            context.contentResolver, Uri.parse(docUri), Uri.parse(fromParentDocUri),
+            Uri.parse(toParentDocUri)
+        )?.toString() ?: ""
+    }.getOrElse {
+        Log.w(TAG, "saf: moveDoc failed on $docUri: $it")
+        ""
+    }
+
     /** The child of `parentDocUri` whose display name is `name`, or null. */
     private fun findChild(parentDocUri: String, name: String): String? {
         for (line in listChildren(parentDocUri).lineSequence()) {

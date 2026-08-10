@@ -6,10 +6,12 @@
 
 #include <android/log.h>
 #include <jni.h>
+#include <unistd.h>        // close() — the writers own the descriptor `safOpenFd` detached
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 namespace ptshell {
 namespace {
@@ -377,28 +379,65 @@ bool SafFileSystem::is_directory(const std::string& path) {
     return false;
 }
 
-// ─── the open hook ───────────────────────────────────────────────────────────────────────────────
+// ─── the pieces the write half is built from ─────────────────────────────────────────────────────
 
-int SafFileSystem::open_fd(const std::string& path, const char* mode) {
-    if (!is_pt_path(path)) return -1;   // a plain path never reaches here — pt_fopen took the fopen branch
+std::string SafFileSystem::leaf_name(const std::string& path) {
+    if (!is_pt_path(path) || path == kRootsPath) return std::string();
+    const size_t slash = path.rfind('/');
+    if (slash == std::string::npos || slash <= kSchemeLen) return std::string();  // a bare tree
+    return path.substr(slash + 1);
+}
 
-    // ⚠️ A document must EXIST before it can be opened for write (byte_source.h says so, and it is
-    // why creating one belongs to `ui::FileSystem`). P3a resolves reads; the write half is P3b.
-    if (mode && (std::strchr(mode, 'w') || std::strchr(mode, 'a'))) {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "saf: open('%s','%s') - write modes arrive in P3b", path.c_str(), mode);
-        return -1;
-    }
+void SafFileSystem::forget(const std::string& path) {
+    const std::string prefix = path + "/";
+    for (auto it = uriCache_.begin(); it != uriCache_.end();)
+        it = (it->first == path || it->first.compare(0, prefix.size(), prefix) == 0)
+                 ? uriCache_.erase(it) : std::next(it);
+    for (auto it = listCache_.begin(); it != listCache_.end();)
+        it = (it->first == path || it->first.compare(0, prefix.size(), prefix) == 0)
+                 ? listCache_.erase(it) : std::next(it);
+    invalidate(parent_path(path));   // the parent's listing no longer describes its children
+}
 
-    const std::string uri = resolve(path);
-    if (uri.empty()) return -1;
+std::string SafFileSystem::ensure_file(const std::string& path) {
+    const std::string existing = resolve(path);
+    if (!existing.empty()) return existing;
 
+    const std::string name = leaf_name(path);
+    if (name.empty()) return std::string();
+    const std::string parentUri = resolve(parent_path(path));
+    if (parentUri.empty()) return std::string();   // ⚠️ the create does NOT make intermediate folders
+
+    const std::string made = call_string("safCreateFile",
+                                         "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                                         parentUri, &name);
+    if (made.empty()) return std::string();
+    invalidate(parent_path(path));
+    uriCache_[path] = made;
+    return made;
+}
+
+bool SafFileSystem::delete_uri(const std::string& uri) {
+    // ⚠️ NOT `call_string`: `safDelete` returns a boolean, and reading a `Z` return through
+    // `CallObjectMethod` is undefined behaviour rather than a wrong answer.
+    Env e;
+    if (!e.ok()) return false;
+    jmethodID m = e.method("safDelete", "(Ljava/lang/String;)Z");
+    if (!m) return false;
+    jstring    ju  = e.str(uri);
+    const bool ok  = e.env->CallBooleanMethod(e.activity, m, ju) == JNI_TRUE;
+    const bool bad = e.threw();
+    e.env->DeleteLocalRef(ju);
+    return ok && !bad;
+}
+
+int SafFileSystem::open_uri_fd(const std::string& uri, const char* mode) {
     Env e;
     if (!e.ok()) return -1;
     jmethodID m = e.method("safOpenFd", "(Ljava/lang/String;Ljava/lang/String;)I");
     if (!m) return -1;
     jstring ju = e.str(uri);
-    jstring jm = e.str("r");
+    jstring jm = e.str(mode);
     const jint fd  = e.env->CallIntMethod(e.activity, m, ju, jm);
     const bool bad = e.threw();
     e.env->DeleteLocalRef(ju);
@@ -406,49 +445,229 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
     return bad ? -1 : static_cast<int>(fd);
 }
 
-// ─── writing — P3a serves plain paths and refuses URIs out loud ──────────────────────────────────
+bool SafFileSystem::write_uri(const std::string& uri, const void* data, size_t len) {
+    // "wt" — write and TRUNCATE. Plain "w" leaves whatever was longer than the new content in place,
+    // so overwriting a big project with a small one would leave the tail of the big one behind and the
+    // file would still parse as far as the JSON goes.
+    const int fd = open_uri_fd(uri, "wt");
+    if (fd < 0) return false;
 
-namespace {
-bool refuse(const char* what, const std::string& path) {
-    __android_log_print(ANDROID_LOG_WARN, kLogTag, "saf: %s on '%s' arrives in P3b", what, path.c_str());
-    return false;
+    std::FILE* f = fdopen(fd, "wb");
+    if (!f) { close(fd); return false; }
+    const bool wrote = len == 0 || std::fwrite(data, 1, len, f) == len;
+    // ⚠️ `fclose` IS A WRITE and it is checked, for `std_filesystem.cpp`'s reason exactly: a payload
+    // smaller than the stdio buffer reaches the provider for the FIRST time in this flush, so a full
+    // disk arrives here and nowhere earlier. Unchecked, a truncated save returns true.
+    const bool closed = std::fclose(f) == 0;
+    return wrote && closed;
 }
-}  // namespace
+
+// ─── the open hook ───────────────────────────────────────────────────────────────────────────────
+
+int SafFileSystem::open_fd(const std::string& path, const char* mode) {
+    if (!is_pt_path(path)) return -1;   // a plain path never reaches here — pt_fopen took the fopen branch
+
+    const bool append = mode && std::strchr(mode, 'a');
+    const bool write  = mode && (std::strchr(mode, 'w') || std::strchr(mode, '+'));
+
+    // ⚠️ APPEND is refused rather than emulated. `openFileDescriptor` has an "wa" mode, but nothing
+    // below the UI opens for append today, and a mode nobody exercises is a mode nobody would notice
+    // breaking. It says so out loud rather than returning a bare -1, which reads as "not found".
+    if (append) {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                            "saf: open('%s','%s') - append is not implemented", path.c_str(), mode);
+        return -1;
+    }
+
+    // See the header: the create is derivable because a `pt://` path is composable. `ensure_file` is
+    // find-or-create, and the "wt" below is what makes the found case an overwrite rather than a patch.
+    const std::string uri = write ? ensure_file(path) : resolve(path);
+    if (uri.empty()) return -1;
+    return open_uri_fd(uri, write ? "wt" : "r");
+}
+
+// ─── writing ─────────────────────────────────────────────────────────────────────────────────────
 
 bool SafFileSystem::write_file(const std::string& path, const std::string& content) {
-    if (!is_pt_path(path)) return priv_.write_file(path, content);
-    return refuse("write_file", path);
+    return write_bytes(path, content.data(), content.size());
 }
 
 bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_t len) {
     if (!is_pt_path(path)) return priv_.write_bytes(path, data, len);
-    return refuse("write_bytes", path);
+
+    const std::string name = leaf_name(path);
+    if (name.empty()) return false;
+
+    // ⚠️ **The temp-then-rename dance survives, and which failure it trades for which matters.**
+    // Writing straight over the target with "wt" would mean a process killed mid-save leaves a
+    // truncated file where the whole project was — the exact failure `StdFileSystem` refuses. Here the
+    // window is between the delete and the rename, and what sits on disk during it is the COMPLETE new
+    // content under `<name>.tmp`: recoverable by hand, where a truncated `.ptp` is not.
+    const std::string tmpPath = path + ".tmp";
+    const std::string tmpUri  = ensure_file(tmpPath);
+    if (tmpUri.empty()) return false;
+
+    if (!write_uri(tmpUri, data, len)) {
+        delete_uri(tmpUri);   // free the space the next attempt needs, and drop the partial
+        forget(tmpPath);
+        return false;
+    }
+
+    // The target has to GO before the rename: `renameDocument` onto a taken name de-duplicates the
+    // way `createDocument` does, so skipping this leaves the old file plus a `song (1).ptp`.
+    const std::string targetUri = resolve(path);
+    if (!targetUri.empty()) {
+        delete_uri(targetUri);
+        forget(path);
+    }
+
+    const std::string renamed = call_string("safRename",
+                                            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                                            tmpUri, &name);
+    forget(tmpPath);
+    if (renamed.empty()) return false;
+    uriCache_[path] = renamed;
+    invalidate(parent_path(path));
+    return true;
 }
 
 bool SafFileSystem::delete_path(const std::string& path) {
     if (!is_pt_path(path)) return priv_.delete_path(path);
-    return refuse("delete_path", path);
+
+    const std::string uri = resolve(path);
+    if (uri.empty()) return false;
+    if (!delete_uri(uri)) return false;
+    forget(path);
+    return true;
 }
 
 bool SafFileSystem::rename_file(const std::string& path, const std::string& new_base_name) {
     if (!is_pt_path(path)) return priv_.rename_file(path, new_base_name);
-    return refuse("rename_file", path);
+
+    // Byte-for-byte `StdFileSystem::rename_file`'s rule, through the shared `path_sanitize`: keep the
+    // extension unless the typed name already ends in it, and never clobber.
+    const bool        dir = is_directory(path);
+    const std::string ext = dir ? std::string() : pt::ui::path_extension(path);
+
+    const std::string safe = pt::ui::path_sanitize(new_base_name, /*allow_dot=*/true);
+    if (safe.empty()) return false;
+
+    std::string finalName = safe;
+    if (!ext.empty()) {
+        const std::string suffix = "." + ext;
+        const bool hasSuffix = safe.size() > suffix.size() &&
+                               safe.compare(safe.size() - suffix.size(), suffix.size(), suffix) == 0;
+        if (!hasSuffix) finalName = safe + suffix;
+    }
+
+    const std::string parent = parent_path(path);
+    const std::string target = parent + "/" + finalName;
+    if (!resolve(target).empty()) return false;   // the browser reports the failure
+
+    const std::string uri = resolve(path);
+    if (uri.empty()) return false;
+
+    const std::string renamed = call_string("safRename",
+                                            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                                            uri, &finalName);
+    if (renamed.empty()) return false;
+
+    // ⚠️ The document's URI may have CHANGED — `ExternalStorageProvider` encodes the display name into
+    // the id — so the OLD path and everything under it is forgotten and the NEW one takes the returned
+    // URI. Caching the old string against the new path is how a renamed folder's children go stale.
+    forget(path);
+    uriCache_[target] = renamed;
+    invalidate(parent);
+    return true;
 }
 
 std::string SafFileSystem::create_folder(const std::string& parent, const std::string& folder_name) {
     if (!is_pt_path(parent)) return priv_.create_folder(parent, folder_name);
-    refuse("create_folder", parent);
-    return std::string();
+
+    const std::string safe = pt::ui::path_sanitize(folder_name, /*allow_dot=*/false);
+    if (safe.empty()) return std::string();
+
+    const std::string target = parent + "/" + safe;
+    // ⚠️ "" when it already exists, which is the interface's contract and NOT what `safCreateDir`
+    // does on its own — that one is find-or-create, because the seven app folders ask for themselves
+    // on every launch. The check belongs here, where the contract is.
+    if (!resolve(target).empty()) return std::string();
+
+    const std::string parentUri = resolve(parent);
+    if (parentUri.empty()) return std::string();
+
+    const std::string made = call_string("safCreateDir",
+                                         "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                                         parentUri, &safe);
+    if (made.empty()) return std::string();
+    uriCache_[target] = made;
+    invalidate(parent);
+    return target;
+}
+
+bool SafFileSystem::copy_tree(const std::string& from, const std::string& to) {
+    if (is_directory(from)) {
+        if (create_folder(parent_path(to), leaf_name(to)).empty()) return false;
+        for (const pt::ui::FileInfo& child : list_files(from))
+            if (!copy_tree(child.path, to + "/" + child.name)) return false;
+        return true;
+    }
+    // Whole-file, because that is what the seam is shaped for (`read_file` returns a string) and what
+    // the callers copy: projects, presets, themes and samples. The largest of them is a sample, and one
+    // already costs twice this much resident once it is loaded.
+    std::string blob;
+    if (!read_file(from, blob)) return false;
+    return write_bytes(to, blob.data(), blob.size());
 }
 
 bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
     if (!is_pt_path(from) && !is_pt_path(to)) return priv_.move_file(from, to);
-    return refuse("move_file", from);
+
+    // Same tree, both ends SAF: ask the provider to move the document, which costs nothing and keeps
+    // the bytes where they are. "" means it will not — a missing FLAG_SUPPORTS_MOVE, or two different
+    // providers — and that is a fallback rather than a failure, exactly as a cross-filesystem
+    // `rename(2)` is for `StdFileSystem`.
+    if (is_pt_path(from) && is_pt_path(to)) {
+        const std::string srcUri       = resolve(from);
+        const std::string fromParent   = resolve(parent_path(from));
+        const std::string toParent     = resolve(parent_path(to));
+        if (!srcUri.empty() && !fromParent.empty() && !toParent.empty()) {
+            Env e;
+            if (e.ok()) {
+                if (jmethodID m = e.method(
+                        "safMove",
+                        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")) {
+                    jstring a = e.str(srcUri), b = e.str(fromParent), c = e.str(toParent);
+                    jobject r = e.env->CallObjectMethod(e.activity, m, a, b, c);
+                    const bool bad = e.threw();
+                    e.env->DeleteLocalRef(a);
+                    e.env->DeleteLocalRef(b);
+                    e.env->DeleteLocalRef(c);
+                    if (bad && r) e.env->DeleteLocalRef(r);   // `take` is what frees it on the good path
+                    const std::string moved = bad ? std::string() : e.take(r);
+                    if (!moved.empty()) {
+                        forget(from);
+                        uriCache_[to] = moved;
+                        invalidate(parent_path(to));
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!copy_tree(from, to)) return false;
+    // ⚠️ The copy is what must not be lost, so a delete that fails leaves BOTH rather than neither and
+    // still reports success — a move that half-worked with the source gone is unrecoverable, one with
+    // the source still there is a duplicate the user can see and remove.
+    delete_path(from);
+    return true;
 }
 
 bool SafFileSystem::copy_file(const std::string& from, const std::string& to) {
     if (!is_pt_path(from) && !is_pt_path(to)) return priv_.copy_file(from, to);
-    return refuse("copy_file", from);
+    if (file_exists(to)) return false;   // the caller has already de-duplicated the name
+    return copy_tree(from, to);
 }
 
 }  // namespace ptshell

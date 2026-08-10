@@ -118,6 +118,16 @@ std::string path_extension(const std::string& path);
 /** `File.nameWithoutExtension` — "/a/b/c.wav" → "c". */
 std::string path_stem(const std::string& path);
 
+/**
+ * `[^a-zA-Z0-9_-.]` → '_', which is what `FileSystem::rename_file` documents. `allow_dot` is
+ * `create_folder`'s rule, which does NOT permit one (a folder named "a.b" would read as a file).
+ *
+ * ⚠️ Declared here rather than kept private to `StdFileSystem` because the rule belongs to the
+ * INTERFACE, not to one implementation: `SafFileSystem` sanitises the same names for the same reason,
+ * and two copies of a character class are two things that can drift apart while both look right.
+ */
+std::string path_sanitize(const std::string& name, bool allow_dot);
+
 /** Lowercased, for the case-insensitive comparisons (the extension filter, the NAME sort). */
 std::string to_lower(std::string s);
 

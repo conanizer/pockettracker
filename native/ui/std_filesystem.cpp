@@ -42,19 +42,6 @@ int64_t to_unix_millis(fs::file_time_type t) {
 /** Forward slashes, always — Kotlin builds every path with them and the browser DRAWS the path. */
 std::string generic(const fs::path& p) { return p.generic_string(); }
 
-/** `[^a-zA-Z0-9_-.]` → '_', which is AndroidFileSystem.renameFile's rule. `allow_dot` is its
- *  createFolder rule, which does NOT permit one (a folder named "a.b" would read as a file). */
-std::string sanitize(const std::string& name, bool allow_dot) {
-    std::string out;
-    out.reserve(name.size());
-    for (char c : name) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-                        c == '_' || c == '-' || (allow_dot && c == '.');
-        out.push_back(ok ? c : '_');
-    }
-    return out;
-}
-
 const char* env_or_null(const char* key) {
     const char* v = std::getenv(key);
     return (v && *v) ? v : nullptr;
@@ -125,6 +112,17 @@ std::string path_stem(const std::string& path) {
     const std::string name = path_name(path);
     const size_t      dot  = name.find_last_of('.');
     return dot == std::string::npos ? name : name.substr(0, dot);
+}
+
+std::string path_sanitize(const std::string& name, bool allow_dot) {
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                        c == '_' || c == '-' || (allow_dot && c == '.');
+        out.push_back(ok ? c : '_');
+    }
+    return out;
 }
 
 std::string to_lower(std::string s) {
@@ -289,7 +287,7 @@ bool StdFileSystem::rename_file(const std::string& path, const std::string& new_
     const bool dir = is_directory(path);
     const std::string ext = dir ? std::string() : path_extension(path);
 
-    std::string safe = sanitize(new_base_name, /*allow_dot=*/true);
+    std::string safe = path_sanitize(new_base_name, /*allow_dot=*/true);
     if (safe.empty()) return false;
 
     // Kotlin keeps the original extension, unless the typed name already ends in it.
@@ -310,7 +308,7 @@ bool StdFileSystem::rename_file(const std::string& path, const std::string& new_
 }
 
 std::string StdFileSystem::create_folder(const std::string& parent, const std::string& folder_name) {
-    const std::string safe = sanitize(folder_name, /*allow_dot=*/false);
+    const std::string safe = path_sanitize(folder_name, /*allow_dot=*/false);
     if (safe.empty()) return "";
 
     const fs::path target = fs::path(parent) / safe;

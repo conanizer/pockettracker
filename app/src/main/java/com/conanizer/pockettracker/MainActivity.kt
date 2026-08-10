@@ -481,7 +481,7 @@ class MainActivity : SDLActivity() {
     // ── Storage Access Framework (SAF migration P3) ──────────────────────────────────────────────
     //
     // `ContentResolver` and `DocumentsContract` are Java-only, so `shell/saf-filesystem.cpp` reaches
-    // them through these six. Each is a one-line delegate to [SafStorage], which holds the whole of
+    // them through these ten. Each is a one-line delegate to [SafStorage], which holds the whole of
     // the SAF knowledge; nothing here decides anything.
     //
     // ⚠️ `@Keep` AND an explicit `proguard-rules.pro` rule, exactly as the thirteen above — the count
@@ -513,6 +513,24 @@ class MainActivity : SDLActivity() {
     @Keep
     fun safCreateDir(parentDocUri: String, name: String): String =
         safStorage.createDir(parentDocUri, name)
+
+    /** Create (or find) a FILE document, returning its URI or "". The write half's create. */
+    @Keep
+    fun safCreateFile(parentDocUri: String, name: String): String =
+        safStorage.createFile(parentDocUri, name)
+
+    /** Delete a document; a directory goes with its whole subtree. */
+    @Keep
+    fun safDelete(docUri: String): Boolean = safStorage.deleteDoc(docUri)
+
+    /** Rename a document, returning the URI it has AFTERWARDS (it may differ), or "". */
+    @Keep
+    fun safRename(docUri: String, newName: String): String = safStorage.renameDoc(docUri, newName)
+
+    /** Move between directory documents, returning the new URI — or "" meaning "copy+delete instead". */
+    @Keep
+    fun safMove(docUri: String, fromParentDocUri: String, toParentDocUri: String): String =
+        safStorage.moveDoc(docUri, fromParentDocUri, toParentDocUri)
 
     /**
      * Move whatever has arrived since the last frame into [out]; returns how many bytes.

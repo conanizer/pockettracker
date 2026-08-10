@@ -22,11 +22,15 @@
 #     midiInCloseDevice()V          — │ because the native side POLLS this port once a frame rather
 #     midiInRead([B)I               — ┘ than being called from the MIDI service's binder thread.
 #     safRootCount()I               — ┐ the Storage Access Framework seam (SAF migration P3).
-#     safRootInfo(I)L…/String;      — │ ContentResolver/DocumentsContract are Java-only, so these six
+#     safRootInfo(I)L…/String;      — │ ContentResolver/DocumentsContract are Java-only, so these ten
 #     safListChildren(L…;)L…/String;— │ are the whole of it. ⚠️ `safOpenFd` is `pt_fopen`'s resolver:
 #     safReadFile(L…;)[B            — │ a rename would make every sample under a granted folder
 #     safOpenFd(L…;L…;)I            — │ fail to open, with the browser still listing it — which
-#     safCreateDir(L…;L…;)L…/String;— ┘ reads as a corrupt file rather than as a stripped method.
+#     safCreateDir(L…;L…;)L…/String;— │ reads as a corrupt file rather than as a stripped method.
+#     safCreateFile(L…;L…;)L…/String;─┤ The write half (P3b). ⚠️ A rename here is WORSE than a read
+#     safDelete(L…;)Z               — │ one: SAVE reports "SAVE FAILED" and the user's edits are still
+#     safRename(L…;L…;)L…/String;   — │ only in RAM, so the failure arrives at the moment the work is
+#     safMove(L…;L…;L…;)L…/String;  — ┘ least recoverable.
 # Every NAME above is part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
@@ -56,6 +60,10 @@
     byte[] safReadFile(java.lang.String);
     int safOpenFd(java.lang.String, java.lang.String);
     java.lang.String safCreateDir(java.lang.String, java.lang.String);
+    java.lang.String safCreateFile(java.lang.String, java.lang.String);
+    boolean safDelete(java.lang.String);
+    java.lang.String safRename(java.lang.String, java.lang.String);
+    java.lang.String safMove(java.lang.String, java.lang.String, java.lang.String);
 }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────

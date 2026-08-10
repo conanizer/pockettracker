@@ -107,9 +107,8 @@ class SafFileSystem : public pt::ui::FileSystem {
 
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ P3a implements the READ half. Each of these still serves a PLAIN path through the inner
-    // `StdFileSystem` — which is what keeps `settings.json` saving — and refuses a `pt://` one with a
-    // log line rather than a silent false. P3b fills them in.
+    // ⚠️ A PLAIN path still goes to the inner `StdFileSystem`, which is what keeps `settings.json`,
+    // `autosave.ptp` and `template.ptp` saving on a device that has granted nothing (P2).
     bool write_file(const std::string& path, const std::string& content) override;
     bool write_bytes(const std::string& path, const void* data, size_t len) override;
     bool delete_path(const std::string& path) override;
@@ -118,7 +117,15 @@ class SafFileSystem : public pt::ui::FileSystem {
     bool move_file(const std::string& from, const std::string& to) override;
     bool copy_file(const std::string& from, const std::string& to) override;
 
-    /** `pt://…` → an owned OS descriptor, or -1. Public because the hook trampoline calls it. */
+    /**
+     * `pt://…` → an owned OS descriptor, or -1. Public because the hook trampoline calls it.
+     *
+     * ⭐ **A write mode CREATES the document, and `byte_source.h`'s note that a hook cannot is about
+     * the URI it assumed, not about this.** The restriction was that a document must exist before it
+     * can be opened for write and an opaque `content://` handle has no nameable child — but a `pt://`
+     * path's parent is a string trim and its name is the tail, so the create is derivable here. That
+     * is the second thing §5a's composable paths bought, after the browser's "..".
+     */
     int open_fd(const std::string& path, const char* mode);
 
   private:
@@ -139,6 +146,34 @@ class SafFileSystem : public pt::ui::FileSystem {
 
     /** `<home>/<sub>` as a `pt://` path, creating the document if it is not there yet. */
     std::string ensure_dir(const char* sub);
+
+    /** The last segment: `pt://<id>/Projects/song.ptp` → `song.ptp`. "" for a bare tree or the roots. */
+    std::string leaf_name(const std::string& path);
+
+    /** The document URI for a FILE `path`, creating it under its (existing) parent. "" on failure. */
+    std::string ensure_file(const std::string& path);
+
+    /** An owned descriptor for a document URI, or -1. `open_fd` and the writers share it. */
+    int open_uri_fd(const std::string& uri, const char* mode);
+
+    /** Truncate a document and write `len` bytes over it. */
+    bool write_uri(const std::string& uri, const void* data, size_t len);
+
+    /** Delete a document by URI. Separate from `delete_path` because the writers hold a URI, not a path. */
+    bool delete_uri(const std::string& uri);
+
+    /**
+     * Drop `path` AND everything beneath it from both caches.
+     *
+     * ⚠️ Every mutation must call this, and a prefix sweep rather than one erase: deleting or renaming
+     * a FOLDER leaves its children's URIs cached under paths that no longer exist, and a stale entry
+     * resolves to a document the provider has already destroyed — which fails as "the file is corrupt"
+     * rather than as anything about a cache.
+     */
+    void forget(const std::string& path);
+
+    /** Recursive copy, for the move/copy fallbacks. `to` must not exist; folders copy as folders. */
+    bool copy_tree(const std::string& from, const std::string& to);
 
     /** The tree the seven app folders live in: the lowest root-id. "" when nothing is granted. */
     std::string home_root_path();
