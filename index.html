@@ -86,8 +86,9 @@
     color:var(--btn-tx); background:var(--btn-face); padding:12px 12px;
     text-shadow:2px 2px 0 #05070b;
     border:2px solid; border-color:var(--hi) var(--sh) var(--sh) var(--hi); }
+  /* The press is the bevel flipping and the face darkening — nothing moves. A translate here
+     shifts the control against its neighbours, and in a strip with no gaps it overlaps them. */
   .btn:hover, .btn:focus-visible{ background:var(--btn-press); text-decoration:none;
-    transform:translate(1px,1px);
     border-color:var(--sh) var(--hi) var(--hi) var(--sh); }
   .subver{ margin:16px 0 0; text-align:center; font-family:var(--mono); font-size:.74rem;
     letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
@@ -109,7 +110,7 @@
   /* every tab keeps the standard white label, so the selected one is told apart by depth alone:
      raised idle, pressed on hover, deepest when selected. */
   .plats .btn.on{ background:var(--navy);
-    border-color:var(--sh) var(--hi) var(--hi) var(--sh); transform:none; }
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh); }
   .pane{ background:var(--surface); border:1px solid var(--edge-2); border-top:none;
     padding:clamp(18px,3vw,26px); }
   .dl.js .pane{ display:none; } .dl.js .pane.on{ display:block; }
