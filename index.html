@@ -80,14 +80,19 @@
      the source newline between them becomes the word space. */
   .pitch span{ display:block; }
   .cta{ display:flex; gap:10px; margin-top:33px; }
-  .cta .btn{ font-size:1.05rem; letter-spacing:.09em; padding:13px 12px; }
-  .btn{ flex:1; text-align:center; white-space:nowrap; cursor:pointer;
+  .cta .btn{ --py:13px; font-size:1.05rem; letter-spacing:.09em; }
+  .btn{ --px:12px; --py:12px;
+    flex:1; text-align:center; white-space:nowrap; cursor:pointer;
     font-family:var(--mono); font-weight:700; font-size:.95rem; letter-spacing:.05em; text-transform:uppercase;
-    color:var(--btn-tx); background:var(--btn-face); padding:12px 12px;
+    color:var(--btn-tx); background:var(--btn-face); padding:var(--py) var(--px);
     text-shadow:2px 2px 0 #05070b;
     border:2px solid; border-color:var(--hi) var(--sh) var(--sh) var(--hi); }
-  /* The press is the bevel flipping and the face darkening — nothing moves. A translate here
-     shifts the control against its neighbours, and in a strip with no gaps it overlaps them. */
+  /* The press: bevel flips, face darkens, and the label sinks a pixel down and right.
+     The shift is padding, not a transform — what it gains on two sides it loses on the other
+     two, so the box stays exactly where it was and never drifts into its neighbours. The
+     text-shadow travels with the glyphs, keeping its offset relative to them. */
+  .btn:hover, .btn:focus-visible, .plats .btn.on{
+    padding:calc(var(--py) + 1px) calc(var(--px) - 1px) calc(var(--py) - 1px) calc(var(--px) + 1px); }
   .btn:hover, .btn:focus-visible{ background:var(--btn-press); text-decoration:none;
     border-color:var(--sh) var(--hi) var(--hi) var(--sh); }
   .subver{ margin:16px 0 0; text-align:center; font-family:var(--mono); font-size:.74rem;
