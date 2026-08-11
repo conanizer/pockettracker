@@ -526,7 +526,7 @@ bool load_instrument_sample(Engine* engine, Project& project, int id, const std:
 }
 
 /**
- * Load an SF2/SF3 into instrument `id`, make the slot a SOUNDFONT, and select the first preset that
+ * Load a soundfont into instrument `id`, make the slot a SOUNDFONT, and select the first preset that
  * actually EXISTS in the file — a bank/preset pair the .sf2 does not contain plays silence, and 0/0 is
  * not present in every soundfont.
  */

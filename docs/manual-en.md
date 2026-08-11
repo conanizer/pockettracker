@@ -607,7 +607,7 @@ WAV written. Video files are instead **converted** to a WAV in the Samples folde
 
 The SAMPLE EDITOR is a full-screen waveform editor for the currently loaded WAV. Open it from the INSTRUMENT screen by moving the cursor to the SAMPLE row and pressing **SELECT**.
 
-Press **B** to close and discard unsaved changes. Use **SAVE / OVERWRITE** inside the editor to write changes to disk.
+Press **B** to close. If you have edited the waveform, B raises **ARE YOU SURE?** first — A discards the edit and leaves, B stays in the editor. Use **SAVE / OVERWRITE** inside the editor to write changes to disk. B is the only way out: R+DPAD cannot leave the editor, so an unsaved edit cannot be lost by walking off the screen.
 
 ### Waveform view
 
@@ -615,7 +615,8 @@ The waveform fills the top portion of the screen. A playback cursor shows the cu
 
 | Input | Action |
 |---|---|
-| A + LEFT/RIGHT | Zoom in / out |
+| R + UP/DOWN | Zoom in / out, from any row |
+| A + LEFT/RIGHT | Zoom in / out (cursor on the ZOOM cell) |
 | D-pad LEFT/RIGHT | Scroll the view (when zoomed in) |
 | START | Preview current sample (respects SOURCE mode) |
 
@@ -2168,12 +2169,13 @@ All 128 slots (00–7F) start empty in a new project. There are no bundled defau
 
 | Input | Action |
 |---|---|
-| A + LEFT / RIGHT | Zoom in / out |
+| R + UP / DOWN | Zoom in / out, from any row |
+| A + LEFT / RIGHT | Zoom in / out (cursor on the ZOOM cell) |
 | D-pad LEFT / RIGHT | Scroll (when zoomed) |
 | D-pad (on marker row) | Move selection marker |
 | A or SELECT (on EQ-effect slot) | Open EQ EDITOR |
 | START | Preview sample |
-| B | Close (discard unsaved changes) |
+| B | Close (asks first if there are unsaved changes) |
 
 ---
 

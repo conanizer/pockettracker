@@ -225,6 +225,17 @@ bool audio_is_audible(const ui::AppState& s) {
 }  // namespace
 
 int run(const AppConfig& cfg) {
+    // The version, in the log, on every platform — a bug report arrives as a log file and a sentence,
+    // and nothing else in this program says which build produced it. It sits in the SHARED shell
+    // rather than in each platform's entry point, which costs it the first line (the audio and MIDI
+    // backends are already open by the time run() is called) and buys it being impossible to have on
+    // one platform and not another.
+    //
+    // PT_VERSION_STRING comes from native/cmake/pt_version.cmake, which reads app/build.gradle.kts.
+    // No fallback here on purpose: a tree that forgets the define must fail to COMPILE rather than
+    // print a version that is quietly a lie.
+    std::printf("PocketTracker %s\n", PT_VERSION_STRING);
+
     AudioEngine&  engineRef  = *cfg.engine;
     AudioBackend& audio      = *cfg.audio;
     ui::FileSystem& filesystem = *cfg.filesystem;
@@ -507,8 +518,9 @@ int run(const AppConfig& cfg) {
     if (ui::seed_config_template(filesystem, SdlInput::default_keyboard_bindings()))
         std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
 
-    // `folders` → the dispatcher's browse start dirs. Its overrides only take effect where the folder
-    // actually exists (input_dispatcher::browser_dir checks is_directory).
+    // `folders` → the dispatcher's browse start dirs. An override is root-relative unless absolute,
+    // is re-rooted when it was authored under another install's root, and falls back to the built-in
+    // folder when it cannot be read here — the whole rule is `ui::resolve_browse_dir`.
     if (ui::load_folder_config(filesystem, state.folderConfig))
         std::printf("config:   %s\n", filesystem.config_path().c_str());
 

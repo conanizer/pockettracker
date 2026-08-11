@@ -168,6 +168,13 @@ apk/
 # thing that makes the mistake recoverable.
 /tools/
 
+# Demo media for the release page and the landing site — not for the repo. The GIFs and their MP4
+# twins are ~12 MB and the full-size theme screenshots ~2 MB each, against ~10 MB of tracked bytes in
+# the whole repository. The six images the README and the store listing actually use are tracked
+# beside these and are NOT covered by these two lines.
+/docs/images/gif/
+/docs/images/screenshot-amiga-*.png
+
 # The crash-recovery autosave. It lands in the APP ROOT, which is the repo root whenever the shell is
 # run from a build tree here — so without this a test run leaves a ~440 KB project one `git add -A`
 # away from being committed. It is user work, never source.

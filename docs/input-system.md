@@ -159,8 +159,14 @@ Hold R and press directions to navigate the 5×5 screen grid:
 - Row 0 and row 1 are column-specific — R+UP from PHRASE reaches GROOVE and then SCALE, R+UP from
   INSTRUMENT reaches MODS and then INST.POOL.
 
-**R elsewhere:** in the file browser **R+LEFT** goes up one directory level. In the QWERTY overlay
-**R+LEFT/RIGHT** scrolls the text cursor, accelerating from 1 to 4 characters per repeat.
+**R elsewhere:** in the file browser **R+LEFT** goes up one directory level and **R+UP/DOWN** cycles
+the sort mode. In the QWERTY overlay **R+LEFT/RIGHT** scrolls the text cursor, accelerating from 1 to
+4 characters per repeat, and **R+UP/DOWN** switches between the letter and number layouts. In the
+SAMPLE EDITOR **R+UP/DOWN** zooms the waveform from wherever the cursor is.
+
+The full-screen overlays (SAMPLE EDITOR, EQ EDITOR, THEME EDITOR) own no cell in the grid above, so
+R+DPAD never navigates out of one — anything not listed here is swallowed. **B** is the way out, and
+on a modified sample it asks first.
 
 ### Instrument Pool fast-jump (INST_POOL ↔ INSTRUMENT)
 
@@ -180,7 +186,7 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 - **LEFT / RIGHT** — move between columns (NAME → V → RV → DE → EQ).
 - **A + DPAD** — edit the value under the cursor (V/RV/DE = 00–FF, EQ = 00–7F).
 - **A** on the NAME column of an **empty** slot — load a source (sampler slots browse .wav, SoundFont
-  slots browse .sf2/.sf3); the slot is auto-named from the file.
+  slots browse .sf2); the slot is auto-named from the file.
 - **A + B** on the NAME column — clear the slot (keeps its instrument type).
 - **A** (tap) or **SELECT** on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
   the slot; the open is deferred to A-release so the two don't clash). Inside the editor, **B** closes it.

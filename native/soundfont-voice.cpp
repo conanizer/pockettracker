@@ -1,12 +1,17 @@
 // TinySoundFont — single-header SF2/SF3 renderer (MIT license)
 // NOTE: TSF_IMPLEMENTATION must be defined in exactly one .cpp file
 
-// ⚠️ **THIS INCLUDE IS WHAT MAKES `.sf3` DECODE, AND IT MUST COME FIRST.** An SF3's `smpl` chunk
-// holds Ogg Vorbis frames, and both of tsf's paths for them — `tsf_decode_sf3_samples` and
-// `tsf_decode_ogg` — sit behind `#ifdef STB_VORBIS_INCLUDE_STB_VORBIS_H`, which is stb_vorbis's own
-// include guard. Without it those two functions are never compiled, and tsf's `#else` arm has no
-// format check: it converts the chunk in place as raw 16-bit PCM, so an `.sf3` LOADS and then
-// renders noise. `.sf3` is offered by the browser and documented, so the file must be decodable.
+// ⚠️ **THIS INCLUDE IS WHAT DECODES COMPRESSED SAMPLE DATA, AND IT MUST COME FIRST.** A compressed
+// soundfont's `smpl` chunk holds Ogg Vorbis frames, and both of tsf's paths for them —
+// `tsf_decode_sf3_samples` and `tsf_decode_ogg` — sit behind `#ifdef STB_VORBIS_INCLUDE_STB_VORBIS_H`,
+// which is stb_vorbis's own include guard. Without it those two functions are never compiled, and
+// tsf's `#else` arm has NO FORMAT CHECK: it converts the chunk in place as raw 16-bit PCM, so the file
+// loads and then renders noise.
+//
+// ⚠️ That is why this stays even though the browser no longer offers `.sf3` (see
+// `ui::soundfont_extensions`, which records why it does not): tsf picks the decoder off each shdr's
+// compression flag, not off the extension, so a file NAMED `.sf2` can carry Vorbis samples. Silent
+// noise on such a file is a far worse outcome than the slow load the extension was withdrawn over.
 //
 // Declarations only. stb_vorbis is compiled as its own C translation unit (see CMakeLists.txt), so
 // STB_VORBIS_HEADER_ONLY avoids a second copy of the implementation, and extern "C" makes these C++
@@ -26,7 +31,7 @@ extern "C" {
 // ===================================
 // SOUNDFONT INFRASTRUCTURE (TinySoundFont)
 // ===================================
-// Supports up to MAX_SOUNDFONTS simultaneously loaded SF2/SF3 files.
+// Supports up to MAX_SOUNDFONTS simultaneously loaded soundfont files.
 // tsf is NOT thread-safe — each entry has its own mutex.
 // The mutex is held by:
 //   • audio thread   — triggerNote(), applyPitchMod(), tsf_render_float()

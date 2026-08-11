@@ -77,8 +77,21 @@ inline const std::vector<std::string>& sample_extensions() {
     return v;
 }
 
+/**
+ * ⚠️ `sf3` IS DELIBERATELY ABSENT, and re-adding it is the mistake this comment exists to stop.
+ *
+ * The decoder handles SF3 correctly — see soundfont-voice.cpp — but tsf opens a separate Vorbis
+ * stream per sample, header and codebooks and all, and grows its float buffer by a fixed step rather
+ * than doubling (`tsf_decode_sf3_samples`). A GM-sized SF3 has thousands of samples, so the load is
+ * quadratic in the decoded size and runs on the thread the UI is drawn from: on a phone it does not
+ * finish, and the app is gone until it is killed. Offering a row that hangs the program is worse than
+ * not offering it.
+ *
+ * Compressed sample data inside a file NAMED `.sf2` still loads, because the decoder is chosen by the
+ * shdr's compression flag, not by the extension.
+ */
 inline const std::vector<std::string>& soundfont_extensions() {
-    static const std::vector<std::string> v = {"sf2", "sf3"};
+    static const std::vector<std::string> v = {"sf2"};
     return v;
 }
 

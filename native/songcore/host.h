@@ -688,7 +688,7 @@ class SongcoreHost {
         return true;
     }
 
-    /** An .sf2/.sf3 → instrument `id`, which becomes a SOUNDFONT slot. The browser's A on one. */
+    /** An .sf2 → instrument `id`, which becomes a SOUNDFONT slot. The browser's A on one. */
     bool load_soundfont(int id, const std::string& path) {
         if (!load_instrument_soundfont(engine_, project_, id, path, routing_)) return false;
         push_instrument(id);

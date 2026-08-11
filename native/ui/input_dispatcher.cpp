@@ -1371,10 +1371,10 @@ void InputDispatcher::on_b_down() {
 // several times over. In the KEYBOARD, R+UP/DOWN switches layout (letters ↔ numbers) and R+LEFT/RIGHT
 // moves the TEXT cursor — four bindings that have nowhere else to live on an eight-button device. In
 // the BROWSER, R+UP/DOWN cycles the SORT MODE and R+LEFT goes UP A DIRECTORY, which is what its own
-// bottom bar advertises ("R+<=UP R+^v=SORT"). In the EQ EDITOR it is simply SWALLOWED: the overlay has
-// no cell in the 5×5 grid, so there is nowhere for R+DPAD to go FROM — and letting it navigate would
-// leave the editor drawn over a screen it was never opened from, still writing into the caller that
-// raised it.
+// bottom bar advertises ("R+<=UP R+^v=SORT"). In the SAMPLE EDITOR R+UP/DOWN is the waveform ZOOM and
+// R+LEFT/RIGHT is swallowed. In the EQ EDITOR all four are simply SWALLOWED: the overlay has no cell in
+// the 5×5 grid, so there is nowhere for R+DPAD to go FROM — and letting it navigate would leave the
+// editor drawn over a screen it was never opened from, still writing into the caller that raised it.
 //
 // None of them may fall through to `navigate_*`: a browser is a popup, not a cell in the screen grid,
 // and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
@@ -1386,7 +1386,8 @@ void InputDispatcher::on_r_up() {
     if (on_browser()) { browser_cycle_sort(+1); return; }
     // Sample-editor ZOOM IN (v0.9.4 C3): R+UP/R+DOWN drive `zoomLevel` (0=1×…4=16×) without hopping to
     // the ZOOM row. The per-frame feed re-bins the waveform off `view_start`/`view_end`, so mutating the
-    // level is the whole job. (SAMPLE_EDITOR is a popup — navigate_* would only sit still here anyway.)
+    // level is the whole job. (SAMPLE_EDITOR is a popup, and `navigate_up`/`navigate_down` sit still on
+    // it via their default arm — unlike the horizontal pair, which do NOT: see on_r_right.)
     if (on_sample_editor()) {
         if (s_.sampleEditor.showConfirmClose) return;   // the ARE YOU SURE? dialog owns the buttons
         s_.sampleEditor.zoomLevel = std::min(s_.sampleEditor.zoomLevel + 1, 4);
@@ -1516,6 +1517,7 @@ void InputDispatcher::on_r_left() {
         return;
     }
     if (eq_open() || theme_open()) return;
+    if (on_sample_editor()) return;   // see on_r_right
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_left(ns);
@@ -1531,6 +1533,12 @@ void InputDispatcher::on_r_right() {
         return;
     }
     if (eq_open() || theme_open()) return;
+    // ⚠️ SWALLOWED on the sample editor, for the reason the EQ overlay is: it has no cell in the 5×5
+    // grid, so `navigate_left`/`navigate_right` fall through their `!is_main_row` arm to
+    // `main_screen_for_column(screen_column(SAMPLE_EDITOR))` = `main_screen_for_column(-1)` = PHRASE.
+    // That is a way OUT of the editor that bypasses ARE YOU SURE? and discards an unsaved edit
+    // silently — B is the only door, and it asks.
+    if (on_sample_editor()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_right(ns);
@@ -3163,7 +3171,11 @@ void InputDispatcher::browser_confirm() {
             // TURNS it into a SoundFont slot (load_instrument_soundfont sets the type), which is what
             // the user asked for by picking one. The browser's filter usually makes this moot — but the
             // user can navigate anywhere, and a folder full of both is not exotic.
-            if (ext == "sf2" || ext == "sf3") {
+            //
+            // `sf3` is not here on purpose (see soundfont_extensions): one navigated to falls through
+            // to load_sample, every decoder refuses it, and the user gets LOAD FAILED — which is the
+            // outcome a format we do not offer should have.
+            if (ext == "sf2") {
                 ok = host_.load_soundfont(id, path);
             } else {
                 ok = host_.load_sample(id, path);
@@ -3228,11 +3240,11 @@ void InputDispatcher::browser_confirm() {
 
     // D2a: remember the folder a SAMPLE was loaded from — `b.currentDirectory` IS that folder (the file
     // just loaded is an item in it). Only for the two sample-load purposes, and not for a SoundFont
-    // (.sf2/.sf3) picked out of a sampler slot — the row is about SAMPLE folders. Persisted on exit by
+    // (.sf2) picked out of a sampler slot — the row is about SAMPLE folders. Persisted on exit by
     // save_settings_if_changed (no dirty flag), so nothing here has to write the file.
     if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
          s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
-        ext != "sf2" && ext != "sf3") {
+        ext != "sf2") {
         s_.settings.lastSampleFolder = b.currentDirectory;
     }
 

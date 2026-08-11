@@ -24,24 +24,10 @@ project("pockettracker-sdl" LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ─── The version, PARSED from the one place that already had it ────────────────────────────────
-# The Windows resource stamps a version into the exe (Explorer > Properties > Details) and
-# build-windows.ps1 names the zip after it. Neither may become a SECOND place a release has to
-# remember to bump — that is the shape of bug this project keeps paying for — so the number is read
-# out of app/build.gradle.kts, which is where `versionName` has always lived.
-#
-# FATAL_ERROR rather than a warning-and-a-default: the file is in this repo and cannot be missing,
-# so the only way here is somebody changing the Gradle syntax, and then a three-second regex fix is
-# the right outcome. A default would let a build ship a version string that is quietly a lie.
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../app/build.gradle.kts" PT_GRADLE)
-if(NOT PT_GRADLE MATCHES "versionName[ \t]*=[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)\"")
-    message(FATAL_ERROR
-            "could not find versionName in app/build.gradle.kts - if its syntax changed, update "
-            "this regex in shell/CMakeLists.txt")
-endif()
-set(PT_VERSION       "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
-set(PT_VERSION_COMMA "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
-message(STATUS "PocketTracker ${PT_VERSION} (from app/build.gradle.kts)")
+# The Windows resource stamps the version into the exe (Explorer > Properties > Details),
+# build-windows.ps1 names the zip after it, and app.cpp prints it in the boot banner. The parse is
+# shared with the Android build rather than repeated here.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../native/cmake/pt_version.cmake")
 
 # ─── A self-contained exe: the MSVC runtime goes IN ────────────────────────────────────────────
 #
@@ -170,6 +156,10 @@ add_executable(pockettracker-sdl
         sdl-video.cpp
         ${PT_WIN_RESOURCES}
 )
+
+# app.cpp's boot banner. A bug report arrives as a log file and a sentence, and without this the
+# version is only in the download's filename — which a reporter has usually thrown away.
+target_compile_definitions(pockettracker-sdl PRIVATE "PT_VERSION_STRING=\"${PT_VERSION}\"")
 
 # winmm — `midiOutShortMsg` and friends (midi-out-winmm.cpp). In every Windows install; no package,
 # no COM, no manifest capability.
