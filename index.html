@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PocketTracker — a music tracker for your pocket</title>
+<meta name="description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux and PortMaster handhelds.">
+<meta name="theme-color" content="#030405">
+<link rel="icon" type="image/png" href="media/favicon.png">
+<link rel="canonical" href="https://conanizer.github.io/pockettracker/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PocketTracker">
+<meta property="og:url" content="https://conanizer.github.io/pockettracker/">
+<meta property="og:title" content="PocketTracker — a music tracker for your pocket">
+<meta property="og:description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux and PortMaster handhelds.">
+<meta property="og:image" content="https://conanizer.github.io/pockettracker/media/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PocketTracker — a music tracker for your pocket">
+<meta name="twitter:description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux and PortMaster handhelds.">
+<meta name="twitter:image" content="https://conanizer.github.io/pockettracker/media/og.png">
+</head>
+<body><style>
+  :root {
+    color-scheme: dark;
+    --page:#030405; --bg:#08121b; --surface:#0f1923; --navy:#020e14; --edge-2:#1a2632;
+    --hi:#5a6b7a; --sh:#05090e;
+    --cyan:#5fd7ff; --cyan-dim:#4a9ec6;
+    --text:#e6eef4; --text-2:#a9bccb; --dim:#667383;
+    --btn-face:#2b3742; --btn-press:#131d29; --btn-tx:#e6eef4;
+
+    --rb-1:#e2453b; --rb-2:#e8892b; --rb-3:#ecd23a; --rb-4:#38bf63; --rb-5:#2f74e8;
+    --mono:"Cascadia Code","JetBrains Mono",ui-monospace,"SF Mono","Menlo","Consolas","DejaVu Sans Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  :root[data-theme="light"],:root[data-theme="dark"]{ color-scheme: dark; }
+
+  *{ box-sizing:border-box; }
+  html{ -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+  body{ margin:0; background:var(--page); color:var(--text-2);
+    font-family:var(--mono); font-size:16px; line-height:1.55; overflow-x:hidden; }
+  img,video{ max-width:100%; display:block; }
+  a{ color:var(--cyan); text-decoration:none; }
+  a:hover{ text-decoration:underline; }
+  :focus-visible{ outline:2px dotted var(--cyan); outline-offset:3px; }
+  h1,h2,h3{ margin:0; text-wrap:balance; }
+
+  .frame{ max-width:940px; margin:0 auto; background:var(--bg); border:1px solid var(--edge-2); }
+  .rainbow{ height:4px; background:linear-gradient(90deg,var(--rb-1),var(--rb-2),var(--rb-3),var(--rb-4),var(--rb-5)); }
+  .rainbow.mini{ max-width:116px; height:3px; }
+  .inner{ padding-inline:clamp(16px,3.6vw,40px); }
+  .label{ font-family:var(--mono); font-weight:700; font-size:.72rem; letter-spacing:.24em;
+    text-transform:uppercase; color:var(--cyan-dim); margin-bottom:16px; }
+
+  /* header carries the wordmark */
+  .top{ min-height:100vh; min-height:100svh; display:flex; flex-direction:column; }
+  .header{ display:flex; align-items:center; gap:16px; padding:20px 0; border-bottom:1px solid var(--edge-2); }
+  .brand{ display:flex; align-items:center; gap:13px; font-family:var(--mono); font-weight:700; color:var(--text); }
+  .brand img{ width:44px; height:44px; }
+  .brand .wm{ font-size:1.9rem; letter-spacing:-.02em; line-height:1; }
+  .brand b{ color:var(--cyan); }
+  .nav{ margin-left:auto; display:flex; gap:28px; font-family:var(--mono);
+    font-size:.88rem; letter-spacing:.1em; text-transform:uppercase; }
+  .nav a{ color:var(--dim); } .nav a:hover{ color:var(--cyan); }
+
+  /* max-content, not a fr ratio: the text column takes exactly the pitch's longest line and the
+     video takes whatever is left, so no hand-tuned split can crush the pitch into rewrapping. */
+  .hero{ flex:1; display:grid; grid-template-columns:max-content 1fr;
+    gap:clamp(22px,4vw,50px); align-content:center; align-items:start; padding:clamp(16px,3vw,34px) 0;
+    --pitch-fs:clamp(1.5rem,3vw,2.2rem); }
+  /* The pitch carries its own line breaks, so max-content sizes this column to its longest line —
+     and the button, filling the column, comes out exactly that wide. max-width keeps it from
+     overflowing a narrow phone, where the lines wrap again instead. */
+  .hero .txt{ width:max-content; max-width:100%; }
+  .pitch{ margin:0; font-family:var(--sans); font-weight:600; font-size:var(--pitch-fs);
+    color:var(--text); line-height:1.3; }
+  /* The authored line breaks are a wide-layout treatment: as blocks they set the column's
+     max-content width. On a phone they go back to inline and the sentence wraps to the screen —
+     the source newline between them becomes the word space. */
+  .pitch span{ display:block; }
+  .cta{ display:flex; gap:10px; margin-top:33px; }
+  .cta .btn{ font-size:1.05rem; letter-spacing:.09em; padding:13px 12px; }
+  .btn{ flex:1; text-align:center; white-space:nowrap; cursor:pointer;
+    font-family:var(--mono); font-weight:700; font-size:.95rem; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--btn-tx); background:var(--btn-face); padding:12px 12px;
+    text-shadow:2px 2px 0 #05070b;
+    border:2px solid; border-color:var(--hi) var(--sh) var(--sh) var(--hi); }
+  .btn:hover, .btn:focus-visible{ background:var(--btn-press); text-decoration:none;
+    transform:translate(1px,1px);
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh); }
+  .subver{ margin:16px 0 0; text-align:center; font-family:var(--mono); font-size:.74rem;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
+  /* Cap the clip at the text block's own height so the two columns end level.
+     ⚠️ The constant is that block measured: 33px .cta margin + 56px button (1.05rem × 1.55
+     line-height + 13px padding + 2px border, doubled) + 34px .subver (16px margin + its line).
+     4 pitch lines × 1.3 line-height is the 5.2. Re-derive it if any of those change.
+     A replaced element clamped by max-height keeps its ratio, so the width follows and the clip
+     never distorts; below ~1170px the column is the smaller constraint and this stops binding. */
+  .hero .media video{ width:100%; max-height:calc(5.2 * var(--pitch-fs) + 123px); }
+
+  /* download */
+  .dl{ margin-top:clamp(46px,7vw,80px); scroll-margin-top:18px; }
+  .dl h2{ font-family:var(--mono); font-weight:700; font-size:clamp(1.3rem,2.9vw,1.75rem);
+    color:var(--text); margin-bottom:18px; }
+  /* no gaps: the bevels butt into one another and read as one ProTracker button strip */
+  .plats{ display:flex; gap:0; flex-wrap:wrap; }
+  .plats .btn{ flex:1 1 0; min-width:132px; -webkit-appearance:none; appearance:none; }
+  /* every tab keeps the standard white label, so the selected one is told apart by depth alone:
+     raised idle, pressed on hover, deepest when selected. */
+  .plats .btn.on{ background:var(--navy);
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh); transform:none; }
+  .pane{ background:var(--surface); border:1px solid var(--edge-2); border-top:none;
+    padding:clamp(18px,3vw,26px); }
+  .dl.js .pane{ display:none; } .dl.js .pane.on{ display:block; }
+  .dl.js .pane{ margin-top:-1px; }
+  .dl:not(.js) .pane{ margin-top:14px; border-top:1px solid var(--edge-2); }
+  .getrow{ display:flex; gap:0; flex-wrap:wrap; justify-content:center; }
+  .getrow .btn{ flex:0 1 230px; }
+  .meta{ margin:14px 0 0; text-align:center;
+    font-family:var(--mono); font-size:.74rem; letter-spacing:.06em; color:var(--dim); }
+  .guide{ margin-top:24px; border-top:1px solid var(--edge-2); padding-top:20px; }
+  .guide .label{ margin-bottom:12px; }
+  .guide ol{ margin:0; padding-left:1.35em; font-family:var(--sans); font-size:.97rem;
+    color:var(--text-2); line-height:1.6; }
+  .guide li{ margin-bottom:10px; } .guide li:last-child{ margin-bottom:0; }
+  .guide li::marker{ font-family:var(--mono); color:var(--cyan-dim); font-size:.85em; }
+  .guide p.note{ margin:16px 0 0; font-family:var(--sans); font-size:.88rem; color:var(--dim); max-width:66ch; }
+  code{ font-family:var(--mono); font-size:.85em; color:var(--text);
+    background:var(--navy); border:1px solid var(--edge-2); padding:1px 5px; }
+  pre{ margin:10px 0 0; padding:11px 13px; overflow-x:auto;
+    background:var(--navy); border:1px solid var(--edge-2); }
+  pre code{ background:none; border:none; padding:0; color:var(--text-2); font-size:.82rem; }
+
+  /* alternating demo blocks */
+  .block{ margin-top:clamp(50px,8vw,92px); display:grid; grid-template-columns:1fr 1.14fr;
+    gap:clamp(28px,5vw,64px); align-items:start; }
+  .block .txt{ order:1; } .block .media{ order:2; }
+  .block.flip{ grid-template-columns:1.14fr 1fr; }
+  .block.flip .txt{ order:2; } .block.flip .media{ order:1; }
+  .block h2{ font-family:var(--mono); font-weight:700; font-size:clamp(1.3rem,2.9vw,1.75rem);
+    color:var(--text); letter-spacing:-.005em; margin-bottom:14px; }
+  .block p{ margin:0; font-family:var(--sans); font-size:1.02rem; color:var(--text-2); line-height:1.62; max-width:52ch; }
+  .block .media video{ width:100%; }
+
+  .phones{ display:flex; gap:14px; justify-content:center; }
+  .phones video{ height:clamp(330px,46vh,450px); width:auto; max-width:49%; }
+
+  .seq video{ display:none; } .seq video.on{ display:block; }
+
+  /* community */
+  .community{ margin-top:clamp(50px,8vw,92px); }
+  .feedback{ margin:0 0 24px; font-family:var(--sans); font-size:1.03rem; color:var(--text-2);
+    line-height:1.64; max-width:64ch; }
+  .tiles{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .tile{ background:var(--surface); border:1px solid var(--edge-2); padding:16px;
+    display:flex; flex-direction:column; gap:6px; }
+  .tile:hover{ border-color:var(--cyan-dim); text-decoration:none; }
+  .tile .k{ font-family:var(--mono); font-size:.66rem; letter-spacing:.2em; text-transform:uppercase; color:var(--cyan-dim); }
+  .tile h3{ font-family:var(--mono); font-size:1.02rem; color:var(--text); }
+  .tile p{ margin:0; font-family:var(--sans); font-size:.85rem; color:var(--dim); }
+  .tile .go{ margin-top:4px; font-family:var(--mono); font-size:.79rem; color:var(--cyan); }
+
+  footer{ margin-top:clamp(50px,8vw,90px); border-top:1px solid var(--edge-2);
+    padding:26px 0 32px; display:flex; flex-direction:column; gap:9px; }
+  footer p{ margin:0; font-family:var(--sans); font-size:.83rem; color:var(--text-2); }
+  footer .ai{ color:var(--dim); font-size:.79rem; }
+
+  @media (max-width:760px){
+    .hero{ grid-template-columns:1fr; } .hero .media{ order:-1; } .top{ min-height:0; }
+    /* one column: the text block spans it instead of shrink-wrapping to its longest line,
+       so the button reaches both edges. The height cap has no partner to match here. */
+    .hero .txt{ width:auto; }
+    .hero .media video{ max-height:none; }
+    .pitch span{ display:inline; }
+    /* .block.flip also sets grid-template-columns, and outranks a bare .block here */
+    .block, .block.flip{ grid-template-columns:1fr; }
+    .block .media, .block.flip .media{ order:-1; }
+    .block .txt, .block.flip .txt{ order:1; }
+    .tiles{ grid-template-columns:1fr; }
+    /* two per row, and the 50% basis has to be exact — there is no gap to absorb a rounding error */
+    .plats .btn{ flex:1 1 50%; min-width:0; }
+    .getrow .btn{ flex:1 1 100%; }
+  }
+  @media (max-width:520px){ .nav{ display:none; } .header{ justify-content:center; } }
+  @media (prefers-reduced-motion:reduce){ html{ scroll-behavior:auto; } }
+</style>
+
+<div class="frame">
+  <div class="rainbow"></div>
+  <div class="inner">
+
+    <div class="top">
+      <header class="header">
+        <span class="brand"><img src="media/logo.png" alt="PocketTracker logo"><span class="wm">Pocket<b>Tracker</b></span></span>
+        <nav class="nav">
+          <a href="#download">Download</a>
+          <a href="#features">Features</a>
+          <a href="#community">Community</a>
+          <a href="https://github.com/conanizer/pockettracker">Source</a>
+        </nav>
+      </header>
+
+      <section class="hero" id="top">
+        <div class="txt">
+          <p class="pitch">
+            <span>Music tracker for retro</span>
+            <span>gaming handhelds</span>
+            <span>and smartphones.</span>
+            <span>Free and open source.</span>
+          </p>
+          <div class="cta">
+            <a class="btn" href="#download">Download</a>
+          </div>
+          <p class="subver">v0.9.4 · public beta</p>
+        </div>
+        <div class="media">
+          <video src="media/song.mp4" autoplay muted loop playsinline preload="auto" aria-label="The SONG screen sequencing a track"></video>
+        </div>
+      </section>
+    </div>
+
+    <section class="dl" id="download">
+      <p class="label">Download</p>
+      <h2>Pick your platform</h2>
+
+      <div class="plats" role="tablist" aria-label="Platform">
+        <button class="btn on" type="button" role="tab" aria-selected="true"  aria-controls="p-android"    id="t-android">Android</button>
+        <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-windows"    id="t-windows">Windows</button>
+        <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-linux"      id="t-linux">Linux</button>
+        <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-portmaster" id="t-portmaster">PortMaster</button>
+      </div>
+
+      <div class="pane on" id="p-android" role="tabpanel" aria-labelledby="t-android">
+        <div class="getrow">
+          <a class="btn" href="https://apps.obtainium.page/redirect?r=obtainium://add/https://github.com/conanizer/pockettracker">Obtainium</a>
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.4/PocketTracker-0.9.4.apk">APK</a>
+        </div>
+        <p class="meta">PocketTracker-0.9.4.apk · 17.5 MB · Android 8.0+ · arm64-v8a / x86-64</p>
+        <div class="guide">
+          <p class="label">How to install</p>
+          <ol>
+            <li><b>Obtainium</b> keeps the app updated for you: install <a href="https://github.com/ImranR98/Obtainium">Obtainium</a> first, then press the button above on your device — PocketTracker is added straight from GitHub Releases.</li>
+            <li><b>Or take the APK</b> and open it on your device. Android will ask you to allow installs from unknown sources — that's normal for anything outside a store.</li>
+            <li>On first run, open the file browser and press <b>A</b> on the <code>ADD FOLDER...</code> row. The folder you pick is where your projects, samples and renders live.</li>
+          </ol>
+          <p class="note">PocketTracker asks for no permissions at all — that folder is the only place it can touch.</p>
+        </div>
+      </div>
+
+      <div class="pane" id="p-windows" role="tabpanel" aria-labelledby="t-windows">
+        <div class="getrow">
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.4/PocketTracker-0.9.4-windows-x64.zip">Download</a>
+        </div>
+        <p class="meta">PocketTracker-0.9.4-windows-x64.zip · 1.9 MB · 64-bit Windows</p>
+        <div class="guide">
+          <p class="label">How to install</p>
+          <ol>
+            <li>Unzip it anywhere — it's a folder, not an installer. Nothing else to install: SDL2 and the Visual C++ runtime are both built in.</li>
+            <li>Run <code>PocketTracker.exe</code>. Windows SmartScreen warns about an unsigned app the first time: <i>More info</i> → <i>Run anyway</i>.</li>
+            <li>Your projects, samples and soundfonts live in <code>Documents\PocketTracker\</code>.</li>
+          </ol>
+          <p class="note">A console window opens behind the tracker and stays there on purpose — it prints what the audio device and the display actually did, which is the most useful thing to attach to a bug report. Closing it closes the app.</p>
+        </div>
+      </div>
+
+      <div class="pane" id="p-linux" role="tabpanel" aria-labelledby="t-linux">
+        <div class="getrow">
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.4/PocketTracker-0.9.4-linux-x64.tar.gz">Download</a>
+        </div>
+        <p class="meta">PocketTracker-0.9.4-linux-x64.tar.gz · 1.3 MB · x86-64 desktop</p>
+        <div class="guide">
+          <p class="label">How to install</p>
+          <ol>
+            <li>Unpack it and run the binary:
+              <pre><code>tar xzf PocketTracker-0.9.4-linux-x64.tar.gz
+cd PocketTracker-0.9.4
+./PocketTracker</code></pre>
+            </li>
+            <li>SDL2 is the only thing it needs from your system — <code>libsdl2-2.0-0</code> on Debian/Ubuntu, <code>SDL2</code> on Fedora, <code>sdl2</code> on Arch.</li>
+            <li>Your files land in <code>~/.local/share/PocketTracker</code>, as <code>Projects/</code>, <code>Samples/</code> and <code>Soundfonts/</code>. Set <code>POCKETTRACKER_HOME</code> to put them somewhere else.</li>
+          </ol>
+          <p class="note">A gamepad works over SDL, and the keyboard is mapped too.</p>
+        </div>
+      </div>
+
+      <div class="pane" id="p-portmaster" role="tabpanel" aria-labelledby="t-portmaster">
+        <div class="getrow">
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.4/PocketTracker-0.9.4-portmaster-aarch64.zip">Download</a>
+        </div>
+        <p class="meta">PocketTracker-0.9.4-portmaster-aarch64.zip · 1.2 MB · aarch64 CFW handhelds</p>
+        <div class="guide">
+          <p class="label">How to install</p>
+          <ol>
+            <li>Unzip it into your device's <code>ports</code> folder, so that <code>PocketTracker.sh</code> and the <code>pockettracker/</code> folder end up side by side in there.</li>
+            <li>Launch <b>PocketTracker</b> from the Ports menu. Nothing extra is needed — no BIOS, no runtime, no gptokeyb.</li>
+            <li>Your files live in <code>ports/pockettracker/data/</code>, created on first launch — copy samples in there over USB or the network.</li>
+          </ol>
+          <p class="note">For ArkOS, muOS, JELOS, Knulli, ROCKNIX and friends. The port uses your device's own SDL2, so it follows whatever your firmware already does about the screen and the audio.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="block flip" id="features">
+      <div class="txt">
+        <h2>Familiar workflow</h2>
+        <p>PocketTracker follows the lineage of LSDJ — the same family as LGPT and the Dirtywave M8. If you've used one, you'll feel at home right away: you build a track from the ground up with the classic song → chain → phrase → instrument structure, chaining small looping patterns into a full arrangement, with a deep set of step effects and per-instrument envelopes and LFOs to bring it to life.</p>
+      </div>
+      <div class="media"><video src="media/screens.mp4" autoplay muted loop playsinline preload="auto" aria-label="Moving between the song, chain, phrase and instrument screens"></video></div>
+    </section>
+
+    <section class="block">
+      <div class="txt">
+        <h2>Sample editor</h2>
+        <p>Load a sample in almost any format — WAV, MP3, FLAC, OGG, Opus or M4A. Short on source material? Just screen-record something from YouTube or your favourite video game and use this MP4 file as a sample. Then get your hands on the waveform: trim it, slice it, repitch it, time-stretch it (can't wait to hear your jungle tunes) and bake in effects, right on the handheld. Add slice markers, or chop it up destructively.</p>
+      </div>
+      <div class="media"><video src="media/editor.mp4" autoplay muted loop playsinline preload="auto" aria-label="Editing a sample waveform"></video></div>
+    </section>
+
+    <section class="block flip">
+      <div class="txt">
+        <h2>Mixing &amp; export</h2>
+        <p>Arrange your patterns into a full song across eight stereo tracks, then balance it on the mixer — per-track sends, reverb and delay buses, and a master chain with an OTT-style multiband compressor or the lo-fi DUST character. Export the finished mix as a WAV, each track as a separate stem, or resample any part of the song back into a fresh instrument to build on.</p>
+      </div>
+      <div class="media"><video src="media/mixing.mp4" autoplay muted loop playsinline preload="auto" aria-label="The mixer, balancing tracks and sends"></video></div>
+    </section>
+
+    <section class="block">
+      <div class="txt">
+        <h2>Handhelds &amp; smartphones</h2>
+        <p>PocketTracker was designed with retro gaming handhelds in mind — but you don't need one to start. There's a full touchscreen layout for Android phones too, wrapped in an Amiga-inspired skin that comes in two color schemes. Windows and Linux desktop versions are also available now.</p>
+      </div>
+      <div class="media">
+        <div class="phones">
+          <video src="media/amiga-classic.mp4" autoplay muted loop playsinline preload="auto" aria-label="Touchscreen layout, classic color scheme"></video>
+          <video src="media/amiga-dark.mp4" autoplay muted loop playsinline preload="auto" aria-label="Touchscreen layout, dark color scheme"></video>
+        </div>
+      </div>
+    </section>
+
+    <section class="block flip">
+      <div class="txt">
+        <h2>Themes &amp; visualizers</h2>
+        <p>Make it yours. Switch between built-in interface color themes or design your own in the theme editor, and pick from a row of top-bar visualizers — from a ProTracker-style scope to a Pioneer-style stereo tower.</p>
+      </div>
+      <div class="media"><div class="seq" data-seq>
+        <video class="on" src="media/themes.mp4" muted playsinline preload="auto" aria-label="Interface color themes"></video>
+        <video src="media/viz.mp4" muted playsinline preload="auto" aria-label="Top-bar visualizers"></video>
+      </div></div>
+    </section>
+
+    <section class="community" id="community">
+      <p class="label">Community &amp; support</p>
+      <p class="feedback">I'd genuinely appreciate your feedback, feature requests and bug reports — they're what help me improve and refine the app. You can reach me on GitHub or over on the Discord. And if you're enjoying PocketTracker, you can help support its continued development.</p>
+      <div class="tiles">
+        <a class="tile" href="https://github.com/conanizer/pockettracker/issues">
+          <span class="k">Feedback</span><h3>GitHub</h3>
+          <p>Report a bug, request a feature, or start a discussion.</p>
+          <span class="go">Issues &amp; discussions →</span>
+        </a>
+        <a class="tile" href="https://discord.gg/Va72sWDmVA">
+          <span class="k">Chat</span><h3>Discord</h3>
+          <p>Share tracks, ask questions, and chat with other users.</p>
+          <span class="go">Join the server →</span>
+        </a>
+        <a class="tile" href="https://ko-fi.com/pockettracker">
+          <span class="k">Support</span><h3>Ko-fi</h3>
+          <p>Help keep development going, if the app's useful to you.</p>
+          <span class="go">Buy me a coffee →</span>
+        </a>
+      </div>
+    </section>
+
+    <footer>
+      <div class="rainbow mini"></div>
+      <p>PocketTracker is free software under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL-3.0</a>.</p>
+      <p class="ai">Developed with AI assistance. If that bothers you, this project isn't for you.</p>
+    </footer>
+
+  </div>
+</div>
+
+<script>
+  (function () {
+    /* Tabs only exist once JS runs; without it every platform's guide stays visible. */
+    var dl = document.getElementById("download");
+    if (dl) {
+      dl.classList.add("js");
+      var tabs = Array.prototype.slice.call(dl.querySelectorAll(".plats .btn"));
+      var panes = Array.prototype.slice.call(dl.querySelectorAll(".pane"));
+      var show = function (k) {
+        tabs.forEach(function (t, i) {
+          var on = i === k;
+          t.classList.toggle("on", on);
+          t.setAttribute("aria-selected", on ? "true" : "false");
+          panes[i].classList.toggle("on", on);
+        });
+      };
+      tabs.forEach(function (t, k) {
+        t.addEventListener("click", function () { show(k); });
+        t.addEventListener("keydown", function (e) {
+          var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          var n = (k + d + tabs.length) % tabs.length;
+          tabs[n].focus(); show(n);
+        });
+      });
+      /* #download-windows etc. deep-links straight to a platform */
+      var m = /^#download-(\w+)$/.exec(location.hash);
+      if (m) {
+        var i = tabs.map(function (t) { return t.id; }).indexOf("t-" + m[1]);
+        if (i >= 0) { show(i); dl.scrollIntoView(); }
+      }
+    }
+
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      document.querySelectorAll("video").forEach(function (v) {
+        v.removeAttribute("autoplay"); v.pause(); v.setAttribute("controls", "");
+      });
+      document.querySelectorAll("[data-seq]").forEach(function (s) {
+        var f = s.querySelector("video"); if (f) f.classList.add("on");
+      });
+      return;
+    }
+    document.querySelectorAll("[data-seq]").forEach(function (seq) {
+      var vids = Array.prototype.slice.call(seq.querySelectorAll("video"));
+      vids.forEach(function (v, k) {
+        v.addEventListener("ended", function () {
+          v.classList.remove("on");
+          var n = (k + 1) % vids.length;
+          vids[n].classList.add("on"); vids[n].currentTime = 0; vids[n].play();
+        });
+      });
+      if (vids[0]) vids[0].play();
+    });
+  })();
+</script>
+
+</body>
+</html>
