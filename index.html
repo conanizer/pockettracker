@@ -54,7 +54,6 @@
     text-transform:uppercase; color:var(--cyan-dim); margin-bottom:16px; }
 
   /* header carries the wordmark */
-  .top{ min-height:100vh; min-height:100svh; display:flex; flex-direction:column; }
   .header{ display:flex; align-items:center; gap:16px; padding:.85rem 0; border-bottom:1px solid var(--edge-2); }
   .brand{ display:flex; align-items:center; gap:13px; font-family:var(--mono); font-weight:700; color:var(--text); }
   .brand img{ width:44px; height:44px; }
@@ -66,8 +65,8 @@
 
   /* max-content, not a fr ratio: the text column takes exactly the pitch's longest line and the
      video takes whatever is left, so no hand-tuned split can crush the pitch into rewrapping. */
-  .hero{ flex:1; display:grid; grid-template-columns:max-content 1fr;
-    gap:clamp(22px,4vw,50px); align-content:center; align-items:start; padding:1.4rem 0;
+  .hero{ display:grid; grid-template-columns:max-content 1fr;
+    gap:clamp(22px,4vw,50px); align-items:start; padding:2rem 0;
     --pitch-fs:clamp(1.5rem,3vw,2.2rem); }
   /* The pitch carries its own line breaks, so max-content sizes this column to its longest line —
      and the button, filling the column, comes out exactly that wide. max-width keeps it from
@@ -184,7 +183,7 @@
   footer .ai{ color:var(--dim); font-size:.79rem; }
 
   @media (max-width:760px){
-    .hero{ grid-template-columns:1fr; } .hero .media{ order:-1; } .top{ min-height:0; }
+    .hero{ grid-template-columns:1fr; } .hero .media{ order:-1; }
     /* one column: the text block spans it instead of shrink-wrapping to its longest line,
        so the button reaches both edges. The height cap has no partner to match here. */
     .hero .txt{ width:auto; }
