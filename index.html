@@ -55,7 +55,7 @@
 
   /* header carries the wordmark */
   .top{ min-height:100vh; min-height:100svh; display:flex; flex-direction:column; }
-  .header{ display:flex; align-items:center; gap:16px; padding:20px 0; border-bottom:1px solid var(--edge-2); }
+  .header{ display:flex; align-items:center; gap:16px; padding:.85rem 0; border-bottom:1px solid var(--edge-2); }
   .brand{ display:flex; align-items:center; gap:13px; font-family:var(--mono); font-weight:700; color:var(--text); }
   .brand img{ width:44px; height:44px; }
   .brand .wm{ font-size:1.9rem; letter-spacing:-.02em; line-height:1; }
@@ -67,7 +67,7 @@
   /* max-content, not a fr ratio: the text column takes exactly the pitch's longest line and the
      video takes whatever is left, so no hand-tuned split can crush the pitch into rewrapping. */
   .hero{ flex:1; display:grid; grid-template-columns:max-content 1fr;
-    gap:clamp(22px,4vw,50px); align-content:center; align-items:start; padding:clamp(16px,3vw,34px) 0;
+    gap:clamp(22px,4vw,50px); align-content:center; align-items:start; padding:1.4rem 0;
     --pitch-fs:clamp(1.5rem,3vw,2.2rem); }
   /* The pitch carries its own line breaks, so max-content sizes this column to its longest line —
      and the button, filling the column, comes out exactly that wide. max-width keeps it from
@@ -138,12 +138,16 @@
     color:var(--text-2); line-height:1.6; }
   .guide li{ margin-bottom:10px; } .guide li:last-child{ margin-bottom:0; }
   .guide li::marker{ font-family:var(--mono); color:var(--cyan-dim); font-size:.85em; }
+  /* Android offers two ways in, not two steps — no numbers, and a rule marking off the part
+     that applies whichever one you took. */
+  .guide .alts{ margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:12px;
+    font-family:var(--sans); font-size:.97rem; color:var(--text-2); line-height:1.6; }
+  .guide .then{ margin:18px 0 0; padding-top:18px; border-top:1px solid var(--edge-2);
+    font-family:var(--sans); font-size:.97rem; color:var(--text-2); line-height:1.6; }
   .guide p.note{ margin:16px 0 0; font-family:var(--sans); font-size:.88rem; color:var(--dim); max-width:66ch; }
   code{ font-family:var(--mono); font-size:.85em; color:var(--text);
     background:var(--navy); border:1px solid var(--edge-2); padding:1px 5px; }
-  pre{ margin:10px 0 0; padding:11px 13px; overflow-x:auto;
-    background:var(--navy); border:1px solid var(--edge-2); }
-  pre code{ background:none; border:none; padding:0; color:var(--text-2); font-size:.82rem; }
+
 
   /* alternating demo blocks */
   .block{ margin-top:clamp(50px,8vw,92px); display:grid; grid-template-columns:1fr 1.14fr;
@@ -228,7 +232,7 @@
           <p class="subver">v0.9.4 · public beta</p>
         </div>
         <div class="media">
-          <video src="media/song.mp4" autoplay muted loop playsinline preload="auto" aria-label="The SONG screen sequencing a track"></video>
+          <video src="media/phrase.mp4" autoplay muted loop playsinline preload="auto" aria-label="Entering notes on the PHRASE screen"></video>
         </div>
       </section>
     </div>
@@ -252,11 +256,11 @@
         <p class="meta">PocketTracker-0.9.4.apk · 17.5 MB · Android 8.0+ · arm64-v8a / x86-64</p>
         <div class="guide">
           <p class="label">How to install</p>
-          <ol>
-            <li><b>Obtainium</b> keeps the app updated for you: install <a href="https://github.com/ImranR98/Obtainium">Obtainium</a> first, then press the button above on your device — PocketTracker is added straight from GitHub Releases.</li>
-            <li><b>Or take the APK</b> and open it on your device. Android will ask you to allow installs from unknown sources — that's normal for anything outside a store.</li>
-            <li>On first run, open the file browser and press <b>A</b> on the <code>ADD FOLDER...</code> row. The folder you pick is where your projects, samples and renders live.</li>
-          </ol>
+          <ul class="alts">
+            <li><b>Obtainium</b> — install <a href="https://github.com/ImranR98/Obtainium">Obtainium</a> first, then press the button above on your device. PocketTracker is added straight from GitHub Releases and stays up to date on its own.</li>
+            <li><b>The APK</b> — download it and open it on your device. Android will ask you to allow installs from unknown sources; that is normal for anything from outside a store.</li>
+          </ul>
+          <p class="then">Either way, on first run open the file browser and press <b>A</b> on the <code>ADD FOLDER...</code> row. The folder you pick is where your projects, samples and renders live.</p>
           <p class="note">PocketTracker asks for no permissions at all — that folder is the only place it can touch.</p>
         </div>
       </div>
@@ -269,7 +273,7 @@
         <div class="guide">
           <p class="label">How to install</p>
           <ol>
-            <li>Unzip it anywhere — it's a folder, not an installer. Nothing else to install: SDL2 and the Visual C++ runtime are both built in.</li>
+            <li>Unzip it anywhere — it's a folder, not an installer.</li>
             <li>Run <code>PocketTracker.exe</code>. Windows SmartScreen warns about an unsigned app the first time: <i>More info</i> → <i>Run anyway</i>.</li>
             <li>Your projects, samples and soundfonts live in <code>Documents\PocketTracker\</code>.</li>
           </ol>
@@ -285,11 +289,7 @@
         <div class="guide">
           <p class="label">How to install</p>
           <ol>
-            <li>Unpack it and run the binary:
-              <pre><code>tar xzf PocketTracker-0.9.4-linux-x64.tar.gz
-cd PocketTracker-0.9.4
-./PocketTracker</code></pre>
-            </li>
+            <li>Unpack the archive anywhere, then run the <code>PocketTracker</code> file inside it.</li>
             <li>SDL2 is the only thing it needs from your system — <code>libsdl2-2.0-0</code> on Debian/Ubuntu, <code>SDL2</code> on Fedora, <code>sdl2</code> on Arch.</li>
             <li>Your files land in <code>~/.local/share/PocketTracker</code>, as <code>Projects/</code>, <code>Samples/</code> and <code>Soundfonts/</code>. Set <code>POCKETTRACKER_HOME</code> to put them somewhere else.</li>
           </ol>
@@ -419,11 +419,30 @@ cd PocketTracker-0.9.4
           tabs[n].focus(); show(n);
         });
       });
-      /* #download-windows etc. deep-links straight to a platform */
-      var m = /^#download-(\w+)$/.exec(location.hash);
-      if (m) {
-        var i = tabs.map(function (t) { return t.id; }).indexOf("t-" + m[1]);
-        if (i >= 0) { show(i); dl.scrollIntoView(); }
+      var indexOfTab = function (name) {
+        return tabs.map(function (t) { return t.id; }).indexOf("t-" + name);
+      };
+
+      /* Open on the platform the visitor is actually on. Android is tested first because its user
+         agent also says Linux, and it is the fallback too: there is no macOS or iOS build, so a Mac
+         or an iPhone lands on the one platform its owner might still be carrying. A wrong guess
+         costs one click — the other three tabs are right there. */
+      var detect = function () {
+        var data = navigator.userAgentData;
+        var plat = (data && data.platform) || "";
+        var ua = navigator.userAgent || "";
+        if (/Android/i.test(plat) || /Android/i.test(ua)) return "android";
+        if (/Windows/i.test(plat) || /Windows/i.test(ua)) return "windows";
+        if (/Linux/i.test(plat) || /(Linux|X11|CrOS)/i.test(ua)) return "linux";
+        return "android";
+      };
+
+      /* an explicit #download-linux link is a stated preference and outranks the guess */
+      var asked = /^#download-(\w+)$/.exec(location.hash);
+      var want = indexOfTab(asked ? asked[1] : detect());
+      if (want >= 0) {
+        show(want);
+        if (asked) dl.scrollIntoView();
       }
     }
 
