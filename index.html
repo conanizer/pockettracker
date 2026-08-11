@@ -79,13 +79,18 @@
      max-content width. On a phone they go back to inline and the sentence wraps to the screen —
      the source newline between them becomes the word space. */
   .pitch span{ display:block; }
-  .cta{ display:flex; gap:10px; margin-top:33px; }
-  .cta .btn{ --py:13px; font-size:1.05rem; letter-spacing:.09em; }
+  .cta{ display:flex; gap:10px; margin-top:28px; }
+  .cta .btn{ font-size:1.85rem; }
   .btn{ --px:12px; --py:12px;
     flex:1; text-align:center; white-space:nowrap; cursor:pointer;
-    font-family:var(--mono); font-weight:700; font-size:.95rem; letter-spacing:.05em; text-transform:uppercase;
+    font-family:var(--mono); font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    /* vw-scaled so PORTMASTER still fits a half-width tab on a phone; the cap is set by the
+       narrowest a tab gets on the wide layout (a quarter of the frame). */
+    font-size:clamp(1.05rem,2.2vw,1.6rem); line-height:1.1;
     color:var(--btn-tx); background:var(--btn-face); padding:var(--py) var(--px);
-    text-shadow:2px 2px 0 #05070b;
+    /* em, so the drop shadow keeps its proportion at both button sizes. Offset under one stem
+       width, and shorter across than down, so the shadow stays welded to the glyphs. */
+    text-shadow:.06em .1em 0 #05070b;
     border:2px solid; border-color:var(--hi) var(--sh) var(--sh) var(--hi); }
   /* The press: bevel flips, face darkens, and the label sinks a pixel down and right.
      The shift is padding, not a transform — what it gains on two sides it loses on the other
@@ -98,8 +103,8 @@
   .subver{ margin:16px 0 0; text-align:center; font-family:var(--mono); font-size:.74rem;
     letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
   /* Cap the clip at the text block's own height so the two columns end level.
-     ⚠️ The constant is that block measured: 33px .cta margin + 56px button (1.05rem × 1.55
-     line-height + 13px padding + 2px border, doubled) + 34px .subver (16px margin + its line).
+     ⚠️ The constant is that block measured: 28px .cta margin + 61px button (1.85rem × 1.1
+     line-height + 12px padding + 2px border, doubled) + 34px .subver (16px margin + its line).
      4 pitch lines × 1.3 line-height is the 5.2. Re-derive it if any of those change.
      A replaced element clamped by max-height keeps its ratio, so the width follows and the clip
      never distorts; below ~1170px the column is the smaller constraint and this stops binding. */
@@ -111,7 +116,9 @@
     color:var(--text); margin-bottom:18px; }
   /* no gaps: the bevels butt into one another and read as one ProTracker button strip */
   .plats{ display:flex; gap:0; flex-wrap:wrap; }
-  .plats .btn{ flex:1 1 0; min-width:132px; -webkit-appearance:none; appearance:none; }
+  /* PORTMASTER is the longest label and a tab is only a quarter of the frame, so the tabs
+     buy their room from the side padding rather than from the type size. */
+  .plats .btn{ --px:8px; flex:1 1 0; min-width:132px; -webkit-appearance:none; appearance:none; }
   /* every tab keeps the standard white label, so the selected one is told apart by depth alone:
      raised idle, pressed on hover, deepest when selected. */
   .plats .btn.on{ background:var(--navy);
