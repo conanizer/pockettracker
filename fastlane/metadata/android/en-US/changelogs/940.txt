@@ -1,9 +1,7 @@
-No storage permission any more. On first run you grant one folder and that folder is its home; you can add more later.
+No storage permission any more — you grant one folder and that folder is the app's home; you can add more later.
 
-• Mixer automation: VTR/VMV fader effects, and AUS/AUF to ramp any of them over time
-• R+UP / R+DOWN zooms the sample editor
-• R+LEFT / R+RIGHT moves the text cursor fast
-• L+R clears the copy buffer
-• Button click records at the volume you hear
-• .sf3 SoundFonts are no longer offered; .sf2 is unaffected
-• Also released for Windows, Linux and Linux handhelds
+• The interface and sequencer are now C++, shared with Windows, Linux and handheld builds
+• New effects: VTR/VMV mixer faders, and AUS/AUF to ramp VOL, PAN, REV, DEL, VTR, VMV
+• R+UP/R+DOWN zooms the sample editor; R+LEFT/R+RIGHT moves the qwerty text cursor
+• Screen recordings get the click at the volume you hear
+• .sf3 SoundFonts are temporarily unavailable; .sf2 is fine
