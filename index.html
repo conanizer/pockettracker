@@ -304,10 +304,12 @@
         <div class="guide">
           <p class="label">How to install</p>
           <ol>
-            <li>Unzip it into your device's <code>ports</code> folder, so that <code>PocketTracker.sh</code> and the <code>pockettracker/</code> folder end up side by side in there.</li>
+            <li>Copy it, still zipped, into the <code>autoinstall</code> folder inside your device's PortMaster folder. Recent PortMaster versions also watch <code>ports/autoinstall/</code>.</li>
+            <li>Open <b>PortMaster</b>. It installs the port and removes the zip.</li>
             <li>Launch <b>PocketTracker</b> from the Ports menu. Nothing extra is needed — no BIOS, no runtime, no gptokeyb.</li>
             <li>Your files live in <code>ports/pockettracker/data/</code>, created on first launch — copy samples in there over USB or the network.</li>
           </ol>
+          <p class="note">Let PortMaster unpack it rather than unzipping it yourself — unzipping on a PC and copying the files across can strip the permissions the port needs, and it then does nothing when you launch it.</p>
           <p class="note">For ArkOS, muOS, JELOS, Knulli, ROCKNIX and friends. The port uses your device's own SDL2, so it follows whatever your firmware already does about the screen and the audio.</p>
         </div>
       </div>
