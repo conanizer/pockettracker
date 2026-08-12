@@ -100,7 +100,20 @@ docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmas
 # -> build/portmaster/pockettracker.zip
 ```
 
-Unzip it into the SD card's `ports/` folder, or install it through PortMaster.
+To put it on a device, drop the zip into the `autoinstall` folder inside the device's PortMaster folder
+and open PortMaster. That is the path a user takes, and it is the one that guarantees the executable
+bit: `PortMaster.sh` hands each zip there to harbourmaster, whose `_install_port` ends in
+`chmod -R 777`. The zip does carry `0755` on the launch script and the binary (`unzip -Z` on the
+artifact), but a desktop unzip is free to throw that away, and the port then silently does nothing.
+`PocketTracker.sh` repairs the binary's bit at launch; nothing can repair its own.
+
+⚠️ **Verify a package by installing it this way, not by unzipping it into `ports/`.** harbourmaster is
+not a plain extraction: it stamps a `# PORTMASTER: <zip>, <script>` line into the launch script (so the
+installed `.sh` is 50 bytes longer than the built one and will never match it by hash), and it is what
+the catalog will do to this zip later. ⚠️ Two things the Flip cannot check for you — its ports live on
+a **vfat** mount (`fmask=0022`, so every file reads `rwxr-xr-x` whatever the archive said, and a
+permission test there passes by construction), and **spruce replaces PortMaster's own script** with an
+older copy that scans only the PortMaster folder's `autoinstall`, never `ports/autoinstall/`.
 
 **Do not shortcut the container**, even though a modern dev box has a perfectly good
 `aarch64-linux-gnu-gcc` and will build this in one command. That build links, produces a valid ARM

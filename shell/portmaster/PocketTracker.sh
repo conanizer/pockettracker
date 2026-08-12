@@ -84,6 +84,16 @@ export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 # the one that knows the hardware. The binary needs SDL >= 2.0.18 (it calls SDL_GetTicks64); every
 # current Tier-1 CFW is well past that.
 
+# The zip ships the binary mode 0755, and harbourmaster preserves that when it installs from
+# autoinstall/. A hand-unzip is what loses it: Windows Explorer and the default 7-Zip extraction drop
+# the Unix mode word entirely, and the port then dies with "Permission denied" on a file that looks
+# perfectly present. Repaired here rather than documented, because by the time this script runs the
+# user has already done the copy. It cannot repair its own bit — that is what autoinstall is for.
+#
+# A no-op on the common case, and a failure on a vfat/exFAT card is expected and harmless: those
+# mounts have no permission bits and hand out +x by mount option.
+chmod +x "$GAMEDIR/pockettracker.${DEVICE_ARCH}" 2>/dev/null || true
+
 pm_platform_helper "$GAMEDIR/pockettracker.${DEVICE_ARCH}"
 
 ./pockettracker.${DEVICE_ARCH}

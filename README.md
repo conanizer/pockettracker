@@ -85,11 +85,14 @@ PocketTracker requests **no permissions**. On first run, open a file browser and
 
 ### Linux handheld (PortMaster)
 
-For aarch64 CFW handhelds. Nothing extra is needed — no BIOS, no runtime, no gptokeyb.
+For aarch64 CFW handhelds — ArkOS, muOS, JELOS, Knulli, ROCKNIX and friends. Nothing extra is needed — no BIOS, no runtime, no gptokeyb.
 
 1. Download `PocketTracker-<version>-portmaster-aarch64.zip`.
-2. Unzip it into your device's **`ports`** folder, so you end up with `ports/PocketTracker.sh` and `ports/pockettracker/` beside each other.
-3. Launch **PocketTracker** from the Ports menu.
+2. Copy it, **still zipped**, into the `autoinstall` folder inside your device's PortMaster folder. (Recent PortMaster versions also watch `ports/autoinstall/`.)
+3. Open **PortMaster**. It installs the port and removes the zip.
+4. Launch **PocketTracker** from the Ports menu.
+
+Let PortMaster unpack it rather than unzipping it yourself — unzipping on a PC and copying the files across can strip the permissions the port needs, and it then does nothing when you launch it.
 
 Your projects, samples and settings live in `ports/pockettracker/data/`, created on first launch — copy samples in there over USB or the network.
 
