@@ -6,7 +6,7 @@ name: Release
 # machine and is not a repository secret, so a release APK produced by CI would either be unsigned or
 # signed with the debug key — and an APK signed with a different key CANNOT be installed as an update
 # over an existing one. It would look like a release and brick every upgrade path. The signed APK is
-# built and device-tested locally (docs/internal/release-process.md steps 3–4) and attached to the
+# built and device-tested locally (docs/internal/guides/release-process.md steps 3–4) and attached to the
 # same draft this workflow opens.
 #
 # ⚠️ DRAFT, never published. The release is a draft so that the APK can be added and the whole set
@@ -132,4 +132,4 @@ jobs:
             <!-- Attach the signed APK, then write the notes and publish. -->
 
             **The signed Android APK is not attached yet** — it is built locally
-            (`docs/internal/release-process.md`) because CI has no access to the signing key.
+            (`docs/internal/guides/release-process.md`) because CI has no access to the signing key.
