@@ -1,29 +1,28 @@
 {
-    "version": 2,
+    "version": 4,
     "name": "pockettracker.zip",
     "items": [
         "PocketTracker.sh",
         "pockettracker"
     ],
-    "items_opt": null,
+    "items_opt": [],
     "attr": {
         "title": "PocketTracker",
-        "desc": "PocketTracker is a music tracker for retro gaming handhelds.",
-        "inst": "Ready to run - no BIOS, no extra files. Your songs and samples live in the port's own data/ folder, created on first launch.",
-        "genres": [
-            "Other"
-        ],
         "porter": [
             "conan"
         ],
-        "image": {
-            "screenshot": "screenshot.png",
-            "covers": [],
-            "thumbnail": null,
-            "video": null
-        },
+        "desc": "PocketTracker is a music tracker for retro gaming handhelds.",
+        "desc_md": null,
+        "inst": "Ready to run - no BIOS, no extra files. Your songs and samples live in the port's own data/ folder, created on first launch.",
+        "inst_md": null,
+        "genres": [
+            "other"
+        ],
+        "image": null,
         "rtr": true,
+        "exp": false,
         "runtime": null,
+        "min_glibc": "2.31",
         "reqs": [],
         "arch": [
             "aarch64"

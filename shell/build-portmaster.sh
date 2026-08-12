@@ -39,6 +39,7 @@ SDL2_BUILD=/tmp/sdl2-build
 BUILD=$SRC/build/aarch64
 OUT=$SRC/build/portmaster
 STAGE=$OUT/stage
+ZIPROOT=$OUT/ziproot
 BIN=$STAGE/pockettracker/pockettracker.aarch64
 
 cd "$SRC"
@@ -72,18 +73,32 @@ cmake --build "$BUILD"
 
 echo
 echo "############ 3/5  stage the package ############"
-# Layout is PortMaster's, and the two names must agree: the port directory and the binary's stem are
-# both `pockettracker` (lowercase, the catalog's rule), while the launch script is capitalised.
+# TWO layouts come out of this build, and they are not the same tree.
 #
-#   pockettracker.zip
+# $STAGE is the CATALOG REPO layout: exactly what gets copied into PortMaster-New's
+# `ports/pockettracker/`. Its five root files are the ones `tools/build_release.py` requires there
+# (port.json, README.md, screenshot.{png|jpg}, gameinfo.xml, the launch script) — a screenshot one
+# level down reads to that checker as a port with no screenshot at all.
+#
+#   $STAGE/
+#   |- PocketTracker.sh
 #   |- port.json
 #   |- gameinfo.xml
 #   |- README.md
-#   |- PocketTracker.sh
+#   |- screenshot.png
 #   `- pockettracker/
 #      |- pockettracker.aarch64
-#      |- screenshot.png
 #      `- licenses/
+#
+# The ZIP is a different shape, and which shape is not ours to pick: upstream's `build_port_zip()`
+# moves those four metadata files INTO the port directory, renames README.md to `<portname>.md`, and
+# leaves only the launch script at the root. Step 5 reproduces that transform, so the zip a tester
+# installs is the zip the catalog will later hand a user — and so `gameinfo.xml`'s
+# `./pockettracker/screenshot.png` resolves on the device, which is the same file the checker wanted
+# at the root. One file, two correct places, one transform between them.
+#
+# ⚠️ The two names must agree: the port directory and the binary's stem are both `pockettracker`
+# (lowercase, the catalog's rule), while the launch script is capitalised.
 rm -rf "$OUT"
 mkdir -p "$STAGE/pockettracker/licenses"
 
@@ -93,15 +108,16 @@ cp "$SRC/shell/portmaster/gameinfo.xml"     "$STAGE/"
 cp "$SRC/shell/portmaster/README.md"        "$STAGE/"
 chmod +x "$STAGE/PocketTracker.sh"
 
-# The art. `gameinfo.xml` points the CFW's game list at it (`<image>./pockettracker/screenshot.png`)
-# and `port.json`'s `image.screenshot` names it for the PortMaster catalog — the same two channels
-# LittleGPTracker uses, which is where this layout was read off rather than guessed.
+# The art. It is staged at the ROOT here because that is where the catalog checker looks; step 5 puts
+# it where `gameinfo.xml` points the CFW's game list (`<image>./pockettracker/screenshot.png`).
+# `port.json` names no image at all — the catalog picks up this file by name, the way the shipped
+# LittleGPTracker port does.
 #
 # ⚠️ It is the ANDROID capture, and that is deliberate rather than lazy: both frontends render the
 # same 640x480 design through the same 5x5 font, so it shows what the handheld actually draws. It is
 # 1280x960 — a 2x capture, so exactly 4:3 and comfortably over PortMaster's 640x480 floor — and it
 # shows the SONG screen mid-edit rather than a title card, which the porting guide asks for.
-cp "$SRC/docs/images/screenshot.png" "$STAGE/pockettracker/screenshot.png"
+cp "$SRC/docs/images/screenshot.png" "$STAGE/screenshot.png"
 
 cp "$BUILD/pockettracker-sdl" "$BIN"
 chmod +x "$BIN"
@@ -222,11 +238,47 @@ if [ -n "$MISSING" ]; then
 fi
 
 echo
-echo "############ 5/5  zip ############"
-( cd "$STAGE" && zip -r "$OUT/pockettracker.zip" . -x '.*' )
+echo "############ 5/5  zip (upstream's transform, not one of ours) ############"
+# `build_port_zip()` in PortMaster-New/tools/build_release.py: the port directory is copied verbatim,
+# the four root metadata files are moved INTO it, README.md becomes `<portname>.md`, and only the
+# launch script stays at the zip root. Mirrored here so the zip posted to a tester and the zip the
+# catalog builds from the same tree are the same artifact — otherwise the beta tests a layout no
+# user will ever install.
+rm -rf "$ZIPROOT"
+mkdir -p "$ZIPROOT"
+cp -a "$STAGE/pockettracker"  "$ZIPROOT/"
+cp    "$STAGE/PocketTracker.sh" "$ZIPROOT/"
+cp    "$STAGE/port.json" "$STAGE/gameinfo.xml" "$STAGE/screenshot.png" "$ZIPROOT/pockettracker/"
+cp    "$STAGE/README.md"        "$ZIPROOT/pockettracker/pockettracker.md"
+( cd "$ZIPROOT" && zip -r "$OUT/pockettracker.zip" . -x '.*' )
 echo
 ls -lh "$OUT/pockettracker.zip"
 unzip -l "$OUT/pockettracker.zip"
+
+# --- the transform, read back out of the zip --------------------------------------------------
+# Two ways it can go wrong, each failing for a reason the other cannot: harbourmaster runs the launch
+# script from the ZIP ROOT (it is an `items` entry), and the CFW's game list reads the screenshot at
+# the path gameinfo.xml names — one level down, which is where the checker did NOT want it. So the
+# same file being in the right place for one consumer says nothing about the other.
+#
+# ⚠️ Both `got`s are derived from the artifact, and both need `|| ...=0`: grep exits 1 on no match
+# and unzip exits 11 on a missing member, either of which kills the script under `set -euo pipefail`
+# before the FAIL line that would have named the problem.
+echo
+SCRIPT_AT_ROOT=$(unzip -l "$OUT/pockettracker.zip" | grep -c ' PocketTracker\.sh$') || SCRIPT_AT_ROOT=0
+echo "launch script at zip root : $SCRIPT_AT_ROOT   (want 1)"
+if [ "$SCRIPT_AT_ROOT" != "1" ]; then
+    echo "FAIL: PocketTracker.sh is not at the zip root - harbourmaster installs the items from there."
+    exit 1
+fi
+
+GAMEINFO_IMG=$(sed -n 's:.*<image>\./\(.*\)</image>.*:\1:p' "$STAGE/gameinfo.xml")
+IMG_BYTES=$(unzip -p "$OUT/pockettracker.zip" "$GAMEINFO_IMG" | wc -c) || IMG_BYTES=0
+echo "gameinfo <image>          : $GAMEINFO_IMG -> $IMG_BYTES bytes in the zip"
+if [ "$IMG_BYTES" -lt 100 ]; then
+    echo "FAIL: gameinfo.xml points at $GAMEINFO_IMG, which is not in the zip (or is empty)."
+    exit 1
+fi
 
 # ⚠️ READ THE LICENCES BACK OUT OF THE ZIP, not out of the staging dir. Everything above this line
 # inspected files that a broken `zip` step could still have failed to include — and the zip is what
