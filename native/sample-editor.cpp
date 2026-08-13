@@ -543,7 +543,9 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
 
 void AudioEngine::timeStretchSample(int id, float ratio) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
-    if (ratio > 0.999f && ratio < 1.001f) return;
+    // ⚠️ The skip is measured in FRAMES, not as a ratio window. A "0.1% is inaudible" window is 8 ms
+    // on an 8-second loop — most of a tick — and SYNC's whole job is to land on the tick.
+    if ((int)std::lround((double)sampleLengths[id] * (double)ratio) == sampleLengths[id]) return;
     setFlushToZeroForCurrentThread();
 
     auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock

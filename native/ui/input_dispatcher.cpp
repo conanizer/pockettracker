@@ -3929,23 +3929,30 @@ void InputDispatcher::sample_editor_confirm() {
                 se.isModified = true;
             };
 
+            // ⚠️ "Already on the grid" is a question about FRAMES, and both branches must ask it the
+            // same way. A ratio window instead — a thousandth either side of 1.0 — is 8 ms on a 4-bar
+            // loop at 120 BPM, which is most of a tick, so a loop inside the window was declared
+            // finished while still audibly off the beat.
+            const double  ratio      = targetSecs / rawSecs;
+            const int64_t wantFrames = std::llround(static_cast<double>(se.totalFrames) * ratio);
+            if (ratio <= 0.001 || wantFrames == se.totalFrames) break;
+
             if (se.syncType == 0) {   // RPITCH
-                const int semitones = std::clamp(
-                    static_cast<int>(std::lround(12.0 * std::log(rawSecs / targetSecs) / std::log(2.0))),
-                    -24, 24);
-                if (semitones == 0) break;   // already on the grid
+                // ⚠️ FRACTIONAL, and that is the point. This is a fit-to-grid, not the musical
+                // transpose row 2 dials in: one semitone is a 5.9 % step in length, so rounding to the
+                // nearest one misses the target by up to half of that — 230 ms on a 4-bar loop, twenty
+                // ticks. Nothing below here is integer: `pitch_shift_sample` takes a float and the
+                // engine resamples by pow(2, semitones/12).
+                const double exact     = 12.0 * std::log(rawSecs / targetSecs) / std::log(2.0);
+                const float  semitones = static_cast<float>(std::clamp(exact, -24.0, 24.0));
                 begin_destructive();
-                host_.pitch_shift_sample(instId, static_cast<float>(semitones));
+                host_.pitch_shift_sample(instId, semitones);
                 // The shift is BAKED, so the pending one on row 2 is spent — leaving it would apply it
                 // twice at the next save.
                 rescale_after(/*clear_pitch=*/true);
             } else {                  // TSTRETCH
-                const float ratio = static_cast<float>(targetSecs / rawSecs);
-                // A ratio within a thousandth of 1.0 is a stretch nobody can hear, bought at the price of
-                // a full SOLA pass over the buffer.
-                if (!(ratio > 0.001f && (ratio < 0.999f || ratio > 1.001f))) break;
                 begin_destructive();
-                host_.time_stretch_sample(instId, ratio);
+                host_.time_stretch_sample(instId, static_cast<float>(ratio));
                 rescale_after(/*clear_pitch=*/false);   // a stretch does not change the pitch
             }
             break;

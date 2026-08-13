@@ -109,27 +109,43 @@ inline int findBestOverlap(const float* prevTail,    // end of previous output c
 
 // Time-stretch a mono buffer by `ratio` (outputLen / inputLen; >1 = slower/longer).
 // Offline: whole sample in, freshly allocated stretched sample out.
+//
+// ⚠️ INVARIANT: the returned length is EXACTLY lround(inputLen * ratio). The sample editor's SYNC
+// fits a loop to the project's grid by asking for a length, so an output quantized to the chunk
+// grid — or short by the tail chunk — puts the loop point in the wrong place, and a drum loop that
+// wraps a few ms early is the whole symptom. Length is a contract here, not an outcome.
 inline std::vector<float> stretch(const float* input,
                                   int          inputLen,
                                   float        ratio,
                                   float        sampleRate)
 {
-    // ratio ≈ 1: plain copy, no DSP, no artifacts.
-    if (ratio > 0.999f && ratio < 1.001f) {
-        return std::vector<float>(input, input + inputLen);
-    }
+    if (inputLen <= 0) return std::vector<float>();
+
     // Beyond ~4x stretch / 0.25x compression SOLA artifacts get severe; clamp
     // to a safe envelope against bad input.
     if (ratio < 0.1f)  ratio = 0.1f;
     if (ratio > 10.0f) ratio = 10.0f;
+
+    const int targetLen = std::max(1, (int)std::lround((double)inputLen * (double)ratio));
+
+    // Already the requested length (to within the rounding): splicing cannot improve on the samples
+    // that are already there. Measured in FRAMES, not as a ratio window — a "0.1% is inaudible"
+    // window is 8 ms on an 8-second loop, which is most of a tick.
+    if (std::abs(targetLen - inputLen) <= 2) {
+        std::vector<float> out(input, input + inputLen);
+        out.resize((size_t)targetLen, 0.0f);
+        return out;
+    }
 
     // ms -> samples.
     int sequenceLen = (int)(SEQUENCE_MS * 0.001f * sampleRate); // ~1764 at 44.1k
     int overlapLen  = (int)(OVERLAP_MS  * 0.001f * sampleRate); // ~661 at 44.1k
     int seekRange   = (int)(SEEK_MS     * 0.001f * sampleRate); // 0 in cyclic mode
 
-    // Safety: overlap must not be larger than the chunk itself.
-    if (overlapLen >= sequenceLen) overlapLen = sequenceLen / 2;
+    // ⚠️ Half the chunk, not the whole chunk: the crossfade reads back `overlapLen` from `outputPos`,
+    // whose smallest value is one outputHop, so an overlap past the halfway point indexes before the
+    // start of the buffer. Only reachable by retuning the constants above.
+    if (overlapLen > sequenceLen / 2) overlapLen = sequenceLen / 2;
 
     // Hop sizes — the heart of the stretch:
     //   outputHop: constant advance in the OUTPUT per chunk (the non-overlapped
@@ -140,10 +156,8 @@ inline std::vector<float> stretch(const float* input,
     int   outputHop = sequenceLen - overlapLen;
     float inputHop  = (float)outputHop / ratio;
 
-    // Output is ~ratio × inputLen; one sequenceLen of headroom so the final
-    // chunk has room to write (trimmed at the end).
-    int outputLen = (int)((float)inputLen * ratio) + sequenceLen;
-    std::vector<float> output(outputLen, 0.0f);
+    // One sequenceLen of headroom so the final chunk has room to write; trimmed to targetLen at the end.
+    std::vector<float> output((size_t)targetLen + sequenceLen, 0.0f);
 
     // inputPos is fractional (inputHop is a float): accumulating fractions and
     // flooring keeps the average tempo accurate for non-integer hops.
@@ -165,8 +179,9 @@ inline std::vector<float> stretch(const float* input,
         inputPosFloat = inputHop;
     }
 
-    // Every subsequent chunk is crossfaded onto the tail of the previous one.
-    while (true)
+    // Every subsequent chunk is crossfaded onto the tail of the previous one, until the output is
+    // filled to targetLen — the OUTPUT drives the loop, because the output length is the contract.
+    while (outputPos < targetLen)
     {
         int inputPos = (int)inputPosFloat;
 
@@ -179,8 +194,13 @@ inline std::vector<float> stretch(const float* input,
             inputPos += offset;
         }
 
-        if (inputPos < 0)                              break;
-        if (inputPos + sequenceLen >= inputLen)        break;
+        // ⚠️ CLAMP to the last full chunk, never break on it. Stopping here instead leaves the final
+        // sequenceLen of input unread and the output that much short — and for ratio > 1 the input
+        // runs out first by design, so that is the common case, not the edge case. Re-reading the last
+        // chunk is what "repeat material to slow down" means; the tail still lands in the output.
+        if (inputPos > inputLen - sequenceLen) inputPos = inputLen - sequenceLen;
+
+        if (inputPos < 0)                              break;   // input shorter than one chunk
         if (outputPos + sequenceLen >= (int)output.size()) break;
 
         // Crossfade the new chunk's head over the previous chunk's tail,
@@ -205,8 +225,10 @@ inline std::vector<float> stretch(const float* input,
         inputPosFloat += inputHop;      // tempo-dependent step in the input
     }
 
-    // Trim the headroom padding: usable length = wherever the last write ended.
-    output.resize(std::min((int)output.size(), outputPos));
+    // Trim the headroom to the length that was ASKED for. The loop above always fills at least that
+    // far (it only exits early when the input is shorter than one chunk), so this is a trim and not
+    // a zero-pad — ptdispatch §55 asserts the tail is real material and not silence.
+    output.resize((size_t)targetLen);
     return output;
 }
 
