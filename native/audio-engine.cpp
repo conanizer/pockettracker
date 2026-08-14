@@ -1422,12 +1422,23 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         voice.chain.drive.setDrive(effDrive);
         voice.chain.crush.setParams(effCrush, 0);   // sampler: downsample=0, pre-interp handles it
         {
-            float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
-            float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
-            float rawLoop    = voice.params.base[PARAM_LOOP_START]   + voice.modDestValues[PARAM_LOOP_START];
             int sl = voice.sampleLength;
-            voice.actualStart     = std::max(0,             std::min((int)(rawStart * sl / 255.0f), sl - 2));
-            voice.actualEnd       = std::max(voice.actualStart + 1, std::min((int)(rawEnd * sl / 255.0f), sl - 1));
+            // START/END are re-derived every block so a mod route can move them WHILE the note rings.
+            // ⚠️ An exact-frame window (note-queue.h) survives that: it is carried on the voice because
+            // the 0-255 pair below cannot express it, and re-deriving would silently widen the sample
+            // editor's audition to the whole file the moment its first block was mixed. A voice under a
+            // frame window is not modulating its endpoints — a window is a property of the SLOT, and the
+            // one caller that arms it is auditioning a cut with the modulation switched off anyway.
+            if (voice.windowStartFrame >= 0) {
+                voice.actualStart = std::max(0, std::min(voice.windowStartFrame, sl - 2));
+                voice.actualEnd   = std::max(voice.actualStart + 1, std::min(voice.windowEndFrame, sl - 1));
+            } else {
+                float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
+                float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
+                voice.actualStart = std::max(0,             std::min((int)(rawStart * sl / 255.0f), sl - 2));
+                voice.actualEnd   = std::max(voice.actualStart + 1, std::min((int)(rawEnd * sl / 255.0f), sl - 1));
+            }
+            float rawLoop    = voice.params.base[PARAM_LOOP_START]   + voice.modDestValues[PARAM_LOOP_START];
             voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));
             voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
         }

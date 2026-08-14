@@ -328,6 +328,10 @@ struct InstrumentParams {
     //
     // Set only by setInstrumentFrameWindow, and CLEARED by every setInstrumentParams push — so an
     // ordinary push of the instrument is what ends a preview's window, and no caller has to remember.
+    //
+    // ⚠️ Read at TRIGGER, and then carried on the voice (`Voice::windowStartFrame`), because the mix
+    // loop re-derives the endpoints from startPoint/endPoint every block. Clearing this mid-note ends
+    // the window for the NEXT note, never for one already ringing.
     int startFrame = -1;
     int endFrame   = -1;
 

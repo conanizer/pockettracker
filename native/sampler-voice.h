@@ -32,6 +32,11 @@ struct Voice : public IAudioVoice {
     int actualLoopStart; // Actual sample index to loop from
     int actualLoopEnd;   // Actual sample index the loop wraps at (top of [loopStart, loopEnd])
     int loopEndNorm;     // Loop end as the raw 0-255 instrument value (actualLoopEnd recomputed per block)
+    // The exact-frame window this note was triggered with, or -1/-1 (note-queue.h). ⚠️ It has to be
+    // CARRIED rather than just applied: the mix loop re-derives actualStart/actualEnd from the 0-255
+    // pair every block, so a window those two cells cannot express is gone by the first block.
+    int windowStartFrame;
+    int windowEndFrame;
     bool reverse;        // Play backwards
     int loopMode;        // 0=off, 1=forward, 2=ping-pong
     bool loopingBack;    // For ping-pong mode direction
@@ -102,6 +107,7 @@ struct Voice : public IAudioVoice {
               panLeft(0.707f), panRight(0.707f),
               prevPanLeft(0.707f), prevPanRight(0.707f),
               actualStart(0), actualEnd(0), actualLoopStart(0), actualLoopEnd(0), loopEndNorm(255),
+              windowStartFrame(-1), windowEndFrame(-1),
               reverse(false), loopMode(0), loopingBack(false), loopReleasing(false),
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
@@ -145,8 +151,10 @@ struct Voice : public IAudioVoice {
         // The exact-frame window (note-queue.h) replaces the pair above when it is armed. A PER-NOTE
         // override still wins over it: an Offset effect or a slice boundary is about THIS note, while
         // the frame window is a property of the slot.
-        if (startPointOverride < 0 && endPointOverride < 0 &&
-            instrParams.startFrame >= 0 && instrParams.endFrame > instrParams.startFrame) {
+        const bool frameWindow = (startPointOverride < 0 && endPointOverride < 0 &&
+                                  instrParams.startFrame >= 0 &&
+                                  instrParams.endFrame > instrParams.startFrame);
+        if (frameWindow) {
             actualStart = instrParams.startFrame;
             actualEnd   = instrParams.endFrame;
         }
@@ -162,6 +170,15 @@ struct Voice : public IAudioVoice {
             actualStart = 0;
             actualEnd = length - 1;
         }
+
+        // ⚠️ THE WINDOW IS CARRIED, CLAMPED, past this call. The mix loop re-derives actualStart and
+        // actualEnd from PARAM_SAMPLE_START/END every block so a mod route can move them live, and those
+        // two are the 0-255 pair — which cannot say "frame 22087". Without this the audition below
+        // STARTS in the right place (`position` is seeded from actualStart here) and then runs straight
+        // past the selection to the end of the file: the editor auditioning something CROP would never
+        // cut, which is the whole bug the frame window exists to fix.
+        windowStartFrame = frameWindow ? actualStart : -1;
+        windowEndFrame   = frameWindow ? actualEnd   : -1;
 
         // Loop region: loopStart ∈ [start, end-1], loopEnd ∈ [loopStart+1, end] (always a non-empty loop).
         actualLoopStart = std::max(actualStart, std::min(actualLoopStart, actualEnd - 1));
