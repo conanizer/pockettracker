@@ -566,6 +566,35 @@ int main(int argc, char** argv) {
     // that device.
     cfg.windowed = true;
 
+    // ⚠️ **AND A RELEASE BUILD ON A PHONE IS PINNED TO PORTRAIT, WHICH IS WHAT MAKES THE LINE ABOVE
+    // SAFE TO SHIP.** `FULL_USER` follows the sensor into LANDSCAPE, where the app presents the centred
+    // frame with a touch panel in each letterbox bar — a layout SETTINGS cannot offer (its LAYOUT row
+    // has exactly one entry, "PORTRAIT", because the shell picks by aspect: app.cpp) and therefore one
+    // the user cannot get back OUT of except by rotating the phone. A mode reachable only by accident,
+    // with no control naming it, is the same lie `platform_caps.h` refuses for a row that configures
+    // nothing. So release allows portrait only; DEBUG leaves the hint empty and keeps `FULL_USER`, so
+    // the landscape panels stay drivable for development.
+    //
+    // ⚠️ THE PAD IS THE OTHER HALF OF THE GATE, and it is not cosmetic: a landscape-native handheld
+    // running this build (the AYANEO) has physical buttons, takes the FULL layout, and pinning it to
+    // portrait would stand its screen on end. Same fact `useTouch` is built from — asked once here
+    // because a hint is read at window creation and never again, which also means a pad plugged in
+    // AFTER launch does not unlock rotation until the next launch.
+    //
+    // "Portrait PortraitUpsideDown" → SCREEN_ORIENTATION_SENSOR_PORTRAIT with a resizable window
+    // (SDLActivity.setOrientationBis) — both ways up, no landscape. Read out of the vendored SDL's own
+    // Java, not remembered. An empty hint is SDL's "nothing explicitly allowed" and changes nothing.
+#ifdef NDEBUG
+    if (!android_has_physical_gamepad()) {
+        SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait PortraitUpsideDown");
+        std::printf("orient:  portrait only (release, no physical pad)\n");
+    } else {
+        std::printf("orient:  free (release, physical pad present)\n");
+    }
+#else
+    std::printf("orient:  free (debug build)\n");
+#endif
+
     // ⚠️ **NULL, AND C4 IS WHERE THIS GETS ITS ANSWER — NOT HERE.** The desktop polls a SIGTERM flag
     // through this hook once a frame. Android must not: SDL freezes the native thread when the
     // activity pauses (`SDL_HINT_ANDROID_BLOCK_ON_PAUSE`, on by default), which is precisely when the
