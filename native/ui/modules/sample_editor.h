@@ -136,8 +136,11 @@ struct SampleEditorState {
     /**
      * The visible frame window. At zoom 0 it is the whole sample; above that it is a window of
      * `totalFrames >> zoom` frames CENTRED on whatever the cursor is pointing at — the selection edge
-     * under the cursor, or the active slice, or the playhead while it is running (so a zoomed-in view
-     * scrolls with playback rather than sitting still while the audio leaves the window).
+     * under the cursor, or the active slice.
+     *
+     * A running playhead overrides that centre, so a zoomed-in view scrolls with the audio rather than
+     * sitting still while it leaves the window — but ONLY while the selection is too wide to fit. Once
+     * both edges are inside the window there is nothing off-screen to follow, and the view holds still.
      */
     int64_t view_start() const;
     int64_t view_end() const;

@@ -149,23 +149,33 @@ int64_t SampleEditorState::effective_slice_position() const {
 int64_t SampleEditorState::view_start() const {
     if (zoomLevel == 0 || totalFrames <= 0) return 0;
 
-    // What the window is centred on: the playhead while it runs (so a zoomed view follows the audio
-    // instead of watching it leave), otherwise whichever marker the cursor is actually pointing at.
+    const int64_t total   = static_cast<int64_t>(totalFrames);
+    const int64_t visible = std::max<int64_t>(total >> zoomLevel, 1);
+
+    const auto window_for = [&](int64_t center) {
+        return std::clamp<int64_t>(center - visible / 2, 0, std::max<int64_t>(total - visible, 0));
+    };
+
+    // Where the window sits when nothing is sounding: on whichever marker the cursor is pointing at.
     int64_t center;
-    if (playbackPosition >= 0.0f) {
-        center = static_cast<int64_t>(playbackPosition * static_cast<float>(totalFrames));
-    } else if (cursorRow == 8 && cursorCol == 1) {
+    if (cursorRow == 8 && cursorCol == 1) {
         center = selectionEnd;
     } else if (cursorRow == 11 && sliceMethod != SampleEditorModule::SLICE_OFF) {
         center = effective_slice_position();
     } else {
         center = selectionStart;   // row 8 col 0, and every other row
     }
+    const int64_t anchored = window_for(center);
 
-    const int64_t total   = static_cast<int64_t>(totalFrames);
-    const int64_t visible = std::max<int64_t>(total >> zoomLevel, 1);
-    const int64_t start   = center - visible / 2;
-    return std::clamp<int64_t>(start, 0, std::max<int64_t>(total - visible, 0));
+    // A running playhead pulls the window along only when the audio would otherwise leave it. If the
+    // whole selection already fits in the anchored window, the playhead cannot reach an edge, and
+    // re-centring every frame would shake a view that has nothing to reveal — worst under LOOP, which
+    // replays that same span forever.
+    if (playbackPosition >= 0.0f &&
+        !(selectionStart >= anchored && selectionEnd <= anchored + visible)) {
+        return window_for(static_cast<int64_t>(playbackPosition * static_cast<float>(total)));
+    }
+    return anchored;
 }
 
 int64_t SampleEditorState::view_end() const {
