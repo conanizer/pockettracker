@@ -106,6 +106,11 @@ public:
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes);
 
+    // The playback window in FRAMES, for the one caller that has frames: the sample editor's audition.
+    // Overrides the 0-255 start/end of the call above until the next setInstrumentParams, which clears
+    // it. −1 (or an inverted pair) disarms. See InstrumentParams::startFrame.
+    void setInstrumentFrameWindow(int instrumentId, int startFrame, int endFrame);
+
     void stopTrack(int trackId);
     void stopAll();
 
@@ -184,7 +189,9 @@ public:
     // Zero-crossing search near `frame`. dir>0 = forward only, dir<0 = backward only, dir==0 = nearest
     // (both ways); returns `frame` if none within searchRadius. Directional keeps marker snapping
     // monotonic so a small move can't snap back and stick.
-    int  findZeroCrossing(int id, int frame, int dir = 0, int searchRadius = 512);
+    // `sourceMode` is the sample editor's SOURCE (0 LEFT, 1 RIGHT, 2 STEREO, 3 MONO) — the signal the
+    // cut will actually be made in. STEREO scores candidates by their worst channel; see the body.
+    int  findZeroCrossing(int id, int frame, int dir = 0, int searchRadius = 512, int sourceMode = 0);
     // Spectral-flux transient detection. Returns count; outMarkers[] filled with frame positions.
     // sensitivity 0x00 = few markers (high threshold), 0xFF = many markers (low threshold).
     int  detectTransients(int id, int sensitivity, int* outMarkers, int maxMarkers);

@@ -75,7 +75,9 @@ struct SampleEditorState {
 
     // ── Row 1: the view ──────────────────────────────────────────────────────────────────────────
     int  zoomLevel     = 0;      // 0 = 1×, 1 = 2×, … 4 = 16×
-    int  sourceMode    = 0;      // 0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO
+    // 0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO. A session opens on STEREO whenever there IS a right
+    // channel — `init_sample_editor_state` sets it, because only that mode saves both (sample_edit.h).
+    int  sourceMode    = 0;
     int  rateMode      = 0;      // 0 = HIGH, 1 = NORM, 2 = LOFI  (a DESTRUCTIVE decimation)
     bool hasStereoData = false;  // the loaded sample has a right channel
 

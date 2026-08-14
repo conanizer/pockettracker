@@ -652,27 +652,73 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
     if (samplesRight[id]) applyToChannel(samplesRight[id]);
 }
 
-int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius) {
+int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, int sourceMode) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] < 2) return frame;
-    const float* buf = samples[id];
+    const float* L   = samples[id];
+    const float* R   = samplesRight[id];
     const int    len = sampleLengths[id];
-    auto isCrossing = [&](int i) {
-        return i >= 1 && i < len && ((buf[i - 1] < 0.0f) != (buf[i] < 0.0f));
+
+    // ⚠️ SOURCE NAMES THE SIGNAL THE SEAM WILL BE CUT IN, so it names the one to hunt a crossing in.
+    // (0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO — the sample editor's own numbering, passed straight
+    // through so there is no second vocabulary to keep in step.) A mono sample has one signal whatever
+    // the row says, and its right-channel pointer is null, so every mode collapses to LEFT there.
+    const int mode = R ? sourceMode : 0;
+
+    // ── STEREO: what counts as a candidate, and how good it is ───────────────────────────────────
+    //
+    // A stereo seam is only clean where BOTH channels are near zero, and the two channels of real
+    // audio almost never cross on the same frame — so "both cross here" as a requirement would find
+    // nothing and snap would silently stop working (the report's "there is going to be much less snap
+    // points"). Instead: the candidates are the frames where EITHER channel crosses, and the one that
+    // wins is the one whose WORST channel is quietest — `max(|L|, |R|)`, because the louder of the two
+    // steps is the click you hear. A true double crossing scores ~0 and beats everything, which is
+    // what makes this an improvement rather than a different answer.
+    //
+    // ⚠️ On a DUAL-MONO file (L == R — what `write_wav_mono` and every CHOP produce) every left
+    // crossing is a right crossing scoring 0, so the first one wins and the answer is bit-identical to
+    // the left-only search. The new path cannot regress the common case.
+    const bool stereo = (mode == 2);
+
+    auto val = [&](int i) -> float {
+        if (mode == 1) return R[i];
+        if (mode == 3) return (L[i] + R[i]) * 0.5f;   // MONO saves the downmix; cut the downmix
+        return L[i];
     };
+    auto crossesIn = [&](const float* b, int i) {
+        return (b[i - 1] < 0.0f) != (b[i] < 0.0f);
+    };
+    auto crosses = [&](int i) {
+        if (stereo) return crossesIn(L, i) || crossesIn(R, i);
+        return (val(i - 1) < 0.0f) != (val(i) < 0.0f);
+    };
+    auto score = [&](int i) -> float {
+        if (!stereo) return 0.0f;   // one signal: every candidate is equally good, so the nearest wins
+        return std::max(std::abs(L[i]), std::abs(R[i]));
+    };
+
+    int   best      = frame;
+    float bestScore = 0.0f;
+    bool  found     = false;
+
+    // Returns true when the search can stop — which for a single signal is the FIRST candidate, the
+    // behaviour this has always had. Stereo keeps looking: a nearer candidate is not a better one.
+    auto consider = [&](int i) {
+        if (i < 1 || i >= len || !crosses(i)) return false;
+        const float sc = score(i);
+        if (!found || sc < bestScore) { bestScore = sc; best = i; found = true; }
+        return !stereo;
+    };
+
     // dir > 0: forward only; dir < 0: backward only; dir == 0: nearest (both ways).
     // Directional search is seeded from the already-stepped `frame`, so the result is always at or
     // past `frame` in the move direction — a marker can never snap back behind itself and stick (#8).
-    if (dir > 0) {
-        for (int d = 0; d <= searchRadius; d++) if (isCrossing(frame + d)) return frame + d;
-    } else if (dir < 0) {
-        for (int d = 0; d <= searchRadius; d++) if (isCrossing(frame - d)) return frame - d;
-    } else {
-        for (int d = 0; d <= searchRadius; d++) {
-            if (isCrossing(frame + d)) return frame + d;
-            if (d > 0 && isCrossing(frame - d)) return frame - d;
-        }
+    // Walking outward in distance order is also what breaks a stereo score tie in favour of the
+    // NEAREST candidate: `sc < bestScore` is strict.
+    for (int d = 0; d <= searchRadius; d++) {
+        if (dir >= 0 && consider(frame + d)) break;
+        if (dir <= 0 && consider(frame - d)) break;
     }
-    return frame;
+    return found ? best : frame;
 }
 
 void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex) {
@@ -778,4 +824,17 @@ void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool
     instrumentParams[instrumentId].filterType = fType;
     instrumentParams[instrumentId].filterCut = fCut;
     instrumentParams[instrumentId].filterRes = fRes;
+    // ⚠️ A push of the instrument's own window ENDS any exact-frame window on this slot. That is what
+    // makes the sample editor's audition safe to arm: whatever else happens, the next ordinary push —
+    // the preview's own restore, an edit on the INSTRUMENT screen, a project load — takes it away, and
+    // no caller has to know it was ever there.
+    instrumentParams[instrumentId].startFrame = -1;
+    instrumentParams[instrumentId].endFrame   = -1;
+}
+
+void AudioEngine::setInstrumentFrameWindow(int instrumentId, int startFrame, int endFrame) {
+    if (instrumentId < 0 || instrumentId >= 256) return;
+    const bool armed = (startFrame >= 0 && endFrame > startFrame);
+    instrumentParams[instrumentId].startFrame = armed ? startFrame : -1;
+    instrumentParams[instrumentId].endFrame   = armed ? endFrame   : -1;
 }

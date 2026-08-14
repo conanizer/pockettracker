@@ -142,6 +142,14 @@ struct Voice : public IAudioVoice {
         // 44.1 kHz — easy to hit via video-audio extraction), silently breaking START/END.
         actualStart = (int)(((int64_t)effectiveStartPoint * length) / 255);
         actualEnd   = (int)(((int64_t)effectiveEndPoint   * length) / 255);
+        // The exact-frame window (note-queue.h) replaces the pair above when it is armed. A PER-NOTE
+        // override still wins over it: an Offset effect or a slice boundary is about THIS note, while
+        // the frame window is a property of the slot.
+        if (startPointOverride < 0 && endPointOverride < 0 &&
+            instrParams.startFrame >= 0 && instrParams.endFrame > instrParams.startFrame) {
+            actualStart = instrParams.startFrame;
+            actualEnd   = instrParams.endFrame;
+        }
         actualLoopStart = (int)(((int64_t)instrParams.loopStart * length) / 255);
         actualLoopEnd   = (int)(((int64_t)instrParams.loopEnd   * length) / 255);
 

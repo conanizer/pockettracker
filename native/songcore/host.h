@@ -787,9 +787,12 @@ class SongcoreHost {
         return std::vector<int>(markers, markers + std::max(n, 0));
     }
 
-    /** The nearest zero crossing to `frame` in direction `dir` (−1 back, +1 forward, 0 either). */
-    int find_zero_crossing(int id, int frame, int dir) const {
-        return engine_ ? engine_->findZeroCrossing(id, frame, dir) : frame;
+    /**
+     * The nearest zero crossing to `frame` in direction `dir` (−1 back, +1 forward, 0 either), in the
+     * signal the editor's SOURCE mode says the cut will be made in — both channels under STEREO.
+     */
+    int find_zero_crossing(int id, int frame, int dir, int sourceMode = 0) const {
+        return engine_ ? engine_->findZeroCrossing(id, frame, dir, 512, sourceMode) : frame;
     }
 
     int clipboard_length() const { return engine_ ? engine_->getClipboardLength() : 0; }
@@ -843,12 +846,14 @@ class SongcoreHost {
      * Play the sample DRY at its root, through the SOURCE mode's channel, with the SELECTION as its
      * window — the editor's START.
      *
-     * ⚠️ It TEMPORARILY mutates the instrument (`sampleStart` / `sampleEnd`, and `sampleId` when a
-     * scratch slot is in play), because that is the only channel the engine has for a voice's window.
-     * The caller MUST call `finish_sample_preview()` once the voice has triggered, or the project keeps
-     * the preview's window as if the user had dialled it in. That is why the dispatcher carries a
-     * deadline rather than restoring immediately: the engine reads those fields when the note FIRES,
-     * 100 frames later, not when it is scheduled.
+     * ⚠️ THE WINDOW GOES IN AS FRAMES (`setInstrumentFrameWindow`), NOT through the instrument's own
+     * 0-255 `sampleStart` / `sampleEnd`. Those are a 1/255 grid — 8 ms on a 2-second sample — so an
+     * audition driven through them cannot hear a one-frame nudge of the selection at all, and CROP
+     * then cuts somewhere the user never heard. The frame window is exactly what CROP will keep.
+     *
+     * ⚠️ It still temporarily mutates `sampleId` when a scratch slot is in play, and the frame window
+     * outlives this call: the engine reads both when the note FIRES, 100 frames later, not when it is
+     * scheduled. `finish_sample_preview()` is what ends them, on the dispatcher's deadline.
      */
     void preview_sample_editor(int id, int sourceMode, int64_t selStart, int64_t selEnd,
                                int totalFrames, int pitchSemitones) {
@@ -856,10 +861,6 @@ class SongcoreHost {
         Instrument& ins = project_.instruments[static_cast<size_t>(id)];
 
         const Note savedRoot = ins.root;
-        if (totalFrames > 0 && selEnd > selStart) {
-            ins.sampleStart = static_cast<int>(std::clamp<int64_t>((selStart * 255) / totalFrames, 0, 255));
-            ins.sampleEnd   = static_cast<int>(std::clamp<int64_t>((selEnd   * 255) / totalFrames, 0, 255));
-        }
         // The PENDING pitch shift is auditioned by transposing the ROOT — nothing is resampled until
         // SAVE bakes it, so this is the only way to hear what it will do.
         if (pitchSemitones != 0)
@@ -873,6 +874,10 @@ class SongcoreHost {
         const int savedSampleId = ins.sampleId;
         if (slot != id) ins.sampleId = slot;
         push_instrument_playback_params(*engine_, ins);
+        // AFTER the push, which clears any window left over from the previous audition. The scratch
+        // slot holds a frame-for-frame copy of the instrument's audio, so the selection indexes both.
+        if (totalFrames > 0 && selEnd > selStart)
+            engine_->setInstrumentFrameWindow(slot, static_cast<int>(selStart), static_cast<int>(selEnd));
         preview_instrument_dry(*engine_, ins, slot, routing_.sampleRateRatio[id]);
         if (slot != id) ins.sampleId = savedSampleId;
 
@@ -881,15 +886,18 @@ class SongcoreHost {
 
     /**
      * Put the instrument back: its real sample window, its EQ, its sends, its modulation. Runs on the
-     * dispatcher's 100 ms deadline, and IMMEDIATELY if a second START arrives inside that window —
-     * otherwise the second preview would save the FIRST preview's window as the "real" one.
+     * dispatcher's 100 ms deadline, and IMMEDIATELY if a second START arrives inside that window.
+     *
+     * The window needs no saved copy to restore FROM — the preview never wrote to the project, and the
+     * push below is itself what disarms the engine's frame window (`setInstrumentParams`).
      */
-    void finish_sample_preview(int id, int savedStart, int savedEnd) {
+    void finish_sample_preview(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
         Instrument& ins = project_.instruments[static_cast<size_t>(id)];
-        ins.sampleStart = savedStart;
-        ins.sampleEnd   = savedEnd;
         push_instrument_playback_params(*engine_, ins);
+        // The push above only reaches the slot the INSTRUMENT points at; a channel-selected audition
+        // played from the scratch, so that one is disarmed by name.
+        engine_->setInstrumentFrameWindow(SOURCE_PREVIEW_SLOT, -1, -1);
         // The three the DRY preview switched off.
         push_instrument_mod_eq_sends(*engine_, ins, project_.tempo, engine_->getSampleRate());
     }

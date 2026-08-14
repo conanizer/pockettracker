@@ -2845,17 +2845,13 @@ void InputDispatcher::on_start() {
             return;
         }
 
-        // ⚠️ The rapid double-START guard. The preview below is about to SAVE the instrument's real
-        // sample window before overwriting it with the selection — so a pending restore from the previous
-        // preview must land FIRST, or what gets saved is the last preview's window and the user's own
-        // start/end points are gone for good.
+        // ⚠️ The rapid double-START guard. A pending restore from the PREVIOUS preview must land before
+        // this one arms anything, or it would land in the middle of this audition and take its EQ,
+        // sends and modulation back off — the dry preview undone a fifth of a second after it started.
         run_due_sample_preview_restore(/*force=*/true);
 
-        SampleEditorState& se  = s_.sampleEditor;
-        const Instrument&  ins = s_.project->instruments[static_cast<size_t>(se.instrumentId)];
+        SampleEditorState& se = s_.sampleEditor;
 
-        previewSavedStart_     = ins.sampleStart;
-        previewSavedEnd_       = ins.sampleEnd;
         previewRestoreInst_    = se.instrumentId;
         previewRestorePending_ = true;
         previewRestoreAtMs_    = now_ms_ + 100;   // Kotlin's `delay(100)`
@@ -3659,6 +3655,14 @@ void InputDispatcher::init_sample_editor_state() {
     se.totalFrames   = host_.sample_length(se.instrumentId);
     se.sampleRate    = host_.sample_rate_of(se.instrumentId);
     se.hasStereoData = host_.has_stereo_data(se.instrumentId);
+
+    // ⚠️ SOURCE OPENS ON STEREO FOR A STEREO SAMPLE, and this is a SAVE decision rather than a display
+    // one. The mode is what `resolve_save_channels` reads: every value but STEREO writes a ONE-CHANNEL
+    // file, so a session that never visited the row would silently throw away the right channel of a
+    // stereo sample the user only meant to trim. The mode a save cannot lose is the one to open on.
+    // (Mono has nothing to choose — the row draws "MONO" and is read-only there whatever this says.)
+    se.sourceMode = se.hasStereoData ? 2 /*STEREO*/ : 0;
+
     se.waveformData  = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
                                              waveform_channel(se.sourceMode));
 
@@ -3734,9 +3738,12 @@ void InputDispatcher::nudge_selection_edge(int64_t delta) {
     // a trimmed sample from clicking at its own boundary. Searching in the direction of the nudge (rather
     // than the nearest in either) is what stops the edge sticking: a crossing you have just left is
     // always the nearest one.
+    // ⚠️ THROUGH THE SOURCE MODE, so the crossing is looked for in the signal the SAVE will write. On a
+    // stereo sample the left channel alone is one of two: an edge that sits exactly on a left crossing
+    // leaves the right one wherever it happened to be, and the seam clicks in one ear.
     auto snap = [&](int64_t f) -> int64_t {
         if (!se.snapEnabled) return f;
-        return host_.find_zero_crossing(se.instrumentId, static_cast<int>(f), dir);
+        return host_.find_zero_crossing(se.instrumentId, static_cast<int>(f), dir, se.sourceMode);
     };
 
     if (se.cursorCol == 0) {
@@ -3793,6 +3800,28 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
     if (reset_selection) {
         se.selectionStart = 0;
         se.selectionEnd   = newLen;
+
+        // ⚠️ AND SO DOES THE INSTRUMENT'S OWN WINDOW, for the same reason and a sharper one: those two
+        // 0-255 cells are a FRACTION of the buffer, so a buffer that changed length silently re-aims
+        // them at audio the user never pointed at. CROP to a loop with START/END at 40/C0 and the note
+        // plays the middle 50 % of the crop — the file on disk holds the whole thing, so it sounds
+        // wrong in the tracker and right everywhere else.
+        //
+        // `cropSample`, `deleteSampleRegion` and `pasteRegion` already reset the ENGINE's copy of the
+        // pair; this is the PROJECT's, and without it the next ordinary push — the audition's own
+        // restore, 100 ms later — puts the stale fraction straight back. The LOOP pair is the same two
+        // cells one row down and gets the same treatment: after a resize it points into audio that is
+        // not there any more, and a loop is the thing this editor is most used to cut.
+        Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)];
+        if (ins.sampleStart != 0x00 || ins.sampleEnd != 0xFF ||
+            ins.loopStart   != 0x00 || ins.loopEnd   != 0xFF) {
+            ins.sampleStart = 0x00;
+            ins.sampleEnd   = 0xFF;
+            ins.loopStart   = 0x00;
+            ins.loopEnd     = 0xFF;
+            host_.push_instrument(se.instrumentId);
+            mark_modified();
+        }
     }
 
     se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS,
@@ -4170,7 +4199,7 @@ void InputDispatcher::run_due_sample_preview_restore(bool force) {
     if (!force && now_ms_ < previewRestoreAtMs_) return;
 
     previewRestorePending_ = false;
-    host_.finish_sample_preview(previewRestoreInst_, previewSavedStart_, previewSavedEnd_);
+    host_.finish_sample_preview(previewRestoreInst_);
 }
 
 bool InputDispatcher::defer_a_to_release() const {

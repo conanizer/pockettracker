@@ -948,22 +948,19 @@ class InputDispatcher {
     std::vector<std::pair<int64_t, int64_t>> current_slices() const;
 
     /**
-     * ⚠️ The deferred half of the audition (see set_now). The preview writes the SELECTION into the
-     * instrument's sample window because that is the only channel the engine has for a voice's window —
-     * and the voice reads it when it TRIGGERS, 100 frames later. So the real window cannot go back
-     * until then, and these three fields are what remembers to do it.
+     * ⚠️ The deferred half of the audition (see set_now). The preview arms an exact-frame window and
+     * strips the instrument's EQ, sends and modulation — and the voice reads all four when it TRIGGERS,
+     * 100 frames later, not when it is scheduled. So none of them can be put back until then, and these
+     * three fields are what remembers to do it.
      *
-     * A second START inside the window runs it IMMEDIATELY, before capturing anything: otherwise the
-     * second preview would save the FIRST preview's window as the instrument's real one, and the user's
-     * start/end points would be silently replaced by whatever they last auditioned.
+     * A second START inside the window runs it IMMEDIATELY, before arming anything: otherwise the first
+     * preview's restore would land in the middle of the second audition and undo it.
      */
     void run_due_sample_preview_restore(bool force = false);
 
     bool      previewRestorePending_ = false;
     long long previewRestoreAtMs_    = 0;
     int       previewRestoreInst_    = 0;
-    int       previewSavedStart_     = 0;
-    int       previewSavedEnd_       = 255;
 
     SampleEditorModule sample_{};
 };

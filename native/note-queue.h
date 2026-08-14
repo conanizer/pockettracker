@@ -317,10 +317,25 @@ struct InstrumentParams {
     float reverbSend = 0.0f;
     float delaySend  = 0.0f;
 
+    // ⚠️ THE EXACT-FRAME WINDOW: −1 = unset, and then startPoint/endPoint above decide. When set it
+    // REPLACES them, in frames, because 0-255 cannot express a frame.
+    //
+    // startPoint/endPoint are eighths of a percent of the buffer: on a 2-second 44.1 kHz sample one
+    // step is 346 frames, ~8 ms. That is the right grain for a playback parameter you dial by ear, and
+    // the wrong one for the sample editor's audition, which exists to let you hear the exact boundary
+    // CROP is about to cut at — dozens of single-frame nudges land inside one step and the audition
+    // does not change, then the crop applies the frame you actually chose.
+    //
+    // Set only by setInstrumentFrameWindow, and CLEARED by every setInstrumentParams push — so an
+    // ordinary push of the instrument is what ends a preview's window, and no caller has to remember.
+    int startFrame = -1;
+    int endFrame   = -1;
+
     InstrumentParams() : startPoint(0), endPoint(255), reverse(false),
                          loopMode(0), loopStart(0), loopEnd(255), drive(0), crush(0), downsample(0),
                          filterType(0), filterCut(128), filterRes(0), filterDrive(128),
-                         eqActive(false), reverbSend(0.0f), delaySend(0.0f) {}
+                         eqActive(false), reverbSend(0.0f), delaySend(0.0f),
+                         startFrame(-1), endFrame(-1) {}
 };
 
 // Per-slot modulation configuration set from Kotlin.
