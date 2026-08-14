@@ -603,18 +603,48 @@ class SongcoreHost {
     // seam from `ui::FileSystem` and deliberately narrower — it knows nothing about names, parents
     // or listings, which is what lets songcore keep depending on it and not on the UI.
 
-    /** Replace the project from a .ptp on disk: parse → push → load its media → push its params. */
+    /** Replace the project from a .ptp on disk: stop → parse → push → load its media → push its params. */
     bool load_project_file(const std::string& path, const std::string& baseDir) {
         std::string blob;
         if (!pt_read_file(path.c_str(), blob)) return false;
+
+        // ⚠️ **THE TRANSPORT STOPS BEFORE THE DOCUMENT UNDER IT IS REPLACED**, exactly as new_project
+        // does — a load is a document swap and every one of them invalidates the scheduler's position.
+        // Without this the sequencer keeps `isPlaying_`, its PlaybackMode and its `nextSongRowToSchedule_`
+        // from the OLD song and walks them through the NEW project's data: the rows there are empty, so
+        // scheduler.h's `maxChainLength == 0` arm advances the row WITHOUT advancing
+        // `nextFrameToSchedule_`, burning through the rest of the stale range for free. By the time the
+        // walk wraps to row 0 and finds real content, the schedule frame is behind the clock and the
+        // song's first row lands in the PAST. What the user sees is a lit PLAY, silence, a playhead
+        // drifting through the previous song's position, and then a late start missing its first row.
+        //
+        // A parse failure below therefore leaves the transport stopped while the previous project stays
+        // intact (push_project's contract). That is deliberate: the only alternative is playing on over a
+        // LOAD FAILED, and there is nothing to resume to — the position that made sense belonged to the
+        // document the user was trying to leave.
+        const bool wasPlaying = seq_.is_playing();
+        stop();
+
         if (!push_project(blob)) return false;
 
-        // ⚠️ The three calls that must follow a push, in this order, or the project you loaded is not
+        // ⚠️ The two calls that must follow a push, in this order, or the project you loaded is not
         // the project you hear. load_media opens the files and learns the Routing; push_params pushes
         // everything the ENGINE holds that no note carries. Phase 3 S4 is the session that found out
         // what happens when the second one is missing (84.4% of the render's bytes differed).
         load_media(baseDir);
         push_params();
+
+        // Loading a project while the transport runs SWITCHES SONGS: the new one takes over from its
+        // top rather than making the user press START again. It cannot be gapless — load_media opens
+        // and decodes every sample on the calling thread — so this is a hard cut, and `play_song`
+        // re-reads the engine's frame counter (sync_clock) so the schedule starts from where the clock
+        // actually is after that wait, not from where it was before the disk work.
+        //
+        // Always the SONG from row 0, whatever mode was running: a CHAIN or PHRASE id from the old
+        // document names unrelated material in the new one, and row 0 is the only position a project
+        // the user has not seen yet is known to have. Nothing starts here that was not already playing,
+        // which is what keeps the launch and autosave-recovery callers silent.
+        if (wasPlaying) play_song(0);
         return true;
     }
 
