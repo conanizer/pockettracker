@@ -1295,13 +1295,23 @@ int run(const AppConfig& cfg) {
         // freezes a half-transitioned frame (the reported "rotate → half black / half theme bg, fixed
         // only by touching a button"). While it counts down we both DRAW and clear the pixel-skip
         // (invalidate_backbuffer), so each settle frame is genuinely re-uploaded at the current size.
+        //
+        // ⚠️ `metersFalling` is the FIFTH, and it is the one place where "audible" and "animating" come
+        // apart. The MIXER's peak markers age one segment per 60 ms peak poll, but they age INSIDE the
+        // draw — so gate 1 closing is what stops them, and the pixel net cannot help because a frame
+        // that is never drawn is never compared. Stop the transport and the markers hang for the ~5 s
+        // of fall they still owe (45 polls of hold, then one 5px segment each), stepping down once per
+        // input instead — any input, mapped or not, because every SDL event sets `sawInput` and buys
+        // exactly one frame. See TrackerLayout::has_falling_meters: it is screen-gated there, since off
+        // the MIXER nothing polls the peaks and nothing would ever bring this term back to false.
+        const bool metersFalling = layout.has_falling_meters(state);
         const bool audible = audio_is_audible(state);
         const bool settling = resizeSettle > 0;
         if (settling) {
             video.invalidate_backbuffer(/*texture_lost=*/false);   // the settled frame must not be skipped
             --resizeSettle;
         }
-        if (audible || audibleEdge || sawInput || !drewOnce || settling ||
+        if (audible || audibleEdge || sawInput || !drewOnce || settling || metersFalling ||
             dispatch.has_pending_timed_work()) {
             layout.draw(canvas, state);
             ++drawn;

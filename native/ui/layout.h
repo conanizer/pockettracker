@@ -72,6 +72,22 @@ public:
      */
     void draw(Canvas& c, const AppState& state);
 
+    /**
+     * Is something on screen still falling that no input will bring back?
+     *
+     * The shell's idle gate (C7) knows about two animation sources — the transport and the master
+     * waveform — and both are AUDIO. This is the third: the MIXER's peak markers step down once per peak
+     * poll, but they do it inside `draw`, so they need frames for a few seconds after the audio has gone
+     * silent or they freeze part-way (mixer.h). The gate is allowed to be conservative, never clever, so
+     * it asks the module that owns the state rather than modelling the fall itself.
+     *
+     * ⚠️ **Gated on the MIXER being UP, and that is load-bearing.** Off that screen the feed stops
+     * polling peaks (ui/engine_feed.h), so `peaksVersion` never moves, so the markers never age.
+     * Answering "still falling" there would pin the redraw loop at 60 Hz forever on a screen with no
+     * meters on it — the exact battery cost the idle gate exists to avoid.
+     */
+    bool has_falling_meters(const AppState& state) const;
+
 private:
     /**
      * A screen with no module yet: its title, and "COMING SOON" in the middle. This is not port

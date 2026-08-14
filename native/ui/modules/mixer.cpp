@@ -213,6 +213,13 @@ void MixerModule::update_peak(int idx, int level_px, bool is_muted) {
     }
 }
 
+bool MixerModule::peaks_at_rest() const {
+    for (float px : peakHoldPx_) {
+        if (px > 0.0f) return false;
+    }
+    return true;
+}
+
 void MixerModule::draw_peak_marker(Canvas& c, int x, int y, int h, int peak_idx,
                                    const Theme& t) const {
     const float peakPx = peakHoldPx_[peak_idx];

@@ -63,6 +63,22 @@ public:
     /** ⚠️ NOT const: the peak-hold state is the module's own, and it moves as it draws. */
     void draw(Canvas& c, int x, int y, const MixerState& s);
 
+    /**
+     * Is every peak marker down to zero?
+     *
+     * ⚠️ **The shell's idle gate has to ask this, because the markers fall INSIDE `draw`.** A screen the
+     * gate has stopped drawing is a screen whose markers never age: the transport stops, the master
+     * waveform decays past the silence floor about a second later, the gate closes — and the markers
+     * hang wherever they were until some input forces a single frame, which steps them by exactly one
+     * segment. That is "the peaks only fall when I press a button", and any input does it because any
+     * SDL event opens the gate for one frame, mapped or not.
+     *
+     * At rest is the resting state, not a transient: `draw` ages a marker and then draws it in the same
+     * call, so the frame that brings the last one to zero is also the frame that shows it gone. The gate
+     * needs no final edge bump the way the waveform does.
+     */
+    bool peaks_at_rest() const;
+
     CursorContext cursor_context(const MixerState& s) const;
 
     /**

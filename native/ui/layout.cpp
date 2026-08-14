@@ -321,6 +321,10 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     draw_confirm_dialog(c, s.confirm, t);
 }
 
+bool TrackerLayout::has_falling_meters(const AppState& s) const {
+    return s.currentScreen == ScreenType::MIXER && !mixer_.peaks_at_rest();
+}
+
 // ─── The global status line ──────────────────────────────────────────────────────────────────────
 //
 // "SAVED" · "EXPORTED!" · "SEQ CLEANED" · "CHAIN CLONED" · "NO FREE PHRASES". Drawn over the
