@@ -528,6 +528,24 @@ private:
     int effectsSampleRate = 44100;
 
     Voice voices[MAX_VOICES];
+
+    // ⚠️ The TIC00 table cursor, per TRACK — where the track's table stands once no voice is left to
+    // carry it. At TIC00 the table advances per NOTE, so the cursor has to outlive any one voice: a
+    // one-shot whose sample runs out before the next note leaves nothing to read the row off. Both the
+    // audible row and the TABLE screen's indicator then depend on the instrument's ROOT note — root
+    // sets playback rate, rate sets how long the sample lasts — which is not a property of the table.
+    //
+    // It mirrors the VOICE's pair rather than any one answer derived from it, so the two consumers
+    // (the next retrigger's start row; the row the indicator shows) derive what they need the same way
+    // they do from a live voice. Written in ONE place — the sampler table-tick loop, below the row
+    // logic. stopAll() clears it, so PLAY, and every render, begins at row 0.
+    struct Tic00Cursor {
+        int tableId       = -1;  // -1 = no TIC00 table running on this track; the next note starts at row 0
+        int row           =  0;  // the voice's tableRow — the row the table is standing on
+        int lastProcessed = -1;  // …and its lastProcessedRow, so "has this row been applied?" survives too
+    };
+    Tic00Cursor tic00Cursor[SF_VOICE_COUNT];
+
     float* samples[256];
     float* samplesRight[256];          // right channel for stereo samples (null = mono)
     int    sampleLengths[256];         // ONE length for both channels — samplesRight[id], when non-null,

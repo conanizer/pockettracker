@@ -52,6 +52,7 @@ AudioEngine::AudioEngine() {
         originalSamplesRight[i] = nullptr;
         originalSampleLengths[i] = 0;
     }
+    for (int t = 0; t < SF_VOICE_COUNT; t++) tic00Cursor[t] = Tic00Cursor();
     globalFrameCounter.store(0, std::memory_order_relaxed);
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;  // vary RND/DRNK per app session
 
@@ -586,6 +587,7 @@ void AudioEngine::stopAll() {
     // Stop all soundfont notes on all tracks (incl. the preview lane)
     for (int t = 0; t < SF_VOICE_COUNT; t++) {
         sfVoices[t].hardStop();
+        tic00Cursor[t] = Tic00Cursor();  // transport stop rewinds every TIC00 table: PLAY starts at row 0
     }
     LOGD("stopAll: voices and SF notes cleared, stream stays running");
 }
@@ -718,6 +720,19 @@ template <typename V> static inline void voiceSetFilterRes(V& v, int res, float 
 static inline int filterByteOf(float value) {
     return std::max(0, std::min(255, (int)(value * 255.0f + 0.5f)));
 }
+
+// The row a TIC00 retrigger continues from.
+//
+// ⚠️ The NEXT row — unless the one the voice is standing on has not been applied yet, in which case
+// it is that row again. `lastProcessedRow` is the record of consumption, and it can disagree with
+// `tableRow` three ways: a voice triggered but not yet ticked, a HOP target, a THO write. Stepping
+// past a row in any of them drops the row entirely — and a dropped HOP row lets the table walk on
+// past its loop point. processTableTick consumes at most one row per voice per audio BLOCK while
+// notes arrive per FRAME, so two triggers inside one block reach this with the row still pending.
+static inline int tic00RowAfter(int tableRow, int lastProcessedRow) {
+    return (lastProcessedRow != tableRow) ? tableRow : (tableRow + 1) % 16;
+}
+static inline int tic00RowAfter(const Voice& v) { return tic00RowAfter(v.tableRow, v.lastProcessedRow); }
 
 // Special TIC modes:
 //   TIC00 (0x00): Trigger mode — table row set by note, doesn't advance automatically
@@ -1274,17 +1289,30 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             // ---- END SOUNDFONT PATH ----
 
-            // TIC00 support: Check if previous voice on this track was using trigger mode
+            // TIC00 support: continue the table where this track's previous note left off.
             int savedTableRow = 0;
             bool wasTIC00Mode = false;
             for (int v = 0; v < MAX_VOICES; v++) {
                 if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
                     if (voices[v].tableTicRate == 0x00 && voices[v].tableId >= 0) {
                         wasTIC00Mode = true;
-                        savedTableRow = (voices[v].tableRow + 1) % 16;
-                        LOGT("📋 TIC00: Saving table row %d for track %d retrigger", savedTableRow, note.trackId);
+                        savedTableRow = tic00RowAfter(voices[v]);
+                        LOGT("📋 TIC00: table row %d for track %d retrigger (from voice %d)",
+                             savedTableRow, note.trackId, v);
                     }
                 }
+            }
+            // No voice left to read the row off — the previous note's sample ran out before this one
+            // arrived. The track's cursor still holds it. Without this the table restarted at row 0
+            // every time, so how far it got depended on the instrument's ROOT note (root → playback
+            // rate → how long a one-shot lasts): a low root never left the first row or two.
+            if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
+                note.tableId >= 0 && tic00Cursor[note.trackId].tableId == note.tableId) {
+                const Tic00Cursor& c = tic00Cursor[note.trackId];
+                wasTIC00Mode = true;
+                savedTableRow = tic00RowAfter(c.row, c.lastProcessed);
+                LOGT("📋 TIC00: table row %d for track %d retrigger (from track cursor)",
+                     savedTableRow, note.trackId);
             }
 
             // ---------------------------------------------------------------
@@ -1425,8 +1453,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // voice types: processTableTick above (KIL/OFFSET differences resolve via the
     // tableKill/tableOffset overloads).
     for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].tableId >= 0)
-            processTableTick(voices[v], numFrames, sampleRate);
+        if (!voices[v].isActive || voices[v].tableId < 0) continue;
+        processTableTick(voices[v], numFrames, sampleRate);
+        // The ONE place the track's TIC00 cursor is written — below the row logic, so it cannot drift
+        // from it. Only the voice a retrigger would have read (live, not fading) owns the cursor;
+        // letting a fading voice write it would make the value depend on slot order.
+        if (voices[v].tableTicRate == 0x00 && !voices[v].isFadingOut) {
+            const int t = voices[v].trackId;
+            if (t >= 0 && t < SF_VOICE_COUNT) {
+                tic00Cursor[t] = { voices[v].tableId, voices[v].tableRow, voices[v].lastProcessedRow };
+            }
+        }
     }
     for (int t = 0; t < SF_VOICE_COUNT; t++) {
         if (sfVoices[t].isActive && sfVoices[t].tableId >= 0)
@@ -2362,32 +2399,49 @@ void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
     LOGD("📋 Loaded table %d", tableId);
 }
 
-int AudioEngine::getVoiceTableRow(int trackId) {
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) {
-            return voices[v].tableRow;
-        }
-    }
-    // SF voices are indexed directly by trackId
-    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
-        const SoundfontVoice& sv = sfVoices[trackId];
-        if (sv.isActive && sv.tableId >= 0) return sv.tableRow;
-    }
+// The TABLE screen's playing-row indicator (ui/engine_feed.h) reads these two, at 60 Hz.
+//
+// ⚠️ They answer "where is this track's table", NOT "is a voice sounding" — the two diverge, and the
+// indicator is the thing that shows it. A retrigger leaves the OLD voice fading beside the new one for
+// the length of its declick, so a plain first-active-slot scan can report the previous note's row; and
+// a one-shot that ends before the next note leaves no voice at all, which read as "no table running"
+// and blanked the indicator for the rest of the note. Both are set by the instrument's ROOT note —
+// root sets playback rate, rate sets how long the sample lasts — so the same table on the same phrase
+// stepped smoothly at one root and skipped and stalled at another.
+//
+// Order: the live voice, then the SF voice, then the track cursor (the TIC00 table outlives its
+// voices), and a fading voice only as a last resort — it goes on ticking its own table after the note
+// that replaced it has moved on, so it is the stalest source here, not the freshest.
+static int findTrackVoice(Voice* voices, int trackId, bool fading) {
+    for (int v = 0; v < MAX_VOICES; v++)
+        if (voices[v].isActive && voices[v].isFadingOut == fading && voices[v].trackId == trackId) return v;
     return -1;
 }
 
-int AudioEngine::getVoiceTableId(int trackId) {
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) {
-            return voices[v].tableId;
-        }
+int AudioEngine::getVoiceTableRow(int trackId) {
+    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
+    if (live >= 0) return voices[live].tableRow;
+
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
+        const SoundfontVoice& sv = sfVoices[trackId];
+        if (sv.isActive && sv.tableId >= 0) return sv.tableRow;
+        if (tic00Cursor[trackId].tableId >= 0) return tic00Cursor[trackId].row;
     }
-    // SF voices are indexed directly by trackId
+    const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
+    return fading >= 0 ? voices[fading].tableRow : -1;
+}
+
+int AudioEngine::getVoiceTableId(int trackId) {
+    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
+    if (live >= 0) return voices[live].tableId;
+
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
         const SoundfontVoice& sv = sfVoices[trackId];
         if (sv.isActive) return sv.tableId;
+        if (tic00Cursor[trackId].tableId >= 0) return tic00Cursor[trackId].tableId;
     }
-    return -1;
+    const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
+    return fading >= 0 ? voices[fading].tableId : -1;
 }
 
 void AudioEngine::scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row) {
