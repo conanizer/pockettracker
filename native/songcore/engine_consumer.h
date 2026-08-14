@@ -109,6 +109,11 @@ class EngineConsumer : public IMidiConsumer {
                     case CC_PAN:         engine_->scheduleVoicePan(ev.frame, ev.track, v);        break;
                     case CC_REVERB_SEND: engine_->scheduleVoiceReverbSend(ev.frame, ev.track, v); break;
                     case CC_DELAY_SEND:  engine_->scheduleVoiceDelaySend(ev.frame, ev.track, v);  break;
+                    // CUT / RES. Both write the SOUNDING voice's own filter and are gone with it, so
+                    // there is no restore on stop() — the instrument's values come back with the next
+                    // note-on. An instrument with FILTER TYPE = OFF runs no filter and swallows them.
+                    case CC_FILTER_CUT:  engine_->scheduleVoiceFilterCut(ev.frame, ev.track, v);  break;
+                    case CC_FILTER_RES:  engine_->scheduleVoiceFilterRes(ev.frame, ev.track, v);  break;
                     // The mixer faders (VTR / VMV). Engine-only ids — `midi_out.h` drops both, which
                     // is the one place the two consumers are meant to disagree (event.h).
                     //
@@ -120,13 +125,12 @@ class EngineConsumer : public IMidiConsumer {
                     // never claims.
                     case CC_TRACK_VOL:   engine_->scheduleTrackVolume(ev.frame, ev.track, v);    break;
                     case CC_MASTER_VOL:  engine_->scheduleMasterVolume(ev.frame, v);             break;
-                    // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION. Cutoff
-                    // (74), resonance (71), attack/release (72/73) and the GP drive/crush pair are
-                    // real sampler params — but they are INSTRUMENT-STATIC in this engine
-                    // (setInstrumentParams), and only the ids above have an entry in the
-                    // sample-accurate ParamUpdateQueue. Wiring the rest means new queue entries and
-                    // per-voice overrides in the DSP, which is engine work phase D does not do; until
-                    // then a `CCA` pointing at 74 moves external gear and nothing here.
+                    // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION.
+                    // Attack/release (72/73) and the GP drive/crush pair are real sampler params — but
+                    // they are INSTRUMENT-STATIC in this engine (setInstrumentParams), and only the ids
+                    // above have an entry in the sample-accurate ParamUpdateQueue. Wiring one means a
+                    // new queue entry and a per-voice override in the DSP, which is what CUT/RES cost;
+                    // until then a `CCA` pointing at 72 moves external gear and nothing here.
                     default: break;
                 }
                 break;

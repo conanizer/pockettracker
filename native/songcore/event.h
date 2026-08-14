@@ -135,6 +135,11 @@ constexpr uint8_t CC_VOLUME      = 7;   // scheduleTrackPhraseVol — the value 
 constexpr uint8_t CC_PAN         = 10;  // scheduleVoicePan   (authored byte /255)
 constexpr uint8_t CC_REVERB_SEND = 91;  // scheduleVoiceReverbSend (authored byte /255)
 constexpr uint8_t CC_DELAY_SEND  = 93;  // scheduleVoiceDelaySend  (authored byte /255)
+// CUT / RES. The two numbers are the STANDARD sound-controller pair — 74 is brightness/cutoff and 71
+// harmonic content/resonance on every synth that speaks MIDI — so the same cell that sweeps this
+// engine's SVF sweeps the gear on an EXTERNAL instrument, the way CC_PAN already does both.
+constexpr uint8_t CC_FILTER_CUT  = 74;  // scheduleVoiceFilterCut (authored byte /255)
+constexpr uint8_t CC_FILTER_RES  = 71;  // scheduleVoiceFilterRes (authored byte /255)
 
 // ─── SYMBOLIC CC ids — the instrument's four CC slots (MIDI phase D, plan §6/§8.3) ───────────────
 //

@@ -89,3 +89,5 @@ const int FX_KILL   = 0x0B;  // K00 - Kill voice
 const int FX_OFFSET = 0x0F;  // Oxx - Sample offset
 const int FX_THO    = 0x15;  // THO 0X - Table hop to row X (simple unconditional jump)
 const int FX_VOLUME = 0x16;  // Vxx - Volume
+const int FX_CUT    = 0x2F;  // CUT xx - filter cutoff   (inert when the instrument runs no filter)
+const int FX_RES    = 0x30;  // RES xx - filter resonance (likewise)

@@ -244,7 +244,8 @@ That last point is what keeps automation cheap. A ramp is not a new kind of even
 per-step effect already emits, emitted more often. So a parameter becomes automatable by paying the
 price of live control at all — a CC id, an arm in `EngineConsumer::consume`, a queued apply on the
 audio thread — plus a row in `automation.h`'s registry, and no `SCHEMA_VERSION` bump. Today's rows are
-`VOL`, `PAN`, `REV`, `DEL`, `VTR` and `VMV`; the set is that table, not a property of the feature.
+`VOL`, `PAN`, `REV`, `DEL`, `VTR`, `VMV`, `CUT` and `RES`; the set is that table, not a property of the
+feature.
 
 Pairing lives in `automation.h` and is **pure**: it answers "which spans does this walk declare", in
 step indices, and never touches frames, tics, grooves or the transport. The emitter already holds each

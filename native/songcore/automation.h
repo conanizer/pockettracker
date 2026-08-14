@@ -57,6 +57,10 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     { FX_RSEND,  CC_REVERB_SEND, false },
     { FX_DSEND,  CC_DELAY_SEND,  false },
     { FX_VTR,    CC_TRACK_VOL,   false },
+    // The instrument filter. A ramp on either is a per-note sweep and dies with the note that carries
+    // it — nothing to restore on stop(), unlike the two faders below.
+    { FX_CUT,    CC_FILTER_CUT,  false },
+    { FX_RES,    CC_FILTER_RES,  false },
     // ⚠️ The master fader belongs to no track. Track-scoped, EngineConsumer's external-routing gate
     // would swallow it whenever the carrying track plays an EXTERNAL instrument (event.h) — so the
     // ramp must ride the same TRACK_GLOBAL lane the per-step VMV does, or it dies on exactly the

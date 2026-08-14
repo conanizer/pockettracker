@@ -1048,7 +1048,7 @@ class Sequencer {
             trackState.clearPitchMod();
         }
 
-        // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM)
+        // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / CUT / RES / EQN / EQM)
         {
             bool triggeredNote = hasNote && !skipNote;
             if (!triggeredNote && params.panValue.has_value())
@@ -1059,6 +1059,12 @@ class Sequencer {
                 router_.cc(voiceFxFrame, trackId, CC_DELAY_SEND, *params.delaySendValue / 255.0f);
             if (params.bckValue.has_value())
                 router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
+            // CUT / RES — `voiceFxFrame` for the same reason REV and DEL take it: on a step that also
+            // triggers, a param queued at the note's own frame reaches the voice the note REPLACES.
+            if (params.filterCutValue.has_value())
+                router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
+            if (params.filterResValue.has_value())
+                router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
             if (params.eqnSlot.has_value())
                 router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
             // The mixer faders. They REPLACE the authored fader and hold until the next VTR/VMV — so,

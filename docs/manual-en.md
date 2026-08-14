@@ -1512,6 +1512,8 @@ skipping any that are not:
 | `DEL` | the delay send |
 | `VTR` | this track's fader |
 | `VMV` | the master fader |
+| `CUT` | the filter cutoff |
+| `RES` | the filter resonance |
 
 In `VOL 20  PSL 40  AUS 00`, the `AUS` ramps the `VOL` — `PSL` is not automatable, so it is passed over.
 
@@ -1528,6 +1530,34 @@ empty cell is. That is the editor telling you the fade will not play. The reason
 - a second `AUS` before an `AUF`, which replaces the first one — the last `AUS` wins, pairs do not nest.
 
 One ramp runs at a time on a track, so to fade two parameters at once, write them on two tracks.
+
+---
+
+### CUT `XX` — Filter Cutoff · RES `XX` — Filter Resonance
+
+Move the **instrument's own filter** on **this note only**: `CUT` sets the cutoff frequency and `RES` the
+resonance, both `00`–`FF`, the same two values as the FREQ and RES cells on the INSTRUMENT screen (§9).
+The next note starts from the instrument's values again.
+
+> ⚠️ **The instrument must have a FILTER TYPE.** `CUT` and `RES` move the filter the instrument declares —
+> they do not switch one on. On an instrument whose FILTER is `OFF` they do nothing at all. Set FILTER to
+> `LP`, `HP` or `BP` on the INSTRUMENT screen first, and the FX column takes it from there.
+
+Cutoff is exponential across the byte: `00` is 20 Hz, `FF` is 20 kHz, and each `+0x33` is roughly one
+decade. On a low-pass, small numbers are dark and large ones are open.
+
+Both can be **ramped** with `AUS`/`AUF`, which is what a filter sweep is:
+
+```
+    00    CUT 20   AUS 80            ← start closed, linear
+    08             AUF E0            ← open over eight steps
+```
+
+Both also work in a **table**, once per tic, so a sweep written once follows every note that instrument
+plays — the shortest way to give a sample a filter envelope without spending a modulation slot.
+
+On an **external** (MIDI) instrument the same two cells send CC 74 (cutoff) and CC 71 (resonance), the
+standard controller numbers for them, instead of touching the internal engine.
 
 ---
 
@@ -1576,8 +1606,9 @@ A slot with no controller number set does nothing. Values arrive **after** the i
 on a step that has a note, so a `CCA` always wins over the default for that note.
 
 > These four also work on internal instruments where the controller number is one the engine
-> understands (7 volume, 10 pan, 91 reverb send, 93 delay send) — the same command drives a sampler and
-> an external synth. Other controller numbers reach external gear only.
+> understands (7 volume, 10 pan, 71 filter resonance, 74 filter cutoff, 91 reverb send, 93 delay send) —
+> the same command drives a sampler and an external synth. Other controller numbers reach external gear
+> only.
 
 ---
 

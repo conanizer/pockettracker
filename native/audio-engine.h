@@ -286,6 +286,8 @@ public:
     void scheduleVoiceReverbSend(int64_t targetFrame, int trackId, float send);        // REV xx
     void scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float send);         // DEL xx
     void scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart);  // BCK
+    void scheduleVoiceFilterCut(int64_t targetFrame, int trackId, float cut);          // CUT xx
+    void scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res);          // RES xx
     void scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot);              // EQN xx
     void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
     void scheduleTrackVolume(int64_t targetFrame, int trackId, float volume);          // VTR xx

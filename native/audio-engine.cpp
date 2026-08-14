@@ -669,6 +669,56 @@ static inline void tableOffset(Voice& v, uint8_t fxValue) {
 }
 static inline void tableOffset(SoundfontVoice&, uint8_t) {}
 
+// ─── CUT / RES — the one place a live filter override lands ───────────────────────────────────────
+//
+// Shared by the param-queue arm (the FX column and an AUS/AUF ramp) and the table's own CUT/RES rows,
+// for both voice types.
+//
+// ⚠️ **INERT ON A VOICE RUNNING NO FILTER** (`type == 0`, i.e. the instrument's FILTER TYPE is OFF).
+// These move the filter the instrument declares; they do not switch one on.
+//
+// ⚠️ **THE PARAM BUS IS WHERE THE LIVE VALUES LIVE, AND THE SF VOICE NEEDS A SECOND WRITE.** The
+// sampler's per-block mod recompute reads `params.get()`, but the SF's reads `instrParams +
+// modDestValues` — so an SF voice given only the bus would have the old value back a block later.
+// `filterStore` below is that difference and the only thing that differs per voice type.
+//
+// The override is per-note by construction: a note-on rebuilds the chain from the instrument, so
+// nothing has to be restored when the note ends.
+static inline void filterStore(Voice& v, int cut, int res) {
+    v.params.setBase(PARAM_FILTER_CUT, (float)cut);
+    v.params.setBase(PARAM_FILTER_RES, (float)res);
+}
+static inline void filterStore(SoundfontVoice& v, int cut, int res) {
+    v.params.setBase(PARAM_FILTER_CUT, (float)cut);
+    v.params.setBase(PARAM_FILTER_RES, (float)res);
+    v.instrParams.filterCut = cut;   // what THIS voice type's per-block recompute reads
+    v.instrParams.filterRes = res;
+}
+
+template <typename V>
+static inline void voiceSetFilter(V& v, int cut, int res, float sampleRate) {
+    filterStore(v, cut, res);
+    if (!v.chain.filter.enabled()) return;
+    // Modulation still applies on top — the same sum the per-block recompute makes, so a CUT under an
+    // LFO moves the centre the LFO swings around instead of fighting it for one block.
+    int modCut = std::max(0, std::min(255, (int)(cut + v.modDestValues[PARAM_FILTER_CUT])));
+    int modRes = std::max(0, std::min(255, (int)(res + v.modDestValues[PARAM_FILTER_RES])));
+    v.chain.filter.setParams(v.chain.filter.type, modCut, modRes, v.chain.filter.drive, (int)sampleRate);
+}
+// CUT and RES are one FilterModule call, so each carries the other's CURRENT value through. Read off
+// the bus, which both voice types seed from the instrument at trigger.
+template <typename V> static inline void voiceSetFilterCut(V& v, int cut, float sr) {
+    voiceSetFilter(v, cut, (int)v.params.base[PARAM_FILTER_RES], sr);
+}
+template <typename V> static inline void voiceSetFilterRes(V& v, int res, float sr) {
+    voiceSetFilter(v, (int)v.params.base[PARAM_FILTER_CUT], res, sr);
+}
+
+/** A 0-1 CC value back to the 00-FF byte the author typed. */
+static inline int filterByteOf(float value) {
+    return std::max(0, std::min(255, (int)(value * 255.0f + 0.5f)));
+}
+
 // Special TIC modes:
 //   TIC00 (0x00): Trigger mode — table row set by note, doesn't advance automatically
 //   TICFC (0xFC): Octave map — row = triggered note's octave (0-9)
@@ -811,6 +861,16 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
 
             case FX_OFFSET:
                 tableOffset(voice, fxValue);
+                break;
+
+            // CUT / RES on a table row: the same per-voice write the FX column makes, once per tic —
+            // a sweep that follows every note the instrument plays without being written per phrase.
+            case FX_CUT:
+                voiceSetFilterCut(voice, fxValue, sampleRate);
+                break;
+
+            case FX_RES:
+                voiceSetFilterRes(voice, fxValue, sampleRate);
                 break;
 
             case FX_TIC:
@@ -999,6 +1059,28 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     break;
                 }
+                // CUT / RES — the sounding voice's filter. Inert on an instrument whose FILTER TYPE
+                // is OFF, and gone with the note: the next note-on reloads the instrument's own.
+                case PARAM_UPDATE_FILTER_CUT: {           // CUT — filter cutoff
+                    int cut = filterByteOf(upd.value);
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            voiceSetFilterCut(voices[v], cut, sampleRate); break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
+                        voiceSetFilterCut(sfVoices[upd.trackId], cut, sampleRate);
+                    break;
+                }
+                case PARAM_UPDATE_FILTER_RES: {           // RES — filter resonance
+                    int res = filterByteOf(upd.value);
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            voiceSetFilterRes(voices[v], res, sampleRate); break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
+                        voiceSetFilterRes(sfVoices[upd.trackId], res, sampleRate);
+                    break;
+                }
                 case PARAM_UPDATE_EQ_SLOT: {              // EQN — per-note EQ preset
                     int slot = (int)upd.value;
                     for (int v = 0; v < MAX_VOICES; v++)
@@ -1152,6 +1234,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.params.setBase(PARAM_VOL,   note.volume);
                     sv.params.setBase(PARAM_PAN,   note.pan);
                     sv.params.setBase(PARAM_PITCH, 0.0f);
+                    // The filter pair seeded from the instrument, as SamplerVoice::triggerNote does:
+                    // CUT/RES carry each other's current value through the bus, so an SF voice whose
+                    // bus still held the ParamBus default would jump to it on the first CUT.
+                    sv.params.setBase(PARAM_FILTER_CUT, (float)sv.instrParams.filterCut);
+                    sv.params.setBase(PARAM_FILTER_RES, (float)sv.instrParams.filterRes);
                     sv.params.resetMods();
                     memset(sv.modSourceValues,  0, sizeof(sv.modSourceValues));
                     memset(sv.modDestValues,    0, sizeof(sv.modDestValues));
@@ -2331,6 +2418,14 @@ void AudioEngine::scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float
 void AudioEngine::scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart) {  // BCK
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, reverse ? 1.0f : 0.0f,
                                 PARAM_UPDATE_REVERSE, restart ? 1.0f : 0.0f });
+}
+
+void AudioEngine::scheduleVoiceFilterCut(int64_t targetFrame, int trackId, float cut) {            // CUT
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, cut, PARAM_UPDATE_FILTER_CUT, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res) {            // RES
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, res, PARAM_UPDATE_FILTER_RES, 0.0f });
 }
 
 void AudioEngine::scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot) {                // EQN

@@ -217,6 +217,10 @@ enum ParamUpdateAction {
     PARAM_UPDATE_REVERB_SEND,     // active voice: reverbSend = value            [REV]
     PARAM_UPDATE_DELAY_SEND,      // active voice: delaySend = value             [DEL]
     PARAM_UPDATE_REVERSE,         // active sampler voice: reverse=(value!=0); value2!=0 → snap pos to new-dir boundary [BCK]
+    // ⚠️ THESE TWO ARE INERT ON A VOICE WHOSE FILTER TYPE IS OFF, and deliberately so: they move the
+    // filter the instrument declares, they do not switch one on.
+    PARAM_UPDATE_FILTER_CUT,      // active voice: filter cutoff    = value*255      [CUT]
+    PARAM_UPDATE_FILTER_RES,      // active voice: filter resonance = value*255      [RES]
     PARAM_UPDATE_EQ_SLOT,         // active voice: apply eqPresets[(int)value] to chain.eq ((int)value<0 = bypass) [EQN]
     PARAM_UPDATE_MASTER_EQ,       // global: apply master EQ preset (int)value ((int)value<0 = bypass) [EQM]
     // ⚠️ THE MIXER FADERS ARE THE ONLY TWO ACTIONS THAT TOUCH NO VOICE, and their apply arms carry a

@@ -100,6 +100,19 @@ constexpr int FX_VMV      = 0x2C;  // VMV  the master fader (00-FF), global
 constexpr int FX_AUS      = 0x2D;  // AUS  automation start: xx = curve (00 ease-in, 80 linear, FF ease-out)
 constexpr int FX_AUF      = 0x2E;  // AUF  automation finish: xx = destination value
 
+// ─── The instrument filter, per note ──────────────────────────────────────────────────────────────
+//
+// ⚠️ **BOTH MOVE THE FILTER THE INSTRUMENT DECLARES, AND NEITHER TURNS ONE ON.** They write the
+// cutoff/resonance of the voice's own SVF, which an instrument with FILTER TYPE = OFF does not run at
+// all — so on such a note they are inert rather than switching on a type the author never typed.
+// The value is the same 00-FF byte the INSTRUMENT screen's FREQ and RES cells hold.
+//
+// Per-note by construction rather than by a restore: a note-on reloads the whole chain from the
+// instrument (`SamplerVoice::triggerNote`), so the next note starts at the instrument's own values
+// with nothing to put back.
+constexpr int FX_CUT      = 0x2F;  // CUT  filter cutoff  (00-FF)
+constexpr int FX_RES      = 0x30;  // RES  filter resonance (00-FF)
+
 /** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
 inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
@@ -118,6 +131,7 @@ inline std::string effect_name(int code) {
         case FX_PVX: return "PVX"; case FX_PIT: return "PIT"; case FX_SLI: return "SLI";
         case FX_PAN: return "PAN"; case FX_RSEND: return "REV"; case FX_DSEND: return "DEL";
         case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
+        case FX_CUT: return "CUT"; case FX_RES: return "RES";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
         case FX_MPG: return "MPG"; case FX_MPB: return "MPB";
@@ -155,8 +169,15 @@ inline constexpr int EFFECT_TYPES[] = {
     FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM,
     // The mixer faders, beside the other things that act on the bus rather than the note
     FX_VTR, FX_VMV,
-    // The automation pair, last of the non-MIDI effects — they act on another slot, not on a bus
+    // The automation pair — they act on another slot, not on a bus
     FX_AUS, FX_AUF,
+    // ⚠️ CUT/RES SIT AT THE END OF THE NON-MIDI EFFECTS RATHER THAN BESIDE BCK AND THE SENDS, WHERE
+    // THEY BELONG BY SUBJECT. Appending leaves every index below them naming the effect it always
+    // named; inserting would renumber a third of the list, and `ptinput`'s Kotlin-recorded EDIT cases
+    // carry the resulting CELL BYTE — which is the effect CODE at an index. Their golden has no
+    // independent author left to re-record it (tools/ptinput/main.cpp), so a renumber there would be
+    // certified by nothing but the code that caused it.
+    FX_CUT, FX_RES,
     // The MIDI commands (see the static_assert below — they must stay the LAST six)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
 };
@@ -220,6 +241,8 @@ struct ResolvedStepParams {
     std::optional<int> reverbSendValue;
     std::optional<int> delaySendValue;
     std::optional<int> bckValue;
+    std::optional<int> filterCutValue;    // CUT
+    std::optional<int> filterResValue;    // RES
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
     std::optional<int> trackVolValue;   // VTR (authored byte)
@@ -270,6 +293,8 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_RSEND:  p.reverbSendValue = value; break;
             case FX_DSEND:  p.delaySendValue = value; break;
             case FX_BCK:    p.bckValue = value; break;
+            case FX_CUT:    p.filterCutValue = value; break;
+            case FX_RES:    p.filterResValue = value; break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
             case FX_VTR:    p.trackVolValue = value; break;
