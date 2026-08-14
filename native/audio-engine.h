@@ -595,7 +595,7 @@ private:
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
     // Per-instrument SF2 ADSR envelope override: stored keyed by instrument id
-    // (always unique) and applied atomically in triggerNote, so two instruments sharing one de-duplicated
+    // (always unique) and applied atomically in fireArmedNote, so two instruments sharing one de-duplicated
     // tsf handle never collide on the shared preset-region patch. -1 = keep the SF2 preset's own value.
     struct SfEnvOverride { int atk = -1, dec = -1, sus = -1, rel = -1; };
     SfEnvOverride sfEnvOverrides[256];

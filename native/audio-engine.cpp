@@ -1201,24 +1201,24 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 int t = note.trackId;
                 // ⚠️ The handle is NOT tested here. It is a non-atomic pointer the JNI/UI thread can
                 // null at any moment, and reading it without the slot mutex is a race whose answer
-                // may already be stale by the next line. `triggerNote` reads it under the lock and
-                // says whether the note started; that answer is the one worth having, and the whole
-                // block below belongs to a note that did start.
+                // may already be stale by the next line. `armNote` reads it under the lock and says
+                // whether the note is worth setting up; that answer is the one worth having, and the
+                // whole block below belongs to a note that is going to play.
                 if (t >= 0 && t < SF_VOICE_COUNT &&
                     note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS) {
 
                     SoundfontVoice& sv = sfVoices[t];
                     float trkVol = trackVolSnapshot[t];
-                    // This instrument's ADSR override (applied atomically inside triggerNote, before
+                    // This instrument's ADSR override (applied atomically inside fireArmedNote, before
                     // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
                     int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
                     if (note.sampleId >= 0 && note.sampleId < 256) {
                         const SfEnvOverride& eo = sfEnvOverrides[note.sampleId];
                         eAtk = eo.atk; eDec = eo.dec; eSus = eo.sus; eRel = eo.rel;
                     }
-                    if (!sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
-                                        note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t,
-                                        eAtk, eDec, eSus, eRel)) {
+                    if (!sv.armNote(note.sfSlot, note.midiNote, note.midiVelocity,
+                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t,
+                                    eAtk, eDec, eSus, eRel)) {
                         LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)",
                              note.sfSlot, note.trackId);
                         continue;   // …and the voice keeps whatever it was already playing
@@ -1860,8 +1860,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!sv.isActive || slot < 0 || slot >= MAX_SOUNDFONTS) continue;
 
             memset(sfBuf, 0, sizeof(float) * numFrames * 2);
-            // Honour the intra-block trigger offset (see the sampler mix loop): render into the
-            // buffer tail so the note starts at its exact frame; the head stays silent (memset).
+            // Honour the intra-block trigger offset (see the sampler mix loop): the note starts at its
+            // exact frame, and everything before it belongs to whatever this track was already playing.
             int sfStart = 0;
             if (sv.startDelayFrames > 0) {
                 sfStart = std::min(sv.startDelayFrames, numFrames);
@@ -1873,8 +1873,48 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // loadSoundfont's eviction tsf_close it between the read and the render.
                 std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
                 tsf* h = soundfonts[slot].handle;
-                if (h && numFrames - sfStart > 0) {
-                    tsf_render_float_channel(h, t, sfBuf + sfStart * 2, numFrames - sfStart, 0 /* overwrite */);
+                if (h && !sv.hasArmedNote) {
+                    tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                    rendered = true;
+                } else if (h) {
+                    // ⚠️⚠️ A NOTE THAT STEALS ANOTHER IS RENDERED IN TWO PASSES WITH A FADE BETWEEN THEM,
+                    // AND EVERY PIECE OF THAT IS LEVERAGE AGAINST THE SAME CRACK.
+                    //
+                    // Pass one is the note being REPLACED, rendered up to `fadeEnd` — past the new
+                    // note's own onset. It used to be rendered not at all: the trigger note_on'd where
+                    // the note was SCHEDULED, one pass earlier, killing the old TSF voices before a
+                    // single frame of this block existed, so the block came out silent up to `sfStart`
+                    // and the previous note ended in a step at the block boundary, at whatever amplitude
+                    // its waveform happened to be at. That is what the armed note is for.
+                    //
+                    // ⚠️ AND THE FADE IS OURS, NOT TSF'S — this is the part that is not obvious. TSF
+                    // computes its amplitude envelope ONCE PER 64-SAMPLE BLOCK and holds it flat across
+                    // it (`gainMono = noteGain * v->ampenv.level` in tsf_voice_render). Its short
+                    // release, `tsf_voice_endquick`, drops the level to 26% at the first of those
+                    // boundaries — so asking TSF to fade a stolen note out quickly buys a smaller step,
+                    // not no step. Measured: still 0.33 of peak. A ramp applied to the rendered samples
+                    // has no such granularity, which is also why the sampler pool fades its own steals
+                    // here rather than in a voice (DECLICK_SAMPLES, audio-defs.h — the same length).
+                    //
+                    // `fadeEnd` is clamped to the block, so the ramp slides EARLIER when a note lands
+                    // near the end of one; a note landing at frame 0 still gets the full 64 samples. It
+                    // is `min(fadeEnd, DECLICK_SAMPLES)` long either way, never a stub.
+                    const int fadeEnd   = std::min(numFrames, sfStart + DECLICK_SAMPLES);
+                    const int rampStart = std::max(0, fadeEnd - DECLICK_SAMPLES);
+                    const int rampLen   = fadeEnd - rampStart;
+                    tsf_render_float_channel(h, t, sfBuf, fadeEnd, 0 /* overwrite */);
+                    for (int i = rampStart; i < fadeEnd; i++) {
+                        const float g = (float)(fadeEnd - i - 1) / (float)(rampLen > 1 ? rampLen - 1 : 1);
+                        sfBuf[i * 2]     *= g;
+                        sfBuf[i * 2 + 1] *= g;
+                    }
+                    // Now the old voices can be cut: the samples they contributed are already at zero.
+                    sv.fireArmedNote(h);
+                    // ⚠️ MIXING, not overwrite — [sfStart, fadeEnd) still holds the tail of the ramp.
+                    if (numFrames - sfStart > 0) {
+                        tsf_render_float_channel(h, t, sfBuf + sfStart * 2, numFrames - sfStart,
+                                                 1 /* mixing */);
+                    }
                     rendered = true;
                 }
             }
@@ -2249,7 +2289,7 @@ int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
 
     // De-dup: this exact file already loaded reuses its slot instead of a second copy. Multiple
     // instruments share one handle — they play on distinct MIDI channels (= tracks) and apply their
-    // ADSR override per-note in triggerNote, so per-instrument state stays isolated. Frees stay
+    // ADSR override per-note in fireArmedNote, so per-instrument state stays isolated. Frees stay
     // reference-guarded (setInstrumentType / clearAllSoundfonts).
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
         if (soundfonts[i].handle != nullptr && soundfonts[i].filePath == path) {

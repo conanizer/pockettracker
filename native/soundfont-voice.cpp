@@ -34,7 +34,8 @@ extern "C" {
 // Supports up to MAX_SOUNDFONTS simultaneously loaded soundfont files.
 // tsf is NOT thread-safe — each entry has its own mutex.
 // The mutex is held by:
-//   • audio thread   — triggerNote(), applyPitchMod(), tsf_render_float()
+//   • audio thread   — armNote(), applyPitchMod(), tsf_render_float() (and, under that last one's
+//                      lock, fireArmedNote())
 //   • JNI/main thread — hardStop(), setVolume(), setPan(), unloadSoundfont()
 
 SoundfontEntry soundfonts[MAX_SOUNDFONTS];
@@ -56,10 +57,17 @@ void SoundfontVoice::hardStop() {
     activeNote      = -1;
     isActive        = false;
     isReleasingOnly = false;
+    // ⚠️ A stop discards an armed note rather than letting it fire afterwards. A note fired into a
+    // voice that has just been stopped is a note nothing will ever end: `isActive` is false, so the
+    // render loop never reaches it again and never runs the silence detection that calls hardStop.
+    hasArmedNote = false;
 }
 
 void SoundfontVoice::noteOff() {
     isReleasingOnly = true;
+    // Same reason as hardStop's: an arm this block that a note-off in the SAME block supersedes (a
+    // sampler note taking the track, a KIL) must not sound after the thing that ended it.
+    hasArmedNote = false;
 
     // Decide whether to defer tsf_channel_note_off based on active ADSR/TRIG VOL mods.
     //
@@ -136,27 +144,56 @@ void SoundfontVoice::setMidiNote(int midiNote) {
     activeNote = midiNote;
 }
 
-bool SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
-                                 float noteVol, float trkVol, float pan,
-                                 int bank, int preset, int trackId,
-                                 int envAtk, int envDec, int envSus, int envRel) {
-    // Hold the slot mutex for the whole trigger: the handle must be read inside the lock
-    // (loadSoundfont eviction can tsf_close it concurrently), and the channel setup below
-    // mutates TSF state that must not interleave with a close.
+bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
+                             float noteVol, float trkVol, float pan,
+                             int bank, int preset, int trackId,
+                             int envAtk, int envDec, int envSus, int envRel) {
+    // The handle must be read inside the lock (loadSoundfont eviction can tsf_close it concurrently).
     //
     // ⚠️ The lock is taken BEFORE any member is written, so a slot whose handle has gone leaves this
-    // voice untouched rather than half-retargeted at a note that never sounds.
-    std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-    tsf* h = soundfonts[slot].handle;
-    if (!h) return false;
+    // voice untouched rather than half-retargeted at a note that never sounds. The handle is only
+    // READ here — the answer is a hint by the time fireArmedNote re-reads it under its own lock, and
+    // that is exactly what it is for: the caller's eighty lines of setup are worth doing on it.
+    {
+        std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
+        if (!soundfonts[slot].handle) return false;
+    }
 
     sfSlot      = slot;
     _trackId    = trackId;
     noteVolume  = noteVol;
     trackVolume = trkVol;
-    // Hard-kill all TSF voices on this channel — no release-tail overlap.
-    // New note on same track = voice-steal (immediate cut), matching sampler behavior.
-    // noteOff() / KIL effect preserves TSF release; this path does not.
+
+    // ⚠️ activeNote is deliberately NOT moved to the new note here. Until the arm fires, the note this
+    // channel is SOUNDING is still the old one, and activeNote is what hardStop() and noteOff() send
+    // TSF's note_off for. Writing the new note now would aim those at a key nothing is holding.
+    armed = ArmedNote{slot, midiNote, midiVelocity, bank, preset,
+                      noteVol, trkVol, pan, envAtk, envDec, envSus, envRel};
+    // ⚠️ A second arm in the same sub-block REPLACES the first, which is what the audible result was
+    // when both fired: two notes 5.8 ms apart on one track, the second stealing the first.
+    hasArmedNote = true;
+    isActive     = true;   // the render pass skips an inactive voice, and it is the one that fires this
+    return true;
+}
+
+void SoundfontVoice::fireArmedNote(tsf* h) {
+    hasArmedNote = false;
+    if (!h) return;
+    const ArmedNote a = armed;
+
+    // Hard-kill every TSF voice on this channel — no release-tail overlap. New note on the same track
+    // = voice-steal, matching sampler behaviour; noteOff() / the KIL effect preserve the instrument's
+    // SF REL envelope, this path does not.
+    //
+    // ⚠️ AND THE CUT IS DELIBERATELY UNFADED, BECAUSE TSF CANNOT FADE. Its amplitude envelope is
+    // computed once per 64-sample render block and held flat across it, so `tsf_voice_endquick` — the
+    // fastest release it has — steps the level down 74% at the first of those boundaries rather than
+    // sliding it. Measured, it left a step a third of the peak: a quieter crack is still a crack.
+    // The steal is faded in the RENDER instead, over DECLICK_SAMPLES of the already-rendered samples,
+    // which is where the sampler pool has always faded its own (processAudioBlock's SF render loop).
+    // ⚠️ That fade must ALREADY have been applied when this runs — the caller's ordering is the
+    // contract, and cutting first would be the old bug back.
+    //
     // tsf_voice_kill() is accessible here because TSF_IMPLEMENTATION is defined in this file.
     {
         struct tsf_voice* v = h->voices;
@@ -165,18 +202,17 @@ bool SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
             if (v->playingPreset != -1 && v->playingChannel == _trackId) tsf_voice_kill(v);
         }
     }
-    tsf_channel_set_pan(h, _trackId, pan);
-    tsf_channel_set_volume(h, _trackId, noteVol * trkVol);
-    tsf_channel_set_bank_preset(h, _trackId, bank, preset);
-    // Apply THIS instrument's ADSR override atomically, under the slot mutex we already hold, right
+    tsf_channel_set_pan(h, _trackId, a.pan);
+    tsf_channel_set_volume(h, _trackId, a.noteVol * a.trkVol);
+    tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
+    // Apply THIS instrument's ADSR override atomically, under the slot mutex the caller holds, right
     // before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own
     // override even when instruments share a de-duplicated handle — the next trigger re-patches and
     // re-captures, and playing voices are immune. -1 fields keep the SF2 value.
-    tsf_preset_apply_overrides(h, bank, preset, envAtk, envDec, envSus, envRel);
-    tsf_channel_note_on(h, _trackId, midiNote, midiVelocity / 127.0f);
-    activeNote = midiNote;
+    tsf_preset_apply_overrides(h, a.bank, a.preset, a.envAtk, a.envDec, a.envSus, a.envRel);
+    tsf_channel_note_on(h, _trackId, a.midiNote, a.midiVelocity / 127.0f);
+    activeNote = a.midiNote;
     isActive   = true;
-    return true;
 }
 
 void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {

@@ -16,8 +16,9 @@
 // audio callback for hundreds of ms and use 8× the SF2 file size in RAM.
 //
 // Thread safety:
-//   audio thread : triggerNote(), applyPitchMod() — sequential, no lock needed.
+//   audio thread : armNote(), applyPitchMod()     — holds soundfonts[slot].mutex.
 //   audio thread : tsf_render_float()             — holds soundfonts[slot].mutex.
+//   audio thread : fireArmedNote()                — the CALLER's lock; it takes none of its own.
 //   JNI thread   : hardStop(), setVolume(), etc.  — holds soundfonts[slot].mutex.
 struct SoundfontVoice : public IAudioVoice {
     int   sfSlot      = -1;    // soundfonts[] index that owns this voice (-1 = unassigned)
@@ -65,6 +66,17 @@ struct SoundfontVoice : public IAudioVoice {
     // pass starts this channel's tsf render at this offset within the trigger block so a
     // mid-block targetFrame doesn't sound at the block start, then zeroes it.
     int   startDelayFrames = 0;
+
+    // ── The armed note ──────────────────────────────────────────────────────────────────────────
+    // Everything a trigger needs, held from the dispatch pass until the RENDER pass fires it. See
+    // armNote() for why the note_on cannot happen where the note is scheduled.
+    struct ArmedNote {
+        int   slot = -1, midiNote = 0, midiVelocity = 0, bank = 0, preset = 0;
+        float noteVol = 1.0f, trkVol = 1.0f, pan = 0.5f;
+        int   envAtk = -1, envDec = -1, envSus = -1, envRel = -1;
+    };
+    bool      hasArmedNote = false;
+    ArmedNote armed;
 
     // ── IAudioVoice ─────────────────────────────────────────────────────────
     bool active()     const override { return isActive; }
@@ -116,21 +128,33 @@ struct SoundfontVoice : public IAudioVoice {
 
     // ── Audio-thread-only methods (no lock needed) ──────────────────────────
 
-    // Trigger a new note. Called from processAudioBlock (audio thread).
+    // Arm a new note. Called from processAudioBlock's dispatch pass (audio thread).
     // noteVol = instrument × phrase volume.
     // trkVol  = current track mixer volume (fetched from trackVolumes[] at call site).
     // TSF channel volume = noteVol * trkVol so per-track mixing works on the shared handle.
     //
-    // ⚠️ **RETURNS FALSE WHEN THE SLOT'S HANDLE IS GONE, AND THE CALLER MUST HONOUR IT.** Only this
-    // function reads the handle under the slot mutex, so only this function can answer; anything the
-    // caller checked beforehand is a hint that may already be stale. On false NOTHING has been
-    // written — the voice is left exactly as it was, still sounding whatever it was sounding, which
-    // is the point: the eighty lines of chain/envelope/mod setup that follow a trigger belong to the
-    // note that actually started.
-    bool triggerNote(int slot, int midiNote, int midiVelocity,
-                     float noteVol, float trkVol, float pan,
-                     int bank, int preset, int trackId,
-                     int envAtk, int envDec, int envSus, int envRel);
+    // ⚠️⚠️ **IT ARMS; IT DOES NOT SOUND.** The note_on happens in `fireArmedNote`, which the SF render
+    // pass calls at this note's exact intra-block frame — AFTER it has rendered the frames before it.
+    // Sounding the note here instead is what used to make an SF note change CRACK: the render pass
+    // starts a trigger block at `startDelayFrames` and leaves the head silent, so a note that had
+    // already replaced the previous one at dispatch time cut it dead at the block boundary, at
+    // whatever amplitude its waveform happened to be at. Nothing on the note's own timing changes —
+    // `startDelayFrames` decided when it sounds before this split and decides it still.
+    //
+    // ⚠️ **RETURNS FALSE WHEN THE SLOT'S HANDLE IS GONE, AND THE CALLER MUST HONOUR IT.** Only a
+    // function holding the slot mutex can answer that; anything the caller checked beforehand is a
+    // hint that may already be stale. On false NOTHING has been written — the voice is left exactly
+    // as it was, still sounding whatever it was sounding, which is the point: the eighty lines of
+    // chain/envelope/mod setup that follow a trigger belong to a note that is actually going to play.
+    bool armNote(int slot, int midiNote, int midiVelocity,
+                 float noteVol, float trkVol, float pan,
+                 int bank, int preset, int trackId,
+                 int envAtk, int envDec, int envSus, int envRel);
+
+    // Fire the armed note into `h`. ⚠️ The caller must already hold `soundfonts[sfSlot].mutex` and
+    // must have read `h` from the handle under it — this is called from inside the render pass's lock.
+    // Clears `hasArmedNote` either way.
+    void fireArmedNote(tsf* h);
 
     // Reset pitch state after a new note trigger.
     // needsPitchReset=true so applyPitchMod() resets the TSF pitch wheel to center on the
@@ -180,6 +204,7 @@ struct SoundfontVoice : public IAudioVoice {
         isReleasingOnly = false;
         tableId        = -1;
         startDelayFrames = 0;
+        hasArmedNote   = false;  // the slot it was armed against is the one being unloaded
     }
 };
 
