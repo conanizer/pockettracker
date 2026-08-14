@@ -611,6 +611,19 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
             out[t] = voices[v].noteOctave * 12 + voices[v].notePitch;
         }
     }
+    // ⚠️ THE SOUNDFONT POOL IS A SECOND VOICE POOL AND THE MONITOR HAS TO READ BOTH. `voices[]` holds
+    // samplers only, so a track playing an SF2 instrument reported no note at all — the note column
+    // beside the navigation map stayed blank for exactly the instruments TSF renders.
+    //
+    // Same encoding and the same fields as the sampler above: `resetTableState` copies the scheduled
+    // note's octave and pitch onto the SF voice at every trigger. Sampler first — a sampler note on a
+    // track supersedes an SF note still releasing on it (that is what the note-off at the sampler
+    // trigger site means), so whichever pool answered first is the one still being played.
+    for (int t = 0; t < SF_VOICE_COUNT && t < trackCount; t++) {
+        if (out[t] == -1 && sfVoices[t].isActive) {
+            out[t] = sfVoices[t].noteOctave * 12 + sfVoices[t].notePitch;
+        }
+    }
 }
 
 int AudioEngine::getSampleRate() {

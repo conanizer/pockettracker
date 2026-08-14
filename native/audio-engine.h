@@ -135,6 +135,9 @@ public:
     /**
      * For each of the 8 tracks, encode the active note as (octave * 12 + pitch), or -1 if no
      * voice is currently playing on that track. The caller passes a pre-allocated int[8] array.
+     *
+     * ⚠️ BOTH voice pools — the sampler `voices[]` AND `sfVoices[]`. A track playing a SoundFont
+     * instrument has no entry in the first one at all.
      */
     void getTrackActiveNotes(int* out, int trackCount);
 
