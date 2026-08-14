@@ -45,27 +45,52 @@ namespace songcore {
 // `effect_value_max(fxCode)` (asserted below) and the emission grid is one constant for all of them —
 // a column holding the same value in every row is a claim that it varies, and the day it stops being
 // true the table and the truth part company silently.
+// ⚠️ **WHAT THE TWO ENDPOINTS MEAN — the one thing that is not the same for every row.**
+//
+//  • `BYTE` — the endpoints are VALUES, and the ramp interpolates the authored byte itself. This is
+//    the sentence the paragraph above is written in: the ramp is the parameter's own CC, emitted
+//    more often.
+//  • `EQ_PRESET` — the endpoints are INDICES into `Project::eqPresets`, and interpolating them would
+//    walk presets 05, 06, 07 … which is a slideshow, not a fade. What moves is the twelve numbers the
+//    two referenced presets HOLD, and the tick carries them as band values (`ExtEqMorphPayload`).
+//
+// A third kind is a third answer to "what does the AUF's byte mean?", and nothing else — every rule
+// below (looking left, last-AUS-wins, the chain boundary, the curve) is indifferent to it.
+enum class RampKind { BYTE, EQ_PRESET };
+
 struct AutomatableParam {
-    int     fxCode;   // the effect the author types, and where AUS reads the ramp's start value
-    uint8_t ccId;     // the EV_CC id the ramp emits — the SAME one the per-step effect emits
-    bool    global;   // the record rides TRACK_GLOBAL rather than the track's own lane
+    int      fxCode;  // the effect the author types, and where AUS reads the ramp's start value
+    uint8_t  ccId;    // BYTE: the EV_CC id the ramp emits — the SAME one the per-step effect emits
+    bool     global;  // the record rides TRACK_GLOBAL rather than the track's own lane
+    RampKind kind;
 };
 
 inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
-    { FX_VOLUME, CC_VOLUME,      false },  // Vxx — the phraseVol channel
-    { FX_PAN,    CC_PAN,         false },
-    { FX_RSEND,  CC_REVERB_SEND, false },
-    { FX_DSEND,  CC_DELAY_SEND,  false },
-    { FX_VTR,    CC_TRACK_VOL,   false },
+    { FX_VOLUME, CC_VOLUME,      false, RampKind::BYTE },  // Vxx — the phraseVol channel
+    { FX_PAN,    CC_PAN,         false, RampKind::BYTE },
+    { FX_RSEND,  CC_REVERB_SEND, false, RampKind::BYTE },
+    { FX_DSEND,  CC_DELAY_SEND,  false, RampKind::BYTE },
+    { FX_VTR,    CC_TRACK_VOL,   false, RampKind::BYTE },
     // The instrument filter. A ramp on either is a per-note sweep and dies with the note that carries
     // it — nothing to restore on stop(), unlike the two faders below.
-    { FX_CUT,    CC_FILTER_CUT,  false },
-    { FX_RES,    CC_FILTER_RES,  false },
+    { FX_CUT,    CC_FILTER_CUT,  false, RampKind::BYTE },
+    { FX_RES,    CC_FILTER_RES,  false, RampKind::BYTE },
     // ⚠️ The master fader belongs to no track. Track-scoped, EngineConsumer's external-routing gate
     // would swallow it whenever the carrying track plays an EXTERNAL instrument (event.h) — so the
     // ramp must ride the same TRACK_GLOBAL lane the per-step VMV does, or it dies on exactly the
     // tracks a master fade is most often written on.
-    { FX_VMV,    CC_MASTER_VOL,  true  },
+    { FX_VMV,    CC_MASTER_VOL,  true,  RampKind::BYTE },
+    // ── The EQ presets. No CC id: what these emit is a band set, not a controller value ───────────
+    //
+    // ⚠️ EQN IS A PER-VOICE SWEEP, not a per-track one. `applyEqPresetToChain` writes the sounding
+    // voice's own chain, and a note-on resets that chain from the instrument's preset — so a morph
+    // re-asserts itself one tic after every retrigger and does nothing at all over a silent track.
+    // Same shape as CUT/RES above. EQM is the one that gives a long global sweep.
+    { FX_EQN,    0,              false, RampKind::EQ_PRESET },
+    // ⚠️ Global for the same reason VMV is, and with the same debt: EQM REPLACES the mixer's master
+    // EQ and holds, so the host must put the project's value back on stop(). The scheduler sets
+    // `eqmActive_` off the ramp as well as off the per-step effect — see emit_ramp_ticks.
+    { FX_EQM,    0,              true,  RampKind::EQ_PRESET },
 };
 
 inline constexpr int AUTOMATABLE_PARAM_COUNT =
@@ -78,17 +103,32 @@ inline constexpr const AutomatableParam* automatable_param(int fxCode) {
     return nullptr;
 }
 
-// The ramp interpolates in the authored 0-255 byte domain and emits `byte / 255`, so every value it
+// A BYTE ramp interpolates in the authored 0-255 domain and emits `byte / 255`, so every value it
 // produces is a member of the same 256-value set the per-step effects already emit. A parameter whose
 // cell caps below 0xFF would break that: its ramp could type values the cell cannot.
 inline constexpr bool automatable_params_are_full_range() {
     for (int i = 0; i < AUTOMATABLE_PARAM_COUNT; ++i)
-        if (effect_value_max(AUTOMATABLE_PARAMS[i].fxCode) != 255) return false;
+        if (AUTOMATABLE_PARAMS[i].kind == RampKind::BYTE &&
+            effect_value_max(AUTOMATABLE_PARAMS[i].fxCode) != 255) return false;
     return true;
 }
 static_assert(automatable_params_are_full_range(),
-              "an automatable parameter must accept the full 00-FF byte — the ramp interpolates in "
-              "that domain and would emit values its own cell cannot hold");
+              "an automatable BYTE parameter must accept the full 00-FF byte — the ramp interpolates "
+              "in that domain and would emit values its own cell cannot hold");
+
+// ⭐ The twin, and it is the reason an out-of-range endpoint needs no runtime range check anywhere:
+// an EQ_PRESET endpoint is a SLOT, the pool is 128 slots, and a cell that caps at 127 cannot hold a
+// number that is not one. Widen either half and this fails at compile time rather than indexing off
+// the end of `Project::eqPresets` at the first tick.
+inline constexpr bool automatable_preset_params_are_slot_range() {
+    for (int i = 0; i < AUTOMATABLE_PARAM_COUNT; ++i)
+        if (AUTOMATABLE_PARAMS[i].kind == RampKind::EQ_PRESET &&
+            effect_value_max(AUTOMATABLE_PARAMS[i].fxCode) != POOL_EQPRESETS - 1) return false;
+    return true;
+}
+static_assert(automatable_preset_params_are_slot_range(),
+              "an EQ_PRESET parameter's cell must cap at the last preset slot — its endpoints are "
+              "indices into Project::eqPresets, and the pairing has no other range check");
 
 // ─── The curve ───────────────────────────────────────────────────────────────────────────────────
 //
@@ -127,6 +167,63 @@ inline int automation_value_byte(int startByte, int destByte, int curveByte, dou
     return b < 0 ? 0 : (b > 255 ? 255 : b);
 }
 
+// ─── The EQ morph — what an EQ_PRESET ramp holds at position `t` ──────────────────────────────────
+//
+// ⚠️ **THE START PRESET'S BAND TYPES SURVIVE THE WHOLE SPAN, ARRIVAL INCLUDED.** A type is not an
+// interpolable quantity — there is no continuous path from BELL to HISHELF, and LOWCUT/HICUT run
+// through the SVF and have no gain at all — so one of the two ends has to win, for every tick. The
+// start wins, and the morph never snaps:
+//
+//   • Types that AGREE (the normal case, and the one to write) make the arrival exactly the
+//     destination preset, by construction rather than by rounding.
+//   • Types that DIFFER still sweep that band's frequency and gain under the start's type, and the
+//     ramp rests on a setting no preset holds. To land on the real destination, write it — `EQM 12`
+//     on the step after the AUF is one cell, visible in the grid, and then the discontinuity is the
+//     author's rather than the ramp's.
+//
+// ⭐ A band OFF in the start preset stays off for the whole ramp, whatever the destination says — so
+// `chain.eq.active` (derived from "some type ≠ 0") cannot change mid-sweep and no band can pop in or
+// out. Fade a band out by ramping its GAIN to 0 dB (0x78) instead.
+//
+// ⚠️ The slots are clamped rather than trusted. Pairing refuses an endpoint above the last slot, so
+// the authored path cannot produce one — but a hand-edited project file is not the authored path, and
+// an unclamped index here reads off the end of the pool on the first tick.
+inline ExtEqMorphPayload eq_morph_at(const Project& project, int startSlot, int destSlot,
+                                     int curveByte, double t) {
+    ExtEqMorphPayload m{};
+    const int last = static_cast<int>(project.eqPresets.size()) - 1;
+    if (last < 0) return m;
+    auto slot = [last](int s) { return static_cast<size_t>(s < 0 ? 0 : (s > last ? last : s)); };
+    const EqPreset& from = project.eqPresets[slot(startSlot)];
+    const EqPreset& to   = project.eqPresets[slot(destSlot)];
+
+    for (int i = 0; i < 3; ++i) {
+        // A preset carries three bands by construction; a file that says otherwise leaves the missing
+        // ones at the zeroed payload, which reads as OFF.
+        if (i >= static_cast<int>(from.bands.size()) || i >= static_cast<int>(to.bands.size())) break;
+        const EqBand& a = from.bands[static_cast<size_t>(i)];
+        const EqBand& b = to.bands[static_cast<size_t>(i)];
+        m.type[i] = static_cast<uint8_t>(a.type < 0 ? 0 : (a.type > 255 ? 255 : a.type));
+        m.freq[i] = static_cast<uint8_t>(automation_value_byte(a.freq, b.freq, curveByte, t));
+        m.gain[i] = static_cast<uint8_t>(automation_value_byte(a.gain, b.gain, curveByte, t));
+        m.q[i]    = static_cast<uint8_t>(automation_value_byte(a.q,    b.q,    curveByte, t));
+    }
+    return m;
+}
+
+/** Two morph ticks that would set the engine to the same thing — the de-dup test. */
+inline bool eq_morph_equal(const ExtEqMorphPayload& a, const ExtEqMorphPayload& b) {
+    for (int i = 0; i < 3; ++i)
+        if (a.type[i] != b.type[i] || a.freq[i] != b.freq[i] ||
+            a.gain[i] != b.gain[i] || a.q[i]    != b.q[i]) return false;
+    return true;
+}
+
+/** Is this byte a slot an EQ_PRESET ramp may use as an endpoint? */
+inline constexpr bool is_eq_preset_slot(int value) {
+    return value >= 0 && value < POOL_EQPRESETS;
+}
+
 // ─── The pairing ─────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -139,9 +236,11 @@ inline int automation_value_byte(int startByte, int destByte, int curveByte, dou
  * `span == aufStep − ausStep`, which is what `find_ramps` produces on its own.
  */
 struct RampSpec {
-    int     fxCode    = FX_NONE;
-    uint8_t ccId      = 0;
-    bool    global    = false;
+    int      fxCode   = FX_NONE;
+    uint8_t  ccId     = 0;
+    bool     global   = false;
+    // What `startByte`/`destByte` MEAN: values for BYTE, `Project::eqPresets` indices for EQ_PRESET.
+    RampKind kind     = RampKind::BYTE;
     int     ausStep   = -1;   // the step carrying AUS, or −1: the ramp opened in an earlier phrase
     int     aufStep   = -1;   // the step carrying the AUF, or −1: it arrives in a later phrase
     int     paramSlot = 0;    // 1-3: the slot AUS read its start value from
@@ -176,6 +275,12 @@ struct RampSpec {
  *  • **AUF must be on a LATER step**, and the FIRST one closes. An AUF sharing a step with its AUS is
  *    inert and leaves the ramp open: slot order inside a step is not a time order, and the span it
  *    would describe has no duration to interpolate across.
+ *  • **An EQ_PRESET endpoint that is not a slot is INERT, at either end.** The AUF cell accepts
+ *    00-FF and a preset index is 00-7F, so `AUF C0` over an EQM names nothing; it does not close the
+ *    ramp, and — like every other unused AUS/AUF cell — it draws DIM, so the author sees it in the
+ *    grid the moment they type it. ⚠️ **The open AUS stays open**, so a later, legal AUF still closes
+ *    the span. The same rule at the start end leaves the AUS itself inert rather than letting it walk
+ *    further left onto a parameter the author was not pointing at.
  *  • **The last AUS wins**, matching the last-wins convention the FX slots already follow: a second
  *    AUS before any AUF replaces the open ramp rather than nesting.
  *  • **An unclosed AUS at the end of the phrase produces nothing.** Pairing is per-phrase — the AUF
@@ -203,19 +308,28 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
                 for (int left = slot - 1; left >= 1; --left) {
                     const AutomatableParam* p = automatable_param(step_fx_type(step, left));
                     if (p == nullptr) continue;
+                    const int startValue = step_fx_value(step, left);
+                    // The nearest automatable effect IS the parameter, so an endpoint it cannot
+                    // express ends the search rather than continuing it.
+                    if (p->kind == RampKind::EQ_PRESET && !is_eq_preset_slot(startValue)) break;
                     open           = RampSpec{};
                     open.fxCode    = p->fxCode;
                     open.ccId      = p->ccId;
                     open.global    = p->global;
+                    open.kind      = p->kind;
                     open.ausStep   = stepIndex;
                     open.paramSlot = left;
                     open.ausSlot   = slot;
-                    open.startByte = step_fx_value(step, left);
+                    open.startByte = startValue;
                     open.curveByte = step_fx_value(step, slot);
                     isOpen         = true;
                     break;
                 }
             } else if (type == FX_AUF && isOpen && stepIndex > open.ausStep) {
+                // ⚠️ Before anything that closes the ramp: an endpoint that is not a slot leaves the
+                // AUS open for a later AUF, and this cell unused (so `RampCells` dims it).
+                if (open.kind == RampKind::EQ_PRESET && !is_eq_preset_slot(step_fx_value(step, slot)))
+                    continue;
                 open.aufStep    = stepIndex;
                 open.aufSlot    = slot;
                 open.destByte   = step_fx_value(step, slot);
@@ -316,13 +430,16 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
                     for (int left = slot - 1; left >= 1; --left) {
                         const AutomatableParam* p = automatable_param(step_fx_type(step, left));
                         if (p == nullptr) continue;
+                        const int startValue = step_fx_value(step, left);
+                        if (p->kind == RampKind::EQ_PRESET && !is_eq_preset_slot(startValue)) break;
                         open           = RampSpec{};
                         open.fxCode    = p->fxCode;
                         open.ccId      = p->ccId;
                         open.global    = p->global;
+                        open.kind      = p->kind;
                         open.paramSlot = left;
                         open.ausSlot   = slot;
-                        open.startByte = step_fx_value(step, left);
+                        open.startByte = startValue;
                         open.curveByte = step_fx_value(step, slot);
                         openAbs        = absStep;
                         openRow        = row;
@@ -330,6 +447,11 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
                         break;
                     }
                 } else if (type == FX_AUF && isOpen && absStep > openAbs) {
+                    // ⚠️ ABOVE `isOpen = false` DELIBERATELY. This walk clears the flag before its
+                    // visibility check, so the same guard written below would close the ramp and emit
+                    // nothing — which looks identical from the grid and is not the same thing.
+                    if (open.kind == RampKind::EQ_PRESET &&
+                        !is_eq_preset_slot(step_fx_value(step, slot))) continue;
                     const int aufAbs = absStep;
                     isOpen = false;
                     // Only the part of the chain this phrase can see is any of its business.

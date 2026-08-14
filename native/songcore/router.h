@@ -233,6 +233,20 @@ struct MidiRouter {
         emit(ev);
     }
 
+    // An AUS/AUF tick over EQN/EQM: band VALUES, not a slot — the setting it names need not be one
+    // any preset holds (automation.h, eq_morph_at).
+    void ext_eq_morph(int64_t frame, int track, const ExtEqMorphPayload& bands) {
+        Event ev = base(frame, track, INSTRUMENT_NONE, EV_EXT_EQ_MORPH);
+        ev.extEqMorph = bands;
+        emit(ev);
+    }
+
+    void ext_master_eq_morph(int64_t frame, const ExtEqMorphPayload& bands) {
+        Event ev = base(frame, TRACK_GLOBAL, INSTRUMENT_NONE, EV_EXT_MASTER_EQ_MORPH);
+        ev.extEqMorph = bands;
+        emit(ev);
+    }
+
   private:
     static uint32_t bits(float v) {
         uint32_t b;

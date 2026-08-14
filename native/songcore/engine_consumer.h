@@ -177,11 +177,39 @@ class EngineConsumer : public IMidiConsumer {
                 engine_->scheduleMasterEqSlot(ev.frame, ev.extMasterEq.slot);
                 break;
 
+            // ⚠️ EQN's morph is subject to the external gate above and EQM's is not — the same
+            // asymmetry VTR/VMV carry, and the right one: a track playing an EXTERNAL instrument
+            // makes no audio here, so its EQ has nothing to move, while the master EQ carries every
+            // other track and must move whatever track the fade was typed on. The master tick rides
+            // TRACK_GLOBAL, which the gate cannot resolve to an instrument and so never claims.
+            case EV_EXT_EQ_MORPH:
+                engine_->scheduleVoiceEqBands(ev.frame, ev.track, eq_bands_of(ev));
+                break;
+
+            case EV_EXT_MASTER_EQ_MORPH:
+                engine_->scheduleMasterEqBands(ev.frame, eq_bands_of(ev));
+                break;
+
             default: break;   // schema-complete: no other emitters exist (event-schema §3)
         }
     }
 
   private:
+    /**
+     * A morph tick's payload in the engine's own struct. The two forms hold the same twelve authored
+     * hex numbers in the same order; this is the seam's job — copying, not deriving.
+     */
+    static EqBandsHex eq_bands_of(const Event& ev) {
+        EqBandsHex b;
+        for (int i = 0; i < 3; ++i) {
+            b.type[i] = ev.extEqMorph.type[i];
+            b.freq[i] = ev.extEqMorph.freq[i];
+            b.gain[i] = ev.extEqMorph.gain[i];
+            b.q[i]    = ev.extEqMorph.q[i];
+        }
+        return b;
+    }
+
     /**
      * The controller number for this event, via the model's shared rule (`resolve_cc_param`) — so a
      * `CCA` means the same controller here as it does on the wire. −1 (unknown instrument, or an

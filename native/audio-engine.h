@@ -293,6 +293,10 @@ public:
     void scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res);          // RES xx
     void scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot);              // EQN xx
     void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
+    // An AUS/AUF EQ morph tick. Not a slot: the bands are carried verbatim, because the setting a
+    // morph names is between two presets and need not be one any slot holds.
+    void scheduleVoiceEqBands(int64_t targetFrame, int trackId, const EqBandsHex& bands);
+    void scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& bands);
     void scheduleTrackVolume(int64_t targetFrame, int trackId, float volume);          // VTR xx
     void scheduleMasterVolume(int64_t targetFrame, float volume);                      // VMV xx
 
@@ -588,6 +592,8 @@ private:
     std::unique_lock<std::mutex> beginSampleEdit(int id);
     // Apply a global EQ preset (0-127, <0 = bypass) to a live voice's inline EQ (EQN effect).
     void applyEqPresetToChain(InstrumentChain& chain, int slot);
+    // The same write, from band VALUES rather than a slot — an AUS/AUF morph tick (EqBandsHex).
+    void applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands);
     // Release one SoundFont slot. Order matters — detach the per-track voices FIRST (so the render
     // pass stops touching the slot), then close the handle under the slot mutex. The only place a
     // slot is ever freed: LRU eviction, unloadSoundfont and clearAllSoundfonts all route through it.

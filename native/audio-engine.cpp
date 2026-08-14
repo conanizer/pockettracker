@@ -1123,6 +1123,23 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     setMasterEqSlot((int)upd.value);
                     break;
                 }
+                // The two morph arms. Same targets as the two above, reached the same way — only the
+                // source of the band values differs, so an EQN morph is subject to exactly the
+                // per-voice limits an EQN is: it writes the SOUNDING voice and a note-on resets that
+                // voice's EQ from the instrument, so the next tick (≤ 1/12 of a step) re-asserts it.
+                case PARAM_UPDATE_EQ_BANDS: {             // EQN under AUS/AUF
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            applyEqBandsToModule(voices[v].chain.eq, upd.eqBands); break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
+                        applyEqBandsToModule(sfVoices[upd.trackId].chain.eq, upd.eqBands);
+                    break;
+                }
+                case PARAM_UPDATE_MASTER_EQ_BANDS: {      // EQM under AUS/AUF (global)
+                    applyEqBandsToModule(masterChain.masterEq, upd.eqBands);
+                    break;
+                }
                 // ⚠️ BOTH FADER ARMS WRITE THE SNAPSHOT AS WELL AS THE MEMBER. The snapshot above is
                 // what the mix loops below actually read; the member is what survives to the next
                 // block. Write one and the fader moves a block late, write the other and it moves for
@@ -2541,6 +2558,40 @@ void AudioEngine::scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot
 
 void AudioEngine::scheduleMasterEqSlot(int64_t targetFrame, int slot) {                            // EQM
     paramUpdateQueue.schedule({ targetFrame, -1, 0, (float)slot, PARAM_UPDATE_MASTER_EQ, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceEqBands(int64_t targetFrame, int trackId, const EqBandsHex& bands) {
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, 0.0f, PARAM_UPDATE_EQ_BANDS, 0.0f, bands });
+}
+
+void AudioEngine::scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& bands) {
+    paramUpdateQueue.schedule({ targetFrame, -1, 0, 0.0f, PARAM_UPDATE_MASTER_EQ_BANDS, 0.0f, bands });
+}
+
+// Convert one band from authored hex to the Hz/dB/Q the filters run on.
+// ⚠️ The three curves are setEqBand's, and there must not be a second copy of them: a morph that
+// converted its frequency even slightly differently would land somewhere the preset it names does
+// not, and only at the ends of a fade — the hardest place to hear it and the easiest to blame on the
+// curve. Anything that changes there changes here, in the same commit.
+static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
+    EqBandData b;
+    b.type   = type;
+    b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
+    b.gainDb = gainHex / 10.0f - 12.0f;
+    b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
+    return b;
+}
+
+// Apply a morph tick's bands to an EQ (a live voice's inline EQ, or the master chain's). Mirrors
+// applyEqPresetToChain, but the bands arrive as values rather than as a slot to look up.
+void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
+    bool any = false;
+    for (int i = 0; i < 3; i++) {
+        EqBandData d = eqBandFromHex(bands.type[i], bands.freq[i], bands.gain[i], bands.q[i]);
+        eq.bands[i].setParams(d.type, d.freqHz, d.gainDb, d.q);
+        if (d.type != 0) any = true;
+    }
+    eq.active = any;
 }
 
 // Apply a global EQ preset (slot 0-127, <0 = bypass) to a live voice's inline EQ. The voice's

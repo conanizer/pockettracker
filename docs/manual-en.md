@@ -1514,8 +1514,40 @@ skipping any that are not:
 | `VMV` | the master fader |
 | `CUT` | the filter cutoff |
 | `RES` | the filter resonance |
+| `EQN` | this track's EQ — **between two presets** (see below) |
+| `EQM` | the master EQ — **between two presets** (see below) |
 
 In `VOL 20  PSL 40  AUS 00`, the `AUS` ramps the `VOL` — `PSL` is not automatable, so it is passed over.
+
+**Fading between two EQ presets.** `EQN` and `EQM` are different from every other row above: their
+value is a **preset number**, not a level. So the pair does not slide the number — it slides the
+**contents**. Write the starting preset, `AUS` beside it, and the destination preset on the `AUF`:
+
+```
+00    EQM 05   AUS 80            ← start on preset 05, linear
+08             AUF 12            ← arrive at preset 12 eight steps later
+```
+
+Over those eight steps the **FREQ, GAIN and Q of all three bands** slide from what preset 05 holds to
+what preset 12 holds. The frequency sweep is even across the keyboard, not bunched at the top.
+
+⚠️ **Give both presets the same three band TYPES.** A type cannot be faded — there is no halfway
+between a BELL and a HI SHELF — so the **starting** preset's types are kept for the whole fade. Match
+them and you arrive exactly on the destination preset. Leave them mismatched and that band still sweeps
+its frequency and gain, but under the start's type, and the fade ends on a setting that is not quite
+either preset. Nothing clicks either way.
+
+To land on the real destination preset, write it: `EQM 12` on the step after the `AUF`.
+
+A band switched **OFF** in the starting preset stays off for the whole fade. To fade a band out, ramp
+its **GAIN to 0.0 dB** instead.
+
+⚠️ A preset number is `00`–`7F`. An `AUF` above `7F` on an EQ fade names no preset, so it is ignored and
+drawn dimmed — and the `AUS` stays open for the next `AUF` you write.
+
+⚠️ `EQM` fades the master bus and keeps going on its own. `EQN` follows the **note** — over a silent
+track there is nothing to filter, and each new note picks the fade back up a moment after it starts. For
+a long, obvious EQ sweep, use `EQM`.
 
 **A fade may cross phrases.** The `AUF` can sit in a **later phrase of the same chain**, which is how a
 fade longer than one phrase is written — up to the sixteen rows of the chain. It does **not** cross into
@@ -1527,7 +1559,8 @@ empty cell is. That is the editor telling you the fade will not play. The reason
 - `AUS` with nothing automatable to its left, or with no `AUF` after it in the chain;
 - `AUF` on the **same step** as its `AUS` — the pair needs a later step to have any duration;
 - a second `AUF` after the pair has already closed;
-- a second `AUS` before an `AUF`, which replaces the first one — the last `AUS` wins, pairs do not nest.
+- a second `AUS` before an `AUF`, which replaces the first one — the last `AUS` wins, pairs do not nest;
+- on an `EQN`/`EQM` fade, an endpoint above `7F` — it is not a preset number, so it names nothing.
 
 One ramp runs at a time on a track, so to fade two parameters at once, write them on two tracks.
 

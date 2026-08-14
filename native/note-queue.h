@@ -230,6 +230,24 @@ enum ParamUpdateAction {
     // member. Both arms write the member AND the in-scope snapshot.
     PARAM_UPDATE_TRACK_VOL,       // mixer: trackVolumes[trackId] = value          [VTR]
     PARAM_UPDATE_MASTER_VOL,      // mixer: masterVolume = value (global)          [VMV]
+    // ⚠️ APPENDED, and these two must stay at the end. An action's NUMBER is its identity — every
+    // value above is a positional entry in a queue record the audio thread branches on.
+    //
+    // The two above carry a SLOT and read the preset bank; these carry the BAND VALUES themselves, in
+    // `eqBands`, because an AUS/AUF morph sets the EQ to a setting no preset holds.
+    PARAM_UPDATE_EQ_BANDS,        // active voice: apply eqBands to chain.eq        [EQN + AUS/AUF]
+    PARAM_UPDATE_MASTER_EQ_BANDS, // global: apply eqBands to the master EQ         [EQM + AUS/AUF]
+};
+
+// One EQ setting as AUTHORED HEX — the domain the project file and the FX cells are written in, not
+// the Hz/dB/Q the engine runs on. It crosses the seam in this form because interpolating hex is what
+// makes a frequency sweep linear in log-frequency; `applyEqBandsToChain` does the conversion, using
+// the same arithmetic as setEqBand().
+struct EqBandsHex {
+    int type[3] = {};                    // 0 OFF | 1 LOSHELF | 2 LOWCUT | 3 BELL | 4 HISHELF | 5 HICUT
+    int freq[3] = { 128, 128, 128 };     // 00-FF → 20-20000 Hz, log
+    int gain[3] = { 120, 120, 120 };     // 0-240 → −12.0..+12.0 dB (120 = flat)
+    int q[3]    = { 128, 128, 128 };     // 00-FF → 0.1-10.0, log
 };
 
 // Scheduled parameter update (e.g. Vxx on empty step — update phraseVol at exact frame)
@@ -240,6 +258,9 @@ struct ScheduledParamUpdate {
     float value;             // New value: mod-source value / bend rate / vibrato speed / table row
     int action = PARAM_UPDATE_MOD_SOURCE;  // discriminator (default keeps Vxx call sites unchanged)
     float value2 = 0.0f;     // second arg: vibrato depth (PARAM_UPDATE_VIBRATO)
+    // ⚠️ LAST, and defaulted: every other call site aggregate-initialises this struct positionally and
+    // stops before here. A field inserted above instead would silently re-bind all of them.
+    EqBandsHex eqBands{};    // PARAM_UPDATE_EQ_BANDS / PARAM_UPDATE_MASTER_EQ_BANDS only
 
     bool operator>(const ScheduledParamUpdate& other) const {
         return targetFrame > other.targetFrame;

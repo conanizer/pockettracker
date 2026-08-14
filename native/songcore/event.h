@@ -49,7 +49,7 @@
 
 namespace songcore {
 
-constexpr int SCHEMA_VERSION = 1;
+constexpr int SCHEMA_VERSION = 2;
 
 /**
  * The schema's float encoding, in one place: an analog value is carried as the RAW BITS of its
@@ -82,7 +82,7 @@ constexpr int16_t INSTRUMENT_NONE = -1;
 
 // ─── Type tags ──────────────────────────────────────────────────────────────────────────────────
 // Events with a MIDI form use their MIDI status high byte; tracker-only events use 0x01-0x7F
-// (never valid MIDI status bytes). 0x07-0x7F reserved for future EXT events.
+// (never valid MIDI status bytes). 0x09-0x7F reserved for future EXT events.
 
 enum EventType : uint8_t {
     EV_EXT_PITCH_RATE = 0x01,  // PBN on empty step (a rate, not an absolute bend)
@@ -91,6 +91,12 @@ enum EventType : uint8_t {
     EV_EXT_REVERSE    = 0x04,  // BCK
     EV_EXT_EQ_SLOT    = 0x05,  // EQN
     EV_EXT_MASTER_EQ  = 0x06,  // EQM (track = TRACK_GLOBAL)
+    // ⚠️ A MORPH CARRIES BAND VALUES, NOT A SLOT — it is the one way the engine's EQ is moved to a
+    // setting no preset holds, so it can never be folded into the two above by widening `slot`.
+    // Mirrored pair for the same reason EQN/EQM are one: the consumer needs a different engine call
+    // for each, and a tag apiece keeps that dispatch flat (automation.h, RampKind::EQ_PRESET).
+    EV_EXT_EQ_MORPH        = 0x07,  // an AUS/AUF tick over EQN
+    EV_EXT_MASTER_EQ_MORPH = 0x08,  // an AUS/AUF tick over EQM (track = TRACK_GLOBAL)
     EV_NOTE_OFF       = 0x80,
     EV_NOTE_ON        = 0x90,
     EV_CC             = 0xB0,
@@ -237,6 +243,21 @@ struct ExtReversePayload   { uint8_t reverse, restart; };          // reverse re
 struct ExtEqSlotPayload    { int16_t slot; };                      // slot      -1 bypass | 0-127
 struct ExtMasterEqPayload  { int16_t slot; };                      // slot      -1 bypass | 0-127
 
+// One EQ setting, as the three bands the engine's EQ actually runs — the AUTHORED hex of each field,
+// not the Hz/dB/Q it converts to. Interpolating the hex is what makes a frequency sweep linear in
+// log-frequency (freq = 20·1000^(hex/255)), and it keeps every value a morph produces inside the same
+// integer domain the goldens already hold, so nothing below the seam has to agree about a float.
+//
+// ⚠️ `type` IS NOT INTERPOLATED — it comes from the ramp's start preset and holds for the whole span
+// (automation.h §4). There is no continuous path from BELL to HISHELF, and no shared parameter set:
+// LOWCUT/HICUT run through the SVF and have no gain at all.
+struct ExtEqMorphPayload {                                         // type0..2 freq0..2 gain0..2 q0..2
+    uint8_t type[3];   // 0 OFF | 1 LOSHELF | 2 LOWCUT | 3 BELL | 4 HISHELF | 5 HICUT (eq-module.h)
+    uint8_t freq[3];   // 00-FF → 20-20000 Hz, log
+    uint8_t gain[3];   // 0-240 → −12.0..+12.0 dB, 0.1 dB a step
+    uint8_t q[3];      // 00-FF → 0.1-10.0, log
+};
+
 // ─── The record ─────────────────────────────────────────────────────────────────────────────────
 
 struct Event {
@@ -257,6 +278,7 @@ struct Event {
         ExtReversePayload   extReverse;
         ExtEqSlotPayload    extEqSlot;
         ExtMasterEqPayload  extMasterEq;
+        ExtEqMorphPayload   extEqMorph;      // EV_EXT_EQ_MORPH and EV_EXT_MASTER_EQ_MORPH both
     };
 };
 

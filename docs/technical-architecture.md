@@ -240,12 +240,38 @@ the start and its own as the curve; `AUF`, on a later step, carries the destinat
 interpolated in the authored 0–255 byte domain by a polynomial — `+ − ×` only, for the determinism
 reason above — and emitted **once per tic** as the parameter's own `EV_CC`.
 
-That last point is what keeps automation cheap. A ramp is not a new kind of event: it is the CC the
-per-step effect already emits, emitted more often. So a parameter becomes automatable by paying the
-price of live control at all — a CC id, an arm in `EngineConsumer::consume`, a queued apply on the
-audio thread — plus a row in `automation.h`'s registry, and no `SCHEMA_VERSION` bump. Today's rows are
-`VOL`, `PAN`, `REV`, `DEL`, `VTR`, `VMV`, `CUT` and `RES`; the set is that table, not a property of the
-feature.
+That last point is what keeps automation cheap. A ramp of this kind is not a new kind of event: it is
+the CC the per-step effect already emits, emitted more often. So a parameter becomes automatable by
+paying the price of live control at all — a CC id, an arm in `EngineConsumer::consume`, a queued apply
+on the audio thread — plus a row in `automation.h`'s registry, and no `SCHEMA_VERSION` bump. Those rows
+are `VOL`, `PAN`, `REV`, `DEL`, `VTR`, `VMV`, `CUT` and `RES`; the set is that table, not a property of
+the feature.
+
+**A registry row also declares what its two endpoints MEAN**, and there are two answers. The eight
+above are `BYTE`: the endpoints are values, and the authored byte itself is what moves. `EQN` and `EQM`
+are `EQ_PRESET`: their cells hold a preset **index**, and interpolating an index would walk presets 05,
+06, 07 — a slideshow, not a fade. What moves instead is the twelve numbers the two referenced presets
+hold, so `EQM 05 · AUS 80` … `AUF 12` slides the FREQ, GAIN and Q of all three bands from one preset to
+the other. Those ticks carry band values rather than a controller, so they ride their own tags
+(`EV_EXT_EQ_MORPH`, `EV_EXT_MASTER_EQ_MORPH`) — which is the one thing a new ramp kind can cost that a
+new row cannot.
+
+The interpolation runs on the **authored hex**, not on the Hz it converts to: frequency and Q are
+exponential in hex (`20 · 1000^(hex/255)`), so linear-in-hex is linear in log-frequency, which is what a
+sweep should sound like — and it keeps every value a morph produces in the same integer domain
+everything else already emits.
+
+⚠️ **A band's TYPE is not interpolable** — there is no continuous path from BELL to HISHELF, and the
+two cut types run through the SVF and have no gain at all. The start preset's three types therefore
+hold for the whole span, arrival included, and only FREQ/GAIN/Q move. When the two presets' types agree
+the arrival **is** the destination preset exactly; when they differ the ramp rests on a setting no
+preset names, and nothing clicks. To land on the real destination, write it: `EQM 12` on the step after
+the `AUF`. A band that is OFF in the start preset stays off, so `active` cannot change mid-sweep and no
+band pops in or out.
+
+⚠️ An `AUF` cell accepts 00–FF while a preset slot is 00–7F, so an `AUF` above 7F over an `EQ_PRESET`
+ramp names nothing: it does not close the span, it draws dimmed like any unused automation cell, and
+the open `AUS` waits for the next legal `AUF`.
 
 Pairing lives in `automation.h` and is **pure**: it answers "which spans does this walk declare", in
 step indices, and never touches frames, tics, grooves or the transport. The emitter already holds each

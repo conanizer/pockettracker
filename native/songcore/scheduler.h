@@ -663,13 +663,22 @@ class Sequencer {
         // the authored start byte the start effect has already emitted. Where the phrase is one the
         // span is crossing, it is the byte the previous phrase signed off on — so the fade continues
         // instead of restating itself at every boundary.
-        std::vector<int> rampLastByte;
-        rampLastByte.reserve(ramps.size());
+        //
+        // An EQ morph seeds the same way and for the same reason: on the AUS step the EQN/EQM effect
+        // has already emitted the real start preset, whose types are the types the morph wears and
+        // whose FREQ/GAIN/Q are what it holds at t≈0 — so the first tick de-dups against it exactly
+        // as a byte ramp's does, with no special case.
+        std::vector<RampLastValue> rampLast;
+        rampLast.reserve(ramps.size());
         for (const RampSpec& r : ramps) {
             const double seedT = (static_cast<double>(r.stepOffset) * TICS_PER_STEP - 1.0) /
                                  (static_cast<double>(r.span) * TICS_PER_STEP);
-            rampLastByte.push_back(
-                automation_value_byte(r.startByte, r.destByte, r.curveByte, seedT));
+            RampLastValue seed;
+            if (r.kind == RampKind::EQ_PRESET)
+                seed.eq = eq_morph_at(project, r.startByte, r.destByte, r.curveByte, seedT);
+            else
+                seed.byte = automation_value_byte(r.startByte, r.destByte, r.curveByte, seedT);
+            rampLast.push_back(seed);
         }
 
         for (int stepIndex = effectiveStartRow; stepIndex < 16; ++stepIndex) {
@@ -712,7 +721,7 @@ class Sequencer {
             // baked into frames the transport then jumps away from would go on moving the parameter
             // after the phrase had ended.
             if (!ramps.empty())
-                emit_ramp_ticks(ramps, rampLastByte, stepResult.effectiveStep, stepIndex, targetFrame,
+                emit_ramp_ticks(ramps, rampLast, stepResult.effectiveStep, stepIndex, targetFrame,
                                 stepDuration, trackId, stepResult.noteFrame, stepResult.fxFrame);
             rowsScheduled++;
             frameOffset += stepDuration;
@@ -745,7 +754,14 @@ class Sequencer {
     //
     // A step is twelve tics however long it is: `stepDuration / TICS_PER_STEP` is the same warped
     // frames-per-tic LAT and KIL offset by, so the fade sits on the grid the rest of the step sits on.
-    void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<int>& lastByte,
+    // Where a ramp has got to. One of the two members is live, chosen by the ramp's kind — a BYTE
+    // ramp's last emitted byte, or an EQ morph's last emitted band set.
+    struct RampLastValue {
+        int               byte = 0;
+        ExtEqMorphPayload eq{};
+    };
+
+    void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<RampLastValue>& lastValue,
                          const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
                          int64_t stepDuration, int trackId, int64_t noteFrame, int64_t fxFrame) {
         const int64_t framesPerTic = stepDuration / TICS_PER_STEP;
@@ -771,6 +787,10 @@ class Sequencer {
             // took its start value from leaves a fade moving a fader nothing will restore. Keyed on the
             // CC the ramp actually sends, which is the thing that moves it.
             if (r.ccId == CC_TRACK_VOL || r.ccId == CC_MASTER_VOL) mixerVolActive_ = true;
+            // ⚠️ EQM carries the same debt, and is keyed the same way — on what the ramp MOVES, not on
+            // the cell that declared it. A morph left the master EQ somewhere no preset names, and
+            // without this nothing puts the project's value back on stop().
+            if (r.kind == RampKind::EQ_PRESET && r.global) eqmActive_ = true;
 
             // ⚠️⚠️ **A STEP THAT WRITES THIS PARAMETER ITSELF OWNS THE FRAME IT WRITES ON — THE RAMP
             // YIELDS, AND RESUMES AFTER IT.** The AUS step is the obvious case (its start effect writes
@@ -798,11 +818,24 @@ class Sequencer {
             // happens to round to it. It stays on its own step — that is what makes a fade written
             // across eight steps land WITH the note on the eighth — so where the step also writes the
             // parameter it takes the frame after that write rather than the next tic.
+            //
+            // ⚠️ AN EQ MORPH ARRIVES AT t=1, NOT AT THE DESTINATION PRESET, and the two are the same
+            // thing only when the band types agree. The morph wears the START preset's types for its
+            // whole length (automation.h), so writing the destination preset whole here would put a
+            // snap on the last step of every mismatched pair — the one artefact a fade exists to
+            // avoid. Landing on the real preset is one visible cell: `EQM 12` on the next step.
             if (stepIndex == r.aufStep) {
-                if (r.destByte != lastByte[i]) {
-                    router_.cc(place(ownsStep ? fxFrame + 1 : targetFrame), lane, r.ccId,
-                               r.destByte / 255.0f);
-                    lastByte[i] = r.destByte;
+                const int64_t arriveFrame = place(ownsStep ? fxFrame + 1 : targetFrame);
+                if (r.kind == RampKind::EQ_PRESET) {
+                    const ExtEqMorphPayload m =
+                        eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, 1.0);
+                    if (!eq_morph_equal(m, lastValue[i].eq)) {
+                        emit_eq_morph(arriveFrame, r, trackId, m);
+                        lastValue[i].eq = m;
+                    }
+                } else if (r.destByte != lastValue[i].byte) {
+                    router_.cc(arriveFrame, lane, r.ccId, r.destByte / 255.0f);
+                    lastValue[i].byte = r.destByte;
                 }
                 continue;
             }
@@ -818,12 +851,28 @@ class Sequencer {
                 // phrases is one curve, not four.
                 const double t = (static_cast<double>(r.stepOffset + stepIndex) +
                                   tic / static_cast<double>(TICS_PER_STEP)) / static_cast<double>(r.span);
+                const int64_t frame = place(targetFrame + tic * framesPerTic);
+                if (r.kind == RampKind::EQ_PRESET) {
+                    const ExtEqMorphPayload m =
+                        eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, t);
+                    if (eq_morph_equal(m, lastValue[i].eq)) continue;
+                    emit_eq_morph(frame, r, trackId, m);
+                    lastValue[i].eq = m;
+                    continue;
+                }
                 const int b = automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
-                if (b == lastByte[i]) continue;
-                router_.cc(place(targetFrame + tic * framesPerTic), lane, r.ccId, b / 255.0f);
-                lastByte[i] = b;
+                if (b == lastValue[i].byte) continue;
+                router_.cc(frame, lane, r.ccId, b / 255.0f);
+                lastValue[i].byte = b;
             }
         }
+    }
+
+    // EQM rides TRACK_GLOBAL and EQN the track's own lane — the same split, and for the same reason,
+    // as the per-step `ext_master_eq` / `ext_eq_slot` pair these ticks interpolate between.
+    void emit_eq_morph(int64_t frame, const RampSpec& r, int trackId, const ExtEqMorphPayload& m) {
+        if (r.global) router_.ext_master_eq_morph(frame, m);
+        else          router_.ext_eq_morph(frame, trackId, m);
     }
 
     // CHA gate + RND/RNL randomize, evaluated before effect resolution. The byte-exact goldens are

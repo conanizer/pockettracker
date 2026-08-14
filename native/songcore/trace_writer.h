@@ -122,6 +122,26 @@ class TraceWriter : public IMidiConsumer {
             case EV_EXT_MASTER_EQ:
                 s += " slot="; s += std::to_string(static_cast<int>(ev.extMasterEq.slot));
                 break;
+            // Every payload field, always all of them, in struct order — twelve here.
+            case EV_EXT_EQ_MORPH:
+            case EV_EXT_MASTER_EQ_MORPH:
+                for (int i = 0; i < 3; ++i) {
+                    s += " type"; s += std::to_string(i);
+                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.type[i]));
+                }
+                for (int i = 0; i < 3; ++i) {
+                    s += " freq"; s += std::to_string(i);
+                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.freq[i]));
+                }
+                for (int i = 0; i < 3; ++i) {
+                    s += " gain"; s += std::to_string(i);
+                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.gain[i]));
+                }
+                for (int i = 0; i < 3; ++i) {
+                    s += " q"; s += std::to_string(i);
+                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.q[i]));
+                }
+                break;
             default: break;  // schema-complete: no other emitters exist (event-schema §3)
         }
         s += '\n';

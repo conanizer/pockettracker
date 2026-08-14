@@ -6,10 +6,13 @@
 
 namespace songcore {
 
-static_assert(SCHEMA_VERSION == 1, "schema bump requires regenerated goldens + doc update");
+// Version 2 added the two EQ-morph tags (AUS/AUF over EQN/EQM). No event LINE moved: nothing that
+// existed emits a new tag, so the goldens changed on their header line and nowhere else.
+static_assert(SCHEMA_VERSION == 2, "schema bump requires regenerated goldens + doc update");
 
 static_assert(EV_EXT_PITCH_RATE == 0x01 && EV_EXT_VIBRATO == 0x02 && EV_EXT_TABLE_ROW == 0x03 &&
-              EV_EXT_REVERSE == 0x04 && EV_EXT_EQ_SLOT == 0x05 && EV_EXT_MASTER_EQ == 0x06,
+              EV_EXT_REVERSE == 0x04 && EV_EXT_EQ_SLOT == 0x05 && EV_EXT_MASTER_EQ == 0x06 &&
+              EV_EXT_EQ_MORPH == 0x07 && EV_EXT_MASTER_EQ_MORPH == 0x08,
               "EXT tags are frozen");
 static_assert(EV_NOTE_OFF == 0x80 && EV_NOTE_ON == 0x90 && EV_CC == 0xB0 &&
               EV_PROGRAM == 0xC0 && EV_PITCH_BEND == 0xE0,
@@ -25,12 +28,16 @@ static_assert(CC_VOLUME == 7 && CC_PAN == 10 && CC_REVERB_SEND == 91 && CC_DELAY
 
 // Same-frame drain order: param-class → NoteOff → NoteOn
 static_assert(sortRank(EV_NOTE_ON) == 2 && sortRank(EV_NOTE_OFF) == 1 &&
-              sortRank(EV_CC) == 0 && sortRank(EV_EXT_MASTER_EQ) == 0,
+              sortRank(EV_CC) == 0 && sortRank(EV_EXT_MASTER_EQ) == 0 &&
+              sortRank(EV_EXT_EQ_MORPH) == 0 && sortRank(EV_EXT_MASTER_EQ_MORPH) == 0,
               "canonical sort ranks are frozen");
 
 // Payload shapes: note(1)+vel(1)+pad(2) + 15 × 4-byte fields = 64. A size change means a field
 // was added/removed/reordered — that is a schema bump with regenerated goldens.
 static_assert(sizeof(NoteOnPayload) == 64, "NoteOnPayload shape changed — schema bump required");
 static_assert(sizeof(Event) - sizeof(NoteOnPayload) >= 12, "envelope shape changed");
+// 3 bands × (type, freq, gain, q), one authored hex byte each. A size change here is a field added
+// or a type widened, which moves the trace's k=v order — a schema bump either way.
+static_assert(sizeof(ExtEqMorphPayload) == 12, "ExtEqMorphPayload shape changed — schema bump required");
 
 }  // namespace songcore
