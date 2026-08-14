@@ -170,6 +170,22 @@ inline std::vector<Theme> theme_builtins() {
     return {theme_classic(), theme_amber(), theme_blue(), theme_mono()};
 }
 
+/**
+ * The palette and visualizer a first launch comes up in — BLUE with the OCTA bars.
+ *
+ * ⚠️ Not `Theme{}`. `Theme{}` IS the CLASSIC palette (`theme_classic` returns it unchanged), so moving
+ * the app's opening look into the struct's field defaults would redefine one of the four built-ins
+ * rather than choose between them. This picks; it does not edit.
+ *
+ * It applies to a launch with no settings.json and nothing else: `load_settings` replaces both the
+ * palette and the visualizer from the file, so a user who has ever quit the app keeps what they had.
+ */
+inline Theme theme_default() {
+    Theme t          = theme_blue();
+    t.visualizerType = VisualizerType::OCTA;
+    return t;
+}
+
 /** A built-in by name, keeping `visualizer`. An unknown name reads as CLASSIC, as a bad .ptt does. */
 inline Theme theme_by_name(const std::string& name, VisualizerType visualizer) {
     Theme found = theme_classic();

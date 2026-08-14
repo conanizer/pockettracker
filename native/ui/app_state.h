@@ -477,7 +477,7 @@ struct AppState {
     bool shouldQuit = false;
 
     // ── Theme ────────────────────────────────────────────────────────────────────────────────────
-    Theme theme = theme_classic();
+    Theme theme = theme_default();
 
     // ── config.json — hand-edited default browse folders (D2b) ─────────────────────────────────────
     // Read ONCE at boot, and only on a debug build (the read is gated on caps.debug in the shell). Empty

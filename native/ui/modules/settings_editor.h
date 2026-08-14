@@ -68,14 +68,23 @@ struct SettingsValues {
     // C6 v2 prefs import lands here. "OFF" is the no-overlay choice.
     std::string overlayName = "OFF";
 
-    bool buttonSoundEnabled = false;
-    int  buttonSoundVolume  = 255;
-    bool buttonVibroEnabled = false;
-    int  vibroPower         = 255;
+    // ⚠️ THESE DEFAULTS ARE THE FIRST LAUNCH, and only the first launch — `load_settings` overwrites
+    // every one of them from settings.json, so an existing user's choices are untouched by a change
+    // here. They describe the app a stranger meets, which is why button feedback is ON: a handheld
+    // whose buttons answer nothing reads as a handheld that did not register the press. LO/quiet
+    // rather than full: the point is a confirmation, not a noise. (`vibroPower` is a LO/HI switch,
+    // 64 vs 255 — see settings_editor.cpp's POW row.)
+    bool buttonSoundEnabled = true;
+    int  buttonSoundVolume  = 0x0F;
+    bool buttonVibroEnabled = true;
+    int  vibroPower         = 64;
     bool autosaveResumeAuto = false;
 
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
-    bool scalingBilinear    = false;
+    // BILINEAR, not INTEGER: integer scaling only fills the screen on a display that is an exact
+    // multiple of 640×480, and on everything else — the portrait overlay above all — it leaves the
+    // editor small and ringed with black. A first run should show the app filling the screen.
+    bool scalingBilinear    = true;
     bool insertBefore       = true;
     bool cursorRemember     = false;
     bool notePreviewEnabled = true;
