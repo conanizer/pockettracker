@@ -76,15 +76,18 @@ public:
      * Is something on screen still falling that no input will bring back?
      *
      * The shell's idle gate (C7) knows about two animation sources — the transport and the master
-     * waveform — and both are AUDIO. This is the third: the MIXER's peak markers step down once per peak
-     * poll, but they do it inside `draw`, so they need frames for a few seconds after the audio has gone
-     * silent or they freeze part-way (mixer.h). The gate is allowed to be conservative, never clever, so
-     * it asks the module that owns the state rather than modelling the fall itself.
+     * waveform — and both are AUDIO. These are the ones that are not: the MIXER's peak markers step down
+     * once per peak poll (mixer.h) and the SPECTRUM strip's bars and dots step down once per frame
+     * (oscilloscope.h), and both do it inside `draw`, so both need frames for a few seconds after the
+     * audio has gone silent or they freeze part-way. The gate is allowed to be conservative, never
+     * clever, so it asks the modules that own the state rather than modelling the fall itself.
      *
-     * ⚠️ **Gated on the MIXER being UP, and that is load-bearing.** Off that screen the feed stops
-     * polling peaks (ui/engine_feed.h), so `peaksVersion` never moves, so the markers never age.
-     * Answering "still falling" there would pin the redraw loop at 60 Hz forever on a screen with no
-     * meters on it — the exact battery cost the idle gate exists to avoid.
+     * ⚠️ **Each half is gated on its module being DRAWN, and that is load-bearing rather than tidy.**
+     * Off the MIXER the feed stops polling peaks (ui/engine_feed.h), so `peaksVersion` never moves and
+     * the markers never age; off the strip — a full-screen module has the frame — the bars never age
+     * either, and neither does a visualizer mode that draws no bars at all. Answering "still falling"
+     * in any of those would pin the redraw loop at 60 Hz for as long as the user stayed there, with
+     * nothing moving on screen to show for it: the exact battery cost the idle gate exists to avoid.
      */
     bool has_falling_meters(const AppState& state) const;
 

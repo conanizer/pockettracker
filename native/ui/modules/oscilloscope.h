@@ -71,6 +71,9 @@ public:
     static constexpr int SEG_GAP   = 1;
     static constexpr int SEG_STEP  = SEGMENT_H + SEG_GAP;  // 3px per LED cell
 
+    /** A full-scale bar, in pixels — 2px of top margin and 2px of bottom. */
+    static constexpr float BAR_AMP_MAX = static_cast<float>(HEIGHT - 4);
+
     /** Instant attack, exponential decay (~333 ms fall at 60 fps). */
     static constexpr float BAR_DECAY = 0.90f;
 
@@ -87,6 +90,27 @@ public:
 
     /** Non-const: the peak-hold and bar-decay state advance one frame per call. */
     void draw(Canvas& c, int x, int y, const OscilloscopeState& s);
+
+    /**
+     * Are the SPECTRUM bars and their peak dots all the way down?
+     *
+     * ⚠️ **The shell's idle gate has to ask this, because the bars fall INSIDE `draw`.** Nothing in the
+     * audio the gate listens to knows about them: the master waveform crosses the silence floor about a
+     * second after a stop, the gate stops drawing, and the bars — a third of full scale at that moment,
+     * with the SPECT P dots still holding above them — freeze there until some input buys a single
+     * frame. That is "the spectrum only falls when I press a button", and any input does it, mapped or
+     * not. (Kotlin held the frames open with a fixed 75-frame release tail instead; asking the module is
+     * the same answer without a number to keep true.)
+     *
+     * At rest is the resting state, not a transient: a bar under one LED cell is snapped to zero rather
+     * than left to an exponential that never arrives, so the frame that brings the last one down is also
+     * the frame that shows it gone.
+     *
+     * ⚠️ Answers only for the two SPECTRUM modes. The other four never call `draw_bar_amps`, so this
+     * state is whatever the last spectrum theme left in it — the caller gates on the visualizer type
+     * (layout.cpp), the way it gates the mixer's markers on the MIXER being up.
+     */
+    bool bars_at_rest() const;
 
 private:
     void draw_scope(Canvas& c, int x, int y, const float* wave, const Theme& t) const;

@@ -113,16 +113,29 @@ void OscilloscopeModule::draw_octa(Canvas& c, int x, int y, const float* tracks,
 
 void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amps, const Theme& t,
                                        bool peak_mode) {
-    const int   barBottom = y + HEIGHT - 2;                     // 2px bottom margin
-    const float maxAmp    = static_cast<float>(HEIGHT - 4);     // 2px top + 2px bottom
+    const int   barBottom = y + HEIGHT - 2;   // 2px bottom margin
+    const float maxAmp    = BAR_AMP_MAX;      // 2px top + 2px bottom
 
     for (int i = 0; i < NUM_BARS; ++i) {
-        const int   barX = x + BAR_START_OFFSET + i * (BAR_W + BAR_GAP);
-        const float raw  = amps ? amps[i] : 0.0f;
+        const int barX = x + BAR_START_OFFSET + i * (BAR_W + BAR_GAP);
+        // A magnitude under one LED cell is silence to this strip — it cannot light a segment and it
+        // cannot raise a dot. Reading it as zero draws the identical picture and keeps `bars_at_rest`
+        // from being held open forever by a noise floor nothing can see.
+        const float rawIn = amps ? amps[i] : 0.0f;
+        const float raw   = (rawIn * maxAmp >= static_cast<float>(SEGMENT_H)) ? rawIn : 0.0f;
 
         // Instant attack, exponential decay — a bar that fell as fast as the audio would strobe.
-        if (raw > barSmoothed_[i]) barSmoothed_[i] = raw;
-        else                       barSmoothed_[i] = std::max(0.0f, barSmoothed_[i] * BAR_DECAY);
+        if (raw > barSmoothed_[i]) {
+            barSmoothed_[i] = raw;
+        } else {
+            barSmoothed_[i] *= BAR_DECAY;
+            // ⚠️ SNAPPED TO ZERO ONCE IT IS UNDER ONE LED CELL, and that is what makes `bars_at_rest`
+            // REACHABLE. A bar this low draws nothing already (the segment loop needs SEGMENT_H px), so
+            // the pixels do not change — but ×0.90 from full scale takes about a thousand frames to
+            // reach a float zero, and the idle gate would hold the screen at 60 Hz for sixteen seconds
+            // after a stop with nothing moving on it, which is worse than the freeze it exists to fix.
+            if (barSmoothed_[i] * maxAmp < static_cast<float>(SEGMENT_H)) barSmoothed_[i] = 0.0f;
+        }
 
         const int barH = static_cast<int>(barSmoothed_[i] * maxAmp);
 
@@ -130,7 +143,13 @@ void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amp
             c.fill_rect(barX, barBottom - dy - SEGMENT_H + 1, BAR_W, SEGMENT_H, t.vizWave);
         }
 
-        if (!peak_mode) continue;
+        if (!peak_mode) {
+            // SPECTRUM draws no dot, so it holds no dot: values left behind by a SPECT P theme would
+            // answer `bars_at_rest` with a picture this mode is not drawing.
+            peakValues_[i]        = 0.0f;
+            peakDecayCounters_[i] = 0;
+            continue;
+        }
 
         if (barSmoothed_[i] > peakValues_[i]) {
             peakValues_[i]        = barSmoothed_[i];
@@ -151,6 +170,13 @@ void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amp
                         darken(t.vizWave, 0.55f));
         }
     }
+}
+
+bool OscilloscopeModule::bars_at_rest() const {
+    for (int i = 0; i < NUM_BARS; ++i) {
+        if (barSmoothed_[i] > 0.0f || peakValues_[i] > 0.0f) return false;
+    }
+    return true;
 }
 
 }  // namespace pt::ui

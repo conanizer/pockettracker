@@ -204,9 +204,13 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
 //
 // What counts as audible is Kotlin's test exactly: the transport playing, OR any master-waveform
 // sample above the silence floor (a one-shot preview still ringing after STOP), OR the preview lane
-// active. The threshold and the spectrum release are its constants, not new ones.
+// active. The threshold is its constant, not a new one.
+//
+// ⚠️ AUDIBLE IS NOT ANIMATING, and this test answers only the first. Everything that keeps moving
+// after the sound has gone — the mixer's markers, the spectrum's bars — is the `metersFalling` term
+// below. Kotlin held the same frames open with a 75-frame release tail it re-armed while audible;
+// asking the modules whether they are at rest is that, without a number that has to stay true.
 constexpr float SCOPE_SILENCE_THRESHOLD = 0.002f;   // PixelPerfectRenderer.kt:101
-constexpr int   SPECTRUM_RELEASE_FRAMES = 75;       // PixelPerfectRenderer.kt:106
 
 bool audio_is_audible(const ui::AppState& s) {
     if (s.isPlaying || s.previewLaneActive) return true;
@@ -1297,13 +1301,14 @@ int run(const AppConfig& cfg) {
         // (invalidate_backbuffer), so each settle frame is genuinely re-uploaded at the current size.
         //
         // ⚠️ `metersFalling` is the FIFTH, and it is the one place where "audible" and "animating" come
-        // apart. The MIXER's peak markers age one segment per 60 ms peak poll, but they age INSIDE the
-        // draw — so gate 1 closing is what stops them, and the pixel net cannot help because a frame
-        // that is never drawn is never compared. Stop the transport and the markers hang for the ~5 s
-        // of fall they still owe (45 polls of hold, then one 5px segment each), stepping down once per
-        // input instead — any input, mapped or not, because every SDL event sets `sawInput` and buys
-        // exactly one frame. See TrackerLayout::has_falling_meters: it is screen-gated there, since off
-        // the MIXER nothing polls the peaks and nothing would ever bring this term back to false.
+        // apart. The MIXER's peak markers age one segment per 60 ms peak poll and the SPECTRUM strip's
+        // bars and peak dots age one step per FRAME, but both age INSIDE the draw — so gate 1 closing is
+        // what stops them, and the pixel net cannot help because a frame that is never drawn is never
+        // compared. Stop the transport and each hangs for the fall it still owes (the markers ~5 s, the
+        // spectrum ~1 s), stepping down once per input instead — any input, mapped or not, because every
+        // SDL event sets `sawInput` and buys exactly one frame. See TrackerLayout::has_falling_meters:
+        // each half is gated there on its module being drawn at all, since nothing off-screen ages and
+        // nothing would ever bring this term back to false.
         const bool metersFalling = layout.has_falling_meters(state);
         const bool audible = audio_is_audible(state);
         const bool settling = resizeSettle > 0;

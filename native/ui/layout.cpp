@@ -8,6 +8,21 @@
 
 namespace pt::ui {
 
+namespace {
+/**
+ * Does a FULL-SCREEN module have the frame — i.e. is none of the furniture drawn this frame?
+ *
+ * Written once because two questions read it: `draw`'s early return, and `has_falling_meters`, which
+ * must not claim the oscilloscope strip is animating on a screen the strip is not on. Two copies of
+ * this list would be one full-screen module away from disagreeing, and the disagreement would show up
+ * as a redraw loop pinned at 60 Hz — nothing on screen, and no test, would ever say so.
+ */
+bool full_screen_module(const AppState& s) {
+    return s.currentScreen == ScreenType::FILE_BROWSER ||
+           (s.currentScreen == ScreenType::SAMPLE_EDITOR && !s.eq.isOpen);
+}
+}  // namespace
+
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
 
@@ -25,12 +40,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     //
     // The QWERTY keyboard still draws on top (it can be open OVER the browser — SELECT+A renames a
     // file), so the early return is *before* the furniture and *after* nothing.
-    if (s.currentScreen == ScreenType::FILE_BROWSER) {
-        fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
-        if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
-        return;
-    }
-
+    //
     // ── The SAMPLE EDITOR is full-screen too, and for the same reason ────────────────────────────
     //
     // `SampleEditorModule.height = 480`. A waveform wants every pixel of the width, and the two things
@@ -41,8 +51,9 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     // than covering it, and the frame goes back to the normal furniture (scope strip, right bar). That
     // is Kotlin's, at PixelPerfectRenderer:474, and it is the right call: the EQ is 495×392 and would
     // sit in a 640×480 waveform's middle like a dialog nobody asked for.
-    if (s.currentScreen == ScreenType::SAMPLE_EDITOR && !s.eq.isOpen) {
-        sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
+    if (full_screen_module(s)) {
+        if (s.currentScreen == ScreenType::FILE_BROWSER) fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
+        else                                             sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
         if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
         return;
     }
@@ -322,7 +333,17 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
 }
 
 bool TrackerLayout::has_falling_meters(const AppState& s) const {
-    return s.currentScreen == ScreenType::MIXER && !mixer_.peaks_at_rest();
+    if (!s.project) return false;   // `draw` returns on the background: nothing of ours is on screen
+
+    if (s.currentScreen == ScreenType::MIXER && !mixer_.peaks_at_rest()) return true;
+
+    // The oscilloscope strip's SPECTRUM bars, on the same terms as the mixer's markers: they fall
+    // inside the draw, so the gate has to hold the frames open for them. Two screens take the whole
+    // frame and the strip is not on them, and the four other visualizer modes never touch the bar
+    // state at all — either way nothing would ever bring the answer back to false.
+    const VisualizerType vt = s.theme.visualizerType;
+    if (vt != VisualizerType::SPECTRUM && vt != VisualizerType::SPECTRUM_PEAKS) return false;
+    return !full_screen_module(s) && !oscilloscope_.bars_at_rest();
 }
 
 // ─── The global status line ──────────────────────────────────────────────────────────────────────
