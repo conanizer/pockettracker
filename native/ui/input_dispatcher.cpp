@@ -66,6 +66,25 @@ std::set<int> used_phrase_ids(const Project& p) {
     return used;
 }
 
+/** The 20 characters a slot's name is cut to when it is taken from a file. One writer, two readers. */
+std::string adopted_name(const std::string& stem) { return stem.substr(0, 20); }
+
+/**
+ * The name slot `id` would carry if it had adopted its CURRENT source file's — "" when it has no
+ * source. Compare a slot's actual name against this to tell an auto-adopted name from a typed one.
+ *
+ * The source is the SoundFont path for a SoundFont slot and the sample path for everything else; an
+ * EXTERNAL slot has neither, and answers "".
+ */
+std::string instrument_auto_name(const Project& p, int id) {
+    if (id < 0 || static_cast<size_t>(id) >= p.instruments.size()) return {};
+    const Instrument& ins = p.instruments[static_cast<size_t>(id)];
+    const std::string source = (ins.instrumentType == songcore::InstrumentType::SOUNDFONT)
+                                   ? ins.soundfontPath.value_or("")
+                                   : ins.sampleFilePath.value_or("");
+    return source.empty() ? std::string{} : adopted_name(path_stem(source));
+}
+
 /** Chain IDs any song track references — same "used even if blank" reasoning. */
 std::set<int> used_chain_ids(const Project& p) {
     std::set<int> used;
@@ -3156,6 +3175,15 @@ void InputDispatcher::browser_confirm() {
     const std::string path = item->path;
     const std::string stem = item->displayName;
 
+    // Which slot a source load lands on. The SAMPLE EDITOR's own LOAD button targets the slot the
+    // EDITOR is on, which is not necessarily the one the INSTRUMENT screen was last left showing.
+    const int sourceId = (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR)
+                             ? s_.sampleEditor.instrumentId
+                             : id;
+    // The name that slot is ABOUT to stop deserving — read before the load overwrites the path it comes
+    // from. See the adopt rule below; on anything but a source load nobody looks at it.
+    const std::string previousAutoName = instrument_auto_name(host_.project(), sourceId);
+
     bool ok = false;
     switch (s_.browserPurpose) {
         case AppState::BrowserPurpose::LOAD_PRESET:
@@ -3225,11 +3253,25 @@ void InputDispatcher::browser_confirm() {
         return;
     }
 
-    // A still-unnamed slot adopts the file's name. Only a DEFAULT-named one ("INST07"): a slot the user
-    // has named is theirs, and silently renaming it on a source swap would lose that.
-    if (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE) {
-        Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(id)];
-        if (songcore::instrument_has_default_name(ins)) ins.name = stem.substr(0, 20);
+    // The slot adopts the file's name — unless the user TYPED the one it has. Two names are not the
+    // user's: the default ("INST07"), and the one the slot took from the source it is replacing right
+    // now. Keeping the second is what left a slot reading RHODES C4 after a different sample was
+    // loaded onto it, which is a label that lies about what the slot plays.
+    //
+    // A typed name still survives a source swap — that is the whole reason the default-name test was
+    // here — and it is `previousAutoName`, captured before the load, that can tell the two apart.
+    //
+    // Both source loads, not just the INSTRUMENT screen's: the editor's LOAD replaces the same slot's
+    // sample, and a rule that held on one of the two doors would leave a name the other could no
+    // longer correct (it would no longer match `previousAutoName`, and would look typed forever).
+    if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
+         s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
+        sourceId >= 0 && static_cast<size_t>(sourceId) < host_.project().instruments.size()) {
+        Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(sourceId)];
+        if (songcore::instrument_has_default_name(ins) ||
+            (!previousAutoName.empty() && ins.name == previousAutoName)) {
+            ins.name = adopted_name(stem);
+        }
     }
 
     mark_modified();
