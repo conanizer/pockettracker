@@ -1,7 +1,7 @@
 # PocketTracker User Manual
 
-**Version:** 1.2  
-**App state:** All Extension Packs complete — Testing & Polish
+**Manual revision:** 1.3  
+**Covers:** PocketTracker 0.9.5
 
 ---
 
@@ -32,11 +32,7 @@
 23. [File Management](#23-file-management)
 24. [Workflow Tips](#24-workflow-tips)
 25. [Configuration File (config.json)](#25-configuration-file-configjson)
-26. [Appendix A: Hex Quick Reference](#appendix-a-hexadecimal-quick-reference)
-27. [Appendix B: Note Names](#appendix-b-note-names)
-28. [Appendix C: Instrument Slots](#appendix-c-instrument-slots)
-29. [Appendix D: Controls Cheat Sheet](#appendix-d-controls-cheat-sheet)
-30. [Appendix E: Parameter Reference — units & ranges](#appendix-e-parameter-reference--units--ranges)
+26. [Appendix: Controls Cheat Sheet](#appendix-controls-cheat-sheet)
 
 ---
 
@@ -362,7 +358,7 @@ PROJECT
 All values (chain IDs, phrase IDs, instrument IDs, etc.) are hexadecimal, ranging from `00` to `FF`.
 
 > [!NOTE]
-> All values in PocketTracker are **hexadecimal** (base-16). Decimal 16 = hex `10`, decimal 255 = hex `FF`. See Appendix A for a quick conversion table.
+> All values in PocketTracker are **hexadecimal** (base-16). Decimal 16 = hex `10`, decimal 255 = hex `FF`. The appendix at the end has a [conversion table](#hex--note-quick-reference).
 
 ---
 
@@ -579,6 +575,11 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 
 ### Navigating instruments
 
+A project has **128 instrument slots**, `00`–`7F`, and in a new project every one of them is empty —
+PocketTracker bundles no samples. An empty slot plays silence and is named `INST00` … `INST7F` until
+you load something into it, at which point it takes the file's name unless you have typed one of your
+own.
+
 - **B + LEFT/RIGHT** — switch between instruments 00–7F
 - **R+UP** from INSTRUMENT → MODULATION screen
 - **A** on SAMPLE field → opens file browser
@@ -635,8 +636,9 @@ These change playback behaviour without modifying the waveform data:
 
 | Parameter | Options | Description |
 |---|---|---|
-| SOURCE | LEFT / RIGHT / STEREO / MONO | Which channel(s) of a stereo WAV to use. Non-destructive — never alters the file. SAVE/OVERWRITE applies SOURCE at write time. |
+| SOURCE | LEFT / RIGHT / STEREO / MONO | Which channel(s) of a stereo WAV to use. Non-destructive — never alters the file. SAVE/OVERWRITE applies SOURCE at write time. Opens on **STEREO** whenever the file has a right channel; a mono file reads MONO and the cell cannot be moved. |
 | RATE | HIGH / NORM / LOFI | Sample rate mode. NORM = original. LOFI = 8-bit lo-fi downsampling. |
+| SNAP | ON / OFF | With SNAP on, a selection edge you move lands on the nearest **zero crossing** instead of the exact frame — the quietest place to cut, and the way to avoid a click at the seam of a loop or a crop. It looks in the signal the cut will actually be made in: LEFT and RIGHT search their own channel, MONO searches the downmix it will save, and STEREO looks for the frame where **both** channels are quiet. Turn it off when you want a frame exactly where you put it. |
 
 ### Destructive operations
 
@@ -736,6 +738,10 @@ The header shows **XX TIC** — how many phrase ticks pass per table row. Use th
 - Default: `06` (6 ticks per row — two rows per phrase step)
 - Lower values = table advances faster
 - Special values: `00` = trigger mode, `FC` = octave map, `FE` = note map, `FF` = 200Hz mode
+
+**TIC `00` — trigger mode.** The table advances one row **per note** instead of with time: each note
+the track plays reads the next row down, so a sixteen-row table is a sixteen-note sequence. `HOP`
+loops a section of it as usual, and PLAY, STOP and a render each start again from row `00`.
 
 > [!TIP]
 > Use **HOP** in the last row of a table section to loop just part of the table. For example: rows 00–03 with `HOP 00` in row 03 will loop those 4 rows indefinitely, ignoring rows 04–0F.
@@ -975,7 +981,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **SELECT** on this row to switch between the two. See [Appendix E](#appendix-e-parameter-reference--units--ranges). |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **SELECT** on this row to switch between the two. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
 | EQ | Press A (or SELECT) to open the EQ EDITOR for the delay return. |
@@ -1021,8 +1027,6 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 | FREQ | `00`–`FF` | 20 Hz – 20 kHz (log) | A single A+UP/DOWN step always changes the displayed Hz. |
 | GAIN | `00`–`F0` | **−12.0 … +12.0 dB** | Small step **0.1 dB**, large step **1.0 dB**. `0.0 dB` is the default. |
 | Q | `00`–`FF` | 0.1 – 10.0 (log) | Bandwidth; higher = narrower. |
-
-See [Appendix E](#appendix-e-parameter-reference--units--ranges) for the full mapping.
 
 ### Band types
 
@@ -1095,7 +1099,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 
 | Setting | Options | Description |
 |---|---|---|
-| LAYOUT | FULLSCREEN / T.LAND / AMIGA PORT | UI layout mode. FULLSCREEN = no virtual controls (physical buttons only). T.LAND adds on-screen buttons in landscape; AMIGA PORT is a themed retro portrait skin for 20:9 phones. |
+| LAYOUT | PORTRAIT (+ SKIN) | On a touchscreen device the app lays itself out as the portrait device skin, and the row's real control is the **SKIN** column beside it: **NORM** (beige casing, dark labels) or **DARK** (slate casing, white labels). There is no mode to choose — PocketTracker picks portrait, landscape or fullscreen for you from the screen shape and from whether it finds physical buttons. |
 | SCALING | INT / BILINEAR | Screen scaling algorithm. INT = crisp pixel-perfect integer scaling. BILINEAR = smooth subpixel scaling. |
 | BTN SOUND | ON / OFF (+ VOL) | Play a click sound on button press. The **VOL** sub-column to its right sets click volume (`00`–`FF`). |
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
@@ -1471,8 +1475,7 @@ Like `VTR` it replaces rather than scales, persists until the next `VMV`, and is
 stops.
 
 It belongs to no track, so it works from any of them: a `VMV` on track 8 fades the same master fader as a
-`VMV` on track 1. Written on a track playing an **external** (MIDI) instrument it still moves the master —
-unlike the per-note effects, which such a track does not send to the internal engine.
+`VMV` on track 1.
 
 ---
 
@@ -1589,66 +1592,11 @@ Both can be **ramped** with `AUS`/`AUF`, which is what a filter sweep is:
 Both also work in a **table**, once per tic, so a sweep written once follows every note that instrument
 plays — the shortest way to give a sample a filter envelope without spending a modulation slot.
 
-On an **external** (MIDI) instrument the same two cells send CC 74 (cutoff) and CC 71 (resonance), the
-standard controller numbers for them, instead of touching the internal engine.
-
----
-
-### The six MIDI effects — not available in this release
-
-> ⚠️ **MPG, MPB and CCA–CCD cannot be entered in this version, and neither can the EXTERNAL
-> instrument type they belong to.** They are absent from the effect picker and from the FX column's
-> range, and TYPE on the INSTRUMENT screen cycles between SAMPLER and SOUNDFONT only.
->
-> They are documented here because a project file can still *contain* them — one written by a future
-> version, or by a build with MIDI turned on — and PocketTracker displays such a step as what it is
-> rather than disguising it. A song that uses them will show them and will not send them.
->
-> The six are described below so that a step you did not write is explicable.
-
-### MPG `XX` — MIDI Program Change
-
-Sends a MIDI **program change** to `XX` (`00`–`7F`) on the channel of the instrument playing this track.
-Use it to switch patches on external gear mid-song. It applies from this step onward; the instrument's
-own PROG setting is re-sent with its next note, so the change lasts until then.
-
-Put it on an **empty step** to change the patch cleanly between notes — on a step that also has a note,
-that note still sounds with the old patch.
-
----
-
-### MPB `XX` — MIDI Pitch Bend
-
-Sends an **absolute** MIDI pitch bend: `00` = fully down, `80` = centre, `FF` = fully up. How far that
-actually bends is the receiving instrument's bend-range setting, not ours.
-
-Unlike `PBN` (which is a *rate*, and drives the internal sampler), `MPB` is a position and is sent to
-external gear only. Playback returns the bend to centre when it stops, so a song cannot leave a synth
-detuned.
-
----
-
-### CCA / CCB / CCC / CCD `XX` — MIDI CC Slots
-
-Sends value `XX` (`00`–`FF`, scaled to MIDI's `0`–`127`) on the controller number configured in the
-instrument's **CC A–D** rows (INSTRUMENT screen, EXTERNAL type). The phrase names the *slot*, the
-instrument names the *controller* — so re-pointing CC A from cutoff to resonance re-points every `CCA`
-in the song with it.
-
-A slot with no controller number set does nothing. Values arrive **after** the instrument's CC defaults
-on a step that has a note, so a `CCA` always wins over the default for that note.
-
-> These four also work on internal instruments where the controller number is one the engine
-> understands (7 volume, 10 pan, 71 filter resonance, 74 filter cutoff, 91 reverb send, 93 delay send) —
-> the same command drives a sampler and an external synth. Other controller numbers reach external gear
-> only.
-
 ---
 
 ## 22. Modulation Reference
 
-See §14 for how to edit mod slots, and [Appendix E](#appendix-e-parameter-reference--units--ranges)
-for exact units and ranges (envelope times are in **tics**, so they track project BPM).
+See §14 for how to edit mod slots. Envelope times are in **tics**, so they track project BPM.
 
 ### AHD Envelope
 
@@ -2035,38 +1983,7 @@ exports and sample-editor saves keep their own folders.
 
 ---
 
-## Appendix A: Hexadecimal Quick Reference
-
-| Decimal | Hex | Decimal | Hex |
-|---|---|---|---|
-| 0 | `00` | 128 | `80` |
-| 16 | `10` | 160 | `A0` |
-| 32 | `20` | 192 | `C0` |
-| 64 | `40` | 224 | `E0` |
-| 96 | `60` | 255 | `FF` |
-
-Half of `FF` (full) = `80` (center / unity). Default for VOL and PAN.
-
----
-
-## Appendix B: Note Names
-
-```
-C  C# D  D# E  F  F# G  G# A  A# B
-00 01 02 03 04 05 06 07 08 09 0A 0B
-```
-
-Middle C = `C-4` = MIDI note 60. Full range: `C-0` to `G-9`.
-
----
-
-## Appendix C: Instrument Slots
-
-All 128 slots (00–7F) start empty in a new project. There are no bundled default samples. Slots without a loaded sample play silence. Slot names are auto-generated as `INST00`–`INST7F`.
-
----
-
-## Appendix D: Controls Cheat Sheet
+## Appendix: Controls Cheat Sheet
 
 *Print this page and keep it handy.*
 
@@ -2353,18 +2270,8 @@ Open with **A** (or SELECT) on an EQ cell.
 | VMV | Master Fader | `XX` | The master fader, from any track; replaces it, **persists**, restored on stop |
 | AUS | Automation Start | `XX` = curve | Fades the automatable effect to its LEFT (00=ease-in 80=linear FF=ease-out) |
 | AUF | Automation Finish | `XX` | Destination value; a later step, may be a later phrase of the same chain |
-
-The six below **cannot be entered in this release** — they are shown only when a project file already
-contains them:
-
-| FX | Name | Value | Effect |
-|---|---|---|---|
-| MPG | MIDI Program | `XX` | Program change (00–7F) on the instrument's MIDI channel |
-| MPB | MIDI Bend | `XX` | Absolute pitch bend (00=down 80=centre FF=up); external only |
-| CCA | MIDI CC A | `XX` | Value for the controller in the instrument's CC A row |
-| CCB | MIDI CC B | `XX` | Value for the controller in the instrument's CC B row |
-| CCC | MIDI CC C | `XX` | Value for the controller in the instrument's CC C row |
-| CCD | MIDI CC D | `XX` | Value for the controller in the instrument's CC D row |
+| CUT | Filter Cutoff | `XX` | This note's filter cutoff (20 Hz–20 kHz, log). Needs a FILTER TYPE on the instrument |
+| RES | Filter Resonance | `XX` | This note's filter resonance. Needs a FILTER TYPE on the instrument |
 
 ---
 
@@ -2388,57 +2295,6 @@ Note offsets:  C   C#  D   D#  E   F   F#  G   G#  A   A#  B
 - **VOL/PAN center** = `80` (unity / center pan)
 - **+1 octave** = +12 semitones = `0C`
 - **+1 perfect fifth** = +7 semitones = `07`
-
----
-
-## Appendix E: Parameter Reference — units & ranges
-
-What every numeric parameter actually means: the value you edit on screen (its hex/raw range)
-and the real-world unit it maps to.
-
-> **How to read the "raw" column:** unless noted, parameters are edited as two hex digits
-> `00`–`FF` (0–255). A+UP/DOWN steps by the small step; A+LEFT/RIGHT by the large step;
-> A+B resets to the default.
-
-### Time parameters
-
-| Parameter | Where | Raw | Maps to | Notes |
-|---|---|---|---|---|
-| Mod **ATK / HOLD / DEC / REL** | MODULATION (AHD/ADSR/DRUM/TRIG) | `00`–`FF` | value × 1 **tic** | Tempo-relative. 1 tic = 1/12 of a step ≈ **10 ms at 120 BPM** (scales inversely with BPM). `00` = instant. Max (`FF`) ≈ 2.7 s at 120 BPM. ADSR/TRIG have no HOLD; AHD/DRUM have no SUS/REL. |
-| Mod **SUS** | MODULATION (ADSR/TRIG) | `00`–`FF` | 0–100 % level | Sustain **level**, not a time (`FF` = hold at full depth). |
-| Mod **AMT** | MODULATION (all) | `00`–`FF` | 0–100 % depth | How much the destination is moved. Defaults to `FF` (full) on a new slot. |
-| Delay **TIME** (free) | EFFECTS, SYNC off | `00`–`FF` | 0–2000 ms | ≈ 7.8 ms per step. Default `40` ≈ 500 ms. |
-| Delay **TIME** (sync) | EFFECTS, SYNC on | `00`–`0B` | 12 subdivisions | BPM-locked. Straight: `00`=1/1, `01`=1/2, `02`=1/4, `03`=1/8, `04`=1/16, `05`=1/32. Triplet: `06`=1/4T, `07`=1/8T, `08`=1/16T. Dotted: `09`=1/4., `0A`=1/8., `0B`=1/16. (the trailing dot = a dotted note). |
-| Delay **FDBK** | EFFECTS | `00`–`FF` | 0–100 % feedback | Near `FF` ≈ near-infinite repeats. |
-| Instrument / Table **TIC** | INSTRUMENT, TABLE | — | tics per step | See §12; sets how many tics each table/retrigger step lasts. |
-
-> **Beat-sync note:** all modulation envelope times are expressed in **tics**, so they already
-> follow project BPM — speeding up the tempo shortens every envelope proportionally. Only the
-> delay has an explicit fraction-sync (`1/8`, `1/4T`, …); a fraction-sync mode for LFO **FREQ**
-> is a possible future addition (not in this build).
-
-### Frequency parameters
-
-| Parameter | Where | Raw | Maps to | Notes |
-|---|---|---|---|---|
-| Filter **CUT** | INSTRUMENT | `00`–`FF` | 20 Hz – 20 kHz, log | `20 × 1000^(v/255)`. ≈ +2.7 % per step. |
-| Filter **RES** | INSTRUMENT | `00`–`FF` | 0.0 – 1.0, linear | Resonance amount. |
-| EQ **FREQ** | EQ EDITOR | `00`–`FF` | 20 Hz – 20 kHz, log | Same curve as filter CUT. ≈ +2.7 % per step, so a single small step always advances the displayed Hz (display-aware stepping). |
-| EQ **GAIN** | EQ EDITOR | `00`–`F0` (0–240) | **−12.0 … +12.0 dB** | **0.1 dB per small step**, 1.0 dB per large step. `120` (`78`) = 0 dB (default). |
-| EQ **Q** | EQ EDITOR | `00`–`FF` | 0.1 – 10.0, log | `0.1 × 100^(v/255)`. Higher = narrower band. |
-| Reverb **DAMP** | EFFECTS | `00`–`FF` | 200 Hz – 20 kHz, log | `200 × 100^(v/255)` HF damping cutoff. Lower = darker. |
-| LFO **FREQ** | MODULATION | `00`–`FF` | ≈ 0.08 – 20 Hz, linear | `(v+1) × 20 / 256`. |
-
-### Gain / level parameters
-
-| Parameter | Where | Raw | Maps to | Notes |
-|---|---|---|---|---|
-| Instrument **VOL** | INSTRUMENT | `00`–`FF` | 0 – max | `FF` default (full). |
-| Instrument **PAN** | INSTRUMENT | `00`–`FF` | L … center … R | `80` = center (default). |
-| Mixer track / master **VOL** | MIXER | `00`–`FF` | silent … +6 dB | `80` = unity (0 dB). |
-| Reverb **SIZE** | EFFECTS | `00`–`FF` | 0.0 – 1.0 feedback | Not a time — higher feedback = longer tail. |
-| Master **DEPTH** (OTT/DUST) | EFFECTS | `00`–`FF` | 0–100 % wet | `00` = bypass. |
-| Sample-editor **LIM** pre-gain | SAMPLE EDITOR (offline LIM FX) | `00`–`FF` | +0 … +12 dB | `1.0 + (v/255)×3.0` linear (×1 … ×4). The always-on master-bus limiter is fixed (not user-set). |
 
 ---
 

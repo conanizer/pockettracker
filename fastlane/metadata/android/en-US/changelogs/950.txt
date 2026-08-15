@@ -1,0 +1,9 @@
+A fixing release, headed by the sample editor: you now hear exactly the selection you made, so a loop tuned by ear is the loop CROP keeps.
+
+• SNAP works — selection edges land on a zero crossing in the channel you'll save
+• SYNC to a bar count now gives you that length; SOURCE opens on STEREO
+• New CUT/RES effects — the instrument's filter, per note, rampable and table-ready
+• AUS/AUF can fade between two whole EQ presets
+• SoundFont notes no longer crack when one runs into the next
+• Mixer and SPECT P meters fall on their own again
+• Load a project while playing; it takes over from row 0

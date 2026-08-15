@@ -31,6 +31,8 @@ Write these into any phrase step to shape how a note plays:
 - **Slice index** — jump straight to a specific slice (works even when slice mode is off)
 - **Latency** — push a note's trigger forward by N ticks
 - **Reverb / delay send** — send a single note to the reverb or delay bus, independent of the instrument
+- **Filter cutoff / resonance** — move the instrument's own filter from a phrase step, on that note only;
+  the same two cells work in a table, so a filter envelope can be written once per instrument
 - **EQ (per note / mixer)** — apply an EQ preset to one note, or automate the master EQ across the song
 - **Chance** — probability gate: set odds the note actually plays
 - **Randomize** — randomize any other FX value on the fly
@@ -38,7 +40,9 @@ Write these into any phrase step to shape how a note plays:
 - **Groove assign** — set groove pattern per track from a phrase step
 - **Tick rate** — control how fast the instrument table advances
 - **Effect automation** — mark a start and a finish step and the value between them glides, on a
-  choice of curve; the span may cross into a later phrase of the same chain
+  choice of curve; the span may cross into a later phrase of the same chain. Volume, pan, the two
+  sends, both faders and the filter all fade this way — and so do the two EQ effects, which slide
+  the *contents* of one EQ preset into another rather than stepping between preset numbers
 - **Track and master faders** — move a mixer fader from a phrase step; the move persists as the song
   plays on, and stopping restores what the mixer had
 
@@ -99,6 +103,8 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Rename files (SELECT+A to enter rename with on-screen QWERTY)
 - Delete files and folders (SELECT+B with confirmation)
 - On-screen QWERTY keyboard for naming projects and files
+- Load a project while the sequencer is running — the new song takes over from its first row, so you
+  can switch material mid-set
 - Projects saved as .ptp files in `Projects/`, inside PocketTracker's home folder
 - Instruments saved as .pti files in `Instruments/`, beside it
 - Samples stored wherever you put them; paths stored in the project
