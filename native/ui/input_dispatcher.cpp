@@ -1699,22 +1699,21 @@ void InputDispatcher::on_l_r() {
     //     selection by accident and must not lose what you copied. `selection.exit()` does not touch
     //     `clip_`, so the buffer is untouched.
     //   • NOT selecting → CLEAR the buffer. It is the only way to dismiss the top-strip clipboard
-    //     readout (`Clipboard::info()`) short of a restart. Only the four grid screens have a
-    //     clipboard, so the clear is scoped to them.
+    //     readout (`Clipboard::info()`) short of a restart.
     if (s_.selection.active) {
         s_.selection.exit();   // buffer untouched
         return;
     }
-    switch (s_.currentScreen) {
-        case ScreenType::PHRASE:
-        case ScreenType::CHAIN:
-        case ScreenType::SONG:
-        case ScreenType::TABLE:
-            clip_.clear();
-            break;
-        default:
-            break;
-    }
+
+    // ⚠️ A DENY-list, not an allow-list, and that is the point: the readout is drawn on the top strip
+    // of EVERY screen, so scoping the clear to the four screens that can fill the buffer left it
+    // undismissable from the other ten. The two exclusions above this line stand (the overlays own
+    // every button; the browser's L+R cancels its own selection, which its hint bar advertises).
+    //
+    // ⚠️ SAMPLE_EDITOR is excluded: L+R is reserved there for the editor's own selection, and a
+    // generic clear would shadow it. GROOVE and the other one-column screens are NOT excluded — a
+    // clear there is a no-op that costs nothing, which beats a special case someone has to remember.
+    if (s_.currentScreen != ScreenType::SAMPLE_EDITOR) clip_.clear();
 }
 
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
@@ -3048,10 +3047,33 @@ void InputDispatcher::refresh_browser_on_foreground() {
 
 // ─── The browser's cursor ────────────────────────────────────────────────────────────────────────
 
+int InputDispatcher::browser_repeat_factor(int delta) {
+    const long long dt = now_ms_ - lastBrowserMoveMs_;
+    lastBrowserMoveMs_ = now_ms_;
+
+    // > 250 ms apart is a fresh press or a deliberate tap, not a hold: the shell's own initial-delay
+    // gap is 400 ms and its repeat cadence 100 ms, so the threshold sits between them with room on
+    // both sides. A different direction is a fresh gesture too, however fast it arrives.
+    if (dt > 250 || delta != lastBrowserMoveDelta_) {
+        lastBrowserMoveDelta_ = delta;
+        browserHoldStartMs_   = now_ms_;
+        return 1;
+    }
+    const long long held = now_ms_ - browserHoldStartMs_;
+    if (held >= BROWSER_ACCEL_X4_MS) return 4;
+    if (held >= BROWSER_ACCEL_X2_MS) return 2;
+    return 1;
+}
+
 void InputDispatcher::browser_move_cursor(int delta, bool page) {
     FileBrowserState& b     = s_.fileBrowser;
     const int         total = static_cast<int>(b.items.size());
     if (total == 0) return;
+
+    // Scaled here rather than at the four D-pad call sites, so a row step and a page jump accelerate
+    // by the one rule and neither can be forgotten. It is a no-op for anything that is not a held
+    // repeat, and `delta` carries the direction the factor keys off.
+    delta *= browser_repeat_factor(delta);
 
     // ⚠️ UP/DOWN WRAP; the LEFT/RIGHT page jump CLAMPS. That asymmetry is Kotlin's and it is the right
     // one: wrapping a single step off the end of a list is a convenience, but a PAGE that wrapped would
@@ -3059,7 +3081,9 @@ void InputDispatcher::browser_move_cursor(int delta, bool page) {
     if (page) {
         b.cursor = std::min(std::max(b.cursor + delta, 0), total - 1);
     } else {
-        b.cursor = (b.cursor + delta + total) % total;
+        // ⚠️ Modulo TWICE, not `+ total` once: `delta` is no longer bounded to ±1 now that a hold
+        // scales it, and one addition of `total` only covers a step smaller than the whole list.
+        b.cursor = ((b.cursor + delta) % total + total) % total;
     }
 
     // Keep the 19-row window around the cursor.

@@ -64,7 +64,47 @@ std::string clip_name(const std::string& name, size_t max_chars) {
     return name.substr(0, max_chars - 2) + "..";
 }
 
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
 }  // namespace
+
+// ─── The name order ──────────────────────────────────────────────────────────────────────────────
+
+bool natural_name_less(const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (is_digit(a[i]) && is_digit(b[j])) {
+            // Leading zeros carry no value, so skip them before measuring: after that the LONGER run
+            // is the larger number, and only equal-length runs need a digit-by-digit compare.
+            size_t si = i, sj = j;
+            while (si < a.size() && a[si] == '0') ++si;
+            while (sj < b.size() && b[sj] == '0') ++sj;
+            size_t ei = si, ej = sj;
+            while (ei < a.size() && is_digit(a[ei])) ++ei;
+            while (ej < b.size() && is_digit(b[ej])) ++ej;
+
+            if (ei - si != ej - sj) return (ei - si) < (ej - sj);
+            for (size_t k = 0; k < ei - si; ++k) {
+                if (a[si + k] != b[sj + k]) return a[si + k] < b[sj + k];
+            }
+            i = ei;   // the two runs are the same number — step over both and keep walking
+            j = ej;
+            continue;
+        }
+        // Unsigned, so a byte above 0x7F (UTF-8 continuation bytes, and every non-ASCII name is made
+        // of them) sorts above ASCII rather than below it.
+        const unsigned char ca = static_cast<unsigned char>(a[i]);
+        const unsigned char cb = static_cast<unsigned char>(b[j]);
+        if (ca != cb) return ca < cb;
+        ++i;
+        ++j;
+    }
+
+    // One ran out first: the shorter name is the smaller one. Both ran out and every token matched,
+    // so any difference left is leading zeros — the raw compare below is what keeps the order TOTAL.
+    if (i < a.size() || j < b.size()) return i >= a.size();
+    return a < b;
+}
 
 // ─── State ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -143,7 +183,11 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
 
     // Both groups by name. This is the base order every other sort mode is STABLE against — see
     // sort_items — so it is not merely the default view, it is the tiebreak for all five others.
-    auto by_name = [](const BrowserItem& a, const BrowserItem& b) { return a.sortName < b.sortName; };
+    // ⚠️ Which is why it is `natural_name_less` and not a plain compare: leave this one lexicographic
+    // and DATE and SIZE would resolve their (very common) ties in a different order from NAME.
+    auto by_name = [](const BrowserItem& a, const BrowserItem& b) {
+        return natural_name_less(a.sortName, b.sortName);
+    };
     std::stable_sort(folders.begin(), folders.end(), by_name);
     std::stable_sort(files.begin(), files.end(), by_name);
 
@@ -174,12 +218,14 @@ void sort_items(std::vector<BrowserItem>& items, FileSortMode mode) {
     auto apply = [mode](std::vector<BrowserItem>& v) {
         switch (mode) {
             case FileSortMode::NAME_ASC:
-                std::stable_sort(v.begin(), v.end(),
-                                 [](const BrowserItem& a, const BrowserItem& b) { return a.sortName < b.sortName; });
+                std::stable_sort(v.begin(), v.end(), [](const BrowserItem& a, const BrowserItem& b) {
+                    return natural_name_less(a.sortName, b.sortName);
+                });
                 break;
             case FileSortMode::NAME_DESC:
-                std::stable_sort(v.begin(), v.end(),
-                                 [](const BrowserItem& a, const BrowserItem& b) { return b.sortName < a.sortName; });
+                std::stable_sort(v.begin(), v.end(), [](const BrowserItem& a, const BrowserItem& b) {
+                    return natural_name_less(b.sortName, a.sortName);
+                });
                 break;
             case FileSortMode::DATE_ASC:
                 std::stable_sort(v.begin(), v.end(), [](const BrowserItem& a, const BrowserItem& b) {
@@ -382,13 +428,25 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         // had the four arrow glyphs since S1 and `draw_text` has advanced per CODE POINT since S4, so
         // they render; a '^' does NOT (there is no caret in the font, and it comes out as a BLANK,
         // which is how the first version of this line shipped a bottom bar reading "R+ V=SORT").
-        c.draw_text("A=OPEN B=BACK R+\xE2\x86\x90=UP R+\xE2\x86\x91\xE2\x86\x93=SORT", x + 10,
+        // ⚠️ Do not "shorten" this line by touching the arrows — the verbs are the slack. 28 code
+        // points from x+10 ends at x+484, which is what leaves the counter below room to grow.
+        c.draw_text("A=OPN B=BCK R+\xE2\x86\x90=UP R+\xE2\x86\x91\xE2\x86\x93=SRT", x + 10,
                     bottomY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
     if (total > 0) {
-        const std::string count = std::to_string(s.cursor + 1) + "/" + std::to_string(total);
-        c.draw_text(count, x + 550, bottomY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+        // RIGHT-ALIGNED against the same 10px spacer the hint line and the path use on the left, so
+        // the bar is symmetric and the count grows leftward from a fixed edge however long it gets. A
+        // fixed left anchor put "100/256" 29px past the panel (7 chars × 17 = 119 from x+550, and
+        // WIDTH is 640).
+        //
+        // `text_width` and not `size() * CHAR_W`: the trailing gap after the last glyph is not ink, and
+        // counting it would leave the digits 2px shy of the mirror. It may reach 8 characters —
+        // `999/9999`, 134px — before it touches the hint line, which ends at x+484.
+        const std::string count  = std::to_string(s.cursor + 1) + "/" + std::to_string(total);
+        const int         countW = Canvas::text_width(count, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam,
+                    CHAR_SPACING, FONT_SCALE);
     }
 }
 

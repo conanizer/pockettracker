@@ -197,6 +197,20 @@ struct FileBrowserState {
 // ─── The listing ─────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Natural order over two already-lowercased `sortName`s: `1, 2, … 9, 10`, not `1, 10, 11, 2`.
+ *
+ * A digit run on both sides compares as a NUMBER (leading zeros skipped, then longest-run-wins, then
+ * digit by digit); anything else compares by byte. The two are consistent because '0'..'9' is one
+ * contiguous block, so a non-digit sorts either below every number or above every one of them.
+ *
+ * ⚠️ **Total, deliberately.** `std::stable_sort` takes a strict weak ordering and a comparator that is
+ * not one is undefined behaviour, not merely a wrong order — and the failure is invisible until a
+ * different standard library's sort surfaces it. Names that tie under the numeric rule but are not the
+ * same string (`01` vs `1`) fall back to a raw compare, so equivalence here means equality.
+ */
+bool natural_name_less(const std::string& a, const std::string& b);
+
+/**
  * Build the item list for `directory`: a ".." if it has a parent, then the folders, then the files
  * that pass `extensions` (empty = all). Hidden entries (a leading '.') are dropped.
  *
