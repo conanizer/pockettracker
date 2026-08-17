@@ -1128,6 +1128,13 @@ void InputDispatcher::on_a_released() {
     s_.fxHelper = FxHelperState{};
 }
 
+void InputDispatcher::on_a_deferred() {
+    // The mapper is holding this press. Nothing acts here — the one thing recorded is the number that
+    // will have MOVED by the time A comes back up. Every other deferred cell opens something that reads
+    // no clock, so they write the "nothing was sounding" value and never look at it again.
+    sliceTapPlayhead_ = on_slice_tap_cell() ? s_.sampleEditor.playbackPosition : -1.0f;
+}
+
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_b() {
@@ -1218,18 +1225,10 @@ void InputDispatcher::on_a_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
-    // ⚠️ **THE SAMPLE EDITOR'S ROW 11 HAS A REPEATABLE A, and the double-tap window would eat half of
-    // it.** Everywhere else A,A means something a single A does not, so the mapper's 300 ms window
-    // routes the second press here instead. On row 11 A cuts a boundary at the playhead — the gesture
-    // is tapping along to the sample, and a 16th note at 120 BPM is 125 ms, well inside that window.
-    // Without this arm every other tap of a fast pass would land in `on_a_a` and be dropped by the
-    // insert-position gate below, which is a boundary the user heard themselves place and cannot find.
-    //
-    // ⚠️ It is the editor's confirm dialog, not `confirm_open()`, that owns the buttons in here.
-    if (on_sample_editor() && !s_.sampleEditor.showConfirmClose && s_.sampleEditor.cursorRow == 11) {
-        tap_slice_marker();
-        return;
-    }
+    // ⚠️ THE SAMPLE EDITOR'S ROW 11 NEEDS NO ARM HERE, though the fast pass it would be for is real —
+    // it taps a boundary per hit, and a 16th note at 120 BPM is 125 ms, well inside the 300 ms window.
+    // Its A is DEFERRED (`defer_a_to_release`) and the mapper clears `lastAPress` on every defer, so no
+    // tap can reach this handler to be dropped by the insert-position gate below.
 
     // ⚠️ RESAMPLE is checked BEFORE the double-tap-position gate below, and it must be — Kotlin's
     // handleAA opens with the identical arm ahead of its InsertPosition logic. Under a SONG selection
@@ -3781,9 +3780,19 @@ void InputDispatcher::init_sample_editor_state() {
     // the loader are looking at the same list. (`sliceMarkers` is int64 — Kotlin's `List<Long>` — and a
     // frame index is an int everywhere else, so the narrowing is said out loud rather than left to the
     // compiler.)
+    //
+    // ⚠️ **SORTED, UNIQUE and strictly INSIDE the sample**, because a `cue ` chunk is written by whatever
+    // made the file and nothing upstream promises any of the three. Every marker reader rests on all
+    // three — `slice_bounds` reads marker `k − 1` and marker `k` as one slice's two edges, so an
+    // out-of-order pair is a negative-length slice and a duplicate a zero-length one, which is what CHOP
+    // would hand to the file writer. MANUAL seeds itself from this list and `place_slice_marker` then
+    // maintains the invariant, so this is the only door it can come in through.
     se.fileMarkers.clear();
     se.fileMarkers.reserve(ins.sliceMarkers.size());
-    for (const int64_t m : ins.sliceMarkers) se.fileMarkers.push_back(static_cast<int>(m));
+    for (const int64_t m : ins.sliceMarkers)
+        if (m >= 1 && m < static_cast<int64_t>(se.totalFrames)) se.fileMarkers.push_back(static_cast<int>(m));
+    std::sort(se.fileMarkers.begin(), se.fileMarkers.end());
+    se.fileMarkers.erase(std::unique(se.fileMarkers.begin(), se.fileMarkers.end()), se.fileMarkers.end());
 
     // ⚠️ The DETECTOR's list opens EMPTY, and that is behaviour rather than tidiness: `sliceMethod`
     // survives a re-entry, so an editor re-opened while TRANSIENT is still selected must re-detect on
@@ -3914,9 +3923,11 @@ int place_slice_marker(std::vector<SliceMarker>& m, int k, int64_t want, int dir
  * Take a copy of whatever the method currently answers with, so the user's nudges have something to
  * write into, and stamp it with the (method, parameter) it describes.
  *
- * TRANSIENT and DIVIDE start from their computed set — a drag adjusts what is there rather than
- * throwing it away. MANUAL starts empty: its boundaries are placed one at a time, and the first is born
- * on frame 0, which is the sample's own start and not a boundary until something is dragged off it.
+ * Every method starts from the set it already shows, so a drag adjusts what is on screen rather than
+ * throwing it away: the detected cuts under TRANSIENT, the arithmetic ones under DIVIDE, and under
+ * MANUAL the boundaries the SAMPLE ITSELF came with — its `cue ` chunk, as the project loaded it. A
+ * sample carrying no cue points starts MANUAL empty, and its first boundary is born on frame 0, which
+ * is the sample's own start and not a boundary until something is dragged off it.
  */
 void InputDispatcher::materialise_manual_markers() {
     SampleEditorState& se = s_.sampleEditor;
@@ -3934,6 +3945,12 @@ void InputDispatcher::materialise_manual_markers() {
             const int f = static_cast<int>((static_cast<int64_t>(i) * se.totalFrames) / div);
             se.manualMarkers.push_back(SliceMarker{f, f});
         }
+    } else if (se.sliceMethod == SampleEditorModule::SLICE_MANUAL) {
+        // ⚠️ ORIGIN −1, unlike the two above: the file's cue points are not a position any method can
+        // RECOMPUTE, so A+B on one REMOVES it. That is deliberate and it is the point of the seed — the
+        // gesture that deletes a boundary the sample came with is the same A+B that deletes one placed by
+        // hand, and there is no second meaning of A+B on this row to learn.
+        for (const int f : se.fileMarkers) se.manualMarkers.push_back(SliceMarker{f, -1});
     }
     se.manualKeyMethod = se.sliceMethod;
     se.manualKeyParam  = se.manual_key_param();
@@ -4000,7 +4017,13 @@ void InputDispatcher::reset_slice_marker() {
     SampleEditorState& se = s_.sampleEditor;
 
     const int k = se.slice_marker_index();
-    if (k < 0 || !se.manual_markers_live()) return;   // nothing has been placed here, so nothing to undo
+    if (k < 0) return;   // slice 00's left edge is the sample's own start: no boundary, nothing to undo
+
+    // ⚠️ **MATERIALISE FIRST, like the drag and the tap do** — all three gestures on this row go through
+    // the same door. The boundary under the cursor may be one the METHOD is still answering with and
+    // nothing has copied yet, and under MANUAL that is a cue point the sample arrived with: A+B is how it
+    // is deleted, so a "nothing has been placed yet" bail made the FIRST A+B of a session do nothing.
+    materialise_manual_markers();
     std::vector<SliceMarker>& m = se.manualMarkers;
     if (k >= static_cast<int>(m.size())) return;      // MANUAL's free slot holds no boundary yet
 
@@ -4010,14 +4033,15 @@ void InputDispatcher::reset_slice_marker() {
     const int origin = m[static_cast<size_t>(k)].originFrame;
 
     if (origin < 0) {
-        // Made by hand: there is no computed position to go back to, so A+B REMOVES it. The boundaries
-        // after it renumber, and the cursor keeps its number and therefore names the slice that has
-        // just grown into the gap.
+        // Placed by hand, or seeded from the file's own cue points: there is no computed position to go
+        // back to, so A+B REMOVES it. The boundaries after it renumber, and the cursor keeps its number
+        // and therefore names the slice that has just grown into the gap.
+        //
+        // ⚠️ Emptying the list does NOT retire the stamp. An empty live list is "this sample has no
+        // boundaries", and it is the answer every reader must get; drop the stamp and the read falls back
+        // to `method_markers()`, which under MANUAL is the file's own cue points — every delete undone at
+        // once by the one that finished the job.
         m.erase(m.begin() + k);
-        if (m.empty()) {
-            se.manualKeyMethod = -1;
-            se.manualKeyParam  = -1;
-        }
     } else {
         // ⚠️ Through `place_slice_marker` like every other move, because a NEIGHBOUR may have been
         // dragged across that position since — the boundary then takes the number its own place gives
@@ -4034,10 +4058,14 @@ void InputDispatcher::reset_slice_marker() {
  * Cut a boundary at the playhead — the "slice it by ear" gesture. MANUAL only, and only while the
  * sample is actually sounding: with nothing playing there is no playhead to cut at.
  *
- * ⭐ **It reads `playbackPosition`, the same field the waveform draws its playhead line from, and that
- * is the point rather than a shortcut.** A fresher number straight off the voice would land the
- * boundary somewhere the user never saw — they are tapping to a line on the screen and to audio that
- * left the device a buffer ago, so the line they were looking at IS the frame they meant.
+ * ⭐ **The frame comes from `playbackPosition`, the same field the waveform draws its playhead line
+ * from, and that is the point rather than a shortcut.** A fresher number straight off the voice would
+ * land the boundary somewhere the user never saw — they are tapping to a line on the screen and to
+ * audio that left the device a buffer ago, so the line they were looking at IS the frame they meant.
+ *
+ * ⚠️ **And it is the line as it stood when A went DOWN** (`on_a_deferred`), not when it came up. The
+ * press is the tap; the release is only where the mapper can tell a tap from an A+DPAD, and by then the
+ * playhead has run on for as long as the user held the button.
  *
  * SNAP searches BACKWARD, unlike a drag's "in the direction of travel". A tap has no direction, and it
  * is always LATE — reaction time plus the audio buffer — so the zero crossing that matters is the one
@@ -4045,12 +4073,18 @@ void InputDispatcher::reset_slice_marker() {
  */
 void InputDispatcher::tap_slice_marker() {
     SampleEditorState& se = s_.sampleEditor;
+
+    // Consumed, not merely read: a press that ended in an A+DPAD leaves its snapshot behind, and the
+    // next tap must not be able to cut at a playhead position from a gesture that was not a tap.
+    const float at    = sliceTapPlayhead_;
+    sliceTapPlayhead_ = -1.0f;
+
     if (se.sliceMethod != SampleEditorModule::SLICE_MANUAL) return;
-    if (se.totalFrames <= 0 || se.playbackPosition < 0.0f) return;
+    if (se.totalFrames <= 0 || at < 0.0f) return;
 
     const int64_t last = static_cast<int64_t>(se.totalFrames) - 1;
     int64_t       want = std::clamp<int64_t>(
-        static_cast<int64_t>(se.playbackPosition * static_cast<float>(se.totalFrames)), 0, last);
+        static_cast<int64_t>(at * static_cast<float>(se.totalFrames)), 0, last);
     if (se.snapEnabled)
         want = host_.find_zero_crossing(se.instrumentId, static_cast<int>(want), -1, se.sourceMode);
 
@@ -4133,6 +4167,26 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
             host_.push_instrument(se.instrumentId);
             mark_modified();
         }
+
+        // ⚠️⚠️ **AND EVERY MARKER LIST, for the third time the same reason: a boundary is a FRAME INDEX,
+        // and the frames have just been replaced.** A cut that meant a drum hit before a CROP means the
+        // middle of the next hit after it, and nothing on screen says the number is stale — it is a line
+        // over a waveform, and a wrong line looks exactly like a right one.
+        //
+        // ⭐ ALL THREE, not the file's alone. `manualMarkers` OVERRIDES the other two while its stamp is
+        // live, so clearing only the source underneath a live override changes nothing the user can see;
+        // and `transientMarkers` empty is what makes the feed re-detect, so the detector comes back with
+        // the cuts in the NEW audio instead of holding the old ones for good.
+        //
+        // ⚠️ This is what makes a save after a resize honest. `compute_slice_cue_points` drops a marker
+        // past the end, so a cropped sample used to write back the SURVIVING half of its old cue points —
+        // fewer slices than before, in the wrong places, with no gesture that said so.
+        se.fileMarkers.clear();
+        se.transientMarkers.clear();
+        se.manualMarkers.clear();
+        se.manualKeyMethod = -1;
+        se.manualKeyParam  = -1;
+        se.sliceIndex      = 0;   // the ceiling has just collapsed to a single slice, the whole sample
     }
 
     se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS,
@@ -4173,6 +4227,10 @@ void InputDispatcher::sample_editor_confirm() {
         //
         // The whole row, both columns, exactly as A+B on it is: which column the cursor sits in says
         // which NUMBER you are reading, and neither of them is what a tap is aimed at.
+        //
+        // ⚠️ It arrives on A's RELEASE, not its press (`defer_a_to_release`), and cuts at the playhead
+        // as it stood on the PRESS (`on_a_deferred`). The row's other gestures all start with the same
+        // A held down, so a tap that fired immediately would precede every one of them.
         //
         // ⚠️ This is the one A on this screen that does nothing destructive and takes no undo backup —
         // a boundary is editor state, not audio. It must sit ABOVE the `begin_destructive` rows for
@@ -4423,8 +4481,9 @@ std::vector<int> InputDispatcher::compute_slice_cue_points() const {
     }
 
     // Whichever list the method is answering with — the detector's under TRANSIENT, the hand-placed one
-    // under MANUAL, and under OFF the file's own, so ⚠️ **a save with slicing OFF can neither add a
-    // slice nor drop one.** A detour
+    // under MANUAL (which starts as the file's, so ⭐ **a MANUAL save keeps the boundaries the sample
+    // came with unless the user moved or deleted them**), and under OFF the file's own, so ⚠️ **a save
+    // with slicing OFF can neither add a slice nor drop one.** A detour
     // through TRANSIENT leaves markers behind on purpose (they are what a return to it re-uses); writing
     // those into the `cue ` chunk would put slices into a file the user turned slicing off for, and
     // nothing on screen would say so.
@@ -4444,7 +4503,7 @@ std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const
 
     // N markers → N+1 slices, whichever method the list came from — which is also what DIVIDE's div−1
     // computed cuts mean, so a dragged DIVIDE keeps its own count. OFF has nothing to chop; TRANSIENT
-    // before the detector has run and MANUAL before anything is placed are one slice, the whole sample.
+    // before the detector has run, and MANUAL with no boundaries at all, are one slice — the whole sample.
     const int markers = se.marker_count();
     const int count   = (se.sliceMethod == SampleEditorModule::SLICE_OFF)
                             ? 0
@@ -4548,6 +4607,12 @@ bool InputDispatcher::defer_a_to_release() const {
     // cell that raised it. Without this line every plain A inside the editor would be deferred to
     // release, and the A,A window cleared, for a press that has nothing to open.
     if (any_modal_open()) return false;
+
+    // ⚠️ The one deferred cell that OPENS NOTHING, and it is deferred for the other half of the reason
+    // the rest are: on row 11 under MANUAL a plain A cuts a boundary at the playhead, and the same A is
+    // held down for the slice-number step, the boundary drag and the delete. Acting on the press left a
+    // stray boundary in front of every one of them.
+    if (on_slice_tap_cell()) return true;
 
     return const_cast<InputDispatcher*>(this)->open_sub_screen_at_cursor(/*peek=*/true);
 }

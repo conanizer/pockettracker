@@ -131,11 +131,18 @@ struct SampleEditorState {
 
     /**
      * The markers the FILE carries: the WAV's `cue ` chunk, as the project loaded it. Snapshotted at
-     * open and never written again during a session.
+     * open, and CLEARED by an op that changes the sample's length — a frame index into audio that has
+     * been replaced describes nothing (`refresh_sample_view`).
      *
      * ⚠️ This is what SLICE = OFF *means* — the sample as it already is on disk — and it is what a save
      * under OFF writes back. Keeping it apart from the detector's output is what stops a detour through
      * TRANSIENT adding slices to a file the user turned slicing off for.
+     *
+     * ⭐ It is also where MANUAL STARTS, which is what makes MANUAL an edit of the slicing a sample
+     * already has rather than a fresh start over the top of it.
+     *
+     * ⚠️ SORTED, UNIQUE and strictly inside the sample — a `cue ` chunk promises none of the three, so
+     * `init_sample_editor_state` makes it so on the way in. Every marker reader rests on all three.
      */
     std::vector<int> fileMarkers;
 
@@ -143,7 +150,8 @@ struct SampleEditorState {
      * The DETECTOR's output, TRANSIENT only: N markers → N+1 slices.
      *
      * ⚠️ EMPTY IS THE TRIGGER — the feed re-runs the detector whenever it finds TRANSIENT with no
-     * markers, which is the state a method or sensitivity change leaves behind (engine_feed.h).
+     * markers, which is the state a method or sensitivity change leaves behind (engine_feed.h), and a
+     * length-changing op too: emptied there, the detector comes back with the cuts in the NEW audio.
      * DIVIDE carries no list at all; it computes its boundaries from `sliceDivisions` on every read.
      */
     std::vector<int> transientMarkers;
@@ -151,12 +159,14 @@ struct SampleEditorState {
     /**
      * The boundaries the USER has placed or moved, sorted by frame and strictly increasing.
      *
-     * Under MANUAL this is the method's only source, and it grows one boundary at a time as they are
-     * dragged off the one each was born on. Under TRANSIENT and DIVIDE it starts as a copy of the
-     * computed set on the first drag and OVERRIDES it from then on — each entry remembering which
-     * computed cut it is, because the order can change afterwards.
+     * It starts as a copy of whatever the method already shows — the detected cuts under TRANSIENT, the
+     * arithmetic ones under DIVIDE, the FILE's own cue points under MANUAL — and OVERRIDES that source
+     * from then on. Each entry remembers which computed cut it is, because the order can change
+     * afterwards; ⚠️ a MANUAL entry remembers −1 instead, so A+B on it DELETES rather than restores, and
+     * that is the whole of "drop a slice the sample came with".
      *
-     * ⚠️ Only live while the stamp below still matches — see `manual_markers_live()`.
+     * ⚠️ Only live while the stamp below still matches — see `manual_markers_live()`. ⚠️ And EMPTY is a
+     * meaningful live value: MANUAL with every boundary deleted, which must not fall back to the file's.
      */
     std::vector<SliceMarker> manualMarkers;
 
@@ -187,13 +197,16 @@ struct SampleEditorState {
     /** The parameter `manualMarkers` is keyed to: SENS under TRANSIENT, BY under DIVIDE, none else. */
     int manual_key_param() const;
 
-    /** True while the hand-placed markers still belong to the method and parameter now on screen. */
+    /**
+     * True while the hand-placed markers still belong to the method and parameter now on screen.
+     * ⚠️ The stamp alone — an EMPTY `manualMarkers` can be live, and has to be.
+     */
     bool manual_markers_live() const;
 
     /**
-     * What the METHOD alone says, with no hand-placed boundaries on top: the file's own under OFF, the
-     * detector's under TRANSIENT, and nothing under DIVIDE (its boundaries are arithmetic, so there is
-     * no list to hand back and its callers compute instead) or a MANUAL session with nothing placed.
+     * What the METHOD alone says, with no hand-placed boundaries on top: the file's own under OFF **and
+     * under MANUAL**, the detector's under TRANSIENT, and nothing under DIVIDE (its boundaries are
+     * arithmetic, so there is no list to hand back and its callers compute instead).
      *
      * ⚠️ Almost nothing wants this. Read `marker_count()` / `marker_position()` instead — they are the
      * seam every reader goes through, and they are where a live hand-placed set overrides this one.

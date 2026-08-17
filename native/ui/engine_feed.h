@@ -312,7 +312,12 @@ private:
         // ⚠️ CLEARED, not merely ignored. `manual_markers_live()` already ignores a stale stamp, but a
         // stamp that is only compared makes the reset REVERSIBLE — BY 08 → BY 09 → BY 08 would bring
         // back overrides the user has watched disappear.
-        if (!se.manualMarkers.empty() && !se.manual_markers_live()) {
+        //
+        // ⚠️ The STAMP is what says there is something to clear, not the list. A MANUAL session in which
+        // the user deleted every boundary is an empty list that is still live and still meant, and it is
+        // the state that has to be retired when the method changes — leave it and the new method reads a
+        // list that describes the old one's cuts.
+        if (se.manualKeyMethod >= 0 && !se.manual_markers_live()) {
             se.manualMarkers.clear();
             se.manualKeyMethod = -1;
             se.manualKeyParam  = -1;

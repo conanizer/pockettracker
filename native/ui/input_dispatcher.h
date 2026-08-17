@@ -240,6 +240,16 @@ class InputDispatcher {
     /** Release of A: commits the FX helper's highlighted effect. */
     void on_a_released();
 
+    /**
+     * A went down on a cell the mapper is DEFERRING (`defer_a_to_release`), so nothing has fired yet
+     * and nothing fires here. It exists for the one thing a release cannot recover: the instant.
+     *
+     * ⚠️ The lazy-chop tap on the sample editor's row 11 is aimed by EAR at the playhead line, and the
+     * release comes a reaction time — and possibly an A+DPAD — later. The frame is snapshotted here and
+     * the boundary is cut from the snapshot.
+     */
+    void on_a_deferred();
+
     // ── B + D-pad: which item am I looking at? ───────────────────────────────────────────────────
     // B+LEFT/RIGHT cycle the current phrase / chain / table / groove — without this the shell can
     // only ever edit slot 0 of each. B+UP/DOWN page the SONG screen.
@@ -737,6 +747,10 @@ class InputDispatcher {
      * the single source of truth for both halves of that claim: what A DOES (peek = false) and what the
      * mapper must DEFER (peek = true).
      *
+     * ⚠️ It is not the WHOLE of what is deferred: `defer_a_to_release` has one arm above this one, for
+     * a cell whose A opens nothing (the sample editor's lazy-chop tap). The rule below applies to that
+     * arm as much as to this list — nothing joins it without an A the RELEASE can still perform.
+     *
      * ⚠️ One function rather than two lists, deliberately. Split them and a cell can drift into being
      * openable-but-not-deferred (its A+DPAD gets pre-empted by the open) or deferred-but-not-openable
      * (its A does nothing at all, and the deferral silently eats the press). Both are bugs that look
@@ -963,6 +977,21 @@ class InputDispatcher {
     /** A+DPAD on row 11 col 1. Mirrors `nudge_selection_edge`; what a boundary may DO is what differs. */
     void nudge_slice_marker(int64_t delta);
 
+    /**
+     * Row 11 under MANUAL, BOTH columns: a plain A is the lazy-chop tap, and the mapper therefore holds
+     * it until A is released.
+     *
+     * ⚠️ Every other gesture on this row starts with the same A held down — A+UP/DOWN steps the slice
+     * number on col 0 and drags the boundary on col 1, A+B deletes one. Fire the tap on the PRESS and
+     * each of those is preceded by a boundary nobody asked for. It is why the EQ slot cell defers its
+     * A too — a cell with an A+DPAD of its own cannot also act on the press.
+     */
+    bool on_slice_tap_cell() const {
+        return on_sample_editor() && !s_.sampleEditor.showConfirmClose &&
+               s_.sampleEditor.cursorRow == 11 &&
+               s_.sampleEditor.sliceMethod == SampleEditorModule::SLICE_MANUAL;
+    }
+
     /** Put the selection on the slice row 11's cursor is pointing at — every boundary gesture ends here. */
     void select_current_slice();
 
@@ -997,7 +1026,12 @@ class InputDispatcher {
     /** The slice boundaries as WAV cue points: the markers, or DIVIDE's N−1 computed cuts. */
     std::vector<int> compute_slice_cue_points() const;
 
-    /** Re-read the length and the waveform after an op. `reset_selection` re-selects the whole sample. */
+    /**
+     * Re-read the length and the waveform after an op. `reset_selection` says the op CHANGED THE LENGTH,
+     * and it does more than re-select: everything measured in frames — the selection, the instrument's
+     * own sample and loop windows, and ⚠️ **every slice marker** — describes audio that no longer exists,
+     * so all of it is reset rather than clamped.
+     */
     void refresh_sample_view(bool reset_selection);
 
     /** SAVE / SAVE-AS / OVERWRITE all end here: write the WAV, adopt it, and leave the editor. */
@@ -1023,6 +1057,15 @@ class InputDispatcher {
     bool      previewRestorePending_ = false;
     long long previewRestoreAtMs_    = 0;
     int       previewRestoreInst_    = 0;
+
+    /**
+     * The playhead as it stood when A went down on the tap cell — 0..1, or −1 for "nothing was
+     * sounding", which is the same value `playbackPosition` itself carries when there is no audition.
+     *
+     * ⚠️ Written by `on_a_deferred` and CONSUMED by `tap_slice_marker`, so a tap can never read a
+     * position from a press that ended in a combo instead.
+     */
+    float sliceTapPlayhead_ = -1.0f;
 
     SampleEditorModule sample_{};
 };

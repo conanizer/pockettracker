@@ -118,8 +118,12 @@ int SampleEditorState::manual_key_param() const {
 }
 
 bool SampleEditorState::manual_markers_live() const {
-    return !manualMarkers.empty() && manualKeyMethod == sliceMethod &&
-           manualKeyParam == manual_key_param();
+    // ⚠️ **The STAMP alone, with no "and the list is not empty".** An EMPTY live list is a real answer —
+    // MANUAL with every boundary deleted — and it has to keep overriding `method_markers()`, which under
+    // MANUAL hands back the file's own cue points. Requiring a non-empty list would bring all of them
+    // back the instant the last one went. `manualKeyMethod` starts at −1 and no method is −1, so the
+    // stamp is the whole test.
+    return manualKeyMethod == sliceMethod && manualKeyParam == manual_key_param();
 }
 
 const std::vector<int>& SampleEditorState::method_markers() const {
@@ -130,9 +134,13 @@ const std::vector<int>& SampleEditorState::method_markers() const {
 
     switch (sliceMethod) {
         case SampleEditorModule::SLICE_TRANSIENT: return transientMarkers;
-        case SampleEditorModule::SLICE_OFF:       return fileMarkers;
-        // DIVIDE derives its boundaries, and a MANUAL session in which nothing has been placed has
-        // none — its first boundary is born on frame 0, which is the sample's own start and in no list.
+        // ⭐ OFF and MANUAL both answer with the FILE's own cue points, and for MANUAL that is what makes
+        // it an EDIT of the slicing a sample already carries rather than a fresh start: choose the method
+        // and the file's boundaries are already on screen to be dragged, deleted and added to. A sample
+        // with no `cue ` chunk hands back an empty list, which is the from-scratch session.
+        case SampleEditorModule::SLICE_OFF:
+        case SampleEditorModule::SLICE_MANUAL:    return fileMarkers;
+        // DIVIDE derives its boundaries from `sliceDivisions` on every read, so there is no list.
         default:                                  return computed;
     }
 }
@@ -200,7 +208,7 @@ void SampleEditorState::slice_bounds(int idx, int64_t& start, int64_t& end) cons
         return;
     }
 
-    start = 0;   // TRANSIENT before the detector has run, and MANUAL before anything is placed
+    start = 0;   // TRANSIENT before the detector has run, and MANUAL on a sample with no boundaries
     end   = total;
 }
 

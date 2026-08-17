@@ -27,9 +27,10 @@
 // that records which handler was called instead of doing it. That stub is the only reason the order
 // below can be measured rather than re-read.
 //
-// ⚠️ **A `Dispatcher` must provide every `on_*` named below plus `defer_a_to_release()` and
-// `defer_b_to_release()`.** A template only type-checks what it instantiates, so a typo here is
-// caught by the shell's own instantiation (which is a full build, every session) and by ptmapper's.
+// ⚠️ **A `Dispatcher` must provide every `on_*` named below plus `defer_a_to_release()`,
+// `defer_b_to_release()` and `on_a_deferred()`.** A template only type-checks what it instantiates,
+// so a typo here is caught by the shell's own instantiation (which is a full build, every session)
+// and by ptmapper's.
 
 #include "ui/buttons.h"
 
@@ -223,6 +224,11 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         if (d.defer_a_to_release()) {
             ms.aPressedAlone = true;
             ms.lastAPress    = 0;
+            // ⚠️ The dispatcher is told the press HAPPENED, and it is the only news it gets until the
+            // release. Nothing is opened here — but a deferred cell whose action is aimed at a MOVING
+            // number (the sample editor's playhead) has to read that number now, because by the time A
+            // comes back up it is a reaction time and a D-pad press further on.
+            d.on_a_deferred();
             return;
         }
         if (now - ms.lastAPress < 300) {
