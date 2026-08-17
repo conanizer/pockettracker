@@ -1126,13 +1126,34 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     noteQueue.drainUntil(blockEnd, noteBatch);
     size_t paramIdx = 0, killIdx = 0, noteIdx = 0;
 
+    // ⚠️ **THE THREE BATCHES ARE ONE TIMELINE, NOT THREE.** Each loop below takes everything due
+    // (`targetFrame <= currentFrame`), which orders them correctly only while the block is keeping up:
+    // one frame index per frame, so a param stamped at F+1 cannot be reached before the note at F.
+    // The moment anything is LATE that stops being true — a note at F and its params at F+1 both fall
+    // due at the SAME frame index, and the only thing left deciding which runs first is which loop is
+    // written first, which is the params. That is a silent DROP, not a reorder: every per-voice param
+    // (REV/DEL/BCK/CUT/RES/EQN ride one frame behind their note by design, `voiceFxFrame` in
+    // scheduler.h) is applied to a track whose voice the note has not started yet, and finds nothing.
+    //
+    // Late is the first step of every take, not an exotic state: `Sequencer::playPhrase` stamps it at
+    // `getCurrentFrame()`, which is the counter as of the last COMPLETED sub-block, so a T PLAY landing
+    // while the audio thread is inside processAudioBlock schedules onto a frame it has already passed.
+    //
+    // So each queue yields to the earlier of the ones after it. `<=` and not `<`: at EQUAL frames the
+    // written order stands (params, then kills, then notes), which is what `voiceFxFrame`'s +1 and a
+    // K00 sharing its step's frame both rest on. What a loop holds back is applied on the next frame
+    // index — 23 µs, and still ahead of everything authored after it. tools/ptlate.
+    const auto dueKill = [&] { return killIdx < killBatch.size() ? killBatch[killIdx].targetFrame : INT64_MAX; };
+    const auto dueNote = [&] { return noteIdx < noteBatch.size() ? noteBatch[noteIdx].targetFrame : INT64_MAX; };
+
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = blockStartFrame + frame;
 
         // Apply scheduled parameter updates at their exact frame. Running here (on the audio
         // thread) is what makes live PBN/PVB/PVX/THO race-free: the look-ahead scheduler only
         // enqueues; the voices[] mutation happens below, where the mix loop is the sole writer.
-        while (paramIdx < paramBatch.size() && paramBatch[paramIdx].targetFrame <= currentFrame) {
+        while (paramIdx < paramBatch.size() && paramBatch[paramIdx].targetFrame <= currentFrame &&
+               paramBatch[paramIdx].targetFrame <= std::min(dueKill(), dueNote())) {
             ScheduledParamUpdate upd = paramBatch[paramIdx++];
             switch (upd.action) {
                 case PARAM_UPDATE_PITCH_BEND: {           // PBN on empty step
@@ -1280,8 +1301,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
 
-        // Process all scheduled kill events for this exact frame (BEFORE notes)
-        while (killIdx < killBatch.size() && killBatch[killIdx].targetFrame <= currentFrame) {
+        // Process all scheduled kill events for this exact frame (BEFORE notes, and after any note
+        // due EARLIER — see the timeline note above the frame loop)
+        while (killIdx < killBatch.size() && killBatch[killIdx].targetFrame <= currentFrame &&
+               killBatch[killIdx].targetFrame <= dueNote()) {
             ScheduledKill kill = killBatch[killIdx++];
             if (kill.mode == KILL_KEY_OFF) {
                 // A live key let go of (MIDI plan §4.1). The three-way rule is inside

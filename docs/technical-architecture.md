@@ -181,6 +181,16 @@ A sample-accurate queue system in C++.
 `renderOffline` are thin wrappers around it, and none of them contains signal processing. It is also
 the **only** place the note and parameter queues drain. A second drain point is a second timeline.
 
+The three queues — parameters, kills, notes — **are one timeline**, and each yields to whatever is due
+earlier in the ones after it. Frames equal, the written order stands: parameters, then kills, then
+notes. That order is what lets a per-voice effect be stamped one frame behind its note so it reaches
+the voice the note starts rather than the one it replaces, and what lets a `K00` share its step's
+frame and still cut only the note before it. Frames unequal — which is any event the block has already
+passed, and the first step of a take can be one — the earlier frame goes first regardless of which
+queue it came from. Draining each queue to exhaustion in turn would collapse them all onto one frame
+index and apply them in queue order instead, which silently drops every effect whose note has not
+started yet.
+
 ### Signal path
 
 ```
