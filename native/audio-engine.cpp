@@ -8,6 +8,7 @@
 #include "effects/primitives/sola-stretch.h"
 #include "audio-decoders.h"
 #include "byte_source.h"   // pt_fopen — the WAV reader and the soundfont loader open through it
+#include "table_automation.h"  // AUS/AUF pairing over a table's rows — shared with the table editor
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -754,20 +755,28 @@ static inline int tic00RowAfter(const Voice& v) { return tic00RowAfter(v.tableRo
 //   TICFF (0xFF): 200Hz mode — advance ~1 row per 5ms
 template <typename V>
 void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
-    // ONE tableMutex acquisition per voice per block: read the loaded flag AND copy the
-    // current row speculatively (8-byte POD; tableRow can't change before the tic logic
-    // below decides shouldProcessRow).
+    // ONE tableMutex acquisition per voice per block: read the loaded flag AND copy the whole table.
+    //
+    // ⚠️ THE WHOLE TABLE, not just the current row, because the AUS/AUF pairing below is re-derived
+    // from every row on every block — that is what lets a backwards HOP resume a ramp mid-span with
+    // nothing stored per voice. 128 bytes inside a lock the block already takes, rather than a
+    // second acquisition for the ramps.
     bool tableLoaded = false;
-    TableRow row;
+    TableRow rows[16];
     {
         std::lock_guard<std::mutex> lock(tableMutex);
         tableLoaded = tables[voice.tableId].loaded;
-        if (tableLoaded) row = tables[voice.tableId].rows[voice.tableRow];
+        if (tableLoaded)
+            for (int i = 0; i < 16; ++i) rows[i] = tables[voice.tableId].rows[i];
     }
     if (!tableLoaded) return;
+    const TableRow& row = rows[voice.tableRow];
 
     bool shouldProcessRow = false;
     bool shouldAdvance = false;
+    // How far the voice is through the row it is standing on, for the ramp's sub-row interpolation.
+    // 0 in the three non-advancing TIC modes, which hold the row still by design.
+    double rowFraction = 0.0;
 
     if (voice.tableTicRate == 0x00) {
         // TIC00: Trigger mode - apply row effects ONCE, don't advance automatically
@@ -786,6 +795,7 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
             shouldProcessRow = true;
             shouldAdvance = true;
         }
+        if (samplesPerTic > 0.0f) rowFraction = voice.tic200HzAccum / samplesPerTic;
     } else {
         // Standard tic mode (01-FB): advance one row every `tableTicRate` musical tics.
         // Frame-accurate and tempo-locked (like the TICFF branch above) so table speed tracks
@@ -811,11 +821,26 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
                 shouldProcessRow = true;
                 shouldAdvance = true;
             }
+            if (framesPerRow > 0.0f) rowFraction = voice.tableFrameAccum / framesPerRow;
         }
     }
 
-    if (!shouldProcessRow) return;
+    if (shouldProcessRow) processTableRow(voice, row, shouldAdvance, sampleRate);
 
+    // ⚠️ THE RAMP IS EVALUATED AGAINST `lastProcessedRow`, NOT `tableRow`. The row whose effects are
+    // in force is the one that was last consumed — `tableRow` has already been advanced (or HOPped)
+    // to the one that comes NEXT, and reading it would run every fade a whole row ahead of what is
+    // being heard. `tableFrameAccum` is the progress through that same consumed row, so the pair is
+    // consistent by construction.
+    //
+    // ⚠️ And AFTER the row work, so a table that just executed `HOP FF` (tableId = −1) runs no ramp.
+    if (voice.tableId >= 0 && voice.lastProcessedRow >= 0)
+        applyTableRamps(voice, rows, voice.lastProcessedRow, rowFraction, sampleRate);
+}
+
+template <typename V>
+void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdvance,
+                                  float sampleRate) {
     // playbackRate does not include transpose; getModulatedPlaybackRate reads
     // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
     int semitones = transposeToSemitones(row.transpose);
@@ -956,6 +981,70 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
     if (shouldAdvance && voice.tableRow == 0) {
         LOGT("📋 Table %d loop: track=%d, transpose=%.0f, vol=%.2f",
              voice.tableId, voice.getTrackId(), voice.tableTranspose, voice.tableVolume);
+    }
+}
+
+// ─── AUS / AUF on a table row ────────────────────────────────────────────────────────────────────
+//
+// The pairing and the curve are both shared — `table_automation.h` runs the same walk the TABLE
+// editor dims cells from, and `automation_curve.h` is the same polynomial the phrase path emits
+// through, so a table morph and a phrase morph over the same two presets land on the same bytes.
+// What is here is only the apply: the five effects a table row can both carry and ramp.
+//
+// ⚠️ **EVERY BLOCK, NOT EVERY ROW** — that is the whole reason processTableTick was split. A ramp
+// re-evaluated only on a row change would be sixteen values, the sub-row interpolation would be dead
+// code, and a slow morph would step audibly. The cost is one 48-slot walk plus, for an EQ ramp, six
+// `powf` per voice per block; at eight voices that is a fraction of a percent of a core, and it buys
+// a fade instead of a staircase.
+template <typename V>
+void AudioEngine::applyTableRamps(V& voice, const TableRow* rows, int row, double rowFraction,
+                                  float sampleRate) {
+    const table_automation::TableRampSet ramps = table_automation::find_table_ramps(rows, 16);
+
+    for (int i = 0; i < ramps.count; ++i) {
+        const table_automation::TableRamp& r = ramps.items[i];
+        const double t = table_automation::table_ramp_position(r, row, rowFraction);
+        if (t < 0.0) continue;   // this ramp does not cover the row the voice is standing on
+
+        if (r.eqPreset) {
+            // ⚠️ Clamped rather than trusted, as the phrase morph is: pairing refuses an endpoint
+            // that is not a slot, so the authored path cannot produce one — but a hand-edited
+            // project file is not the authored path, and an unchecked index reads off the bank.
+            if (!table_automation::is_eq_slot(r.startByte) ||
+                !table_automation::is_eq_slot(r.destByte)) continue;
+            const EqBandsHex& from = eqPresetHex[r.startByte];
+            const EqBandsHex& to   = eqPresetHex[r.destByte];
+            EqBandsHex m;
+            for (int b = 0; b < 3; ++b) {
+                const songcore::AutomationEqBand v = songcore::automation_eq_band_at(
+                        { from.type[b], from.freq[b], from.gain[b], from.q[b] },
+                        { to.type[b],   to.freq[b],   to.gain[b],   to.q[b]   }, r.curveByte, t);
+                m.type[b] = v.type;
+                m.freq[b] = v.freq;
+                m.gain[b] = v.gain;
+                m.q[b]    = v.q;
+            }
+            if (r.fxCode == FX_EQN) {
+                applyEqBandsToModule(voice.chain.eq, m);
+            } else {
+                applyEqBandsToModule(masterChain.masterEq, m);
+                // Same one-way latch the per-row EQM arms: the master bus outlives the voice, so
+                // stop() has to put the project's own preset back.
+                tableMasterEqTouched.store(true, std::memory_order_relaxed);
+            }
+            continue;
+        }
+
+        const int value = songcore::automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
+        switch (r.fxCode) {
+            case FX_VOLUME:
+                voice.tableVolume = value / 255.0f;
+                voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
+                break;
+            case FX_CUT: voiceSetFilterCut(voice, value, sampleRate); break;
+            case FX_RES: voiceSetFilterRes(voice, value, sampleRate); break;
+            default: break;   // the registry admits nothing else the table has an arm for
+        }
     }
 }
 

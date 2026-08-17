@@ -20,6 +20,7 @@
 // −1 sentinel below where the Kotlin has `Int?`.
 
 #include "songcore/model.h"
+#include "table_automation.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
 #include "ui/theme.h"
@@ -60,8 +61,9 @@ public:
 
 private:
     void draw_row(Canvas& c, int x, int y, int index, const songcore::TableRow& row,
-                  const TableState& s, int stepX, int transposeX, int volX, int fx1NameX,
-                  int fx1ValueX, int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const;
+                  const TableState& s, const table_automation::TableRampCells& rampCells,
+                  int stepX, int transposeX, int volX, int fx1NameX, int fx1ValueX, int fx2NameX,
+                  int fx2ValueX, int fx3NameX, int fx3ValueX) const;
 };
 
 }  // namespace pt::ui

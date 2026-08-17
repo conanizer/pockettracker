@@ -444,6 +444,20 @@ public:
     // template is defined and (implicitly) instantiated.
     template <typename V> void processTableTick(V& voice, int numFrames, float sampleRate);
 
+    // The row half of the above: transpose, volume and the three FX slots, applied on the blocks
+    // where a row is actually consumed. Split out so that processTableTick has ONE exit and the
+    // AUS/AUF ramp below it runs on EVERY block — the row work returning early is what used to end
+    // the tick, and a ramp that only moved on a row change would be sixteen values instead of a fade.
+    template <typename V> void processTableRow(V& voice, const TableRow& row, bool shouldAdvance,
+                                               float sampleRate);
+
+    // The AUS/AUF ramps a table declares, applied to one voice at the position it is standing on.
+    // ⚠️ AFTER the row's own effects, never before: on the AUS row the ramp is at t=0, so it writes
+    // the same value the cell to its left just wrote, and on every later row the fade is the thing
+    // that should win over a stale per-row cell.
+    template <typename V> void applyTableRamps(V& voice, const TableRow* rows, int row,
+                                               double rowFraction, float sampleRate);
+
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
     void triggerNoteOff(int trackId);
 
@@ -711,6 +725,14 @@ private:
     struct EqPresetBank {
         EqBandData bands[3];
     } eqPresets[128];
+    // ⚠️ THE SAME 128 PRESETS AS AUTHORED HEX, and the bank above cannot answer for them. A morph
+    // interpolates the AUTHORED bytes — that is what makes a frequency sweep linear in log-frequency
+    // — and Hz/dB/Q is a one-way conversion: interpolating those instead walks a different path
+    // between the same two presets. The phrase path never needed this because the morph happens
+    // above the seam, where the model still has the hex; a TABLE morph happens here.
+    //
+    // Both arrays are written in exactly one place, `setEqBand`, and always together.
+    EqBandsHex eqPresetHex[128];
 
     // Per-track waveform buffers for OCTA visualizer.
     // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE, declared public above): all

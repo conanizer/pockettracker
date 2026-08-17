@@ -20,6 +20,8 @@
 #include <cstdint>
 
 #include "../audio-engine.h"
+#include "../table_automation.h"  // …and the same, for the table-ramp cross-check below
+#include "automation.h"           // …likewise: the registry one half of that check reads
 #include "effects.h"    // …only for the cross-check below; the consumer itself resolves no effects
 #include "event.h"
 #include "model.h"
@@ -43,6 +45,54 @@ static_assert(::FX_EQN    == FX_EQN,    "audio-defs.h FX_EQN has drifted from ef
 static_assert(::FX_EQM    == FX_EQM,    "audio-defs.h FX_EQM has drifted from effects.h");
 static_assert(::FX_CUT    == FX_CUT,    "audio-defs.h FX_CUT has drifted from effects.h");
 static_assert(::FX_RES    == FX_RES,    "audio-defs.h FX_RES has drifted from effects.h");
+
+// ─── …and the third list: what a TABLE row's AUS may ramp ────────────────────────────────────────
+//
+// `native/table_automation.h` runs the pairing for BOTH the engine and the table editor, so it can
+// name neither side's constants and spells its codes as literals. This is the one file that sees all
+// three lists, so it is where they are made to agree — and the agreement is what makes the ramp-able
+// set an INTERSECTION that is derived rather than a hand-written list of five.
+static_assert(table_automation::FX_AUS_CODE == FX_AUS,
+              "table_automation.h AUS has drifted from effects.h");
+static_assert(table_automation::FX_AUF_CODE == FX_AUF,
+              "table_automation.h AUF has drifted from effects.h");
+static_assert(table_automation::EQ_PRESET_SLOTS == POOL_EQPRESETS,
+              "table_automation.h's preset-slot ceiling has drifted from the pool size");
+
+// Both directions, so neither list can grow an entry the other has not: every arm declared there is
+// a code the table engine processes, and every code the table engine processes is declared there.
+constexpr bool table_arms_match_the_engine() {
+    for (int i = 0; i < table_automation::ARM_COUNT; ++i) {
+        const int c = table_automation::ARMS[i].code;
+        if (c != ::FX_HOP && c != ::FX_TIC && c != ::FX_KILL && c != ::FX_OFFSET &&
+            c != ::FX_THO && c != ::FX_VOLUME && c != ::FX_EQN && c != ::FX_EQM &&
+            c != ::FX_CUT && c != ::FX_RES) return false;
+    }
+    return table_automation::arm_for(::FX_HOP)    && table_automation::arm_for(::FX_TIC)  &&
+           table_automation::arm_for(::FX_KILL)   && table_automation::arm_for(::FX_OFFSET) &&
+           table_automation::arm_for(::FX_THO)    && table_automation::arm_for(::FX_VOLUME) &&
+           table_automation::arm_for(::FX_EQN)    && table_automation::arm_for(::FX_EQM)  &&
+           table_automation::arm_for(::FX_CUT)    && table_automation::arm_for(::FX_RES);
+}
+static_assert(table_arms_match_the_engine(),
+              "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
+              "has an effect the other does not");
+
+// ⭐ THE FLAGS ARE NOT A JUDGEMENT CALL, and this is what says so. `rampable` is exactly "the
+// registry admits it" and `eqPreset` is exactly "…and its endpoints are preset slots" — so giving
+// `OFF` a registry row, or the table a `PAN` arm, changes which effects a table AUS can ramp with no
+// third list to remember. Getting either flag wrong by hand fails here rather than at the ear.
+constexpr bool table_arm_flags_match_the_registry() {
+    for (int i = 0; i < table_automation::ARM_COUNT; ++i) {
+        const AutomatableParam* p = automatable_param(table_automation::ARMS[i].code);
+        if (table_automation::ARMS[i].rampable != (p != nullptr)) return false;
+        if (table_automation::ARMS[i].eqPreset != (p != nullptr && p->kind == RampKind::EQ_PRESET))
+            return false;
+    }
+    return true;
+}
+static_assert(table_arm_flags_match_the_registry(),
+              "a table arm's rampable/eqPreset flag disagrees with AUTOMATABLE_PARAMS");
 
 // Routing + plan_note_on (the note path itself) live in voice_derive.h — engine-agnostic, so
 // tools/ptvoice can instantiate the same code against a recorder and golden it.

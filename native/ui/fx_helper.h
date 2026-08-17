@@ -204,7 +204,7 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 28 VTR */ {"VTR: Track mixer fader", "xx=level (00=silent FF=max)", "replaces the MIXER fader", "resets to the MIXER on stop"},
         /* 29 VMV */ {"VMV: Master mixer fader", "xx=level (00=silent FF=max)", "replaces the MASTER fader", "resets to the MIXER on stop"},
         /* 30 AUS */ {"AUS: Automation start", "xx=curve 00=IN 80=LIN FF=OUT", "ramps the FX slot to its left", "to the value of the next AUF"},
-        /* 31 AUF */ {"AUF: Automation finish", "xx=destination value", "ends the ramp an AUS opened", "same phrase and track only"},
+        /* 31 AUF */ {"AUF: Automation finish", "xx=destination value", "ends the ramp an AUS opened", "one chain, or one table"},
         /* 32 CUT */ {"CUT: Filter cutoff", "xx=cutoff (00=low FF=high)", "needs a FILTER TYPE in INST", "this note only"},
         /* 33 RES */ {"RES: Filter resonance", "xx=resonance (00-FF)", "needs a FILTER TYPE in INST", "this note only"},
         /* 34 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},

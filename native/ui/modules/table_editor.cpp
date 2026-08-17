@@ -1,5 +1,6 @@
 #include "ui/modules/table_editor.h"
 
+#include "table_automation.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
@@ -35,16 +36,24 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     c.draw_text("FX2", fx2NameX,   rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
     c.draw_text("FX3", fx3NameX,   rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
+    // Asked once and read three times a row: an AUS/AUF cell no ramp uses draws dimmed (draw_row).
+    // It is the pairing the ENGINE itself runs — the same walk, over the same three FX slots — so the
+    // grid can neither show a fade the voice will not play nor deny one it will.
+    const table_automation::TableRampCells rampCells =
+            table_automation::find_table_ramp_cells(s.table.rows.data(),
+                                                    static_cast<int>(s.table.rows.size()));
+
     for (int i = 0; i < static_cast<int>(s.table.rows.size()); ++i) {
-        draw_row(c, x, y, i, s.table.rows[static_cast<size_t>(i)], s, stepX, transposeX, volX,
-                 fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
+        draw_row(c, x, y, i, s.table.rows[static_cast<size_t>(i)], s, rampCells, stepX, transposeX,
+                 volX, fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
     }
 }
 
 void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& row,
-                           const TableState& s, int stepX, int transposeX, int volX, int fx1NameX,
-                           int fx1ValueX, int fx2NameX, int fx2ValueX, int fx3NameX,
-                           int fx3ValueX) const {
+                           const TableState& s,
+                           const table_automation::TableRampCells& rampCells, int stepX,
+                           int transposeX, int volX, int fx1NameX, int fx1ValueX, int fx2NameX,
+                           int fx2ValueX, int fx3NameX, int fx3ValueX) const {
     const Theme& t = s.theme;
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
@@ -75,13 +84,21 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
               /*is_empty=*/row.volume == -1, t.textValue, t);
 
     // Both FX cells are textValue here — see the header. FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8.
-    const bool fx1Empty = (row.fx1Type == 0);
+    // An FX pair dims when the slot is unset — and an AUS/AUF cell dims when no ramp uses it, which
+    // is the only place the editor says that a fade the author thought they wrote is not one. Both
+    // reach draw_cell through the one flag, because an inert cell does exactly what an unset cell
+    // does: nothing.
+    const auto fxDim = [&](int type, int slot) {
+        return type == 0x00 || !rampCells.active(type, index, slot);
+    };
+
+    const bool fx1Empty = fxDim(row.fx1Type, 1);
     draw_cell(c, effect_name(row.fx1Type), fx1NameX,  textY, cur(3), sel(3), fx1Empty, t.textValue, t);
     draw_cell(c, hex2(row.fx1Value),       fx1ValueX, textY, cur(4), sel(4), fx1Empty, t.textValue, t);
-    const bool fx2Empty = (row.fx2Type == 0);
+    const bool fx2Empty = fxDim(row.fx2Type, 2);
     draw_cell(c, effect_name(row.fx2Type), fx2NameX,  textY, cur(5), sel(5), fx2Empty, t.textValue, t);
     draw_cell(c, hex2(row.fx2Value),       fx2ValueX, textY, cur(6), sel(6), fx2Empty, t.textValue, t);
-    const bool fx3Empty = (row.fx3Type == 0);
+    const bool fx3Empty = fxDim(row.fx3Type, 3);
     draw_cell(c, effect_name(row.fx3Type), fx3NameX,  textY, cur(7), sel(7), fx3Empty, t.textValue, t);
     draw_cell(c, hex2(row.fx3Value),       fx3ValueX, textY, cur(8), sel(8), fx3Empty, t.textValue, t);
 }

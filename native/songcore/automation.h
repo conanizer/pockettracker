@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "automation_curve.h"   // the shape, the byte, the one EQ-morph rule — shared with the engine
 #include "effects.h"
 #include "event.h"
 #include "model.h"
@@ -130,60 +131,11 @@ static_assert(automatable_preset_params_are_slot_range(),
               "an EQ_PRESET parameter's cell must cap at the last preset slot — its endpoints are "
               "indices into Project::eqPresets, and the pairing has no other range check");
 
-// ─── The curve ───────────────────────────────────────────────────────────────────────────────────
-//
-// AUS's value byte picks the shape, as a continuous family between three anchors. It is a POLYNOMIAL
-// on purpose — `+ − ×` only, never `pow` or `exp`: the scheduling TUs compile with no fast-math and
-// `-ffp-contract=off`, and the emitted values have to be bit-identical on every platform, which is
-// the same reason note→Hz is vendored rather than called (event-schema.md).
-constexpr int AUS_CURVE_EASE_IN  = 0x00;  // slow to leave, fast to arrive — cubic up
-constexpr int AUS_CURVE_LINEAR   = 0x80;
-constexpr int AUS_CURVE_EASE_OUT = 0xFF;  // fast to leave, slow to arrive
-
-/**
- * The eased position, `t` and the result both in [0,1]. 0x80 is exactly `t`; either side blends
- * linearly towards the cubic anchor, so the family is continuous through the middle and the two
- * halves meet at the same value.
- */
-inline double automation_shape(int curveByte, double t) {
-    if (t <= 0.0) return 0.0;
-    if (t >= 1.0) return 1.0;
-    if (curveByte <= AUS_CURVE_LINEAR) {
-        const double w = curveByte / 128.0;                 // 00 → all ease-in, 80 → all linear
-        return (1.0 - w) * (t * t * t) + w * t;
-    }
-    const double w = (curveByte - AUS_CURVE_LINEAR) / 127.0;  // 80 → all linear, FF → all ease-out
-    const double u = 1.0 - t;
-    return (1.0 - w) * t + w * (1.0 - u * u * u);
-}
-
-/**
- * The byte a ramp holds at position `t`. Rounded half-up — both ends are 0-255 and the shape never
- * leaves [0,1], so the value is never negative and the rounding needs no sign case.
- */
-inline int automation_value_byte(int startByte, int destByte, int curveByte, double t) {
-    const double v = startByte + (destByte - startByte) * automation_shape(curveByte, t);
-    const int    b = static_cast<int>(v + 0.5);
-    return b < 0 ? 0 : (b > 255 ? 255 : b);
-}
-
 // ─── The EQ morph — what an EQ_PRESET ramp holds at position `t` ──────────────────────────────────
 //
-// ⚠️ **THE START PRESET'S BAND TYPES SURVIVE THE WHOLE SPAN, ARRIVAL INCLUDED.** A type is not an
-// interpolable quantity — there is no continuous path from BELL to HISHELF, and LOWCUT/HICUT run
-// through the SVF and have no gain at all — so one of the two ends has to win, for every tick. The
-// start wins, and the morph never snaps:
-//
-//   • Types that AGREE (the normal case, and the one to write) make the arrival exactly the
-//     destination preset, by construction rather than by rounding.
-//   • Types that DIFFER still sweep that band's frequency and gain under the start's type, and the
-//     ramp rests on a setting no preset holds. To land on the real destination, write it — `EQM 12`
-//     on the step after the AUF is one cell, visible in the grid, and then the discontinuity is the
-//     author's rather than the ramp's.
-//
-// ⭐ A band OFF in the start preset stays off for the whole ramp, whatever the destination says — so
-// `chain.eq.active` (derived from "some type ≠ 0") cannot change mid-sweep and no band can pop in or
-// out. Fade a band out by ramping its GAIN to 0 dB (0x78) instead.
+// The per-band RULE — which of the two ends' type wins, and what interpolates — is
+// `automation_eq_band_at` in automation_curve.h, because the table path applies the same rule from
+// below the seam. What is here is only the lookup: two `Project` slots to two bands.
 //
 // ⚠️ The slots are clamped rather than trusted. Pairing refuses an endpoint above the last slot, so
 // the authored path cannot produce one — but a hand-edited project file is not the authored path, and
@@ -203,10 +155,13 @@ inline ExtEqMorphPayload eq_morph_at(const Project& project, int startSlot, int 
         if (i >= static_cast<int>(from.bands.size()) || i >= static_cast<int>(to.bands.size())) break;
         const EqBand& a = from.bands[static_cast<size_t>(i)];
         const EqBand& b = to.bands[static_cast<size_t>(i)];
-        m.type[i] = static_cast<uint8_t>(a.type < 0 ? 0 : (a.type > 255 ? 255 : a.type));
-        m.freq[i] = static_cast<uint8_t>(automation_value_byte(a.freq, b.freq, curveByte, t));
-        m.gain[i] = static_cast<uint8_t>(automation_value_byte(a.gain, b.gain, curveByte, t));
-        m.q[i]    = static_cast<uint8_t>(automation_value_byte(a.q,    b.q,    curveByte, t));
+        const AutomationEqBand v = automation_eq_band_at({ a.type, a.freq, a.gain, a.q },
+                                                         { b.type, b.freq, b.gain, b.q },
+                                                         curveByte, t);
+        m.type[i] = static_cast<uint8_t>(v.type);
+        m.freq[i] = static_cast<uint8_t>(v.freq);
+        m.gain[i] = static_cast<uint8_t>(v.gain);
+        m.q[i]    = static_cast<uint8_t>(v.q);
     }
     return m;
 }

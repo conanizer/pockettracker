@@ -728,6 +728,13 @@ void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainH
     b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
     b.gainDb = gainHex / 10.0f - 12.0f;   // gainHex 0..240 → −12.0..+12.0 dB (0.1 dB/step)
     b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
+    // The authored bytes, kept beside the conversion because a table morph interpolates THEM. This
+    // is the only writer of either array — see audio-engine.h.
+    auto& h = eqPresetHex[slot];
+    h.type[band] = type;
+    h.freq[band] = freqHex;
+    h.gain[band] = gainHex;
+    h.q[band]    = qHex;
 }
 
 void AudioEngine::setInstrumentEqSlot(int instrId, int slot) {
