@@ -19,6 +19,8 @@
 // ptshot's ability to draw every screen headlessly is the standing proof that the UI is portable. So
 // the feed is what any *shell* constructs, and a tool simply does not construct one.
 
+#include <algorithm>
+
 #include "audio-engine.h"
 #include "songcore/host.h"
 #include "ui/app_state.h"
@@ -299,6 +301,23 @@ private:
                                   : se.instrumentId;
         se.playbackPosition = host.sample_playback_position(voiceSlot);
 
+        // ── The HAND-PLACED markers ──────────────────────────────────────────────────────────────
+        // "Changing the SLICE method or its setting also resets the positions set by hand", derived
+        // from the data rather than asked of every caller: the list carries the (method, parameter) it
+        // was made under, and a pair that no longer matches the screen is a list that no longer
+        // describes anything. ⚠️ ONE SITE, above every reader — there are five writes to `sliceMethod`,
+        // `sliceSensitivity` and `sliceDivisions` between the module and the dispatcher, and a rule that
+        // needs each of them to remember to clear is already broken.
+        //
+        // ⚠️ CLEARED, not merely ignored. `manual_markers_live()` already ignores a stale stamp, but a
+        // stamp that is only compared makes the reset REVERSIBLE — BY 08 → BY 09 → BY 08 would bring
+        // back overrides the user has watched disappear.
+        if (!se.manualMarkers.empty() && !se.manual_markers_live()) {
+            se.manualMarkers.clear();
+            se.manualKeyMethod = -1;
+            se.manualKeyParam  = -1;
+        }
+
         // ── The TRANSIENTS ───────────────────────────────────────────────────────────────────────
         // Detect when the method is TRANSIENT and there are no markers — which is exactly the state
         // `handle_input` leaves behind when the user switches INTO transient mode or changes the
@@ -314,6 +333,11 @@ private:
             // slicing was turned off again.
             se.sliceIndex = 0;
         }
+
+        // The ceiling moves with the marker set — a method change, a re-detect, or a hand-placed list
+        // that just went stale can all leave the index above it. Clamped here rather than at each of
+        // those, for the same reason the reset above is.
+        se.sliceIndex = std::clamp(se.sliceIndex, 0, se.slice_index_ceiling());
 
         // ── The WAVEFORM ─────────────────────────────────────────────────────────────────────────
         // Re-binned when the WINDOW moves (zoom, or the view scrolling to follow the cursor or the

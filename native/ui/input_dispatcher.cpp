@@ -1058,6 +1058,7 @@ void InputDispatcher::on_a_up() {
     if (eq_open()) { generic_input(pt::ui::on_a); return; }
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
+    if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) {
         s_.fxHelper = fx_helper_opened_at(current_fx_type_index(),
                                           FxGrid::of(visible_effect_type_count()));
@@ -1079,6 +1080,7 @@ void InputDispatcher::on_a_down() {
     if (eq_open()) { generic_input(pt::ui::on_b); return; }
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
+    if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) {
         s_.fxHelper = fx_helper_opened_at(current_fx_type_index(),
                                           FxGrid::of(visible_effect_type_count()));
@@ -1099,6 +1101,7 @@ void InputDispatcher::on_a_left() {
     if (eq_open()) { generic_input(pt::ui::on_a_left); return; }
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
+    if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_coarse_step(s_.sampleEditor)); return; }
     selection_or_single(pt::ui::on_a_left);
 }
 
@@ -1112,6 +1115,7 @@ void InputDispatcher::on_a_right() {
     if (eq_open()) { generic_input(pt::ui::on_a_right); return; }
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
+    if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_coarse_step(s_.sampleEditor)); return; }
     selection_or_single(pt::ui::on_a_right);
 }
 
@@ -1174,6 +1178,13 @@ void InputDispatcher::on_a_b() {
         else if (se.cursorCol == 1) se.selectionEnd   = se.totalFrames;
         return;
     }
+
+    // ⚠️ The SLICE DETAIL row (11): A+B puts the boundary under the cursor back where its own method
+    // would have put it — the detected position under TRANSIENT and the arithmetic cut under DIVIDE.
+    // Under MANUAL there is no such position and it DELETES instead, the slices after it renumbering.
+    // ONE boundary, matching row 8 above; changing the method or its parameter is what resets them all
+    // (engine_feed.h).
+    if (on_sample_editor() && s_.sampleEditor.cursorRow == 11) { reset_slice_marker(); return; }
 
     // The pool's NAME column: A+B CLEARS the slot (M8's EDIT+OPTION). It frees the sample's PCM and,
     // if this was the SoundFont's last user, that .sf2's engine slot too — which is the whole reason it
@@ -3765,6 +3776,12 @@ void InputDispatcher::init_sample_editor_state() {
     // survives a re-entry, so an editor re-opened while TRANSIENT is still selected must re-detect on
     // the new audio. Empty is the only thing the feed reads as "detect".
     se.transientMarkers.clear();
+    // ⚠️ And so do the HAND-PLACED ones. The METHOD survives a re-entry; the markers cannot — they are
+    // frame indices into audio that has just been replaced, and a position that meant a drum hit in one
+    // sample means the middle of a chord in the next.
+    se.manualMarkers.clear();
+    se.manualKeyMethod = -1;
+    se.manualKeyParam  = -1;
     se.sliceIndex = 0;
     // ⚠️ sliceMethod is deliberately NOT reset — it opens at OFF on a fresh session (the struct's
     // default) and SURVIVES a re-entry, so loading a second sample to compare does not silently drop you
@@ -3826,6 +3843,178 @@ void InputDispatcher::nudge_selection_edge(int64_t delta) {
         const int64_t raw = std::clamp<int64_t>(se.selectionEnd + delta, se.selectionStart + 1, maxFrame);
         se.selectionEnd   = std::clamp<int64_t>(snap(raw), se.selectionStart + 1, maxFrame);
     }
+}
+
+// ─── The slice markers: A+DPAD and A+B on row 11 ─────────────────────────────────────────────────
+
+namespace {
+
+/**
+ * Put boundary `k` at `want` — or MAKE one there when `k` is not in the list — and answer with the
+ * index it ended up at, which is not necessarily the one it started from. −1 when there is nowhere for
+ * it to go.
+ *
+ * ⭐ **A boundary MAY be dragged past its neighbours; its NUMBER follows its POSITION.** The list stays
+ * sorted because it is re-sorted here, in the one place a boundary can move, rather than because a
+ * clamp forbids the crossing — and that is what lets a boundary made at the end be walked back to
+ * anywhere in the sample instead of having to be deleted and remade.
+ *
+ * ⚠️ **Two boundaries may never share a frame.** `slice_bounds` reads marker `k − 1` as the left edge
+ * of slice `k` and marker `k` as its right, so a duplicate is a zero-length slice — one CHOP would hand
+ * to the file writer. A landing that is taken is stepped PAST in the direction of travel rather than
+ * refused, so a drag through a crowd keeps moving.
+ *
+ * ⚠️ Frame 0 and the last frame are the sample's own bounds and not boundaries within it — the same
+ * rule `compute_slice_cue_points` applies when it writes the `cue ` chunk.
+ */
+int place_slice_marker(std::vector<SliceMarker>& m, int k, int64_t want, int dir, int totalFrames) {
+    const int64_t last = static_cast<int64_t>(totalFrames) - 1;
+    if (last < 1) return -1;   // no room for an interior boundary at all
+
+    // ⚠️ `i != k` and not a value compare: the boundary being dragged must not collide with itself.
+    const auto taken = [&](int64_t f) {
+        for (int i = 0; i < static_cast<int>(m.size()); ++i)
+            if (i != k && static_cast<int64_t>(m[static_cast<size_t>(i)].frame) == f) return true;
+        return false;
+    };
+
+    int64_t at = std::clamp<int64_t>(want, 1, last);
+    while (at >= 1 && at <= last && taken(at)) at += dir;
+    if (at < 1 || at > last) return -1;   // walked off the end through a wall of boundaries
+
+    // ⚠️ MOVE the boundary, never rebuild it: `originFrame` is its identity and has to travel with it
+    // through every crossing, or A+B loses the position it is meant to put the boundary back on. A
+    // boundary that is MADE here rather than moved has no computed home, which is what −1 says.
+    if (k >= 0 && k < static_cast<int>(m.size())) m[static_cast<size_t>(k)].frame = static_cast<int>(at);
+    else                                          m.push_back(SliceMarker{static_cast<int>(at), -1});
+    std::sort(m.begin(), m.end(),
+              [](const SliceMarker& a, const SliceMarker& b) { return a.frame < b.frame; });
+
+    for (int i = 0; i < static_cast<int>(m.size()); ++i)
+        if (static_cast<int64_t>(m[static_cast<size_t>(i)].frame) == at) return i;
+    return -1;   // unreachable: the frame was just written and the frames are unique
+}
+
+}  // namespace
+
+/**
+ * Take a copy of whatever the method currently answers with, so the user's nudges have something to
+ * write into, and stamp it with the (method, parameter) it describes.
+ *
+ * TRANSIENT and DIVIDE start from their computed set — a drag adjusts what is there rather than
+ * throwing it away. MANUAL starts empty: its boundaries are placed one at a time, and the first is born
+ * on frame 0, which is the sample's own start and not a boundary until something is dragged off it.
+ */
+void InputDispatcher::materialise_manual_markers() {
+    SampleEditorState& se = s_.sampleEditor;
+    if (se.manual_markers_live()) return;
+
+    // ⚠️ Each copy remembers the frame it was made at, and that is the whole of "put slice 01 back where
+    // DIVIDE had it" — the boundary can be dragged past its neighbours afterwards, so by the time A+B
+    // arrives its index says nothing about which cut it is.
+    se.manualMarkers.clear();
+    if (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT) {
+        for (const int f : se.transientMarkers) se.manualMarkers.push_back(SliceMarker{f, f});
+    } else if (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE) {
+        const int div = std::max(se.sliceDivisions, 1);
+        for (int i = 1; i < div; ++i) {
+            const int f = static_cast<int>((static_cast<int64_t>(i) * se.totalFrames) / div);
+            se.manualMarkers.push_back(SliceMarker{f, f});
+        }
+    }
+    se.manualKeyMethod = se.sliceMethod;
+    se.manualKeyParam  = se.manual_key_param();
+}
+
+/**
+ * The selection follows the slice the row-11 cursor is on. ⚠️ Every gesture that moves a boundary or
+ * changes which one is under the cursor ends here — a slice whose edge has just moved is one START must
+ * play the new shape of, and the reset leaving the old shape behind is the defect this closes.
+ */
+void InputDispatcher::select_current_slice() {
+    SampleEditorState& se = s_.sampleEditor;
+    int64_t start = 0, end = 0;
+    se.slice_bounds(se.sliceIndex, start, end);
+    se.selectionStart = start;
+    se.selectionEnd   = end;
+}
+
+void InputDispatcher::nudge_slice_marker(int64_t delta) {
+    SampleEditorState& se = s_.sampleEditor;
+
+    // The same guard `nudge_selection_edge` carries, for the same reason: this screen is reachable on an
+    // empty slot in four presses, and `std::clamp` with lo > hi is UB rather than a wrong answer.
+    if (se.totalFrames <= 0 || delta == 0) return;
+
+    const bool manual = se.sliceMethod == SampleEditorModule::SLICE_MANUAL;
+    const int  k      = se.slice_marker_index();
+
+    // Slice 00's left edge is the sample's own start: under TRANSIENT and DIVIDE there is no boundary
+    // there and nothing to drag. ⭐ Under MANUAL a rightward drag MAKES one instead of moving that edge
+    // — the sample does not start later, it gains a cut — and the cursor follows the new boundary onto
+    // whichever slice it opens. Leftward there is nowhere to go: frame 0 is the sample's own start.
+    if (k < 0 && (!manual || delta < 0)) return;
+
+    materialise_manual_markers();
+    std::vector<SliceMarker>& m = se.manualMarkers;
+
+    // A boundary past the end of the list is MANUAL's free slot — the next one, not yet made. It is
+    // born on the boundary to its left, which is where the cell already reads, and this drag is what
+    // carries it off there.
+    if (k >= static_cast<int>(m.size()) && !manual) return;
+    const int64_t from = (k >= 0 && k < static_cast<int>(m.size()))
+                             ? static_cast<int64_t>(m[static_cast<size_t>(k)].frame)
+                             : (k < 0 || m.empty() ? 0 : static_cast<int64_t>(m.back().frame));
+
+    const int dir  = (delta > 0) ? 1 : -1;
+    int64_t   want = from + delta;
+    // SNAP is row 2's toggle and it already works on the selection edges; a boundary is the same kind of
+    // cut through the same audio, so it reads the same switch and searches in the direction of travel.
+    if (se.snapEnabled)
+        want = host_.find_zero_crossing(
+            se.instrumentId,
+            static_cast<int>(std::clamp<int64_t>(want, 0, static_cast<int64_t>(se.totalFrames) - 1)),
+            dir, se.sourceMode);
+
+    const int landed = place_slice_marker(m, k, want, dir, se.totalFrames);
+    if (landed < 0) return;
+
+    se.sliceIndex = landed + 1;   // the boundary's own number — marker `j` is the left edge of slice j+1
+    select_current_slice();
+}
+
+void InputDispatcher::reset_slice_marker() {
+    SampleEditorState& se = s_.sampleEditor;
+
+    const int k = se.slice_marker_index();
+    if (k < 0 || !se.manual_markers_live()) return;   // nothing has been placed here, so nothing to undo
+    std::vector<SliceMarker>& m = se.manualMarkers;
+    if (k >= static_cast<int>(m.size())) return;      // MANUAL's free slot holds no boundary yet
+
+    // ⭐ THE BOUNDARY ITSELF SAYS WHERE IT GOES, so there is no arm per method here and — more to the
+    // point — nothing reads the boundary's INDEX to decide. The index is where it currently sits on
+    // screen, which after a crossing is somebody else's cut.
+    const int origin = m[static_cast<size_t>(k)].originFrame;
+
+    if (origin < 0) {
+        // Made by hand: there is no computed position to go back to, so A+B REMOVES it. The boundaries
+        // after it renumber, and the cursor keeps its number and therefore names the slice that has
+        // just grown into the gap.
+        m.erase(m.begin() + k);
+        if (m.empty()) {
+            se.manualKeyMethod = -1;
+            se.manualKeyParam  = -1;
+        }
+    } else {
+        // ⚠️ Through `place_slice_marker` like every other move, because a NEIGHBOUR may have been
+        // dragged across that position since — the boundary then takes the number its own place gives
+        // it, rather than breaking the sort order.
+        const int landed = place_slice_marker(m, k, origin, +1, se.totalFrames);
+        if (landed < 0) return;
+        se.sliceIndex = landed + 1;
+    }
+
+    select_current_slice();
 }
 
 // ─── RATE: the destructive one on row 1 ──────────────────────────────────────────────────────────
@@ -4160,7 +4349,9 @@ void InputDispatcher::bake_pending_pitch() {
 std::vector<int> InputDispatcher::compute_slice_cue_points() const {
     const SampleEditorState& se = s_.sampleEditor;
 
-    if (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE) {
+    // DIVIDE only while it is still arithmetic — a boundary the user has dragged makes it a list like
+    // any other, and the cue points must be the ones on the screen.
+    if (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE && se.marker_count() == 0) {
         const int div = std::max(se.sliceDivisions, 1);
         std::vector<int> cues;
         cues.reserve(static_cast<size_t>(std::max(div - 1, 0)));
@@ -4169,8 +4360,9 @@ std::vector<int> InputDispatcher::compute_slice_cue_points() const {
         return cues;
     }
 
-    // Whichever list the method is answering with — the detector's under TRANSIENT, and under OFF the
-    // file's own, so ⚠️ **a save with slicing OFF can neither add a slice nor drop one.** A detour
+    // Whichever list the method is answering with — the detector's under TRANSIENT, the hand-placed one
+    // under MANUAL, and under OFF the file's own, so ⚠️ **a save with slicing OFF can neither add a
+    // slice nor drop one.** A detour
     // through TRANSIENT leaves markers behind on purpose (they are what a return to it re-uses); writing
     // those into the `cue ` chunk would put slices into a file the user turned slicing off for, and
     // nothing on screen would say so.
@@ -4178,19 +4370,27 @@ std::vector<int> InputDispatcher::compute_slice_cue_points() const {
     // Frame 0 and the end frame are dropped: they are the sample's own bounds, not boundaries WITHIN
     // it, and a cue point at 0 gives every reader a zero-length first slice.
     std::vector<int> cues;
-    for (const int m : se.effective_markers())
+    for (int i = 0; i < se.marker_count(); ++i) {
+        const int m = static_cast<int>(se.marker_position(i));
         if (m > 0 && m < se.totalFrames) cues.push_back(m);
+    }
     return cues;
 }
 
 std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const {
     const SampleEditorState& se = s_.sampleEditor;
 
-    const int count = (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT)
-                          ? static_cast<int>(se.effective_markers().size()) + 1   // N markers → N+1 slices
-                          : (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE)
-                                ? std::max(se.sliceDivisions, 1)
-                                : 0;                                            // OFF → nothing to chop
+    // N markers → N+1 slices, whichever method the list came from — which is also what DIVIDE's div−1
+    // computed cuts mean, so a dragged DIVIDE keeps its own count. OFF has nothing to chop; TRANSIENT
+    // before the detector has run and MANUAL before anything is placed are one slice, the whole sample.
+    const int markers = se.marker_count();
+    const int count   = (se.sliceMethod == SampleEditorModule::SLICE_OFF)
+                            ? 0
+                            : (markers > 0)
+                                  ? markers + 1
+                                  : (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE)
+                                        ? std::max(se.sliceDivisions, 1)
+                                        : 1;
 
     std::vector<std::pair<int64_t, int64_t>> out;
     out.reserve(static_cast<size_t>(std::max(count, 0)));

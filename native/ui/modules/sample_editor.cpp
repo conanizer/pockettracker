@@ -23,12 +23,6 @@ const std::string& at(const std::vector<std::string>& v, int i) {
     return v[static_cast<size_t>(std::clamp(i, 0, static_cast<int>(v.size()) - 1))];
 }
 
-/** `IntArray.getOrElse(i) { fallback }`. */
-int64_t marker_or(const std::vector<int>& v, int i, int64_t fallback) {
-    if (i < 0 || i >= static_cast<int>(v.size())) return fallback;
-    return static_cast<int64_t>(v[static_cast<size_t>(i)]);
-}
-
 /** A vertical 1px rule — Compose's `drawLine` from (x, y0) to (x, y1) with a butt cap. */
 void v_line(Canvas& c, int x, int y0, int h, Argb color, int thickness = 1) {
     if (h <= 0) return;   // a zero-length butt-capped line draws nothing; neither does this
@@ -61,7 +55,7 @@ const std::vector<std::string>& SampleEditorModule::sync_types() {
     return v;
 }
 const std::vector<std::string>& SampleEditorModule::slice_methods() {
-    static const std::vector<std::string> v{"TRANSIENT", "DIVIDE", "OFF"};
+    static const std::vector<std::string> v{"TRANSIENT", "DIVIDE", "OFF", "MANUAL"};
     return v;
 }
 const std::vector<std::string>& SampleEditorModule::ops_row1() {
@@ -106,7 +100,7 @@ int SampleEditorModule::row_below(int row, int slice_method) {
 int SampleEditorModule::max_col_for_row(int row, int slice_method) {
     if (row == 1 || row == 2) return 2;
     if (row >= 3 && row <= 8) return 1;          // the selection's two edges (START / END)
-    if (row == 10) return (slice_method == SLICE_OFF) ? 0 : 1;
+    if (row == 10) return slice_has_parameter(slice_method) ? 1 : 0;
     if (row == 11) return 1;
     if (row == 13 || row == 14) return 5;        // six ops per row
     if (row == 16) return 2;                     // TYPE / VALUE / APPLY
@@ -117,40 +111,97 @@ int SampleEditorModule::max_col_for_row(int row, int slice_method) {
 
 // ─── SampleEditorState: the derived values ───────────────────────────────────────────────────────
 
-const std::vector<int>& SampleEditorState::effective_markers() const {
-    // DIVIDE's answer. It is a function-local static rather than a member so that there is exactly one
-    // marker list per method and no empty fourth vector for a future reader to write into by mistake.
+int SampleEditorState::manual_key_param() const {
+    if (sliceMethod == SampleEditorModule::SLICE_TRANSIENT) return sliceSensitivity;
+    if (sliceMethod == SampleEditorModule::SLICE_DIVIDE)    return sliceDivisions;
+    return 0;   // MANUAL and OFF have no parameter for the markers to be keyed to
+}
+
+bool SampleEditorState::manual_markers_live() const {
+    return !manualMarkers.empty() && manualKeyMethod == sliceMethod &&
+           manualKeyParam == manual_key_param();
+}
+
+const std::vector<int>& SampleEditorState::method_markers() const {
+    // The answer for a method that computes rather than stores. It is a function-local static rather
+    // than a member so that there is exactly one marker list per source and no spare empty vector for a
+    // future reader to write into by mistake.
     static const std::vector<int> computed;
 
     switch (sliceMethod) {
         case SampleEditorModule::SLICE_TRANSIENT: return transientMarkers;
         case SampleEditorModule::SLICE_OFF:       return fileMarkers;
-        default:                                  return computed;   // DIVIDE derives, it does not store
+        // DIVIDE derives its boundaries, and a MANUAL session in which nothing has been placed has
+        // none — its first boundary is born on frame 0, which is the sample's own start and in no list.
+        default:                                  return computed;
+    }
+}
+
+int SampleEditorState::marker_count() const {
+    return static_cast<int>(manual_markers_live() ? manualMarkers.size() : method_markers().size());
+}
+
+int64_t SampleEditorState::marker_position(int k) const {
+    const int n = marker_count();
+    if (k < 0 || n == 0) return 0;
+    const int i = std::min(k, n - 1);   // past the end: the boundary an unplaced one is born on
+    return manual_markers_live() ? static_cast<int64_t>(manualMarkers[static_cast<size_t>(i)].frame)
+                                 : static_cast<int64_t>(method_markers()[static_cast<size_t>(i)]);
+}
+
+int SampleEditorState::slice_marker_index() const {
+    if (sliceMethod == SampleEditorModule::SLICE_OFF) return -1;
+    return sliceIndex - 1;   // −1 at index 0: slice 00's left edge is the sample's own start
+}
+
+int SampleEditorState::slice_index_ceiling() const {
+    const int markers = marker_count();
+    switch (sliceMethod) {
+        // N markers make N + 1 slices, so the top slice number is N …
+        case SampleEditorModule::SLICE_TRANSIENT: return markers;
+        // … and MANUAL reaches ONE FURTHER, onto a slice that does not exist yet. That slot reads the
+        // boundary to its left and is born the moment it is dragged off it, which is how every boundary
+        // after the first is made. ⭐ It is also the whole of "slice N + 1 becomes available only once
+        // the ones before it hold different positions": a boundary enters the list by being placed
+        // somewhere no other one is, so the length IS the rule — no unlocked-count, no duplicate check.
+        case SampleEditorModule::SLICE_MANUAL:    return markers + 1;
+        case SampleEditorModule::SLICE_DIVIDE:
+            return markers > 0 ? markers : std::max(sliceDivisions - 1, 0);
+        default:                                  return 0;
     }
 }
 
 void SampleEditorState::slice_bounds(int idx, int64_t& start, int64_t& end) const {
     const int64_t total = static_cast<int64_t>(totalFrames);
-    switch (sliceMethod) {
-        case SampleEditorModule::SLICE_TRANSIENT: {
-            // Marker `idx − 1` is the left edge of slice `idx`, marker `idx` its right edge — so N
-            // markers make N + 1 slices, and the first and last are bounded by the sample itself.
-            const std::vector<int>& m = effective_markers();
-            start = (idx == 0) ? 0 : marker_or(m, idx - 1, 0);
-            end   = marker_or(m, idx, total);
-            break;
-        }
-        case SampleEditorModule::SLICE_DIVIDE: {
-            const int64_t div = std::max(sliceDivisions, 1);
-            start = (static_cast<int64_t>(idx) * total) / div;
-            end   = std::min((static_cast<int64_t>(idx + 1) * total) / div, total);
-            break;
-        }
-        default:
-            start = 0;
-            end   = total;
-            break;
+    if (sliceMethod == SampleEditorModule::SLICE_OFF) {
+        start = 0;
+        end   = total;
+        return;
     }
+
+    // Marker `idx − 1` is the left edge of slice `idx`, marker `idx` its right edge — so N markers make
+    // N + 1 slices, and the first and last are bounded by the sample itself. ⚠️ A DIVIDE the user has
+    // nudged answers with a list too, and it needs no arm of its own: div − 1 interior markers ARE div
+    // slices, which is the same arithmetic said as a list.
+    const int n = marker_count();
+    if (n > 0) {
+        // ⚠️ `marker_position` clamps past the end on purpose: MANUAL's free slot is one slice past the
+        // last real one, and the boundary it is born on is the last in the list. The RIGHT edge does
+        // not clamp — past the last boundary the slice runs to the end of the sample.
+        start = (idx == 0) ? 0 : marker_position(idx - 1);
+        end   = (idx < n) ? marker_position(idx) : total;
+        return;
+    }
+
+    if (sliceMethod == SampleEditorModule::SLICE_DIVIDE) {
+        const int64_t div = std::max(sliceDivisions, 1);
+        start = (static_cast<int64_t>(idx) * total) / div;
+        end   = std::min((static_cast<int64_t>(idx + 1) * total) / div, total);
+        return;
+    }
+
+    start = 0;   // TRANSIENT before the detector has run, and MANUAL before anything is placed
+    end   = total;
 }
 
 int64_t SampleEditorState::effective_slice_position() const {
@@ -312,7 +363,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         c.draw_text("SLICE", x + 10, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(at(slice_methods(), s.sliceMethod), x + 175, ty,
                     (cur && s.cursorCol == 0) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-        if (s.sliceMethod != SLICE_OFF) {
+        if (slice_has_parameter(s.sliceMethod)) {
             const bool        onVal = (cur && s.cursorCol == 1);
             const std::string lbl   = (s.sliceMethod == SLICE_TRANSIENT) ? "SENS" : "BY";
             const std::string val   = hex2(s.sliceMethod == SLICE_TRANSIENT ? s.sliceSensitivity
@@ -335,9 +386,10 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         // reads as detached from the row above. `/total` follows the index immediately, so its x is
         // derived from the index's rather than typed as a second constant that has to be kept in step.
         c.draw_text(hex2(s.sliceIndex), x + 175, ty, idxColor, CHAR_SPACING, FONT_SCALE);
-        if (s.sliceMethod == SLICE_TRANSIENT) {
-            // N markers → N + 1 slices, so the total is one more than the marker count.
-            const int total = static_cast<int>(s.effective_markers().size()) + 1;
+        if (s.sliceMethod == SLICE_TRANSIENT || s.sliceMethod == SLICE_MANUAL) {
+            // How many the index can reach, which is one more than its ceiling. DIVIDE draws none: its
+            // count is the BY cell directly above, and saying it twice invites the two to disagree.
+            const int total = s.slice_index_ceiling() + 1;
             c.draw_text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         }
         c.draw_text(hex8(s.effective_slice_position()), x + 335, ty, posColor, CHAR_SPACING, FONT_SCALE);
@@ -483,23 +535,24 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     // Whichever list the method is answering with: the detector's under TRANSIENT, and the file's own
     // `cue ` chunk read-only under OFF — showing those is the whole reason a chopped file looks chopped
     // when you reopen it. DIVIDE answers with nothing and computes its N − 1 cuts in the arm below.
-    const std::vector<int>& markers = s.effective_markers();
-    if (!markers.empty()) {
+    const int markerCount = s.marker_count();
+    if (markerCount > 0) {
         if (onSliceRow) {
             int64_t start = 0, end = 0;
             s.slice_bounds(s.sliceIndex, start, end);
             highlight_slice(start, end);
         }
-        for (size_t i = 0; i < markers.size(); ++i) {
-            const int idx = static_cast<int>(i);
+        for (int idx = 0; idx < markerCount; ++idx) {
             // Marker `idx` is the RIGHT edge of slice `idx` and the LEFT edge of slice `idx + 1`, so
             // the two bounding the current slice are `sliceIndex − 1` and `sliceIndex`.
             const bool active = onSliceRow && (idx == s.sliceIndex - 1 || idx == s.sliceIndex);
-            boundary(markers[i], active);
+            boundary(s.marker_position(idx), active);
         }
     }
 
-    if (s.sliceMethod == SLICE_DIVIDE && s.sliceDivisions > 0) {
+    // ⚠️ Only while DIVIDE is still arithmetic. Once a marker has been nudged the list above IS the
+    // boundaries, and computing them a second time would draw the originals over the moved ones.
+    if (s.sliceMethod == SLICE_DIVIDE && s.sliceDivisions > 0 && markerCount == 0) {
         const int64_t div   = s.sliceDivisions;
         const int64_t total = static_cast<int64_t>(s.totalFrames);
         if (onSliceRow) {
@@ -582,12 +635,11 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
             }
 
         case 11:
-            // The index's ceiling is the slice COUNT, and the two methods count differently: N markers
-            // make N + 1 slices (so the top index is N), while DIVIDE into N makes N (top index N − 1).
-            if (s.sliceMethod == SLICE_TRANSIENT && s.cursorCol == 0)
-                return cc::hex_byte(s.sliceIndex, 0, static_cast<int>(s.effective_markers().size()));
-            if (s.sliceMethod == SLICE_DIVIDE && s.cursorCol == 0)
-                return cc::hex_byte(s.sliceIndex, 0, std::max(s.sliceDivisions - 1, 0));
+            // The ceiling is the method's own — see slice_index_ceiling(), which is where the three
+            // ways of counting live. Col 1 is the POSITION, and it has no cell to step: A+DPAD DRAGS
+            // the marker, exactly as it drags a selection edge on row 8 (nudge_slice_marker).
+            if (s.cursorCol == 0 && s.sliceMethod != SLICE_OFF)
+                return cc::hex_byte(s.sliceIndex, 0, s.slice_index_ceiling());
             return cc::none();
 
         case 13: case 14:

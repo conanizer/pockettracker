@@ -949,6 +949,29 @@ class InputDispatcher {
     /** A+DPAD on rows 3..8, and the whole reason those rows have no CursorContext. */
     void nudge_selection_edge(int64_t delta);
 
+    /**
+     * Row 11's POSITION cell: A+DPAD drags the slice boundary under the cursor, as it drags a
+     * selection edge one section up. Col 0 is the index and keeps its own cell — dragging there would
+     * fight the step that chooses which marker you are looking at.
+     */
+    bool on_sample_slice_marker_row() const {
+        return on_sample_editor() && s_.sampleEditor.cursorRow == 11 &&
+               s_.sampleEditor.cursorCol == 1 &&
+               s_.sampleEditor.sliceMethod != SampleEditorModule::SLICE_OFF;
+    }
+
+    /** A+DPAD on row 11 col 1. Mirrors `nudge_selection_edge`; what a boundary may DO is what differs. */
+    void nudge_slice_marker(int64_t delta);
+
+    /** Put the selection on the slice row 11's cursor is pointing at — every boundary gesture ends here. */
+    void select_current_slice();
+
+    /** Copy the method's computed boundaries into the hand-placed list, so a nudge has a home. */
+    void materialise_manual_markers();
+
+    /** A+B on row 11: put the marker under the cursor back where its method would have put it. */
+    void reset_slice_marker();
+
     /** RATE (row 1, col 2) re-decimates the buffer — the one row-1 edit that changes the AUDIO. */
     void apply_sample_rate_mode();
 

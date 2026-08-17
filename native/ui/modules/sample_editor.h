@@ -57,6 +57,24 @@ namespace pt::ui {
  * min/max pairs the waveform draws from), and the only things that reach the document are the ones the
  * user explicitly saves: the name, the file path, and the slice markers.
  */
+/**
+ * A slice boundary the user has moved or made: where it is, and where its METHOD had put it.
+ *
+ * ⚠️ **`originFrame` is the boundary's IDENTITY, and it is what makes A+B mean anything now that a
+ * boundary may be dragged past its neighbours.** The list is sorted by `frame`, so a boundary's INDEX
+ * is its place on the SCREEN and changes under it as it is dragged — the index is not the boundary.
+ * Reading the reset target off the index is how "put slice 01 back" became "put whatever is now at 01
+ * back", which lands on a position another boundary already holds.
+ *
+ * ⭐ It carries the FRAME rather than which computed cut it was, so a reset needs no arithmetic and no
+ * arm per method: put it back where it says. −1 means MADE BY HAND — there is no computed position to
+ * return to, and A+B removes it instead.
+ */
+struct SliceMarker {
+    int frame       = 0;
+    int originFrame = -1;
+};
+
 struct SampleEditorState {
     int sampleId     = 0;
     int instrumentId = 0;
@@ -92,9 +110,15 @@ struct SampleEditorState {
     int64_t selectionEnd   = 0;
 
     // ── Slicing ──────────────────────────────────────────────────────────────────────────────────
-    int sliceMethod      = 2;   // 0 = TRANSIENT, 1 = DIVIDE, 2 = OFF
+    int sliceMethod      = 2;   // 0 = TRANSIENT, 1 = DIVIDE, 2 = OFF, 3 = MANUAL
     int sliceSensitivity = 64;  // TRANSIENT: the detector's threshold
     int sliceDivisions   = 8;   // DIVIDE: cut into N equal parts
+    /**
+     * Row 11's cell: which SLICE, under every method. ⚠️ Slice 00's left edge is the sample's own
+     * start rather than a marker, so the boundary the cursor is on is the one BEFORE it —
+     * `slice_marker_index()`. Under MANUAL the index reaches one slice past the last real one; that
+     * slot is where the next boundary is made.
+     */
     int sliceIndex       = 0;
 
     /**
@@ -124,6 +148,27 @@ struct SampleEditorState {
      */
     std::vector<int> transientMarkers;
 
+    /**
+     * The boundaries the USER has placed or moved, sorted by frame and strictly increasing.
+     *
+     * Under MANUAL this is the method's only source, and it grows one boundary at a time as they are
+     * dragged off the one each was born on. Under TRANSIENT and DIVIDE it starts as a copy of the
+     * computed set on the first drag and OVERRIDES it from then on — each entry remembering which
+     * computed cut it is, because the order can change afterwards.
+     *
+     * ⚠️ Only live while the stamp below still matches — see `manual_markers_live()`.
+     */
+    std::vector<SliceMarker> manualMarkers;
+
+    /**
+     * The (method, parameter) pair `manualMarkers` was made under. ⚠️ Not bookkeeping: it is what
+     * makes "changing the method or its setting resets the hand-placed markers" DERIVED rather than
+     * something every future write to `sliceMethod`, `sliceSensitivity` and `sliceDivisions` has to
+     * remember to do. The feed clears a stale list once per frame, above every reader.
+     */
+    int manualKeyMethod = -1;
+    int manualKeyParam  = -1;
+
     // ── Row 16: the FX row ───────────────────────────────────────────────────────────────────────
     int fxType   = 0;   // 0 = OTT, 1 = DUST, 2 = DRIVE, 3 = EQ, 4 = SYNC
     int fxValue  = 0;   // the amount — or, for EQ, the slot in the 128-preset bank
@@ -139,20 +184,56 @@ struct SampleEditorState {
 
     // ── Derived (Kotlin's computed properties, and the same arithmetic) ──────────────────────────
 
+    /** The parameter `manualMarkers` is keyed to: SENS under TRANSIENT, BY under DIVIDE, none else. */
+    int manual_key_param() const;
+
+    /** True while the hand-placed markers still belong to the method and parameter now on screen. */
+    bool manual_markers_live() const;
+
     /**
-     * The marker set in force. ⚠️ **Every reader goes through here** rather than choosing a list per
-     * method — one vector answering several questions is what made a save under OFF write the
-     * detector's markers into the file.
+     * What the METHOD alone says, with no hand-placed boundaries on top: the file's own under OFF, the
+     * detector's under TRANSIENT, and nothing under DIVIDE (its boundaries are arithmetic, so there is
+     * no list to hand back and its callers compute instead) or a MANUAL session with nothing placed.
      *
-     * OFF answers with the file's own, TRANSIENT with the detector's, and DIVIDE with nothing: its
-     * boundaries are arithmetic, so there is no list to hand back and its callers compute instead.
+     * ⚠️ Almost nothing wants this. Read `marker_count()` / `marker_position()` instead — they are the
+     * seam every reader goes through, and they are where a live hand-placed set overrides this one.
+     * One vector answering several questions is what made a save under OFF write the detector's
+     * markers into the file.
      */
-    const std::vector<int>& effective_markers() const;
+    const std::vector<int>& method_markers() const;
+
+    /** How many boundaries are in force. ⚠️ **Every reader counts through here.** */
+    int marker_count() const;
+
+    /**
+     * Boundary `k`'s frame — its own once it has been placed, and otherwise the boundary it was BORN
+     * on: its predecessor's frame, or frame 0 below the first. ⚠️ Not clamped to the end of the sample;
+     * an unplaced boundary sits on the one to its left, which is what makes it a place to step away from.
+     */
+    int64_t marker_position(int k) const;
+
+    /**
+     * Which boundary the row-11 cursor is on: the marker at the LEFT edge of slice `sliceIndex`.
+     *
+     * ⚠️ −1 on slice 00, whose left edge is the sample's own start — there is no marker there and
+     * nothing to drag. ⚠️ And one PAST the end of the list on MANUAL's free slot, where the boundary
+     * has not been made yet; `marker_position` answers for that one with the boundary it would be born
+     * on, which is the place it is dragged away from.
+     */
+    int slice_marker_index() const;
+
+    /**
+     * Row 11's top index. N markers make N + 1 slices, so it is N — except under MANUAL, which reaches
+     * one further: that slot is the next boundary, and moving it off the boundary to its left is what
+     * makes it exist. ⭐ There is no separate "how many are unlocked" to keep in step, and none of the
+     * duplicate-position checks the request asked for — the list's own length is the whole rule.
+     */
+    int slice_index_ceiling() const;
 
     /** (start, end) of slice `idx` under the current method. OFF = the whole sample. */
     void slice_bounds(int idx, int64_t& start, int64_t& end) const;
 
-    /** The START of the slice under the cursor — what row 11's position column reads. */
+    /** What row 11's position column reads: the START of the slice under the cursor. */
     int64_t effective_slice_position() const;
 
     /**
@@ -202,7 +283,7 @@ public:
     static const std::vector<std::string>& duration_values();  // 4 BAR … 1/32
     static const std::vector<std::string>& fx_types();         // OTT / DUST / DRIVE / EQ / SYNC
     static const std::vector<std::string>& sync_types();       // RPITCH / TSTRETCH
-    static const std::vector<std::string>& slice_methods();    // TRANSIENT / DIVIDE / OFF
+    static const std::vector<std::string>& slice_methods();    // TRANSIENT / DIVIDE / OFF / MANUAL
     static const std::vector<std::string>& ops_row1();         // CROP COPY CUT DUPL PASTE DEL
     static const std::vector<std::string>& ops_row2();         // NORM FADE+ FADE- SLNC REV UNDO
 
@@ -216,6 +297,15 @@ public:
     static constexpr int SLICE_TRANSIENT = 0;
     static constexpr int SLICE_DIVIDE    = 1;
     static constexpr int SLICE_OFF       = 2;
+    // ⚠️ APPENDED after OFF, never inserted. `sliceMethod` is an index into `slice_methods()` that
+    // survives a session, and `SLICE_OFF` is compared by name in a dozen places across the module, the
+    // dispatcher and the feed — every one of which keeps meaning what it means only because 2 is still 2.
+    static constexpr int SLICE_MANUAL    = 3;
+
+    /** Row 10's second cell: TRANSIENT has SENS and DIVIDE has BY. OFF and MANUAL have neither. */
+    static constexpr bool slice_has_parameter(int slice_method) {
+        return slice_method == SLICE_TRANSIENT || slice_method == SLICE_DIVIDE;
+    }
 
     // ── The sparse row map ───────────────────────────────────────────────────────────────────────
     //
