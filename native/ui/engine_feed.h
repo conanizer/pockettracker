@@ -307,13 +307,12 @@ private:
         if (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT && se.totalFrames > 0 &&
             se.transientMarkers.empty()) {
             se.transientMarkers = host.detect_transients(se.instrumentId, se.sliceSensitivity);
-            se.sliceIndex       = 0;
-            // Select the FIRST slice, so the detector's result is something you can immediately hear:
-            // press START and you get slice 0, not the whole sample again.
-            se.selectionStart = 0;
-            se.selectionEnd   = se.transientMarkers.empty()
-                                    ? se.totalFrames
-                                    : se.transientMarkers.front();
+            // ⚠️ The INDEX is reset because the new marker set may be shorter; **the SELECTION is not
+            // touched.** Detecting is not choosing: only row 11 selects a slice, and it is one DOWN
+            // away. A detect that moved the selection to slice 0 left it there for good — nothing put
+            // it back — so a sensitivity the user only tried out went on owning the selection after
+            // slicing was turned off again.
+            se.sliceIndex = 0;
         }
 
         // ── The WAVEFORM ─────────────────────────────────────────────────────────────────────────

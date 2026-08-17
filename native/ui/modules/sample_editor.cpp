@@ -117,14 +117,27 @@ int SampleEditorModule::max_col_for_row(int row, int slice_method) {
 
 // ─── SampleEditorState: the derived values ───────────────────────────────────────────────────────
 
+const std::vector<int>& SampleEditorState::effective_markers() const {
+    // DIVIDE's answer. It is a function-local static rather than a member so that there is exactly one
+    // marker list per method and no empty fourth vector for a future reader to write into by mistake.
+    static const std::vector<int> computed;
+
+    switch (sliceMethod) {
+        case SampleEditorModule::SLICE_TRANSIENT: return transientMarkers;
+        case SampleEditorModule::SLICE_OFF:       return fileMarkers;
+        default:                                  return computed;   // DIVIDE derives, it does not store
+    }
+}
+
 void SampleEditorState::slice_bounds(int idx, int64_t& start, int64_t& end) const {
     const int64_t total = static_cast<int64_t>(totalFrames);
     switch (sliceMethod) {
         case SampleEditorModule::SLICE_TRANSIENT: {
             // Marker `idx − 1` is the left edge of slice `idx`, marker `idx` its right edge — so N
             // markers make N + 1 slices, and the first and last are bounded by the sample itself.
-            start = (idx == 0) ? 0 : marker_or(transientMarkers, idx - 1, 0);
-            end   = marker_or(transientMarkers, idx, total);
+            const std::vector<int>& m = effective_markers();
+            start = (idx == 0) ? 0 : marker_or(m, idx - 1, 0);
+            end   = marker_or(m, idx, total);
             break;
         }
         case SampleEditorModule::SLICE_DIVIDE: {
@@ -317,13 +330,17 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const Argb idxColor = (cur && s.cursorCol == 0) ? t.textCursor : t.textValue;
         const Argb posColor = (cur && s.cursorCol == 1) ? t.textCursor : t.textValue;
 
-        c.draw_text(hex2(s.sliceIndex), x + 90, ty, idxColor, CHAR_SPACING, FONT_SCALE);
+        // The two cells sit under row 10's: the index under the METHOD value (x + 175) and the position
+        // under the SENS/BY LABEL (x + 335), not under its value at x + 410 — one column further right
+        // reads as detached from the row above. `/total` follows the index immediately, so its x is
+        // derived from the index's rather than typed as a second constant that has to be kept in step.
+        c.draw_text(hex2(s.sliceIndex), x + 175, ty, idxColor, CHAR_SPACING, FONT_SCALE);
         if (s.sliceMethod == SLICE_TRANSIENT) {
             // N markers → N + 1 slices, so the total is one more than the marker count.
-            const int total = static_cast<int>(s.transientMarkers.size()) + 1;
-            c.draw_text("/" + hex2(total), x + 120, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
+            const int total = static_cast<int>(s.effective_markers().size()) + 1;
+            c.draw_text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         }
-        c.draw_text(hex8(s.effective_slice_position()), x + 175, ty, posColor, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(hex8(s.effective_slice_position()), x + 335, ty, posColor, CHAR_SPACING, FONT_SCALE);
     }
 
     draw_ops_row(c, x, y + content_y(13), ops_row1(), s.cursorRow == 13, s.cursorCol, t);
@@ -463,22 +480,22 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
 
     // ── The slice boundaries ─────────────────────────────────────────────────────────────────────
     //
-    // TRANSIENT (0) and OFF (2) both draw the MARKERS — in OFF they are read-only, straight from the
-    // WAV's `cue ` chunk, and showing them is the whole reason a chopped file looks chopped when you
-    // reopen it. DIVIDE (1) ignores them and computes its own N − 1 cuts.
-    if ((s.sliceMethod == SLICE_TRANSIENT || s.sliceMethod == SLICE_OFF) &&
-        !s.transientMarkers.empty()) {
+    // Whichever list the method is answering with: the detector's under TRANSIENT, and the file's own
+    // `cue ` chunk read-only under OFF — showing those is the whole reason a chopped file looks chopped
+    // when you reopen it. DIVIDE answers with nothing and computes its N − 1 cuts in the arm below.
+    const std::vector<int>& markers = s.effective_markers();
+    if (!markers.empty()) {
         if (onSliceRow) {
             int64_t start = 0, end = 0;
             s.slice_bounds(s.sliceIndex, start, end);
             highlight_slice(start, end);
         }
-        for (size_t i = 0; i < s.transientMarkers.size(); ++i) {
+        for (size_t i = 0; i < markers.size(); ++i) {
             const int idx = static_cast<int>(i);
             // Marker `idx` is the RIGHT edge of slice `idx` and the LEFT edge of slice `idx + 1`, so
             // the two bounding the current slice are `sliceIndex − 1` and `sliceIndex`.
             const bool active = onSliceRow && (idx == s.sliceIndex - 1 || idx == s.sliceIndex);
-            boundary(s.transientMarkers[i], active);
+            boundary(markers[i], active);
         }
     }
 
@@ -568,7 +585,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
             // The index's ceiling is the slice COUNT, and the two methods count differently: N markers
             // make N + 1 slices (so the top index is N), while DIVIDE into N makes N (top index N − 1).
             if (s.sliceMethod == SLICE_TRANSIENT && s.cursorCol == 0)
-                return cc::hex_byte(s.sliceIndex, 0, static_cast<int>(s.transientMarkers.size()));
+                return cc::hex_byte(s.sliceIndex, 0, static_cast<int>(s.effective_markers().size()));
             if (s.sliceMethod == SLICE_DIVIDE && s.cursorCol == 0)
                 return cc::hex_byte(s.sliceIndex, 0, std::max(s.sliceDivisions - 1, 0));
             return cc::none();
@@ -631,10 +648,10 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
             switch (s.cursorCol) {
                 case 0:
                     s.sliceMethod = v;
-                    // Switching TO transient clears the markers, which is what makes the feed re-run the
-                    // detector (it fires on "transient mode with no markers"). Switching to DIVIDE or OFF
-                    // KEEPS them — in OFF they become the read-only display of the file's own cue points,
-                    // and throwing them away would lose the only copy the editor has.
+                    // Switching TO transient clears the detector's list, which is what makes the feed
+                    // re-run it (it fires on "transient mode with no markers"). Switching to DIVIDE or
+                    // OFF leaves it alone: neither reads it — OFF answers with `fileMarkers` — so
+                    // dropping it would only force a re-detect on the way back.
                     if (v == SLICE_TRANSIENT) s.transientMarkers.clear();
                     r.modified = true;
                     break;

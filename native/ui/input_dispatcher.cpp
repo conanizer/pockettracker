@@ -3752,13 +3752,19 @@ void InputDispatcher::init_sample_editor_state() {
         se.selectionEnd   = 0;
     }
 
-    // The markers come from the PROJECT, which got them from the file's `cue ` chunk when the sample was
-    // loaded (engine_setup.h / wav_writer.h). No file I/O here, and no race: the editor and the loader
-    // are looking at the same list. (`sliceMarkers` is int64 — Kotlin's `List<Long>` — and a frame index
-    // is an int everywhere else, so the narrowing is said out loud rather than left to the compiler.)
+    // The FILE's markers come from the PROJECT, which got them from the file's `cue ` chunk when the
+    // sample was loaded (engine_setup.h / wav_writer.h). No file I/O here, and no race: the editor and
+    // the loader are looking at the same list. (`sliceMarkers` is int64 — Kotlin's `List<Long>` — and a
+    // frame index is an int everywhere else, so the narrowing is said out loud rather than left to the
+    // compiler.)
+    se.fileMarkers.clear();
+    se.fileMarkers.reserve(ins.sliceMarkers.size());
+    for (const int64_t m : ins.sliceMarkers) se.fileMarkers.push_back(static_cast<int>(m));
+
+    // ⚠️ The DETECTOR's list opens EMPTY, and that is behaviour rather than tidiness: `sliceMethod`
+    // survives a re-entry, so an editor re-opened while TRANSIENT is still selected must re-detect on
+    // the new audio. Empty is the only thing the feed reads as "detect".
     se.transientMarkers.clear();
-    se.transientMarkers.reserve(ins.sliceMarkers.size());
-    for (const int64_t m : ins.sliceMarkers) se.transientMarkers.push_back(static_cast<int>(m));
     se.sliceIndex = 0;
     // ⚠️ sliceMethod is deliberately NOT reset — it opens at OFF on a fresh session (the struct's
     // default) and SURVIVES a re-entry, so loading a second sample to compare does not silently drop you
@@ -4163,11 +4169,16 @@ std::vector<int> InputDispatcher::compute_slice_cue_points() const {
         return cues;
     }
 
-    // TRANSIENT and OFF both carry the marker list. Frame 0 and the end frame are dropped: they are the
-    // sample's own bounds, not boundaries WITHIN it, and a cue point at 0 gives every reader a
-    // zero-length first slice.
+    // Whichever list the method is answering with — the detector's under TRANSIENT, and under OFF the
+    // file's own, so ⚠️ **a save with slicing OFF can neither add a slice nor drop one.** A detour
+    // through TRANSIENT leaves markers behind on purpose (they are what a return to it re-uses); writing
+    // those into the `cue ` chunk would put slices into a file the user turned slicing off for, and
+    // nothing on screen would say so.
+    //
+    // Frame 0 and the end frame are dropped: they are the sample's own bounds, not boundaries WITHIN
+    // it, and a cue point at 0 gives every reader a zero-length first slice.
     std::vector<int> cues;
-    for (const int m : se.transientMarkers)
+    for (const int m : se.effective_markers())
         if (m > 0 && m < se.totalFrames) cues.push_back(m);
     return cues;
 }
@@ -4176,7 +4187,7 @@ std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const
     const SampleEditorState& se = s_.sampleEditor;
 
     const int count = (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT)
-                          ? static_cast<int>(se.transientMarkers.size()) + 1   // N markers → N+1 slices
+                          ? static_cast<int>(se.effective_markers().size()) + 1   // N markers → N+1 slices
                           : (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE)
                                 ? std::max(se.sliceDivisions, 1)
                                 : 0;                                            // OFF → nothing to chop

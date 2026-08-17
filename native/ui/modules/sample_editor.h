@@ -106,9 +106,21 @@ struct SampleEditorState {
     int64_t slicePosition = 0;
 
     /**
-     * The slice boundaries: N markers → N+1 slices. In TRANSIENT they are DETECTED (the feed runs the
-     * engine's detector when the method or the sensitivity changes); in OFF they are whatever the WAV's
-     * `cue ` chunk carried, shown read-only. DIVIDE ignores them and computes its own.
+     * The markers the FILE carries: the WAV's `cue ` chunk, as the project loaded it. Snapshotted at
+     * open and never written again during a session.
+     *
+     * ⚠️ This is what SLICE = OFF *means* — the sample as it already is on disk — and it is what a save
+     * under OFF writes back. Keeping it apart from the detector's output is what stops a detour through
+     * TRANSIENT adding slices to a file the user turned slicing off for.
+     */
+    std::vector<int> fileMarkers;
+
+    /**
+     * The DETECTOR's output, TRANSIENT only: N markers → N+1 slices.
+     *
+     * ⚠️ EMPTY IS THE TRIGGER — the feed re-runs the detector whenever it finds TRANSIENT with no
+     * markers, which is the state a method or sensitivity change leaves behind (engine_feed.h).
+     * DIVIDE carries no list at all; it computes its boundaries from `sliceDivisions` on every read.
      */
     std::vector<int> transientMarkers;
 
@@ -126,6 +138,16 @@ struct SampleEditorState {
     float playbackPosition = -1.0f;
 
     // ── Derived (Kotlin's computed properties, and the same arithmetic) ──────────────────────────
+
+    /**
+     * The marker set in force. ⚠️ **Every reader goes through here** rather than choosing a list per
+     * method — one vector answering several questions is what made a save under OFF write the
+     * detector's markers into the file.
+     *
+     * OFF answers with the file's own, TRANSIENT with the detector's, and DIVIDE with nothing: its
+     * boundaries are arithmetic, so there is no list to hand back and its callers compute instead.
+     */
+    const std::vector<int>& effective_markers() const;
 
     /** (start, end) of slice `idx` under the current method. OFF = the whole sample. */
     void slice_bounds(int idx, int64_t& start, int64_t& end) const;
