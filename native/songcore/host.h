@@ -300,7 +300,13 @@ class SongcoreHost {
      * into the event trace the 36 goldens byte-compare.
      */
     void stop() {
-        if (engine_ && seq_.eqm_active() && seq_.has_live_project()) {
+        // ⚠️ TWO SOURCES ARM THIS RESTORE, ONE ON EACH SIDE OF THE SEAM. A phrase step's EQM is
+        // emitted by the scheduler, which knows it happened; a TABLE row's EQM is applied by the
+        // audio engine itself, per voice, and the scheduler never sees it. Read the engine's latch
+        // UNCONDITIONALLY — short-circuiting past it would leave it set for the next take, which
+        // would then restore the mixer EQ over a bus nothing had overridden.
+        const bool table_eqm = engine_ && engine_->takeTableMasterEqTouched();
+        if (engine_ && (seq_.eqm_active() || table_eqm) && seq_.has_live_project()) {
             engine_->setMasterEqSlot(project_.masterEqSlot);
         }
         // The mixer faders VTR/VMV moved, for the identical reason and in the identical window: they
@@ -1103,6 +1109,16 @@ class SongcoreHost {
         const int64_t now = engine_->getCurrentFrame();
         engine_->scheduleKill(now, AudioEngine::PREVIEW_LANE);
         preview_note_off(now);
+        // ⚠️ AN AUDITIONED TABLE CAN CARRY AN EQM, and the master bus outlives the lane that moved it.
+        // The TABLE screen's START runs the table on the screen through the preview lane, so this is
+        // the only end that audition has — without the restore here, auditioning a table with an EQM
+        // on it leaves the master EQ on that preset with no transport stop to put it back.
+        //
+        // ⚠️ ONLY WHILE THE TRANSPORT IS IDLE. Playing, the latch belongs to stop(): consuming it here
+        // would disarm the restore the SONG's own table rows are counting on, and the bus would keep
+        // the last EQM for good.
+        if (!seq_.is_playing() && seq_.has_live_project() && engine_->takeTableMasterEqTouched())
+            engine_->setMasterEqSlot(project_.masterEqSlot);
     }
 
     // ── ↑ feedback ───────────────────────────────────────────────────────────────────────────────

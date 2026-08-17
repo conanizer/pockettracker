@@ -901,6 +901,26 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
                 voiceSetFilterRes(voice, fxValue, sampleRate);
                 break;
 
+            // EQN / EQM on a table row: the same two writes the FX column's EQN and EQM make, once
+            // per tic, reached directly rather than through the param queue because the voice is
+            // already in hand — the queue's only job on that path is finding it.
+            //
+            // ⚠️ THE TWO HAVE DIFFERENT LIFETIMES, and only one of them cleans up after itself. EQN
+            // writes THIS voice's chain and dies with the note, because a note-on rebuilds the chain
+            // from the instrument. EQM writes the MASTER BUS, which outlives every voice and the
+            // table with them — so it is armed for the restore on stop() the phrase-level EQM gets
+            // from the scheduler's own flag (songcore/scheduler.h eqm_active, host.h stop). Without
+            // the arming the bus keeps the table's preset after the transport stops, and the FX
+            // helper's "resets to mixer EQ on stop" would be false for exactly this one way in.
+            case FX_EQN:
+                applyEqPresetToChain(voice.chain, fxValue);
+                break;
+
+            case FX_EQM:
+                setMasterEqSlot(fxValue);
+                tableMasterEqTouched.store(true, std::memory_order_relaxed);
+                break;
+
             case FX_TIC:
                 if (fxValue >= 0x01 && fxValue <= 0xFB) {
                     voice.tableTicRate = fxValue;

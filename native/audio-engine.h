@@ -387,6 +387,16 @@ public:
     // Set master EQ from the global preset bank (-1 = off).
     void setMasterEqSlot(int slot);
 
+    /**
+     * Did a TABLE row's EQM move the master bus since this was last asked? Reading CLEARS it.
+     *
+     * ⚠️ THE HOST'S "PUT THE MIXER'S EQ BACK ON STOP" IS DRIVEN BY THE SCHEDULER, WHICH A TABLE ROW
+     * NEVER REACHES — a table runs inside this class, per voice, off the audio thread. So the two
+     * ways an EQM can be authored arm the same restore from opposite sides of the seam, and this is
+     * the engine's half (songcore/host.h stop(), beside `Sequencer::eqm_active()`).
+     */
+    bool takeTableMasterEqTouched() { return tableMasterEqTouched.exchange(false, std::memory_order_relaxed); }
+
     // Set OTT depth (0=bypass, 255=full wet). Enables/disables OTT module.
     void setOttDepth(int depth);
     // Reset OTT for offline render: clean state, no warmup fade.
@@ -644,6 +654,9 @@ private:
     uint32_t noteSeedEntropy = 0x9E3779B9u;
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
+    // Set by a table row's EQM, consumed by takeTableMasterEqTouched(). Audio thread writes,
+    // UI thread reads — atomic for that reason and no other; it is a one-way latch.
+    std::atomic<bool> tableMasterEqTouched{false};
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
 
     // Oscilloscope waveform buffer (circular buffer for recent output)

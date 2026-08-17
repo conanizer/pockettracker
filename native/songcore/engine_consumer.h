@@ -20,12 +20,29 @@
 #include <cstdint>
 
 #include "../audio-engine.h"
+#include "effects.h"    // …only for the cross-check below; the consumer itself resolves no effects
 #include "event.h"
 #include "model.h"
 #include "router.h"
 #include "voice_derive.h"
 
 namespace songcore {
+
+// ⚠️ THE TABLE ENGINE KEEPS ITS OWN COPY OF THE EFFECT CODES IT PROCESSES (`native/audio-defs.h`),
+// because it sits below this seam and must not depend on the model. A copy held together by a comment
+// is a copy that drifts, and the drift is SILENT in the worst way: a table cell would go on being
+// typeable and drawn by its right name while the row it lands on did something else, or nothing.
+// This is the one place both lists are visible, so it is where they are made to agree.
+static_assert(::FX_HOP    == FX_HOP,    "audio-defs.h FX_HOP has drifted from effects.h");
+static_assert(::FX_TIC    == FX_TIC,    "audio-defs.h FX_TIC has drifted from effects.h");
+static_assert(::FX_KILL   == FX_KILL,   "audio-defs.h FX_KILL has drifted from effects.h");
+static_assert(::FX_OFFSET == FX_OFFSET, "audio-defs.h FX_OFFSET has drifted from effects.h");
+static_assert(::FX_THO    == FX_THO,    "audio-defs.h FX_THO has drifted from effects.h");
+static_assert(::FX_VOLUME == FX_VOLUME, "audio-defs.h FX_VOLUME has drifted from effects.h");
+static_assert(::FX_EQN    == FX_EQN,    "audio-defs.h FX_EQN has drifted from effects.h");
+static_assert(::FX_EQM    == FX_EQM,    "audio-defs.h FX_EQM has drifted from effects.h");
+static_assert(::FX_CUT    == FX_CUT,    "audio-defs.h FX_CUT has drifted from effects.h");
+static_assert(::FX_RES    == FX_RES,    "audio-defs.h FX_RES has drifted from effects.h");
 
 // Routing + plan_note_on (the note path itself) live in voice_derive.h — engine-agnostic, so
 // tools/ptvoice can instantiate the same code against a recorder and golden it.
