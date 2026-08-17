@@ -1218,6 +1218,19 @@ void InputDispatcher::on_a_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
+    // ⚠️ **THE SAMPLE EDITOR'S ROW 11 HAS A REPEATABLE A, and the double-tap window would eat half of
+    // it.** Everywhere else A,A means something a single A does not, so the mapper's 300 ms window
+    // routes the second press here instead. On row 11 A cuts a boundary at the playhead — the gesture
+    // is tapping along to the sample, and a 16th note at 120 BPM is 125 ms, well inside that window.
+    // Without this arm every other tap of a fast pass would land in `on_a_a` and be dropped by the
+    // insert-position gate below, which is a boundary the user heard themselves place and cannot find.
+    //
+    // ⚠️ It is the editor's confirm dialog, not `confirm_open()`, that owns the buttons in here.
+    if (on_sample_editor() && !s_.sampleEditor.showConfirmClose && s_.sampleEditor.cursorRow == 11) {
+        tap_slice_marker();
+        return;
+    }
+
     // ⚠️ RESAMPLE is checked BEFORE the double-tap-position gate below, and it must be — Kotlin's
     // handleAA opens with the identical arm ahead of its InsertPosition logic. Under a SONG selection
     // the FIRST A press COPIED the selection rather than inserting an item, so `hasInsertPos_` was
@@ -4017,6 +4030,43 @@ void InputDispatcher::reset_slice_marker() {
     select_current_slice();
 }
 
+/**
+ * Cut a boundary at the playhead — the "slice it by ear" gesture. MANUAL only, and only while the
+ * sample is actually sounding: with nothing playing there is no playhead to cut at.
+ *
+ * ⭐ **It reads `playbackPosition`, the same field the waveform draws its playhead line from, and that
+ * is the point rather than a shortcut.** A fresher number straight off the voice would land the
+ * boundary somewhere the user never saw — they are tapping to a line on the screen and to audio that
+ * left the device a buffer ago, so the line they were looking at IS the frame they meant.
+ *
+ * SNAP searches BACKWARD, unlike a drag's "in the direction of travel". A tap has no direction, and it
+ * is always LATE — reaction time plus the audio buffer — so the zero crossing that matters is the one
+ * before the hit rather than the one inside it.
+ */
+void InputDispatcher::tap_slice_marker() {
+    SampleEditorState& se = s_.sampleEditor;
+    if (se.sliceMethod != SampleEditorModule::SLICE_MANUAL) return;
+    if (se.totalFrames <= 0 || se.playbackPosition < 0.0f) return;
+
+    const int64_t last = static_cast<int64_t>(se.totalFrames) - 1;
+    int64_t       want = std::clamp<int64_t>(
+        static_cast<int64_t>(se.playbackPosition * static_cast<float>(se.totalFrames)), 0, last);
+    if (se.snapEnabled)
+        want = host_.find_zero_crossing(se.instrumentId, static_cast<int>(want), -1, se.sourceMode);
+
+    materialise_manual_markers();
+    std::vector<SliceMarker>& m = se.manualMarkers;
+
+    // ⚠️ Past the end of the list on purpose: a tap always MAKES a boundary, wherever the cursor
+    // happens to be sitting. `place_slice_marker` stamps a made one with origin −1 — "by hand, with
+    // nowhere to go back to" — which is what makes A+B remove it rather than move it.
+    const int landed = place_slice_marker(m, static_cast<int>(m.size()), want, +1, se.totalFrames);
+    if (landed < 0) return;
+
+    se.sliceIndex = landed + 1;   // the cursor follows the cut onto the slice it opens
+    select_current_slice();
+}
+
 // ─── RATE: the destructive one on row 1 ──────────────────────────────────────────────────────────
 
 void InputDispatcher::apply_sample_rate_mode() {
@@ -4119,6 +4169,18 @@ void InputDispatcher::sample_editor_confirm() {
     };
 
     switch (se.cursorRow) {
+        // ── Row 11: cut a boundary at the playhead, mid-audition ─────────────────────────────────
+        //
+        // The whole row, both columns, exactly as A+B on it is: which column the cursor sits in says
+        // which NUMBER you are reading, and neither of them is what a tap is aimed at.
+        //
+        // ⚠️ This is the one A on this screen that does nothing destructive and takes no undo backup —
+        // a boundary is editor state, not audio. It must sit ABOVE the `begin_destructive` rows for
+        // that to stay obvious, not because the order matters to the switch.
+        case 11:
+            tap_slice_marker();
+            break;
+
         // ── Row 13: CROP  COPY  CUT  DUPL  PASTE  DEL ────────────────────────────────────────────
         case 13:
             switch (se.cursorCol) {

@@ -972,6 +972,15 @@ class InputDispatcher {
     /** A+B on row 11: put the marker under the cursor back where its method would have put it. */
     void reset_slice_marker();
 
+    /**
+     * A on row 11 under MANUAL: cut a boundary at the PLAYHEAD, while the sample is sounding.
+     *
+     * Slicing by ear rather than by number — press START, listen, and tap A on each hit. It makes the
+     * same kind of boundary a rightward drag does, so everything already built for one applies to it:
+     * A+DPAD walks it, A+B removes it, and the list stays sorted however out of order the taps arrive.
+     */
+    void tap_slice_marker();
+
     /** RATE (row 1, col 2) re-decimates the buffer — the one row-1 edit that changes the AUDIO. */
     void apply_sample_rate_mode();
 
