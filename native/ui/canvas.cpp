@@ -118,19 +118,38 @@ void Canvas::stroke_rect(int x, int y, int w, int h, Argb color, int thickness) 
     fill_rect(x + w - t, y + t, t, h - 2 * t, color);  // right
 }
 
+// One source pixel becomes a font_scale × font_scale block — nearest-neighbour by construction, which
+// is what keeps the glyphs hard-edged (Compose has to ask for FilterQuality.None to get the same thing
+// out of its atlas blit).
+//
+// ⚠️ THE BLOCKS ARE EMITTED AS RECTANGLES, NOT ONE PER LIT PIXEL, AND THE PIXELS MUST NOT CHANGE.
+// Text is 67–77 % of a frame (measured: with draw_glyph stubbed out, PHRASE goes 381 → 89 µs), and it
+// is spent in `fill_rect`'s per-call clip clamp rather than in the writes, which are nine bytes. So
+// identical adjacent ROWS merge into one band, and each band's horizontal RUNS become one rect —
+// 7.0–12.7 calls per glyph become 2.1–5.1, a 58–70 % cut depending on which characters a screen draws.
+//
+// The rects tile the same union with no overlap, exactly as the one-per-pixel version did, so a
+// translucent colour composites identically too — every covered pixel is still blended exactly once.
+// That is the safety argument; `ptshot` is what holds it, since every golden pixel comes through here.
 void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale) {
     if (font_scale <= 0) return;
-    for (int row = 0; row < 5; ++row) {
+    for (int row = 0; row < 5;) {
         const uint8_t bits = g[static_cast<size_t>(row)];
-        if (bits == 0) continue;
-        for (int col = 0; col < 5; ++col) {
-            if ((bits >> (4 - col)) & 1) {
-                // One source pixel becomes a font_scale × font_scale block. Nearest-neighbour by
-                // construction, which is what keeps the glyphs hard-edged (Compose has to ask for
-                // FilterQuality.None to get the same thing out of its atlas blit).
-                fill_rect(x + col * font_scale, y + row * font_scale, font_scale, font_scale, color);
-            }
+        if (bits == 0) { ++row; continue; }
+
+        int last = row + 1;
+        while (last < 5 && g[static_cast<size_t>(last)] == bits) ++last;
+        const int band_y = y + row * font_scale;
+        const int band_h = (last - row) * font_scale;
+
+        for (int col = 0; col < 5;) {
+            if (!((bits >> (4 - col)) & 1)) { ++col; continue; }
+            int end = col + 1;
+            while (end < 5 && ((bits >> (4 - end)) & 1)) ++end;
+            fill_rect(x + col * font_scale, band_y, (end - col) * font_scale, band_h, color);
+            col = end;
         }
+        row = last;
     }
 }
 
