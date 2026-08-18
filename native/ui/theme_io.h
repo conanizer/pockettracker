@@ -2,19 +2,24 @@
 
 // ─── .ptt — a theme, as a file ───────────────────────────────────────────────────────────────────
 //
-// The reader and writer for the theme files the four built-in palettes have been standing in for
-// since S1. It is the same job `songcore/project_io.h` does for `.ptp`, at a twentieth of the size,
-// and it is done the same way and for the same reason: nlohmann parses (tolerant, like kotlinx's
-// `ignoreUnknownKeys` + `coerceInputValues`), and a hand-rolled emitter writes bytes that are
-// IDENTICAL to what `kotlinx.serialization` produces on Android.
+// The reader and writer for the theme files the four built-in palettes stand in for. It is the same
+// job `songcore/project_io.h` does for `.ptp`, at a twentieth of the size, and it is done the same way:
+// nlohmann parses (tolerant, like kotlinx's `ignoreUnknownKeys` + `coerceInputValues`), and a
+// hand-rolled emitter writes bytes that are IDENTICAL to what `kotlinx.serialization` produces.
+//
+// ⚠️ THE `.ptp` GAVE ITS BYTE-EXACTNESS UP AND THE `.ptt` DID NOT. A project is rewritten by autosave
+// every few seconds and is 78 KB nobody reads, so it is minified; a theme is ~400 bytes a person may
+// open, edit or hand to someone else, and byte-exactness here still costs nothing. `serialize_theme`
+// therefore asks `JsonWriter` for `JsonLayout::Pretty` explicitly — that enum has no default, so this
+// is a stated choice rather than whatever the other caller happened to want.
 //
 // ⚠️ WHY BYTE-EXACT, when a theme is only eighteen colours and any JSON would "work"?
 //
 // Because byte-exactness is the only claim a golden can actually CHECK. "Semantically equivalent" is
 // a promise a test cannot hold you to; "these 400 bytes match the 400 bytes Kotlin wrote" is a promise
-// a `memcmp` holds you to. S2 bought the whole `.ptp` round trip with that argument and it has caught
-// real drift since. The user-facing half is the same as it was there: a `PocketTracker/` folder copied
-// off a phone onto an SD card must simply work, in both directions, with no conversion step.
+// a `memcmp` holds you to, and ptinput's THEMEPTT cases hold it. The user-facing half: a
+// `PocketTracker/` folder copied off a phone onto an SD card must simply work, in both directions,
+// with no conversion step.
 //
 // ⚠️ kotlinx's contract, reproduced exactly (this is the part that is easy to get almost right):
 //
@@ -38,7 +43,7 @@
 #include <cstdint>
 #include <string>
 
-#include "songcore/project_io.h"   // JsonWriter — kotlinx-exact, and already goldened by ptroundtrip
+#include "songcore/project_io.h"   // JsonWriter + JsonLayout
 #include "ui/filesystem.h"
 #include "ui/theme.h"
 #include "vendor/nlohmann/json.hpp"
@@ -77,7 +82,7 @@ inline VisualizerType visualizer_from_serial_name(const std::string& s) {
  */
 inline std::string serialize_theme(const Theme& t) {
     const Theme d{};   // the field defaults — kotlinx's yardstick, not ours
-    songcore::JsonWriter w;
+    songcore::JsonWriter w{songcore::JsonLayout::Pretty};
     w.begin_object();
 
     if (t.name != d.name) w.field_string("name", t.name);

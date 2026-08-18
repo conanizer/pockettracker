@@ -3,20 +3,27 @@
 
 // ─── .ptp / .pti reader + writer + migrate/normalize ────────────────────────────────────────────
 //
-// Reads with nlohmann/json (tolerant of unknown keys); writes with a hand-rolled emitter that
-// reproduces kotlinx.serialization's pretty-print output BYTE-FOR-BYTE. Proven by tools/ptroundtrip
-// against tools/testdata/*.ptp.
+// Reads with nlohmann/json (tolerant of unknown keys and of any whitespace); writes with a
+// hand-rolled MINIFIED emitter. Both directions are proven by tools/ptroundtrip against the golden
+// projects in tools/testdata.
 //
-// ⚠️ WHY BYTE-EXACT, now that this is the only writer there is: every .ptp a user already has was
-// written to this layout, and the goldens are byte-compared against it. Loosening the emitter does not
-// break a READER — nlohmann is whitespace-agnostic and every existing project would still load — but
-// it moves nine goldens and turns ptroundtrip's byte-identity into a structural compare. That is a
-// deliberate format decision, not a cleanup, and it is not free.
+// ⚠️ THE WRITTEN FORM IS MINIFIED; THE SCHEMA IS NOT NEGOTIABLE. Layout was 82 % of a .ptp, and
+// autosave rewrites the whole file every 3 s — 443 KB → 78 KB is flash wear, on a device whose
+// storage is the part that wears out. Everything a reader can observe is unchanged: the same keys,
+// in the same order, with the same omission rules. ⚠️ Any project a user already has still loads —
+// the emitter is the only thing that changed, and no reader here has ever cared about layout.
+// (JsonWriter still pretty-prints on request, and theme_io.h asks; see JsonLayout for why.)
 //
-// The kotlinx output contract we replicate (verified against the golden .ptp files, 2026-07):
-//   * Json { prettyPrint = true; ignoreUnknownKeys = true }  → encodeDefaults defaults to FALSE.
-//   * 4-space indent; "key": value (colon + one space); members/elements separated by ",\n";
-//     empty object = "{}", empty array = "[]"; NO trailing newline at end of file; LF throughout.
+// ⚠️ THE GOLDENS ARE STILL kotlinx's PRETTY-PRINTED BYTES AND MUST STAY THAT WAY. They are the one
+// artifact in this tree written by an implementation that no longer exists, which is the only reason
+// they can catch a schema drift in ours; regenerating them from this emitter would certify whatever
+// it currently does. ptroundtrip compares the parsed DOMs — key for key, in order — so the goldens
+// keep pinning everything except the layout that was deliberately dropped.
+//
+// The output contract (inherited from kotlinx, verified against the golden .ptp files):
+//   * encodeDefaults = FALSE; unknown keys ignored on read.
+//   * `{"key":value,...}` — no spaces, no newlines, none needed anywhere.
+//     Empty object = "{}", empty array = "[]"; no trailing newline.
 //   * Keys emitted in @Serializable DECLARATION order.
 //   * encodeDefaults=false omission, with kotlinx's value-vs-default comparison semantics:
 //       - scalar / String / enum / Note / SFOverrides / List : omit when == the FIELD default
@@ -26,9 +33,6 @@
 //       - nullable `= null` fields : omit when null.
 //       - fields with NO default (ids, Note.pitch/octave, InstrumentPreset.instrument) : always.
 //   * enums serialise by entry NAME; every number is an integer (no floats in this schema).
-//
-// Header-only and NOT part of the Android engine build (ENGINE_CORE_SOURCES) yet — songcore's JNI
-// seam lands in a later Phase-1 session. For now this compiles into the host round-trip tool only.
 
 #include "model.h"
 #include "../vendor/nlohmann/json.hpp"
@@ -378,31 +382,43 @@ inline void normalize_and_migrate(Project& p) {
     migrate_project(p);
 }
 
-// ─── writer: kotlinx-byte-exact pretty printer ──────────────────────────────────────────────────
+// ─── writer ─────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How a document is laid out. The SCHEMA is identical either way — same keys, same order, same
+ * omission rules — so this decides nothing a reader can observe, and both forms load everywhere.
+ *
+ * ⚠️ THERE IS NO DEFAULT, DELIBERATELY. The two files this writes want opposite things and the
+ * reason is size and audience, not taste:
+ *   * MINIFIED — the .ptp/.pti. Autosave rewrites a project every 3 s and layout was 82 % of it;
+ *     78 KB instead of 443 KB is flash wear on a device whose storage is the part that wears out.
+ *     Nobody reads 78 KB of integer arrays, so there is nothing to make readable.
+ *   * PRETTY — the .ptt. A theme is ~400 bytes, written when the user presses save, and it is the
+ *     one file here a person might open, hand-edit or hand to someone else. Its byte-golden is also
+ *     kotlinx's, which is what lets it catch a drift in ours (see theme_io.h).
+ * A third writer has to pick a side rather than inherit whichever one was written first.
+ */
+enum class JsonLayout { Minified, Pretty };
 
 class JsonWriter {
 public:
     std::string out;
 
-    void begin_object() { out += '{'; stack_.push_back(true); ++depth_; }
-    void end_object()   { bool had = !stack_.back(); stack_.pop_back(); --depth_; if (had) newline_indent(); out += '}'; }
-    void begin_array()  { out += '['; stack_.push_back(true); ++depth_; }
-    void end_array()    { bool had = !stack_.back(); stack_.pop_back(); --depth_; if (had) newline_indent(); out += ']'; }
+    explicit JsonWriter(JsonLayout layout) : pretty_(layout == JsonLayout::Pretty) {}
 
-    // In an object: emit the separator + `"key": ` prefix. Follow with a value_* call or a nested
-    // begin_object/begin_array.
+    void begin_object() { out += '{'; stack_.push_back(true); ++depth_; }
+    void end_object()   { close('}'); }
+    void begin_array()  { out += '['; stack_.push_back(true); ++depth_; }
+    void end_array()    { close(']'); }
+
+    // In an object: emit the separator + `"key":` prefix (`"key": ` when pretty). Follow with a
+    // value_* call or a nested begin_object/begin_array.
     void key(const char* k) {
-        if (!stack_.back()) out += ',';
-        stack_.back() = false;
-        newline_indent();
-        out += '"'; escape_into(k); out += "\": ";
+        separator();
+        out += '"'; escape_into(k); out += pretty_ ? "\": " : "\":";
     }
-    // In an array: emit the separator + indent before an element value.
-    void element() {
-        if (!stack_.back()) out += ',';
-        stack_.back() = false;
-        newline_indent();
-    }
+    // In an array: emit the separator before an element value.
+    void element() { separator(); }
 
     void value_int(long long v)          { out += std::to_string(v); }
     void value_bool(bool b)              { out += b ? "true" : "false"; }
@@ -415,8 +431,29 @@ public:
 private:
     std::vector<bool> stack_;  // per-open-container: still empty?  (true = no members/elements yet)
     int depth_ = 0;
+    bool pretty_;
 
-    void newline_indent() { out += '\n'; out.append((size_t)depth_ * 4, ' '); }
+    // A comma before every member/element except the first one in its container, and — only when
+    // pretty — the newline + indent that follows it. Together with key()'s colon these are the ONLY
+    // places layout is emitted, which is what makes the minified form contain no whitespace at all.
+    void separator() {
+        if (!stack_.back()) out += ',';
+        stack_.back() = false;
+        newline_indent();
+    }
+    // An empty container stays `{}` / `[]` on one line, with or without pretty-printing.
+    void close(char brace) {
+        const bool had = !stack_.back();
+        stack_.pop_back();
+        --depth_;
+        if (had) newline_indent();
+        out += brace;
+    }
+    void newline_indent() {
+        if (!pretty_) return;
+        out += '\n';
+        out.append((size_t)depth_ * 4, ' ');
+    }
 
     void escape_into(const char* s) { escape_into(s, std::char_traits<char>::length(s)); }
     void escape_into(const char* s, size_t n) {
@@ -657,7 +694,7 @@ inline void emit_pool(JsonWriter& w, const char* key, const std::vector<T>& pool
 // Serialize a Project to the exact bytes kotlinx.serialization would write (no trailing newline).
 inline std::string serialize_project(const Project& p) {
     using namespace detail;
-    JsonWriter w;
+    JsonWriter w{JsonLayout::Minified};
     w.begin_object();
     if (p.version != 0)         w.field_int("version", p.version);
     if (p.name != "UNTITLED")   w.field_string("name", p.name);
@@ -703,7 +740,7 @@ inline std::string serialize_project(const Project& p) {
 // Serialize an InstrumentPreset (.pti) to kotlinx-exact bytes.
 inline std::string serialize_instrument_preset(const InstrumentPreset& ip) {
     using namespace detail;
-    JsonWriter w;
+    JsonWriter w{JsonLayout::Minified};
     w.begin_object();
     if (ip.version != 1) w.field_int("version", ip.version);
     w.key("instrument");

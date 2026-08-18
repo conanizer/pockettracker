@@ -84,7 +84,7 @@ native/                            The portable program
 │
 ├── songcore/                      Header-only, platform-free. No SDL, no JNI, no POSIX.
 │   ├── model.h                      Project, Chain, Phrase, Table, Groove, Instrument, Note
-│   ├── project_io.h                 .ptp / .pti parse + emit (byte-exact)
+│   ├── project_io.h                 .ptp / .pti parse + emit (minified), and JsonWriter
 │   ├── project_ops.h                Compact, transitive table walks, slot surgery
 │   ├── timing.h                     frames_per_step / _tic, groove timing, transpose
 │   ├── effects.h                    Effect codes, names, EFFECT_TYPES, resolve_step_params
@@ -384,16 +384,22 @@ note-on on an empty instrument is still a valid *event*; the consumer is what dr
 
 | Extension | Contents |
 |---|---|
-| `.ptp` | A project. JSON, pretty-printed, defaults omitted. |
+| `.ptp` | A project. JSON, minified, defaults omitted. |
 | `.pti` | A single instrument preset — any type, including external. |
 | `settings.json` | Device and app settings. Shared shape across platforms. |
 | `config.json` | Optional overrides: the browser's folders, the gamepad's face-button layout, and the keyboard bindings. |
 | `.ptt` | A theme. |
 
-`project_io.h` emits **byte-exact** JSON: the field order, the pretty-printing and the
-default-omission rules are all pinned, and a set of golden projects round-trips byte-for-byte under
-the headless test suite (developed separately — see [`building.md`](building.md)). Any new serialized
-field must be default-guarded or those goldens break.
+`project_io.h` pins the **schema**, not the layout: field order and the default-omission rules are
+fixed, and a set of golden projects round-trips against them under the headless test suite (developed
+separately — see [`building.md`](building.md)). Any new serialized field must be default-guarded or
+those goldens break.
+
+A `.ptp` is written **minified** and a `.ptt` **pretty-printed**, from the same emitter, and the split
+is not cosmetic. Autosave rewrites the whole project every few seconds, and layout was 82 % of the
+bytes; a theme is a few hundred bytes a person may open or hand to someone else. The goldens stay
+pretty-printed either way — they are the only artifact here written by an implementation that no
+longer exists, so regenerating them from the emitter they exist to check would prove nothing.
 
 ### Storage
 
