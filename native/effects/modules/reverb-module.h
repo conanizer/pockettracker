@@ -14,15 +14,15 @@ struct ReverbModule {
     EqModule          inputEq;
     float             sampleRate = 44100.0f;   // the rate the delay lines were actually built at
 
-    // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array and refuses a rate whose lines
-    // will not fit — about 48 kHz is the ceiling. Its refusal leaves three buffer pointers
+    // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array, sized for exactly this rate,
+    // and refuses any rate whose lines will not fit. Its refusal leaves three buffer pointers
     // indeterminate, so the return value is not optional: `Process` would dereference them.
     //
     // A device above the ceiling gets a reverb built at the ceiling instead: shorter and brighter
     // than intended, which is the same compromise the whole engine ran on before the buses learned
     // the device rate at all, and much better than no reverb. `sampleRate` records what was really
     // used, so nobody reads it as the device rate.
-    static constexpr float MAX_SUPPORTED_RATE = 48000.0f;
+    static constexpr float MAX_SUPPORTED_RATE = DSY_REVERBSC_MAX_RATE;
 
     void reset(float sr) {
         sampleRate = sr;

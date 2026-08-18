@@ -614,8 +614,9 @@ private:
     // sample-editor op must hold the returned lock while mutating/freeing the slot's buffers so
     // the audio thread's try_lock fails (one silent block) instead of reading freed memory.
     std::unique_lock<std::mutex> beginSampleEdit(int id);
-    // Apply a global EQ preset (0-127, <0 = bypass) to a live voice's inline EQ (EQN effect).
-    void applyEqPresetToChain(InstrumentChain& chain, int slot);
+    // Apply a global EQ preset (0-127, <0 = bypass) to any EQ — a live voice's inline EQ (EQN), the
+    // master bus (EQM), or a send's input EQ. The one place a slot becomes band params.
+    void applyEqPresetToModule(EqModule& eq, int slot);
     // The same write, from band VALUES rather than a slot — an AUS/AUF morph tick (EqBandsHex).
     void applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands);
     // Release one SoundFont slot. Order matters — detach the per-track voices FIRST (so the render

@@ -938,7 +938,7 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdva
             // the arming the bus keeps the table's preset after the transport stops, and the FX
             // helper's "resets to mixer EQ on stop" would be false for exactly this one way in.
             case FX_EQN:
-                applyEqPresetToChain(voice.chain, fxValue);
+                applyEqPresetToModule(voice.chain.eq, fxValue);
                 break;
 
             case FX_EQM:
@@ -1243,10 +1243,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     int slot = (int)upd.value;
                     for (int v = 0; v < MAX_VOICES; v++)
                         if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            applyEqPresetToChain(voices[v].chain, slot); break;
+                            applyEqPresetToModule(voices[v].chain.eq, slot); break;
                         }
                     if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        applyEqPresetToChain(sfVoices[upd.trackId].chain, slot);
+                        applyEqPresetToModule(sfVoices[upd.trackId].chain.eq, slot);
                     break;
                 }
                 case PARAM_UPDATE_MASTER_EQ: {            // EQM — master/mixer EQ preset (global)
@@ -2715,7 +2715,7 @@ static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
 }
 
 // Apply a morph tick's bands to an EQ (a live voice's inline EQ, or the master chain's). Mirrors
-// applyEqPresetToChain, but the bands arrive as values rather than as a slot to look up.
+// applyEqPresetToModule, but the bands arrive as values rather than as a slot to look up.
 void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
     bool any = false;
     for (int i = 0; i < 3; i++) {
@@ -2726,19 +2726,23 @@ void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
     eq.active = any;
 }
 
-// Apply a global EQ preset (slot 0-127, <0 = bypass) to a live voice's inline EQ. The voice's
-// chain.eq was already sp_pareq_init'd at trigger (chain.reset), so we only re-set band params.
-// Mirrors setInstrumentEqSlot's preset→bands copy, but writes straight into a playing voice (EQN).
-void AudioEngine::applyEqPresetToChain(InstrumentChain& chain, int slot) {
-    if (slot < 0 || slot >= 128) { chain.eq.active = false; return; }
+// Apply a global EQ preset (slot 0-127, <0 = bypass) to any EQ: a live voice's inline EQ (EQN), the
+// master bus (EQM), or either send's input EQ. The target was already sp_pareq_init'd by its owner's
+// reset, so only the band params are re-set here.
+//
+// `active` follows "some band is not type 0" rather than "the slot index is in range". The two are
+// audibly identical — a type-0 band sets its own `bypass` and returns the input untouched
+// (eq-module.h) — but the derived form skips three bypassed bands per sample on an all-off preset.
+void AudioEngine::applyEqPresetToModule(EqModule& eq, int slot) {
+    if (slot < 0 || slot >= 128) { eq.active = false; return; }
     const EqPresetBank& preset = eqPresets[slot];
     bool any = false;
     for (int i = 0; i < 3; i++) {
-        chain.eq.bands[i].setParams(preset.bands[i].type, preset.bands[i].freqHz,
-                                    preset.bands[i].gainDb, preset.bands[i].q);
+        eq.bands[i].setParams(preset.bands[i].type, preset.bands[i].freqHz,
+                              preset.bands[i].gainDb, preset.bands[i].q);
         if (preset.bands[i].type != 0) any = true;
     }
-    chain.eq.active = any;
+    eq.active = any;
 }
 
 static const int SPECTRUM_FFT_SIZE = 2048;

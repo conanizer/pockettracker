@@ -26,7 +26,9 @@ using namespace daisysp;
 /* kReverbParams[n][2] = random variation frequency (in 1/sec)       */
 /* kReverbParams[n][3] = random seed (0 - 32767)                     */
 
-static const float kReverbParams[8][4]
+/* ⚠️ PT: constexpr so the aux_ budget can be checked against this table at compile time — see the
+ * static_assert below `DelayLineMaxSamples`. Nothing else about it changed. */
+static constexpr float kReverbParams[8][4]
     = {{(2473.0 / DEFAULT_SRATE), 0.0010, 3.100, 1966.0},
        {(2767.0 / DEFAULT_SRATE), 0.0011, 3.500, 29491.0},
        {(3217.0 / DEFAULT_SRATE), 0.0017, 1.110, 22937.0},
@@ -36,11 +38,39 @@ static const float kReverbParams[8][4]
        {(2143.0 / DEFAULT_SRATE), 0.0017, 0.891, 29491.0},
        {(1933.0 / DEFAULT_SRATE), 0.0006, 3.221, 14417.0}};
 
-static int DelayLineMaxSamples(float sr, float i_pitch_mod, int n);
 //static int InitDelayLine(dsy_reverbsc_dl *lp, int n);
-static int         DelayLineBytesAlloc(float sr, float i_pitch_mod, int n);
 static const float kOutputGain = 0.35;
 static const float kJpScale    = 0.25;
+
+static constexpr int DelayLineMaxSamples(float sr, float i_pitch_mod, int n)
+{
+    /* ⚠️ PT: initialised at its declaration — upstream declared it bare and assigned on the next
+     * line, which C++17 forbids inside a constant expression. The arithmetic is unchanged. */
+    float max_del = kReverbParams[n][0];
+    max_del += (kReverbParams[n][1] * (float)i_pitch_mod * 1.125);
+    return (int)(max_del * sr + 16.5);
+}
+
+/* ⚠️ PT: `aux_` is exactly what the eight lines ask for at the highest rate they may be built at.
+ *
+ * The upper bound is what makes `Init` safe; the lower one is what keeps the array from silently
+ * growing back. The slack is 8 rather than 0 because this sum is computed with constant-folded IEEE
+ * arithmetic while `Init` computes it at runtime, where a target may contract `max_del * sr + 16.5`
+ * into an FMA and land the other side of the truncation — one sample per line, eight lines. */
+static constexpr int kAuxFloatsNeeded()
+{
+    int total = 0;
+    for(int i = 0; i < 8; i++)
+        total += DelayLineMaxSamples(DSY_REVERBSC_MAX_RATE, 1, i);
+    return total;
+}
+static_assert(kAuxFloatsNeeded() <= DSY_REVERBSC_MAX_SIZE,
+              "ReverbSc::aux_ is smaller than the eight delay lines need at DSY_REVERBSC_MAX_RATE — "
+              "Init would refuse that rate, and ReverbModule would fall back to a rate it also "
+              "refuses");
+static_assert(DSY_REVERBSC_MAX_SIZE - kAuxFloatsNeeded() <= 8,
+              "ReverbSc::aux_ is carrying padding no delay line can reach — it is 396 KB of an "
+              "AudioEngine that must already be heap-allocated, so the slack is not free");
 
 int ReverbSc::Init(float sr)
 {
@@ -53,47 +83,29 @@ int ReverbSc::Init(float sr)
     damp_fact_     = 1.0;
     prv_lpfreq_    = 0.0;
     init_done_     = 1;
-    int i, n_bytes = 0;
-    n_bytes = 0;
+    /* ⚠️ PT: ONE UNIT, AND THE BOUND MUST COVER THE WRITE.
+     *
+     * `buf` is `float*` and `InitDelayLine` zeroes `buffer_size` FLOATS, so the running offset is a
+     * float count — upstream accumulated bytes into it, which placed every line four times further
+     * into `aux_` than it needed and left the test at the top of the loop admitting an iteration
+     * whose write does not fit: at 96 kHz the fifth line started at float 98,272, inside the array,
+     * and ran 7,274 floats past the end into the rest of the AudioEngine object, after which `Init`
+     * returned 1 with `delay_lines_[5..7].buf` never assigned and the first `Process` dereferenced
+     * three indeterminate pointers.
+     *
+     * Counting the same unit on both sides makes the test exact: the lines tile `aux_` end to end,
+     * and a rate whose eight lines do not fit is refused before the first one is placed. */
+    int i, n_floats = 0;
     for(i = 0; i < 8; i++)
     {
-        /* ⚠️ PT: the bound must cover the WRITE, not just the running total.
-         *
-         * `n_bytes` counts BYTES while `buf` is `float*` and `InitDelayLine` zeroes `buffer_size`
-         * FLOATS, so each line is placed four times further into `aux_` than it needs and the last
-         * one writes past wherever `n_bytes` has reached. Upstream's test at the top of the loop
-         * therefore admits an iteration whose write does not fit: at 96 kHz the fifth line starts at
-         * float 98,272 — inside the array — and runs to 106,210, which is 7,274 floats (29 KB) past
-         * the end, straight into the rest of the AudioEngine object. Then `Init` returns 1 with
-         * `delay_lines_[5..7].buf` never assigned, and the first `Process` dereferences three
-         * indeterminate pointers.
-         *
-         * Testing `n_bytes + <this line's floats>` refuses the rate BEFORE the overrun instead of
-         * after it. The placement is untouched, so nothing changes at 44.1 or 48 kHz. */
-        if(n_bytes + DelayLineMaxSamples(sr, 1, i) > DSY_REVERBSC_MAX_SIZE)
+        const int line = DelayLineMaxSamples(sr, 1, i);
+        if(n_floats + line > DSY_REVERBSC_MAX_SIZE)
             return 1;
-        delay_lines_[i].buf = (aux_) + n_bytes;
+        delay_lines_[i].buf = (aux_) + n_floats;
         InitDelayLine(&delay_lines_[i], i);
-        n_bytes += DelayLineBytesAlloc(sr, 1, i);
+        n_floats += line;
     }
     return 0;
-}
-
-static int DelayLineMaxSamples(float sr, float i_pitch_mod, int n)
-{
-    float max_del;
-
-    max_del = kReverbParams[n][0];
-    max_del += (kReverbParams[n][1] * (float)i_pitch_mod * 1.125);
-    return (int)(max_del * sr + 16.5);
-}
-
-static int DelayLineBytesAlloc(float sr, float i_pitch_mod, int n)
-{
-    int n_bytes = 0;
-
-    n_bytes += (DelayLineMaxSamples(sr, i_pitch_mod, n) * (int)sizeof(float));
-    return n_bytes;
 }
 
 void ReverbSc::NextRandomLineseg(ReverbScDl *lp, int n)

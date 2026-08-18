@@ -306,10 +306,7 @@ void AudioEngine::restoreFxPreviewBackup() {
     if (fxPreviewBackupId < 0 || !fxPreviewBackup) return;
     int id = fxPreviewBackupId;
     if (id >= 0 && id < 256 && samples[id] && sampleLengths[id] == fxPreviewBackupLen) {
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
-        }
-        std::lock_guard<std::mutex> lock(sampleEditMutex);
+        auto lock = beginSampleEdit(id);
         std::memcpy(samples[id], fxPreviewBackup, fxPreviewBackupLen * sizeof(float));
         if (fxPreviewBackupRight && samplesRight[id])
             std::memcpy(samplesRight[id], fxPreviewBackupRight, fxPreviewBackupLen * sizeof(float));
@@ -643,9 +640,11 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
         LimiterModule lim;
         lim.reset();
         lim.setPreGain(1.0f + (limiterPreGain / 255.0f) * 3.0f);
-        for (int i = 0; i < len; i++) {
-            lim.limL.ProcessBlock(&buf[i], 1, lim.preGain);
-        }
+        // One call over the whole channel. `LimiterModule::process` goes a frame at a time because
+        // its buffer is INTERLEAVED and the two limiters must not read each other's samples; this
+        // buffer is de-interleaved mono, so the block API walks it directly. `ProcessBlock` carries
+        // nothing across calls but `peak_`, which the loop carried too — the output is identical.
+        lim.limL.ProcessBlock(buf, static_cast<size_t>(len), lim.preGain);
     };
 
     applyToChannel(samples[id]);
@@ -776,44 +775,11 @@ void AudioEngine::setDelayReverbSend(int sendHex) {
     delayToReverbSend = sendHex / 255.0f;
 }
 
-void AudioEngine::setReverbInputEq(int slot) {
-    if (slot < 0 || slot >= 128) {
-        reverbSend.inputEq.active = false;
-        return;
-    }
-    const auto& preset = eqPresets[slot];
-    reverbSend.inputEq.active = true;
-    for (int b = 0; b < 3; b++)
-        reverbSend.inputEq.bands[b].setParams(
-            preset.bands[b].type, preset.bands[b].freqHz,
-            preset.bands[b].gainDb, preset.bands[b].q);
-}
+void AudioEngine::setReverbInputEq(int slot) { applyEqPresetToModule(reverbSend.inputEq, slot); }
 
-void AudioEngine::setDelayInputEq(int slot) {
-    if (slot < 0 || slot >= 128) {
-        delaySend.inputEq.active = false;
-        return;
-    }
-    const auto& preset = eqPresets[slot];
-    delaySend.inputEq.active = true;
-    for (int b = 0; b < 3; b++)
-        delaySend.inputEq.bands[b].setParams(
-            preset.bands[b].type, preset.bands[b].freqHz,
-            preset.bands[b].gainDb, preset.bands[b].q);
-}
+void AudioEngine::setDelayInputEq(int slot) { applyEqPresetToModule(delaySend.inputEq, slot); }
 
-void AudioEngine::setMasterEqSlot(int slot) {
-    if (slot < 0 || slot >= 128) {
-        masterChain.masterEq.active = false;
-        return;
-    }
-    const auto& preset = eqPresets[slot];
-    masterChain.masterEq.active = true;
-    for (int b = 0; b < 3; b++)
-        masterChain.masterEq.bands[b].setParams(
-            preset.bands[b].type, preset.bands[b].freqHz,
-            preset.bands[b].gainDb, preset.bands[b].q);
-}
+void AudioEngine::setMasterEqSlot(int slot) { applyEqPresetToModule(masterChain.masterEq, slot); }
 
 void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                                       int drv, int crsh, int dwn, int fType, int fCut, int fRes) {

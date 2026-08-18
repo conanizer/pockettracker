@@ -10,7 +10,21 @@ https://opensource.org/license/lgpl-2-1/
 #ifndef DSYSP_REVERBSC_H
 #define DSYSP_REVERBSC_H
 
-#define DSY_REVERBSC_MAX_SIZE 98936
+/* ⚠️ PT: `aux_` IS SIZED IN FLOATS, AND USED TO BE COUNTED IN BYTES.
+ *
+ * Upstream's 98936 is a byte budget, but `aux_` is `float[DSY_REVERBSC_MAX_SIZE]` and `Init` placed
+ * each delay line at a float offset it had accumulated in bytes — so every line sat four times
+ * further into the array than it needed and three quarters of a 396 KB member was padding between
+ * them. `Init` now advances in floats, which is the unit `buf` is indexed in, and the array is the
+ * count the eight lines really need.
+ *
+ * The two constants below are ONE fact: the size is what `kReverbParams` asks for at the highest
+ * rate the lines are allowed to be built at, and reverbsc.cpp static_asserts them against that
+ * table, so raising the rate without regrowing the array — or the reverse — will not compile.
+ * `ReverbModule::MAX_SUPPORTED_RATE` reads the rate from here rather than repeating it, and a
+ * device running faster than this gets its reverb built at this rate instead (reverb-module.h). */
+#define DSY_REVERBSC_MAX_RATE 48000.0f
+#define DSY_REVERBSC_MAX_SIZE 24726
 
 namespace daisysp
 {
