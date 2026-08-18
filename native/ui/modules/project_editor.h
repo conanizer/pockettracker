@@ -11,9 +11,14 @@
 // of their behaviour is what plain A does on them, which lives in the dispatcher. That is why
 // `handle_input` below only ever touches rows 0-2, exactly as Kotlin's does.
 //
-// ⚠️ NAME is the port's first IN-PLACE character editor. Each of the 20 characters is its own cursor
-// COLUMN (1..20), A+UP/DOWN walks `allowed_chars()`, and A+B writes a space. (A on the row opens the
-// QWERTY keyboard instead — the deferred-A latch S6a built for the INSTRUMENT NAME cell.)
+// ⚠️ NAME is the port's first IN-PLACE character editor. Each of its `PROJECT_NAME_MAX_CHARS`
+// characters is its own cursor COLUMN (1..20), A+UP/DOWN walks `allowed_chars()`, and A+B writes a
+// space. (A on the row opens the QWERTY keyboard instead — the deferred-A latch S6a built for the
+// INSTRUMENT NAME cell.)
+//
+// ⚠️ There are more columns than the row can show. The field scrolls under the cursor and marks the
+// hidden side with a "…", which is why the draw goes through `qwerty_text_window` — the same window
+// the keyboard's own text box uses, for the same reason.
 //
 // ⚠️ Column 0 — the row LABEL — is unreachable on this screen. `getProjectCursorLeftColumn` coerces
 // to at least 1 and the cursor starts there, so ProjectModule's four `cursorColumn == 0 -> readOnly()`
@@ -58,6 +63,21 @@ class ProjectModule {
 public:
     static constexpr int WIDTH  = 510;
     static constexpr int HEIGHT = 392;
+
+    /** x of the value column, from the module's own left edge. Every row's value starts here. */
+    static constexpr int VALUE_X = 210;
+
+    /**
+     * How many of NAME's `PROJECT_NAME_MAX_CHARS` cells are on screen at once. The row cannot show
+     * all of them — `VALUE_X` plus 20 character columns lands past the editor clip — so the field
+     * scrolls under the cursor, exactly as the QWERTY box does, with a "…" on whichever side is
+     * hiding characters.
+     *
+     * ⚠️ **This number belongs to the clip, not to this file**, and the clip is a `layout.h` fact:
+     * two `static_assert`s there hold it to the most cells that fit. Do not adjust it to taste — move
+     * `VALUE_X` and let them re-derive it.
+     */
+    static constexpr int NAME_VISIBLE_CHARS = 17;
 
     void draw(Canvas& c, int x, int y, const ProjectState& s) const;
 

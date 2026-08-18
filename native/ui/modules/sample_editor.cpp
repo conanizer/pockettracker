@@ -46,6 +46,10 @@ const std::vector<std::string>& SampleEditorModule::duration_values() {
                                             "1/4",   "1/8",   "1/16",  "1/32"};
     return v;
 }
+double SampleEditorModule::duration_beats(int duration_index) {
+    const int i = std::clamp(duration_index, 0, static_cast<int>(duration_values().size()) - 1);
+    return 16.0 / static_cast<double>(1 << i);   // 4 BAR = 16 beats, halving to 1/32 = 0.125
+}
 const std::vector<std::string>& SampleEditorModule::fx_types() {
     static const std::vector<std::string> v{"OTT", "DUST", "DRIVE", "EQ", "SYNC"};
     return v;
@@ -272,6 +276,18 @@ std::string SampleEditorState::duration_display() const {
     return std::string(buf);
 }
 
+std::string SampleEditorState::bpm_display() const {
+    if (sampleRate <= 0 || totalFrames <= 0) return "---BPM";
+
+    const double ratio   = std::pow(2.0, pitchSemitones / 12.0);
+    const double seconds = static_cast<double>(totalFrames) / (ratio * sampleRate);
+    if (seconds <= 0.0) return "---BPM";
+
+    const long bpm = std::lround(SampleEditorModule::duration_beats(durationIndex) * 60.0 / seconds);
+    if (bpm < 1 || bpm > 999) return "---BPM";
+    return std::to_string(bpm) + "BPM";
+}
+
 // ─── The draw ────────────────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -321,6 +337,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     {
         const int ty = y + 5 + TEXT_PADDING;
         c.draw_text("SAMPLE EDITOR", x + 10, ty, t.textTitle, CHAR_SPACING, FONT_SCALE);
+        // BPM sits in the gap the title leaves, left of the two facts it is derived from: the rate
+        // and the length. Six columns is what fits there, which is what caps the reading at 999.
+        c.draw_text(s.bpm_display(), x + 245, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(std::to_string(s.sampleRate) + "Hz", x + 360, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(s.duration_display(), x + 492, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
     }

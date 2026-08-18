@@ -4,16 +4,15 @@
 #include <initializer_list>
 
 #include "ui/helpers.h"
+#include "ui/modules/qwerty_keyboard.h"
 
 namespace pt::ui {
 
 namespace {
 
-constexpr int NAME_X   = 10;   // the label column
-constexpr int VALUE_X  = 210;  // the value column
+constexpr int NAME_X   = 10;                       // the label column
+constexpr int VALUE_X  = ProjectModule::VALUE_X;   // the value column
 constexpr int OPTION_W = 80;   // the stride between the buttons on a multi-button row
-
-constexpr int NAME_MAX_CHARS = 20;
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -115,16 +114,40 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     param_row(ProjectRow::TEMPO,     "TEMPO",     pad3(p.tempo));
     param_row(ProjectRow::TRANSPOSE, "TRANSPOSE", hex2(p.transpose));
 
-    // ── NAME — 20 characters, one per cursor column ──────────────────────────────────────────────
+    // ── NAME — 20 characters, one per cursor column, in a 17-column window ───────────────────────
+    //
+    // The row affords `NAME_VISIBLE_CHARS` columns before the editor clip, so the last three cells
+    // used to be drawn straight into it: a name could be typed to 20 characters and only ever read
+    // to 17, with nothing on screen saying so. The field scrolls under the cursor instead.
     {
         const ProjectRow row = ProjectRow::NAME;
         row_bg(row);
         label(row, "NAME");
 
-        const std::string name = p.name.substr(0, std::min<size_t>(p.name.size(), NAME_MAX_CHARS));
+        const std::string name =
+            p.name.substr(0, std::min<size_t>(p.name.size(), PROJECT_NAME_MAX_CHARS));
 
-        int charX = valueX;
-        for (int i = 0; i < NAME_MAX_CHARS; ++i) {
+        // ⚠️ The window's content is the name OR the cursor, whichever reaches further — not the 20
+        // cells. A cell past the end of the name is blank, and a "…" beside blanks claims there is
+        // text off the edge when there is not; the cursor still has to be reachable out there,
+        // because typing into cell 19 of an 8-character name is how it gets longer. The helper adds
+        // a phantom column of its own for a keyboard's end-of-text cursor, so it is handed one less.
+        const int cursorChar = on_row(row) ? s.cursorColumn - 1 : 0;
+        const int content    = std::max(static_cast<int>(name.size()), cursorChar + 1);
+        const QwertyTextWindow win =
+            qwerty_text_window(content - 1, cursorChar, ProjectModule::NAME_VISIBLE_CHARS);
+
+        const std::string ELLIPSIS = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
+        const Argb markerColor = darken(t.textValue, 0.5f);
+        const int  textX       = valueX + (win.clipLeft ? CHAR_W : 0);
+
+        if (win.clipLeft)
+            c.draw_text(ELLIPSIS, valueX, rowY(row) + TEXT_PADDING, markerColor, CHAR_SPACING,
+                        FONT_SCALE);
+
+        for (int k = 0; k < win.cols; ++k) {
+            const int  i          = win.first + k;
+            const int  charX      = textX + k * CHAR_W;
             const bool onThisChar = on_cell(row, i + 1);
 
             // The per-character cursor is a DARKENED block behind the glyph, not a row highlight —
@@ -138,8 +161,11 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
                             rowY(row) + TEXT_PADDING,
                             onThisChar ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
             }
-            charX += CHAR_W;
         }
+
+        if (win.clipRight)
+            c.draw_text(ELLIPSIS, textX + win.cols * CHAR_W, rowY(row) + TEXT_PADDING, markerColor,
+                        CHAR_SPACING, FONT_SCALE);
     }
 
     // ⚠️ SAVE is column 1 and LOAD is column 2 — the draw order, not the reading order. The Kotlin
@@ -212,7 +238,7 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
 
         case ProjectRow::NAME: {
             const int charIndex = s.cursorColumn - 1;
-            if (charIndex >= NAME_MAX_CHARS) return cc::none();
+            if (charIndex >= PROJECT_NAME_MAX_CHARS) return cc::none();
             // Past the end of the name is a SPACE, not an empty cell — a character always has a value.
             const char ch = (charIndex < static_cast<int>(p.name.size()))
                                 ? p.name[static_cast<size_t>(charIndex)]
@@ -256,13 +282,13 @@ ProjectInputResult ProjectModule::handle_input(songcore::Project& project, int c
 
         case ProjectRow::NAME: {
             const int charIndex = cursor_column - 1;
-            if (charIndex < 0 || charIndex >= NAME_MAX_CHARS) return ProjectInputResult{false};
+            if (charIndex < 0 || charIndex >= PROJECT_NAME_MAX_CHARS) return ProjectInputResult{false};
 
             if (action.type == ActionType::SET_VALUE) {
                 // Pad, write, trim — Kotlin's `StringBuilder(name.padEnd(20)).setCharAt(i, c)`, then
                 // trimEnd. A name shorter than the cursor column grows to meet it.
                 std::string name = project.name;
-                if (name.size() < NAME_MAX_CHARS) name.resize(NAME_MAX_CHARS, ' ');
+                if (name.size() < PROJECT_NAME_MAX_CHARS) name.resize(PROJECT_NAME_MAX_CHARS, ' ');
                 name[static_cast<size_t>(charIndex)] = static_cast<char>(action.value);
                 project.name = trim_end(name);
 
@@ -272,7 +298,7 @@ ProjectInputResult ProjectModule::handle_input(songcore::Project& project, int c
                 // spaces and trimming them straight back off. Kotlin's asymmetry, kept.
                 if (charIndex < static_cast<int>(project.name.size())) {
                     std::string name = project.name;
-                    if (name.size() < NAME_MAX_CHARS) name.resize(NAME_MAX_CHARS, ' ');
+                    if (name.size() < PROJECT_NAME_MAX_CHARS) name.resize(PROJECT_NAME_MAX_CHARS, ' ');
                     name[static_cast<size_t>(charIndex)] = ' ';
                     project.name = trim_end(name);
                 }

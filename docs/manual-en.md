@@ -667,6 +667,11 @@ These modify the waveform in memory (UNDO is available after each operation).
 
 SYNC applies time or pitch transformations to match the sample to the current project BPM.
 
+The header shows the sample's own tempo beside its rate and length — the BPM it plays at if it holds
+exactly the bar count on the DURATION row. When that number matches the project's TEMPO the sample is
+already on the grid. `---BPM` means there is no sample, or that DURATION is set to a length this
+sample cannot be.
+
 | Sub-mode | Description |
 |---|---|
 | RPITCH | Pitch-shifts the selection to align its length to a target beat count, without changing duration. |

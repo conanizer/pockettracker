@@ -313,13 +313,23 @@ inline int project_clamp_row(int row, const PlatformCaps& caps) {
 }
 
 /**
+ * How many characters a project NAME holds. It is the NAME row's cursor column count, the QWERTY
+ * box's length limit and the module's cell count — one number, because three copies of it is how a
+ * name grows a 21st column that nothing can type into.
+ *
+ * ⚠️ More than fit on the row: the module shows `ProjectModule::NAME_VISIBLE_CHARS` of them and
+ * scrolls the rest under the cursor. `layout.h` pins that count against the editor clip.
+ */
+inline constexpr int PROJECT_NAME_MAX_CHARS = 20;
+
+/**
  * The highest cursor column on a PROJECT row. Column 0 is the row's LABEL and is never reachable —
  * `getProjectCursorLeftColumn` coerces to at least 1, and the cursor starts at 1 (which is why
  * ProjectModule's `cursorColumn == 0 -> readOnly()` arms are, on inspection, dead).
  */
 inline int project_row_max_column(ProjectRow row) {
     switch (row) {
-        case ProjectRow::NAME:    return 20;  // one column per character
+        case ProjectRow::NAME:    return PROJECT_NAME_MAX_CHARS;  // one column per character
         case ProjectRow::PROJECT: return 3;   // SAVE | LOAD | NEW
         case ProjectRow::EXPORT:  return 2;   // MIX | STEMS
         case ProjectRow::COMPACT: return 2;   // SEQ | INST

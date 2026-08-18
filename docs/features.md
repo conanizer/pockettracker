@@ -72,6 +72,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Reverse, normalize, fade in, fade out, silence a selection
 - Undo last destructive operation
 - Apply effects permanently: overdrive, bitcrusher, 3-band EQ, OTT compressor, dust (vinyl noise/wear)
+- Read the sample's own tempo off the header — the BPM it plays at for the bar count on the DURATION row
 - Pitch-shift to match a BPM target without changing length (repitch)
 - Time-stretch to match a BPM target without changing pitch — Akai SOLA algorithm (same "jungle chop" character as the S950/S1000)
 - Auto-detect transients to place slice markers, or divide into equal slices

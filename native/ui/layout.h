@@ -59,6 +59,17 @@ inline constexpr int RIGHT_BAR_X = DESIGN_W - NavigationMapModule::WIDTH - SIDE_
 /** Right edge of the editor clip: 640 − 115 − 10 − 6 = 509. */
 inline constexpr int EDITOR_CLIP_RIGHT = RIGHT_BAR_X - SCREEN_SPACER;
 
+// PROJECT's NAME row holds more characters than it can show, and the number it CAN show is a fact
+// about this clip — the module knows neither the clip nor the x it is drawn at. Pinned here, from
+// both sides, because a window one column too WIDE draws into the right bar (which is the bug that
+// put it here: 20 cells were drawn and 17 arrived) and one column too NARROW throws a column away.
+inline constexpr int PROJECT_NAME_CELLS_X = SIDE_SPACER + ProjectModule::VALUE_X;
+static_assert(PROJECT_NAME_CELLS_X + ProjectModule::NAME_VISIBLE_CHARS * CHAR_W <= EDITOR_CLIP_RIGHT,
+              "PROJECT's NAME window spills past the editor clip");
+static_assert(PROJECT_NAME_CELLS_X + (ProjectModule::NAME_VISIBLE_CHARS + 1) * CHAR_W
+                  > EDITOR_CLIP_RIGHT,
+              "PROJECT's NAME window is narrower than the row affords — another cell fits");
+
 class TrackerLayout {
 public:
     /**

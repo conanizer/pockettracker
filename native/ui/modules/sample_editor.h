@@ -263,6 +263,23 @@ struct SampleEditorState {
 
     /** "MM:SS.CC", scaled by the PENDING pitch shift — so DURATION previews what SAVE will bake. */
     std::string duration_display() const;
+
+    /**
+     * "NNNBPM" — the tempo this sample IS, if it holds exactly the DURATION row's bar count. The
+     * inverse of what SYNC does: SYNC stretches the audio to fit `duration_beats` at the project's
+     * tempo, this reads the tempo off the audio it already has. With no pending pitch, this number
+     * reaching the project's tempo is SYNC's "already on the grid" test — both sides reduce to
+     * `beats * 60 / seconds`.
+     *
+     * ⚠️ Scaled by the pending PITCH, which SYNC is NOT. The clock beside this one previews the same
+     * shift (`duration_display`), and one length shown in two units cannot be allowed to disagree with
+     * itself. So a pending shift moves this away from the tempo SYNC would still fit — which is the
+     * honest reading, because SYNC's RPITCH discards that shift rather than baking it.
+     *
+     * "---BPM" when there is no sample, or when the answer is outside 1..999: a five-digit tempo is
+     * the DURATION row being wrong about the sample, and printing it would dress that up as a reading.
+     */
+    std::string bpm_display() const;
 };
 
 /** What `handle_input` changed — enough for the dispatcher to know which engine calls to make. */
@@ -294,6 +311,16 @@ public:
     static const std::vector<std::string>& source_values();    // LEFT / RIGHT / STEREO / MONO
     static const std::vector<std::string>& rate_values();      // HIGH / NORM / LOFI
     static const std::vector<std::string>& duration_values();  // 4 BAR … 1/32
+
+    /**
+     * How many beats one DURATION index is worth — "1 BAR" is 4. The list halves at every step, so
+     * this is `16 >> index` rather than a second table beside `duration_values()`: two tables that
+     * must agree row for row is how a new duration gets the beat count of its neighbour.
+     *
+     * SYNC fits the sample to this many beats at the project's tempo; `bpm_display` runs it backwards
+     * to say what tempo the sample is already at.
+     */
+    static double duration_beats(int duration_index);
     static const std::vector<std::string>& fx_types();         // OTT / DUST / DRIVE / EQ / SYNC
     static const std::vector<std::string>& sync_types();       // RPITCH / TSTRETCH
     static const std::vector<std::string>& slice_methods();    // TRANSIENT / DIVIDE / OFF / MANUAL

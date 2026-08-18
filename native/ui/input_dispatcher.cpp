@@ -3707,20 +3707,6 @@ int waveform_channel(int source_mode) {
     return (source_mode == 0) ? 0 : (source_mode == 1) ? 1 : 2;
 }
 
-/** DURATION index → beats. "1 BAR" is 4 beats; the list runs 4 BAR … 1/32. */
-double target_beats(int duration_index) {
-    switch (duration_index) {
-        case 0:  return 16.0;   // 4 BAR
-        case 1:  return 8.0;    // 2 BAR
-        case 2:  return 4.0;    // 1 BAR
-        case 3:  return 2.0;    // 1/2
-        case 4:  return 1.0;    // 1/4
-        case 5:  return 0.5;    // 1/8
-        case 6:  return 0.25;   // 1/16
-        default: return 0.125;  // 1/32
-    }
-}
-
 }  // namespace
 
 // ─── Opening and closing ─────────────────────────────────────────────────────────────────────────
@@ -4332,7 +4318,7 @@ void InputDispatcher::sample_editor_confirm() {
                                        : 0.0;
             if (rawSecs <= 0.0 || bpm <= 0) break;
 
-            const double targetSecs = target_beats(se.durationIndex) * 60.0 / bpm;
+            const double targetSecs = SampleEditorModule::duration_beats(se.durationIndex) * 60.0 / bpm;
             const int    oldLen     = se.totalFrames;
 
             auto rescale_after = [&](bool clear_pitch) {
@@ -4641,13 +4627,13 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
 
     switch (s_.currentScreen) {
         case ScreenType::PROJECT:
-            // The NAME row, any column but the label. Its 20 characters are 20 cursor COLUMNS, each an
+            // The NAME row, any column but the label. Its characters are cursor COLUMNS, each an
             // in-place CHARACTER cell — so on ONE cell A opens the keyboard, A+UP walks that character
             // through the alphabet, and A+B blanks it. The sharpest case the defer latch exists for.
             if (s_.projectCursorRow == static_cast<int>(ProjectRow::NAME) &&
                 s_.projectCursorColumn >= 1) {
                 if (!peek) open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name,
-                                       "PROJECT NAME:", "", 20);
+                                       "PROJECT NAME:", "", PROJECT_NAME_MAX_CHARS);
                 return true;
             }
             break;
