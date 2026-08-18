@@ -83,7 +83,7 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     { FX_VMV,    CC_MASTER_VOL,  true,  RampKind::BYTE },
     // ── The EQ presets. No CC id: what these emit is a band set, not a controller value ───────────
     //
-    // ⚠️ EQN IS A PER-VOICE SWEEP, not a per-track one. `applyEqPresetToChain` writes the sounding
+    // ⚠️ EQN IS A PER-VOICE SWEEP, not a per-track one. `applyEqPresetToModule` writes the sounding
     // voice's own chain, and a note-on resets that chain from the instrument's preset — so a morph
     // re-asserts itself one tic after every retrigger and does nothing at all over a silent track.
     // Same shape as CUT/RES above. EQM is the one that gives a long global sweep.
@@ -246,6 +246,23 @@ struct RampSpec {
  * same project render differently twice, and a fade is not a thing anyone wants dice on. RND on an
  * AUS, AUF or start-value slot is ignored for pairing purposes.
  */
+/**
+ * Does this phrase carry an AUS or an AUF cell at all?
+ *
+ * A ramp is a property of the walk, not of one phrase — this answers only whether the phrase owns an
+ * END of one, which is the cheap question the pairing walks cannot be asked. Used to skip work whose
+ * answer is already known; it is never a substitute for pairing.
+ */
+inline bool phrase_has_ramp_cell(const Phrase& phrase) {
+    for (const PhraseStep& step : phrase.steps) {
+        for (int slot = 1; slot <= 3; ++slot) {
+            const int type = step_fx_type(step, slot);
+            if (type == FX_AUS || type == FX_AUF) return true;
+        }
+    }
+    return false;
+}
+
 inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) {
     std::vector<RampSpec> out;
     RampSpec              open;
@@ -491,6 +508,16 @@ inline RampCells find_ramp_cells(const Project& project, int phraseId) {
     RampCells cells;
     if (phraseId < 0 || phraseId >= static_cast<int>(project.phrases.size())) return cells;
 
+    // ⚠️ EVERY CELL THIS CAN MARK BELONGS TO THIS PHRASE. `RampSpec::ausStep`/`aufStep` are −1 for an
+    // end living in another phrase and `mark` skips those, so a phrase carrying no AUS and no AUF cell
+    // of its own has an all-false mask however the chains around it are written — and `active()`
+    // answers true for every other effect without consulting the mask at all. Asking that first is
+    // EXACT rather than an approximation, and it is what keeps the editor off the walk below on an
+    // ordinary phrase: the walk pairs 16×16×3 cells once per chain row that plays this phrase, and
+    // the PHRASE screen redraws at 60 Hz for as long as the transport is audible.
+    const Phrase& self = project.phrases[static_cast<size_t>(phraseId)];
+    if (!phrase_has_ramp_cell(self)) return cells;
+
     bool placed = false;
     for (const Chain& chain : project.chains) {
         for (int row = 0; row < CHAIN_ROWS; ++row) {
@@ -499,7 +526,7 @@ inline RampCells find_ramp_cells(const Project& project, int phraseId) {
             cells.mark(find_ramps_in_chain(project, chain, row));
         }
     }
-    if (!placed) cells.mark(find_ramps(project.phrases[static_cast<size_t>(phraseId)]));
+    if (!placed) cells.mark(find_ramps(self));
     return cells;
 }
 
