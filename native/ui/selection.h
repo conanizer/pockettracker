@@ -28,6 +28,9 @@ namespace pt::ui {
 /** How much the selection covers. Grows CELL → ROW → SCREEN on each tap inside the window. */
 enum class SelectionScope { NONE, CELL, ROW, SCREEN };
 
+/** A D-pad direction. Named so the hottest input path compares an int, not four strings. */
+enum class NavDir { UP, DOWN, LEFT, RIGHT };
+
 struct CursorPosition {
     int row    = 0;
     int column = 0;
@@ -92,13 +95,14 @@ struct Selection {
     }
 
     /** D-pad while a selection is up: drag its active edge, clamped. The anchor never moves. */
-    void expand(const char* direction, int maxRow, int maxColumn) {
+    void expand(NavDir direction, int maxRow, int maxColumn) {
         if (!active) return;
-        const std::string d(direction);
-        if (d == "UP")         end.row    = std::max(0, end.row - 1);
-        else if (d == "DOWN")  end.row    = std::min(maxRow, end.row + 1);
-        else if (d == "LEFT")  end.column = std::max(1, end.column - 1);
-        else if (d == "RIGHT") end.column = std::min(maxColumn, end.column + 1);
+        switch (direction) {
+            case NavDir::UP:    end.row    = std::max(0, end.row - 1);            break;
+            case NavDir::DOWN:  end.row    = std::min(maxRow, end.row + 1);       break;
+            case NavDir::LEFT:  end.column = std::max(1, end.column - 1);         break;
+            case NavDir::RIGHT: end.column = std::min(maxColumn, end.column + 1); break;
+        }
     }
 
     /** The rectangle, normalised — the edge may be above/left of the anchor. */

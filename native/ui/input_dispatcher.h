@@ -16,15 +16,18 @@
 // dialog, the EQ EDITOR overlay behind all five EQ cells, the MIDI screen, and the THEME editor.
 // Every screen the app has is dispatched from here; there is no second input path.
 //
-// ── ⚠️ THE MODAL RULE, which arrives with S6a and grows a third member in S8 ─────────────────────
+// ── ⚠️ THE MODAL RULE ────────────────────────────────────────────────────────────────────────────
 //
-// The QWERTY keyboard is the app's first true modal, the FILE BROWSER is the first full-screen popup,
-// the CONFIRM DIALOG (S7) is the topmost, and the EQ EDITOR (S8) is the first PARTIAL one. Each OWNS
-// THE BUTTONS while it is up, and every handler below therefore opens with the same questions in the
-// same order — confirm, then keyboard, then the EQ overlay, then the browser, then the screen — before
-// it does anything else. That order is the specification: the keyboard can be open ON TOP of the
-// browser (SELECT+A to rename a file), and a D-pad press there must move the KEY cursor, not the file
-// cursor.
+// The CONFIRM DIALOG is the topmost layer, the QWERTY keyboard is a true modal, the THEME and EQ
+// editors are PARTIAL ones, the FX HELPER is a picker held up by A, and the FILE BROWSER is a
+// full-screen popup. Each OWNS THE BUTTONS while it is up, and the order in which a press is offered
+// to them is the specification, not an implementation detail: the keyboard can be open ON TOP of the
+// browser (SELECT+A to rename a file) or ON TOP of the theme editor (its SAVE), and a D-pad press
+// there must move the KEY cursor, not the one underneath.
+//
+// ⭐ **That order is written exactly once, in `top_overlay()`**, and every handler below asks
+// `overlay_swallows()` with the set of layers it answers for rather than re-deriving the stack. See
+// the block comment on those two, which is where the rule's whole mechanism now lives.
 //
 // ⚠️ **The EQ editor is PARTIAL, and that is a design decision rather than an oversight.** It swallows
 // the D-pad, A, B and SELECT, but it lets START through to the screen underneath — because START on
@@ -33,12 +36,11 @@
 // screen when it was opened over an instrument, so its band edits "sweep a held preview live").
 // Every other modal in the app swallows everything.
 //
-// Kotlin enforces this the same way (an `if (qwertyKeyboardState.isOpen) { … ; return }` at the top of
-// each handler) and its own comment states the rule the hard way: "every new show*Dialog-style modal
-// state MUST be added to this predicate". A modal that one handler forgets is a button that does the
-// wrong thing exactly once — and that is a bug nobody reports, because it looks like a mis-press.
-// ⚠️ S8 found exactly that bug, ON ANDROID: `handleBUp`/`handleBDown` never got the EQ guard, so B+UP
-// with the editor open over INST.POOL pages the pool cursor 16 slots underneath it. See on_b_up().
+// ⚠️ **A modal that one handler forgets is a button that does the wrong thing exactly once** — and
+// that is a bug nobody reports, because it looks like a mis-press. Android carries a live one, found
+// by porting: `handleBUp`/`handleBDown` never got the EQ guard, so B+UP with the editor open over
+// INST.POOL pages the pool cursor 16 slots underneath it. See on_b_up(). That is the failure a
+// per-handler subset invites and the reason the stack is derived here rather than remembered.
 //
 // ── THE MAPPER IS SPLIT IN TWO, AND ONLY ONE HALF IS THE SHELL'S ─────────────────────────────────
 //
@@ -601,7 +603,7 @@ class InputDispatcher {
     void selection_or_single(InputAction (*fn)(const CursorContext&));
 
     /** `handleDPadNavigation`: move the cursor, or drag the selection's active edge. */
-    void dpad_nav(const char* direction);
+    void dpad_nav(NavDir direction);
 
     /**
      * `AppInputDispatcher.syncLastEditedOnScreenSwitch` (:2760) — the R+LEFT/R+RIGHT deep-link.
@@ -672,6 +674,78 @@ class InputDispatcher {
     // ── The modal guards (see the ⚠️ THE MODAL RULE note at the top of this file) ────────────────
     bool qwerty_open() const { return s_.qwerty.isOpen; }
     bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // THE OVERLAY STACK — `top_overlay()` below is the ONE place its order is written
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // The order is the specification (see THE MODAL RULE at the top of this file). Every handler has
+    // to know it, and none of them may state it: a stack re-typed at two dozen call sites is a stack
+    // that drifts, and each site's subset is correct only about TODAY's overlays.
+    //
+    // A handler names the layers it answers for ITSELF and `overlay_swallows()` answers for the rest.
+    // ⭐ **The default for a layer a handler does not name is SWALLOW**, and that is what makes a new
+    // overlay ONE registration: add the enumerator, add its line to `top_overlay()`, and every handler
+    // that has not been taught about it is INERT under it. The failure mode of forgetting one is a
+    // button that does nothing — not a button that edits the screen hidden behind the new overlay.
+    //
+    // ⚠️ FX_HELPER and BROWSER are not modals. The helper is a picker held up by A, and the browser is
+    // a SCREEN — but every handler has to ask about them in the same breath and in the same place as
+    // the three real modals, so they are layers here. `modal_backdrop_active` (ui/app_state.h) asks
+    // the narrower question of which layers paint a full-canvas scrim, and stays separate.
+
+    /**
+     * ⚠️ The enumerators are BITS, so that a handler's `arms` set is a plain OR of them and reads as
+     * one line. `top_overlay()` returns exactly one of them; `overlay_swallows()` takes any number.
+     */
+    enum class Overlay : unsigned {
+        NONE      = 0,
+        CONFIRM   = 1u << 0,
+        QWERTY    = 1u << 1,
+        THEME     = 1u << 2,
+        EQ        = 1u << 3,
+        FX_HELPER = 1u << 4,
+        BROWSER   = 1u << 5,
+    };
+
+    friend constexpr Overlay operator|(Overlay a, Overlay b) {
+        return static_cast<Overlay>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
+    }
+
+    /**
+     * The topmost open layer — the one whose vocabulary a press belongs to.
+     *
+     * ⚠️ QWERTY sits ABOVE THEME because it genuinely stacks on it: the editor's SAVE raises the
+     * keyboard without closing the editor, and a D-pad press there must move the KEY cursor. That is
+     * the only pair in the app that can be open at once; every other ordering below is disjoint by
+     * construction, which is exactly why it was free to drift before it lived in one function.
+     */
+    Overlay top_overlay() const {
+        if (confirm_open())     return Overlay::CONFIRM;
+        if (qwerty_open())      return Overlay::QWERTY;
+        if (theme_open())       return Overlay::THEME;
+        if (eq_open())          return Overlay::EQ;
+        if (s_.fxHelper.isOpen) return Overlay::FX_HELPER;
+        if (on_browser())       return Overlay::BROWSER;
+        return Overlay::NONE;
+    }
+
+    /**
+     * THE MODAL RULE, DERIVED: true when a layer this handler does not answer for is up, and the
+     * caller must return without touching the screen behind it.
+     *
+     * `arms` is the set of layers the handler takes responsibility for — either by SERVING them with
+     * the arms that follow this call (the D-pad moves the key cursor, the theme cursor, the EQ cursor
+     * or the file cursor) or by deliberately LETTING THEM THROUGH to the screen underneath, which is
+     * what START does for the two partial overlays: they name it, and it reaches the transport.
+     *
+     * `Overlay::NONE` is the common `arms` value and reads as "any layer at all owns this button".
+     */
+    bool overlay_swallows(Overlay arms) const {
+        const Overlay top = top_overlay();
+        return top != Overlay::NONE &&
+               (static_cast<unsigned>(arms) & static_cast<unsigned>(top)) == 0;
+    }
 
     /**
      * The confirm dialog owns EVERY button but A and B. It is the topmost modal — drawn last, over

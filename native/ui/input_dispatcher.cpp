@@ -679,7 +679,7 @@ void InputDispatcher::selection_or_single(InputAction (*fn)(const CursorContext&
     }
 }
 
-void InputDispatcher::dpad_nav(const char* direction) {
+void InputDispatcher::dpad_nav(NavDir direction) {
     if (s_.selection.active) {
         const CursorPosition edgeBefore = s_.selection.end;
         s_.selection.expand(direction, max_selection_row(), max_selection_column());
@@ -703,11 +703,12 @@ void InputDispatcher::dpad_nav(const char* direction) {
         return;
     }
 
-    const std::string d(direction);
-    if (d == "UP")         move_cursor_up(s_);
-    else if (d == "DOWN")  move_cursor_down(s_);
-    else if (d == "LEFT")  move_cursor_left(s_);
-    else if (d == "RIGHT") move_cursor_right(s_);
+    switch (direction) {
+        case NavDir::UP:    move_cursor_up(s_);    break;
+        case NavDir::DOWN:  move_cursor_down(s_);  break;
+        case NavDir::LEFT:  move_cursor_left(s_);  break;
+        case NavDir::RIGHT: move_cursor_right(s_); break;
+    }
 }
 
 // ─── D-pad alone ─────────────────────────────────────────────────────────────────────────────────
@@ -717,25 +718,25 @@ void InputDispatcher::dpad_nav(const char* direction) {
 // press there must move the KEY cursor, not the file cursor.
 
 void InputDispatcher::on_dpad_up() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(-1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, -1); return; }
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
-    dpad_nav("UP");
+    dpad_nav(NavDir::UP);
 }
 
 void InputDispatcher::on_dpad_down() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(+1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, +1); return; }
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
-    dpad_nav("DOWN");
+    dpad_nav(NavDir::DOWN);
 }
 
 void InputDispatcher::on_dpad_left() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
     // ⚠️ In the THEME editor LEFT/RIGHT change CHANNEL (R→G→B), and they WRAP, where the EQ's clamp.
     // Three channels are a ring you walk, not a range you scan to the end of.
@@ -746,16 +747,16 @@ void InputDispatcher::on_dpad_left() {
     if (eq_open())     { eq_move_cursor(-1, 0); return; }
     // LEFT/RIGHT PAGE the browser by a screenful — the one list in the app long enough to need it.
     if (on_browser())  { browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
-    dpad_nav("LEFT");
+    dpad_nav(NavDir::LEFT);
 }
 
 void InputDispatcher::on_dpad_right() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(0, +1); return; }
     if (eq_open())     { eq_move_cursor(+1, 0); return; }
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
-    dpad_nav("RIGHT");
+    dpad_nav(NavDir::RIGHT);
 }
 
 // ─── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────────
@@ -1047,8 +1048,7 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 // "A+DOWN gives me the next theme" is the phone's.
 
 void InputDispatcher::on_a_up() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
         if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, -1);
         else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
@@ -1069,8 +1069,7 @@ void InputDispatcher::on_a_up() {
 }
 
 void InputDispatcher::on_a_down() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
         if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, +1);
         else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
@@ -1091,8 +1090,7 @@ void InputDispatcher::on_a_down() {
 }
 
 void InputDispatcher::on_a_left() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
         // Row 0 falls through to nothing: `theme_adjust_color` rejects it, as Kotlin's `>= 1` guard does.
         theme_adjust_color(s_.theme, s_.themeEditor.cursorRow, s_.themeEditor.cursorChannel, -0x10);
@@ -1106,8 +1104,7 @@ void InputDispatcher::on_a_left() {
 }
 
 void InputDispatcher::on_a_right() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
         theme_adjust_color(s_.theme, s_.themeEditor.cursorRow, s_.themeEditor.cursorChannel, +0x10);
         return;
@@ -1120,10 +1117,9 @@ void InputDispatcher::on_a_right() {
 }
 
 void InputDispatcher::on_a_released() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     // The FX helper commits on RELEASE, not on a press — which is what lets you hold A, read the
     // description of half a dozen effects, and let go on the one you want.
-    if (!s_.fxHelper.isOpen) return;
+    if (top_overlay() != Overlay::FX_HELPER) return;
     apply_fx_type_change(s_.fxHelper.selected_effect_code());
     s_.fxHelper = FxHelperState{};
 }
@@ -1138,8 +1134,7 @@ void InputDispatcher::on_a_deferred() {
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_b() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (overlay_swallows(Overlay::EQ)) return;
 
     // A+B in the EQ editor RESETS the band param under the cursor to its default — FREQ to 0x80
     // (≈450 Hz, the middle of the log sweep), GAIN to 120 (0 dB) and Q to 0x80. TYPE has no default and
@@ -1222,8 +1217,7 @@ void InputDispatcher::on_a_b() {
 // matters and which holds with or without these lines).
 
 void InputDispatcher::on_a_a() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::NONE)) return;
 
     // ⚠️ THE SAMPLE EDITOR'S ROW 11 NEEDS NO ARM HERE, though the fast pass it would be for is real —
     // it taps a boundary per hit, and a 16th note at 120 BPM is 125 ms, well inside the 300 ms window.
@@ -1357,8 +1351,18 @@ void InputDispatcher::cycle_current_item(int delta) {
     }
 }
 
-void InputDispatcher::on_b_left() { if (confirm_open()) return; if (qwerty_open() || on_browser()) return; cycle_current_item(-1); }
-void InputDispatcher::on_b_right() { if (confirm_open()) return; if (qwerty_open() || on_browser()) return; cycle_current_item(+1); }
+// ⚠️ THE THEME AND EQ EDITORS ARE ARMED HERE, and their arms live inside `cycle_current_item` above
+// rather than in the two lines below — one of them swallows B+LEFT/RIGHT and the other re-points the
+// EQ slot with it.
+void InputDispatcher::on_b_left() {
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
+    cycle_current_item(-1);
+}
+
+void InputDispatcher::on_b_right() {
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
+    cycle_current_item(+1);
+}
 
 // ⚠️ AN ANDROID BUG, FOUND BY PORTING — and it is the modal rule's own warning coming true.
 //
@@ -1377,8 +1381,7 @@ void InputDispatcher::on_b_right() { if (confirm_open()) return; if (qwerty_open
 // fixed on Android too (`AppInputDispatcher.handleBUp`/`handleBDown`), per §4's rule.
 
 void InputDispatcher::on_b_up() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::NONE)) return;
 
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
     // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
@@ -1393,8 +1396,7 @@ void InputDispatcher::on_b_up() {
 }
 
 void InputDispatcher::on_b_down() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::NONE)) return;
 
     if (s_.currentScreen == ScreenType::INST_POOL) {
         const int last = static_cast<int>(s_.project->instruments.size()) - 1;
@@ -1422,9 +1424,8 @@ void InputDispatcher::on_b_down() {
 // and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
 
 void InputDispatcher::on_r_up() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
-    if (eq_open() || theme_open()) return;
     if (on_browser()) { browser_cycle_sort(+1); return; }
     // Sample-editor ZOOM IN (v0.9.4 C3): R+UP/R+DOWN drive `zoomLevel` (0=1×…4=16×) without hopping to
     // the ZOOM row. The per-frame feed re-bins the waveform off `view_start`/`view_end`, so mutating the
@@ -1441,9 +1442,8 @@ void InputDispatcher::on_r_up() {
 }
 
 void InputDispatcher::on_r_down() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
-    if (eq_open() || theme_open()) return;
     if (on_browser()) { browser_cycle_sort(-1); return; }
     if (on_sample_editor()) {   // ZOOM OUT — see on_r_up
         if (s_.sampleEditor.showConfirmClose) return;
@@ -1553,12 +1553,11 @@ int InputDispatcher::text_cursor_repeat_step() {
 }
 
 void InputDispatcher::on_r_left() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) {
         for (int n = text_cursor_repeat_step(); n > 0; --n) move_text_cursor_left(s_.qwerty);
         return;
     }
-    if (eq_open() || theme_open()) return;
     if (on_sample_editor()) return;   // see on_r_right
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
@@ -1569,12 +1568,11 @@ void InputDispatcher::on_r_left() {
 }
 
 void InputDispatcher::on_r_right() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) {
         for (int n = text_cursor_repeat_step(); n > 0; --n) move_text_cursor_right(s_.qwerty);
         return;
     }
-    if (eq_open() || theme_open()) return;
     // ⚠️ SWALLOWED on the sample editor, for the reason the EQ overlay is: it has no cell in the 5×5
     // grid, so `navigate_left`/`navigate_right` fall through their `!is_main_row` arm to
     // `main_screen_for_column(screen_column(SAMPLE_EDITOR))` = `main_screen_for_column(-1)` = PHRASE.
@@ -1592,8 +1590,7 @@ void InputDispatcher::on_r_right() {
 // ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::BROWSER)) return;
 
     // ⚠️ The browser's selection is a DIFFERENT machine from the grid editors'. Theirs is the multi-tap
     // CELL→ROW→SCREEN widener (ui/selection.h); the browser's is a plain anchor..cursor RANGE over a
@@ -1636,8 +1633,7 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::BROWSER)) return;
 
     // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
     // outside one it pastes" shape as the grid editors below, over files instead of cells.
@@ -1709,8 +1705,7 @@ void InputDispatcher::on_l_a() {
 }
 
 void InputDispatcher::on_l_r() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
         s_.fileBrowser.selectionAnchor = -1;
@@ -1742,8 +1737,7 @@ void InputDispatcher::on_l_r() {
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b_a() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
+    if (overlay_swallows(Overlay::NONE)) return;
 
     Project& p = host_.edit_project();
 
@@ -2446,6 +2440,12 @@ void InputDispatcher::midi_action() {
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_button_a() {
+    // Every layer below is ARMED — A means something on each of them, which is why this call swallows
+    // only the FX helper. It is still here so that a layer added tomorrow is INERT on A rather than
+    // inserting a chain on the screen hidden behind it.
+    if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
+                         Overlay::BROWSER)) return;
+
     // ⚠️ THE CONFIRM DIALOG IS CHECKED FIRST, ahead of the keyboard and the browser both. It is the
     // topmost modal — drawn last, over everything — and a dialog owns the buttons of whatever it is
     // covering: pressing A to answer "CLEAN INST?" must not also fire whatever the cursor is parked on
@@ -2592,6 +2592,11 @@ void InputDispatcher::on_button_a() {
 }
 
 void InputDispatcher::on_button_b() {
+    // Every layer below is ARMED — B closes or answers on each of them. Here for the same reason as
+    // on_button_a's: a layer added tomorrow is inert on B rather than closing the browser behind it.
+    if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
+                         Overlay::BROWSER)) return;
+
     // B is the NO of "A=YES  B=NO", and it is checked first for the same reason A's accept is: the
     // dialog owns the buttons of the screen underneath it.
     if (confirm_open()) { confirm_cancel(); return; }
@@ -2712,7 +2717,9 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    // ⚠️ THE BROWSER IS NOT ARMED, and that is the whole of SELECT there: it does nothing ALONE on a
+    // browser, because it is a MODIFIER (SELECT+A/B/R) and its press is what arms those three.
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ)) return;
     // SELECT is the keyboard's ABORT — the chord alias for the button on its action row.
     if (qwerty_open()) { qwerty_cancel(); return; }
 
@@ -2726,10 +2733,6 @@ void InputDispatcher::on_select() {
     // the editor (the slot cycle owns B+DPAD), so SELECT is the way out that acts on the press.
     if (eq_open()) { close_eq_editor(); return; }
 
-    // On the browser SELECT does nothing ALONE; it is a modifier there (SELECT+A/B/R), and its press
-    // is what arms those three. Kotlin's `handleSelect()` has an empty FILE_BROWSER arm for the same
-    // reason.
-    if (on_browser()) return;
 
     // ⚠️ SELECT IS THE ALIAS FOR THE DEFERRED-A CELLS, and that is what it is FOR. A on those cells is
     // held until release (`defer_a_to_release`), so that a held A+DPAD can still dial the value
@@ -2808,7 +2811,12 @@ void InputDispatcher::on_select() {
 }
 
 void InputDispatcher::on_stop_preview() {
-    if (qwerty_open()) return;
+    // ⚠️ THE ONE HANDLER A CONFIRM DOES NOT OWN, and it is ARMED here to say so: a dialog raised over
+    // an INSTRUMENT audition must not leave the note hanging, and silencing a note is not an edit. The
+    // FX helper and the browser are armed for the same reason — the screen behind them is the one that
+    // started the preview, and `previewScreen` below is what decides whether there is one to stop.
+    if (overlay_swallows(Overlay::CONFIRM | Overlay::EQ | Overlay::FX_HELPER |
+                         Overlay::BROWSER)) return;
 
     // Only the screens that can START an audition can stop one — `stopActivePreview()`. On PHRASE it
     // is gated on the setting, because with previews off there is nothing to silence. The three
@@ -2833,7 +2841,10 @@ void InputDispatcher::on_stop_preview() {
 }
 
 void InputDispatcher::on_start() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
+    // ⚠️ THE THEME AND EQ EDITORS ARE ARMED HERE TO LET START THROUGH, not to serve it: both partial
+    // overlays keep the transport of the screen underneath, which is the only way to HEAR what an edit
+    // is doing while you dial it (ui/app_state.h).
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     // START is the keyboard's APPLY — the chord alias for the button on its action row.
     if (qwerty_open()) { qwerty_apply(); return; }
 
@@ -3412,8 +3423,7 @@ void InputDispatcher::browser_paste() {
 // ─── SELECT + A / B / R — the browser's file-management chords ───────────────────────────────────
 
 void InputDispatcher::on_select_a() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || !on_browser()) return;
+    if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
@@ -3446,8 +3456,7 @@ void InputDispatcher::on_select_a() {
 }
 
 void InputDispatcher::on_select_b() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || !on_browser()) return;
+    if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
@@ -3473,8 +3482,7 @@ void InputDispatcher::on_select_b() {
 }
 
 void InputDispatcher::on_select_r() {
-    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || !on_browser()) return;
+    if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
     open_qwerty(QwertyContext::FOLDER_CREATE, "NEW FOLDER", "FOLDER NAME:",
                 s_.fileBrowser.currentDirectory);
