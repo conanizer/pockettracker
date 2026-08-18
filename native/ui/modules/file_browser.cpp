@@ -53,16 +53,14 @@ bool ext_matches(const std::string& ext, const std::vector<std::string>& allowed
 }
 
 /**
- * Clip to `max_chars`, marking the truncation with a trailing ".." over the last two.
- *
- * Two callers with two limits, and both are geometry: 20 for a list row (past that the name would run
- * under the size column at x+370), and 16 for the DELETE prompt (`DELETE <name>? A=YES B=NO` has to fit
- * inside 640px).
+ * The column budget of each clipped string on this screen. The two name limits are explained where
+ * the row is drawn; the path bar and the status line each own their row outright. The three SEL
+ * prompts keep their budget inline, beside the wording they have to share 640px with.
  */
-std::string clip_name(const std::string& name, size_t max_chars) {
-    if (name.size() <= max_chars) return name;
-    return name.substr(0, max_chars - 2) + "..";
-}
+constexpr int NAME_COLS   = 20;
+constexpr int ROOT_COLS   = 32;
+constexpr int PATH_COLS   = 36;
+constexpr int STATUS_COLS = 31;
 
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
@@ -319,20 +317,20 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     Argb        hintColor;
     if (s.mode == BrowserMode::DELETE) {
         const BrowserItem* item = s.current();
-        hint = "DELETE " + clip_name(item ? item->displayName : "", 16) + "? A=YES B=NO";
+        hint = "DELETE " + Canvas::clip_text(item ? item->displayName : "", 16) + "? A=YES B=NO";
         hintColor = 0xFFFF0000;
     } else if (s.mode == BrowserMode::SET_HOME) {
         const BrowserItem* item = s.current();
         // Not red: it destroys nothing and is undone by choosing another tree. It IS a confirm, though
         // — it moves where every one of the app's folders is looked for.
-        hint = "HOME FOLDER? " + clip_name(item ? item->displayName : "", 14) + " A=YES B=NO";
+        hint = "HOME FOLDER? " + Canvas::clip_text(item ? item->displayName : "", 14) + " A=YES B=NO";
         hintColor = t.textTitle;
     } else if (s.mode == BrowserMode::FORGET_ROOT) {
         const BrowserItem* item = s.current();
         // ⚠️ **The word is FORGET and it must never read as DELETE** — this hands back a permission and
         // removes a row; every file in the folder stays. Not red for exactly that reason: the red bar
         // in this app means "something is about to be destroyed".
-        hint = "FORGET " + clip_name(item ? item->displayName : "", 15) + "? A=YES B=NO";
+        hint = "FORGET " + Canvas::clip_text(item ? item->displayName : "", 15) + "? A=YES B=NO";
         hintColor = t.textTitle;
     } else if (s.selectionMode) {
         hint      = "B=COPY L+A=CUT L+B=ALL L+R=CANCEL";
@@ -353,10 +351,9 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     }
     c.draw_text(hint, x + 10, barY1 + TEXT_PADDING, hintColor, CHAR_SPACING, FONT_SCALE);
 
-    // The path, tail-clipped: it is the one string on screen that can be arbitrarily long, and the
+    // The path, HEAD-clipped: it is the one string on screen that can be arbitrarily long, and the
     // END of it is the part that says where you are.
-    std::string path = s.currentDirectory;
-    if (path.size() > 36) path = ".." + path.substr(path.size() - 34);
+    const std::string path = Canvas::clip_text_head(s.currentDirectory, PATH_COLS);
     c.draw_text(path, x + 10, barY2 + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
 
     // ── The list ────────────────────────────────────────────────────────────────────────────────
@@ -403,8 +400,8 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         // tree has no size and no date, so nothing is under it to run into, and clipping one at 20 cut
         // off the `(HOME)` / `(MISSING)` marker that is the whole reason those rows say anything.
         // Derived from the row's own kind rather than from a second constant nobody would keep in step.
-        c.draw_text(clip_name(item.displayName, item.isRoot ? 32 : 20), x + 30, rowY + TEXT_PADDING,
-                    textColor, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(Canvas::clip_text(item.displayName, item.isRoot ? ROOT_COLS : NAME_COLS),
+                    x + 30, rowY + TEXT_PADDING, textColor, CHAR_SPACING, FONT_SCALE);
 
         if (item.kind == BrowserItem::Kind::FILE) {
             c.draw_text(item.sizeText, x + 370, rowY + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
@@ -421,7 +418,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     // The status message wins the left half when there is one — a failed rename or a finished paste
     // has something to say, and the control hints are the same every frame.
     if (!s.statusMessage.empty()) {
-        c.draw_text(clip_name(s.statusMessage, 31), x + 10, bottomY + TEXT_PADDING,
+        c.draw_text(Canvas::clip_text(s.statusMessage, STATUS_COLS), x + 10, bottomY + TEXT_PADDING,
                     s.statusSuccess ? t.textTitle : 0xFFFF4444, CHAR_SPACING, FONT_SCALE);
     } else {
         // ⚠️ REAL ARROWS (U+2190/2191/2193), as Kotlin draws them — not "<" and "^v". The 5×5 font has

@@ -75,7 +75,7 @@ void InstrumentPoolModule::draw_row(Canvas& c, int x, int rowY, int slot, const 
     // reads as a list of blanks rather than as 128 rows of "INST00, INST01, …" that all look occupied.
     const bool        unnamed = songcore::instrument_has_default_name(ins);
     const std::string name    = unnamed ? std::string(NAME_MAX_CHARS, '_')
-                                        : ins.name.substr(0, NAME_MAX_CHARS);
+                                        : Canvas::clip_text(ins.name, NAME_MAX_CHARS);
     const Argb nameColor = (selected && s.cursorColumn == 0) ? t.textCursor
                            : unnamed                         ? t.textEmpty
                                                              : t.textValue;

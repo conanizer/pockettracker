@@ -160,4 +160,34 @@ int Canvas::glyph_count(const std::string& text) {
     return n;
 }
 
+std::string Canvas::clip_text(const std::string& text, int max_glyphs) {
+    if (max_glyphs <= 0) return {};
+
+    size_t i   = 0;
+    size_t cut = 0;   // byte offset just past glyph `max_glyphs - 1`, where the marker goes
+    int    n   = 0;
+
+    while (i < text.size()) {
+        if (n == max_glyphs - 1) cut = i;
+        next_codepoint(text, i);
+        // Only a glyph BEYOND the budget proves anything was lost. At exactly `max_glyphs` the
+        // string fits and must come back whole — spending a column on a marker for nothing is how
+        // a name that fits loses its last character.
+        if (++n > max_glyphs) return text.substr(0, cut) + "\xE2\x80\xA6";
+    }
+    return text;
+}
+
+std::string Canvas::clip_text_head(const std::string& text, int max_glyphs) {
+    if (max_glyphs <= 0) return {};
+    const int total = glyph_count(text);
+    if (total <= max_glyphs) return text;
+
+    // Skip whatever does not fit, marker included, and keep the rest — walking from the front is the
+    // only way to land on a code-point boundary, since UTF-8 cannot be read backwards from an offset.
+    size_t i = 0;
+    for (int skip = total - (max_glyphs - 1); skip > 0; --skip) next_codepoint(text, i);
+    return "\xE2\x80\xA6" + text.substr(i);
+}
+
 }  // namespace pt::ui

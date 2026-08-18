@@ -9,6 +9,10 @@
 namespace pt::ui {
 
 namespace {
+
+/** The status strip's budget, in columns — it is one line high and shares it with nothing. */
+constexpr int STATUS_MAX_CHARS = 34;
+
 /**
  * Does a FULL-SCREEN module have the frame — i.e. is none of the furniture drawn this frame?
  *
@@ -364,8 +368,8 @@ bool TrackerLayout::has_falling_meters(const AppState& s) const {
 void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
     if (s.statusMessage.empty()) return;
 
-    // `statusMessage.take(34)` — a longer message is cut, not wrapped: the strip is one line high.
-    const std::string text = s.statusMessage.substr(0, 34);
+    // A longer message is cut with a marker, not wrapped: the strip is one line high.
+    const std::string text = Canvas::clip_text(s.statusMessage, STATUS_MAX_CHARS);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
     c.draw_text(text, SIDE_SPACER + 10, SCREEN_SPACER + 10, color, CHAR_SPACING, FONT_SCALE);
 }

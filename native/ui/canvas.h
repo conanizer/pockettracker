@@ -88,6 +88,27 @@ public:
     /** Glyphs (code points) in `text` — what Kotlin's `String.length` gives, since a Kotlin Char IS one. */
     static int glyph_count(const std::string& text);
 
+    /**
+     * Clip `text` to at most `max_glyphs` COLUMNS as drawn, marking a cut with U+2026 (`…`).
+     *
+     * ⚠️ The marker is drawn INSIDE the budget, never after it: a clipped string is
+     * `max_glyphs - 1` glyphs plus the ellipsis, so the result is never wider than what the caller
+     * measured its column for. A string that fits comes back untouched — no marker, no copy of
+     * meaning, so a caller can hand this every name it draws.
+     *
+     * The budget is code points, not bytes, because that is what the advance is (see `draw_text`) —
+     * a byte-wise cut can also split a UTF-8 sequence and hand `draw_text` a `U+FFFD` blank.
+     */
+    static std::string clip_text(const std::string& text, int max_glyphs);
+
+    /**
+     * `clip_text`'s mirror: keep the END of `text` and mark the cut at the FRONT.
+     *
+     * For the one string whose tail is the part that means something — a filesystem path, where the
+     * directory you are standing in is the last component and the root is the part nobody needs.
+     */
+    static std::string clip_text_head(const std::string& text, int max_glyphs);
+
     // ── Clipping ─────────────────────────────────────────────────────────────────────────────────
     //
     // The layout clips the editor area to the left of the right-hand bar so that wide row highlights

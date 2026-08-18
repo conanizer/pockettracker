@@ -66,10 +66,7 @@ std::string device_text(const std::vector<std::string>& names, int index) {
     const int devices = count - 1;   // "OFF" is index 0 and is not a device
     if (idx == 0) return devices > 0 ? "OFF  " + dec2(devices) + " PORTS" : "OFF  NO PORTS";
 
-    std::string value = names[static_cast<size_t>(idx)];
-    if (static_cast<int>(value.size()) > VALUE_MAX_CHARS)
-        value = value.substr(0, static_cast<size_t>(VALUE_MAX_CHARS));
-    return value;
+    return Canvas::clip_text(names[static_cast<size_t>(idx)], VALUE_MAX_CHARS);
 }
 
 /**

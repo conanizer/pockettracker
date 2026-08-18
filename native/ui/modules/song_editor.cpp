@@ -6,6 +6,13 @@ namespace pt::ui {
 
 using songcore::Track;
 
+namespace {
+
+/** How much of the project name the title row shows, in columns; the "SONG: " prefix is extra. */
+constexpr int TITLE_MAX_CHARS = 20;
+
+}  // namespace
+
 void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) const {
     const Theme& t = s.theme;
 
@@ -19,8 +26,8 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
     int rowY = y + TEXT_PADDING;
     // The status overlay (SAVED / LOADED / …) is drawn by the layout on the visualizer header, not
     // here — the title row stays put.
-    c.draw_text("SONG: " + s.project.name.substr(0, 20), x + 10, rowY, t.textTitle, CHAR_SPACING,
-                FONT_SCALE);
+    c.draw_text("SONG: " + Canvas::clip_text(s.project.name, TITLE_MAX_CHARS), x + 10, rowY,
+                t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     for (int trackId = 0; trackId < 8; ++trackId) {
