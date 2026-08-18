@@ -223,6 +223,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 // table with a cursor of its own.
                 ps.selectedInstrument = s.currentInstrument;
                 ps.cursorColumn       = s.poolCursorColumn;
+                ps.sampleRamBytes     = s.sampleRamBytes;
                 ps.theme              = t;
                 instrumentPool_.draw(c, moduleX, EDITOR_Y, ps);
                 break;

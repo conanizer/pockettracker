@@ -197,14 +197,14 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     if (hasExit) door_row(ProjectRow::EXIT, "EXIT");
 
     // ── USED RAM — a read-only info line, NOT a cursor row ───────────────────────────────────────
-    // Integer math in tenths of a MB, as Kotlin does it, to dodge the locale decimal separator.
-    if (s.caps.debug) {
+    // Drawn in every build. Sample memory has no cap by design, so seeing the total is the only
+    // warning a user gets before the OS takes the process away; INST.POOL carries the same number.
+    {
         const int ramY = firstRowY +
                          project_row_offset_y(static_cast<ProjectRow>(lastRow), s.caps, ROW_HEIGHT) +
                          ROW_HEIGHT * 2;
-        const int64_t tenths = (s.sampleRamBytes * 10 + 524288) / 1048576;
         c.draw_text("USED RAM", labelX, ramY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(std::to_string(tenths / 10) + "." + std::to_string(tenths % 10) + " MB",
+        c.draw_text(megabytes_str(s.sampleRamBytes),
                     valueX, ramY + TEXT_PADDING, t.textValue, CHAR_SPACING, FONT_SCALE);
     }
 

@@ -107,6 +107,9 @@ TSFDEF int tsf_get_presetindex(const tsf* f, int bank, int preset_number);
 // Returns the number of presets in the loaded SoundFont
 TSFDEF int tsf_get_presetcount(const tsf* f);
 
+// PocketTracker local addition: how many floats tsf_load allocated for the sample data.
+TSFDEF unsigned int tsf_get_fontsamplecount(const tsf* f);
+
 // Returns the name of a preset index >= 0 and < tsf_get_presetcount()
 TSFDEF const char* tsf_get_presetname(const tsf* f, int preset_index);
 
@@ -341,6 +344,10 @@ struct tsf
 {
 	struct tsf_preset* presets;
 	float* fontSamples;
+	/* PocketTracker local addition: the length of fontSamples. Upstream computes it during load and
+	   then discards it, so there is no way to ask a loaded font how much audio it is holding. Needed
+	   by AudioEngine::audio_memory_bytes(). Re-apply on any tsf update. */
+	unsigned int fontSampleCount;
 	struct tsf_voice* voices;
 	struct tsf_channels* channels;
 
@@ -1449,6 +1456,7 @@ TSFDEF tsf* tsf_load(struct tsf_stream* stream)
 		if (!res || !tsf_load_presets(res, &hydra, smplCount)) goto out_of_memory;
 		res->outSampleRate = 44100.0f;
 		res->fontSamples = floatBuffer;
+		res->fontSampleCount = smplCount;   /* PocketTracker local addition */
 		floatBuffer = TSF_NULL; // don't free below
 	}
 	if (0)
@@ -1523,6 +1531,12 @@ TSFDEF int tsf_get_presetindex(const tsf* f, int bank, int preset_number)
 TSFDEF int tsf_get_presetcount(const tsf* f)
 {
 	return f->presetNum;
+}
+
+/* PocketTracker local addition — see the struct member. */
+TSFDEF unsigned int tsf_get_fontsamplecount(const tsf* f)
+{
+	return f->fontSampleCount;
 }
 
 TSFDEF const char* tsf_get_presetname(const tsf* f, int preset)

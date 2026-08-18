@@ -69,7 +69,7 @@ native/                            The portable program
 ├── audio-engine.cpp / .h          The engine: processAudioBlock, voices, modulation, DSP
 ├── audio-decoders.cpp / .h        WAV, MP3, FLAC, OGG, Opus, M4A decoding
 ├── sampler-voice.h                Per-voice state for sample playback
-├── soundfont-voice.cpp / .h       Per-voice state for SF2 (TinySoundFont)
+├── soundfont-voice.cpp / .h       Per-voice state for SF2 (TinySoundFont — see the note below)
 ├── note-queue.h                   Sample-accurate note + parameter scheduling queues
 ├── sample-editor.cpp              Destructive waveform operations
 ├── transient-detector.cpp         Slice-point detection
@@ -137,6 +137,12 @@ shell/                             The only SDL in the tree
 app/                               Android: manifest, resources, and a seven-file Kotlin shim
 docs/                              The manual, this document, and the licence notices
 ```
+
+> **TinySoundFont carries one local change.** `vendor/tsf/tsf.h` records the length of the sample
+> buffer it allocates (`fontSampleCount`, plus a `tsf_get_fontsamplecount()` accessor); upstream
+> computes that number during load and then discards it. Without it a loaded font's PCM is
+> unmeasurable, and the engine's USED RAM total would silently omit the largest thing it holds.
+> **Re-apply it on any tsf update** — both sites are marked in the file.
 
 ---
 

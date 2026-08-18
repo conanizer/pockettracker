@@ -1140,6 +1140,15 @@ WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's ho
 > [!TIP]
 > **EXPORT → MIX** renders faster than real-time. A 3-minute song typically exports in a few seconds. The status line shows the output filename when done.
 
+### USED RAM
+
+The bottom of the screen shows how much memory your samples and SoundFonts are using. The same figure
+appears in the header of the INST.POOL screen, beside the list of instruments that make it up.
+
+Samples are held uncompressed, so a long stereo sample costs roughly twice its file size — and there is
+no limit on how many you load. If the figure climbs towards what your device has spare, that is the
+warning to shorten or drop a sample before the system closes the app.
+
 ---
 
 ## 19. SETTINGS Screen

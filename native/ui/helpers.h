@@ -12,6 +12,7 @@
 // `EditorHelpers.getEffectTypeName()` is a one-line alias for `EffectProcessor.effectName()`, "so the
 // code↔name map lives in core and can't drift from the effect codes".
 
+#include <cstdint>
 #include <string>
 
 #include "canvas.h"
@@ -157,6 +158,18 @@ inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool i
         c.draw_text(">", value_x + 2 * CHAR_W, text_y, is_cursor ? t.textCursor : t.textValue,
                     CHAR_SPACING, FONT_SCALE);
     }
+}
+
+/**
+ * A byte count as "12.4 MB" — the USED RAM readout, drawn on PROJECT and on INST.POOL.
+ *
+ * Integer math in tenths, never a float format: `%.1f` would print a comma under a locale that uses
+ * one, and this font has no comma-as-decimal-point convention to fall back on. Written once because
+ * two screens show the same quantity and a reader comparing them must not find two roundings.
+ */
+inline std::string megabytes_str(int64_t bytes) {
+    const int64_t tenths = (bytes * 10 + 524288) / 1048576;   // round to nearest tenth of a MiB
+    return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10) + " MB";
 }
 
 // ─── Clears ──────────────────────────────────────────────────────────────────────────────────────

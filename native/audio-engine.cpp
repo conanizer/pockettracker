@@ -501,6 +501,35 @@ bool AudioEngine::hasStereoData(int id) {
     return samplesRight[id] != nullptr;
 }
 
+// Declared in audio-engine.h, where the reason it is a member rather than a UI-side walk is written
+// down. One line per buffer this class owns; a right-channel pointer is counted only when it exists,
+// since a mono sample leaves it null and shares the one length. It lives in THIS file because tsf.h
+// is only included here and in soundfont-voice.cpp.
+int64_t AudioEngine::audio_memory_bytes() const {
+    const auto pcm = [](const void* left, const void* right, int64_t frames, int64_t bytesPerFrame) {
+        if (!left || frames <= 0) return int64_t{0};
+        return frames * bytesPerFrame * (right ? 2 : 1);
+    };
+
+    int64_t total = 0;
+    for (int id = 0; id < 256; ++id) {
+        total += pcm(samples[id],         samplesRight[id],         sampleLengths[id],         4);
+        total += pcm(sampleBackups[id],   sampleBackupsRight[id],   sampleBackupLengths[id],   2);
+        total += pcm(originalSamples[id], originalSamplesRight[id], originalSampleLengths[id], 2);
+    }
+    total += pcm(fxPreviewBackup, fxPreviewBackupRight, fxPreviewBackupLen,    4);
+    total += pcm(sampleClipboard, sampleClipboardRight, sampleClipboardLength, 4);
+
+    // A SoundFont's PCM lives inside tsf, which converts every sample to float on load. One handle is
+    // shared by every track pointed at that slot, so it is counted once per LOADED FONT rather than
+    // per instrument — the same 40 MB font on four tracks is 40 MB, not 160.
+    for (int slot = 0; slot < MAX_SOUNDFONTS; ++slot) {
+        if (soundfonts[slot].handle)
+            total += static_cast<int64_t>(tsf_get_fontsamplecount(soundfonts[slot].handle)) * 4;
+    }
+    return total;
+}
+
 void AudioEngine::clearSample(int id) {
     if (id < 0 || id >= 256) return;
     std::lock_guard<std::mutex> lock(sampleEditMutex);

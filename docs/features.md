@@ -63,6 +63,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Per-instrument real-time effects: low/high/band-pass filter, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)
 - 4 modulation slots per instrument: envelope shapes (AHD, ADSR) and LFO targeting volume, pitch, filter, pan, and more
 - Save and load instruments as preset files (.pti) — bundles all parameters, table, and modulation settings together
+- **USED RAM readout** on the PROJECT and INST.POOL screens: how much memory the loaded samples and SoundFonts are holding
 
 ## Sample Editor
 

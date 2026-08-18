@@ -147,6 +147,23 @@ public:
     // SAMPLE EDITOR OPERATIONS
     // ===================================
     int   getSampleLength(int id);
+
+    /**
+     * Every byte of audio the engine is holding, for the USED RAM readout.
+     *
+     * ⚠️ IT LIVES HERE BECAUSE THE BUFFERS DO. A caller outside the engine can only reach the playable
+     * pool, through getSampleLength() — it cannot see the undo buffers, the RATE-HIGH originals, the
+     * FX-preview copy, the sample clipboard or a SoundFont's PCM, which together can be several times
+     * the pool while a sample is being edited. Summing it at the call site meant reporting a quarter of
+     * the truth and calling it a total. **A buffer added to this class must be added to this function**,
+     * and it is the only place that can be true of.
+     *
+     * ⚠️ Deliberately takes no lock. It reads pointers and lengths the edit path swaps under
+     * `sampleEditMutex`, so a value can be one frame stale — which is the correct trade for a number
+     * drawn 60 times a second, and the reason it must never be used for an allocation decision.
+     */
+    int64_t audio_memory_bytes() const;
+
     void  getSampleWaveform(int id, float* out, int numBins);
     void  getSampleWaveformRange(int id, int startFrame, int endFrame, float* out, int numBins);
     // channel: 0=left, 1=right, 2=averaged (for STEREO/MONO source views)

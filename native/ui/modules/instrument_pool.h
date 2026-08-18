@@ -18,6 +18,8 @@
 //
 // Reorder (M8's EDIT+UP/DOWN on the name column) is deliberately not here, as in the Kotlin.
 
+#include <cstdint>
+
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
@@ -28,6 +30,7 @@ namespace pt::ui {
 struct InstrumentPoolState {
     const songcore::Project& project;
     int   selectedInstrument = 0;   // …which IS the cursor row
+    int64_t sampleRamBytes   = 0;   // the USED RAM total, drawn in the header (engine_feed.h)
     int   cursorColumn       = 0;
     Theme theme              = theme_classic();
 };
@@ -36,6 +39,13 @@ class InstrumentPoolModule {
 public:
     static constexpr int WIDTH  = 620;
     static constexpr int HEIGHT = 392;
+
+    // The USED RAM readout in the title row, as offsets from the module's left edge. Public because
+    // only layout.h knows both this module's x AND the editor clip, and it asserts there that the
+    // widest total this can print still lands left of the right bar.
+    static constexpr int RAM_LABEL_X   = 280;
+    static constexpr int RAM_VALUE_X   = 348;
+    static constexpr int RAM_MAX_CHARS = 9;   // "1234.5 MB" — four digits before the point
 
     void draw(Canvas& c, int x, int y, const InstrumentPoolState& s) const;
 

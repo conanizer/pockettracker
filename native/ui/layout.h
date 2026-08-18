@@ -70,6 +70,17 @@ static_assert(PROJECT_NAME_CELLS_X + (ProjectModule::NAME_VISIBLE_CHARS + 1) * C
                   > EDITOR_CLIP_RIGHT,
               "PROJECT's NAME window is narrower than the row affords — another cell fits");
 
+// INST.POOL's USED RAM readout sits in the title row, and the same clip applies to it. Pinned here
+// for the same reason: the module knows neither the clip nor the x it is drawn at, so nothing inside
+// it could catch a total that runs off the edge — and a RAM figure is exactly the string that grows
+// when things are going wrong.
+inline constexpr int POOL_RAM_VALUE_X = SIDE_SPACER + InstrumentPoolModule::RAM_VALUE_X;
+static_assert(POOL_RAM_VALUE_X + InstrumentPoolModule::RAM_MAX_CHARS * CHAR_W - CHAR_SPACING
+                  <= EDITOR_CLIP_RIGHT,
+              "INST.POOL's USED RAM total can print past the editor clip");
+static_assert(SIDE_SPACER + InstrumentPoolModule::RAM_LABEL_X + 3 * CHAR_W <= POOL_RAM_VALUE_X,
+              "INST.POOL's RAM label overlaps its value");
+
 class TrackerLayout {
 public:
     /**

@@ -105,7 +105,7 @@ private:
         }
     }
     /**
-     * PROJECT's debug-only USED RAM readout.
+     * The USED RAM readout on PROJECT and INST.POOL.
      *
      * ⚠️ It is a DIFFERENT number from Android's, and the divergence is deliberate. Kotlin reports
      * native-heap GROWTH since launch (`Debug.getNativeHeapAllocatedSize()` minus a baseline), which is
@@ -114,20 +114,17 @@ private:
      * the row is actually for. A proxy is what you use when you cannot reach the truth; in-process, we
      * can.
      *
-     * Only on PROJECT, and only in a debug build — 128 integer reads is cheap, but not for a row that
-     * is not on screen.
+     * ⚠️ NOT debug-gated. Sample memory is uncapped by design — a tracker with a length limit is a
+     * worse tracker — so the only thing standing between a user and an out-of-memory kill is being able
+     * to SEE the total. A number that exists only in a developer build protects the developer.
+     *
+     * The screen check stays: two screens show it, and the walk is not worth doing for a readout that
+     * is not on either of them.
      */
     void poll_sample_ram(AudioEngine& engine, AppState& state) {
-        if (!state.caps.debug || state.currentScreen != ScreenType::PROJECT) return;
-
-        int64_t bytes = 0;
-        for (int id = 0; id < songcore::POOL_INSTRUMENTS; ++id) {
-            const int frames = engine.getSampleLength(id);
-            if (frames <= 0) continue;
-            const int channels = engine.hasStereoData(id) ? 2 : 1;
-            bytes += static_cast<int64_t>(frames) * channels * 4;   // float32 PCM
-        }
-        state.sampleRamBytes = bytes;
+        if (state.currentScreen != ScreenType::PROJECT &&
+            state.currentScreen != ScreenType::INST_POOL) return;
+        state.sampleRamBytes = engine.audio_memory_bytes();
     }
 
     void poll_engine(AudioEngine& engine, AppState& state) {
