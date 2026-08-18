@@ -15,6 +15,22 @@ int clamp_table_id(const Project& p, int tableId) {
     return std::max(0, std::min(tableId, last));
 }
 
+/**
+ * The selection rectangle with its corners sorted.
+ *
+ * A selection is an anchor plus a dragged edge, so either corner may be the smaller one on either
+ * axis — every copy and delete below walks `[minRow..maxRow] × [minCol..maxCol]` and there is one
+ * rule for getting there.
+ */
+struct Bounds {
+    int minRow, maxRow, minCol, maxCol;
+};
+
+Bounds normalise(int startRow, int startColumn, int endRow, int endColumn) {
+    return {std::min(startRow, endRow), std::max(startRow, endRow),
+            std::min(startColumn, endColumn), std::max(startColumn, endColumn)};
+}
+
 /** The smallest `column` across the copied items — the anchor a paste re-offsets from. */
 template <typename Item>
 int min_source_column(const std::vector<Item>& items) {
@@ -31,10 +47,8 @@ void Clipboard::copy_phrase_steps(const Project& p, int phraseId, int startRow, 
                                   int endRow, int endColumn) {
     const songcore::Phrase& phrase = p.phrases[static_cast<size_t>(phraseId)];
 
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
 
     phraseItems_.clear();
     for (int row = minRow; row <= maxRow; ++row) {
@@ -72,10 +86,8 @@ void Clipboard::copy_chain_rows(const Project& p, int chainId, int startRow, int
                                 int endRow, int endColumn) {
     const songcore::Chain& chain = p.chains[static_cast<size_t>(chainId)];
 
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
 
     chainItems_.clear();
     for (int row = minRow; row <= maxRow; ++row) {
@@ -103,10 +115,8 @@ void Clipboard::copy_chain_rows(const Project& p, int chainId, int startRow, int
 
 void Clipboard::copy_song_cells(const Project& p, int startRow, int startColumn, int endRow,
                                 int endColumn) {
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
 
     songItems_.clear();
     for (int row = minRow; row <= maxRow; ++row) {
@@ -142,10 +152,8 @@ void Clipboard::copy_table_rows(const Project& p, int tableId, int startRow, int
                                 int endRow, int endColumn) {
     const songcore::Table& table = p.tables[static_cast<size_t>(clamp_table_id(p, tableId))];
 
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
 
     tableItems_.clear();
     for (int row = minRow; row <= maxRow; ++row) {
@@ -368,10 +376,8 @@ int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int s
                                    int endRow, int endColumn) {
     songcore::Phrase& phrase = p.phrases[static_cast<size_t>(phraseId)];
 
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
     int itemsDeleted = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
@@ -398,10 +404,8 @@ int Clipboard::delete_chain_rows(Project& p, int chainId, int startRow, int star
                                  int endColumn) {
     songcore::Chain& chain = p.chains[static_cast<size_t>(chainId)];
 
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
     int itemsDeleted = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
@@ -424,10 +428,8 @@ int Clipboard::delete_chain_rows(Project& p, int chainId, int startRow, int star
 
 int Clipboard::delete_song_cells(Project& p, int startRow, int startColumn, int endRow,
                                  int endColumn) {
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
     int itemsDeleted = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
@@ -451,10 +453,8 @@ int Clipboard::delete_table_rows(Project& p, int tableId, int startRow, int star
                                  int endColumn) {
     songcore::Table& table = p.tables[static_cast<size_t>(clamp_table_id(p, tableId))];
 
-    const int minRow = std::min(startRow, endRow);
-    const int maxRow = std::max(startRow, endRow);
-    const int minCol = std::min(startColumn, endColumn);
-    const int maxCol = std::max(startColumn, endColumn);
+    const auto [minRow, maxRow, minCol, maxCol] =
+        normalise(startRow, startColumn, endRow, endColumn);
     int itemsDeleted = 0;
 
     for (int row = minRow; row <= maxRow; ++row) {
