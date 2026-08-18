@@ -300,6 +300,16 @@ A phrase has no single playing context — it may sit at several chain rows, in 
 so the editor unions the answer over every chain row that plays it (`find_ramp_cells`) and falls back
 to pairing within the phrase only for a phrase no chain references.
 
+A **table** takes the same pair and shares none of that mechanism. It has no scheduler and emits no
+event: it runs inside `AudioEngine`, per voice, off the row the voice is standing on, over sixteen rows
+with a `HOP` that can jump backwards. So the ramp **holds no state** — its position is re-derived on
+every audio block from the current row and the table's cells, which is why a `HOP` anywhere into or out
+of a span needs no code to handle it. What a table `AUS` can move is the **intersection** of what the
+table engine has an arm for and what the registry above takes, held together by `static_assert` in the
+one file that sees both lists rather than written down as a third. ⚠️ A phrase `EQM` is an event, so the
+scheduler arms the restore-on-stop as it emits one; a table `EQM` is emitted nowhere, so the engine
+latches it and the host consumes the latch — one restore, armed from either end.
+
 ### Determinism
 
 The floats have to be bit-identical across compilers and architectures, because the event stream is
@@ -443,6 +453,17 @@ skipped, never renumbered, so a stored cursor and a recorded test case keep mean
 
 Two modules are stateful, both because their output is a function of the *previous* frame: the
 oscilloscope (peak-hold dots, falling bars) and the mixer (falling peak markers).
+
+The sample editor holds **three marker lists behind one accessor** — the file's own `cue ` chunk, the
+detector's output, and the boundaries the user has moved. Every reader goes through `marker_count()` /
+`marker_position()`, because one vector answering several questions is how a save under `SLICE = OFF`
+once wrote the detector's markers into a file. The hand-moved list overrides the others while a stamp
+of the `(method, parameter)` it was made under still matches the screen, so "changing the method resets
+what you moved" is **derived** rather than asked of each write to those fields; an *empty* stamped list
+is a real answer, not an absent one. Each boundary carries the frame its method gave it, since a
+boundary may be dragged past its neighbours and its number follows its position — an index says where
+it sits on screen, not which cut it is. ⚠️ An op that changes the sample's **length** drops all three:
+a marker is a frame index, and the frames have been replaced.
 
 **Modals own the buttons while they are up**, and every new modal has to be added to the predicate
 that says so.

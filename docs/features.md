@@ -50,6 +50,9 @@ Write these into any phrase step to shape how a note plays:
 
 Each instrument has its own 16-row mini-sequencer. It loops continuously while the note plays and lets you automate volume, pitch, and effects row by row — great for programmed arpeggios, tremolo, and rhythmic gating without using up phrase FX slots.
 
+- EQ per note and master EQ from a table row, alongside the filter cells
+- Effect automation in a table too — mark a start and a finish **row** and the value between them glides; HOP steers the fade, so a looped section can restart or continue it
+
 ## Instruments
 
 - **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
@@ -71,7 +74,8 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Apply effects permanently: overdrive, bitcrusher, 3-band EQ, OTT compressor, dust (vinyl noise/wear)
 - Pitch-shift to match a BPM target without changing length (repitch)
 - Time-stretch to match a BPM target without changing pitch — Akai SOLA algorithm (same "jungle chop" character as the S950/S1000)
-- Auto-detect transients to place slice markers, or divide manually
+- Auto-detect transients to place slice markers, or divide into equal slices
+- Place slices by hand — drag any boundary, delete one, or press START and tap A on every hit to chop by ear. A sample that already carries slices opens on them, ready to edit
 - Slice markers embedded in the WAV cue chunk — compatible with M8, Blackbox, Reaper, Logic
 - Export all slices as separate WAV files (CHOP)
 - Assign slice playback mode on the instrument: trigger individual slices by note, play from slice to end, or standard pitch mode

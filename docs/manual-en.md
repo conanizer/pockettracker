@@ -695,8 +695,37 @@ The SLICE row controls how slice markers are managed:
 | OFF | Show existing WAV cue markers (read-only). No detection. |
 | TRANSIENT | Run spectral-flux transient detection. SENS (`00`–`FF`) controls threshold. |
 | DIVIDE | Divide the sample into equal slices. |
+| MANUAL | Place the boundaries yourself. Opens on the sample's existing markers, or empty if it has none. No SENS/BY parameter. |
 
 Slice markers are stored in the WAV `cue ` chunk — compatible with M8, Blackbox, Reaper, Logic, and Adobe Audition.
+
+The row below shows which slice you are on and where it starts. Stepping it selects that slice, so you
+can dial through them and hear each one with START.
+
+### Moving and making slice boundaries
+
+The **position** cell on that row is editable under every mode but OFF, so a detected transient or an
+equal division can be nudged. **MANUAL** is the mode with no computed set of its own, and the only one
+where a plain A makes a new boundary.
+
+| Input | Action |
+|---|---|
+| A + UP/DOWN | Move the boundary by a fine step |
+| A + LEFT/RIGHT | Move it by a coarse step |
+| A + B | MANUAL: delete it. TRANSIENT / DIVIDE: put it back where the mode had placed it |
+| A *(while the sample plays)* | MANUAL: cut a boundary at the playhead |
+
+Both steps scale with the zoom, as the selection edges do, and **SNAP** applies the same way.
+
+Under MANUAL the slice counter reaches one past the last slice: that slot is the next boundary, sitting
+on the one to its left, and moving it off is what creates it. A boundary may be dragged past its
+neighbours — its number follows its position — and deleting one renumbers the rest.
+
+**Chopping by ear:** with the cursor on that row, press START and tap A on every hit.
+
+> [!NOTE]
+> Anything that changes the sample's **length** — CROP, CUT, DUPL, PASTE, DEL, UNDO, a resizing SYNC —
+> clears every slice boundary, including the ones the file arrived with.
 
 **CHOP** — exports each slice as a separate WAV file to `Samples/Chops/{name}/`.
 
@@ -748,6 +777,23 @@ loops a section of it as usual, and PLAY, STOP and a render each start again fro
 
 > [!NOTE]
 > By default, instrument N uses table N. To override this per-note, place a **TBL XX** effect in the phrase FX column. The table switches immediately and stays active for subsequent notes on that track.
+
+### Fades in a table
+
+`AUS` and `AUF` work on a table row as they do on a phrase step (§21), with **rows** as the span:
+
+```
+     N    VOL  FX1      FX2      FX3
+02   00   --   CUT 20   AUS 80   ---  00   ← start at 20, linear
+0A   00   --   ---  00  AUF F0   ---  00   ← arrive at F0 eight rows later
+```
+
+A table `AUS` can move **VOL**, **CUT**, **RES**, **EQN** and **EQM**; anything else to its left is
+passed over. The fade follows the row the table is on, so **HOP steers it** — back to the `AUS` row
+restarts it, into the middle picks it up there, past the `AUF` ends it. A `TIC` change stretches it
+along with the rest of the table.
+
+⚠️ A span never wraps past row `0F`: write the `AUF` on a later row than the `AUS`.
 
 ### Table–instrument link
 
@@ -1440,7 +1486,7 @@ delay send.
 ### EQN `XX` — EQ (per note)
 
 Applies EQ preset slot `XX` (`00`–`7F`) to **this note only**. Edit the presets in the EQ EDITOR (§17).
-A preset with all bands off = no EQ.
+A preset with all bands off = no EQ. Works in a **table row** too, like `CUT` and `RES`.
 
 ---
 
@@ -1448,7 +1494,7 @@ A preset with all bands off = no EQ.
 
 Switches the **master bus** EQ to preset slot `XX` (`00`–`7F`) during playback. It **persists** until the
 next `EQM`, then resets to the master EQ configured on the MIXER screen when playback stops. Use it to
-automate the master EQ across a song (e.g. a filter-sweep build-up).
+automate the master EQ across a song (e.g. a filter-sweep build-up). Works in a **table row** too.
 
 ---
 
@@ -1555,6 +1601,9 @@ a long, obvious EQ sweep, use `EQM`.
 **A fade may cross phrases.** The `AUF` can sit in a **later phrase of the same chain**, which is how a
 fade longer than one phrase is written — up to the sixteen rows of the chain. It does **not** cross into
 the next chain: pairing stops at the end of the chain the `AUS` was written in.
+
+**A fade may also be written in a TABLE**, over rows rather than steps and with a smaller set of
+parameters — see §12 → *Fades in a table*.
 
 **When nothing happens.** A cell that is not part of a working pair is drawn **dimmed**, the same way an
 empty cell is. That is the editor telling you the fade will not play. The reasons are:
@@ -2154,6 +2203,9 @@ exports and sample-editor saves keep their own folders.
 | A + LEFT / RIGHT | Zoom in / out (cursor on the ZOOM cell) |
 | D-pad LEFT / RIGHT | Scroll (when zoomed) |
 | D-pad (on marker row) | Move selection marker |
+| A + D-pad (on slice position) | Move the boundary — UP/DOWN fine, LEFT/RIGHT coarse |
+| A + B (on slice row) | Delete the boundary (MANUAL), or reset it (TRANSIENT / DIVIDE) |
+| A (on slice row, while playing) | Cut a boundary at the playhead (MANUAL) |
 | A or SELECT (on EQ-effect slot) | Open EQ EDITOR |
 | START | Preview sample |
 | B | Close (asks first if there are unsaved changes) |
