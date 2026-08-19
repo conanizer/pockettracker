@@ -393,6 +393,7 @@ struct Track {
     std::vector<int> chainRefs;   // mutableListOf() — empty default
     int  volume = 0xFF;
     bool mute   = false;
+    bool solo   = false;
     Track() = default;
     explicit Track(int id_) : id(id_) {}
 };
@@ -560,6 +561,30 @@ struct Project {
     bool midiSendProgramChange = true;
     std::vector<int> midiInputChannels = std::vector<int>(POOL_TRACKS, -1);  // per-track input channel
 };
+
+// ── Which tracks are making sound ────────────────────────────────────────────────────────────────
+//
+// ⚠️ DERIVED, NEVER STORED. Solo is a property of the SET of tracks, not of one of them: the answer
+// for track 3 changes when track 5 is soloed. A cached per-track "audible" flag would have to be
+// rewritten on every toggle and would be wrong the first time a site forgot, so every consumer —
+// both schedulers, the render, the traversal, the engine push and both screens — asks here instead.
+//
+// Mute wins over solo: a soloed track that is also muted stays silent, because MUTE is the explicit
+// statement about that one channel and SOLO is a statement about the others.
+inline bool any_solo(const Project& p) {
+    for (const Track& t : p.tracks)
+        if (t.solo) return true;
+    return false;
+}
+
+inline bool track_audible(const Project& p, const Track& t) {
+    return !t.mute && (t.solo || !any_solo(p));
+}
+
+inline bool track_audible(const Project& p, int trackId) {
+    if (trackId < 0 || trackId >= static_cast<int>(p.tracks.size())) return false;
+    return track_audible(p, p.tracks[static_cast<size_t>(trackId)]);
+}
 
 struct InstrumentPreset {
     int version = 1;

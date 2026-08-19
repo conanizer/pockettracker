@@ -105,6 +105,7 @@ void InputDispatcher::set_now(long long now_ms) {
     run_due_autosave();                 // the crash-recovery autosave's 3 s debounce  (S10)
     run_due_status_dismiss();           // the status line's 5 s auto-dismiss (parity finding 5)
     run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
+    run_selection_recency();            // which rung L+R takes first
 }
 
 void InputDispatcher::run_instrument_entry_push() {
@@ -1782,11 +1783,174 @@ void InputDispatcher::on_l_a() {
     if (r.kind == PasteResult::Kind::SUCCESS && r.itemsPasted > 0) mark_modified();
 }
 
+// ─── R+A / R+B: MUTE and SOLO ────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
+    count = 0;
+    switch (s_.currentScreen) {
+        case ScreenType::SONG: {
+            // A selection makes the chord act on every channel it covers — the reason the gesture is
+            // worth having on a tracker at all: L+B+B selects the row, R+B drops the whole mix out.
+            if (s_.selection.active) {
+                const SelectionBounds b = s_.selection.bounds();
+                for (int col = b.topLeftColumn; col <= b.bottomRightColumn; ++col)
+                    if (col >= 1 && col <= 8) out[count++] = col - 1;
+                return;
+            }
+            if (s_.cursorColumn >= 1 && s_.cursorColumn <= 8) out[count++] = s_.cursorColumn - 1;
+            return;
+        }
+        case ScreenType::MIXER:
+            // ⚠️ Column 8 is the MASTER strip and has no mute of its own — the chord is a no-op there
+            // rather than muting track 8, which does not exist. The selection is not consulted: it
+            // belongs to the grid editors, and a stale one from SONG must not reach across.
+            if (s_.mixerCursorColumn >= 0 && s_.mixerCursorColumn <= 7)
+                out[count++] = s_.mixerCursorColumn;
+            return;
+        default:
+            return;   // every other screen: the chord is the consumed no-op it has always been
+    }
+}
+
+void InputDispatcher::toggle_mute_solo(bool solo) {
+    // Ordering, not bookkeeping: a selection made earlier in THIS batch of events has to be seen as
+    // older than the toggle about to happen. See `run_selection_recency()`.
+    run_selection_recency();
+
+    int targets[8];
+    int count = 0;
+    mute_solo_targets(targets, count);
+    if (count == 0) return;
+
+    Project& p = host_.edit_project();
+
+    // ⚠️ ALL EIGHT PAIRS, and only on the FIRST toggle of a chord. A revert has to undo everything the
+    // chord did — a selection touches several channels, and a solo changes what the other seven are
+    // heard doing — and re-snapshotting per press would leave it able to undo only the last one.
+    if (!mixSnapshot_.live) {
+        for (int i = 0; i < 8 && i < static_cast<int>(p.tracks.size()); ++i) {
+            mixSnapshot_.mute[i] = p.tracks[static_cast<size_t>(i)].mute;
+            mixSnapshot_.solo[i] = p.tracks[static_cast<size_t>(i)].solo;
+        }
+        mixSnapshot_.live = true;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        if (targets[i] >= static_cast<int>(p.tracks.size())) continue;
+        songcore::Track& t = p.tracks[static_cast<size_t>(targets[i])];
+        if (solo) t.solo = !t.solo;
+        else      t.mute = !t.mute;
+    }
+
+    s_.lastClearable = AppState::Clearable::MUTE;
+
+    // ⚠️ NO mark_dirty_and_arm_autosave(). Muting a channel is a PERFORMANCE action, not an edit to
+    // the document: it is saved when the project is saved for some other reason, but on its own it
+    // must not arm the 3 s autosave, must not make the song read as dirty, and must not put a
+    // "RECOVER WORK?" in front of the next launch. `push_globals()` is what makes it audible, and it
+    // sweeps all eight tracks because a solo changes the answer for the seven it was not aimed at.
+    host_.push_globals();
+}
+
+void InputDispatcher::restore_full_playback() {
+    Project& p = host_.edit_project();
+    for (songcore::Track& t : p.tracks) { t.mute = false; t.solo = false; }
+    s_.lastClearable = AppState::Clearable::NONE;
+    host_.push_globals();
+}
+
+void InputDispatcher::on_r_b() {
+    if (!mute_solo_chord_live()) return;
+    toggle_mute_solo(/*solo=*/false);
+}
+
+void InputDispatcher::on_r_a() {
+    if (!mute_solo_chord_live()) return;
+    toggle_mute_solo(/*solo=*/true);
+}
+
+// The one question both the chord and the deferred B ask: is R+A/R+B a MUTE/SOLO here, right now?
+// Derived rather than restated at the three sites, so a screen that grows the chord tomorrow starts
+// deferring its B on the same day.
+bool InputDispatcher::mute_solo_chord_live() const {
+    if (overlay_swallows(Overlay::NONE)) return false;   // a modal owns the buttons while it is up
+    return s_.currentScreen == ScreenType::SONG || s_.currentScreen == ScreenType::MIXER;
+}
+
+void InputDispatcher::on_r_combo_commit() {
+    // R came up first, so what the chord did stands. Dropping the snapshot is the whole of it — the
+    // next chord takes a fresh one. (A real handler rather than an absent one: the mapper's release
+    // ordering is the specification, and a closer that never ran must be distinguishable from one
+    // that ran and had nothing to do.)
+    mixSnapshot_.live = false;
+}
+
+void InputDispatcher::on_r_combo_revert() {
+    if (!mixSnapshot_.live) return;   // the chord armed on a screen that has no channels
+    Project& p = host_.edit_project();
+    for (int i = 0; i < 8 && i < static_cast<int>(p.tracks.size()); ++i) {
+        p.tracks[static_cast<size_t>(i)].mute = mixSnapshot_.mute[i];
+        p.tracks[static_cast<size_t>(i)].solo = mixSnapshot_.solo[i];
+    }
+    mixSnapshot_.live = false;
+    host_.push_globals();
+}
+
+unsigned InputDispatcher::selection_signature() const {
+    unsigned h = clip_.has_data() ? 1u : 0u;
+    h = h * 31u + static_cast<unsigned>(clip_.type());
+    h = h * 31u + static_cast<unsigned>(clip_.width());
+    h = h * 31u + static_cast<unsigned>(clip_.height());
+    h = h * 31u + (s_.selection.active ? 1u : 0u);
+    if (s_.selection.active) {
+        const SelectionBounds b = s_.selection.bounds();
+        h = h * 31u + static_cast<unsigned>(b.topLeftRow);
+        h = h * 31u + static_cast<unsigned>(b.topLeftColumn);
+        h = h * 31u + static_cast<unsigned>(b.bottomRightRow);
+        h = h * 31u + static_cast<unsigned>(b.bottomRightColumn);
+    }
+    return h;
+}
+
+void InputDispatcher::run_selection_recency() {
+    const unsigned sig = selection_signature();
+    if (sig == selectionSig_) return;
+    selectionSig_    = sig;
+    s_.lastClearable = AppState::Clearable::SELECTION;
+}
+
 void InputDispatcher::on_l_r() {
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
         s_.fileBrowser.selectionAnchor = -1;
+        return;
+    }
+
+    // ── ONE PRESS UNDOES ONE THING, MOST RECENT FIRST ────────────────────────────────────────────
+    //
+    // Two rungs: the mix (any track muted or soloed) and the selection with its buffer.
+    // `s_.lastClearable` says which the user touched last, and that one is tried first — clearing
+    // both at once would throw away a selection someone built press by press just because they also
+    // dropped a channel out of the mix.
+    //
+    // ⚠️ A rung with nothing to clear FALLS THROUGH to the other. Without that, L+R reads as a dead
+    // button whenever the most recent thing is already empty — and the recency flag survives the
+    // clear that emptied it, so that is not a rare state.
+    //
+    // ⚠️ The SAMPLE_EDITOR exclusion covers this rung too, for the reason it covers the clipboard's:
+    // L+R is reserved there for the editor's own selection, and one screen with two exclusion lists
+    // is a special case someone has to remember.
+    const bool mix_touched = [&] {
+        if (s_.currentScreen == ScreenType::SAMPLE_EDITOR) return false;
+        const Project& p = host_.project();
+        for (const songcore::Track& t : p.tracks)
+            if (t.mute || t.solo) return true;
+        return false;
+    }();
+
+    if (s_.lastClearable == AppState::Clearable::MUTE && mix_touched) {
+        restore_full_playback();
         return;
     }
 
@@ -1809,7 +1973,12 @@ void InputDispatcher::on_l_r() {
     // ⚠️ SAMPLE_EDITOR is excluded: L+R is reserved there for the editor's own selection, and a
     // generic clear would shadow it. GROOVE and the other one-column screens are NOT excluded — a
     // clear there is a no-op that costs nothing, which beats a special case someone has to remember.
+    const bool had_buffer = !clip_.info().empty();
     if (s_.currentScreen != ScreenType::SAMPLE_EDITOR) clip_.clear();
+
+    // Nothing on the selection rung to clear, but the mix has something: take it rather than leave
+    // the press doing nothing at all.
+    if (!had_buffer && mix_touched) restore_full_playback();
 }
 
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
@@ -4724,10 +4893,21 @@ bool InputDispatcher::defer_a_to_release() const {
 }
 
 bool InputDispatcher::defer_b_to_release() const {
-    // Exactly the EQ editor, and nothing else. See the header: B is both the CLOSE and the modifier of
-    // the slot cycle, so it cannot act until it is known which one the user meant — and only the release
-    // says that.
-    return eq_open();
+    // The EQ editor. See the header: B is both the CLOSE and the modifier of the slot cycle, so it
+    // cannot act until it is known which one the user meant — and only the release says that.
+    if (eq_open()) return true;
+
+    // ⚠️ AND WHEREVER R+B IS A MUTE, for the same reason one layer out. TWO BUTTONS ARE NEVER PRESSED
+    // ON THE SAME FRAME: a shoulder and a face button aimed at each other still arrive as two events,
+    // in whichever order the pad reported them. Acting on B's own press means a B that lands a frame
+    // ahead of its R COPIES the selection and closes it — and the R+B that was aimed at that selection
+    // then mutes one channel under the cursor instead of the eight that were highlighted.
+    //
+    // Holding B until it comes up makes the two gestures the same either way round: R can still claim
+    // the press (button_mapper's R_SHIFT arm), and a B that is let go unclaimed is the plain copy it
+    // always was. It costs nothing visible — B's copy on the release of B is the same instant to a
+    // hand — and it is also what stops B+UP/B+DOWN paging a selection away on the way past.
+    return mute_solo_chord_live();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════

@@ -350,6 +350,10 @@ public:
     // Set real-time track volume (affects playback immediately, including SF channels).
     void setTrackVolume(int trackId, float volume);
 
+    // MUTE the track, independently of its fader — voices already ringing go silent within one block.
+    // "Inaudible" is the caller's word: songcore folds solo into it (songcore/model.h track_audible).
+    void setTrackMuted(int trackId, bool muted);
+
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
 
@@ -731,6 +735,10 @@ private:
 
     // Real-time volume control (can be changed without rescheduling notes)
     float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    // ⚠️ A SEPARATE GATE, NOT A FADER VALUE. Folding the mute into trackVolumes would make a VTR
+    // ramp — which writes the fader from the audio thread — un-mute the track it lands on. The two
+    // stay independent and are multiplied where the block snapshots them.
+    bool  trackMuted[8] = {false, false, false, false, false, false, false, false};
     // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
     // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.

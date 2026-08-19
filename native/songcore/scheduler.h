@@ -228,6 +228,12 @@ class Sequencer {
         Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
 
         nextFrameToSchedule_ = cp.frame;
+        // ⚠️ AND THE STATE THE RE-SCHEDULE WILL CONSUME — see Checkpoint. Without this the phrase is
+        // replayed against a groove phase, a HOP and an RNG stream that the first pass already moved,
+        // so what comes back is not what was thrown away: with a groove whose active length does not
+        // divide 16, every track in the song is re-timed by an edit aimed at one of them.
+        for (int i = 0; i < 8; ++i) trackStates_[i] = cp.trackStates[i];
+        rng_ = cp.rng;
         switch (playbackMode_) {
             case PlaybackMode::CHAIN:
                 nextChainRowToSchedule_ = cp.chainRow;
@@ -272,7 +278,6 @@ class Sequencer {
         int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         router_.t_play("PHRASE", "id=" + hex2(phraseId), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
-        if (playback_track_muted()) { nextFrameToSchedule_ += framesPerStep * 16; return; }
         SchedulePhraseResult r = schedulePhrase(phrase, playbackStartFrame_, playbackTrack_,
                                                 project_transpose_semitones(*project_), framesPerStep, 0);
         nextFrameToSchedule_ += r.framesScheduled;
@@ -296,11 +301,6 @@ class Sequencer {
         chainRowStartFrames_.clear();
         int firstRow = findNextNonEmptyChainRow(0, chain);
         if (firstRow >= 0) {
-            if (playback_track_muted()) {
-                nextFrameToSchedule_ += framesPerStep * 16;
-                nextChainRowToSchedule_ = firstRow + 1;
-                return;
-            }
             int phraseId = chain_phrase_ref(chain, firstRow);
             int transposeSemitones = chain_transpose_semitones(chain, firstRow);
             SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_,
@@ -366,9 +366,6 @@ class Sequencer {
             case PlaybackMode::PHRASE: {
                 const Phrase& phrase = project.phrases[currentPhraseId_];
                 TrackState& trackState = trackStates_[playbackTrack_];
-                // Muted: the transport keeps its time, so unmuting mid-audition picks the phrase up
-                // where it is rather than restarting it. Same shape as trackStopped below.
-                if (playback_track_muted()) { nextFrameToSchedule_ += framesPerPhrase; break; }
                 save_checkpoint(Checkpoint{nextFrameToSchedule_});
                 int hopStartRow = trackState.consumeHopTarget();
                 int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
@@ -381,11 +378,6 @@ class Sequencer {
             case PlaybackMode::CHAIN: {
                 const Chain& chain = project.chains[currentChainId_];
                 TrackState& trackState = trackStates_[playbackTrack_];
-                if (playback_track_muted()) {
-                    nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
-                    nextFrameToSchedule_ += framesPerPhrase;
-                    return;
-                }
                 if (trackState.trackStopped) {
                     nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
                     nextFrameToSchedule_ += framesPerPhrase;
@@ -443,6 +435,15 @@ class Sequencer {
                     for (int trackId = 0; trackId < 8; ++trackId) {
                         TrackState& trackState = trackStates_[trackId];
                         if (trackState.trackStopped) continue;
+                        // ⚠️ NO AUDIBILITY TEST — MUTE IS A MIXER GATE, NOT A SEQUENCER ONE.
+                        // A muted track is scheduled exactly like any other and the ENGINE zeroes its
+                        // output (`setTrackMuted`, audio-engine.cpp), which lands within one block.
+                        // That is what makes an unmute mid-phrase drop you into the middle of the
+                        // sequence where it actually is: the notes were being triggered all along.
+                        // Gating it here instead means nothing is triggered while muted, so unmuting
+                        // reveals only the voice still ringing from BEFORE the mute — the phrase
+                        // appears to freeze on that one note until the next boundary. It is also how
+                        // LittleGPTracker does it: Player::SetChannelMute only reaches the mixer.
                         if (nextSongRowToSchedule_ < static_cast<int>(project.tracks[trackId].chainRefs.size())) {
                             int chainId = project.tracks[trackId].chainRefs[nextSongRowToSchedule_];
                             if (chainId >= 0 && chainId < 256) {
@@ -457,6 +458,10 @@ class Sequencer {
                                                                             trackId, transposeSemitones, framesPerStep,
                                                                             effectiveStartRow, &chain,
                                                                             nextSongChainRowToSchedule_);
+                                    // ⚠️ RECORDED FOR A MUTED TRACK TOO — this is the PLAYHEAD, and
+                                    // it answers "where is the song", not "what can I hear". Gating
+                                    // it on audibility freezes the SONG cursor for as long as every
+                                    // track on the row is muted, while the transport walks on.
                                     put_song_position(nextSongRowToSchedule_, nextSongChainRowToSchedule_,
                                                       nextFrameToSchedule_);
                                     scheduledAny = true;
@@ -484,8 +489,9 @@ class Sequencer {
     }
 
     // ── the render-path scheduler (render mode) ──
-    // trackFilter == nullptr schedules all tracks; muted tracks always skipped. Mirrors
-    // scheduleSongRowRange; ptplay only uses the full (null-filter) form.
+    // trackFilter == nullptr schedules all tracks; inaudible ones (muted, or unsoloed while another
+    // track is soloed) are always skipped. Mirrors scheduleSongRowRange; ptplay only uses the full
+    // (null-filter) form.
     int64_t scheduleSongRowRange(int startRow, int endRow, const std::set<int>* trackFilter = nullptr) {
         const Project& project = *project_;
         for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
@@ -500,7 +506,10 @@ class Sequencer {
             for (int trackId = 0; trackId < 8; ++trackId) {
                 if (trackFilter && trackFilter->find(trackId) == trackFilter->end()) continue;
                 const Track& track = project.tracks[trackId];
-                if (track.mute) continue;
+                // ⚠️ NO audibility test: a row is as long as the longest chain ON it, muted or not.
+                // The live arm computes it the same way, and that is the point — otherwise muting the
+                // track that happens to hold the longest chain would shorten the row and re-time every
+                // other track, and the export would disagree with what was played.
                 if (songRow >= static_cast<int>(track.chainRefs.size())) continue;
                 int chainId = track.chainRefs[songRow];
                 if (chainId < 0 || chainId >= 256) continue;
@@ -518,7 +527,16 @@ class Sequencer {
                     TrackState& trackState = trackStates_[trackId];
                     if (trackState.trackStopped) continue;
                     const Track& track = project.tracks[trackId];
-                    if (track.mute) continue;
+                    // ⚠️ THE RENDER SKIPS AN INAUDIBLE TRACK; THE LIVE ARM ABOVE DOES NOT, AND THE
+                    // ASYMMETRY IS DELIBERATE. An export is a file you keep: a muted track is left
+                    // out of it entirely, which is what this arm has always done. Live, mute is a
+                    // performance control on the mixer and the sequencer must keep running under it,
+                    // or unmuting mid-phrase reveals a stale voice instead of the sequence.
+                    //
+                    // The audio agrees either way — `push_mixer` gates a muted track to zero in both
+                    // — so what the asymmetry costs is only the global FX (EQM/VMV) authored ON a
+                    // muted track, which a render drops and a live play still applies.
+                    if (!track_audible(project, trackId)) continue;
                     if (songRow >= static_cast<int>(track.chainRefs.size())) continue;
                     int chainId = track.chainRefs[songRow];
                     if (chainId < 0 || chainId >= 256) continue;
@@ -544,14 +562,6 @@ class Sequencer {
 
   private:
     static int clamp_track(int trackId) { return (trackId >= 0 && trackId < 8) ? trackId : 0; }
-
-    // Read LIVE, every lookahead pass, off `project_` rather than latched at play time — the mixer is
-    // a live surface, so a mute toggled mid-audition takes effect on the next phrase the way a fader
-    // move takes effect on the next block. SONG and render mode ask the same question per track.
-    bool playback_track_muted() const {
-        return project_ != nullptr && playbackTrack_ < static_cast<int>(project_->tracks.size()) &&
-               project_->tracks[static_cast<size_t>(playbackTrack_)].mute;
-    }
 
     struct SchedulePhraseResult {
         int rowsScheduled = 0;
@@ -583,16 +593,34 @@ class Sequencer {
 
     // Snapshot taken just BEFORE scheduling a phrase, so notify_data_changed() can roll the buffer
     // back to the earliest future phrase boundary without disturbing the phrase now playing.
+    //
+    // ⚠️⚠️ **A ROLLBACK RE-RUNS schedulePhrase(), AND schedulePhrase() CONSUMES STATE.** It advances
+    // `TrackState::grooveStep`, it takes the pending HOP with `consumeHopTarget()`, and it draws from
+    // `rng_` for CHA/RND/RNL and a random ARP. Rolling the FRAME back while leaving those where the
+    // first pass left them replays the phrase against a track that has already moved on — so the
+    // re-scheduled phrase is not the one that was thrown away. A groove whose active length does not
+    // divide 16 comes back at a different phase and RE-TIMES every track, muted or not, and the dice
+    // are thrown again. The frame and the row cursors alone are not a checkpoint; this is.
     struct Checkpoint {
         int64_t frame = 0;
         int chainRow = 0;
         int songRow = 0;
         int songChainRow = 0;
+        // ⚠️ Filled by save_checkpoint(), NEVER by the call sites — there are four of them and a
+        // fifth is one edit away. Captured below the sites, exactly so none of them can forget.
+        TrackState trackStates[8]{};
+        Rng        rng{};
     };
 
     int64_t getCurrentFrame() const { return currentFrame_; }
 
-    void save_checkpoint(const Checkpoint& cp) {
+    // ⚠️ BY VALUE, and the state is captured HERE rather than at the four call sites. Every one of
+    // them names only the frame and the cursors it knows about; what a rollback has to put back is
+    // the sequencer's business, and deriving it once below the sites is what stops the fifth caller
+    // from being the one that forgets.
+    void save_checkpoint(Checkpoint cp) {
+        for (int i = 0; i < 8; ++i) cp.trackStates[i] = trackStates_[i];
+        cp.rng = rng_;
         checkpoints_.push_back(cp);
         if (checkpoints_.size() > 4) checkpoints_.pop_front();   // ring of 4, oldest = earliest unplayed
     }

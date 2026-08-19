@@ -336,6 +336,10 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 again by accident without losing what you copied. Press **L + R** when you are *not* selecting to clear
 it, which is also how you dismiss the clipboard readout in the top strip.
 
+**L + R** also restores muted and soloed tracks (§5.7). It undoes one thing per press, most recent
+first: if you muted a channel after making a selection, the first press brings the channel back and
+the second clears the selection — and the other way round if the selection came last.
+
 **Selection modes:**
 - **CELL** — single cell under cursor
 - **ROW** — full row (all columns)
@@ -346,7 +350,36 @@ it, which is also how you dismiss the clipboard readout in the top strip.
 
 ---
 
-### 5.7 Playback Controls
+### 5.7 Mute & Solo
+
+Works on the SONG and MIXER screens, while playing or stopped.
+
+| Input | Action |
+|---|---|
+| R + B | Mute / unmute the track under the cursor |
+| R + A | Solo / unsolo it |
+| R + B or R + A over a selection | Applies to every track the selection covers |
+| L + R | Restore full playback on all tracks |
+
+The sound stops the instant you press, notes already ringing included.
+
+**Hold or latch.** Which button you let go of first decides what happens:
+
+- release **R** first — the change stays;
+- release **A** or **B** first — everything that chord did is undone.
+
+So the same chord gives you a momentary drop you can hold through a bar, and a mute you set and walk
+away from.
+
+Soloing is additive: solo a second track and both play. A track that is muted stays silent even when
+soloed.
+
+A track that is making no sound draws its numbers dimmed — its chain IDs on SONG, its fader value on
+MIXER — so soloing one track dims the other seven.
+
+---
+
+### 5.8 Playback Controls
 
 | Input | Action |
 |---|---|

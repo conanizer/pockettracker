@@ -272,6 +272,19 @@ class InputDispatcher {
     void on_r_left();
     void on_r_right();
 
+    // ── R + A/B: MUTE and SOLO (SONG and MIXER) ──────────────────────────────────────────────────
+    // The chord acts the instant it is pressed and is undone if its own button comes up before R —
+    // the mapper owns that half (`MapperState::rComboArmed`) and calls exactly one of the two
+    // closers below. The snapshot the revert restores is taken here, on the first toggle of a chord.
+    /** R+B: toggle MUTE on the cursor's channel, or on every channel in the selection. */
+    void on_r_b();
+    /** R+A: toggle SOLO, same targeting. */
+    void on_r_a();
+    /** R came up first: the chord's changes stand. Drops the snapshot. */
+    void on_r_combo_commit();
+    /** A/B came up first: put every track's mute and solo back the way the chord found them. */
+    void on_r_combo_revert();
+
     // ── L: selection and the clipboard ───────────────────────────────────────────────────────────
     /** L+B: enter selection, then widen it CELL → ROW → SCREEN on each tap inside 500 ms. */
     void on_l_b();
@@ -562,6 +575,43 @@ class InputDispatcher {
     bool recover_from_autosave();
 
     Clipboard clip_{};
+
+    // ── The MUTE/SOLO chord's undo ───────────────────────────────────────────────────────────────
+    // What the mix looked like when the chord started, so `on_r_combo_revert()` can put it back. All
+    // EIGHT tracks, not the one under the cursor: a chord over a selection touches several, and a
+    // SOLO changes what every other track can be heard doing.
+    //
+    // ⚠️ Taken on the FIRST toggle of a chord and not on every press, or holding R and muting three
+    // channels in turn would leave the revert able to undo only the last of them.
+    struct MixSnapshot {
+        bool live = false;
+        bool mute[8] = {false, false, false, false, false, false, false, false};
+        bool solo[8] = {false, false, false, false, false, false, false, false};
+    };
+    MixSnapshot mixSnapshot_{};
+
+    /** The channels a MUTE/SOLO chord applies to: the selection's columns, else the cursor's. */
+    void mute_solo_targets(int (&out)[8], int& count) const;
+    /** Toggle `mute` (or `solo`) on those channels, arm the snapshot, and push the result. */
+    void toggle_mute_solo(bool solo);
+    /** Every track audible again — L+R's mute rung, and the whole of "restore full playback". */
+    void restore_full_playback();
+    /** Whether R+A/R+B mean MUTE/SOLO on the screen as it stands — and so whether B must be held. */
+    bool mute_solo_chord_live() const;
+    /**
+     * L+R's recency flag, DERIVED rather than stamped by each of the paths that could move it.
+     *
+     * ⚠️ There is no one place a selection changes: L+B opens it, the D-pad drags its edge, B copies
+     * and exits, L+A cuts, a paste fills the buffer, and the next screen to grow a selection will add
+     * another. A flag every one of those had to remember to set is the failure this codebase has hit
+     * seven times — so the watcher folds the observable state into one number instead and notices
+     * when it moves. `run_selection_recency()` runs once a frame from `set_now()`, AND at the top of
+     * `toggle_mute_solo()`, which is what keeps the ordering right to the PRESS rather than to the
+     * frame when both happen inside one 16 ms batch of events.
+     */
+    unsigned selection_signature() const;
+    void     run_selection_recency();
+    unsigned selectionSig_ = 0;
 
     SongEditorModule       song_{};
     ChainEditorModule      chain_{};

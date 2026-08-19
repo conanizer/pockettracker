@@ -89,6 +89,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 ## Mixing & Effects
 
 - Mixer screen: volume for each of the 8 tracks and the master, plus send amounts to reverb and delay
+- Mute and solo any track from the song or mixer screen, on the cursor or across a selection — the chord latches or stays momentary depending on which button you release first
 - True dBFS peak meters per track
 - Two send effects: reverb (Schroeder-Moorer algorithm) and a stereo delay
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency

@@ -62,12 +62,26 @@ struct MapperState {
      * ⚠️ The DEFERRED-B latch (`InputMapper.bPressedAlone`), the exact mirror of the above, and it
      * exists for exactly one screen: the EQ EDITOR (S8).
      *
+     * (The MUTE/SOLO latch below is a third of the same family — see `rComboArmed`.)
+     *
      * There, B is BOTH the close AND the modifier of the slot cycle (B+LEFT/RIGHT walks the 128-preset
      * bank). Fire the close on B's own press and the cycle is unreachable — you would be back on the
      * mixer before LEFT ever arrived. So the close is held until B is RELEASED, and CANCELLED if any
      * B-combo fires in between.
      */
     bool bPressedAlone = false;
+
+    /**
+     * ⚠️ The MUTE/SOLO chord latch. R+B and R+A change the mix the instant they are pressed, and
+     * **which of the two buttons comes back UP first decides whether the change stays**: let go of R
+     * first and it sticks, let go of A/B first and everything the chord did is undone. That makes one
+     * chord both a latching mute and a momentary one, which is the whole gesture.
+     *
+     * It lives here for the same reason the two latches above do: the mapper is the only layer that
+     * sees the press, the combo and the release as ONE gesture. The dispatcher is told to commit or to
+     * revert and never has to guess at release order.
+     */
+    bool rComboArmed = false;
 };
 
 /**
@@ -82,8 +96,8 @@ struct MapperState {
  *
  * ⚠️ **THE ORDER OF THESE CHECKS IS THE SPECIFICATION.** They run most-specific-first, and each arm
  * RETURNS. L+B+A must be tested before L+A or a clone would paste; A+B before a plain A or a delete
- * would insert; R+A is consumed and does nothing, so that holding R to change screens cannot also fire
- * an edit underneath. Reordering them silently changes what the tracker does.
+ * would insert; R+A and R+B — MUTE and SOLO — before the plain A and B arms, or holding R to change
+ * screens would fire an edit underneath. Reordering them silently changes what the tracker does.
  *
  * ⚠️ **The modifiers come from the EVENT, never from `input.is_held()`.** See ui/buttons.h: SDL delivers
  * a frame's worth of events at once, so a poll-time read describes the end of the frame rather than the
@@ -95,6 +109,25 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
 
     // ── RELEASE ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {
+        // ⚠️ THE MUTE/SOLO CHORD ENDS ON A RELEASE, AND WHICH ONE IS THE SPECIFICATION. It is tested
+        // before everything else here because it CONSUMES the release: an armed A must not also reach
+        // `on_a_released()`. That is safe — the FX helper it would commit can only be armed by a plain
+        // A, which never arms this latch.
+        //
+        // ⚠️ `m.r`, never `is_held()`. `SdlInput::release` clears the released button's own flag and
+        // THEN snapshots, so on the A/B release `m.r` answers exactly "is R still down?".
+        if (ms.rComboArmed) {
+            if (e.button == Button::R_SHIFT) {
+                ms.rComboArmed = false;
+                d.on_r_combo_commit();
+                return;
+            }
+            if ((e.button == Button::A || e.button == Button::B) && m.r) {
+                ms.rComboArmed = false;
+                d.on_r_combo_revert();
+                return;
+            }
+        }
         if (e.button == Button::A) {
             // The DEFERRED single-A: it went down on a sub-screen-opening cell and no A-combo
             // intervened, so the open fires NOW, on the release, rather than on the press.
@@ -203,9 +236,31 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             case Button::DPAD_DOWN:  d.on_r_down();  return;
             case Button::DPAD_LEFT:  d.on_r_left();  return;
             case Button::DPAD_RIGHT: d.on_r_right(); return;
-            // Reserved, and consumed: R is held to navigate, and a stray A must not edit underneath it.
-            case Button::A:
-            case Button::B:
+            // MUTE and SOLO, on the channel under the cursor or on every channel in the selection.
+            // ⚠️ Both ARM the latch even on a screen where the dispatcher does nothing with them: the
+            // gesture is over when the buttons come up, and a chord that armed on SONG and released
+            // after an R+DPAD walked to MIXER must still be closed out rather than left hanging.
+            // ⚠️ B cancels its own deferral first — the press it was holding turned out to be a chord.
+            case Button::A:          d.on_r_a(); ms.rComboArmed = true; return;
+            case Button::B:          ms.bPressedAlone = false; d.on_r_b(); ms.rComboArmed = true; return;
+            // ⚠️ R ARRIVING SECOND, and it is the other half of the mute chord rather than a nicety:
+            // two buttons are never pressed on the same frame, so half the time it is B that lands
+            // first. The screens where R+B is a mute hold their B until it comes up
+            // (`defer_b_to_release`) precisely so this arm can still claim it — and `bPressedAlone`,
+            // not `m.b`, is the test, because it is the one that says the single-B action has NOT
+            // fired yet. A B whose press already did its work must not also be read as a chord.
+            //
+            // A has no counterpart: it is deferred only on the sub-screen cells, and everywhere else
+            // its press has already inserted by the time R arrives. R+A is still whole when R goes
+            // down first, which is the order the gesture is written for.
+            case Button::R_SHIFT:
+                if (ms.bPressedAlone) {
+                    ms.bPressedAlone = false;
+                    d.on_r_b();
+                    ms.rComboArmed = true;
+                }
+                return;
+            // Reserved, and consumed: R is held to navigate, and START must not toggle playback here.
             case Button::START:      return;
             default: break;
         }

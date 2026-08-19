@@ -245,6 +245,27 @@ INST.POOL still walk their pools.
 
 ---
 
+## Mute & Solo — a chord that is momentary or latching
+
+| Control | Action |
+|---------|--------|
+| **R+B** | Toggle mute on the track under the cursor (SONG, MIXER) |
+| **R+A** | Toggle solo, same targeting |
+| **either, over a selection** | Applies to every track the selection's columns cover |
+| **L+R** | Restore full playback |
+
+**Which button comes up first is the gesture.** The chord acts on the press; releasing **R** first
+latches it, and releasing **A** or **B** first undoes everything that chord did. One chord is
+therefore both a mute you set and a mute you hold through a bar.
+
+The revert restores all eight tracks, not the one under the cursor: a chord over a selection touches
+several, and a solo changes what every other track is heard doing.
+
+On the MIXER, column 8 is the master strip and the chord is a no-op there. On every screen other
+than SONG and MIXER it stays the consumed no-op it has always been.
+
+---
+
 ## File Browser
 
 | Control | Action |
@@ -308,8 +329,12 @@ B + UP/DOWN             Page the SONG screen / jump 16 instrument slots
 L + A                   Paste (outside selection) / Cut (in selection)
 L + B                   Enter selection mode / widen it
 L + B + A               Clone current item (deep clone)
-L + R                   Leave selection mode / clear the copy buffer
+L + R                   Restore muted tracks / leave selection mode / clear the copy buffer
 ```
+
+**L + R undoes one thing per press, most recent first.** Two things are on it: the mute and solo
+state, and the selection with its copy buffer. Whichever was touched last is cleared first, and a
+press falls through to the other when the first has nothing to clear.
 
 ### Tier 4: R Modifier (Navigation)
 
@@ -317,6 +342,8 @@ L + R                   Leave selection mode / clear the copy buffer
 R + UP/DOWN/LEFT/RIGHT  Navigate between screens
 R + LEFT                Up one directory (file browser)
 R + LEFT/RIGHT          Scroll the text cursor (QWERTY overlay)
+R + B                   Mute the track under the cursor  (SONG, MIXER)
+R + A                   Solo it                          (SONG, MIXER)
 ```
 
 ### Tier 5: SELECT Modifier (File management)
@@ -333,7 +360,7 @@ These are deliberately **consumed and do nothing**, so that holding a modifier c
 underneath it. They are listed so they aren't mistaken for broken controls:
 
 ```
-R + A, R + B, R + START           R is held to change screens
+R + START                         R is held to change screens
 L + START                         START must not toggle playback mid-chord
 L + R + A, L + R + B, L + R + SELECT
 ```

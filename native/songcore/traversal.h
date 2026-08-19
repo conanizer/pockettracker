@@ -24,13 +24,15 @@ inline bool step_is_empty(const PhraseStep& step) { return step.note == Note::EM
 
 // Visit every phrase step in song rows [start_row, end_row] (inclusive) across all 8 tracks, applying
 // the same guards each time: a track row past the end, or one pointing at an empty chain/phrase slot,
-// is skipped; muted tracks are skipped unless include_muted. Mirrors Project.forEachStepInSongRange().
+// is skipped; inaudible tracks (muted, or unsoloed while another is soloed) are skipped unless
+// include_inaudible. ⚠️ RENDER-SIDE ONLY — the live path pushes every instrument, and its scheduler
+// does not consult audibility at all (mute is a mixer gate there). Mirrors forEachStepInSongRange().
 template <typename Action>
 inline void for_each_step_in_song_range(const Project& project, int start_row, int end_row,
-                                        bool include_muted, Action action) {
+                                        bool include_inaudible, Action action) {
     for (int row = start_row; row <= end_row; ++row) {
         for (const Track& track : project.tracks) {
-            if (!include_muted && track.mute) continue;
+            if (!include_inaudible && !track_audible(project, track)) continue;
             if (row >= static_cast<int>(track.chainRefs.size())) continue;
             int chainId = track.chainRefs[row];
             if (chainId < 0 || chainId >= static_cast<int>(project.chains.size())) continue;
@@ -51,7 +53,7 @@ inline void for_each_step_in_song_range(const Project& project, int start_row, i
 inline std::set<int> collect_used_instruments(const Project& project, int start_row, int end_row) {
     std::set<int> used;
     int n = static_cast<int>(project.instruments.size());
-    for_each_step_in_song_range(project, start_row, end_row, /*include_muted=*/false,
+    for_each_step_in_song_range(project, start_row, end_row, /*include_inaudible=*/false,
         [&](const PhraseStep& step) {
             if (!step_is_empty(step) && step.instrument >= 0 && step.instrument < n)
                 used.insert(step.instrument);

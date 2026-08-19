@@ -211,6 +211,17 @@ struct AppState {
         return selection.is_cell_selected(row, column);
     }
 
+    /**
+     * Which of L+R's two rungs to try FIRST — the transient state the user touched most recently.
+     *
+     * L+R undoes one thing per press: the mute/solo state, or the selection and its buffer. Doing
+     * both at once would throw away a selection someone spent four presses building just because
+     * they also dropped a channel out of the mix. So the most recent goes first, and a rung with
+     * nothing to clear falls through to the other rather than reading as a dead button.
+     */
+    enum class Clearable { NONE, SELECTION, MUTE };
+    Clearable lastClearable = Clearable::NONE;
+
     // ── The clipboard's readout ──────────────────────────────────────────────────────────────────
     // A POINTER to the dispatcher's clipboard, set once by its constructor — exactly as `project` above
     // points at the host's one document. The layout draws its "PHR:2x3" contents beside the selection

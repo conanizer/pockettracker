@@ -73,8 +73,15 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const bool isCursor   = (absolute_row == s.cursorRow) && (trackId == s.cursorTrack - 1);
         const bool isSelected = s.selectionMode && s.isCellSelected(absolute_row, trackId + 1);
 
+        // A track making no sound draws its chain numbers in the EMPTY colour, so the arrangement
+        // reads as what you are hearing rather than as what is written down. The predicate is the
+        // audible one, not `mute`, which is what gives SOLO a display for free: solo one channel and
+        // the other seven dim, because they are the ones that stopped. Cursor and selection colours
+        // still win inside draw_cell, so the cursor is never lost on a muted channel.
+        const Argb value_color = track_audible(s.project, trackId) ? t.textValue : t.textEmpty;
+
         draw_cell(c, chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], textY, isCursor,
-                  isSelected, /*is_empty=*/chainId == -1, t.textValue, t);
+                  isSelected, /*is_empty=*/chainId == -1, value_color, t);
     }
 }
 

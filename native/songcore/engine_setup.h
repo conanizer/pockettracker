@@ -53,7 +53,7 @@ void push_instrument_params(Engine& engine, const Instrument& ins, int tempo, in
     push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate);
 }
 
-// The pre-render sweep: every instrument any non-muted step in rows [startRow, endRow] plays.
+// The pre-render sweep: every instrument any step on an AUDIBLE track in rows [startRow, endRow] plays.
 template <typename Engine>
 void push_used_instrument_params(Engine& engine, const Project& project, int startRow, int endRow) {
     const int sampleRate = engine.getSampleRate();
@@ -110,6 +110,10 @@ void push_mixer(Engine& engine, const Project& project) {
     const int tracks = static_cast<int>(project.tracks.size());
     for (int i = 0; i < 8 && i < tracks; ++i) {
         engine.setTrackVolume(i, hex_to_float(project.tracks[i].volume));
+        // ⚠️ SEPARATE FROM THE FADER, and pushed from the same place, because SOLO makes a track's
+        // audibility depend on the other seven: soloing track 3 has to reach the engine for 0,1,2,
+        // 4..7 as well, and only a sweep of all eight can do that.
+        engine.setTrackMuted(i, !track_audible(project, i));
     }
     engine.setMasterVolume(hex_to_float(project.masterVolume));
     engine.setOttDepth(project.ottDepth);

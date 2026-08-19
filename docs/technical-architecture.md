@@ -249,6 +249,15 @@ randomization, and emits **events** rather than engine calls.
 Timing is frame-based: `frames_per_step` and `frames_per_tic` derive from the tempo, and grooves
 change a step's length per position. Everything downstream is stamped in frames.
 
+**Mute and solo never reach the sequencer.** A muted track is scheduled exactly like any other; the
+gate is `AudioEngine::setTrackMuted`, folded into the track's gain where the audio block snapshots it,
+so it lands within one block and silences voices already ringing. Routing mute through the scheduler
+instead looks equivalent and is not: note-offs are KIL-only, so the voice playing when a track is
+muted is gated rather than stopped, and a scheduler that stops triggering has nothing else to reveal
+when the gate lifts — unmuting mid-phrase brings back that one stale note and holds it until the next
+phrase boundary. The offline render is the single exception, deliberately: `scheduleSongRowRange`
+skips an inaudible track outright, because an export is a file you keep.
+
 ### Parameter automation
 
 `AUS` opens a ramp on the automatable effect in the slot to its **left**, taking that cell's value as

@@ -197,6 +197,7 @@ inline Track parse_track(const json& j, int index) {
     }
     t.volume = get_int(j, "volume", t.volume);
     t.mute   = get_bool(j, "mute",  t.mute);
+    t.solo   = get_bool(j, "solo",  t.solo);
     return t;
 }
 
@@ -600,6 +601,7 @@ inline void emit_track(JsonWriter& w, const Track& t) {
     }
     if (t.volume != 0xFF) w.field_int("volume", t.volume);
     if (t.mute)           w.field_bool("mute", t.mute);
+    if (t.solo)           w.field_bool("solo", t.solo);
     w.end_object();
 }
 

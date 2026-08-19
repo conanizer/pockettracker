@@ -1101,11 +1101,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // pure overhead plus a dropout hazard if the Kotlin thread held the lock during setTrackVolume/
     // setMasterVolume. One block of slightly-stale volume is inaudible.
     float trackVolSnapshot[SF_VOICE_COUNT];
+    bool  trackMutedSnapshot[8];
     float masterVolSnapshot;
     int previewTrack;
     {
         std::lock_guard<std::mutex> lock(volumeMutex);
-        for (int t = 0; t < 8; t++) trackVolSnapshot[t] = trackVolumes[t];
+        // ⚠️ THE MUTE IS FOLDED IN HERE, WHERE THE VALUE ENTERS THE SNAPSHOT — not at the three
+        // places that read it. Every one of them then inherits the gate for free, the preview lane
+        // included (it copies out of this array below), and there is no read site left to forget.
+        for (int t = 0; t < 8; t++) {
+            trackMutedSnapshot[t] = trackMuted[t];
+            trackVolSnapshot[t]   = trackMuted[t] ? 0.0f : trackVolumes[t];
+        }
         masterVolSnapshot = masterVolume;
         previewTrack      = previewLaneTrack;
     }
@@ -1314,8 +1321,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // one block and springs back.
                 case PARAM_UPDATE_TRACK_VOL: {            // VTR — this track's mixer fader
                     if (upd.trackId >= 0 && upd.trackId < 8) {
+                        // ⚠️ The MEMBER takes the authored value and the SNAPSHOT takes the gated
+                        // one: the fader keeps moving under a muted track, so unmuting lands on
+                        // wherever the ramp has got to rather than on where it started.
                         applyTrackVolume(upd.trackId, upd.value);
-                        trackVolSnapshot[upd.trackId] = upd.value;
+                        trackVolSnapshot[upd.trackId] =
+                            trackMutedSnapshot[upd.trackId] ? 0.0f : upd.value;
                     }
                     break;
                 }
@@ -2968,6 +2979,14 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
     applyTrackVolume(trackId, volume);
     LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
+}
+
+void AudioEngine::setTrackMuted(int trackId, bool muted) {
+    if (trackId < 0 || trackId >= 8) return;
+    { std::lock_guard<std::mutex> lock(volumeMutex); trackMuted[trackId] = muted; }
+    // The sampler and the SF channel both re-read the snapshot next block, so nothing else is needed
+    // to silence what is ringing — a mute lands within one block, like a fader slammed to 00.
+    LOGD("🔇 Track %d %s", trackId, muted ? "muted" : "unmuted");
 }
 
 void AudioEngine::setMasterVolume(float volume) {

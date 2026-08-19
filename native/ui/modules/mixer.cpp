@@ -92,12 +92,17 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
         const int  mX    = x + FIRST_METER_X + i * METER_SPACING;
         const bool isSel = (s.mixerMasterRow == 0 && s.cursorColumn == i);
 
+        // Muted, or unsoloed while another channel is soloed — either way this strip is contributing
+        // nothing, and the meter and the fader value both say so.
+        const bool audible = track_audible(p, i);
+
         draw_stereo_meter(c, mX, y + TRACK_METER_TOP, TRACK_METER_H, peak_at(s.trackPeaks, i * 2),
-                          peak_at(s.trackPeaks, i * 2 + 1), isSel, p.tracks[static_cast<size_t>(i)].mute,
+                          peak_at(s.trackPeaks, i * 2 + 1), isSel, /*is_muted=*/!audible,
                           t, i * 2, i * 2 + 1, advance);
 
         c.draw_text(hex2(p.tracks[static_cast<size_t>(i)].volume), mX + 5, y + TRACK_VOL_Y,
-                    isSel ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+                    isSel ? t.textCursor : (audible ? t.textValue : t.textEmpty),
+                    CHAR_SPACING, FONT_SCALE);
     }
 
     // ── The master meter ─────────────────────────────────────────────────────────────────────────
