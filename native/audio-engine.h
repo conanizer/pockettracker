@@ -353,6 +353,9 @@ public:
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
 
+    // Route the preview lane through a mixer channel's fader: 0..7, or -1 for unity gain.
+    void setPreviewTrack(int trackId);
+
     // The same two writes with no log line — what the VTR/VMV queue arms call from the audio thread.
     // See the comment above their definitions for why the split exists.
     void applyTrackVolume(int trackId, float volume);
@@ -728,6 +731,10 @@ private:
 
     // Real-time volume control (can be changed without rescheduling notes)
     float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
+    // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
+    // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.
+    int   previewLaneTrack = -1;
     float masterVolume = 1.0f;
     float reverbReturnGain  = 0.5f;
     float delayReturnGain   = 0.5f;

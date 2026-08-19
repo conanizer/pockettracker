@@ -593,12 +593,26 @@ void InputDispatcher::mark_modified(bool table_touched) {
     if (host_.is_playing()) host_.notify_data_changed();
 }
 
+int InputDispatcher::remembered_song_track() const { return s_.songCursorColumn - 1; }
+
+int InputDispatcher::audition_track() const {
+    const Project& p = *s_.project;
+    const int track = remembered_song_track();
+    if (track < 0 || track >= static_cast<int>(p.tracks.size())) return -1;
+    const std::vector<int>& refs = p.tracks[static_cast<size_t>(track)].chainRefs;
+    // ⚠️ The size guard is load-bearing, not defensive: a track's chainRefs may be SHORTER than the
+    // 256-row screen (the model's default is an empty vector).
+    if (s_.songCursorRow < 0 || s_.songCursorRow >= static_cast<int>(refs.size())) return -1;
+    return refs[static_cast<size_t>(s_.songCursorRow)] >= 0 ? track : -1;
+}
+
 void InputDispatcher::preview_edited_note() {
     const Project& p = *s_.project;
     const songcore::PhraseStep& step =
         p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
 
     const int sr = std::max(44100, host_.sample_rate());
+    host_.set_preview_track(audition_track());
     host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note,
                        songcore::frames_per_step(p.tempo, sr));
 }
@@ -2543,6 +2557,7 @@ void InputDispatcher::on_button_a() {
                 // A WHOLE PHRASE long, not one step: this gesture lays a note down to listen to, and
                 // an audition that dies after a 16th note tells you nothing about a pad.
                 const int sr = std::max(44100, host_.sample_rate());
+                host_.set_preview_track(audition_track());
                 host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note,
                                    songcore::frames_per_step(p.tempo, sr) * 16);
             }
@@ -2870,6 +2885,9 @@ void InputDispatcher::on_start() {
                              sample_extensions().end();
         if (!audible) return;   // a .pti or an .sf2 has no waveform to play
 
+        // A file on disk has no song cell behind it — neutral gain, and never the channel an earlier
+        // audition left pointed at.
+        host_.set_preview_track(-1);
         if (!host_.preview_file(item->path)) {
             s_.fileBrowser.statusMessage = "PREVIEW FAILED";
             s_.fileBrowser.statusSuccess = false;
@@ -2919,6 +2937,7 @@ void InputDispatcher::on_start() {
             host_.apply_sample_fx(se.instrumentId, se.fxType, se.fxValue);
         }
 
+        host_.set_preview_track(-1);   // a waveform being edited is not in the arrangement either
         host_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
                                     se.totalFrames, se.pitchSemitones);
         return;
@@ -2937,11 +2956,17 @@ void InputDispatcher::on_start() {
     // currentTable)` — the instrument id and the table id are the same number, because instrument N
     // owns table N). Without the override you would hear the instrument's own table instead of the
     // automation on the screen in front of you, which is the one thing the audition exists to check.
+    //
+    // ⚠️ …AND IT IS NO LONGER AT UNITY GAIN. The lane borrows the fader of the song cell you came
+    // through, so a pad you can only hear through its sends auditions where it actually sits. It is
+    // still a ninth voice, and still steals nothing.
     if (on_instrument_screen()) {
+        host_.set_preview_track(audition_track());
         host_.preview_instrument(s_.currentInstrument);
         return;
     }
     if (s_.currentScreen == ScreenType::TABLE) {
+        host_.set_preview_track(audition_track());
         host_.preview_instrument(s_.currentTable, /*tableIdOverride=*/s_.currentTable);
         return;
     }
@@ -2955,7 +2980,17 @@ void InputDispatcher::on_start() {
         // ⚠️ SONG starts at the CURSOR ROW, not at row 0 — "play from here" is the gesture, and on a
         // 200-row arrangement starting from the top every time makes the screen unusable.
         case ScreenType::SONG:  host_.play_song(s_.cursorRow); break;
-        case ScreenType::CHAIN: host_.play_chain(s_.currentChain); break;
+
+        // ⚠️ …AND CHAIN PLAYS ON THE TRACK IT BELONGS TO, not on channel 1. A track is a fader, a
+        // mute, a peak meter, a voice slot and every per-track FX the phrase carries — a chain
+        // auditioned on track 0 is heard at another channel's level, with a VTR inside it moving
+        // another channel's fader. The remembered song cell only breaks a tie between the tracks that
+        // already hold this chain; the arrangement is what answers.
+        case ScreenType::CHAIN:
+            host_.play_chain(s_.currentChain,
+                             songcore::track_of_chain(*s_.project, s_.currentChain,
+                                                      remembered_song_track()));
+            break;
 
         // ⚠️ …and the four screens with NO song cursor play the SONG, from the top. This is a bug fixed
         // in S5, not a new behaviour: the S3 comment already said "MIXER, EFFECTS, PROJECT, SETTINGS
@@ -2972,8 +3007,14 @@ void InputDispatcher::on_start() {
         // untunable.
         case ScreenType::MIDI: host_.play_song(0); break;
 
-        // PHRASE, GROOVE, SCALE… — Kotlin's `togglePlayback()` else-arm.
-        default: host_.play_phrase(s_.currentPhrase); break;
+        // PHRASE, GROOVE, SCALE… — Kotlin's `togglePlayback()` else-arm. The phrase is asked through
+        // the chain on screen first: the same phrase may sit in five chains, and the one you are
+        // inside is the only one with a gesture behind it.
+        default:
+            host_.play_phrase(s_.currentPhrase,
+                              songcore::track_of_phrase(*s_.project, s_.currentPhrase, s_.currentChain,
+                                                        remembered_song_track()));
+            break;
     }
 }
 

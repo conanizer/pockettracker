@@ -12,6 +12,7 @@
 // SongTraversal.kt is the executable spec. tools/ptresolve proves collect_used_instruments against a
 // JVM golden over the real /tools/testdata projects.
 
+#include <algorithm>
 #include <functional>
 #include <set>
 #include "model.h"
@@ -56,6 +57,62 @@ inline std::set<int> collect_used_instruments(const Project& project, int start_
                 used.insert(step.instrument);
         });
     return used;
+}
+
+
+// ─── Which mixer track a chain or a phrase belongs to ────────────────────────────────────────────
+//
+// The arrangement is the answer, not a remembered cursor: a chain reached by scrolling the 00..FF
+// pool was never entered from a song cell, so there is nothing to remember and a memory-only answer
+// would leave it on track 0. `preferred` is a TIE-BREAK only — it is honoured just when it is one of
+// the tracks that actually hold the chain, so a stale one can never route a chain somewhere it does
+// not live.
+//
+// A chain in no track at all answers 0: the pre-existing behaviour, and the arm a project that has
+// never been arranged still takes.
+
+/** The track holding `chainId`; `preferred` wins if it is one of them, else the lowest, else 0. */
+inline int track_of_chain(const Project& project, int chainId, int preferred = -1) {
+    if (chainId < 0) return 0;
+    int lowest = -1;
+    const int trackCount = static_cast<int>(project.tracks.size());
+    for (int t = 0; t < trackCount; ++t) {
+        const std::vector<int>& refs = project.tracks[t].chainRefs;
+        if (std::find(refs.begin(), refs.end(), chainId) == refs.end()) continue;
+        if (t == preferred) return t;
+        if (lowest < 0) lowest = t;
+    }
+    return lowest >= 0 ? lowest : 0;
+}
+
+/**
+ * The track holding `phraseId`, asked through the chain the user is looking at.
+ *
+ * The chain on screen is consulted FIRST and its answer is that chain's — the same phrase may sit in
+ * five chains, and the one you are inside is the only one with a gesture behind it. Only when the
+ * phrase is not in that chain does this fall back to the first place in the arrangement that reaches
+ * it, in (track, song row, chain row) order.
+ */
+inline int track_of_phrase(const Project& project, int phraseId, int currentChainId,
+                           int preferred = -1) {
+    if (phraseId < 0) return 0;
+    const int chainCount = static_cast<int>(project.chains.size());
+    if (currentChainId >= 0 && currentChainId < chainCount) {
+        const Chain& chain = project.chains[currentChainId];
+        for (int row = 0; row < CHAIN_ROWS; ++row)
+            if (chain_phrase_ref(chain, row) == phraseId)
+                return track_of_chain(project, currentChainId, preferred);
+    }
+    const int trackCount = static_cast<int>(project.tracks.size());
+    for (int t = 0; t < trackCount; ++t) {
+        for (int chainId : project.tracks[t].chainRefs) {
+            if (chainId < 0 || chainId >= chainCount) continue;
+            const Chain& chain = project.chains[chainId];
+            for (int row = 0; row < CHAIN_ROWS; ++row)
+                if (chain_phrase_ref(chain, row) == phraseId) return t;
+        }
+    }
+    return 0;
 }
 
 }  // namespace songcore

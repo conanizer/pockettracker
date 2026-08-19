@@ -1102,12 +1102,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // setMasterVolume. One block of slightly-stale volume is inaudible.
     float trackVolSnapshot[SF_VOICE_COUNT];
     float masterVolSnapshot;
+    int previewTrack;
     {
         std::lock_guard<std::mutex> lock(volumeMutex);
         for (int t = 0; t < 8; t++) trackVolSnapshot[t] = trackVolumes[t];
         masterVolSnapshot = masterVolume;
+        previewTrack      = previewLaneTrack;
     }
-    trackVolSnapshot[PREVIEW_LANE] = 1.0f;  // preview lane has no mixer fader — neutral volume
+    // The preview lane borrows the fader of the channel the audition came from — the lane is a ninth
+    // voice with no fader of its own, and an instrument you can only hear at full dry level tells you
+    // nothing about how it sits in the mix. -1 (no origin) keeps the neutral gain it has always had.
+    //
+    // ⚠️ THE ASSIGNMENT SITS AFTER THE SNAPSHOT LOOP, not in the setter: reading trackVolSnapshot here
+    // is what makes it the LIVE fader, so a VTR or a mixer move lands in the audition it is aimed at.
+    trackVolSnapshot[PREVIEW_LANE] = (previewTrack >= 0 && previewTrack < 8)
+                                   ? trackVolSnapshot[previewTrack] : 1.0f;
 
     // Zero only the [0,numFrames) slice actually used (not the full PROCESS_SUBBLOCK arrays), and
     // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
@@ -1804,7 +1813,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             float volRoute = voice.prevModDestValues[PARAM_VOL]
                            + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
-            float trackVol = (voice.trackId >= 0 && voice.trackId < 8) ? trackVolSnapshot[voice.trackId] : 1.0f;
+            // ⚠️ SF_VOICE_COUNT, not 8: the preview lane is index 8 and now carries a real fader.
+            // Bounded at 8 the sampler path would hold unity while the SoundFont path (which indexes
+            // the same array by trackId with no such clamp) followed it — two readings of one array.
+            float trackVol = (voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT)
+                           ? trackVolSnapshot[voice.trackId] : 1.0f;
             float antiClick = voice.antiClickFade();
 
             // Sample fetch + per-voice chain is the ONLY mono/stereo difference; a mono
@@ -2960,6 +2973,11 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
 void AudioEngine::setMasterVolume(float volume) {
     applyMasterVolume(volume);
     LOGD("🔊 Master volume set to %.2f", volume);
+}
+
+void AudioEngine::setPreviewTrack(int trackId) {
+    std::lock_guard<std::mutex> lock(volumeMutex);
+    previewLaneTrack = (trackId >= 0 && trackId < 8) ? trackId : -1;
 }
 
 // The sample-accurate faces of the same two faders — what a VTR / VMV effect schedules. VMV is global

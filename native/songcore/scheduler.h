@@ -255,10 +255,14 @@ class Sequencer {
 
     // ── transport starts ──
 
-    void playPhrase(int phraseId) {
+    // ⚠️ `trackId` DEFAULTS TO 0, and the default is load-bearing: every tool caller asks for track 0
+    // and keeps asking for it, which is why the trace goldens record track 0. They record it because
+    // the caller requests it, not because the sequencer cannot do anything else.
+    void playPhrase(int phraseId, int trackId = 0) {
         stop();
         currentProject_ = project_;
         currentPhraseId_ = phraseId;
+        playbackTrack_ = clamp_track(trackId);
         playbackStartFrame_ = getCurrentFrame();
         if (phraseId < 0 || phraseId > 255) return;
         const Phrase& phrase = project_->phrases[phraseId];
@@ -268,15 +272,17 @@ class Sequencer {
         int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         router_.t_play("PHRASE", "id=" + hex2(phraseId), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
-        SchedulePhraseResult r = schedulePhrase(phrase, playbackStartFrame_, 0,
+        if (playback_track_muted()) { nextFrameToSchedule_ += framesPerStep * 16; return; }
+        SchedulePhraseResult r = schedulePhrase(phrase, playbackStartFrame_, playbackTrack_,
                                                 project_transpose_semitones(*project_), framesPerStep, 0);
         nextFrameToSchedule_ += r.framesScheduled;
     }
 
-    void playChain(int chainId) {
+    void playChain(int chainId, int trackId = 0) {
         stop();
         currentProject_ = project_;
         currentChainId_ = chainId;
+        playbackTrack_ = clamp_track(trackId);
         playbackStartFrame_ = getCurrentFrame();
         if (chainId < 0 || chainId > 255) return;
         const Chain& chain = project_->chains[chainId];
@@ -290,9 +296,15 @@ class Sequencer {
         chainRowStartFrames_.clear();
         int firstRow = findNextNonEmptyChainRow(0, chain);
         if (firstRow >= 0) {
+            if (playback_track_muted()) {
+                nextFrameToSchedule_ += framesPerStep * 16;
+                nextChainRowToSchedule_ = firstRow + 1;
+                return;
+            }
             int phraseId = chain_phrase_ref(chain, firstRow);
             int transposeSemitones = chain_transpose_semitones(chain, firstRow);
-            SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_, 0,
+            SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_,
+                                                    playbackTrack_,
                                                     transposeSemitones + project_transpose_semitones(*project_),
                                                     framesPerStep, 0, &chain, firstRow);
             chainRowStartFrames_.emplace_back(firstRow, playbackStartFrame_);
@@ -327,9 +339,14 @@ class Sequencer {
         eqmActive_ = false;
         mixerVolActive_ = false;
         nextSongChainRowToSchedule_ = 0;
+        playbackTrack_ = 0;
         // Full per-track reset: playback is a pure function of the project (see PlaybackController.stop).
         for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
     }
+
+    // The track PHRASE/CHAIN mode is playing through — what the two live arms schedule at, and what
+    // the mixer's fader, mute and peak meter are read from.
+    int playback_track() const { return playbackTrack_; }
 
     // ── the polling scheduler (live modes) ──
 
@@ -348,11 +365,14 @@ class Sequencer {
         switch (playbackMode_) {
             case PlaybackMode::PHRASE: {
                 const Phrase& phrase = project.phrases[currentPhraseId_];
-                TrackState& trackState = trackStates_[0];
+                TrackState& trackState = trackStates_[playbackTrack_];
+                // Muted: the transport keeps its time, so unmuting mid-audition picks the phrase up
+                // where it is rather than restarting it. Same shape as trackStopped below.
+                if (playback_track_muted()) { nextFrameToSchedule_ += framesPerPhrase; break; }
                 save_checkpoint(Checkpoint{nextFrameToSchedule_});
                 int hopStartRow = trackState.consumeHopTarget();
                 int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                SchedulePhraseResult r = schedulePhrase(phrase, nextFrameToSchedule_, 0,
+                SchedulePhraseResult r = schedulePhrase(phrase, nextFrameToSchedule_, playbackTrack_,
                                                         project_transpose_semitones(project), framesPerStep,
                                                         effectiveStartRow);
                 nextFrameToSchedule_ += r.framesScheduled;
@@ -360,7 +380,12 @@ class Sequencer {
             }
             case PlaybackMode::CHAIN: {
                 const Chain& chain = project.chains[currentChainId_];
-                TrackState& trackState = trackStates_[0];
+                TrackState& trackState = trackStates_[playbackTrack_];
+                if (playback_track_muted()) {
+                    nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
+                    nextFrameToSchedule_ += framesPerPhrase;
+                    return;
+                }
                 if (trackState.trackStopped) {
                     nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
                     nextFrameToSchedule_ += framesPerPhrase;
@@ -374,7 +399,8 @@ class Sequencer {
                     save_checkpoint(Checkpoint{nextFrameToSchedule_, nextRow});
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                    SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_, 0,
+                    SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_,
+                                                            playbackTrack_,
                                                             transposeSemitones, framesPerStep, effectiveStartRow,
                                                             &chain, nextRow);
                     chainRowStartFrames_.emplace_back(nextRow, nextFrameToSchedule_);
@@ -517,6 +543,16 @@ class Sequencer {
     }
 
   private:
+    static int clamp_track(int trackId) { return (trackId >= 0 && trackId < 8) ? trackId : 0; }
+
+    // Read LIVE, every lookahead pass, off `project_` rather than latched at play time — the mixer is
+    // a live surface, so a mute toggled mid-audition takes effect on the next phrase the way a fader
+    // move takes effect on the next block. SONG and render mode ask the same question per track.
+    bool playback_track_muted() const {
+        return project_ != nullptr && playbackTrack_ < static_cast<int>(project_->tracks.size()) &&
+               project_->tracks[static_cast<size_t>(playbackTrack_)].mute;
+    }
+
     struct SchedulePhraseResult {
         int rowsScheduled = 0;
         bool hopTriggered = false;
@@ -1453,6 +1489,9 @@ class Sequencer {
     int nextSongChainRowToSchedule_ = 0;
     int currentPhraseId_ = 0;
     int currentChainId_ = 0;
+    // The mixer track PHRASE/CHAIN mode plays through: its fader, its mute, its voice slot and its
+    // per-track FX. Unused in SONG and render mode, which carry the track per scheduled row.
+    int playbackTrack_ = 0;
     int64_t playbackStartFrame_ = 0;
     PlaybackMode playbackMode_ = PlaybackMode::STOPPED;
     bool isPlaying_ = false;

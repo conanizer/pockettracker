@@ -265,9 +265,17 @@ class SongcoreHost {
     // ── ↓ transport ──────────────────────────────────────────────────────────────────────────────
     // Each returns the frame the transport latched (the trace's session base), so a caller that also
     // keeps a Kotlin-side trace stamps the SAME base instead of re-reading a clock that has moved on.
+    //
+    // ⚠️ CHAIN and PHRASE take the MIXER TRACK they belong to, defaulted to 0. It is what gives them
+    // the arrangement's fader, mute, voice slot and per-track FX instead of channel 1's; the default
+    // is what keeps every tool caller — and its goldens — asking for track 0 unchanged.
     int64_t play_song(int startRow)   { sync_clock(); seq_.playSong(startRow);     return after_play(); }
-    int64_t play_chain(int chainId)   { sync_clock(); seq_.playChain(chainId);     return after_play(); }
-    int64_t play_phrase(int phraseId) { sync_clock(); seq_.playPhrase(phraseId);   return after_play(); }
+    int64_t play_chain(int chainId, int trackId = 0) {
+        sync_clock(); seq_.playChain(chainId, trackId);   return after_play();
+    }
+    int64_t play_phrase(int phraseId, int trackId = 0) {
+        sync_clock(); seq_.playPhrase(phraseId, trackId); return after_play();
+    }
 
     /**
      * Stop the transport — the scheduler AND the engine.
@@ -1093,6 +1101,18 @@ class SongcoreHost {
         if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
         preview_note(instrumentId, project_.instruments[instrumentId].root, /*durationFrames=*/0,
                      /*rootAudition=*/true, tableIdOverride);
+    }
+
+    /**
+     * Point the preview lane at a mixer channel — `trackId` in 0..7, or −1 for the unity gain it has
+     * always had.
+     *
+     * ⭐ THE TRACK, NOT THE VOLUME. A stored gain goes stale the moment the fader moves or a VTR
+     * lands; a stored index re-reads the live fader every block, for nothing. The lane keeps its own
+     * ninth voice either way — an audition over a running song must go on stealing nothing.
+     */
+    void set_preview_track(int trackId) {
+        if (engine_) engine_->setPreviewTrack(trackId);
     }
 
     /**

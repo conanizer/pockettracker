@@ -630,6 +630,27 @@ class InputDispatcher {
     /** Play the note an edit just wrote (SETTINGS "NOTE PREVIEW"). */
     void preview_edited_note();
 
+    /**
+     * The song cell the cursor last left SONG on, as a 0-based track — the TIE-BREAK a chain or
+     * phrase played from its own screen offers `songcore::track_of_*`, never the answer on its own.
+     *
+     * ⭐ It needs no new field: `go_to_screen` saves songCursorRow/Column every time you leave SONG,
+     * and on SONG the column IS the track, 1-based. Because it only ever breaks a tie between tracks
+     * that already hold the chain, a stale one cannot route a chain somewhere it does not live.
+     */
+    int remembered_song_track() const;
+
+    /**
+     * The mixer channel an audition on the preview lane borrows, or -1 for the neutral unity gain the
+     * lane has always had.
+     *
+     * ⚠️ An INSTRUMENT IS NOT IN THE SONG — only its uses are. So this is the song cell you came
+     * through, and only while that cell still holds a chain; "the first track that plays it" is
+     * available and tempting, but an instrument used on five tracks would audition through whichever
+     * sorts first, which is a lie with no gesture behind it.
+     */
+    int audition_track() const;
+
     /** True on the three screens that edit an INSTRUMENT rather than the arrangement. */
     bool on_instrument_screen() const;
 
