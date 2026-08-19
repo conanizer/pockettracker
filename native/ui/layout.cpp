@@ -5,6 +5,7 @@
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
+#include "ui/song_pointer.h"   // NAV = SONG — the cell the CHAIN/PHRASE headers read out
 
 namespace pt::ui {
 
@@ -148,6 +149,15 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 // them itself, from the phrase's id — where the user happens to have navigated from
                 // is not the answer, since a phrase placed at two rows has two of them.
                 ps.project        = &p;
+                // Under NAV = SONG the phrase is being looked at THROUGH a chain row and a song cell,
+                // and which one decides where the next B+D-pad press goes. Left at −1 under POOL, where
+                // there is no cell to name (ui/song_pointer.h).
+                if (s.settings.navSongRelative) {
+                    ps.viaChain    = s.currentChain;
+                    ps.viaChainRow = pointer_chain_row(s);
+                    ps.songRow     = pointer_song_row(s);
+                    ps.songTrack   = pointer_track(s);
+                }
                 phraseEditor_.draw(c, moduleX, EDITOR_Y, ps);
                 break;
             }
@@ -161,6 +171,10 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 cs.selectionMode  = s.selection_mode();
                 cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 cs.theme          = t;
+                if (s.settings.navSongRelative) {   // see the PHRASE arm above
+                    cs.songRow   = pointer_song_row(s);
+                    cs.songTrack = pointer_track(s);
+                }
                 chainEditor_.draw(c, moduleX, EDITOR_Y, cs);
                 break;
             }

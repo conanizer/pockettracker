@@ -28,6 +28,13 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
 
     int rowY = y + TEXT_PADDING;
     c.draw_text("PHRASE " + hex2(s.phrase.id), x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    // The chain row and the song cell it hangs off — see PhraseEditorState.
+    if (s.viaChain >= 0 && s.viaChainRow >= 0) {
+        std::string via = "C" + hex2(s.viaChain) + "/" + hex1(s.viaChainRow);
+        if (s.songRow >= 0 && s.songTrack >= 0)
+            via += "  S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1);
+        c.draw_text(via, x + 190, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    }
 
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     c.draw_text("N",   noteX,    rowY, t.textParam, CHAR_SPACING, FONT_SCALE);

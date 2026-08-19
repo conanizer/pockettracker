@@ -72,6 +72,7 @@
 #include "ui/app_state.h"
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
+#include "ui/song_pointer.h"     // NAV = SONG — the ctor clamps the pointer onto a real cell
 #include "ui/filesystem.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/effects_editor.h"
@@ -115,6 +116,11 @@ class InputDispatcher {
         // through AppState — so point AppState at our clipboard here, once, the same way the shell points
         // it at the host's document. `clip_` is a member and outlives every frame this dispatcher drives.
         s_.clipboard = &clip_;
+
+        // …and the same thing for the song-relative pointer, for the launch-time project the shell
+        // pushed before this object existed: it is the LOAD path `reset_editing_context` covers, minus
+        // the reset. A no-op under NAV = POOL and with no project pointed at yet (ui/song_pointer.h).
+        clamp_song_pointer(s_);
     }
 
     /**
@@ -639,6 +645,13 @@ class InputDispatcher {
      * that already hold the chain, a stale one cannot route a chain somewhere it does not live.
      */
     int remembered_song_track() const;
+
+    /**
+     * B+UP/DOWN under NAV = SONG: the CHAIN screen walks the track column of the song grid, the PHRASE
+     * screen walks the current chain's filled rows. Returns true when it owned the press — including
+     * when the walk clamped and nothing moved (ui/song_pointer.h).
+     */
+    bool song_relative_b_vertical(int delta);
 
     /**
      * The mixer channel an audition on the preview lane borrows, or -1 for the neutral unity gain the

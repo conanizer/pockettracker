@@ -499,4 +499,16 @@ inline bool modal_backdrop_active(const AppState& s) {
     return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen;
 }
 
+/**
+ * SONG shows 16 of its 256 rows; keep `cursorRow` inside that window. `scrollSongToRow` in Kotlin.
+ *
+ * Lives here rather than beside the cursor table because three unrelated things move the song row —
+ * the D-pad, `go_to_screen` on arrival, and the song-relative pointer — and it is the state's own
+ * invariant rather than any one of their business.
+ */
+inline void scroll_song_to_row(AppState& s, int row) {
+    if (row < s.songScrollPosition)            s.songScrollPosition = row;
+    else if (row >= s.songScrollPosition + 16) s.songScrollPosition = row - 15;
+}
+
 }  // namespace pt::ui

@@ -463,6 +463,15 @@ Screen geometry lives in **one table per screen** that the cursor walks and the 
 rows are conditional (SETTINGS, PROJECT), a row's **number is its identity** — hidden rows are
 skipped, never renumbered, so a stored cursor and a recorded test case keep meaning the same thing.
 
+Under `NAV = SONG` the CHAIN and PHRASE screens point at a **song cell** rather than at a pool slot.
+`currentChain` and `currentPhrase` stop being state and become a reading of the SONG and CHAIN cursors
+— the three fields `go_to_screen` already saves and restores — so the ruleset adds no field, which is
+the invariant rather than an economy: storing "which chain am I looking at" would mean carrying the
+cell beside it as a second copy, and the two diverge on the first move that lands on the same chain
+from a different cell. The two `current*` fields are still written, by one refresh sitting below the
+three places the pointer can move, because the call sites that index `project.chains[currentChain]`
+number about thirty and deriving at each of them is the bug this avoids.
+
 Two modules are stateful, both because their output is a function of the *previous* frame: the
 oscilloscope (peak-hold dots, falling bars) and the mixer (falling peak markers).
 

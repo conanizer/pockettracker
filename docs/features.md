@@ -124,6 +124,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 ## Controls
 
+- Song-relative navigation: B+D-pad walks the arrangement instead of the 00–FF pools, so the chain and phrase on screen are always the ones the song plays (SETTINGS → NAV)
 - Full physical button support (tested on Miyoo Flip and Ayaneo Pocket Air Mini)
 - Touch layout: virtual buttons in portrait orientation
 - Virtual button clicks: choose a sound and volume

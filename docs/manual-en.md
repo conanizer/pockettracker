@@ -287,6 +287,27 @@ Hold **B** and press LEFT/RIGHT to switch between items of the same type without
 | TABLE | Previous / next table (00–7F) |
 | GROOVE | Previous / next groove (00–7F) |
 
+**With `SETTINGS → NAV` set to `SONG`**, B + D-pad on CHAIN and PHRASE walks the arrangement instead
+of the pools. The cursor becomes a song cell, and the chain or phrase you are looking at is whichever
+one that cell holds — the CHAIN and PHRASE headers show it (`CHAIN 20  S01 T3`).
+
+| Screen | B + LEFT / RIGHT | B + UP / DOWN |
+|---|---|---|
+| CHAIN | Nearest filled cell left / right in the same song row | Nearest filled cell up / down the same track, skipping empty rows |
+| PHRASE | Nearest track left / right whose chain also has a phrase at this chain row | Previous / next filled row of the chain you are in |
+
+Nothing to that side means the press does nothing. On PHRASE, plain UP/DOWN off step `00` or `0F` now
+moves to the previous or next filled row of the chain instead of wrapping inside the same phrase, and
+**R+RIGHT does nothing when the cell under the cursor is empty** — you reach a chain by putting it in
+the song first.
+
+> [!IMPORTANT]
+> Under `NAV = SONG` a chain or phrase that is not placed in the arrangement cannot be opened at all.
+> Nothing is lost — set NAV back to `POOL` and every slot is reachable again.
+
+The other screens are unchanged: SONG still pages by 16, and INSTRUMENT, MODS, TABLE, GROOVE and
+INST.POOL still walk their pools.
+
 ---
 
 ### 5.5 Screen Navigation — R + D-pad
@@ -1165,6 +1186,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
+| NAV | POOL / SONG | What B + D-pad walks. **POOL** steps through the 00–FF chain and phrase pools. **SONG** walks the arrangement instead: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds — see §5.4. |
 | FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 25). |
 | NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |

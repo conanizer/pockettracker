@@ -24,6 +24,14 @@ struct ChainEditorState {
     const songcore::Chain& chain;
     int  cursorRow     = 0;
     int  cursorColumn  = 1;
+
+    // The song cell this chain is being looked at THROUGH, drawn beside the title as `S01 T3`.
+    // −1 = "no cell", which is what NAV = POOL always answers and what NAV = SONG answers for a chain
+    // reached before the pointer had anywhere to be. ⭐ Not decoration: under NAV = SONG the cell is
+    // what decides where the next B+D-pad press goes, and a B+UP that lands on the SAME chain has
+    // still moved — the header is the only thing on screen that says so.
+    int  songRow = -1;
+    int  songTrack = -1;
     int  playbackRow   = 0;
     bool isPlaying     = false;
     bool selectionMode = false;

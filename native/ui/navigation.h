@@ -18,10 +18,10 @@
 //  row 4  EFFECTS  EFFECTS   EFFECTS   EFFECTS     EFFECTS    ← shared
 //
 // PROJECT / MIXER / EFFECTS are shared: they sit in every column and therefore have no column of
-// their own. `previousColumn` is what remembers which one you entered from, so that going back UP out
-// of MIXER returns you to the main-row screen you came from rather than to a fixed default. That is
-// why every function here takes it, and why they return the new column alongside the new screen — the
-// pair travels together or the memory desyncs.
+// their own. `previousColumn` is what remembers which one you entered from, so that leaving MIXER —
+// UP onto the main row, or SIDEWAYS onto the column beside it — is answered relative to where you
+// dropped in rather than from a fixed default. That is why every function here takes it, and why they
+// return the new column alongside the new screen — the pair travels together or the memory desyncs.
 //
 // The four `navigate_*` functions are PURE: a `NavState` in, a `NavResult` out, no canvas and no
 // engine. `go_to_screen` at the bottom is the one that APPLIES the answer, and it carries the whole
@@ -94,6 +94,19 @@ inline int context_column(const NavState& s) {
     const int c = screen_column(s.currentScreen);
     return (c == -1) ? s.previousColumn : c;
 }
+
+/**
+ * Does R+LEFT/R+RIGHT step SIDEWAYS off this screen, onto the MAIN row one column over?
+ *
+ * True for row 1 (PROJECT / GROOVE / MODS) and row 3 (MIXER): you do not walk ALONG those rows, you
+ * drop back to the tracker and then move. The four that are absent are absent for four reasons —
+ * EFFECTS has no side doors at all, INST.POOL owns the fast-jump pair, SCALE drops straight to its
+ * own column's main screen, and the popups have no cell in the grid to move from.
+ */
+inline bool exits_sideways_to_main_row(ScreenType s) {
+    return s == ScreenType::PROJECT || s == ScreenType::GROOVE ||
+           s == ScreenType::MODS    || s == ScreenType::MIXER;
+}
 }  // namespace detail
 
 inline NavResult navigate_up(const NavState& s) {
@@ -160,17 +173,15 @@ inline NavResult navigate_left(const NavState& s) {
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::INST_POOL, 3, true};
 
-    // Row 1 (PROJECT / GROOVE / MODS) and row 3 (MIXER) exit sideways onto the MAIN row, one column
-    // over — you do not walk along row 1, you drop back to the tracker and then move.
-    int contextCol = -1;
-    switch (s.currentScreen) {
-        case ScreenType::PROJECT: contextCol = s.previousColumn; break;
-        case ScreenType::GROOVE:  contextCol = 2; break;
-        case ScreenType::MODS:    contextCol = 3; break;
-        case ScreenType::MIXER:   contextCol = 2; break;
-        default: break;
-    }
-    if (contextCol >= 0) {
+    // Rows 1 and 3 exit sideways onto the MAIN row, one column over.
+    //
+    // ⭐ THE COLUMN IS DERIVED, not spelled out per screen: `context_column` is the SAME reading the
+    // navigation MAP paints (`modules/navigation_map.cpp:42`), so the picture and the movement cannot
+    // disagree about which column a shared screen is standing in — which is the one bug either can
+    // have. For MIXER that column is the one it was ENTERED from, so a sideways exit lands beside the
+    // screen you dropped in from and never on a fixed pair.
+    if (detail::exits_sideways_to_main_row(s.currentScreen)) {
+        const int contextCol = detail::context_column(s);
         const int target = contextCol - 1 < 0 ? 0 : contextCol - 1;
         return {main_screen_for_column(target), target};
     }
@@ -200,15 +211,9 @@ inline NavResult navigate_right(const NavState& s) {
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::INSTRUMENT, 3, true};
 
-    int contextCol = -1;
-    switch (s.currentScreen) {
-        case ScreenType::PROJECT: contextCol = s.previousColumn; break;
-        case ScreenType::GROOVE:  contextCol = 2; break;
-        case ScreenType::MODS:    contextCol = 3; break;
-        case ScreenType::MIXER:   contextCol = 2; break;
-        default: break;
-    }
-    if (contextCol >= 0) {
+    // The mirror of navigate_left's — see the comment there for why the column is derived.
+    if (detail::exits_sideways_to_main_row(s.currentScreen)) {
+        const int contextCol = detail::context_column(s);
         const int target = contextCol + 1 > 4 ? 4 : contextCol + 1;
         return {main_screen_for_column(target), target};
     }
@@ -276,7 +281,15 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
     }
 
     // Restore — or refresh, which is the Android default.
-    if (s.settings.cursorRemember) {
+    //
+    // ⚠️ UNDER NAV = SONG, SONG AND CHAIN ALWAYS RESTORE, whatever the CURSOR row says. Their cursors
+    // are not a convenience there — they ARE the pointer (ui/song_pointer.h), so a REFRESH to row 0
+    // would not lose your place, it would silently re-aim the whole thing at song row 0 / track 1.
+    // PHRASE is untouched: its row is a step, not a pointer component, so REFRESH still means what it
+    // has always meant.
+    const bool pointerScreen = s.settings.navSongRelative &&
+                               (r.screen == ScreenType::SONG || r.screen == ScreenType::CHAIN);
+    if (s.settings.cursorRemember || pointerScreen) {
         switch (r.screen) {
             case ScreenType::SONG:
                 s.cursorRow = s.songCursorRow;   s.cursorColumn = s.songCursorColumn;   break;
@@ -288,7 +301,8 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
             default: break;
         }
     } else {
-        // REFRESH — every screen that owns a cursor resets it to its top-left editable cell on entry.
+        // REFRESH — every screen that owns a cursor resets it to its top-left editable cell on entry
+        // (bar the two the pointer owns under NAV = SONG, which took the branch above).
         //
         // ⚠️ INSTRUMENT, MODS and INST.POOL were MISSING here until S5 (their cursors persisted across
         // an entry, where Android's refresh them). Harmless-looking, but INSTRUMENT is the one screen
@@ -345,6 +359,11 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
 
     // SONG's viewport must contain its cursor, whichever branch above set it.
     if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.cursorRow);
+
+    // ⭐ And under NAV = SONG the two current* refs are a READING of the cursors just saved and
+    // restored above — so this is where they are taken, once, below every site that lands a screen
+    // change, rather than at each of the thirty that consume them. A no-op under NAV = POOL.
+    refresh_song_relative_refs(s);
 }
 
 }  // namespace pt::ui

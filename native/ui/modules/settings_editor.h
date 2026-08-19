@@ -98,6 +98,15 @@ struct SettingsValues {
     bool        rememberFolder   = false;
     std::string lastSampleFolder;   // runtime only — see settings_store.cpp (not saved)
 
+    // NAV = POOL / SONG. POOL is what B+LEFT/RIGHT has always done — scroll the 00..FF chain and phrase
+    // pools. SONG makes B+D-pad walk the ARRANGEMENT instead, so the cursor is a SONG CELL and the chain
+    // and phrase on screen are whatever that cell names (the LSDJ/LGPT ruleset).
+    //
+    // ⚠️ DEFAULT POOL, and not merely out of caution: under SONG a phrase nobody has placed in the song
+    // is unreachable, so the ruleset is a bargain a user has to opt into rather than one they meet on
+    // first launch.
+    bool navSongRelative = false;
+
     // ── MIDI (plan §8.1, phase B4.3) ─────────────────────────────────────────────────────────────
     //
     // ⚠️ THESE TWO ARE NOT ON THE SETTINGS SCREEN — they belong to the MIDI screen and merely LIVE in

@@ -35,6 +35,14 @@ struct PhraseEditorState {
     const songcore::Phrase& phrase;
     int                     cursorRow    = 0;
     int                     cursorColumn = 1;
+
+    // The chain row and song cell this phrase is being looked at THROUGH — `C20/01 S01 T3` beside the
+    // title. −1 on any of them means "no cell", which is what NAV = POOL always answers. See
+    // ChainEditorState for why this is not decoration.
+    int                     viaChain     = -1;
+    int                     viaChainRow  = -1;
+    int                     songRow      = -1;
+    int                     songTrack    = -1;
     int                     playbackRow  = 0;
     bool                    isPlaying    = false;
     bool                    selectionMode = false;

@@ -44,12 +44,20 @@
 //
 // Any screen not named below falls through to the shared 16-row default, which is what the Kotlin
 // `else` branch does for anything it has not named.
+//
+// And the one thing a SETTING changes (ui/song_pointer.h):
+//
+//   • PHRASE SPILLS ACROSS CHAIN ROWS under NAV = SONG. Stepping off step 0F lands on step 00 of the
+//     next filled row's phrase rather than back at 00 of the same one — the 16 steps stop being the
+//     loop and the CHAIN becomes it. Under NAV = POOL, PHRASE is the plain 16-row default it has
+//     always been, which is why the arm below states both answers rather than branching around one.
 
 #include <algorithm>
 
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
 #include "ui/settings_row_layout.h"
+#include "ui/song_pointer.h"
 
 namespace pt::ui {
 
@@ -166,11 +174,6 @@ inline void move_pool_selection(AppState& s, int delta) {
 
 }  // namespace detail
 
-/** SONG shows 16 of its 256 rows; keep `cursorRow` inside that window. `scrollSongToRow` in Kotlin. */
-inline void scroll_song_to_row(AppState& s, int row) {
-    if (row < s.songScrollPosition)            s.songScrollPosition = row;
-    else if (row >= s.songScrollPosition + 16) s.songScrollPosition = row - 15;
-}
 
 // ─── SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────────
 //
@@ -298,6 +301,21 @@ inline void move_cursor_up(AppState& s) {
             s.midiCursorColumn = 1;
             break;
 
+        // Off the top step, under NAV = SONG: the pointer climbs to the previous FILLED chain row and
+        // the cursor lands on the last step of whatever phrase sits there. The move itself is the same
+        // wrap either way — only the pointer is extra — so the assignment below is said once.
+        // ⚠️ A chain with a single filled row answers `from` and nothing moves, which is exactly right:
+        // the wrap then happens inside the one phrase, as it does under POOL.
+        case ScreenType::PHRASE:
+            if (s.settings.navSongRelative && s.cursorRow == 0) {
+                const int from = pointer_chain_row(s);
+                const int to   = songcore::next_chain_row(*s.project, s.currentChain, from, -1,
+                                                         /*wrap=*/true);
+                if (to != from) { set_pointer_chain_row(s, to); refresh_song_relative_refs(s); }
+            }
+            s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
+            break;
+
         default:
             s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
             break;
@@ -378,6 +396,17 @@ inline void move_cursor_down(AppState& s) {
         case ScreenType::MIDI:
             s.midiCursorRow = (s.midiCursorRow < MIDI_ROW_COUNT - 1) ? s.midiCursorRow + 1 : 0;
             s.midiCursorColumn = 1;
+            break;
+
+        // …and off the bottom step it descends. See move_cursor_up's arm.
+        case ScreenType::PHRASE:
+            if (s.settings.navSongRelative && s.cursorRow == 15) {
+                const int from = pointer_chain_row(s);
+                const int to   = songcore::next_chain_row(*s.project, s.currentChain, from, +1,
+                                                         /*wrap=*/true);
+                if (to != from) { set_pointer_chain_row(s, to); refresh_song_relative_refs(s); }
+            }
+            s.cursorRow = (s.cursorRow < 15) ? s.cursorRow + 1 : 0;
             break;
 
         default:

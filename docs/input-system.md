@@ -155,7 +155,8 @@ Hold R and press directions to navigate the 5×5 screen grid:
 
 - The main screens (SONG/CHAIN/PHRASE/INSTRUMENT/TABLE) are row 2, and R+LEFT/RIGHT walks along it.
 - PROJECT, MIXER and EFFECTS are shared: they sit in every column and have none of their own, so
-  R+UP out of MIXER returns you to the main-row screen you entered from.
+  leaving MIXER is answered relative to the column you entered it from — R+UP returns to that
+  column's main-row screen, R+LEFT/RIGHT to the main-row screen one column to either side.
 - Row 0 and row 1 are column-specific — R+UP from PHRASE reaches GROOVE and then SCALE, R+UP from
   INSTRUMENT reaches MODS and then INST.POOL.
 
@@ -204,6 +205,24 @@ Hold B and press directions to change *which* item the screen is showing, withou
 | **B + LEFT / RIGHT** (EQ EDITOR) | Previous / next EQ preset slot |
 | **B + UP / DOWN** (SONG) | Page up / down 16 rows |
 | **B + UP / DOWN** (INST.POOL) | Jump ±16 slots |
+
+### Under `SETTINGS -> NAV = SONG`
+
+B + D-pad on CHAIN and PHRASE walks the **arrangement** instead of the pools. The cursor is a song
+cell, so the chain and phrase on screen are whichever ones that cell names, and the CHAIN and PHRASE
+headers show it (`CHAIN 20  S01 T3`).
+
+| Control | Action |
+|---------|--------|
+| **B + LEFT / RIGHT** (CHAIN) | Nearest filled song cell left / right in the same song row. Clamps |
+| **B + UP / DOWN** (CHAIN) | Nearest filled song cell up / down the same track column, skipping gaps. Clamps |
+| **B + LEFT / RIGHT** (PHRASE) | Nearest track left / right whose chain also has a phrase at this chain row. Clamps |
+| **B + UP / DOWN** (PHRASE) | Previous / next filled row of the current chain. Never leaves the chain |
+| **UP / DOWN** (PHRASE) | Off step 00 / 0F, spills into the previous / next filled chain row |
+| **R + RIGHT** (SONG, CHAIN) | Does nothing when the cell under the cursor is empty |
+
+The other screens are unchanged: SONG still pages by 16, and INSTRUMENT, MODS, TABLE, GROOVE and
+INST.POOL still walk their pools.
 
 ---
 

@@ -115,6 +115,92 @@ inline int track_of_phrase(const Project& project, int phraseId, int currentChai
     return 0;
 }
 
+// ─── Walking the song grid ───────────────────────────────────────────────────────────────────────
+//
+// The pure half of song-relative navigation (SETTINGS → NAV = SONG), where B+DPAD walks the
+// ARRANGEMENT instead of the 00..FF pool — so the chain in front of you is always one the song
+// actually plays. Project in, index out: no AppState, no cursor, no screen.
+//
+// ⭐ THEY ALL CLAMP. Nothing to that side means the index comes back unchanged, which the caller
+// spends as "the press did nothing". A song row is eight cells wide, and wrapping across it would
+// read as a mis-press rather than as a shortcut. The one exception is spelled out loud: the `wrap`
+// argument on `next_chain_row`, used only by the plain UP/DOWN spill.
+
+/** The chain in song cell (track, row), or −1. ⚠️ A track's chainRefs may be SHORTER than the song. */
+inline int chain_at(const Project& project, int track, int songRow) {
+    if (track < 0 || track >= static_cast<int>(project.tracks.size()) || songRow < 0) return -1;
+    const std::vector<int>& refs = project.tracks[static_cast<size_t>(track)].chainRefs;
+    if (songRow >= static_cast<int>(refs.size())) return -1;
+    const int id = refs[static_cast<size_t>(songRow)];
+    return (id >= 0 && id < static_cast<int>(project.chains.size())) ? id : -1;
+}
+
+/** The phrase in row `chainRow` of chain `chainId`, or −1. */
+inline int phrase_at(const Project& project, int chainId, int chainRow) {
+    if (chainId < 0 || chainId >= static_cast<int>(project.chains.size())) return -1;
+    return chain_phrase_ref(project.chains[static_cast<size_t>(chainId)], chainRow);
+}
+
+/**
+ * The nearest track to the side of `track` whose cell in song row `songRow` holds a chain — and,
+ * when `requirePhraseAtRow >= 0`, whose chain also holds a phrase at that chain row.
+ *
+ * ⭐ ONE PREDICATE, TWO REASONS. Stepping sideways on the PHRASE screen skips a track both because
+ * its song cell is empty and because the chain sitting there has no phrase at the row you are on.
+ * Written as two tests they drift; written as one they cannot.
+ */
+inline int next_song_cell_h(const Project& project, int songRow, int track, int delta,
+                            int requirePhraseAtRow = -1) {
+    const int trackCount = static_cast<int>(project.tracks.size());
+    for (int t = track + delta; t >= 0 && t < trackCount; t += delta) {
+        const int chainId = chain_at(project, t, songRow);
+        if (chainId < 0) continue;
+        if (requirePhraseAtRow >= 0 && phrase_at(project, chainId, requirePhraseAtRow) < 0) continue;
+        return t;
+    }
+    return track;
+}
+
+/**
+ * The nearest song row above/below `songRow` whose cell in track `track` holds a chain. GAPS ARE
+ * SKIPPED — an empty bar in the middle of a column is walked straight over rather than stopped at.
+ *
+ * The bound is the track's OWN chainRefs length rather than the screen's 256 rows: a cell past the
+ * end of that vector is empty by construction, so there is nothing out there to find.
+ */
+inline int next_song_cell_v(const Project& project, int songRow, int track, int delta) {
+    if (track < 0 || track >= static_cast<int>(project.tracks.size())) return songRow;
+    const int last =
+        static_cast<int>(project.tracks[static_cast<size_t>(track)].chainRefs.size()) - 1;
+    for (int r = songRow + delta; r >= 0 && r <= last; r += delta)
+        if (chain_at(project, track, r) >= 0) return r;
+    return songRow;
+}
+
+/**
+ * The nearest row of `chainId` above/below `fromRow` that holds a phrase.
+ *
+ * `wrap` is the whole difference between the two gestures that call this. B+UP/DOWN on the PHRASE
+ * screen CLAMPS — vertical movement never leaves the chain — while plain UP/DOWN spilling off step
+ * 00 or 0F wraps to the chain's last/first filled row, so "rows wrap" stays true one level up.
+ * Returns `fromRow` when the chain holds no other filled row, which both callers spend as "stay".
+ */
+inline int next_chain_row(const Project& project, int chainId, int fromRow, int delta,
+                          bool wrap = false) {
+    if (chainId < 0 || chainId >= static_cast<int>(project.chains.size())) return fromRow;
+    const Chain& chain = project.chains[static_cast<size_t>(chainId)];
+    for (int step = 1; step <= CHAIN_ROWS; ++step) {
+        int r = fromRow + delta * step;
+        if (r < 0 || r >= CHAIN_ROWS) {
+            if (!wrap) return fromRow;
+            r = ((r % CHAIN_ROWS) + CHAIN_ROWS) % CHAIN_ROWS;
+        }
+        if (r == fromRow) break;                       // a full lap: nothing else is filled
+        if (chain_phrase_ref(chain, r) >= 0) return r;
+    }
+    return fromRow;
+}
+
 }  // namespace songcore
 
 #endif  // POCKETTRACKER_SONGCORE_TRAVERSAL_H

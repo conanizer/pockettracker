@@ -16,6 +16,11 @@ void ChainEditorModule::draw(Canvas& c, int x, int y, const ChainEditorState& s)
 
     int rowY = y + TEXT_PADDING;
     c.draw_text("CHAIN " + hex2(s.chain.id), x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    // The song cell, in the title's own dim colour so it reads as context rather than as a second title.
+    if (s.songRow >= 0 && s.songTrack >= 0) {
+        c.draw_text("S" + hex2(s.songRow) + " T" + std::to_string(s.songTrack + 1), x + 170, rowY,
+                    t.textParam, CHAR_SPACING, FONT_SCALE);
+    }
 
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     c.draw_text("PH",  phX,  rowY, t.textParam, CHAR_SPACING, FONT_SCALE);

@@ -54,6 +54,12 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // SESSION-ONLY — it resets to the default folder on every launch, exactly like CURSOR remembering.
     // So the choice survives a restart but the remembered path does not (the user's call).
     values.rememberFolder     = get_bool(j, "rememberFolder", values.rememberFolder);
+
+    // NAV = POOL / SONG. ⚠️ A ROW THIS PLATFORM HAS MUST BE PERSISTED, or the setting silently resets
+    // to POOL on every launch and nothing anywhere says so — the S10 RESUME bug's exact shape, one row
+    // later. Absent from an older settings.json → POOL, which is what every file written before this
+    // row existed means.
+    values.navSongRelative    = get_bool(j, "navSongRelative", values.navSongRelative);
     values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
 
     // ── MIDI (B4.3) — the CABLE's half. The song's half is in the .ptp. ──────────────────────────
@@ -172,6 +178,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["notePreview"]        = values.notePreviewEnabled;
     j["rememberFolder"]     = values.rememberFolder;      // D2a — FOLDER row (the toggle only; the
                                                           // remembered PATH is session-only, not saved)
+    j["navSongRelative"]    = values.navSongRelative;   // the NAV row — POOL / SONG
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);

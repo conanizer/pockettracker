@@ -5,6 +5,7 @@
 #include "ui/cursor_move.h"
 #include "ui/lifecycle.h"        // the crash-recovery autosave — write / clear / load (S10)
 #include "ui/navigation.h"
+#include "ui/song_pointer.h"     // NAV = SONG — the pointer, the entry gate and the load-time clamp
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 #include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
 
@@ -481,10 +482,16 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
         // song dirty, and it must not put a "you have unsaved work" question in front of the next NEW
         // or EXIT. (It is also why this arm is the only one that ignores `p`.) The shell persists
         // these to settings.json instead — see the SETTINGS branch of on_a and the shell's own save.
-        case ScreenType::SETTINGS:
+        case ScreenType::SETTINGS: {
+            const bool navBefore = s_.settings.navSongRelative;
             settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
                                    s_.settingsCursorColumn, action);
+            // ⚠️ SWITCHING NAV ON MUST LAND THE POINTER SOMEWHERE REAL. The remembered song cell was
+            // last meaningful under POOL, where nothing kept it on a filled cell — so without this the
+            // first R+RIGHT after flipping the row is refused, on a screen with nothing to say why.
+            if (!navBefore && s_.settings.navSongRelative) clamp_song_pointer(s_);
             return false;
+        }
 
         // ⚠️ MIDI IS THE ONE SCREEN THAT EDITS BOTH SUBJECTS, so it is the one arm whose return value
         // is a QUESTION rather than a constant. PROG CHG and IN CH are `Project` fields that emit into
@@ -1329,6 +1336,26 @@ void InputDispatcher::cycle_current_item(int delta) {
         return;
     }
 
+    // ⭐ UNDER NAV = SONG, THIS WALKS THE SONG ROW instead of the pool — the whole gesture changes
+    // meaning, so it takes the press before the pool arms below ever see it. CHAIN steps to the nearest
+    // FILLED cell either side; PHRASE steps to the nearest one whose chain ALSO holds a phrase at the
+    // chain row you are on, which is one predicate covering both reasons a track is skipped
+    // (songcore/traversal.h). Both CLAMP: nothing to that side is a press that does nothing.
+    //
+    // ⚠️ `chainRow` is deliberately NOT reset by the move. It may then point at an empty row of the
+    // chain you land on — which the CHAIN→PHRASE entry gate already refuses, so a second guard here
+    // would only be a second place to get it wrong.
+    if (s_.settings.navSongRelative &&
+        (s_.currentScreen == ScreenType::CHAIN || s_.currentScreen == ScreenType::PHRASE)) {
+        const int requireRow = (s_.currentScreen == ScreenType::PHRASE) ? pointer_chain_row(s_) : -1;
+        const int songRow    = pointer_song_row(s_);
+        const int track      = songcore::next_song_cell_h(*s_.project, songRow, pointer_track(s_),
+                                                          delta, requireRow);
+        set_pointer_song_cell(s_, songRow, track);
+        refresh_song_relative_refs(s_);
+        return;
+    }
+
     // Kotlin's `(value + delta).mod(max + 1)` — a FLOORING modulo, so −1 wraps to the top rather than
     // staying at −1 the way C's % would.
     auto wrap = [delta](int value, int max) {
@@ -1394,8 +1421,39 @@ void InputDispatcher::on_b_right() {
 // Not corrupting, and that is exactly why nobody ever reported it: it reads as a mis-press. Zone B, so
 // fixed on Android too (`AppInputDispatcher.handleBUp`/`handleBDown`), per §4's rule.
 
+/**
+ * B+UP/DOWN under NAV = SONG — the two directions the pool ruleset leaves FREE on both screens.
+ *
+ * On CHAIN it walks the track COLUMN: the nearest song row above or below whose cell in this track is
+ * filled, GAPS SKIPPED. On PHRASE it walks the CHAIN's own filled rows and NEVER LEAVES THE CHAIN —
+ * crossing chains vertically from there is deliberately not a gesture.
+ *
+ * ⚠️ Returns true even when the walk CLAMPS. The press was owned and its answer was "nothing to that
+ * side"; falling through to the pool arms would page the song out from under the pointer instead.
+ */
+bool InputDispatcher::song_relative_b_vertical(int delta) {
+    if (!s_.settings.navSongRelative) return false;
+
+    if (s_.currentScreen == ScreenType::CHAIN) {
+        const int track = pointer_track(s_);
+        const int row   = songcore::next_song_cell_v(*s_.project, pointer_song_row(s_), track, delta);
+        set_pointer_song_cell(s_, row, track);
+        refresh_song_relative_refs(s_);
+        return true;
+    }
+    if (s_.currentScreen == ScreenType::PHRASE) {
+        const int row = songcore::next_chain_row(*s_.project, s_.currentChain, pointer_chain_row(s_),
+                                                 delta, /*wrap=*/false);
+        set_pointer_chain_row(s_, row);
+        refresh_song_relative_refs(s_);
+        return true;
+    }
+    return false;
+}
+
 void InputDispatcher::on_b_up() {
     if (overlay_swallows(Overlay::NONE)) return;
+    if (song_relative_b_vertical(-1)) return;
 
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
     // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
@@ -1411,6 +1469,7 @@ void InputDispatcher::on_b_up() {
 
 void InputDispatcher::on_b_down() {
     if (overlay_swallows(Overlay::NONE)) return;
+    if (song_relative_b_vertical(+1)) return;
 
     if (s_.currentScreen == ScreenType::INST_POOL) {
         const int last = static_cast<int>(s_.project->instruments.size()) - 1;
@@ -1596,6 +1655,11 @@ void InputDispatcher::on_r_right() {
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_right(ns);
+    // ⚠️ THE ENTRY GATE, and it sits ABOVE the sync rather than beside `go_to_screen`: under NAV = SONG
+    // a refused press must leave NOTHING behind, and `sync_last_edited_on_screen_switch` writes the
+    // lastEdited memory before the screen moves. See ui/song_pointer.h — R+RIGHT is the only gated
+    // direction, because it is the only one that goes DEEPER into the arrangement.
+    if (!song_relative_entry_allowed(s_, r.screen)) return;
     if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
     go_to_screen(s_, r);
     s_.selection.exit();
@@ -1992,6 +2056,13 @@ void InputDispatcher::reset_editing_context() {
     // alone (the pool's ROW is currentInstrument, which IS reset above). Match the quirk exactly —
     // ptdispatch §32 pins the negatives too.
     s_.selection = Selection{};
+
+    // ⚠️ …AND UNDER NAV = SONG THE THREE REMEMBER SLOTS ABOVE ARE THE POINTER, so "reset to 0" aims it
+    // at song row 0 / track 1 — a cell the document just loaded need not have. The entry gate then
+    // refuses CHAIN, correctly and silently, and the user cannot leave SONG until they find a filled
+    // cell themselves. So it is DERIVED from the arrangement here, below every reset, rather than
+    // remembered. A no-op under NAV = POOL, where these are only a convenience.
+    clamp_song_pointer(s_);
 }
 
 void InputDispatcher::start_new_project() {

@@ -43,7 +43,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     // ── Scroll (v0.9.4 D2a) ───────────────────────────────────────────────────────────────────────
     // The rows below the title form a scrollable viewport. When the rows OVERFLOW it — the dense debug
-    // caps put 14 rows in a 392px panel — it scrolls to keep the cursor row visible, so the bottom rows
+    // caps put 15 rows in a 392px panel — it scrolls to keep the cursor row visible, so the bottom rows
     // (RESUME/TRACE) stay reachable exactly like the file browser / SONG list. When they fit (every
     // release build, where the debug rows are hidden) `maxScroll` is 0 and this is a no-op. The scroll is
     // DERIVED from the cursor row each frame — no stored scroll state — centring the cursor in the
@@ -118,6 +118,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     param_row(SettingsRow::KB_INSERT, "KB INSERT", v.insertBefore ? "BEFORE" : "AFTER");
     param_row(SettingsRow::CURSOR,    "CURSOR",    v.cursorRemember ? "REMEMBER" : "REFRESH");
+    param_row(SettingsRow::NAV,       "NAV",       v.navSongRelative ? "SONG" : "POOL");
     param_row(SettingsRow::NOTE_PREV, "NOTE PREV", on_off(v.notePreviewEnabled));
 
     {
@@ -203,6 +204,7 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
         case SettingsRow::NOTE_PREV:  return cc::toggle_binary(v.notePreviewEnabled);
         case SettingsRow::FOLDER:     return cc::toggle_binary(v.rememberFolder);
+        case SettingsRow::NAV:        return cc::toggle_binary(v.navSongRelative);
 
         case SettingsRow::VISUALIZER:
             return cc::enum_cycle(static_cast<int>(s.theme.visualizerType),
@@ -286,6 +288,7 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         case SettingsRow::CURSOR:    if (set) v.cursorRemember     = action.value > 0; break;
         case SettingsRow::NOTE_PREV: if (set) v.notePreviewEnabled = action.value > 0; break;
         case SettingsRow::FOLDER:    if (set) v.rememberFolder     = action.value > 0; break;
+        case SettingsRow::NAV:       if (set) v.navSongRelative    = action.value > 0; break;
 
         case SettingsRow::VISUALIZER:
             if (set) {

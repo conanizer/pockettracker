@@ -50,6 +50,7 @@ namespace pt::ui {
  * 11 RESUME      ASK / AUTO                          (what to do with a crash autosave)
  * 12 TRACE       ON / OFF, + ENG: KT / C++          (debug)
  * 13 FOLDER      REMEMBER / REFRESH                 (v0.9.4 D2a — remember the last sample folder)
+ * 14 NAV         POOL / SONG                        (what B+D-pad walks: the 00..FF pool, or the song)
  */
 enum class SettingsRow {
     LAYOUT     = 0,
@@ -71,23 +72,28 @@ enum class SettingsRow {
     // NAVIGATES between CURSOR and NOTE PREV, with the other app toggles (user's call, v0.9.4 D2a) — see
     // SETTINGS_DISPLAY_ORDER below, which is the order the panel walks, decoupled from these values.
     FOLDER     = 13,
+    // ⚠️ APPENDED for the same reason FOLDER was, and it is the one row where getting it wrong is not
+    // merely a cursor landing oddly: `settings.json` stores the cursor row by NUMBER, so inserting NAV
+    // anywhere below 14 would move every row a user's file already names.
+    NAV        = 14,
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 14;
+inline constexpr int SETTINGS_ROW_COUNT = 15;
 
 // ─── Display / navigation order ──────────────────────────────────────────────────────────────────
 //
 // The order the rows are DRAWN down the panel and the D-pad walks — DECOUPLED from the enum VALUE above,
-// which stays each row's identity. The only divergence from ascending value is FOLDER (value 13): it
-// lives here between CURSOR and NOTE PREV so a session toggle sits with the other app toggles, while its
-// identity stays 13 everywhere a row is named or persisted. `offset_y`, `next_visible_row` and
+// which stays each row's identity. The rows that diverge from ascending value are the two appended ones,
+// FOLDER (13) and NAV (14): both live here beside CURSOR so the session toggles sit together, while their
+// identities stay 13 and 14 everywhere a row is named or persisted. `offset_y`, `next_visible_row` and
 // `first_visible_row` all walk THIS array; the cursor still stores the row's VALUE, not its position.
 //
 // ⚠️ Every SettingsRow appears exactly once and the length is SETTINGS_ROW_COUNT — the walkers assume it.
 inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::LAYOUT,   SettingsRow::SCALING,   SettingsRow::OVERLAY,
     SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO,
-    SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::FOLDER, SettingsRow::NOTE_PREV,
+    SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
+    SettingsRow::FOLDER,    SettingsRow::NOTE_PREV,
     SettingsRow::VISUALIZER, SettingsRow::THEME,    SettingsRow::TEMPLATE,
     SettingsRow::RESUME,    SettingsRow::TRACE,
 };
@@ -106,8 +112,9 @@ inline bool settings_row_gap_after(SettingsRow row) {
         case SettingsRow::BTN_VIBRO:  // …before KB INSERT
         case SettingsRow::NOTE_PREV:  // …before VISUALIZER
         case SettingsRow::THEME:      // …before TEMPLATE
-            // FOLDER (D2a) sits mid-group between CURSOR and NOTE PREV (SETTINGS_DISPLAY_ORDER), so it
-            // takes NO gap of its own — it joins the KB INSERT / CURSOR / NOTE PREV app-toggle group.
+            // FOLDER and NAV sit mid-group between CURSOR and NOTE PREV (SETTINGS_DISPLAY_ORDER), so
+            // neither takes a gap of its own — both join the KB INSERT / CURSOR / NOTE PREV app-toggle
+            // group.
             return true;
         default:
             return false;
@@ -124,8 +131,13 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
         case SettingsRow::RESUME:    return caps.autosave;
         case SettingsRow::TRACE:     return caps.debug;
 
-        // SCALING, KB INSERT, CURSOR, NOTE PREV, VISUALIZER, THEME and TEMPLATE are about the app,
-        // not the device. Every platform has them.
+        // SCALING, KB INSERT, CURSOR, NAV, NOTE PREV, VISUALIZER, THEME and TEMPLATE are about the
+        // app, not the device. Every platform has them.
+        //
+        // ⚠️ NAV IS DELIBERATELY NOT DEBUG-GATED, where a half-built feature normally would be. Under
+        // NAV = SONG a phrase that is not placed in the arrangement cannot be reached at all, and this
+        // row is the only way back out — a user who can see the trap but not the switch is worse off
+        // than one who never saw either.
         default: return true;
     }
 }
