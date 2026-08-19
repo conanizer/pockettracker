@@ -155,8 +155,8 @@ Hold R and press directions to navigate the 5×5 screen grid:
 
 - The main screens (SONG/CHAIN/PHRASE/INSTRUMENT/TABLE) are row 2, and R+LEFT/RIGHT walks along it.
 - PROJECT, MIXER and EFFECTS are shared: they sit in every column and have none of their own, so
-  leaving MIXER is answered relative to the column you entered it from — R+UP returns to that
-  column's main-row screen, R+LEFT/RIGHT to the main-row screen one column to either side.
+  leaving one of them is answered relative to the column you entered it from — R+UP goes to the
+  screen above it in that column, and R+LEFT/RIGHT to the main-row screen one column to either side.
 - Row 0 and row 1 are column-specific — R+UP from PHRASE reaches GROOVE and then SCALE, R+UP from
   INSTRUMENT reaches MODS and then INST.POOL.
 

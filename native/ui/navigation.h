@@ -18,10 +18,10 @@
 //  row 4  EFFECTS  EFFECTS   EFFECTS   EFFECTS     EFFECTS    ← shared
 //
 // PROJECT / MIXER / EFFECTS are shared: they sit in every column and therefore have no column of
-// their own. `previousColumn` is what remembers which one you entered from, so that leaving MIXER —
-// UP onto the main row, or SIDEWAYS onto the column beside it — is answered relative to where you
-// dropped in rather than from a fixed default. That is why every function here takes it, and why they
-// return the new column alongside the new screen — the pair travels together or the memory desyncs.
+// their own. `previousColumn` is what remembers which one you entered from, so that leaving one of
+// them — UP onto the main row, or SIDEWAYS onto the column beside it — is answered relative to where
+// you dropped in rather than from a fixed default. That is why every function here takes it, and why
+// they return the new column alongside the new screen — the pair travels together or it desyncs.
 //
 // The four `navigate_*` functions are PURE: a `NavState` in, a `NavResult` out, no canvas and no
 // engine. `go_to_screen` at the bottom is the one that APPLIES the answer, and it carries the whole
@@ -98,14 +98,17 @@ inline int context_column(const NavState& s) {
 /**
  * Does R+LEFT/R+RIGHT step SIDEWAYS off this screen, onto the MAIN row one column over?
  *
- * True for row 1 (PROJECT / GROOVE / MODS) and row 3 (MIXER): you do not walk ALONG those rows, you
- * drop back to the tracker and then move. The four that are absent are absent for four reasons —
- * EFFECTS has no side doors at all, INST.POOL owns the fast-jump pair, SCALE drops straight to its
- * own column's main screen, and the popups have no cell in the grid to move from.
+ * True for every screen off the main row that sits in a column: row 1 (PROJECT / GROOVE / MODS) and
+ * the two shared rows below it (MIXER, EFFECTS). You do not walk ALONG those rows — row 4 is EFFECTS
+ * in all five columns, so a step sideways within it would change nothing you can see — you drop back
+ * to the tracker and then move.
+ *
+ * The three that are absent are absent for three reasons: INST.POOL owns the fast-jump pair, SCALE
+ * drops straight to its own column's main screen, and the popups have no cell in the grid to move from.
  */
 inline bool exits_sideways_to_main_row(ScreenType s) {
-    return s == ScreenType::PROJECT || s == ScreenType::GROOVE ||
-           s == ScreenType::MODS    || s == ScreenType::MIXER;
+    return s == ScreenType::PROJECT || s == ScreenType::GROOVE || s == ScreenType::MODS ||
+           s == ScreenType::MIXER   || s == ScreenType::EFFECTS;
 }
 }  // namespace detail
 
@@ -163,9 +166,6 @@ inline NavResult navigate_down(const NavState& s) {
 }
 
 inline NavResult navigate_left(const NavState& s) {
-    // EFFECTS has no side doors.
-    if (s.currentScreen == ScreenType::EFFECTS) return {s.currentScreen, s.previousColumn};
-
     // The instrument-pool fast-jump pair, R+LEFT half: out of the pool exits left to PHRASE, and out
     // of an INSTRUMENT that was ENTERED from the pool returns to it. (A normally-entered INSTRUMENT
     // still goes to PHRASE — which is exactly what instrumentFromPool is for.)
@@ -173,13 +173,13 @@ inline NavResult navigate_left(const NavState& s) {
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::INST_POOL, 3, true};
 
-    // Rows 1 and 3 exit sideways onto the MAIN row, one column over.
+    // Rows 1, 3 and 4 exit sideways onto the MAIN row, one column over.
     //
     // ⭐ THE COLUMN IS DERIVED, not spelled out per screen: `context_column` is the SAME reading the
     // navigation MAP paints (`modules/navigation_map.cpp:42`), so the picture and the movement cannot
     // disagree about which column a shared screen is standing in — which is the one bug either can
-    // have. For MIXER that column is the one it was ENTERED from, so a sideways exit lands beside the
-    // screen you dropped in from and never on a fixed pair.
+    // have. For MIXER and EFFECTS that column is the one they were ENTERED from, so a sideways exit
+    // lands beside the screen you dropped in from and never on a fixed pair.
     if (detail::exits_sideways_to_main_row(s.currentScreen)) {
         const int contextCol = detail::context_column(s);
         const int target = contextCol - 1 < 0 ? 0 : contextCol - 1;
@@ -203,8 +203,6 @@ inline NavResult navigate_left(const NavState& s) {
 }
 
 inline NavResult navigate_right(const NavState& s) {
-    if (s.currentScreen == ScreenType::EFFECTS) return {s.currentScreen, s.previousColumn};
-
     // R+RIGHT out of the pool jumps to INSTRUMENT and MARKS it, so R+LEFT comes back to the pool.
     if (s.currentScreen == ScreenType::INST_POOL) return {ScreenType::INSTRUMENT, 3, true};
     // …and that row-0 instrument has nothing to its right — stay, rather than fall through to TABLE.
