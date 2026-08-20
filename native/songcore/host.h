@@ -732,11 +732,24 @@ class SongcoreHost {
         return true;
     }
 
-    /** An .sf2 → instrument `id`, which becomes a SOUNDFONT slot. The browser's A on one. */
+    /** An .sf2/.sf3 → instrument `id`, which becomes a SOUNDFONT slot. The browser's A on one. */
     bool load_soundfont(int id, const std::string& path) {
         if (!load_instrument_soundfont(engine_, project_, id, path, routing_)) return false;
         push_instrument(id);
         return true;
+    }
+
+    /**
+     * True when the last media load failed because the device could not hold it, rather than because
+     * the file would not parse. The two want opposite messages, and every loader reports failure the
+     * same way without this.
+     *
+     * ⚠️ It forwards ONE bool rather than exposing the engine. The UI has no business reaching the
+     * engine directly — that seam is why `pt-ui` is portable — and the question it actually needs
+     * answered is this narrow.
+     */
+    bool last_load_ran_out_of_memory() const {
+        return engine_ && engine_->lastLoadFailure() == AudioEngine::LoadFailure::OUT_OF_MEMORY;
     }
 
     /**

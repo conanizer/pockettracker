@@ -22,6 +22,7 @@
 #include <algorithm>
 
 #include "audio-engine.h"
+#include "platform_memory.h"
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/modules/oscilloscope.h"
@@ -114,17 +115,30 @@ private:
      * the row is actually for. A proxy is what you use when you cannot reach the truth; in-process, we
      * can.
      *
-     * ⚠️ NOT debug-gated. Sample memory is uncapped by design — a tracker with a length limit is a
-     * worse tracker — so the only thing standing between a user and an out-of-memory kill is being able
-     * to SEE the total. A number that exists only in a developer build protects the developer.
+     * ⚠️ **DEVELOPER BUILDS ONLY**, matching the two draw sites (`project_editor.cpp`,
+     * `instrument_pool.cpp`) — a per-frame walk of the engine's buffers plus a kernel query, for a
+     * pair of numbers a release build draws nowhere. ⚠️ So `sampleRamBytes` and `freeRamBytes` stay
+     * 0 in a release build: a new consumer of either must carry the same gate, or read a zero.
      *
-     * The screen check stays: two screens show it, and the walk is not worth doing for a readout that
-     * is not on either of them.
+     * The screen check stays on top of it: two screens show it, and the walk is not worth doing for a
+     * readout that is not on either of them.
      */
     void poll_sample_ram(AudioEngine& engine, AppState& state) {
+        if (!state.caps.debug) return;
         if (state.currentScreen != ScreenType::PROJECT &&
             state.currentScreen != ScreenType::INST_POOL) return;
         state.sampleRamBytes = engine.audio_memory_bytes();
+
+        // ⚠️ **THE TWO NUMBERS ARE NOT THE SAME KIND OF NUMBER, AND ONLY ONE OF THEM IS MEASURED.**
+        // USED is what the ENGINE says it holds — a walk of its own buffers, so it cannot see
+        // allocator overhead, fragmentation, a decoder's transient copies or anything leaked. FREE
+        // comes from the kernel and is the real thing. They will not sum to the machine's total and
+        // are not meant to: FREE is the one that decides whether the next load survives.
+        //
+        // ⚠️ The DISPLAYED free is `available_memory_bytes()`, deliberately NOT `load_budget_bytes()`
+        // — the budget is generous on purpose (platform_memory.h), and a row printing it would tell
+        // the user they have more than they do.
+        state.freeRamBytes = pt::available_memory_bytes();
     }
 
     void poll_engine(AudioEngine& engine, AppState& state) {

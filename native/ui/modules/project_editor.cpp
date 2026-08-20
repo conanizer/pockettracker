@@ -196,16 +196,31 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // '>' unlike the two doors above it: this one leaves the app rather than opening a screen.
     if (hasExit) door_row(ProjectRow::EXIT, "EXIT");
 
-    // ── USED RAM — a read-only info line, NOT a cursor row ───────────────────────────────────────
-    // Drawn in every build. Sample memory has no cap by design, so seeing the total is the only
-    // warning a user gets before the OS takes the process away; INST.POOL carries the same number.
-    {
+    // ── USED / FREE RAM — read-only info lines, NOT cursor rows ──────────────────────────────────
+    // ⚠️ **DEVELOPER BUILDS ONLY, and the reason is what a user could DO with the pair.** Nothing:
+    // the numbers are not a budget they can spend against. FREE is the machine's, USED is the
+    // engine's own audio, they do not sum to anything, and no screen lets a user free the second to
+    // move the first. A load the device cannot hold is refused and says so, which is the one moment
+    // the figure would have mattered — so the readout is instrumentation, and it is kept where
+    // instrumentation belongs. INST.POOL's header total is gated the same way, and `poll_sample_ram`
+    // stops sampling both when this is off.
+    if (s.caps.debug) {
         const int ramY = firstRowY +
                          project_row_offset_y(static_cast<ProjectRow>(lastRow), s.caps, ROW_HEIGHT) +
                          ROW_HEIGHT * 2;
         c.draw_text("USED RAM", labelX, ramY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(megabytes_str(s.sampleRamBytes),
                     valueX, ramY + TEXT_PADDING, t.textValue, CHAR_SPACING, FONT_SCALE);
+
+        // FREE RAM directly beneath it, in the SAME unit — two numbers a user is meant to compare
+        // must not be printed in different ones. Skipped entirely when the platform could not answer,
+        // because a "0.0 MB" here would say the opposite of "unknown".
+        if (s.freeRamBytes > 0) {
+            const int freeY = ramY + ROW_HEIGHT;
+            c.draw_text("FREE RAM", labelX, freeY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+            c.draw_text(megabytes_str(s.freeRamBytes),
+                        valueX, freeY + TEXT_PADDING, t.textValue, CHAR_SPACING, FONT_SCALE);
+        }
     }
 
     // The status line (SAVED / EXPORTED! / SEQ CLEANED) is NOT drawn here. It is a global overlay on

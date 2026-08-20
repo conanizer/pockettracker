@@ -197,6 +197,9 @@ set(ENGINE_CORE_SOURCES
         # The single definition of the file-open hook every layer above resolves against. It is a
         # .cpp and not a header inline for a linkage reason byte_source.h states in full.
         byte_source.cpp
+        # How much RAM the machine will actually give us. A .cpp for byte_source's linkage reason and
+        # to keep <windows.h> out of every TU that asks; see the header.
+        platform_memory.cpp
         soundfont-voice.cpp
         sample-editor.cpp
         audio-engine.cpp

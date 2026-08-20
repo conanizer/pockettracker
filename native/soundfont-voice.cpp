@@ -8,10 +8,10 @@
 // tsf's `#else` arm has NO FORMAT CHECK: it converts the chunk in place as raw 16-bit PCM, so the file
 // loads and then renders noise.
 //
-// ⚠️ That is why this stays even though the browser no longer offers `.sf3` (see
-// `ui::soundfont_extensions`, which records why it does not): tsf picks the decoder off each shdr's
-// compression flag, not off the extension, so a file NAMED `.sf2` can carry Vorbis samples. Silent
-// noise on such a file is a far worse outcome than the slow load the extension was withdrawn over.
+// ⚠️ It is needed for more than the `.sf3` the browser offers: tsf picks the decoder off each shdr's
+// compression flag, not off the extension, so a file NAMED `.sf2` can carry Vorbis samples. Removing
+// this include to follow whatever the extension list currently says would make such a file load and
+// render noise, silently.
 //
 // Declarations only. stb_vorbis is compiled as its own C translation unit (see CMakeLists.txt), so
 // STB_VORBIS_HEADER_ONLY avoids a second copy of the implementation, and extern "C" makes these C++
@@ -20,6 +20,91 @@ extern "C" {
 #define STB_VORBIS_HEADER_ONLY
 #include "vendor/stb_vorbis/stb_vorbis.c"
 }
+
+// ─── The memory guard on a soundfont load ────────────────────────────────────────────────────────
+//
+// ⚠️⚠️ **WITHOUT THIS, A FONT TOO BIG FOR THE MACHINE KILLS THE APP AND NOTHING SAYS WHY.** tsf
+// null-checks its allocations and unwinds to a null return, but the null never arrives: measured on
+// a shipping device, bionic GRANTED a 256 GB request on a 7.36 GB machine. `malloc` never refuses,
+// the request succeeds against untouched address space, and the kernel kills the process the moment
+// the pages are written.
+//
+// ⭐ **So this does not ESTIMATE anything — it MEASURES.** There is nothing in an SF3 header that
+// states its decoded size (tsf only learns it by decoding), so a prediction was never available for
+// the format that needs one most. Asking the machine how much is actually free, at the moment a
+// large block is about to be taken, needs no header and is exact for both formats at once.
+//
+// ⭐ tsf documents `TSF_MALLOC`/`TSF_REALLOC`/`TSF_FREE` as override points (tsf.h:13), so the guard
+// itself needs no edit to the vendored file, and the refusal lands on tsf's own null checks.
+//
+// ⚠️⚠️ **BUT ONE OF THOSE UNWIND PATHS WAS WRONG, AND MAKING THE ALLOCATOR SAY NO IS WHAT EXPOSED
+// IT.** `tsf_decode_ogg` freed the CALLER's buffer and returned 0; the caller freed it again — a
+// double free, reachable only when a realloc fails, which under overcommit it never did. It is fixed
+// in `tsf.h` and is the **THIRD** local change to vendored tsf, all three of which must be re-applied
+// on any update. ⭐ The lesson to keep: **a dormant error path is not a working one, and a guard that
+// makes a never-taken branch reachable inherits every bug in it.**
+//
+// ⚠️ Only allocations at or above `SF_GUARD_MIN_BYTES` are checked. `/proc/meminfo` costs ~50 us to
+// read and tsf makes thousands of small allocations for its preset and region tables; the ones that
+// can exhaust a machine are the sample buffers, and those are enormous. A small allocation cannot be
+// the one that kills us, so measuring before it is cost with no answer attached.
+//
+// ⚠️ **`available_memory_bytes()` returning 0 means UNKNOWN and must never refuse.** A platform that
+// cannot answer has to keep loading exactly as it does today, or the guard turns into a total outage
+// on whatever port reads it wrong.
+#include "platform_memory.h"
+
+#include <cstdlib>
+
+namespace {
+
+/** Set when the guard below refuses, so `loadSoundfont` can tell "too big" from "not a soundfont". */
+bool g_sfMemoryGuardTripped = false;
+
+/** Below this, an allocation cannot plausibly exhaust the machine and is not worth a syscall. */
+constexpr size_t SF_GUARD_MIN_BYTES = 4u * 1024 * 1024;
+
+/**
+ * Headroom left unclaimed so that refusing a font leaves a machine that still works. This is NOT the
+ * "reserve fraction" the budget policy rejects — that one shrinks a *predicted* budget and costs the
+ * user files. This is an absolute floor under a *measured* one, and it exists so the app that just
+ * said LOAD FAILED can still draw the message.
+ */
+constexpr int64_t SF_GUARD_RESERVE_BYTES = 32ll * 1024 * 1024;
+
+/** True when taking `size` right now would leave the machine with nothing. */
+bool sf_alloc_would_exhaust(size_t size) {
+    if (size < SF_GUARD_MIN_BYTES) return false;
+    const int64_t available = pt::available_memory_bytes();
+    if (available <= 0) return false;              // unknown is not "empty"
+    const bool exhausted = static_cast<int64_t>(size) > available - SF_GUARD_RESERVE_BYTES;
+    if (exhausted) g_sfMemoryGuardTripped = true;
+    return exhausted;
+}
+
+void* sf_guarded_malloc(size_t size) {
+    if (sf_alloc_would_exhaust(size)) return nullptr;
+    return std::malloc(size);
+}
+
+/**
+ * ⚠️ On refusal the ORIGINAL BLOCK IS LEFT ALIVE and untouched, because that is what `realloc`
+ * promises on failure and what tsf's growth sites rely on: both do `oldres = res; res =
+ * TSF_REALLOC(res, ...); if (!res) { TSF_FREE(oldres); ... }`. Freeing here as well would double-free.
+ */
+void* sf_guarded_realloc(void* ptr, size_t size) {
+    if (sf_alloc_would_exhaust(size)) return nullptr;
+    return std::realloc(ptr, size);
+}
+
+}  // namespace
+
+void sf_memory_guard_reset()   { g_sfMemoryGuardTripped = false; }
+bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
+
+#define TSF_MALLOC(size)       sf_guarded_malloc(size)
+#define TSF_REALLOC(ptr, size) sf_guarded_realloc(ptr, size)
+#define TSF_FREE(ptr)          std::free(ptr)
 
 #define TSF_IMPLEMENTATION
 #include "vendor/tsf/tsf.h"

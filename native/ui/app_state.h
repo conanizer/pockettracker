@@ -430,8 +430,11 @@ struct AppState {
     std::string skinText{};
     std::string overlayText = "OFF";
 
-    /** PROJECT's debug-only USED RAM readout: sample + SoundFont PCM the engine is holding. */
+    /** USED RAM: sample + SoundFont PCM the engine is holding. Drawn on PROJECT and INST.POOL. */
     int64_t sampleRamBytes = 0;
+
+    /** FREE RAM: physical memory the machine still has. 0 = the platform could not answer. */
+    int64_t freeRamBytes = 0;
 
     // ── "Last edited" — the memory that makes A,A and the insert defaults useful ─────────────────
     //

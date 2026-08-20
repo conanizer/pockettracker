@@ -1,6 +1,7 @@
 #include "audio-decoders.h"
 #include "audio-defs.h"     // LOGD/LOGE (portable shim)
 #include "byte_source.h"    // pt_fopen — every open below goes through it
+#include "platform_memory.h"  // available_memory_bytes — the decode's memory guard
 
 #define DR_MP3_IMPLEMENTATION
 #include "vendor/dr_mp3/dr_mp3.h"
@@ -49,14 +50,49 @@ inline int  ptDup(int fd)     { return dup(fd); }
 inline void ptClose(int fd)   { close(fd); }
 #endif
 
+/**
+ * Headroom left unclaimed, so that abandoning a decode leaves a machine that can still draw the
+ * message saying so.
+ */
+constexpr int64_t DECODE_RESERVE_BYTES = 32ll * 1024 * 1024;
+
+/**
+ * Is there room to append `frames` more? **False means the machine ran out**, and the caller must
+ * stop decoding and fail the load — a decode that keeps going here is the one that gets the process
+ * killed with nothing on screen.
+ *
+ * ⚠️ The container's own frame count is NOT the thing to guard on: an MP3 without a Xing header does
+ * not state one at all (`reserveOutput` is skipped entirely there), and a corrupt FLAC can state a
+ * count in the hundreds of GB. Guarding the actual growth needs neither to be honest.
+ *
+ * ⭐ **The check rides on the REALLOCATION, not on the block.** `/proc/meminfo` costs ~50 us and a
+ * long file is thousands of blocks; but a vector only takes memory when it outgrows its capacity, so
+ * testing exactly there is O(log n) reads placed on precisely the events that can exhaust a machine.
+ * A file that fits its reservation is never checked at all.
+ *
+ * ⚠️ `available <= 0` is "the platform cannot say", and must never refuse.
+ */
+inline bool decode_has_room(const std::vector<float>& L, const std::vector<float>& R, int frames) {
+    if (L.size() + static_cast<size_t>(frames) <= L.capacity()) return true;
+    const int64_t held      = static_cast<int64_t>(L.capacity() + R.capacity()) * sizeof(float);
+    const int64_t available = pt::available_memory_bytes();
+    // A regrow holds the old buffer and the new one at once and the new is about twice the old, so
+    // what is about to be TAKEN on top of what is already resident is roughly 2x `held`.
+    if (available <= 0) return true;
+    return held * 2 <= available - DECODE_RESERVE_BYTES;
+}
+
 // Deinterleave a freshly-decoded float block into L (always) and R (only when channels >= 2).
 // For >2 channels keep ch0/ch1 and drop the rest — same downmix the old Kotlin extractor used.
-inline void appendBlock(const float* interleaved, int frames, int channels,
+// False when the machine ran out — see decode_has_room.
+inline bool appendBlock(const float* interleaved, int frames, int channels,
                         std::vector<float>& L, std::vector<float>& R) {
+    if (!decode_has_room(L, R, frames)) return false;
     for (int i = 0; i < frames; i++) {
         L.push_back(interleaved[(size_t)i * channels]);
         if (channels >= 2) R.push_back(interleaved[(size_t)i * channels + 1]);
     }
+    return true;
 }
 
 // Reserve the finished length before decoding, so a decode is ONE allocation per channel instead of a
@@ -155,10 +191,12 @@ bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float
     const drmp3_uint64 CHUNK = 8192;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
     drmp3_uint64 got;
+    bool room = true;
     while ((got = drmp3_read_pcm_frames_f32(&mp3, CHUNK, block.data())) > 0)
-        appendBlock(block.data(), (int)got, channels, outL, outR);
+        if (!appendBlock(block.data(), (int)got, channels, outL, outR)) { room = false; break; }
     drmp3_uninit(&mp3);
     std::fclose(f);
+    if (!room) { LOGE("decodeMp3File: out of memory at %zu frames: %s", outL.size(), path); return false; }
     LOGD("decodeMp3File: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
@@ -182,10 +220,12 @@ bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<floa
     const drflac_uint64 CHUNK = 8192;
     std::vector<float> block((size_t)CHUNK * channels);
     drflac_uint64 got;
+    bool room = true;
     while ((got = drflac_read_pcm_frames_f32(flac, CHUNK, block.data())) > 0)
-        appendBlock(block.data(), (int)got, channels, outL, outR);
+        if (!appendBlock(block.data(), (int)got, channels, outL, outR)) { room = false; break; }
     drflac_close(flac);
     std::fclose(f);
+    if (!room) { LOGE("decodeFlacFile: out of memory at %zu frames: %s", outL.size(), path); return false; }
     LOGD("decodeFlacFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
@@ -219,9 +259,11 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
     std::vector<float> block((size_t)CHUNK * channels);
     int got;
     // num_floats is the buffer capacity in floats; returns frames (samples per channel) written, 0 at EOF.
+    bool room = true;
     while ((got = stb_vorbis_get_samples_float_interleaved(v, channels, block.data(), CHUNK * channels)) > 0)
-        appendBlock(block.data(), got, channels, outL, outR);
+        if (!appendBlock(block.data(), got, channels, outL, outR)) { room = false; break; }
     stb_vorbis_close(v);
+    if (!room) { LOGE("decodeOggFile: out of memory at %zu frames: %s", outL.size(), path); return false; }
     LOGD("decodeOggFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
@@ -262,11 +304,13 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     std::vector<float> block((size_t)CHUNK * channels);
     int li = 0;
     int got;
+    bool room = true;
     while ((got = op_read_float(of, block.data(), (int)block.size(), &li)) > 0)
-        appendBlock(block.data(), got, channels, outL, outR);
+        if (!appendBlock(block.data(), got, channels, outL, outR)) { room = false; break; }
     if (got < 0) LOGE("decodeOpusFile: op_read_float error %d (using %zu decoded frames): %s",
                       got, outL.size(), path);  // keep whatever decoded before the error
     op_free(of);
+    if (!room) { LOGE("decodeOpusFile: out of memory at %zu frames: %s", outL.size(), path); return false; }
     LOGD("decodeOpusFile: ch=%d rate=48000 frames=%zu", channels, outL.size());
     return !outL.empty();
 }
@@ -318,7 +362,7 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
     if (!dec) { LOGE("decodeMp4File: NeAACDecOpen failed"); MP4D_close(&mp4); return false; }
     NeAACDecConfigurationPtr cfg = NeAACDecGetCurrentConfiguration(dec);
     cfg->outputFormat = FAAD_FMT_FLOAT;  // FAAD2's float output is FLOAT_SCALE (1/32768) — already [-1,1]
-    cfg->downMatrix   = 0;               // keep source channels; appendBlock does the >2ch → L/R downmix
+    cfg->downMatrix   = 0;               // keep source channels; the append loop below takes ch0/ch1
     NeAACDecSetConfiguration(dec, cfg);
 
     unsigned long initRate = 0;
@@ -370,6 +414,15 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
         // decision (keepStereo) is known.
         if (outL.empty())
             reserveOutput((int64_t)tr->sample_count * frames, keepStereo ? 2 : 1, outL, outR);
+        // ⚠️ This path appends INLINE rather than through appendBlock — the interleave stride and the
+        // keepStereo rule are its own — so it needs the memory guard spelled out here. It is the one
+        // decoder where "every append goes through one helper" is not true.
+        if (!decode_has_room(outL, outR, frames)) {
+            NeAACDecClose(dec);
+            MP4D_close(&mp4);
+            LOGE("decodeMp4File: out of memory at %zu frames: %s", outL.size(), path);
+            return false;
+        }
         for (int i = 0; i < frames; i++) {
             outL.push_back(p[(size_t)i * stride]);            // ch0 → L (a mono duplicate's ch0 == ch1)
             if (keepStereo) outR.push_back(p[(size_t)i * stride + 1]);  // ch1 → R only for real stereo

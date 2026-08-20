@@ -238,6 +238,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ps.selectedInstrument = s.currentInstrument;
                 ps.cursorColumn       = s.poolCursorColumn;
                 ps.sampleRamBytes     = s.sampleRamBytes;
+                ps.caps               = s.caps;
                 ps.theme              = t;
                 instrumentPool_.draw(c, moduleX, EDITOR_Y, ps);
                 break;
@@ -284,6 +285,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 prs.isRendering    = s.isRendering;
                 prs.renderProgress = s.renderProgress;
                 prs.sampleRamBytes = s.sampleRamBytes;
+                prs.freeRamBytes   = s.freeRamBytes;
                 prs.caps           = s.caps;
                 prs.theme          = t;
                 project_.draw(c, moduleX, EDITOR_Y, prs);

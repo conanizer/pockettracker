@@ -32,6 +32,7 @@
 #include "ui/filesystem.h"
 #include "ui/theme.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -78,21 +79,28 @@ inline const std::vector<std::string>& sample_extensions() {
 }
 
 /**
- * ⚠️ `sf3` IS DELIBERATELY ABSENT, and re-adding it is the mistake this comment exists to stop.
+ * `sf3` is the same font as `sf2` with its samples Vorbis-compressed, and it is offered on exactly
+ * the same terms — no size limit on either. It costs about 3× the load time and HALF the peak memory
+ * of the uncompressed twin; the measurements and the reason there is no cap are in `audio-engine.h`.
  *
- * The decoder handles SF3 correctly — see soundfont-voice.cpp — but tsf opens a separate Vorbis
- * stream per sample, header and codebooks and all, and grows its float buffer by a fixed step rather
- * than doubling (`tsf_decode_sf3_samples`). A GM-sized SF3 has thousands of samples, so the load is
- * quadratic in the decoded size and runs on the thread the UI is drawn from: on a phone it does not
- * finish, and the app is gone until it is killed. Offering a row that hangs the program is worse than
- * not offering it.
- *
- * Compressed sample data inside a file NAMED `.sf2` still loads, because the decoder is chosen by the
- * shdr's compression flag, not by the extension.
+ * ⚠️ The extension does not decide the decoder. tsf reads a compression flag off each `shdr`, so a
+ * file named `.sf2` can carry Vorbis samples and will decode correctly — see `soundfont-voice.cpp`,
+ * where the stb_vorbis include that makes that work is guarded by a comment saying why it stays.
  */
 inline const std::vector<std::string>& soundfont_extensions() {
-    static const std::vector<std::string> v = {"sf2"};
+    static const std::vector<std::string> v = {"sf2", "sf3"};
     return v;
+}
+
+/**
+ * True when `ext` — lowercase, no dot — is one the browser treats as a SoundFont rather than a
+ * sample. Derived from the list above rather than spelled out again at the sites that ask, so a
+ * fourth format added there is handled everywhere at once instead of at whichever call sites
+ * someone remembered.
+ */
+inline bool is_soundfont_extension(const std::string& ext) {
+    const std::vector<std::string>& v = soundfont_extensions();
+    return std::find(v.begin(), v.end(), ext) != v.end();
 }
 
 struct BrowserItem {

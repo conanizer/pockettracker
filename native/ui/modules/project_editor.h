@@ -48,8 +48,15 @@ struct ProjectState {
     bool  isRendering    = false;
     float renderProgress = 0.0f;
 
-    /** The debug-only USED RAM readout. Bytes of sample + SoundFont PCM the engine is holding. */
+    /** USED RAM. Bytes of sample + SoundFont PCM the engine is holding. `caps.debug` builds only. */
     int64_t sampleRamBytes = 0;
+
+    /**
+     * FREE RAM — physical memory the machine still has, the denominator USED never had. 0 when the
+     * platform cannot answer, and then the row is not drawn at all: a readout stuck on "0.0 MB"
+     * reads as "you have no memory left", which is the one message it must never send by accident.
+     */
+    int64_t freeRamBytes = 0;
 
     PlatformCaps caps{};
     Theme        theme = theme_classic();

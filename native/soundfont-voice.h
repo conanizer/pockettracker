@@ -212,3 +212,16 @@ struct SoundfontVoice : public IAudioVoice {
 // Defined in soundfont-voice.cpp where TSF_IMPLEMENTATION is active (full tsf struct visible).
 // Returns true on success, false if f is null or index is out of range.
 bool tsf_get_preset_at(tsf* f, int index, int* bank, int* preset_number);
+
+// ─── Why the last soundfont load returned null ───────────────────────────────────────────────────
+//
+// `tsf_load` reports failure the same way whatever went wrong: a null return. A file that is not a
+// soundfont and one that is simply too big for the machine are indistinguishable to the caller, and
+// the two want opposite messages on screen — "this file is broken" against "this device cannot hold
+// it". The allocator guard (soundfont-voice.cpp) is the only thing that can tell them apart, because
+// it is what refused.
+//
+// Reset before a load, read after. ⚠️ Not thread-safe by design and does not need to be: soundfont
+// loads happen on one thread, and the flag is read immediately after the load that set it.
+void sf_memory_guard_reset();
+bool sf_memory_guard_tripped();

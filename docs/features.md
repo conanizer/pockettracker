@@ -56,14 +56,13 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 ## Instruments
 
 - **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
-- **SoundFont**: load SF2 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
+- **SoundFont**: load SF2 and SF3 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
 - Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
 - Non-destructive start and end point trimming
 - Per-instrument real-time effects: low/high/band-pass filter, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)
 - 4 modulation slots per instrument: envelope shapes (AHD, ADSR) and LFO targeting volume, pitch, filter, pan, and more
 - Save and load instruments as preset files (.pti) — bundles all parameters, table, and modulation settings together
-- **USED RAM readout** on the PROJECT and INST.POOL screens: how much memory the loaded samples and SoundFonts are holding
 
 ## Sample Editor
 

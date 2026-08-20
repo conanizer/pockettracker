@@ -148,9 +148,10 @@ class InputDispatcher {
      * ⚠️ **C7 NEEDS THIS AND THE PIXEL COMPARISON CANNOT ANSWER IT.** The shell skips drawing on an
      * idle frame, and the safety net under that decision is a byte-compare of the drawn frame — but a
      * frame that is never drawn is never compared. So anything that changes the SCREEN on a TIMER,
-     * with no input at all, is invisible to that net: the status line auto-dismisses 5 s after it is
-     * set (`run_due_status_dismiss`), and without this query a "PROJECT SAVED" would sit on a
-     * quiescent screen forever, cleared in the state and stale in the pixels.
+     * with no input at all, is invisible to that net: BOTH status lines auto-dismiss 5 s after they
+     * are set (`run_due_status_dismiss`), and without this query a "PROJECT SAVED" — or a "FILE TOO
+     * BIG" on the browser's own bar — would sit on a quiescent screen forever, cleared in the state
+     * and stale in the pixels.
      *
      * Derived from the DEADLINES themselves rather than from a flag any caller has to set — the same
      * rule that made the dismissal watch the message field instead of trusting its 22 assignment
@@ -160,7 +161,7 @@ class InputDispatcher {
      * `autosavePending_` is included though it draws nothing itself: it ends in a status message.
      */
     bool has_pending_timed_work() const {
-        return statusDismissAtMs_ != 0 || autosavePending_;
+        return statusDismissAtMs_ != 0 || browserStatusDismissAtMs_ != 0 || autosavePending_;
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -539,10 +540,17 @@ class InputDispatcher {
     std::string statusLastSeen_{};
     long long   statusDismissAtMs_ = 0;
 
+    // The FILE BROWSER's line, on the same 5 s window. ⚠️ A SEPARATE PAIR, and not for tidiness:
+    // feeding both message fields through ONE pair stops the dismissal working at all — `lastSeen`
+    // then thrashes between two different strings and re-arms the deadline on every frame, so
+    // neither line ever expires. (Measured; §34's own checks are what go red.)
+    std::string browserStatusLastSeen_{};
+    long long   browserStatusDismissAtMs_ = 0;
+
     /** 5 s — Kotlin's own delay (MainActivity's two status LaunchedEffects). */
     static constexpr long long STATUS_DISMISS_MS = 5000;
 
-    /** The watcher and the deadline, both run once a frame by set_now(). */
+    /** The watchers and the deadlines, all run once a frame by set_now(). */
     void run_due_status_dismiss();
 
     // ── The INSTRUMENT-entry param push (parity audit, finding 8) ────────────────────────────────

@@ -42,7 +42,7 @@ PocketTracker is a sample-based music tracker for Android handhelds and budget A
 
 **New to trackers?** A tracker is a music sequencer where notes are arranged in a grid, with time flowing downward. Each row is a step, each column carries a parameter (note, instrument, volume, effect). Songs are built by chaining together short patterns called **phrases**, grouped into **chains**, arranged in a **song**. Think of it as building music from small, reusable blocks.
 
-PocketTracker stores everything in a single project file (`.ptp`). Sounds come from standard `.wav` files or **SoundFont (SF2)** files that you load yourself — there are no bundled samples.
+PocketTracker stores everything in a single project file (`.ptp`). Sounds come from standard `.wav` files or **SoundFont (SF2 / SF3)** files that you load yourself — there are no bundled samples.
 
 ### Minimum requirements
 
@@ -97,7 +97,9 @@ The folder currently in use is marked `(HOME)`. One whose directory has been del
 
 ### Sample files
 
-PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files into a folder you have granted, and load them from the **INSTRUMENT** screen using the file browser. SF2 files are loaded the same way.
+PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files into a folder you have granted, and load them from the **INSTRUMENT** screen using the file browser. SF2 and SF3 files are loaded the same way.
+
+> A large SoundFont of either kind takes a moment to load, and the screen does not redraw while it does. SF3 stores its samples compressed, so its files are much smaller on disk and it holds less memory once loaded, but it takes longer to open than the SF2 of the same bank.
 
 ### Project files
 
@@ -539,7 +541,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | Parameter | Range | Description |
 |---|---|---|
 | NAME | — | Instrument name. Press A (or SELECT) to edit it on the keyboard overlay. |
-| SAMPLE | path | WAV or SF2 file. Press A to open file browser; SELECT to open SAMPLE EDITOR. |
+| SAMPLE | path | WAV, SF2 or SF3 file. Press A to open file browser; SELECT to open SAMPLE EDITOR. |
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
 | VOL | 00–FF | Base volume. `FF` = full. |
@@ -566,7 +568,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 
 ### SF2 instrument parameters
 
-When the loaded file is an SF2 SoundFont, additional override fields appear for the preset's internal envelope and filter. Setting these to `--` uses the SF2's built-in values.
+When the loaded file is a SoundFont, additional override fields appear for the preset's internal envelope and filter. Setting these to `--` uses the SoundFont's built-in values.
 
 | Parameter | Description |
 |---|---|
@@ -1194,15 +1196,6 @@ WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's ho
 > [!TIP]
 > **EXPORT → MIX** renders faster than real-time. A 3-minute song typically exports in a few seconds. The status line shows the output filename when done.
 
-### USED RAM
-
-The bottom of the screen shows how much memory your samples and SoundFonts are using. The same figure
-appears in the header of the INST.POOL screen, beside the list of instruments that make it up.
-
-Samples are held uncompressed, so a long stereo sample costs roughly twice its file size — and there is
-no limit on how many you load. If the figure climbs towards what your device has spare, that is the
-warning to shorten or drop a sample before the system closes the app.
-
 ---
 
 ## 19. SETTINGS Screen
@@ -1815,7 +1808,7 @@ Two details worth knowing:
 - Stereo WAV files are supported natively — SOURCE mode on the instrument or sample editor selects LEFT / RIGHT / STEREO / MONO non-destructively
 - Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files automatically
 - Loaded via: INSTRUMENT screen → SAMPLE field → A button → file browser
-- SF2 files are loaded the same way
+- SF2 and SF3 files are loaded the same way
 - **Compressed audio** (`.mp3`, `.flac`, `.ogg`, `.opus`, `.m4a`) loads directly as a sample — decoded into memory with **no WAV file written** and no slice markers. The instrument remembers the original file path, so it is re-decoded automatically each time the project is reopened. FLAC is lossless, so it is the best choice when you want a small file with no quality loss. (`.opus` and `.m4a` are common voice-recording formats — phone memos, messaging-app exports.)
 - **Video files** (`.mp4`, `.mkv`, `.webm`, `.3gp`, `.mov`) can instead be **converted** to samples — the audio track is extracted and saved as a WAV. See *Audio from video files* below.
 

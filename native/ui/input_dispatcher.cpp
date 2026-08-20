@@ -145,24 +145,49 @@ void InputDispatcher::flush_autosave() {
 
 // ─── The status line's 5 s auto-dismiss (MainActivity.kt:734–747) ────────────────────────────────
 
-void InputDispatcher::run_due_status_dismiss() {
-    // The WATCHER half: a CHANGE in the message re-arms the window; a change TO empty cancels it.
-    // The field is the funnel, not its 22 call sites — any site that assigns it, including ones not
-    // written yet, gets the dismissal for free. And it matches Kotlin's key semantics exactly:
-    // LaunchedEffect(statusMessage) restarts only when the VALUE changes, so an identical message
-    // re-set inside the window does NOT extend it (ptdispatch §34 pins that case).
-    if (s_.statusMessage != statusLastSeen_) {
-        statusLastSeen_    = s_.statusMessage;
-        statusDismissAtMs_ = s_.statusMessage.empty() ? 0 : now_ms_ + STATUS_DISMISS_MS;
+namespace {
+
+/**
+ * One status field's watcher and deadline, for the 5 s window both status lines run.
+ *
+ * The WATCHER half: a CHANGE in the message re-arms the window; a change TO empty cancels it. The
+ * field is the funnel, not its call sites — any site that assigns it, including ones not written
+ * yet, gets the dismissal for free. And it matches Kotlin's key semantics exactly:
+ * LaunchedEffect(statusMessage) restarts only when the VALUE changes, so an identical message re-set
+ * inside the window does NOT extend it (ptdispatch §34 pins that case).
+ *
+ * Written once and called per field rather than copied: two clocks whose rules drift apart is
+ * exactly the failure the funnel is here to prevent.
+ */
+void dismiss_status_field(std::string& message, bool& success, std::string& lastSeen,
+                          long long& deadlineMs, long long nowMs, long long windowMs) {
+    if (message != lastSeen) {
+        lastSeen   = message;
+        deadlineMs = message.empty() ? 0 : nowMs + windowMs;
     }
 
-    if (statusDismissAtMs_ != 0 && now_ms_ >= statusDismissAtMs_) {
-        // TrackerController.clearStatus: the message goes, and statusSuccess returns to true.
-        s_.statusMessage.clear();
-        statusLastSeen_.clear();
-        s_.statusSuccess   = true;
-        statusDismissAtMs_ = 0;
+    if (deadlineMs != 0 && nowMs >= deadlineMs) {
+        // TrackerController.clearStatus: the message goes, and success returns to true.
+        message.clear();
+        lastSeen.clear();
+        success    = true;
+        deadlineMs = 0;
     }
+}
+
+}  // namespace
+
+void InputDispatcher::run_due_status_dismiss() {
+    dismiss_status_field(s_.statusMessage, s_.statusSuccess, statusLastSeen_, statusDismissAtMs_,
+                         now_ms_, STATUS_DISMISS_MS);
+
+    // ⚠️ The BROWSER's own line, on the same clock. It is a second field because the browser is a
+    // full-screen overlay that draws its own bottom bar and never sees the global one — but a user
+    // does not know that, and a message that sits there until the directory changes is the only one
+    // in the app that outlives the action it reported.
+    dismiss_status_field(s_.fileBrowser.statusMessage, s_.fileBrowser.statusSuccess,
+                         browserStatusLastSeen_, browserStatusDismissAtMs_, now_ms_,
+                         STATUS_DISMISS_MS);
 }
 
 bool InputDispatcher::recover_from_autosave() {
@@ -3535,10 +3560,9 @@ void InputDispatcher::browser_confirm() {
             // the user asked for by picking one. The browser's filter usually makes this moot — but the
             // user can navigate anywhere, and a folder full of both is not exotic.
             //
-            // `sf3` is not here on purpose (see soundfont_extensions): one navigated to falls through
-            // to load_sample, every decoder refuses it, and the user gets LOAD FAILED — which is the
-            // outcome a format we do not offer should have.
-            if (ext == "sf2") {
+            // `.sf3` is here on the same footing as `.sf2` — same font, same float buffer at the end
+            // of it, and the compressed one is the CHEAPER of the two in peak memory (audio-engine.h).
+            if (is_soundfont_extension(ext)) {
                 ok = host_.load_soundfont(id, path);
             } else {
                 ok = host_.load_sample(id, path);
@@ -3587,7 +3611,12 @@ void InputDispatcher::browser_confirm() {
     }
 
     if (!ok) {
-        b.statusMessage = "LOAD FAILED";
+        // ⚠️ "LOAD FAILED" for a file the DEVICE cannot hold sends the user looking for a corrupt
+        // file that is fine. The engine separates the two, and that separation is the whole message:
+        // the file is sound, this machine cannot hold it, pick a smaller one. No free figure beside
+        // it — the only decision the number could inform has already been made by the refusal, and a
+        // megabyte count on a status line is a quantity the user has nothing to compare against.
+        b.statusMessage = host_.last_load_ran_out_of_memory() ? "FILE TOO BIG" : "LOAD FAILED";
         b.statusSuccess = false;
         return;
     }
@@ -3617,11 +3646,11 @@ void InputDispatcher::browser_confirm() {
 
     // D2a: remember the folder a SAMPLE was loaded from — `b.currentDirectory` IS that folder (the file
     // just loaded is an item in it). Only for the two sample-load purposes, and not for a SoundFont
-    // (.sf2) picked out of a sampler slot — the row is about SAMPLE folders. Persisted on exit by
+    // picked out of a sampler slot — the row is about SAMPLE folders. Persisted on exit by
     // save_settings_if_changed (no dirty flag), so nothing here has to write the file.
     if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
          s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
-        ext != "sf2") {
+        !is_soundfont_extension(ext)) {
         s_.settings.lastSampleFolder = b.currentDirectory;
     }
 

@@ -8,6 +8,7 @@
 #include "effects/primitives/sola-stretch.h"
 #include "audio-decoders.h"
 #include "byte_source.h"   // pt_fopen — the WAV reader and the soundfont loader open through it
+#include "platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
 #include "table_automation.h"  // AUS/AUF pairing over a table's rows — shared with the table editor
 #include <cstdio>
 #include <cstdint>
@@ -120,8 +121,27 @@ AudioEngine::~AudioEngine() {
 // Stream lifecycle (openStream/closeStream/resumeStream) and the audio callback now live in the
 // platform backend, oboe-audio-engine.cpp. The core is backend-agnostic.
 
-void AudioEngine::loadSample(int id, const float* data, int length) {
-    if (id < 0 || id >= 256) return;
+bool AudioEngine::loadSample(int id, const float* data, int length) {
+    if (id < 0 || id >= 256 || !data || length < 1) return false;
+
+    // ⚠️ Allocated and filled BEFORE the lock and before anything is freed, so a failure leaves the
+    // slot holding the sample it already had. Freeing first and then failing to allocate would
+    // destroy a loaded sample to report that a different one could not be loaded.
+    //
+    // std::nothrow because a bare `new` throws and nothing in native/ catches — an uncaught
+    // bad_alloc is std::terminate, which loses the song and not just the file.
+    //
+    // ⚠️ This buys a clean failure only where the allocator HAS one to give. Windows (real commit
+    // accounting) and 32-bit armhf (3 GB of address space) reach it. 64-bit Android does not: bionic
+    // grants any size — 256 GB was granted on a 7 GB device — and the process is killed on the write
+    // instead. Nothing written at an allocation site can turn that into a LOAD FAILED; only refusing
+    // the load before it starts can.
+    float* newL = new (std::nothrow) float[length];
+    if (!newL) {
+        LOGE("loadSample: OOM allocating %d frames", length);
+        return false;
+    }
+    std::memcpy(newL, data, static_cast<size_t>(length) * sizeof(float));
 
     // Hold sampleEditMutex while swapping the buffer.  The audio thread uses
     // try_to_lock on this mutex inside its mix loop, so it will skip at most
@@ -149,17 +169,28 @@ void AudioEngine::loadSample(int id, const float* data, int length) {
     }
     if (originalSamplesRight[id]) { delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr; }
 
-    samples[id] = new float[length];
-    for (int i = 0; i < length; i++) {
-        samples[id][i] = data[i];
-    }
+    samples[id] = newL;
     sampleLengths[id] = length;
 
     LOGD("Sample %d: %d frames (mono)", id, length);
+    return true;
 }
 
-void AudioEngine::loadSampleStereo(int id, const float* left, const float* right, int length) {
-    if (id < 0 || id >= 256 || !left || !right) return;
+bool AudioEngine::loadSampleStereo(int id, const float* left, const float* right, int length) {
+    if (id < 0 || id >= 256 || !left || !right || length < 1) return false;
+
+    // Both channels up front, for loadSample's reason — and both or neither, so a half-allocated
+    // stereo pair can never be published.
+    float* newL = new (std::nothrow) float[length];
+    float* newR = new (std::nothrow) float[length];
+    if (!newL || !newR) {
+        delete[] newL;
+        delete[] newR;
+        LOGE("loadSampleStereo: OOM allocating 2 x %d frames", length);
+        return false;
+    }
+    std::memcpy(newL, left,  static_cast<size_t>(length) * sizeof(float));
+    std::memcpy(newR, right, static_cast<size_t>(length) * sizeof(float));
 
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
@@ -180,13 +211,12 @@ void AudioEngine::loadSampleStereo(int id, const float* left, const float* right
     }
     if (originalSamplesRight[id]) { delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr; }
 
-    samples[id] = new float[length];
-    samplesRight[id] = new float[length];
-    std::memcpy(samples[id],      left,  length * sizeof(float));
-    std::memcpy(samplesRight[id], right, length * sizeof(float));
+    samples[id]      = newL;
+    samplesRight[id] = newR;
     sampleLengths[id] = length;
 
     LOGD("Sample %d: %d frames (stereo)", id, length);
+    return true;
 }
 
 bool AudioEngine::beginSampleLoad(int id, int channels, int estimatedFrames) {
@@ -300,6 +330,10 @@ static inline float decodeWavSample(const uint8_t* p, int audioFormat, int bitsP
 int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     if (id < 0 || id >= 256 || !path) return 0;
 
+    // Every exit below leaves this at PARSE unless it is raised to OUT_OF_MEMORY or cleared on
+    // success, so the UI can never read a reason left behind by an earlier load.
+    lastLoadFailure_ = LoadFailure::PARSE;
+
     FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("loadSampleFromWavFile: cannot open %s", path); return 0; }
 
@@ -376,6 +410,27 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     int totalFrames = (int)(dataSize / (uint32_t)bytesPerFrame);
     if (totalFrames < 1) { fclose(f); return 0; }
 
+    // ⭐ The one source whose cost is known EXACTLY before a byte is decoded: `dataSize` is in the
+    // header, so the destination is `totalFrames x channels x 4` and nothing has to be guessed. The
+    // soundfont and compressed paths cannot do this — they learn their size only by decoding — and
+    // are guarded where they grow instead.
+    //
+    // ⚠️ Checked against `load_budget_bytes()` rather than raw free memory, because this is a
+    // PREDICTION made before the work starts, and the budget is the number that carries the floor for
+    // Android's under-reporting. The guards that measure live use free memory directly. A budget of 0
+    // means the platform could not answer, and then nothing is refused.
+    {
+        const int64_t needed = static_cast<int64_t>(totalFrames) * channels * 4;
+        const int64_t budget = pt::load_budget_bytes();
+        if (budget > 0 && needed > budget) {
+            LOGE("loadSampleFromWavFile: %s needs %lld MB, %lld MB free — refused",
+                 path, (long long)(needed >> 20), (long long)(budget >> 20));
+            lastLoadFailure_ = LoadFailure::OUT_OF_MEMORY;
+            fclose(f);
+            return 0;
+        }
+    }
+
     // Allocate the destination buffers in NATIVE memory (not the capped Java heap). std::nothrow so
     // a genuine OOM returns cleanly instead of terminating (native new aborts under -fno-exceptions).
     float* newL = new (std::nothrow) float[totalFrames];
@@ -437,6 +492,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
         sampleLengths[id] = totalFrames;
     }
 
+    lastLoadFailure_ = LoadFailure::NONE;
     LOGD("loadSampleFromWavFile: id=%d %d frames %s rate=%d bits=%d fmt=%d",
          id, totalFrames, channels == 2 ? "stereo" : "mono", sampleRate, bitsPerSample, audioFormat);
     return sampleRate;
@@ -462,35 +518,70 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
     std::vector<float> L, R;
     int sr = 0;
     bool ok;
-    if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, L, R, sr);
-    else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, L, R, sr);
-    else if (std::strcmp(ext, "ogg")  == 0) {
-        // An .ogg holds either Vorbis or Opus. Try Vorbis (stb_vorbis); on a miss, retry as Opus.
-        ok = ptdec::decodeOggFile(path, L, R, sr);
-        if (!ok) { L.clear(); R.clear(); ok = ptdec::decodeOpusFile(path, L, R, sr); }
+
+    // ⚠️ THE ONLY `catch` IN native/, AND IT IS HERE BECAUSE THE ALLOCATIONS ARE NOT OURS. The
+    // decoders below grow std::vectors — five vendored libraries, each with its own idea of how much
+    // to reserve — so there is no allocation site here to hand a std::nothrow to. An uncaught
+    // bad_alloc is std::terminate, which takes the unsaved song with it; a caught one is a
+    // LOAD FAILED that costs the user only the file they picked.
+    //
+    // ⚠️ It cannot help on 64-bit Android, where bionic grants any size and the kernel kills on the
+    // write — see loadSample. It is Windows and 32-bit armhf that reach a real bad_alloc.
+    try {
+        if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, L, R, sr);
+        else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, L, R, sr);
+        else if (std::strcmp(ext, "ogg")  == 0) {
+            // An .ogg holds either Vorbis or Opus. Try Vorbis (stb_vorbis); on a miss, retry as Opus.
+            ok = ptdec::decodeOggFile(path, L, R, sr);
+            if (!ok) { L.clear(); R.clear(); ok = ptdec::decodeOpusFile(path, L, R, sr); }
+        }
+        else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, L, R, sr);
+        // ISO-BMFF containers holding AAC (minimp4 demux + FAAD2). One decoder covers them all — .m4a and
+        // the container extensions are the same box format. Raw .aac (ADTS) is deliberately NOT here: it is
+        // a bare stream, not a container, and is not a sample format the app offers.
+        else if (std::strcmp(ext, "m4a") == 0 || std::strcmp(ext, "mp4") == 0 ||
+                 std::strcmp(ext, "m4b") == 0 || std::strcmp(ext, "mov") == 0 ||
+                 std::strcmp(ext, "3gp") == 0)
+            ok = ptdec::decodeMp4File(path, L, R, sr);
+        else { LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext); return 0; }
+    } catch (const std::bad_alloc&) {
+        LOGE("loadSampleFromCompressed: out of memory decoding %s", path);
+        lastLoadFailure_ = LoadFailure::OUT_OF_MEMORY;
+        return 0;
     }
-    else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, L, R, sr);
-    // ISO-BMFF containers holding AAC (minimp4 demux + FAAD2). One decoder covers them all — .m4a and
-    // the container extensions are the same box format. Raw .aac (ADTS) is deliberately NOT here: it is
-    // a bare stream, not a container, and is not a sample format the app offers.
-    else if (std::strcmp(ext, "m4a") == 0 || std::strcmp(ext, "mp4") == 0 ||
-             std::strcmp(ext, "m4b") == 0 || std::strcmp(ext, "mov") == 0 ||
-             std::strcmp(ext, "3gp") == 0)
-        ok = ptdec::decodeMp4File(path, L, R, sr);
-    else { LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext); return 0; }
 
     if (!ok || L.empty() || sr <= 0) {
+        // ⚠️ A decoder that ran out of room returns false exactly as a corrupt file does, so the
+        // reason comes from whether memory is short RIGHT NOW rather than from the return value.
+        // The decoders abandon the decode and free as they unwind, so this reads the state that
+        // stopped them.
         LOGE("loadSampleFromCompressed: decode failed (%s)", path);
+        const int64_t budget = pt::load_budget_bytes();
+        const int64_t decoded = static_cast<int64_t>(L.capacity() + R.capacity()) * sizeof(float);
+        lastLoadFailure_ = (budget > 0 && decoded > 0 && decoded * 2 > budget)
+                               ? LoadFailure::OUT_OF_MEMORY
+                               : LoadFailure::PARSE;
         return 0;
     }
 
     // Publish via the existing, tested slot path (voice-stop + buffer free — incl. the stale undo
     // backup — + mutex all handled there).
-    if (!R.empty() && R.size() == L.size())
-        loadSampleStereo(id, L.data(), R.data(), (int)L.size());
-    else
-        loadSample(id, L.data(), (int)L.size());
+    //
+    // ⚠️ The publish allocates a SECOND full copy and the decoded vectors are still live across it,
+    // so this path peaks at twice what it keeps. The WAV path does not — it allocates its destination
+    // up front and streams into it. Removing the asymmetry means decoding straight into the slot,
+    // which needs the frame count before the decode starts.
+    const bool published =
+        (!R.empty() && R.size() == L.size())
+            ? loadSampleStereo(id, L.data(), R.data(), (int)L.size())
+            : loadSample(id, L.data(), (int)L.size());
+    if (!published) {
+        LOGE("loadSampleFromCompressed: could not allocate slot %d for %zu frames", id, L.size());
+        lastLoadFailure_ = LoadFailure::OUT_OF_MEMORY;
+        return 0;
+    }
 
+    lastLoadFailure_ = LoadFailure::NONE;
     LOGD("loadSampleFromCompressed: id=%d %zu frames %s rate=%d (%s)",
          id, L.size(), R.empty() ? "mono" : "stereo", sr, ext);
     return sr;
@@ -2540,10 +2631,22 @@ int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
         return -1;
     }
     tsf_stream sfStream = { sf, &sfStreamRead, &sfStreamSkip };
+    // ⭐ The guard that makes a too-large font a MESSAGE instead of a kill. There is no size to check
+    // up front — nothing in an SF3 header states its decoded size — so the allocator itself refuses
+    // when a block would exhaust the machine, and tsf's own null checks unwind to the failure below.
+    // Reset first: the flag is what separates "too big for this device" from "not a soundfont".
+    sf_memory_guard_reset();
     tsf* loaded = tsf_load(&sfStream);
     std::fclose(sf);
     if (!loaded) {
-        LOGE("❌ Failed to parse soundfont: %s", path);
+        if (sf_memory_guard_tripped()) {
+            LOGE("❌ Soundfont too large for this device (%lld MB free): %s",
+                 (long long)(pt::available_memory_bytes() >> 20), path);
+            lastLoadFailure_ = LoadFailure::OUT_OF_MEMORY;
+        } else {
+            LOGE("❌ Failed to parse soundfont: %s", path);
+            lastLoadFailure_ = LoadFailure::PARSE;
+        }
         return -1;
     }
     // Configured before publication, for the same reason: a voice that sees the handle must see it
@@ -2556,6 +2659,7 @@ int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
     soundfonts[slot].instrumentId = instrumentId;
     soundfonts[slot].filePath = path;
     soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest
+    lastLoadFailure_ = LoadFailure::NONE;
     LOGD("🎹 Loaded soundfont slot %d: %s (instrumentId=%d)", slot, path, instrumentId);
     return slot;
 }

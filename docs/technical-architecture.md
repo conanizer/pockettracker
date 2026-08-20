@@ -69,7 +69,7 @@ native/                            The portable program
 ├── audio-engine.cpp / .h          The engine: processAudioBlock, voices, modulation, DSP
 ├── audio-decoders.cpp / .h        WAV, MP3, FLAC, OGG, Opus, M4A decoding
 ├── sampler-voice.h                Per-voice state for sample playback
-├── soundfont-voice.cpp / .h       Per-voice state for SF2 (TinySoundFont — see the note below)
+├── soundfont-voice.cpp / .h       Per-voice state for SF2/SF3 (TinySoundFont — see the note below)
 ├── note-queue.h                   Sample-accurate note + parameter scheduling queues
 ├── sample-editor.cpp              Destructive waveform operations
 ├── transient-detector.cpp         Slice-point detection
@@ -138,11 +138,18 @@ app/                               Android: manifest, resources, and a seven-fil
 docs/                              The manual, this document, and the licence notices
 ```
 
-> **TinySoundFont carries one local change.** `vendor/tsf/tsf.h` records the length of the sample
-> buffer it allocates (`fontSampleCount`, plus a `tsf_get_fontsamplecount()` accessor); upstream
-> computes that number during load and then discards it. Without it a loaded font's PCM is
-> unmeasurable, and the engine's USED RAM total would silently omit the largest thing it holds.
-> **Re-apply it on any tsf update** — both sites are marked in the file.
+> **TinySoundFont carries two local changes**, both marked in `vendor/tsf/tsf.h`, and both must be
+> **re-applied on any tsf update**.
+>
+> 1. It records the length of the sample buffer it allocates (`fontSampleCount`, plus a
+>    `tsf_get_fontsamplecount()` accessor); upstream computes that number during load and then
+>    discards it. Without it a loaded font's PCM is unmeasurable, and the engine's USED RAM total
+>    would silently omit the largest thing it holds.
+> 2. The accumulating float buffer the SF3 decoder fills **doubles** instead of growing by upstream's
+>    fixed 1 M-float step. The step makes the realloc count linear in the decoded size and the bytes
+>    copied quadratic — a cost paid only where `realloc` copies. glibc and bionic serve a
+>    multi-megabyte block from `mmap` and grow it with `mremap`, so nothing moves; the MSVC CRT copies
+>    every time, which is why the symptom was ever only visible on Windows.
 
 ---
 

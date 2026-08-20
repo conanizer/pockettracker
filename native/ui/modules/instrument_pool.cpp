@@ -36,12 +36,17 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
     c.draw_text("INST.POOL", x + ID_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     // ── USED RAM, in the gap the title leaves ────────────────────────────────────────────────────
-    // The same total PROJECT shows, on the screen where the samples that make it up are listed —
-    // which is where a user who is about to load a seventeenth one is actually looking. It is a
-    // readout, not a row: the cursor never reaches it and nothing here can edit it.
-    c.draw_text("RAM", x + RAM_LABEL_X, y + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(megabytes_str(s.sampleRamBytes), x + RAM_VALUE_X, y + TEXT_PADDING, t.textValue,
-                CHAR_SPACING, FONT_SCALE);
+    // The same total PROJECT shows, on the screen where the samples that make it up are listed. It
+    // is a readout, not a row: the cursor never reaches it and nothing here can edit it.
+    //
+    // ⚠️ Gated with PROJECT's pair, on the same flag and for the same reason (project_editor.cpp) —
+    // one number on two screens must appear and disappear on both at once, or a release build hides
+    // a figure the manual could still point at.
+    if (s.caps.debug) {
+        c.draw_text("RAM", x + RAM_LABEL_X, y + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(megabytes_str(s.sampleRamBytes), x + RAM_VALUE_X, y + TEXT_PADDING, t.textValue,
+                    CHAR_SPACING, FONT_SCALE);
+    }
 
     const int headerY = y + ROW_HEIGHT + 14;
     c.draw_text("# ",   x + ID_X,   headerY, t.textParam, CHAR_SPACING, FONT_SCALE);

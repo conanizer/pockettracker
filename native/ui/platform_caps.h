@@ -35,7 +35,10 @@
 namespace pt::ui {
 
 struct PlatformCaps {
-    /** A developer build. Gates the OVERLAY row, the TRACE row, and PROJECT's USED RAM readout. */
+    /**
+     * A developer build. Gates the OVERLAY row, the TRACE row, and the RAM readouts on PROJECT and
+     * INST.POOL — which `engine_feed.h` then stops sampling, so the two byte counts read 0 here.
+     */
     bool debug = false;
 
     /** LAYOUT: FULLSCREEN / LANDSCAPE / PORTRAIT, and the skin column the portrait layout gains. */

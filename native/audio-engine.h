@@ -29,6 +29,46 @@
 static const int SF_VOICE_COUNT = 9;
 extern SoundfontVoice sfVoices[SF_VOICE_COUNT];
 
+/**
+ * ⚠️ **THERE IS NO SIZE LIMIT ON A SOUNDFONT, AND A LIMIT ON `.sf3` ALONE WOULD BE THE WRONG SHAPE.**
+ * This is written down because it looks like an obvious thing to add.
+ *
+ * The two formats are the same font with the sample data compressed or not, and they end at the same
+ * float buffer. Measured on a 3000-sample font decoding to 410 MB of float:
+ *
+ *   | | file | load | peak RSS |
+ *   |---|---|---|---|
+ *   | `.sf2` | 205 MB | 1.24 s | **825 MB** |
+ *   | `.sf3` |  14 MB | 3.60 s | **443 MB** |
+ *
+ * SF3 costs about 3× the load time and **half the peak memory**, because the SF2 path holds the whole
+ * raw `smpl` chunk alongside the float buffer while SF3's raw chunk is a fourteenth of the size. So
+ * capping SF3 by file size refuses the cheaper of the two and admits the more expensive one — and it
+ * would do it at a threshold nothing can derive, since **nothing in an SF3 header states the decoded
+ * size**: tsf only learns it by decoding.
+ *
+ * ⚠️⚠️ **AND NOTHING BOUNDS IT AT THE ALLOCATOR EITHER — DO NOT ASSUME A FAILED LOAD FAILS CLEANLY.**
+ * tsf does null-check every allocation it makes, so the unwind path is real; what is missing is the
+ * null. Measured: **bionic granted a 256 GB request on a 7.36 GB device**, so on Android there is no
+ * size at which `malloc` refuses and `tsf_load` cannot return null for want of memory — the process
+ * is killed on the write instead, with no message and no autosave. glibc does refuse, but only above
+ * `MemTotal + SwapTotal`: it refuses against the size of the whole machine, never against what is
+ * free. Only Windows (real commit accounting) and 32-bit armhf (3 GB of address space) fail cleanly.
+ *
+ * What bounds it instead is a check against the DEVICE's free memory, made where the memory actually
+ * grows: a counting `TSF_MALLOC`/`TSF_REALLOC` for both font formats (`soundfont-voice.cpp`),
+ * `decode_has_room()` for compressed samples (`audio-decoders.cpp`), and `load_budget_bytes()` up
+ * front for WAV — the one source whose decoded size a header states. ⚠️ Deliberately NOT an estimate
+ * made before opening the file: that would re-parse what the loaders already parse, and **no SF3
+ * header carries the decoded size at all** — tsf only learns it by decoding. The limit is therefore
+ * derived per-device from the file as it loads, which is why a fixed cap on one format is still the
+ * wrong shape.
+ *
+ * ⚠️ **Also unsolved: the load is SYNCHRONOUS on the thread the UI is drawn from**, for both formats.
+ * A big font freezes the picture for its load — over a second even for SF2 — and that is a threading
+ * problem, not a format problem. A cap on one format was never the fix for that either.
+ */
+
 class AudioEngine {
 public:
     AudioEngine();
@@ -53,8 +93,21 @@ public:
      */
     void setDeviceSampleRate(int sr);
 
-    void loadSample(int id, const float* data, int length);
-    void loadSampleStereo(int id, const float* left, const float* right, int length);
+    // False when the destination could not be allocated. The slot is left exactly as it was — the
+    // buffers are taken before anything is freed — so a caller that reports LOAD FAILED is telling
+    // the truth about a slot that still holds whatever it held before.
+    bool loadSample(int id, const float* data, int length);
+    bool loadSampleStereo(int id, const float* left, const float* right, int length);
+
+    /**
+     * Why the last media load failed. Every loader reports failure the same way — 0 or -1 — and a
+     * file that is not a soundfont wants a different message from one the device cannot hold.
+     *
+     * ⚠️ Set by every load PATH, including the successful one (which clears it), so a stale value
+     * cannot be read after a load that worked. Read immediately after the load that set it.
+     */
+    enum class LoadFailure { NONE = 0, PARSE, OUT_OF_MEMORY };
+    LoadFailure lastLoadFailure() const { return lastLoadFailure_; }
 
     // Streaming sample load — decode a compressed file (e.g. MP3) chunk-by-chunk straight into native
     // memory so the whole PCM never has to live on the Java heap. begin allocates the slot from an
@@ -536,6 +589,9 @@ public:
     void setStemsMode(int mode) { stemsMode = mode; }
 
 private:
+    /** Backs lastLoadFailure(). Written by every load path, including the ones that succeed. */
+    LoadFailure lastLoadFailure_ = LoadFailure::NONE;
+
     /**
      * Flush-to-Zero: the engine's denormal protection, and not any compile flag.
      *

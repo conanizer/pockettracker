@@ -187,7 +187,7 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 - **LEFT / RIGHT** — move between columns (NAME → V → RV → DE → EQ).
 - **A + DPAD** — edit the value under the cursor (V/RV/DE = 00–FF, EQ = 00–7F).
 - **A** on the NAME column of an **empty** slot — load a source (sampler slots browse .wav, SoundFont
-  slots browse .sf2); the slot is auto-named from the file.
+  slots browse .sf2 and .sf3); the slot is auto-named from the file.
 - **A + B** on the NAME column — clear the slot (keeps its instrument type).
 - **A** (tap) or **SELECT** on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
   the slot; the open is deferred to A-release so the two don't clash). Inside the editor, **B** closes it.

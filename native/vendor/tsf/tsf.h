@@ -912,10 +912,27 @@ static int tsf_decode_ogg(const tsf_u8 *pSmpl, const tsf_u8 *pSmplEnd, float** p
 		resNum += n_samples;
 		if (resNum > resMax)
 		{
-			do { resMax += (resMax ? (resMax < 1048576 ? resMax : 1048576) : resInitial); } while (resNum > resMax);
+			/* PocketTracker local addition: DOUBLE rather than step by a fixed 1 M floats. Upstream
+			   caps the growth increment, which makes the number of reallocs linear in the decoded
+			   size and the bytes copied quadratic. Whether that is paid depends on the allocator:
+			   glibc and bionic serve a multi-megabyte block from mmap and realloc it with mremap, so
+			   the pages are repointed and nothing is copied; the MSVC CRT copies every time. Measured
+			   on a 3000-sample font decoding to 410 MB of float, MSVC went 9.93 s -> 3.20 s and glibc
+			   did not move (3.58 s -> 3.51 s). Doubling costs at most 2x the final buffer in slack,
+			   which the trim-down realloc at the end of tsf_decode_sf3_samples gives straight back. */
+			do { resMax += (resMax ? resMax : resInitial); } while (resNum > resMax);
 			oldres = res;
 			res = (float*)TSF_REALLOC(res, resMax * sizeof(float));
-			if (!res) { TSF_FREE(oldres); stb_vorbis_close(v); return 0; }
+			/* PocketTracker local addition — THIRD local change, re-apply on any tsf update.
+			   ⚠️ Upstream frees `oldres` here and returns 0. `oldres` is the CALLER's buffer, and
+			   the caller (tsf_decode_sf3_samples) does `TSF_FREE(res); return 0;` on this exact
+			   failure — so the same pointer is freed twice. On bionic that is heap corruption and a
+			   SIGSEGV inside tsf_load, not a clean OOM.
+			   It could never fire upstream because a failing realloc is what triggers it and malloc
+			   does not fail under overcommit; the allocator guard in soundfont-voice.cpp is the first
+			   thing that ever makes it say no, which is what made a dormant bug reachable.
+			   Leaving the buffer for the caller to free is both correct and the smaller change. */
+			if (!res) { stb_vorbis_close(v); return 0; }
 		}
 		TSF_MEMCPY(res + resNum - n_samples, outputs[0], n_samples * sizeof(float));
 	}
@@ -970,7 +987,10 @@ static int tsf_decode_sf3_samples(const void* rawBuffer, float** pFloatBuffer, u
 			resNum += (tsf_u32)(inEnd - in);
 			if (resNum > resMax)
 			{
-				do { resMax += (resMax ? (resMax < 1048576 ? resMax : 1048576) : resInitial); } while (resNum > resMax);
+				/* PocketTracker local addition — same doubling as the ogg branch above, for the same
+				   reason. This arm runs for the uncompressed shdrs INTERLEAVED among compressed ones
+				   in a mixed font, so it shares the one accumulating buffer and the one growth rule. */
+				do { resMax += (resMax ? resMax : resInitial); } while (resNum > resMax);
 				oldres = res;
 				res = (float*)TSF_REALLOC(res, resMax * sizeof(float));
 				if (!res) { TSF_FREE(oldres); return 0; }
