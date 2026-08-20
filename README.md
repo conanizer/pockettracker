@@ -21,12 +21,15 @@ framework, no dependencies.
 The download buttons link straight to the release assets rather than to the Releases page, so a new
 version means editing `index.html` in three places:
 
-1. the four `href`s under `id="download"` — each carries the version twice, e.g.
+1. the four asset `href`s under `id="download"` — each carries the version twice, e.g.
    `/releases/download/v0.9.4/PocketTracker-0.9.4-windows-x64.zip`
 2. the four `<p class="meta">` lines, which name each file and its size
 3. the `<p class="subver">` line under the hero button
 
 `/releases/latest/download/` cannot be used instead: the asset filenames carry the version.
+
+The **F-Droid** and **Obtainium** buttons carry no version and are never edited for a release — both
+resolve to whatever is current on their own.
 
 ## Clips
 

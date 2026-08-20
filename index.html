@@ -137,7 +137,7 @@
     color:var(--text-2); line-height:1.6; }
   .guide li{ margin-bottom:10px; } .guide li:last-child{ margin-bottom:0; }
   .guide li::marker{ font-family:var(--mono); color:var(--cyan-dim); font-size:.85em; }
-  /* Android offers two ways in, not two steps — no numbers, and a rule marking off the part
+  /* Android offers three ways in, not three steps — no numbers, and a rule marking off the part
      that applies whichever one you took. */
   .guide .alts{ margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:12px;
     font-family:var(--sans); font-size:.97rem; color:var(--text-2); line-height:1.6; }
@@ -228,7 +228,7 @@
           <div class="cta">
             <a class="btn" href="#download">Download</a>
           </div>
-          <p class="subver">v0.9.5 · public beta</p>
+          <p class="subver">v0.9.6 · public beta</p>
         </div>
         <div class="media">
           <video src="media/phrase.mp4" autoplay muted loop playsinline preload="auto" aria-label="Entering notes on the PHRASE screen"></video>
@@ -249,26 +249,29 @@
 
       <div class="pane on" id="p-android" role="tabpanel" aria-labelledby="t-android">
         <div class="getrow">
+          <a class="btn" href="https://f-droid.org/packages/com.conanizer.pockettracker/">F-Droid</a>
           <a class="btn" href="https://apps.obtainium.page/redirect?r=obtainium://add/https://github.com/conanizer/pockettracker">Obtainium</a>
-          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.5/PocketTracker-0.9.5.apk">APK</a>
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.6/PocketTracker-0.9.6.apk">APK</a>
         </div>
-        <p class="meta">PocketTracker-0.9.5.apk · 17.6 MB · Android 8.0+ · arm64-v8a / x86-64</p>
+        <p class="meta">PocketTracker-0.9.6.apk · 17.7 MB · Android 8.0+ · arm64-v8a / x86-64</p>
         <div class="guide">
           <p class="label">How to install</p>
           <ul class="alts">
-            <li><b>Obtainium</b> — install <a href="https://github.com/ImranR98/Obtainium">Obtainium</a> first, then press the button above on your device. PocketTracker is added straight from GitHub Releases and stays up to date on its own.</li>
+            <li><b>F-Droid</b> — PocketTracker is in the main F-Droid repository. Press the button above, or search for it inside the F-Droid app. F-Droid builds it from source on its own machines, and new versions arrive a few days after a release.</li>
+            <li><b>Obtainium</b> — install <a href="https://github.com/ImranR98/Obtainium">Obtainium</a> first, then press the button above on your device. PocketTracker is added straight from GitHub Releases and stays up to date on its own, on release day.</li>
             <li><b>The APK</b> — download it and open it on your device. Android will ask you to allow installs from unknown sources; that is normal for anything from outside a store.</li>
           </ul>
-          <p class="then">Either way, on first run open the file browser and press <b>A</b> on the <code>ADD FOLDER...</code> row. The folder you pick is where your projects, samples and renders live.</p>
+          <p class="then">Whichever you pick, on first run open the file browser and press <b>A</b> on the <code>ADD FOLDER...</code> row. The folder you pick is where your projects, samples and renders live.</p>
+          <p class="note">Pick one route and stay with it. F-Droid signs its own build, so its copy and the one from GitHub Releases will not install over each other — switching means uninstalling first, and that takes your settings with it. Projects and samples survive.</p>
           <p class="note">PocketTracker asks for no permissions at all — that folder is the only place it can touch.</p>
         </div>
       </div>
 
       <div class="pane" id="p-windows" role="tabpanel" aria-labelledby="t-windows">
         <div class="getrow">
-          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.5/PocketTracker-0.9.5-windows-x64.zip">Download</a>
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.6/PocketTracker-0.9.6-windows-x64.zip">Download</a>
         </div>
-        <p class="meta">PocketTracker-0.9.5-windows-x64.zip · 1.9 MB · 64-bit Windows</p>
+        <p class="meta">PocketTracker-0.9.6-windows-x64.zip · 1.9 MB · 64-bit Windows</p>
         <div class="guide">
           <p class="label">How to install</p>
           <ol>
@@ -282,9 +285,9 @@
 
       <div class="pane" id="p-linux" role="tabpanel" aria-labelledby="t-linux">
         <div class="getrow">
-          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.5/PocketTracker-0.9.5-linux-x64.tar.gz">Download</a>
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.6/PocketTracker-0.9.6-linux-x64.tar.gz">Download</a>
         </div>
-        <p class="meta">PocketTracker-0.9.5-linux-x64.tar.gz · 1.3 MB · x86-64 desktop</p>
+        <p class="meta">PocketTracker-0.9.6-linux-x64.tar.gz · 1.3 MB · x86-64 desktop</p>
         <div class="guide">
           <p class="label">How to install</p>
           <ol>
@@ -298,9 +301,9 @@
 
       <div class="pane" id="p-portmaster" role="tabpanel" aria-labelledby="t-portmaster">
         <div class="getrow">
-          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.5/PocketTracker-0.9.5-portmaster-aarch64.zip">Download</a>
+          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.6/PocketTracker-0.9.6-portmaster-aarch64.zip">Download</a>
         </div>
-        <p class="meta">PocketTracker-0.9.5-portmaster-aarch64.zip · 1.2 MB · aarch64 CFW handhelds</p>
+        <p class="meta">PocketTracker-0.9.6-portmaster-aarch64.zip · 1.2 MB · aarch64 CFW handhelds</p>
         <div class="guide">
           <p class="label">How to install</p>
           <ol>
