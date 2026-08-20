@@ -1,7 +1,7 @@
 # PocketTracker User Manual
 
 **Manual revision:** 1.3  
-**Covers:** PocketTracker 0.9.5
+**Covers:** PocketTracker 0.9.6
 
 ---
 
@@ -289,7 +289,7 @@ Hold **B** and press LEFT/RIGHT to switch between items of the same type without
 | TABLE | Previous / next table (00–7F) |
 | GROOVE | Previous / next groove (00–7F) |
 
-**With `SETTINGS → NAV` set to `SONG`**, B + D-pad on CHAIN and PHRASE walks the arrangement instead
+**`SETTINGS → NAV` is `SONG` by default**, and B + D-pad on CHAIN and PHRASE walks the arrangement instead
 of the pools. The cursor becomes a song cell, and the chain or phrase you are looking at is whichever
 one that cell holds — the CHAIN and PHRASE headers show it (`CHAIN 20  S01 T3`).
 
@@ -1212,7 +1212,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
-| NAV | POOL / SONG | What B + D-pad walks. **POOL** steps through the 00–FF chain and phrase pools. **SONG** walks the arrangement instead: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds — see §5.4. |
+| NAV | POOL / SONG | What B + D-pad walks. **SONG** (the default) walks the arrangement: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds. **POOL** steps through the 00–FF chain and phrase pools instead, which is what earlier versions did — see §5.4. |
 | FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 25). |
 | NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |

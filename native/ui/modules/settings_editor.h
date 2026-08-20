@@ -102,10 +102,16 @@ struct SettingsValues {
     // pools. SONG makes B+D-pad walk the ARRANGEMENT instead, so the cursor is a SONG CELL and the chain
     // and phrase on screen are whatever that cell names (the LSDJ/LGPT ruleset).
     //
-    // ⚠️ DEFAULT POOL, and not merely out of caution: under SONG a phrase nobody has placed in the song
-    // is unreachable, so the ruleset is a bargain a user has to opt into rather than one they meet on
-    // first launch.
-    bool navSongRelative = false;
+    // DEFAULT SONG: the arrangement-relative ruleset is the one this app is modelled on, and meeting it
+    // on first launch is the point rather than a hazard to opt into.
+    //
+    // ⚠️ THIS DEFAULT REACHES EXISTING INSTALLS, not just fresh ones. The key is absent from every
+    // settings.json written before the row existed, so `get_bool` falls through to this value for
+    // everyone who upgrades — unlike the five first-launch defaults, which `load_settings` overwrites
+    // from a file that already has their keys. Under SONG a phrase nobody has placed in the song is
+    // unreachable, so an upgrading user with unplaced sketches meets that on the first launch after
+    // the update; the NAV row is the way back and the manual says so.
+    bool navSongRelative = true;
 
     // ── MIDI (plan §8.1, phase B4.3) ─────────────────────────────────────────────────────────────
     //

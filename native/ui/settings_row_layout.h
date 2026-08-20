@@ -137,7 +137,8 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
         // ⚠️ NAV IS DELIBERATELY NOT DEBUG-GATED, where a half-built feature normally would be. Under
         // NAV = SONG a phrase that is not placed in the arrangement cannot be reached at all, and this
         // row is the only way back out — a user who can see the trap but not the switch is worse off
-        // than one who never saw either.
+        // than one who never saw either. ⚠️ SONG is the DEFAULT, so that applies to every install and
+        // not only to someone who went looking: this row must never become gateable.
         default: return true;
     }
 }

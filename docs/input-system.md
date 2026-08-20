@@ -206,7 +206,7 @@ Hold B and press directions to change *which* item the screen is showing, withou
 | **B + UP / DOWN** (SONG) | Page up / down 16 rows |
 | **B + UP / DOWN** (INST.POOL) | Jump ±16 slots |
 
-### Under `SETTINGS -> NAV = SONG`
+### Under `SETTINGS -> NAV = SONG` (the default)
 
 B + D-pad on CHAIN and PHRASE walks the **arrangement** instead of the pools. The cursor is a song
 cell, so the chain and phrase on screen are whichever ones that cell names, and the CHAIN and PHRASE
