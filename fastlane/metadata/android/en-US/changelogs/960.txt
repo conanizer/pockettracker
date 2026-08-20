@@ -1,0 +1,9 @@
+Mute and solo, song-relative navigation, and SF3 SoundFonts.
+
+• R+B mutes and R+A solos a track from SONG or MIXER — hold it, or latch it
+• B+D-pad now walks the arrangement, not the 00–FF pools (SETTINGS → NAV)
+• SF3 SoundFonts load on SF2's terms — smaller files, less memory
+• A file too big for the device is refused instead of taking the app with it
+• Tables reach EQ presets, and AUS/AUF fades run over table rows
+• Place slices by hand: drag, delete, or tap A on each hit while it plays
+• A chain played from its own screen keeps its own mixer channel

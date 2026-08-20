@@ -4,7 +4,7 @@ Features:
 
 * 8-track sequencer with the classic Song → Chain → Phrase structure
 * Sampler instruments: load WAV, MP3, FLAC, OGG, Opus and M4A files
-* SoundFont (SF2) instrument support
+* SoundFont instrument support: SF2 and SF3
 * Sample editor: trim, chop, slice, time-stretch (SOLA), pitch-shift, destructive FX
 * Sample from video: extract audio from screen recordings (MP4/MKV/WebM)
 * 31 step effects: arpeggio, retrigger, pitch slides, vibrato, chance/randomize, tables, grooves, mixer-fader automation and more

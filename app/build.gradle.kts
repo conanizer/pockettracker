@@ -32,13 +32,14 @@ android {
         minSdk = 26
         targetSdk = 34
         // versionCode is hardcoded per release (900 = v0.9.0, 910 = v0.9.1 [F-Droid hotfix],
-        // 920 = v0.9.2, 930 = v0.9.3, 940 = v0.9.4, 950 = v0.9.5; next: 960, … 1000 = 1.0.0).
+        // 920 = v0.9.2, 930 = v0.9.3, 940 = v0.9.4, 950 = v0.9.5, 960 = v0.9.6;
+        // next: 970, … 1000 = 1.0.0).
         // F-Droid's Tags update check and the fastlane changelog filename
         // (changelogs/<versionCode>.txt) both need a literal value, and it outranks any
         // commit-count build ever sideloaded.
         // versionName is bumped by hand per release; tag the matching release in git.
-        versionCode = 950
-        versionName = "0.9.5"
+        versionCode = 960
+        versionName = "0.9.6"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")

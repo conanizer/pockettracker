@@ -12,7 +12,7 @@ One codebase and one audio engine across Android, Linux handhelds, Linux desktop
 
 > **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
-**Status:** 0.9.5 — public beta
+**Status:** 0.9.6 — public beta
 
 **License:** [GPL-3.0](LICENSE)
 
@@ -21,7 +21,7 @@ One codebase and one audio engine across Android, Linux handhelds, Linux desktop
 ## Features
 
 ### Instruments
-Two instrument types: a **sampler** that loads WAV, MP3, M4A, FLAC, OGG and Opus files, and a **SoundFont** player for SF2 files.
+Two instrument types: a **sampler** that loads WAV, MP3, M4A, FLAC, OGG and Opus files, and a **SoundFont** player for SF2 and SF3 files.
 
 ### Sampling from video
 Just screen record stuff from YouTube or your favourite video games and sample it with the built-in video-to-WAV converter!
@@ -69,7 +69,11 @@ All packages are on the [Releases](https://github.com/conanizer/pockettracker/re
 
 ### Android
 
-**One-click (recommended):** install [Obtainium](https://github.com/ImranR98/Obtainium), then tap the badge below on your device. PocketTracker is added straight from GitHub Releases and Obtainium keeps it up to date automatically.
+**F-Droid:** PocketTracker is in the main F-Droid repository. Tap the badge, or search for it in the F-Droid app.
+
+[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="54">](https://f-droid.org/packages/com.conanizer.pockettracker/)
+
+**Obtainium:** install [Obtainium](https://github.com/ImranR98/Obtainium), then tap the badge below on your device. PocketTracker is added straight from GitHub Releases and Obtainium keeps it up to date automatically — new versions appear here on release day, a few days before F-Droid builds them.
 
 [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="54">](https://apps.obtainium.page/redirect?r=obtainium://add/https://github.com/conanizer/pockettracker)
 
@@ -80,6 +84,8 @@ https://github.com/conanizer/pockettracker
 ```
 
 **Manual:** download `PocketTracker-<version>.apk` and open it on your device (allow "install from unknown sources" if asked).
+
+⚠️ **Pick one and stay with it.** F-Droid builds and signs its own copy, so its APK and the one from GitHub Releases carry different signatures. Android will not install either over the other — switching means uninstalling first, which takes your settings with it. Your projects and samples are untouched.
 
 PocketTracker requests **no permissions**. On first run, open a file browser and press **A** on the `ADD FOLDER...` row — Android's folder picker opens, and the folder you choose is where your projects, samples and renders live. See the [quick-start guide](docs/quick-start-guide.md).
 
