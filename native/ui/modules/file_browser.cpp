@@ -372,7 +372,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         if (isCursor)        bg = t.rowCursor;
         else if (isSel)      bg = t.rowSelection;
         else if (i % 2 == 0) bg = t.background;
-        else                 bg = 0xFF111111;
+        else                 bg = t.rowEvery4th;  // theme color instead of hardcoded dark (issue #21)
         c.fill_rect(x, rowY, WIDTH, ROW_HEIGHT, bg);
 
         // Initialized, not merely assigned in every arm below: the `switch` covers all three
