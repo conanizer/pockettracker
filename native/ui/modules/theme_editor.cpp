@@ -12,7 +12,7 @@ namespace {
 constexpr int ROW_AREA_TOP = TEXT_PADDING + ROW_HEIGHT + 14;   // 3 + 21 + 14 = 38
 
 /** Row 0 is the THEME row; the rest are colours. */
-int total_rows() { return 1 + static_cast<int>(theme_color_rows().size()); }   // 18
+int total_rows() { return 1 + static_cast<int>(theme_color_rows().size()); }
 
 }  // namespace
 
@@ -67,7 +67,13 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         c.draw_text("THEME", x + NAME_COL_X, ty,
                     on_row ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-        c.draw_text(t.name, x + THEME_NAME_X, ty, value_color(on_row, 0), CHAR_SPACING, FONT_SCALE);
+        // ⚠️ CLIPPED, and the budget is the gap to SAVE's column. A name is user-typed and unbounded;
+        // unclipped it does not merely spill off the panel, it paints over SAVE and LOAD — the two
+        // labels this screen is exited through. Derived from the two X constants, so moving a column
+        // cannot leave the budget behind.
+        constexpr int NAME_COLS = (SAVE_LABEL_X - THEME_NAME_X) / CHAR_W;
+        c.draw_text(Canvas::clip_text(t.name, NAME_COLS), x + THEME_NAME_X, ty,
+                    value_color(on_row, 0), CHAR_SPACING, FONT_SCALE);
         c.draw_text("SAVE",  x + SAVE_LABEL_X, ty, value_color(on_row, 1), CHAR_SPACING, FONT_SCALE);
         c.draw_text("LOAD",  x + LOAD_LABEL_X, ty, value_color(on_row, 2), CHAR_SPACING, FONT_SCALE);
     }

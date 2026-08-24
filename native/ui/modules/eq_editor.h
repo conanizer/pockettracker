@@ -180,6 +180,20 @@ public:
     /** "+3.5" / "-12.0" — a band's gain, from its stored 0..240. */
     static std::string format_gain_db(float db);
 
+    /**
+     * Is the spectrum panel's picture already empty? — the C7 idle gate's question, and the module's
+     * answer is about the LAST FRAME IT DREW, not about the magnitudes it would draw next.
+     *
+     * ⚠️ This is not the mixer's or the oscilloscope's kind of "at rest". Those two hold a value that
+     * ages inside their own draw, so the frames they need are frames to age IN. Nothing here ages:
+     * `engine_feed` re-polls the magnitudes every 50 ms whether or not a frame is drawn, and they go
+     * to zero on their own a few tens of milliseconds after the last sample. What hangs on the screen
+     * is simply the last frame that reached it. So the reading that matters is what was PUT on the
+     * canvas — and it is what brings the gate back to false, because once the empty frame is drawn
+     * there is nothing left for another frame to change.
+     */
+    bool spectrum_at_rest() const { return spectrumAtRest_; }
+
 private:
     void draw_header(Canvas& c, int x, int y, const EqState& s) const;
     void draw_visualization(Canvas& c, int x, int y, const EqState& s);
@@ -203,6 +217,15 @@ private:
     int   curveCacheSlot_       = -1;
     long long curveCacheHash_   = 0;
     float curveCacheDb_[WIDTH]  = {};
+
+    /**
+     * Whether the last drawn frame's spectrum had any height at all — see `spectrum_at_rest`.
+     *
+     * Written from the same `specY[]` the fill and the outline are drawn from, so it cannot report a
+     * picture the panel is not showing. It starts TRUE: a module that has never drawn has nothing on
+     * screen to fall.
+     */
+    bool spectrumAtRest_ = true;
 };
 
 }  // namespace pt::ui

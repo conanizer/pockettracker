@@ -131,7 +131,16 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     // THEME shows the name and a ">" — the arrow is the promise that A opens something, and it does:
     // the theme editor is its own module (theme_editor.cpp), opened by InputDispatcher and drawn over
     // this one.
-    param_row(SettingsRow::THEME, "THEME", s.themeName + " >");
+    //
+    // ⚠️ The NAME is clipped, and the arrow is what the budget protects. It is the one value on this
+    // screen a user types, so it is the one that can outrun its column; the row's clip would hide the
+    // overflow but the ">" goes out with it, and the arrow is the only thing saying this row opens a
+    // screen. Two glyphs are held back for it, out of the value column's own width.
+    {
+        constexpr int VALUE_COLS = (WIDTH - 10 - VAL1_X) / CHAR_W;
+        param_row(SettingsRow::THEME, "THEME",
+                  Canvas::clip_text(s.themeName, VALUE_COLS - 2) + " >");
+    }
 
     // TEMPLATE is a BUTTON row, like PROJECT's — two options, no value.
     if (settings_row_visible(SettingsRow::TEMPLATE, s.caps)) {

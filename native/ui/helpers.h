@@ -92,14 +92,8 @@ inline std::string dec2(int v) {
     return s.size() >= 2 ? s : "0" + s;
 }
 
-/** Multiply the RGB channels by `factor` (0..1 darker, >1 brighter); alpha preserved. Int.darken(). */
-inline Argb darken(Argb c, float factor) {
-    auto ch = [&](int shift) {
-        const int v = static_cast<int>(static_cast<float>((c >> shift) & 0xFF) * factor);
-        return static_cast<Argb>(v < 0 ? 0 : (v > 255 ? 255 : v));
-    };
-    return (c & 0xFF000000u) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
-}
+// `darken` lives in theme.h — a theme's own fallback colours are derived with it, and theme.h cannot
+// include this file. It is reachable from here, as it always was, because this file includes that one.
 
 /**
  * REPLACE the alpha channel, keeping the RGB — Compose's `Color(x).copy(alpha = a)`, which the sample

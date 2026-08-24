@@ -26,6 +26,21 @@ bool full_screen_module(const AppState& s) {
     return s.currentScreen == ScreenType::FILE_BROWSER ||
            (s.currentScreen == ScreenType::SAMPLE_EDITOR && !s.eq.isOpen);
 }
+
+/**
+ * Is an overlay standing in the editor's place — i.e. is `currentScreen`'s own module NOT drawn?
+ *
+ * ⚠️ The overlays here do not change `currentScreen`, which is exactly what makes this worth naming:
+ * a screen can be selected, be the answer to every question about where the cursor is, and still not
+ * be on the canvas. `has_falling_meters` is the reader that cares — a module that ages its picture
+ * inside its own draw never ages while one of these is up, so a term that forgot to ask would hold the
+ * idle gate open forever with nothing moving.
+ *
+ * ⚠️ The list is `draw`'s if/else chain below, and a new overlay added there must be added here.
+ */
+bool editor_overlay_up(const AppState& s) {
+    return s.eq.isOpen || s.themeEditor.isOpen;
+}
 }  // namespace
 
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
@@ -356,7 +371,20 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
 bool TrackerLayout::has_falling_meters(const AppState& s) const {
     if (!s.project) return false;   // `draw` returns on the background: nothing of ours is on screen
 
-    if (s.currentScreen == ScreenType::MIXER && !mixer_.peaks_at_rest()) return true;
+    // The EQ editor's spectrum panel — a THIRD term, and not the same mechanism as the two below.
+    // Nothing in it ages: `engine_feed` re-polls the magnitudes every 50 ms whether or not a frame is
+    // drawn, and they reach zero on their own once the audio does. What hangs on a stopped transport is
+    // the last frame that was DRAWN, so the module is asked what it last put on the canvas rather than
+    // what it holds. Gated on the panel being up, like the two below, and asked FIRST because the EQ
+    // takes the editor's place on whatever screen it was opened from.
+    if (s.eq.isOpen && !eq_.spectrum_at_rest()) return true;
+
+    // ⚠️ MIXER: gated on the mixer being DRAWN, not merely selected. A peak marker ages inside the
+    // mixer's own draw, and an overlay in the editor's place leaves `currentScreen` alone — so a marker
+    // caught mid-fall when the EQ or the theme editor went up would hold this true for as long as the
+    // overlay stayed up, pinning the loop at 60 Hz over a picture nothing is changing.
+    if (s.currentScreen == ScreenType::MIXER && !editor_overlay_up(s) && !mixer_.peaks_at_rest())
+        return true;
 
     // The oscilloscope strip's SPECTRUM bars, on the same terms as the mixer's markers: they fall
     // inside the draw, so the gate has to hold the frames open for them. Two screens take the whole

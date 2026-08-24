@@ -136,8 +136,15 @@ public:
     static constexpr int WIDTH  = 510;
     static constexpr int HEIGHT = 392;
 
-    /** The last cursor row — colour row 17. The list scrolls; the cursor does not clamp, it WRAPS. */
-    static constexpr int MAX_ROW = 17;
+    /**
+     * The last cursor row — one per colour, after the THEME row at 0. The list scrolls; the cursor
+     * does not clamp, it WRAPS.
+     *
+     * ⚠️ DERIVED FROM THE ROW TABLE, not typed. A colour added to `theme_color_rows()` is a row the
+     * module draws; if this were a constant it would also be a row the cursor could never reach, and
+     * the only symptom would be a colour that quietly cannot be edited.
+     */
+    static int max_row() { return static_cast<int>(theme_color_rows().size()); }
 
     void draw(Canvas& c, int x, int y, const ThemeState& s) const;
 

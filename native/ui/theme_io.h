@@ -13,7 +13,7 @@
 // therefore asks `JsonWriter` for `JsonLayout::Pretty` explicitly — that enum has no default, so this
 // is a stated choice rather than whatever the other caller happened to want.
 //
-// ⚠️ WHY BYTE-EXACT, when a theme is only eighteen colours and any JSON would "work"?
+// ⚠️ WHY BYTE-EXACT, when a theme is only twenty-two colours and any JSON would "work"?
 //
 // Because byte-exactness is the only claim a golden can actually CHECK. "Semantically equivalent" is
 // a promise a test cannot hold you to; "these 400 bytes match the 400 bytes Kotlin wrote" is a promise
@@ -87,9 +87,9 @@ inline std::string serialize_theme(const Theme& t) {
 
     if (t.name != d.name) w.field_string("name", t.name);
 
-    // ⚠️ Spelled out, and deliberately NOT driven off `theme_color_rows()`, though the first seventeen
-    // lines below are that table in that order. Two reasons, and the second is the real one:
-    // `meterBorder` is a serialized field with no editor row, so the table is not the field list; and
+    // ⚠️ Spelled out, and deliberately NOT driven off `theme_color_rows()`, though it is nearly that
+    // table in that order — `meterBorder` sits in the middle of it here and has no row at all. Two
+    // reasons, and the second is the real one: the table is not the field list; and
     // more importantly THIS ORDER IS THE FILE FORMAT. The row table is a UI concern and someone may one
     // day reorder it to group the colours differently — which must not silently rewrite every `.ptt`
     // key order and break the byte-golden. The two lists look alike today and answer different
@@ -116,6 +116,19 @@ inline std::string serialize_theme(const Theme& t) {
     color("meterMid",        t.meterMid,        d.meterMid);
     color("meterHigh",       t.meterHigh,       d.meterHigh);
     color("meterBorder",     t.meterBorder,     d.meterBorder);   // no editor row; still a field
+
+    // ⚠️ THE FOUR EQ KEYS ARE MEASURED AGAINST A DIFFERENT YARDSTICK — `derive_eq_colors` run on THIS
+    // theme, not `Theme{}`. Their absence from a file does not mean "CLASSIC's value", it means "the
+    // four fields the EQ screen used to borrow", which is a function of the palette in hand.
+    // `parse_theme` fills them in that way, and omitting them on the same terms is what makes the pair
+    // a round trip. It also keeps a theme nobody has dialled these rows on byte-identical to what a
+    // build without them wrote — the keys appear in a `.ptt` the first time they are actually used.
+    Theme e = t;
+    derive_eq_colors(e);
+    color("eqBg",     t.eqBg,     e.eqBg);
+    color("eqFill",   t.eqFill,   e.eqFill);
+    color("eqBorder", t.eqBorder, e.eqBorder);
+    color("eqTxt",    t.eqTxt,    e.eqTxt);
 
     if (t.visualizerType != d.visualizerType)
         w.field_string("visualizerType", visualizer_serial_name(t.visualizerType));
@@ -170,6 +183,16 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     color("meterMid",        t.meterMid);
     color("meterHigh",       t.meterHigh);
     color("meterBorder",     t.meterBorder);
+
+    // ⚠️ The EQ four are DERIVED FIRST and then overwritten by whatever the file names, so a theme
+    // written before these keys existed keeps the exact EQ screen it has always had. Derived here
+    // rather than in the struct's field defaults because the source fields are the ones just read: a
+    // constant default would repaint every existing `.ptt`'s spectrum in CLASSIC's greys.
+    derive_eq_colors(t);
+    color("eqBg",     t.eqBg);
+    color("eqFill",   t.eqFill);
+    color("eqBorder", t.eqBorder);
+    color("eqTxt",    t.eqTxt);
 
     if (const auto it = j.find("visualizerType"); it != j.end() && it->is_string())
         t.visualizerType = visualizer_from_serial_name(it->get<std::string>());

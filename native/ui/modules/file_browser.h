@@ -42,10 +42,13 @@ namespace pt::ui {
 inline constexpr int BROWSER_VISIBLE_ROWS = 19;
 
 /**
- * Kept out of the theme on purpose, exactly as Kotlin keeps them out of `AppTheme`: these three say
- * what KIND of thing a row is, and that meaning must not change when the user picks a different skin.
+ * Kept out of the theme on purpose: these three say what KIND of thing a row is, and that meaning must
+ * not change when the user picks a different skin.
+ *
+ * ⚠️ A FOLDER is NOT one of them — it draws in `textTitle` and follows the palette. It is the one kind
+ * here whose row is not an exception to the list but the ordinary case of it, so a fixed blue simply
+ * read as a colour the theme had forgotten.
  */
-inline constexpr Argb COLOR_FOLDER = 0xFF88CCFF;  // light blue
 inline constexpr Argb COLOR_VIDEO  = 0xFFFFBB55;  // amber — a container we can show but not load
 inline constexpr Argb COLOR_PARENT = 0xFFFFAA88;  // orange — ".."
 inline constexpr Argb COLOR_ACTION = 0xFF88FF88;  // green — a row that DOES something, not one that is

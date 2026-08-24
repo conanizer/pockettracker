@@ -1306,8 +1306,10 @@ int run(const AppConfig& cfg) {
         // what stops them, and the pixel net cannot help because a frame that is never drawn is never
         // compared. Stop the transport and each hangs for the fall it still owes (the markers ~5 s, the
         // spectrum ~1 s), stepping down once per input instead — any input, mapped or not, because every
-        // SDL event sets `sawInput` and buys exactly one frame. See TrackerLayout::has_falling_meters:
-        // each half is gated there on its module being drawn at all, since nothing off-screen ages and
+        // SDL event sets `sawInput` and buys exactly one frame. The EQ editor's spectrum panel is a third
+        // case and a different one: nothing in it ages, but it is only ever as current as the last frame
+        // drawn, so a closed gate strands whatever was on screen. See TrackerLayout::has_falling_meters:
+        // every term is gated there on its module being drawn at all, since nothing off-screen ages and
         // nothing would ever bring this term back to false.
         const bool metersFalling = layout.has_falling_meters(state);
         const bool audible = audio_is_audible(state);

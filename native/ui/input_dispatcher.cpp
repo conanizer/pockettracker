@@ -810,15 +810,15 @@ void InputDispatcher::on_dpad_right() {
 
 void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
     // ⚠️ BOTH AXES WRAP, and neither clamps — which makes this the only cursor in the app that wraps in
-    // BOTH directions. The rows are a ring of eighteen (Kotlin: `if (row > 0) row - 1 else MAX_ROW`)
-    // and the channels a ring of three, and the argument is the mixer's row 0 again: a list of colours
-    // is a ring you scroll, not a document you reach the end of. The panel SCROLLS to follow the row
-    // (only 16 of the 18 fit), so wrapping from row 17 to row 0 also scrolls the list back to the top.
+    // BOTH directions. The rows are the THEME row plus one per colour, the channels a ring of three,
+    // and the argument is the mixer's row 0 again: a list of colours is a ring you scroll, not a
+    // document you reach the end of. The panel SCROLLS to follow the row (only 16 rows fit), so
+    // wrapping from the last row to row 0 also scrolls the list back to the top.
     if (d_row != 0) {
         const int row = s_.themeEditor.cursorRow;
-        s_.themeEditor.cursorRow =
-            (d_row < 0) ? (row > 0 ? row - 1 : ThemeEditorModule::MAX_ROW)
-                        : (row < ThemeEditorModule::MAX_ROW ? row + 1 : 0);
+        const int max = ThemeEditorModule::max_row();
+        s_.themeEditor.cursorRow = (d_row < 0) ? (row > 0 ? row - 1 : max)
+                                               : (row < max ? row + 1 : 0);
     }
     if (d_channel != 0) {
         const int ch = s_.themeEditor.cursorChannel;

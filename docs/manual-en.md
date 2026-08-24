@@ -1250,7 +1250,7 @@ The top row lets you cycle through built-in themes and save or load custom theme
 
 Move between positions with D-pad LEFT/RIGHT.
 
-### Rows 1–16 — Color parameters
+### Rows 1–21 — Color parameters
 
 Each row edits one color in the theme. The color preview swatch is shown on the right. Cursor moves between **R**, **G**, **B** channels with D-pad LEFT/RIGHT.
 
@@ -1269,9 +1269,16 @@ Each row edits one color in the theme. The color preview swatch is shown on the 
 | VIZ BG | Visualizer background |
 | VIZ LINE | Visualizer center line |
 | VIZ WAVE | Waveform / bar fill color |
+| MTR BG | Meter background |
 | MTR LOW | Meter green zone (below −6 dBFS) |
 | MTR MID | Meter yellow zone (−6 to 0 dBFS) |
 | MTR HIGH | Meter red zone (≥ 0 dBFS) |
+| EQ BG | EQ EDITOR spectrum panel background |
+| EQ FILL | Shading under the EQ EDITOR's spectrum curve |
+| EQ BORDER | The EQ EDITOR's spectrum curve itself |
+| EQ TXT | Frequency labels on the EQ EDITOR's spectrum |
+
+A theme file saved before these four rows existed loads with them set to what the EQ EDITOR drew previously, so an older `.ptt` looks unchanged until you edit them.
 
 ### Controls
 

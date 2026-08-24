@@ -368,11 +368,14 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         const bool         isCursor = (index == s.cursor);
         const bool         isSel    = s.is_selected(index);
 
+        // ⚠️ The stripe alternates on the ITEM index, not on the on-screen row. Keyed on `i` it
+        // re-phases whenever the list scrolls by an odd number of rows, so a row changes colour
+        // without its content changing.
         Argb bg;
-        if (isCursor)        bg = t.rowCursor;
-        else if (isSel)      bg = t.rowSelection;
-        else if (i % 2 == 0) bg = t.background;
-        else                 bg = t.rowEvery4th;  // theme color instead of hardcoded dark (issue #21)
+        if (isCursor)            bg = t.rowCursor;
+        else if (isSel)          bg = t.rowSelection;
+        else if (index % 2 == 0) bg = t.background;
+        else                     bg = t.rowEvery4th;
         c.fill_rect(x, rowY, WIDTH, ROW_HEIGHT, bg);
 
         // Initialized, not merely assigned in every arm below: the `switch` covers all three
@@ -386,7 +389,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
             switch (item.kind) {
                 case BrowserItem::Kind::PARENT: textColor = COLOR_PARENT; break;
                 case BrowserItem::Kind::ACTION: textColor = COLOR_ACTION; break;
-                case BrowserItem::Kind::FOLDER: textColor = COLOR_FOLDER; break;
+                case BrowserItem::Kind::FOLDER: textColor = t.textTitle; break;
                 case BrowserItem::Kind::FILE:
                     textColor = ext_matches(item.extension, video_extensions()) ? COLOR_VIDEO
                                                                                 : t.textValue;

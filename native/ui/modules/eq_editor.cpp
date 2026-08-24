@@ -302,7 +302,7 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     const int    vy     = y + HEADER_H + ROW_H;
     const int    bottom = VIS_H;  // panel-relative
 
-    c.fill_rect(x, vy, WIDTH, VIS_H, t.vizBackground);
+    c.fill_rect(x, vy, WIDTH, VIS_H, t.eqBg);
 
     // ── The spectrum, one sample per pixel column ────────────────────────────────────────────────
     // Log-mapped bins come out of the engine already, so bin → pixel is a straight rescale. Fewer than
@@ -310,6 +310,10 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     // which is what ptshot draws, and the reason this screen renders with no engine in the process.
     int  specY[WIDTH];
     bool haveSpectrum = (s.spectrum != nullptr && s.spectrumCount >= 2);
+    // What the idle gate reads back (see `spectrum_at_rest`). Set from the heights actually drawn, so
+    // a bar too short to occupy a pixel counts as no bar — which is what the panel shows anyway, and
+    // what lets the answer reach true instead of chasing a magnitude that only approaches zero.
+    spectrumAtRest_ = true;
     if (haveSpectrum) {
         const int n = s.spectrumCount;
         for (int xi = 0; xi < WIDTH; ++xi) {
@@ -320,9 +324,10 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
             const float mag = std::max(s.spectrum[bin0], s.spectrum[bin1]);
             const int   h   = std::min(VIS_H, std::max(0, static_cast<int>(mag * static_cast<float>(VIS_H))));
             specY[xi]       = VIS_H - h;
+            if (h > 0) spectrumAtRest_ = false;
         }
         // The FILL goes down first, so the grid lines below render on top of it — Kotlin's order.
-        fill_under_curve(c, x, vy, specY, WIDTH, bottom, darken(t.textParam, 0.27f));
+        fill_under_curve(c, x, vy, specY, WIDTH, bottom, t.eqFill);
     }
 
     // ── The dB grid ─────────────────────────────────────────────────────────────────────────────
@@ -343,11 +348,11 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     for (const Marker& m : markers) {
         const int fx = freq_to_pixel(m.hz);
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
-        c.draw_text(m.label, x + fx + 2, vy + 3, t.vizCenterLine, CHAR_SPACING, 2);
+        c.draw_text(m.label, x + fx + 2, vy + 3, t.eqTxt, CHAR_SPACING, 2);
     }
 
     // The spectrum's own outline, over the grid.
-    if (haveSpectrum) stroke_column_curve(c, x, vy, specY, WIDTH, t.textParam, 1);
+    if (haveSpectrum) stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1);
 
     // ── The response curve — the point of the whole screen ───────────────────────────────────────
     if (s.slotIndex >= 0 && s.slotIndex < static_cast<int>(s.project.eqPresets.size())) {
