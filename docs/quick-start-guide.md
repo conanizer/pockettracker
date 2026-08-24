@@ -94,7 +94,7 @@ SONG  (8 tracks)  →  CHAIN  (list of phrases)  →  PHRASE  (16 steps)
 2. Hold **R** and tap LEFT again to reach the **SONG** screen. Press **A** on track 1, row `00` — it places chain `00`.
 3. Press **START** — the song plays from the top.
 
-That's a complete, playing song structure. Drums on track 1; put a bassline chain on track 2, chords on track 3 — each of the 8 tracks is a column, and every row plays all 8 tracks together.
+That's a complete, playing song structure. Drums on track 1; put a bassline chain on track 2, chords on track 3 — each of the 8 tracks is a column, and all 8 start together when you press START.
 
 ---
 

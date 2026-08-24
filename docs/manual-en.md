@@ -409,7 +409,7 @@ PROJECT
 - A **STEP** is a single note event with optional effects.
 - A **PHRASE** is a short pattern of 16 steps — like a bar of music.
 - A **CHAIN** is a sequence of up to 16 phrases. Each phrase slot can have a **transpose** value to shift pitch without duplicating the phrase.
-- The **SONG** arranges chains across 8 tracks. Each song row plays all 8 tracks simultaneously.
+- The **SONG** arranges chains across 8 tracks. All 8 start together on the row you press START from, and each then moves down its own column as its own chains end.
 
 All values (chain IDs, phrase IDs, instrument IDs, etc.) are hexadecimal, ranging from `00` to `FF`.
 
@@ -430,6 +430,10 @@ The SONG screen arranges chains across 8 tracks. Each column is a track (1–8),
 ```
 
 `--` means the track is silent at that position. Numbers are chain IDs (hex).
+
+During playback a `>` appears to the left of the cell each track is on. The eight move independently, so they are rarely all on the same row.
+
+A `>` also marks the playing row on the CHAIN and PHRASE screens. It is only drawn where the screen is showing something that is actually playing — audition a phrase on its own and the chain and song screens stay unmarked, because that phrase need not belong to any chain.
 
 ### Controls
 
@@ -1258,13 +1262,13 @@ Each row edits one color in the theme. The color preview swatch is shown on the 
 |---|---|
 | BACKGROUND | Module fill and default row background |
 | ROW 4TH | Beat-accent rows (every 4th step) |
-| ROW CURSOR | The row the cursor is on |
-| ROW PLAY | The currently playing step during playback |
+| ROW CURSOR | The cell the cursor is on in a grid (SONG, CHAIN, PHRASE, TABLE, GROOVE); the whole row on list screens such as SETTINGS |
+| ROW PLAY | The `>` playback marker. It is drawn brightened, so a dark value still reads as ink |
 | ROW SELECT | Selected region during copy/paste |
 | TXT TITLE | Screen header text (e.g., "PHRASE", "INSTRUMENT") |
 | TXT PARAM | Inactive parameter labels |
 | TXT VALUE | Inactive parameter values |
-| TXT CURSOR | Text on the cursor row |
+| TXT CURSOR | Text under the cursor, and the row number and column heading that mark where it is |
 | TXT EMPTY | Empty / placeholder cells |
 | VIZ BG | Visualizer background |
 | VIZ LINE | Visualizer center line |

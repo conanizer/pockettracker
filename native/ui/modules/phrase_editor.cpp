@@ -36,13 +36,16 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
         c.draw_text(via, x + 190, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
+    // The header lights for the column the cursor is in — it is half of what the row highlight used
+    // to say, the row number being the other half. An FX header covers its name AND its value cell.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
-    c.draw_text("N",   noteX,    rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("V",   volX,     rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("I",   instX,    rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX1", fx1NameX, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX2", fx2NameX, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX3", fx3NameX, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    const int cc = s.cursorColumn;
+    c.draw_text("N",   noteX,    rowY, header_color(cc, 1, 1, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("V",   volX,     rowY, header_color(cc, 2, 2, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("I",   instX,    rowY, header_color(cc, 3, 3, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("FX1", fx1NameX, rowY, header_color(cc, 4, 5, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("FX2", fx2NameX, rowY, header_color(cc, 6, 7, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("FX3", fx3NameX, rowY, header_color(cc, 8, 9, t), CHAR_SPACING, FONT_SCALE);
 
     // Asked once and read three times a row: an AUS/AUF cell no ramp uses draws dimmed (draw_row).
     // It is the pairing the emitter itself runs, over every chain row that plays this phrase, so the
@@ -73,21 +76,29 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
         for (int col = 1; col <= 9 && !isRowSelected; ++col) isRowSelected = s.isCellSelected(index, col);
     }
 
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT,
-                row_bg_color(index, s.cursorRow, s.playbackRow, s.isPlaying, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, isRowSelected, t));
 
     const int textY = dataRowY + TEXT_PADDING;
-
-    // Quarter-note rows (every 4th) are drawn brighter as a beat-accent cue.
-    const Argb stepColor = (index == s.cursorRow && s.cursorColumn == 0) ? t.textCursor
-                           : (index % 4 == 0)                            ? t.textParam
-                                                                         : t.textEmpty;
-    c.draw_text(hex1(index), stepX, textY, stepColor, CHAR_SPACING, FONT_SCALE);
 
     // Every value cell shares draw_cell's colour priority (cursor > selection > empty > per-column
     // colour); note-emptiness dims NOTE/VOL/INST, fx-emptiness dims its own name/value pair.
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
+
+    // Quarter-note rows (every 4th) are drawn brighter as a beat-accent cue — and the whole cursor
+    // ROW's number lights, whatever column the cursor is in, because that is what now says which row
+    // is being edited. Column 0 is a real cursor position, so the number goes through draw_cell and
+    // gets the cell background when the cursor is actually on it.
+    const Argb stepColor = (index == s.cursorRow) ? t.textCursor
+                           : (index % 4 == 0)     ? t.textParam
+                                                  : t.textEmpty;
+    draw_cell(c, hex1(index), stepX, textY, cur(0), /*is_selected=*/false, /*is_empty=*/false,
+              stepColor, t);
+
+    // Beside the one-character row number, in the gutter that was already there - 40px of which a
+    // glyph uses 15. No column moves.
+    for (const TrackPlayhead& ph : s.playheads)
+        if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
     const bool noteEmpty = (step.note == Note::EMPTY());
     draw_cell(c, note_name(step.note),  noteX, textY, cur(1), sel(1), noteEmpty, t.textValue, t);

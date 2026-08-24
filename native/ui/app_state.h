@@ -29,6 +29,7 @@
 #include "ui/modules/theme_editor.h"
 #include "ui/modules/settings_editor.h"
 #include "ui/platform_caps.h"
+#include "ui/playhead.h"
 #include "ui/selection.h"
 
 #include "songcore/midi_in.h"    // IMidiIn  — the input port (E2); its row is E3's
@@ -146,13 +147,15 @@ struct AppState {
     int currentGroove     = 0;
 
     // ── Playback (read back from songcore's playheads at 60 Hz) ──────────────────────────────────
-    bool isPlaying          = false;
-    int  playbackRow        = 0;  // phrase step, on the PHRASE screen
-    int  playbackChainRow   = 0;
-    int  playbackSongRow    = 0;
+    //
+    // ⚠️ EIGHT, one per track, and −1 where a track has no position at all (ui/playhead.h). There is
+    // no "the playback row": the eight song cursors run independently, so any single number would be
+    // one track's answer wearing the whole song's name.
+    bool          isPlaying    = false;
+    TrackPlayhead playheads[8] = {};
 
     /**
-     * The TABLE row an engine voice is on — −1 when none is. Unlike the three above, this is not a
+     * The TABLE row an engine voice is on — −1 when none is. Unlike the eight above, this is not a
      * sequencer playhead: it is read off the VOICE, because a table advances on its own tic clock
      * under a note that may outlive the step that started it (ui/engine_feed.h).
      */

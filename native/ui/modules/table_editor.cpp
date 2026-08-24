@@ -29,12 +29,15 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     // two speeds. It is shown here because this is where you feel it.
     c.draw_text(hex2(s.ticRate) + " TIC", x + WIDTH - 120, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
+    // The header lights for the column the cursor is in — it is half of what the row highlight used
+    // to say, the row number being the other half. An FX header covers its name AND its value cell.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
-    c.draw_text("N",   transposeX, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("V",   volX,       rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX1", fx1NameX,   rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX2", fx2NameX,   rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("FX3", fx3NameX,   rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    const int cc = s.cursorColumn;
+    c.draw_text("N",   transposeX, rowY, header_color(cc, 1, 1, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("V",   volX,       rowY, header_color(cc, 2, 2, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("FX1", fx1NameX,   rowY, header_color(cc, 3, 4, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("FX2", fx2NameX,   rowY, header_color(cc, 5, 6, t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("FX3", fx3NameX,   rowY, header_color(cc, 7, 8, t), CHAR_SPACING, FONT_SCALE);
 
     // Asked once and read three times a row: an AUS/AUF cell no ramp uses draws dimmed (draw_row).
     // It is the pairing the ENGINE itself runs — the same walk, over the same three FX slots — so the
@@ -63,17 +66,22 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
         for (int col = 1; col <= 8 && !isRowSelected; ++col) isRowSelected = s.isCellSelected(index, col);
     }
 
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT,
-                row_bg_color(index, s.cursorRow, s.playbackRow, s.playbackRow >= 0, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, isRowSelected, t));
 
     const int textY = dataRowY + TEXT_PADDING;
 
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
-    // No every-4th accent: a table row is a tic, not a beat.
-    c.draw_text(hex1(index), stepX, textY, cur(0) ? t.textCursor : t.textEmpty, CHAR_SPACING,
-                FONT_SCALE);
+    // No every-4th accent: a table row is a tic, not a beat. The number lights across the whole
+    // cursor row — that is what now says which row is being edited — and column 0 is a real cursor
+    // position, so it goes through draw_cell and gets the cell background when the cursor is on it.
+    draw_cell(c, hex1(index), stepX, textY, cur(0), /*is_selected=*/false, /*is_empty=*/false,
+              (index == s.cursorRow) ? t.textCursor : t.textEmpty, t);
+
+    // ONE marker, in the gutter beside the row number. The three FX lanes get their own once they
+    // have their own playheads; until then every column of a table advances together.
+    if (s.playbackRow == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
     // Transpose is always shown — 0x00 is "no transpose", drawn dim, but it is still a value.
     draw_cell(c, hex2(row.transpose), transposeX, textY, cur(1), sel(1),

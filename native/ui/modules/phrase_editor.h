@@ -27,6 +27,7 @@
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/playhead.h"
 #include "ui/theme.h"
 
 namespace pt::ui {
@@ -43,8 +44,10 @@ struct PhraseEditorState {
     int                     viaChainRow  = -1;
     int                     songRow      = -1;
     int                     songTrack    = -1;
-    int                     playbackRow  = 0;
-    bool                    isPlaying    = false;
+    // ONE screen, EIGHT possible playheads: the same phrase placed on three tracks is being played
+    // by three of them, at three different steps. A marker is drawn where `phraseId` matches the
+    // phrase on display, so auditioning a phrase marks this screen and nothing upstream of it.
+    TrackPlayhead           playheads[8] = {};
     bool                    selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme                   theme = theme_classic();

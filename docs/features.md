@@ -13,6 +13,7 @@ Everything you can do with PocketTracker.
 - Set swing and shuffle per track or globally with groove patterns
 - 256 phrases, 256 chains, 8 tracks, 128 grooves
 - Use HOP to jump between phrases mid-sequence — create odd time signatures and generative loops
+- Every track runs its own column of the song at its own pace: all 8 start together, then each moves on as soon as its own chain ends, so a 2-row chain beside a 16-row one loops eight times instead of waiting. A `>` marker on the song, chain and phrase screens shows where each track has got to
 
 ## Sequence Effects
 

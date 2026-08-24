@@ -1241,12 +1241,15 @@ int run(const AppConfig& cfg) {
         // this loop's period and not something a backend chose.
         host.poll();
 
-        const PlaybackPosition pos = host.playheads();
-        state.isPlaying        = host.is_playing();
-        state.playbackRow      = pos.phraseStep;
-        state.playbackChainRow = pos.chainRow;
-        state.playbackSongRow  = pos.songRow;
-        state.trackMask        = host.track_mask();
+        state.isPlaying = host.is_playing();
+        // Eight asks, one per track, because there is no ninth answer that covers them all. A track
+        // with no position hands back −1 in every field and the screens draw no marker for it —
+        // which is what makes auditioning a phrase leave CHAIN and SONG alone (ui/playhead.h).
+        for (int t = 0; t < 8; ++t) {
+            const PlaybackPosition p = host.playheads(t);
+            state.playheads[t] = {p.songRow, p.chainId, p.chainRow, p.phraseId, p.phraseStep};
+        }
+        state.trackMask = host.track_mask();
 
         // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored
         // notes, the table's playing row, the SF2 preset list, the mixer's meters. AFTER the transport
@@ -1350,14 +1353,19 @@ int run(const AppConfig& cfg) {
         // audio device is calling back, the PLAYHEAD means the sequencer is advancing, and VOICES
         // means events are reaching the engine and turning into sound. Any one stuck at zero names the
         // broken link. A window on screen does not answer that question when there is no screen.
+        //
+        // TRACK 0 of the eight, and it is the right one to print: a PHRASE or CHAIN audition plays
+        // track 0 by default, and under SONG any track advancing proves the clock is alive, which is
+        // the whole job of this line. −1 shows as such, and means that track has no position at all.
         if (cfg.console && now - lastStatus >= 1000) {
             lastStatus = now;
+            const ui::TrackPlayhead& t0 = state.playheads[0];
             std::printf(
                 "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d"
                 "   drew %lld skip %lld same %lld\n",
                 host.is_playing() ? "play" : "stop",
-                static_cast<long long>(engineRef.getCurrentFrame()), pos.songRow, pos.chainRow,
-                pos.phraseStep, engineRef.getActiveVoiceCount(), ui::screen_label(state.currentScreen),
+                static_cast<long long>(engineRef.getCurrentFrame()), t0.songRow, t0.chainRow,
+                t0.step, engineRef.getActiveVoiceCount(), ui::screen_label(state.currentScreen),
                 state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented);
             std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
         }

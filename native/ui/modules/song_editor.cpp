@@ -18,10 +18,15 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
+    // TRACK_PITCH is 56, not the 50 it was, and the six pixels bought one marker column per track:
+    // eight of them have to fit ahead of eight cells on a 510px module. Track 7 now ends at 490 and
+    // the editor clip is 499, so the widening spends the free space on the right and no more.
+    // The step gutter takes the same pitch so track 0's marker clears the two-digit row number.
+    constexpr int TRACK_PITCH = 30 + 26;
     int       colX  = x + 10;
-    const int stepX = colX; colX += 30 + 20;
+    const int stepX = colX; colX += TRACK_PITCH;
     int       trackColumns[8];
-    for (int i = 0; i < 8; ++i) { trackColumns[i] = colX; colX += 30 + 20; }
+    for (int i = 0; i < 8; ++i) { trackColumns[i] = colX; colX += TRACK_PITCH; }
 
     int rowY = y + TEXT_PADDING;
     // The status overlay (SAVED / LOADED / …) is drawn by the layout on the visualizer header, not
@@ -29,10 +34,14 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
     c.draw_text("SONG: " + Canvas::clip_text(s.project.name, TITLE_MAX_CHARS), x + 10, rowY,
                 t.textTitle, CHAR_SPACING, FONT_SCALE);
 
+    // The track number lights for the track the cursor is in — it is half of what the row highlight
+    // used to say, the row number being the other half. `cursorTrack` is already 1-based, so it IS
+    // the column index the header stands over.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     for (int trackId = 0; trackId < 8; ++trackId) {
-        c.draw_text(std::to_string(trackId + 1), trackColumns[trackId], rowY, t.textParam,
-                    CHAR_SPACING, FONT_SCALE);
+        c.draw_text(std::to_string(trackId + 1), trackColumns[trackId], rowY,
+                    header_color(s.cursorTrack, trackId + 1, trackId + 1, t), CHAR_SPACING,
+                    FONT_SCALE);
     }
 
     for (int rowIndex = 0; rowIndex < VISIBLE_ROWS; ++rowIndex) {
@@ -53,14 +62,18 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
             isRowSelected = s.isCellSelected(absolute_row, col);
     }
 
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT,
-                row_bg_color(absolute_row, s.cursorRow, s.playbackRow, s.isPlaying, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(absolute_row, isRowSelected, t));
 
     const int textY = dataRowY + TEXT_PADDING;
 
-    // No cursor colour: column 0 is a gutter the cursor cannot reach (cursorTrack starts at 1).
+    // No cell background: column 0 is a gutter the cursor cannot reach (cursorTrack starts at 1).
+    // It still lights on the cursor row, though — with the row no longer painted, the row number is
+    // the only thing saying which of 256 rows is being edited.
     c.draw_text(hex2(absolute_row), stepX, textY,
-                (absolute_row % 4 == 0) ? t.textParam : t.textEmpty, CHAR_SPACING, FONT_SCALE);
+                (absolute_row == s.cursorRow) ? t.textCursor
+                : (absolute_row % 4 == 0)     ? t.textParam
+                                              : t.textEmpty,
+                CHAR_SPACING, FONT_SCALE);
 
     for (int trackId = 0; trackId < 8; ++trackId) {
         const Track& track = s.project.tracks[static_cast<size_t>(trackId)];
@@ -82,6 +95,12 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
 
         draw_cell(c, chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], textY, isCursor,
                   isSelected, /*is_empty=*/chainId == -1, value_color, t);
+
+        // This track and no other. Eight cursors means eight answers, and a track that has stopped
+        // (or is only lending its number to a PHRASE being auditioned) answers −1 and gets nothing
+        // drawn — which is the whole reason the row highlight had to go.
+        if (s.playheads[trackId].songRow == absolute_row)
+            draw_playhead(c, trackColumns[trackId] - CHAR_W, textY, t);
     }
 }
 

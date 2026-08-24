@@ -14,6 +14,7 @@
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/playhead.h"
 #include "ui/theme.h"
 
 #include <functional>
@@ -32,8 +33,10 @@ struct ChainEditorState {
     // still moved — the header is the only thing on screen that says so.
     int  songRow = -1;
     int  songTrack = -1;
-    int  playbackRow   = 0;
-    bool isPlaying     = false;
+    // ONE screen, EIGHT possible playheads: two tracks can be inside this same chain at two
+    // different rows, and a third inside a chain this screen is not showing. A marker is drawn only
+    // where `chainId` matches the chain on display, never on a row number alone (ui/playhead.h).
+    TrackPlayhead playheads[8] = {};
     bool selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme theme = theme_classic();

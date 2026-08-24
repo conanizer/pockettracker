@@ -46,6 +46,7 @@
 #include "automation.h"
 #include "rng.h"
 #include "router.h"
+#include "traversal.h"   // chain_at / phrase_at — the ids a playhead is IN, not just its row numbers
 
 namespace songcore {
 
@@ -66,13 +67,27 @@ inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi
 enum class PlaybackMode { STOPPED, PHRASE, CHAIN, SONG };
 
 // ─── UI cursor feedback (SC-4 — never goldened) ──────────────────────────────────────────────────
-// PlaybackController.PlaybackPosition field-for-field. `row` doubles as the phrase step in every
-// mode (that is how Kotlin fills it), so the UI reads one struct wherever the cursor lives.
+//
+// Where ONE track is. There is no whole-song answer: the eight song cursors run independently, so a
+// caller names the track it is asking about.
+//
+// ⚠️ **EVERY FIELD IS −1 WHEN THERE IS NO ANSWER, AND −1 IS NOT ROW 0.** A phrase auditioned on its
+// own is in no chain and in no song; a track whose song column has run out has stopped. Filling
+// those with zeros is what put a frozen playhead on row 0 of CHAIN and SONG while a PHRASE played,
+// and any consumer that draws a marker on a zero will do it again.
+//
+// ⚠️ **THE IDS ARE PART OF THE POSITION.** A chain row means nothing without the chain it is a row
+// of: the CHAIN screen shows one chain and two tracks may be inside it at two different rows while
+// a third is inside a chain the screen is not showing. Same for a phrase step.
+//
+// `row` doubles as the phrase step in every mode (that is how PlaybackController filled it).
 struct PlaybackPosition {
-    int row = 0;
-    int chainRow = 0;
-    int phraseStep = 0;
-    int songRow = 0;
+    int row = -1;
+    int chainRow = -1;
+    int phraseStep = -1;
+    int songRow = -1;
+    int chainId = -1;    // the chain `chainRow` is a row OF
+    int phraseId = -1;   // the phrase `phraseStep` is a step OF
 };
 
 // Where one track is in the song, as the scheduler queued it. ⚠️ The TRACK is part of the key now:
@@ -196,14 +211,15 @@ class Sequencer {
     // PlaybackController.getPlaybackPosition, verbatim (incl. the tempo fallback: currentProject_ is
     // null on the render path, but so is isPlaying_, so this reads the live tempo in practice).
     //
-    // ⚠️ `trackId < 0` means "whichever track's marker is oldest in the window" — the one full-row
-    // highlight the SONG screen still draws. It cannot mean anything once the cursors diverge and it
-    // goes when the per-track markers land; the per-track form below is what those read.
+    // ⚠️ `trackId < 0` means "whichever track's marker is oldest in the window" — one number for a
+    // song that no longer has one. Nothing in the app calls it; it survives for the harness, which
+    // drives PHRASE mode, where there is only ever one track playing and the question is well posed.
     PlaybackPosition getPlaybackPosition() { return getPlaybackPosition(-1); }
 
-    // Where ONE track is. In PHRASE and CHAIN mode only the track being played has a position, and
-    // every other track answers with the zero struct — which is the honest answer: a phrase that is
-    // not in any chain has no chain row, and a chain that is not in the song has no song row.
+    // Where ONE track is. In PHRASE and CHAIN mode only the track being played has a position and
+    // every other track answers −1 across the board — which is the honest answer, and the whole
+    // answer: a phrase auditioned on its own is in no chain and in no song, so the CHAIN and SONG
+    // screens draw nothing for it rather than freezing a marker on row 0.
     PlaybackPosition getPlaybackPosition(int trackId) {
         PlaybackPosition pos;
         if (!isPlaying_) return pos;
@@ -220,11 +236,12 @@ class Sequencer {
             case PlaybackMode::PHRASE: {
                 // ⚠️ BOTH fields, and `phraseStep` is the load-bearing one: the shell reads the phrase
                 // cursor out of `phraseStep`, not `row`. Filling only `row` here (as the Kotlin original
-                // does, where the UI read `row`) leaves `phraseStep` at its zero default, so the PHRASE
-                // screen's playback highlight sits frozen on step 0 for the whole loop while CHAIN and
-                // SONG — which fill both — move normally. Same shape as the two arms below.
+                // does, where the UI read `row`) leaves `phraseStep` at its default, so the PHRASE
+                // screen's marker sits frozen on step 0 for the whole loop while CHAIN and SONG —
+                // which fill both — move normally. Same shape as the two arms below.
                 pos.phraseStep = clampi(static_cast<int>((elapsedFrames % framesPerPhrase) / framesPerStep), 0, 15);
                 pos.row = pos.phraseStep;
+                pos.phraseId = currentPhraseId_;
                 return pos;
             }
             case PlaybackMode::CHAIN: {
@@ -234,6 +251,8 @@ class Sequencer {
                     if (into >= 0 && into < framesPerPhrase) {
                         pos.chainRow = e.first;
                         pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
+                        pos.chainId = currentChainId_;
+                        pos.phraseId = project_ ? phrase_at(*project_, pos.chainId, pos.chainRow) : -1;
                         break;
                     }
                 }
@@ -249,6 +268,13 @@ class Sequencer {
                         pos.songRow = e.first.songRow;
                         pos.chainRow = e.first.chainRow;
                         pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
+                        // ⭐ Re-derived from the project rather than banked in SongPos, so an edit to
+                        // the song cell or the chain row under a running track shows the phrase the
+                        // NEXT lap will play, not the one the entry was queued from.
+                        if (project_) {
+                            pos.chainId  = chain_at(*project_, e.first.track, pos.songRow);
+                            pos.phraseId = phrase_at(*project_, pos.chainId, pos.chainRow);
+                        }
                         break;
                     }
                 }

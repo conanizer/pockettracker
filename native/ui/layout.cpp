@@ -1,5 +1,6 @@
 #include "ui/layout.h"
 
+#include <algorithm>
 #include <string>
 
 #include "ui/clipboard.h"
@@ -154,8 +155,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
                 ps.cursorRow      = s.cursorRow;
                 ps.cursorColumn   = s.cursorColumn;
-                ps.playbackRow    = s.playbackRow;
-                ps.isPlaying      = s.isPlaying;
+                std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ps.playheads));
                 ps.selectionMode  = s.selection_mode();
                 ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ps.theme          = t;
@@ -181,8 +181,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ChainEditorState cs{p.chains[static_cast<size_t>(s.currentChain)]};
                 cs.cursorRow      = s.cursorRow;
                 cs.cursorColumn   = s.cursorColumn;
-                cs.playbackRow    = s.playbackChainRow;
-                cs.isPlaying      = s.isPlaying;
+                std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(cs.playheads));
                 cs.selectionMode  = s.selection_mode();
                 cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 cs.theme          = t;
@@ -199,8 +198,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ss.cursorRow      = s.cursorRow;
                 ss.cursorTrack    = s.cursorColumn;  // on SONG the cursor column IS the track (1..8)
                 ss.scrollPosition = s.songScrollPosition;
-                ss.isPlaying      = s.isPlaying;
-                ss.playbackRow    = s.playbackSongRow;
+                std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ss.playheads));
                 ss.selectionMode  = s.selection_mode();
                 ss.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ss.theme          = t;

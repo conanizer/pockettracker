@@ -9,11 +9,11 @@
 //   0x00  skip: the phrase row is not triggered and takes no time
 //   0x01+ that step lasts this many ticks (0x0C = 12 = the default, one step = one beat/4)
 //
-// The simplest module in the app, and the only grid editor with NO playback row and NO selection —
-// so its row background is just the cursor, with no `row_bg_color` priority ladder to run. Its rows
-// are also laid out from a `dataStartY` that already includes TEXT_PADDING (the others add it per
-// row), so the cursor rect subtracts it back off. Same pixels, different spelling; kept as Kotlin
-// writes it.
+// The simplest module in the app, and the only grid editor with NO playback marker and NO selection
+// — so it has no row background at all, and no `row_bg_color` priority ladder to run. Its rows are
+// laid out from a `dataStartY` that already includes TEXT_PADDING (the others add it per row), which
+// is why the y passed to `draw_cell` needs no adjusting here. Same pixels, different spelling; kept
+// as Kotlin writes it.
 
 #include "songcore/model.h"
 #include "ui/canvas.h"

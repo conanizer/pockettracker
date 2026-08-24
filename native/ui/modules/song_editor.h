@@ -18,6 +18,7 @@
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/playhead.h"
 #include "ui/theme.h"
 
 #include <functional>
@@ -29,8 +30,8 @@ struct SongEditorState {
     int  cursorRow      = 0;  // absolute (0..255), not the on-screen index
     int  cursorTrack    = 1;  // 1..8 — NOT 0..7
     int  scrollPosition = 0;
-    bool isPlaying      = false;
-    int  playbackRow    = 0;
+    // Eight markers, one per track (ui/playhead.h) — a track with no position draws none.
+    TrackPlayhead playheads[8] = {};
     bool selectionMode  = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme theme = theme_classic();

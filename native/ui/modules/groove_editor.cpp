@@ -28,8 +28,10 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     c.draw_text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
-    c.draw_text("TIC", tickX, y + ROW_HEIGHT + 14 + TEXT_PADDING, t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    // It lights for the column the cursor is in, as the other grids' headers do. With one value
+    // column that is nearly always lit — the point is that GROOVE reads the same as PHRASE.
+    c.draw_text("TIC", tickX, y + ROW_HEIGHT + 14 + TEXT_PADDING,
+                header_color(s.cursorColumn, 1, 1, t), CHAR_SPACING, FONT_SCALE);
 
     // ── 16 data rows ─────────────────────────────────────────────────────────────────────────────
     const int dataStartY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + TEXT_PADDING;
@@ -41,16 +43,15 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
         const bool isEndMarker = (tickValue == -1);
         const bool isPastEnd   = (index >= activeLen);  // past the first −1: inactive, drawn dim
 
-        if (isCursor) c.fill_rect(x, rowY - TEXT_PADDING, WIDTH, ROW_HEIGHT, t.rowCursor);
+        // The cursor is a background under ONE cell, as on every other grid; the row number lights
+        // across the cursor row to say which row, the header to say which column.
+        draw_cell(c, hex1(index), stepX, rowY, isCursor && s.cursorColumn == 0,
+                  /*is_selected=*/false, /*is_empty=*/false,
+                  isCursor ? t.textCursor : t.textEmpty, t);
 
-        c.draw_text(hex1(index), stepX, rowY, isCursor ? t.textCursor : t.textEmpty, CHAR_SPACING,
-                    FONT_SCALE);
-
-        const Argb tickColor = (isCursor && s.cursorColumn == 1) ? t.textCursor
-                               : (isEndMarker || isPastEnd)      ? t.textEmpty
-                                                                 : t.textValue;
-        c.draw_text(isEndMarker ? "--" : hex2(tickValue), tickX, rowY, tickColor, CHAR_SPACING,
-                    FONT_SCALE);
+        draw_cell(c, isEndMarker ? "--" : hex2(tickValue), tickX, rowY,
+                  isCursor && s.cursorColumn == 1, /*is_selected=*/false,
+                  /*is_empty=*/isEndMarker || isPastEnd, t.textValue, t);
     }
 }
 

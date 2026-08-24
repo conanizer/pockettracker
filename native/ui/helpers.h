@@ -110,15 +110,58 @@ inline Argb with_alpha(Argb c, float alpha) {
 
 /**
  * The standard row background for every grid editor (phrase, chain, song, table).
- * Priority: playing > selected > cursor > every-4th-row accent > default.
+ * Priority: selected > every-4th-row accent > default.
+ *
+ * ⚠️ NEITHER THE CURSOR NOR PLAYBACK IS A ROW HERE, and for the same reason: a grid row holds up to
+ * ten cells and a row-wide colour cannot say which one is meant. The cursor is a background under
+ * ONE cell (`draw_cell`); what plays is a marker per track (`draw_playhead`), which can be absent,
+ * and can be in eight places at once.
  */
-inline Argb row_bg_color(int index, int cursor_row, int playback_row, bool is_playing,
-                         bool is_selected, const Theme& t) {
-    if (is_playing && index == playback_row) return t.rowPlayback;
+inline Argb row_bg_color(int index, bool is_selected, const Theme& t) {
     if (is_selected) return t.rowSelection;
-    if (index == cursor_row) return t.rowCursor;
     if (index % 4 == 0) return t.rowEvery4th;
     return t.background;
+}
+
+/**
+ * A grid's column header, which is how the cursor says WHICH COLUMN now that it no longer paints a
+ * whole row. `lo`..`hi` is a range because an FX header stands over two cursor columns: a name and
+ * its value are one column to the reader and two to the cursor.
+ */
+inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
+    return (cursor_column >= lo && cursor_column <= hi) ? t.textCursor : t.textParam;
+}
+
+// ─── The playback marker ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The colour of the `>` marker, derived from `rowPlayback` — the key that used to paint the whole
+ * row, kept by name so every `.ptt` on a user's card still loads and still controls this.
+ *
+ * ⚠️ IT CANNOT BE USED RAW. Every value that key has ever held was chosen to sit BEHIND text on a
+ * dark screen (CLASSIC's is 0xFF004400), and ink that dark on `background` is not readable. So the
+ * hue is the theme's and the brightness is not: scale all three channels until the strongest reaches
+ * `TARGET`. That keeps green green, amber amber and blue blue across the four built-ins and across
+ * anything a user has typed, while guaranteeing one legible glyph.
+ *
+ * A palette whose playback colour is already bright scales by ~1 and is left alone; pure black has
+ * no hue to keep, so it falls back to the cursor colour rather than staying invisible.
+ */
+inline Argb playhead_color(const Theme& t) {
+    constexpr int TARGET = 0xE0;
+    const int r = (t.rowPlayback >> 16) & 0xFF, g = (t.rowPlayback >> 8) & 0xFF, b = t.rowPlayback & 0xFF;
+    const int peak = (r > g ? r : g) > b ? (r > g ? r : g) : b;
+    if (peak == 0) return t.textCursor;
+    if (peak >= TARGET) return 0xFF000000u | (t.rowPlayback & 0x00FFFFFFu);
+    return darken(t.rowPlayback, static_cast<float>(TARGET) / static_cast<float>(peak));
+}
+
+/**
+ * LGPT's and M8's playhead: a `>` in the gap ahead of the cell, one per track. It is one glyph wide
+ * (CHAR_W), so `x` is the marker's own column and never the cell's.
+ */
+inline void draw_playhead(Canvas& c, int x, int text_y, const Theme& t) {
+    c.draw_text(">", x, text_y, playhead_color(t), CHAR_SPACING, FONT_SCALE);
 }
 
 // ─── Cells ───────────────────────────────────────────────────────────────────────────────────────
@@ -126,9 +169,27 @@ inline Argb row_bg_color(int index, int cursor_row, int playback_row, bool is_pl
 /**
  * One value cell in an editor grid row, with the standard colour priority:
  * cursor > selection > empty > `value_color` (which varies per column: values, params, FX names).
+ *
+ * ⚠️ THE CURSOR'S BACKGROUND IS PAINTED HERE, per cell — `row_bg_color` has none.
+ *
+ * The width is DERIVED from the text rather than passed in, and that is exact rather than
+ * approximate: every column of every grid is fixed-width in GLYPHS, because an empty cell prints a
+ * placeholder the same length as a full one (`--`, `---`). So the derived width is uniform down a
+ * column without a tenth argument at two dozen call sites, and it is the width of the string
+ * actually drawn. ⚠️ A column whose text could change length would highlight raggedly — that is the
+ * constraint this buys the brevity with, and it is the one thing to check before adding one.
+ *
+ * The horizontal margin is CHAR_SPACING, the font's own inter-glyph gap: the cell edge lands exactly
+ * where the next character would have begun, which reads as one character cell and clears the
+ * playhead marker sitting one CHAR_W to the left of the cell.
  */
 inline void draw_cell(Canvas& c, const std::string& text, int x, int text_y, bool is_cursor,
                       bool is_selected, bool is_empty, Argb value_color, const Theme& t) {
+    if (is_cursor) {
+        c.fill_rect(x - CHAR_SPACING, text_y - TEXT_PADDING,
+                    Canvas::text_width(text, CHAR_SPACING, FONT_SCALE) + 2 * CHAR_SPACING,
+                    ROW_HEIGHT, t.rowCursor);
+    }
     const Argb color = is_cursor     ? t.textCursor
                        : is_selected ? t.vizWave
                        : is_empty    ? t.textEmpty

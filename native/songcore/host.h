@@ -1180,14 +1180,10 @@ class SongcoreHost {
     }
 
     // ── ↑ feedback ───────────────────────────────────────────────────────────────────────────────
-    PlaybackPosition playheads() {
-        sync_clock();
-        return seq_.getPlaybackPosition();
-    }
 
-    // Where ONE track's playhead is. In SONG mode the eight are at eight different places, so this
-    // is the only form that can answer honestly; the form above answers with whichever marker is
-    // oldest in the window, for the single full-row highlight that has not been replaced yet.
+    // Where ONE track's playhead is — the only form there is. In SONG mode the eight run
+    // independently, so a single whole-song answer would be one track's number wearing the song's
+    // name; the UI asks eight times, once per marker it might draw (ui/playhead.h).
     PlaybackPosition playheads(int trackId) {
         sync_clock();
         return seq_.getPlaybackPosition(trackId);
