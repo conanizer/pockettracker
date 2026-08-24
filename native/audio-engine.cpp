@@ -781,15 +781,21 @@ void AudioEngine::setFlushToZeroForCurrentThread() {
 #endif
 }
 
-int AudioEngine::effectiveTicRateFor(int tableId, int fallback) {
-    if (tableId < 0 || tableId >= 256) return fallback;
+// A TIC in the table's LAST ROW overrides the instrument's rate — per COLUMN, because each column
+// has its own playhead. FX1 sets lane 0's rate, FX2 lane 1's, FX3 lane 2's, and a column with no TIC
+// there keeps the instrument's.
+//
+// ⚠️ This is the one row where a TIC does not act when the playhead reaches it: it is read at TRIGGER,
+// so the rate is in force from row 0. A TIC anywhere else takes effect when its lane arrives.
+void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_LANES]) {
+    for (int l = 0; l < TABLE_LANES; ++l) out[l] = fallback;
+    if (tableId < 0 || tableId >= 256) return;
     std::lock_guard<std::mutex> lock(tableMutex);
-    if (!tables[tableId].loaded) return fallback;
+    if (!tables[tableId].loaded) return;
     const TableRow& lastRow = tables[tableId].rows[15];
-    if (lastRow.fx1Type == FX_TIC) return lastRow.fx1Value;
-    if (lastRow.fx2Type == FX_TIC) return lastRow.fx2Value;
-    if (lastRow.fx3Type == FX_TIC) return lastRow.fx3Value;
-    return fallback;
+    if (lastRow.fx1Type == FX_TIC) out[0] = lastRow.fx1Value;
+    if (lastRow.fx2Type == FX_TIC) out[1] = lastRow.fx2Value;
+    if (lastRow.fx3Type == FX_TIC) out[2] = lastRow.fx3Value;
 }
 
 // Per-voice-type table FX behaviour, resolved at compile time inside processTableTick:
@@ -866,7 +872,9 @@ static inline int filterByteOf(float value) {
 static inline int tic00RowAfter(int tableRow, int lastProcessedRow) {
     return (lastProcessedRow != tableRow) ? tableRow : (tableRow + 1) % 16;
 }
-static inline int tic00RowAfter(const Voice& v) { return tic00RowAfter(v.tableRow, v.lastProcessedRow); }
+static inline int tic00RowAfter(const TableLane& lane) {
+    return tic00RowAfter(lane.row, lane.lastProcessed);
+}
 
 // Special TIC modes:
 //   TIC00 (0x00): Trigger mode — table row set by note, doesn't advance automatically
@@ -890,90 +898,112 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
             for (int i = 0; i < 16; ++i) rows[i] = tables[voice.tableId].rows[i];
     }
     if (!tableLoaded) return;
-    const TableRow& row = rows[voice.tableRow];
 
-    bool shouldProcessRow = false;
-    bool shouldAdvance = false;
-    // How far the voice is through the row it is standing on, for the ramp's sub-row interpolation.
+    // How far each lane is through the row it is standing on, for the ramp's sub-row interpolation.
     // 0 in the three non-advancing TIC modes, which hold the row still by design.
-    double rowFraction = 0.0;
+    double rowFraction[TABLE_LANES] = {0.0, 0.0, 0.0};
 
-    if (voice.tableTicRate == 0x00) {
-        // TIC00: Trigger mode - apply row effects ONCE, don't advance automatically
-        shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
-        shouldAdvance = false;
-    } else if (voice.tableTicRate == 0xFC || voice.tableTicRate == 0xFE) {
-        // TICFC/TICFE: Static mapping modes - row is fixed, process ONCE
-        shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
-        shouldAdvance = false;
-    } else if (voice.tableTicRate == 0xFF) {
-        // TICFF: 200Hz mode - faster advancement
-        voice.tic200HzAccum += numFrames;
-        float samplesPerTic = sampleRate / 200.0f;
-        if (voice.tic200HzAccum >= samplesPerTic) {
-            voice.tic200HzAccum -= samplesPerTic;
-            shouldProcessRow = true;
-            shouldAdvance = true;
-        }
-        if (samplesPerTic > 0.0f) rowFraction = voice.tic200HzAccum / samplesPerTic;
-    } else {
-        // Standard tic mode (01-FB): advance one row every `tableTicRate` musical tics.
-        // Frame-accurate and tempo-locked (like the TICFF branch above) so table speed tracks
-        // the sequencer, is identical live vs. offline render, and is independent of the audio
-        // buffer size. framesPerTic = sr / (BPM/60 · 4 steps/beat · 12 tics/step).
-        if (voice.lastProcessedRow == -1) {
-            // Fire the first tic AT trigger so row 0's transpose/vol/FX apply immediately.
-            // Otherwise the voice plays one full row-duration with no table effect, which sounds
-            // like the first row lasts twice as long. Mirrors TIC00's note-on processing.
-            voice.tableFrameAccum = 0.0f;
-            shouldProcessRow = true;
-            shouldAdvance = true;
-        } else {
-            int tempo = currentTempo.load(std::memory_order_relaxed);
-            float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)voice.tableTicRate;
-            voice.tableFrameAccum += numFrames;
-            if (framesPerRow > 0.0f && voice.tableFrameAccum >= framesPerRow) {
-                voice.tableFrameAccum -= framesPerRow;
-                // A block longer than one row (very fast tables) can't advance >1 row here, so
-                // drop the extra rather than banking it (which would run away). Normal tic rates
-                // have framesPerRow >> block, so the remainder carries and the rate stays exact.
-                if (voice.tableFrameAccum >= framesPerRow) voice.tableFrameAccum = 0.0f;
+    // ⚠️ **THE RATE MACHINE RUNS ONCE PER LANE, AND NOTHING IN IT IS SHARED.** A lane at TICFF next
+    // to a lane at TIC 06 is the point of the feature; a single accumulator would make the faster
+    // one drag the slower.
+    for (int lane = 0; lane < TABLE_LANES; ++lane) {
+        TableLane& L = voice.lanes[lane];
+        if (!L.active) continue;   // this column executed HOP FF; the others carry on
+
+        bool shouldProcessRow = false;
+        bool shouldAdvance = false;
+
+        if (L.ticRate == 0x00) {
+            // TIC00: Trigger mode - apply row effects ONCE, don't advance automatically
+            shouldProcessRow = (L.row != L.lastProcessed);
+            shouldAdvance = false;
+        } else if (L.ticRate == 0xFC || L.ticRate == 0xFE) {
+            // TICFC/TICFE: Static mapping modes - row is fixed, process ONCE
+            shouldProcessRow = (L.row != L.lastProcessed);
+            shouldAdvance = false;
+        } else if (L.ticRate == 0xFF) {
+            // TICFF: 200Hz mode - faster advancement
+            L.tic200Accum += numFrames;
+            float samplesPerTic = sampleRate / 200.0f;
+            if (L.tic200Accum >= samplesPerTic) {
+                L.tic200Accum -= samplesPerTic;
                 shouldProcessRow = true;
                 shouldAdvance = true;
             }
-            if (framesPerRow > 0.0f) rowFraction = voice.tableFrameAccum / framesPerRow;
+            if (samplesPerTic > 0.0f) rowFraction[lane] = L.tic200Accum / samplesPerTic;
+        } else {
+            // Standard tic mode (01-FB): advance one row every `ticRate` musical tics.
+            // Frame-accurate and tempo-locked (like the TICFF branch above) so table speed tracks
+            // the sequencer, is identical live vs. offline render, and is independent of the audio
+            // buffer size. framesPerTic = sr / (BPM/60 · 4 steps/beat · 12 tics/step).
+            if (L.lastProcessed == -1) {
+                // Fire the first tic AT trigger so row 0's transpose/vol/FX apply immediately.
+                // Otherwise the voice plays one full row-duration with no table effect, which sounds
+                // like the first row lasts twice as long. Mirrors TIC00's note-on processing.
+                L.frameAccum = 0.0f;
+                shouldProcessRow = true;
+                shouldAdvance = true;
+            } else {
+                int tempo = currentTempo.load(std::memory_order_relaxed);
+                float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)L.ticRate;
+                L.frameAccum += numFrames;
+                if (framesPerRow > 0.0f && L.frameAccum >= framesPerRow) {
+                    L.frameAccum -= framesPerRow;
+                    // A block longer than one row (very fast tables) can't advance >1 row here, so
+                    // drop the extra rather than banking it (which would run away). Normal tic rates
+                    // have framesPerRow >> block, so the remainder carries and the rate stays exact.
+                    if (L.frameAccum >= framesPerRow) L.frameAccum = 0.0f;
+                    shouldProcessRow = true;
+                    shouldAdvance = true;
+                }
+                if (framesPerRow > 0.0f) rowFraction[lane] = L.frameAccum / framesPerRow;
+            }
         }
+
+        if (shouldProcessRow) processTableRow(voice, rows[L.row], lane, shouldAdvance, sampleRate);
+        // ⚠️ A HOP FF in an EARLIER lane can have cleared tableId this same block. Stop reading the
+        // table copy the moment it does — the remaining lanes are already down.
+        if (voice.tableId < 0) break;
     }
 
-    if (shouldProcessRow) processTableRow(voice, row, shouldAdvance, sampleRate);
-
-    // ⚠️ THE RAMP IS EVALUATED AGAINST `lastProcessedRow`, NOT `tableRow`. The row whose effects are
-    // in force is the one that was last consumed — `tableRow` has already been advanced (or HOPped)
-    // to the one that comes NEXT, and reading it would run every fade a whole row ahead of what is
-    // being heard. `tableFrameAccum` is the progress through that same consumed row, so the pair is
-    // consistent by construction.
+    // ⚠️ THE RAMP IS EVALUATED AGAINST `lastProcessed`, NOT the lane's current row. The row whose
+    // effects are in force is the one that was last consumed — the cursor has already been advanced
+    // (or HOPped) to the one that comes NEXT, and reading it would run every fade a whole row ahead
+    // of what is being heard. `frameAccum` is the progress through that same consumed row, so the
+    // pair is consistent by construction.
     //
-    // ⚠️ And AFTER the row work, so a table that just executed `HOP FF` (tableId = −1) runs no ramp.
-    if (voice.tableId >= 0 && voice.lastProcessedRow >= 0)
-        applyTableRamps(voice, rows, voice.lastProcessedRow, rowFraction, sampleRate);
+    // ⚠️ And AFTER the row work, so a table that just executed `HOP FF` in every lane runs no ramp.
+    if (voice.tableId >= 0) applyTableRamps(voice, rows, rowFraction, sampleRate);
 }
 
+// One lane consuming one row.
+//
+// ⚠️ **THE TRANSPOSE AND VOLUME COLUMNS BELONG TO LANE 0, and only lane 0 applies them.** They share
+// FX1's playhead by definition — that is what "lane A" means — so running them from any other lane
+// would rewrite the note's pitch at FX2's rate.
+//
+// ⚠️ And a lane reads **exactly one** FX slot: its own. `KIL VOL OFFSET CUT RES EQN EQM` are global
+// effects any column may carry, but `HOP`, `TIC` and `THO` steer the lane they are written in.
 template <typename V>
-void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdvance,
+void AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool shouldAdvance,
                                   float sampleRate) {
-    // playbackRate does not include transpose; getModulatedPlaybackRate reads
-    // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
-    int semitones = transposeToSemitones(row.transpose);
-    voice.tableTranspose = (float)semitones;  // kept for debug log
-    voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
+    TableLane& L = voice.lanes[lane];
 
-    // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
-    if (row.volume == 0xFF) {
-        voice.tableVolume = 1.0f;  // kept for debug log
-    } else {
-        voice.tableVolume = row.volume / 255.0f;
+    if (lane == 0) {
+        // playbackRate does not include transpose; getModulatedPlaybackRate reads
+        // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
+        int semitones = transposeToSemitones(row.transpose);
+        voice.tableTranspose = (float)semitones;  // kept for debug log
+        voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
+
+        // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
+        if (row.volume == 0xFF) {
+            voice.tableVolume = 1.0f;  // kept for debug log
+        } else {
+            voice.tableVolume = row.volume / 255.0f;
+        }
+        voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
     }
-    voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
 
     bool hopExecuted = false;
     int hopTarget = -1;
@@ -988,12 +1018,19 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdva
                 break;
 
             case FX_HOP:
-                // HOP XY: X=repeat count (0=infinite), Y=target row; FF=stop table
+                // HOP XY: X=repeat count (0=infinite), Y=target row; FF=stop THIS COLUMN
                 if (fxValue == 0xFF) {
-                    voice.tableId = -1;
-                    voice.hopTargetRow = -1;
-                    voice.hopRepeatCount = 0;
-                    LOGT("📋 Table HOP FF: stopped table for track %d", voice.getTrackId());
+                    // ⚠️ **THE LANE, NOT THE TABLE.** The voice's table only ends once all three
+                    // columns have stopped — a HOP FF typed in FX3 must not silence the note and
+                    // volume columns, which is exactly the coupling per-column playback removes.
+                    L.active = false;
+                    L.hopTarget = -1;
+                    L.hopRepeat = 0;
+                    bool anyRunning = false;
+                    for (int o = 0; o < TABLE_LANES; ++o) anyRunning |= voice.lanes[o].active;
+                    if (!anyRunning) voice.tableId = -1;
+                    LOGT("📋 Table HOP FF: stopped column %d for track %d%s", lane + 1,
+                         voice.getTrackId(), anyRunning ? "" : " (table ended)");
                 } else {
                     int repeatCount = (fxValue >> 4) & 0x0F;  // High nibble = X
                     int targetRow = fxValue & 0x0F;           // Low nibble = Y
@@ -1005,22 +1042,22 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdva
                         LOGT("📋 Table HOP %02X: infinite loop to row %d, track %d", fxValue, targetRow, voice.getTrackId());
                     } else {
                         // HOP XY (X>0) = Jump X times, then continue
-                        if (voice.hopTargetRow == -1 || voice.hopTargetRow != targetRow) {
-                            voice.hopRepeatCount = repeatCount;
-                            voice.hopTargetRow = targetRow;
+                        if (L.hopTarget == -1 || L.hopTarget != targetRow) {
+                            L.hopRepeat = repeatCount;
+                            L.hopTarget = targetRow;
                             LOGT("📋 Table HOP %02X: initialized counter=%d, target=%d, track %d",
                                  fxValue, repeatCount, targetRow, voice.getTrackId());
                         }
 
-                        if (voice.hopRepeatCount > 0) {
-                            voice.hopRepeatCount--;
+                        if (L.hopRepeat > 0) {
+                            L.hopRepeat--;
                             hopExecuted = true;
                             hopTarget = targetRow;
                             LOGT("📋 Table HOP: jump to row %d, %d jumps remaining, track %d",
-                                 targetRow, voice.hopRepeatCount, voice.getTrackId());
+                                 targetRow, L.hopRepeat, voice.getTrackId());
                         } else {
                             // Counter exhausted, don't jump, reset state and continue normally
-                            voice.hopTargetRow = -1;
+                            L.hopTarget = -1;
                             LOGT("📋 Table HOP: counter exhausted, continuing past row, track %d", voice.getTrackId());
                         }
                     }
@@ -1067,10 +1104,12 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdva
                 break;
 
             case FX_TIC:
+                // The rate of the COLUMN it is written in — that is what lets one table carry two
+                // speeds at once. (Row 15's TIC is read at trigger instead; effectiveTicRatesFor.)
                 if (fxValue >= 0x01 && fxValue <= 0xFB) {
-                    voice.tableTicRate = fxValue;
-                    voice.tableTicCounter = 0;
-                    LOGT("📋 Table effect: TIC %02X - set tick rate to %d", fxValue, fxValue);
+                    L.ticRate = fxValue;
+                    LOGT("📋 Table effect: TIC %02X - column %d now advances every %d tics",
+                         fxValue, lane + 1, fxValue);
                 }
                 break;
 
@@ -1085,20 +1124,20 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdva
         }
     };
 
-    processEffect(row.fx1Type, row.fx1Value);
-    processEffect(row.fx2Type, row.fx2Value);
-    processEffect(row.fx3Type, row.fx3Value);
+    if (lane == 0)      processEffect(row.fx1Type, row.fx1Value);
+    else if (lane == 1) processEffect(row.fx2Type, row.fx2Value);
+    else                processEffect(row.fx3Type, row.fx3Value);
 
-    voice.lastProcessedRow = voice.tableRow;
+    L.lastProcessed = L.row;
 
     if (hopExecuted && hopTarget >= 0) {
-        voice.tableRow = hopTarget % 16;
-        LOGT("📋 Table HOP: track %d jumped to row %d", voice.getTrackId(), voice.tableRow);
+        L.row = hopTarget % 16;
+        LOGT("📋 Table HOP: track %d column %d jumped to row %d", voice.getTrackId(), lane + 1, L.row);
     } else if (shouldAdvance) {
-        voice.tableRow = (voice.tableRow + 1) % 16;
+        L.row = (L.row + 1) % 16;
     }
 
-    if (shouldAdvance && voice.tableRow == 0) {
+    if (lane == 0 && shouldAdvance && L.row == 0) {
         LOGT("📋 Table %d loop: track=%d, transpose=%.0f, vol=%.2f",
              voice.tableId, voice.getTrackId(), voice.tableTranspose, voice.tableVolume);
     }
@@ -1117,14 +1156,24 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, bool shouldAdva
 // `powf` per voice per block; at eight voices that is a fraction of a percent of a core, and it buys
 // a fade instead of a staircase.
 template <typename V>
-void AudioEngine::applyTableRamps(V& voice, const TableRow* rows, int row, double rowFraction,
-                                  float sampleRate) {
+void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
+                                  const double (&rowFraction)[TABLE_LANES], float sampleRate) {
     const table_automation::TableRampSet ramps = table_automation::find_table_ramps(rows, 16);
 
     for (int i = 0; i < ramps.count; ++i) {
         const table_automation::TableRamp& r = ramps.items[i];
-        const double t = table_automation::table_ramp_position(r, row, rowFraction);
-        if (t < 0.0) continue;   // this ramp does not cover the row the voice is standing on
+        // ⚠️⚠️ **A RAMP RUNS ON THE COLUMN ITS PARAMETER IS IN, NOT THE ONE ITS AUS IS IN.** AUS pairs
+        // by looking LEFT along its own row, so the value being faded always sits in a lower slot
+        // than the curve — every ramp spans at least two columns, and with three playheads there are
+        // two candidate clocks. The parameter's is the only one that cannot fight itself: that same
+        // cell is re-applied on its own column's tic, and driving the fade from the AUS's column
+        // would have the two writing one destination at two rates. (In practice the parameter is in
+        // FX1, so a fade written before per-column playback existed keeps running on lane 0.)
+        const TableLane& L = voice.lanes[r.paramSlot - 1];
+        if (!L.active || L.lastProcessed < 0) continue;
+        const double t = table_automation::table_ramp_position(r, L.lastProcessed,
+                                                               rowFraction[r.paramSlot - 1]);
+        if (t < 0.0) continue;   // this ramp does not cover the row that column is standing on
 
         if (r.eqPreset) {
             // ⚠️ Clamped rather than trusted, as the phrase morph is: pairing refuses an endpoint
@@ -1328,8 +1377,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 case PARAM_UPDATE_TABLE_ROW: {            // THO on empty step (sampler voices only)
                     for (int v = 0; v < MAX_VOICES; v++) {
                         if (voices[v].isActive && voices[v].trackId == upd.trackId) {
-                            voices[v].tableRow = (int)upd.value % 16;
-                            voices[v].lastProcessedRow = -1;  // re-apply the row immediately
+                            // ⚠️ ALL THREE COLUMNS. This THO is written in a PHRASE, not in the
+                            // table, so it belongs to no column — "put this track's table on row X"
+                            // is the only thing it can mean. A THO inside the table steers the
+                            // column it is typed in; that one is in processTableRow.
+                            for (int l = 0; l < TABLE_LANES; ++l) {
+                                voices[v].lanes[l].row = (int)upd.value % 16;
+                                voices[v].lanes[l].lastProcessed = -1;  // re-apply the row immediately
+                            }
                             break;
                         }
                     }
@@ -1541,10 +1596,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
                     sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
 
-                    // M8-style: a TIC in the table's last row overrides the instrument tic rate.
-                    int effectiveTicRate = effectiveTicRateFor(note.tableId, note.tableTicRate);
-                    sv.resetTableState(note.tableId, effectiveTicRate,
-                                       note.noteOctave, note.notePitch, note.tableStartRow);
+                    // M8-style: a TIC in the table's last row overrides the instrument tic rate —
+                    // one rate per FX column.
+                    int effectiveTicRates[TABLE_LANES];
+                    effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
+                    const int sfStartRows[TABLE_LANES] = {note.tableStartRow, note.tableStartRow,
+                                                          note.tableStartRow};
+                    sv.resetTableState(note.tableId, effectiveTicRates,
+                                       note.noteOctave, note.notePitch, sfStartRows);
 
                     // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
                     if (note.sampleId >= 0 && note.sampleId < 256) {
@@ -1614,16 +1673,20 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             // ---- END SOUNDFONT PATH ----
 
-            // TIC00 support: continue the table where this track's previous note left off.
-            int savedTableRow = 0;
+            // TIC00 support: continue the table where this track's previous note left off — per
+            // COLUMN, since a table can be at TIC00 in FX2 and free-running in FX1. −1 = this column
+            // has nothing to carry and starts wherever the trigger says.
+            int savedTableRows[TABLE_LANES] = {-1, -1, -1};
             bool wasTIC00Mode = false;
             for (int v = 0; v < MAX_VOICES; v++) {
-                if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
-                    if (voices[v].tableTicRate == 0x00 && voices[v].tableId >= 0) {
+                if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut
+                    && voices[v].tableId >= 0) {
+                    for (int l = 0; l < TABLE_LANES; ++l) {
+                        if (voices[v].lanes[l].ticRate != 0x00) continue;
                         wasTIC00Mode = true;
-                        savedTableRow = tic00RowAfter(voices[v]);
-                        LOGT("📋 TIC00: table row %d for track %d retrigger (from voice %d)",
-                             savedTableRow, note.trackId, v);
+                        savedTableRows[l] = tic00RowAfter(voices[v].lanes[l]);
+                        LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from voice %d)",
+                             savedTableRows[l], note.trackId, l + 1, v);
                     }
                 }
             }
@@ -1634,10 +1697,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
                 note.tableId >= 0 && tic00Cursor[note.trackId].tableId == note.tableId) {
                 const Tic00Cursor& c = tic00Cursor[note.trackId];
-                wasTIC00Mode = true;
-                savedTableRow = tic00RowAfter(c.row, c.lastProcessed);
-                LOGT("📋 TIC00: table row %d for track %d retrigger (from track cursor)",
-                     savedTableRow, note.trackId);
+                for (int l = 0; l < TABLE_LANES; ++l) {
+                    if (c.ticRate[l] != 0x00 || !c.active[l]) continue;
+                    wasTIC00Mode = true;
+                    savedTableRows[l] = tic00RowAfter(c.row[l], c.lastProcessed[l]);
+                    LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from track cursor)",
+                         savedTableRows[l], note.trackId, l + 1);
+                }
             }
 
             // ---------------------------------------------------------------
@@ -1710,22 +1776,24 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     float rate = note.frequency / note.baseFrequency;
 
-                    // M8-style: a TIC in the table's last row overrides the instrument tic rate.
-                    int effectiveTicRate = effectiveTicRateFor(note.tableId, note.tableTicRate);
+                    // M8-style: a TIC in the table's last row overrides the instrument tic rate —
+                    // one rate per FX column.
+                    int effectiveTicRates[TABLE_LANES];
+                    effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
 
-                    int startRow;
-                    if (note.tableStartRow >= 0) {
-                        startRow = note.tableStartRow % 16;
-                    } else if (wasTIC00Mode && effectiveTicRate == 0x00) {
-                        startRow = savedTableRow;
-                    } else {
-                        startRow = 0;
+                    // A THO-with-note start row places every column; otherwise only a column that is
+                    // BOTH at TIC00 and had something to carry resumes, and the rest begin at row 0.
+                    int startRows[TABLE_LANES] = {0, 0, 0};
+                    for (int l = 0; l < TABLE_LANES; ++l) {
+                        if (note.tableStartRow >= 0) startRows[l] = note.tableStartRow % 16;
+                        else if (wasTIC00Mode && effectiveTicRates[l] == 0x00 && savedTableRows[l] >= 0)
+                            startRows[l] = savedTableRows[l];
                     }
 
                     voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
                                       note.trackId, rate, note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                                       sampleRate, note.startPointOverride, note.endPointOverride,
-                                      note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+                                      note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
                     voices[v].instrId = note.sampleId;
                     voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
 
@@ -1783,10 +1851,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // The ONE place the track's TIC00 cursor is written — below the row logic, so it cannot drift
         // from it. Only the voice a retrigger would have read (live, not fading) owns the cursor;
         // letting a fading voice write it would make the value depend on slot order.
-        if (voices[v].tableTicRate == 0x00 && !voices[v].isFadingOut) {
+        //
+        // Written when ANY column is at TIC00, and it stores all three: the retrigger re-checks each
+        // column's own rate, exactly as it does when reading them off a live voice.
+        bool anyTic00 = false;
+        for (int l = 0; l < TABLE_LANES; ++l) anyTic00 |= (voices[v].lanes[l].ticRate == 0x00);
+        if (anyTic00 && !voices[v].isFadingOut) {
             const int t = voices[v].trackId;
             if (t >= 0 && t < SF_VOICE_COUNT) {
-                tic00Cursor[t] = { voices[v].tableId, voices[v].tableRow, voices[v].lastProcessedRow };
+                Tic00Cursor& c = tic00Cursor[t];
+                c.tableId = voices[v].tableId;
+                for (int l = 0; l < TABLE_LANES; ++l) {
+                    c.row[l]           = voices[v].lanes[l].row;
+                    c.lastProcessed[l] = voices[v].lanes[l].lastProcessed;
+                    c.ticRate[l]       = voices[v].lanes[l].ticRate;
+                    c.active[l]        = voices[v].lanes[l].active;
+                }
             }
         }
     }
@@ -2811,17 +2891,30 @@ static int findTrackVoice(Voice* voices, int trackId, bool fading) {
     return -1;
 }
 
-int AudioEngine::getVoiceTableRow(int trackId) {
+// ⚠️ A column that has executed `HOP FF` reads −1, the same "no position" the whole call answers with
+// — the marker for that column disappears while its neighbours keep moving, which is the only honest
+// drawing of a table with one column stopped.
+static void lanesOf(const TableLane (&lanes)[TABLE_LANES], int out[TABLE_LANES]) {
+    for (int l = 0; l < TABLE_LANES; ++l) out[l] = lanes[l].active ? lanes[l].row : -1;
+}
+
+void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
+    for (int l = 0; l < TABLE_LANES; ++l) out[l] = -1;
+
     const int live = findTrackVoice(voices, trackId, /*fading=*/false);
-    if (live >= 0) return voices[live].tableRow;
+    if (live >= 0) { lanesOf(voices[live].lanes, out); return; }
 
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
         const SoundfontVoice& sv = sfVoices[trackId];
-        if (sv.isActive && sv.tableId >= 0) return sv.tableRow;
-        if (tic00Cursor[trackId].tableId >= 0) return tic00Cursor[trackId].row;
+        if (sv.isActive && sv.tableId >= 0) { lanesOf(sv.lanes, out); return; }
+        const Tic00Cursor& c = tic00Cursor[trackId];
+        if (c.tableId >= 0) {
+            for (int l = 0; l < TABLE_LANES; ++l) out[l] = c.active[l] ? c.row[l] : -1;
+            return;
+        }
     }
     const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
-    return fading >= 0 ? voices[fading].tableRow : -1;
+    if (fading >= 0) lanesOf(voices[fading].lanes, out);
 }
 
 int AudioEngine::getVoiceTableId(int trackId) {

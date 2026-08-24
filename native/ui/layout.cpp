@@ -210,7 +210,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 TableState ts{p.tables[static_cast<size_t>(s.currentTable)]};
                 ts.cursorRow    = s.tableCursorRow;
                 ts.cursorColumn = s.tableCursorColumn;
-                ts.playbackRow  = s.tablePlaybackRow;
+                for (int l = 0; l < TABLE_LANES; ++l) ts.playbackRows[l] = s.tablePlaybackRows[l];
                 // The tic rate is the INSTRUMENT's, not the table's — the same table run by two
                 // instruments runs at two speeds, and this shows the one you are looking through.
                 ts.ticRate      = p.instruments[static_cast<size_t>(s.currentInstrument)].tableTicRate;

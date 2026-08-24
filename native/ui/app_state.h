@@ -17,6 +17,7 @@
 // A new screen adds its fields here; it does not get state of its own.
 
 #include "screen.h"
+#include "table-lanes.h"
 #include "songcore/model.h"
 #include "theme.h"
 #include "ui/folder_config.h"
@@ -155,11 +156,12 @@ struct AppState {
     TrackPlayhead playheads[8] = {};
 
     /**
-     * The TABLE row an engine voice is on — −1 when none is. Unlike the eight above, this is not a
-     * sequencer playhead: it is read off the VOICE, because a table advances on its own tic clock
-     * under a note that may outlive the step that started it (ui/engine_feed.h).
+     * The TABLE row an engine voice is on, ONE PER FX COLUMN — −1 for a column that is not running.
+     * Unlike the eight above, these are not sequencer playheads: they are read off the VOICE,
+     * because a table advances on its own tic clock under a note that may outlive the step that
+     * started it (ui/engine_feed.h), and each of its columns advances on a clock of its own.
      */
-    int tablePlaybackRow = -1;
+    int tablePlaybackRows[TABLE_LANES] = {-1, -1, -1};
 
     // ── The note monitor (right bar) ─────────────────────────────────────────────────────────────
     // What each of the 8 tracks is SOUNDING, read from the engine's voice pool rather than from the

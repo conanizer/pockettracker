@@ -39,7 +39,9 @@ Write these into any phrase step to shape how a note plays:
 - **Randomize** — randomize any other FX value on the fly
 - **Table override** — switch which table an instrument follows
 - **Groove assign** — set groove pattern per track from a phrase step
-- **Tick rate** — control how fast the instrument table advances
+- **Tick rate** — control how fast the instrument table advances, per FX column
+- **Three table playheads** — each of a table's FX columns runs at its own speed and loops on its own,
+  so one table can drive cross-rhythms
 - **Effect automation** — mark a start and a finish step and the value between them glides, on a
   choice of curve; the span may cross into a later phrase of the same chain. Volume, pan, the two
   sends, both faders and the filter all fade this way — and so do the two EQ effects, which slide

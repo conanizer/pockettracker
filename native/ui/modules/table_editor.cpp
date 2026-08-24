@@ -7,19 +7,42 @@ namespace pt::ui {
 
 using songcore::TableRow;
 
+// ─── Where FX2's and FX3's playback markers stand, and therefore how wide the gap before those two
+//     columns is ─────────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ ONE definition, read by BOTH the column layout and the marker draw. Sized rather than chosen: a
+// cell paints its background CHAR_SPACING past the text on either side, so the marker needs
+// MARKER_CLEAR of daylight on each side of it or the cursor's filled background on the FX1 value
+// touches the `>` and it reads as part of that value instead of as the next column's playhead.
+constexpr int MARKER_CLEAR = 4;
+constexpr int GLYPH_W      = CHAR_W - CHAR_SPACING;
+
+/** The gap an FX value cell's x must leave before the NEXT FX column's name x. */
+constexpr int marker_gap() { return 2 * CHAR_SPACING + 2 * MARKER_CLEAR + GLYPH_W; }
+
+/** …and where in that gap the marker itself goes, given the name x on its right. */
+constexpr int marker_x(int name_x) { return name_x - CHAR_SPACING - MARKER_CLEAR - GLYPH_W; }
+
 void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     const Theme& t = s.theme;
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
+    // ⚠️ THE GAP BEFORE EACH OF THE THREE FX COLUMNS IS WIDER THAN THE OTHERS, and it is not
+    // decoration: that is where the playback markers stand, and the width is derived rather than
+    // chosen. A cell paints its background CHAR_SPACING past the text on both sides, so a two-glyph
+    // value ends `2·CHAR_W` past its x; the marker is one glyph wide and wants MARKER_CLEAR either
+    // side of it, or the cursor's filled background touches it and the `>` reads as part of the
+    // value to its left. The extra comes out of the slack at the right edge; every column keeps the
+    // width it had.
     int       colX       = x + 10;
     const int stepX      = colX; colX += 30 + 10;
     const int transposeX = colX; colX += 45 + 15;
-    const int volX       = colX; colX += 30 + 15;
+    const int volX       = colX; colX += 2 * CHAR_W + marker_gap();
     const int fx1NameX   = colX; colX += 45 + 10;
-    const int fx1ValueX  = colX; colX += 30 + 15;
+    const int fx1ValueX  = colX; colX += 2 * CHAR_W + marker_gap();
     const int fx2NameX   = colX; colX += 45 + 10;
-    const int fx2ValueX  = colX; colX += 30 + 15;
+    const int fx2ValueX  = colX; colX += 2 * CHAR_W + marker_gap();
     const int fx3NameX   = colX; colX += 45 + 10;
     const int fx3ValueX  = colX;
 
@@ -79,9 +102,17 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
     draw_cell(c, hex1(index), stepX, textY, cur(0), /*is_selected=*/false, /*is_empty=*/false,
               (index == s.cursorRow) ? t.textCursor : t.textEmpty, t);
 
-    // ONE marker, in the gutter beside the row number. The three FX lanes get their own once they
-    // have their own playheads; until then every column of a table advances together.
-    if (s.playbackRow == index) draw_playhead(c, stepX + CHAR_W, textY, t);
+    // Three playheads, FOUR markers. Lanes 1 and 2 get one each, in the gutter ahead of their own FX
+    // column. Lane 0 gets TWO, and the repeat is deliberate: beside the row number, because it is the
+    // note and volume columns' playhead as well, and again ahead of FX1, so that all three FX columns
+    // are marked the same way and the eye can read down the row. A column that has stopped reads −1
+    // and simply has no marker.
+    if (s.playbackRows[0] == index) {
+        draw_playhead(c, stepX + CHAR_W, textY, t);
+        draw_playhead(c, marker_x(fx1NameX), textY, t);
+    }
+    if (s.playbackRows[1] == index) draw_playhead(c, marker_x(fx2NameX), textY, t);
+    if (s.playbackRows[2] == index) draw_playhead(c, marker_x(fx3NameX), textY, t);
 
     // Transpose is always shown — 0x00 is "no transpose", drawn dim, but it is still a value.
     draw_cell(c, hex2(row.transpose), transposeX, textY, cur(1), sel(1),

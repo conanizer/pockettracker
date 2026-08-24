@@ -2,6 +2,7 @@
 #include <cmath>
 #include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
+#include "table-lanes.h"
 
 // Forward declaration — tsf is defined in soundfont-voice.cpp (TSF_IMPLEMENTATION).
 // note-queue.h declares SoundfontEntry and extern soundfonts[].
@@ -46,16 +47,9 @@ struct SoundfontVoice : public IAudioVoice {
 
     // Table state — mirrors Voice table fields; populated from scheduleSoundfontNote.
     int   tableId          = -1;
-    int   tableRow         = 0;
-    int   lastProcessedRow = -1;
-    int   tableTicRate     = 6;
-    int   tableTicCounter  = 0;
-    float tic200HzAccum    = 0.0f;
-    float tableFrameAccum  = 0.0f;  // Frame accumulator for standard tempo-locked tic mode (01-FB)
+    TableLane lanes[TABLE_LANES];   // one cursor and one rate per FX column — see table-lanes.h
     float tableTranspose   = 0.0f;  // current semitones from table row (for debug)
     float tableVolume      = 1.0f;  // current vol multiplier from table row (for debug)
-    int   hopRepeatCount   = 0;
-    int   hopTargetRow     = -1;
     int   noteOctave       = 4;     // note octave (for TICFC/TICFE special modes)
     int   notePitch        = 0;     // note pitch  (for TICFE mode)
 
@@ -170,23 +164,14 @@ struct SoundfontVoice : public IAudioVoice {
     }
 
     // Reset table state for a new note.
-    void resetTableState(int tblId, int ticRate, int octave, int pitch, int startRow) {
+    void resetTableState(int tblId, const int (&ticRates)[TABLE_LANES], int octave, int pitch,
+                         const int (&startRows)[TABLE_LANES]) {
         tableId          = tblId;
-        tableRow         = (startRow >= 0) ? startRow % 16 : 0;
-        lastProcessedRow = -1;
-        tableTicRate     = ticRate;
-        tableTicCounter  = 0;
-        tic200HzAccum    = 0.0f;
-        tableFrameAccum  = 0.0f;
         tableTranspose   = 0.0f;
         tableVolume      = 1.0f;
-        hopRepeatCount   = 0;
-        hopTargetRow     = -1;
         noteOctave       = octave;
         notePitch        = pitch;
-        // TICFC/TICFE special modes: pin starting row to note octave/pitch
-        if (ticRate == 0xFC) tableRow = std::min(octave, 15);
-        else if (ticRate == 0xFE) tableRow = pitch;
+        reset_table_lanes(lanes, ticRates, startRows, octave, pitch);
     }
 
     // Advance pitch LFO/slide and write MIDI pitch wheel to the shared handle.

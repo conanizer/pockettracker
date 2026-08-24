@@ -843,6 +843,33 @@ loops a section of it as usual, and PLAY, STOP and a render each start again fro
 > [!NOTE]
 > By default, instrument N uses table N. To override this per-note, place a **TBL XX** effect in the phrase FX column. The table switches immediately and stays active for subsequent notes on that track.
 
+### Three playheads
+
+Each FX column runs at its own speed and loops independently. There are three playheads, marked by a
+`>` before each FX column. The FX1 playhead carries the N and VOL columns too, so it is also shown
+beside the row number.
+
+- **`HOP` steers only the column it is written in.** `HOP 00` in FX2 loops FX2 while N, VOL and FX1
+  keep walking all sixteen rows.
+- **`TIC` sets only that column's speed.** Write it in a column's last row to set that column's rate
+  for the whole table, or anywhere else to change it as the playhead passes.
+- **`HOP FF` stops only its own column.** The table ends when all three have stopped.
+
+```
+     N    VOL  FX1      FX2      FX3
+00   00   --   CUT 40   ---  00   ---  00
+01   00   --   CUT 60   HOP 00   ---  00   ← FX2 loops rows 00-01 for ever
+…
+0F   00   --   ---  00  TIC 03   ---  00   ← …twice as fast as everything else
+```
+
+Two columns at different rates give you cross-rhythms out of a single table — a filter moving in
+threes under a volume moving in fours.
+
+> [!NOTE]
+> `THO` written in a **phrase** moves all three playheads, since it belongs to no column. `THO` inside
+> the table moves the column it is typed in.
+
 ### Fades in a table
 
 `AUS` and `AUF` work on a table row as they do on a phrase step (§21), with **rows** as the span:
@@ -854,9 +881,10 @@ loops a section of it as usual, and PLAY, STOP and a render each start again fro
 ```
 
 A table `AUS` can move **VOL**, **CUT**, **RES**, **EQN** and **EQM**; anything else to its left is
-passed over. The fade follows the row the table is on, so **HOP steers it** — back to the `AUS` row
-restarts it, into the middle picks it up there, past the `AUF` ends it. A `TIC` change stretches it
-along with the rest of the table.
+passed over. The fade follows the playhead of the column holding the value it is moving — `CUT` in
+FX1 above, so that fade runs at FX1's speed whichever column the `AUS` sits in. **HOP steers it** —
+back to the `AUS` row restarts it, into the middle picks it up there, past the `AUF` ends it. A `TIC`
+change stretches it along with the rest of that column.
 
 ⚠️ A span never wraps past row `0F`: write the `AUF` on a later row than the `AUS`.
 
@@ -1374,8 +1402,9 @@ Switches the current track to use groove `XX` from this step onward.
 ### HOP `XY` — Hop / Jump
 
 - In a **phrase**: ends the phrase at this step; the **next** phrase starts at row `Y` (`X` is ignored).
-- In a **table**: jumps to table row `Y`, `X` times before falling through (`X` = 0: forever).
-- `HOP FF`: **stops the track** — in SONG mode until the next song row; in PHRASE/CHAIN playback the track stays silent until you stop.
+- In a **table**: jumps **its own FX column's** playhead to table row `Y`, `X` times before falling through (`X` = 0: forever).
+- `HOP FF` in a **phrase**: **stops the track** — in SONG mode until the next song row; in PHRASE/CHAIN playback the track stays silent until you stop.
+- `HOP FF` in a **table**: stops **that FX column** only. The table ends when all three have stopped.
 
 `HOP 00` at the end of a section = infinite loop of that section.
 
@@ -1500,11 +1529,15 @@ Overrides the instrument's default table, using table `XX` for this note.
 
 Jumps the table playhead to row `0X`. `THO 00` = loop current section.
 
+In a **table** it moves its own FX column's playhead; in a **phrase** it moves all three.
+
 ---
 
 ### TIC `XX` — Tick Rate
 
-Sets the table tick rate:
+Sets the tick rate of the FX column it is written in — each of the three has its own. In a table's
+**last row** it sets that column's rate from the start; anywhere else it takes effect as that
+column's playhead passes.
 
 - `TIC 06` = default (6 ticks per row, two rows per phrase step)
 - `TIC 03` = twice as fast

@@ -345,7 +345,9 @@ public:
     void loadTable(int tableId, const uint8_t* rowData);
 
     // Get current table row for a voice (for UI feedback)
-    int getVoiceTableRow(int trackId);
+    // Where each of the table's three column playheads stands on this track, or −1 for a column that
+    // is not running one. Three markers on the TABLE screen; see ui/engine_feed.h.
+    void getVoiceTableRows(int trackId, int out[TABLE_LANES]);
 
     // Get table ID for a voice
     int getVoiceTableId(int trackId);
@@ -518,8 +520,9 @@ public:
     void initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate);
 
     // M8-style: a TIC FX in the table's LAST row overrides the instrument's tic rate at
-    // note trigger. Shared by the sampler and SF dispatch paths (audio thread only).
-    int effectiveTicRateFor(int tableId, int fallback);
+    // note trigger — per COLUMN, one rate per playhead. Shared by the sampler and SF dispatch
+    // paths (audio thread only).
+    void effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_LANES]);
 
     // Unified per-voice table tick (tic advance + row FX processing) for sampler AND SF
     // voices — was two drifted ~90-line copies. Duck-typed template over the identical
@@ -528,19 +531,23 @@ public:
     // template is defined and (implicitly) instantiated.
     template <typename V> void processTableTick(V& voice, int numFrames, float sampleRate);
 
-    // The row half of the above: transpose, volume and the three FX slots, applied on the blocks
-    // where a row is actually consumed. Split out so that processTableTick has ONE exit and the
-    // AUS/AUF ramp below it runs on EVERY block — the row work returning early is what used to end
-    // the tick, and a ramp that only moved on a row change would be sixteen values instead of a fade.
-    template <typename V> void processTableRow(V& voice, const TableRow& row, bool shouldAdvance,
-                                               float sampleRate);
+    // The row half of the above, for ONE column's playhead: lane 0 also carries transpose and
+    // volume, and every lane carries its own FX slot. Applied on the blocks where that lane
+    // actually consumes a row. Split out so that processTableTick has ONE exit and the AUS/AUF ramp
+    // below it runs on EVERY block — the row work returning early is what used to end the tick, and
+    // a ramp that only moved on a row change would be sixteen values instead of a fade.
+    template <typename V> void processTableRow(V& voice, const TableRow& row, int lane,
+                                               bool shouldAdvance, float sampleRate);
 
     // The AUS/AUF ramps a table declares, applied to one voice at the position it is standing on.
     // ⚠️ AFTER the row's own effects, never before: on the AUS row the ramp is at t=0, so it writes
     // the same value the cell to its left just wrote, and on every later row the fade is the thing
     // that should win over a stale per-row cell.
-    template <typename V> void applyTableRamps(V& voice, const TableRow* rows, int row,
-                                               double rowFraction, float sampleRate);
+    // ⚠️ `rowFraction` is per COLUMN, and each ramp reads the column its PARAMETER cell is in — see
+    // the derivation at the definition.
+    template <typename V> void applyTableRamps(V& voice, const TableRow* rows,
+                                               const double (&rowFraction)[TABLE_LANES],
+                                               float sampleRate);
 
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
     void triggerNoteOff(int trackId);
@@ -657,10 +664,18 @@ private:
     // (the next retrigger's start row; the row the indicator shows) derive what they need the same way
     // they do from a live voice. Written in ONE place — the sampler table-tick loop, below the row
     // logic. stopAll() clears it, so PLAY, and every render, begins at row 0.
+    //
+    // ⚠️ **PER COLUMN, because the columns advance separately.** Only a column actually at TIC00
+    // carries over; the entry is written for all three so the two consumers read the same shape they
+    // would from a live voice, and each of them checks that column's own rate before using it.
     struct Tic00Cursor {
         int tableId       = -1;  // -1 = no TIC00 table running on this track; the next note starts at row 0
-        int row           =  0;  // the voice's tableRow — the row the table is standing on
-        int lastProcessed = -1;  // …and its lastProcessedRow, so "has this row been applied?" survives too
+        int  row[TABLE_LANES]           = {0, 0, 0};    // each column's row — where its table stands
+        int  lastProcessed[TABLE_LANES] = {-1, -1, -1}; // …and whether that row has been applied yet
+        int  ticRate[TABLE_LANES]       = {6, 6, 6};    // which columns were at TIC00 and may carry over
+        // ⚠️ …and which had already executed HOP FF. Without it a column that stopped before its voice
+        // ended would both draw a marker on the row it stopped at and resume there on the next note.
+        bool active[TABLE_LANES]        = {true, true, true};
     };
     Tic00Cursor tic00Cursor[SF_VOICE_COUNT];
 

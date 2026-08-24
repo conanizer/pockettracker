@@ -5,6 +5,7 @@
 #include "rng.h"
 #include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
+#include "table-lanes.h"
 
 struct Voice : public IAudioVoice {
     bool isActive;
@@ -48,10 +49,8 @@ struct Voice : public IAudioVoice {
     InstrumentChain chain;
 
     int tableId;             // -1 = no table, 0-255 = table ID
-    int tableRow;            // Current table row (0-15)
-    int lastProcessedRow;    // Last row that had effects processed (-1 = none)
-    int tableTicRate;        // Ticks per table row advance (special: 0=trigger, FC=octave, FE=note, FF=200Hz)
-    int tableTicCounter;     // Counter for tic-based advance
+    // One cursor and one rate PER FX COLUMN — see table-lanes.h.
+    TableLane lanes[TABLE_LANES];
     float tableTranspose;    // Current transpose from table (semitones)
     float tableVolume;       // Current volume multiplier from table (0.0-1.0)
 
@@ -59,15 +58,10 @@ struct Voice : public IAudioVoice {
     int noteOctave;          // Octave of the triggered note (0-9), -1 = none
     int notePitch;           // Pitch of the triggered note (0-11, C=0)
 
-    // Special TIC mode support
+    // Special TIC mode support. The note belongs to the VOICE, so every lane reads the same one:
+    // TICFC and TICFE place ANY lane's cursor, not just lane 0's.
     int triggerOctave;       // Octave of triggered note (0-9) for TICFC mode
     int triggerPitch;        // Pitch of triggered note (0-11, C=0) for TICFE mode
-    float tic200HzAccum;     // Accumulator for 200Hz mode (TICFF)
-    float tableFrameAccum;   // Frame accumulator for standard tempo-locked tic mode (01-FB)
-
-    // HOP XY: X = repeat count (0 = infinite), Y = target row
-    int hopRepeatCount;      // Number of times left to jump (0 = done or infinite mode)
-    int hopTargetRow;        // Target row for active HOP (-1 = no active HOP)
 
     // Pitch slide state (PSL, PBN, PVB, PVX)
     float pitchOffset;           // Current semitones offset from base pitch (can be fractional)
@@ -109,11 +103,10 @@ struct Voice : public IAudioVoice {
               actualStart(0), actualEnd(0), actualLoopStart(0), actualLoopEnd(0), loopEndNorm(255),
               windowStartFrame(-1), windowEndFrame(-1),
               reverse(false), loopMode(0), loopingBack(false), loopReleasing(false),
-              tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
+              tableId(-1),
               tableTranspose(0.0f), tableVolume(1.0f),
               noteOctave(-1), notePitch(0),
-              triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f), tableFrameAccum(0.0f),
-              hopRepeatCount(0), hopTargetRow(-1),
+              triggerOctave(4), triggerPitch(0),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
               fadeOutRemaining(0), fadeOutTotal(1), isFadingOut(false), startDelayFrames(0) {}
@@ -122,7 +115,10 @@ struct Voice : public IAudioVoice {
     void trigger(float* sample, float* sampleRight, int length, int track, float rate, float instrVol, float phraseVol, float pan,
                  const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
                  int endPointOverride = -1,
-                 int tblId = -1, int tblTicRate = 6, int octave = 4, int pitch = 0, int startRow = 0) {
+                 int tblId = -1,
+                 const int (&tblTicRates)[TABLE_LANES] = TABLE_TICS_DEFAULT,
+                 int octave = 4, int pitch = 0,
+                 const int (&startRows)[TABLE_LANES] = TABLE_ROWS_TOP) {
         sampleData = sample;
         sampleDataRight = sampleRight;
         sampleLength = length;
@@ -212,15 +208,9 @@ struct Voice : public IAudioVoice {
         delaySend  = instrParams.delaySend;
 
         tableId = tblId;
-        tableRow = startRow % 16;  // Use provided start row, wrap to 0-15
-        lastProcessedRow = -1;     // Reset so first row gets processed
-        tableTicRate = tblTicRate;
-        tableTicCounter = 0;
         tableTranspose = 0.0f;
         tableVolume = 1.0f;
-
-        hopRepeatCount = 0;
-        hopTargetRow = -1;
+        // The lanes themselves are placed below, once the note they may be mapped from is known.
 
         // New notes clear all pitch effects (PSL, PBN, PVB, PVX)
         pitchOffset = 0.0f;
@@ -281,19 +271,8 @@ struct Voice : public IAudioVoice {
         notePitch  = std::max(0, std::min(pitch, 11));
         triggerOctave = noteOctave;
         triggerPitch  = notePitch;
-        tic200HzAccum = 0.0f;
-        tableFrameAccum = 0.0f;
 
-        // For special TIC modes, set initial table row based on mode
-        // These override the startRow parameter
-        if (tblTicRate == 0xFC) {
-            // TICFC: Octave map - row = octave (clamped to 0-15)
-            tableRow = std::min(triggerOctave, 15);
-        } else if (tblTicRate == 0xFE) {
-            // TICFE: Note map - row = pitch (0-11, wraps to 0-11)
-            tableRow = triggerPitch;
-        }
-        // Note: For TIC00 (trigger mode), startRow is used directly (set by caller)
+        reset_table_lanes(lanes, tblTicRates, startRows, triggerOctave, triggerPitch);
 
         // Set initial position based on direction
         // For reverse: start at actualEnd - 1 (not actualEnd) because we need to read idx+1 for interpolation

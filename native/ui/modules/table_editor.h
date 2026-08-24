@@ -15,11 +15,16 @@
 //   • ITS TRANSPOSE IS NEVER "--". `0x00` means no transpose and is drawn dim, but it is still drawn —
 //     unlike the volume, where −1 is a genuine "leave it alone" and shows "--".
 //
-// The playback row is the row the ENGINE's voice is on, not one the sequencer reports: the layout
-// resolves it per frame from `getVoiceTableId`/`getVoiceTableRow` (see ui/engine_feed.h). Hence the
-// −1 sentinel below where the Kotlin has `Int?`.
+// The playback rows are the rows the ENGINE's voice is on, not ones the sequencer reports: the
+// layout resolves them per frame from `getVoiceTableId`/`getVoiceTableRows` (see ui/engine_feed.h).
+// Hence the −1 sentinel below where the Kotlin has `Int?`.
+//
+// ⚠️ **THERE ARE THREE OF THEM, one per FX column**, because each column has its own playhead and its
+// own tic rate. The gutters they draw in are what set the horizontal gaps between the FX columns —
+// see the layout in the .cpp.
 
 #include "songcore/model.h"
+#include "table-lanes.h"
 #include "table_automation.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
@@ -33,7 +38,9 @@ struct TableState {
     const songcore::Table& table;
     int  cursorRow    = 0;
     int  cursorColumn = 1;   // starts on transpose
-    int  playbackRow  = -1;  // −1 = not playing this table  (Kotlin: `Int?`)
+    // One per FX column; −1 = that column is not playing this table. The columns have separate
+    // playheads, so a table can be sounding with only one, two or three markers on screen.
+    int  playbackRows[TABLE_LANES] = {-1, -1, -1};
     int  ticRate      = 0x06;
     bool selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
