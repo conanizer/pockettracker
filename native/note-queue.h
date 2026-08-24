@@ -147,13 +147,18 @@ public:
         LOGD("🗑️ Note queue cleared");
     }
 
-    // Clear only notes scheduled at or after fromFrame (keeps earlier notes intact)
-    void clearFrom(int64_t fromFrame) {
+    // Clear only notes scheduled at or after fromFrame (keeps earlier notes intact).
+    //
+    // ⚠️ `trackId >= 0` clears ONE track's, and the sequencer needs that: the eight song tracks each
+    // roll their lookahead back to their own phrase boundary, so a live edit must drop exactly the
+    // notes the track being rolled back is about to schedule again — and nothing another track has
+    // already queued past that frame and will not.
+    void clearFrom(int64_t fromFrame, int trackId = -1) {
         std::lock_guard<std::mutex> lock(mutex);
         std::vector<ScheduledNote> keep;
         while (!queue.empty()) {
             ScheduledNote n = queue.top(); queue.pop();
-            if (n.targetFrame < fromFrame) keep.push_back(n);
+            if (n.targetFrame < fromFrame || (trackId >= 0 && n.trackId != trackId)) keep.push_back(n);
         }
         for (auto& n : keep) queue.push(n);
     }
@@ -192,13 +197,14 @@ public:
         LOGD("🗑️ Kill queue cleared");
     }
 
-    // Clear only kills scheduled at or after fromFrame
-    void clearFrom(int64_t fromFrame) {
+    // Clear only kills scheduled at or after fromFrame; `trackId >= 0` clears one track's. See
+    // NoteQueue::clearFrom for why the filter exists.
+    void clearFrom(int64_t fromFrame, int trackId = -1) {
         std::lock_guard<std::mutex> lock(mutex);
         std::vector<ScheduledKill> keep;
         while (!queue.empty()) {
             ScheduledKill k = queue.top(); queue.pop();
-            if (k.targetFrame < fromFrame) keep.push_back(k);
+            if (k.targetFrame < fromFrame || (trackId >= 0 && k.trackId != trackId)) keep.push_back(k);
         }
         for (auto& k : keep) queue.push(k);
     }
@@ -292,12 +298,15 @@ public:
         while (!queue.empty()) queue.pop();
     }
 
-    void clearFrom(int64_t fromFrame) {
+    // `trackId >= 0` clears one track's — see NoteQueue::clearFrom. ⚠️ The two GLOBAL actions
+    // (PARAM_UPDATE_MASTER_EQ / _VOL) carry the trackId of the track that AUTHORED them, and go with
+    // it: the track being rolled back is the one that will emit them again.
+    void clearFrom(int64_t fromFrame, int trackId = -1) {
         std::lock_guard<std::mutex> lock(mutex);
         std::vector<ScheduledParamUpdate> keep;
         while (!queue.empty()) {
             ScheduledParamUpdate u = queue.top(); queue.pop();
-            if (u.targetFrame < fromFrame) keep.push_back(u);
+            if (u.targetFrame < fromFrame || (trackId >= 0 && u.trackId != trackId)) keep.push_back(u);
         }
         for (auto& u : keep) queue.push(u);
     }

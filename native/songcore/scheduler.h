@@ -75,6 +75,21 @@ struct PlaybackPosition {
     int songRow = 0;
 };
 
+// Where one track is in the song, as the scheduler queued it. ⚠️ The TRACK is part of the key now:
+// with independent cursors "the song is on row 5" is not a fact anybody can state.
+struct SongPos {
+    int track = 0;
+    int songRow = 0;
+    int chainRow = 0;
+};
+
+// What notify_data_changed() asks the host to drop, per track: the frame that track's lookahead was
+// rolled back to, or −1 for "this one has nothing queued past now". ⚠️ A single frame cannot express
+// this once the eight cursors are independent — see notify_data_changed.
+struct RollbackPlan {
+    int64_t frames[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+};
+
 // ─── Per-track persistent effect state (TrackState) ─────────────────────────────────────────────
 struct TrackState {
     Note  lastNote = Note::EMPTY();
@@ -128,7 +143,16 @@ struct TrackState {
 class Sequencer {
   public:
     Sequencer(MidiRouter& router, const Project& project, int sample_rate)
-        : router_(router), project_(&project), sampleRate_(sample_rate) {}
+        : router_(router), project_(&project), sampleRate_(sample_rate) {
+        // ⚠️ Rng's own default seeding folds a clock read with the address of a function-local static
+        // (rng.h). Eight of them constructed in a row share that address and can share the tick, so
+        // the array as built may hold EIGHT COPIES OF ONE STREAM — every track's chance gate passing
+        // and failing together. Re-derive all eight from track 0's platform draw instead, which keeps
+        // the entropy and makes the streams distinct by construction.
+        uint64_t hi = rngs_[0].next_u32();   // ⚠️ separate statements: C++ leaves the evaluation
+        uint64_t lo = rngs_[0].next_u32();   //    order of two calls in one expression unspecified
+        seed_rng((hi << 32) ^ lo);
+    }
 
     // The transport clock — the driver advances it and polls updatePlaybackBuffer(). In the app the
     // driver is the host, which copies the engine's frame counter in (that IS what the Kotlin
@@ -144,7 +168,14 @@ class Sequencer {
     // Pin the random FX (CHA/RND/RNL/ARP-RANDOM) to a known stream. For tools/ptrandom, which must be
     // able to fail reproducibly; the app never calls it, and a fresh Sequencer seeds itself from the
     // platform exactly as kotlin.random.Random.Default does (rng.h).
-    void seed_rng(uint64_t s) { rng_.seed(s); }
+    //
+    // ⚠️ EIGHT STREAMS, one per track, and track 0's is seeded with `s` UNCHANGED — tools/ptrandom
+    // drives track 0, so it measures the same stream it has always measured. The offset is the
+    // golden ratio in 64 bits, PCG's own stream-selector idiom, so no two tracks walk the same
+    // sequence at an offset of each other.
+    void seed_rng(uint64_t s) {
+        for (int t = 0; t < 8; ++t) rngs_[t].seed(s + static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ULL);
+    }
     int  sample_rate() const { return sampleRate_; }
 
     // The frame the current session latched at T PLAY — the trace's session base.
@@ -152,6 +183,10 @@ class Sequencer {
 
     static constexpr int64_t LOOKAHEAD_MS = 50;
     static constexpr int BUFFER_PHRASES = 2;
+    // How many per-track scheduling steps one SONG poll may take. Eight tracks × two buffered
+    // phrases is 16 phrases of real work; the rest of the budget is headroom for rows that cost no
+    // frames at all (an unauthored row, a spent chain), which are what could otherwise spin.
+    static constexpr int SONG_STEPS_PER_POLL = 64;
 
     bool is_playing() const { return isPlaying_; }
     PlaybackMode playback_mode() const { return playbackMode_; }
@@ -160,9 +195,19 @@ class Sequencer {
 
     // PlaybackController.getPlaybackPosition, verbatim (incl. the tempo fallback: currentProject_ is
     // null on the render path, but so is isPlaying_, so this reads the live tempo in practice).
-    PlaybackPosition getPlaybackPosition() {
+    //
+    // ⚠️ `trackId < 0` means "whichever track's marker is oldest in the window" — the one full-row
+    // highlight the SONG screen still draws. It cannot mean anything once the cursors diverge and it
+    // goes when the per-track markers land; the per-track form below is what those read.
+    PlaybackPosition getPlaybackPosition() { return getPlaybackPosition(-1); }
+
+    // Where ONE track is. In PHRASE and CHAIN mode only the track being played has a position, and
+    // every other track answers with the zero struct — which is the honest answer: a phrase that is
+    // not in any chain has no chain row, and a chain that is not in the song has no song row.
+    PlaybackPosition getPlaybackPosition(int trackId) {
         PlaybackPosition pos;
         if (!isPlaying_) return pos;
+        if (trackId >= 0 && playbackMode_ != PlaybackMode::SONG && trackId != playbackTrack_) return pos;
 
         int64_t currentFrame = getCurrentFrame();
         int64_t elapsedFrames = currentFrame - playbackStartFrame_;
@@ -198,10 +243,11 @@ class Sequencer {
             case PlaybackMode::SONG: {
                 prune_past(songPositionStartFrames_, currentFrame, framesPerPhrase);
                 for (const auto& e : songPositionStartFrames_) {
+                    if (trackId >= 0 && e.first.track != trackId) continue;
                     int64_t into = currentFrame - e.second;
                     if (into >= 0 && into < framesPerPhrase) {
-                        pos.songRow = e.first.first;
-                        pos.chainRow = e.first.second;
+                        pos.songRow = e.first.songRow;
+                        pos.chainRow = e.first.chainRow;
                         pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
                         break;
                     }
@@ -214,38 +260,54 @@ class Sequencer {
     }
 
     // PlaybackController.notifyDataChanged: roll the lookahead back to the earliest UNPLAYED phrase
-    // boundary so an edit is heard on the next phrase loop instead of 2–3 phrases later. Returns the
-    // frame the host must clearScheduledNotesFrom(), or −1 when there is nothing to roll back (the
-    // Sequencer holds no engine handle — that call is the host's, exactly as it is Kotlin's).
-    int64_t notify_data_changed(int64_t currentFrame) {
-        if (!isPlaying_) return -1;
+    // boundary so an edit is heard on the next phrase loop instead of 2–3 phrases later.
+    //
+    // ⚠️ THE ANSWER IS PER TRACK, and it has to be. Each track's boundary is its own, so one frame
+    // for the whole engine would either drop notes a track had already queued past that frame and
+    // will not schedule again, or leave notes it is about to re-emit. The Sequencer holds no engine
+    // handle — clearing the queues is the host's job, exactly as it is Kotlin's; it clears each
+    // track's from that track's frame.
+    RollbackPlan notify_data_changed(int64_t currentFrame) {
+        RollbackPlan plan;
+        if (!isPlaying_) return plan;
 
-        const Checkpoint* hit = nullptr;
-        for (const Checkpoint& c : checkpoints_) {
-            if (c.frame > currentFrame) { hit = &c; break; }
-        }
-        if (!hit) return -1;
-        Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
+        // PHRASE and CHAIN schedule one track only, so only that track has anything queued.
+        const bool oneTrack = playbackMode_ != PlaybackMode::SONG;
 
-        nextFrameToSchedule_ = cp.frame;
-        // ⚠️ AND THE STATE THE RE-SCHEDULE WILL CONSUME — see Checkpoint. Without this the phrase is
-        // replayed against a groove phase, a HOP and an RNG stream that the first pass already moved,
-        // so what comes back is not what was thrown away: with a groove whose active length does not
-        // divide 16, every track in the song is re-timed by an edit aimed at one of them.
-        for (int i = 0; i < 8; ++i) trackStates_[i] = cp.trackStates[i];
-        rng_ = cp.rng;
-        switch (playbackMode_) {
-            case PlaybackMode::CHAIN:
-                nextChainRowToSchedule_ = cp.chainRow;
-                break;
-            case PlaybackMode::SONG:
-                nextSongRowToSchedule_ = cp.songRow;
-                nextSongChainRowToSchedule_ = cp.songChainRow;
-                break;
-            default: break;   // PHRASE: resetting nextFrameToSchedule_ is enough
+        for (int t = 0; t < 8; ++t) {
+            if (oneTrack && t != playbackTrack_) continue;
+
+            std::deque<Checkpoint>& ring = checkpoints_[t];
+            const Checkpoint* hit = nullptr;
+            for (const Checkpoint& c : ring) {
+                if (c.frame > currentFrame) { hit = &c; break; }
+            }
+            if (!hit) continue;
+            Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
+
+            // ⚠️ AND THE STATE THE RE-SCHEDULE WILL CONSUME — see Checkpoint. Without this the
+            // phrase is replayed against a groove phase, a HOP and an RNG stream the first pass has
+            // already moved, so what comes back is not what was thrown away: with a groove whose
+            // active length does not divide 16 the track comes back re-timed.
+            trackStates_[t] = cp.trackState;
+            rngs_[t] = cp.rng;
+            if (oneTrack) {
+                nextFrameToSchedule_ = cp.frame;
+                if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
+                // PHRASE: resetting nextFrameToSchedule_ is enough
+            } else {
+                trackNextFrame_[t] = cp.frame;
+                trackSongRow_[t]   = cp.songRow;
+                trackChainRow_[t]  = cp.songChainRow;
+                // ⚠️ A track that had finished its column is LIVE again: the edit may well be the
+                // chain it was missing, and leaving it done would keep it silent until the song
+                // looped.
+                trackDone_[t] = false;
+            }
+            while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
+            plan.frames[t] = cp.frame;
         }
-        while (!checkpoints_.empty() && checkpoints_.back().frame >= cp.frame) checkpoints_.pop_back();
-        return cp.frame;
+        return plan;
     }
 
     // True once an EQM has overridden the master EQ this session. The host reads it BEFORE stop()
@@ -329,8 +391,15 @@ class Sequencer {
         int tempo = project_->tempo;
         router_.t_play("SONG", "row=" + hex2(startRow), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
-        nextSongRowToSchedule_ = startRow;
-        nextSongChainRowToSchedule_ = 0;
+        // ⚠️ ALL EIGHT START TOGETHER, from the cursor's row — one transport, one downbeat. They
+        // diverge from here as their chains run out at different lengths; per-track STARTING is a
+        // different feature (LIVE mode) and is not this one.
+        for (int t = 0; t < 8; ++t) {
+            trackNextFrame_[t] = playbackStartFrame_;
+            trackSongRow_[t]   = startRow;
+            trackChainRow_[t]  = 0;
+            trackDone_[t]      = false;
+        }
         songPositionStartFrames_.clear();
     }
 
@@ -340,16 +409,21 @@ class Sequencer {
         playbackMode_ = PlaybackMode::STOPPED;
         chainRowStartFrames_.clear();
         songPositionStartFrames_.clear();
-        checkpoints_.clear();
+        for (int t = 0; t < 8; ++t) checkpoints_[t].clear();
         // Both flags are read BEFORE the host calls stop(), which is what restores the master EQ and
         // the mixer faders — clearing them here is what makes the next session start clean.
         eqmActive_ = false;
         mixerVolTracks_ = 0;
         masterVolActive_ = false;
-        nextSongChainRowToSchedule_ = 0;
         playbackTrack_ = 0;
         // Full per-track reset: playback is a pure function of the project (see PlaybackController.stop).
-        for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
+        for (int i = 0; i < 8; ++i) {
+            trackStates_[i] = TrackState();
+            trackNextFrame_[i] = 0;
+            trackSongRow_[i] = 0;
+            trackChainRow_[i] = 0;
+            trackDone_[i] = false;
+        }
     }
 
     // The track PHRASE/CHAIN mode is playing through — what the two live arms schedule at, and what
@@ -366,7 +440,24 @@ class Sequencer {
         int64_t framesPerPhrase = framesPerStep * 16;
         int64_t currentFrame = getCurrentFrame();
 
-        int64_t bufferRemaining = nextFrameToSchedule_ - currentFrame;
+        // ⚠️ SONG MODE HAS EIGHT LOOKAHEADS, so "is the buffer deep enough" is asked of the track
+        // that is FURTHEST BEHIND — one track running ahead must never let a lagging one arrive
+        // late. PHRASE and CHAIN play a single track and keep the one shared cursor.
+        //
+        // ⚠️ When every track has finished its column the head is pinned to `currentFrame` rather
+        // than left at +∞: the arm below is what restarts the song (§2.A call B), and returning here
+        // would leave it silent forever.
+        int64_t bufferHead = nextFrameToSchedule_;
+        if (playbackMode_ == PlaybackMode::SONG) {
+            bufferHead = currentFrame;
+            bool anyLive = false;
+            for (int t = 0; t < 8; ++t) {
+                if (trackDone_[t]) continue;
+                if (!anyLive || trackNextFrame_[t] < bufferHead) bufferHead = trackNextFrame_[t];
+                anyLive = true;
+            }
+        }
+        int64_t bufferRemaining = bufferHead - currentFrame;
         int64_t minBuffer = static_cast<int64_t>(BUFFER_PHRASES) * framesPerPhrase;
         if (bufferRemaining >= minBuffer) return;
 
@@ -374,7 +465,7 @@ class Sequencer {
             case PlaybackMode::PHRASE: {
                 const Phrase& phrase = project.phrases[currentPhraseId_];
                 TrackState& trackState = trackStates_[playbackTrack_];
-                save_checkpoint(Checkpoint{nextFrameToSchedule_});
+                save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_});
                 int hopStartRow = trackState.consumeHopTarget();
                 int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                 SchedulePhraseResult r = schedulePhrase(phrase, nextFrameToSchedule_, playbackTrack_,
@@ -396,7 +487,7 @@ class Sequencer {
                     int phraseId = chain_phrase_ref(chain, nextRow);
                     int transposeSemitones = chain_transpose_semitones(chain, nextRow)
                                              + project_transpose_semitones(project);
-                    save_checkpoint(Checkpoint{nextFrameToSchedule_, nextRow});
+                    save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_, nextRow});
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                     SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_,
@@ -417,78 +508,33 @@ class Sequencer {
                     songLength = std::max(songLength, static_cast<int>(project.tracks[t].chainRefs.size()));
                 if (songLength == 0) { stop(); break; }
 
-                int maxChainLength = 0;
-                for (int trackId = 0; trackId < 8; ++trackId) {
-                    if (nextSongRowToSchedule_ < static_cast<int>(project.tracks[trackId].chainRefs.size())) {
-                        int chainId = project.tracks[trackId].chainRefs[nextSongRowToSchedule_];
-                        if (chainId >= 0 && chainId < 256) {
-                            const Chain& chain = project.chains[chainId];
-                            int chainLength = 0;
-                            for (int i = 0; i < 16; ++i) if (!chain_is_empty(chain, i)) chainLength++;
-                            maxChainLength = std::max(maxChainLength, chainLength);
+                // ─── EIGHT INDEPENDENT CURSORS ───────────────────────────────────────────────────
+                //
+                // Fill whichever LIVE track is furthest behind, one phrase at a time, until every
+                // one of them is BUFFER_PHRASES ahead. A two-row chain therefore moves on while the
+                // sixteen-row chain beside it is still running, which is the whole feature; the
+                // per-track walk is in schedule_track_unit().
+                //
+                // ⚠️ THE STEP CAP IS LOAD-BEARING, not a nervous guard. A song row nobody has
+                // authored costs ZERO frames, so a project of empty rows would advance its cursors
+                // forever without the buffer ever filling. The lock-step arm this replaces was
+                // bounded the same way, by doing exactly one row per poll.
+                for (int step = 0; step < SONG_STEPS_PER_POLL; ++step) {
+                    int nextTrack = -1;
+                    int64_t earliest = 0;
+                    for (int t = 0; t < 8; ++t) {
+                        if (trackDone_[t]) continue;
+                        if (nextTrack < 0 || trackNextFrame_[t] < earliest) {
+                            nextTrack = t;
+                            earliest = trackNextFrame_[t];
                         }
                     }
-                }
-
-                if (maxChainLength == 0) {
-                    nextSongRowToSchedule_++;
-                    nextSongChainRowToSchedule_ = 0;
-                    for (int i = 0; i < 8; ++i) trackStates_[i].trackStopped = false;
-                    if (nextSongRowToSchedule_ >= songLength) nextSongRowToSchedule_ = 0;
-                } else if (nextSongChainRowToSchedule_ < maxChainLength) {
-                    save_checkpoint(Checkpoint{nextFrameToSchedule_, 0,
-                                               nextSongRowToSchedule_, nextSongChainRowToSchedule_});
-                    bool scheduledAny = false;
-                    int64_t maxFramesScheduled = 0;
-                    for (int trackId = 0; trackId < 8; ++trackId) {
-                        TrackState& trackState = trackStates_[trackId];
-                        if (trackState.trackStopped) continue;
-                        // ⚠️ NO AUDIBILITY TEST — MUTE IS A MIXER GATE, NOT A SEQUENCER ONE.
-                        // A muted track is scheduled exactly like any other and the ENGINE zeroes its
-                        // output (`setTrackMuted`, audio-engine.cpp), which lands within one block.
-                        // That is what makes an unmute mid-phrase drop you into the middle of the
-                        // sequence where it actually is: the notes were being triggered all along.
-                        // Gating it here instead means nothing is triggered while muted, so unmuting
-                        // reveals only the voice still ringing from BEFORE the mute — the phrase
-                        // appears to freeze on that one note until the next boundary. It is also how
-                        // LittleGPTracker does it: Player::SetChannelMute only reaches the mixer.
-                        if (nextSongRowToSchedule_ < static_cast<int>(project.tracks[trackId].chainRefs.size())) {
-                            int chainId = project.tracks[trackId].chainRefs[nextSongRowToSchedule_];
-                            if (chainId >= 0 && chainId < 256) {
-                                const Chain& chain = project.chains[chainId];
-                                if (!chain_is_empty(chain, nextSongChainRowToSchedule_)) {
-                                    int phraseId = chain_phrase_ref(chain, nextSongChainRowToSchedule_);
-                                    int transposeSemitones = chain_transpose_semitones(chain, nextSongChainRowToSchedule_)
-                                                             + project_transpose_semitones(project);
-                                    int hopStartRow = trackState.consumeHopTarget();
-                                    int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                                    SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_,
-                                                                            trackId, transposeSemitones, framesPerStep,
-                                                                            effectiveStartRow, &chain,
-                                                                            nextSongChainRowToSchedule_);
-                                    // ⚠️ RECORDED FOR A MUTED TRACK TOO — this is the PLAYHEAD, and
-                                    // it answers "where is the song", not "what can I hear". Gating
-                                    // it on audibility freezes the SONG cursor for as long as every
-                                    // track on the row is muted, while the transport walks on.
-                                    put_song_position(nextSongRowToSchedule_, nextSongChainRowToSchedule_,
-                                                      nextFrameToSchedule_);
-                                    scheduledAny = true;
-                                    if (r.framesScheduled > maxFramesScheduled) maxFramesScheduled = r.framesScheduled;
-                                }
-                            }
-                        }
-                    }
-                    if (scheduledAny) {
-                        nextFrameToSchedule_ += maxFramesScheduled;
-                        nextSongChainRowToSchedule_++;
-                    } else {
-                        nextSongChainRowToSchedule_++;
-                    }
-                } else {
-                    nextSongRowToSchedule_++;
-                    nextSongChainRowToSchedule_ = 0;
-                    for (int i = 0; i < 8; ++i) trackStates_[i].trackStopped = false;
-                    if (nextSongRowToSchedule_ >= songLength) nextSongRowToSchedule_ = 0;
+                    // Every column has run out → the song starts again, all eight together. One
+                    // restart per poll: the lap after it is scheduled by the next poll, exactly as
+                    // the old arm advanced one row per poll.
+                    if (nextTrack < 0) { restart_all_tracks(); break; }
+                    if (earliest - currentFrame >= minBuffer) break;
+                    schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase);
                 }
                 break;
             }
@@ -506,66 +552,53 @@ class Sequencer {
         int64_t framesPerStep = frames_per_step(project.tempo, sampleRate_);
         router_.t_play("RENDER", "rows=" + hex2(startRow) + "-" + hex2(endRow), 0, project.tempo, sampleRate_);
 
-        int64_t currentFrame = 0;
-        for (int songRow = startRow; songRow <= endRow; ++songRow) {
-            for (int i = 0; i < 8; ++i) trackStates_[i].trackStopped = false;
+        const int64_t framesPerPhrase = framesPerStep * 16;
 
-            int maxChainLength = 0;
-            for (int trackId = 0; trackId < 8; ++trackId) {
-                if (trackFilter && trackFilter->find(trackId) == trackFilter->end()) continue;
-                const Track& track = project.tracks[trackId];
-                // ⚠️ NO audibility test: a row is as long as the longest chain ON it, muted or not.
-                // The live arm computes it the same way, and that is the point — otherwise muting the
-                // track that happens to hold the longest chain would shorten the row and re-time every
-                // other track, and the export would disagree with what was played.
-                if (songRow >= static_cast<int>(track.chainRefs.size())) continue;
-                int chainId = track.chainRefs[songRow];
-                if (chainId < 0 || chainId >= 256) continue;
-                const Chain& chain = project.chains[chainId];
-                int length = 0;
-                for (int i = 0; i < 16; ++i) if (!chain_is_empty(chain, i)) length++;
-                if (length > maxChainLength) maxChainLength = length;
-            }
-
-            for (int chainRow = 0; chainRow < maxChainLength; ++chainRow) {
-                int64_t maxFramesScheduled = 0;
-                bool scheduledAny = false;
-                for (int trackId = 0; trackId < 8; ++trackId) {
-                    if (trackFilter && trackFilter->find(trackId) == trackFilter->end()) continue;
-                    TrackState& trackState = trackStates_[trackId];
-                    if (trackState.trackStopped) continue;
-                    const Track& track = project.tracks[trackId];
-                    // ⚠️ THE RENDER SKIPS AN INAUDIBLE TRACK; THE LIVE ARM ABOVE DOES NOT, AND THE
-                    // ASYMMETRY IS DELIBERATE. An export is a file you keep: a muted track is left
-                    // out of it entirely, which is what this arm has always done. Live, mute is a
-                    // performance control on the mixer and the sequencer must keep running under it,
-                    // or unmuting mid-phrase reveals a stale voice instead of the sequence.
-                    //
-                    // The audio agrees either way — `push_mixer` gates a muted track to zero in both
-                    // — so what the asymmetry costs is only the global FX (EQM/VMV) authored ON a
-                    // muted track, which a render drops and a live play still applies.
-                    if (!track_audible(project, trackId)) continue;
-                    if (songRow >= static_cast<int>(track.chainRefs.size())) continue;
-                    int chainId = track.chainRefs[songRow];
-                    if (chainId < 0 || chainId >= 256) continue;
-                    const Chain& chain = project.chains[chainId];
-                    int phraseId = chain_phrase_ref(chain, chainRow);
-                    if (phraseId < 0) continue;
-                    int transposeSemitones = chain_transpose_semitones(chain, chainRow)
-                                             + project_transpose_semitones(project);
-                    int hopStartRow = trackState.consumeHopTarget();
-                    int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                    SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], currentFrame, trackId,
-                                                            transposeSemitones, framesPerStep, effectiveStartRow,
-                                                            &chain, chainRow);
-                    scheduledAny = true;
-                    if (r.framesScheduled > maxFramesScheduled) maxFramesScheduled = r.framesScheduled;
-                }
-                if (scheduledAny) currentFrame += maxFramesScheduled;
-            }
+        for (int trackId = 0; trackId < 8; ++trackId) {
+            trackNextFrame_[trackId] = 0;
+            trackSongRow_[trackId]   = startRow;
+            trackChainRow_[trackId]  = 0;
+            // ⚠️ THE RENDER SKIPS AN INAUDIBLE TRACK; THE LIVE ARM ABOVE DOES NOT, AND THE
+            // ASYMMETRY IS DELIBERATE. An export is a file you keep: a muted track is left out of it
+            // entirely, which is what this arm has always done. Live, mute is a performance control
+            // on the mixer and the sequencer must keep running under it, or unmuting mid-phrase
+            // reveals a stale voice instead of the sequence.
+            //
+            // The audio agrees either way — `push_mixer` gates a muted track to zero in both — so
+            // what the asymmetry costs is only the global FX (EQM/VMV) authored ON a muted track,
+            // which a render drops and a live play still applies.
+            //
+            // ⚠️ WITH INDEPENDENT CURSORS IT ALSO SHORTENS THE FILE when the longest chain on the
+            // last row is a muted one: the render now ends with the last AUDIBLE material instead of
+            // padding to a silence nobody can hear. It cannot re-time anything — that was the reason
+            // the old row-length pass ignored audibility, and per-track clocks remove it.
+            trackDone_[trackId] = (trackFilter && trackFilter->find(trackId) == trackFilter->end())
+                                  || !track_audible(project, trackId);
         }
+
+        // The same per-track walk the live arm takes, and deliberately the SAME FUNCTION: a render
+        // that disagrees with what was played is worse than no feature. ⚠️ It does NOT loop — a
+        // render plays its range once — and it takes no checkpoints, because nothing edits a project
+        // mid-export. Every unit either ends a track or advances one of its two row cursors, so the
+        // walk terminates on the range without a step cap.
+        for (;;) {
+            int nextTrack = -1;
+            int64_t earliest = 0;
+            for (int t = 0; t < 8; ++t) {
+                if (trackDone_[t]) continue;
+                if (nextTrack < 0 || trackNextFrame_[t] < earliest) {
+                    nextTrack = t;
+                    earliest = trackNextFrame_[t];
+                }
+            }
+            if (nextTrack < 0) break;
+            schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase, endRow, false);
+        }
+
+        int64_t endFrame = 0;
+        for (int t = 0; t < 8; ++t) endFrame = std::max(endFrame, trackNextFrame_[t]);
         router_.t_stop();
-        return currentFrame;
+        return endFrame;
     }
 
   private:
@@ -604,9 +637,10 @@ class Sequencer {
     //
     // ⚠️⚠️ **A ROLLBACK RE-RUNS schedulePhrase(), AND schedulePhrase() CONSUMES STATE.** It advances
     // `TrackState::grooveStep`, it takes the pending HOP with `consumeHopTarget()`, and it draws from
-    // `rng_` for CHA/RND/RNL and a random ARP. Rolling the FRAME back while leaving those where the
-    // first pass left them replays the phrase against a track that has already moved on — so the
-    // re-scheduled phrase is not the one that was thrown away. A groove whose active length does not
+    // the track's own `rngs_` stream for CHA/RND/RNL and a random ARP. Rolling the FRAME back while
+    // leaving those where the first pass left them replays the phrase against a track that has
+    // already moved on — so the re-scheduled phrase is not the one that was thrown away.
+    // A groove whose active length does not
     // divide 16 comes back at a different phase and RE-TIMES every track, muted or not, and the dice
     // are thrown again. The frame and the row cursors alone are not a checkpoint; this is.
     struct Checkpoint {
@@ -616,7 +650,12 @@ class Sequencer {
         int songChainRow = 0;
         // ⚠️ Filled by save_checkpoint(), NEVER by the call sites — there are four of them and a
         // fifth is one edit away. Captured below the sites, exactly so none of them can forget.
-        TrackState trackStates[8]{};
+        //
+        // ⚠️ ONE TRACK'S STATE, not all eight. With eight independent lookaheads a single checkpoint
+        // is no longer a single moment: rolling every track back to one frame either wipes material
+        // a track had queued and will not schedule again, or leaves material it is about to schedule
+        // twice. Each track carries its own ring and its own boundary.
+        TrackState trackState{};
         Rng        rng{};
     };
 
@@ -626,11 +665,12 @@ class Sequencer {
     // them names only the frame and the cursors it knows about; what a rollback has to put back is
     // the sequencer's business, and deriving it once below the sites is what stops the fifth caller
     // from being the one that forgets.
-    void save_checkpoint(Checkpoint cp) {
-        for (int i = 0; i < 8; ++i) cp.trackStates[i] = trackStates_[i];
-        cp.rng = rng_;
-        checkpoints_.push_back(cp);
-        if (checkpoints_.size() > 4) checkpoints_.pop_front();   // ring of 4, oldest = earliest unplayed
+    void save_checkpoint(int trackId, Checkpoint cp) {
+        cp.trackState = trackStates_[trackId];
+        cp.rng = rngs_[trackId];
+        checkpoints_[trackId].push_back(cp);
+        // ring of 4, oldest = earliest unplayed
+        if (checkpoints_[trackId].size() > 4) checkpoints_[trackId].pop_front();
     }
 
     // APPEND, never overwrite — a DELIBERATE divergence from the Kotlin original, which is buggy here.
@@ -655,8 +695,11 @@ class Sequencer {
     // so the list stays a handful of entries. Insertion order is still load-bearing — getPlaybackPosition
     // takes the FIRST in-window entry, which is now the OLDEST, i.e. the row actually sounding, instead
     // of a future one that had overwritten it.
-    void put_song_position(int songRow, int chainRow, int64_t frame) {
-        songPositionStartFrames_.emplace_back(std::make_pair(songRow, chainRow), frame);
+    // ⚠️ AND THE TRACK, because the eight cursors are at eight different places: the entry is now
+    // "track 3 is on song row 5, chain row 2", not "the song is". `prune_past` is unchanged — the
+    // frame is still the pair's second, which is all it reads.
+    void put_song_position(int trackId, int songRow, int chainRow, int64_t frame) {
+        songPositionStartFrames_.emplace_back(SongPos{trackId, songRow, chainRow}, frame);
     }
 
     // Drop entries that are definitely in the past (> 1 phrase ago) — Kotlin prunes both containers
@@ -687,6 +730,185 @@ class Sequencer {
         return -1;
     }
 
+    // ─── the per-track SONG walk ─────────────────────────────────────────────────────────────────
+    //
+    // Each track owns a frame, a song row and a chain row, and none of them is anybody else's
+    // business. What replaced the shared cursor is written here rather than in the arm above so the
+    // poll reads as "fill the track that is furthest behind" and nothing more.
+
+    // The last song row this track has a chain on; −1 when the column is empty. It is what "the
+    // column ran out" MEANS — an empty cell in the middle is a rest, not an ending, which is the
+    // deliberate divergence from LGPT and M8 (both treat the first blank as terminal).
+    static int last_filled_song_row(const Project& project, int trackId) {
+        const std::vector<int>& refs = project.tracks[trackId].chainRefs;
+        for (int r = static_cast<int>(refs.size()) - 1; r >= 0; --r)
+            if (refs[r] >= 0 && refs[r] < 256) return r;
+        return -1;
+    }
+
+    // How many rows of a chain hold a phrase. ⚠️ A COUNT, and it is now used only where a count is
+    // meant: the lock-step arm used it as an INDEX BOUND, so a chain with a hole in it lost every
+    // row past the hole, and two goldens recorded that as the specification.
+    static int chain_filled_rows(const Project& project, int chainId) {
+        if (chainId < 0 || chainId >= 256) return 0;
+        const Chain& chain = project.chains[chainId];
+        int n = 0;
+        for (int i = 0; i < CHAIN_ROWS; ++i) if (!chain_is_empty(chain, i)) n++;
+        return n;
+    }
+
+    // How long a song row is, in phrases, as AUTHORED: the longest column standing on it. It is what
+    // an EMPTY cell on that row costs the track sitting there.
+    //
+    // ⚠️ There is nothing else to derive it from once the cursors are independent, and it has to
+    // cost SOMETHING: a track that drops out for eight rows and comes back must come back where it
+    // always did, or every song already written with a gap in it is silently re-timed. A row nobody
+    // has authored spans zero phrases and costs nothing, which is what the old arm did too.
+    //
+    // ⚠️⚠️ **THE CALLER SPENDS THIS ONE PHRASE AT A TIME AND ASKS AGAIN EACH TIME.** It must never be
+    // multiplied out into a single jump. A rest is often several phrases long, the lookahead is two,
+    // and the user is editing the very chains this reads: a resting track that banked the whole span
+    // in one go is holding a number no later edit can reach — lengthen a neighbour's chain while the
+    // rest is playing and the track still comes back on the old, shorter answer. It has no
+    // checkpoint to roll back to either, because a jump is not a schedule. Reloading the project was
+    // the only thing that cleared it.
+    //
+    // ⚠️ It is still the NOMINAL length — a groove or a HOP on another track makes the row itself a
+    // little longer or shorter, so a resting track can rejoin slightly early or late.
+    static int song_row_span(const Project& project, int songRow) {
+        int span = 0;
+        for (int t = 0; t < 8; ++t) {
+            const std::vector<int>& refs = project.tracks[t].chainRefs;
+            if (songRow < 0 || songRow >= static_cast<int>(refs.size())) continue;
+            span = std::max(span, chain_filled_rows(project, refs[songRow]));
+        }
+        return span;
+    }
+
+    // The next row at or after `startRow` holding a phrase, or −1 when the chain has no more.
+    // ⚠️ NO WRAP, and that is the whole difference from findNextNonEmptyChainRow: wrapping is right
+    // for CHAIN mode, which loops one chain forever, and wrong inside a song, where running out is
+    // exactly the event that moves the track to its next row.
+    static int next_chain_row_no_wrap(const Chain& chain, int startRow) {
+        for (int r = std::max(0, startRow); r < CHAIN_ROWS; ++r)
+            if (!chain_is_empty(chain, r)) return r;
+        return -1;
+    }
+
+    // One song row finished for this track: drop the per-row state and move on. It costs nothing —
+    // every phrase and every bar of rest inside the row has already been paid for, one at a time.
+    void advance_track_song_row(int trackId) {
+        trackSongRow_[trackId]++;
+        trackChainRow_[trackId] = 0;
+        trackStates_[trackId].trackStopped = false;
+    }
+
+    // The snapshot every unit of work takes before it commits, written once below the three sites
+    // that need it — a phrase, a bar of rest, and a bar sat out after HOP FF. ⚠️ A unit that takes
+    // no checkpoint is a unit `notify_data_changed` cannot revise, which is exactly how a resting
+    // track came to hold a stale answer.
+    void checkpoint_track(int trackId, int songRow, int rowUnit, bool take) {
+        if (!take) return;
+        Checkpoint cp;
+        cp.frame = trackNextFrame_[trackId];
+        cp.songRow = songRow;
+        cp.songChainRow = rowUnit;
+        save_checkpoint(trackId, cp);
+    }
+
+    // Every column has run out. The song starts again with all eight together on one downbeat, at
+    // the latest of their end frames — the same loop point the shared cursor had when it wrapped
+    // past the longest column, and the reason a jam does not stop on its own.
+    void restart_all_tracks() {
+        int64_t at = trackNextFrame_[0];
+        for (int t = 1; t < 8; ++t) at = std::max(at, trackNextFrame_[t]);
+        for (int t = 0; t < 8; ++t) {
+            trackNextFrame_[t] = at;
+            trackSongRow_[t] = 0;
+            trackChainRow_[t] = 0;
+            trackDone_[t] = false;
+            trackStates_[t].trackStopped = false;
+        }
+    }
+
+    // Advance ONE track by one unit of work: a phrase, a rest, or the end of its column.
+    //
+    // `lastSongRow` bounds the walk for the RENDER path, which plays a range rather than a column;
+    // −1 means the track's own column end. `takeCheckpoint` is false there for the same reason —
+    // nothing edits a project mid-export.
+    void schedule_track_unit(const Project& project, int trackId, int64_t framesPerStep,
+                             int64_t framesPerPhrase, int lastSongRow = -1,
+                             bool takeCheckpoint = true) {
+        TrackState& trackState = trackStates_[trackId];
+        const std::vector<int>& refs = project.tracks[trackId].chainRefs;
+        const int songRow = trackSongRow_[trackId];
+
+        // ⚠️ RE-DERIVED PER UNIT, never cached at play time: the project is edited underneath a
+        // running transport (host.h `edit_project`), so a column length latched at T PLAY would keep
+        // playing rows the user has just cleared.
+        const int lastRow = (lastSongRow >= 0) ? lastSongRow : last_filled_song_row(project, trackId);
+        if (lastRow < 0 || songRow > lastRow) { trackDone_[trackId] = true; return; }
+
+        const int chainId = (songRow < static_cast<int>(refs.size())) ? refs[songRow] : -1;
+
+        // ⭐ A BLANK CELL AND A SHORT CHAIN ARE NOT THE SAME THING. A blank is how a rest is written,
+        // so it lasts as long as its row; a cell that NAMES a chain is played for as long as that
+        // chain has rows — however few — because not waiting is the request.
+        //
+        // ⚠️⚠️ ONE BAR PER UNIT, AND THE SPAN ASKED FOR AGAIN ON EVERY ONE — see song_row_span. The
+        // rest is never banked as a single jump; `trackChainRow_` counts the bars spent, exactly as
+        // it counts chain rows for a cell that has a chain in it.
+        if (chainId < 0 || chainId >= 256) {
+            if (trackChainRow_[trackId] >= song_row_span(project, songRow)) {
+                advance_track_song_row(trackId);
+                return;
+            }
+            checkpoint_track(trackId, songRow, trackChainRow_[trackId], takeCheckpoint);
+            trackNextFrame_[trackId] += framesPerPhrase;
+            trackChainRow_[trackId]++;
+            return;
+        }
+
+        const Chain& chain = project.chains[chainId];
+
+        // HOP FF stopped this track: it sits out the rest of its chain and rejoins on the next song
+        // row, which is what the lock-step arm did by skipping it for the row's remaining rows.
+        // ⚠️ A bar at a time, for the same reason the rest above is.
+        if (trackState.trackStopped) {
+            const int satOut = next_chain_row_no_wrap(chain, trackChainRow_[trackId]);
+            if (satOut < 0) { advance_track_song_row(trackId); return; }
+            checkpoint_track(trackId, songRow, satOut, takeCheckpoint);
+            trackNextFrame_[trackId] += framesPerPhrase;
+            trackChainRow_[trackId] = satOut + 1;
+            return;
+        }
+
+        const int chainRow = next_chain_row_no_wrap(chain, trackChainRow_[trackId]);
+        if (chainRow < 0) { advance_track_song_row(trackId); return; }   // the chain is spent
+
+        checkpoint_track(trackId, songRow, chainRow, takeCheckpoint);
+
+        // ⚠️ NO AUDIBILITY TEST — MUTE IS A MIXER GATE, NOT A SEQUENCER ONE, and a per-track loop is
+        // exactly where "skip this track" starts to look natural. A muted track is scheduled like
+        // any other and the ENGINE zeroes its output (`setTrackMuted`, audio-engine.cpp), which is
+        // what makes an unmute mid-phrase drop you into the middle of the sequence where it actually
+        // is: the notes were being triggered all along. Gating it here means unmuting reveals only
+        // the voice still ringing from BEFORE the mute. LittleGPTracker does it the same way —
+        // Player::SetChannelMute only reaches the mixer.
+        const int transposeSemitones = chain_transpose_semitones(chain, chainRow)
+                                       + project_transpose_semitones(project);
+        const int hopStartRow = trackState.consumeHopTarget();
+        const int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
+        SchedulePhraseResult r = schedulePhrase(project.phrases[chain_phrase_ref(chain, chainRow)],
+                                                trackNextFrame_[trackId], trackId, transposeSemitones,
+                                                framesPerStep, effectiveStartRow, &chain, chainRow);
+        // ⚠️ RECORDED FOR A MUTED TRACK TOO — this is the PLAYHEAD, and it answers "where is this
+        // track", not "what can I hear".
+        put_song_position(trackId, songRow, chainRow, trackNextFrame_[trackId]);
+        trackNextFrame_[trackId] += r.framesScheduled;
+        trackChainRow_[trackId] = chainRow + 1;
+    }
+
     // `chain`/`chainRow` are the phrase's place in the chain being played, and they exist for AUS/AUF
     // alone: a fade may run from one phrase into a later one of the same chain, and the pairing needs
     // to see past the phrase in hand to know how long the span is. PHRASE mode passes nullptr and gets
@@ -698,6 +920,9 @@ class Sequencer {
         int scheduledNotes = 0;
         int rowsScheduled = 0;
         TrackState& trackState = trackStates_[clampi(trackId, 0, 7)];
+        // Every random draw in the sequencer is reached from inside this call, so selecting the
+        // track's stream once here is what keeps rng_int/rng_range from needing a track argument.
+        schedulingTrack_ = clampi(trackId, 0, 7);
 
         if (trackState.trackStopped) return SchedulePhraseResult{0, false, true, 0};
 
@@ -1507,10 +1732,20 @@ class Sequencer {
     // PlaybackController.kt line for line: `rng_int(15)` is its `Random.nextInt(15)`, `rng_range(a, b)`
     // its `Random.nextInt(a, b)` — half-open at the top, negative `lo` allowed. See rng.h for why this
     // is the one piece of songcore proven statistically rather than by a golden.
-    int rng_int(int bound) { return rng_.next_int(bound); }
-    int rng_range(int lo, int hi) { return rng_.next_int(lo, hi); }
+    //
+    // ⚠️ The stream is chosen by `schedulingTrack_`, which `schedulePhrase` sets on entry — the ONE
+    // place a draw can be reached from. Passing the track down to each draw site instead would mean
+    // four signatures widened for a value every one of them already sits underneath, and a fifth
+    // site one edit away from forgetting.
+    int rng_int(int bound) { return rngs_[schedulingTrack_].next_int(bound); }
+    int rng_range(int lo, int hi) { return rngs_[schedulingTrack_].next_int(lo, hi); }
 
-    Rng rng_;
+    // ⚠️ ONE STREAM PER TRACK, because the live-edit rollback is per track: a shared stream cannot be
+    // rewound for one track without un-drawing dice another track has already thrown. The draws
+    // themselves carry no golden (SC-1) — tools/ptrandom measures the distribution, and it drives
+    // track 0, whose stream is unchanged.
+    Rng rngs_[8];
+    int schedulingTrack_ = 0;
     MidiRouter& router_;
     const Project* project_ = nullptr;
     // Mirrors PlaybackController.currentProject: set only by the live transport starts, left null on
@@ -1520,10 +1755,18 @@ class Sequencer {
 
     TrackState trackStates_[8];
     int64_t currentFrame_ = 0;
+    // PHRASE and CHAIN play ONE track and keep the single cursor they always had.
     int64_t nextFrameToSchedule_ = 0;
     int nextChainRowToSchedule_ = 0;
-    int nextSongRowToSchedule_ = 0;
-    int nextSongChainRowToSchedule_ = 0;
+
+    // ─── SONG's eight cursors ────────────────────────────────────────────────────────────────────
+    // One per track, and the reason SONG has no shared frame, song row or chain row left: a track
+    // whose chain runs short moves on alone. `trackDone_` is a column that has run out — it stays
+    // silent until every other track has run out too, which is when the song loops.
+    int64_t trackNextFrame_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int  trackSongRow_[8]  = {0, 0, 0, 0, 0, 0, 0, 0};
+    int  trackChainRow_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    bool trackDone_[8]     = {false, false, false, false, false, false, false, false};
     int currentPhraseId_ = 0;
     int currentChainId_ = 0;
     // The mixer track PHRASE/CHAIN mode plays through: its fader, its mute, its voice slot and its
@@ -1534,10 +1777,10 @@ class Sequencer {
     bool isPlaying_ = false;
 
     // ── side-records: UI cursor + live-edit rollback + the EQM restore flag (S5, SC-4/SC-2) ──
-    std::deque<Checkpoint> checkpoints_;                                   // ring of 4
+    std::deque<Checkpoint> checkpoints_[8];                                // ring of 4, per track
     std::deque<std::pair<int, int64_t>> chainRowStartFrames_;              // (chainRow, startFrame)
-    std::vector<std::pair<std::pair<int, int>, int64_t>>
-        songPositionStartFrames_;                                          // ((songRow, chainRow) → startFrame), insertion-ordered
+    std::vector<std::pair<SongPos, int64_t>>
+        songPositionStartFrames_;                                          // (SongPos → startFrame), insertion-ordered
     bool eqmActive_ = false;
     int  mixerVolTracks_ = 0;      // bit N: a VTR has moved track N's fader this take
     bool masterVolActive_ = false; // …and a VMV has moved the master's

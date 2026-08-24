@@ -1021,8 +1021,13 @@ class SongcoreHost {
     // boundary; clearing the queue is the host's job because only the host holds the engine.
     void notify_data_changed() {
         sync_clock();
-        int64_t rollbackFrame = seq_.notify_data_changed(seq_.clock());
-        if (rollbackFrame >= 0 && engine_) engine_->clearScheduledNotesFrom(rollbackFrame);
+        // ⚠️ ONE FRAME PER TRACK, not one for the engine: the eight song cursors have their own
+        // phrase boundaries, so clearing every track from the earliest of them would drop notes a
+        // track ahead of it had queued and is not going to schedule again.
+        songcore::RollbackPlan plan = seq_.notify_data_changed(seq_.clock());
+        if (!engine_) return;
+        for (int t = 0; t < 8; ++t)
+            if (plan.frames[t] >= 0) engine_->clearScheduledNotesFrom(plan.frames[t], t);
     }
 
     // ── ↕ the note preview — "hear the note you just dialled in" ──────────────────────────────────
@@ -1178,6 +1183,14 @@ class SongcoreHost {
     PlaybackPosition playheads() {
         sync_clock();
         return seq_.getPlaybackPosition();
+    }
+
+    // Where ONE track's playhead is. In SONG mode the eight are at eight different places, so this
+    // is the only form that can answer honestly; the form above answers with whichever marker is
+    // oldest in the window, for the single full-row highlight that has not been replaced yet.
+    PlaybackPosition playheads(int trackId) {
+        sync_clock();
+        return seq_.getPlaybackPosition(trackId);
     }
 
     bool is_playing() const { return seq_.is_playing(); }

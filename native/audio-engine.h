@@ -334,8 +334,10 @@ public:
     // Clear all scheduled notes
     void clearScheduledNotes();
 
-    // Clear only notes/kills at or after fromFrame (leaves the current phrase intact)
-    void clearScheduledNotesFrom(int64_t fromFrame);
+    // Clear only notes/kills at or after fromFrame (leaves the current phrase intact).
+    // ⚠️ `trackId >= 0` clears ONE track's — the eight song cursors roll back independently, so a
+    // live edit must drop only what the track being rolled back is going to schedule again.
+    void clearScheduledNotesFrom(int64_t fromFrame, int trackId = -1);
 
     // Load table data from Kotlin
     // rowData format: 16 rows × 8 bytes = 128 bytes

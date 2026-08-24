@@ -2764,10 +2764,10 @@ void AudioEngine::clearScheduledNotes() {
     paramUpdateQueue.clear();
 }
 
-void AudioEngine::clearScheduledNotesFrom(int64_t fromFrame) {
-    noteQueue.clearFrom(fromFrame);
-    killQueue.clearFrom(fromFrame);
-    paramUpdateQueue.clearFrom(fromFrame);
+void AudioEngine::clearScheduledNotesFrom(int64_t fromFrame, int trackId) {
+    noteQueue.clearFrom(fromFrame, trackId);
+    killQueue.clearFrom(fromFrame, trackId);
+    paramUpdateQueue.clearFrom(fromFrame, trackId);
 }
 
 void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
