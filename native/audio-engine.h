@@ -474,6 +474,11 @@ public:
      */
     bool takeTableMasterEqTouched() { return tableMasterEqTouched.exchange(false, std::memory_order_relaxed); }
 
+    // The same question WITHOUT consuming the answer, for a caller that wants to know whether the bus
+    // is currently overridden rather than to discharge the restore. ⚠️ Anyone asking mid-take must use
+    // this one: `take` would disarm stop(), and the bus would then keep the table's preset forever.
+    bool tableMasterEqTouchedPeek() const { return tableMasterEqTouched.load(std::memory_order_relaxed); }
+
     // Set OTT depth (0=bypass, 255=full wet). Enables/disables OTT module.
     void setOttDepth(int depth);
     // Reset OTT for offline render: clean state, no warmup fade.
@@ -795,6 +800,11 @@ private:
     // ramp — which writes the fader from the audio thread — un-mute the track it lands on. The two
     // stay independent and are multiplied where the block snapshots them.
     bool  trackMuted[8] = {false, false, false, false, false, false, false, false};
+    // Where the gate has actually GOT TO, chasing trackMuted at MUTE_GATE_SAMPLES per full swing.
+    // ⚠️ AUDIO THREAD ONLY — it is advanced once per block inside processAudioBlock and read nowhere
+    // else, which is why it needs no atomic and no lock of its own. Starts open: an engine that has
+    // never been told about a mute must not fade its first block in.
+    float trackGate[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
     // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.

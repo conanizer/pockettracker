@@ -254,8 +254,15 @@ class Sequencer {
     bool eqm_active() const { return eqmActive_; }
 
     // True once a VTR or VMV has moved a mixer fader this session — read by the host on the same
-    // BEFORE-stop() edge as eqm_active(), to push the project's faders back.
-    bool mixer_vol_active() const { return mixerVolActive_; }
+    // BEFORE-stop() edge as eqm_active(), to push the project's faders back. Derived from the two
+    // below rather than latched beside them: a third thing to remember to set is a third thing to
+    // forget.
+    bool mixer_vol_active() const { return mixerVolTracks_ != 0 || masterVolActive_; }
+
+    // …and WHICH faders, because a mid-take push of the authored mixer has to put back everything the
+    // song did NOT move (engine_setup.h `MixerHeld`). Bit N = track N's fader is the song's now.
+    int  mixer_vol_tracks() const { return mixerVolTracks_; }
+    bool master_vol_active() const { return masterVolActive_; }
 
     bool has_live_project() const { return currentProject_ != nullptr; }
 
@@ -337,7 +344,8 @@ class Sequencer {
         // Both flags are read BEFORE the host calls stop(), which is what restores the master EQ and
         // the mixer faders — clearing them here is what makes the next session start clean.
         eqmActive_ = false;
-        mixerVolActive_ = false;
+        mixerVolTracks_ = 0;
+        masterVolActive_ = false;
         nextSongChainRowToSchedule_ = 0;
         playbackTrack_ = 0;
         // Full per-track reset: playback is a pure function of the project (see PlaybackController.stop).
@@ -850,7 +858,8 @@ class Sequencer {
             // not enough here: pairing reads the AUTHORED step, so a CHA that zeroes the slot the ramp
             // took its start value from leaves a fade moving a fader nothing will restore. Keyed on the
             // CC the ramp actually sends, which is the thing that moves it.
-            if (r.ccId == CC_TRACK_VOL || r.ccId == CC_MASTER_VOL) mixerVolActive_ = true;
+            if (r.ccId == CC_TRACK_VOL)  mixerVolTracks_ |= 1 << clampi(trackId, 0, 7);
+            if (r.ccId == CC_MASTER_VOL) masterVolActive_ = true;
             // ⚠️ EQM carries the same debt, and is keyed the same way — on what the ramp MOVES, not on
             // the cell that declared it. A morph left the master EQ somewhere no preset names, and
             // without this nothing puts the project's value back on stop().
@@ -1184,14 +1193,14 @@ class Sequencer {
             // exactly like EQM below, the host puts the project's value back on stop().
             if (params.trackVolValue.has_value()) {
                 router_.cc(voiceFxFrame, trackId, CC_TRACK_VOL, *params.trackVolValue / 255.0f);
-                mixerVolActive_ = true;
+                mixerVolTracks_ |= 1 << clampi(trackId, 0, 7);
             }
             if (params.masterVolValue.has_value()) {
                 // TRACK_GLOBAL, not `trackId` — the master fader belongs to no track, and riding the
                 // track lane would let EngineConsumer's external gate swallow it (event.h).
                 router_.cc(effectiveTargetFrame, TRACK_GLOBAL, CC_MASTER_VOL,
                            *params.masterVolValue / 255.0f);
-                mixerVolActive_ = true;
+                masterVolActive_ = true;
             }
             if (params.eqmSlot.has_value()) {
                 // Master/mixer EQ — global, persists until the next EQM; the host restores the mixer
@@ -1530,7 +1539,8 @@ class Sequencer {
     std::vector<std::pair<std::pair<int, int>, int64_t>>
         songPositionStartFrames_;                                          // ((songRow, chainRow) → startFrame), insertion-ordered
     bool eqmActive_ = false;
-    bool mixerVolActive_ = false;
+    int  mixerVolTracks_ = 0;      // bit N: a VTR has moved track N's fader this take
+    bool masterVolActive_ = false; // …and a VMV has moved the master's
 
     // Per-retrigger additive volume delta for RPT (Rxy), indexed by ramp nibble. Same constants as
     // PlaybackController.REPEAT_RAMP_DELTAS (single source of the ramp curve).

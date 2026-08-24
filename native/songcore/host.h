@@ -503,7 +503,27 @@ class SongcoreHost {
      */
     void push_globals() {
         if (!engine_) return;
-        push_mixer(*engine_, project_);
+        push_mixer(*engine_, project_, held_by_song());
+    }
+
+    /**
+     * What the RUNNING TAKE owns right now, so `push_globals()` can push the authored mixer WITHOUT
+     * wiping it. Same two questions `stop()`'s restore asks, from the other end of the take.
+     *
+     * ⚠️ It is not only the mute/solo chords that need this. Every `mark_modified` on a globals screen
+     * pushes too, so nudging a MIXER fader or an EFFECTS dial mid-song used to kill a running EQM the
+     * same way a mute did.
+     *
+     * ⚠️ PEEK, NEVER TAKE, on the table latch: it is a one-way arm for the restore in `stop()`, and
+     * consuming it here would leave a bus a TABLE row's EQM had overridden restored by nobody.
+     */
+    MixerHeld held_by_song() const {
+        MixerHeld held;
+        if (!engine_ || !seq_.has_live_project()) return held;
+        held.faderTracks = seq_.mixer_vol_tracks();
+        held.masterFader = seq_.master_vol_active();
+        held.masterEq    = seq_.eqm_active() || engine_->tableMasterEqTouchedPeek();
+        return held;
     }
 
     // ── ↕ the EQ editor (Phase 3 S8) ─────────────────────────────────────────────────────────────

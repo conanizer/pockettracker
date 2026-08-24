@@ -1191,18 +1191,38 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // hot loops below. Previously volumeMutex was taken per-sample-per-voice (~350k locks/sec/voice) —
     // pure overhead plus a dropout hazard if the Kotlin thread held the lock during setTrackVolume/
     // setMasterVolume. One block of slightly-stale volume is inaudible.
+
+    // ⚠️ HOISTED ABOVE THE SNAPSHOT because the mute gate reads it: an export must not FADE a muted
+    // track out over its first 5.8 ms, it must start silent. Also used by the visualizer gates below.
+    const bool offlineRender = isOfflineRendering.load(std::memory_order_relaxed);
+
     float trackVolSnapshot[SF_VOICE_COUNT];
-    bool  trackMutedSnapshot[8];
+    // ⚠️ THE MUTE IS NO LONGER FOLDED INTO THE FADER — it is a RAMP now, and a ramp cannot be carried
+    // by one per-block number. The gate arrives as its value at the block's first frame and its value
+    // at the last, and both read sites interpolate between them per sample exactly as pan and the
+    // mod-destination routes already do. Slamming a track to zero in one sample is what a mute sounded
+    // like, and it was a step ~14x anything the signal does on its own.
+    //
+    // ⚠️ TWO READ SITES, AND BOTH ARE OBLIGATORY: the sampler's per-sample gain, and the SoundFont
+    // buffer's post-chain multiply. They are the only two places a track's audio exists on its own
+    // before it is summed — the SF path cannot take the gate through `tsf_channel_set_volume` because
+    // that is set once per block, which is the very staircase this removes.
+    float gateStart[SF_VOICE_COUNT];
+    float gateEnd[SF_VOICE_COUNT];
     float masterVolSnapshot;
     int previewTrack;
     {
         std::lock_guard<std::mutex> lock(volumeMutex);
-        // ⚠️ THE MUTE IS FOLDED IN HERE, WHERE THE VALUE ENTERS THE SNAPSHOT — not at the three
-        // places that read it. Every one of them then inherits the gate for free, the preview lane
-        // included (it copies out of this array below), and there is no read site left to forget.
+        // Per full swing, so the ramp is the same wall-clock length whatever the block size.
+        const float gateStep = (float)numFrames / (float)MUTE_GATE_SAMPLES;
         for (int t = 0; t < 8; t++) {
-            trackMutedSnapshot[t] = trackMuted[t];
-            trackVolSnapshot[t]   = trackMuted[t] ? 0.0f : trackVolumes[t];
+            trackVolSnapshot[t] = trackVolumes[t];
+            const float target  = trackMuted[t] ? 0.0f : 1.0f;
+            if (offlineRender) trackGate[t] = target;   // a mute is a STATE in an export, not a gesture
+            gateStart[t] = trackGate[t];
+            if      (trackGate[t] < target) trackGate[t] = fminf(target, trackGate[t] + gateStep);
+            else if (trackGate[t] > target) trackGate[t] = fmaxf(target, trackGate[t] - gateStep);
+            gateEnd[t]   = trackGate[t];
         }
         masterVolSnapshot = masterVolume;
         previewTrack      = previewLaneTrack;
@@ -1213,15 +1233,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     //
     // ⚠️ THE ASSIGNMENT SITS AFTER THE SNAPSHOT LOOP, not in the setter: reading trackVolSnapshot here
     // is what makes it the LIVE fader, so a VTR or a mixer move lands in the audition it is aimed at.
-    trackVolSnapshot[PREVIEW_LANE] = (previewTrack >= 0 && previewTrack < 8)
-                                   ? trackVolSnapshot[previewTrack] : 1.0f;
+    const bool previewBorrows      = (previewTrack >= 0 && previewTrack < 8);
+    trackVolSnapshot[PREVIEW_LANE] = previewBorrows ? trackVolSnapshot[previewTrack] : 1.0f;
+    // …and the gate comes with it: an audition off a muted channel stayed silent when the mute was a
+    // fold into the fader, and it has to keep doing that now the gate is carried separately.
+    gateStart[PREVIEW_LANE]        = previewBorrows ? gateStart[previewTrack] : 1.0f;
+    gateEnd[PREVIEW_LANE]          = previewBorrows ? gateEnd[previewTrack]   : 1.0f;
 
     // Zero only the [0,numFrames) slice actually used (not the full PROCESS_SUBBLOCK arrays), and
     // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
     // Also skip all visualizer capture during offline WAV export: the live stream is silent so the
     // scopes already read flat, and OCTA would otherwise snapshot random mid-render frames that only
     // repaint on progress ticks (a frozen, twitching scope). Let the visualizers sit flat mid-render.
-    const bool offlineRender    = isOfflineRendering.load(std::memory_order_relaxed);
     const int64_t nowMsec       = nowMs();
     const bool octaWanted       = !offlineRender && (nowMsec - lastTrackWaveformReadMs.load(std::memory_order_relaxed)) < CAPTURE_IDLE_MS;
     const bool spectrumWanted   = !offlineRender && (nowMsec - lastSpectrumReadMs.load(std::memory_order_relaxed))      < CAPTURE_IDLE_MS;
@@ -1412,12 +1435,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // one block and springs back.
                 case PARAM_UPDATE_TRACK_VOL: {            // VTR — this track's mixer fader
                     if (upd.trackId >= 0 && upd.trackId < 8) {
-                        // ⚠️ The MEMBER takes the authored value and the SNAPSHOT takes the gated
-                        // one: the fader keeps moving under a muted track, so unmuting lands on
-                        // wherever the ramp has got to rather than on where it started.
+                        // Both take the authored value: the mute is no longer folded in here, it is a
+                        // separate gate multiplied at the two read sites. The fader therefore keeps
+                        // moving under a muted track exactly as before, so unmuting lands on wherever
+                        // the ramp has got to rather than on where it started.
                         applyTrackVolume(upd.trackId, upd.value);
-                        trackVolSnapshot[upd.trackId] =
-                            trackMutedSnapshot[upd.trackId] ? 0.0f : upd.value;
+                        trackVolSnapshot[upd.trackId] = upd.value;
                     }
                     break;
                 }
@@ -1918,8 +1941,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // ⚠️ SF_VOICE_COUNT, not 8: the preview lane is index 8 and now carries a real fader.
             // Bounded at 8 the sampler path would hold unity while the SoundFont path (which indexes
             // the same array by trackId with no such clamp) followed it — two readings of one array.
+            // ⚠️ THE MUTE GATE RIDES ALONG HERE, interpolated across the block on the same `t` as pan:
+            // it is the only thing between a mute press and a full-scale step in the output.
             float trackVol = (voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT)
-                           ? trackVolSnapshot[voice.trackId] : 1.0f;
+                           ? trackVolSnapshot[voice.trackId]
+                             * (gateStart[voice.trackId]
+                                + (gateEnd[voice.trackId] - gateStart[voice.trackId]) * t)
+                           : 1.0f;
             float antiClick = voice.antiClickFade();
 
             // Sample fetch + per-voice chain is the ONLY mono/stereo difference; a mono
@@ -2213,14 +2241,20 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             if (!rendered) continue;
 
+            // ⚠️ THE MUTE GATE IS APPLIED HERE, and it has to be ABOVE the send tap below: the fader
+            // itself reaches this path through `tsf_channel_set_volume`, which makes a SoundFont send
+            // post-fader where the sampler's is pre-fader, and a muted SF track has always taken its
+            // reverb and delay down with it. The gate cannot ride the channel volume — that is set
+            // once per block, which is exactly the staircase the ramp exists to remove.
             for (int i = 0; i < numFrames; i++) {
                 float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
                 float L = sfBuf[i * 2];
                 float R = sfBuf[i * 2 + 1];
                 sv.chain.filter.setInterpolatedCoeffs(lerp_t);
                 sv.chain.processStereo(L, R);
-                sfBuf[i * 2]     = L;
-                sfBuf[i * 2 + 1] = R;
+                const float gate = gateStart[t] + (gateEnd[t] - gateStart[t]) * lerp_t;
+                sfBuf[i * 2]     = L * gate;
+                sfBuf[i * 2 + 1] = R * gate;
             }
 
             // SEND TAP: stereo post-chain SF buffer into reverb/delay buses
@@ -3088,8 +3122,9 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
 void AudioEngine::setTrackMuted(int trackId, bool muted) {
     if (trackId < 0 || trackId >= 8) return;
     { std::lock_guard<std::mutex> lock(volumeMutex); trackMuted[trackId] = muted; }
-    // The sampler and the SF channel both re-read the snapshot next block, so nothing else is needed
-    // to silence what is ringing — a mute lands within one block, like a fader slammed to 00.
+    // Nothing else is needed to silence what is ringing: the next block picks the new target up and
+    // both mix paths walk their gate to it over MUTE_GATE_SAMPLES, so a mute lands in ~5.8 ms rather
+    // than in one sample. Voices keep running underneath — a mute is a gate, never a stop.
     LOGD("🔇 Track %d %s", trackId, muted ? "muted" : "unmuted");
 }
 

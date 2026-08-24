@@ -77,6 +77,10 @@ const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz (note sta
 // DECLICK_SAMPLES — their tail is masked by the new note, and short fades keep slots turning
 // over at phrase-boundary trigger bursts.
 const int KILL_FADE_SAMPLES = 256;
+// The MUTE/SOLO gate, for the same reason and at the same length: a track cut to zero at a
+// high-amplitude point is a click whatever cut it. ⚠️ It is a GATE, not a fade — it runs in both
+// directions, so unmuting rides back up to the fader over the same 5.8 ms rather than snapping.
+const int MUTE_GATE_SAMPLES = 256;
 
 // ===================================
 // EFFECT TYPE CONSTANTS — ⚠️ must match native/songcore/effects.h, which is where an effect's code is

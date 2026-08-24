@@ -77,6 +77,26 @@ void push_all_instrument_params(Engine& engine, const Project& project) {
     }
 }
 
+// What the RUNNING SONG has already taken over, and whose authored value must therefore NOT be
+// pushed back on top of it.
+//
+// ⚠️ VTR/VMV and EQM *replace* engine state and nothing puts it back until the transport stops — see
+// effects.h's VTR note, and `SongcoreHost::stop()`'s restore, which answers this same question from
+// the other end with the same two flags. So a mid-take push of the authored mixer is not a refresh,
+// it is a WIPE: the song's fade springs back to the fader on screen, and its master-EQ sweep is gone.
+//
+// ⚠️ PER FADER, NOT A BLANKET SKIP, and the granularity is what keeps the fix from costing something
+// else: `mark_modified` on the MIXER screen pushes through here too, so a whole-mixer skip would mean
+// that once ANY VTR had run, no fader the user typed could be heard until the transport stopped.
+// Only the faders the song is actually driving are its own.
+//
+// Empty is the LOAD-time answer, and the default: nothing is running, so everything is pushed.
+struct MixerHeld {
+    int  faderTracks = 0;       // bit N: a VTR has moved track N's fader this take
+    bool masterFader = false;   // a VMV has moved the master fader
+    bool masterEq    = false;   // an EQM has moved the master bus off the project's slot
+};
+
 // AppInputDispatcher.pushGlobalEffectsToBackend — the state that lives ONLY in the engine and so
 // survives a project swap: the 128-slot EQ preset bank, the reverb and delay buses (+ their input EQ
 // and the delay→reverb send), and the master EQ. Without it a loaded project's reverb/delay keep
@@ -85,7 +105,7 @@ void push_all_instrument_params(Engine& engine, const Project& project) {
 // Every slot and band is pushed, including cleared (type = 0) ones, so a previous project's presets
 // are fully overwritten rather than partially.
 template <typename Engine>
-void push_global_effects(Engine& engine, const Project& project) {
+void push_global_effects(Engine& engine, const Project& project, MixerHeld held = {}) {
     const int presets = static_cast<int>(project.eqPresets.size());
     for (int slot = 0; slot < presets; ++slot) {
         const std::vector<EqBand>& bands = project.eqPresets[slot].bands;
@@ -101,26 +121,32 @@ void push_global_effects(Engine& engine, const Project& project) {
                           static_cast<float>(project.tempo), project.delayWet);
     engine.setDelayInputEq(project.delayInputEq);
     engine.setDelayReverbSend(project.delayReverbSend);
-    engine.setMasterEqSlot(project.masterEqSlot);   // -1 = bypass
+    // The bank above is safe to re-push at any moment — `setEqBand` writes only the 128-slot store,
+    // and nothing that is USING a slot reads it back. THIS line is the one that reaches the bus.
+    if (!held.masterEq) engine.setMasterEqSlot(project.masterEqSlot);   // -1 = bypass
 }
 
 // AppInputDispatcher.syncVolumesToAudioBackend — the mixer and master bus, then the globals above.
 template <typename Engine>
-void push_mixer(Engine& engine, const Project& project) {
+void push_mixer(Engine& engine, const Project& project, MixerHeld held = {}) {
     const int tracks = static_cast<int>(project.tracks.size());
     for (int i = 0; i < 8 && i < tracks; ++i) {
-        engine.setTrackVolume(i, hex_to_float(project.tracks[i].volume));
+        if (!(held.faderTracks & (1 << i)))
+            engine.setTrackVolume(i, hex_to_float(project.tracks[i].volume));
         // ⚠️ SEPARATE FROM THE FADER, and pushed from the same place, because SOLO makes a track's
         // audibility depend on the other seven: soloing track 3 has to reach the engine for 0,1,2,
         // 4..7 as well, and only a sweep of all eight can do that.
+        //
+        // ⚠️ AND NEVER GATED BY `held`: on a mute/solo press this line IS the press. The fader beside
+        // it is what the SONG may have moved; the mute is what the user just typed.
         engine.setTrackMuted(i, !track_audible(project, i));
     }
-    engine.setMasterVolume(hex_to_float(project.masterVolume));
+    if (!held.masterFader) engine.setMasterVolume(hex_to_float(project.masterVolume));
     engine.setOttDepth(project.ottDepth);
     engine.setMasterFx(project.masterBusFx);
     engine.setDustDepth(project.dustDepth);
     engine.setLimiterPreGain(project.limiterPreGain);
-    push_global_effects(engine, project);
+    push_global_effects(engine, project, held);
 }
 
 // RenderController.applyMasterBusForRender. The *ForRender variants reset the module rather than
