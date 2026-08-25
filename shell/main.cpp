@@ -25,6 +25,15 @@
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
+#include <filesystem>
+#ifdef _WIN32
+#include <io.h>          // _dup2/_fileno — the session log, below
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>     // AttachConsole — PT_CONSOLE, below
+#else
+#include <unistd.h>      // dup2/isatty  — ditto
+#endif
 
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
@@ -101,6 +110,55 @@ std::string dir_of(const std::string& path) {
     return (slash == std::string::npos) ? std::string(".") : path.substr(0, slash);
 }
 
+// Point stdout and stderr at `<app root>/pockettracker-log.txt`, truncated, for this session.
+//
+// ⚠️⚠️ **THE WINDOWS BUILD HAS NO CONSOLE AT ALL** (shell/CMakeLists.txt links it as a GUI
+// subsystem), so without this every line the program prints goes nowhere and a bug report arrives
+// with nothing attached. One session per file, overwritten at each launch: the run that just went
+// wrong is the one anybody wants.
+//
+// ⚠️ `dup2` rather than a second `freopen` — two FILE* opened on the same path keep two independent
+// write offsets and overwrite each other's lines. Sharing one file description is what interleaves
+// them in the order they were printed.
+//
+// ⚠️ LEFT ALONE WHEN SOMETHING ELSE IS ALREADY CAPTURING US. A PortMaster launch script redirects
+// the port's output into its own log and that log is how a handheld problem gets diagnosed; stealing
+// it would leave the launcher with an empty file. Only a terminal — the thing there is to hide — is
+// taken over. Windows has neither, so it is unconditional there.
+//
+// ⚠️ `PT_CONSOLE=1` keeps the output where it was, which is what a bring-up on a dev box wants.
+void open_session_log(const std::string& appRoot) {
+    if (std::getenv("PT_CONSOLE")) {
+#ifdef _WIN32
+        // ⚠️ ON WINDOWS "LEAVE THE OUTPUT WHERE IT WAS" WOULD LEAVE IT NOWHERE — a GUI-subsystem
+        // process starts with no console and no valid stdout at all, so the escape hatch has to
+        // BORROW the console it was launched from. Nothing attaches when it was double-clicked, and
+        // then the hatch honestly does nothing.
+        if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+            std::freopen("CONOUT$", "w", stdout);
+            std::freopen("CONOUT$", "w", stderr);
+        }
+#endif
+        return;
+    }
+#ifndef _WIN32
+    if (!isatty(fileno(stdout))) return;
+#endif
+    std::error_code ec;
+    std::filesystem::create_directories(appRoot, ec);   // first launch: the root does not exist yet
+    const std::string path = appRoot + "/pockettracker-log.txt";
+    if (!std::freopen(path.c_str(), "w", stdout)) return;
+#ifdef _WIN32
+    _dup2(_fileno(stdout), _fileno(stderr));
+#else
+    dup2(fileno(stdout), fileno(stderr));
+#endif
+    // ⚠️ Both again: freopen resets the buffering mode main() set, and a file is FULLY buffered by
+    // default — which is the exact bug the setvbuf at the top of main() exists to prevent.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -137,6 +195,12 @@ int main(int argc, char** argv) {
     const bool        hasProject  = (argc > 1);
     const std::string projectPath = hasProject ? argv[1] : std::string();
     const std::string baseDir     = hasProject ? ((argc > 2) ? argv[2] : dir_of(projectPath)) : std::string();
+
+    // ⚠️ RESOLVED HERE RATHER THAN BESIDE THE FileSystem IT FEEDS, because the log has to be open
+    // before the first line is printed and the start-up banner is the half of the output that says
+    // whether anything worked. It depends on nothing but argv and the environment.
+    const std::string appRoot = (argc > 3) ? argv[3] : ui::default_app_root();
+    open_session_log(appRoot);
 
     // Read it BEFORE SDL_Init, so a bad path fails on the console instead of behind a window that has
     // already opened.
@@ -176,7 +240,6 @@ int main(int argc, char** argv) {
     // `$POCKETTRACKER_HOME` if the launcher says (which is how a PortMaster script points the app at the
     // SD card's ports folder) and otherwise by platform — Documents on a desktop, where a file manager
     // is how the user reaches their songs, and XDG on a handheld, which has no Documents folder.
-    const std::string appRoot = (argc > 3) ? argv[3] : ui::default_app_root();
     ui::StdFileSystem filesystem(appRoot);
 
     ptshell::AppConfig cfg;

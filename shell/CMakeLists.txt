@@ -165,6 +165,22 @@ target_compile_definitions(pockettracker-sdl PRIVATE "PT_VERSION_STRING=\"${PT_V
 # no COM, no manifest capability.
 if(WIN32)
     target_link_libraries(pockettracker-sdl PRIVATE winmm)
+
+    # ⚠️ NO CONSOLE WINDOW. A console-subsystem exe opens a black window beside the app for the whole
+    # session, and on Windows that window IS the only place the program's output ever went. The
+    # subsystem moves to WINDOWS and the output moves to <app root>/pockettracker-log.txt — see
+    # open_session_log() in main.cpp, which is unconditional here because there is nothing left to
+    # print to.
+    #
+    # ⚠️ /ENTRY:mainCRTStartup with it. A WINDOWS-subsystem link looks for WinMain, and this shell
+    # deliberately does not link SDL2main (it calls SDL_SetMainReady itself), so without the entry
+    # point named the link fails on an unresolved WinMain rather than on anything that names a
+    # console.
+    if(MSVC)
+        target_link_options(pockettracker-sdl PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+    else()
+        target_link_options(pockettracker-sdl PRIVATE -mwindows)
+    endif()
 endif()
 
 # ⚠️ The Linux MIDI backend links NO libasound — it dlopen()s it (midi-out-alsa.cpp explains why: the
