@@ -133,7 +133,10 @@ bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaul
     };
 
     j["_README_controller"] =
-        "abxy: which way round your pad's face buttons are PRINTED. \"auto\" trusts the controller "
+        "abxy: SETTINGS > ABXY is the control for this now, and it appears whenever a controller is "
+        "attached. This key SEEDS it: it is used only while ABXY still says AUTO, so a value written "
+        "here before that row existed keeps working. Which way round your pad's face buttons are "
+        "PRINTED. \"auto\" trusts the controller "
         "(correct for a built-in handheld pad and a real Switch pad). Use \"nintendo\" if A is the "
         "RIGHT button but the app reads it as B — common with 8BitDo pads in XInput mode, which report "
         "themselves as Xbox controllers. \"xbox\" = A is the bottom button. Keyboard keys are never "

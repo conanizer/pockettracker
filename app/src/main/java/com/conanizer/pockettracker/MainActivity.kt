@@ -1,6 +1,7 @@
 package com.conanizer.pockettracker
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -330,6 +331,35 @@ class MainActivity : SDLActivity() {
             }
         }
         return false
+    }
+
+    /**
+     * May the screen rotate into LANDSCAPE right now? Called by the shell's layout gate whenever the
+     * answer changes: true only while the FULL layout is in force — a controller is driving and there
+     * are no on-screen buttons.
+     *
+     * ⚠️ **A LAUNCH-TIME `SDL_HINT_ORIENTATIONS` CANNOT TAKE THE PERMISSION BACK.** SDL reads that
+     * hint once, when it creates the window, so a phone that launched with a controller keeps the
+     * freedom to sit in landscape after the controller is switched off — and the app is by then
+     * drawing the letterbox touch panels, a layout release does not ship and no SETTINGS row names.
+     * Setting [requestedOrientation] makes Android re-orient the running activity, which is what
+     * stands the picture back up without the user turning the phone.
+     *
+     * `SENSOR_PORTRAIT` rather than `PORTRAIT` so both ways up still work, matching the hint's
+     * "Portrait PortraitUpsideDown"; `FULL_USER` is what SDL itself hands a resizable window, so
+     * releasing the lock hands rotation back exactly as it was at launch.
+     *
+     * ⚠️ On the UI thread: this arrives on the SDL thread (the frame loop), and
+     * `setRequestedOrientation` is an activity call. ⚠️ Called by name over JNI, so `@Keep` plus an
+     * explicit `proguard-rules.pro` `-keep`.
+     */
+    @Keep
+    fun setLandscapeAllowed(allowed: Boolean) {
+        runOnUiThread {
+            requestedOrientation =
+                if (allowed) ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                else         ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
     }
 
     /**

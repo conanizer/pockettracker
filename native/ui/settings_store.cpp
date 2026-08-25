@@ -63,6 +63,13 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.navSongRelative    = get_bool(j, "navSongRelative", values.navSongRelative);
     values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
 
+    // ABXY = AUTO / XBOX / NINTENDO, and the on-screen buttons kept under a pad. Both are absent from
+    // every settings.json written before their rows existed, and both struct defaults are what the app
+    // already did - AUTO is a no-op and a pad already turned the buttons off - so an upgrade changes
+    // nothing until the row is touched.
+    values.abxyIndex          = clamp(get_int(j, "abxy", values.abxyIndex), 0, 2);
+    values.touchButtonsWithPad = get_bool(j, "touchButtonsWithPad", values.touchButtonsWithPad);
+
     // ── MIDI (B4.3) — the CABLE's half. The song's half is in the .ptp. ──────────────────────────
     //
     // ⚠️ THE DEVICE IS A NAME AND NOT AN INDEX, and MIDI is the case that rule exists for: a port list
@@ -180,6 +187,8 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["rememberFolder"]     = values.rememberFolder;      // D2a — FOLDER row (the toggle only; the
                                                           // remembered PATH is session-only, not saved)
     j["navSongRelative"]    = values.navSongRelative;   // the NAV row — POOL / SONG
+    j["abxy"]               = values.abxyIndex;            // the ABXY row - 0 AUTO, 1 XBOX, 2 NINTENDO
+    j["touchButtonsWithPad"] = values.touchButtonsWithPad; // LAYOUT s FULL / PORTRAIT under a pad
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);

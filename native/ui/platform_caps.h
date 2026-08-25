@@ -44,6 +44,12 @@ struct PlatformCaps {
     /** LAYOUT: FULLSCREEN / LANDSCAPE / PORTRAIT, and the skin column the portrait layout gains. */
     bool touchLayouts = false;
 
+    /** A physical controller is attached RIGHT NOW. It is the face-button-swap row s gate: a pad
+     *  that misreports which button is PRINTED A is the only thing that setting is for, so on a
+     *  device with nothing plugged in the row would configure nothing. RUNTIME, like touchLayouts
+     *  and for the same reason - the fact it rests on is hot-pluggable. */
+    bool padAttached = false;
+
     /** OVERLAY: a PNG laid over the virtual button skin, with a strength. Debug-gated on top. */
     bool skinOverlay = false;
 

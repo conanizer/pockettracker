@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "ui/helpers.h"
+#include "ui/input_config.h"   // abxy_name - the ABXY row and config.json speak one vocabulary
 
 namespace pt::ui {
 
@@ -116,6 +117,11 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     dual_row(SettingsRow::BTN_VIBRO, "BTN VIBRO", on_off(v.buttonVibroEnabled),
              "POW", std::string(v.vibroPower >= 128 ? "HI" : "LO"));
 
+    // The face-button swap. Its names come from input_config.h, which is also what parses the same
+    // three words out of config.json - one vocabulary, not two.
+    param_row(SettingsRow::ABXY, "ABXY",
+              abxy_name(static_cast<AbxyLayout>(clamp(v.abxyIndex, 0, 2))));
+
     param_row(SettingsRow::KB_INSERT, "KB INSERT", v.insertBefore ? "BEFORE" : "AFTER");
     param_row(SettingsRow::CURSOR,    "CURSOR",    v.cursorRemember ? "REMEMBER" : "REFRESH");
     param_row(SettingsRow::NAV,       "NAV",       v.navSongRelative ? "SONG" : "POOL");
@@ -209,6 +215,7 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
             if (s.cursorColumn == 1) return cc::toggle_binary(v.buttonVibroEnabled);
             return cc::toggle_binary(v.vibroPower >= 128);  // LO / HI, not a 0..255 knob
 
+        case SettingsRow::ABXY:       return cc::enum_cycle(v.abxyIndex, 3);
         case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
         case SettingsRow::NOTE_PREV:  return cc::toggle_binary(v.notePreviewEnabled);
@@ -293,6 +300,9 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
             }
             break;
 
+        // Out of range falls back to AUTO - index 0, the same shape LAYOUT and OVERLAY use.
+        case SettingsRow::ABXY:      if (set) v.abxyIndex = (action.value >= 0 && action.value < 3)
+                                                                ? action.value : 0; break;
         case SettingsRow::KB_INSERT: if (set) v.insertBefore       = action.value > 0; break;
         case SettingsRow::CURSOR:    if (set) v.cursorRemember     = action.value > 0; break;
         case SettingsRow::NOTE_PREV: if (set) v.notePreviewEnabled = action.value > 0; break;

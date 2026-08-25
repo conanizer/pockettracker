@@ -51,6 +51,7 @@ namespace pt::ui {
  * 12 TRACE       ON / OFF, + ENG: KT / C++          (debug)
  * 13 FOLDER      REMEMBER / REFRESH                 (v0.9.4 D2a — remember the last sample folder)
  * 14 NAV         POOL / SONG                        (what B+D-pad walks: the 00..FF pool, or the song)
+ * 15 ABXY        AUTO / XBOX / NINTENDO             (which face button is PRINTED A; only with a pad)
  */
 enum class SettingsRow {
     LAYOUT     = 0,
@@ -76,9 +77,14 @@ enum class SettingsRow {
     // merely a cursor landing oddly: `settings.json` stores the cursor row by NUMBER, so inserting NAV
     // anywhere below 14 would move every row a user's file already names.
     NAV        = 14,
+    // APPENDED, like FOLDER and NAV before it, and for the same reason: settings.json stores the
+    // cursor row by NUMBER, so a new row takes the next free ordinal and never a place in the middle.
+    // It DRAWS beside BTN SOUND / BTN VIBRO - the device-input cluster - and that is a POSITION, not
+    // an identity; SETTINGS_DISPLAY_ORDER is where it is said.
+    ABXY       = 15,
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 15;
+inline constexpr int SETTINGS_ROW_COUNT = 16;
 
 // ─── Display / navigation order ──────────────────────────────────────────────────────────────────
 //
@@ -91,7 +97,7 @@ inline constexpr int SETTINGS_ROW_COUNT = 15;
 // ⚠️ Every SettingsRow appears exactly once and the length is SETTINGS_ROW_COUNT — the walkers assume it.
 inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::LAYOUT,   SettingsRow::SCALING,   SettingsRow::OVERLAY,
-    SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO,
+    SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO, SettingsRow::ABXY,
     SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
     SettingsRow::FOLDER,    SettingsRow::NOTE_PREV,
     SettingsRow::VISUALIZER, SettingsRow::THEME,    SettingsRow::TEMPLATE,
@@ -109,7 +115,10 @@ inline int settings_display_index(SettingsRow row) {
 inline bool settings_row_gap_after(SettingsRow row) {
     switch (row) {
         case SettingsRow::OVERLAY:    // …before BTN SOUND
-        case SettingsRow::BTN_VIBRO:  // …before KB INSERT
+        // The gap MOVED from BTN VIBRO to ABXY when ABXY joined the cluster, and the arithmetic is
+        // why it does not matter that ABXY is usually hidden: a hidden row still contributes its gap
+        // (settings_row_offset_y), so the air before KB INSERT is one row either way - what it was.
+        case SettingsRow::ABXY:       // …before KB INSERT
         case SettingsRow::NOTE_PREV:  // …before VISUALIZER
         case SettingsRow::THEME:      // …before TEMPLATE
             // FOLDER and NAV sit mid-group between CURSOR and NOTE PREV (SETTINGS_DISPLAY_ORDER), so
@@ -128,6 +137,7 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
         case SettingsRow::OVERLAY:   return caps.skinOverlay && caps.debug;
         case SettingsRow::BTN_SOUND:
         case SettingsRow::BTN_VIBRO: return caps.buttonFeedback;
+        case SettingsRow::ABXY:      return caps.padAttached;
         case SettingsRow::RESUME:    return caps.autosave;
         case SettingsRow::TRACE:     return caps.debug;
 

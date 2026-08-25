@@ -1260,7 +1260,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 
 | Setting | Options | Description |
 |---|---|---|
-| LAYOUT | PORTRAIT (+ SKIN) | On a touchscreen device the app lays itself out as the portrait device skin, and the row's real control is the **SKIN** column beside it: **NORM** (beige casing, dark labels) or **DARK** (slate casing, white labels). There is no mode to choose — PocketTracker picks portrait, landscape or fullscreen for you from the screen shape and from whether it finds physical buttons. |
+| LAYOUT | PORTRAIT (+ SKIN) | On a touchscreen device the app lays itself out as the portrait device skin, and the row's real control is the **SKIN** column beside it: **NORM** (beige casing, dark labels) or **DARK** (slate casing, white labels). PocketTracker picks portrait, landscape or fullscreen for you from the screen shape and from whether it finds physical buttons; a mode column appears only on a device that has both a touchscreen and a controller (see below). |
 | SCALING | INT / BILINEAR | Screen scaling algorithm. INT = crisp pixel-perfect integer scaling. BILINEAR = smooth subpixel scaling. |
 | BTN SOUND | ON / OFF (+ VOL) | Play a click sound on button press. The **VOL** sub-column to its right sets click volume (`00`–`FF`). |
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
@@ -1272,9 +1272,20 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
+| ABXY | AUTO / XBOX / NINTENDO | Which face button your controller has **printed** A. Appears only while a controller is attached. **AUTO** trusts the controller and is right for a handheld's built-in pad and for a real Switch pad. Use **NINTENDO** if A is the right-hand button but the app reads it as B - common with 8BitDo pads in XInput mode, which report themselves as Xbox controllers. **XBOX** = A is the bottom button. Keyboard keys are never affected. |
 | RESUME | ASK / AUTO | What happens to unsaved work after the app is killed in the background. **ASK** shows a "RECOVER WORK?" prompt on the next launch; **AUTO** silently restores the autosave (use on ROMs that kill the app when backgrounded, e.g. Miyoo Flip / Ayaneo). |
 
 Layout and scaling mode are persisted across app restarts. The auto-detected layout on startup depends on whether physical gamepad buttons are detected.
+
+**Phone held upright with a clip-on controller:** when a phone is in portrait and a physical
+controller is attached, PocketTracker moves the tracker into the upper half of the screen instead
+of centring it, so a grip like the GameSir Pocket Taco or the 8BitDo FlipPad does not cover it.
+Unclip the controller or turn the phone and it centres again.
+
+**Keeping the on-screen buttons with a controller attached:** attaching a controller normally turns
+the on-screen buttons off. On a device that has both, the LAYOUT row offers **FULL** (no on-screen
+buttons) and **PORTRAIT** (keep them), so you can use the touchscreen and the controller together.
+BTN SOUND and BTN VIBRO appear only while the on-screen buttons are actually shown.
 
 **Not every row is on every device.** LAYOUT, BTN SOUND and BTN VIBRO configure a touchscreen and its
 virtual buttons, so they appear on Android and not on the Windows, Linux or handheld builds — where

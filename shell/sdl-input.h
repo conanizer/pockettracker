@@ -78,6 +78,15 @@ public:
     void apply_input_config(const pt::ui::InputConfig& cfg);
 
     /**
+     * The face-button swap, live - the SETTINGS row calls this every frame.
+     *
+     * It is the same value `apply_input_config` sets from config.json, and the row is now the
+     * control: config.json seeds it at boot (app.cpp) and this owns it from there, so the two cannot
+     * disagree about which one is in force.
+     */
+    void set_abxy(pt::ui::AbxyLayout layout) { abxy_ = layout; }
+
+    /**
      * Print one line per input event: what SDL delivered, and what this class did with it — a Button,
      * or nothing at all. Off by default; the shell turns it on for POCKETTRACKER_INPUT_TRACE=1.
      *

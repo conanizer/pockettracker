@@ -80,6 +80,23 @@ struct SettingsValues {
     int  vibroPower         = 64;
     bool autosaveResumeAuto = false;
 
+    // Which way round the pad's face buttons are PRINTED: 0 AUTO, 1 XBOX, 2 NINTENDO - the order of
+    // ui::AbxyLayout, which is what the shell hands to its input layer.
+    //
+    // AUTO is a no-op, which is what makes this safe to add to an existing install: a settings.json
+    // written before the row existed has no key, falls through to this default, and nothing about
+    // that install changes.
+    int  abxyIndex          = 0;
+
+    // Show the on-screen buttons even though a physical pad is attached - a phone with a clip-on
+    // controller has both, and only its owner knows which they want.
+    //
+    // FALSE is today's behaviour (a pad turns the buttons off), so an existing install is unchanged.
+    // It is a value of its OWN and not `layoutIndex`, because the layout list has one entry when no
+    // pad is attached and two when one is: the same index would mean different things in the two
+    // states, and unplugging the pad would forget the choice.
+    bool touchButtonsWithPad = false;
+
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
     // BILINEAR, not INTEGER: integer scaling only fills the screen on a display that is an exact
     // multiple of 640×480, and on everything else — the portrait overlay above all — it leaves the

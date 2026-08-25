@@ -238,6 +238,22 @@ struct AppConfig {
     std::function<bool()> physicalGamepadPresent;
 
     /**
+     * May the screen rotate into LANDSCAPE right now? NULLABLE and Android-only, called on CHANGE
+     * from the layout gate (app.cpp): true exactly while the FULL layout is in force — a pad is
+     * driving and there are no on-screen buttons — and false everywhere else.
+     *
+     * ⚠️ **THE BOOT HINT IS NOT ENOUGH, AND THAT IS THE WHOLE REASON THIS EXISTS.**
+     * `SDL_HINT_ORIENTATIONS` is read once, when the window is created, so a permission granted for a
+     * pad that is later UNPLUGGED outlives the pad: the app drops back to the portrait skin while the
+     * activity is still free to sit in landscape, presenting the letterbox touch panels — a layout
+     * release does not ship and no SETTINGS row names. The platform re-applies the permission live.
+     *
+     * Desktop and the handhelds leave this NULL: their windows are not orientation-locked by anyone,
+     * and a `nullptr` here is simply never called.
+     */
+    std::function<void(bool)> allowLandscape;
+
+    /**
      * Polled once a frame; true ends the session as an UNCLEAN exit, so the autosave is kept.
      *
      * Desktop hands its SIGTERM/SIGINT flag through here. ⚠️ May be null, and Android's will be —

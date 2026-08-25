@@ -54,6 +54,7 @@
 -keepclassmembers class com.conanizer.pockettracker.MainActivity {
     void onButtonFeedback(int, boolean, boolean, int, boolean, int);
     boolean hasPhysicalGameButtons();
+    void setLandscapeAllowed(boolean);
     java.lang.String describeInputDevices();
     int midiDeviceCount();
     java.lang.String midiDeviceName(int);

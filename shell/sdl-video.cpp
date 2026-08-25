@@ -266,7 +266,7 @@ SDL_Rect SdlVideo::dest_rect() const {
             w = outW;
             h = outW * DESIGN_H / DESIGN_W;
         }
-        return SDL_Rect{(outW - w) / 2, (outH - h) / 2, w, h};
+        return SDL_Rect{(outW - w) / 2, frame_top(outH, h), w, h};
     }
 
     // INTEGER: the largest whole multiple that fits, centred. Clamped to 1 so a window smaller than
@@ -275,7 +275,21 @@ SDL_Rect SdlVideo::dest_rect() const {
     const int scale = std::max(1, std::min(outW / DESIGN_W, outH / DESIGN_H));
     const int w     = DESIGN_W * scale;
     const int h     = DESIGN_H * scale;
-    return SDL_Rect{(outW - w) / 2, (outH - h) / 2, w, h};
+    return SDL_Rect{(outW - w) / 2, frame_top(outH, h), w, h};
+}
+
+// Where the frame's top edge goes - the ONE place the vertical placement is decided, so the two
+// scaling modes cannot drift apart.
+//
+// The anchored answer is "centred in the TOP HALF", not "flush with the top": it is the same
+// arithmetic one output shorter, it keeps the frame clear of the status bar, and it lands close to
+// where the PORTRAIT2 skin puts its bezel - which is what the request asked it to look like.
+//
+// Clamped at 0: a frame taller than half the output has no top half to sit in, and a negative y
+// would push its first rows off the screen.
+int SdlVideo::frame_top(int outH, int h) const {
+    if (!topAnchor_) return (outH - h) / 2;
+    return std::max(0, (outH / 2 - h) / 2);
 }
 
 /**

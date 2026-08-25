@@ -142,6 +142,17 @@ public:
     void        set_scaling(ScalingMode m);
     ScalingMode scaling() const { return scaling_; }
 
+    /**
+     * Put the frame in the TOP HALF of the output instead of the middle of it.
+     *
+     * ⚠️ For a phone held in PORTRAIT with a clip-on gamepad - a GameSir Pocket Taco, an
+     * 8BitDo FlipPad - whose grips cover the bottom of the screen. A physical pad turns the
+     * on-screen buttons off, so nothing else moves the frame out from behind it. Set per frame
+     * from the same gate that decides the touch layout, so unclipping the pad or turning the
+     * phone puts the frame back without a restart.
+     */
+    void set_top_anchor(bool on) { topAnchor_ = on; }
+
     SDL_Window* window() const { return window_; }
 
     /**
@@ -172,6 +183,7 @@ public:
 private:
     bool     create_texture();
     SDL_Rect dest_rect() const;
+    int      frame_top(int outH, int h) const;
 
     /** The shared body of `present` and `present_skinned`: the C7 pixel gate, the streaming-texture
      *  upload, clear → underlay → frame → overlay → flip, and the pacing. The two public entries differ
@@ -190,6 +202,7 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture*  texture_  = nullptr;
     ScalingMode   scaling_  = ScalingMode::INTEGER;
+    bool          topAnchor_ = false;
     bool          vsync_    = false;
     Uint64        lastPresentMs_ = 0;
 

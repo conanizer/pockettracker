@@ -285,6 +285,41 @@ bool android_has_physical_gamepad() {
     return result;
 }
 
+// ─── may the screen rotate into landscape? → SdlActivity ─────────────────────────────────────────
+//
+// The live half of the orientation lock. `SDL_HINT_ORIENTATIONS` (set below, at window creation) is read
+// ONCE, so it can only ever describe the pad situation at launch — and unplugging a pad mid-session is
+// exactly the case that needs answering: the app returns to the portrait skin while the activity, still
+// holding the launch-time permission, stays in landscape and draws the letterbox touch panels.
+//
+// So the shell's layout gate calls this on every change, and Java sets `requestedOrientation`. Android
+// re-orients the activity itself when the current one stops being allowed, which is what turns a
+// physically-horizontal phone back upright the moment the pad goes away.
+//
+// Same by-name/exception-safe shape as the hook above: a missing method logs and changes nothing.
+void android_set_landscape_allowed(bool allowed) {
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (!env) return;
+    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (!activity) return;
+
+    jclass    cls = env->GetObjectClass(activity);
+    jmethodID mid = env->GetMethodID(cls, "setLandscapeAllowed", "(Z)V");
+    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
+    if (mid) {
+        env->CallVoidMethod(activity, mid, allowed ? JNI_TRUE : JNI_FALSE);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        else std::printf("orient:  %s\n", allowed ? "landscape allowed (FULL layout)"
+                                                  : "portrait only (on-screen buttons in force)");
+        std::fflush(stdout);
+    } else {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                            "setLandscapeAllowed(Z)V not found - orientation stays as launched");
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+}
+
 // ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
 //
 // ⚠️ **THE ONE THING A LAYOUT BUG REPORT NEEDS, AND THE ONE THING NOTHING RECORDED.** `useTouch` is
@@ -577,9 +612,13 @@ int main(int argc, char** argv) {
     //
     // ⚠️ THE PAD IS THE OTHER HALF OF THE GATE, and it is not cosmetic: a landscape-native handheld
     // running this build (the AYANEO) has physical buttons, takes the FULL layout, and pinning it to
-    // portrait would stand its screen on end. Same fact `useTouch` is built from — asked once here
-    // because a hint is read at window creation and never again, which also means a pad plugged in
-    // AFTER launch does not unlock rotation until the next launch.
+    // portrait would stand its screen on end. Same fact `useTouch` is built from.
+    //
+    // ⚠️ **THIS IS THE LAUNCH-TIME ANSWER ONLY.** A hint is read at window creation and never again, so
+    // it can neither unlock rotation for a pad plugged in later nor take the permission BACK when one
+    // is unplugged — and the second of those leaves the phone sitting in a landscape layout release
+    // does not ship. `cfg.allowLandscape` below is the live half; this stays so the FIRST frame is
+    // already right rather than snapping after it.
     //
     // "Portrait PortraitUpsideDown" → SCREEN_ORIENTATION_SENSOR_PORTRAIT with a resizable window
     // (SDLActivity.setOrientationBis) — both ways up, no landscape. Read out of the vendored SDL's own
@@ -594,6 +633,16 @@ int main(int argc, char** argv) {
 #else
     std::printf("orient:  free (debug build)\n");
 #endif
+
+    // The live half of the same rule, called on change by the layout gate (app.h `allowLandscape`).
+    //
+    // ⚠️ **UNCONDITIONAL, unlike the boot hint above, and the difference is deliberate.** The hint
+    // decides where the app STARTS, and a debug build starting free is a dev convenience that costs
+    // nothing. This decides where it may END UP, and the state it forbids — the landscape touch panels
+    // arrived at by unplugging a pad — is confusing in a debug build for exactly the same reason it is
+    // unshippable in a release one. The landscape panels stay drivable where they are actually
+    // developed: `POCKETTRACKER_TOUCH=1` on a desktop with the window dragged wide (main.cpp).
+    cfg.allowLandscape = [](bool allowed) { android_set_landscape_allowed(allowed); };
 
     // ⚠️ **NULL, AND C4 IS WHERE THIS GETS ITS ANSWER — NOT HERE.** The desktop polls a SIGTERM flag
     // through this hook once a frame. Android must not: SDL freezes the native thread when the
