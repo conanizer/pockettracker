@@ -1059,8 +1059,77 @@ class Sequencer {
         return n;
     }
 
-    // How long a song row is, in phrases, as AUTHORED: the longest column standing on it. It is what
-    // an EMPTY cell on that row costs the track sitting there.
+    // The chain a track has authored on one song row, or −1 for a blank cell. ⚠️ An out-of-range id
+    // is a blank too — a column is a plain vector and the pools are 0..255.
+    static int song_cell_chain(const Project& project, int trackId, int songRow) {
+        const std::vector<int>& refs = project.tracks[trackId].chainRefs;
+        if (songRow < 0 || songRow >= static_cast<int>(refs.size())) return -1;
+        const int id = refs[songRow];
+        return (id >= 0 && id < 256) ? id : -1;
+    }
+
+    // Is the rest on a blank cell over?
+    //
+    // ⚠️⚠️ THE QUESTION IS "HAS ANYONE ELSE REACHED THE NEXT ROW", NOT "HOW LONG IS THIS ROW". A
+    // blank cell is how a track is told to wait, and a track that arrives at one EARLY — its own
+    // chain on the row above being shorter than its neighbours' — has to wait LONGER, not the same.
+    // A length measured from this row alone carries that lead straight through the blank, and the
+    // next chain in the column then starts ahead of everybody else's.
+    //
+    // ⭐ Asking the live cursors also FOLLOWS a groove or a HOP on the track being waited for, which
+    // song_row_span can only approximate. When every track arrives together the two answers are the
+    // same, so an arrangement that never runs a track ahead is unchanged.
+    //
+    // ⚠️ A TRACK RESTING ON A BLANK OF ITS OWN IS NOT WAITED FOR — two of them would wait on each
+    // other for ever, and the song would never move. It is read off the cell rather than kept as a
+    // flag, so no rollback can leave it stale.
+    //
+    // ⚠️ The RENDER path marks inaudible tracks done before the walk starts, so a rest waiting on a
+    // MUTED neighbour falls back to the span there and can end earlier than it does live. That is
+    // the asymmetry scheduleSongRowRange already documents, reaching one row further than it did.
+    bool blank_cell_rest_is_over(const Project& project, int trackId, int songRow,
+                                 int barsRested) const {
+        const int64_t here = trackNextFrame_[trackId];
+        bool someone_to_wait_for = false;
+        for (int t = 0; t < 8; ++t) {
+            if (t == trackId || trackDone_[t]) continue;
+            if (trackSongRow_[t] > songRow) return true;               // already turned the row
+            if (track_still_holds_row(project, t, songRow, here)) someone_to_wait_for = true;
+        }
+        return !someone_to_wait_for && barsRested >= song_row_span(project, songRow);
+    }
+
+    // Is track `t` still standing on song row `songRow` or an earlier one, at frame `here`?
+    //
+    // ⚠️⚠️ "ITS CURSOR SAYS THAT ROW" IS NOT "IT IS STILL PLAYING THAT ROW", AND THE DIFFERENCE IS
+    // ONE BAR IN BOTH DIRECTIONS. A track keeps its song row until the unit AFTER its chain runs
+    // out, and the eight cursors are filled one at a time in frame order — so a track whose row has
+    // just ended still reads as standing there, and waiting for it costs an extra bar on a song
+    // where nobody was ahead of anybody. Four goldens said exactly that. But the row it has just
+    // SCHEDULED is still sounding, and not waiting for that ends the rest a bar early.
+    //
+    // Both are answered by the same two questions — has it rows left to play here, and is its clock
+    // committed past mine — plus what it has authored between there and here.
+    //
+    // ⭐ A track resting on a blank cell of its own holds nothing, which is what stops two resting
+    // tracks from waiting on each other for ever. Read off the cell, so no rollback can leave it
+    // stale.
+    bool track_still_holds_row(const Project& project, int t, int songRow, int64_t here) const {
+        const int otherRow = trackSongRow_[t];
+        const int chainId  = song_cell_chain(project, t, otherRow);
+        if (chainId >= 0) {
+            if (next_chain_row_no_wrap(project.chains[chainId], trackChainRow_[t]) >= 0) return true;
+            if (trackNextFrame_[t] > here) return true;    // its last chain row is still sounding
+        }
+        // Anything authored between where it stands and the row being rested on is still to come.
+        for (int r = otherRow + 1; r <= songRow; ++r)
+            if (song_cell_chain(project, t, r) >= 0) return true;
+        return false;
+    }
+
+    // How long a song row is, in phrases, as AUTHORED: the longest column standing on it. It is the
+    // FALLBACK length of a rest — what a blank cell costs when there is no other track left to wait
+    // for. blank_cell_rest_is_over is the rule; this is what it falls back to.
     //
     // ⚠️ There is nothing else to derive it from once the cursors are independent, and it has to
     // cost SOMETHING: a track that drops out for eight rows and comes back must come back where it
@@ -1162,15 +1231,16 @@ class Sequencer {
 
         const int chainId = (songRow < static_cast<int>(refs.size())) ? refs[songRow] : -1;
 
-        // ⭐ A BLANK CELL AND A SHORT CHAIN ARE NOT THE SAME THING. A blank is how a rest is written,
-        // so it lasts as long as its row; a cell that NAMES a chain is played for as long as that
-        // chain has rows — however few — because not waiting is the request.
+        // ⭐ A BLANK CELL AND A SHORT CHAIN ARE NOT THE SAME THING. A blank is how a track is told to
+        // WAIT FOR THE OTHERS, so it lasts until one of them starts the next song row; a cell that
+        // NAMES a chain is played for as long as that chain has rows — however few — because not
+        // waiting is the request.
         //
-        // ⚠️⚠️ ONE BAR PER UNIT, AND THE SPAN ASKED FOR AGAIN ON EVERY ONE — see song_row_span. The
-        // rest is never banked as a single jump; `trackChainRow_` counts the bars spent, exactly as
-        // it counts chain rows for a cell that has a chain in it.
+        // ⚠️⚠️ ONE BAR PER UNIT, AND THE QUESTION ASKED AGAIN ON EVERY ONE — see
+        // blank_cell_rest_is_over. The rest is never banked as a single jump; `trackChainRow_` counts
+        // the bars spent, exactly as it counts chain rows for a cell that has a chain in it.
         if (chainId < 0 || chainId >= 256) {
-            if (trackChainRow_[trackId] >= song_row_span(project, songRow)) {
+            if (blank_cell_rest_is_over(project, trackId, songRow, trackChainRow_[trackId])) {
                 advance_track_song_row(trackId);
                 return;
             }
