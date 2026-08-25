@@ -336,6 +336,7 @@ the source tree.
 | **PortMaster zip** (`shell/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
 | **Windows zip** (`shell/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `shell/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
 | **APK** | **dynamically, against a `libSDL2.so` built from the vendored source** (`native/vendor/SDL2/`) and packaged in the APK — F-Droid builds offline from source and rejects prebuilts, so Android is the one target that carries SDL in-tree | **yes — `lib/<abi>/libSDL2.so`, one per ABI** |
+| **Miyoo/OnionOS zip** (`shell/build-miyoo.sh`) | dynamically, against a **prebuilt `mmiyoo` fork we bundle** — this device has no system SDL2 at all, so the PortMaster row's rule inverts and the build asserts `libs/` is **present** | **yes — `libs/libSDL2-2.0.so.0`**, and see the fork's own section below |
 
 So the Windows package carries the notice below, and `build-windows.ps1` copies it out of the SDL
 source tree that was actually compiled (`_deps/sdl2-src/LICENSE.txt`) rather than from a stale copy
@@ -366,6 +367,7 @@ different version policies:
 | Android (vendored, `native/vendor/SDL2/`) | **2.30.9** (`release-2.30.9`, commit `c98c4fbf`) | the APK bundles its own, so it should carry a current 2.x |
 | Windows (FetchContent pin, `shell/CMakeLists.txt`) | **2.30.9** | built from source into the exe |
 | PortMaster (`SDL2_TAG`, the *link floor*) | **2.0.18** | ports are expected to link the CFW's own libSDL2; this is the compatibility floor they are built against, not a copy we ship |
+| Miyoo/OnionOS (`SDL2_TAG`, the *shipped binary*) | **2.0.20**, the `mmiyoo` fork — see below | not a floor but the exact build that ships, so it is pinned to one tag |
 
 ```
 Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
@@ -386,6 +388,34 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 ```
+
+---
+
+## SDL2 `mmiyoo` fork — GPL-3.0 (**Miyoo/OnionOS package only**)
+
+`XK9274/sdl2_miyoo`, the SDL 2.0.20 fork carrying video (`MI GFX`), audio (`MI AO`), joystick and
+haptic drivers for the SigmaStar SSD202D. Shipped as `libs/libSDL2-2.0.so.0` in the OnionOS package
+and **nowhere else** — that device has no system SDL2, so unlike every other handheld artifact this
+one carries the binary.
+
+The fork's tree holds two licence files and both ship, because they cover different halves of it:
+
+| file in the fork | ships as | covers |
+|---|---|---|
+| `LICENSE.txt` | `licenses/libSDL2-zlib-LICENSE.txt` | upstream SDL2, zlib, © 1997-2022 Sam Lantinga |
+| `LICENSE` | `licenses/libSDL2-miyoo-fork-GPL-3.0.txt` | the fork as distributed, GPL-3.0 |
+
+PocketTracker is GPL-3.0 itself, so linking against a GPL-3.0 library raises no compatibility
+question. `build-miyoo.sh` copies both texts **out of the fork's own tree at the pinned tag**, so
+what ships is the licence of the code that shipped.
+
+⚠️⚠️ **`libneonarmmiyoo.so` HAS NO LICENCE AND THAT IS AN OPEN BLOCKER FOR PUBLICATION.** The fork
+lists it as a `DT_NEEDED`, so the package cannot start without it, and it is bundled beside SDL2. Its
+repository (`XK9274/neon-arm-library-miyoo`) carries no licence file, and its README states plainly
+that the maintainer did not write the source and does not know its origin. That is default
+copyright: fine to build and hand to a tester, **not** something to put in `OnionUI/Ports-Collection`
+or a GitHub release. Two ways out, neither started: get the upstream identified and a licence added,
+or build the fork ourselves without the NEON helper.
 
 ---
 

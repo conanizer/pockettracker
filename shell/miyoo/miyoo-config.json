@@ -1,0 +1,35 @@
+{
+  "_README": "PocketTracker configuration. This file is YOURS: the app reads it at startup and never rewrites it. Every key is optional - delete a line to use the built-in default.",
+
+  "_README_keyboard": "The Miyoo Mini has no gamepad device: SDL delivers its buttons as KEY presses, so this section is what makes them work. A button listed here REPLACES its built-in keys rather than adding to them - which is the point. Three desktop defaults sit on Miyoo buttons that mean something else (Space is START, Left Shift is SELECT, Return is A), so a PARTIAL block would leave a key doing two jobs at once. All ten are listed for that reason; do not delete one, empty it ([]) if you want it unbound.",
+
+  "keyboard": {
+    "DPAD_UP":    ["Up"],
+    "DPAD_DOWN":  ["Down"],
+    "DPAD_LEFT":  ["Left"],
+    "DPAD_RIGHT": ["Right"],
+
+    "A":      ["Space"],
+    "B":      ["Left Ctrl"],
+
+    "L":      ["E", "Tab"],
+    "R":      ["T", "Backspace"],
+
+    "SELECT": ["Right Ctrl"],
+    "START":  ["Return"]
+  },
+
+  "_README_shoulders": "L takes E and Tab, R takes T and Backspace, because the Mini+ has two shoulder rows (L1/L2, R1/R2) and the Mini has one. Both rows do the same thing here rather than leaving half the buttons dead on the larger device.",
+
+  "_README_unbound": "X (Left Shift) and Y (Left Alt) are deliberately absent: PocketTracker has ten buttons and the Miyoo has twelve. MENU (Escape) is absent for the same reason - leaving it bound to B, as it is on a desktop keyboard, would make the system button cancel dialogs.",
+
+  "_README_folders": "Where a LOAD browse STARTS for each category. A plain name is inside your PocketTracker folder (\"Samples\", \"Samples/Packs\"); an absolute path (\"/mnt/SDCARD/Music\") is used as given. A folder this device cannot read is ignored. This does not change where anything is SAVED.",
+
+  "folders": {
+    "samples":     "Samples",
+    "soundfonts":  "Soundfonts",
+    "instruments": "Instruments",
+    "projects":    "Projects",
+    "themes":      "Themes"
+  }
+}

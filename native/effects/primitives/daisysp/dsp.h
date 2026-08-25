@@ -37,25 +37,37 @@ static constexpr float kOneTwelfth = 1.f / 12.f;
 /** efficient floating point min/max
 c/o stephen mccaul
 */
+// ⚠️⚠️ `vmaxnm`/`vminnm` EXIST ONLY ON ARMv8 AND ON CORTEX-M's FPv5 — and `__arm__` is true on every
+// 32-bit ARM, including the ARMv7-A Cortex-A7 this project ships an armhf build to. So the guard
+// asks the ACLE feature macro, which the compiler defines for exactly these two instructions,
+// rather than inferring an instruction set from the word size.
+//
+// ⚠️ Getting it wrong does not reliably fail the build: an assembler emitting THUMB-2 takes the
+// encoding without complaint (ARM mode rejects it), and qemu-user's default CPU model has the
+// instruction — so a binary that SIGILLs on the real device can pass a full cross-built test suite.
+#if defined(__arm__) && defined(__ARM_FEATURE_NUMERIC_MAXMIN)
+#define DSP_HAS_VFP_NUMERIC_MAXMIN 1
+#endif
+
 inline float fmax(float a, float b)
 {
     float r;
-#ifdef __arm__
+#ifdef DSP_HAS_VFP_NUMERIC_MAXMIN
     asm("vmaxnm.f32 %[d], %[n], %[m]" : [d] "=t"(r) : [n] "t"(a), [m] "t"(b) :);
 #else
     r = (a > b) ? a : b;
-#endif // __arm__
+#endif
     return r;
 }
 
 inline float fmin(float a, float b)
 {
     float r;
-#ifdef __arm__
+#ifdef DSP_HAS_VFP_NUMERIC_MAXMIN
     asm("vminnm.f32 %[d], %[n], %[m]" : [d] "=t"(r) : [n] "t"(a), [m] "t"(b) :);
 #else
     r = (a < b) ? a : b;
-#endif // __arm__
+#endif
     return r;
 }
 

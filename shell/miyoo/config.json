@@ -1,0 +1,6 @@
+{
+  "label": "PocketTracker",
+  "icon": "icon.png",
+  "launch": "launch.sh",
+  "description": "8-track sample tracker"
+}
