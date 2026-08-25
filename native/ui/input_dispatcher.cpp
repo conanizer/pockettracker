@@ -1362,6 +1362,19 @@ void InputDispatcher::cycle_current_item(int delta) {
         return;
     }
 
+    // ⭐ ON SONG, B+LEFT/RIGHT TOGGLES THE TRANSPORT MODE — LGPT's own gesture, ported literally
+    // because it was free here: the NAV=SONG arm below is gated on CHAIN and PHRASE, and the pool
+    // switch under it has no SONG case, so this press has always reached `default: break;` and done
+    // nothing. LEFT and RIGHT both toggle rather than one each: there are two modes, so a direction
+    // that could only ever confirm the mode you are already in would be a button that does nothing.
+    //
+    // ⚠️ GATED ON SONG ALONE. The handler is shared: an ungated arm would swallow the pool cycle on
+    // six screens and the song-relative walk on two.
+    if (s_.currentScreen == ScreenType::SONG) {
+        host_.set_live_mode(!host_.live_mode());
+        return;
+    }
+
     // ⭐ UNDER NAV = SONG, THIS WALKS THE SONG ROW instead of the pool — the whole gesture changes
     // meaning, so it takes the press before the pool arms below ever see it. CHAIN steps to the nearest
     // FILLED cell either side; PHRASE steps to the nearest one whose chain ALSO holds a phrase at the
@@ -3236,6 +3249,31 @@ void InputDispatcher::on_start() {
         return;
     }
 
+    // ⚠️ **IN LIVE MODE, START ON SONG IS NOT THE TRANSPORT AT ALL — IT QUEUES.** It sits ahead of the
+    // play/stop toggle rather than inside it because that is the whole difference between the two
+    // modes: here the button launches the cell under the cursor, and stopping is R+START for one
+    // channel or the STOP button for everything.
+    if (live_song_gesture()) {
+        const int track = s_.cursorColumn - 1;   // on SONG the cursor column IS the track, 1-based
+        if (!host_.is_playing()) {
+            // Nothing is running, so there is no boundary to wait for: this channel starts NOW and
+            // the transport starts with it. The other seven begin silent, waiting to be launched.
+            host_.play_song_live(s_.cursorRow, 1 << track);
+            return;
+        }
+        // ⭐ LGPT's two-press launch, and it needs no second chord and no state of its own: the first
+        // press queues for the end of the playing chain, and a second on the SAME cell promotes that
+        // queue to the next phrase boundary. The slot already says which press this is.
+        //
+        // ⚠️ **ONLY WHILE IT IS STILL ARMED.** A launch the sequencer has already committed to a frame
+        // goes on showing as queued until it is heard, which is right for the marker and wrong here:
+        // promoting it then pulls it earlier and cuts short a chain the player is still listening to.
+        const songcore::LiveSlot q = host_.live_queue(track);
+        const bool               immediate = q.armed() && !q.stop && q.targetRow == s_.cursorRow;
+        host_.queue_live(track, s_.cursorRow, immediate);
+        return;
+    }
+
     // Everywhere else START is the transport.
     if (host_.is_playing()) {
         host_.stop();
@@ -3281,6 +3319,55 @@ void InputDispatcher::on_start() {
                                                         remembered_song_track()));
             break;
     }
+}
+
+// ─── LIVE mode's two chords ──────────────────────────────────────────────────────────────────────
+//
+// ⚠️ **BOTH ARE RESERVED CHORDS TAKING ON A MEANING, NOT NEW ONES.** `button_mapper.h` has consumed
+// L+START and R+START since the matrix was written — *"reserved — START must not toggle playback
+// here"* — so on every screen but SONG, and in every mode but LIVE, they still do exactly nothing.
+// The gate is what keeps that true: the mapper's two arms are GLOBAL, so without it L+START would
+// queue a song row from inside the sample editor.
+
+int InputDispatcher::live_row_mask(int songRow) const {
+    int mask = 0;
+    for (int t = 0; t < 8; ++t) {
+        // chainRefs is a GROWING list, so a row past a track's end is empty rather than out of bounds.
+        const std::vector<int>& refs = s_.project->tracks[static_cast<size_t>(t)].chainRefs;
+        const int chainId = (songRow >= 0 && songRow < static_cast<int>(refs.size()))
+                                ? refs[static_cast<size_t>(songRow)] : -1;
+        if (chainId >= 0 && chainId < 256) mask |= 1 << t;
+    }
+    return mask;
+}
+
+bool InputDispatcher::live_row_armed(int songRow) const {
+    for (int t = 0; t < 8; ++t) {
+        const songcore::LiveSlot q = host_.live_queue(t);
+        if (!q.stop && q.targetRow == songRow) return true;
+    }
+    return false;
+}
+
+void InputDispatcher::on_l_start() {
+    if (!live_song_gesture()) return;
+    if (!host_.is_playing()) {
+        // From a standing start the whole row launches together, on one downbeat. A cell with no
+        // chain in it starts silent — the row sounds the way it looks.
+        host_.play_song_live(s_.cursorRow, live_row_mask(s_.cursorRow));
+        return;
+    }
+    host_.queue_live_row(s_.cursorRow, live_row_armed(s_.cursorRow));
+}
+
+void InputDispatcher::on_r_start() {
+    if (!live_song_gesture()) return;
+    if (!host_.is_playing()) return;   // nothing is sounding, so there is nothing to queue a stop for
+    const int track = s_.cursorColumn - 1;
+    // The same two-press promotion the launch has: queued for the chain end, pressed again for the
+    // next phrase boundary.
+    const songcore::LiveSlot sq = host_.live_queue(track);
+    host_.queue_live_stop(track, sq.armed() && sq.stop);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════

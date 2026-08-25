@@ -32,6 +32,12 @@ struct SongEditorState {
     int  scrollPosition = 0;
     // Eight markers, one per track (ui/playhead.h) — a track with no position draws none.
     TrackPlayhead playheads[8] = {};
+    // LIVE mode's launcher: what each channel is waiting to do, and the phase its marker blinks on.
+    // ⚠️ The phase is handed in rather than read from a clock, which is what lets a tool draw the
+    // blink deterministically (ui/app_state.h).
+    bool      liveMode     = false;
+    LiveQueue liveQueue[8] = {};
+    int       blinkPhaseMs = 0;
     bool selectionMode  = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme theme = theme_classic();

@@ -391,6 +391,7 @@ MIXER — so soloing one track dims the other seven.
 | START on PHRASE | Play current phrase (loops) |
 | START on INSTRUMENT | Preview current instrument |
 | START on SAMPLE EDITOR | Preview edited sample |
+| START on SONG in LIVE mode | Queue the chain under the cursor ([LIVE Mode](#live-mode)) |
 
 ---
 
@@ -445,10 +446,31 @@ A `>` also marks the playing row on the CHAIN and PHRASE screens. It is only dra
 | A + LEFT/RIGHT | Increment / decrement by 16 |
 | A + B | Delete (set to --) |
 | B + UP/DOWN | Page up / down (jump 16 rows) |
+| B + LEFT/RIGHT | Switch between SONG and LIVE mode |
 | START | Play song from current row |
 
 > [!TIP]
 > You can start playback from any row — not just the beginning. Move the cursor to the row where you want playback to start, then press **START**. Useful for jumping to a specific section while mixing.
+
+### LIVE Mode
+
+Press **B + LEFT** or **B + RIGHT** on the SONG screen to switch between the two transport modes. The title changes from `SONG:` to `LIVE:`.
+
+In LIVE mode the song grid is a scene launcher. Each channel plays one chain and repeats it until you queue something else, and START no longer starts or stops the transport — it queues.
+
+| Input | Action |
+|---|---|
+| START | Queue the chain under the cursor on that channel |
+| START again on the same cell | Start it at the next bar instead of waiting for the chain |
+| L + START | Queue the whole cursor row — every channel at once |
+| R + START | Queue the channel under the cursor to fall silent |
+| B + LEFT/RIGHT | Back to SONG mode |
+
+A queued launch blinks a `>` on the row it will jump to, while the solid `>` stays where the channel is now. A queued stop blinks a `_` in place of the channel's marker. Slow blink means it is waiting for the chain to end; fast blink means the next bar.
+
+A blank cell in a queued row silences that channel, so a row sounds the way it looks. With the transport stopped, START and L+START begin playing immediately.
+
+Switching modes never jumps or silences anything: each channel keeps its place, and starts repeating — or resumes walking down its column — from its next chain boundary. LIVE mode lasts for the session and is not saved with the project.
 
 ---
 

@@ -26,4 +26,30 @@ struct TrackPlayhead {
     int step     = -1;
 };
 
+// ─── …AND WHAT ONE TRACK IS WAITING TO DO ────────────────────────────────────────────────────────
+//
+// LIVE mode's queue, mirrored for the drawing layer exactly as `TrackPlayhead` mirrors a playback
+// position — pt-ui reads back what the sequencer decided and never includes it.
+//
+// ⚠️ **`row < 0` WITHOUT `stop` IS AN EMPTY SLOT, AND IT IS NOT ROW 0** — the same rule as above, for
+// the same reason: a stop queue carries no row at all, so "nothing queued" cannot be said by the row
+// on its own, and a marker drawn on a zero would blink on the first row of a channel with nothing
+// waiting.
+struct LiveQueue {
+    int  row       = -1;      // the song row queued to launch on this channel
+    bool stop      = false;   // …or this channel is queued to fall silent
+    bool immediate = false;   // at the next phrase boundary, not the next chain end — a FAST blink
+    /**
+     * The sequencer has not committed this to a frame yet.
+     *
+     * ⚠️ **THE MARKER AND THE SECOND PRESS ASK DIFFERENT QUESTIONS OF THE SAME SLOT.** A launch the
+     * walk has scheduled but the transport has not reached is still WAITING to the eye — the marker
+     * must keep blinking — while to a press it is already committed, and pulling it earlier would cut
+     * short a chain the player is still hearing. `pending()` draws; `armed` promotes.
+     */
+    bool armed     = false;
+
+    bool pending() const { return row >= 0 || stop; }
+};
+
 }  // namespace pt::ui

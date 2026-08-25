@@ -360,10 +360,12 @@ These are deliberately **consumed and do nothing**, so that holding a modifier c
 underneath it. They are listed so they aren't mistaken for broken controls:
 
 ```
-R + START                         R is held to change screens
-L + START                         START must not toggle playback mid-chord
 L + R + A, L + R + B, L + R + SELECT
 ```
+
+`L + START` and `R + START` are consumed the same way everywhere except the SONG screen in LIVE
+mode, where they queue a row and queue a channel's stop. They never toggle playback and never
+silence a preview.
 
 ---
 

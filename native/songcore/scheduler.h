@@ -105,6 +105,40 @@ struct RollbackPlan {
     int64_t frames[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 };
 
+// ─── LIVE mode: what one channel is waiting to do ───────────────────────────────────────────────
+//
+// LIVE is a MODIFIER ON SONG, not a fifth PlaybackMode: the scheduler runs its SONG arm and only
+// what happens at a track's boundary changes. Everything that branches on `playbackMode_` — the
+// playhead readback, the live-edit rollback's one-track test, the trace writer and the 36
+// byte-compared goldens — therefore needs no arm for a mode it has no answer for, and a project that
+// never enters LIVE produces the identical schedule.
+//
+// ⚠️ `targetRow < 0 && !stop` is the empty slot. A stop queue carries no row, which is why "nothing
+// queued" cannot be expressed by the row alone.
+//
+// ⚠️⚠️ **A SLOT IS SCHEDULED LONG BEFORE IT IS HEARD, AND THE SCREEN ANSWERS TO THE SECOND.** The
+// lookahead runs two phrases ahead, so a queue consumed by the walk has up to two phrases still to
+// play before anything changes — and clearing the slot on consumption made the blinking marker go
+// out a bar or two early, while the player was still waiting for the launch they could see coming.
+// `firesAt` is the frame it lands on: the SCHEDULER treats the slot as spent the moment it is set,
+// and the DISPLAY keeps showing it until the transport reaches it.
+struct LiveSlot {
+    int     targetRow = -1;      // the song row to launch on this channel
+    bool    stop      = false;   // …or silence it instead
+    bool    immediate = false;   // at the next PHRASE boundary rather than the next CHAIN boundary
+    int64_t firesAt   = -1;      // the frame it was scheduled to land on; −1 = still waiting
+    // ⭐ There is deliberately NO "not before frame X" here. A rewind can only ever land on a
+    // boundary PAST the press (rewind_song_track takes the earliest checkpoint with `frame >
+    // currentFrame`), so "the launch cannot land at or before the moment it was queued" is already
+    // true by construction — and a second copy of it, keyed on the lap ORIGIN, put the launch a full
+    // lap late whenever the rewound cursor had already crossed into the next lap.
+
+    /** Something is queued here at all — the question a MARKER asks. */
+    bool pending() const { return targetRow >= 0 || stop; }
+    /** …and the walk has not spent it yet — the question the SCHEDULER asks. */
+    bool armed() const { return pending() && firesAt < 0; }
+};
+
 // ─── Per-track persistent effect state (TrackState) ─────────────────────────────────────────────
 struct TrackState {
     Note  lastNote = Note::EMPTY();
@@ -303,6 +337,14 @@ class Sequencer {
         for (int t = 0; t < 8; ++t) {
             if (oneTrack && t != playbackTrack_) continue;
 
+            // SONG's eight cursors: the rewind is shared with a LIVE launch — see rewind_song_track,
+            // which carries the note about the TrackState and the RNG coming back with the position.
+            if (!oneTrack) {
+                const int64_t f = rewind_song_track(t, currentFrame);
+                if (f >= 0) plan.frames[t] = f;
+                continue;
+            }
+
             std::deque<Checkpoint>& ring = checkpoints_[t];
             const Checkpoint* hit = nullptr;
             for (const Checkpoint& c : ring) {
@@ -317,20 +359,14 @@ class Sequencer {
             // active length does not divide 16 the track comes back re-timed.
             trackStates_[t] = cp.trackState;
             rngs_[t] = cp.rng;
-            if (oneTrack) {
-                nextFrameToSchedule_ = cp.frame;
-                if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
-                // PHRASE: resetting nextFrameToSchedule_ is enough
-            } else {
-                trackNextFrame_[t] = cp.frame;
-                trackSongRow_[t]   = cp.songRow;
-                trackChainRow_[t]  = cp.songChainRow;
-                // ⚠️ A track that had finished its column is LIVE again: the edit may well be the
-                // chain it was missing, and leaving it done would keep it silent until the song
-                // looped.
-                trackDone_[t] = false;
-            }
+            nextFrameToSchedule_ = cp.frame;
+            if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
+            // PHRASE: resetting nextFrameToSchedule_ is enough
             while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
+            // …and the marker's side-record with them — see drop_positions_from. PHRASE has none:
+            // its step is arithmetic off the start frame, so there is nothing to go stale.
+            if (playbackMode_ == PlaybackMode::CHAIN)
+                drop_positions_from(chainRowStartFrames_, cp.frame, [](int) { return true; });
             plan.frames[t] = cp.frame;
         }
         return plan;
@@ -425,6 +461,7 @@ class Sequencer {
             trackSongRow_[t]   = startRow;
             trackChainRow_[t]  = 0;
             trackDone_[t]      = false;
+            liveLoopFrame_[t]  = playbackStartFrame_;
         }
         songPositionStartFrames_.clear();
     }
@@ -449,12 +486,133 @@ class Sequencer {
             trackSongRow_[i] = 0;
             trackChainRow_[i] = 0;
             trackDone_[i] = false;
+            // ⚠️ THE QUEUES GO, THE MODE STAYS. `liveMode_` is a per-session performance choice — you
+            // stop between takes and start the next one still in LIVE — while a slot waiting for a
+            // boundary that will never come is a launch the next take would fire on its downbeat.
+            liveQueue_[i] = LiveSlot{};
+            liveSilent_[i] = false;
+            liveLoopFrame_[i] = 0;
         }
     }
 
     // The track PHRASE/CHAIN mode is playing through — what the two live arms schedule at, and what
     // the mixer's fader, mute and peak meter are read from.
     int playback_track() const { return playbackTrack_; }
+
+    // ── LIVE mode ────────────────────────────────────────────────────────────────────────────────
+    //
+    // Queue-and-launch: the song grid becomes a scene launcher. A launched cell REPEATS on its
+    // channel until something else is queued, so a track in LIVE never advances down its column and
+    // never runs out of one. See LiveSlot for why this is a modifier on SONG rather than a mode.
+
+    bool     live_mode() const               { return liveMode_; }
+    bool     live_silent(int trackId) const  { return liveSilent_[clamp_track(trackId)]; }
+
+    /**
+     * What this channel is still waiting to do — **the question the SCREEN asks, which is not the one
+     * the scheduler asks.** A slot the walk has already spent goes on being reported until the
+     * transport actually reaches the frame it landed on, because until then the launch has not
+     * happened yet as far as anyone listening is concerned. Reporting the scheduler's answer made the
+     * marker stop blinking a bar or two before the launch a player could still hear coming.
+     */
+    LiveSlot live_queue(int trackId) const {
+        const LiveSlot& q = liveQueue_[clamp_track(trackId)];
+        if (q.firesAt >= 0 && currentFrame_ >= q.firesAt) return LiveSlot{};
+        return q;
+    }
+
+    /**
+     * Start in LIVE mode with the transport stopped — LGPT's "the performance begins here". `mask`
+     * bit N launches track N at `songRow`; every channel not in it starts SILENT, which is what makes
+     * one press on one cell start one channel.
+     */
+    void playSongLive(int songRow, int mask) {
+        playSong(songRow);
+        liveMode_ = true;
+        for (int t = 0; t < 8; ++t) {
+            liveQueue_[t]  = LiveSlot{};
+            liveSilent_[t] = ((mask >> t) & 1) == 0;
+        }
+    }
+
+    /**
+     * Toggle the mode under a running transport. Every track keeps its place and starts repeating
+     * the row it is on; leaving LIVE, every track resumes walking its column from that same row.
+     * Nothing jumps and nothing is silenced.
+     *
+     * ⚠️ IT REWINDS, and that is the whole reason it is audible at the next boundary rather than a
+     * lap later: the scheduler runs two phrases ahead, so a chain end inside the lookahead has
+     * already been committed as "advance the column" by the time the button is pressed.
+     */
+    RollbackPlan set_live_mode(bool on, int64_t currentFrame) {
+        RollbackPlan plan;
+        if (liveMode_ == on) return plan;
+        liveMode_ = on;
+        for (int t = 0; t < 8; ++t) liveQueue_[t] = LiveSlot{};
+
+        if (!isPlaying_ || playbackMode_ != PlaybackMode::SONG) {
+            for (int t = 0; t < 8; ++t) liveSilent_[t] = false;
+            return plan;
+        }
+
+        if (on) {
+            // ⚠️ A COLUMN THAT HAD ALREADY RUN OUT BECOMES A SILENT CHANNEL, NOT A DEAD ONE — it can
+            // be launched. Its clock stopped when it finished, so it is put back on the bar grid of
+            // the channels still running (the one FURTHEST BEHIND, so it cannot outrun the buffer
+            // fill). A launch quantised against a frame from two minutes ago lands in the past, and
+            // one offset from everybody else's grid is not a downbeat anyone can hear.
+            int64_t inStep = -1;
+            for (int t = 0; t < 8; ++t)
+                if (!trackDone_[t]) inStep = (inStep < 0) ? trackNextFrame_[t]
+                                                         : std::min(inStep, trackNextFrame_[t]);
+            if (inStep < 0) inStep = currentFrame;   // every column had run out
+            for (int t = 0; t < 8; ++t) {
+                liveSilent_[t] = trackDone_[t];
+                if (trackDone_[t]) { trackNextFrame_[t] = inStep; trackChainRow_[t] = 0; }
+                trackDone_[t] = false;
+            }
+        } else {
+            for (int t = 0; t < 8; ++t) liveSilent_[t] = false;
+        }
+
+        for (int t = 0; t < 8; ++t) {
+            const int64_t f = rewind_song_track(t, currentFrame);
+            if (f >= 0) plan.frames[t] = f;
+        }
+        return plan;
+    }
+
+    /** Queue one channel to launch `songRow`. `immediate` = the next phrase boundary, else the next chain end. */
+    RollbackPlan queue_live(int trackId, int songRow, bool immediate, int64_t currentFrame) {
+        return arm_live_slot(clamp_track(trackId), LiveSlot{songRow, false, immediate}, currentFrame);
+    }
+
+    /** Queue one channel to fall silent. The other seven keep playing — stopping everything is what stop() is. */
+    RollbackPlan queue_live_stop(int trackId, bool immediate, int64_t currentFrame) {
+        return arm_live_slot(clamp_track(trackId), LiveSlot{-1, true, immediate}, currentFrame);
+    }
+
+    /**
+     * Queue a whole row as one scene. ⚠️ AN EMPTY CELL QUEUES A STOP, deliberately: a row is what the
+     * user is looking at, and a blank in channel 5 has to sound the way it looks. (This is the
+     * opposite of an empty cell in the MIDDLE of a column, which SONG mode plays as a bar of rest —
+     * that is a column being walked, and a launcher has no middle.)
+     */
+    RollbackPlan queue_live_row(int songRow, bool immediate, int64_t currentFrame) {
+        RollbackPlan plan;
+        if (!liveMode_ || project_ == nullptr) return plan;
+        for (int t = 0; t < 8; ++t) {
+            const std::vector<int>& refs = project_->tracks[static_cast<size_t>(t)].chainRefs;
+            const int chainId = (songRow >= 0 && songRow < static_cast<int>(refs.size()))
+                                    ? refs[static_cast<size_t>(songRow)] : -1;
+            const bool filled = chainId >= 0 && chainId < 256;
+            const RollbackPlan one = arm_live_slot(
+                t, filled ? LiveSlot{songRow, false, immediate} : LiveSlot{-1, true, immediate},
+                currentFrame);
+            if (one.frames[t] >= 0) plan.frames[t] = one.frames[t];
+        }
+        return plan;
+    }
 
     // ── the polling scheduler (live modes) ──
 
@@ -630,6 +788,95 @@ class Sequencer {
   private:
     static int clamp_track(int trackId) { return (trackId >= 0 && trackId < 8) ? trackId : 0; }
 
+    /**
+     * Rewind ONE song-mode track to its earliest boundary past `currentFrame`, and hand back the
+     * frame the caller must drop queued notes from (−1 = this track has nothing queued past now).
+     *
+     * Written once below its two callers, which are the same motion for different reasons: a live
+     * EDIT has to be heard on the next loop rather than three phrases later, and a LIVE launch has to
+     * land on the next boundary rather than after the two phrases already in the buffer.
+     *
+     * ⚠️ THE TrackState AND THE RNG COME BACK WITH IT. Without them the phrase is replayed against a
+     * groove phase, a HOP and a random stream the first pass has already moved, so what comes back is
+     * not what was thrown away — with a groove whose active length does not divide 16 the track
+     * returns re-timed. It is what the checkpoint ring carries those two fields for.
+     */
+    int64_t rewind_song_track(int trackId, int64_t currentFrame) {
+        std::deque<Checkpoint>& ring = checkpoints_[trackId];
+        const Checkpoint* hit = nullptr;
+        for (const Checkpoint& c : ring) {
+            if (c.frame > currentFrame) { hit = &c; break; }
+        }
+        if (!hit) return -1;
+        Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
+
+        trackStates_[trackId] = cp.trackState;
+        rngs_[trackId]        = cp.rng;
+        liveLoopFrame_[trackId]  = cp.liveLoopFrame;
+        trackNextFrame_[trackId] = cp.frame;
+        trackSongRow_[trackId]   = cp.songRow;
+        trackChainRow_[trackId]  = cp.songChainRow;
+        // ⚠️ A track that had finished its column is LIVE again: the edit may well be the chain it
+        // was missing, and leaving it done would keep it silent until the song looped.
+        trackDone_[trackId] = false;
+        // ⚠️ …AND A LAUNCH THIS REWIND ROLLED BACK OVER IS WAITING AGAIN. A slot stamped with a frame
+        // the cursor no longer reaches is a launch nothing will replay: the walk skips it as spent,
+        // and the channel goes on playing the chain the queue was meant to end.
+        if (LiveSlot& q = liveQueue_[trackId]; q.firesAt >= cp.frame) q.firesAt = -1;
+
+        while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
+        drop_positions_from(songPositionStartFrames_, cp.frame,
+                            [&](const SongPos& p) { return p.track == trackId; });
+        return cp.frame;
+    }
+
+    /**
+     * Put one slot in the queue and rewind that track so the launch can still land on the boundary it
+     * was aimed at.
+     *
+     * ⚠️ **THE REWIND IS FOR THE CHAIN-BOUNDARY QUEUE TOO, not only the immediate one.** The
+     * scheduler runs two phrases ahead, so the chain end the user is aiming at may already have been
+     * committed as "loop the same row again" before the button was pressed — and without the rewind
+     * the launch would land a whole lap late, on a boundary nobody was counting to.
+     */
+    RollbackPlan arm_live_slot(int trackId, LiveSlot slot, int64_t currentFrame) {
+        RollbackPlan plan;
+        if (!liveMode_) return plan;
+        const int64_t f = rewind_song_track(trackId, currentFrame);
+        if (f >= 0) plan.frames[trackId] = f;
+        // ⚠️ AFTER the rewind, which is what un-stamps a launch it rolled back over — this slot is a
+        // fresh one either way, and setting it first would only hide that ordering.
+        liveQueue_[trackId] = slot;
+        return plan;
+    }
+
+    /**
+     * Take the queued slot if this boundary is the one it was waiting for, and say whether it fired.
+     * `chainEnd` is false mid-lap and true on the unit that begins one — so an immediate queue fires
+     * at either and a chain-boundary queue only at the second. **The two launch quantizations are one
+     * code path with two trigger points**, not two mechanisms.
+     *
+     * ⚠️ The slot is STAMPED rather than cleared — see LiveSlot. `armed()` is what makes that safe:
+     * a stamped slot can never fire twice.
+     */
+    bool consume_live_queue(int trackId, bool chainEnd) {
+        LiveSlot& q = liveQueue_[trackId];
+        if (!q.armed()) return false;                    // nothing waiting, or already fired
+        if (!q.immediate && !chainEnd) return false;      // still mid-lap
+
+        if (q.stop) {
+            liveSilent_[trackId] = true;
+        } else {
+            liveSilent_[trackId] = false;
+            trackSongRow_[trackId] = q.targetRow;
+        }
+        trackChainRow_[trackId] = 0;
+        trackStates_[trackId].trackStopped = false;
+        liveLoopFrame_[trackId] = trackNextFrame_[trackId];   // a lap begins here
+        q.firesAt = trackNextFrame_[trackId];
+        return true;
+    }
+
     struct SchedulePhraseResult {
         int rowsScheduled = 0;
         bool hopTriggered = false;
@@ -683,6 +930,12 @@ class Sequencer {
         // twice. Each track carries its own ring and its own boundary.
         TrackState trackState{};
         Rng        rng{};
+        // ⚠️⚠️ LIVE's lap origin, and it is here for exactly the reason TrackState and Rng are: a
+        // rewind that leaves it behind leaves a frame from the FUTURE beside a cursor from the past,
+        // and the starvation guard then reads a lap that scheduled a full chain as one that cost
+        // nothing. It rests a bar, and the launch lands a bar late — on the offsets where the poll
+        // happened to have crossed the boundary already, and nowhere else.
+        int64_t liveLoopFrame = 0;
     };
 
     int64_t getCurrentFrame() const { return currentFrame_; }
@@ -694,6 +947,7 @@ class Sequencer {
     void save_checkpoint(int trackId, Checkpoint cp) {
         cp.trackState = trackStates_[trackId];
         cp.rng = rngs_[trackId];
+        cp.liveLoopFrame = liveLoopFrame_[trackId];
         checkpoints_[trackId].push_back(cp);
         // ring of 4, oldest = earliest unplayed
         if (checkpoints_[trackId].size() > 4) checkpoints_[trackId].pop_front();
@@ -735,6 +989,28 @@ class Sequencer {
         c.erase(std::remove_if(c.begin(), c.end(),
                                [&](const typename C::value_type& e) {
                                    return currentFrame > e.second + framesPerPhrase;
+                               }),
+                c.end());
+    }
+
+    /**
+     * Drop the position entries a rollback has just invalidated — everything this cursor had recorded
+     * at or past the frame it was rewound to. `match` picks the entries the rewound cursor owns.
+     *
+     * ⚠️⚠️ **A ROLLBACK HAS TO REACH THE SIDE-RECORD, AND DROPPING THE QUEUED NOTES CANNOT DO IT — A
+     * MARKER IS NOT AN EVENT.** getPlaybackPosition takes the FIRST in-window entry, which is the
+     * OLDEST, so a stale entry the re-schedule has already replaced goes on winning the lookup until
+     * it falls out of the window — and there is one per phrase the lookahead had reached, so the
+     * marker sits on the row the launch left behind for as many bars as were in the buffer (measured
+     * at two). It only shows when the re-scheduled position DIFFERS — a LIVE launch queued in the
+     * last phrase of a chain, where the rewind frame is inside the lookahead and the new lap is a
+     * different song row.
+     */
+    template <typename C, typename Match>
+    static void drop_positions_from(C& c, int64_t frame, Match match) {
+        c.erase(std::remove_if(c.begin(), c.end(),
+                               [&](const typename C::value_type& e) {
+                                   return e.second >= frame && match(e.first);
                                }),
                 c.end());
     }
@@ -865,6 +1141,15 @@ class Sequencer {
     void schedule_track_unit(const Project& project, int trackId, int64_t framesPerStep,
                              int64_t framesPerPhrase, int lastSongRow = -1,
                              bool takeCheckpoint = true) {
+        // LIVE mode replaces the column walk with a launcher, and it is a SEPARATE function rather
+        // than arms inside this one: SONG's path must stay exactly what it was, because "a project
+        // that never enters LIVE schedules identically" is what the 36 goldens check.
+        // ⚠️ Never on the RENDER path — an export walks a row range and has no transport to queue at.
+        if (liveMode_ && lastSongRow < 0) {
+            schedule_live_unit(project, trackId, framesPerStep, framesPerPhrase, takeCheckpoint);
+            return;
+        }
+
         TrackState& trackState = trackStates_[trackId];
         const std::vector<int>& refs = project.tracks[trackId].chainRefs;
         const int songRow = trackSongRow_[trackId];
@@ -930,6 +1215,110 @@ class Sequencer {
                                                 framesPerStep, effectiveStartRow, &chain, chainRow);
         // ⚠️ RECORDED FOR A MUTED TRACK TOO — this is the PLAYHEAD, and it answers "where is this
         // track", not "what can I hear".
+        put_song_position(trackId, songRow, chainRow, trackNextFrame_[trackId]);
+        trackNextFrame_[trackId] += r.framesScheduled;
+        trackChainRow_[trackId] = chainRow + 1;
+    }
+
+    // ─── LIVE mode's unit of work ────────────────────────────────────────────────────────────────
+    //
+    // The launched song row REPEATS: a chain that runs out re-enters the SAME row instead of moving
+    // down the column, so a track here never advances on its own and never runs out of one. That is
+    // what makes the song grid a scene launcher rather than an arrangement.
+    //
+    // It is a separate function from its SONG twin rather than a set of arms inside it, because
+    // "a project that never enters LIVE schedules identically" is what the 36 goldens check — and the
+    // cheapest way to keep that true is for SONG's path not to gain a branch at all.
+    void schedule_live_unit(const Project& project, int trackId, int64_t framesPerStep,
+                            int64_t framesPerPhrase, bool takeCheckpoint) {
+        TrackState& trackState = trackStates_[trackId];
+
+        // Every unit begins on a PHRASE boundary, so an IMMEDIATE queue always lands here. A
+        // chain-boundary one lands here too, on the unit that BEGINS A LAP.
+        //
+        // ⚠️⚠️ **"THE LAP BEGINS HERE" AND "THE CHAIN JUST RAN OUT" ARE THE SAME INSTANT, AND ONLY
+        // THE FIRST OF THEM CAN STILL BE REACHED.** Watching for the chain to run out — which is what
+        // this did — asks a question the LOOKAHEAD has usually already answered: the scheduler runs
+        // two phrases ahead, so a START pressed during the LAST bar of a chain rewinds to a
+        // checkpoint that is already PAST that chain's end, and the walk resuming there finds a chain
+        // with rows still in it. The launch then waits for the end after that — **one whole repeat
+        // late**, and late by exactly the amount a player is most likely to press. Asking where the
+        // cursor IS makes the same boundary answerable from either side of it.
+        //
+        // ⭐ A SILENT CHANNEL ANSWERS TRUE HERE WITHOUT NEEDING A TERM OF ITS OWN, and that is worth
+        // knowing rather than guessing at: both ways of silencing one — a stop queue, and a channel a
+        // single-cell START never launched — leave the cursor AT zero, and the silent branch below
+        // never moves it. So a channel with no lap is permanently at a lap start, which is the honest
+        // answer for it, and an explicit `|| liveSilent_` beside this was measured to change nothing.
+        consume_live_queue(trackId, /*chainEnd=*/trackChainRow_[trackId] == 0);
+
+        const std::vector<int>& refs = project.tracks[static_cast<size_t>(trackId)].chainRefs;
+        const int songRow = trackSongRow_[trackId];
+        const int chainId = (songRow >= 0 && songRow < static_cast<int>(refs.size()))
+                                ? refs[static_cast<size_t>(songRow)] : -1;
+
+        // ⚠️ A SILENT CHANNEL STILL SPENDS ITS BAR — one that has been stopped, or launched at a cell
+        // with no chain in it. Its clock has to stay on the same bar grid as the seven that are
+        // sounding, or the next launch would be quantised against a frame that has already gone by.
+        // The checkpoint goes with it: a unit that takes none is a unit the rollback cannot revise.
+        if (liveSilent_[trackId] || chainId < 0 || chainId >= 256) {
+            checkpoint_track(trackId, songRow, trackChainRow_[trackId], takeCheckpoint);
+            trackNextFrame_[trackId] += framesPerPhrase;
+            return;
+        }
+
+        const Chain& chain = project.chains[static_cast<size_t>(chainId)];
+
+        // HOP FF sat this track out: it rests to the end of the chain and rejoins on the loop, the
+        // same bar at a time SONG mode rests it, ending in the same place.
+        if (trackState.trackStopped) {
+            const int satOut = next_chain_row_no_wrap(chain, trackChainRow_[trackId]);
+            if (satOut >= 0) {
+                checkpoint_track(trackId, songRow, satOut, takeCheckpoint);
+                trackNextFrame_[trackId] += framesPerPhrase;
+                trackChainRow_[trackId] = satOut + 1;
+                return;
+            }
+        }
+
+        int chainRow = next_chain_row_no_wrap(chain, trackChainRow_[trackId]);
+        if (chainRow < 0) {
+            // ─── THE CHAIN BOUNDARY ──────────────────────────────────────────────────────────────
+            // The one place a chain-boundary queue can land, and the one place a loop happens.
+            trackChainRow_[trackId] = 0;
+            trackState.trackStopped = false;
+
+            // ⚠️⚠️ A LAP THAT COST NOTHING RESTS INSTEAD OF LOOPING — see liveLoopFrame_. Re-entering
+            // it would leave this track the furthest-behind cursor on every pass and starve the other
+            // seven; a bar of rest costs the same silence and keeps the launch grid intact.
+            if (trackNextFrame_[trackId] == liveLoopFrame_[trackId]) {
+                checkpoint_track(trackId, songRow, 0, takeCheckpoint);
+                trackNextFrame_[trackId] += framesPerPhrase;
+                liveLoopFrame_[trackId] = trackNextFrame_[trackId];
+                return;
+            }
+
+            // ⭐ AND THE QUEUE IS NOT READ HERE. The cursor now sits at the top of a lap, which is
+            // the one condition the unit's own first line tests — so hand the next pass a clean
+            // re-read rather than asking the same question in a second place with a second answer.
+            // It costs one of the poll's 64 steps, and a launch changes the song row, which would
+            // have made every local read above this point stale anyway.
+            liveLoopFrame_[trackId] = trackNextFrame_[trackId];   // the next lap of the same row
+            return;
+        }
+
+        checkpoint_track(trackId, songRow, chainRow, takeCheckpoint);
+
+        // ⚠️ NO AUDIBILITY TEST, for the reason its SONG twin gives at length: mute is a mixer gate
+        // and never a sequencer one, and a per-channel launcher is exactly where "skip this track"
+        // starts to look natural.
+        const int transposeSemitones = chain_transpose_semitones(chain, chainRow)
+                                       + project_transpose_semitones(project);
+        const int hopStartRow = trackState.consumeHopTarget();
+        const int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
+        SchedulePhraseResult r = schedulePhrase(project.phrases[chain_phrase_ref(chain, chainRow)],
+                                                trackNextFrame_[trackId], trackId, transposeSemitones,
+                                                framesPerStep, effectiveStartRow, &chain, chainRow);
         put_song_position(trackId, songRow, chainRow, trackNextFrame_[trackId]);
         trackNextFrame_[trackId] += r.framesScheduled;
         trackChainRow_[trackId] = chainRow + 1;
@@ -1793,6 +2182,29 @@ class Sequencer {
     int  trackSongRow_[8]  = {0, 0, 0, 0, 0, 0, 0, 0};
     int  trackChainRow_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     bool trackDone_[8]     = {false, false, false, false, false, false, false, false};
+
+    // ─── LIVE mode ───────────────────────────────────────────────────────────────────────────────
+    // ⭐ THE ROW A CHANNEL LOOPS IS `trackSongRow_`, and there is deliberately no second field
+    // holding it: in LIVE a chain that runs out re-enters the SAME song row instead of advancing, so
+    // the cursor never moves on its own and is already the answer. A `liveRow_` beside it would be
+    // one fact in two places, and the day they disagreed "loop the chain" would quietly become "loop
+    // the last chain row".
+    //
+    // `liveSilent_` is the one thing the cursor cannot say: a channel that has been stopped, or
+    // launched at a cell with no chain in it. ⚠️ It is NOT `trackDone_` — a silent channel still
+    // spends its bar (schedule_live_unit), because a clock that froze would quantise the next launch
+    // against a frame that has already gone by.
+    //
+    // ⚠️⚠️ `liveLoopFrame_` is the frame the current LAP of the looping row began at, and it is the
+    // whole starvation guard. A lap that costs ZERO frames — every row of the chain empty, or a
+    // groove holding every step at nought tics — would leave this track the furthest-behind cursor on
+    // every pass forever, so the poll would spend all 64 of its steps here and the other seven would
+    // run dry. Measuring the lap in FRAMES catches every way of costing none, which is why there is
+    // no separate empty-chain test beside it.
+    bool     liveMode_ = false;
+    LiveSlot liveQueue_[8];
+    bool     liveSilent_[8] = {false, false, false, false, false, false, false, false};
+    int64_t  liveLoopFrame_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     int currentPhraseId_ = 0;
     int currentChainId_ = 0;
     // The mixer track PHRASE/CHAIN mode plays through: its fader, its mute, its voice slot and its

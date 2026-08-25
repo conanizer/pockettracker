@@ -164,6 +164,19 @@ inline void draw_playhead(Canvas& c, int x, int text_y, const Theme& t) {
     c.draw_text(">", x, text_y, playhead_color(t), CHAR_SPACING, FONT_SCALE);
 }
 
+/**
+ * Is a LIVE queue marker lit on this frame's phase? SLOW is a queue waiting for its chain to end,
+ * FAST one that lands on the next phrase boundary — so the two launch quantizations are told apart
+ * by the RATE of the same marker rather than by a second glyph.
+ *
+ * ⚠️ `phase_ms` is handed in (ui/app_state.h): a drawing layer with no clock is what makes a blinking
+ * marker reproducible in a screenshot.
+ */
+inline bool blink_on(int phase_ms, bool fast) {
+    const int period = fast ? 200 : 600;
+    return (phase_ms % period) * 2 < period;
+}
+
 // ─── Cells ───────────────────────────────────────────────────────────────────────────────────────
 
 /**

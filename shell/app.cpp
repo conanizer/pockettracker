@@ -1248,7 +1248,15 @@ int run(const AppConfig& cfg) {
         for (int t = 0; t < 8; ++t) {
             const PlaybackPosition p = host.playheads(t);
             state.playheads[t] = {p.songRow, p.chainId, p.chainRow, p.phraseId, p.phraseStep};
+            const songcore::LiveSlot q = host.live_queue(t);
+            state.liveQueue[t] = {q.targetRow, q.stop, q.immediate, q.armed()};
         }
+        // ⚠️ READ BACK FROM THE HOST, not trusted from the toggle that set it: `stop()` and a project
+        // load can both end a take, and a screen still drawing LIVE over a transport that has left it
+        // would blink markers at a queue nothing is holding.
+        state.liveMode     = host.live_mode();
+        // The blink phase, handed to the drawing layer rather than reached for by it — see AppState.
+        state.blinkPhaseMs = static_cast<int>(now % 1000);
         state.trackMask = host.track_mask();
 
         // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored

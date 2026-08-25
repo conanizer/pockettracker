@@ -270,6 +270,10 @@ class SongcoreHost {
     // the arrangement's fader, mute, voice slot and per-track FX instead of channel 1's; the default
     // is what keeps every tool caller — and its goldens — asking for track 0 unchanged.
     int64_t play_song(int startRow)   { sync_clock(); seq_.playSong(startRow);     return after_play(); }
+    /** LIVE mode from a standing start: `mask` bit N launches track N at `songRow`, the rest begin silent. */
+    int64_t play_song_live(int songRow, int mask) {
+        sync_clock(); seq_.playSongLive(songRow, mask); return after_play();
+    }
     int64_t play_chain(int chainId, int trackId = 0) {
         sync_clock(); seq_.playChain(chainId, trackId);   return after_play();
     }
@@ -1021,14 +1025,25 @@ class SongcoreHost {
     // boundary; clearing the queue is the host's job because only the host holds the engine.
     void notify_data_changed() {
         sync_clock();
-        // ⚠️ ONE FRAME PER TRACK, not one for the engine: the eight song cursors have their own
-        // phrase boundaries, so clearing every track from the earliest of them would drop notes a
-        // track ahead of it had queued and is not going to schedule again.
-        songcore::RollbackPlan plan = seq_.notify_data_changed(seq_.clock());
-        if (!engine_) return;
-        for (int t = 0; t < 8; ++t)
-            if (plan.frames[t] >= 0) engine_->clearScheduledNotesFrom(plan.frames[t], t);
+        apply_rollback(seq_.notify_data_changed(seq_.clock()));
     }
+
+    // ── ↕ LIVE mode ──────────────────────────────────────────────────────────────────────────────
+    //
+    // Queue-and-launch. Each verb arms a slot and rewinds the track it belongs to so the launch can
+    // still land on the boundary it was aimed at — the scheduler runs two phrases ahead, so without
+    // the rewind a launch aimed at a boundary already inside the buffer would arrive a lap late.
+    // ⚠️ Dropping the notes past that frame is the HOST's half, exactly as it is for a live edit:
+    // only the host holds the engine.
+
+    bool               live_mode() const              { return seq_.live_mode(); }
+    songcore::LiveSlot live_queue(int track) const    { return seq_.live_queue(track); }
+    bool               live_silent(int track) const   { return seq_.live_silent(track); }
+
+    void set_live_mode(bool on)                       { sync_clock(); apply_rollback(seq_.set_live_mode(on, seq_.clock())); }
+    void queue_live(int track, int songRow, bool now) { sync_clock(); apply_rollback(seq_.queue_live(track, songRow, now, seq_.clock())); }
+    void queue_live_stop(int track, bool now)         { sync_clock(); apply_rollback(seq_.queue_live_stop(track, now, seq_.clock())); }
+    void queue_live_row(int songRow, bool now)        { sync_clock(); apply_rollback(seq_.queue_live_row(songRow, now, seq_.clock())); }
 
     // ── ↕ the note preview — "hear the note you just dialled in" ──────────────────────────────────
     //
@@ -1219,6 +1234,17 @@ class SongcoreHost {
     bool trace_enabled() const { return traceEnabled_; }
 
   private:
+    // Drop what the rolled-back tracks had already queued. ⚠️ ONE FRAME PER TRACK, not one for the
+    // engine: the eight song cursors have their own boundaries, so clearing every track from the
+    // earliest of them would drop notes a track ahead of it had queued and is not going to schedule
+    // again. Written once below its four callers — the live edit and the three LIVE verbs, which are
+    // the same motion for different reasons.
+    void apply_rollback(const songcore::RollbackPlan& plan) {
+        if (!engine_) return;
+        for (int t = 0; t < 8; ++t)
+            if (plan.frames[t] >= 0) engine_->clearScheduledNotesFrom(plan.frames[t], t);
+    }
+
     // songcore owns no clock: the engine's frame counter IS the transport clock (getCurrentFrame() is
     // what the Kotlin scheduler polled). With no engine the clock stays where a test put it.
     void sync_clock() {

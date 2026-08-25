@@ -31,8 +31,12 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
     int rowY = y + TEXT_PADDING;
     // The status overlay (SAVED / LOADED / …) is drawn by the layout on the visualizer header, not
     // here — the title row stays put.
-    c.draw_text("SONG: " + Canvas::clip_text(s.project.name, TITLE_MAX_CHARS), x + 10, rowY,
-                t.textTitle, CHAR_SPACING, FONT_SCALE);
+    // The title carries the transport mode, because nothing else can: LIVE changes what START means
+    // on this screen, and a mode you have to press a button to discover is a mode that surprises you
+    // mid-performance. Both words are four glyphs, so the project name neither shifts nor re-clips.
+    c.draw_text(std::string(s.liveMode ? "LIVE: " : "SONG: ") +
+                    Canvas::clip_text(s.project.name, TITLE_MAX_CHARS),
+                x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     // The track number lights for the track the cursor is in — it is half of what the row highlight
     // used to say, the row number being the other half. `cursorTrack` is already 1-based, so it IS
@@ -99,8 +103,23 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         // This track and no other. Eight cursors means eight answers, and a track that has stopped
         // (or is only lending its number to a PHRASE being auditioned) answers −1 and gets nothing
         // drawn — which is the whole reason the row highlight had to go.
-        if (s.playheads[trackId].songRow == absolute_row)
-            draw_playhead(c, trackColumns[trackId] - CHAR_W, textY, t);
+        // ⚠️ ONE GLYPH IN ONE COLUMN, decided before anything is drawn. The marker column is a single
+        // character wide, and `draw_text` paints without erasing — so a stop queue drawn "over" the
+        // playhead it replaces superimposes `_` on `>` and reads as neither.
+        //
+        // ⚠️ THE TWO QUEUE MARKERS SIT IN DIFFERENT PLACES, because they answer different questions.
+        // A LAUNCH is drawn on the row it will jump to, so the blinking marker walks ahead of the
+        // playhead to the cell you aimed at. A STOP has no target row at all — it can only be drawn
+        // where the channel is now, in place of the `>` it is about to end.
+        const int  markerX     = trackColumns[trackId] - CHAR_W;
+        const bool playingHere = s.playheads[trackId].songRow == absolute_row;
+        const LiveQueue& q     = s.liveQueue[trackId];
+        const bool queueLit    = s.liveMode && q.pending() && blink_on(s.blinkPhaseMs, q.immediate);
+
+        if (queueLit && q.stop && playingHere)
+            c.draw_text("_", markerX, textY, playhead_color(t), CHAR_SPACING, FONT_SCALE);
+        else if (playingHere || (queueLit && !q.stop && q.row == absolute_row))
+            draw_playhead(c, markerX, textY, t);
     }
 }
 

@@ -265,6 +265,15 @@ when the gate lifts — unmuting mid-phrase brings back that one stale note and 
 phrase boundary. The offline render is the single exception, deliberately: `scheduleSongRowRange`
 skips an inaudible track outright, because an export is a file you keep.
 
+**LIVE mode is a modifier on SONG, not a fifth transport mode.** The mode changes only what happens at
+a track's boundary — a launched song row re-enters itself instead of the cursor moving down the column
+— so everything that branches on the playback mode (the playhead readback, the live-edit rollback, the
+event trace) needs no arm for it, and a project that never enters LIVE schedules identically. The
+launch itself is the live-edit rollback with the song row overwritten on the way back in: both rewind
+one track to its earliest unplayed boundary and hand the host a frame to drop queued notes from, which
+is why a launch aimed at a boundary already inside the lookahead still lands on it rather than a lap
+late.
+
 ### Parameter automation
 
 `AUS` opens a ramp on the automatable effect in the slot to its **left**, taking that cell's value as

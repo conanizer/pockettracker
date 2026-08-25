@@ -155,6 +155,28 @@ struct AppState {
     bool          isPlaying    = false;
     TrackPlayhead playheads[8] = {};
 
+    // ── LIVE mode (SONG's launcher) ──────────────────────────────────────────────────────────────
+    //
+    // ⚠️ A PER-SESSION PERFORMANCE CHOICE — deliberately not in `settings.json` and not in the `.ptp`.
+    // Reopening a project puts you back on the arrangement, which is where editing happens.
+    //
+    // ⚠️ AND THESE ARE A READBACK, NOT THE MODE ITSELF. The sequencer owns it — it is the thing that
+    // has to schedule differently — and both fields are refilled from the host each frame beside the
+    // playheads. The input side asks the host, never this, so there is one answer to "are we live"
+    // and no way for the screen and the transport to disagree about it.
+    bool     liveMode     = false;
+    LiveQueue liveQueue[8] = {};
+
+    /**
+     * The blink phase the queue markers are drawn on, 0..999 ms, written once a frame beside the
+     * playheads.
+     *
+     * ⚠️ IT IS HANDED IN RATHER THAN READ, and that is what keeps a blinking marker drawable by a
+     * tool: `ptshot` has no clock and no engine, so it sets the phase it wants and gets the same
+     * pixels every time. It is the same contract the input dispatcher and the meters are built on.
+     */
+    int blinkPhaseMs = 0;
+
     /**
      * The TABLE row an engine voice is on, ONE PER FX COLUMN — −1 for a column that is not running.
      * Unlike the eight above, these are not sequencer playheads: they are read off the VOICE,

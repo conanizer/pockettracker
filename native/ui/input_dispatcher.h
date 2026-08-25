@@ -315,6 +315,37 @@ class InputDispatcher {
     void on_start();
 
     /**
+     * LIVE mode's two chords, both of them SONG's alone: L+START queues the whole cursor ROW as one
+     * scene, R+START queues the channel under the cursor to fall silent. Off SONG, or out of LIVE
+     * mode, they stay what they have always been — reserved, and doing nothing.
+     */
+    void on_l_start();
+    void on_r_start();
+
+  private:
+    /**
+     * The one gate every LIVE gesture asks, written once below its four sites: LIVE mode, on SONG,
+     * with nothing on top of it. ⚠️ The SONG half is not a nicety — the mapper's L+START and R+START
+     * arms are global, so an ungated handler would queue a song row from inside the sample editor.
+     */
+    bool live_song_gesture() const {
+        return host_.live_mode() && s_.currentScreen == ScreenType::SONG &&
+               !overlay_swallows(Overlay::NONE);
+    }
+
+    /** Bit N set where track N has a chain on `songRow` — the channels a row launch starts sounding. */
+    int  live_row_mask(int songRow) const;
+
+    /**
+     * Has this row already been queued? It is what promotes a second L+START to the next phrase
+     * boundary, and it is read back off the slots rather than remembered: a row queue writes all
+     * eight, so any one of them still pointing here says the press before this one aimed at it.
+     */
+    bool live_row_armed(int songRow) const;
+
+  public:
+
+    /**
      * "Press any button to silence the audition." The mapper calls this on every plain press; the
      * dispatcher decides whether the current screen even HAS a preview to stop. Previews live on
      * their own voice, so this never touches song playback.

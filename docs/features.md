@@ -14,6 +14,7 @@ Everything you can do with PocketTracker.
 - 256 phrases, 256 chains, 8 tracks, 128 grooves
 - Use HOP to jump between phrases mid-sequence — create odd time signatures and generative loops
 - Every track runs its own column of the song at its own pace: all 8 start together, then each moves on as soon as its own chain ends, so a 2-row chain beside a 16-row one loops eight times instead of waiting. A `>` marker on the song, chain and phrase screens shows where each track has got to
+- LIVE mode (B+LEFT/RIGHT on the song screen): the song grid becomes a scene launcher. START queues the chain under the cursor to start when that channel's current chain ends, pressed again to start at the next bar instead; a launched chain repeats until you queue something else. L+START launches the whole row as one scene, R+START silences a single channel, and a blinking marker shows what is waiting
 
 ## Sequence Effects
 

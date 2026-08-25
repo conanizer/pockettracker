@@ -199,6 +199,9 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ss.cursorTrack    = s.cursorColumn;  // on SONG the cursor column IS the track (1..8)
                 ss.scrollPosition = s.songScrollPosition;
                 std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ss.playheads));
+                ss.liveMode      = s.liveMode;
+                std::copy(std::begin(s.liveQueue), std::end(s.liveQueue), std::begin(ss.liveQueue));
+                ss.blinkPhaseMs  = s.blinkPhaseMs;
                 ss.selectionMode  = s.selection_mode();
                 ss.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ss.theme          = t;

@@ -224,7 +224,10 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         switch (e.button) {
             case Button::A:     d.on_l_a(); return;   // cut (in a selection) / paste (outside one)
             case Button::B:     d.on_l_b(); return;   // enter selection, then widen it
-            case Button::START: return;               // reserved — START must not toggle playback here
+            // LIVE mode's row queue on SONG, and STILL RESERVED everywhere else — the handler's own
+            // gate is what decides, and it returns having done nothing outside LIVE. START must not
+            // toggle playback here either way.
+            case Button::START: d.on_l_start(); return;
             default: break;                           // L+DPAD is the file browser's; it has no screen yet
         }
     }
@@ -260,8 +263,9 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                     ms.rComboArmed = true;
                 }
                 return;
-            // Reserved, and consumed: R is held to navigate, and START must not toggle playback here.
-            case Button::START:      return;
+            // LIVE mode's stop queue on SONG; reserved and consumed everywhere else, exactly as
+            // L+START above. R is held to navigate, and START must not toggle playback here.
+            case Button::START:      d.on_r_start(); return;
             default: break;
         }
     }
