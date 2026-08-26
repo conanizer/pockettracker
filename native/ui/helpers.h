@@ -110,17 +110,18 @@ inline Argb with_alpha(Argb c, float alpha) {
 
 /**
  * The standard row background for every grid editor (phrase, chain, song, table).
- * Priority: selected > every-4th-row accent > default.
+ * Priority: every-4th-row accent > default.
  *
- * ⚠️ NEITHER THE CURSOR NOR PLAYBACK IS A ROW HERE, and for the same reason: a grid row holds up to
- * ten cells and a row-wide colour cannot say which one is meant. The cursor is a background under
- * ONE cell (`draw_cell`); what plays is a marker per track (`draw_playhead`), which can be absent,
- * and can be in eight places at once.
+ * ⚠️ NOTHING THAT PICKS CELLS IS A ROW HERE — not the cursor, not playback, and not the selection —
+ * all for the same reason: a grid row holds up to ten cells and a row-wide colour cannot say which
+ * of them is meant. A selection is a RECTANGLE, and it starts at column 1: painting its rows edge to
+ * edge claims both the columns outside it and the row-number gutter, which no selection can reach.
+ * So the cursor and the selection are backgrounds under the cells themselves (`RowCells`), and what
+ * plays is a marker per track (`draw_playhead`), which can be absent, and can be in eight places at
+ * once.
  */
-inline Argb row_bg_color(int index, bool is_selected, const Theme& t) {
-    if (is_selected) return t.rowSelection;
-    if (index % 4 == 0) return t.rowEvery4th;
-    return t.background;
+inline Argb row_bg_color(int index, const Theme& t) {
+    return (index % 4 == 0) ? t.rowEvery4th : t.background;
 }
 
 /**
@@ -180,10 +181,26 @@ inline bool blink_on(int phase_ms, bool fast) {
 // ─── Cells ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One value cell in an editor grid row, with the standard colour priority:
+ * A grid row's cells, painted left to right, with the standard colour priority per cell:
  * cursor > selection > empty > `value_color` (which varies per column: values, params, FX names).
  *
- * ⚠️ THE CURSOR'S BACKGROUND IS PAINTED HERE, per cell — `row_bg_color` has none.
+ * ⚠️ BOTH THE CURSOR'S BACKGROUND AND THE SELECTION'S ARE PAINTED HERE, per cell — `row_bg_color`
+ * has neither.
+ *
+ * ⚠️ AND THE SELECTION OUTRANKS THE CURSOR IN THE BACKGROUND WHILE LOSING TO IT IN THE TEXT. That is
+ * not a contradiction: the cursor is always inside the selection it is dragging, so a cursor
+ * background would punch a hole in the one region the screen is trying to show as a block. The
+ * region stays one unbroken colour and the cursor says where its edge is with its INK alone — which
+ * means `rowCursor` is a colour seen only when no selection is up.
+ *
+ * ⚠️ AND A SELECTION IS ONE BLOCK, WHICH IS WHY THIS IS AN OBJECT AND NOT A FREE FUNCTION. The
+ * gutter between two columns belongs to neither cell, and its width is not something a call site
+ * could pass: it is the DISTANCE between two cells, and only something that has already drawn the
+ * left one knows it. So a row hands its cells over in COLUMN ORDER and each selected cell whose
+ * left neighbour was also selected begins its fill at that neighbour's right edge — a selected
+ * range reads as a rectangle rather than as a line of separate chips, and it still stops at the
+ * columns the selection actually covers. ⚠️ HANDED OVER OUT OF ORDER, the fill either runs backwards
+ * over a cell already drawn or leaves the gap it was meant to close; every grid draws left to right.
  *
  * The width is DERIVED from the text rather than passed in, and that is exact rather than
  * approximate: every column of every grid is fixed-width in GLYPHS, because an empty cell prints a
@@ -196,18 +213,44 @@ inline bool blink_on(int phase_ms, bool fast) {
  * where the next character would have begun, which reads as one character cell and clears the
  * playhead marker sitting one CHAR_W to the left of the cell.
  */
+class RowCells {
+  public:
+    RowCells(Canvas& c, int text_y, const Theme& t) : c_(c), textY_(text_y), t_(t) {}
+
+    void cell(const std::string& text, int x, bool is_cursor, bool is_selected, bool is_empty,
+              Argb value_color) {
+        const int left  = x - CHAR_SPACING;
+        const int right = x + Canvas::text_width(text, CHAR_SPACING, FONT_SCALE) + CHAR_SPACING;
+
+        if (is_cursor || is_selected) {
+            // The gutter on the left is claimed only when the cells on BOTH sides of it are selected.
+            const int from = (is_selected && selectedRight_ >= 0) ? selectedRight_ : left;
+            c_.fill_rect(from, textY_ - TEXT_PADDING, right - from, ROW_HEIGHT,
+                         is_selected ? t_.rowSelection : t_.rowCursor);
+        }
+
+        // −1 is "nothing selected on my left", and an unselected cell restores it: the next selected
+        // cell then opens a fresh block at its own edge instead of reaching back across it.
+        selectedRight_ = is_selected ? right : -1;
+
+        const Argb color = is_cursor     ? t_.textCursor
+                           : is_selected ? t_.textSelection
+                           : is_empty    ? t_.textEmpty
+                                         : value_color;
+        c_.draw_text(text, x, textY_, color, CHAR_SPACING, FONT_SCALE);
+    }
+
+  private:
+    Canvas&      c_;
+    int          textY_;
+    const Theme& t_;
+    int          selectedRight_ = -1;
+};
+
+/** One cell with no neighbours — a grid with no selection to join up (GROOVE), or a row's gutter. */
 inline void draw_cell(Canvas& c, const std::string& text, int x, int text_y, bool is_cursor,
                       bool is_selected, bool is_empty, Argb value_color, const Theme& t) {
-    if (is_cursor) {
-        c.fill_rect(x - CHAR_SPACING, text_y - TEXT_PADDING,
-                    Canvas::text_width(text, CHAR_SPACING, FONT_SCALE) + 2 * CHAR_SPACING,
-                    ROW_HEIGHT, t.rowCursor);
-    }
-    const Argb color = is_cursor     ? t.textCursor
-                       : is_selected ? t.vizWave
-                       : is_empty    ? t.textEmpty
-                                     : value_color;
-    c.draw_text(text, x, text_y, color, CHAR_SPACING, FONT_SCALE);
+    RowCells{c, text_y, t}.cell(text, x, is_cursor, is_selected, is_empty, value_color);
 }
 
 /**

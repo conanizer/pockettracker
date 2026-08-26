@@ -1315,7 +1315,7 @@ The top row lets you cycle through built-in themes and save or load custom theme
 
 Move between positions with D-pad LEFT/RIGHT.
 
-### Rows 1–21 — Color parameters
+### Rows 1–22 — Color parameters
 
 Each row edits one color in the theme. The color preview swatch is shown on the right. Cursor moves between **R**, **G**, **B** channels with D-pad LEFT/RIGHT.
 
@@ -1325,7 +1325,7 @@ Each row edits one color in the theme. The color preview swatch is shown on the 
 | ROW 4TH | Beat-accent rows (every 4th step) |
 | ROW CURSOR | The cell the cursor is on in a grid (SONG, CHAIN, PHRASE, TABLE, GROOVE); the whole row on list screens such as SETTINGS |
 | ROW PLAY | The `>` playback marker. It is drawn brightened, so a dark value still reads as ink |
-| ROW SELECT | Selected region during copy/paste |
+| ROW SELECT | The selected cells during copy/paste |
 | TXT TITLE | Screen header text (e.g., "PHRASE", "INSTRUMENT") |
 | TXT PARAM | Inactive parameter labels |
 | TXT VALUE | Inactive parameter values |
@@ -1342,8 +1342,9 @@ Each row edits one color in the theme. The color preview swatch is shown on the 
 | EQ FILL | Shading under the EQ EDITOR's spectrum curve |
 | EQ BORDER | The EQ EDITOR's spectrum curve itself |
 | EQ TXT | Frequency labels on the EQ EDITOR's spectrum |
+| TXT SELECT | Text in the selected cells |
 
-A theme file saved before these four rows existed loads with them set to what the EQ EDITOR drew previously, so an older `.ptt` looks unchanged until you edit them.
+A theme file saved before these rows existed loads with them set to what the screen drew previously — the EQ rows from the theme's own colors, TXT SELECT from VIZ WAVE — so an older `.ptt` looks unchanged until you edit them.
 
 ### Controls
 

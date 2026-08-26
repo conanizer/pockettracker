@@ -117,18 +117,22 @@ inline std::string serialize_theme(const Theme& t) {
     color("meterHigh",       t.meterHigh,       d.meterHigh);
     color("meterBorder",     t.meterBorder,     d.meterBorder);   // no editor row; still a field
 
-    // ⚠️ THE FOUR EQ KEYS ARE MEASURED AGAINST A DIFFERENT YARDSTICK — `derive_eq_colors` run on THIS
-    // theme, not `Theme{}`. Their absence from a file does not mean "CLASSIC's value", it means "the
-    // four fields the EQ screen used to borrow", which is a function of the palette in hand.
+    // ⚠️ THE FIVE BORROWED KEYS ARE MEASURED AGAINST A DIFFERENT YARDSTICK — `derive_borrowed_colors`
+    // run on THIS theme, not `Theme{}`. Their absence from a file does not mean "CLASSIC's value", it
+    // means "the fields those screens used to borrow", which is a function of the palette in hand.
     // `parse_theme` fills them in that way, and omitting them on the same terms is what makes the pair
     // a round trip. It also keeps a theme nobody has dialled these rows on byte-identical to what a
     // build without them wrote — the keys appear in a `.ptt` the first time they are actually used.
     Theme e = t;
-    derive_eq_colors(e);
+    derive_borrowed_colors(e);
     color("eqBg",     t.eqBg,     e.eqBg);
     color("eqFill",   t.eqFill,   e.eqFill);
     color("eqBorder", t.eqBorder, e.eqBorder);
     color("eqTxt",    t.eqTxt,    e.eqTxt);
+
+    // ⚠️ LAST, AND AFTER THE EQ FOUR — this order IS the file format, and appending here is what keeps
+    // every byte a previous build wrote in the same place it was.
+    color("textSelection", t.textSelection, e.textSelection);
 
     if (t.visualizerType != d.visualizerType)
         w.field_string("visualizerType", visualizer_serial_name(t.visualizerType));
@@ -184,15 +188,17 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     color("meterHigh",       t.meterHigh);
     color("meterBorder",     t.meterBorder);
 
-    // ⚠️ The EQ four are DERIVED FIRST and then overwritten by whatever the file names, so a theme
-    // written before these keys existed keeps the exact EQ screen it has always had. Derived here
-    // rather than in the struct's field defaults because the source fields are the ones just read: a
-    // constant default would repaint every existing `.ptt`'s spectrum in CLASSIC's greys.
-    derive_eq_colors(t);
+    // ⚠️ The five borrowed keys are DERIVED FIRST and then overwritten by whatever the file names, so a
+    // theme written before they existed keeps the exact EQ screen and the exact selection colour it has
+    // always had. Derived here rather than in the struct's field defaults because the source fields are
+    // the ones just read: a constant default would repaint every existing `.ptt`'s spectrum in CLASSIC's
+    // greys and its selected cells in CLASSIC's green.
+    derive_borrowed_colors(t);
     color("eqBg",     t.eqBg);
     color("eqFill",   t.eqFill);
     color("eqBorder", t.eqBorder);
     color("eqTxt",    t.eqTxt);
+    color("textSelection", t.textSelection);
 
     if (const auto it = j.find("visualizerType"); it != j.end() && it->is_string())
         t.visualizerType = visualizer_from_serial_name(it->get<std::string>());

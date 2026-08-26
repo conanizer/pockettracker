@@ -84,62 +84,65 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
 
-    bool isRowSelected = false;
-    if (s.selectionMode) {
-        for (int col = 1; col <= 8 && !isRowSelected; ++col) isRowSelected = s.isCellSelected(index, col);
-    }
-
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, t));
 
     const int textY = dataRowY + TEXT_PADDING;
+
+    // Left to right, column by column — RowCells joins a selected run into one block across the
+    // gutters, and it can only do that if the cells arrive in the order they are laid out.
+    RowCells cells(c, textY, t);
 
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
     // No every-4th accent: a table row is a tic, not a beat. The number lights across the whole
     // cursor row — that is what now says which row is being edited — and column 0 is a real cursor
-    // position, so it goes through draw_cell and gets the cell background when the cursor is on it.
-    draw_cell(c, hex1(index), stepX, textY, cur(0), /*is_selected=*/false, /*is_empty=*/false,
-              (index == s.cursorRow) ? t.textCursor : t.textEmpty, t);
-
-    // Three playheads, FOUR markers. Lanes 1 and 2 get one each, in the gutter ahead of their own FX
-    // column. Lane 0 gets TWO, and the repeat is deliberate: beside the row number, because it is the
-    // note and volume columns' playhead as well, and again ahead of FX1, so that all three FX columns
-    // are marked the same way and the eye can read down the row. A column that has stopped reads −1
-    // and simply has no marker.
-    if (s.playbackRows[0] == index) {
-        draw_playhead(c, stepX + CHAR_W, textY, t);
-        draw_playhead(c, marker_x(fx1NameX), textY, t);
-    }
-    if (s.playbackRows[1] == index) draw_playhead(c, marker_x(fx2NameX), textY, t);
-    if (s.playbackRows[2] == index) draw_playhead(c, marker_x(fx3NameX), textY, t);
+    // position, so it goes through the painter and gets the cell background when the cursor is on it.
+    cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false,
+               (index == s.cursorRow) ? t.textCursor : t.textEmpty);
 
     // Transpose is always shown — 0x00 is "no transpose", drawn dim, but it is still a value.
-    draw_cell(c, hex2(row.transpose), transposeX, textY, cur(1), sel(1),
-              /*is_empty=*/row.transpose == 0x00, t.textValue, t);
+    cells.cell(hex2(row.transpose), transposeX, cur(1), sel(1),
+               /*is_empty=*/row.transpose == 0x00, t.textValue);
 
     // Volume −1 IS empty: "leave the note's own volume alone".
-    draw_cell(c, row.volume == -1 ? "--" : hex2(row.volume), volX, textY, cur(2), sel(2),
-              /*is_empty=*/row.volume == -1, t.textValue, t);
+    cells.cell(row.volume == -1 ? "--" : hex2(row.volume), volX, cur(2), sel(2),
+               /*is_empty=*/row.volume == -1, t.textValue);
 
     // Both FX cells are textValue here — see the header. FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8.
     // An FX pair dims when the slot is unset — and an AUS/AUF cell dims when no ramp uses it, which
     // is the only place the editor says that a fade the author thought they wrote is not one. Both
-    // reach draw_cell through the one flag, because an inert cell does exactly what an unset cell
+    // reach the painter through the one flag, because an inert cell does exactly what an unset cell
     // does: nothing.
     const auto fxDim = [&](int type, int slot) {
         return type == 0x00 || !rampCells.active(type, index, slot);
     };
 
     const bool fx1Empty = fxDim(row.fx1Type, 1);
-    draw_cell(c, effect_name(row.fx1Type), fx1NameX,  textY, cur(3), sel(3), fx1Empty, t.textValue, t);
-    draw_cell(c, hex2(row.fx1Value),       fx1ValueX, textY, cur(4), sel(4), fx1Empty, t.textValue, t);
+    cells.cell(effect_name(row.fx1Type), fx1NameX,  cur(3), sel(3), fx1Empty, t.textValue);
+    cells.cell(hex2(row.fx1Value),       fx1ValueX, cur(4), sel(4), fx1Empty, t.textValue);
     const bool fx2Empty = fxDim(row.fx2Type, 2);
-    draw_cell(c, effect_name(row.fx2Type), fx2NameX,  textY, cur(5), sel(5), fx2Empty, t.textValue, t);
-    draw_cell(c, hex2(row.fx2Value),       fx2ValueX, textY, cur(6), sel(6), fx2Empty, t.textValue, t);
+    cells.cell(effect_name(row.fx2Type), fx2NameX,  cur(5), sel(5), fx2Empty, t.textValue);
+    cells.cell(hex2(row.fx2Value),       fx2ValueX, cur(6), sel(6), fx2Empty, t.textValue);
     const bool fx3Empty = fxDim(row.fx3Type, 3);
-    draw_cell(c, effect_name(row.fx3Type), fx3NameX,  textY, cur(7), sel(7), fx3Empty, t.textValue, t);
-    draw_cell(c, hex2(row.fx3Value),       fx3ValueX, textY, cur(8), sel(8), fx3Empty, t.textValue, t);
+    cells.cell(effect_name(row.fx3Type), fx3NameX,  cur(7), sel(7), fx3Empty, t.textValue);
+    cells.cell(hex2(row.fx3Value),       fx3ValueX, cur(8), sel(8), fx3Empty, t.textValue);
+
+    // Three playheads, FOUR markers. Lanes 1 and 2 get one each, in the gutter ahead of their own FX
+    // column. Lane 0 gets TWO, and the repeat is deliberate: beside the row number, because it is the
+    // note and volume columns' playhead as well, and again ahead of FX1, so that all three FX columns
+    // are marked the same way and the eye can read down the row. A column that has stopped reads −1
+    // and simply has no marker.
+    //
+    // ⚠️ AND THEY ARE DRAWN AFTER THE CELLS, because three of the four stand in a gutter BETWEEN two
+    // value columns: a selection covering the columns on both sides fills that gutter, and a marker
+    // drawn first is a marker the fill erases.
+    if (s.playbackRows[0] == index) {
+        draw_playhead(c, stepX + CHAR_W, textY, t);
+        draw_playhead(c, marker_x(fx1NameX), textY, t);
+    }
+    if (s.playbackRows[1] == index) draw_playhead(c, marker_x(fx2NameX), textY, t);
+    if (s.playbackRows[2] == index) draw_playhead(c, marker_x(fx3NameX), textY, t);
 }
 
 CursorContext TableModule::cursor_context(const TableState& s) const {

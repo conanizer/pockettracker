@@ -39,26 +39,24 @@ void ChainEditorModule::draw_row(Canvas& c, int x, int y, int index, const Chain
     const int  phraseRef = s.chain.phraseRefs[static_cast<size_t>(index)];
     const bool isEmpty   = (phraseRef == -1);
 
-    bool isRowSelected = false;
-    if (s.selectionMode) {
-        for (int col = 1; col <= 2 && !isRowSelected; ++col) isRowSelected = s.isCellSelected(index, col);
-    }
-
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, t));
 
     const int textY = dataRowY + TEXT_PADDING;
+
+    // Left to right, column by column — RowCells joins a selected run into one block across the
+    // gutters, and it can only do that if the cells arrive in the order they are laid out.
+    RowCells cells(c, textY, t);
 
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
     // The whole cursor ROW's number lights, whatever column the cursor is in — that is what now says
     // which row is being edited. Column 0 is a real cursor position, so the number goes through
-    // draw_cell and gets the cell background when the cursor is actually on it.
+    // the painter and gets the cell background when the cursor is actually on it.
     const Argb stepColor = (index == s.cursorRow) ? t.textCursor
                            : (index % 4 == 0)     ? t.textParam
                                                   : t.textEmpty;
-    draw_cell(c, hex1(index), stepX, textY, cur(0), /*is_selected=*/false, /*is_empty=*/false,
-              stepColor, t);
+    cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
 
     // The gutter holds a ONE-character row number, so the marker sits beside it and no column
     // moves. Any track inside this chain marks its own row; two tracks on the same row overlap on
@@ -66,12 +64,11 @@ void ChainEditorModule::draw_row(Canvas& c, int x, int y, int index, const Chain
     for (const TrackPlayhead& ph : s.playheads)
         if (ph.chainId == s.chain.id && ph.chainRow == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
-    draw_cell(c, isEmpty ? "--" : hex2(phraseRef), phX, textY, cur(1), sel(1), isEmpty, t.textValue, t);
+    cells.cell(isEmpty ? "--" : hex2(phraseRef), phX, cur(1), sel(1), isEmpty, t.textValue);
 
     // An empty slot has no transpose to show — the emptiness of BOTH cells is the phrase ref's.
     const int transposeValue = s.chain.transposeValues[static_cast<size_t>(index)];
-    draw_cell(c, isEmpty ? "--" : hex2(transposeValue), tspX, textY, cur(2), sel(2), isEmpty,
-              t.textParam, t);
+    cells.cell(isEmpty ? "--" : hex2(transposeValue), tspX, cur(2), sel(2), isEmpty, t.textParam);
 }
 
 CursorContext ChainEditorModule::cursor_context(const ChainEditorState& s) const {

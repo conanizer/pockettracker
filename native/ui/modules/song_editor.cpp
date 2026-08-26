@@ -60,15 +60,13 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (row_index * ROW_HEIGHT);
 
-    bool isRowSelected = false;
-    if (s.selectionMode) {
-        for (int col = 1; col <= 8 && !isRowSelected; ++col)
-            isRowSelected = s.isCellSelected(absolute_row, col);
-    }
-
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(absolute_row, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(absolute_row, t));
 
     const int textY = dataRowY + TEXT_PADDING;
+
+    // The eight track cells, left to right — RowCells joins a selected run into one block across
+    // the gutters, and it can only do that if the cells arrive in the order they are laid out.
+    RowCells cells(c, textY, t);
 
     // No cell background: column 0 is a gutter the cursor cannot reach (cursorTrack starts at 1).
     // It still lights on the cursor row, though — with the row no longer painted, the row number is
@@ -94,11 +92,11 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         // reads as what you are hearing rather than as what is written down. The predicate is the
         // audible one, not `mute`, which is what gives SOLO a display for free: solo one channel and
         // the other seven dim, because they are the ones that stopped. Cursor and selection colours
-        // still win inside draw_cell, so the cursor is never lost on a muted channel.
+        // still win inside the painter, so the cursor is never lost on a muted channel.
         const Argb value_color = track_audible(s.project, trackId) ? t.textValue : t.textEmpty;
 
-        draw_cell(c, chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], textY, isCursor,
-                  isSelected, /*is_empty=*/chainId == -1, value_color, t);
+        cells.cell(chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], isCursor, isSelected,
+                   /*is_empty=*/chainId == -1, value_color);
 
         // This track and no other. Eight cursors means eight answers, and a track that has stopped
         // (or is only lending its number to a PHRASE being auditioned) answers −1 and gets nothing

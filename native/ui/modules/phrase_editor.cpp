@@ -71,29 +71,27 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
 
-    bool isRowSelected = false;
-    if (s.selectionMode) {
-        for (int col = 1; col <= 9 && !isRowSelected; ++col) isRowSelected = s.isCellSelected(index, col);
-    }
-
-    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, isRowSelected, t));
+    c.fill_rect(x, dataRowY, WIDTH, ROW_HEIGHT, row_bg_color(index, t));
 
     const int textY = dataRowY + TEXT_PADDING;
 
-    // Every value cell shares draw_cell's colour priority (cursor > selection > empty > per-column
+    // Left to right, column by column — RowCells joins a selected run into one block across the
+    // gutters, and it can only do that if the cells arrive in the order they are laid out.
+    RowCells cells(c, textY, t);
+
+    // Every value cell shares the painter.s colour priority (cursor > selection > empty > per-column
     // colour); note-emptiness dims NOTE/VOL/INST, fx-emptiness dims its own name/value pair.
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
     // Quarter-note rows (every 4th) are drawn brighter as a beat-accent cue — and the whole cursor
     // ROW's number lights, whatever column the cursor is in, because that is what now says which row
-    // is being edited. Column 0 is a real cursor position, so the number goes through draw_cell and
+    // is being edited. Column 0 is a real cursor position, so the number goes through the painter and
     // gets the cell background when the cursor is actually on it.
     const Argb stepColor = (index == s.cursorRow) ? t.textCursor
                            : (index % 4 == 0)     ? t.textParam
                                                   : t.textEmpty;
-    draw_cell(c, hex1(index), stepX, textY, cur(0), /*is_selected=*/false, /*is_empty=*/false,
-              stepColor, t);
+    cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
 
     // Beside the one-character row number, in the gutter that was already there - 40px of which a
     // glyph uses 15. No column moves.
@@ -101,27 +99,27 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
         if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
     const bool noteEmpty = (step.note == Note::EMPTY());
-    draw_cell(c, note_name(step.note),  noteX, textY, cur(1), sel(1), noteEmpty, t.textValue, t);
-    draw_cell(c, hex2(step.volume),     volX,  textY, cur(2), sel(2), noteEmpty, t.textParam, t);
-    draw_cell(c, hex2(step.instrument), instX, textY, cur(3), sel(3), noteEmpty, t.textParam, t);
+    cells.cell(note_name(step.note),  noteX, cur(1), sel(1), noteEmpty, t.textValue);
+    cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noteEmpty, t.textParam);
+    cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noteEmpty, t.textParam);
 
     // An FX pair dims when the slot is unset — and an AUS/AUF cell dims when no ramp uses it, which
     // is the only place the editor says that a fade the author thought they wrote is not one. Both
-    // reach draw_cell through the one flag, because an inert cell does exactly what an unset cell
+    // reach the painter through the one flag, because an inert cell does exactly what an unset cell
     // does: nothing.
     const auto fxDim = [&](int type, int slot) {
         return type == 0x00 || !rampCells.active(type, index, slot);
     };
 
     const bool fx1Dim = fxDim(step.fx1Type, 1);
-    draw_cell(c, effect_name(step.fx1Type), fx1NameX,  textY, cur(4), sel(4), fx1Dim, t.textTitle, t);
-    draw_cell(c, hex2(step.fx1Value),       fx1ValueX, textY, cur(5), sel(5), fx1Dim, t.textParam, t);
+    cells.cell(effect_name(step.fx1Type), fx1NameX,  cur(4), sel(4), fx1Dim, t.textTitle);
+    cells.cell(hex2(step.fx1Value),       fx1ValueX, cur(5), sel(5), fx1Dim, t.textParam);
     const bool fx2Dim = fxDim(step.fx2Type, 2);
-    draw_cell(c, effect_name(step.fx2Type), fx2NameX,  textY, cur(6), sel(6), fx2Dim, t.textTitle, t);
-    draw_cell(c, hex2(step.fx2Value),       fx2ValueX, textY, cur(7), sel(7), fx2Dim, t.textParam, t);
+    cells.cell(effect_name(step.fx2Type), fx2NameX,  cur(6), sel(6), fx2Dim, t.textTitle);
+    cells.cell(hex2(step.fx2Value),       fx2ValueX, cur(7), sel(7), fx2Dim, t.textParam);
     const bool fx3Dim = fxDim(step.fx3Type, 3);
-    draw_cell(c, effect_name(step.fx3Type), fx3NameX,  textY, cur(8), sel(8), fx3Dim, t.textTitle, t);
-    draw_cell(c, hex2(step.fx3Value),       fx3ValueX, textY, cur(9), sel(9), fx3Dim, t.textParam, t);
+    cells.cell(effect_name(step.fx3Type), fx3NameX,  cur(8), sel(8), fx3Dim, t.textTitle);
+    cells.cell(hex2(step.fx3Value),       fx3ValueX, cur(9), sel(9), fx3Dim, t.textParam);
 }
 
 CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) const {
