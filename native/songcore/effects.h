@@ -154,7 +154,7 @@ inline constexpr int effect_value_max(int effect_type) {
 }
 
 // The cycle order of the FX-type column, and the reading order of the FX helper grid. This is a
-// UI-facing list (an FX column stores an INDEX into it, and A+UP steps that index), but it lives here
+// UI-facing list (an FX column stores an INDEX into it, and A+RIGHT steps that index), but it lives here
 // beside the codes and the names because those three must never drift: an entry added to the effects
 // without an entry here is an effect no one can type.
 //

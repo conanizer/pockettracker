@@ -50,7 +50,7 @@ struct ThemeState {
  * Nudge one channel of the colour under the cursor. Kotlin's `AppInputDispatcher.adjustThemeColor`.
  *
  * `row` is the CURSOR row (1..17); row 0 is the THEME header and is rejected, as Kotlin rejects it.
- * `delta` is ±0x01 from A+UP / A+DOWN and ±0x10 from A+RIGHT / A+LEFT.
+ * `delta` is ±0x01 from A+RIGHT / A+LEFT and ±0x10 from A+UP / A+DOWN.
  *
  * ⚠️ Each channel CLAMPS at 0 and 255 — it does not wrap. Rolling 0xFF over to 0x00 would take a
  * colour you are dialling UP and drop it to black, which is not a nudge, it is a cliff.
@@ -90,7 +90,7 @@ inline void theme_adjust_color(Theme& theme, int row, int channel, int delta) {
 }
 
 /**
- * Step the built-in palette. `delta` is −1 (A+UP, Kotlin's `cyclePrevBuiltinTheme`) or +1 (A+DOWN,
+ * Step the built-in palette. `delta` is −1 (A+LEFT, Kotlin's `cyclePrevBuiltinTheme`) or +1 (A+RIGHT,
  * `cycleNextBuiltinTheme`).
  *
  * ⚠️ IT REPLACES THE WHOLE THEME, so every colour the user has dialled on the current one is GONE. That

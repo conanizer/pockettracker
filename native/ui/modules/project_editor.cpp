@@ -238,14 +238,14 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
     switch (static_cast<ProjectRow>(s.cursorRow)) {
         case ProjectRow::TEMPO: {
             // Decimal, not hex — but a HEX_BYTE context, because the type only decides how the value
-            // STEPS and 20..999 steps the same way either way. A+LEFT/RIGHT jumps by 10.
+            // STEPS and 20..999 steps the same way either way. A+UP/DOWN jumps by 10.
             CursorContext c = cc::hex_byte(p.tempo, 20, 999);
             c.largeStep = 10;
             return c;
         }
 
         case ProjectRow::TRANSPOSE: {
-            // Same signed encoding as the chain transpose. A+LEFT/RIGHT = an octave.
+            // Same signed encoding as the chain transpose. A+UP/DOWN = an octave.
             CursorContext c = cc::hex_byte(p.transpose, 0, 255);
             c.largeStep = 12;
             return c;

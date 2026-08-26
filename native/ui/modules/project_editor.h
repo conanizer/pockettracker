@@ -12,7 +12,7 @@
 // `handle_input` below only ever touches rows 0-2, exactly as Kotlin's does.
 //
 // ⚠️ NAME is the port's first IN-PLACE character editor. Each of its `PROJECT_NAME_MAX_CHARS`
-// characters is its own cursor COLUMN (1..20), A+UP/DOWN walks `allowed_chars()`, and A+B writes a
+// characters is its own cursor COLUMN (1..20), A+LEFT/RIGHT walks `allowed_chars()`, and A+B writes a
 // space. (A on the row opens the QWERTY keyboard instead — the deferred-A latch S6a built for the
 // INSTRUMENT NAME cell.)
 //

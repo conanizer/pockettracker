@@ -151,7 +151,7 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
         case 0: return cc::read_only();
 
         case 1: {
-            // The SAME semitone context the chain's TSP uses, so A+LEFT/RIGHT is ±1 octave on both.
+            // The SAME semitone context the chain's TSP uses, so A+UP/DOWN is ±1 octave on both.
             // It was a plain hex_byte with a ±16 large step, which had drifted from the chain.
             CursorContext ctx            = cc::transpose(row.transpose);
             ctx.capabilities.canDelete   = (row.transpose != 0x00);  // deletable back to 00 = no transpose

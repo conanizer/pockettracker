@@ -95,12 +95,12 @@ This creates a consistent, learnable pattern where:
 Hold A and press directions to edit values:
 
 ### Small Steps
-- **A + UP** - Increment by 1
-- **A + DOWN** - Decrement by 1
+- **A + RIGHT** - Increment by 1
+- **A + LEFT** - Decrement by 1
 
 ### Large Steps
-- **A + RIGHT** - Increment by 16 (hex) or 12 semitones (notes)
-- **A + LEFT** - Decrement by 16 (hex) or 12 semitones (notes)
+- **A + UP** - Increment by 16 (hex) or 12 semitones (notes)
+- **A + DOWN** - Decrement by 16 (hex) or 12 semitones (notes)
 
 ### Delete
 - **A + B** - Delete the value at the cursor, or reset it to its default where the cell cannot be
@@ -137,7 +137,7 @@ The tracker automatically adjusts behavior based on what you're editing:
 The split is deliberate: discrete values **wrap**, so a four-button device can dial one in by holding
 a direction. Continuous physical units — EQ gain in dB, EQ frequency in Hz — **clamp**, because
 wrapping +12 dB round to −12 dB would be a trap rather than a convenience. HEX_NIBBLE clamps for the
-same reason: holding A+UP on CRUSH stops at F instead of quietly undoing what you were dialling in.
+same reason: holding A+RIGHT on CRUSH stops at F instead of quietly undoing what you were dialling in.
 
 ---
 
@@ -306,10 +306,10 @@ never chosen as the home.
 ```
 A                       Insert value on empty / Enter edit mode
 A, A                    Insert the next UNUSED chain/phrase (double-tap, 300 ms)
-A + UP                  Increment by small step (+1)
-A + DOWN                Decrement by small step (-1)
-A + RIGHT               Increment by large step (+16 or +12)
-A + LEFT                Decrement by large step (-16 or -12)
+A + RIGHT               Increment by small step (+1)
+A + LEFT                Decrement by small step (-1)
+A + UP                  Increment by large step (+16 or +12)
+A + DOWN                Decrement by large step (-16 or -12)
 A + B                   Delete value / reset it to its default
 B                       Cancel / Exit / Back / Copy a selection
 SELECT                  Context action (open or close what the cursor is on)
@@ -401,6 +401,7 @@ PocketTracker takes the best of both systems:
 | Feature | Source | Rationale |
 |---------|--------|-----------|
 | A + directions for editing | M8 | More precise control |
+| LEFT/RIGHT small step, UP/DOWN large step | LGPT | The axis split LGPT users already have in their fingers |
 | Dual modifiers (L/R) | LGPT | More ergonomic |
 | Deep clone | M8 | Powerful unique feature |
 | Selection mode cycling | M8 | More flexible |

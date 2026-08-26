@@ -160,10 +160,10 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             // ⚠️ Every arm CANCELS the deferred A first: the gesture turned out to be a combo, so the
             // open it was holding must not fire when A comes back up.
             case Button::B:          ms.aPressedAlone = false; d.on_a_b();     return;   // delete / reset
-            case Button::DPAD_UP:    ms.aPressedAlone = false; d.on_a_up();    return;   // +1 (or the FX helper)
-            case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return;   // −1
-            case Button::DPAD_RIGHT: ms.aPressedAlone = false; d.on_a_right(); return;   // +16 / +1 octave
-            case Button::DPAD_LEFT:  ms.aPressedAlone = false; d.on_a_left();  return;   // −16 / −1 octave
+            case Button::DPAD_UP:    ms.aPressedAlone = false; d.on_a_up();    return;   // +16 / +1 octave (or the FX helper)
+            case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return;   // −16 / −1 octave
+            case Button::DPAD_RIGHT: ms.aPressedAlone = false; d.on_a_right(); return;   // +1
+            case Button::DPAD_LEFT:  ms.aPressedAlone = false; d.on_a_left();  return;   // −1
             default: break;
         }
     }

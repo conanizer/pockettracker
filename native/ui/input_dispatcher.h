@@ -233,7 +233,7 @@ class InputDispatcher {
     void on_dpad_right();
 
     // ── A + D-pad: edit the cell under the cursor ────────────────────────────────────────────────
-    // A+UP/DOWN step by one, A+LEFT/RIGHT by the large step (16 for a hex byte, an octave for a
+    // A+LEFT/RIGHT step by one, A+UP/DOWN by the large step (16 for a hex byte, an octave for a
     // note). On an FX-TYPE column, A+UP/DOWN instead open the FX helper.
     void on_a_up();
     void on_a_down();
@@ -693,7 +693,7 @@ class InputDispatcher {
 
     /**
      * `handleSelectionOrSingleIncrement`: the same, but applied to EVERY ROW of a selection when one
-     * is up. A+UP over a 4-row selection increments four cells.
+     * is up. A+RIGHT over a 4-row selection increments four cells.
      */
     void selection_or_single(InputAction (*fn)(const CursorContext&));
 
@@ -760,17 +760,17 @@ class InputDispatcher {
     bool on_globals_screen() const;
 
     /**
-     * INSTRUMENT row 0, A+UP/DOWN on the TYPE cell: switch outright if the slot is EMPTY, else put the
+     * INSTRUMENT row 0, A+LEFT/RIGHT on the TYPE cell: switch outright if the slot is EMPTY, else put the
      * CONFIRM DIALOG in front of it — the toggle drops the loaded source, since a sampler has no use
      * for an .sf2 and vice versa.
      *
-     * `delta` is the direction — +1 for A+UP, −1 for A+DOWN — and it rides through the dialog in
+     * `delta` is the direction — +1 for A+RIGHT, −1 for A+LEFT — and it rides through the dialog in
      * `ConfirmDialogState::arg`, because with three types the two buttons no longer mean the same.
      */
     void request_instrument_type_toggle(int delta);
     void toggle_instrument_type(int delta);
 
-    /** True when the cursor is on INSTRUMENT's TYPE cell — where A+UP/DOWN toggles rather than steps. */
+    /** True when the cursor is on INSTRUMENT's TYPE cell — where A+LEFT/RIGHT toggles rather than steps. */
     bool on_instrument_type_cell() const;
 
     // ── The cursor's live row/column for the screen we are on ────────────────────────────────────
@@ -1178,7 +1178,7 @@ class InputDispatcher {
      * Row 11 under MANUAL, BOTH columns: a plain A is the lazy-chop tap, and the mapper therefore holds
      * it until A is released.
      *
-     * ⚠️ Every other gesture on this row starts with the same A held down — A+UP/DOWN steps the slice
+     * ⚠️ Every other gesture on this row starts with the same A held down — A+DPAD steps the slice
      * number on col 0 and drags the boundary on col 1, A+B deletes one. Fire the tap on the PRESS and
      * each of those is preceded by a boundary nobody asked for. It is why the EQ slot cell defers its
      * A too — a cell with an A+DPAD of its own cannot also act on the press.

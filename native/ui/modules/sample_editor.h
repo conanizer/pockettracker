@@ -31,7 +31,7 @@
 // not drawn and must not be reachable, so DOWN from 10 skips straight to 13.
 //
 // ⚠️ **Rows 3..8 are the SELECTION, and their D-pad does not move the cursor — it drags an edge.**
-// A+LEFT/RIGHT nudges the selection edge coarsely (±totalFrames/16), A+UP/DOWN finely (±/256), both
+// A+UP/DOWN nudges the selection edge coarsely (±totalFrames/16), A+LEFT/RIGHT finely (±/256), both
 // scaled by the zoom and snapped to a zero crossing when SNAP is on. That is why `cursor_context()`
 // answers `none()` for the whole range: there is no cell there to increment. The dispatcher handles it.
 

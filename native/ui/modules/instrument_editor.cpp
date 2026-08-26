@@ -472,7 +472,7 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     const int  row = s.cursorRow;
     const int  col = s.cursorColumn;
 
-    // Rows 0 and 1 are the TYPE and NAME rows. They are READ_ONLY *to the generic handlers* — A+UP on
+    // Rows 0 and 1 are the TYPE and NAME rows. They are READ_ONLY *to the generic handlers* — A+LEFT/RIGHT on
     // TYPE cycles the three types and A on NAME opens the name editor, and both are dispatcher
     // business (a type change frees a sample; a name is text, not a number). Read-only here means "the
     // five generic handlers must not touch this", not "nothing happens".

@@ -770,7 +770,7 @@ int run(const AppConfig& cfg) {
     // to "did my samples load?" and "where did it put its folders?".
     if (cfg.console) {
         std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
-        std::printf("A+UP/DOWN edit   A+LEFT/RIGHT edit fast   A+B clear   A,A insert next unused\n");
+        std::printf("A+LEFT/RIGHT edit   A+UP/DOWN edit fast   A+B clear   A,A insert next unused\n");
         std::printf("B+LEFT/RIGHT change WHICH phrase/chain/table   B+UP/DOWN page the song\n");
         std::printf("L+B select (tap again to widen)   B copies   L+A cut/paste   L+R deselect   L+B+A clone\n");
         // ASCII only, deliberately: this goes to a console whose encoding is not ours to choose (a
@@ -780,7 +780,7 @@ int run(const AppConfig& cfg) {
         std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
         std::printf("                             GROOVE MIXER EFFECTS PROJECT SETTINGS\n");
         std::printf("PROJECT: A on SAVE/LOAD/NEW, on EXPORT MIX/STEMS, on COMPACT SEQ/INST, on SETTINGS>, on EXIT\n");
-        std::printf("         A on NAME opens the keyboard; A+UP/DOWN edits one character in place\n");
+        std::printf("         A on NAME opens the keyboard; A+LEFT/RIGHT edits one character in place\n");
         std::printf("         a confirm asks A=YES B=NO before anything destructive\n");
         std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n");
         std::printf("SELECT on the EFFECTS TIME row toggles delay sync (free ms <-> note divisions)\n");
@@ -792,7 +792,7 @@ int run(const AppConfig& cfg) {
         std::printf("KEYBOARD: DPAD picks a key   A types   B deletes   R+UP/DOWN = ABC/123 layout\n");
         std::printf("          R+LEFT/RIGHT moves the text cursor   SELECT aborts   START applies\n");
         std::printf("\nEQ EDITOR (A on any EQ cell: INSTRUMENT/POOL/MIXER master/EFFECTS REV+DLY/SAMPLE FX):\n");
-        std::printf("  DPAD UP/DOWN picks the param, LEFT/RIGHT the band   A+UP/DOWN and A+LEFT/RIGHT dial it\n");
+        std::printf("  DPAD UP/DOWN picks the param, LEFT/RIGHT the band   A+LEFT/RIGHT and A+UP/DOWN dial it\n");
         std::printf("  A+B resets it   B+LEFT/RIGHT changes the EQ SLOT   B or SELECT closes\n");
         std::printf("  START still auditions underneath, so you can sweep a band across a ringing note\n\n");
     }

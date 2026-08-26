@@ -60,12 +60,12 @@ struct ConfirmDialogState {
 
     /**
      * What the pending answer needs to know that its Kind does not — today, only CHANGE_TYPE's
-     * DIRECTION (+1 for A+UP, −1 for A+DOWN).
+     * DIRECTION (+1 for A+RIGHT, −1 for A+LEFT).
      *
      * ⚠️ It exists because the TYPE cell stopped being a two-way toggle. With two types the question
      * "change it to what?" had one answer and the dialog could forget which button raised it; with
-     * three it does not, and the direction has to survive the round trip through the box or A+DOWN
-     * silently becomes A+UP the moment the slot has a source loaded. Nothing else reads it, and it
+     * three it does not, and the direction has to survive the round trip through the box or A+LEFT
+     * silently becomes A+RIGHT the moment the slot has a source loaded. Nothing else reads it, and it
      * resets on `close()` so a stale value cannot reach the next dialog.
      */
     int arg = 0;

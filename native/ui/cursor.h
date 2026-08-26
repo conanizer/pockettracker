@@ -68,10 +68,10 @@ enum class CursorValueType {
 
 /** Which button combinations do anything here. */
 struct CursorCapabilities {
-    bool canIncrement     = false;  // A
-    bool canDecrement     = false;  // B
-    bool canIncrementFast = false;  // A+RIGHT
-    bool canDecrementFast = false;  // A+LEFT
+    bool canIncrement     = false;  // A+RIGHT
+    bool canDecrement     = false;  // A+LEFT
+    bool canIncrementFast = false;  // A+UP
+    bool canDecrementFast = false;  // A+DOWN
     bool canDelete        = false;  // A+B
     bool canInsert        = false;  // A on an empty cell
     bool canCreate        = false;  // A+A
@@ -85,8 +85,8 @@ struct CursorContext {
     int                currentValue = 0;
     int                minValue     = 0;
     int                maxValue     = 255;
-    int                smallStep    = 1;   // A / B
-    int                largeStep    = 16;  // A+LEFT / A+RIGHT
+    int                smallStep    = 1;   // A+RIGHT / A+LEFT
+    int                largeStep    = 16;  // A+UP / A+DOWN
     int                emptyValue   = 0xFF;
     int                fxSlot       = 0;  // for effects: which FX slot (1, 2, 3)
     int                defaultValue = NO_DEFAULT;  // A+B resets a non-deletable value to this
@@ -215,7 +215,7 @@ inline CursorContext instrument(int current) {
  * A single hex digit, 0..F — CRUSH and DWNSMPL on the INSTRUMENT screen.
  *
  * ⚠️ It CLAMPS, where a hex byte wraps: HEX_NIBBLE is not in `step_value`'s wrapping set, on either
- * side of the port. Holding A+UP on CRUSH stops at F rather than snapping back to 0 and quietly
+ * side of the port. Holding A+RIGHT on CRUSH stops at F rather than snapping back to 0 and quietly
  * undoing the destruction you were dialling in. Large step is 4 — a quarter of the range.
  */
 inline CursorContext hex_nibble(int current, int def = NO_DEFAULT) {
@@ -377,7 +377,7 @@ inline CursorContext enum_cycle(int current, int option_count) {
 
 /**
  * One character of an in-place name editor — PROJECT's NAME row, where each of the 20 characters is
- * its own cursor column and A+UP/DOWN walks the allowed set (`allowed_chars()`).
+ * its own cursor column and A+LEFT/RIGHT walks the allowed set (`allowed_chars()`).
  *
  * The first user of CursorValueType::CHARACTER in the port: the stepping has been here since S1 (it
  * came with the value type), but no ported screen had an in-place text cell until PROJECT — the
@@ -401,13 +401,13 @@ inline CursorContext character(char current) {
 }
 
 /**
- * Effect type. The stored value is an INDEX into songcore::EFFECT_TYPES, not an effect code — A+UP
- * walks the list, and the module converts back to a code when it writes the step.
+ * Effect type. The stored value is an INDEX into songcore::EFFECT_TYPES, not an effect code —
+ * A+RIGHT walks the list, and the module converts back to a code when it writes the step.
  * A+B clears the effect, but only when it is not already NONE (FX_NONE is a valid stop on the cycle,
  * not an "empty" cell).
  *
  * `type_count` is how many of the list this build lets you reach — fewer where the MIDI commands at
- * the end of it are hidden (ui/platform_caps.h `midi`). It bounds the coarse A+LEFT/A+RIGHT step; the
+ * the end of it are hidden (ui/platform_caps.h `midi`). It bounds the coarse A+UP/A+DOWN step; the
  * picker that A+UP/A+DOWN opens is bounded by its own grid (ui/fx_helper.h). ⚠️ It clamps the CURSOR,
  * never the CELL: a step that already holds a hidden effect keeps it and keeps drawing it, because
  * the value came off disk and this build is not the one that authored it.
@@ -487,7 +487,7 @@ inline const std::string& allowed_chars() {
  * Apply a signed step to the cursor value, honouring the value type's wrap/clamp rules.
  *
  * The split matters and is not arbitrary: the discrete, enumerable types WRAP (stepping past FF on a
- * hex byte lands back on 00, which is what makes A+UP a usable way to dial a value in on a
+ * hex byte lands back on 00, which is what makes A+RIGHT a usable way to dial a value in on a
  * four-button device), while the continuous physical-unit types — GAIN in dB, FREQ in Hz — CLAMP,
  * because wrapping +12 dB round to −12 dB would be a trap rather than a convenience. NOTE clamps too
  * (its range is the MIDI ceiling), and so does anything not named here.
@@ -536,11 +536,15 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
     }
 }
 
-// ─── Button → action ─────────────────────────────────────────────────────────────────────────────
+// ─── Step → action ───────────────────────────────────────────────────────────────────────────────
 // The generic half of InputController: these five functions are the ENTIRE editing vocabulary, and
 // they never mention a screen.
+//
+// ⚠️ They are named for the STEP, not for the chord that fires them, because the two are not the same
+// thing on every screen and the binding has moved once already. Today, in the dispatcher:
+// A+RIGHT → `increment`, A+LEFT → `decrement`, A+UP → `increment_fast`, A+DOWN → `decrement_fast`.
 
-inline InputAction on_a(const CursorContext& c) {
+inline InputAction increment(const CursorContext& c) {
     if (!c.is_editable()) return InputAction::none();
     if (c.capabilities.isEmpty && c.capabilities.canInsert)
         return InputAction::of(ActionType::INSERT_DEFAULT);
@@ -549,21 +553,21 @@ inline InputAction on_a(const CursorContext& c) {
     return InputAction::none();
 }
 
-inline InputAction on_b(const CursorContext& c) {
+inline InputAction decrement(const CursorContext& c) {
     if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
     if (c.capabilities.canDecrement)
         return InputAction::set_value(step_value(c.currentValue, -c.smallStep, c));
     return InputAction::none();
 }
 
-inline InputAction on_a_right(const CursorContext& c) {
+inline InputAction increment_fast(const CursorContext& c) {
     if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
     if (c.capabilities.canIncrementFast)
         return InputAction::set_value(step_value(c.currentValue, c.largeStep, c));
     return InputAction::none();
 }
 
-inline InputAction on_a_left(const CursorContext& c) {
+inline InputAction decrement_fast(const CursorContext& c) {
     if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
     if (c.capabilities.canDecrementFast)
         return InputAction::set_value(step_value(c.currentValue, -c.largeStep, c));

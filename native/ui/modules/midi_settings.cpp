@@ -228,7 +228,7 @@ CursorContext MidiModule::cursor_context(const MidiState& s) const {
             // but not away from, on the one screen whose purpose is dialling it.
             CursorContext c = cc::hex_byte(s.settings.midiOffsetMs, -99, 99,
                                            /*empty_value=*/-1000);
-            c.largeStep = 10;   // A+LEFT/RIGHT walks it in tens, like TEMPO
+            c.largeStep = 10;   // A+UP/DOWN walks it in tens, like TEMPO
             return c;
         }
 

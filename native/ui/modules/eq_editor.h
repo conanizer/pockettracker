@@ -160,10 +160,10 @@ public:
      * the value by more than one step.
      *
      * `freq` is 0..255 mapped logarithmically over 20 Hz..20 kHz, so a single hex step is ~2.7% — FINER
-     * than the readout can show near 1 kHz, where "1.2kHz" covers several adjacent values. A+UP there
+     * than the readout can show near 1 kHz, where "1.2kHz" covers several adjacent values. A+RIGHT there
      * would leave the number on screen unchanged and the cell would feel stuck. So a SINGLE step keeps
      * advancing in the direction pressed until `format_freq_hz` produces a different string (bounded by
-     * 0..255). Multi-step moves — A+LEFT/RIGHT's ±16, and A+B's reset to 0x80 — are applied exactly.
+     * 0..255). Multi-step moves — A+UP/DOWN's ±16, and A+B's reset to 0x80 — are applied exactly.
      *
      * The label comparison is what decides where it stops, which makes `format_freq_hz` load-bearing for
      * the CELL rather than merely for the picture — and therefore something the golden must measure over

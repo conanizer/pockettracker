@@ -6,7 +6,7 @@
 // *type* column (PHRASE cols 4/6/8, TABLE cols 3/5/7): the effects in a six-column grid, with the
 // highlighted one's documentation above it.
 //
-// It exists because a tracker's FX column is otherwise unusable — A+UP steps blindly through dozens
+// It exists because a tracker's FX column is otherwise unusable — A+RIGHT steps blindly through dozens
 // of three-letter codes with nothing on screen to say what "PVX" or "THO" does. Holding A and reading
 // is how you find an effect; releasing A is how you pick it.
 //

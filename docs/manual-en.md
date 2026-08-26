@@ -265,10 +265,10 @@ Hold **A** and press a direction to edit the value under the cursor:
 
 | Combo | Step |
 |---|---|
-| A + UP | +1 (small step) |
-| A + DOWN | −1 (small step) |
-| A + RIGHT | +16 / +1 octave (large step) |
-| A + LEFT | −16 / −1 octave (large step) |
+| A + RIGHT | +1 (small step) |
+| A + LEFT | −1 (small step) |
+| A + UP | +16 / +1 octave (large step) |
+| A + DOWN | −16 / −1 octave (large step) |
 | A + B | Delete / clear value |
 
 - **Key repeat is active:** hold the combo for ~400 ms and it starts repeating at ~10/s.
@@ -332,7 +332,7 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 | L + B + A | Deep-clone the chain or phrase under the cursor into the next free slot |
 | L + R | Leave selection mode (nothing copied) |
 
-**Selection increment:** In selection mode, **A + UP/DOWN** increments or decrements all selected values simultaneously.
+**Selection increment:** In selection mode, **A + LEFT/RIGHT** increments or decrements all selected values simultaneously.
 
 **Clearing the clipboard:** the copy buffer deliberately survives leaving a selection — you can select
 again by accident without losing what you copied. Press **L + R** when you are *not* selecting to clear
@@ -442,8 +442,8 @@ A `>` also marks the playing row on the CHAIN and PHRASE screens. It is only dra
 |---|---|
 | D-pad | Move cursor |
 | A | Insert last-used chain ID |
-| A + UP/DOWN | Increment / decrement chain ID |
-| A + LEFT/RIGHT | Increment / decrement by 16 |
+| A + LEFT/RIGHT | Increment / decrement chain ID |
+| A + UP/DOWN | Increment / decrement by 16 |
 | A + B | Delete (set to --) |
 | B + UP/DOWN | Page up / down (jump 16 rows) |
 | B + LEFT/RIGHT | Switch between SONG and LIVE mode |
@@ -496,8 +496,8 @@ When played, the chain loops from slot 00 after the last filled slot.
 |---|---|
 | D-pad | Move cursor |
 | A | Insert last-used value |
-| A + UP/DOWN | Increment / decrement |
-| A + LEFT/RIGHT | ±16 (PH) or ±12 semitones (TSP) |
+| A + LEFT/RIGHT | Increment / decrement |
+| A + UP/DOWN | ±16 (PH) or ±12 semitones (TSP) |
 | A + B | Delete slot |
 | B + LEFT/RIGHT | Switch to previous / next chain |
 | START | Play current chain |
@@ -533,15 +533,15 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 |---|---|
 | D-pad | Move cursor |
 | A | Insert last-used note / value |
-| A + UP/DOWN | +1 / −1 semitone (note), +1 / −1 (other values) |
-| A + LEFT/RIGHT | ±1 octave (note), ±16 (other values) |
+| A + LEFT/RIGHT | +1 / −1 semitone (note), +1 / −1 (other values) |
+| A + UP/DOWN | ±1 octave (note), ±16 (other values) |
 | A + B | Delete value at cursor |
 | B + LEFT/RIGHT | Switch to previous / next phrase |
 | START | Play current phrase (loops) |
 
 ### FX columns
 
-Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+UP/DOWN on the type to cycle through available effects. Effects are listed in §21.
+Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker and choose from the grid. Effects are listed in §21.
 
 > [!WARNING]
 > Some effects (**ARP**, **RPT**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
@@ -584,7 +584,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | RES | 00–FF | Filter resonance. `00` = none. |
 | DRIVE | 00–FF | Soft-clipping overdrive. `00` = off. |
 | CRUSH | 00–FF | Bit-depth crusher. `00` = off. |
-| EQ | — | Press A (or SELECT) to open the EQ EDITOR for this instrument. A + UP/DOWN picks the EQ slot. |
+| EQ | — | Press A (or SELECT) to open the EQ EDITOR for this instrument. A + LEFT/RIGHT picks the EQ slot. |
 
 > [!TIP]
 > **ROOT** is the most important tuning parameter. Set it to the actual pitch of your sample (e.g., `A-4` for a 440 Hz sine). If notes sound in the wrong octave, ROOT is usually the reason.
@@ -710,7 +710,7 @@ Move the selection start and end markers to define a region for operations.
 | Input | Action |
 |---|---|
 | D-pad (on start/end marker row) | Move the active marker |
-| A + LEFT/RIGHT | Jump marker by large step |
+| A + UP/DOWN | Jump marker by large step |
 
 ### Non-destructive parameters
 
@@ -797,8 +797,8 @@ where a plain A makes a new boundary.
 
 | Input | Action |
 |---|---|
-| A + UP/DOWN | Move the boundary by a fine step |
-| A + LEFT/RIGHT | Move it by a coarse step |
+| A + LEFT/RIGHT | Move the boundary by a fine step |
+| A + UP/DOWN | Move it by a coarse step |
 | A + B | MANUAL: delete it. TRANSIENT / DIVIDE: put it back where the mode had placed it |
 | A *(while the sample plays)* | MANUAL: cut a boundary at the playhead |
 
@@ -919,7 +919,7 @@ By default, instrument N uses table N. Override per-note with the **TBL** phrase
 | Input | Action |
 |---|---|
 | D-pad | Move cursor |
-| A + UP/DOWN | Edit value |
+| A + LEFT/RIGHT | Edit value |
 | A + B | Delete value |
 | B + LEFT/RIGHT | Previous / next table |
 | L + B / copy / paste | Selection, copy, paste (same as phrase) |
@@ -976,8 +976,8 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 | Input | Action |
 |---|---|
 | D-pad UP/DOWN | Move between rows |
-| A + UP/DOWN | Edit tick value |
-| A + LEFT/RIGHT | Edit tick value (large step) |
+| A + LEFT/RIGHT | Edit tick value |
+| A + UP/DOWN | Edit tick value (large step) |
 | A + B | Clear row |
 | B + LEFT/RIGHT | Previous / next groove |
 
@@ -1051,8 +1051,8 @@ Example: MOD1 (LFO) with DEST=MOD AMT targeting MOD2 (AHD) — the LFO rhythmica
 |---|---|
 | D-pad UP/DOWN | Move between parameters |
 | D-pad LEFT/RIGHT | Switch between paired slots (MOD1↔MOD2 or MOD3↔MOD4) |
-| A + UP/DOWN | Edit value |
-| A + LEFT/RIGHT | Edit value (large step) |
+| A + LEFT/RIGHT | Edit value |
+| A + UP/DOWN | Edit value (large step) |
 | A + B | Reset to default |
 | B + LEFT/RIGHT | Previous / next instrument |
 
@@ -1116,9 +1116,9 @@ The master column also has stereo send peak meters showing REV and DEL bus level
 |---|---|
 | D-pad LEFT/RIGHT | Select track / column |
 | D-pad UP/DOWN | Move between rows (track volume, or REV/DEL/VOL in master) |
-| A + UP/DOWN | Increase / decrease value by 1 |
-| A + LEFT/RIGHT | Increase / decrease value by 16 |
-| A or SELECT (on the master EQ cell) | Open EQ EDITOR. A + UP/DOWN picks the EQ slot. |
+| A + LEFT/RIGHT | Increase / decrease value by 1 |
+| A + UP/DOWN | Increase / decrease value by 16 |
+| A or SELECT (on the master EQ cell) | Open EQ EDITOR. A + LEFT/RIGHT picks the EQ slot. |
 
 ---
 
@@ -1185,7 +1185,7 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 | Param | Range | Unit | Notes |
 |---|---|---|---|
 | TYPE | — | — | Band shape (see table below). |
-| FREQ | `00`–`FF` | 20 Hz – 20 kHz (log) | A single A+UP/DOWN step always changes the displayed Hz. |
+| FREQ | `00`–`FF` | 20 Hz – 20 kHz (log) | A single A+LEFT/RIGHT step always changes the displayed Hz. |
 | GAIN | `00`–`F0` | **−12.0 … +12.0 dB** | Small step **0.1 dB**, large step **1.0 dB**. `0.0 dB` is the default. |
 | Q | `00`–`FF` | 0.1 – 10.0 (log) | Bandwidth; higher = narrower. |
 
@@ -1207,8 +1207,8 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 |---|---|
 | D-pad LEFT/RIGHT | Switch between bands (1–3) |
 | D-pad UP/DOWN | Move between parameters (TYPE, FREQ, GAIN, Q) |
-| A + UP/DOWN | Edit value (small step — GAIN: ±0.1 dB) |
-| A + LEFT/RIGHT | Edit value (large step — GAIN: ±1.0 dB) |
+| A + LEFT/RIGHT | Edit value (small step — GAIN: ±0.1 dB) |
+| A + UP/DOWN | Edit value (large step — GAIN: ±1.0 dB) |
 | A + B | Reset parameter to default (FREQ mid · GAIN 0 dB · Q mid) |
 | B + LEFT/RIGHT | Switch EQ preset slot (the slot shown in the top row) |
 | B | Close EQ EDITOR and apply changes (SELECT also closes) |
@@ -1226,7 +1226,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 
 | Parameter | Description |
 |---|---|
-| NAME | Project name. Tap A (or SELECT) to edit it on the keyboard overlay; hold A + UP/DOWN cycles the character under the cursor in place. |
+| NAME | Project name. Tap A (or SELECT) to edit it on the keyboard overlay; hold A + LEFT/RIGHT cycles the character under the cursor in place. |
 | TEMPO | BPM. |
 | TRANSPOSE | Global semitone offset applied to all tracks. |
 
@@ -1309,7 +1309,7 @@ The top row lets you cycle through built-in themes and save or load custom theme
 
 | Cursor position (channel) | Action |
 |---|---|
-| 0 — theme name | A+UP/DOWN to cycle built-in themes: CLASSIC, AMBER, BLUE, MONO |
+| 0 — theme name | A+LEFT/RIGHT to cycle built-in themes: CLASSIC, AMBER, BLUE, MONO |
 | 1 — SAVE | Press A to save the current theme to a `.ptt` file |
 | 2 — LOAD | Press A to load a theme from a `.ptt` file |
 
@@ -1352,8 +1352,8 @@ A theme file saved before these rows existed loads with them set to what the scr
 |---|---|
 | D-pad UP/DOWN | Move between color rows |
 | D-pad LEFT/RIGHT | Move between R / G / B channels (on color rows), or between theme name / SAVE / LOAD (on row 0) |
-| A + UP/DOWN | +1 / −1 to the selected channel |
-| A + LEFT/RIGHT | +16 / −16 to the selected channel |
+| A + LEFT/RIGHT | +1 / −1 to the selected channel |
+| A + UP/DOWN | +16 / −16 to the selected channel |
 | B | Close theme editor |
 
 ### Built-in themes
@@ -1962,8 +1962,8 @@ needs and what is hardest to describe from memory. If something is wrong, attach
 
 1. Open **PHRASE** (R+RIGHT from SONG).
 2. Cursor on row 00, column N. Press **A** — inserts default note (C-4, instrument 00).
-3. Use **A+UP/DOWN** to change pitch; **A+LEFT/RIGHT** to change octave.
-4. Move to the I column, use **A+UP/DOWN** to select an instrument.
+3. Use **A+LEFT/RIGHT** to change pitch; **A+UP/DOWN** to change octave.
+4. Move to the I column, use **A+LEFT/RIGHT** to select an instrument.
 5. Press **START** to hear the phrase loop.
 
 ### Building a basic beat
@@ -2021,8 +2021,8 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 1. Navigate to SETTINGS (PROJECT → SETTINGS row → A).
 2. Move to the THEME row and press **A** to open the THEME EDITOR.
-3. On row 0, use A+UP/DOWN on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO).
-4. Move down to any color row, then LEFT/RIGHT to select R/G/B, and A+UP/DOWN to adjust.
+3. On row 0, use A+LEFT/RIGHT on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO).
+4. Move down to any color row, then LEFT/RIGHT to select R/G/B, and A+LEFT/RIGHT to adjust.
 5. When you are happy with the look, move back to row 0, move RIGHT to SAVE, and press A.
 
 ---
@@ -2184,8 +2184,8 @@ exports and sample-editor saves keep their own folders.
 |---|---|
 | D-pad | Move cursor |
 | A | Insert / confirm |
-| A + UP / DOWN | Edit value (+1 / −1) |
-| A + RIGHT / LEFT | Edit value (+16 / −16, or ±1 octave for notes) |
+| A + LEFT / RIGHT | Edit value (+1 / −1) |
+| A + UP / DOWN | Edit value (+16 / −16, or ±1 octave for notes) |
 | A + B | Delete / clear value |
 | B | Cancel / back / delete |
 | START | Play / Stop |
@@ -2244,7 +2244,7 @@ exports and sample-editor saves keep their own folders.
 | L + A *(in selection)* | Cut (copy + clear), exit selection |
 | L + A *(outside selection)* | Paste at cursor |
 | A + B *(in selection)* | Delete selection (no clipboard), exit |
-| A + UP / DOWN *(in selection)* | Increment / decrement all selected values |
+| A + LEFT / RIGHT *(in selection)* | Increment / decrement all selected values |
 | L + B + A | Deep-clone the chain / phrase under the cursor |
 | L + R *(in selection)* | Leave selection mode; the copy buffer survives |
 | L + R *(outside selection)* | Clear the copy buffer |
@@ -2290,8 +2290,8 @@ exports and sample-editor saves keep their own folders.
 | Input | Action |
 |---|---|
 | A | Insert last-used chain ID |
-| A + UP / DOWN | ±1 chain ID |
-| A + LEFT / RIGHT | ±16 chain IDs |
+| A + LEFT / RIGHT | ±1 chain ID |
+| A + UP / DOWN | ±16 chain IDs |
 | A + B | Delete (set to --) |
 | B + UP / DOWN | Page up / down (16 rows) |
 
@@ -2302,8 +2302,8 @@ exports and sample-editor saves keep their own folders.
 | Input | Action |
 |---|---|
 | A | Insert last-used phrase / TSP |
-| A + UP / DOWN | ±1 |
-| A + LEFT / RIGHT | ±16 (PHR), ±12 semitones (TSP) |
+| A + LEFT / RIGHT | ±1 |
+| A + UP / DOWN | ±16 (PHR), ±12 semitones (TSP) |
 | A + B | Delete slot |
 | B + LEFT / RIGHT | Previous / next chain |
 
@@ -2314,8 +2314,8 @@ exports and sample-editor saves keep their own folders.
 | Input | Action |
 |---|---|
 | A | Insert last-used note / value |
-| A + UP / DOWN | ±1 semitone (note), ±1 (other) |
-| A + LEFT / RIGHT | ±1 octave (note), ±16 (other) |
+| A + LEFT / RIGHT | ±1 semitone (note), ±1 (other) |
+| A + UP / DOWN | ±1 octave (note), ±16 (other) |
 | A + B | Delete value |
 | B + LEFT / RIGHT | Previous / next phrase |
 
@@ -2329,7 +2329,7 @@ exports and sample-editor saves keep their own folders.
 | SELECT (on SAMPLE) | Open SAMPLE EDITOR |
 | A or SELECT (on NAME) | Edit instrument name |
 | A or SELECT (on EQ) | Open EQ EDITOR |
-| A + UP / DOWN | Edit current parameter |
+| A + LEFT / RIGHT | Edit current parameter |
 | A + B | Reset to default |
 | B + LEFT / RIGHT | Previous / next instrument |
 
@@ -2356,7 +2356,7 @@ exports and sample-editor saves keep their own folders.
 
 | Input | Action |
 |---|---|
-| A + UP / DOWN | Edit value |
+| A + LEFT / RIGHT | Edit value |
 | A + B | Delete value |
 | B + LEFT / RIGHT | Previous / next table |
 | L + B | Enter selection mode |
@@ -2368,8 +2368,8 @@ exports and sample-editor saves keep their own folders.
 | Input | Action |
 |---|---|
 | D-pad UP / DOWN | Move between rows |
-| A + UP / DOWN | Edit tick value |
-| A + LEFT / RIGHT | Large step |
+| A + LEFT / RIGHT | Edit tick value |
+| A + UP / DOWN | Large step |
 | A + B | Clear row |
 | B + LEFT / RIGHT | Previous / next groove |
 
@@ -2381,8 +2381,8 @@ exports and sample-editor saves keep their own folders.
 |---|---|
 | D-pad UP / DOWN | Move between parameters |
 | D-pad LEFT / RIGHT | Switch between paired slots |
-| A + UP / DOWN | Edit value |
-| A + LEFT / RIGHT | Large step |
+| A + LEFT / RIGHT | Edit value |
+| A + UP / DOWN | Large step |
 | A + B | Reset to default |
 | B + LEFT / RIGHT | Previous / next instrument |
 
@@ -2394,8 +2394,8 @@ exports and sample-editor saves keep their own folders.
 |---|---|
 | D-pad LEFT / RIGHT | Select track column |
 | D-pad UP / DOWN | Move between rows |
-| A + UP / DOWN | ±1 |
-| A + LEFT / RIGHT | ±16 |
+| A + LEFT / RIGHT | ±1 |
+| A + UP / DOWN | ±16 |
 | A or SELECT (on master EQ) | Open EQ EDITOR |
 
 ---
@@ -2408,8 +2408,8 @@ Open with **A** (or SELECT) on an EQ cell.
 |---|---|
 | D-pad LEFT / RIGHT | Switch between bands 1–3 |
 | D-pad UP / DOWN | Move between parameters |
-| A + UP / DOWN | Edit value |
-| A + LEFT / RIGHT | Large step |
+| A + LEFT / RIGHT | Edit value |
+| A + UP / DOWN | Large step |
 | B + LEFT / RIGHT | Switch EQ preset slot |
 | B | Close and apply (SELECT also closes) |
 
@@ -2421,8 +2421,8 @@ Open with **A** (or SELECT) on an EQ cell.
 |---|---|
 | D-pad UP / DOWN | Move between color rows |
 | D-pad LEFT / RIGHT | Move between R / G / B (color rows) or name / SAVE / LOAD (row 0) |
-| A + UP / DOWN | ±1 to selected channel |
-| A + LEFT / RIGHT | ±16 to selected channel |
+| A + LEFT / RIGHT | ±1 to selected channel |
+| A + UP / DOWN | ±16 to selected channel |
 | B | Close |
 
 ---
