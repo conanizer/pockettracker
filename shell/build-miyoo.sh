@@ -108,6 +108,21 @@ EOF
 printf 'set(PACKAGE_VERSION 2.0.20)\nset(PACKAGE_VERSION_COMPATIBLE TRUE)\n' \
     > "$SDK/lib/cmake/SDL2/SDL2ConfigVersion.cmake"
 
+# ⚠️ THE HELPER THAT SHIPS IS OURS, NOT THE ONE IN THE TARBALL. The fork's release carries a
+# `libneonarmmiyoo.so` whose upstream repository has no licence at all, which makes the whole
+# package unpublishable; shell/miyoo/neon_compat.c defines the same 25 symbols in plain C, and
+# check 9 below proves the set is complete against the libSDL2 that actually ships. The soname
+# is forced because the fork's `DT_NEEDED` is the bare file name and the tarball's copy records
+# no soname of its own.
+#
+# ⚠️ The -mcpu/-mfpu trio is REPEATED from toolchain-miyoo.cmake rather than inherited: this
+# compile does not go through CMake, and the toolchain's own default is a VFPv3 Cortex-A7 that
+# check 2 rejects.
+NEON_SO=$SDK/lib/libneonarmmiyoo.so
+"${CROSS}gcc" -O2 -fPIC -shared -Wl,-soname,libneonarmmiyoo.so \
+    -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard \
+    -o "$NEON_SO" "$SRC/shell/miyoo/neon_compat.c"
+
 echo
 echo "############ 2/5  cross-build PocketTracker ############"
 # ⚠️ `-static-libstdc++ -static-libgcc` costs 370 KB and removes an entire class of unknown: this
@@ -163,7 +178,7 @@ chmod +x "$BIN"
 "${CROSS}strip" "$BIN"
 
 cp "$SDL2_LIBDIR/libSDL2-2.0.so.0"   "$APPDIR/libs/"
-cp "$SDL2_LIBDIR/libneonarmmiyoo.so" "$APPDIR/libs/"
+cp "$NEON_SO"                        "$APPDIR/libs/"
 
 # PocketTracker is GPL-3.0 and statically links its decoders, so their notices ship with the binary
 # that contains them. `docs/licenses/THIRD-PARTY-NOTICES.md` is the single source of truth and the
@@ -196,12 +211,19 @@ case "$FILE_OUT" in
     *) echo "FAIL: not a 32-bit ARM EABI5 ELF. The toolchain file did not take."; exit 1 ;;
 esac
 
+# --- 2 and 3 run over EVERY IMAGE WE COMPILE, which is two: the app and the helper library that
+# stands in for the fork's unlicensed one. A library compiled by hand outside CMake picks up the
+# toolchain's defaults rather than toolchain-miyoo.cmake's flags, so it is exactly the file that
+# can end up built for a CPU the device does not have.
+for IMAGE in "$BIN" "$APPDIR/libs/libneonarmmiyoo.so"; do
+echo "--- $(basename "$IMAGE")"
+
 # --- 2. the CPU it was compiled FOR ------------------------------------------------------------
 # ⚠️ Fails for a reason nothing else here does: -mcpu/-mfpu silently not applied. It is also NOT a
 # substitute for check 3 — the attributes said v7 while the binary contained ARMv8 instructions.
-CPU_ARCH=$("${CROSS}readelf" -A "$BIN" | sed -n 's/.*Tag_CPU_arch: *//p' | head -1)
-FP_ARCH=$( "${CROSS}readelf" -A "$BIN" | sed -n 's/.*Tag_FP_arch: *//p'  | head -1)
-VFP_ARGS=$("${CROSS}readelf" -A "$BIN" | sed -n 's/.*Tag_ABI_VFP_args: *//p' | head -1)
+CPU_ARCH=$("${CROSS}readelf" -A "$IMAGE" | sed -n 's/.*Tag_CPU_arch: *//p' | head -1)
+FP_ARCH=$( "${CROSS}readelf" -A "$IMAGE" | sed -n 's/.*Tag_FP_arch: *//p'  | head -1)
+VFP_ARGS=$("${CROSS}readelf" -A "$IMAGE" | sed -n 's/.*Tag_ABI_VFP_args: *//p' | head -1)
 echo "CPU arch           : $CPU_ARCH   (want v7)"
 echo "FP arch            : $FP_ARCH   (want VFPv4)"
 echo "VFP args           : $VFP_ARGS   (want VFP registers - hard float)"
@@ -214,13 +236,14 @@ echo "VFP args           : $VFP_ARGS   (want VFP registers - hard float)"
 # target entirely: a vendored DSP header guarded `vmaxnm.f32` on `__arm__`, which is true on every
 # 32-bit ARM, and the instruction exists only from ARMv8 (and on Cortex-M's FPv5). It would run on
 # qemu-user, whose default CPU model has it, and SIGILL on a Cortex-A7.
-V8_COUNT=$("${CROSS}objdump" -d "$BIN" | grep -cE '\b(vmaxnm|vminnm|vrint[apmnxz]|vcvta|vcvtn|vcvtp|vcvtm|vsel)\b' || true)
+V8_COUNT=$("${CROSS}objdump" -d "$IMAGE" | grep -cE '\b(vmaxnm|vminnm|vrint[apmnxz]|vcvta|vcvtn|vcvtp|vcvtm|vsel)\b' || true)
 echo "ARMv8-only insns   : $V8_COUNT   (want 0)"
 if [ "$V8_COUNT" != "0" ]; then
     echo "FAIL: the image contains ARMv8 instructions a Cortex-A7 cannot execute."
     echo "      Look for inline asm guarded on __arm__ rather than on an ACLE feature macro."
     exit 1
 fi
+done
 
 # --- 4. the glibc ceiling ----------------------------------------------------------------------
 GLIBC_MAX=$(readelf -V "$BIN" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -1)
@@ -265,7 +288,7 @@ mkdir -p "$STUBS"
 for L in libmi_common libmi_sys libmi_gfx libmi_ao libcam_os_wrapper; do
     [ -f "$STUBS/$L.so" ] || "${CROSS}gcc" -shared -Wl,-soname,"$L.so" -o "$STUBS/$L.so" -x c "$CACHE/empty.c"
 done
-cp -f "$SDL2_LIBDIR/libneonarmmiyoo.so" "$STUBS/"
+cp -f "$APPDIR/libs/libneonarmmiyoo.so" "$STUBS/"
 
 cat > "$CACHE/keycheck.c" <<'EOF'
 #include <stdio.h>
@@ -334,6 +357,38 @@ for COMPONENT in $VENDORED kissfft daisysp soundpipe; do
 done
 if [ -n "$MISSING" ]; then
     echo "FAIL: statically linked but not named in THIRD-PARTY-NOTICES.md:$MISSING"
+    exit 1
+fi
+
+# --- 9. our libneonarmmiyoo.so defines every symbol the shipped libSDL2 needs from it ----------
+# ⚠️ THE ONLY THING STANDING BETWEEN THIS PACKAGE AND A LOADER ERROR ON THE DEVICE. The wanted
+# list is read out of the libSDL2 THAT SHIPS, never typed here: the fork is pinned but not ours,
+# and a bumped tag that calls one more scaler has to fail this line rather than the boot.
+#
+# ⚠️ It is also not reachable by the qemu run below. A missing function symbol in a NEEDED
+# library is a lazy-binding failure — the loader would let keycheck start and the device would
+# die at the first frame instead.
+echo
+WANT=$("${CROSS}gcc-nm" -D --undefined-only "$APPDIR/libs/libSDL2-2.0.so.0" \
+    | grep -oE '\b(neon_memcpy|scale[0-9]+x[0-9]+_n(16|32))\b' | sort -u)
+HAVE=$("${CROSS}gcc-nm" -D --defined-only "$APPDIR/libs/libneonarmmiyoo.so" \
+    | grep -oE '\b(neon_memcpy|scale[0-9]+x[0-9]+_n(16|32))\b' | sort -u)
+WANT_N=$(printf '%s\n' "$WANT" | grep -c . || true)
+HAVE_N=$(printf '%s\n' "$HAVE" | grep -c . || true)
+UNMET=$(comm -23 <(printf '%s\n' "$WANT") <(printf '%s\n' "$HAVE") | tr '\n' ' ')
+echo "libSDL2 wants from libneonarmmiyoo : $WANT_N symbols"
+echo "our libneonarmmiyoo defines         : $HAVE_N symbols"
+echo "unresolved                          : ${UNMET:-none}"
+# The wanted list being EMPTY is the failure this check would otherwise report as a pass — a
+# renamed nm, a stripped .so or a changed symbol spelling all look like "nothing missing".
+if [ "$WANT_N" -lt 25 ]; then
+    echo "FAIL: read only $WANT_N wanted symbols out of libSDL2, and it has 25. The reader is broken,"
+    echo "      or the pinned fork changed. Check with: ${CROSS}gcc-nm -D --undefined-only <so>"
+    exit 1
+fi
+if [ -n "$UNMET" ]; then
+    echo "FAIL: the app cannot load - those symbols are undefined at runtime."
+    echo "      Add them to shell/miyoo/neon_compat.c."
     exit 1
 fi
 

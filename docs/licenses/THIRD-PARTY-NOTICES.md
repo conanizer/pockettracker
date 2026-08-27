@@ -409,13 +409,15 @@ PocketTracker is GPL-3.0 itself, so linking against a GPL-3.0 library raises no 
 question. `build-miyoo.sh` copies both texts **out of the fork's own tree at the pinned tag**, so
 what ships is the licence of the code that shipped.
 
-⚠️⚠️ **`libneonarmmiyoo.so` HAS NO LICENCE AND THAT IS AN OPEN BLOCKER FOR PUBLICATION.** The fork
-lists it as a `DT_NEEDED`, so the package cannot start without it, and it is bundled beside SDL2. Its
-repository (`XK9274/neon-arm-library-miyoo`) carries no licence file, and its README states plainly
-that the maintainer did not write the source and does not know its origin. That is default
-copyright: fine to build and hand to a tester, **not** something to put in `OnionUI/Ports-Collection`
-or a GitHub release. Two ways out, neither started: get the upstream identified and a licence added,
-or build the fork ourselves without the NEON helper.
+⚠️ **THE `libneonarmmiyoo.so` BESIDE IT IS NOT A THIRD-PARTY COMPONENT — IT IS OURS.** The fork
+resolves 25 symbols from a library of that name (`neon_memcpy` and 24 integer scalers) and lists it
+as a `DT_NEEDED`, so the package cannot start without a file of that name defining every one of
+them. The one the fork's own release carries cannot be redistributed: its repository
+(`XK9274/neon-arm-library-miyoo`) has no licence file at all and its README states that the
+maintainer did not write the source and does not know its origin, which leaves it under default
+copyright. What ships instead is `shell/miyoo/neon_compat.c`, PocketTracker's own plain-C
+implementation of the same 25 entry points, covered by the GPL-3.0 in `licenses/LICENSE` with
+everything else of ours. Nothing from that repository is in the package.
 
 ---
 
