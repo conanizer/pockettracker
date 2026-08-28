@@ -21,7 +21,7 @@ PocketTracker is built for gamepad buttons (phones get the same buttons on scree
 | Button | What it does |
 |---|---|
 | **D-pad** | Move the cursor |
-| **A** | Insert a value; **hold A + D-pad** edits the value under the cursor (UP/DOWN = small step, LEFT/RIGHT = big step) |
+| **A** | Insert a value; **hold A + D-pad** edits the value under the cursor (LEFT/RIGHT = small step, UP/DOWN = big step) |
 | **B** | Delete a value / go back |
 | **R + D-pad** | Switch screens — the mini-map in the top-right shows where you are |
 | **START** | Play / stop |
@@ -41,27 +41,61 @@ Supported sample formats: **WAV**, MP3, FLAC, OGG, Opus, M4A. **SoundFont (SF2)*
 
 ---
 
-## 4. Load your first instrument
+## 4. Make a place for the music
 
-1. Hold **R** and tap RIGHT until you reach the **INSTRUMENT** screen.
-2. Move the cursor to the **SAMPLE** row and press **A** — the file browser opens.
-3. Navigate to your samples: **A** enters a folder, **B** goes up one level, **START** previews the highlighted file.
-4. Press **A** on your kick sample to load it into instrument `00`.
-5. Press **START** — you should hear it.
+PocketTracker works from the top down. The song holds chains, a chain holds phrases, and a phrase holds
+the sixteen steps you write notes into:
 
-Now load the rest of the kit: press **B + RIGHT** to switch to instrument `01`, load the snare the same way, then `02` for the hi-hat.
+```
+SONG  (8 tracks)  →  CHAIN  (list of phrases)  →  PHRASE  (16 steps)
+```
 
-> [!TIP]
-> If a melodic sample plays in the wrong key, set **ROOT** to the pitch the sample was recorded at — it is the most important tuning parameter.
+The app opens on the **SONG** screen. Make one of each before you load a sound:
+
+1. The cursor starts on track 1, row `00`. Press **A** — a chain appears.
+2. Hold **R** and tap RIGHT — you are inside that chain. Press **A** on slot `00` — a phrase appears.
+3. Hold **R** and tap RIGHT again — you are inside that phrase, an empty 16-step grid.
+
+> [!IMPORTANT]
+> **The app follows the song.** Holding **R** and tapping RIGHT only opens a chain the song is actually
+> using, and a phrase that chain is actually using — so place it first, then step into it. On an empty
+> cell the press simply does nothing, and the empty cell under the cursor is the reason.
+> (`SETTINGS → NAV = POOL` turns this off and lets you reach all 256 slots directly.)
 
 ---
 
-## 5. Write your first phrase
+## 5. Load your first instrument
 
-A **phrase** is a 16-step pattern — one bar of music. Hold **R** and tap LEFT to move from INSTRUMENT to the **PHRASE** screen.
+1. From PHRASE, hold **R** and tap RIGHT once more to reach the **INSTRUMENT** screen.
+2. The top row is **TYPE**, and it carries two buttons to the right of its value: **LOAD** and **EDIT >**.
+   Move the cursor right onto **LOAD** and press **A** — the file browser opens.
+3. Navigate to your samples: **A** enters a folder, **B** goes up one level, **START** previews the
+   highlighted file.
+4. Press **A** on your kick sample to load it into instrument `00`.
+5. Press **START** — you should hear it.
 
-1. With the cursor on step `00`, note column, press **A** — it inserts `C-4` playing instrument `00` (your kick).
-2. Move down to step `04`. Press **A** again, then move right to the **I** column and hold **A + RIGHT** to change the instrument to `01` (snare).
+Now load the rest of the kit: press **B + RIGHT** to switch to instrument `01`, load the snare the same
+way, then `02` for the hi-hat.
+
+> [!TIP]
+> If a melodic sample plays in the wrong key, set **ROOT** to the pitch the sample was recorded at — it
+> is the most important tuning parameter.
+
+> [!TIP]
+> **EDIT >**, beside LOAD, opens the [sample editor](manual-en.md#11-sample-editor-screen) — trimming,
+> slicing, chopping and time-stretching all live in there.
+
+---
+
+## 6. Write your first phrase
+
+Hold **R** and tap LEFT to go back to the **PHRASE** screen — the one you made in step 4. A phrase is a
+16-step pattern, one bar of music, read downwards.
+
+1. With the cursor on step `00`, note column, press **A** — it inserts `C-4` playing instrument `00`
+   (your kick).
+2. Move down to step `04`. Press **A** again, then move right to the **I** column and hold **A + RIGHT**
+   to change the instrument to `01` (snare).
 3. Fill out a basic boom-bap bar (N = note, I = instrument):
 
    | Step | Note | I | Sound |
@@ -75,30 +109,36 @@ A **phrase** is a 16-step pattern — one bar of music. Hold **R** and tap LEFT 
    | `0C` | C-4 | 01 | snare |
    | `0E` | C-4 | 02 | hat |
 
-   Pressing **A** on an empty step repeats the last note you placed — place the first hat, and the rest are two button presses each.
+   Pressing **A** on an empty step repeats the last note you placed — place the first hat, and the rest
+   are two button presses each.
 4. Press **START** — the phrase plays and loops. Edit while it plays; changes are live.
 
-On the note column, **hold A + LEFT/RIGHT** moves in semitones and **A + UP/DOWN** in octaves — that's all you need to turn a copy of this workflow into a bassline or melody later.
+On the note column, **hold A + LEFT/RIGHT** moves in semitones and **A + UP/DOWN** in octaves — that's
+all you need to turn a copy of this workflow into a bassline or melody later.
 
 ---
 
-## 6. Chain it into a song
+## 7. Grow it into a song
 
-Phrases are arranged into **chains**, and chains are arranged on the 8-track **SONG** grid:
+You already have the structure from step 4 — one chain on track 1, one phrase inside it. Now make it
+longer.
 
-```
-SONG  (8 tracks)  →  CHAIN  (list of phrases)  →  PHRASE  (16 steps)
-```
+1. Hold **R** and tap LEFT to reach the **CHAIN** screen. Press **A** on slot `01` to add a second
+   phrase to the chain, and again on `02` and `03` if you want a longer section. A chain loops back to
+   slot `00` after its last filled slot.
+2. Use the **TSP** column to play the same phrase transposed — `0C` is one octave up. One phrase can be
+   a verse and a chorus without being copied.
+3. Hold **R** and tap LEFT again for the **SONG** screen. Press **A** on track 2, row `00` to start a
+   second track, then walk right into it the same way as step 4 and give it a bassline.
+4. Press **START** — the song plays from the top.
 
-1. Hold **R** and tap LEFT to move to the **CHAIN** screen. Press **A** on slot `00` — it references phrase `00`, the one you just wrote. Add more slots below to make a longer section, or leave it as one looping bar.
-2. Hold **R** and tap LEFT again to reach the **SONG** screen. Press **A** on track 1, row `00` — it places chain `00`.
-3. Press **START** — the song plays from the top.
-
-That's a complete, playing song structure. Drums on track 1; put a bassline chain on track 2, chords on track 3 — each of the 8 tracks is a column, and all 8 start together when you press START.
+Each of the 8 tracks is a column, and all 8 start together when you press START. From then on each one
+moves at its own pace: a 2-row chain beside a 16-row one simply comes round eight times. A `>` marker
+shows where each track has got to.
 
 ---
 
-## 7. Save your work
+## 8. Save your work
 
 1. From SONG, hold **R** and tap UP to open the **PROJECT** screen.
 2. Cursor on **NAME**, press **A** to name the project.
