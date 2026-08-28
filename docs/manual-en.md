@@ -198,8 +198,8 @@ The navigation map always shows where you are.
 
 | Screen | How to open |
 |---|---|
-| SAMPLE EDITOR | INSTRUMENT screen → cursor on SAMPLE → SELECT |
-| EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ cell → **A** (or SELECT). Close with **B** (or SELECT). |
+| SAMPLE EDITOR | INSTRUMENT screen → **TYPE** row → cursor on **EDIT >** → **A** |
+| EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ cell → **A**. Close with **B**. |
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
@@ -225,7 +225,7 @@ The navigation map always shows where you are.
 | B | Cancel / Delete |
 | L | L modifier |
 | R | R modifier |
-| SELECT | Context action |
+| SELECT | File-management modifier in the file browser; cancels the keyboard overlay |
 | START | Play / Stop |
 
 #### Keyboard (Bluetooth keyboard or testing on PC)
@@ -251,7 +251,7 @@ Both keyboard and gamepad work simultaneously.
 | D-pad | Move cursor |
 | A | Insert value (on an empty cell, inserts the last-used value) |
 | B | Delete value / cancel |
-| SELECT | Context action (varies by screen) |
+| SELECT | File-management modifier in the file browser; cancels the keyboard overlay |
 | START | Play / Stop |
 
 > [!TIP]
@@ -566,8 +566,8 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 
 | Parameter | Range | Description |
 |---|---|---|
-| NAME | — | Instrument name. Press A (or SELECT) to edit it on the keyboard overlay. |
-| SAMPLE | path | WAV, SF2 or SF3 file. Press A to open file browser; SELECT to open SAMPLE EDITOR. |
+| TYPE | — | The instrument kind, with two buttons to the right of its value. **LOAD** opens the file browser; **EDIT >** opens the SAMPLE EDITOR. Press **A** on either. ⚠️ **EDIT >** is not drawn on a SoundFont — there is no single waveform to edit — and an EXTERNAL instrument has neither button. |
+| NAME | — | Instrument name. Press A to edit it on the keyboard overlay. |
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
 | VOL | 00–FF | Base volume. `FF` = full. |
@@ -584,7 +584,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | RES | 00–FF | Filter resonance. `00` = none. |
 | DRIVE | 00–FF | Soft-clipping overdrive. `00` = off. |
 | CRUSH | 00–FF | Bit-depth crusher. `00` = off. |
-| EQ | — | Press A (or SELECT) to open the EQ EDITOR for this instrument. A + LEFT/RIGHT picks the EQ slot. |
+| EQ | — | Press A to open the EQ EDITOR for this instrument. A + LEFT/RIGHT picks the EQ slot. |
 
 > [!TIP]
 > **ROOT** is the most important tuning parameter. Set it to the actual pitch of your sample (e.g., `A-4` for a 440 Hz sine). If notes sound in the wrong octave, ROOT is usually the reason.
@@ -664,8 +664,8 @@ own.
 
 - **B + LEFT/RIGHT** — switch between instruments 00–7F
 - **R+UP** from INSTRUMENT → MODULATION screen
-- **A** on SAMPLE field → opens file browser
-- **SELECT** on SAMPLE field → opens SAMPLE EDITOR
+- **A** on the TYPE row's **LOAD** button → opens the file browser
+- **A** on the TYPE row's **EDIT >** button → opens the SAMPLE EDITOR
 
 ### File browser controls
 
@@ -688,7 +688,7 @@ WAV written. Video files are instead **converted** to a WAV in the Samples folde
 
 ## 11. SAMPLE EDITOR Screen
 
-The SAMPLE EDITOR is a full-screen waveform editor for the currently loaded WAV. Open it from the INSTRUMENT screen by moving the cursor to the SAMPLE row and pressing **SELECT**.
+The SAMPLE EDITOR is a full-screen waveform editor for the currently loaded WAV. Open it from the INSTRUMENT screen: on the **TYPE** row, move the cursor right past **LOAD** onto **EDIT >**, and press **A**.
 
 Press **B** to close. If you have edited the waveform, B raises **ARE YOU SURE?** first — A discards the edit and leaves, B stays in the editor. Use **SAVE / OVERWRITE** inside the editor to write changes to disk. B is the only way out: R+DPAD cannot leave the editor, so an unsaved edit cannot be lost by walking off the screen.
 
@@ -765,7 +765,7 @@ Applied to the whole sample (or selection) offline — rendered immediately, wit
 
 | FX | Description |
 |---|---|
-| EQ | Tap A (or SELECT) on the slot cell to open the EQ EDITOR and dial it in; then APPLY bakes the EQ into the sample. |
+| EQ | Tap A on the slot cell to open the EQ EDITOR and dial it in; then APPLY bakes the EQ into the sample. |
 | DUST | Lo-fi effect chain: shelf EQ → low-pass → tube saturation → FET compression → wow/drift → bitcrush → soft-clip. |
 | DRIVE | Soft-clipping overdrive. |
 | OTT | 3-band bidirectional compressor. |
@@ -1118,7 +1118,7 @@ The master column also has stereo send peak meters showing REV and DEL bus level
 | D-pad UP/DOWN | Move between rows (track volume, or REV/DEL/VOL in master) |
 | A + LEFT/RIGHT | Increase / decrease value by 1 |
 | A + UP/DOWN | Increase / decrease value by 16 |
-| A or SELECT (on the master EQ cell) | Open EQ EDITOR. A + LEFT/RIGHT picks the EQ slot. |
+| A (on the master EQ cell) | Open EQ EDITOR. A + LEFT/RIGHT picks the EQ slot. |
 
 ---
 
@@ -1134,7 +1134,7 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 |---|---|
 | SIZE | Room size (`00`–`FF`). Higher = longer reverb tail. |
 | DAMP | High-frequency damping (`00`–`FF`). Higher = darker reverb. |
-| EQ | Press A (or SELECT) to open the EQ EDITOR for the reverb return. |
+| EQ | Press A to open the EQ EDITOR for the reverb return. |
 
 The reverb return volume is set on the MIXER screen (REV row in master column).
 
@@ -1142,10 +1142,10 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **SELECT** on this row to switch between the two. |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
-| EQ | Press A (or SELECT) to open the EQ EDITOR for the delay return. |
+| EQ | Press A to open the EQ EDITOR for the delay return. |
 
 The delay return volume is set on the MIXER screen (DEL row in master column).
 
@@ -1168,7 +1168,7 @@ Per-instrument effects (filter, drive, crush) are set on the INSTRUMENT screen.
 
 ## 17. EQ EDITOR
 
-The EQ EDITOR is a full-screen overlay that opens when you press **A** (or SELECT) on an EQ cell in the INSTRUMENT, INST.POOL, MIXER, EFFECTS, or SAMPLE EDITOR (EQ-effect slot) screens.
+The EQ EDITOR is a full-screen overlay that opens when you press **A** on an EQ cell in the INSTRUMENT, INST.POOL, MIXER, EFFECTS, or SAMPLE EDITOR (EQ-effect slot) screens.
 
 It applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbook). A real-time spectrum analyzer (KissFFT, ~20 fps) shows the signal relevant to the current EQ context — instrument output when opened from INSTRUMENT, delay bus from EFFECTS delay, reverb bus from EFFECTS reverb, or master bus from MIXER/master — with the computed frequency response curve overlaid.
 
@@ -1211,7 +1211,7 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 | A + UP/DOWN | Edit value (large step — GAIN: ±1.0 dB) |
 | A + B | Reset parameter to default (FREQ mid · GAIN 0 dB · Q mid) |
 | B + LEFT/RIGHT | Switch EQ preset slot (the slot shown in the top row) |
-| B | Close EQ EDITOR and apply changes (SELECT also closes) |
+| B | Close EQ EDITOR and apply changes |
 
 
 ---
@@ -1226,7 +1226,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 
 | Parameter | Description |
 |---|---|
-| NAME | Project name. Tap A (or SELECT) to edit it on the keyboard overlay; hold A + LEFT/RIGHT cycles the character under the cursor in place. |
+| NAME | Project name. Tap A to edit it on the keyboard overlay; hold A + LEFT/RIGHT cycles the character under the cursor in place. |
 | TEMPO | BPM. |
 | TRANSPOSE | Global semitone offset applied to all tracks. |
 
@@ -1841,7 +1841,7 @@ Throughout this section `<home>` is PocketTracker's home folder: on Android the 
 ### Managing files in the browser
 
 You do not need a separate file manager. Any file browser — the one PROJECT → LOAD opens, or the one
-the INSTRUMENT SAMPLE field opens — can rename, delete, move and copy, using **SELECT** and **L** as
+the INSTRUMENT screen's **LOAD** button opens — can rename, delete, move and copy, using **SELECT** and **L** as
 modifiers.
 
 | Input | Action |
@@ -1885,7 +1885,7 @@ Two details worth knowing:
 - Format: `.wav` (8/16/24/32-bit PCM or float; mono or stereo)
 - Stereo WAV files are supported natively — SOURCE mode on the instrument or sample editor selects LEFT / RIGHT / STEREO / MONO non-destructively
 - Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files automatically
-- Loaded via: INSTRUMENT screen → SAMPLE field → A button → file browser
+- Loaded via: INSTRUMENT screen → **TYPE** row → **LOAD** → **A** → file browser
 - SF2 and SF3 files are loaded the same way
 - **Compressed audio** (`.mp3`, `.flac`, `.ogg`, `.opus`, `.m4a`) loads directly as a sample — decoded into memory with **no WAV file written** and no slice markers. The instrument remembers the original file path, so it is re-decoded automatically each time the project is reopened. FLAC is lossless, so it is the best choice when you want a small file with no quality loss. (`.opus` and `.m4a` are common voice-recording formats — phone memos, messaging-app exports.)
 - **Video files** (`.mp4`, `.mkv`, `.webm`, `.3gp`, `.mov`) can instead be **converted** to samples — the audio track is extracted and saved as a WAV. See *Audio from video files* below.
@@ -2005,7 +2005,7 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 ### Using the sample editor for sliced breaks
 
 1. Load a drum loop WAV on an instrument.
-2. Press SELECT on the SAMPLE field to open SAMPLE EDITOR.
+2. On the TYPE row, move the cursor to **EDIT >** and press **A** to open the SAMPLE EDITOR.
 3. Set SLICE mode to TRANSIENT, adjust SENS until markers land on drum hits.
 4. Press SAVE / OVERWRITE to embed the cue chunk in the WAV file.
 5. Back on INSTRUMENT screen, set SLICE = CUT.
@@ -2214,8 +2214,8 @@ exports and sample-editor saves keep their own folders.
 
 | Screen | How to open |
 |---|---|
-| SAMPLE EDITOR | INSTRUMENT → cursor on SAMPLE → SELECT |
-| EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ → A (or SELECT); close with B (or SELECT) |
+| SAMPLE EDITOR | INSTRUMENT → TYPE row → cursor on **EDIT >** → **A** |
+| EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ → A; close with B |
 | SETTINGS | PROJECT → cursor on SETTINGS → A |
 | THEME EDITOR | SETTINGS → cursor on THEME → A |
 
@@ -2325,10 +2325,10 @@ exports and sample-editor saves keep their own folders.
 
 | Input | Action |
 |---|---|
-| A (on SAMPLE) | Open file browser |
-| SELECT (on SAMPLE) | Open SAMPLE EDITOR |
-| A or SELECT (on NAME) | Edit instrument name |
-| A or SELECT (on EQ) | Open EQ EDITOR |
+| A (on TYPE row, LOAD) | Open file browser |
+| A (on TYPE row, EDIT >) | Open SAMPLE EDITOR |
+| A (on NAME) | Edit instrument name |
+| A (on EQ) | Open EQ EDITOR |
 | A + LEFT / RIGHT | Edit current parameter |
 | A + B | Reset to default |
 | B + LEFT / RIGHT | Previous / next instrument |
@@ -2346,7 +2346,7 @@ exports and sample-editor saves keep their own folders.
 | A + D-pad (on slice position) | Move the boundary — UP/DOWN fine, LEFT/RIGHT coarse |
 | A + B (on slice row) | Delete the boundary (MANUAL), or reset it (TRANSIENT / DIVIDE) |
 | A (on slice row, while playing) | Cut a boundary at the playhead (MANUAL) |
-| A or SELECT (on EQ-effect slot) | Open EQ EDITOR |
+| A (on EQ-effect slot) | Open EQ EDITOR |
 | START | Preview sample |
 | B | Close (asks first if there are unsaved changes) |
 
@@ -2396,13 +2396,13 @@ exports and sample-editor saves keep their own folders.
 | D-pad UP / DOWN | Move between rows |
 | A + LEFT / RIGHT | ±1 |
 | A + UP / DOWN | ±16 |
-| A or SELECT (on master EQ) | Open EQ EDITOR |
+| A (on master EQ) | Open EQ EDITOR |
 
 ---
 
 ### EQ EDITOR
 
-Open with **A** (or SELECT) on an EQ cell.
+Open with **A** on an EQ cell.
 
 | Input | Action |
 |---|---|
@@ -2411,7 +2411,7 @@ Open with **A** (or SELECT) on an EQ cell.
 | A + LEFT / RIGHT | Edit value |
 | A + UP / DOWN | Large step |
 | B + LEFT / RIGHT | Switch EQ preset slot |
-| B | Close and apply (SELECT also closes) |
+| B | Close and apply |
 
 ---
 

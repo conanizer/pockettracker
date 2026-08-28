@@ -13,8 +13,8 @@
 // every cursor row — and it is why the row highlight is drawn from the map rather than from the cursor.
 //
 // The one place it is stateful-looking but is not: TIME reads as either a hex byte or a note division
-// ("1/8T"), depending on `delaySync` — the same cell, two vocabularies. SELECT toggles which; see
-// InputDispatcher::on_select.
+// ("1/8T"), depending on `delaySync` — the same cell, two vocabularies. B toggles which; see
+// InputDispatcher::on_button_b.
 
 #include <string>
 #include <vector>

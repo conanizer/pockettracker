@@ -310,6 +310,12 @@ class InputDispatcher {
     /** B inside a selection COPIES it and exits — the tracker's copy gesture. */
     void on_button_b();
     void on_button_a();
+    /**
+     * Bare SELECT is the KEYBOARD's abort and nothing else. ⚠️ The emptiness everywhere else is
+     * deliberate: the button is RESERVED for the help overlay, and every action a cell could want from
+     * it is already on the A or B sitting on that same cell. SELECT+A/B/R on the browser is a separate
+     * gesture and is unaffected.
+     */
     void on_select();
     /** START: play/stop. What it plays depends on the screen you are on. */
     void on_start();

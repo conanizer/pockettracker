@@ -57,7 +57,7 @@ for the schema, the key-name spellings and the 8BitDo/XInput case that makes A a
 - **B button** = "Which item am I looking at" (previous/next phrase, chain, instrument…)
 - **L button** = "Clipboard and selection"
 - **R button** = "Navigate screens"
-- **SELECT** = "Context action" — opens whatever the cursor is sitting on
+- **SELECT** = "File management" — the modifier for rename, delete and new folder in the file browser
 
 This creates a consistent, learnable pattern where:
 - You don't memorize different controls per screen
@@ -78,8 +78,9 @@ This creates a consistent, learnable pattern where:
 ### Basic Actions
 - **A button** - Insert value on empty cell
 - **B button** - Cancel / back / copy a selection
-- **SELECT** - Context action: opens the sub-screen the cursor is on (SAMPLE EDITOR, EQ EDITOR, the
-  name keyboard), closes those overlays again, and toggles delay SYNC on the EFFECTS TIME row.
+- **SELECT** - Cancels the keyboard overlay, and is the modifier for the file browser's rename /
+  delete / new-folder chords. It does nothing on its own anywhere else — the button is held free for
+  the on-screen help panel.
   ⚠️ SELECT does **not** delete — clearing a value is always **A + B**.
 - **START** - Play/Stop sequencer
 
@@ -189,7 +190,7 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 - **A** on the NAME column of an **empty** slot — load a source (sampler slots browse .wav, SoundFont
   slots browse .sf2 and .sf3); the slot is auto-named from the file.
 - **A + B** on the NAME column — clear the slot (keeps its instrument type).
-- **A** (tap) or **SELECT** on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
+- **A** (tap) on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
   the slot; the open is deferred to A-release so the two don't clash). Inside the editor, **B** closes it.
 - **START** — preview the selected instrument (when stopped).
 
@@ -312,7 +313,8 @@ A + UP                  Increment by large step (+16 or +12)
 A + DOWN                Decrement by large step (-16 or -12)
 A + B                   Delete value / reset it to its default
 B                       Cancel / Exit / Back / Copy a selection
-SELECT                  Context action (open or close what the cursor is on)
+B on EFFECTS' TIME row  Switch the delay time between milliseconds and note lengths
+SELECT                  Cancel the keyboard overlay (and the file-management modifier)
 START                   Play / Stop
 ```
 

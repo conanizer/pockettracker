@@ -2964,6 +2964,26 @@ void InputDispatcher::on_button_b() {
         return;
     }
 
+    // ⚠️ EFFECTS' TIME row: B toggles DELAY SYNC — free-running milliseconds ↔ note divisions. It has to
+    // be a gesture of its OWN, because the cell's VALUE means two different things on either side of it
+    // (0x40 is a delay length; 4 is a 1/16 note) and no amount of A+DPAD can express "change which of
+    // those you mean".
+    //
+    // ⚠️ B IS COMPLETELY FREE ON THIS SCREEN, which is what makes it the right home: EFFECTS is in no arm
+    // of `cycle_current_item`, `on_b_up`/`on_b_down` act only on SONG and INST_POOL, and `on_l_b` will
+    // not start a selection here — so there is no B+DPAD to protect and the press needs no release latch.
+    //
+    // Re-clamping delayTime into 0..B on the way IN is not optional: a free time of 0xF0 is not a
+    // subdivision, and an unclamped one would index past the end of the name list.
+    if (s_.currentScreen == ScreenType::EFFECTS &&
+        s_.effectsCursorRow == EffectModule::ROW_DLY_TIME) {
+        songcore::Project& p = host_.edit_project();
+        p.delaySync = !p.delaySync;
+        if (p.delaySync) p.delayTime = std::min(std::max(p.delayTime, 0), 11);
+        mark_modified();
+        return;
+    }
+
     // ⚠️ B on the SAMPLE EDITOR is BACK — but it asks first if there is anything to lose. The editor's
     // edits live in the ENGINE's buffer, not in the project, so leaving without saving is the one
     // gesture in the app that can silently destroy work. Three states, in order: the dialog is up (B is
@@ -3007,97 +3027,23 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
-    // ⚠️ THE BROWSER IS NOT ARMED, and that is the whole of SELECT there: it does nothing ALONE on a
-    // browser, because it is a MODIFIER (SELECT+A/B/R) and its press is what arms those three.
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ)) return;
-    // SELECT is the keyboard's ABORT — the chord alias for the button on its action row.
+    // ⚠️ BARE SELECT ANSWERS FOR THE KEYBOARD AND FOR NOTHING ELSE, and the emptiness IS the design: the
+    // button is RESERVED for the help overlay, so anything bound here is a gesture that has to be taken
+    // back off users the day help lands. Nothing is missing because of it — every action a cell could
+    // want from SELECT is already on the A or the B sitting on that same cell.
+    //
+    // ⚠️ THE THREE BROWSER CHORDS ARE A DIFFERENT GESTURE and are untouched by that: SELECT does nothing
+    // ALONE on a browser, because it is a MODIFIER there and its press is only what arms SELECT+A/B/R.
+    //
+    // ⚠️ NOT TO BE CONFUSED WITH THE A-DEFERRAL. `defer_a_to_release` holds A on the cells that open a
+    // sub-screen so that a held A+DPAD can still dial the value underneath. That mechanism is required,
+    // it is what makes those cells editable at all, and it has nothing to do with this handler.
+    if (overlay_swallows(Overlay::QWERTY)) return;
+
+    // The keyboard's ABORT — the chord alias for the button on its own action row, and the one bare
+    // SELECT that duplicates nothing: B backspaces here, so without it the only way to abandon a rename
+    // is to walk the cursor onto ABORT and press A.
     if (qwerty_open()) { qwerty_cancel(); return; }
-
-    // SELECT is the THEME editor's second CLOSE, beside B — Kotlin's `handleSelect` closes it too. It
-    // does not strictly NEED one the way the EQ editor does (B is not deferred here; there is no B+DPAD
-    // gesture inside this editor to protect), but it is the same key on the same overlay and the phone
-    // does it, so the muscle memory carries.
-    if (theme_open()) { close_theme_editor(); return; }
-
-    // SELECT is the EQ editor's second CLOSE, beside B. It needs one: B is deferred to release inside
-    // the editor (the slot cycle owns B+DPAD), so SELECT is the way out that acts on the press.
-    if (eq_open()) { close_eq_editor(); return; }
-
-
-    // ⚠️ SELECT IS THE ALIAS FOR THE DEFERRED-A CELLS, and that is what it is FOR. A on those cells is
-    // held until release (`defer_a_to_release`), so that a held A+DPAD can still dial the value
-    // underneath — and SELECT is how you open the same thing without the wait. One list, one call.
-    //
-    // Kotlin keeps the two in step by hand and DRIFTED once doing it: its `handleSelect` SAMPLE_EDITOR
-    // arm tests `cursorRow == 16 && fxType == 3` with NO column check, so SELECT on the APPLY cell
-    // (col 2) opens the EQ editor there while a deferred A on the same cell does not. That difference is
-    // preserved below rather than tidied away — it is reachable, it is harmless, and a port that
-    // "fixes" it is a port that no longer matches the device.
-    if (open_sub_screen_at_cursor(/*peek=*/false)) return;
-
-    if (on_sample_editor()) {
-        if (s_.sampleEditor.showConfirmClose) return;   // a dialog owns the buttons under it
-
-        // Kotlin's wider EQ arm (see above): row 16 with the EQ effect selected, ANY column.
-        if (s_.sampleEditor.cursorRow == 16 && s_.sampleEditor.fxType == 3) {
-            open_eq_editor(std::min(127, std::max(0, s_.sampleEditor.fxValue)),
-                           EqCallerContext::sample_editor_fx());
-            return;
-        }
-        if (s_.sampleEditor.cursorRow == 18)
-            open_qwerty(QwertyContext::SAMPLE_NAME, s_.sampleEditor.sampleName, "SAMPLE NAME:",
-                        fs_.samples_directory());
-        return;
-    }
-
-    // SELECT does NOT clear the cell under the cursor on the editor screens — deleting a value is
-    // A+B. It is left free for CONTEXT ACTIONS, exactly as Kotlin leaves it, and S5 lands the first
-    // one the port can honour.
-    //
-    // ⚠️ EFFECTS' TIME row: SELECT toggles DELAY SYNC — free-running milliseconds ↔ note divisions. It
-    // has to be a separate gesture, because the cell's VALUE means two different things on either side
-    // of it (0x40 is a delay length; 4 is a 1/16 note) and no amount of A+DPAD can express "change
-    // which of those you mean". Re-clamping delayTime into 0..B on the way IN is not optional: a free
-    // time of 0xF0 is not a subdivision, and an unclamped one would index past the end of the name list.
-    if (s_.currentScreen == ScreenType::EFFECTS &&
-        s_.effectsCursorRow == EffectModule::ROW_DLY_TIME) {
-        songcore::Project& p = host_.edit_project();
-        p.delaySync = !p.delaySync;
-        if (p.delaySync) p.delayTime = std::min(std::max(p.delayTime, 0), 11);
-        mark_modified();
-        return;
-    }
-
-    // ⚠️ THE CONTEXT-SCREEN BACK-NAV — Kotlin `handleSelect`'s `else` arm (parity: the Kotlin↔C++
-    // handler-surface diff, 2026-07-27; the one arm that diff found missing). A bare SELECT on a
-    // context/popup screen that has no SELECT action of its own pops back to the column's main screen.
-    //
-    // ⚠️ It is deliberately NOT `!is_main_row(currentScreen)`. PROJECT, MIXER, EFFECTS and INST_POOL are
-    // non-main-row screens Kotlin cases as EXPLICIT no-ops (INST_POOL's own comment: "intentionally NOT
-    // the default jump"), and each only early-returns above when the cursor is on an actionable cell —
-    // so a blanket main-row test would wrongly navigate them off a plain cell. Only the four screens
-    // Kotlin's `else` actually reaches — GROOVE, SCALE, MODS, SETTINGS — navigate.
-    //
-    // ⚠️ Kotlin does a BARE `currentScreen =` here (its setter only — no caller cursor save/restore).
-    // The port routes through go_to_screen instead, ON PURPOSE: a bare field write is the
-    // cursor-stranding bug go_to_screen's header documents (SONG/CHAIN/PHRASE share one cursorColumn
-    // across different column counts), and going through it lands SELECT on the same valid cursor R+UP
-    // would — the coherent behaviour once the Kotlin is gone. `column` stays previousColumn, so the
-    // arriving main screen keeps the column this context screen belonged to.
-    switch (s_.currentScreen) {
-        case ScreenType::GROOVE:
-        case ScreenType::SCALE:
-        case ScreenType::MODS:
-        case ScreenType::SETTINGS: {
-            NavResult nav;
-            nav.screen = main_screen_for_column(s_.previousColumn);
-            nav.column = s_.previousColumn;
-            go_to_screen(s_, nav);
-            break;
-        }
-        default:
-            break;
-    }
 }
 
 void InputDispatcher::on_stop_preview() {
