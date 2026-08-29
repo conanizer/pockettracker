@@ -220,15 +220,20 @@ inline Theme theme_classic() {
 inline Theme theme_amber() {
     Theme t;
     t.name          = "AMBER";
+    t.background    = 0xFF0A0808;
+    t.rowEvery4th   = 0xFF151212;
+    t.rowCursor     = 0xFF382400;
     t.rowPlayback   = 0xFF332200;
     t.rowSelection  = 0xFF3A2A00;
-    t.textTitle     = 0xFFFFCC00;
+    t.textTitle     = 0xFFFFBB00;
     t.textParam     = 0xFF806040;
     t.textValue     = 0xFFEECC88;
-    t.textCursor    = 0xFFFFFF00;
+    t.textCursor    = 0xFFFFBB00;
     t.textEmpty     = 0xFF664422;
-    t.vizCenterLine = 0xFF442200;
+    t.vizBackground = 0xFF0A0808;
+    t.vizCenterLine = 0xFF382404;
     t.vizWave       = 0xFFFF8800;
+    t.meterBackground = 0xFF1A1515;
     t.meterLow      = 0xFFCC8800;
     t.meterMid      = 0xFFCC4400;
     t.meterHigh     = 0xFFCC0000;
@@ -239,38 +244,51 @@ inline Theme theme_amber() {
 inline Theme theme_blue() {
     Theme t;
     t.name          = "BLUE";
-    t.rowPlayback   = 0xFF001144;
+    t.rowCursor     = 0xFF4486AA;
+    t.rowPlayback   = 0xFF002266;
     t.rowSelection  = 0xFF002266;
     t.textTitle     = 0xFF88CEFF;
-    t.textParam     = 0xFF4488AA;
+    t.textParam     = 0xFF4486AA;
     t.textValue     = 0xFFAADDFF;
-    t.textCursor    = 0xFF00FFFF;
+    t.textCursor    = 0xFF224466;
     t.textEmpty     = 0xFF224466;
     t.vizCenterLine = 0xFF112244;
-    t.vizWave       = 0xFF0088FF;
-    t.meterLow      = 0xFF0088CC;
-    t.meterMid      = 0xFF0044CC;
-    t.meterHigh     = 0xFF8800CC;
+    t.vizWave       = 0xFF0082BA;
+    t.meterBackground = 0xFF151515;
+    t.meterLow      = 0xFF0082BA;
+    t.meterMid      = 0xFF004499;
+    t.meterHigh     = 0xFF6050A0;
     derive_borrowed_colors(t);
+    // ⚠️ AFTER THE DERIVE, AND THAT ORDER IS THE POINT — these three are dialled, not borrowed, so the
+    // derive would overwrite them. The outline sits a shade off TXT PARAM, the selected cell keeps the
+    // brighter blue the wave used to be, and the playback marker is the deep blue TXT EMPTY carries.
+    t.eqBorder      = 0xFF4488AA;
+    t.textSelection = 0xFF0088CC;
+    t.textPlayhead  = 0xFF224466;
     return t;
 }
 
 inline Theme theme_mono() {
     Theme t;
     t.name          = "MONO";
-    t.rowPlayback   = 0xFF222222;
-    t.rowSelection  = 0xFF333333;
+    t.rowCursor     = 0xFF808080;
+    t.rowPlayback   = 0xFF444444;
+    t.rowSelection  = 0xFF505050;
     t.textTitle     = 0xFFFFFFFF;
-    t.textParam     = 0xFF888888;
-    t.textValue     = 0xFF8F8F8F;
-    t.textCursor    = 0xFFFFFFFF;
+    t.textParam     = 0xFFC0C0C0;
+    t.textValue     = 0xFFC0C0C0;
+    t.textCursor    = 0xFF303030;
     t.textEmpty     = 0xFF444444;
     t.vizCenterLine = 0xFF222222;
     t.vizWave       = 0xFFCCCCCC;
-    t.meterLow      = 0xFFCCCCCC;
-    t.meterMid      = 0xFF888888;
+    t.meterLow      = 0xFFB0B0B0;
+    t.meterMid      = 0xFF808080;
     t.meterHigh     = 0xFF444444;
     derive_borrowed_colors(t);
+    // ⚠️ AFTER THE DERIVE — dialled, not borrowed. TXT PARAM is bright here, so the derived fill and
+    // outline would both come out too light to read the curve against; these two are set by hand.
+    t.eqFill        = 0xFF444444;
+    t.eqBorder      = 0xFF808080;
     return t;
 }
 
