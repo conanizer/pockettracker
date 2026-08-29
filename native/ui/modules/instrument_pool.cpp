@@ -48,13 +48,16 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
                     CHAR_SPACING, FONT_SCALE);
     }
 
-    const int headerY = y + ROW_HEIGHT + 14;
+    // The headers say WHICH COLUMN the cursor is in, as a grid's do — the cursor itself is one cell
+    // wide here, and four of the five columns are two hex digits that look alike.
+    const int  headerY = y + ROW_HEIGHT + 14;
+    const auto head    = [&](int col) { return header_color(s.cursorColumn, col, col, t); };
     c.draw_text("# ",   x + ID_X,   headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("NAME", x + NAME_X, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("V",    x + VOL_X,  headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("RV",   x + REV_X,  headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("DE",   x + DEL_X,  headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("EQ",   x + EQ_X,   headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("NAME", x + NAME_X, headerY, head(0), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("V",    x + VOL_X,  headerY, head(1), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("RV",   x + REV_X,  headerY, head(2), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("DE",   x + DEL_X,  headerY, head(3), CHAR_SPACING, FONT_SCALE);
+    c.draw_text("EQ",   x + EQ_X,   headerY, head(4), CHAR_SPACING, FONT_SCALE);
 
     // The scroll is DERIVED, not stored: the selected row is kept centred, so there is no scroll state
     // to get out of sync with the selection. (Contrast SONG, whose viewport is its own field because
@@ -73,14 +76,13 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
 void InstrumentPoolModule::draw_row(Canvas& c, int x, int rowY, int slot, const Instrument& ins,
                                     const InstrumentPoolState& s, const Theme& t) const {
     const bool selected = (slot == s.selectedInstrument);
-    if (selected) c.fill_rect(x, rowY, WIDTH, ROW_HEIGHT, t.rowCursor);
 
     const int textY = rowY + TEXT_PADDING;
 
-    const auto col_color = [&](int col) {
-        return (selected && s.cursorColumn == col) ? t.textCursor : t.textValue;
-    };
+    const auto on_col = [&](int col) { return selected && s.cursorColumn == col; };
 
+    // The slot number is this table's row-number gutter: it lights across the whole selected row, and
+    // it is what says which row while the cursor itself covers one cell of it.
     c.draw_text(hex2(slot), x + ID_X, textY, selected ? t.textCursor : t.textParam, CHAR_SPACING,
                 FONT_SCALE);
 
@@ -89,14 +91,12 @@ void InstrumentPoolModule::draw_row(Canvas& c, int x, int rowY, int slot, const 
     const bool        unnamed = songcore::instrument_has_default_name(ins);
     const std::string name    = unnamed ? std::string(NAME_MAX_CHARS, '_')
                                         : Canvas::clip_text(ins.name, NAME_MAX_CHARS);
-    const Argb nameColor = (selected && s.cursorColumn == 0) ? t.textCursor
-                           : unnamed                         ? t.textEmpty
-                                                             : t.textValue;
-    c.draw_text(name, x + NAME_X, textY, nameColor, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, name, x + NAME_X, textY, on_col(0),
+                     unnamed ? t.textEmpty : t.textValue, t);
 
-    c.draw_text(hex2(ins.volume),     x + VOL_X, textY, col_color(1), CHAR_SPACING, FONT_SCALE);
-    c.draw_text(hex2(ins.reverbSend), x + REV_X, textY, col_color(2), CHAR_SPACING, FONT_SCALE);
-    c.draw_text(hex2(ins.delaySend),  x + DEL_X, textY, col_color(3), CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, hex2(ins.volume),     x + VOL_X, textY, on_col(1), t.textValue, t);
+    draw_cursor_cell(c, hex2(ins.reverbSend), x + REV_X, textY, on_col(2), t.textValue, t);
+    draw_cursor_cell(c, hex2(ins.delaySend),  x + DEL_X, textY, on_col(3), t.textValue, t);
 
     // The ">" only on the selected row — it is the one row with space for it before the clip, and the
     // one row where the cell can actually be opened.

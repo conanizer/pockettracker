@@ -55,14 +55,15 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         if (on_row)                                return t.textValue;
         return t.textParam;
     };
+    const auto on_cell = [&](bool on_row, int channel) {
+        return on_row && es.cursorChannel == channel;
+    };
 
     // ── Row 0: THEME — the built-in cycle, SAVE, LOAD ────────────────────────────────────────────
     if (row_visible(0)) {
         const bool on_row = (es.cursorRow == 0);
         const int  ry     = row_top(0);
         const int  ty     = ry + TEXT_PADDING;
-
-        if (on_row) c.fill_rect(x, ry, WIDTH, ROW_HEIGHT, t.rowCursor);
 
         c.draw_text("THEME", x + NAME_COL_X, ty,
                     on_row ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
@@ -72,10 +73,12 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         // labels this screen is exited through. Derived from the two X constants, so moving a column
         // cannot leave the budget behind.
         constexpr int NAME_COLS = (SAVE_LABEL_X - THEME_NAME_X) / CHAR_W;
-        c.draw_text(Canvas::clip_text(t.name, NAME_COLS), x + THEME_NAME_X, ty,
-                    value_color(on_row, 0), CHAR_SPACING, FONT_SCALE);
-        c.draw_text("SAVE",  x + SAVE_LABEL_X, ty, value_color(on_row, 1), CHAR_SPACING, FONT_SCALE);
-        c.draw_text("LOAD",  x + LOAD_LABEL_X, ty, value_color(on_row, 2), CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, Canvas::clip_text(t.name, NAME_COLS), x + THEME_NAME_X, ty,
+                         on_cell(on_row, 0), value_color(on_row, 0), t);
+        draw_cursor_cell(c, "SAVE", x + SAVE_LABEL_X, ty, on_cell(on_row, 1),
+                         value_color(on_row, 1), t);
+        draw_cursor_cell(c, "LOAD", x + LOAD_LABEL_X, ty, on_cell(on_row, 2),
+                         value_color(on_row, 2), t);
     }
 
     // ── Rows 1..17: the colours ──────────────────────────────────────────────────────────────────
@@ -90,8 +93,6 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int            ry     = row_top(logical);
         const int            ty     = ry + TEXT_PADDING;
 
-        if (on_row) c.fill_rect(x, ry, WIDTH, ROW_HEIGHT, t.rowCursor);
-
         c.draw_text(row.label, x + NAME_COL_X, ty,
                     on_row ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
 
@@ -99,9 +100,9 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int g = static_cast<int>((color >> 8) & 0xFF);
         const int b = static_cast<int>(color & 0xFF);
 
-        c.draw_text(hex2(r), x + R_COL_X, ty, value_color(on_row, 0), CHAR_SPACING, FONT_SCALE);
-        c.draw_text(hex2(g), x + G_COL_X, ty, value_color(on_row, 1), CHAR_SPACING, FONT_SCALE);
-        c.draw_text(hex2(b), x + B_COL_X, ty, value_color(on_row, 2), CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, hex2(r), x + R_COL_X, ty, on_cell(on_row, 0), value_color(on_row, 0), t);
+        draw_cursor_cell(c, hex2(g), x + G_COL_X, ty, on_cell(on_row, 1), value_color(on_row, 1), t);
+        draw_cursor_cell(c, hex2(b), x + B_COL_X, ty, on_cell(on_row, 2), value_color(on_row, 2), t);
 
         // The swatch — the only reason the R/G/B columns are usable at all. It is drawn with the
         // colour ITSELF, which makes this the one module in the app whose output is not a function of

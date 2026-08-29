@@ -60,19 +60,14 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     const bool hasMidi = s.caps.midi;
     const int  lastRow = static_cast<int>(project_last_row(s.caps));
 
-    // The row highlight spans the whole module, and it lights from the ROW alone — every column of a
-    // row shares it. Only the VALUE under the cursor additionally takes textCursor.
+    // The cursor is the CELL it is on, as it is on every grid. What says WHICH ROW here is the row's
+    // own label, which takes textCursor while the cursor is anywhere along the row — including on a
+    // column the label itself is not, which is why this collapses to "on the row".
     const auto on_row = [&](ProjectRow row) { return s.cursorRow == static_cast<int>(row); };
     const auto on_cell = [&](ProjectRow row, int column) {
         return on_row(row) && s.cursorColumn == column;
     };
 
-    // A row's label is textCursor while the cursor is anywhere on the row, textParam otherwise —
-    // including when the cursor is on column 0, which is why `isCursorOnName || isCursorOnValue`
-    // collapses to "on the row".
-    const auto row_bg = [&](ProjectRow row) {
-        if (on_row(row)) c.fill_rect(x, rowY(row), WIDTH, ROW_HEIGHT, t.rowCursor);
-    };
     const auto label = [&](ProjectRow row, const char* text) {
         c.draw_text(text, labelX, rowY(row) + TEXT_PADDING,
                     on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
@@ -80,10 +75,8 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     // ── A single-value row: TEMPO, TRANSPOSE, SYSTEM, EXIT ───────────────────────────────────────
     const auto param_row = [&](ProjectRow row, const char* name, const std::string& value) {
-        row_bg(row);
         label(row, name);
-        c.draw_text(value, valueX, rowY(row) + TEXT_PADDING,
-                    on_cell(row, 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value, valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
     // ── A DOOR row: MIDI, EXIT — the button alone, no label ──────────────────────────────────────
@@ -91,21 +84,18 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // in the VALUE column, level with SETTINGS > above it, because the cursor lands on column 1 here
     // exactly as it does on a labelled row.
     const auto door_row = [&](ProjectRow row, const char* button) {
-        row_bg(row);
-        c.draw_text(button, valueX, rowY(row) + TEXT_PADDING,
-                    on_cell(row, 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, button, valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
     // ── A button row: PROJECT, EXPORT, COMPACT ───────────────────────────────────────────────────
     const auto button_row = [&](ProjectRow row, const char* name,
                                 std::initializer_list<const char*> options) {
-        row_bg(row);
         label(row, name);
         int optionX = valueX;
         int index   = 1;
         for (const char* option : options) {
-            c.draw_text(option, optionX, rowY(row) + TEXT_PADDING,
-                        on_cell(row, index) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+            draw_cursor_cell(c, option, optionX, rowY(row) + TEXT_PADDING, on_cell(row, index),
+                             t.textValue, t);
             optionX += OPTION_W;
             ++index;
         }
@@ -121,7 +111,6 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // to 17, with nothing on screen saying so. The field scrolls under the cursor instead.
     {
         const ProjectRow row = ProjectRow::NAME;
-        row_bg(row);
         label(row, "NAME");
 
         const std::string name =
@@ -150,17 +139,14 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
             const int  charX      = textX + k * CHAR_W;
             const bool onThisChar = on_cell(row, i + 1);
 
-            // The per-character cursor is a DARKENED block behind the glyph, not a row highlight —
-            // the row is already lit, so the character needs to stand out from within it.
-            if (onThisChar) {
-                c.fill_rect(charX, rowY(row), 5 * FONT_SCALE, ROW_HEIGHT,
-                            darken(t.textCursor, 0.27f));
-            }
-            if (i < static_cast<int>(name.size())) {
-                c.draw_text(std::string(1, name[static_cast<size_t>(i)]), charX,
-                            rowY(row) + TEXT_PADDING,
-                            onThisChar ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-            }
+            // One character IS the cell here, so it is painted like any other: a space stands in for
+            // a cell past the end of the name, which draws nothing but gives the cursor out there the
+            // same width as every other cell — typing into cell 19 of an 8-character name is how a
+            // name gets longer, so the cursor has to be visible on a blank.
+            const std::string ch = (i < static_cast<int>(name.size()))
+                                       ? std::string(1, name[static_cast<size_t>(i)])
+                                       : std::string(" ");
+            draw_cursor_cell(c, ch, charX, rowY(row) + TEXT_PADDING, onThisChar, t.textValue, t);
         }
 
         if (win.clipRight)

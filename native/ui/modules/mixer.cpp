@@ -96,13 +96,16 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
         // nothing, and the meter and the fader value both say so.
         const bool audible = track_audible(p, i);
 
+        // ⚠️ THE FADER CELL IS PAINTED BEFORE ITS METER, and the order is load-bearing: the volume sits
+        // 2px under the meter, one short of a row's own 3px of padding, so the cell's top row lands on
+        // the meter's bottom BORDER. Drawn after, it would take a 36px bite out of the bright frame
+        // that says which strip is selected. The meter overdraws that one row instead.
+        draw_cursor_cell(c, hex2(p.tracks[static_cast<size_t>(i)].volume), mX + 5, y + TRACK_VOL_Y,
+                         isSel, audible ? t.textValue : t.textEmpty, t);
+
         draw_stereo_meter(c, mX, y + TRACK_METER_TOP, TRACK_METER_H, peak_at(s.trackPeaks, i * 2),
                           peak_at(s.trackPeaks, i * 2 + 1), isSel, /*is_muted=*/!audible,
                           t, i * 2, i * 2 + 1, advance);
-
-        c.draw_text(hex2(p.tracks[static_cast<size_t>(i)].volume), mX + 5, y + TRACK_VOL_Y,
-                    isSel ? t.textCursor : (audible ? t.textValue : t.textEmpty),
-                    CHAR_SPACING, FONT_SCALE);
     }
 
     // ── The master meter ─────────────────────────────────────────────────────────────────────────
@@ -129,15 +132,17 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const int revCX = x + FIRST_METER_X + (BAR_W + BAR_SEP + BAR_W) / 2;
     const int delCX = x + FIRST_METER_X + METER_SPACING + (BAR_W + BAR_SEP + BAR_W) / 2;
 
-    c.draw_text("REV", revCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y, t.textParam, CHAR_SPACING,
-                FONT_SCALE);
-    c.draw_text("DEL", delCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y, t.textParam, CHAR_SPACING,
-                FONT_SCALE);
+    // The two headers are these cells' LABELS — they sit above rather than beside, but they do the
+    // same job the label does on every other screen: say which of the two the cursor is on.
+    c.draw_text("REV", revCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y,
+                revSendSel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("DEL", delCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y,
+                delSendSel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-    c.draw_text(hex2(p.reverbWet), revCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y,
-                revSendSel ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(hex2(p.delayWet), delCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y,
-                delSendSel ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, hex2(p.reverbWet), revCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y, revSendSel,
+                     t.textValue, t);
+    draw_cursor_cell(c, hex2(p.delayWet), delCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y, delSendSel,
+                     t.textValue, t);
 
     // ── The master strip ─────────────────────────────────────────────────────────────────────────
     // Row 2 shows OTT *or* DUST — one control, two destinations, chosen by the EFFECTS screen's TYPE.
@@ -151,20 +156,24 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const bool depthSel = masterSel && s.mixerMasterRow == 2;
     const bool limSel   = masterSel && s.mixerMasterRow == 3;
 
-    c.draw_text("MIX", x + MSTR_LABEL_X, y + MROW0_Y, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(hex2(p.masterVolume), x + MSTR_VALUE_X, y + MROW0_Y,
-                mixSel ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    // Four label/value rows, painted as they are on every other screen: the label says which row, the
+    // value is the cell the cursor fills. ⚠️ The METER stays lit for all four (`masterSel` above) —
+    // that is what says the master strip is the one being edited, and it is a different question from
+    // which of its four rows the cursor is down on.
+    const auto master_row = [&](const char* label, int row_y, const std::string& value, bool sel) {
+        c.draw_text(label, x + MSTR_LABEL_X, y + row_y, sel ? t.textCursor : t.textParam,
+                    CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value, x + MSTR_VALUE_X, y + row_y, sel, t.textValue, t);
+    };
 
-    c.draw_text("EQ", x + MSTR_LABEL_X, y + MROW1_Y, t.textParam, CHAR_SPACING, FONT_SCALE);
+    master_row("MIX", MROW0_Y, hex2(p.masterVolume), mixSel);
+
+    c.draw_text("EQ", x + MSTR_LABEL_X, y + MROW1_Y, eqSel ? t.textCursor : t.textParam,
+                CHAR_SPACING, FONT_SCALE);
     draw_eq_cell(c, x + MSTR_VALUE_X, y + MROW1_Y, p.masterEqSlot, eqSel, t);
 
-    c.draw_text(depthLabel, x + MSTR_LABEL_X, y + MROW2_Y, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(hex2(depthValue), x + MSTR_VALUE_X, y + MROW2_Y,
-                depthSel ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-
-    c.draw_text("LIM", x + MSTR_LABEL_X, y + MROW3_Y, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(hex2(p.limiterPreGain), x + MSTR_VALUE_X, y + MROW3_Y,
-                limSel ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    master_row(depthLabel, MROW2_Y, hex2(depthValue), depthSel);
+    master_row("LIM",      MROW3_Y, hex2(p.limiterPreGain), limSel);
 }
 
 void MixerModule::draw_stereo_meter(Canvas& c, int x, int y, int h, float level_l, float level_r,

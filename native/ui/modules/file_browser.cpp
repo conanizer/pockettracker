@@ -371,6 +371,10 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         // ⚠️ The stripe alternates on the ITEM index, not on the on-screen row. Keyed on `i` it
         // re-phases whenever the list scrolls by an odd number of rows, so a row changes colour
         // without its content changing.
+        // ⚠️ THE CURSOR IS A WHOLE ROW HERE, and it is the one screen in the app where it still is.
+        // A row carries three columns the cursor cannot land on — the name, the size and the date —
+        // and they are read TOGETHER: highlighting the name alone leaves the size and date of the
+        // file you are on looking like every other row's. The row IS the unit of this screen.
         Argb bg;
         if (isCursor)            bg = t.rowCursor;
         else if (isSel)          bg = t.rowSelection;

@@ -42,57 +42,55 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // The row highlight is drawn from the VISUAL row, not the cursor row — see the map above.
-    if (s.cursorRow >= 0 && s.cursorRow <= MAX_CURSOR_ROW) {
-        const int selVis = CURSOR_TO_VIS[static_cast<size_t>(s.cursorRow)];
-        c.fill_rect(x, y + selVis * ROW_HEIGHT, WIDTH, ROW_HEIGHT, t.rowCursor);
-    }
-
     const auto rowY = [y](int vis) { return y + TEXT_PADDING + vis * ROW_HEIGHT; };
-    const auto valueColor = [&t](bool is_sel) { return is_sel ? t.textCursor : t.textValue; };
 
-    const auto label = [&](const char* text, int vis) {
-        c.draw_text(text, x + LABEL_X, rowY(vis), t.textParam, CHAR_SPACING, FONT_SCALE);
-    };
     const auto header = [&](const char* text, int vis) {
         c.draw_text(text, x + LABEL_X, rowY(vis), t.textTitle, CHAR_SPACING, FONT_SCALE);
     };
-    const auto value = [&](const std::string& text, int vis, bool is_sel) {
-        c.draw_text(text, x + VALUE_X, rowY(vis), valueColor(is_sel), CHAR_SPACING, FONT_SCALE);
+
+    // A parameter row, addressed by its CURSOR row: where it lands on screen comes out of the same
+    // map the cursor walks, so a header inserted between two sections cannot move one and not the
+    // other. The label says which row the cursor is on, the value is the cell it fills.
+    const auto param = [&](const char* name, int row, const std::string& text) {
+        const int  vis = CURSOR_TO_VIS[static_cast<size_t>(row)];
+        const bool sel = (s.cursorRow == row);
+        c.draw_text(name, x + LABEL_X, rowY(vis), sel ? t.textCursor : t.textParam, CHAR_SPACING,
+                    FONT_SCALE);
+        draw_cursor_cell(c, text, x + VALUE_X, rowY(vis), sel, t.textValue, t);
+    };
+
+    /** The same row, whose value is an EQ slot rather than a number. */
+    const auto eq_param = [&](int row, int eq_slot) {
+        const int  vis = CURSOR_TO_VIS[static_cast<size_t>(row)];
+        const bool sel = (s.cursorRow == row);
+        c.draw_text("INP EQ", x + LABEL_X, rowY(vis), sel ? t.textCursor : t.textParam, CHAR_SPACING,
+                    FONT_SCALE);
+        draw_eq_cell(c, x + VALUE_X, rowY(vis), eq_slot, sel, t);
     };
 
     header("EFFECTS", 0);
 
     // ── Master bus ───────────────────────────────────────────────────────────────────────────────
     header("MASTER FX", 2);
-    label("TYPE", 3);
-    value(p.masterBusFx == 0 ? "OTT" : "DUST", 3, s.cursorRow == ROW_MASTER_TYPE);
+    param("TYPE", ROW_MASTER_TYPE, p.masterBusFx == 0 ? "OTT" : "DUST");
 
     // ── Reverb ───────────────────────────────────────────────────────────────────────────────────
     header("REVERB", 5);
-    label("SIZE", 6);
-    value(hex2(p.reverbFeedback), 6, s.cursorRow == ROW_REV_SIZE);
-    label("DAMP", 7);
-    value(hex2(p.reverbDamp), 7, s.cursorRow == ROW_REV_DAMP);
-    label("INP EQ", 8);
-    draw_eq_cell(c, x + VALUE_X, rowY(8), p.reverbInputEq, s.cursorRow == ROW_REV_EQ, t);
+    param("SIZE", ROW_REV_SIZE, hex2(p.reverbFeedback));
+    param("DAMP", ROW_REV_DAMP, hex2(p.reverbDamp));
+    eq_param(ROW_REV_EQ, p.reverbInputEq);
 
     // ── Delay ────────────────────────────────────────────────────────────────────────────────────
     header("DELAY", 10);
-    label("TIME", 11);
     // Synced, TIME is a note division rather than a raw byte — the same cell speaking a second
     // vocabulary, which is why its cursor range changes with it (0..B instead of 00..FF).
-    const std::string timeText =
-        p.delaySync ? delay_sync_names()[static_cast<size_t>(clamp(p.delayTime, 0, 11))]
-                    : hex2(p.delayTime);
-    value(timeText, 11, s.cursorRow == ROW_DLY_TIME);
+    param("TIME", ROW_DLY_TIME,
+          p.delaySync ? delay_sync_names()[static_cast<size_t>(clamp(p.delayTime, 0, 11))]
+                      : hex2(p.delayTime));
 
-    label("FDBK", 12);
-    value(hex2(p.delayFeedback), 12, s.cursorRow == ROW_DLY_FDBK);
-    label("REV", 13);
-    value(hex2(p.delayReverbSend), 13, s.cursorRow == ROW_DLY_REV);
-    label("INP EQ", 14);
-    draw_eq_cell(c, x + VALUE_X, rowY(14), p.delayInputEq, s.cursorRow == ROW_DLY_EQ, t);
+    param("FDBK", ROW_DLY_FDBK, hex2(p.delayFeedback));
+    param("REV",  ROW_DLY_REV,  hex2(p.delayReverbSend));
+    eq_param(ROW_DLY_EQ, p.delayInputEq);
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────────────────────────

@@ -68,11 +68,9 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const auto param_row = [&](SettingsRow row, const char* name, const std::string& value) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
-        if (on_row(row)) c.fill_rect(x, ry, WIDTH, ROW_HEIGHT, t.rowCursor);
         c.draw_text(name, labelX, ry + TEXT_PADDING,
                     on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(value, val1X, ry + TEXT_PADDING,
-                    on_cell(row, 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
     /** A row with two values, the second behind its own little label (STR / VOL / POW / ENG). */
@@ -80,16 +78,13 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
                               const char* sublabel, const std::string& value2) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
-        if (on_row(row)) c.fill_rect(x, ry, WIDTH, ROW_HEIGHT, t.rowCursor);
         c.draw_text(name, labelX, ry + TEXT_PADDING,
                     on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(value1, val1X, ry + TEXT_PADDING,
-                    on_cell(row, 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value1, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
         // The sublabel is textParam whether or not the cursor is on the row — Kotlin's ternary picks
         // textParam on both arms, which is a tell that it was written and then thought better of.
         c.draw_text(sublabel, subX, ry + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(value2, val2X, ry + TEXT_PADDING,
-                    on_cell(row, 2) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value2, val2X, ry + TEXT_PADDING, on_cell(row, 2), t.textValue, t);
     };
 
     const auto on_off = [](bool b) { return std::string(b ? "ON" : "OFF"); };
@@ -152,13 +147,12 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     if (settings_row_visible(SettingsRow::TEMPLATE, s.caps)) {
         const SettingsRow row = SettingsRow::TEMPLATE;
         const int ry = rowY(row);
-        if (on_row(row)) c.fill_rect(x, ry, WIDTH, ROW_HEIGHT, t.rowCursor);
         c.draw_text("TEMPLATE", labelX, ry + TEXT_PADDING,
                     on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
         const char* options[2] = {"SAVE", "CLEAR"};
         for (int i = 0; i < 2; ++i) {
-            c.draw_text(options[i], val1X + i * 80, ry + TEXT_PADDING,
-                        on_cell(row, i + 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+            draw_cursor_cell(c, options[i], val1X + i * 80, ry + TEXT_PADDING,
+                             on_cell(row, i + 1), t.textValue, t);
         }
     }
 

@@ -106,11 +106,9 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     const auto on_row = [&](MidiRow row) { return s.cursorRow == static_cast<int>(row); };
 
     const auto row_of = [&](MidiRow row, const char* name, const std::string& value) {
-        if (on_row(row)) c.fill_rect(x, rowY(row), WIDTH, ROW_HEIGHT, t.rowCursor);
         c.draw_text(name, labelX, rowY(row) + TEXT_PADDING,
                     on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(value, valueX, rowY(row) + TEXT_PADDING,
-                    on_row(row) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value, valueX, rowY(row) + TEXT_PADDING, on_row(row), t.textValue, t);
     };
 
     // ── OUTPUT and INPUT — the ports, or WHY there is not one ────────────────────────────────────
@@ -157,22 +155,22 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
 
         for (int i = 0; i < tracks; ++i) {
             // Centred over a two-digit cell: one glyph is CHAR_W narrower than the value above it.
+            // It is this row's COLUMN HEADER — the grids' convention, and the only thing that can say
+            // which of eight identical `--` the cursor is on, since the cell it fills is two glyphs
+            // wide and they all look alike.
             c.draw_text(std::to_string(i + 1), cellX + MAP_CELL_PITCH * i + CHAR_W / 2,
-                        headerY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
+                        headerY + TEXT_PADDING,
+                        header_color(onMap ? s.cursorColumn : -1, i + 1, i + 1, t),
+                        CHAR_SPACING, FONT_SCALE);
         }
 
-        if (onMap) c.fill_rect(x, mapY, WIDTH, ROW_HEIGHT, t.rowCursor);
         c.draw_text("IN CH", labelX, mapY + TEXT_PADDING, onMap ? t.textCursor : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
 
         for (int i = 0; i < tracks; ++i) {
-            // ⚠️ The whole row lights up and only the SELECTED CELL's text takes the cursor colour —
-            // the groove editor's convention, and the one every multi-column row in this app follows.
-            const bool onCell = onMap && (s.cursorColumn == i + 1);
-            const Argb col    = onCell ? t.textCursor : t.textValue;
-            c.draw_text(map_cell_text(s.project.midiInputChannels[static_cast<size_t>(i)]),
-                        cellX + MAP_CELL_PITCH * i, mapY + TEXT_PADDING, col, CHAR_SPACING,
-                        FONT_SCALE);
+            draw_cursor_cell(c, map_cell_text(s.project.midiInputChannels[static_cast<size_t>(i)]),
+                             cellX + MAP_CELL_PITCH * i, mapY + TEXT_PADDING,
+                             onMap && (s.cursorColumn == i + 1), t.textValue, t);
         }
     }
 

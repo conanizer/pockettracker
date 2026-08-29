@@ -136,15 +136,13 @@ public:
                                        const InputAction& action) const;
 
 private:
-    void draw_row_bg(Canvas& c, int x, int y, const Theme& t) const;
-
     /** One parameter, label + value, at the standard two columns. */
-    void draw_parameter_row(Canvas& c, int x, int y, int name_x, int value_x, const std::string& name,
+    void draw_parameter_row(Canvas& c, int y, int name_x, int value_x, const std::string& name,
                             const std::string& value, bool cursor_on_name, bool cursor_on_value,
                             const Theme& t) const;
 
     /** Two parameters. Cursor columns 1 and 3. */
-    void draw_dual_row(Canvas& c, int x, int y, int name_x, int value_x, const std::string& n1,
+    void draw_dual_row(Canvas& c, int y, int name_x, int value_x, const std::string& n1,
                        const std::string& v1, const std::string& n2, const std::string& v2,
                        int cursor_row, int cursor_column, int this_row, const Theme& t) const;
 
@@ -158,7 +156,7 @@ private:
                             const songcore::Instrument& ins, int cursor_row, int cursor_column,
                             int this_row, const Theme& t) const;
 
-    void draw_name_row(Canvas& c, int x, int y, int name_x, int value_x,
+    void draw_name_row(Canvas& c, int y, int name_x, int value_x,
                        const InstrumentEditorState& s, int this_row, const Theme& t) const;
 
     void draw_section_source_row(Canvas& c, int x, int y, int name_x, int cursor_row,
@@ -174,7 +172,7 @@ private:
      */
     void draw_external(Canvas& c, int x, int y, const InstrumentEditorState& s) const;
 
-    void draw_eq_row(Canvas& c, int x, int y, int name_x, int value_x, int eq_slot, int cursor_row,
+    void draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot, int cursor_row,
                      int cursor_column, int this_row, const Theme& t) const;
 };
 

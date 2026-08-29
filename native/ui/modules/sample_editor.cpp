@@ -292,38 +292,33 @@ std::string SampleEditorState::bpm_display() const {
 
 namespace {
 
-/** The cursor row's full-width band. 640 wide — this screen has no right bar to stay clear of. */
-void row_bg(Canvas& c, int x, int y, const Theme& t) {
-    c.fill_rect(x, y, SampleEditorModule::WIDTH, ROW_HEIGHT, t.rowCursor);
-}
+// ⚠️ NO ROW BACKGROUND ANYWHERE ON THIS SCREEN. The cursor is the CELL it is on, as it is on every
+// grid; the label beside a cell is what says which row, and it takes `textCursor` with it.
 
 /** Three label/value pairs across one row — rows 1 and 2 are both built from this. */
 void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, const Theme& t,
                      const std::string& l1, const std::string& v1, int c1,
                      const std::string& l2, const std::string& v2, int c2,
                      const std::string& l3, const std::string& v3, int c3) {
-    auto label_color = [&](int col) { return (is_cur_row && cur_col == col) ? t.textCursor : t.textParam; };
-    auto value_color = [&](int col) { return (is_cur_row && cur_col == col) ? t.textCursor : t.textValue; };
+    auto on          = [&](int col) { return is_cur_row && cur_col == col; };
+    auto label_color = [&](int col) { return on(col) ? t.textCursor : t.textParam; };
 
     c.draw_text(l1, x + 10,  ty, label_color(c1), CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v1, x + 110, ty, value_color(c1), CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v1, x + 110, ty, on(c1), t.textValue, t);
     c.draw_text(l2, x + 180, ty, label_color(c2), CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v2, x + 335, ty, value_color(c2), CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v2, x + 335, ty, on(c2), t.textValue, t);
     c.draw_text(l3, x + 445, ty, label_color(c3), CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v3, x + 535, ty, value_color(c3), CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v3, x + 535, ty, on(c3), t.textValue, t);
 }
 
 /** One of the two op rows: six evenly-spaced buttons, the one under the cursor lit. */
 void draw_ops_row(Canvas& c, int x, int y, const std::vector<std::string>& ops, bool is_cur,
                   int cur_col, const Theme& t) {
-    if (is_cur) row_bg(c, x, y, t);
     const int ty   = y + TEXT_PADDING;
     const int colW = SampleEditorModule::WIDTH / static_cast<int>(ops.size());   // ~106px
     for (size_t i = 0; i < ops.size(); ++i) {
         const int lx = x + static_cast<int>(i) * colW + 15;
-        c.draw_text(ops[i], lx, ty,
-                    (is_cur && cur_col == static_cast<int>(i)) ? t.textCursor : t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, ops[i], lx, ty, is_cur && cur_col == static_cast<int>(i), t.textValue, t);
     }
 }
 
@@ -347,7 +342,6 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     {   // Row 1 — ZOOM / SOURCE / RATE
         const int  ry  = y + 26;
         const bool cur = (s.cursorRow == 1);
-        if (cur) row_bg(c, x, ry, t);
         // SOURCE reads MONO on a mono sample whatever the mode says — there is no second channel to
         // pick from, and the cell is read-only there (see cursor_context).
         const std::string source = s.hasStereoData ? at(source_values(), s.sourceMode) : "MONO";
@@ -360,7 +354,6 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     {   // Row 2 — PITCH / DURATION / SNAP
         const int  ry  = y + 47;
         const bool cur = (s.cursorRow == 2);
-        if (cur) row_bg(c, x, ry, t);
         const std::string pitch = (s.pitchSemitones >= 0 ? "+" : "") + std::to_string(s.pitchSemitones);
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
                         "PITCH",    pitch,                                 0,
@@ -373,53 +366,53 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     {   // Row 8 — the selection, in frames
         const int  ry  = y + content_y(8);
         const bool cur = (s.cursorRow == 8);
-        if (cur) row_bg(c, x, ry, t);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("SELECTION", x + 10, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(hex8(s.selectionStart), x + 180, ty,
-                    (cur && s.cursorCol == 0) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(hex8(s.selectionEnd), x + 335, ty,
-                    (cur && s.cursorCol == 1) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("SELECTION", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING,
+                    FONT_SCALE);
+        draw_cursor_cell(c, hex8(s.selectionStart), x + 180, ty, cur && s.cursorCol == 0,
+                         t.textValue, t);
+        draw_cursor_cell(c, hex8(s.selectionEnd), x + 335, ty, cur && s.cursorCol == 1,
+                         t.textValue, t);
     }
 
     {   // Row 10 — the slice METHOD, and its one parameter (SENS or BY, depending)
         const int  ry  = y + content_y(10);
         const bool cur = (s.cursorRow == 10);
-        if (cur) row_bg(c, x, ry, t);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("SLICE", x + 10, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(at(slice_methods(), s.sliceMethod), x + 175, ty,
-                    (cur && s.cursorCol == 0) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("SLICE", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, at(slice_methods(), s.sliceMethod), x + 175, ty,
+                         cur && s.cursorCol == 0, t.textValue, t);
         if (slice_has_parameter(s.sliceMethod)) {
             const bool        onVal = (cur && s.cursorCol == 1);
             const std::string lbl   = (s.sliceMethod == SLICE_TRANSIENT) ? "SENS" : "BY";
             const std::string val   = hex2(s.sliceMethod == SLICE_TRANSIENT ? s.sliceSensitivity
                                                                             : s.sliceDivisions);
             c.draw_text(lbl, x + 335, ty, onVal ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-            c.draw_text(val, x + 410, ty, onVal ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+            draw_cursor_cell(c, val, x + 410, ty, onVal, t.textValue, t);
         }
     }
 
     if (s.sliceMethod != SLICE_OFF) {   // Row 11 — which slice, and where it starts
         const int  ry  = y + content_y(11);
         const bool cur = (s.cursorRow == 11);
-        if (cur) row_bg(c, x, ry, t);
-        const int  ty       = ry + TEXT_PADDING;
-        const Argb idxColor = (cur && s.cursorCol == 0) ? t.textCursor : t.textValue;
-        const Argb posColor = (cur && s.cursorCol == 1) ? t.textCursor : t.textValue;
+        const int ty = ry + TEXT_PADDING;
 
         // The two cells sit under row 10's: the index under the METHOD value (x + 175) and the position
         // under the SENS/BY LABEL (x + 335), not under its value at x + 410 — one column further right
         // reads as detached from the row above. `/total` follows the index immediately, so its x is
         // derived from the index's rather than typed as a second constant that has to be kept in step.
-        c.draw_text(hex2(s.sliceIndex), x + 175, ty, idxColor, CHAR_SPACING, FONT_SCALE);
+        //
+        // ⚠️ This row has no label of its own — the SLICE row above it names both cells — so the
+        // cursor's own fill is the only thing that says the cursor is here at all.
+        draw_cursor_cell(c, hex2(s.sliceIndex), x + 175, ty, cur && s.cursorCol == 0, t.textValue, t);
         if (s.sliceMethod == SLICE_TRANSIENT || s.sliceMethod == SLICE_MANUAL) {
             // How many the index can reach, which is one more than its ceiling. DIVIDE draws none: its
             // count is the BY cell directly above, and saying it twice invites the two to disagree.
             const int total = s.slice_index_ceiling() + 1;
             c.draw_text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         }
-        c.draw_text(hex8(s.effective_slice_position()), x + 335, ty, posColor, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, hex8(s.effective_slice_position()), x + 335, ty, cur && s.cursorCol == 1,
+                         t.textValue, t);
     }
 
     draw_ops_row(c, x, y + content_y(13), ops_row1(), s.cursorRow == 13, s.cursorCol, t);
@@ -428,11 +421,10 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     {   // Row 16 — the FX row. Its VALUE cell is the one cell in the app with three vocabularies.
         const int  ry  = y + content_y(16);
         const bool cur = (s.cursorRow == 16);
-        if (cur) row_bg(c, x, ry, t);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("EFFECT", x + 10, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(at(fx_types(), s.fxType), x + 180, ty,
-                    (cur && s.cursorCol == 0) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("EFFECT", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, at(fx_types(), s.fxType), x + 180, ty, cur && s.cursorCol == 0,
+                         t.textValue, t);
 
         const bool onVal = (cur && s.cursorCol == 1);
         if (s.fxType == FX_EQ) {
@@ -442,32 +434,30 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         } else {
             const std::string val = (s.fxType == FX_SYNC) ? at(sync_types(), s.syncType)
                                                           : hex2(s.fxValue);
-            c.draw_text(val, x + 290, ty, onVal ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+            draw_cursor_cell(c, val, x + 290, ty, onVal, t.textValue, t);
         }
-        c.draw_text("APPLY", x + 440, ty,
-                    (cur && s.cursorCol == 2) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, "APPLY", x + 440, ty, cur && s.cursorCol == 2, t.textValue, t);
     }
 
-    {   // Row 18 — NAME. One cell: the whole row lights, there is no column.
+    {   // Row 18 — NAME. One cell, and no column: the row and the cell are the same thing.
         const int  ry  = y + content_y(18);
         const bool cur = (s.cursorRow == 18);
-        if (cur) row_bg(c, x, ry, t);
         const int ty = ry + TEXT_PADDING;
         c.draw_text("NAME", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-        c.draw_text(s.sampleName, x + 120, ty, cur ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, s.sampleName, x + 120, ty, cur, t.textValue, t);
     }
 
     {   // Row 19 — LOAD / SAVE / OVERWRITE, and CHOP when there are slices to chop
         const int  ry  = y + content_y(19);
         const bool cur = (s.cursorRow == 19);
-        if (cur) row_bg(c, x, ry, t);
         const int ty = ry + TEXT_PADDING;
-        auto col = [&](int i) { return (cur && s.cursorCol == i) ? t.textCursor : t.textValue; };
-        c.draw_text("LOAD",      x + 120, ty, col(0), CHAR_SPACING, FONT_SCALE);
-        c.draw_text("SAVE",      x + 230, ty, col(1), CHAR_SPACING, FONT_SCALE);
-        c.draw_text("OVERWRITE", x + 335, ty, col(2), CHAR_SPACING, FONT_SCALE);
-        if (s.sliceMethod != SLICE_OFF)
-            c.draw_text("CHOP",  x + 510, ty, col(3), CHAR_SPACING, FONT_SCALE);
+        auto btn = [&](const char* text, int bx, int i) {
+            draw_cursor_cell(c, text, bx, ty, cur && s.cursorCol == i, t.textValue, t);
+        };
+        btn("LOAD",      x + 120, 0);
+        btn("SAVE",      x + 230, 1);
+        btn("OVERWRITE", x + 335, 2);
+        if (s.sliceMethod != SLICE_OFF) btn("CHOP", x + 510, 3);
     }
 
     if (s.showConfirmClose) draw_confirm_dialog(c, x, y, t);

@@ -129,10 +129,6 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
             const int  textY       = dataStartY + rowIdx * ROW_HEIGHT;
             const bool isCursorRow = (pair == s.cursorPair && rowIdx == s.cursorRow);
 
-            // The highlight spans BOTH slots of the pair — it marks the row, and the cursor colour on
-            // one side or the other is what marks the slot.
-            if (isCursorRow) c.fill_rect(x, textY - TEXT_PADDING, WIDTH, ROW_HEIGHT, t.rowCursor);
-
             const bool activePair = (pair == s.cursorPair);
 
             const auto draw_side = [&](const ModSlot& slot, int rows, int side, int nameX, int valX) {
@@ -143,12 +139,14 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
                                               : std::string();
                 const std::string value = mod_row_value(slot, rowIdx, pair * 2 + side);
 
-                const bool active     = activePair && (s.cursorSide == side);
-                const Argb labelColor = (isCursorRow && active) ? t.textCursor : t.textParam;
-                const Argb valueColor = (isCursorRow && active) ? t.textCursor : t.textValue;
+                // The cursor is the VALUE cell alone. Two slots sit side by side on one row, so the
+                // label beside it is what says both which row and which of the two — a highlight
+                // across the row could only ever have said the first.
+                const bool onCell = isCursorRow && activePair && (s.cursorSide == side);
 
-                c.draw_text(label, x + nameX, textY, labelColor, CHAR_SPACING, FONT_SCALE);
-                c.draw_text(value, x + valX,  textY, valueColor, CHAR_SPACING, FONT_SCALE);
+                c.draw_text(label, x + nameX, textY, onCell ? t.textCursor : t.textParam,
+                            CHAR_SPACING, FONT_SCALE);
+                draw_cursor_cell(c, value, x + valX, textY, onCell, t.textValue, t);
             };
 
             draw_side(left,  leftRows,  0, NAME_X1, VAL_X1);

@@ -236,6 +236,20 @@ inline void draw_cell(Canvas& c, const std::string& text, int x, int text_y, boo
 }
 
 /**
+ * One cell on a screen that has no selection at all — every parameter screen, and every button on
+ * one. The same cursor the grids draw, so the whole app says "you are here" one way; `color` is the
+ * cell's RESTING colour (a value, a button, a name), which the cursor's own ink replaces.
+ *
+ * ⚠️ These screens carry "which row" on the row's LABEL rather than on a row number: the label takes
+ * `textCursor` while the cursor is anywhere on its row, and it is not a cell — no fill — unless the
+ * cursor can actually land on it.
+ */
+inline void draw_cursor_cell(Canvas& c, const std::string& text, int x, int text_y, bool is_cursor,
+                             Argb color, const Theme& t) {
+    draw_cell(c, text, x, text_y, is_cursor, /*is_selected=*/false, /*is_empty=*/false, color, t);
+}
+
+/**
  * An EQ slot value ("--" when unassigned, hex when set) plus the trailing ">" that signals the cell
  * opens the EQ editor. Shared by every EQ cell so they all look identical. The ">" never dims with
  * the value; `show_arrow=false` hides it (the instrument pool hides it on non-selected rows).
@@ -243,6 +257,17 @@ inline void draw_cell(Canvas& c, const std::string& text, int x, int text_y, boo
 inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool is_cursor,
                          const Theme& t, bool show_arrow = true) {
     const std::string eq_str = (eq_slot < 0) ? "--" : hex2(eq_slot);
+
+    // ⚠️ The cursor's background spans the value AND the arrow, but the two keep separate colours —
+    // which is why this is a fill of its own rather than a `draw_cursor_cell` of one string. The
+    // width is measured off the glyphs that will actually be drawn, on the same edges `RowCells`
+    // uses, so an EQ cell and a grid cell cannot end up different sizes.
+    if (is_cursor) {
+        const std::string span = show_arrow ? eq_str + ">" : eq_str;
+        const int         w = Canvas::text_width(span, CHAR_SPACING, FONT_SCALE) + 2 * CHAR_SPACING;
+        c.fill_rect(value_x - CHAR_SPACING, text_y - TEXT_PADDING, w, ROW_HEIGHT, t.rowCursor);
+    }
+
     const Argb value_color   = is_cursor      ? t.textCursor
                                : (eq_slot < 0) ? t.textEmpty
                                                : t.textValue;

@@ -67,7 +67,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 1: NAME ──────────────────────────────────────────────────────────────────────────────────
-    draw_name_row(c, x, rowY, nameX, valueX, s, currentRow, t);
+    draw_name_row(c, rowY, nameX, valueX, s, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 2: ROOT + DETUNE + TIC ───────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
 
     // ── 3: VOL + PAN (SF) / VOL + SLICE + PAN (sampler) ──────────────────────────────────────────
     if (sf) {
-        draw_dual_row(c, x, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
+        draw_dual_row(c, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
                       s.cursorRow, s.cursorColumn, currentRow, t);
     } else {
         draw_triple_row(c, x, rowY, nameX,
@@ -110,11 +110,9 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
         const std::string value = s.sfPresetName.empty() ? num : num + " " + s.sfPresetName;
 
         const bool onRow = (s.cursorRow == currentRow);
-        if (onRow) draw_row_bg(c, x, rowY, t);
         c.draw_text("PATCH", nameX, rowY + TEXT_PADDING, onRow ? t.textCursor : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
-        c.draw_text(value, valueX, rowY + TEXT_PADDING, onRow ? t.textCursor : t.textValue,
-                    CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, value, valueX, rowY + TEXT_PADDING, onRow, t.textValue, t);
         rowY += ROW_HEIGHT; currentRow++;
     }
 
@@ -122,15 +120,15 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── The DSP block: DRIVE+FILTER, CRUSH+FREQ, DWNSMPL+RES ─────────────────────────────────────
-    draw_dual_row(c, x, rowY, nameX, valueX, "DRIVE", hex2(ins.drive), "FILTER", ins.filterType,
+    draw_dual_row(c, rowY, nameX, valueX, "DRIVE", hex2(ins.drive), "FILTER", ins.filterType,
                   s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
-    draw_dual_row(c, x, rowY, nameX, valueX, "CRUSH", hex1(ins.crush), "FREQ", hex2(ins.filterCut),
+    draw_dual_row(c, rowY, nameX, valueX, "CRUSH", hex1(ins.crush), "FREQ", hex2(ins.filterCut),
                   s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
-    draw_dual_row(c, x, rowY, nameX, valueX, "DWNSMPL", hex1(ins.downsample), "RES",
+    draw_dual_row(c, rowY, nameX, valueX, "DWNSMPL", hex1(ins.downsample), "RES",
                   hex2(ins.filterRes), s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
@@ -143,31 +141,31 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
         // ends at EQ.
         const auto on = [&](int col) { return s.cursorRow == currentRow && s.cursorColumn == col; };
 
-        draw_parameter_row(c, x, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), on(0), on(1), t);
+        draw_parameter_row(c, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), on(0), on(1), t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_parameter_row(c, x, rowY, nameX, valueX, "DEL", hex2(ins.delaySend), on(0), on(1), t);
+        draw_parameter_row(c, rowY, nameX, valueX, "DEL", hex2(ins.delaySend), on(0), on(1), t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_eq_row(c, x, rowY, nameX, valueX, ins.eqSlot, s.cursorRow, s.cursorColumn, currentRow, t);
+        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot, s.cursorRow, s.cursorColumn, currentRow, t);
 
     } else {
-        draw_dual_row(c, x, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), "DEL",
+        draw_dual_row(c, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), "DEL",
                       hex2(ins.delaySend), s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_eq_row(c, x, rowY, nameX, valueX, ins.eqSlot, s.cursorRow, s.cursorColumn, currentRow, t);
+        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot, s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_dual_row(c, x, rowY, nameX, valueX, "LOOP", ins.loopMode, "START", hex2(ins.sampleStart),
+        draw_dual_row(c, rowY, nameX, valueX, "LOOP", ins.loopMode, "START", hex2(ins.sampleStart),
                       s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_dual_row(c, x, rowY, nameX, valueX, "LOOP ST", hex2(ins.loopStart), "END",
+        draw_dual_row(c, rowY, nameX, valueX, "LOOP ST", hex2(ins.loopStart), "END",
                       hex2(ins.sampleEnd), s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_dual_row(c, x, rowY, nameX, valueX, "LOOP END", hex2(ins.loopEnd), "REVERSE",
+        draw_dual_row(c, rowY, nameX, valueX, "LOOP END", hex2(ins.loopEnd), "REVERSE",
                       ins.reverse ? "on" : "off", s.cursorRow, s.cursorColumn, currentRow, t);
     }
 
@@ -196,21 +194,21 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 1: NAME ──────────────────────────────────────────────────────────────────────────────────
-    draw_name_row(c, x, rowY, nameX, valueX, s, currentRow, t);
+    draw_name_row(c, rowY, nameX, valueX, s, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 2: CHAN + BANK ───────────────────────────────────────────────────────────────────────────
     // CHAN is shown 1-16 and stored 0-15 — the MIDI convention. The +1 lives here and the −1 lives in
     // handle_input; nothing between them ever sees the display number. BANK is FOUR hex digits: it is
     // 14-bit, and it shares this row with one cell rather than two so the number has room to print.
-    draw_dual_row(c, x, rowY, nameX, valueX,
+    draw_dual_row(c, rowY, nameX, valueX,
                   "CHAN", dec2(clamp(ins.midiChannel, 0, 15) + 1),
                   "BANK", ins.midiBank < 0 ? "----" : hex4(ins.midiBank),
                   s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 3: PROG + LEN ────────────────────────────────────────────────────────────────────────────
-    draw_dual_row(c, x, rowY, nameX, valueX, "PROG", midi_opt(ins.midiProgram), "LEN",
+    draw_dual_row(c, rowY, nameX, valueX, "PROG", midi_opt(ins.midiProgram), "LEN",
                   hex2(ins.midiLen), s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
@@ -229,7 +227,7 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
     // ── 7: VOL + PAN ─────────────────────────────────────────────────────────────────────────────
     // The two that survive the cable: VOL scales the note-on velocity (there is no gain stage on our
     // side of it) and PAN leaves as CC 10. Everything else in the sampler's DSP block has no meaning.
-    draw_dual_row(c, x, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
+    draw_dual_row(c, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
                   s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
@@ -238,7 +236,7 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
     const int ccRows = std::min(songcore::MIDI_CC_SLOTS, static_cast<int>(ins.midiCC.size()));
     for (int i = 0; i < ccRows; ++i) {
         const songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(i)];
-        draw_dual_row(c, x, rowY, nameX, valueX, CC_LABELS[i], midi_opt(slot.cc), "VAL",
+        draw_dual_row(c, rowY, nameX, valueX, CC_LABELS[i], midi_opt(slot.cc), "VAL",
                       midi_opt(slot.value), s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
     }
@@ -246,31 +244,29 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
 
 // ─── Draw helpers ────────────────────────────────────────────────────────────────────────────────
 
-void InstrumentEditorModule::draw_row_bg(Canvas& c, int x, int y, const Theme& t) const {
-    c.fill_rect(x, y, WIDTH, ROW_HEIGHT, t.rowCursor);
-}
+// ⚠️ NO ROW BACKGROUND ANYWHERE ON THIS SCREEN. The cursor is the CELL it is on, as it is on every
+// grid; what says WHICH ROW is the label beside it, which takes `textCursor` while the cursor is
+// anywhere along its row. A label is only a CELL — only filled — where the cursor can land on it.
 
-void InstrumentEditorModule::draw_parameter_row(Canvas& c, int x, int y, int name_x, int value_x,
+void InstrumentEditorModule::draw_parameter_row(Canvas& c, int y, int name_x, int value_x,
                                                 const std::string& name, const std::string& value,
                                                 bool cursor_on_name, bool cursor_on_value,
                                                 const Theme& t) const {
     const int  textY = y + TEXT_PADDING;
     const bool onRow = cursor_on_name || cursor_on_value;
-    if (onRow) draw_row_bg(c, x, y, t);
 
-    c.draw_text(name, name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(value, value_x, textY, cursor_on_value ? t.textCursor : t.textValue, CHAR_SPACING,
-                FONT_SCALE);
+    draw_cursor_cell(c, name, name_x, textY, cursor_on_name,
+                     onRow ? t.textCursor : t.textParam, t);
+    draw_cursor_cell(c, value, value_x, textY, cursor_on_value, t.textValue, t);
 }
 
-void InstrumentEditorModule::draw_dual_row(Canvas& c, int x, int y, int name_x, int value_x,
+void InstrumentEditorModule::draw_dual_row(Canvas& c, int y, int name_x, int value_x,
                                            const std::string& n1, const std::string& v1,
                                            const std::string& n2, const std::string& v2,
                                            int cursor_row, int cursor_column, int this_row,
                                            const Theme& t) const {
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
-    if (onRow) draw_row_bg(c, x, y, t);
 
     const int name2X  = name_x + 230;
     const int value2X = value_x + 220;
@@ -278,10 +274,10 @@ void InstrumentEditorModule::draw_dual_row(Canvas& c, int x, int y, int name_x, 
     const bool c1 = onRow && cursor_column == 1;
     const bool c3 = onRow && cursor_column == 3;
 
-    c.draw_text(n1, name_x,  textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v1, value_x, textY, c1 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(n2, name2X,  textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v2, value2X, textY, c3 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n1, name_x, textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v1, value_x, textY, c1, t.textValue, t);
+    c.draw_text(n2, name2X, textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v2, value2X, textY, c3, t.textValue, t);
 }
 
 void InstrumentEditorModule::draw_triple_row(Canvas& c, int x, int y, int name_x,
@@ -292,18 +288,17 @@ void InstrumentEditorModule::draw_triple_row(Canvas& c, int x, int y, int name_x
                                              const Theme& t) const {
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
-    if (onRow) draw_row_bg(c, x, y, t);
 
     const bool c1 = onRow && cursor_column == 1;
     const bool c3 = onRow && cursor_column == 3;
     const bool c5 = onRow && cursor_column == 5;
 
     c.draw_text(n1, name_x,        textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v1, x + TRIPLE_V1, textY, c1 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v1, x + TRIPLE_V1, textY, c1, t.textValue, t);
     c.draw_text(n2, x + TRIPLE_N2, textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v2, x + TRIPLE_V2, textY, c3 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v2, x + TRIPLE_V2, textY, c3, t.textValue, t);
     c.draw_text(n3, x + TRIPLE_N3, textY, c5 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(v3, x + TRIPLE_V3, textY, c5 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v3, x + TRIPLE_V3, textY, c5, t.textValue, t);
 }
 
 void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int name_x, int value_x,
@@ -313,7 +308,6 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     (void)value_x;   // the TYPE row aligns to the TRIPLE grid, not the two-column grid
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
-    if (onRow) draw_row_bg(c, x, y, t);
 
     const InstrumentType type = ins.instrumentType;
 
@@ -332,8 +326,8 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     // TYPE's value sits under the ROOT/VOL column; the source LOAD and EDIT are the two buttons to its
     // right. LOAD and EDIT are BUTTONS — `textValue` even unselected, because a dim label would read as
     // a parameter name rather than as something you can press.
-    c.draw_text("TYPE",   name_x,          textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(typeText, x + TYPE_VALUE,  textY, c1 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("TYPE", name_x, textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, typeText, x + TYPE_VALUE, textY, c1, t.textValue, t);
 
     // ⚠️ Both buttons are drawn only where they DO something, and `instrument_row_layout.h` caps the
     // cursor at the same numbers — one table, so a button that is not drawn is also not reachable.
@@ -341,21 +335,18 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     // No EDIT on a SoundFont: there is no single waveform to edit.
     const int maxCol = instrument_name_row_max_column(type);
     if (maxCol >= 2) {
-        c.draw_text("LOAD", x + BTN_COL2, textY, c2 ? t.textCursor : t.textValue, CHAR_SPACING,
-                    FONT_SCALE);
+        draw_cursor_cell(c, "LOAD", x + BTN_COL2, textY, c2, t.textValue, t);
     }
     if (maxCol >= 3) {
-        c.draw_text("EDIT >", x + BTN_COL3, textY, c3 ? t.textCursor : t.textValue, CHAR_SPACING,
-                    FONT_SCALE);
+        draw_cursor_cell(c, "EDIT >", x + BTN_COL3, textY, c3, t.textValue, t);
     }
 }
 
-void InstrumentEditorModule::draw_name_row(Canvas& c, int x, int y, int name_x, int value_x,
+void InstrumentEditorModule::draw_name_row(Canvas& c, int y, int name_x, int value_x,
                                            const InstrumentEditorState& s, int this_row,
                                            const Theme& t) const {
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (s.cursorRow == this_row);
-    if (onRow) draw_row_bg(c, x, y, t);
 
     c.draw_text("NAME", name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
 
@@ -365,7 +356,7 @@ void InstrumentEditorModule::draw_name_row(Canvas& c, int x, int y, int name_x, 
     const std::string display = songcore::instrument_has_default_name(s.instrument)
                                     ? "______"
                                     : s.instrument.name;
-    c.draw_text(display, value_x, textY, onRow ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, display, value_x, textY, onRow, t.textValue, t);
 }
 
 void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, int name_x,
@@ -376,24 +367,21 @@ void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, in
     // third value nothing would look at.
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
-    if (onRow) draw_row_bg(c, x, y, t);
 
     // The INSTRUMENT PRESET row: SAVE (col 2) and LOAD (col 3) a .pti. Named "INST PRESET" so it is not
     // confused with the source LOAD on the TYPE row above, nor the SoundFont PATCH selector below it.
     // SAVE and LOAD line up under the TYPE row's LOAD and EDIT (BTN_COL2 / BTN_COL3).
-    c.draw_text("INST PRESET", name_x, textY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("SAVE", x + BTN_COL2, textY,
-                (onRow && cursor_column == 2) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("LOAD", x + BTN_COL3, textY,
-                (onRow && cursor_column == 3) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("INST PRESET", name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING,
+                FONT_SCALE);
+    draw_cursor_cell(c, "SAVE", x + BTN_COL2, textY, onRow && cursor_column == 2, t.textValue, t);
+    draw_cursor_cell(c, "LOAD", x + BTN_COL3, textY, onRow && cursor_column == 3, t.textValue, t);
 }
 
-void InstrumentEditorModule::draw_eq_row(Canvas& c, int x, int y, int name_x, int value_x, int eq_slot,
+void InstrumentEditorModule::draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot,
                                          int cursor_row, int cursor_column, int this_row,
                                          const Theme& t) const {
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
-    if (onRow) draw_row_bg(c, x, y, t);
 
     c.draw_text("EQ", name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
     // The shared painter, so this cell cannot drift from the pool's or the mixer's: "--" when

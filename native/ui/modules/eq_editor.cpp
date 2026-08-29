@@ -404,10 +404,10 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
         const int  rowY     = edY + ROW_H + pi * ROW_H;
         const bool isParSel = (pi == curParam);
 
-        // The cursor highlights the whole ROW — all three bands — because the D-pad's LEFT/RIGHT moves
-        // along it, and the row is what you are about to sweep.
-        if (isParSel) c.fill_rect(x, rowY, WIDTH, ROW_H, t.rowCursor);
-
+        // The cursor is ONE cell — the band × parameter it is on. The parameter label says which row
+        // and the band header above says which column, which is the pair every grid uses; the row the
+        // D-pad sweeps along is still readable, because the two bands the cursor is not on print
+        // `textEmpty` while the whole cursor row's label prints `textCursor`.
         c.draw_text(kParamLabels[pi], x + 6, rowY + 3, isParSel ? t.textCursor : t.textEmpty,
                     CHAR_SPACING, FONT_SCALE);
 
@@ -434,7 +434,7 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
                     }
                 }
             }
-            c.draw_text(text, bandX[bi] + 6, rowY + 3, col, CHAR_SPACING, FONT_SCALE);
+            draw_cursor_cell(c, text, bandX[bi] + 6, rowY + 3, isCursor, col, t);
         }
     }
 }
