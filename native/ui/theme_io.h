@@ -117,7 +117,7 @@ inline std::string serialize_theme(const Theme& t) {
     color("meterHigh",       t.meterHigh,       d.meterHigh);
     color("meterBorder",     t.meterBorder,     d.meterBorder);   // no editor row; still a field
 
-    // ⚠️ THE FIVE BORROWED KEYS ARE MEASURED AGAINST A DIFFERENT YARDSTICK — `derive_borrowed_colors`
+    // ⚠️ THE SIX BORROWED KEYS ARE MEASURED AGAINST A DIFFERENT YARDSTICK — `derive_borrowed_colors`
     // run on THIS theme, not `Theme{}`. Their absence from a file does not mean "CLASSIC's value", it
     // means "the fields those screens used to borrow", which is a function of the palette in hand.
     // `parse_theme` fills them in that way, and omitting them on the same terms is what makes the pair
@@ -133,6 +133,7 @@ inline std::string serialize_theme(const Theme& t) {
     // ⚠️ LAST, AND AFTER THE EQ FOUR — this order IS the file format, and appending here is what keeps
     // every byte a previous build wrote in the same place it was.
     color("textSelection", t.textSelection, e.textSelection);
+    color("textPlayhead",  t.textPlayhead,  e.textPlayhead);
 
     if (t.visualizerType != d.visualizerType)
         w.field_string("visualizerType", visualizer_serial_name(t.visualizerType));
@@ -188,7 +189,7 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     color("meterHigh",       t.meterHigh);
     color("meterBorder",     t.meterBorder);
 
-    // ⚠️ The five borrowed keys are DERIVED FIRST and then overwritten by whatever the file names, so a
+    // ⚠️ The six borrowed keys are DERIVED FIRST and then overwritten by whatever the file names, so a
     // theme written before they existed keeps the exact EQ screen and the exact selection colour it has
     // always had. Derived here rather than in the struct's field defaults because the source fields are
     // the ones just read: a constant default would repaint every existing `.ptt`'s spectrum in CLASSIC's
@@ -199,6 +200,7 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     color("eqBorder", t.eqBorder);
     color("eqTxt",    t.eqTxt);
     color("textSelection", t.textSelection);
+    color("textPlayhead",  t.textPlayhead);
 
     if (const auto it = j.find("visualizerType"); it != j.end() && it->is_string())
         t.visualizerType = visualizer_from_serial_name(it->get<std::string>());

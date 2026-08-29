@@ -115,7 +115,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const bool queueLit    = s.liveMode && q.pending() && blink_on(s.blinkPhaseMs, q.immediate);
 
         if (queueLit && q.stop && playingHere)
-            c.draw_text("_", markerX, textY, playhead_color(t), CHAR_SPACING, FONT_SCALE);
+            c.draw_text("_", markerX, textY, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
         else if (playingHere || (queueLit && !q.stop && q.row == absolute_row))
             draw_playhead(c, markerX, textY, t);
     }

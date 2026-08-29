@@ -28,7 +28,11 @@ struct Theme {
     Argb background   = 0xFF0A0A0A;  // module fill + default row
     Argb rowEvery4th  = 0xFF151515;  // beat-accent rows (every 4th)
     Argb rowCursor    = 0xFF333333;  // cursor row highlight
-    Argb rowPlayback  = 0xFF004400;  // current playback row
+    // ⚠️ NO EDITOR ROW, AND IT PAINTS NOTHING — it is the SEED for `textPlayhead` below, and that is
+    // its whole job since the full-row playback highlight was deleted. A `.ptt` written before TXT PLAY
+    // existed carries only this, and `derive_borrowed_colors` is what turns it back into the marker
+    // colour that file has always drawn.
+    Argb rowPlayback  = 0xFF004400;  // the pre-TXT PLAY seed
     Argb rowSelection = 0xFF1A3A1A;  // selection region
 
     // ── Text roles ───────────────────────────────────────────────────────────────────────────────
@@ -42,6 +46,15 @@ struct Theme {
     // below, and that function is the authority. The literal here is only what a bare `Theme t;`
     // gets, and it is CLASSIC's own `vizWave`.
     Argb textSelection = 0xFF00FF00;  // = vizWave — a selected cell's ink
+
+    // ⚠️ NOT AN INDEPENDENT DEFAULT EITHER — `derive_borrowed_colors` lifts it out of `rowPlayback`,
+    // which is what keeps a `.ptt` that never named this key drawing the marker it has always drawn.
+    // The literal is CLASSIC's own seed lifted: 0xFF004400 → 0xFF00E000.
+    //
+    // ⚠️ THE LIFT IS THE DEFAULT AND NOT THE DRAW. Once the key is in a file, the value is used AS
+    // TYPED — a marker the same colour as ROW SELECT is now a marker that vanishes into a selection,
+    // which is what a colour row is supposed to let someone do.
+    Argb textPlayhead = 0xFF00E000;  // the `>` playback marker's ink
 
     // ── Visualizer (oscilloscope bar) ────────────────────────────────────────────────────────────
     Argb vizBackground = 0xFF0A0A0A;
@@ -83,9 +96,34 @@ inline Argb darken(Argb c, float factor) {
     return (c & 0xFF000000u) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
+
+/**
+ * ROW PLAY's value, lifted to something readable as INK — the default `textPlayhead` takes when a
+ * `.ptt` does not name TXT PLAY.
+ *
+ * ⚠️ IT EXISTS BECAUSE THE SEED IS A BACKGROUND COLOUR. Every value `rowPlayback` has ever held was
+ * chosen to sit BEHIND text on a dark screen (CLASSIC's is 0xFF004400), and ink that dark on
+ * `background` cannot be read. So the hue is the theme's and the brightness is not: scale all three
+ * channels until the strongest reaches `TARGET`. That keeps green green, amber amber and blue blue
+ * across the four built-ins and across anything a user typed into an older file.
+ *
+ * A seed already that bright scales by ~1 and is left alone; pure black has no hue to keep, so it
+ * falls back to the cursor colour rather than staying invisible.
+ *
+ * ⚠️ THIS RUNS ONCE, AS A DEFAULT — never on the value the user typed into TXT PLAY. Lifting on every
+ * draw is what made a dark marker unreachable and made two rows set to one colour draw as two.
+ */
+inline Argb lift_seed_to_ink(Argb seed, Argb fallback) {
+    constexpr int TARGET = 0xE0;
+    const int r = (seed >> 16) & 0xFF, g = (seed >> 8) & 0xFF, b = seed & 0xFF;
+    const int peak = (r > g ? r : g) > b ? (r > g ? r : g) : b;
+    if (peak == 0) return fallback;
+    if (peak >= TARGET) return 0xFF000000u | (seed & 0x00FFFFFFu);
+    return darken(seed, static_cast<float>(TARGET) / static_cast<float>(peak));
+}
 // ─── The colours a theme has not named ───────────────────────────────────────────────────────────
 //
-// ⚠️ THESE FIVE KEYS ARE THE ONLY ONES WHOSE DEFAULT IS A FUNCTION OF THE THEME, and it has to be:
+// ⚠️ THESE SIX KEYS ARE THE ONLY ONES WHOSE DEFAULT IS A FUNCTION OF THE THEME, and it has to be:
 // their default is *what the screen drew before they existed*, which was five other fields of the
 // same palette. A constant default would restyle every `.ptt` already on an SD card the moment it
 // loaded into a build that has these keys — the EQ fill of a light theme would jump from that theme's
@@ -93,7 +131,7 @@ inline Argb darken(Argb c, float factor) {
 // CLASSIC's green.
 //
 // So this one function is the authority, and BOTH ends read it: `parse_theme` fills in whichever of
-// the five a file does not carry, and `serialize_theme` omits whichever still equals it. That is the
+// the six a file does not carry, and `serialize_theme` omits whichever still equals it. That is the
 // same encodeDefaults=false bargain the other seventeen colours get, with the yardstick derived per
 // theme instead of read off `Theme{}` — and it keeps a saved theme's bytes identical to what an older
 // build wrote until the user actually dials one of these rows.
@@ -110,6 +148,7 @@ inline void derive_borrowed_colors(Theme& t) {
     t.eqTxt    = t.vizCenterLine;
 
     t.textSelection = t.vizWave;
+    t.textPlayhead  = lift_seed_to_ink(t.rowPlayback, t.textCursor);
 }
 
 // ─── The editable colours ────────────────────────────────────────────────────────────────────────
@@ -120,15 +159,18 @@ inline void derive_borrowed_colors(Theme& t) {
 // a bug waiting for someone to add a colour. Three consumers read it (the module draws it, the
 // dispatcher's colour nudge indexes it, and the ptinput golden sweeps it) and none may re-derive it.
 //
-// ⚠️ TWENTY-TWO ROWS, TWENTY-THREE COLOURS — `meterBorder` HAS NO ROW. It is a field on the theme, it
-// is serialized into a `.ptt`, it is read by the mixer's meter frames, and there is simply no way to
-// edit it in the UI. Left that way rather than "fixed": it is the one colour whose row would sit in
-// the golden with nothing on either side of it to say what it did.
+// ⚠️ TWENTY-TWO ROWS, TWENTY-FOUR COLOURS — `meterBorder` and `rowPlayback` HAVE NO ROW. Both are
+// fields on the theme and both are serialized into a `.ptt`: the first is read by the mixer's meter
+// frames and has simply never had a way to edit it; the second is the seed TXT PLAY defaults from,
+// and a row for it would be a second control over one colour, which is how one of the two becomes a
+// lie.
 //
-// ⚠️ A NEW ROW IS APPENDED, NEVER INSERTED, even when it would read better beside its neighbours. A
-// row's position IS its number to the dispatcher's colour nudge, and the golden records that number
-// in every recorded line — so inserting TXT SELECT next to TXT EMPTY would silently re-point every
-// swept line below it at a different colour.
+// ⚠️ THE ROW ORDER IS GROUPED BY PREFIX and the groups are what a reader scans by, so a new colour
+// joins its group rather than landing at the end. ⚠️⚠️ BUT THE POSITION IS A NUMBER, NOT A LABEL:
+// the dispatcher's colour nudge indexes this table and ptinput's THEME sweep records the index in
+// every line, so moving a row re-points every swept line at or below it. The recorded lines are then
+// a PERMUTATION of the ones already there — the same beds, the same nudges, re-labelled — and never a
+// re-recording, which would certify whatever the table happens to say today.
 //
 // ⚠️ AND IT IS A POINTER-TO-MEMBER, NOT A GET/SET PAIR. Kotlin's row carries two lambdas — `get` and a
 // copy-based `set` — which are two statements of the same fact and can therefore disagree; that is
@@ -146,13 +188,14 @@ inline const std::vector<ThemeColorRow>& theme_color_rows() {
         {"BACKGROUND", &Theme::background},
         {"ROW 4TH",    &Theme::rowEvery4th},
         {"ROW CURSOR", &Theme::rowCursor},
-        {"ROW PLAY",   &Theme::rowPlayback},
         {"ROW SELECT", &Theme::rowSelection},
         {"TXT TITLE",  &Theme::textTitle},
         {"TXT PARAM",  &Theme::textParam},
         {"TXT VALUE",  &Theme::textValue},
         {"TXT CURSOR", &Theme::textCursor},
         {"TXT EMPTY",  &Theme::textEmpty},
+        {"TXT SELECT", &Theme::textSelection},
+        {"TXT PLAY",   &Theme::textPlayhead},
         {"VIZ BG",     &Theme::vizBackground},
         {"VIZ LINE",   &Theme::vizCenterLine},
         {"VIZ WAVE",   &Theme::vizWave},
@@ -164,7 +207,6 @@ inline const std::vector<ThemeColorRow>& theme_color_rows() {
         {"EQ FILL",    &Theme::eqFill},
         {"EQ BORDER",  &Theme::eqBorder},
         {"EQ TXT",     &Theme::eqTxt},
-        {"TXT SELECT", &Theme::textSelection},
     };
     return rows;
 }
@@ -190,7 +232,7 @@ inline Theme theme_amber() {
     t.meterLow      = 0xFFCC8800;
     t.meterMid      = 0xFFCC4400;
     t.meterHigh     = 0xFFCC0000;
-    derive_borrowed_colors(t);   // AFTER the palette — it reads four of the fields set above
+    derive_borrowed_colors(t);   // AFTER the palette — it reads five of the fields set above
     return t;
 }
 

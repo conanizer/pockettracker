@@ -136,33 +136,15 @@ inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
 // ─── The playback marker ─────────────────────────────────────────────────────────────────────────
 
 /**
- * The colour of the `>` marker, derived from `rowPlayback` — the key that used to paint the whole
- * row, kept by name so every `.ptt` on a user's card still loads and still controls this.
- *
- * ⚠️ IT CANNOT BE USED RAW. Every value that key has ever held was chosen to sit BEHIND text on a
- * dark screen (CLASSIC's is 0xFF004400), and ink that dark on `background` is not readable. So the
- * hue is the theme's and the brightness is not: scale all three channels until the strongest reaches
- * `TARGET`. That keeps green green, amber amber and blue blue across the four built-ins and across
- * anything a user has typed, while guaranteeing one legible glyph.
- *
- * A palette whose playback colour is already bright scales by ~1 and is left alone; pure black has
- * no hue to keep, so it falls back to the cursor colour rather than staying invisible.
- */
-inline Argb playhead_color(const Theme& t) {
-    constexpr int TARGET = 0xE0;
-    const int r = (t.rowPlayback >> 16) & 0xFF, g = (t.rowPlayback >> 8) & 0xFF, b = t.rowPlayback & 0xFF;
-    const int peak = (r > g ? r : g) > b ? (r > g ? r : g) : b;
-    if (peak == 0) return t.textCursor;
-    if (peak >= TARGET) return 0xFF000000u | (t.rowPlayback & 0x00FFFFFFu);
-    return darken(t.rowPlayback, static_cast<float>(TARGET) / static_cast<float>(peak));
-}
-
-/**
  * LGPT's and M8's playhead: a `>` in the gap ahead of the cell, one per track. It is one glyph wide
  * (CHAR_W), so `x` is the marker's own column and never the cell's.
+ *
+ * ⚠️ THE COLOUR IS `textPlayhead` AS TYPED. The lift that makes an old theme's ROW PLAY readable as
+ * ink is a DEFAULT (`derive_borrowed_colors`), not a step in the drawing — so TXT PLAY set to the
+ * selection colour really does hide the marker inside a selection.
  */
 inline void draw_playhead(Canvas& c, int x, int text_y, const Theme& t) {
-    c.draw_text(">", x, text_y, playhead_color(t), CHAR_SPACING, FONT_SCALE);
+    c.draw_text(">", x, text_y, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
 }
 
 /**

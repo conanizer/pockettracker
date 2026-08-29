@@ -31,7 +31,7 @@ namespace pt::ui {
 struct ThemeEditorState {
     bool isOpen = false;
 
-    /** 0 = the THEME row; 1..17 = a colour row (`theme_color_rows()[cursorRow - 1]`). */
+    /** 0 = the THEME row; 1..`max_row()` = a colour row (`theme_color_rows()[cursorRow - 1]`). */
     int cursorRow = 0;
 
     /** On the THEME row: 0 = the name, 1 = SAVE, 2 = LOAD. On a colour row: 0 = R, 1 = G, 2 = B. */
