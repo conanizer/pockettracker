@@ -38,8 +38,8 @@ android {
         // (changelogs/<versionCode>.txt) both need a literal value, and it outranks any
         // commit-count build ever sideloaded.
         // versionName is bumped by hand per release; tag the matching release in git.
-        versionCode = 960
-        versionName = "0.9.6"
+        versionCode = 970
+        versionName = "0.9.7"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")

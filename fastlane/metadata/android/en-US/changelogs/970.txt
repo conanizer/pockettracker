@@ -1,0 +1,9 @@
+Every track plays its own column, tables get three playheads, and LIVE mode.
+
+• The eight tracks no longer wait for each other; a > marks where each one is
+• The cursor is the cell you are on, not the whole row, everywhere
+• A table's three FX columns run on their own clocks — TIC and HOP FF per column
+• LIVE mode — B+LEFT/RIGHT on SONG makes the grid a scene launcher
+• A+LEFT/RIGHT is the small edit step now, A+UP/DOWN the large one
+• EQ colours, the selection and the playback marker are theme rows now
+• A phone with a clip-on pad puts the tracker in the top half of the screen

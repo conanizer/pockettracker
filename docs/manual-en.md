@@ -1,7 +1,7 @@
 # PocketTracker User Manual
 
 **Manual revision:** 1.3  
-**Covers:** PocketTracker 0.9.6
+**Covers:** PocketTracker 0.9.7
 
 ---
 

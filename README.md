@@ -12,7 +12,7 @@ One codebase and one audio engine across Android, Linux handhelds, Linux desktop
 
 > **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
-**Status:** 0.9.6 — public beta
+**Status:** 0.9.7 — public beta
 
 **License:** [GPL-3.0](LICENSE)
 
