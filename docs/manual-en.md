@@ -1362,7 +1362,7 @@ A theme file saved before these rows existed loads with them set to what the scr
 |---|---|
 | CLASSIC | Dark background, green wave, cyan headers, yellow cursor — the default look |
 | AMBER | Warm amber/orange tones, reminiscent of an old CRT monitor |
-| BLUE | Cool blue tones with bright cyan accents |
+| BLUE | Cool blue tones throughout, from deep navy rows to a pale sky-blue header |
 | MONO | Grayscale — pure black/white/grey, no color |
 
 ---
