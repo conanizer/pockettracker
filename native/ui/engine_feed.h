@@ -264,25 +264,33 @@ private:
 
         const int id = state.currentInstrument;
         const songcore::Instrument& ins = state.project->instruments[static_cast<size_t>(id)];
-        if (ins.instrumentType != songcore::InstrumentType::SOUNDFONT) {
+        const bool sf = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
+
+        // The PATH is part of the key, not just the bank and preset: load a DIFFERENT .sf2 into this
+        // slot that happens to sit at the same bank/preset and every displayed field changes while the
+        // other three key fields do not.
+        //
+        // ⚠️ The TYPE is part of it too, and the "---" a non-SoundFont slot shows is a cached answer
+        // like any other. Write that answer outside the key and the key still names the last SoundFont
+        // while the three displayed fields no longer match it — so walking back to that SoundFont is a
+        // HIT, nothing is recomputed, and its PATCH row keeps the empty placeholder.
+        const std::string& path = ins.soundfontPath.value_or(std::string());
+        if (id == sfCachedId_ && sf == sfCachedIsSf_ && ins.sfBank == sfCachedBank_ &&
+            ins.sfPreset == sfCachedPreset_ && path == sfCachedPath_) {
+            return;   // nothing the answer depends on has moved
+        }
+        sfCachedId_     = id;
+        sfCachedIsSf_   = sf;
+        sfCachedBank_   = ins.sfBank;
+        sfCachedPreset_ = ins.sfPreset;
+        sfCachedPath_   = path;
+
+        if (!sf) {
             state.sfPresetName  = "---";
             state.sfPresetCount = 0;
             state.sfPresetIndex = 0;
             return;
         }
-
-        // The PATH is part of the key, not just the bank and preset: load a DIFFERENT .sf2 into this
-        // slot that happens to sit at the same bank/preset and every displayed field changes while the
-        // other three key fields do not.
-        const std::string& path = ins.soundfontPath.value_or(std::string());
-        if (id == sfCachedId_ && ins.sfBank == sfCachedBank_ && ins.sfPreset == sfCachedPreset_ &&
-            path == sfCachedPath_) {
-            return;   // nothing the answer depends on has moved
-        }
-        sfCachedId_     = id;
-        sfCachedBank_   = ins.sfBank;
-        sfCachedPreset_ = ins.sfPreset;
-        sfCachedPath_   = path;
 
         state.sfPresetCount = host.sf_preset_count(id);
         state.sfPresetIndex = host.sf_preset_index(id);
@@ -393,6 +401,7 @@ private:
     int     wfSource_ = -1, wfTotal_ = -1, wfInst_ = -1;
 
     int         sfCachedId_ = -1, sfCachedBank_ = -1, sfCachedPreset_ = -1;
+    bool        sfCachedIsSf_ = false;
     std::string sfCachedPath_{};
 
     /** Kotlin's `delay(60)` between peak reads. See poll_peaks — it is a contract, not a throttle. */
