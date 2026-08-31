@@ -377,6 +377,7 @@ add_library(pt-ui STATIC
         ui/modules/file_browser.cpp
         ui/modules/fx_helper_overlay.cpp
         ui/modules/groove_editor.cpp
+        ui/modules/help_panel.cpp
         ui/modules/instrument_editor.cpp
         ui/modules/instrument_pool.cpp
         ui/modules/midi_settings.cpp

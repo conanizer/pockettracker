@@ -16,19 +16,6 @@ namespace {
 constexpr int STATUS_MAX_CHARS = 34;
 
 /**
- * Does a FULL-SCREEN module have the frame — i.e. is none of the furniture drawn this frame?
- *
- * Written once because two questions read it: `draw`'s early return, and `has_falling_meters`, which
- * must not claim the oscilloscope strip is animating on a screen the strip is not on. Two copies of
- * this list would be one full-screen module away from disagreeing, and the disagreement would show up
- * as a redraw loop pinned at 60 Hz — nothing on screen, and no test, would ever say so.
- */
-bool full_screen_module(const AppState& s) {
-    return s.currentScreen == ScreenType::FILE_BROWSER ||
-           (s.currentScreen == ScreenType::SAMPLE_EDITOR && !s.eq.isOpen);
-}
-
-/**
  * Is an overlay standing in the editor's place — i.e. is `currentScreen`'s own module NOT drawn?
  *
  * ⚠️ The overlays here do not change `currentScreen`, which is exactly what makes this worth naming:
@@ -82,8 +69,14 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     const songcore::Project& p       = *s.project;
     const int                moduleX = SIDE_SPACER;
 
-    // ── The oscilloscope strip ───────────────────────────────────────────────────────────────────
-    {
+    // ── The oscilloscope strip — or the HELP PANEL standing in for it ────────────────────────────
+    //
+    // Help takes the whole strip, so the scope is not drawn under it and neither is the status line
+    // or the selection/clipboard readout below. That is the one place the compact help can go: three
+    // 21px lines is exactly 63 of the strip's 70, and there is no corner left over.
+    if (s.helpOpen) {
+        helpPanel_.draw(c, moduleX, SCREEN_SPACER, help_topic(s), t);
+    } else {
         OscilloscopeState os;
         os.waveform = s.waveform;
         os.theme    = t;
@@ -358,8 +351,14 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     // Both sit over the scope strip so every screen can report: the status message top-LEFT, the
     // selection scope + clipboard contents top-RIGHT. See each method — and the bug that four sessions
     // of this port shipped without EITHER (the readouts were computed and drawn nowhere).
-    draw_status_line(c, s);
-    draw_selection_clipboard(c, s);
+    //
+    // ⚠️ Both stand down while HELP is up, because help IS the strip they are drawn over — three
+    // lines of text fill it, and either readout would land on top of a sentence. Nothing is lost: any
+    // press puts help away, and a status message outlives the press that raised it.
+    if (!s.helpOpen) {
+        draw_status_line(c, s);
+        draw_selection_clipboard(c, s);
+    }
 
     // ── The overlays ─────────────────────────────────────────────────────────────────────────────
     // LAST, over everything, including the right bar and the status line — an overlay is modal, and
@@ -391,9 +390,13 @@ bool TrackerLayout::has_falling_meters(const AppState& s) const {
     // inside the draw, so the gate has to hold the frames open for them. Two screens take the whole
     // frame and the strip is not on them, and the four other visualizer modes never touch the bar
     // state at all — either way nothing would ever bring the answer back to false.
+    //
+    // ⚠️ `!s.helpOpen` is the THIRD term and belongs to that same "the strip is not being drawn"
+    // family: help takes the strip, the bars stop falling because nothing calls into them, and a gate
+    // that did not ask would pin the loop at 60 Hz over a static panel for as long as help stayed up.
     const VisualizerType vt = s.theme.visualizerType;
     if (vt != VisualizerType::SPECTRUM && vt != VisualizerType::SPECTRUM_PEAKS) return false;
-    return !full_screen_module(s) && !oscilloscope_.bars_at_rest();
+    return !full_screen_module(s) && !s.helpOpen && !oscilloscope_.bars_at_rest();
 }
 
 // ─── The global status line ──────────────────────────────────────────────────────────────────────

@@ -82,6 +82,19 @@ struct MapperState {
      * revert and never has to guess at release order.
      */
     bool rComboArmed = false;
+
+    /**
+     * ⚠️ The DEFERRED-SELECT latch — HELP. Set when SELECT goes down with nothing else held, and
+     * CLEARED by the press of any other button, so the handler fires on the release only if SELECT was
+     * alone from the moment it went down to the moment it came up.
+     *
+     * The fourth of the same family, and the one with the sharpest reason: on the FILE BROWSER, SELECT
+     * is PURELY a modifier — its press is what arms SELECT+A (rename), SELECT+B (delete) and SELECT+R
+     * (new folder). Fire help on the press and every one of those three flashes a help panel on its
+     * way to a dialog. Deferring to the release, and cancelling on any other press, makes "SELECT
+     * alone" and "SELECT as a modifier" two gestures that cannot be confused.
+     */
+    bool selectPressedAlone = false;
 };
 
 /**
@@ -147,7 +160,32 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                 d.on_button_b();
             }
         }
+        if (e.button == Button::SELECT) {
+            // The DEFERRED single-SELECT: it went down alone and nothing else was pressed while it was
+            // held, so this is a bare SELECT — help, or the keyboard's abort. Same shape as the two
+            // latches above; the difference is that ANY other press clears this one, not just a combo
+            // the matrix recognises, because SELECT+DPAD is unclaimed and must not read as a tap.
+            if (ms.selectPressedAlone) {
+                ms.selectPressedAlone = false;
+                d.on_select();
+            }
+        }
         return;
+    }
+
+    // ── HELP: any press that is not SELECT puts the panel away and cancels a pending tap ──────────
+    //
+    // ⚠️ ABOVE EVERY ARM, and it consumes nothing — `on_help_dismiss` clears a flag and returns, so
+    // the press falls straight through to whatever it was going to do anyway. That is what makes help
+    // safe to bolt onto the matrix: it cannot swallow a gesture, cannot reorder one, and cannot make
+    // an arm below behave differently from the way it did before help existed.
+    //
+    // ⚠️ SELECT IS EXCLUDED, and it has to be: its own press is what ARMS the tap, and dismissing here
+    // would close the panel a few milliseconds before the release re-opened it — a toggle that never
+    // appears to turn off.
+    if (e.button != Button::SELECT) {
+        ms.selectPressedAlone = false;   // SELECT is being used as a modifier, not tapped
+        d.on_help_dismiss();
     }
 
     // Silence a ringing audition on any "plain" press. START is exempt (it starts playback), and so is
@@ -315,7 +353,14 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     // ⚠️ SELECT and START are checked EXPLICITLY, ahead of the "no modifiers" guard below, and the
     // reason is easy to miss: pressing SELECT sets `m.select` — its own press would be swallowed by a
     // guard that rejects any modifier. Kotlin carries the same explicit check for the same reason.
-    if (e.button == Button::SELECT && !m.l && !m.r && !m.a && !m.b) { d.on_select(); return; }
+    //
+    // ⚠️ SELECT ARMS AND DOES NOT ACT. `on_select` fires on the RELEASE (the latch above), because on
+    // the file browser SELECT is purely the modifier of three chords and acting on its press would
+    // flash help on the way into every rename, delete and new-folder.
+    if (e.button == Button::SELECT && !m.l && !m.r && !m.a && !m.b) {
+        ms.selectPressedAlone = true;
+        return;
+    }
     if (e.button == Button::START && !m.l && !m.r && !m.a && !m.b && !m.select) { d.on_start(); return; }
 
     // ── The D-pad, unmodified: move the cursor (or drag a selection's edge) ──────────────────────

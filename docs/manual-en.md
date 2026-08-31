@@ -225,7 +225,7 @@ The navigation map always shows where you are.
 | B | Cancel / Delete |
 | L | L modifier |
 | R | R modifier |
-| SELECT | File-management modifier in the file browser; cancels the keyboard overlay |
+| SELECT | Show help for the cell under the cursor; file-management modifier in the file browser; cancels the keyboard overlay |
 | START | Play / Stop |
 
 #### Keyboard (Bluetooth keyboard or testing on PC)
@@ -251,11 +251,17 @@ Both keyboard and gamepad work simultaneously.
 | D-pad | Move cursor |
 | A | Insert value (on an empty cell, inserts the last-used value) |
 | B | Delete value / cancel |
-| SELECT | File-management modifier in the file browser; cancels the keyboard overlay |
+| SELECT | Show help for the cell under the cursor; file-management modifier in the file browser; cancels the keyboard overlay |
 | START | Play / Stop |
 
 > [!TIP]
 > Pressing **A** on an empty note cell re-inserts the last note you placed — same pitch, same instrument. This is the fastest way to place a drum pattern: move to the row, press A, move on.
+
+#### Help on SELECT
+
+Tap **SELECT** and the visualizer strip at the top of the screen becomes three lines describing the cell the cursor is on. Any other button puts it away.
+
+The panel uses the theme's **VIZ BG** and **VIZ WAVE** colours. It is not available on the file browser or the sample editor — both of those use the whole screen and have no visualizer strip.
 
 ---
 

@@ -3027,13 +3027,14 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
-    // ⚠️ BARE SELECT ANSWERS FOR THE KEYBOARD AND FOR NOTHING ELSE, and the emptiness IS the design: the
-    // button is RESERVED for the help overlay, so anything bound here is a gesture that has to be taken
-    // back off users the day help lands. Nothing is missing because of it — every action a cell could
-    // want from SELECT is already on the A or the B sitting on that same cell.
+    // ⚠️ BARE SELECT IS HELP, AND THE KEYBOARD'S ABORT. That is the whole list, and the emptiness
+    // everywhere else was kept for years to make this possible: every action a cell could want from
+    // SELECT is already on the A or the B sitting on that same cell, so nothing had to be taken back
+    // off users when help landed.
     //
-    // ⚠️ THE THREE BROWSER CHORDS ARE A DIFFERENT GESTURE and are untouched by that: SELECT does nothing
-    // ALONE on a browser, because it is a MODIFIER there and its press is only what arms SELECT+A/B/R.
+    // ⚠️ **IT ARRIVES ON THE RELEASE, NOT THE PRESS** (ui/button_mapper.h), and that is what keeps the
+    // three browser chords whole: SELECT is a MODIFIER there, so its press only arms SELECT+A/B/R and
+    // any other button going down during it cancels this handler outright.
     //
     // ⚠️ NOT TO BE CONFUSED WITH THE A-DEFERRAL. `defer_a_to_release` holds A on the cells that open a
     // sub-screen so that a held A+DPAD can still dial the value underneath. That mechanism is required,
@@ -3044,6 +3045,23 @@ void InputDispatcher::on_select() {
     // SELECT that duplicates nothing: B backspaces here, so without it the only way to abandon a rename
     // is to walk the cursor onto ABORT and press A.
     if (qwerty_open()) { qwerty_cancel(); return; }
+
+    // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
+    //
+    // ⚠️ Gated on there BEING a strip to draw it in. The compact panel takes the oscilloscope's 620×70
+    // and nothing else, and the two full-screen modules have neither — a toggle there would set a flag
+    // no frame reads, and the next screen you walked onto would come up holding help you never asked
+    // for. (`full_screen_module` is in ui/app_state.h, shared with the two questions layout.cpp asks.)
+    if (full_screen_module(s_)) return;
+    s_.helpOpen = !s_.helpOpen;
+}
+
+void InputDispatcher::on_help_dismiss() {
+    // ⚠️ **THE PRESS IS NOT CONSUMED — it closes help and then does its normal job**, which is the
+    // whole reason help is not an `Overlay`. It covers the strip and never the editor, so there is
+    // nothing under it to protect from a stray press: closing it and swallowing the press would cost a
+    // button on every gesture and buy nothing.
+    s_.helpOpen = false;
 }
 
 void InputDispatcher::on_stop_preview() {

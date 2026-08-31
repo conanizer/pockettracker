@@ -311,12 +311,22 @@ class InputDispatcher {
     void on_button_b();
     void on_button_a();
     /**
-     * Bare SELECT is the KEYBOARD's abort and nothing else. ⚠️ The emptiness everywhere else is
-     * deliberate: the button is RESERVED for the help overlay, and every action a cell could want from
-     * it is already on the A or B sitting on that same cell. SELECT+A/B/R on the browser is a separate
-     * gesture and is unaffected.
+     * Bare SELECT toggles the compact HELP panel, and aborts the keyboard. Nothing else is bound to
+     * it, on any screen.
+     *
+     * ⚠️ **Called on the RELEASE**, and only when SELECT went down and came back up with no other
+     * button touched in between (ui/button_mapper.h). SELECT+A/B/R on the browser is a separate
+     * gesture and cancels this one.
      */
     void on_select();
+
+    /**
+     * Any button that is not SELECT has gone down: put the help panel away.
+     *
+     * ⚠️ Called by the MAPPER on every plain press, like `on_stop_preview` beside it, because the
+     * mapper is the one layer every press passes through. The press is NOT consumed — see the handler.
+     */
+    void on_help_dismiss();
     /** START: play/stop. What it plays depends on the screen you are on. */
     void on_start();
 
