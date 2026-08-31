@@ -43,6 +43,7 @@
 #include "ui/modules/phrase_editor.h"
 #include "ui/modules/project_editor.h"
 #include "ui/modules/qwerty_keyboard.h"
+#include "ui/modules/scale_editor.h"
 #include "ui/modules/sample_editor.h"
 #include "ui/modules/settings_editor.h"
 #include "ui/modules/song_editor.h"
@@ -140,6 +141,7 @@ private:
     SongEditorModule      songEditor_;
     TableModule           tableModule_;
     GrooveModule          grooveModule_;
+    ScaleModule           scaleModule_;
     InstrumentEditorModule instrumentEditor_;
     InstrumentPoolModule  instrumentPool_;
     ModulationModule      modulation_;

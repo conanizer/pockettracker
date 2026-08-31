@@ -226,6 +226,15 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 break;
             }
 
+            case ScreenType::SCALE: {
+                ScaleState cs{p.scales[static_cast<size_t>(s.currentScale)]};
+                cs.key       = p.scaleKey;
+                cs.cursorRow = s.scaleCursorRow;
+                cs.theme     = t;
+                scaleModule_.draw(c, moduleX, EDITOR_Y, cs);
+                break;
+            }
+
             case ScreenType::INSTRUMENT: {
                 InstrumentEditorState is{p.instruments[static_cast<size_t>(s.currentInstrument)]};
                 is.cursorRow     = s.instrumentCursorRow;

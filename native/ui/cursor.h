@@ -91,6 +91,21 @@ struct CursorContext {
     int                fxSlot       = 0;  // for effects: which FX slot (1, 2, 3)
     int                defaultValue = NO_DEFAULT;  // A+B resets a non-deletable value to this
 
+    /**
+     * NOTE cells only: which of the twelve pitch classes may be typed, as a 12-bit mask with bit 0 =
+     * pitch class `scaleKey`. `0x0FFF` is the chromatic default and means "no constraint" — every
+     * other context leaves it at that, and so does every project that has not authored a scale.
+     *
+     * ⚠️ It lives on the CONTEXT rather than being applied afterwards because stepping is where the
+     * scale is felt: A+RIGHT must move a whole scale degree, and a step that lands out of scale and is
+     * corrected back afterwards would land on the note it started from — a cell that cannot be edited.
+     *
+     * ⚠️ `ptinput`'s recorded contexts do not print these two, deliberately: a chromatic project (which
+     * every fixture is) produces the identical actions it always did, so the golden is untouched.
+     */
+    unsigned           scaleMask = 0x0FFFu;
+    int                scaleKey  = 0;
+
     bool is_editable() const {
         return valueType != CursorValueType::READ_ONLY && valueType != CursorValueType::NONE;
     }
@@ -176,8 +191,13 @@ inline CursorContext transpose(int current, bool is_empty = false, int def = NO_
 /**
  * A musical note. Range C-0 (midi 12) to G-9 (midi 127), keeping C-4 = middle C = midi 60.
  * A on an empty note inserts C-4; A+B deletes it.
+ *
+ * `scale_mask` / `scale_key` constrain which notes can be typed (roadmap 1.A). The default is the
+ * chromatic mask, so a caller that has no scale to offer — the INSTRUMENT screen's ROOT cell, which is
+ * a tuning reference rather than a note in the song — gets exactly the behaviour it always had.
  */
-inline CursorContext note(int current, bool is_empty = false) {
+inline CursorContext note(int current, bool is_empty = false, unsigned scale_mask = 0x0FFFu,
+                          int scale_key = 0) {
     CursorContext c;
     c.valueType                     = CursorValueType::NOTE;
     c.capabilities.canIncrement     = !is_empty;
@@ -193,6 +213,8 @@ inline CursorContext note(int current, bool is_empty = false) {
     c.smallStep    = 1;
     c.largeStep    = 12;
     c.emptyValue   = -1;
+    c.scaleMask    = (scale_mask & 0x0FFFu) == 0 ? 0x0FFFu : (scale_mask & 0x0FFFu);
+    c.scaleKey     = scale_key;
     return c;
 }
 
@@ -492,6 +514,25 @@ inline const std::string& allowed_chars() {
  * because wrapping +12 dB round to −12 dB would be a trap rather than a convenience. NOTE clamps too
  * (its range is the MIDI ceiling), and so does anything not named here.
  */
+/** Is this MIDI note one the context's scale allows? Bit 0 of the mask is pitch class `scaleKey`. */
+inline bool note_in_scale_mask(const CursorContext& ctx, int midi) {
+    if (midi < 0) return false;
+    const int degree = ((midi - ctx.scaleKey) % 12 + 12) % 12;
+    return (ctx.scaleMask >> degree) & 1u;
+}
+
+/**
+ * The nearest allowed note at or above `midi`, wrapping down within the octave if the search runs off
+ * the top. What A on an empty note cell inserts: C-4, unless C is not in the scale.
+ */
+inline int snap_note_to_scale(const CursorContext& ctx, int midi) {
+    for (int d = 0; d < 12; ++d) {
+        if (midi + d <= ctx.maxValue && note_in_scale_mask(ctx, midi + d)) return midi + d;
+        if (d != 0 && midi - d >= ctx.minValue && note_in_scale_mask(ctx, midi - d)) return midi - d;
+    }
+    return midi;
+}
+
 inline int step_value(int current, int signed_step, const CursorContext& ctx) {
     switch (ctx.valueType) {
         case CursorValueType::CHARACTER: {
@@ -529,6 +570,23 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
             return v;
         }
 
+        case CursorValueType::NOTE: {
+            // A+LEFT/RIGHT walks ONE NOTE OF THE SCALE, so a press is a scale degree rather than a
+            // semitone — on the chromatic default the two are the same thing, which is why nothing
+            // about note entry changes for a song that has never authored a scale.
+            //
+            // ⚠️ A+UP/DOWN (largeStep 12) is deliberately NOT walked: an octave is in every scale by
+            // construction, and walking twelve degrees of a pentatonic would jump two octaves.
+            const bool byDegree = (signed_step == ctx.smallStep || signed_step == -ctx.smallStep);
+            if (!byDegree || ctx.scaleMask == 0x0FFFu)
+                return std::min(ctx.maxValue, std::max(ctx.minValue, current + signed_step));
+
+            const int dir = signed_step > 0 ? 1 : -1;
+            for (int v = current + dir; v >= ctx.minValue && v <= ctx.maxValue; v += dir)
+                if (note_in_scale_mask(ctx, v)) return v;
+            return current;  // no further note in the scale: stay put rather than leave it
+        }
+
         default: {
             const int v = current + signed_step;
             return v < ctx.minValue ? ctx.minValue : (v > ctx.maxValue ? ctx.maxValue : v);
@@ -544,10 +602,26 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
 // thing on every screen and the binding has moved once already. Today, in the dispatcher:
 // A+RIGHT → `increment`, A+LEFT → `decrement`, A+UP → `increment_fast`, A+DOWN → `decrement_fast`.
 
+/**
+ * What A on an empty NOTE cell inserts, as a MIDI number. ⚠️ Its twin is `Note::C4()` in
+ * phrase_editor.cpp, which is what actually runs on the INSERT_DEFAULT below — this constant exists
+ * only so the scale can ask whether that note is typeable, and the two must name the same note.
+ */
+inline constexpr int NOTE_INSERT_DEFAULT_MIDI = 60;  // C-4
+
 inline InputAction increment(const CursorContext& c) {
     if (!c.is_editable()) return InputAction::none();
-    if (c.capabilities.isEmpty && c.capabilities.canInsert)
+    if (c.capabilities.isEmpty && c.capabilities.canInsert) {
+        // ⚠️ A scale that does not contain C-4 must not be handed one: the inserted note would be a
+        // note no press could have produced, and A+LEFT/RIGHT would then step away from it and never
+        // be able to come back. Spelled as a VALUE only when the scale actually moves it, so the
+        // chromatic default emits the INSERT_DEFAULT it always did — golden and all.
+        if (c.valueType == CursorValueType::NOTE && c.scaleMask != 0x0FFFu) {
+            const int snapped = snap_note_to_scale(c, NOTE_INSERT_DEFAULT_MIDI);
+            if (snapped != NOTE_INSERT_DEFAULT_MIDI) return InputAction::set_value(snapped);
+        }
         return InputAction::of(ActionType::INSERT_DEFAULT);
+    }
     if (c.capabilities.canIncrement)
         return InputAction::set_value(step_value(c.currentValue, c.smallStep, c));
     return InputAction::none();

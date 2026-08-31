@@ -86,6 +86,7 @@ struct AppState {
     int tableCursorRow    = 0;
     int tableCursorColumn = 1;  // starts on transpose
     int grooveCursorRow   = 0;
+    int scaleCursorRow    = 0;
 
     // INSTRUMENT. Its rows are not a uniform grid — they are the row-kind table in
     // ui/instrument_row_layout.h, and the cursor walks that rather than a range.
@@ -146,6 +147,7 @@ struct AppState {
     int currentInstrument = 0;
     int currentTable      = 0;
     int currentGroove     = 0;
+    int currentScale      = 0;   // which of the 16 slots the SCALE screen is showing, 0-15
 
     // ── Playback (read back from songcore's playheads at 60 Hz) ──────────────────────────────────
     //

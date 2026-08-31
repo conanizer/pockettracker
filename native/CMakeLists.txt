@@ -388,6 +388,7 @@ add_library(pt-ui STATIC
         ui/modules/phrase_editor.cpp
         ui/modules/project_editor.cpp
         ui/modules/qwerty_keyboard.cpp
+        ui/modules/scale_editor.cpp
         ui/modules/sample_editor.cpp
         ui/modules/settings_editor.cpp
         ui/modules/song_editor.cpp

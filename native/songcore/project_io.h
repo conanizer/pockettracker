@@ -169,6 +169,17 @@ inline Groove parse_groove(const json& j, int index) {
     return g;
 }
 
+inline Scale parse_scale(const json& j, int index) {
+    Scale s(get_int(j, "id", index));
+    s.name    = get_str(j, "name", s.name);
+    s.enabled = parse_int_array(j, "enabled", s.enabled);
+    s.offset  = parse_int_array(j, "offset",  s.offset);
+    // A hand-edited or truncated array must not leave a 12-degree consumer reading past its end.
+    s.enabled.resize(12, 1);
+    s.offset.resize(12, 0);
+    return s;
+}
+
 inline EqBand parse_eq_band(const json& j) {
     EqBand b;
     b.type = get_int(j, "type", b.type);
@@ -249,6 +260,7 @@ inline Instrument parse_instrument(const json& j, int index) {
     i.delaySend      = get_int(j, "delaySend", i.delaySend);
     i.eqSlot         = get_int(j, "eqSlot", i.eqSlot);
     i.slicingMode    = get_int(j, "slicingMode", i.slicingMode);
+    i.transposeEnabled = get_bool(j, "transposeEnabled", i.transposeEnabled);
     { auto it = j.find("sliceMarkers");
       if (it != j.end() && it->is_array())
           for (const auto& e : *it) i.sliceMarkers.push_back(e.is_number() ? e.get<int64_t>() : 0); }
@@ -315,6 +327,8 @@ inline Project parse_project(const json& j) {
     p.instruments = parse_pool<Instrument>(j, "instruments", parse_instrument);
     p.tables      = parse_pool<Table>(j, "tables", parse_table);
     p.grooves     = parse_pool<Groove>(j, "grooves", parse_groove);
+    p.scales      = parse_pool<Scale>(j, "scales", parse_scale);
+    p.scaleKey    = get_int(j, "scaleKey", p.scaleKey);
     p.midiSyncOut           = get_int(j, "midiSyncOut", p.midiSyncOut);
     p.midiSendProgramChange = get_bool(j, "midiSendProgramChange", p.midiSendProgramChange);
     { auto it = j.find("midiInputChannels");
@@ -346,7 +360,7 @@ inline bool normalize_project(Project& p) {
     if ((int)p.phrases.size() == POOL_PHRASES && (int)p.chains.size() == POOL_CHAINS &&
         (int)p.tracks.size() == POOL_TRACKS && (int)p.instruments.size() == POOL_INSTRUMENTS &&
         (int)p.tables.size() == POOL_TABLES && (int)p.grooves.size() == POOL_GROOVES &&
-        (int)p.eqPresets.size() == POOL_EQPRESETS) {
+        (int)p.eqPresets.size() == POOL_EQPRESETS && (int)p.scales.size() == POOL_SCALES) {
         return false;
     }
     Project d = make_default_project();
@@ -363,6 +377,7 @@ inline bool normalize_project(Project& p) {
     fix(p.tables,      d.tables,      POOL_TABLES);
     fix(p.grooves,     d.grooves,     POOL_GROOVES);
     fix(p.eqPresets,   d.eqPresets,   POOL_EQPRESETS);
+    fix(p.scales,      d.scales,      POOL_SCALES);
     return true;
 }
 
@@ -571,6 +586,18 @@ inline void emit_groove(JsonWriter& w, const Groove& g) {
     w.end_object();
 }
 
+inline void emit_scale(JsonWriter& w, const Scale& s) {
+    w.begin_object();
+    w.field_int("id", s.id);
+    if (!s.name.empty()) w.field_string("name", s.name);
+    // ⏸️ `offset` is emitted the moment it is non-default even though nothing reads it — that is the
+    // point of writing it from the first version (call S3): switching microtuning on later must not
+    // need a migration.
+    if (s.enabled != std::vector<int>(12, 1)) emit_int_array(w, "enabled", s.enabled);
+    if (s.offset  != std::vector<int>(12, 0)) emit_int_array(w, "offset",  s.offset);
+    w.end_object();
+}
+
 inline void emit_eq_band(JsonWriter& w, const EqBand& b) {
     w.begin_object();
     if (b.type != 0)    w.field_int("type", b.type);
@@ -653,6 +680,9 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
     if (i.delaySend != 0x00) w.field_int("delaySend", i.delaySend);
     if (i.eqSlot != -1)     w.field_int("eqSlot", i.eqSlot);
     if (i.slicingMode != 0) w.field_int("slicingMode", i.slicingMode);
+    // ⚠️ Defaults to TRUE, so the guard is inverted — the field appears only once turned OFF, which is
+    // what keeps a project that has never seen scales byte-identical.
+    if (!i.transposeEnabled) w.field_bool("transposeEnabled", i.transposeEnabled);
     if (!i.sliceMarkers.empty()) {
         w.key("sliceMarkers");
         w.begin_array();
@@ -725,6 +755,19 @@ inline std::string serialize_project(const Project& p) {
     emit_pool(w, "instruments", p.instruments, emit_instrument);
     emit_pool(w, "tables",      p.tables,      emit_table);
     emit_pool(w, "grooves",     p.grooves,     emit_groove);
+    // ⚠️ THE SCALE POOL IS OMITTED WHOLE WHEN NOTHING HAS BEEN AUTHORED, where every pool above is
+    // always written. That is what keeps this release's bytes identical to the last one's for a song
+    // that has never opened the SCALE screen — sixteen `{"id":n}` objects would move every golden
+    // `.ptp` in the tree, for a pool whose default carries no information. Slot 00 all-enabled IS the
+    // chromatic scale, so an absent pool and a default pool mean the same thing to every reader.
+    {
+        bool anyAuthored = (int)p.scales.size() != POOL_SCALES;
+        for (const Scale& s : p.scales)
+            if (!s.name.empty() || s.enabled != std::vector<int>(12, 1) ||
+                s.offset != std::vector<int>(12, 0)) { anyAuthored = true; break; }
+        if (anyAuthored) emit_pool(w, "scales", p.scales, emit_scale);
+    }
+    if (p.scaleKey != 0) w.field_int("scaleKey", p.scaleKey);
     // MIDI, the project's half (plan §7). ⚠️ `midiSendProgramChange` defaults to TRUE, so its guard is
     // the inverted one — the field appears only when the user has turned it OFF.
     if (p.midiSyncOut != 0)          w.field_int("midiSyncOut", p.midiSyncOut);

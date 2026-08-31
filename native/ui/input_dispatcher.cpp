@@ -253,6 +253,7 @@ int InputDispatcher::cursor_row() const {
     switch (s_.currentScreen) {
         case ScreenType::TABLE:  return s_.tableCursorRow;
         case ScreenType::GROOVE: return s_.grooveCursorRow;
+        case ScreenType::SCALE:  return s_.scaleCursorRow;
         default:                 return s_.cursorRow;
     }
 }
@@ -261,6 +262,7 @@ int InputDispatcher::cursor_column() const {
     switch (s_.currentScreen) {
         case ScreenType::TABLE:  return s_.tableCursorColumn;
         case ScreenType::GROOVE: return 1;
+        case ScreenType::SCALE:  return 1;
         default:                 return s_.cursorColumn;
     }
 }
@@ -269,6 +271,7 @@ void InputDispatcher::set_cursor_row(int row) {
     switch (s_.currentScreen) {
         case ScreenType::TABLE:  s_.tableCursorRow = row;  break;
         case ScreenType::GROOVE: s_.grooveCursorRow = row; break;
+        case ScreenType::SCALE:  s_.scaleCursorRow = row;  break;
         default:                 s_.cursorRow = row;       break;
     }
 }
@@ -319,6 +322,11 @@ CursorContext InputDispatcher::cursor_context() const {
             ps.cursorRow        = s_.cursorRow;
             ps.cursorColumn     = s_.cursorColumn;
             ps.effectTypeCount  = visible_effect_type_count();
+            // ⚠️ The CURSOR needs the project too, not only the renderer: the NOTE cell's scale comes
+            // from it, and a null one silently reads as "chromatic" — a note cursor that steps by
+            // semitones with no error anywhere. `layout.cpp` sets this on its own PhraseEditorState;
+            // the two are separate objects and setting one is not setting the other.
+            ps.project          = &p;
             return phrase_.cursor_context(ps);
         }
         case ScreenType::TABLE: {
@@ -333,6 +341,12 @@ CursorContext InputDispatcher::cursor_context() const {
             gs.cursorRow    = s_.grooveCursorRow;
             gs.cursorColumn = 1;
             return groove_.cursor_context(gs);
+        }
+        case ScreenType::SCALE: {
+            ScaleState cs{p.scales[static_cast<size_t>(s_.currentScale)]};
+            cs.key       = p.scaleKey;
+            cs.cursorRow = s_.scaleCursorRow;
+            return scale_.cursor_context(cs);
         }
 
         case ScreenType::INSTRUMENT: {
@@ -461,6 +475,16 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
                 .handle_input(p.grooves[static_cast<size_t>(s_.currentGroove)], s_.grooveCursorRow,
                               /*cursor_column=*/1, action)
                 .modified;
+
+        case ScreenType::SCALE: {
+            // ⚠️ The KEY row is the one cell on this screen that does NOT edit the object the module
+            // was handed — it edits the project. The module says so by handing the new key back
+            // rather than by reaching for a Project it has no business holding.
+            const ScaleInputResult r = scale_.handle_input(
+                p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursorRow, action);
+            if (r.newKey >= 0) p.scaleKey = r.newKey;
+            return r.modified;
+        }
 
         case ScreenType::INSTRUMENT: {
             const InstrumentInputResult r = instrument_.handle_input(
@@ -1414,6 +1438,9 @@ void InputDispatcher::cycle_current_item(int delta) {
             break;
         case ScreenType::GROOVE:
             s_.currentGroove = wrap(s_.currentGroove, 127);
+            break;
+        case ScreenType::SCALE:
+            s_.currentScale = wrap(s_.currentScale, songcore::POOL_SCALES - 1);
             break;
         // INSTRUMENT and MODS cycle the same thing — the instrument — because MODS *is* a view of one.
         // (INST_POOL is absent on purpose: there, the D-PAD already selects the instrument, so B+LEFT

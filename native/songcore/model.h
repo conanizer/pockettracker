@@ -49,6 +49,7 @@ constexpr int POOL_INSTRUMENTS = 128;
 constexpr int POOL_TABLES      = 128;
 constexpr int POOL_GROOVES     = 128;
 constexpr int POOL_EQPRESETS   = 128;
+constexpr int POOL_SCALES      = 16;
 
 // Rows in one chain, and steps in one phrase. Fixed by the screen geometry, not by a pool.
 constexpr int CHAIN_ROWS  = 16;
@@ -374,6 +375,39 @@ struct Groove {
     explicit Groove(int id_) : id(id_) {}
 };
 
+/**
+ * One of the project's 16 scales: which of the twelve chromatic intervals are IN the scale.
+ *
+ * The intervals are counted from the KEY, not from C — degree 0 is the root — so one Scale object
+ * describes a shape (major, dorian, in-sen) that the key then positions. That is why the key is NOT
+ * a field here: the same slot transposed to D must be the same slot.
+ *
+ * ⚠️ ALL TWELVE ENABLED IS THE CHROMATIC SCALE, and it is the default deliberately. A project that
+ * has never seen this feature quantizes to every note, i.e. does not quantize — so the feature costs
+ * an existing song nothing, with no migration step. Every consumer must keep that property.
+ *
+ * ⏸️ `offset` is WRITTEN AND NOT READ. Hundredths of a semitone, −2400..+2400, per degree: the
+ * microtuning half of the feature, which reaches the pitch computation rather than the editor and is
+ * deferred past 1.0. It is serialised from the first version so that switching it on later changes
+ * no saved song.
+ */
+struct Scale {
+    int id = 0;
+    std::string name;                                        // "" = never named
+    std::vector<int> enabled = std::vector<int>(12, 1);      // 1 = the degree is in the scale
+    std::vector<int> offset  = std::vector<int>(12, 0);      // ⏸️ centi-semitones, −2400..+2400
+    Scale() = default;
+    explicit Scale(int id_) : id(id_) {}
+};
+
+/** Is every degree in? Then the scale constrains nothing and every quantizer is the identity. */
+inline bool scale_is_chromatic(const Scale& s) {
+    if (s.enabled.size() != 12) return true;   // a malformed pool must not silently mute notes
+    for (int e : s.enabled)
+        if (e == 0) return false;
+    return true;
+}
+
 struct EqBand {
     int type = 0;
     int freq = 0x80;
@@ -449,6 +483,18 @@ struct Instrument {
     int eqSlot = -1;
     int slicingMode = 0;
     std::vector<int64_t> sliceMarkers;           // emptyList()
+
+    /**
+     * Does this instrument follow note TRANSPOSITION at all? (M8's `TRANSP.`)
+     *
+     * ⚠️ It is not a scale switch, and the wider meaning is M8's rather than a choice made here: OFF
+     * silences the scale quantizer, the chain TSP column AND the project transpose for this
+     * instrument. That is what makes it useful — a drum kit whose slots are pitched by hand must not
+     * move when the song is transposed either.
+     *
+     * ⏸️ Only the scale quantizer reads it today; the two transposes join when they are quantized.
+     */
+    bool transposeEnabled = true;
 
     // ── EXTERNAL (instrumentType == EXTERNAL) — MIDI plan §7 ─────────────────────────────────────
     // Every one of these is ignored by the other two types, and every one has a default, so an
@@ -553,6 +599,16 @@ struct Project {
     std::vector<Instrument> instruments;          // Array(128){ Instrument(id=i, sampleId=i) }
     std::vector<Table>      tables;               // Array(128){Table(it)}
     std::vector<Groove>     grooves;              // Array(128){Groove(it)}
+    std::vector<Scale>      scales;               // Array(16){Scale(it)} — slot 00 is every track's
+
+    /**
+     * The root note of the default scale, 0-11 (0 = C). Global, and the only half of "what scale am
+     * I in" that is not the slot: a slot is a shape, the key is where that shape starts.
+     *
+     * A track can be moved off it at playback by the SCA command; nothing stores that, exactly as
+     * nothing stores the groove GRV assigns.
+     */
+    int scaleKey = 0;
 
     // ── MIDI, the parts that are MUSICAL INTENT and so travel with the song (MIDI plan §7) ───────
     // The device PICKS do not live here — they are settings.json (settings_store.h), because a project
@@ -614,6 +670,8 @@ inline Project make_default_project() {
     for (int i = 0; i < POOL_TABLES; ++i) p.tables.emplace_back(i);
     p.grooves.reserve(POOL_GROOVES);
     for (int i = 0; i < POOL_GROOVES; ++i) p.grooves.emplace_back(i);
+    p.scales.reserve(POOL_SCALES);
+    for (int i = 0; i < POOL_SCALES; ++i) p.scales.emplace_back(i);
     return p;
 }
 

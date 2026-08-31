@@ -1,5 +1,6 @@
 #include "ui/modules/phrase_editor.h"
 
+#include "songcore/scales.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
@@ -128,7 +129,16 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
         case 0: return cc::read_only();
         case 1: {
             const bool isEmpty = (step.note == Note::EMPTY());
-            return cc::note(isEmpty ? 0 : songcore::note_to_midi(step.note), isEmpty);
+            // ⚠️ Note ENTRY is quantized; a note already written is not. Only the cursor sees the
+            // scale — nothing here rewrites `step.note`, so opening an old song under a new scale
+            // leaves every note where its author put it (roadmap 1.A, call S2).
+            unsigned mask = 0x0FFFu;
+            int      key  = 0;
+            if (s.project != nullptr) {
+                mask = songcore::scale_mask(songcore::track_scale(*s.project, s.songTrack));
+                key  = s.project->scaleKey;
+            }
+            return cc::note(isEmpty ? 0 : songcore::note_to_midi(step.note), isEmpty, mask, key);
         }
         case 2: return cc::volume(step.volume);
         case 3: return cc::instrument(step.instrument);

@@ -56,6 +56,7 @@
 
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
+#include "ui/modules/scale_editor.h"
 #include "ui/settings_row_layout.h"
 #include "ui/song_pointer.h"
 
@@ -234,6 +235,10 @@ inline void move_cursor_up(AppState& s) {
         case ScreenType::GROOVE:
             s.grooveCursorRow = (s.grooveCursorRow > 0) ? s.grooveCursorRow - 1 : 15;
             break;
+        case ScreenType::SCALE:
+            s.scaleCursorRow =
+                (s.scaleCursorRow > 0) ? s.scaleCursorRow - 1 : SCALE_ROW_COUNT - 1;
+            break;
 
         case ScreenType::INSTRUMENT: {
             const songcore::InstrumentType ty = detail::instrument_type_of(s);
@@ -339,6 +344,10 @@ inline void move_cursor_down(AppState& s) {
             break;
         case ScreenType::GROOVE:
             s.grooveCursorRow = (s.grooveCursorRow < 15) ? s.grooveCursorRow + 1 : 0;
+            break;
+        case ScreenType::SCALE:
+            s.scaleCursorRow =
+                (s.scaleCursorRow < SCALE_ROW_COUNT - 1) ? s.scaleCursorRow + 1 : 0;
             break;
 
         case ScreenType::INSTRUMENT: {

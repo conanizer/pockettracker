@@ -79,6 +79,7 @@
 #include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
+#include "ui/modules/scale_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
 #include "ui/modules/midi_settings.h"
@@ -673,6 +674,7 @@ class InputDispatcher {
     PhraseEditorModule     phrase_{};
     TableModule            table_{};
     GrooveModule           groove_{};
+    ScaleModule            scale_{};
     InstrumentEditorModule instrument_{};
     InstrumentPoolModule   pool_{};
     ModulationModule       mods_{};
