@@ -174,6 +174,12 @@ apk/
 # beside these and are NOT covered by these two lines.
 /docs/images/gif/
 /docs/images/screenshot-amiga-*.png
+# A demo song staged into the OnionOS package. LOCAL ONLY, and the reason is the CONTENT rather than
+# the size: the samples and the soundfont in there are other people's material, so they can be on a
+# test card and not in a published GPL-3.0 package. shell/build-miyoo.sh treats the directory as
+# optional — absent, it says so and builds the package without one, which is what anyone else cloning
+# this repository gets.
+/shell/miyoo/demo/
 
 # The crash-recovery autosave. It lands in the APP ROOT, which is the repo root whenever the shell is
 # run from a build tree here — so without this a test run leaves a ~440 KB project one `git add -A`

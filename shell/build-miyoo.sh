@@ -155,7 +155,8 @@ echo "############ 3/5  stage the Onion APP package ############"
 #   |- miyoo-config.json    the app's OWN config.json, seeded to $POCKETTRACKER_HOME on first run
 #   |- pockettracker        the armhf ELF
 #   |- libs/                libSDL2-2.0.so.0 + libneonarmmiyoo.so
-#   `- licenses/
+#   |- licenses/
+#   `- demo/                OPTIONAL: a starter song, copied to the user's folder on first launch
 #
 # ⚠️ THE TWO config.json FILES ARE DIFFERENT FILES and both would be `config.json` in this directory.
 # Onion owns the name here, so the app's copy travels as `miyoo-config.json` and launch.sh puts it
@@ -172,6 +173,24 @@ cp "$SRC/shell/miyoo/launch.sh"          "$APPDIR/"
 cp "$SRC/shell/miyoo/miyoo-config.json"  "$APPDIR/"
 cp "$SRC/shell/miyoo/README.md"          "$APPDIR/"
 chmod +x "$APPDIR/launch.sh"
+
+# ── The demo song, if this tree has one ──────────────────────────────────────────────────────────
+# ⚠️ OPTIONAL BY DESIGN, and the directory is gitignored. What is in there is other people's samples
+# and soundfonts, fine on a test card and not fine in a published GPL-3.0 package — so a clone builds
+# a demo-less zip and says so, rather than failing on a missing input.
+#
+# It is STAGED, not written into the user's folder: launch.sh copies it to $POCKETTRACKER_HOME on the
+# first launch only. Putting it in the zip at the card root instead would have overwritten a user's
+# edited copy on every upgrade, and would have broken the README's Wi-Fi install, which copies the
+# `App` folder alone.
+DEMO_DIR=${DEMO_DIR:-$SRC/shell/miyoo/demo}
+if [ -d "$DEMO_DIR" ]; then
+    cp -r "$DEMO_DIR" "$APPDIR/demo"
+    echo "demo song          : staged from $DEMO_DIR ($(du -sh "$APPDIR/demo" | cut -f1))"
+    find "$APPDIR/demo" -type f -printf '  %P\n' | sort
+else
+    echo "demo song          : none ($DEMO_DIR absent) - packaging without one"
+fi
 
 cp "$BUILD/pockettracker-sdl" "$BIN"
 chmod +x "$BIN"
@@ -392,6 +411,63 @@ if [ -n "$UNMET" ]; then
     exit 1
 fi
 
+# --- 10. every sample and soundfont the demo song names is IN the demo we staged -----------------
+# ⚠️⚠️ THE ONE THING IN THIS PACKAGE WITH NO SIGNAL AT ALL. A media path that does not resolve is not
+# an error anywhere: the project loads, the instrument reads empty, its steps play silence, and the
+# only way to find out is to hold the device. Everything else here fails loudly or shows on screen.
+#
+# The demo is authored on a phone, so its paths are that install's — `pt://<tree-id>/Samples/x.wav`,
+# or an absolute `/storage/emulated/0/…`. The app re-roots them onto $POCKETTRACKER_HOME through
+# songcore::app_root_relative_tail (native/songcore/media_path.h), and this repeats that function's
+# two anchors so the question asked here is the question the device asks.
+#
+# ⚠️ The paths are READ OUT of the .ptp, never listed here. A hand-typed list is a list that agrees
+# with itself while the project names something else entirely.
+if [ -d "$APPDIR/demo" ]; then
+echo
+# Anchor 1 is "/PocketTracker/"; anchor 2 is the last media sub-tree, kept whole so it re-roots as
+# "Samples/…". Only one of the three ever appears in a real path, so loop order is not a tie-break.
+demo_tail() {
+    local p=$1 sub t best=
+    case "$p" in */PocketTracker/*) printf '%s\n' "${p##*/PocketTracker/}"; return ;; esac
+    for sub in /Samples/ /Soundfonts/ /Renders/; do
+        case "$p" in *"$sub"*) t=${p##*"$sub"}; best="${sub:1}$t" ;; esac
+    done
+    printf '%s\n' "$best"
+}
+mapfile -t DEMO_REFS < <(
+    find "$APPDIR/demo" -name '*.ptp' -print0 | xargs -0 cat \
+        | grep -oE '"(sampleFilePath|soundfontPath)":"[^"]+"' \
+        | sed 's/^"[^"]*":"//; s/"$//' | sort -u)
+echo "demo media named   : ${#DEMO_REFS[@]}"
+# The parse finding NOTHING is the failure this check would otherwise report as a pass — an empty
+# list has no unresolved entries in it.
+[ "${#DEMO_REFS[@]}" -ge 1 ] || { echo "FAIL: no sample or soundfont path parsed out of the demo .ptp - the reader is broken."; exit 1; }
+DEMO_UNMET=0
+for REF in "${DEMO_REFS[@]}"; do
+    TAIL=$(demo_tail "$REF")
+    if [ -z "$TAIL" ]; then
+        # app_root_relative_tail returns "" and the app leaves the path as authored - unfindable here.
+        echo "  UNROOTED  $REF"; DEMO_UNMET=$((DEMO_UNMET + 1)); continue
+    fi
+    if [ -f "$APPDIR/demo/$TAIL" ]; then
+        echo "  ok        $TAIL"
+    # The device's own last step: resolve_case_insensitive, for a project authored where storage did
+    # not care about case. Reported rather than passed silently - it only works by that fallback.
+    elif FOUND=$(find "$APPDIR/demo" -ipath "$APPDIR/demo/$TAIL" -type f | head -1) && [ -n "$FOUND" ]; then
+        echo "  ok        $TAIL   (CASE DIFFERS on disk: ${FOUND#$APPDIR/demo/})"
+    else
+        echo "  MISSING   $TAIL   <- named by $REF"; DEMO_UNMET=$((DEMO_UNMET + 1))
+    fi
+done
+echo "unresolved         : $DEMO_UNMET   (want 0)"
+if [ "$DEMO_UNMET" != "0" ]; then
+    echo "FAIL: the demo names media that is not in it. Those instruments load EMPTY on the device and"
+    echo "      say nothing. Add the files to $DEMO_DIR, or clear the instruments in the project."
+    exit 1
+fi
+fi
+
 echo
 echo "############ 5/5  zip (extracts at the SD card root) ############"
 # ⚠️ MODES ARE SET HERE, NOT INHERITED. `zip` records whatever `stat` reports, and Onion runs
@@ -418,23 +494,32 @@ unzip -l "$OUT/pockettracker-miyoo.zip"
 # have failed to include, and the zip is what ships.
 echo
 echo "read back out of the zip:"
-for M in App/PocketTracker/pockettracker \
-         App/PocketTracker/launch.sh \
-         App/PocketTracker/config.json \
-         App/PocketTracker/miyoo-config.json \
-         App/PocketTracker/icon.png \
-         App/PocketTracker/README.md \
-         App/PocketTracker/libs/libSDL2-2.0.so.0 \
-         App/PocketTracker/libs/libneonarmmiyoo.so \
-         App/PocketTracker/licenses/LICENSE \
-         App/PocketTracker/licenses/THIRD-PARTY-NOTICES.md \
-         App/PocketTracker/licenses/CREDITS.md \
-         App/PocketTracker/licenses/libogg-COPYING \
-         App/PocketTracker/licenses/libopus-COPYING \
-         App/PocketTracker/licenses/libopus-LICENSE_PLEASE_READ.txt \
-         App/PocketTracker/licenses/OFL-1.1-LinuxBiolinum.txt \
-         App/PocketTracker/licenses/libSDL2-zlib-LICENSE.txt \
-         App/PocketTracker/licenses/libSDL2-miyoo-fork-GPL-3.0.txt ; do
+MEMBERS=( App/PocketTracker/pockettracker
+          App/PocketTracker/launch.sh
+          App/PocketTracker/config.json
+          App/PocketTracker/miyoo-config.json
+          App/PocketTracker/icon.png
+          App/PocketTracker/README.md
+          App/PocketTracker/libs/libSDL2-2.0.so.0
+          App/PocketTracker/libs/libneonarmmiyoo.so
+          App/PocketTracker/licenses/LICENSE
+          App/PocketTracker/licenses/THIRD-PARTY-NOTICES.md
+          App/PocketTracker/licenses/CREDITS.md
+          App/PocketTracker/licenses/libogg-COPYING
+          App/PocketTracker/licenses/libopus-COPYING
+          App/PocketTracker/licenses/libopus-LICENSE_PLEASE_READ.txt
+          App/PocketTracker/licenses/OFL-1.1-LinuxBiolinum.txt
+          App/PocketTracker/licenses/libSDL2-zlib-LICENSE.txt
+          App/PocketTracker/licenses/libSDL2-miyoo-fork-GPL-3.0.txt )
+# ⚠️ An ARRAY, and the demo's members are APPENDED FROM THE STAGING TREE rather than typed: the file
+# names carry spaces, which the old unquoted `for M in a b c` list could not have held, and a demo
+# is a different set of files in every tree that has one. Nothing above check 10 reads the zip, so
+# without this the whole demo could be absent from it and every line here would still be green.
+if [ -d "$APPDIR/demo" ]; then
+    while IFS= read -r M; do MEMBERS+=("$M"); done \
+        < <(cd "$STAGE" && find App/PocketTracker/demo -type f | LC_ALL=C sort)
+fi
+for M in "${MEMBERS[@]}"; do
     # ⚠️ `|| BYTES=0` is what makes the failure READABLE: unzip exits 11 on a missing member, and
     # under `set -euo pipefail` that kills the script before the line that would have named it.
     BYTES=$(unzip -p "$OUT/pockettracker-miyoo.zip" "$M" | wc -c) || BYTES=0

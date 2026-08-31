@@ -54,6 +54,9 @@ whole of that session's output and is overwritten each launch. That file is what
 report it. If there is no `log.txt` there at all, the launcher itself never ran, and saying so is
 the useful half of the report.
 
+**It starts and drops straight back to the shelf** — a message with an exit code is put up on
+the way out, and `log.txt` holds the detail behind it.
+
 You do not have to worry about file permissions on this device, whichever method you used: the card
 is FAT32, which has no Unix permission bits for Windows to lose, and the device grants the execute
 bit to everything on the mount. (The PortMaster port says the opposite for a real reason: its card is
