@@ -492,7 +492,8 @@ struct Instrument {
      * instrument. That is what makes it useful — a drum kit whose slots are pitched by hand must not
      * move when the song is transposed either.
      *
-     * ⏸️ Only the scale quantizer reads it today; the two transposes join when they are quantized.
+     * ⏸️ Only the scale quantizer reads it today (`Sequencer::emit_note`); the two transposes join
+     * when they are quantized.
      */
     bool transposeEnabled = true;
 
@@ -520,6 +521,25 @@ struct Instrument {
     Instrument() = default;
     explicit Instrument(int id_) : id(id_), name(default_instrument_name(id_)) {}
 };
+
+/**
+ * Is a note on this instrument a PITCH, or is it choosing a slice?
+ *
+ * ⚠️ **A SLICED INSTRUMENT'S NOTE IS A SELECTOR, NOT A PITCH** — C-4 is slice 0, C#4 is slice 1, and
+ * the sound they make has nothing to do with the semitone between them. Anything that moves notes
+ * around musically (the scale quantizer today, the transposes when they follow) must ask this first
+ * and leave the note alone when the answer is true, or a drum kit plays a different drum.
+ *
+ * `sliceOverride` is the step's own SLI value, -1 for none: an SLI turns slice selection on for one
+ * note even when the instrument's own slicing mode is off.
+ *
+ * ⚠️ It is written here, next to the two fields it reads, because `voice_derive.h` decides the very
+ * same question when it picks the slice and the two answers MUST be the same one. Two copies of this
+ * condition is a note quantized here and sliced there.
+ */
+inline bool note_selects_slice(const Instrument& ins, int sliceOverride) {
+    return (ins.slicingMode != 0 || sliceOverride >= 0) && !ins.sliceMarkers.empty();
+}
 
 /**
  * Instrument.hasDefaultName() — the name is still the auto-generated "INSTxx", i.e. nobody has named

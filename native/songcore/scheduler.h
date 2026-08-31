@@ -46,6 +46,7 @@
 #include "automation.h"
 #include "rng.h"
 #include "router.h"
+#include "scales.h"      // the quantizer emit_note() puts every scheduled note through
 #include "traversal.h"   // chain_at / phrase_at — the ids a playhead is IN, not just its row numbers
 
 namespace songcore {
@@ -172,6 +173,13 @@ struct TrackState {
 
     int   grooveId = 0;
     int   grooveStep = 0;
+
+    // Where SCA / SCG put this track. `scaleKey = -1` is "the project's KEY setting" rather than a
+    // key of its own, so a default-constructed TrackState reproduces exactly what the song says — and
+    // that is what makes STOP, the render path and a rollback all land back on the song's own scale
+    // with no code of their own.
+    int   scaleSlot = 0;
+    int   scaleKey  = -1;
 
     int   lastColFxType[4] = {0, 0, 0, 0};   // 1-indexed: [1]=FX1 …
     int   lastColFxValue[4] = {0, 0, 0, 0};
@@ -370,6 +378,20 @@ class Sequencer {
             plan.frames[t] = cp.frame;
         }
         return plan;
+    }
+
+    /**
+     * The scale one track is scheduling against — where its last SCA (or the last SCG) left it.
+     *
+     * ⚠️ THIS IS THE SCHEDULER'S CLOCK, NOT THE LISTENER'S: the walk runs up to two phrases ahead, so
+     * this answers "what the next scheduled note will be quantized to", never "what you are hearing".
+     * The playback quantization sites read it because they run on the same clock; the note cursor
+     * asks `songcore::track_scale` instead, which is the song's own answer (see scales.h).
+     */
+    int track_scale_slot(int trackId) const { return trackStates_[clampi(trackId, 0, 7)].scaleSlot; }
+    int track_scale_key(int trackId) const {
+        const int k = trackStates_[clampi(trackId, 0, 7)].scaleKey;
+        return k >= 0 ? k : (project_ ? project_->scaleKey : 0);
     }
 
     // True once an EQM has overridden the master EQ this session. The host reads it BEFORE stop()
@@ -1802,6 +1824,22 @@ class Sequencer {
             trackState.grooveStep = 0;
         }
 
+        // SCA / SCG assignment. Above the note below rather than after it, so the step that carries
+        // the command is already in the new scale — the same relationship GRV has with its own step.
+        //
+        // ⚠️ SCG writes all eight TrackStates, including this one, so the order matters only if both
+        // are on the same step: SCA is applied second and wins, which is the narrower command winning
+        // over the broader one and matches last-wins everywhere else here.
+        if (params.scaleGlobalByte.has_value()) {
+            const int key = scale_cmd_key(*params.scaleGlobalByte);
+            const int slot = scale_cmd_slot(*params.scaleGlobalByte);
+            for (int t = 0; t < 8; ++t) { trackStates_[t].scaleSlot = slot; trackStates_[t].scaleKey = key; }
+        }
+        if (params.scaleTrackByte.has_value()) {
+            trackState.scaleSlot = scale_cmd_slot(*params.scaleTrackByte);
+            trackState.scaleKey  = scale_cmd_key(*params.scaleTrackByte);
+        }
+
         bool noteScheduled = false;
         if (hasNote && !skipNote) {
             Note note;
@@ -2208,9 +2246,65 @@ class Sequencer {
 
     // Empty-note guard mirrors AudioEngine.scheduleNote (the tap is BELOW it): an EMPTY note is
     // never an event. Real call sites never pass EMPTY, but the guard keeps the seam faithful.
-    void emit_note(const NoteArgs& a, const Note& note) {
+    void emit_note(NoteArgs a, const Note& note) {
         if (note == Note::EMPTY()) return;
+        apply_track_scale(a);
         router_.note_on(a);
+    }
+
+    /**
+     * Pull a scheduled note onto the scale its track is in — the playback half of SCA / SCG.
+     *
+     * ⭐ **ONE SNAP HERE IS ALL FOUR OF THE PLACES M8 QUANTIZES SEPARATELY.** By the time a note
+     * reaches this funnel the chain and project transposes are already folded into it and PIT and
+     * ARP are resolved beside it, so the pitch that will sound is `note + pit + arp`. Quantizing
+     * that sum covers the phrase note, both transposes, PIT and ARP at once — where a quantizer
+     * written per site would be four sites and a fifth one added later that forgot.
+     *
+     * ⚠️ **THE CORRECTION IS GIVEN BACK TO THE BASE NOTE, NOT TO `pit` OR `arp`.** Those two are
+     * re-applied below the seam (voice_derive.h), so moving them would move the note twice; and
+     * `transpose` is what the slice derivation subtracts back out, so it cannot absorb it either.
+     * The base note is the one field nothing downstream re-adds.
+     *
+     * ⚠️ It is the SCHEDULER's scale, read off `TrackState` on the scheduler's own clock — correct
+     * precisely because this runs at schedule time, two phrases ahead of what is heard, and the note
+     * being built here is one of those future notes. Nothing below the seam may re-ask this
+     * question: at the far end the answer would be the scale of a bar nobody has reached.
+     *
+     * Four cases are deliberately left alone:
+     *  · a CHROMATIC scale — the identity that makes every song written before this feature cost
+     *    nothing, checked first rather than falling out of the search;
+     *  · an instrument with TRANSP. off (model.h — M8's rule, wider than scales);
+     *  · ⚠️ a note that is SELECTING A SLICE, where the number is not a pitch at all. M8 shipped
+     *    exactly this defect and fixed it ("Scale issues with Sampler slice mode"): quantizing a
+     *    sliced kit plays a different drum, not a different note;
+     *  · a pitch outside 0..127 at either end of the arithmetic. No scale degree lives out there,
+     *    an authored B-9 (131) must stay 131 rather than be dragged into range, and a correction
+     *    that cannot be expressed on the base note is not applied at all rather than clamped into
+     *    a pitch nobody asked for.
+     */
+    void apply_track_scale(NoteArgs& a) const {
+        const int track = clampi(a.track, 0, 7);
+        const Scale& scale = scale_at(*project_, track_scale_slot(track));
+        if (scale_is_chromatic(scale)) return;
+
+        if (a.instrument >= 0 && a.instrument < static_cast<int>(project_->instruments.size())) {
+            const Instrument& ins = project_->instruments[static_cast<size_t>(a.instrument)];
+            if (!ins.transposeEnabled) return;
+            if (note_selects_slice(ins, a.slice)) return;
+        }
+
+        const int midi     = (a.noteOctave + 1) * 12 + a.notePitch;
+        const int sounding = midi + a.pit + a.arp;
+        if (sounding < 0 || sounding > 127) return;
+
+        const int snapped = scale_snap(scale, track_scale_key(track), sounding);
+        if (snapped == sounding) return;
+
+        const int base = midi + (snapped - sounding);
+        if (base < 0 || base > 127) return;
+        a.notePitch  = base % 12;
+        a.noteOctave = base / 12 - 1;
     }
 
     // The random draws for CHA / RND / RNL / ARP-RANDOM. Thin names kept so the port reads against

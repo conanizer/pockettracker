@@ -320,7 +320,7 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
     // Slice playback: slicingMode (CUT/TRU) or an explicit SLI. Pitch becomes ROOT + chain/master
     // transpose; the phrase note only selects the slice. PIT applies after, shifting pitch without
     // changing the selection.
-    const bool useSliceLogic = (ins.slicingMode != 0 || n.slice >= 0) && !ins.sliceMarkers.empty();
+    const bool useSliceLogic = note_selects_slice(ins, n.slice);
     if (useSliceLogic) {
         const std::vector<int64_t>& markers = ins.sliceMarkers;
         const int markerCount = static_cast<int>(markers.size());

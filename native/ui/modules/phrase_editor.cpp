@@ -129,14 +129,21 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
         case 0: return cc::read_only();
         case 1: {
             const bool isEmpty = (step.note == Note::EMPTY());
-            // ⚠️ Note ENTRY is quantized; a note already written is not. Only the cursor sees the
-            // scale — nothing here rewrites `step.note`, so opening an old song under a new scale
-            // leaves every note where its author put it (roadmap 1.A, call S2).
+            // ⚠️ THIS QUANTIZES TYPING, NOT THE SONG. Nothing here rewrites `step.note` — opening an
+            // old song under a new scale leaves every note exactly where its author put it, and what
+            // moves it is the playback quantizer (scheduler.h), which the cell on screen never shows.
+            //
+            // The scale is the one the phrase's own `SCA`/`SCG` puts this row in, so typing under a
+            // command offers that command's notes. ⚠️ It is a walk of the AUTHORED cells above the
+            // cursor, never the sequencer's live scale — see `phrase_scale_at_row` for why that
+            // distinction is the whole safety argument.
             unsigned mask = 0x0FFFu;
             int      key  = 0;
             if (s.project != nullptr) {
-                mask = songcore::scale_mask(songcore::track_scale(*s.project, s.songTrack));
-                key  = s.project->scaleKey;
+                const songcore::ScaleAt at =
+                    songcore::phrase_scale_at_row(s.phrase, s.cursorRow, s.project->scaleKey);
+                mask = songcore::scale_mask(songcore::scale_at(*s.project, at.slot));
+                key  = at.key;
             }
             return cc::note(isEmpty ? 0 : songcore::note_to_midi(step.note), isEmpty, mask, key);
         }

@@ -11,6 +11,7 @@ Everything you can do with PocketTracker.
 - Transpose phrases per chain slot — sequence the same phrase in different keys
 - Select cells, rows, or entire screens and copy, cut, paste, or delete them (M8-style selection)
 - Set swing and shuffle per track or globally with groove patterns
+- Build up to 16 scales per project by switching each of the twelve notes on or off, and set the song's key. A track using a scale plays only the notes in it: anything out of the scale is moved to the nearest note that is in, both as you type and as the song plays, so a phrase written before you chose the scale falls into it. The scale screen marks the note being heard; sliced instruments are left alone, and any instrument can be taken out of transposition entirely with its TSP switch
 - 256 phrases, 256 chains, 8 tracks, 128 grooves
 - Use HOP to jump between phrases mid-sequence — create odd time signatures and generative loops
 - Every track runs its own column of the song at its own pace: all 8 start together, then each moves on as soon as its own chain ends, so a 2-row chain beside a 16-row one loops eight times instead of waiting. A `>` marker on the song, chain and phrase screens shows where each track has got to
@@ -40,6 +41,7 @@ Write these into any phrase step to shape how a note plays:
 - **Randomize** — randomize any other FX value on the fly
 - **Table override** — switch which table an instrument follows
 - **Groove assign** — set groove pattern per track from a phrase step
+- **Scale (track / global)** — move one track, or all eight, onto one of the project's scales and a key
 - **Tick rate** — control how fast the instrument table advances, per FX column
 - **Three table playheads** — each of a table's FX columns runs at its own speed and loops on its own,
   so one table can drive cross-rhythms

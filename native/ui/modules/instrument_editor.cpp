@@ -78,17 +78,14 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
                     s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
-    // ── 3: VOL + PAN (SF) / VOL + SLICE + PAN (sampler) ──────────────────────────────────────────
-    if (sf) {
-        draw_dual_row(c, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
-                      s.cursorRow, s.cursorColumn, currentRow, t);
-    } else {
-        draw_triple_row(c, x, rowY, nameX,
-                        "VOL",   hex2(ins.volume),
-                        "SLICE", slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))],
-                        "PAN",   hex2(ins.pan),
-                        s.cursorRow, s.cursorColumn, currentRow, t);
-    }
+    // ── 3: VOL + TSP + PAN, on both types ────────────────────────────────────────────────────────
+    // TSP is the same switch on a SoundFont as on a sampler, so the row is the same shape on both —
+    // which is why the SoundFont's row 3 became a TRIPLE rather than growing a layout of its own.
+    draw_triple_row(c, x, rowY, nameX,
+                    "VOL", hex2(ins.volume),
+                    "TSP", ins.transposeEnabled ? "on" : "off",
+                    "PAN", hex2(ins.pan),
+                    s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 4: spacer ────────────────────────────────────────────────────────────────────────────────
@@ -147,14 +144,17 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
         draw_parameter_row(c, rowY, nameX, valueX, "DEL", hex2(ins.delaySend), on(0), on(1), t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot, s.cursorRow, s.cursorColumn, currentRow, t);
+        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot, "", "", s.cursorRow,
+                    s.cursorColumn, currentRow, t);
 
     } else {
         draw_dual_row(c, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), "DEL",
                       hex2(ins.delaySend), s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
 
-        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot, s.cursorRow, s.cursorColumn, currentRow, t);
+        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot,
+                    "SLICE", slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))],
+                    s.cursorRow, s.cursorColumn, currentRow, t);
         rowY += ROW_HEIGHT; currentRow++;
 
         draw_dual_row(c, rowY, nameX, valueX, "LOOP", ins.loopMode, "START", hex2(ins.sampleStart),
@@ -231,7 +231,16 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
                   s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
-    // ── 8-11: the four CC slots, number then default value ───────────────────────────────────────
+    // ── 8: TSP + TIC ─────────────────────────────────────────────────────────────────────────────
+    // The two the other layouts have that this one was missing. TSP matters here for the same reason
+    // it does anywhere — the scale quantizer moves the notes this instrument sends down the cable, so
+    // a drum machine on the other end needs a way to say no. TIC is the table clock, which an EXTERNAL
+    // instrument runs exactly as a sampler does: the table is where its FX live.
+    draw_dual_row(c, rowY, nameX, valueX, "TSP", ins.transposeEnabled ? "on" : "off",
+                  "TIC", hex2(ins.tableTicRate), s.cursorRow, s.cursorColumn, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 9-12: the four CC slots, number then default value ───────────────────────────────────────
     static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
     const int ccRows = std::min(songcore::MIDI_CC_SLOTS, static_cast<int>(ins.midiCC.size()));
     for (int i = 0; i < ccRows; ++i) {
@@ -378,15 +387,26 @@ void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, in
 }
 
 void InstrumentEditorModule::draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot,
+                                         const std::string& n2, const std::string& v2,
                                          int cursor_row, int cursor_column, int this_row,
                                          const Theme& t) const {
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
 
-    c.draw_text("EQ", name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    const bool c1 = onRow && cursor_column == 1;
+    const bool c3 = onRow && cursor_column == 3;
+
+    c.draw_text("EQ", name_x, textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
     // The shared painter, so this cell cannot drift from the pool's or the mixer's: "--" when
     // unassigned, and a trailing ">" that says the cell opens the EQ editor.
-    draw_eq_cell(c, value_x, textY, eq_slot, onRow && cursor_column == 1, t);
+    draw_eq_cell(c, value_x, textY, eq_slot, c1, t);
+
+    // ⚠️ An EMPTY name means this row has no second pair — the SoundFont tail, where there are no
+    // slices to put beside the EQ and the row stays a SINGLE. The offsets are `draw_dual_row`'s, so
+    // the pair that IS drawn lands where every other second column on the screen does.
+    if (n2.empty()) return;
+    c.draw_text(n2, name_x + 230, textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    draw_cursor_cell(c, v2, value_x + 220, textY, c3, t.textValue, t);
 }
 
 // ─── Cursor context ──────────────────────────────────────────────────────────────────────────────
@@ -446,6 +466,13 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             return cc::none();
         }
 
+        if (row == 8) {  // TSP + TIC
+            if (col == 1) return cc::toggle_binary(ins.transposeEnabled);
+            if (col == 3) return cc::hex_byte(ins.tableTicRate, 0, 255, -1, false, false, false,
+                                              /*def=*/0x06);
+            return cc::none();
+        }
+
         const int ccIndex = row - INSTRUMENT_EXTERNAL_CC_ROW;
         if (ccIndex >= 0 && ccIndex < static_cast<int>(ins.midiCC.size())) {
             const songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(ccIndex)];
@@ -478,18 +505,11 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
         }
     }
 
-    if (row == 3) {  // VOL + PAN (SF) / VOL + SLICE + PAN (sampler)
-        if (sf) {
-            switch (col) {
-                case 1: return cc::hex_byte(ins.volume, 0, 255, -1, false, false, false, /*def=*/0xFF);
-                case 3: return cc::hex_byte(ins.pan, 0, 255, -1, false, false, false, /*def=*/0x80);
-                default: return cc::none();
-            }
-        }
+    // VOL + TSP + PAN — the same three cells on both types, so no `sf` arm.
+    if (row == 3) {
         switch (col) {
             case 1: return cc::hex_byte(ins.volume, 0, 255, -1, false, false, false, /*def=*/0xFF);
-            case 3: return cc::toggle_ternary(slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))],
-                                              slice_modes());
+            case 3: return cc::toggle_binary(ins.transposeEnabled);
             case 5: return cc::hex_byte(ins.pan, 0, 255, -1, false, false, false, /*def=*/0x80);
             default: return cc::none();
         }
@@ -574,8 +594,11 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             if (col == 3) return cc::hex_byte(ins.delaySend, 0, 255, -1, false, false, false, 0x00);
             return cc::none();
 
-        case 12:  // EQ, alone
-            return (col == 1) ? eq_context() : cc::none();
+        case 12:  // EQ + SLICE
+            if (col == 1) return eq_context();
+            if (col == 3) return cc::toggle_ternary(
+                slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))], slice_modes());
+            return cc::none();
 
         case 13:  // LOOP + START
             if (col == 1) return cc::toggle_ternary(ins.loopMode, loop_modes());
@@ -632,6 +655,10 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
             if (col == 1)      b255(ins.volume);
             else if (col == 3) b255(ins.pan);
 
+        } else if (row == 8) {
+            if (col == 1)      { if (isSet) ins.transposeEnabled = (v == 1); }
+            else if (col == 3) b255(ins.tableTicRate);
+
         } else {
             const int ccIndex = row - INSTRUMENT_EXTERNAL_CC_ROW;
             if (ccIndex >= 0 && ccIndex < static_cast<int>(ins.midiCC.size())) {
@@ -655,11 +682,11 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
         else if (col == 5) b255(ins.tableTicRate);
 
     } else if (row == 3) {
-        if (col == 1) b255(ins.volume);
-        else if (col == 3) {
-            if (sf) b255(ins.pan);
-            else if (isSet) ins.slicingMode = clamp(v, 0, 2);
-        } else if (col == 5 && !sf) b255(ins.pan);
+        // VOL + TSP + PAN, identical on both types — the `sf` split this arm used to carry went with
+        // SLICE when it moved down to the EQ row.
+        if (col == 1)      b255(ins.volume);
+        else if (col == 3) { if (isSet) ins.transposeEnabled = (v == 1); }
+        else if (col == 5) b255(ins.pan);
 
     } else if (sf && row == 6) {
         // PATCH — the module cannot resolve this itself: the bank+preset behind index `v` live in the
@@ -687,10 +714,17 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
     } else if (sf && row == 13) {
         b255(ins.delaySend);
     } else if ((sf && row == 14) || (!sf && row == 12)) {
-        // The EQ slot. −1 is "no EQ", so DELETE clears to it and INSERT lands on slot 0.
-        if (isSet)                                       ins.eqSlot = clamp(v, 0, 127);
-        else if (action.type == ActionType::DELETE)      ins.eqSlot = -1;
-        else if (action.type == ActionType::INSERT_DEFAULT) ins.eqSlot = 0;
+        // ⚠️ On a SAMPLER, SLICE shares this row, so the EQ arm is no longer the whole row — an edit
+        // that ignored the column would write an EQ slot of 0, 1 or 2 every time SLICE was cycled.
+        // The SoundFont has no second column here and falls into the EQ half for any column.
+        if (col == 3 && !sf) {
+            if (isSet) ins.slicingMode = clamp(v, 0, 2);
+        } else {
+            // The EQ slot. −1 is "no EQ", so DELETE clears to it and INSERT lands on slot 0.
+            if (isSet)                                       ins.eqSlot = clamp(v, 0, 127);
+            else if (action.type == ActionType::DELETE)      ins.eqSlot = -1;
+            else if (action.type == ActionType::INSERT_DEFAULT) ins.eqSlot = 0;
+        }
 
     } else if (!sf && row == 11) {
         if (col == 1) b255(ins.reverbSend);

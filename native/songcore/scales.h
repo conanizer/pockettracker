@@ -19,6 +19,7 @@
 
 #include <algorithm>
 
+#include "effects.h"   // FX_SCA / FX_SCG and their nibble split — the phrase walk below reads them
 #include "model.h"
 
 namespace songcore {
@@ -102,14 +103,64 @@ inline unsigned scale_mask(const Scale& s) {
 }
 
 /**
- * The scale a track is currently in. ⏸️ TODAY IT IS ALWAYS SLOT 00 — the manual's "scale 00 is the
- * default scale for all 8 tracks" — because the two commands that move a track off it, `SCA` and
- * `SCG`, are the next step. It is a function rather than a literal so that when they land, every
- * caller changes at once instead of one at a time.
+ * A slot of the project's pool, clamped. Out of range answers slot 00 rather than the chromatic
+ * default, because a pool that is short is a malformed file and slot 00 is the scale the song was
+ * written against; a hand-typed `SCA` slot beyond the pool is the same case.
  */
-inline const Scale& track_scale(const Project& p, int /*trackId*/) {
+inline const Scale& scale_at(const Project& p, int slot) {
     static const Scale kChromatic{};
-    return p.scales.empty() ? kChromatic : p.scales[0];
+    if (p.scales.empty()) return kChromatic;
+    const int last = static_cast<int>(p.scales.size()) - 1;
+    return p.scales[static_cast<size_t>(slot < 0 ? 0 : (slot > last ? 0 : slot))];
+}
+
+/** A scale slot together with the key it is positioned at — what a lookup answers with. */
+struct ScaleAt {
+    int slot = 0;
+    int key  = 0;
+};
+
+/**
+ * The scale a PHRASE puts one of its rows in: the last `SCA` (or `SCG`) on or above `row`, falling
+ * back to slot 00 and the project's key when the phrase carries none. This is what the note cursor
+ * asks, so that typing under an `SCA` offers that command's notes.
+ *
+ * ⚠️⚠️ **IT READS THE SONG, NEVER `TrackState`, AND THAT DISTINCTION IS THE WHOLE SAFETY ARGUMENT.**
+ * A track's live scale is scheduler state, and the scheduler runs TWO PHRASES AHEAD of what is being
+ * heard — wiring the cursor to it would quantize a typed note to the scale of a bar the player has
+ * not reached yet, the shape of every LIVE-mode defect this project has had. What this walks instead
+ * is the authored cells of the phrase that is on screen: a value the transport cannot move, that
+ * reads the same whether anything is playing, and that a screenshot tool can reproduce.
+ *
+ * ⚠️ The two commands are resolved exactly as `Sequencer` resolves them, or the cursor and the sound
+ * would disagree about a step carrying both: within one row the last of each wins across the three
+ * slots, then `SCG` is applied and `SCA` second — the narrower command over the broader one.
+ *
+ * ⚠️ A command on the cursor's OWN row counts, because the scheduler applies both above the note on
+ * their step. Typing a note on the same row as an `SCA` gets that command's scale, which is what the
+ * screen shows.
+ *
+ * ⏸️ It sees this phrase and nothing else. An `SCA` in an EARLIER phrase of the same chain, and an
+ * `SCG` typed on another track, both reach this row at playback and are invisible here — the cursor
+ * then offers slot 00 while the sound follows the command. Widening the walk to the chain is the
+ * obvious next step and needs the chain the phrase is being viewed THROUGH, which a phrase reached
+ * from the pool does not have.
+ */
+inline ScaleAt phrase_scale_at_row(const Phrase& ph, int row, int projectKey) {
+    ScaleAt at{0, projectKey};
+    const int last = std::min(row, static_cast<int>(ph.steps.size()) - 1);
+    for (int r = 0; r <= last; ++r) {
+        const PhraseStep& step = ph.steps[static_cast<size_t>(r)];
+        int sca = -1, scg = -1;
+        for (int slot = 1; slot <= 3; ++slot) {
+            const int type = step_fx_type(step, slot);
+            if (type == FX_SCG)      scg = step_fx_value(step, slot);
+            else if (type == FX_SCA) sca = step_fx_value(step, slot);
+        }
+        if (scg >= 0) { at.slot = scale_cmd_slot(scg); at.key = scale_cmd_key(scg); }
+        if (sca >= 0) { at.slot = scale_cmd_slot(sca); at.key = scale_cmd_key(sca); }
+    }
+    return at;
 }
 
 /**

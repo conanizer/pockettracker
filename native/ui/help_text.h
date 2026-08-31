@@ -142,6 +142,9 @@ enum class HelpTopic {
     INST_MIDI_CC_NUMBER,
     INST_MIDI_CC_VALUE,
 
+    // Appended, never inserted — HELP_ENTRIES is indexed by these values.
+    INST_TRANSPOSE,
+
     COUNT
 };
 
@@ -290,6 +293,10 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"CC: which controller", "The MIDI CC number this slot", "moves. 00 to 7F."},
     /* INST_MIDI_CC_VALUE */
     {"VAL: what to send", "The value for the CC to its", "left. 00 to 7F."},
+
+    // ── Appended after the MIDI block, to match the enum ─────────────────────────────────────────
+    /* INST_TRANSPOSE */
+    {"TSP: scales and transpose", "OFF pins this instrument to the", "notes as written. ON follows."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -401,6 +408,7 @@ inline HelpTopic instrument_external_topic(int row, int column) {
         case 2: return column == 1 ? HelpTopic::INST_MIDI_CHANNEL : HelpTopic::INST_MIDI_BANK;
         case 3: return column == 1 ? HelpTopic::INST_MIDI_PROGRAM : HelpTopic::INST_MIDI_LENGTH;
         case 7: return column == 1 ? HelpTopic::INST_VOLUME : HelpTopic::INST_PAN;
+        case 8: return column == 1 ? HelpTopic::INST_TRANSPOSE : HelpTopic::INST_TIC;
         default: break;
     }
     // The four CC rows are one pair repeated, exactly as `cursor_context` reads them.
@@ -426,10 +434,10 @@ inline HelpTopic instrument_sample_topic(bool sf, int row, int column) {
         if (column == 5) return HelpTopic::INST_TIC;
         return HelpTopic::NONE;
     }
-    if (row == 3) {  // VOL + PAN on a SoundFont, VOL + SLICE + PAN on a sampler
+    if (row == 3) {  // VOL + TSP + PAN, the same three on both types
         if (column == 1) return HelpTopic::INST_VOLUME;
-        if (column == 3) return sf ? HelpTopic::INST_PAN : HelpTopic::INST_SLICE;
-        if (column == 5 && !sf) return HelpTopic::INST_PAN;
+        if (column == 3) return HelpTopic::INST_TRANSPOSE;
+        if (column == 5) return HelpTopic::INST_PAN;
         return HelpTopic::NONE;
     }
     if (sf && row == 6) return column == 1 ? HelpTopic::INST_PATCH : HelpTopic::NONE;
@@ -448,7 +456,7 @@ inline HelpTopic instrument_sample_topic(bool sf, int row, int column) {
 
     switch (row) {
         case 11: return column == 1 ? HelpTopic::INST_REVERB_SEND : HelpTopic::INST_DELAY_SEND;
-        case 12: return column == 1 ? HelpTopic::INST_EQ : HelpTopic::NONE;
+        case 12: return column == 1 ? HelpTopic::INST_EQ : HelpTopic::INST_SLICE;
         case 13: return column == 1 ? HelpTopic::INST_LOOP_MODE : HelpTopic::INST_SAMPLE_START;
         case 14: return column == 1 ? HelpTopic::INST_LOOP_START : HelpTopic::INST_SAMPLE_END;
         case 15: return column == 1 ? HelpTopic::INST_LOOP_END : HelpTopic::INST_REVERSE;

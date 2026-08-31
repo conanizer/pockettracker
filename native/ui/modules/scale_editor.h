@@ -37,6 +37,25 @@ struct ScaleState {
     const songcore::Scale& scale;
     int   key       = 0;   // the project's, 0-11
     int   cursorRow = 0;
+
+    /**
+     * Which PITCH CLASSES are sounding right now, bit 0 = C — the degrees that get a `>` marker.
+     *
+     * ⚠️⚠️ **IT MUST BE WHAT IS HEARD, NOT WHAT IS SCHEDULED.** The sequencer runs two phrases ahead,
+     * so a marker fed from it would light the degree of a bar nobody has reached. It is filled from
+     * the ENGINE's voices (`AppState::trackNotes`), the same source the note monitor uses, which is
+     * the only place in the app that knows what is coming out of the speaker.
+     *
+     * ⚠️ It is a PITCH-CLASS mask rather than a degree mask on purpose: a degree only exists relative
+     * to a key, and the whole point of the marker is that it can land on a row this scale has turned
+     * OFF — which is how you see a track playing under a different scale, or an instrument with
+     * transposing disabled.
+     *
+     * ⚠️ Handed in rather than read, like `blinkPhaseMs`: a drawing layer with no engine is what
+     * makes the marker reproducible in a screenshot.
+     */
+    unsigned soundingMask = 0;
+
     Theme theme     = theme_classic();
 };
 

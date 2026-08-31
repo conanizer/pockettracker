@@ -43,7 +43,7 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SAMPLER[] = {
     InstrumentRowKind::NAME,    //  0  TYPE + source LOAD + EDIT
     InstrumentRowKind::SINGLE,  //  1  NAME
     InstrumentRowKind::TRIPLE,  //  2  ROOT + DETUNE + TIC
-    InstrumentRowKind::TRIPLE,  //  3  VOL + SLICE + PAN
+    InstrumentRowKind::TRIPLE,  //  3  VOL + TSP + PAN
     InstrumentRowKind::SPACER,  //  4
     InstrumentRowKind::SOURCE,  //  5  INST PRESET: SAVE / LOAD (.pti)
     InstrumentRowKind::SPACER,  //  6
@@ -52,7 +52,7 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SAMPLER[] = {
     InstrumentRowKind::DUAL,    //  9  DWNSMPL + RES
     InstrumentRowKind::SPACER,  // 10
     InstrumentRowKind::DUAL,    // 11  REV + DEL
-    InstrumentRowKind::SINGLE,  // 12  EQ
+    InstrumentRowKind::DUAL,    // 12  EQ + SLICE
     InstrumentRowKind::DUAL,    // 13  LOOP + START
     InstrumentRowKind::DUAL,    // 14  LOOP ST + END
     InstrumentRowKind::DUAL,    // 15  LOOP END + REVERSE
@@ -63,7 +63,7 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SOUNDFONT[] = {
     InstrumentRowKind::NAME,    //  0  TYPE + source LOAD (no EDIT on SF)
     InstrumentRowKind::SINGLE,  //  1  NAME
     InstrumentRowKind::TRIPLE,  //  2  ROOT + DETUNE + TIC
-    InstrumentRowKind::DUAL,    //  3  VOL + PAN
+    InstrumentRowKind::TRIPLE,  //  3  VOL + TSP + PAN
     InstrumentRowKind::SPACER,  //  4
     InstrumentRowKind::SOURCE,  //  5  INST PRESET: SAVE / LOAD (.pti)
     InstrumentRowKind::SINGLE,  //  6  PATCH (the SF2's internal patch selector)
@@ -78,7 +78,7 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SOUNDFONT[] = {
 };
 
 /**
- * EXTERNAL: 12 rows. It owns NO source file — no sample, no SF2 — so its row 0 is the TYPE cell alone
+ * EXTERNAL: 13 rows. It owns NO source file — no sample, no SF2 — so its row 0 is the TYPE cell alone
  * (no LOAD, no EDIT) and every row is a byte the device is actually sent rather than a DSP parameter.
  * None of the sampler's voice controls apply: there is no gain stage, no filter and no loop on our
  * side of the cable. VOL and PAN are here because `ExternalConsumer` folds them into note-on velocity
@@ -103,10 +103,11 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_EXTERNAL[] = {
     InstrumentRowKind::SOURCE,  //  5  INST PRESET: SAVE / LOAD (.pti)
     InstrumentRowKind::SPACER,  //  6
     InstrumentRowKind::DUAL,    //  7  VOL + PAN
-    InstrumentRowKind::DUAL,    //  8  CC A: number + default
-    InstrumentRowKind::DUAL,    //  9  CC B
-    InstrumentRowKind::DUAL,    // 10  CC C
-    InstrumentRowKind::DUAL,    // 11  CC D
+    InstrumentRowKind::DUAL,    //  8  TSP + TIC
+    InstrumentRowKind::DUAL,    //  9  CC A: number + default
+    InstrumentRowKind::DUAL,    // 10  CC B
+    InstrumentRowKind::DUAL,    // 11  CC C
+    InstrumentRowKind::DUAL,    // 12  CC D
 };
 
 inline constexpr int INSTRUMENT_ROWS_SAMPLER_COUNT =
@@ -117,7 +118,7 @@ inline constexpr int INSTRUMENT_ROWS_EXTERNAL_COUNT =
     static_cast<int>(sizeof(INSTRUMENT_ROWS_EXTERNAL) / sizeof(INSTRUMENT_ROWS_EXTERNAL[0]));
 
 /** The first row of the EXTERNAL layout's CC block — CC A. The three below it follow. */
-inline constexpr int INSTRUMENT_EXTERNAL_CC_ROW = 8;
+inline constexpr int INSTRUMENT_EXTERNAL_CC_ROW = 9;
 
 /** How many rows the screen has for this instrument type. */
 inline int instrument_row_count(songcore::InstrumentType type) {
@@ -184,6 +185,12 @@ inline int instrument_sf_offset(songcore::InstrumentType type) {
  * `openSubScreenAtCursor` and `handleSelect` and its own module, which is three places to forget when a
  * row is inserted — and S5 already found the shape of that bug once (`go_to_screen` silently skipping
  * the three screens S4 added).
+ */
+/**
+ * ⚠️ On a SAMPLER the EQ row is a DUAL — its second column is `SLICE`, which moved down here when
+ * `TSP` took its place beside VOL. On a SoundFont it stays a SINGLE: there are no slices to put
+ * there. The row NUMBER is unchanged on both, which is what mattered — it is identity (this function,
+ * and the dispatcher site that tests it) where a column is free.
  */
 inline int instrument_eq_row(songcore::InstrumentType type) {
     switch (type) {

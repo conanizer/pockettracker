@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include "songcore/scales.h"   // scale_mod12 — the SCALE screen's sounding-pitch mask
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
@@ -230,6 +231,16 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ScaleState cs{p.scales[static_cast<size_t>(s.currentScale)]};
                 cs.key       = p.scaleKey;
                 cs.cursorRow = s.scaleCursorRow;
+                // The pitch classes coming out of the speaker, from the same voice readback the note
+                // monitor draws — ⚠️ NOT from the sequencer, which is two phrases ahead of them.
+                // All eight tracks fold into one mask: the screen shows a SCALE, and a scale slot
+                // belongs to no track.
+                for (int i = 0; i < 8; ++i) {
+                    const songcore::Note n = s.trackNotes[i];
+                    if (n == songcore::Note::EMPTY()) continue;
+                    const int midi = songcore::note_to_midi(n);
+                    if (midi >= 0) cs.soundingMask |= 1u << songcore::scale_mod12(midi);
+                }
                 cs.theme     = t;
                 scaleModule_.draw(c, moduleX, EDITOR_Y, cs);
                 break;

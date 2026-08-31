@@ -274,6 +274,23 @@ one track to its earliest unplayed boundary and hand the host a frame to drop qu
 is why a launch aimed at a boundary already inside the lookahead still lands on it rather than a lap
 late.
 
+**Scale quantization happens once, where a note is emitted.** By that point the chain and project
+transposes are folded into the note and the PIT and ARP offsets sit beside it, so quantizing that sum
+in the emit funnel covers the written note, both transposes, the pitch offset and the arpeggio
+together — a quantizer written per site would be four sites, and a fifth added later would be the one
+that forgot. The correction lands on the base note rather than on the offsets, which are re-applied
+below the seam, and never on `transpose`, which the slice derivation subtracts back out. Two cases are
+excluded at the funnel rather than downstream: an instrument with transposition disabled, and a note
+that is selecting a slice, where the value is not a pitch at all.
+
+**The editor, playback and the SCALE screen's marker read the scale from three different places, and
+that is the design.** A track's live scale is scheduler state, advanced a lookahead ahead of what is
+audible, so only the scheduler reads it. The note cursor walks the authored `SCA`/`SCG` cells at or
+above the cursor row — a value no transport can move, identical whether the song is playing or
+stopped. The marker reads the engine's voices, because it has to show what is being heard rather than
+what has been queued. Any two of the three sharing a source would put one of them on a clock that is
+not its own.
+
 ### Parameter automation
 
 `AUS` opens a ramp on the automatable effect in the slot to its **left**, taking that cell's value as

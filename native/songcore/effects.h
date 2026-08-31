@@ -113,6 +113,24 @@ constexpr int FX_AUF      = 0x2E;  // AUF  automation finish: xx = destination v
 constexpr int FX_CUT      = 0x2F;  // CUT  filter cutoff  (00-FF)
 constexpr int FX_RES      = 0x30;  // RES  filter resonance (00-FF)
 
+// ─── The scale commands ───────────────────────────────────────────────────────────────────────────
+//
+// One byte, two nibbles: the high one is the KEY (0 = C … 11 = B) and the low one is the SLOT in the
+// project's 16-scale pool. `effect_value_max` caps the pair at 0xBF so the key nibble cannot be typed
+// past B — keys 12..15 do not exist, and a cell whose top half selects nothing is a cell that reads
+// as broken.
+//
+// ⚠️ **NEITHER IS SONG STATE — the scale a track is in lives on `TrackState`, exactly as the groove
+// does.** The project stores the POOL and the default key; which slot a track has been moved to is a
+// property of the take, so it comes back with a LIVE rewind (`Checkpoint::trackState`) and it is gone
+// at STOP. Nothing is written to the `.ptp`, and nothing needs to be.
+//
+// SCG is SCA applied to all eight tracks rather than a second, song-level variable. That is what
+// makes it a way BACK: a track moved by SCA has no other route to the song's scale, and a global that
+// sat beside the per-track override would leave that track wherever its last SCA put it.
+constexpr int FX_SCA      = 0x31;  // SCA  this track's scale: x = key, y = slot
+constexpr int FX_SCG      = 0x32;  // SCG  every track's scale, same byte layout
+
 /** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
 inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
@@ -133,6 +151,7 @@ inline std::string effect_name(int code) {
         case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
         case FX_CUT: return "CUT"; case FX_RES: return "RES";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
+        case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
         case FX_MPG: return "MPG"; case FX_MPB: return "MPB";
         case FX_CCA: return "CCA"; case FX_CCB: return "CCB";
@@ -147,11 +166,24 @@ inline std::string effect_name(int code) {
 // MPG joins the 0x7F group and does not merely follow it: a MIDI program number IS seven bits, so a
 // cell that let you type FF would be a cell whose top half sends something else (`& 0x7F` folds 0x80
 // back onto program 0). MPB stays 0xFF — it is the wide 14-bit value's top byte, not a 7-bit one.
+//
+// SCA/SCG stop at 0xBF for the same kind of reason and a different arithmetic: their high nibble is a
+// KEY, and there are twelve of those, so 0xC0 and up name a key that does not exist.
 inline constexpr int effect_value_max(int effect_type) {
+    if (effect_type == FX_SCA || effect_type == FX_SCG) return 0xBF;
     return (effect_type == FX_TBL || effect_type == FX_GRV ||
             effect_type == FX_EQN || effect_type == FX_EQM ||
             effect_type == FX_MPG) ? 127 : 255;
 }
+
+/**
+ * The two halves of an SCA/SCG byte. Written here, beside the codes, because the editor's cap, the
+ * scheduler's application and every check have to agree about which nibble is which — and a file
+ * written by hand can carry a key nibble the editor refuses, so the key is clamped rather than
+ * trusted. The slot needs no clamp: four bits is exactly the pool.
+ */
+inline constexpr int scale_cmd_key(int value) { return ((value >> 4) & 0x0F) > 11 ? 11 : ((value >> 4) & 0x0F); }
+inline constexpr int scale_cmd_slot(int value) { return value & 0x0F; }
 
 // The cycle order of the FX-type column, and the reading order of the FX helper grid. This is a
 // UI-facing list (an FX column stores an INDEX into it, and A+RIGHT steps that index), but it lives here
@@ -178,6 +210,11 @@ inline constexpr int EFFECT_TYPES[] = {
     // independent author left to re-record it (tools/ptinput/main.cpp), so a renumber there would be
     // certified by nothing but the code that caused it.
     FX_CUT, FX_RES,
+    // The scale commands, appended for the same reason CUT/RES were, and ahead of the MIDI six
+    // because the assert below requires those to stay last. Appending renumbers everything after it,
+    // and what that costs is `ptinput`'s golden and nothing else: an FX cell holds an INDEX only
+    // while it is a live cursor value, and a `.ptp` holds the effect CODE.
+    FX_SCA, FX_SCG,
     // The MIDI commands (see the static_assert below — they must stay the LAST six)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
 };
@@ -245,6 +282,11 @@ struct ResolvedStepParams {
     std::optional<int> filterResValue;    // RES
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
+    // SCA / SCG: the authored byte, key and slot nibbles still packed. It is split at the point of
+    // APPLICATION (scale_cmd_key / scale_cmd_slot) rather than here, so the bundle carries what the
+    // cell holds and the clamp on a hand-written key lives in one place.
+    std::optional<int> scaleTrackByte;   // SCA
+    std::optional<int> scaleGlobalByte;  // SCG
     std::optional<int> trackVolValue;   // VTR (authored byte)
     std::optional<int> masterVolValue;  // VMV (authored byte)
     // MIDI phase D. `ccSlotValue[i]` is slot A..D's authored 00-FF byte; the controller NUMBER it
@@ -297,6 +339,8 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_RES:    p.filterResValue = value; break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
+            case FX_SCA:    p.scaleTrackByte = value; break;
+            case FX_SCG:    p.scaleGlobalByte = value; break;
             case FX_VTR:    p.trackVolValue = value; break;
             case FX_VMV:    p.masterVolValue = value; break;
             case FX_TBL:    p.tableOverride = value; break;

@@ -73,6 +73,18 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
         const bool isCursor = (row == s.cursorRow);
         const bool isOn     = scale.enabled[static_cast<size_t>(degree)] != 0;
 
+        // ── What is sounding ─────────────────────────────────────────────────────────────────────
+        // The same `>` every grid draws for a playback position, in the gap ahead of the EN cell.
+        // Here it is not a position but a PITCH: the degree the note coming out of the speaker
+        // landed on, which is how the quantizer becomes something you can watch. Play a chromatic
+        // run under a five-note scale and the marker visibly skips the rows that are off.
+        //
+        // ⚠️ A marker on a row that is OFF is not a bug — it means the pitch sounding is not in the
+        // scale on screen, because that track is under a different one or its instrument has
+        // transposing disabled. Drawing it only on enabled rows would hide exactly that.
+        if ((s.soundingMask >> degree_pitch_class(s.key, degree)) & 1u)
+            draw_playhead(c, valueX - CHAR_W, rowY, t);
+
         // The row number is the DEGREE (0-B), the same gutter every grid draws; the note name beside
         // it is what that degree sounds like in the current key, and it moves when the key does.
         draw_cell(c, hex1(degree), labelX, rowY, /*is_cursor=*/false, /*is_selected=*/false,

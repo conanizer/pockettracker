@@ -172,8 +172,9 @@ private:
      */
     void draw_external(Canvas& c, int x, int y, const InstrumentEditorState& s) const;
 
-    void draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot, int cursor_row,
-                     int cursor_column, int this_row, const Theme& t) const;
+    void draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot,
+                     const std::string& n2, const std::string& v2,
+                     int cursor_row, int cursor_column, int this_row, const Theme& t) const;
 };
 
 }  // namespace pt::ui

@@ -20,19 +20,20 @@
 11. [SAMPLE EDITOR Screen](#11-sample-editor-screen)
 12. [TABLE Screen](#12-table-screen)
 13. [GROOVE Screen](#13-groove-screen)
-14. [MODULATION Screen](#14-modulation-screen)
-15. [MIXER Screen](#15-mixer-screen)
-16. [EFFECTS Screen](#16-effects-screen)
-17. [EQ EDITOR](#17-eq-editor)
-18. [PROJECT Screen](#18-project-screen)
-19. [SETTINGS Screen](#19-settings-screen)
-20. [THEME EDITOR](#20-theme-editor)
-21. [Effects Reference](#21-effects-reference)
-22. [Modulation Reference](#22-modulation-reference)
-23. [File Management](#23-file-management)
-24. [Workflow Tips](#24-workflow-tips)
-25. [Configuration File (config.json)](#25-configuration-file-configjson)
-26. [Appendix: Controls Cheat Sheet](#appendix-controls-cheat-sheet)
+14. [SCALE Screen](#14-scale-screen)
+15. [MODULATION Screen](#15-modulation-screen)
+16. [MIXER Screen](#16-mixer-screen)
+17. [EFFECTS Screen](#17-effects-screen)
+18. [EQ EDITOR](#18-eq-editor)
+19. [PROJECT Screen](#19-project-screen)
+20. [SETTINGS Screen](#20-settings-screen)
+21. [THEME EDITOR](#21-theme-editor)
+22. [Effects Reference](#22-effects-reference)
+23. [Modulation Reference](#23-modulation-reference)
+24. [File Management](#24-file-management)
+25. [Workflow Tips](#25-workflow-tips)
+26. [Configuration File (config.json)](#26-configuration-file-configjson)
+27. [Appendix: Controls Cheat Sheet](#appendix-controls-cheat-sheet)
 
 ---
 
@@ -182,7 +183,7 @@ Row 3                       MIXER
 Row 4                      EFFECTS
 ```
 
-> **SCALE** and **INST POOL** (Row 0) are reserved for future features and not yet active.  
+> **SCALE** and **INST POOL** (Row 0) only appear in column 2 and 3 respectively.  
 > **GROOVE** and **MODS** (Row 1) only appear in column 2 and 3 respectively.  
 > **MIXER** and **EFFECTS** (rows 3–4) only appear in the column you are currently on — move left/right first, then navigate up/down.
 
@@ -280,6 +281,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 - **Key repeat is active:** hold the combo for ~400 ms and it starts repeating at ~10/s.
 - For **note values**, large step = ±12 semitones (one octave).
 - For **hex byte values**, large step = ±0x10.
+- Under a scale, a note's small step is the next note **of that scale** rather than the next semitone — see [section 14](#14-scale-screen). The large step stays a full octave.
 
 ---
 
@@ -539,7 +541,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 |---|---|
 | D-pad | Move cursor |
 | A | Insert last-used note / value |
-| A + LEFT/RIGHT | +1 / −1 semitone (note), +1 / −1 (other values) |
+| A + LEFT/RIGHT | +1 / −1 semitone (note — or the next note of the scale, see [section 14](#14-scale-screen)), +1 / −1 (other values) |
 | A + UP/DOWN | ±1 octave (note), ±16 (other values) |
 | A + B | Delete value at cursor |
 | B + LEFT/RIGHT | Switch to previous / next phrase |
@@ -577,6 +579,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
 | VOL | 00–FF | Base volume. `FF` = full. |
+| TSP | ON / OFF | Between VOL and PAN. `OFF` takes this instrument out of **every** note transposition — the scale on its track, the chain transpose column and the project TRANSPOSE setting. Turn it off for a drum kit whose slots you have pitched by hand. |
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |
 | START | 00–FF | Sample start point (fraction of sample length). |
 | END | 00–FF | Sample end point. |
@@ -684,7 +687,7 @@ own.
 | B | Close the browser |
 | START | Preview highlighted audio (WAV / MP3 / FLAC / OGG / OPUS / M4A) or video file |
 
-The browser can also manage files — see [section 23](#23-file-management).
+The browser can also manage files — see [section 24](#24-file-management).
 
 Compressed audio (MP3 / FLAC / OGG / Opus / M4A) loads as a sample too — it decodes in place, with no
 WAV written. Video files are instead **converted** to a WAV in the Samples folder. See §23 →
@@ -989,7 +992,75 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 
 ---
 
-## 14. MODULATION Screen
+## 14. SCALE Screen
+
+A scale is a set of notes. While a track is using one, every note it plays lands on the nearest note in that set — including notes you wrote before you chose the scale.
+
+Navigate here: **R+UP** from GROOVE (column 2).
+
+A project holds **16 scales**, numbered `00`–`0F`. Every track starts on scale `00`, which has all twelve notes switched on and so constrains nothing.
+
+```
+SCALE 00                 LEN: 7
+KEY        C
+
+       EN
+0  C   >ON
+1  C#   --
+2  D   >ON
+3  D#   --
+4  E    ON
+5  F    ON
+6  F# >--
+7  G    ON
+8  G#   --
+9  A    ON
+A  A#   --
+B  B    ON
+```
+
+| Field | Meaning |
+|---|---|
+| KEY | The root the scale is built from. It belongs to the project rather than to the individual scale, so changing it re-labels every row and moves all 16 scales to the new key. |
+| LEN | How many notes this scale contains. 7 is a mode, 5 a pentatonic, 12 no constraint at all. |
+| Rows 0–B | The twelve intervals above the key, each `ON` or `--`. The note name beside each row is what that interval sounds like in the current key. |
+
+Row 0 is the root and cannot be switched off, and neither can the last note still on.
+
+The `>` marker shows a note that is sounding right now. Play a chromatic run under a five-note scale and you can watch it skip the rows that are off.
+
+> [!NOTE]
+> A marker on a row that is switched off is not a mistake — it means the note you are hearing is not in the scale on screen: that track is on a different scale, or the instrument is sliced, or its TSP is off.
+
+### What a scale changes
+
+- **Typing.** A+LEFT/RIGHT on a note cell steps to the next note of the scale instead of the next semitone, and A on an empty cell inserts a note the scale contains.
+- **Playing.** Every note the track plays lands on a note of the scale — including notes written before the scale existed, and notes moved by a chain transpose.
+- **PIT and ARP.** The pitch offset and the arpeggio land in the scale too. Because each result goes to the *nearest* note in the scale, a small `PIT` under a narrow scale can leave a note exactly where it was rather than moving it.
+
+Two things are left alone. **Sliced instruments are never moved** — there the note picks which slice of the sample to play rather than a pitch, so moving it would play a different slice. And any instrument whose **TSP** is `OFF` (INSTRUMENT screen, between VOL and PAN) is left exactly as written, which is how you keep a hand-pitched drum kit out of the scale.
+
+### Choosing a scale for a track
+
+Every track uses scale `00` until a phrase says otherwise. **SCA** moves one track, **SCG** moves all eight, and both carry a key as well as a scale number so a section can change key and scale on the same step. Both last until the next scale command or until playback stops.
+
+While you are typing, the note cell follows the last `SCA` or `SCG` written **at or above** the cursor in the same phrase.
+
+> [!NOTE]
+> That look-up reads the phrase on screen and nothing else. A scale command in an earlier phrase of the same chain, or an `SCG` typed on another track, still applies when the song plays — but the note cell you are typing into will not know about it and will offer scale `00`.
+
+### Controls
+
+| Input | Action |
+|---|---|
+| D-pad UP/DOWN | Move between rows |
+| A + LEFT/RIGHT | Change KEY / switch a note ON or off |
+| A + UP/DOWN | Nothing — none of these cells has a large step |
+| B + LEFT/RIGHT | Previous / next scale |
+
+---
+
+## 15. MODULATION Screen
 
 The MODULATION screen (MODS) adds up to **4 modulation slots** per instrument. Each slot runs an envelope or LFO targeting a destination parameter — great for volume shapes, pitch vibrato, filter sweeps, and more.
 
@@ -1064,7 +1135,7 @@ Example: MOD1 (LFO) with DEST=MOD AMT targeting MOD2 (AHD) — the LFO rhythmica
 
 ---
 
-## 15. MIXER Screen
+## 16. MIXER Screen
 
 The MIXER screen shows all 8 tracks plus a master column with real-time dBFS peak meters. This is where you balance levels, control reverb/delay return volumes, and open per-track EQs.
 
@@ -1128,7 +1199,7 @@ The master column also has stereo send peak meters showing REV and DEL bus level
 
 ---
 
-## 16. EFFECTS Screen
+## 17. EFFECTS Screen
 
 The EFFECTS screen configures the global stereo send buses (reverb and delay) and selects the master bus effect.
 
@@ -1172,7 +1243,7 @@ Per-instrument effects (filter, drive, crush) are set on the INSTRUMENT screen.
 
 ---
 
-## 17. EQ EDITOR
+## 18. EQ EDITOR
 
 The EQ EDITOR is a full-screen overlay that opens when you press **A** on an EQ cell in the INSTRUMENT, INST.POOL, MIXER, EFFECTS, or SAMPLE EDITOR (EQ-effect slot) screens.
 
@@ -1222,7 +1293,7 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 
 ---
 
-## 18. PROJECT Screen
+## 19. PROJECT Screen
 
 The PROJECT screen contains global settings and file operations.
 
@@ -1258,7 +1329,7 @@ WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's ho
 
 ---
 
-## 19. SETTINGS Screen
+## 20. SETTINGS Screen
 
 The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, press A). Press **B** to return to PROJECT.
 
@@ -1273,7 +1344,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
 | NAV | POOL / SONG | What B + D-pad walks. **SONG** (the default) walks the arrangement: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds. **POOL** steps through the 00–FF chain and phrase pools instead, which is what earlier versions did — see §5.4. |
-| FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 25). |
+| FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 26). |
 | NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
@@ -1303,7 +1374,7 @@ that would configure nothing is not shown rather than shown and inert.
 
 ---
 
-## 20. THEME EDITOR
+## 21. THEME EDITOR
 
 The THEME EDITOR lets you customize the entire color scheme of the app, or switch between built-in themes. Open it from SETTINGS → THEME row → press A.
 
@@ -1373,7 +1444,7 @@ A theme file saved before these rows existed loads with them set to what the scr
 
 ---
 
-## 21. Effects Reference
+## 22. Effects Reference
 
 Effects are placed in the **FX1**, **FX2**, and **FX3** columns of a phrase step, or in the FX columns of a table row. Each has a 3-letter code and a 2-digit hex value.
 
@@ -1789,7 +1860,36 @@ plays — the shortest way to give a sample a filter envelope without spending a
 
 ---
 
-## 22. Modulation Reference
+### SCA `XY` — Track Scale · SCG `XY` — Global Scale
+
+Put a track on one of the project's 16 scales. `SCA` moves the track the command is written on; `SCG`
+moves all eight.
+
+| Nibble | Meaning |
+|---|---|
+| `X` | The key, `0`–`B` — `0` is C, `1` is C#, up to `B` for B |
+| `Y` | Which scale, `0`–`F` |
+
+```
+    00   C-4   SCA 71           ← this track plays scale 01 in the key of G
+    04   D#4   SCG 03           ← every track plays scale 03 in the key of C
+```
+
+From that step onward every note the track plays lands on a note of that scale — see
+[section 14](#14-scale-screen) for what a scale is and what it leaves alone. The command takes effect
+on its own step, so a note written beside it is already in the new scale.
+
+Both last until the next scale command and are forgotten when playback stops; nothing about them is
+saved in the song. To put a track back on scale `00`, name it again — `SCA 00`, or `SCG 00` for every
+track at once, including tracks an earlier `SCA` moved. Note that this also sets the key to C, because
+every scale command carries one: only stopping playback returns a track to the project's own KEY.
+
+> [!NOTE]
+> On a step carrying both, `SCA` wins for its own track and `SCG` still moves the other seven.
+
+---
+
+## 23. Modulation Reference
 
 See §14 for how to edit mod slots. Envelope times are in **tics**, so they track project BPM.
 
@@ -1839,7 +1939,7 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 
 ---
 
-## 23. File Management
+## 24. File Management
 
 Throughout this section `<home>` is PocketTracker's home folder: on Android the folder you granted it
 (section 2), and elsewhere the `PocketTracker` folder the app keeps beside itself.
@@ -1962,7 +2062,7 @@ needs and what is hardest to describe from memory. If something is wrong, attach
 
 ---
 
-## 24. Workflow Tips
+## 25. Workflow Tips
 
 ### Making your first phrase
 
@@ -2033,7 +2133,7 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 ---
 
-## 25. Configuration File (config.json)
+## 26. Configuration File (config.json)
 
 Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in
 PocketTracker's home folder, beside the `Projects` and `Samples` directories, and covers three of them:
@@ -2470,6 +2570,8 @@ Open with **A** on an EQ cell.
 | AUF | Automation Finish | `XX` | Destination value; a later step, may be a later phrase of the same chain |
 | CUT | Filter Cutoff | `XX` | This note's filter cutoff (20 Hz–20 kHz, log). Needs a FILTER TYPE on the instrument |
 | RES | Filter Resonance | `XX` | This note's filter resonance. Needs a FILTER TYPE on the instrument |
+| SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
+| SCG | Global Scale | `XY` | The same for all eight tracks |
 
 ---
 
