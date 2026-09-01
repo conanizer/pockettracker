@@ -1501,14 +1501,12 @@ class Sequencer {
                                                                  static_cast<int>(project.grooves.size()) - 1)];
             bool currentGrooveActive = groove_active_length(currentGroove) > 0;
 
-            int64_t stepDuration;
-            if (currentGrooveActive) {
-                anyGrooveActive = true;
-                int stepTics = groove_ticks_for_step(currentGroove, localGrooveStep);
-                stepDuration = framesPerTic * stepTics;  // 0 tics = skip step
-            } else {
-                stepDuration = framesPerStep;
-            }
+            // ⚠️ THE LENGTH COMES FROM `timing.h`, NOT FROM A COPY HERE. This block held its own
+            // `framesPerTic × tics` for years while `groove_step_duration` sat beside it computing the
+            // same thing — so the two could disagree, and when the truncation was corrected only the
+            // one the tools call would have moved. One definition, and the tools measure what runs.
+            if (currentGrooveActive) anyGrooveActive = true;
+            int64_t stepDuration = groove_step_duration(currentGroove, localGrooveStep, framesPerStep);
 
             if (stepDuration == 0) {
                 rowsScheduled++;

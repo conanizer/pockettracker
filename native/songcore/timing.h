@@ -14,10 +14,14 @@
 //
 // framesPerStep is a binary64 (Double) computation truncated to Long. The evaluation ORDER is
 // replicated verbatim — 60000.0 / tempo / 4.0 * sr / 1000.0, left-to-right, same precedence — so the
-// double rounding, and therefore the truncated frame count, is bit-identical to the JVM. Likewise the
-// groove path multiplies the already-truncated framesPerTic (never re-derives from framesPerStep), so
-// a 12-tic groove step does NOT equal a plain step — that rounding drift is intentional and preserved.
-// tools/ptresolve proves all of this against a JVM-emitted golden.
+// double rounding, and therefore the truncated frame count, is bit-identical to the JVM.
+// tools/ptresolve proves that against a JVM-emitted golden.
+//
+// ⚠️ ONE FUNCTION HERE DELIBERATELY NO LONGER MATCHES THE JVM: `groove_step_duration`, which
+// multiplies before dividing where Kotlin divided first. Kotlin's order lost up to eleven frames on
+// every grooved step and the scheduler accumulates them, so grooved playback ran fast. The golden
+// still records Kotlin's answer and ptresolve derives the exact departure from it rather than
+// adopting the new number — see that function, and `tools/testdata/README.md` §1.
 
 #include <cstdint>
 #include "model.h"
@@ -77,15 +81,27 @@ inline int groove_ticks_for_step(const Groove& g, int groove_step) {
     return g.steps[groove_step % len];
 }
 
-// Composed per-step duration in frames, exactly as PlaybackController.schedulePhrase computes it:
-// an active groove (activeLength > 0) gives `framesPerTic × ticksForStep(pos)` — which can be 0 (skip
-// the row) and which does NOT equal framesPerStep for a 12-tic step because framesPerTic already
-// truncated; no active groove falls back to the exact framesPerStep to avoid that drift.
+// Composed per-step duration in frames. An active groove scales the step by its tic count — which can
+// be 0, meaning skip the row; no active groove is exactly one plain step.
+//
+// ⚠️⚠️ MULTIPLY THEN DIVIDE. `framesPerTic × tics` divides first and throws away up to
+// TICS_PER_STEP−1 frames on every step, and the scheduler ACCUMULATES these durations, so the loss
+// compounds: a full-length 12-tic step came out SHORTER than a plain step, and a grooved track ran
+// measurably fast against an ungrooved one on the same song — at 140 BPM they separated by a whole
+// step inside 33 bars. Multiplying first makes a full-length step exactly `frames_per_step_value` and
+// leaves under one frame of residual.
+//
+// ⚠️ This is a DELIBERATE DEPARTURE FROM THE JVM, which truncated. It is the one thing in this file
+// that no longer reproduces `PlaybackController.schedulePhrase`, and `tools/ptresolve` states the
+// departure as an exact offset off the recorded golden rather than adopting the new answer.
+//
+// ⚠️ `frames_per_tic` is still the unit an EFFECT positions itself in WITHIN a step (see the
+// scheduler's `stepDuration / TICS_PER_STEP`). It is simply not what a step's LENGTH is built from,
+// which is why it is no longer a parameter here.
 inline int64_t groove_step_duration(const Groove& g, int groove_step,
-                                    int64_t frames_per_step_value, int64_t frames_per_tic_value) {
-    if (groove_active_length(g) > 0)
-        return frames_per_tic_value * groove_ticks_for_step(g, groove_step);
-    return frames_per_step_value;
+                                    int64_t frames_per_step_value) {
+    if (groove_active_length(g) == 0) return frames_per_step_value;
+    return frames_per_step_value * groove_ticks_for_step(g, groove_step) / TICS_PER_STEP;
 }
 
 }  // namespace songcore
