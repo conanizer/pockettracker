@@ -326,8 +326,12 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
             specY[xi]       = VIS_H - h;
             if (h > 0) spectrumAtRest_ = false;
         }
-        // The FILL goes down first, so the grid lines below render on top of it — Kotlin's order.
+        // ⚠️ The fill AND its outline both go down before the grid, so the grid lines render on top
+        // of the whole spectrum. Splitting them — outline after the grid — puts a hard edge over the
+        // dB and frequency lines while the area under it stays behind them, and the two halves of one
+        // shape then sit on opposite sides of the grid.
         fill_under_curve(c, x, vy, specY, WIDTH, bottom, t.eqFill);
+        stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1);
     }
 
     // ── The dB grid ─────────────────────────────────────────────────────────────────────────────
@@ -350,9 +354,6 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
         c.draw_text(m.label, x + fx + 2, vy + 3, t.eqTxt, CHAR_SPACING, 2);
     }
-
-    // The spectrum's own outline, over the grid.
-    if (haveSpectrum) stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1);
 
     // ── The response curve — the point of the whole screen ───────────────────────────────────────
     if (s.slotIndex >= 0 && s.slotIndex < static_cast<int>(s.project.eqPresets.size())) {

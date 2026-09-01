@@ -1192,6 +1192,18 @@ void InputDispatcher::on_a_released() {
     s_.fxHelper = FxHelperState{};
 }
 
+void InputDispatcher::on_dpad_released() {
+    // Both accelerations are keyed off "the last call looked like part of the same gesture", so
+    // ending the gesture is all this has to do — the next press then reads as fresh on its own terms.
+    // `lastBrowserMoveDelta_ = 0` is that statement for the browser: a delta is never 0, so the next
+    // call cannot match it.
+    //
+    // The gap tests in both functions STAY. They are no longer the discriminator, but they still
+    // cover the case a release cannot reach: a repeat train that outlives whatever produced it.
+    lastBrowserMoveDelta_    = 0;
+    textCursorRepeatStreak_  = 0;
+}
+
 void InputDispatcher::on_a_deferred() {
     // The mapper is holding this press. Nothing acts here — the one thing recorded is the number that
     // will have MOVED by the time A comes back up. Every other deferred cell opens something that reads

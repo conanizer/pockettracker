@@ -251,6 +251,16 @@ class InputDispatcher {
     void on_a_released();
 
     /**
+     * Release of any direction: ends both hold accelerations.
+     *
+     * ⚠️ It is the ONLY thing that can. Both of them measure the gap between calls, and a gap cannot
+     * separate a sustained hold from fast repeated taps — which is what made the file browser take
+     * off under a tapped D-pad (issue #32). The shell synthesizes a repeat as another PRESSED and
+     * never interleaves a release, so this fires exactly when the button came up.
+     */
+    void on_dpad_released();
+
+    /**
      * A went down on a cell the mapper is DEFERRING (`defer_a_to_release`), so nothing has fired yet
      * and nothing fires here. It exists for the one thing a release cannot recover: the instant.
      *

@@ -50,11 +50,8 @@ constexpr KeyDefault KEY_DEFAULTS[] = {
 /** SDL returns NULL for an enum it does not recognise, and "%s" with NULL is UB. Never trust it. */
 const char* or_unknown(const char* s) { return s ? s : "?"; }
 
-/** The always-repeatable buttons. B joins them only under `set_b_repeatable` — see press(). */
-bool is_dpad(Button b) {
-    return b == Button::DPAD_UP || b == Button::DPAD_DOWN || b == Button::DPAD_LEFT ||
-           b == Button::DPAD_RIGHT;
-}
+// The always-repeatable buttons are the D-pad; `is_dpad` lives beside the enum in ui/buttons.h.
+// B joins them only under `set_b_repeatable` — see press().
 
 }  // namespace
 

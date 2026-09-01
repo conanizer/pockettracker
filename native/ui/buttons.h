@@ -51,6 +51,12 @@ enum class Button {
 
 enum class ButtonAction { PRESSED, RELEASED };
 
+/** The four directions, as one question — beside the enum, so a new member cannot miss a call site. */
+inline bool is_dpad(Button b) {
+    return b == Button::DPAD_UP || b == Button::DPAD_DOWN || b == Button::DPAD_LEFT ||
+           b == Button::DPAD_RIGHT;
+}
+
 /**
  * The one spelling of each button's name — indexed by `Button`, so it tracks the enum's order.
  *

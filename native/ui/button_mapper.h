@@ -170,6 +170,13 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                 d.on_select();
             }
         }
+        // ⚠️ THE ONE UNAMBIGUOUS END OF A HOLD. Two hold accelerations (the file browser's and the
+        // qwerty text cursor's) previously inferred "still held" from the gap between calls alone,
+        // and a gap cannot tell a sustained hold from fast repeated taps — tapping under the 250 ms
+        // threshold built the streak and the browser took off (issue #32). A release can: the shell
+        // synthesizes a repeat as another PRESSED and never interleaves a release, so this arrives
+        // only when the button actually came up.
+        if (is_dpad(e.button)) d.on_dpad_released();
         return;
     }
 
