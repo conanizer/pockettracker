@@ -122,6 +122,10 @@ inline constexpr Entry TABLE[] = {
     {')', {{0b01000, 0b00100, 0b00100, 0b00100, 0b01000}}},
     {'|', {{0b00100, 0b00100, 0b00100, 0b00100, 0b00100}}},
     {'"', {{0b01010, 0b00000, 0b00000, 0b00000, 0b00000}}},
+    // ⚠️ NOT in the Kotlin font — the one glyph in this table that was never on the phone. It is the
+    // "edited since it was named" marker the SCALE screen draws, and an unmapped char draws as a
+    // BLANK rather than as anything you would notice was missing.
+    {'*', {{0b00100, 0b10101, 0b01110, 0b10101, 0b00100}}},
     {' ', {{0b00000, 0b00000, 0b00000, 0b00000, 0b00000}}},
 };
 

@@ -8,6 +8,7 @@
 #include "ui/song_pointer.h"     // NAV = SONG — the pointer, the entry gate and the load-time clamp
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 #include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
+#include "ui/scale_io.h"         // .pts — save_scale_file / load_scale_file / the factory seed
 
 #include <algorithm>
 #include <map>
@@ -344,8 +345,9 @@ CursorContext InputDispatcher::cursor_context() const {
         }
         case ScreenType::SCALE: {
             ScaleState cs{p.scales[static_cast<size_t>(s_.currentScale)]};
-            cs.key       = p.scaleKey;
-            cs.cursorRow = s_.scaleCursorRow;
+            cs.key          = p.scaleKey;
+            cs.cursorRow    = s_.scaleCursorRow;
+            cs.cursorColumn = s_.scaleCursorColumn;
             return scale_.cursor_context(cs);
         }
 
@@ -481,7 +483,8 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             // was handed — it edits the project. The module says so by handing the new key back
             // rather than by reaching for a Project it has no business holding.
             const ScaleInputResult r = scale_.handle_input(
-                p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursorRow, action);
+                p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursorRow,
+                s_.scaleCursorColumn, action);
             if (r.newKey >= 0) p.scaleKey = r.newKey;
             return r.modified;
         }
@@ -895,6 +898,66 @@ void InputDispatcher::theme_row_action() {
         default:    // column 0 is the NAME, and a bare A on it does nothing. Kotlin's `when` has no arm.
             break;
     }
+}
+
+// ─── The SCALE screen's NAME row ─────────────────────────────────────────────────────────────────
+
+void InputDispatcher::scale_row_action() {
+    const songcore::Scale& scale =
+        host_.project().scales[static_cast<size_t>(s_.currentScale)];
+
+    switch (scale_name_action(s_.scaleCursorRow, s_.scaleCursorColumn)) {
+        case ScaleNameAction::SAVE: {
+            // Seeded with the SANITIZED name the row is showing, so what you are shown is what the file
+            // will be called — and the row shows a name even for a slot that stores none, which is why
+            // it is `scale_display_name` and not `scale.name`.
+            const std::string seed = sanitize_scale_filename(songcore::scale_display_name(scale));
+            open_qwerty(QwertyContext::SCALE_SAVE, seed.empty() ? "SCALE" : seed, "SAVE SCALE:",
+                        fs_.scales_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
+            break;
+        }
+        case ScaleNameAction::LOAD:
+            // ⚠️ Unlike the theme's, nothing has to be closed first: SCALE is a SCREEN, so the browser
+            // simply replaces it and `previousScreen` brings the user back. The theme editor is an
+            // overlay and would have been left standing underneath.
+            //
+            // ⚠️ And unlike every other load, this browser starts at the built-in folder rather than at
+            // a config.json override — `folders` names five categories and scales is not one of them.
+            // Adding a sixth key means changing the template every user has already been seeded with,
+            // which is a decision about config.json rather than about scales.
+            open_file_browser(AppState::BrowserPurpose::LOAD_SCALE, fs_.scales_directory(),
+                              {SCALE_FILE_EXT});
+            break;
+        case ScaleNameAction::NONE:
+            break;
+    }
+}
+
+void InputDispatcher::save_scale_as(const std::string& dir, const std::string& typed_text) {
+    // The theme save's two-names rule, on a scale: the FILENAME is sanitized so it survives a FAT32
+    // card, the name IN the file is what was typed. An empty field keeps the name the row was showing
+    // rather than blanking it, and falls back to "SCALE" for the file — never `.pts`, which is a
+    // dotfile the browser does not list.
+    const std::string safe = sanitize_scale_filename(typed_text);
+    const std::string file = (safe.empty() ? std::string("SCALE") : safe) + ".pts";
+
+    songcore::Scale& slot = host_.edit_project().scales[static_cast<size_t>(s_.currentScale)];
+
+    // ⚠️ THE SLOT ADOPTS THE NAME IT WAS SAVED UNDER, where the THEME row deliberately does not. That
+    // divergence is on purpose: the theme's is a Kotlin wart kept for parity, and here the name is the
+    // only thing on screen that says which file this slot is. Adopting it is also what clears the `*` —
+    // the slot now matches the shape it is named after, because that shape is the one just written.
+    const std::string want = !typed_text.empty()          ? typed_text
+                           : !slot.name.empty()           ? slot.name
+                                                          : songcore::scale_display_name(slot);
+    if (slot.name != want) {
+        slot.name = want;
+        mark_modified();
+    }
+
+    const bool ok = save_scale_file(fs_, dir + "/" + file, slot);
+    s_.statusMessage = ok ? "SCALE SAVED" : "SAVE FAILED";
+    s_.statusSuccess = ok;
 }
 
 void InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {
@@ -2839,6 +2902,14 @@ void InputDispatcher::on_button_a() {
     // `open_sub_screen_at_cursor` — Kotlin splits them the same way (`handleConfirmAInstrument`).
     if (instrument_open_at_cursor()) return;
 
+    // A on the SCALE screen's SAVE / LOAD cells. Like the two arms above it this returns rather than
+    // falling through, and unlike them it is a SCREEN rather than an overlay — so it is placed here, in
+    // the run of "A on a button", and not up among the modal guards.
+    if (s_.currentScreen == ScreenType::SCALE) {
+        scale_row_action();
+        return;
+    }
+
     // A on an EMPTY cell inserts the item you last edited. That is what makes A,A meaningful: press
     // A once to lay down the last chain again, press it twice to get a fresh one.
     Project& p = host_.edit_project();
@@ -3695,6 +3766,27 @@ void InputDispatcher::browser_confirm() {
             s_.statusMessage = "THEME LOADED";
             s_.statusSuccess = true;
             return;
+
+        case AppState::BrowserPurpose::LOAD_SCALE: {
+            // ⚠️ Loaded into a COPY and only committed once it parses, so a truncated or hand-mangled
+            // file cannot leave a slot half-overwritten — and the copy is what keeps the slot's `id`,
+            // which is *which of the sixteen this is* rather than anything the file gets a say in.
+            //
+            // ⚠️ The extension is re-checked even though the browser was opened filtered: the user can
+            // walk out of the Scales folder, and the D-pad does not stop at a directory boundary.
+            songcore::Scale loaded = host_.project().scales[static_cast<size_t>(s_.currentScale)];
+            if (ext != SCALE_FILE_EXT || !load_scale_file(fs_, path, loaded)) {
+                b.statusMessage = "LOAD FAILED";
+                b.statusSuccess = false;
+                return;
+            }
+            host_.edit_project().scales[static_cast<size_t>(s_.currentScale)] = loaded;
+            mark_modified();
+            close_file_browser();
+            s_.statusMessage = "SCALE LOADED";
+            s_.statusSuccess = true;
+            return;
+        }
     }
 
     if (!ok) {
@@ -3974,6 +4066,12 @@ void InputDispatcher::qwerty_apply() {
             // and for the error return Kotlin drops on the floor. ⚠️ `k.contextExtra`, not
             // `s_.qwerty.contextExtra`: the live keyboard was cleared at the top of this function.
             save_theme_as(k.contextExtra, text);
+            break;
+
+        case QwertyContext::SCALE_SAVE:
+            // ⚠️ `k.contextExtra`, for the same reason the arm above it takes one: the live keyboard is
+            // cleared before any of these run, so reading `s_.qwerty` here writes to the filesystem root.
+            save_scale_as(k.contextExtra, text);
             break;
 
         case QwertyContext::SAMPLE_NAME: {

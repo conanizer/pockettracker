@@ -1039,6 +1039,12 @@ class InputDispatcher {
      */
     void save_theme_as(const std::string& dir, const std::string& typed_text);
 
+    /** A on the SCALE screen's NAME row: column 1 = SAVE, column 2 = LOAD. Column 0 cycles on A+DPAD. */
+    void scale_row_action();
+
+    /** Apply the typed name and write `<dir>/<name>.pts`. The QWERTY's SCALE_SAVE arm. */
+    void save_scale_as(const std::string& dir, const std::string& typed_text);
+
     // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
     /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
     void project_action();

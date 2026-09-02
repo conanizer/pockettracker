@@ -434,6 +434,7 @@ std::string SafFileSystem::resampled_directory()   { return ensure_dir("Samples/
 std::string SafFileSystem::instruments_directory() { return ensure_dir("Instruments"); }
 std::string SafFileSystem::soundfonts_directory()  { return ensure_dir("Soundfonts"); }
 std::string SafFileSystem::themes_directory()      { return ensure_dir("Themes"); }
+std::string SafFileSystem::scales_directory()      { return ensure_dir("Scales"); }
 
 bool SafFileSystem::activate(const std::string& path) {
     if (path != kAddRootPath) return false;

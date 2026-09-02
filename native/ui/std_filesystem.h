@@ -64,6 +64,7 @@ class StdFileSystem : public FileSystem {
     std::string instruments_directory() override { return ensure_dir("Instruments"); }
     std::string soundfonts_directory() override  { return ensure_dir("Soundfonts"); }
     std::string themes_directory() override      { return ensure_dir("Themes"); }
+    std::string scales_directory() override      { return ensure_dir("Scales"); }
 
     // ── The app's own files ─────────────────────────────────────────────────────────────────────
     //

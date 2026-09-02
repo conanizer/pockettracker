@@ -87,6 +87,10 @@ struct AppState {
     int tableCursorColumn = 1;  // starts on transpose
     int grooveCursorRow   = 0;
     int scaleCursorRow    = 0;
+    // ⚠️ Read on the SCALE screen's NAME row and nowhere else — that is the only row there with more
+    // than one cell. It is NOT what `InputDispatcher::cursor_column()` answers for SCALE: that one
+    // feeds the selection and the clipboard, which see this screen as a single column of degrees.
+    int scaleCursorColumn = 0;
 
     // INSTRUMENT. Its rows are not a uniform grid — they are the row-kind table in
     // ui/instrument_row_layout.h, and the cursor walks that rather than a range.
@@ -280,7 +284,8 @@ struct AppState {
         LOAD_PRESET,        // a .pti into the current instrument slot
         LOAD_SAMPLE_EDITOR, // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
         LOAD_PROJECT,       // a .ptp — the whole document, from PROJECT's LOAD button (S7)
-        LOAD_THEME          // a .ptt — and back into the THEME EDITOR, which raised the browser (S9)
+        LOAD_THEME,         // a .ptt — and back into the THEME EDITOR, which raised the browser (S9)
+        LOAD_SCALE          // a .pts into the slot the SCALE screen is showing
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 

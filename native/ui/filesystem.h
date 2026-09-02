@@ -136,6 +136,7 @@ class FileSystem {
     virtual std::string instruments_directory() = 0;
     virtual std::string soundfonts_directory() = 0;
     virtual std::string themes_directory()     = 0;
+    virtual std::string scales_directory()     = 0;
 
     // ── The app's own files ──────────────────────────────────────────────────────────────────────
     //

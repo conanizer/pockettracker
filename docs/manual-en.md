@@ -1002,6 +1002,7 @@ A project holds **16 scales**, numbered `00`–`0F`. Every track starts on scale
 
 ```
 SCALE 00                 LEN: 7
+MAJOR              SAVE  LOAD
 KEY        C
 
        EN
@@ -1021,6 +1022,7 @@ B  B    ON
 
 | Field | Meaning |
 |---|---|
+| Name | The scale this slot was taken from. A+LEFT/RIGHT steps through the 38 built-in scales and loads the one you land on. **SAVE** and **LOAD** write and read scale files — see below. |
 | KEY | The root the scale is built from. It belongs to the project rather than to the individual scale, so changing it re-labels every row and moves all 16 scales to the new key. |
 | LEN | How many notes this scale contains. 7 is a mode, 5 a pentatonic, 12 no constraint at all. |
 | Rows 0–B | The twelve intervals above the key, each `ON` or `--`. The note name beside each row is what that interval sounds like in the current key. |
@@ -1031,6 +1033,17 @@ The `>` marker shows a note that is sounding right now. Play a chromatic run und
 
 > [!NOTE]
 > A marker on a row that is switched off is not a mistake — it means the note you are hearing is not in the scale on screen: that track is on a different scale, or the instrument is sliced, or its TSP is off.
+
+### The built-in scales, and scale files
+
+The name row cycles 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones. Landing on a name loads that scale's twelve notes into the slot.
+
+Switching a note on or off afterwards leaves the name alone and puts a `*` in front of it, so `*MAJOR` is a major scale you have changed.
+
+**SAVE** names the slot and writes it to `PocketTracker/Scales` as a `.pts` file; **LOAD** reads one back into the slot you are looking at. The 38 built-ins are written into that folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and the name row still offers all 38.
+
+> [!NOTE]
+> Cycling the name replaces all twelve notes. Save a scale you have built before stepping off it.
 
 ### What a scale changes
 
@@ -1054,7 +1067,9 @@ While you are typing, the note cell follows the last `SCA` or `SCG` written **at
 | Input | Action |
 |---|---|
 | D-pad UP/DOWN | Move between rows |
-| A + LEFT/RIGHT | Change KEY / switch a note ON or off |
+| D-pad LEFT/RIGHT | On the name row, move between the name, SAVE and LOAD |
+| A + LEFT/RIGHT | Step through the built-in scales / change KEY / switch a note ON or off |
+| A | On SAVE or LOAD, run it. Nothing on any other cell |
 | A + UP/DOWN | Nothing — none of these cells has a large step |
 | B + LEFT/RIGHT | Previous / next scale |
 

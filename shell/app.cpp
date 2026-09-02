@@ -16,6 +16,7 @@
 #include "ui/input_dispatcher.h"
 #include "ui/layout.h"
 #include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE — the C7 audible test
+#include "ui/scale_io.h"              // seed_scale_bank — the factory scales, as .pts files
 #include "ui/settings_store.h"
 
 #include "device_skin.h"
@@ -365,6 +366,7 @@ int run(const AppConfig& cfg) {
     filesystem.instruments_directory();
     filesystem.soundfonts_directory();
     filesystem.themes_directory();
+    filesystem.scales_directory();
     std::printf("files:   %s\n", cfg.appRoot.c_str());
 
     // ⚠️ The app's OWN files need not live in the tree just named — on Android they do not, because
@@ -521,6 +523,18 @@ int run(const AppConfig& cfg) {
     // no template. This is the whole reason `default_keyboard_bindings()` exists.
     if (ui::seed_config_template(filesystem, SdlInput::default_keyboard_bindings()))
         std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
+
+    // ── The factory scales, as files ──────────────────────────────────────────────────────────────
+    //
+    // The bank the SCALE screen cycles is compiled in and works with or without these; what the files
+    // add is that a shape can be edited, renamed and carried to another device. Written only when the
+    // folder holds no `.pts` at all, so a user who has pruned the list keeps their pruning.
+    //
+    // ⚠️ The count is PRINTED, because this is the one thing here with no signal inside the app: a seed
+    // that silently wrote nothing looks exactly like a seed that had nothing to do.
+    if (const int seeded = ui::seed_scale_bank(filesystem); seeded > 0)
+        std::printf("files:   seeded %d factory scales in %s\n", seeded,
+                    filesystem.scales_directory().c_str());
 
     // `folders` → the dispatcher's browse start dirs. An override is root-relative unless absolute,
     // is re-rooted when it was authored under another install's root, and falls back to the built-in

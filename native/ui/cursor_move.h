@@ -454,6 +454,13 @@ inline void move_cursor_left(AppState& s) {
             if (s.tableCursorColumn > 1) s.tableCursorColumn--;
             return;
 
+        // ⚠️ ONLY THE NAME ROW HAS COLUMNS HERE — the KEY row and the twelve degrees are a single
+        // column, so LEFT/RIGHT below row 0 must be a no-op rather than falling through to the shared
+        // `cursorColumn` at the bottom of this function, which belongs to SONG/CHAIN/PHRASE.
+        case ScreenType::SCALE:
+            if (s.scaleCursorRow == SCALE_NAME_ROW && s.scaleCursorColumn > 0) s.scaleCursorColumn--;
+            return;
+
         case ScreenType::INSTRUMENT: {
             const int minColumn = detail::instrument_left_column(
                 detail::instrument_type_of(s), s.instrumentCursorRow, s.instrumentCursorColumn);
@@ -537,6 +544,12 @@ inline void move_cursor_right(AppState& s) {
     switch (s.currentScreen) {
         case ScreenType::TABLE:
             if (s.tableCursorColumn < 8) s.tableCursorColumn++;
+            return;
+
+        case ScreenType::SCALE:
+            if (s.scaleCursorRow == SCALE_NAME_ROW &&
+                s.scaleCursorColumn < SCALE_NAME_COL_COUNT - 1)
+                s.scaleCursorColumn++;
             return;
 
         case ScreenType::INSTRUMENT: {

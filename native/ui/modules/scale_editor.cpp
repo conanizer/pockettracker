@@ -21,6 +21,23 @@ inline std::string pitch_class_name(int pc) {
     return name;
 }
 
+// ── The NAME row's three cells ───────────────────────────────────────────────────────────────────
+//
+// The name gets everything up to SAVE, which is what makes the abbreviations the source sheet carries
+// unnecessary: the longest shape in the bank is "Phrygian Dominant" at 17 characters, and 17 fit.
+//
+// ⚠️ THE `*` COLUMN IS TAKEN, NOT RESERVED. An unmarked name starts on the SAME column as SCALE, KEY
+// and the twelve row numbers, so the row reads as part of the grid; the marker moves it one character
+// right when there is one to draw. Reserving the column unconditionally would indent every name on
+// every screen for the sake of a marker that is usually absent.
+//
+// ⚠️ SAVE's column therefore clears the longest name IN ITS SHIFTED position — 17 characters starting
+// one column in — not the longest name at rest. At 325 the two cursor boxes touched.
+inline constexpr int SCALE_STAR_X   = 10;
+inline constexpr int SCALE_NAME_X   = 10;             // …+ CHAR_W while the marker is up
+inline constexpr int SCALE_SAVE_X   = 335;
+inline constexpr int SCALE_LOAD_X   = 418;
+
 }  // namespace
 
 void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
@@ -43,11 +60,36 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     if (lenText.size() < 2) lenText = " " + lenText;
     c.draw_text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
-    // ── Row 0: KEY ───────────────────────────────────────────────────────────────────────────────
-    // ⚠️ It sits ABOVE the EN column header, not under it, and that is the whole reason for the gap:
-    // the key belongs to the PROJECT and the twelve rows below belong to this SLOT. Drawn inside the
-    // column, its value reads as the twelve rows' thirteenth "EN".
-    const int keyY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
+    // ── Row 0: NAME / SAVE / LOAD ────────────────────────────────────────────────────────────────
+    const int  nameY    = y + ROW_HEIGHT + 14 + TEXT_PADDING;
+    const bool onName   = (s.cursorRow == SCALE_NAME_ROW);
+
+    // ⚠️ The name SHOWN is not always the name stored: an unnamed slot is named by its intervals, so a
+    // project that has never been touched reads "Chromatic" without a `name` field ever being written
+    // to its file. `----` is the remaining case — a shape built by hand that the bank has no word for.
+    std::string shown = songcore::scale_display_name(scale);
+    const bool  named = !shown.empty();
+    if (!named) shown = "----";
+
+    // The drift marker takes the grid column and pushes the name off it — see the note above.
+    const bool marked = songcore::scale_differs_from_its_name(scale);
+    if (marked) c.draw_text("*", x + SCALE_STAR_X, nameY, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
+
+    draw_cell(c, shown, x + SCALE_NAME_X + (marked ? CHAR_W : 0), nameY,
+              /*is_cursor=*/onName && s.cursorColumn == SCALE_NAME_COL_NAME,
+              /*is_selected=*/false, /*is_empty=*/!named, t.textValue, t);
+    draw_cell(c, "SAVE", x + SCALE_SAVE_X, nameY,
+              /*is_cursor=*/onName && s.cursorColumn == SCALE_NAME_COL_SAVE,
+              /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
+    draw_cell(c, "LOAD", x + SCALE_LOAD_X, nameY,
+              /*is_cursor=*/onName && s.cursorColumn == SCALE_NAME_COL_LOAD,
+              /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
+
+    // ── Row 1: KEY ───────────────────────────────────────────────────────────────────────────────
+    // ⚠️ It sits ABOVE the EN column header, not under it, and that is the whole reason for the gap
+    // below: the key belongs to the PROJECT and the twelve rows under it belong to this SLOT. Drawn
+    // inside the column, its value reads as the twelve rows' thirteenth "EN".
+    const int keyY = nameY + ROW_HEIGHT;
 
     const bool keyCursor = (s.cursorRow == SCALE_KEY_ROW);
     c.draw_text("KEY", labelX, keyY, keyCursor ? t.textCursor : t.textParam, CHAR_SPACING,
@@ -64,11 +106,11 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     const int columnHeaderY = keyY + ROW_HEIGHT + 14;
     c.draw_text("EN", valueX, columnHeaderY, t.textCursor, CHAR_SPACING, FONT_SCALE);
 
-    // ── Rows 1..12: the degrees ──────────────────────────────────────────────────────────────────
+    // ── The twelve degrees ───────────────────────────────────────────────────────────────────────
     const int dataStartY = columnHeaderY + ROW_HEIGHT;
 
     for (int degree = 0; degree < 12; ++degree) {
-        const int  row      = degree + 1;
+        const int  row      = SCALE_KEY_ROW + 1 + degree;
         const int  rowY     = dataStartY + (degree * ROW_HEIGHT);
         const bool isCursor = (row == s.cursorRow);
         const bool isOn     = scale.enabled[static_cast<size_t>(degree)] != 0;
@@ -101,6 +143,14 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
 }
 
 CursorContext ScaleModule::cursor_context(const ScaleState& s) const {
+    if (s.cursorRow == SCALE_NAME_ROW) {
+        // ⚠️ SAVE and LOAD are READ-ONLY rather than absent: they answer a bare A, and a `none()`
+        // context would also switch off the cursor box that says which of the three you are on.
+        if (s.cursorColumn != SCALE_NAME_COL_NAME) return cc::read_only();
+        return cc::index_cycle(songcore::scale_bank_cycle_index(s.scale),
+                               static_cast<int>(songcore::scale_bank().size()));
+    }
+
     if (s.cursorRow == SCALE_KEY_ROW) return cc::index_cycle(s.key, 12);
 
     const int degree = scale_row_degree(s.cursorRow);
@@ -116,9 +166,26 @@ CursorContext ScaleModule::cursor_context(const ScaleState& s) const {
 }
 
 ScaleInputResult ScaleModule::handle_input(songcore::Scale& scale, int key, int cursor_row,
-                                           const InputAction& action) const {
+                                           int cursor_column, const InputAction& action) const {
     ScaleInputResult r;
     if (action.type != ActionType::SET_VALUE) return r;
+
+    if (cursor_row == SCALE_NAME_ROW) {
+        if (cursor_column != SCALE_NAME_COL_NAME) return r;   // SAVE / LOAD are not values
+
+        const int index = action.value;
+        if (index < 0 || index >= static_cast<int>(songcore::scale_bank().size())) return r;
+
+        // ⚠️ Compared BEFORE the write and against both halves, because a cycle that lands back on the
+        // shape already in the slot must not bump the dirty counter — that counter is also the
+        // redraw/live-edit trigger, and a spurious bump is a phantom autosave and a phantom
+        // "RECOVER WORK?" on the next launch.
+        songcore::Scale after = scale;
+        songcore::scale_apply_bank(after, index);
+        r.modified = (after.name != scale.name || after.enabled != scale.enabled);
+        scale      = after;
+        return r;
+    }
 
     if (cursor_row == SCALE_KEY_ROW) {
         const int k = songcore::scale_mod12(action.value);

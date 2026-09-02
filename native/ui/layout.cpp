@@ -229,8 +229,9 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
 
             case ScreenType::SCALE: {
                 ScaleState cs{p.scales[static_cast<size_t>(s.currentScale)]};
-                cs.key       = p.scaleKey;
-                cs.cursorRow = s.scaleCursorRow;
+                cs.key          = p.scaleKey;
+                cs.cursorRow    = s.scaleCursorRow;
+                cs.cursorColumn = s.scaleCursorColumn;
                 // The pitch classes coming out of the speaker, from the same voice readback the note
                 // monitor draws — ⚠️ NOT from the sequencer, which is two phrases ahead of them.
                 // All eight tracks fold into one mask: the screen shows a SCALE, and a scale slot
