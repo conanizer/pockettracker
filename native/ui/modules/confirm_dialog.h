@@ -2,7 +2,7 @@
 
 // ─── The confirm dialog — the port's SECOND true modal ────────────────────────────────────────────
 //
-// A 260×55 box in the middle of a dimmed screen: a question, and "A=YES  B=NO". Kotlin's
+// A 261×57 box in the middle of a dimmed screen: a question, and "A=YES  B=NO". Kotlin's
 // `drawSimpleConfirmDialog`, which serves four questions (CLEAN SEQ/INST, NEW PROJECT, CHANGE TYPE,
 // RECOVER WORK) and is the thing standing between the user and every destructive action in the app.
 //
@@ -77,6 +77,19 @@ struct ConfirmDialogState {
 
 /** "CLEAN SEQ?" / "NEW PROJECT?" / … — the question the box asks. */
 std::string confirm_dialog_title(ConfirmDialogState::Kind kind);
+
+/**
+ * THE confirm box — the geometry, the frame and the "A=YES  B=NO" line — asking `title`.
+ *
+ * ⚠️ IT IS SEPARATE FROM `draw_confirm_dialog` FOR ONE CALLER: the SAMPLE EDITOR asks its own
+ * "ARE YOU SURE?" out of its own state, and used to draw its own box to do it — a second confirm
+ * dialog, a different size, with a rule along its top edge where this one has an outline. Two boxes
+ * asking the same question in two looks is the drift; one box and two callers is not.
+ *
+ * ⚠️ IT DOES NOT DIM THE SCREEN. `draw_confirm_dialog` does that before calling this; the sample
+ * editor instead COVERS its own surface, which is a decision about that dialog and not about boxes.
+ */
+void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t);
 
 void draw_confirm_dialog(Canvas& c, const ConfirmDialogState& s, const Theme& t);
 

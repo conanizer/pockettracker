@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "ui/helpers.h"
+#include "ui/modules/confirm_dialog.h"
 
 namespace pt::ui {
 
@@ -593,14 +594,14 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
 
 void SampleEditorModule::draw_confirm_dialog(Canvas& c, int x, int y, const Theme& t) const {
     // It covers the editor completely — an unsaved sample is not something to decide about while the
-    // waveform is still inviting you to keep editing it.
+    // waveform is still inviting you to keep editing it. ⚠️ THAT COVER IS WHY THIS DIALOG IS NOT IN
+    // `modal_backdrop_active`: it does not dim the screen, so the shell must not dim the bars either.
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    const int dX = x + 160, dY = y + 200, dW = 320, dH = 80;
-    c.fill_rect(dX, dY, dW, dH, t.meterBackground);
-    c.fill_rect(dX, dY, dW, 2, t.textEmpty);   // the 2px rule along its top edge
-    c.draw_text("ARE YOU SURE?", dX + 55, dY + 15, t.textValue,  CHAR_SPACING, FONT_SCALE);
-    c.draw_text("A=YES  B=NO",   dX + 65, dY + 45, t.textCursor, CHAR_SPACING, FONT_SCALE);
+    // THE app's confirm box, asking this screen's question. It used to be a box of its own — 320×80,
+    // a rule along its top edge instead of an outline — and two boxes asking the same question in two
+    // looks is exactly the drift a shared one cannot have.
+    draw_confirm_box(c, "ARE YOU SURE?", t);
 }
 
 // ─── The cursor ──────────────────────────────────────────────────────────────────────────────────

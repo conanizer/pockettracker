@@ -106,6 +106,40 @@ inline Argb with_alpha(Argb c, float alpha) {
     return (v << 24) | (c & 0x00FFFFFFu);
 }
 
+// ─── Modal chrome ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The border every modal box wears: a solid line, `MODAL_BORDER` px thick, in the title colour.
+ *
+ * ⚠️ IT GROWS OUTWARD from the box it is given — its innermost pixel is the box's own edge and the
+ * rest sit outside, so nothing inside a modal moves or shrinks to make room for it. The one thing a
+ * box has to have is `MODAL_BORDER - 1` px of screen beyond its own rect on all four sides.
+ */
+inline constexpr int MODAL_BORDER = 3;
+
+/**
+ * A modal box: the fill and the border.
+ *
+ * ⚠️ It is one function because there is one look. Every overlay open-coded the same fill and stroke,
+ * and the next one would have open-coded them again; a border added at three call sites is a border
+ * that is two sites out of date the first time it changes.
+ *
+ * ⚠️ THE SCREEN-WIDE DIM IS NOT IN HERE, and that is not an oversight. Whether a modal dims what is
+ * behind it is a decision per modal — `modal_backdrop_active` (ui/app_state.h) is the list, and the
+ * shell reads it to carry the same dim into the letterbox bars. The sample editor's confirm does not
+ * dim: it COVERS the editor outright. So the box's own chrome is here and the screen's is not.
+ */
+inline void draw_modal_box(Canvas& c, int x, int y, int boxW, int boxH, const Theme& t) {
+    c.fill_rect(x, y, boxW, boxH, t.meterBackground);
+    // Ring 0 is the line the box has always had, on its own rect; the rest step outward one at a time.
+    for (int r = 0; r < MODAL_BORDER; ++r)
+        c.stroke_rect(x - r, y - r, boxW + 2 * r, boxH + 2 * r, t.textTitle);
+}
+
+/** The full-canvas dim under a modal that has one. ⚠️ Add the modal to `modal_backdrop_active` too,
+ *  or the shell leaves the letterbox bars bright and the scrim stops at the 4:3 edge (B4). */
+inline void draw_modal_backdrop(Canvas& c) { c.fill_rect(0, 0, DESIGN_W, DESIGN_H, MODAL_BACKDROP); }
+
 // ─── Row background ──────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -161,6 +195,12 @@ inline bool blink_on(int phase_ms, bool fast) {
 }
 
 // ─── Cells ───────────────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ A CURSOR IS `rowCursor` BEHIND AND `textCursor` IN FRONT, EVERYWHERE, AND NEITHER IS DERIVED
+// FROM THE OTHER. A shade mixed out of `textCursor` looks like a reasonable highlight and reads as
+// one, but it answers to no row of the theme editor: a user who sets ROW CURS sees every grid in the
+// app change and that one cell not. It is the same trap `eqFill` was in (theme.h) — a colour with no
+// key of its own. Two theme rows exist for this; a cell that wants to stand out uses them.
 
 /**
  * A grid row's cells, painted left to right, with the standard colour priority per cell:

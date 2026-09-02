@@ -188,30 +188,39 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     constexpr int CELLW = 46;                 // innerW 460 / 10 keys
     constexpr int ROWGAP = 4;
 
+    // 470×228. The border grows outward from it (helpers.h), so these are the fill, not the outside
+    // edge, and the keys keep their own 10-column grid inside untouched.
     constexpr int BOXW = 470;
     constexpr int BOXH = 228;
-    constexpr int BOXX = (DESIGN_W - BOXW) / 2;   // 85
-    constexpr int BOXY = (DESIGN_H - BOXH) / 2;   // 126
+    constexpr int BOXX = (DESIGN_W - BOXW) / 2;
+    constexpr int BOXY = (DESIGN_H - BOXH) / 2;
     constexpr int INNERX = BOXX + 5;
     constexpr int INNERW = BOXW - 10;
 
     // The backdrop dims everything behind it — this is a modal, and it should look like one. The shell
-    // paints the SAME MODAL_BACKDROP in the letterbox bars (B4) so the dim does not stop at the 4:3 edge.
-    c.fill_rect(0, 0, DESIGN_W, DESIGN_H, MODAL_BACKDROP);
+    // paints the SAME dim in the letterbox bars (B4) so it does not stop at the 4:3 edge.
+    draw_modal_backdrop(c);
+    draw_modal_box(c, BOXX, BOXY, BOXW, BOXH, t);
 
-    c.fill_rect(BOXX, BOXY, BOXW, BOXH, t.meterBackground);
-    c.stroke_rect(BOXX, BOXY, BOXW, BOXH, t.textTitle);
+    // The label, the edited text and the key rows sit at FIXED offsets from one another; only where
+    // the stack STARTS is derived, by centring it in the box. ⚠️ A hand-typed top pad cannot stay
+    // centred: the box's height and the row count are both free to move, and every px they left over
+    // landed under the action row.
+    constexpr int TEXTROW_OFF = 30;   // the edited text, below the field label
+    constexpr int KEYROWS_OFF = 66;   // the first key row, below the edited text
+    const int contentH = KEYROWS_OFF + (s.total_rows() - 1) * (CELLH + ROWGAP) + CELLH;
+    const int contentY = BOXY + (BOXH - contentH) / 2;
 
     // ── The header ──────────────────────────────────────────────────────────────────────────────
     const int labelW = static_cast<int>(s.fieldLabel.size()) * CHARW;
-    c.draw_text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, BOXY + 5 + 3, t.textParam, CS, FS);
+    c.draw_text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, CS, FS);
 
     // ── The text row: a scroll window that keeps the cursor visible (C1) ─────────────────────────
     // Short text is centred on the box midpoint (as it always was). Once it overflows the box, the
     // window left-aligns and scrolls under the cursor — the cursor walks to the centre, then the text
     // slides beneath it — with a single "…" marker on whichever side is hiding characters.
     const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
-    const int              textRowY   = BOXY + 35;
+    const int              textRowY   = contentY + TEXTROW_OFF;
     const int              textLen    = static_cast<int>(s.text.size());
     const int              windowCols = INNERW / CHARW;   // whole character columns the box holds
     const QwertyTextWindow win        = qwerty_text_window(textLen, s.textCursor, windowCols);
@@ -233,7 +242,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         const int  idx      = win.first + k;
         const int  px       = textX + k * CHARW;
         const bool isCursor = (idx == s.textCursor);   // idx can be textLen: the phantom end position
-        if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, darken(t.textCursor, 0.27f));
+        if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, t.rowCursor);
         if (idx < textLen) {
             c.draw_text(std::string(1, s.text[static_cast<size_t>(idx)]), px, textRowY + 3,
                         isCursor ? t.textCursor : t.textValue, CS, FS);
@@ -244,7 +253,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
 
     // ── The key rows ────────────────────────────────────────────────────────────────────────────
     const auto& rows     = qwerty_rows(s.layout);
-    const int   rowBaseY = BOXY + 71;
+    const int   rowBaseY = contentY + KEYROWS_OFF;
     const int   lastRow  = static_cast<int>(rows.size()) - 1;
 
     for (int r = 0; r <= lastRow; ++r) {
@@ -256,8 +265,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
             const int  spaceX  = BOXX + (BOXW - spaceW) / 2;
             const bool cursor  = (s.keyCursorRow == r);
             c.fill_rect(spaceX, rowY, spaceW, CELLH,
-                        cursor ? darken(t.textCursor, 0.27f) : t.meterBackground);
-            if (cursor) c.stroke_rect(spaceX, rowY, spaceW, CELLH, t.textCursor);
+                        cursor ? t.rowCursor : t.meterBackground);
             c.draw_text("SPACE", spaceX + (spaceW - 5 * CHARW) / 2, rowY + 3,
                         cursor ? t.textCursor : t.textParam, CS, FS);
             continue;
@@ -269,8 +277,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
             const bool cursor = (s.keyCursorRow == r && s.keyCursorCol == col);
 
             c.fill_rect(cellX, rowY, CELLW - 1, CELLH,
-                        cursor ? darken(t.textCursor, 0.27f) : t.meterBackground);
-            if (cursor) c.stroke_rect(cellX, rowY, CELLW - 1, CELLH, t.textCursor);
+                        cursor ? t.rowCursor : t.meterBackground);
 
             c.draw_text(std::string(1, row[static_cast<size_t>(col)]),
                         cellX + (CELLW - 1 - 5 * FS) / 2, rowY + 3,
@@ -294,8 +301,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         const bool cursor = (s.keyCursorRow == actionRow && s.keyCursorCol == col);
 
         c.fill_rect(btnX, actionRowY, ABTNW, CELLH,
-                    cursor ? darken(t.textCursor, 0.27f) : t.meterBackground);
-        if (cursor) c.stroke_rect(btnX, actionRowY, ABTNW, CELLH, t.textCursor);
+                    cursor ? t.rowCursor : t.meterBackground);
 
         const std::string label = labels[col];
         const int         lw    = static_cast<int>(label.size()) * ACHARW;

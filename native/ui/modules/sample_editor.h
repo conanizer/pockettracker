@@ -377,7 +377,7 @@ private:
     /** The 620×155 panel: the wave, the S/E edges, the slice boundaries, and the playhead. */
     void draw_waveform(Canvas& c, int x, int y, const SampleEditorState& s, const Theme& t) const;
 
-    /** "ARE YOU SURE?" — B on a modified sample. Full-screen, over everything. */
+    /** "ARE YOU SURE?" — B on a modified sample. Covers the editor, then draws THE confirm box. */
     void draw_confirm_dialog(Canvas& c, int x, int y, const Theme& t) const;
 };
 
