@@ -986,6 +986,7 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 | Input | Action |
 |---|---|
 | D-pad UP/DOWN | Move between rows |
+| A | On a `--` row, add a step at 12 ticks |
 | A + LEFT/RIGHT | Edit tick value |
 | A + UP/DOWN | Edit tick value (large step) |
 | A + B | Clear row |
@@ -1071,6 +1072,7 @@ While you are typing, the note cell follows the last `SCA` or `SCG` written **at
 | D-pad LEFT/RIGHT | On the name row, move between the name, SAVE and LOAD |
 | A + LEFT/RIGHT | Step through the built-in scales / change KEY / switch a note ON or off |
 | A | On SAVE or LOAD, run it. Nothing on any other cell |
+| A + B | On the name, put the slot back to Chromatic — all twelve notes on |
 | A + UP/DOWN | Nothing — none of these cells has a large step |
 | B + LEFT/RIGHT | Previous / next scale |
 

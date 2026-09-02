@@ -2988,6 +2988,16 @@ void InputDispatcher::on_button_a() {
             break;
         }
 
+        // A on the end-of-pattern marker lays a step down at the default tick count — the very insert
+        // the cell already declares, reached by the bare press as well as by A+RIGHT. GROOVE has one
+        // editable column and nothing for a plain A to open or confirm, so that is all it can mean.
+        //
+        // ⚠️ Guarded on EMPTY, and that guard is the whole arm: without it a bare A on a tick that is
+        // already there would STEP it, and the press that lays a groove down would also nudge it.
+        case ScreenType::GROOVE:
+            if (cursor_context().capabilities.isEmpty) generic_input(pt::ui::increment);
+            break;
+
         // The two screens whose rows are BUTTONS. Nothing to insert — A *is* the action.
         case ScreenType::PROJECT:  project_action();  break;
         case ScreenType::SETTINGS: settings_action(); break;

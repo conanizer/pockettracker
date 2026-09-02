@@ -147,8 +147,16 @@ CursorContext ScaleModule::cursor_context(const ScaleState& s) const {
         // ⚠️ SAVE and LOAD are READ-ONLY rather than absent: they answer a bare A, and a `none()`
         // context would also switch off the cursor box that says which of the three you are on.
         if (s.cursorColumn != SCALE_NAME_COL_NAME) return cc::read_only();
-        return cc::index_cycle(songcore::scale_bank_cycle_index(s.scale),
-                               static_cast<int>(songcore::scale_bank().size()));
+        CursorContext c = cc::index_cycle(songcore::scale_bank_cycle_index(s.scale),
+                                          static_cast<int>(songcore::scale_bank().size()));
+        // A+B on the name puts the slot back to Chromatic, which is bank row 0 (scale_bank.h) and is
+        // also what a default-constructed slot already is — so "reset this slot" and "load the first
+        // entry" are one edit, and the gesture needs no arm of its own anywhere.
+        //
+        // ⚠️ A cell with no delete resets to `defaultValue`; this cycle has no delete, which is what
+        // makes the plain assignment the whole of the change.
+        c.defaultValue = 0;
+        return c;
     }
 
     if (s.cursorRow == SCALE_KEY_ROW) return cc::index_cycle(s.key, 12);
