@@ -349,10 +349,16 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         {20.0f, "20"},    {100.0f, "100"},  {200.0f, "200"},   {500.0f, "500"}, {1000.0f, "1K"},
         {2000.0f, "2K"},  {5000.0f, "5K"},  {10000.0f, "10K"}, {20000.0f, "20K"},
     };
+    // ⚠️ A label sits to the LEFT of its own grid line, because the panel's right edge runs under the
+    // side bar and a right-hand "20K" is covered by it. 20 Hz is the exception, and the reason the
+    // rule cannot be blanket: its line IS the left edge, so its label goes right or off the panel.
+    constexpr int LABEL_GAP = 2;
     for (const Marker& m : markers) {
         const int fx = freq_to_pixel(m.hz);
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
-        c.draw_text(m.label, x + fx + 2, vy + 3, t.eqTxt, CHAR_SPACING, 2);
+        const int w  = Canvas::text_width(m.label, CHAR_SPACING, 2);
+        const int tx = (fx <= 0) ? x + fx + LABEL_GAP : x + fx - LABEL_GAP - w;
+        c.draw_text(m.label, tx, vy + 3, t.eqTxt, CHAR_SPACING, 2);
     }
 
     // ── The response curve — the point of the whole screen ───────────────────────────────────────

@@ -113,13 +113,13 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     };
 
     const bool fx1Dim = fxDim(step.fx1Type, 1);
-    cells.cell(effect_name(step.fx1Type), fx1NameX,  cur(4), sel(4), fx1Dim, t.textTitle);
+    cells.cell(effect_name(step.fx1Type), fx1NameX,  cur(4), sel(4), fx1Dim, t.textValue);
     cells.cell(hex2(step.fx1Value),       fx1ValueX, cur(5), sel(5), fx1Dim, t.textParam);
     const bool fx2Dim = fxDim(step.fx2Type, 2);
-    cells.cell(effect_name(step.fx2Type), fx2NameX,  cur(6), sel(6), fx2Dim, t.textTitle);
+    cells.cell(effect_name(step.fx2Type), fx2NameX,  cur(6), sel(6), fx2Dim, t.textValue);
     cells.cell(hex2(step.fx2Value),       fx2ValueX, cur(7), sel(7), fx2Dim, t.textParam);
     const bool fx3Dim = fxDim(step.fx3Type, 3);
-    cells.cell(effect_name(step.fx3Type), fx3NameX,  cur(8), sel(8), fx3Dim, t.textTitle);
+    cells.cell(effect_name(step.fx3Type), fx3NameX,  cur(8), sel(8), fx3Dim, t.textValue);
     cells.cell(hex2(step.fx3Value),       fx3ValueX, cur(9), sel(9), fx3Dim, t.textParam);
 }
 

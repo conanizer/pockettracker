@@ -282,6 +282,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 - For **note values**, large step = ±12 semitones (one octave).
 - For **hex byte values**, large step = ±0x10.
 - Under a scale, a note's small step is the next note **of that scale** rather than the next semitone — see [section 14](#14-scale-screen). The large step stays a full octave.
+- Where a cell is a short list rather than a number — theme presets, scales, SLICE, SOURCE, an on/off flag, the instrument TYPE — there is no large step, and **A + UP/DOWN walk the list exactly as A + RIGHT/LEFT do**.
 
 ---
 

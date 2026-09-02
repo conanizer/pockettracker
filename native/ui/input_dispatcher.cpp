@@ -1083,7 +1083,7 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
 // The one gesture that is not a step at all, the FX picker, stays on the vertical axis.
 
 /**
- * A+LEFT/RIGHT on the INSTRUMENT screen's TYPE cell. Switching a slot's type FREES whatever source it
+ * A+DPAD on the INSTRUMENT screen's TYPE cell. Switching a slot's type FREES whatever source it
  * holds — a sampler has no use for an .sf2 and vice versa — so a loaded slot is asked about through
  * the confirm dialog first, and only an EMPTY slot switches outright.
  *
@@ -1137,7 +1137,7 @@ void InputDispatcher::toggle_instrument_type(int delta) {
     s_.statusSuccess = true;
 }
 
-/** True when the cursor is on INSTRUMENT's TYPE cell, the one A+LEFT/RIGHT does not merely increment. */
+/** True when the cursor is on INSTRUMENT's TYPE cell, the one A+DPAD does not merely increment. */
 bool InputDispatcher::on_instrument_type_cell() const {
     return s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 0 &&
            s_.instrumentCursorColumn == 1;
@@ -1174,15 +1174,16 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 //
 //   A+LEFT / A+RIGHT → on the THEME row, step the BUILT-IN palette (prev / next).
 //                      on a colour row, nudge the cursor's channel by ∓0x01.
-//   A+UP   / A+DOWN  → on the THEME row, NOTHING (`if (cursorRow >= 1)` — there is no coarse step for a
-//                      palette, and no fifth thing for a name to do).
+//   A+UP   / A+DOWN  → on the THEME row, step the palette too: a list of presets has no coarse step,
+//                      and a cell that can be changed at all should answer both axes.
 //                      on a colour row, nudge the cursor's channel by ±0x10.
 
 void InputDispatcher::on_a_up() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
-        // Row 0 falls through to nothing: `theme_adjust_color` rejects it, as the coarse arm must.
-        theme_adjust_color(s_.theme, s_.themeEditor.cursorRow, s_.themeEditor.cursorChannel, +0x10);
+        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, +1);
+        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
+                                s_.themeEditor.cursorChannel, +0x10);
         return;
     }
     if (eq_open()) { generic_input(pt::ui::increment_fast); return; }
@@ -1194,13 +1195,18 @@ void InputDispatcher::on_a_up() {
                                           FxGrid::of(visible_effect_type_count()));
         return;
     }
+    // The TYPE cell is a three-stop cycle with no coarse step, so both axes walk it — and both go
+    // through the same request, which means both still meet the confirm dialog on a loaded slot.
+    if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment_fast);
 }
 
 void InputDispatcher::on_a_down() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
-        theme_adjust_color(s_.theme, s_.themeEditor.cursorRow, s_.themeEditor.cursorChannel, -0x10);
+        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, -1);
+        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
+                                s_.themeEditor.cursorChannel, -0x10);
         return;
     }
     if (eq_open()) { generic_input(pt::ui::decrement_fast); return; }
@@ -1212,6 +1218,7 @@ void InputDispatcher::on_a_down() {
                                           FxGrid::of(visible_effect_type_count()));
         return;
     }
+    if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement_fast);
 }
 
