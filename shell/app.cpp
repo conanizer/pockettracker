@@ -970,9 +970,11 @@ int run(const AppConfig& cfg) {
     // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
     //                  (Kotlin's active→idle bump; without it the scope freezes mid-wave).
     // `drewOnce`     — the first frame always draws, or the window comes up empty until a keypress.
-    bool sawInput    = false;
-    bool audibleEdge = true;
-    bool drewOnce    = false;
+    // `timedWorkEdge`— the SAME active→idle bump, for the dispatcher's timers. See the gate.
+    bool sawInput      = false;
+    bool audibleEdge   = true;
+    bool timedWorkEdge = false;
+    bool drewOnce      = false;
 
     // ⚠️ **THE NUMBERS BESIDE THE VERDICT, AND C7 IS UNVERIFIABLE WITHOUT THEM.** A working idle skip
     // and a skip that never fires look IDENTICAL on screen — that is the whole point of it, the
@@ -1506,7 +1508,7 @@ int run(const AppConfig& cfg) {
         // lifecycle watcher all still run every frame at 60 Hz. Kotlin could afford `delay(50L)` when
         // idle because its visualizer was a separate coroutine; here that would be 50 ms of input lag.
         // ⚠️ `has_pending_timed_work()` is the third term and it is NOT covered by the pixel net: the
-        // status line clears itself 5 s after it is set, with no input, and a frame that is never
+        // status line clears itself 3 s after it is set, with no input, and a frame that is never
         // drawn is never compared. Without it a "PROJECT SAVED" would sit on a still screen forever.
         //
         // ⚠️ `resizeSettle` is the FOURTH, and it is a rotation/resize term the pixel net cannot cover
@@ -1526,6 +1528,15 @@ int run(const AppConfig& cfg) {
         // drawn, so a closed gate strands whatever was on screen. See TrackerLayout::has_falling_meters:
         // every term is gated there on its module being drawn at all, since nothing off-screen ages and
         // nothing would ever bring this term back to false.
+        // ⚠️⚠️ **`timedWorkEdge` IS THE SIXTH, AND WITHOUT IT THE THIRD TERM MISSES BY EXACTLY ONE
+        // FRAME — WHICH IS THE WHOLE FRAME THAT MATTERS.** `set_now()` (above) is what clears an
+        // expired status message, and it clears the DEADLINE in the same call. So on the one frame
+        // where the message actually goes away, `has_pending_timed_work()` has already gone false and
+        // the gate closes: the state is clean, the pixels still read "PROJECT SAVED", and they stay
+        // that way until the next input. Reported from the device, on both platforms — a message that
+        // sits on a still screen until a button is touched. This is `audibleEdge`'s shape applied to
+        // the same edge: the frame after the work finishes is still drawn once.
+        const bool timedWork = dispatch.has_pending_timed_work();
         const bool metersFalling = layout.has_falling_meters(state);
         const bool audible = audio_is_audible(state);
         const bool settling = resizeSettle > 0;
@@ -1534,7 +1545,7 @@ int run(const AppConfig& cfg) {
             --resizeSettle;
         }
         if (audible || audibleEdge || sawInput || !drewOnce || settling || metersFalling ||
-            dispatch.has_pending_timed_work()) {
+            timedWork || timedWorkEdge) {
             layout.draw(canvas, state);
             ++drawn;
 
@@ -1556,8 +1567,9 @@ int run(const AppConfig& cfg) {
             // idle path costs MORE than the busy one. See SdlVideo::pace().
             video.idle_frame();
         }
-        audibleEdge = audible;   // so the first silent frame is still drawn (the flattened scope)
-        sawInput    = false;
+        audibleEdge   = audible;     // so the first silent frame is still drawn (the flattened scope)
+        timedWorkEdge = timedWork;   // …and the frame a timer's own work vanishes on
+        sawInput      = false;
 
         // A status line once a second, kept from the Phase 2 shell and kept for the same reason: on a
         // headless box, over ssh, or during a handheld bring-up where you cannot yet see or hear

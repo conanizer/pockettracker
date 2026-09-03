@@ -126,7 +126,7 @@ void InputDispatcher::set_now(long long now_ms) {
     now_ms_ = now_ms;
     run_due_sample_preview_restore();   // the sample editor's 100 ms audition restore (S6b)
     run_due_autosave();                 // the crash-recovery autosave's 3 s debounce  (S10)
-    run_due_status_dismiss();           // the status line's 5 s auto-dismiss (parity finding 5)
+    run_due_status_dismiss();           // the status line's auto-dismiss (parity finding 5)
     run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
     run_selection_recency();            // which rung L+R takes first
 }
@@ -216,12 +216,12 @@ void InputDispatcher::flush_autosave() {
     autosave_write(host_, fs_);
 }
 
-// ─── The status line's 5 s auto-dismiss (MainActivity.kt:734–747) ────────────────────────────────
+// ─── The status line's auto-dismiss (MainActivity.kt:734–747) ────────────────────────────────
 
 namespace {
 
 /**
- * One status field's watcher and deadline, for the 5 s window both status lines run.
+ * One status field's watcher and deadline, for the window both status lines run.
  *
  * The WATCHER half: a CHANGE in the message re-arms the window; a change TO empty cancels it. The
  * field is the funnel, not its call sites — any site that assigns it, including ones not written
@@ -1223,7 +1223,25 @@ void InputDispatcher::toggle_instrument_type(int delta) {
     // type instead, so the gesture still has somewhere to go.
     const int from  = (cur >= count) ? count - 1 : cur;
     const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
+
+    // The name the slot would have adopted from the source it is ABOUT to lose — read before the
+    // change, exactly as a source load reads it. See the adopt rule at the end of browser activation:
+    // this is the same question asked at the other end of the same slot's life.
+    const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
+
     host_.set_instrument_type(s_.currentInstrument, next);
+
+    // ⚠️⚠️ **A TYPE CHANGE DROPS THE SOURCE, SO A NAME TAKEN FROM THAT SOURCE HAS TO GO WITH IT — AND
+    // THE SECOND HALF IS THE ONE THAT BIT.** An orphaned adopted name does not merely mislead: it no
+    // longer matches what the slot's new type would auto-name, so the adopt rule on the NEXT load
+    // reads it as a name the user TYPED and keeps it. The slot then wears the first file's name
+    // through every later load, and the only way out was to blank the name by hand.
+    //
+    // ⚠️ A name the user really did type still survives, here as there — `previousAutoName` is what
+    // tells the two apart, and it is empty for a slot that never had a source. (`ins` is still the
+    // same slot: the type change rewrites it in place and never resizes the pool.)
+    if (!previousAutoName.empty() && ins.name == previousAutoName)
+        ins.name = songcore::default_instrument_name(ins.id);
 
     // The row map just changed under the cursor — the three layouts have 16, 15 and 11 rows — and the
     // cursor is sitting on row 0, which exists in all three. Its COLUMN may not: row 0 caps at 3 on a

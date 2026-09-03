@@ -149,10 +149,17 @@ class InputDispatcher {
      * ⚠️ **C7 NEEDS THIS AND THE PIXEL COMPARISON CANNOT ANSWER IT.** The shell skips drawing on an
      * idle frame, and the safety net under that decision is a byte-compare of the drawn frame — but a
      * frame that is never drawn is never compared. So anything that changes the SCREEN on a TIMER,
-     * with no input at all, is invisible to that net: BOTH status lines auto-dismiss 5 s after they
-     * are set (`run_due_status_dismiss`), and without this query a "PROJECT SAVED" — or a "FILE TOO
-     * BIG" on the browser's own bar — would sit on a quiescent screen forever, cleared in the state
-     * and stale in the pixels.
+     * with no input at all, is invisible to that net: BOTH status lines auto-dismiss after
+     * `STATUS_DISMISS_MS` (`run_due_status_dismiss`), and without this query a "PROJECT SAVED" — or a
+     * "FILE TOO BIG" on the browser's own bar — would sit on a quiescent screen forever, cleared in
+     * the state and stale in the pixels.
+     *
+     * ⚠️⚠️ **IT GOES FALSE ON THE FRAME THE WORK COMPLETES, AND THAT FRAME IS THE ONE THAT HAS TO BE
+     * DRAWN.** `set_now()` clears the message and its deadline together, so a gate that asks this
+     * question afterwards closes on exactly the frame that would have erased the message — which is
+     * how "PROJECT SAVED" came to sit on a still screen until the next button press, on both
+     * platforms. The caller owes this an active→idle EDGE, the way it already owes one to audio; the
+     * shell's `timedWorkEdge` is that, and the comment at the gate is where the reasoning lives.
      *
      * Derived from the DEADLINES themselves rather than from a flag any caller has to set — the same
      * rule that made the dismissal watch the message field instead of trusting its 22 assignment
@@ -500,6 +507,19 @@ class InputDispatcher {
     static constexpr int LOADING_DELAY_MS = 400;
 
     /**
+     * How long a status message stays up before it clears itself (`run_due_status_dismiss`).
+     *
+     * ⚠️ **3 s, and it is a DEPARTURE from Kotlin's 5 s (MainActivity's two status LaunchedEffects) —
+     * asked for from the device.** Five seconds is long enough that the message is still sitting there
+     * two or three actions later, reporting on something the user has already moved on from, and it
+     * reads as stuck rather than as slow. Nothing measures this window; it is a judgement about
+     * reading speed, and it is the user's.
+     *
+     * Public so a check can be written against the WINDOW rather than against a number typed twice.
+     */
+    static constexpr long long STATUS_DISMISS_MS = 3000;
+
+    /**
      * How often the strip is redrawn and the buttons are read while a load runs.
      *
      * ⚠️⚠️ **NOT "on every report", and the difference is measured rather than tidy.** A soundfont
@@ -672,15 +692,12 @@ class InputDispatcher {
     std::string statusLastSeen_{};
     long long   statusDismissAtMs_ = 0;
 
-    // The FILE BROWSER's line, on the same 5 s window. ⚠️ A SEPARATE PAIR, and not for tidiness:
+    // The FILE BROWSER's line, on the same window. ⚠️ A SEPARATE PAIR, and not for tidiness:
     // feeding both message fields through ONE pair stops the dismissal working at all — `lastSeen`
     // then thrashes between two different strings and re-arms the deadline on every frame, so
     // neither line ever expires. (Measured; §34's own checks are what go red.)
     std::string browserStatusLastSeen_{};
     long long   browserStatusDismissAtMs_ = 0;
-
-    /** 5 s — Kotlin's own delay (MainActivity's two status LaunchedEffects). */
-    static constexpr long long STATUS_DISMISS_MS = 5000;
 
     /** The watchers and the deadlines, all run once a frame by set_now(). */
     void run_due_status_dismiss();
