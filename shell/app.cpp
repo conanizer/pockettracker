@@ -7,6 +7,7 @@
 
 #include "audio-backend.h"
 #include "audio-engine.h"
+#include "load_progress.h"   // set_load_tick — where a slow load reports itself
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/button_mapper.h"
@@ -721,6 +722,11 @@ int run(const AppConfig& cfg) {
                              ui::modal_backdrop_active(state) ? ui::MODAL_BACKDROP : 0);
     };
 
+    // Declared here rather than beside the frame loop because `load_pump` below has to be able to
+    // stop the app: an SDL_QUIT that arrives while a load is running must not be swallowed with the
+    // rest of the queue.
+    bool running = true;
+
     ui::InputDispatcher::RenderHooks hooks;
     hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
     // A SYNCHRONOUS repaint — the "RENDERING... 43%" / "RESAMPLING..." readout the dispatcher pushes on
@@ -731,7 +737,67 @@ int run(const AppConfig& cfg) {
         layout.draw(canvas, state);
         present_current();
     };
+
+    // ── The pump a LOAD runs instead of the frame loop ────────────────────────────────────────────
+    //
+    // While a load is in flight the frame loop is inside it, so nothing is polling. This is what
+    // polls, and it buys three separate things that all needed the same call:
+    //
+    //   1. **The lifecycle stays alive.** `SDL_APP_WILLENTERBACKGROUND` is delivered from inside
+    //      SDL's own pump, and `on_app_event` — the watcher that flushes the crash-recovery autosave
+    //      on a Home press — fires synchronously from there. A loop that has stopped polling has
+    //      silently switched that off, which made a long load a window in which work could be lost.
+    //   2. **Queued presses are CONSUMED rather than replayed.** Without this SDL keeps every button
+    //      pressed during the wait and delivers them in one burst when it ends, onto whatever screen
+    //      the load returned to. (Still true of EXPORT, which does not pump — see the plan doc.)
+    //   3. **B cancels.**
+    //
+    // ⚠️⚠️ **IT DELIBERATELY DOES NOT CALL `handle_button`.** The presses are read for exactly one
+    // question and then dropped. Dispatching them would be re-entering the dispatcher from inside a
+    // dispatcher call, on a document the load is halfway through rewriting — and `Overlay::LOADING`
+    // makes every handler inert anyway, so the only thing running them could add is that risk.
+    //
+    // ⚠️ SDL_QUIT is honoured, not consumed: a window close or a SIGTERM translation arriving here
+    // has to reach the loop, or the app finishes the load and then ignores the kill. It also cancels,
+    // so the load unwinds instead of holding the process open for its full length.
+    hooks.load_pump = [&]() -> bool {
+        bool cancel = false;
+        const Uint64 now = SDL_GetTicks64();
+
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) {
+                running = false;
+                cancel  = true;
+            } else if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP ||
+                       e.type == SDL_FINGERMOTION) {
+                touch.handle_finger(e, input, now);
+            } else {
+                input.handle_event(e, now);
+            }
+        }
+        input.tick(now);
+
+        // ⚠️ The queue is DRAINED whatever it holds — a press left in it would fire on the screen
+        // underneath the moment the load ended. B is the one that means anything here, and it is the
+        // PRESS edge, so a B still held from before the load started cannot cancel it by itself.
+        ui::ButtonEvent be;
+        while (input.poll(be))
+            if (be.button == ui::Button::B && be.action == ui::ButtonAction::PRESSED) cancel = true;
+
+        return cancel;
+    };
     dispatch.set_render_hooks(std::move(hooks));
+
+    // ⚠️ **INSTALLED ONCE, AND ONLY BY THE SHELL.** Everything below `pt::load_tick` — the five
+    // decoders, the WAV reader and tsf's sample decode — reports through this and behaves exactly as
+    // it did before it existed when nothing is installed, which is the case for every tool and for
+    // the offline render. The clock is passed IN rather than read by the dispatcher: `set_now()`
+    // also runs due work, and the 3 s autosave firing from inside a project load would write the
+    // recovery file from a half-loaded document.
+    pt::set_load_tick([&dispatch](float fraction) {
+        return dispatch.load_tick(static_cast<long long>(SDL_GetTicks64()), fraction);
+    });
 
     // ── THE LIFECYCLE (S10) ──────────────────────────────────────────────────────────────────────
     //
@@ -811,7 +877,6 @@ int run(const AppConfig& cfg) {
         std::printf("  START still auditions underneath, so you can sweep a band across a ringing note\n\n");
     }
 
-    bool   running    = true;
     Uint64 lastStatus = 0;
 
     // ── ⚠️ DEV BRING-UP ONLY: the two hooks that make a TIMED run scriptable (phase B3) ───────────

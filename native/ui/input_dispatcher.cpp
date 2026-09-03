@@ -9,6 +9,7 @@
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 #include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
 #include "ui/scale_io.h"         // .pts — save_scale_file / load_scale_file / the factory seed
+#include "load_progress.h"       // begin_load / end_load — where the engine reports a slow load
 
 #include <algorithm>
 #include <map>
@@ -25,6 +26,27 @@ using songcore::Phrase;
 using songcore::Project;
 
 namespace {
+
+/**
+ * One load, opened and closed.
+ *
+ * ⚠️ **RAII BECAUSE THE LOAD PATHS RETURN EARLY, AND SEVERAL OF THEM DO.** The browser's switch has
+ * four arms that `return` from inside it; a hand-written `end_load()` at the bottom would be missed
+ * by each of them and would leave `Overlay::LOADING` up forever — an app that has stopped taking
+ * input with nothing on screen that ever appeared to explain it.
+ */
+struct LoadScope {
+    LoadScope(InputDispatcher& d, long long now_ms, std::string detail) : d_(d) {
+        d_.begin_load(now_ms, std::move(detail));
+    }
+    ~LoadScope() { d_.end_load(); }
+
+    LoadScope(const LoadScope&)            = delete;
+    LoadScope& operator=(const LoadScope&) = delete;
+
+  private:
+    InputDispatcher& d_;
+};
 
 /** Chain.isEmpty(row) — the row holds no phrase. */
 bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<size_t>(row)] == -1; }
@@ -107,6 +129,56 @@ void InputDispatcher::set_now(long long now_ms) {
     run_due_status_dismiss();           // the status line's 5 s auto-dismiss (parity finding 5)
     run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
     run_selection_recency();            // which rung L+R takes first
+}
+
+// ─── A slow load ─────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::begin_load(long long now_ms, std::string detail) {
+    pt::begin_load();                 // clears the engine-side cancel flag; see load_progress.h
+    s_.loading = AppState::LoadingState{};
+    s_.loading.running = true;
+    s_.loading.detail  = std::move(detail);
+    loadStartMs_       = now_ms;
+    lastLoadPaintMs_   = now_ms;   // the first paint is one cadence in, never on the opening report
+}
+
+bool InputDispatcher::load_tick(long long now_ms, float fraction) {
+    if (!s_.loading.running) return true;   // a tick from a load nobody opened — nothing to draw on
+
+    s_.loading.progress  = fraction;
+    s_.loading.elapsedMs = static_cast<int>(now_ms - loadStartMs_);
+
+    // ⚠️ The strip is raised HERE and never at `begin_load`. Below the delay a load draws nothing at
+    // all — see LOADING_DELAY_MS. Once raised it stays up: a bar that vanishes because one file
+    // in a project happened to be quick is a flicker, not a report.
+    if (s_.loading.elapsedMs >= LOADING_DELAY_MS) s_.loading.shown = true;
+
+    // ⚠️⚠️ **THROTTLED, AND WITHOUT THIS THE STRIP MAKES THE LOAD IT IS REPORTING ON DRAMATICALLY
+    // SLOWER.** A report arrives per SAMPLE HEADER — measured, 1628 of them for a 43 MB `.sf3`,
+    // roughly one every 2.5 ms — and each repaint is a FULL canvas redraw plus a present. Painting
+    // every report turned a 4 s load into one still running after 6 s, with a bar that looked frozen
+    // because each frame advanced it by 0.06% (⅟₁₆₂₈ of the bar is a fifth of a pixel). The instrument
+    // was changing what it measured, and only a run of the real app could show it.
+    //
+    // ⭐ Thirty frames a second is more than a progress bar can use, and it puts the drawing back
+    // under the load instead of on top of it. The cancel rides the same cadence, so a press is seen
+    // within a frame — which is the same latency every other button in the app has.
+    if (now_ms - lastLoadPaintMs_ >= LOADING_REPAINT_MS) {
+        lastLoadPaintMs_ = now_ms;
+
+        // ⚠️ **THE PUMP COMES FIRST, AND IT IS WHAT MAKES THE FRAME WORTH DRAWING.** It is also the
+        // only thing keeping the app's lifecycle alive while a load runs — see `RenderHooks::load_pump`.
+        if (render_.load_pump && render_.load_pump()) s_.loading.cancelRequested = true;
+
+        if (s_.loading.shown && render_.repaint) render_.repaint();
+    }
+
+    return !s_.loading.cancelRequested;
+}
+
+void InputDispatcher::end_load() {
+    pt::end_load();
+    s_.loading = AppState::LoadingState{};
 }
 
 void InputDispatcher::run_instrument_entry_push() {
@@ -192,6 +264,14 @@ void InputDispatcher::run_due_status_dismiss() {
 }
 
 bool InputDispatcher::recover_from_autosave() {
+    // ⚠️ A recovery opens every source the crashed session had open, so it costs exactly what loading
+    // that project from the browser costs — and it is the load the user is LEAST expecting to wait
+    // for, because they only pressed A on a question. Same strip, same delay, same B.
+    //
+    // ⚠️ The AUTO path reaches this too (`boot_recovery`), which is the one caller with no window
+    // behind it on some platforms; the strip simply never gets a repaint hook there and nothing is drawn.
+    const LoadScope recoverScope(*this, now_ms_, "RECOVERED WORK");
+
     if (!autosave_load(host_, fs_, mediaBaseDir_)) {
         s_.statusMessage = "RECOVER FAILED";
         s_.statusSuccess = false;
@@ -199,6 +279,23 @@ bool InputDispatcher::recover_from_autosave() {
     }
 
     reset_editing_context();
+
+    // ⚠️⚠️ **A CANCELLED RECOVERY MUST RETURN TRUE, WHICH LOOKS BACKWARDS AND IS THE WHOLE POINT.**
+    // `confirm_accept` reads a false as "this file is no good" and DELETES the autosave — so reporting
+    // the cancel honestly here would throw the user's crashed session away because they stopped a slow
+    // load. The document goes blank (half its instruments point at audio the engine does not have) and
+    // the FILE STAYS, so the next launch offers it again.
+    if (pt::load_cancelled()) {
+        host_.new_project();
+        host_.push_params();
+        reset_editing_context();
+        s_.projectVersion      = 0;
+        s_.savedProjectVersion = 0;
+        s_.projectPath.clear();
+        s_.statusMessage = "RECOVER CANCELLED";
+        s_.statusSuccess = true;
+        return true;
+    }
 
     // ⚠️ **DIRTY, on purpose — the one load path in the app that is.** `load_project_done` aligns the
     // two versions because a loaded project IS what is on disk. Recovered work is not: it lives in one
@@ -3254,7 +3351,12 @@ void InputDispatcher::on_start() {
         // A file on disk has no song cell behind it — neutral gain, and never the channel an earlier
         // audition left pointed at.
         host_.set_preview_track(-1);
+        // ⚠️ An audition is a full DECODE, so a four-minute mp3 costs here exactly what it costs on a
+        // real load — and this is the one the user presses casually, walking a folder. Same strip, same
+        // B to stop it.
+        const LoadScope previewScope(*this, now_ms_, item->displayName);
         if (!host_.preview_file(item->path)) {
+            if (host_.last_load_cancelled()) return;   // stopped on purpose; nothing failed
             s_.fileBrowser.statusMessage = "PREVIEW FAILED";
             s_.fileBrowser.statusSuccess = false;
         }
@@ -3723,6 +3825,12 @@ void InputDispatcher::browser_confirm() {
     // from. See the adopt rule below; on anything but a source load nobody looks at it.
     const std::string previousAutoName = instrument_auto_name(host_.project(), sourceId);
 
+    // ⚠️ EVERY arm, not only the ones expected to be slow. Which loads are slow is a fact about the
+    // FILE and the DEVICE, not about the menu item — a `.ptt` theme is bytes and a `.sf3` is half a
+    // minute, and both come through here. The scope costs nothing on a fast one: below the delay
+    // nothing is drawn and nothing is dimmed.
+    const LoadScope loadScope(*this, now_ms_, stem);
+
     bool ok = false;
     switch (s_.browserPurpose) {
         case AppState::BrowserPurpose::LOAD_PRESET:
@@ -3758,6 +3866,23 @@ void InputDispatcher::browser_confirm() {
             if (!host_.load_project_file(path, fs_.samples_directory())) {
                 b.statusMessage = "LOAD FAILED";
                 b.statusSuccess = false;
+                return;
+            }
+            // ⚠️⚠️ **A CANCELLED PROJECT LOAD CANNOT BE LEFT WHERE IT STOPPED, AND THIS IS THE ONE
+            // CANCEL THAT COSTS SOMETHING.** A single file that is stopped leaves the slot it was
+            // going into untouched; a project is a whole document, already swapped in, with the
+            // instruments after the stopping point pointing at audio the engine does not have — they
+            // would look loaded on the screen and play silence. The honest state is the blank
+            // document NEW PROJECT gives, and the message says which of the two happened.
+            if (pt::load_cancelled()) {
+                host_.new_project();
+                host_.push_params();
+                // The same settling `load_project_done` does — an empty path, because there is no
+                // file this document came from, and the autosave cleared because the work that was
+                // in it belonged to the project the user has just left.
+                load_project_done("");
+                s_.statusMessage = "LOAD CANCELLED";
+                s_.statusSuccess = true;
                 return;
             }
             load_project_done(path);
@@ -3807,6 +3932,14 @@ void InputDispatcher::browser_confirm() {
     }
 
     if (!ok) {
+        // ⚠️ A CANCEL IS NOT A FAILURE AND GETS NO RED LINE. The user pressed B; being told LOAD
+        // FAILED afterwards reads as "and it would not have worked anyway", which is a claim about
+        // the file that nothing here knows. It is asked first for that reason.
+        if (host_.last_load_cancelled()) {
+            b.statusMessage = "CANCELLED";
+            b.statusSuccess = true;
+            return;
+        }
         // ⚠️ "LOAD FAILED" for a file the DEVICE cannot hold sends the user looking for a corrupt
         // file that is fine. The engine separates the two, and that separation is the whole message:
         // the file is sound, this machine cannot hold it, pick a smaller one. No free figure beside

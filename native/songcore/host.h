@@ -777,6 +777,17 @@ class SongcoreHost {
     }
 
     /**
+     * True when the last media load stopped because the USER stopped it.
+     *
+     * ⚠️ It is a third answer and not a shade of the second: a cancel is not a failure, and the file
+     * is not at fault. The UI's job on this one is to say nothing — the user pressed B and already
+     * knows why nothing arrived. Same one-bool seam as the query above, for the same reason.
+     */
+    bool last_load_cancelled() const {
+        return engine_ && engine_->lastLoadFailure() == AudioEngine::LoadFailure::CANCELLED;
+    }
+
+    /**
      * Read a .pti into instrument `id`. False if the file will not parse, OR if its source file is
      * gone — but the PARAMETERS land either way in the second case, which is deliberate (a preset
      * whose sample has moved should still give you back its filter and its mod slots).

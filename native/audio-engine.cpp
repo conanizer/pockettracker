@@ -9,6 +9,7 @@
 #include "audio-decoders.h"
 #include "byte_source.h"   // pt_fopen — the WAV reader and the soundfont loader open through it
 #include "platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
+#include "load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
 #include "table_automation.h"  // AUS/AUF pairing over a table's rows — shared with the table editor
 #include <cstdio>
 #include <cstdint>
@@ -446,7 +447,8 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     // Stream the data chunk in whole-frame blocks so a sample is never split across a read.
     const int BLOCK_FRAMES = 16384;
     std::vector<uint8_t> blk((size_t)BLOCK_FRAMES * bytesPerFrame);
-    int frameIdx = 0;
+    int  frameIdx  = 0;
+    bool cancelled = false;
     while (frameIdx < totalFrames) {
         int want = totalFrames - frameIdx;
         if (want > BLOCK_FRAMES) want = BLOCK_FRAMES;
@@ -459,9 +461,24 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
                 newR[frameIdx + i] = decodeWavSample(p + bytesPerSample, audioFormat, bitsPerSample);
         }
         frameIdx += framesGot;
+        // ⭐ The only load in the app whose fraction is exact from the first block: `totalFrames` is
+        // read out of the header. A WAV is a read rather than a decode, so this is normally over
+        // before anything can be drawn — it matters on a slow card and on a very long file.
+        if (!pt::load_tick((float)frameIdx / (float)totalFrames)) { cancelled = true; break; }
         if (framesGot < want) break;  // short read / truncated file (shouldn't happen — see clamp)
     }
     fclose(f);
+
+    // ⚠️ Nothing is published on a cancel — the slot keeps the sample it had. The two fresh buffers
+    // are ours alone at this point (the swap below is what hands them over), so freeing them here is
+    // the whole cleanup.
+    if (cancelled) {
+        delete[] newL;
+        delete[] newR;
+        lastLoadFailure_ = LoadFailure::CANCELLED;
+        LOGD("loadSampleFromWavFile: cancelled at %d/%d frames: %s", frameIdx, totalFrames, path);
+        return 0;
+    }
 
     // `new float[]` is not zero-initialized; a short read above would leave indeterminate tail
     // samples. dataSize is clamped to the bytes actually present, so this is defensive — but zero
@@ -532,8 +549,14 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
         else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, L, R, sr);
         else if (std::strcmp(ext, "ogg")  == 0) {
             // An .ogg holds either Vorbis or Opus. Try Vorbis (stb_vorbis); on a miss, retry as Opus.
+            // ⚠️ A CANCEL IS NOT A MISS. Without that term the retry decodes the whole file a second
+            // time with the box still up and the user's press already spent — the one place in the
+            // app where "it failed, try the other decoder" and "stop" arrive as the same false.
             ok = ptdec::decodeOggFile(path, L, R, sr);
-            if (!ok) { L.clear(); R.clear(); ok = ptdec::decodeOpusFile(path, L, R, sr); }
+            if (!ok && !pt::load_cancelled()) {
+                L.clear(); R.clear();
+                ok = ptdec::decodeOpusFile(path, L, R, sr);
+            }
         }
         else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, L, R, sr);
         // ISO-BMFF containers holding AAC (minimp4 demux + FAAD2). One decoder covers them all — .m4a and
@@ -551,6 +574,14 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
     }
 
     if (!ok || L.empty() || sr <= 0) {
+        // ⚠️ A CANCEL comes back as the same false as everything else, and it is asked FIRST because
+        // it is the one answer that is not a failure: nothing is wrong with the file and the user is
+        // not to be told there is.
+        if (pt::load_cancelled()) {
+            lastLoadFailure_ = LoadFailure::CANCELLED;
+            LOGD("loadSampleFromCompressed: cancelled (%s)", path);
+            return 0;
+        }
         // ⚠️ A decoder that ran out of room returns false exactly as a corrupt file does, so the
         // reason comes from whether memory is short RIGHT NOW rather than from the return value.
         // The decoders abandon the decode and free as they unwind, so this reads the state that
@@ -2753,6 +2784,14 @@ int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
     tsf* loaded = tsf_load(&sfStream);
     std::fclose(sf);
     if (!loaded) {
+        // ⚠️ Asked FIRST, and before the guard: a cancel is not a failure and must not be reported as
+        // one. tsf unwinds through the identical null return either way (the abort reuses the decode
+        // failure's own cleanup), so the reason is only knowable out here.
+        if (pt::load_cancelled()) {
+            LOGD("🎹 Soundfont load cancelled: %s", path);
+            lastLoadFailure_ = LoadFailure::CANCELLED;
+            return -1;
+        }
         if (sf_memory_guard_tripped()) {
             LOGE("❌ Soundfont too large for this device (%lld MB free): %s",
                  (long long)(pt::available_memory_bytes() >> 20), path);

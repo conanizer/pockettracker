@@ -690,6 +690,10 @@ own.
 
 The browser can also manage files — see [section 24](#24-file-management).
 
+A load that takes more than a moment puts a **LOADING** line across the top of the screen with the
+file's name and how far along it is. **B** stops it: nothing is loaded, and the slot keeps what it
+had. Cancelling a *project* load leaves you on an empty project. Quick loads show nothing at all.
+
 Compressed audio (MP3 / FLAC / OGG / Opus / M4A) loads as a sample too — it decodes in place, with no
 WAV written. Video files are instead **converted** to a WAV in the Samples folder. See §23 →
 *Audio from video files*.

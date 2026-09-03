@@ -300,6 +300,19 @@ TSFDEF float tsf_channel_get_tuning(tsf* f, int channel);
 #  define TSF_MEMSET  memset
 #endif
 
+/* PocketTracker local addition — FOURTH local change, re-apply on any tsf update.
+   Progress out of, and a stop into, the SF3 sample decode. Unpacking an .sf3 is the slowest thing
+   this library does — one Vorbis stream per sample header, seconds on a handheld — and it is the one
+   part of a load nothing outside can see or interrupt: tsf_load takes no callback.
+   ⚠️ The stream position is NOT a usable substitute. tsf_load_samples reads the whole `smpl` chunk
+   before tsf_decode_sf3_samples decodes any of it, so the file is 100% read before the expensive part
+   starts. The honest counter is the shdr index, which is why the call is where it is.
+   Returns non-zero to continue, zero to abort; undefined it is the constant 1 and every compiler
+   deletes the branch, so an unhosted build of this file behaves exactly as upstream. */
+#if !defined(TSF_PROGRESS)
+#  define TSF_PROGRESS(i, n) 1
+#endif
+
 #if !defined(TSF_POW) || !defined(TSF_POWF) || !defined(TSF_EXPF) || !defined(TSF_LOG) || !defined(TSF_TAN) || !defined(TSF_LOG10) || !defined(TSF_SQRT)
 #  include <math.h>
 #  if !defined(__cplusplus) && !defined(NAN) && !defined(powf) && !defined(expf) && !defined(sqrtf)
@@ -912,15 +925,21 @@ static int tsf_decode_ogg(const tsf_u8 *pSmpl, const tsf_u8 *pSmplEnd, float** p
 		resNum += n_samples;
 		if (resNum > resMax)
 		{
-			/* PocketTracker local addition: DOUBLE rather than step by a fixed 1 M floats. Upstream
-			   caps the growth increment, which makes the number of reallocs linear in the decoded
-			   size and the bytes copied quadratic. Whether that is paid depends on the allocator:
-			   glibc and bionic serve a multi-megabyte block from mmap and realloc it with mremap, so
-			   the pages are repointed and nothing is copied; the MSVC CRT copies every time. Measured
-			   on a 3000-sample font decoding to 410 MB of float, MSVC went 9.93 s -> 3.20 s and glibc
-			   did not move (3.58 s -> 3.51 s). Doubling costs at most 2x the final buffer in slack,
-			   which the trim-down realloc at the end of tsf_decode_sf3_samples gives straight back. */
-			do { resMax += (resMax ? resMax : resInitial); } while (resNum > resMax);
+			/* PocketTracker local addition: grow GEOMETRICALLY rather than by a fixed 1 M floats.
+			   Upstream caps the growth increment, which makes the number of reallocs linear in the
+			   decoded size and the bytes copied quadratic. Whether that is paid depends on the
+			   allocator: glibc and bionic serve a multi-megabyte block from mmap and realloc it with
+			   mremap, so the pages are repointed and nothing is copied; the MSVC CRT copies every
+			   time. Measured on a 3000-sample font decoding to 410 MB of float, MSVC went 9.93 s ->
+			   3.20 s and glibc did not move (3.58 s -> 3.51 s).
+			   ⚠️ The factor is 1.5x and NOT 2x, and on a handheld that is the difference between a
+			   load and a kill. A realloc holds the old block and the new one at the same time, so the
+			   machine is asked for old+new at the moment of the largest step. Measured on a 43 MB
+			   .sf3 decoding to 789 MB: doubling steps 160/320/640/1280 MB and peaks at 640+1280 =
+			   1.9 GB, of which 491 MB is slack nothing ever writes. At 1.5x the ladder is
+			   160/240/360/540/810 and the peak is 540+810 = 1.35 GB — 30% less, for one extra
+			   realloc. The growth stays geometric, so the quadratic copy cost above does not return. */
+			do { resMax += (resMax ? resMax / 2 : resInitial); } while (resNum > resMax);
 			oldres = res;
 			res = (float*)TSF_REALLOC(res, resMax * sizeof(float));
 			/* PocketTracker local addition — THIRD local change, re-apply on any tsf update.
@@ -950,6 +969,10 @@ static int tsf_decode_sf3_samples(const void* rawBuffer, float** pFloatBuffer, u
 	for (i = 0; i <= shdrLast; i++)
 	{
 		struct tsf_hydra_shdr *shdr = &hydra->shdrs[i];
+		/* PocketTracker local addition (fourth) — see TSF_PROGRESS at the top of this file. The
+		   unwind is the SAME one the decode failure below already uses, deliberately: `res` is the
+		   accumulating buffer and freeing it here is the whole cleanup. */
+		if (!TSF_PROGRESS(i, shdrLast + 1)) { TSF_FREE(res); return 0; }
 		if (shdr->sampleType & 0x30) // compression flags (sometimes Vorbis flag)
 		{
 			const tsf_u8 *pSmpl = smplBuffer + shdr->start, *pSmplEnd = smplBuffer + shdr->end;
@@ -987,10 +1010,12 @@ static int tsf_decode_sf3_samples(const void* rawBuffer, float** pFloatBuffer, u
 			resNum += (tsf_u32)(inEnd - in);
 			if (resNum > resMax)
 			{
-				/* PocketTracker local addition — same doubling as the ogg branch above, for the same
-				   reason. This arm runs for the uncompressed shdrs INTERLEAVED among compressed ones
-				   in a mixed font, so it shares the one accumulating buffer and the one growth rule. */
-				do { resMax += (resMax ? resMax : resInitial); } while (resNum > resMax);
+				/* PocketTracker local addition — the same 1.5x growth as the ogg branch above, for the
+				   same reasons. This arm runs for the uncompressed shdrs INTERLEAVED among compressed
+				   ones in a mixed font, so it shares the one accumulating buffer and must share the
+				   one growth rule: two different factors on one buffer is a ladder nobody can reason
+				   about. */
+				do { resMax += (resMax ? resMax / 2 : resInitial); } while (resNum > resMax);
 				oldres = res;
 				res = (float*)TSF_REALLOC(res, resMax * sizeof(float));
 				if (!res) { TSF_FREE(oldres); return 0; }

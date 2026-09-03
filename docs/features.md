@@ -118,6 +118,8 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - On-screen QWERTY keyboard for naming projects and files
 - Load a project while the sequencer is running — the new song takes over from its first row, so you
   can switch material mid-set
+- Slow loads show progress and can be stopped with B — large compressed soundfonts and long samples
+  report how far along they are; quick loads show nothing
 - Projects saved as .ptp files in `Projects/`, inside PocketTracker's home folder
 - Instruments saved as .pti files in `Instruments/`, beside it
 - Samples stored wherever you put them; paths stored in the project

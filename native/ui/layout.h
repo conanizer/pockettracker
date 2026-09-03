@@ -35,6 +35,7 @@
 #include "ui/modules/help_panel.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
+#include "ui/modules/loading_strip.h"
 #include "ui/modules/midi_settings.h"
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
@@ -93,6 +94,8 @@ public:
      * and there is nowhere else for that to live. Since S8 the EQ EDITOR joins them, for a different
      * reason: it caches its response curve, which is a function of the project alone but far too
      * expensive to recompute 60 times a second (eq_editor.h).
+     *
+     * It is `draw_frame` plus the loading strip, and the split is load-bearing — see `draw_frame`.
      */
     void draw(Canvas& c, const AppState& state);
 
@@ -116,6 +119,16 @@ public:
     bool has_falling_meters(const AppState& state) const;
 
 private:
+    /**
+     * Everything below the loading strip: the background, the module, the furniture, the overlays.
+     *
+     * ⚠️⚠️ **IT RETURNS FROM THE MIDDLE, THREE TIMES** — no document, and each of the two full-screen
+     * modules — so anything that has to appear on EVERY screen cannot be written at the bottom of it.
+     * That is not a wart to tidy away: the browser and the sample editor genuinely draw nothing else,
+     * and they are also the two screens a load is started from. `draw` is where the exceptions go.
+     */
+    void draw_frame(Canvas& c, const AppState& state);
+
     /**
      * A screen with no module yet: its title, and "COMING SOON" in the middle. This is not port
      * scaffolding — it is `drawPlaceholderScreen` from the Kotlin renderer, which the Android app

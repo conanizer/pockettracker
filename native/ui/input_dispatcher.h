@@ -462,8 +462,78 @@ class InputDispatcher {
     struct RenderHooks {
         std::function<void(bool)> suspend_audio;
         std::function<void()>     repaint;
+
+        /**
+         * ⭐ **THE THIRD ONE, AND IT IS A LOAD'S, NOT A RENDER'S** (see `begin_load` below).
+         *
+         * "Drain whatever the platform has queued, and tell me whether the user asked to stop." It is
+         * what makes a load cancellable, and what keeps the app's lifecycle alive while one runs.
+         *
+         * ⚠️⚠️ **IT DOES NOT DISPATCH THE PRESSES IT DRAINS, AND THAT IS THE POINT.** Every button
+         * except a cancel is CONSUMED. Without it a load's queued input is not lost, it is REPLAYED:
+         * SDL keeps the presses, and they all arrive at once when the load ends, onto whatever screen
+         * it returned to. That is still true of EXPORT today.
+         *
+         * ⚠️ It is also the only reason `SDL_APP_WILLENTERBACKGROUND` is seen during a load at all —
+         * the watcher that flushes the crash-recovery autosave fires from inside the platform's own
+         * pump, so a frame loop that has stopped polling has silently switched that machinery off.
+         */
+        std::function<bool()> load_pump;
     };
     void set_render_hooks(RenderHooks hooks) { render_ = std::move(hooks); }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // A SLOW LOAD
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Opening a file is the one thing the app does that can outlast a frame. Most loads do not — a
+    // 106 MB `.sf2` takes a quarter of a second, every `.wav` is a read — but a compressed `.sf3` is
+    // unpacked one sample at a time and a long mp3 in proportion to its length, and there the loop is
+    // inside the load rather than running.
+    //
+    // ⚠️ **THE APP NEVER PREDICTS WHETHER A FILE IS BIG.** `begin_load` starts a clock; the strip goes
+    // up only if the load is still running after `LOADING_DELAY_MS`. ⭐ Which is also what makes
+    // it right on a slow device with no second number in it: a file that is instant on a desktop
+    // crosses the delay on a handheld and gets a strip there and only there.
+
+    /** The wait before a running load is drawn. Below it a strip would flash and be worse than none. */
+    static constexpr int LOADING_DELAY_MS = 400;
+
+    /**
+     * How often the strip is redrawn and the buttons are read while a load runs.
+     *
+     * ⚠️⚠️ **NOT "on every report", and the difference is measured rather than tidy.** A soundfont
+     * reports once per sample header — 1628 times for a 43 MB `.sf3` — and each repaint is a full
+     * canvas draw and a present. Doing that per report made the load visibly slower than it was with
+     * no strip at all: the reporting cost more than the decoding. Thirty frames a second is more than a
+     * bar can use.
+     */
+    static constexpr int LOADING_REPAINT_MS = 33;
+
+    /**
+     * Open a load. `detail` is what the strip names — a file's display name, or a project's.
+     *
+     * ⚠️ Every `begin_load` needs its `end_load`, and every load path in the app is wrapped by
+     * `LoadScope` (input_dispatcher.cpp) rather than calling these by hand.
+     */
+    void begin_load(long long now_ms, std::string detail);
+
+    /**
+     * The report from inside the load, called by the sink the shell installs into `pt::set_load_tick`.
+     * **Returns false when the user has cancelled**, which is what the engine unwinds on.
+     *
+     * ⚠️ THE TIME IS PASSED IN rather than taken from `set_now()`, and that is deliberate rather than
+     * tidy: `set_now` also RUNS DUE WORK, and the 3 s autosave firing from inside a project load
+     * would write the crash-recovery file from a document that is half-loaded. A tick moves the
+     * clock the strip reads and nothing else.
+     */
+    bool load_tick(long long now_ms, float fraction);
+
+    /** Close it. Leaves `loading` clear whether the load finished, failed or was cancelled. */
+    void end_load();
+
+    /** Is a load in flight? The shell asks before it does anything that assumes a settled document. */
+    bool load_running() const { return s_.loading.running; }
 
     /**
      * Open the MIDI port the settings name, once, at boot — call it after `AppState::midiOut` is set
@@ -518,6 +588,10 @@ class InputDispatcher {
     songcore::SongcoreHost& host_;
     FileSystem&             fs_;
     long long               now_ms_ = 0;
+    /** When the load in flight opened — what `LOADING_DELAY_MS` is measured from. */
+    long long               loadStartMs_ = 0;
+    /** …and when it was last drawn, which is what `LOADING_REPAINT_MS` paces. */
+    long long               lastLoadPaintMs_ = 0;
     RenderHooks             render_{};
 
     /** See set_media_base_dir. Empty means "relative paths stay relative" (resolve_media_path). */
@@ -857,6 +931,7 @@ class InputDispatcher {
         EQ        = 1u << 3,
         FX_HELPER = 1u << 4,
         BROWSER   = 1u << 5,
+        LOADING   = 1u << 6,
     };
 
     friend constexpr Overlay operator|(Overlay a, Overlay b) {
@@ -872,6 +947,14 @@ class InputDispatcher {
      * construction, which is exactly why it was free to drift before it lived in one function.
      */
     Overlay top_overlay() const {
+        // ⚠️ FIRST, above even the confirm dialog. A load is the one layer that can open while another
+        // modal is already up — the sample editor's LOAD is reached from behind its own confirm — and
+        // it is not dismissible by anything except finishing or being cancelled.
+        //
+        // ⚠️ `running`, not `shown`: a load owns the buttons from its first moment, whether or not it
+        // has been up long enough to have drawn anything. A press in the first 400 ms is not a press
+        // on the screen underneath.
+        if (s_.loading.running) return Overlay::LOADING;
         if (confirm_open())     return Overlay::CONFIRM;
         if (qwerty_open())      return Overlay::QWERTY;
         if (theme_open())       return Overlay::THEME;

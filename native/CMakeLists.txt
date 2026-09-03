@@ -200,6 +200,9 @@ set(ENGINE_CORE_SOURCES
         # How much RAM the machine will actually give us. A .cpp for byte_source's linkage reason and
         # to keep <windows.h> out of every TU that asks; see the header.
         platform_memory.cpp
+        # Where a slow load reports itself and where a cancel is read. A .cpp for platform_memory's
+        # linkage reason — one symbol, not one copy per shared library. See the header.
+        load_progress.cpp
         soundfont-voice.cpp
         sample-editor.cpp
         audio-engine.cpp
@@ -380,6 +383,7 @@ add_library(pt-ui STATIC
         ui/modules/help_panel.cpp
         ui/modules/instrument_editor.cpp
         ui/modules/instrument_pool.cpp
+        ui/modules/loading_strip.cpp
         ui/modules/midi_settings.cpp
         ui/modules/mixer.cpp
         ui/modules/modulation.cpp

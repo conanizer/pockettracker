@@ -56,9 +56,33 @@ int64_t clamp_to_address_space(int64_t bytes) {
     return std::min(bytes, userAddressSpace);
 }
 
-}  // namespace
+/**
+ * `PT_MEMORY_LIMIT_MB` — pretend the machine has only this much free.
+ *
+ * ⚠️⚠️ **THE ONLY WAY TO REACH THE LOW-MEMORY PATHS ON A MACHINE THAT IS NOT LOW ON MEMORY, AND THEY
+ * WERE UNREACHED FOR MONTHS.** Every refusal in the app hangs off this number: the soundfont
+ * allocator guard and the sample decoder's room check both refuse a file only when it will not fit,
+ * so on any development box the whole mechanism is a branch nothing takes. The guard was measuring
+ * the wrong quantity for a soundfont's growth (see soundfont-voice.cpp) and read green throughout,
+ * because no test could make it say no.
+ *
+ * ⚠️ It only ever makes the answer SMALLER — `std::min` — so it cannot be used to talk the app into a
+ * load the machine cannot serve, and an unset or unparseable value changes nothing at all. Read on
+ * every call rather than cached, because a probe that sets it after the first allocation must still
+ * be obeyed.
+ */
+int64_t apply_memory_limit_env(int64_t bytes) {
+    const char* v = std::getenv("PT_MEMORY_LIMIT_MB");
+    if (!v || !*v) return bytes;
+    char*           end   = nullptr;
+    const long long limit = std::strtoll(v, &end, 10);
+    if (end == v || limit <= 0) return bytes;
+    const int64_t capped = static_cast<int64_t>(limit) * 1024 * 1024;
+    return (bytes <= 0) ? capped : std::min(bytes, capped);
+}
 
-int64_t available_memory_bytes() {
+/** What the OS says, before `PT_MEMORY_LIMIT_MB` gets a chance to lower it. */
+int64_t available_memory_raw() {
 #if defined(_WIN32)
     MEMORYSTATUSEX st;
     st.dwLength = sizeof(st);
@@ -79,6 +103,10 @@ int64_t available_memory_bytes() {
     return clamp_to_address_space(free_ + (cached > 0 ? cached : 0));
 #endif
 }
+
+}  // namespace
+
+int64_t available_memory_bytes() { return apply_memory_limit_env(available_memory_raw()); }
 
 int64_t total_memory_bytes() {
 #if defined(_WIN32)

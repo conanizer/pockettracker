@@ -44,6 +44,11 @@ extern "C" {
 // on any update. ⭐ The lesson to keep: **a dormant error path is not a working one, and a guard that
 // makes a never-taken branch reachable inherits every bug in it.**
 //
+// ⚠️⚠️ **AND THE QUANTITY IT MEASURES IS `old + new`, NOT `new`** — see the block table below. A
+// guard that measured only the requested size approved the step that killed the process, because a
+// `realloc` holds both blocks at once. That, and tsf's growth factor (1.5x rather than 2x, in
+// tsf.h), are what a font the machine can very nearly hold turns on.
+//
 // ⚠️ Only allocations at or above `SF_GUARD_MIN_BYTES` are checked. `/proc/meminfo` costs ~50 us to
 // read and tsf makes thousands of small allocations for its preset and region tables; the ones that
 // can exhaust a machine are the sample buffers, and those are enormous. A small allocation cannot be
@@ -53,6 +58,8 @@ extern "C" {
 // cannot answer has to keep loading exactly as it does today, or the guard turns into a total outage
 // on whatever port reads it wrong.
 #include "platform_memory.h"
+#include "load_progress.h"
+#include "note-queue.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
 
 #include <cstdlib>
 
@@ -72,19 +79,73 @@ constexpr size_t SF_GUARD_MIN_BYTES = 4u * 1024 * 1024;
  */
 constexpr int64_t SF_GUARD_RESERVE_BYTES = 32ll * 1024 * 1024;
 
-/** True when taking `size` right now would leave the machine with nothing. */
-bool sf_alloc_would_exhaust(size_t size) {
+/**
+ * The large blocks this guard has handed out.
+ *
+ * ⚠️⚠️ **IT EXISTS BECAUSE A `realloc` COSTS `old + new`, NOT `new`, AND A GUARD THAT MEASURES THE
+ * WRONG QUANTITY READS GREEN RIGHT UP TO THE CRASH.** Measured on a 43 MB `.sf3`: the sample buffer
+ * climbs 160 → 240 → 360 → 540 → 810 MB, and while the last step is being served the 540 MB block is
+ * still alive and still owned, because that is exactly what `realloc` promises. The machine is asked
+ * for 1.35 GB at that instant. Comparing only the 810 MB against what is free approves the step on
+ * any machine with about 850 MB — and the kill arrives during the copy, with the guard having said
+ * yes. The growth factor in `tsf.h` is the other half of the same number.
+ *
+ * ⚠️ Sized for every font that can be RESIDENT plus the two a load in flight holds — a loaded font
+ * keeps its trimmed sample buffer for its whole life, so those entries stay occupied. An overflowing
+ * table simply leaves a block unrecorded, and a later realloc of it is measured the old, optimistic
+ * way: the table degrades toward today's behaviour rather than toward a spurious refusal.
+ */
+struct SfBigBlock {
+    void*  ptr  = nullptr;
+    size_t size = 0;
+};
+SfBigBlock g_sfBig[MAX_SOUNDFONTS + 2];
+
+/** The size this guard handed out for `ptr`, or 0 when it is not one of ours (or was too small). */
+size_t sf_big_block_size(const void* ptr) {
+    if (!ptr) return 0;
+    for (const SfBigBlock& b : g_sfBig)
+        if (b.ptr == ptr) return b.size;
+    return 0;
+}
+
+void sf_forget_big_block(const void* ptr) {
+    if (!ptr) return;
+    for (SfBigBlock& b : g_sfBig)
+        if (b.ptr == ptr) { b.ptr = nullptr; b.size = 0; return; }
+}
+
+void sf_remember_big_block(void* ptr, size_t size) {
+    if (!ptr || size < SF_GUARD_MIN_BYTES) return;
+    for (SfBigBlock& b : g_sfBig)
+        if (b.ptr == nullptr) { b.ptr = ptr; b.size = size; return; }
+    // Full: the block goes unrecorded, and a later realloc of it is measured without its old half.
+}
+
+/**
+ * True when taking `size` right now — while still holding `alsoHeld` bytes across the call — would
+ * leave the machine with nothing.
+ */
+bool sf_alloc_would_exhaust(size_t size, size_t alsoHeld) {
     if (size < SF_GUARD_MIN_BYTES) return false;
     const int64_t available = pt::available_memory_bytes();
     if (available <= 0) return false;              // unknown is not "empty"
-    const bool exhausted = static_cast<int64_t>(size) > available - SF_GUARD_RESERVE_BYTES;
+    const int64_t needed = static_cast<int64_t>(size) + static_cast<int64_t>(alsoHeld);
+    const bool exhausted = needed > available - SF_GUARD_RESERVE_BYTES;
     if (exhausted) g_sfMemoryGuardTripped = true;
     return exhausted;
 }
 
 void* sf_guarded_malloc(size_t size) {
-    if (sf_alloc_would_exhaust(size)) return nullptr;
-    return std::malloc(size);
+    if (sf_alloc_would_exhaust(size, 0)) return nullptr;
+    void* out = std::malloc(size);
+    sf_remember_big_block(out, size);
+    return out;
+}
+
+void sf_guarded_free(void* ptr) {
+    sf_forget_big_block(ptr);
+    std::free(ptr);
 }
 
 /**
@@ -93,8 +154,41 @@ void* sf_guarded_malloc(size_t size) {
  * TSF_REALLOC(res, ...); if (!res) { TSF_FREE(oldres); ... }`. Freeing here as well would double-free.
  */
 void* sf_guarded_realloc(void* ptr, size_t size) {
-    if (sf_alloc_would_exhaust(size)) return nullptr;
-    return std::realloc(ptr, size);
+    const size_t held = sf_big_block_size(ptr);
+
+    // ⚠️⚠️ **A SHRINK IS NEVER REFUSED, AND THAT IS NOT LENIENCY.** The one shrink tsf performs is the
+    // trim at the end of `tsf_decode_sf3_samples`, whose failure arm quietly keeps the oversized
+    // buffer and reports SUCCESS — so a refusal there would trip `g_sfMemoryGuardTripped` on a font
+    // that had in fact loaded, and the app would say FILE TOO BIG about a soundfont sitting in a
+    // playable slot. The guard is about GROWTH; a request no larger than what is already held cannot
+    // be the allocation that exhausts the machine.
+    if (size > held && sf_alloc_would_exhaust(size, held)) return nullptr;
+
+    void* out = std::realloc(ptr, size);
+    if (out) {
+        sf_forget_big_block(ptr);
+        sf_remember_big_block(out, size);
+    }
+    return out;
+}
+
+// ─── Progress out of, and a stop into, the SF3 decode ────────────────────────────────────────────
+//
+// ⚠️ **THE ALLOCATOR ABOVE IS NOT A USABLE HOOK FOR THIS, AND THAT IS WHY tsf.h IS PATCHED.** Through
+// the decode of a 43 MB `.sf3`, `TSF_MALLOC`/`TSF_REALLOC` fire about a DOZEN times — the sample
+// buffer only allocates when it grows — and the last of those steps covers half the run. A
+// percentage built on that is a staircase, and a cancel read there lands seconds after the press.
+// One report per sample header is the granularity both actually need.
+//
+// ⭐ **AN .sf2 REPORTS TOO, WHICH IS NOT OBVIOUS FROM THE FUNCTION'S NAME.** `tsf_decode_sf3_samples`
+// runs for BOTH formats — tsf calls it whenever `tsf_load_samples` left the float buffer unbuilt,
+// which is every plain `smpl` chunk — and its raw-PCM `else` arm is what converts an uncompressed
+// font. So the report is one per SAMPLE HEADER for either format, and the bar and the cancel work on
+// an `.sf2` as well. It rarely matters: measured, a 106 MB `.sf2` loads in 0.26 s and is over long
+// before the box's delay. It matters on a slow card, and it costs nothing.
+int sf_load_progress(int index, int count) {
+    return pt::load_tick(count > 0 ? static_cast<float>(index) / static_cast<float>(count) : -1.0f)
+               ? 1 : 0;
 }
 
 }  // namespace
@@ -104,7 +198,11 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 
 #define TSF_MALLOC(size)       sf_guarded_malloc(size)
 #define TSF_REALLOC(ptr, size) sf_guarded_realloc(ptr, size)
-#define TSF_FREE(ptr)          std::free(ptr)
+// ⚠️ FREE goes through the guard too — not to check anything, but so the block table above stays
+// true. A free that did not un-record its block would leave a stale pointer that a later allocation
+// can land on, and the next realloc of that address would be charged a size it does not have.
+#define TSF_FREE(ptr)          sf_guarded_free(ptr)
+#define TSF_PROGRESS(i, n)     sf_load_progress((i), (n))
 
 #define TSF_IMPLEMENTATION
 #include "vendor/tsf/tsf.h"

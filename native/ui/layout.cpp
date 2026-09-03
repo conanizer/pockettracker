@@ -33,6 +33,17 @@ bool editor_overlay_up(const AppState& s) {
 }  // namespace
 
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
+    draw_frame(c, s);
+
+    // ⚠️⚠️ **OUTSIDE `draw_frame`, AND THAT IS THE WHOLE POINT.** The file browser and the sample
+    // editor return from the MIDDLE of that function, and those two screens are where every load the
+    // user starts begins — a load drawn at the end of the frame is skipped by an early return that has
+    // nothing to do with it, on exactly the screens it exists for. One draw site, after everything,
+    // reachable from every screen: nothing added to the frame later can hide it again.
+    draw_loading_strip(c, s.loading, s.theme);
+}
+
+void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
 
     c.fill_rect(0, 0, DESIGN_W, DESIGN_H, t.background);

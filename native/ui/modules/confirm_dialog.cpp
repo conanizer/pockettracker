@@ -52,7 +52,14 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
 
     c.draw_text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle,
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
-    c.draw_text(instruction, BOX_X + (BOX_W - instrW) / 2, BOX_Y + DLG_INSTR_Y, t.textCursor,
+    // ⚠️⚠️ **`textValue`, NOT `textCursor` — THE SAME TRAP AS THE OVERLAY CURSORS, ONE LAYER OVER.**
+    // TXT CURSOR is an INK colour: everywhere else in the app it is painted in FRONT of `rowCursor`,
+    // and two palettes pick it to be read against that light block rather than against a dark one.
+    // On the modal's near-black fill it is a smudge — under MONO (`0x303030` on `0x1A1A1A`) the line
+    // telling you which button says yes is very nearly invisible, and under BLUE it is dim. TXT VALUE
+    // is the bright readable role in all four palettes and is a theme row, so a hand-made one gets
+    // the same guarantee. The title above was never affected: TXT TITLE is bright by definition.
+    c.draw_text(instruction, BOX_X + (BOX_W - instrW) / 2, BOX_Y + DLG_INSTR_Y, t.textValue,
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
 }
 

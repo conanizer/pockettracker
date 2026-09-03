@@ -2,6 +2,7 @@
 #include "audio-defs.h"     // LOGD/LOGE (portable shim)
 #include "byte_source.h"    // pt_fopen — every open below goes through it
 #include "platform_memory.h"  // available_memory_bytes — the decode's memory guard
+#include "load_progress.h"    // load_tick — a long decode reports itself, and can be cancelled
 
 #define DR_MP3_IMPLEMENTATION
 #include "vendor/dr_mp3/dr_mp3.h"
@@ -84,15 +85,27 @@ inline bool decode_has_room(const std::vector<float>& L, const std::vector<float
 
 // Deinterleave a freshly-decoded float block into L (always) and R (only when channels >= 2).
 // For >2 channels keep ch0/ch1 and drop the rest — same downmix the old Kotlin extractor used.
-// False when the machine ran out — see decode_has_room.
+//
+// **False means STOP**, for either of two reasons, and the caller asks `pt::load_cancelled()` which:
+// the machine ran out (decode_has_room), or the user cancelled the load (load_tick). ⭐ One return
+// value for both because the unwind is identical — the difference is only in the message at the end,
+// and choosing it where the message is written is one question instead of five.
+//
+// `totalFrames` is what the container said its length was, or 0 when it did not say (an mp3 with no
+// Xing header). Zero reports "unknown" rather than a made-up percentage.
 inline bool appendBlock(const float* interleaved, int frames, int channels,
-                        std::vector<float>& L, std::vector<float>& R) {
+                        std::vector<float>& L, std::vector<float>& R, int64_t totalFrames) {
     if (!decode_has_room(L, R, frames)) return false;
     for (int i = 0; i < frames; i++) {
         L.push_back(interleaved[(size_t)i * channels]);
         if (channels >= 2) R.push_back(interleaved[(size_t)i * channels + 1]);
     }
-    return true;
+    // Once per block, which is 4k-11k frames — often enough that a cancel lands within a frame or two
+    // and rare enough that the report costs nothing against the decode it is reporting on.
+    const float done = (totalFrames > 0)
+                           ? static_cast<float>(L.size()) / static_cast<float>(totalFrames)
+                           : -1.0f;
+    return pt::load_tick(done > 1.0f ? 1.0f : done);
 }
 
 // Reserve the finished length before decoding, so a decode is ONE allocation per channel instead of a
@@ -184,19 +197,23 @@ bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float
     sampleRate = (int)mp3.sampleRate;
     if (channels < 1) { drmp3_uninit(&mp3); std::fclose(f); return false; }
 
-    // DRMP3_UINT64_MAX means "no Xing/LAME header, length unknown" — reserveOutput ignores it.
-    if (mp3.totalPCMFrameCount != DRMP3_UINT64_MAX)
-        reserveOutput((int64_t)mp3.totalPCMFrameCount, channels, outL, outR);
+    // DRMP3_UINT64_MAX means "no Xing/LAME header, length unknown" — reserveOutput ignores it, and
+    // so does the progress report: `total` stays 0 and the box shows a moving bar with no percentage.
+    const int64_t total = (mp3.totalPCMFrameCount != DRMP3_UINT64_MAX)
+                              ? (int64_t)mp3.totalPCMFrameCount : 0;
+    if (total > 0) reserveOutput(total, channels, outL, outR);
 
     const drmp3_uint64 CHUNK = 8192;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
     drmp3_uint64 got;
     bool room = true;
     while ((got = drmp3_read_pcm_frames_f32(&mp3, CHUNK, block.data())) > 0)
-        if (!appendBlock(block.data(), (int)got, channels, outL, outR)) { room = false; break; }
+        if (!appendBlock(block.data(), (int)got, channels, outL, outR, total)) { room = false; break; }
     drmp3_uninit(&mp3);
     std::fclose(f);
-    if (!room) { LOGE("decodeMp3File: out of memory at %zu frames: %s", outL.size(), path); return false; }
+    if (!room) { LOGE("decodeMp3File: %s at %zu frames: %s",
+                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                 return false; }
     LOGD("decodeMp3File: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
@@ -215,17 +232,20 @@ bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<floa
     sampleRate = (int)flac->sampleRate;
     if (channels < 1) { drflac_close(flac); std::fclose(f); return false; }
 
-    reserveOutput((int64_t)flac->totalPCMFrameCount, channels, outL, outR);
+    const int64_t total = (int64_t)flac->totalPCMFrameCount;
+    reserveOutput(total, channels, outL, outR);
 
     const drflac_uint64 CHUNK = 8192;
     std::vector<float> block((size_t)CHUNK * channels);
     drflac_uint64 got;
     bool room = true;
     while ((got = drflac_read_pcm_frames_f32(flac, CHUNK, block.data())) > 0)
-        if (!appendBlock(block.data(), (int)got, channels, outL, outR)) { room = false; break; }
+        if (!appendBlock(block.data(), (int)got, channels, outL, outR, total)) { room = false; break; }
     drflac_close(flac);
     std::fclose(f);
-    if (!room) { LOGE("decodeFlacFile: out of memory at %zu frames: %s", outL.size(), path); return false; }
+    if (!room) { LOGE("decodeFlacFile: %s at %zu frames: %s",
+                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                 return false; }
     LOGD("decodeFlacFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
@@ -253,7 +273,8 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
     if (channels < 1) { stb_vorbis_close(v); return false; }
 
     // 0 when the stream length is not derivable (stb_vorbis returns 0 rather than an error).
-    reserveOutput((int64_t)stb_vorbis_stream_length_in_samples(v), channels, outL, outR);
+    const int64_t total = (int64_t)stb_vorbis_stream_length_in_samples(v);
+    reserveOutput(total, channels, outL, outR);
 
     const int CHUNK = 4096;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
@@ -261,9 +282,11 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
     // num_floats is the buffer capacity in floats; returns frames (samples per channel) written, 0 at EOF.
     bool room = true;
     while ((got = stb_vorbis_get_samples_float_interleaved(v, channels, block.data(), CHUNK * channels)) > 0)
-        if (!appendBlock(block.data(), got, channels, outL, outR)) { room = false; break; }
+        if (!appendBlock(block.data(), got, channels, outL, outR, total)) { room = false; break; }
     stb_vorbis_close(v);
-    if (!room) { LOGE("decodeOggFile: out of memory at %zu frames: %s", outL.size(), path); return false; }
+    if (!room) { LOGE("decodeOggFile: %s at %zu frames: %s",
+                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                 return false; }
     LOGD("decodeOggFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
     return !outL.empty();
 }
@@ -296,8 +319,11 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     sampleRate = 48000;  // Opus always decodes at 48 kHz regardless of the original rate
     if (channels < 1) { op_free(of); return false; }
 
-    // Negative on error, or for a link-index total the stream cannot give — reserveOutput ignores it.
-    reserveOutput((int64_t)op_pcm_total(of, -1), channels, outL, outR);
+    // Negative on error, or for a link-index total the stream cannot give — reserveOutput ignores it,
+    // and so does the progress report (0 = "no percentage available").
+    const int64_t pcmTotal = (int64_t)op_pcm_total(of, -1);
+    const int64_t total    = pcmTotal > 0 ? pcmTotal : 0;
+    reserveOutput(pcmTotal, channels, outL, outR);
 
     // op_read_float wants room for >= 120 ms/channel (5760 frames at 48 kHz); use a generous chunk.
     const int CHUNK = 11520;  // frames
@@ -306,11 +332,13 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     int got;
     bool room = true;
     while ((got = op_read_float(of, block.data(), (int)block.size(), &li)) > 0)
-        if (!appendBlock(block.data(), got, channels, outL, outR)) { room = false; break; }
+        if (!appendBlock(block.data(), got, channels, outL, outR, total)) { room = false; break; }
     if (got < 0) LOGE("decodeOpusFile: op_read_float error %d (using %zu decoded frames): %s",
                       got, outL.size(), path);  // keep whatever decoded before the error
     op_free(of);
-    if (!room) { LOGE("decodeOpusFile: out of memory at %zu frames: %s", outL.size(), path); return false; }
+    if (!room) { LOGE("decodeOpusFile: %s at %zu frames: %s",
+                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                 return false; }
     LOGD("decodeOpusFile: ch=%d rate=48000 frames=%zu", channels, outL.size());
     return !outL.empty();
 }
@@ -426,6 +454,15 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
         for (int i = 0; i < frames; i++) {
             outL.push_back(p[(size_t)i * stride]);            // ch0 → L (a mono duplicate's ch0 == ch1)
             if (keepStereo) outR.push_back(p[(size_t)i * stride + 1]);  // ch1 → R only for real stereo
+        }
+        // ⚠️ The report is spelled out here for the same reason the guard above is: this path does not
+        // go through appendBlock. Its fraction is the better one though — the container states a PACKET
+        // count up front, so this is exact from the first packet rather than from a decoded length.
+        if (!pt::load_tick((float)(s + 1) / (float)tr->sample_count)) {
+            NeAACDecClose(dec);
+            MP4D_close(&mp4);
+            LOGE("decodeMp4File: cancelled at %zu frames: %s", outL.size(), path);
+            return false;
         }
     }
 

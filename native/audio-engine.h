@@ -106,7 +106,9 @@ public:
      * ⚠️ Set by every load PATH, including the successful one (which clears it), so a stale value
      * cannot be read after a load that worked. Read immediately after the load that set it.
      */
-    enum class LoadFailure { NONE = 0, PARSE, OUT_OF_MEMORY };
+    // ⚠️ APPEND ONLY. CANCELLED is not an error and the UI must not draw it as one — the user stopped
+    // the load on purpose and already knows why nothing arrived.
+    enum class LoadFailure { NONE = 0, PARSE, OUT_OF_MEMORY, CANCELLED };
     LoadFailure lastLoadFailure() const { return lastLoadFailure_; }
 
     // Streaming sample load — decode a compressed file (e.g. MP3) chunk-by-chunk straight into native

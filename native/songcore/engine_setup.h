@@ -32,7 +32,8 @@
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"  // pt_fopen — every media open below goes through it
+#include "../byte_source.h"     // pt_fopen — every media open below goes through it
+#include "../load_progress.h"   // LoadSpan — one bar over a whole project's worth of files
 #include "media_path.h"      // resolve_media_path and the path helpers a media load resolves through
 #include "model.h"
 #include "scheduler.h"    // hex_to_float (VolumeUtils.hexToFloat)
@@ -279,23 +280,52 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
     MediaLoadResult result;
     const float deviceRate = static_cast<float>(engine.getSampleRate());
 
+    // ── One bar over the whole project ───────────────────────────────────────────────────────────
+    //
+    // A project's load cost is the SUM over its instruments, and a bar that restarts at every file
+    // says nothing about how long there is left. So each source gets a SLICE of 0..1 and reports
+    // inside it (`pt::LoadSpan`); a slice whose file cannot say how far through itself it is still
+    // places the job, because the slice's own start is a true position.
+    //
+    // ⚠️ Counted over the instruments that HAVE a source rather than over the 128 the pool holds — a
+    // bar that reaches 6% on a full project of eight samples is measuring the wrong thing. Two passes
+    // because the denominator has to exist before the first slice does.
+    int sources = 0;
+    for (const Instrument& ins : project.instruments) {
+        if (ins.id < 0 || ins.id >= POOL_INSTRUMENTS) continue;
+        if ((ins.instrumentType == InstrumentType::SOUNDFONT && ins.soundfontPath.has_value()) ||
+            ins.sampleFilePath.has_value())
+            sources++;
+    }
+    int loadedSoFar = 0;
+    const auto slice = [&sources, &loadedSoFar]() {
+        const float n  = static_cast<float>(sources > 0 ? sources : 1);
+        const float lo = static_cast<float>(loadedSoFar) / n;
+        return pt::LoadSpan(lo, lo + 1.0f / n);
+    };
+
     for (Instrument& ins : project.instruments) {
         if (ins.id < 0 || ins.id >= POOL_INSTRUMENTS) continue;
 
         if (ins.instrumentType == InstrumentType::SOUNDFONT && ins.soundfontPath.has_value()) {
             const std::string path = resolve_media_path(*ins.soundfontPath, base_dir, app_root);
+            const auto span = slice();
             const int slot = engine.loadSoundfont(ins.id, path.c_str());
+            loadedSoFar++;
             if (slot >= 0) {
                 routing.sfSlot[ins.id] = slot;
                 result.loaded++;
             } else {
                 result.failed++;
             }
+            if (pt::load_cancelled()) break;
         } else if (ins.sampleFilePath.has_value()) {
             // sampleFilePath == null is the single "empty slot" signal — an instrument with no path
             // loads nothing and its note is dropped at the seam, exactly as on Android.
             const std::string path = resolve_media_path(*ins.sampleFilePath, base_dir, app_root);
+            const auto span = slice();
             const int fileRate = load_sample_file(engine, ins.id, path);
+            loadedSoFar++;
             if (fileRate > 0) {
                 routing.sampleRateRatio[ins.id] = deviceRate / static_cast<float>(fileRate);
                 // The file's slice boundaries win over the project's — but only a WAV has any.
@@ -305,6 +335,10 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
             } else {
                 result.failed++;
             }
+            // ⚠️ A cancelled PROJECT load leaves the document pointing at sources the engine does not
+            // have. It is stopped here rather than carried on with, and the CALLER is what puts the
+            // app back on a coherent document — see the dispatcher's project-load path.
+            if (pt::load_cancelled()) break;
         }
     }
     return result;
