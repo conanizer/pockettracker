@@ -64,6 +64,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 
 - **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
 - **SoundFont**: load SF2 and SF3 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
+- Only the chosen sound is loaded out of a SoundFont, not the bank around it — SF2 and SF3 alike, so banks of hundreds of megabytes are usable; the list of sounds inside a file opens instantly
 - Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
 - Non-destructive start and end point trimming

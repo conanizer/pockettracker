@@ -13,13 +13,22 @@
 // Forward declaration — tsf is defined in soundfont-voice.cpp (TSF_IMPLEMENTATION).
 struct tsf;
 
-static const int MAX_SOUNDFONTS = 4;
+// A slot holds ONE PRESET, not a whole bank, so eight tracks on eight different sounds of the same
+// file want eight slots — plus the preview lane, plus room for the file the user is scrolling through
+// on the INSTRUMENT screen. A trimmed preset is one to three megabytes, so the headroom is cheap.
+// ⚠️ `SfBigBlock g_sfBig[MAX_SOUNDFONTS + 2]` in soundfont-voice.cpp sizes off this.
+static const int MAX_SOUNDFONTS = 12;
 
 struct SoundfontEntry {
     tsf* handle = nullptr;
     std::mutex mutex;            // Protects handle from concurrent audio/JNI access
     int instrumentId = -1;       // Which Instrument slot owns this (-1 = free)
+    // ⚠️ **The IDENTITY of a slot is the path AND the bank AND the preset**, because what is loaded
+    // is one preset trimmed out of the file rather than the file. Two instruments on the same .sf2 at
+    // different sounds are two slots; matching on the path alone would hand the second one whichever
+    // sound loaded first, with nothing to hear but the wrong instrument.
     std::string filePath;
+    int bank = -1, preset = -1;
     std::atomic<uint64_t> lastUsed{0};  // Monotonic use tick for LRU eviction; 0 = never used
     // Rendered via the master tsf handle on per-track MIDI channels (no per-track clones).
 };

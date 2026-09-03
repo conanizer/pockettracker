@@ -62,11 +62,18 @@ extern "C" {
 #include "note-queue.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
 
 #include <cstdlib>
+#include <mutex>
 
 namespace {
 
-/** Set when the guard below refuses, so `loadSoundfont` can tell "too big" from "not a soundfont". */
-bool g_sfMemoryGuardTripped = false;
+/**
+ * Set when the guard below refuses, so `loadSoundfont` can tell "too big" from "not a soundfont".
+ *
+ * ⚠️ **PER-THREAD.** A preset now loads on a worker while the main thread can be loading a project,
+ * and the flag is read by whichever load just came back — sharing it would let one load's refusal be
+ * reported as the other's, on a font that loaded fine.
+ */
+thread_local bool g_sfMemoryGuardTripped = false;
 
 /** Below this, an allocation cannot plausibly exhaust the machine and is not worth a syscall. */
 constexpr size_t SF_GUARD_MIN_BYTES = 4u * 1024 * 1024;
@@ -101,9 +108,20 @@ struct SfBigBlock {
 };
 SfBigBlock g_sfBig[MAX_SOUNDFONTS + 2];
 
+/**
+ * ⚠️⚠️ **THE TABLE IS SHARED AND IS NOT PER-THREAD, so every touch of it takes this.** It must be
+ * global: a block allocated by the worker loading a preset is FREED by the main thread when that slot
+ * is evicted, so a per-thread table would lose the entry and charge a later realloc the wrong size.
+ * Uncontended it costs nothing, it is taken only during a load or a free, and the alternative — one
+ * thread walking the array while another writes it — is a torn read of a pointer the guard then
+ * treats as a live block.
+ */
+std::mutex g_sfBigMutex;
+
 /** The size this guard handed out for `ptr`, or 0 when it is not one of ours (or was too small). */
 size_t sf_big_block_size(const void* ptr) {
     if (!ptr) return 0;
+    std::lock_guard<std::mutex> lock(g_sfBigMutex);
     for (const SfBigBlock& b : g_sfBig)
         if (b.ptr == ptr) return b.size;
     return 0;
@@ -111,12 +129,14 @@ size_t sf_big_block_size(const void* ptr) {
 
 void sf_forget_big_block(const void* ptr) {
     if (!ptr) return;
+    std::lock_guard<std::mutex> lock(g_sfBigMutex);
     for (SfBigBlock& b : g_sfBig)
         if (b.ptr == ptr) { b.ptr = nullptr; b.size = 0; return; }
 }
 
 void sf_remember_big_block(void* ptr, size_t size) {
     if (!ptr || size < SF_GUARD_MIN_BYTES) return;
+    std::lock_guard<std::mutex> lock(g_sfBigMutex);
     for (SfBigBlock& b : g_sfBig)
         if (b.ptr == nullptr) { b.ptr = ptr; b.size = size; return; }
     // Full: the block goes unrecorded, and a later realloc of it is measured without its old half.

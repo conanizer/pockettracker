@@ -605,24 +605,52 @@ class SongcoreHost {
         push_instrument(id);
     }
 
-    // The SF2 preset list, for the INSTRUMENT screen's PRESET row. All three answer for an instrument
-    // with no SoundFont (0 / 0 / "---"), which is what lets the screen draw before anything is loaded.
+    // The SoundFont preset list, for the INSTRUMENT screen's PRESET row. All three answer for an
+    // instrument with no SoundFont (0 / 0 / "---"), which is what lets the screen draw before anything
+    // is loaded — and they read the FILE's index, so they also answer for a bank too large to load.
     int sf_preset_count(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
-        return soundfont_preset_count(*engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+        return soundfont_preset_count(*engine_, project_.instruments[static_cast<size_t>(id)]);
     }
     int sf_preset_index(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
-        return soundfont_preset_index(*engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+        return soundfont_preset_index(*engine_, project_.instruments[static_cast<size_t>(id)]);
     }
     std::string sf_preset_name(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return "---";
-        return soundfont_preset_name(*engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+        return soundfont_preset_name(*engine_, project_.instruments[static_cast<size_t>(id)]);
     }
     void set_sf_preset_by_index(int id, int index) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
         songcore::set_soundfont_preset_by_index(*engine_, project_.instruments[static_cast<size_t>(id)],
-                                                routing_, index);
+                                                index);
+    }
+
+    /**
+     * Bring instrument `id`'s loaded sound into line with the preset it names — a load when the PATCH
+     * row has moved, and nothing at all otherwise. Safe to call every frame; see
+     * `sync_instrument_soundfont`.
+     */
+    void sync_sf_preset(int id) {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
+        songcore::sync_instrument_soundfont(*engine_, project_.instruments[static_cast<size_t>(id)],
+                                            routing_);
+    }
+
+    /**
+     * The PATCH row's load, started rather than done. False means the engine was busy and the caller
+     * must ask again — see `request_instrument_soundfont`.
+     */
+    bool request_sf_preset(int id) {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return true;
+        return songcore::request_instrument_soundfont(
+            *engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+    }
+
+    /** Install a finished background preset load. Called once a frame by the feed. */
+    void poll_sf_load() {
+        if (!engine_) return;
+        songcore::collect_instrument_soundfont(*engine_, project_, routing_);
     }
 
     // ── ↕ the FILE verbs (Phase 3 S6a — what the browser's A button reaches) ─────────────────────
@@ -1267,8 +1295,33 @@ class SongcoreHost {
     }
 
     int64_t after_play() {
+        resync_soundfont_slots();
         flush_trace();
         return seq_.playback_start_frame();
+    }
+
+    /**
+     * Every SoundFont instrument made to hold the sound it names, once, as the transport starts.
+     *
+     * ⚠️ **A SLOT HOLDS ONE PRESET, SO BROWSING THE PATCH ROW NOW COMPETES WITH THE SONG FOR SLOTS.**
+     * Scrolling loads a preset per step; enough steps and the least-recently-used eviction reclaims a
+     * slot a song instrument was pointing at, and `routing.sfSlot` has no way to know — the symptom is
+     * a track playing the wrong instrument with nothing logged. A note trigger bumps its slot's use
+     * tick, so a song that is PLAYING defends its own slots; this is what covers the case where the
+     * browsing happened while stopped.
+     *
+     * It is here rather than at the four `play_*` entry points because correctness must not rest on
+     * each of them remembering. Nearly always free: a non-SoundFont instrument returns on its type, and
+     * a slot that already holds the right sound returns on a comparison.
+     *
+     * ⚠️ A project naming more distinct SoundFont sounds than there are slots cannot have them all
+     * resident in any arrangement, and this cannot fix that — it will reload the stale ones on every
+     * start. `MAX_SOUNDFONTS` is sized so that eight tracks plus the preview lane fit.
+     */
+    void resync_soundfont_slots() {
+        if (!engine_) return;
+        for (const Instrument& ins : project_.instruments)
+            songcore::sync_instrument_soundfont(*engine_, ins, routing_);
     }
 
     /**

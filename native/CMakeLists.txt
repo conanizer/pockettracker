@@ -204,6 +204,9 @@ set(ENGINE_CORE_SOURCES
         # linkage reason — one symbol, not one copy per shared library. See the header.
         load_progress.cpp
         soundfont-voice.cpp
+        # Reading a SoundFont's preset index without its samples, and writing a one-preset copy of
+        # it. Pure file-format handling over a FILE* — no tsf, no engine. See the header.
+        soundfont-trim.cpp
         sample-editor.cpp
         audio-engine.cpp
         transient-detector.cpp

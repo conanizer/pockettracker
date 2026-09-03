@@ -138,18 +138,30 @@ app/                               Android: manifest, resources, and a seven-fil
 docs/                              The manual, this document, and the licence notices
 ```
 
-> **TinySoundFont carries two local changes**, both marked in `vendor/tsf/tsf.h`, and both must be
-> **re-applied on any tsf update**.
+> **TinySoundFont carries five local changes**, all marked in `vendor/tsf/tsf.h`, and all of them must
+> be **re-applied on any tsf update**.
 >
 > 1. It records the length of the sample buffer it allocates (`fontSampleCount`, plus a
 >    `tsf_get_fontsamplecount()` accessor); upstream computes that number during load and then
 >    discards it. Without it a loaded font's PCM is unmeasurable, and the engine's USED RAM total
 >    would silently omit the largest thing it holds.
-> 2. The accumulating float buffer the SF3 decoder fills **doubles** instead of growing by upstream's
->    fixed 1 M-float step. The step makes the realloc count linear in the decoded size and the bytes
->    copied quadratic — a cost paid only where `realloc` copies. glibc and bionic serve a
+> 2. The accumulating sample buffer the SF3 decoder fills grows **geometrically** instead of by
+>    upstream's fixed 1 M-element step. The step makes the realloc count linear in the decoded size and
+>    the bytes copied quadratic — a cost paid only where `realloc` copies. glibc and bionic serve a
 >    multi-megabyte block from `mmap` and grow it with `mremap`, so nothing moves; the MSVC CRT copies
->    every time, which is why the symptom was ever only visible on Windows.
+>    every time, which is why the symptom was ever only visible on Windows. The factor is 1.5× and not
+>    2×, because a `realloc` holds the old block and the new one at once and it is that sum a small
+>    device runs out of.
+> 3. A failed `realloc` in the Ogg decoder leaves the buffer for its caller to free. Upstream frees it
+>    and returns, and the caller frees the same pointer again — unreachable until an allocator that can
+>    actually refuse is installed underneath, which this project does.
+> 4. The SF3 decode reports progress and can be stopped, one call per sample header. There is no
+>    callback in the API to hang that on, and the loop is the only place with a usable granularity.
+> 5. **Samples are stored as 16-bit, not `float`.** Both sources are 16-bit — an uncompressed SF2
+>    stores shorts, and an SF3's Vorbis streams were encoded from them — so widening on load doubles
+>    the resident cost of every font and buys no precision. The scale back to −1..1 is folded into the
+>    per-block voice gain rather than applied per sample, which is exact because everything between the
+>    fetch and that gain (the interpolation, the lowpass) is linear.
 
 ---
 
@@ -234,6 +246,41 @@ steals a voice from the song.
 
 Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR or
 TRIG voice rings until something explicitly stops it.
+
+**A SoundFont slot holds ONE PRESET, not a file.** `soundfont-trim.h` reads a SoundFont's index —
+the small tables at the end of the file that say which samples each preset reaches — and writes a
+complete, minimal SoundFont in memory holding just the chosen preset and its sample bytes; tsf parses
+that, unmodified and unaware. The index costs kilobytes where the bank costs hundreds of megabytes,
+which is what lets the instrument screen list the patches in a file nothing has loaded, or could load.
+
+⚠️ **The identity of a slot is therefore `(path, bank, preset)`, not the path.** Two instruments on
+one `.sf2` at different patches are two slots; matching on the path alone hands the second one whatever
+loaded first, and the only symptom is the wrong instrument playing. The same triple keys the sharing
+guards that decide when a slot may be freed.
+
+⚠️ **A file the trimmer cannot cut apart loads whole**, which is the behaviour that predates this and
+is still correct — a false answer from the trimmer means "not this layout", never "broken file".
+
+⚠️ **Parsing a preset and owning a slot are separate jobs on separate threads.** A compressed preset
+still has to be Vorbis-decoded, which does not fit in a frame, so the parse runs on a worker and only
+the slot table's own thread chooses, evicts and publishes. The instrument goes on playing what it had
+until the new handle arrives. One parse runs at a time — tsf's allocator guard, its progress sink and
+its cancel are per-process hooks — and a load the user is *watching*, with a progress bar and a cancel,
+is still made synchronously on the thread that draws it.
+
+⚠️⚠️ **The frames just PAST a sample are what the two layouts exist to control.** Regions routinely
+read a little beyond their own data: a loop end a frame past the stream, an `endAddrsOffset`
+generator, the interpolator's lookahead. In a whole bank those frames belong to the next sample; in a
+font holding one preset there is no next sample, so the read has to land on silence instead. An
+uncompressed sample is copied with the spec's silent padding after it. A compressed one cannot be
+padded from the inside — its decoded length is not in the header — so it is followed in the sample
+TABLE by a silent sample header, which puts zeros in the decoded buffer exactly where the overrun
+reads; tsf decodes the table in order, so the two are equivalent by the time a region indexes them.
+
+⚠️ **A compressed font's sample chunk is also padded to an even length**, and that is not RIFF's own
+pad byte: tsf's chunk walk advances by exactly the declared size and does not know about it, so an
+odd chunk leaves the stream one byte adrift and everything after the samples — `pdta` included — is
+never read. Uncompressed sizes are frames × 2 and cannot be odd; Ogg streams are any length at all.
 
 ---
 

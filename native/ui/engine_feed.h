@@ -46,6 +46,7 @@ public:
     void poll(AudioEngine& engine, songcore::SongcoreHost& host, AppState& state, long long now_ms) {
         poll_engine(engine, state);
         poll_soundfont_presets(host, state);
+        poll_soundfont_reload(host, state, now_ms);
         poll_peaks(engine, state, now_ms);
         poll_eq_spectrum(host, state, now_ms);
         poll_sample_editor(host, state);
@@ -298,6 +299,65 @@ private:
     }
 
     /**
+     * Load the sound the PATCH row now names, once the row has stopped moving.
+     *
+     * ⚠️ **A PRESET IS A LOAD NOW, NOT A NUMBER.** One preset is cut out of the file and parsed, so
+     * every step of the row would otherwise be a parse — imperceptible on the ordinary one-to-three
+     * megabyte sound, and not on the rare fifty-megabyte one. Waiting for a short still moment makes
+     * the row behave the same on a 200 MB bank as on a 6 MB one, which is the only version of this that
+     * does.
+     *
+     * ⚠️ **AND THE LOAD ITSELF RUNS ELSEWHERE.** The settle only decides WHEN to ask; the decode
+     * happens on a worker, so a compressed preset that takes a quarter of a second costs no frames at
+     * all. `poll_sf_load` is what installs it, which is why it runs before the settle and every frame
+     * rather than only when something changed. A request refused because the engine is still busy
+     * leaves the pending flag up, so the next frame asks again.
+     *
+     * ⚠️ **NOT gated on the INSTRUMENT screen, unlike the display poll above.** Leaving the screen
+     * within the settle window would otherwise strand the instrument on the sound it had before — and
+     * the row is not the only thing that moves a preset; a `.pti` does too. For the same reason a
+     * pending load for a DIFFERENT instrument is flushed the moment the cursor leaves it, rather than
+     * dropped.
+     */
+    void poll_soundfont_reload(songcore::SongcoreHost& host, AppState& state, long long now_ms) {
+        // ⚠️ Unconditional, and above every early return below: a load started on the INSTRUMENT
+        // screen still has to be installed after the user has left it, or the sound never arrives.
+        host.poll_sf_load();
+
+        if (!state.project) return;
+        const int id = state.currentInstrument;
+        if (id < 0 || id >= static_cast<int>(state.project->instruments.size())) return;
+
+        const songcore::Instrument& ins = state.project->instruments[static_cast<size_t>(id)];
+        if (ins.instrumentType != songcore::InstrumentType::SOUNDFONT || !ins.soundfontPath.has_value()) {
+            sfReloadPending_ = false;
+            return;
+        }
+
+        const std::string& path = *ins.soundfontPath;
+        if (id != sfReloadId_ || ins.sfBank != sfReloadBank_ || ins.sfPreset != sfReloadPreset_ ||
+            path != sfReloadPath_) {
+            // ⚠️ **THE FLUSH STAYS SYNCHRONOUS, and that is the one place it should be.** The
+            // instrument being left is about to stop being looked at, so nothing here will ask again
+            // for it; a refused background request would leave it on the wrong sound for good. It
+            // costs a frame, and only when the cursor leaves an instrument within the settle window.
+            if (sfReloadPending_ && sfReloadId_ != id) host.sync_sf_preset(sfReloadId_);
+            sfReloadId_      = id;
+            sfReloadBank_    = ins.sfBank;
+            sfReloadPreset_  = ins.sfPreset;
+            sfReloadPath_    = path;
+            sfReloadDueMs_   = now_ms + SF_RELOAD_SETTLE_MS;
+            sfReloadPending_ = true;
+            return;
+        }
+        // ⚠️ The flag is cleared only when the request was ACCEPTED. Refused means the engine is still
+        // decoding the previous one; dropping it here would strand the instrument on the old sound.
+        if (sfReloadPending_ && now_ms >= sfReloadDueMs_ && host.request_sf_preset(id)) {
+            sfReloadPending_ = false;
+        }
+    }
+
+    /**
      * The SAMPLE EDITOR's three live reads — the C++ twin of MainActivity's three `LaunchedEffect`s.
      *
      * All three are EDGE-TRIGGERED, on the same keys Compose keys its effects on, and that is not an
@@ -403,6 +463,17 @@ private:
     int         sfCachedId_ = -1, sfCachedBank_ = -1, sfCachedPreset_ = -1;
     bool        sfCachedIsSf_ = false;
     std::string sfCachedPath_{};
+
+    /**
+     * How still the PATCH row has to be before the sound behind it is loaded. Long enough that holding
+     * a direction to scroll never loads anything on the way past, short enough that a deliberate step
+     * is heard as soon as the finger lifts.
+     */
+    static constexpr long long SF_RELOAD_SETTLE_MS = 150;
+    int         sfReloadId_ = -1, sfReloadBank_ = -1, sfReloadPreset_ = -1;
+    std::string sfReloadPath_{};
+    long long   sfReloadDueMs_   = 0;
+    bool        sfReloadPending_ = false;
 
     /** Kotlin's `delay(60)` between peak reads. See poll_peaks — it is a contract, not a throttle. */
     static constexpr long long PEAK_POLL_MS = 60;

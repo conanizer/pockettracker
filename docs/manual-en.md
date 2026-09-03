@@ -100,7 +100,7 @@ The folder currently in use is marked `(HOME)`. One whose directory has been del
 
 PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files into a folder you have granted, and load them from the **INSTRUMENT** screen using the file browser. SF2 and SF3 files are loaded the same way.
 
-> A large SoundFont of either kind takes a moment to load, and the screen does not redraw while it does. SF3 stores its samples compressed, so its files are much smaller on disk and it holds less memory once loaded, but it takes longer to open than the SF2 of the same bank.
+> Only the sound you have chosen is loaded, rather than the whole bank around it, so even a very large SoundFont costs about as much memory as the one instrument you are playing. Changing the PATCH row loads the new sound once you stop scrolling. The list of sounds inside a file opens straight away, however large the file is. SF3 stores its samples compressed, so its files are much smaller on disk and take a little longer to open.
 
 ### Project files
 

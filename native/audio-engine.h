@@ -14,11 +14,13 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <algorithm>
 #include "sampler-voice.h"
 #include "soundfont-voice.h"
+#include "soundfont-trim.h"
 #include "effects/send-chain.h"
 #include "effects/master-chain.h"
 
@@ -64,9 +66,9 @@ extern SoundfontVoice sfVoices[SF_VOICE_COUNT];
  * derived per-device from the file as it loads, which is why a fixed cap on one format is still the
  * wrong shape.
  *
- * ⚠️ **Also unsolved: the load is SYNCHRONOUS on the thread the UI is drawn from**, for both formats.
- * A big font freezes the picture for its load — over a second even for SF2 — and that is a threading
- * problem, not a format problem. A cap on one format was never the fix for that either.
+ * ⚠️ A load the user is WATCHING — opening a project, applying a preset — is still synchronous on the
+ * drawing thread, and reports itself through `load_progress.h` while it runs. The one that is not is
+ * the PATCH row's, which has no bar and must not have one; see `requestSoundfontLoad`.
  */
 
 class AudioEngine {
@@ -143,20 +145,81 @@ public:
     // any non-Android build — tools/ptrender could not render an SF2 project, and the SDL shell would
     // have had to reimplement the slot cache. The JNI functions are now thin forwards to these.
     //
-    // MAX_SOUNDFONTS slots, shared by file: an already-loaded path de-duplicates onto its existing slot
-    // (instruments sharing a handle play on distinct MIDI channels and apply their ADSR override
-    // per-note, so their state stays isolated), and one more distinct SF2 than there are slots evicts
-    // the least-recently-used one.
-    int  loadSoundfont(int instrumentId, const char* path);   // → slot index, or -1 on failure
+    // ⭐ **ONE PRESET IS LOADED, NOT THE WHOLE FILE.** The chosen preset is cut out of the file into a
+    // small in-memory SoundFont (soundfont-trim.h) and that is what tsf parses, so a 200 MB orchestral
+    // bank costs the few megabytes of the one sound in use instead of 400 MB of everything else. A file
+    // this cannot cut apart falls back to loading it whole, which is the old behaviour exactly.
+    //
+    // MAX_SOUNDFONTS slots, shared by (path, bank, preset): the same sound asked for twice de-duplicates
+    // onto its existing slot (instruments sharing a handle play on distinct MIDI channels and apply
+    // their ADSR override per-note, so their state stays isolated), and one more distinct sound than
+    // there are slots evicts the least-recently-used one.
+    int  loadSoundfont(int instrumentId, const char* path, int bank, int preset);   // → slot, or -1
     void unloadSoundfont(int slot);
     void clearAllSoundfonts();
 
-    // Preset metadata for the UI. Each takes the slot mutex before touching the handle: a concurrent
-    // load can evict and tsf_close a slot at any moment, and TSF's getters dereference without a null
-    // check. Empty slot → "---" / false / 0.
-    std::string getSoundfontPresetName(int slot, int bank, int preset);
-    bool getSoundfontPresetAt(int slot, int index, int* bank, int* presetNumber);
-    int  getSoundfontPresetCount(int slot);
+    // ── the same load, off the drawing thread ─────────────────────────────────────────────────────
+    //
+    // ⚠️⚠️ **A PRESET IS A DECODE, AND A DECODE DOES NOT FIT IN A FRAME.** Trimming made the cost
+    // proportional to one sound rather than to the bank, but a compressed one still has to be
+    // unpacked: measured on a 43 MB `.sf3`, 37 ms for an average preset and 288 ms for the largest —
+    // and that is on a desktop. Run where `loadSoundfont` is called from, that is the screen and the
+    // keyboard stopping dead every time the PATCH row settles.
+    //
+    // So the expensive half runs on a worker and the cheap half — choosing the slot, publishing the
+    // pointer — stays here, on the thread that owns the slot table. The instrument keeps PLAYING its
+    // previous sound the whole time; nothing goes silent waiting.
+    //
+    // ⚠️ ONE worker, and no queue. A request arriving while one is in flight is REFUSED, and the
+    // caller (which is polling anyway) asks again on the next frame. A queue would have to answer
+    // "which of the four presets you scrolled past do you still want", and the answer is always "ask
+    // me again", which is what refusing already says.
+    enum class SfRequest {
+        READY,      ///< already resident — `readySlot` is it, and nothing was started
+        STARTED,    ///< the worker has it; call collectSoundfontLoad until it comes back
+        BUSY,       ///< a different load is in flight; ask again
+    };
+    SfRequest requestSoundfontLoad(int instrumentId, const char* path, int bank, int preset,
+                                   int* readySlot);
+
+    /**
+     * Install a finished background load, if there is one.
+     *
+     * Returns false when nothing has finished. On true, `instrumentId` is who asked and `slot` is
+     * where it landed — or −1 if the load failed, which the caller reports exactly as a synchronous
+     * failure. ⚠️ **The caller must re-check that the instrument still wants this sound**: the row
+     * may have moved on while it decoded, and then the slot is a spare nobody names.
+     */
+    bool collectSoundfontLoad(int* instrumentId, int* slot);
+
+    /** True while a background load is in flight. */
+    bool soundfontLoadPending() const;
+
+    /** True when `slot` is loaded and holds exactly this sound — what a caller checks before reloading. */
+    bool soundfontSlotHolds(int slot, const char* path, int bank, int preset);
+
+    /**
+     * What `slot` is holding — false, and the outputs untouched, when it is empty.
+     *
+     * The only way to ask whether a slot is OCCUPIED, and by what, without naming a sound first:
+     * `soundfontSlotHolds` can only confirm a guess. That question has no answer on screen and none
+     * in the audio, which is what a slot silently left resident depends on.
+     */
+    bool soundfontSlotSound(int slot, std::string& path, int& bank, int& preset);
+
+    /** How many SoundFont slots there are, so a caller can walk them without knowing the constant. */
+    int soundfontSlotCount() const;
+
+
+    // ── the FILE's preset list, which a loaded slot can no longer answer ──────────────────────────
+    //
+    // ⚠️ A slot holds ONE preset now, so "what else is in this file?" cannot be asked of the handle.
+    // These read the file's index directly — a few kilobytes, no sample data — which is also what lets
+    // the PATCH row list a bank far too large to load, and lets it list one before anything is loaded.
+    // Cached by path, because the answer only changes when the file does.
+    int  getSoundfontFilePresetCount(const char* path);
+    bool getSoundfontFilePresetAt(const char* path, int index, int* bank, int* presetNumber);
+    std::string getSoundfontFilePresetName(const char* path, int bank, int preset);
 
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes);
@@ -727,6 +790,58 @@ private:
     // pass stops touching the slot), then close the handle under the slot mutex. The only place a
     // slot is ever freed: LRU eviction, unloadSoundfont and clearAllSoundfonts all route through it.
     void freeSoundfontSlot(int slot);
+
+    // ── the two halves of a load, split so one of them can run somewhere else ─────────────────────
+    //
+    // `parseSoundfont` is everything expensive and everything that touches a FILE — the trim, the
+    // decode, the fallback to the whole bank — and it touches no slot, so it is what the worker runs.
+    // `installSoundfont` is everything that touches the slot table, and only the owning thread runs
+    // it. `loadSoundfont` is still the two of them back to back.
+    //
+    // ⚠️ **`parseSoundfont` MUST BE THE ONLY tsf PARSE RUNNING.** tsf's allocator guard, its progress
+    // sink and its cancel flag are per-process hooks; the guard's block table is mutexed and the other
+    // two are per-thread, but two concurrent parses would still be two decodes bidding for the memory
+    // the guard measures one at a time. `waitForSoundfontLoad` is what every synchronous caller uses
+    // to keep that true.
+    tsf* parseSoundfont(const char* path, int bank, int preset, LoadFailure* failure);
+    int  installSoundfont(tsf* handle, int instrumentId, const char* path, int bank, int preset);
+
+    /**
+     * Block until any background load has finished, and reap its thread — but KEEP its result, which
+     * the next `collectSoundfontLoad` installs as normal. What the caller wanted was to be the only
+     * parse running, not to cancel anything.
+     */
+    void waitForSoundfontLoad();
+
+    /** The same wait, then throw the answer away. For a project being torn down, and for teardown. */
+    void discardSoundfontLoad();
+
+    // The background preset load. `sfLoadDone` is the handshake: the worker writes the result fields
+    // and then sets it, the owning thread reads it and then reads the fields, so nothing else needs a
+    // lock. `sfLoadBusy` says a thread object exists and has still to be joined.
+    std::thread       sfLoadThread;
+    std::atomic<bool> sfLoadBusy{false};
+    std::atomic<bool> sfLoadDone{false};
+    int               sfLoadInstrument = -1;
+    std::string       sfLoadPath;
+    int               sfLoadBank = -1, sfLoadPreset = -1;
+    tsf*              sfLoadHandle  = nullptr;
+    LoadFailure       sfLoadFailure = LoadFailure::NONE;
+
+    // The preset list of the last few SoundFont FILES asked about, so scrolling the PATCH row does not
+    // re-read the index every frame. Keyed by path and capped: the answer is a few kilobytes each, and
+    // nothing here holds a sample. Guarded by its own mutex — the UI thread is the only caller today,
+    // but this sits beside data the audio thread reads.
+    struct SfFileIndex { std::string path; std::vector<pt::SfPreset> presets; };
+    std::vector<SfFileIndex> sfFileIndexCache;
+    std::mutex               sfFileIndexMutex;
+    /**
+     * Position of `path`'s preset list in the cache, reading the file only on a miss; -1 if the file
+     * has no preset table. ⚠️ Call it with `sfFileIndexMutex` HELD and read the entry under the same
+     * lock — a later miss can move the vector out from under a reference.
+     */
+    int soundfontFileIndexSlot(const char* path);
+
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
     // Per-instrument SF2 ADSR envelope override: stored keyed by instrument id
