@@ -339,44 +339,36 @@ class Sequencer {
         RollbackPlan plan;
         if (!isPlaying_) return plan;
 
+        // SONG's eight cursors: the rewind is shared with a LIVE launch and with leaving LIVE — see
+        // rewind_song_track, which carries the note about the TrackState and the RNG coming back with
+        // the position, and rewind_all_song_tracks, which keeps the eight of them in one lap.
+        if (playbackMode_ == PlaybackMode::SONG) return rewind_all_song_tracks(currentFrame);
+
         // PHRASE and CHAIN schedule one track only, so only that track has anything queued.
-        const bool oneTrack = playbackMode_ != PlaybackMode::SONG;
-
-        for (int t = 0; t < 8; ++t) {
-            if (oneTrack && t != playbackTrack_) continue;
-
-            // SONG's eight cursors: the rewind is shared with a LIVE launch — see rewind_song_track,
-            // which carries the note about the TrackState and the RNG coming back with the position.
-            if (!oneTrack) {
-                const int64_t f = rewind_song_track(t, currentFrame);
-                if (f >= 0) plan.frames[t] = f;
-                continue;
-            }
-
-            std::deque<Checkpoint>& ring = checkpoints_[t];
-            const Checkpoint* hit = nullptr;
-            for (const Checkpoint& c : ring) {
-                if (c.frame > currentFrame) { hit = &c; break; }
-            }
-            if (!hit) continue;
-            Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
-
-            // ⚠️ AND THE STATE THE RE-SCHEDULE WILL CONSUME — see Checkpoint. Without this the
-            // phrase is replayed against a groove phase, a HOP and an RNG stream the first pass has
-            // already moved, so what comes back is not what was thrown away: with a groove whose
-            // active length does not divide 16 the track comes back re-timed.
-            trackStates_[t] = cp.trackState;
-            rngs_[t] = cp.rng;
-            nextFrameToSchedule_ = cp.frame;
-            if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
-            // PHRASE: resetting nextFrameToSchedule_ is enough
-            while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
-            // …and the marker's side-record with them — see drop_positions_from. PHRASE has none:
-            // its step is arithmetic off the start frame, so there is nothing to go stale.
-            if (playbackMode_ == PlaybackMode::CHAIN)
-                drop_positions_from(chainRowStartFrames_, cp.frame, [](int) { return true; });
-            plan.frames[t] = cp.frame;
+        const int t = playbackTrack_;
+        std::deque<Checkpoint>& ring = checkpoints_[t];
+        const Checkpoint* hit = nullptr;
+        for (const Checkpoint& c : ring) {
+            if (c.frame > currentFrame) { hit = &c; break; }
         }
+        if (!hit) return plan;
+        Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
+
+        // ⚠️ AND THE STATE THE RE-SCHEDULE WILL CONSUME — see Checkpoint. Without this the
+        // phrase is replayed against a groove phase, a HOP and an RNG stream the first pass has
+        // already moved, so what comes back is not what was thrown away: with a groove whose
+        // active length does not divide 16 the track comes back re-timed.
+        trackStates_[t] = cp.trackState;
+        rngs_[t] = cp.rng;
+        nextFrameToSchedule_ = cp.frame;
+        if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
+        // PHRASE: resetting nextFrameToSchedule_ is enough
+        while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
+        // …and the marker's side-record with them — see drop_positions_from. PHRASE has none:
+        // its step is arithmetic off the start frame, so there is nothing to go stale.
+        if (playbackMode_ == PlaybackMode::CHAIN)
+            drop_positions_from(chainRowStartFrames_, cp.frame, [](int) { return true; });
+        plan.frames[t] = cp.frame;
         return plan;
     }
 
@@ -495,6 +487,7 @@ class Sequencer {
         chainRowStartFrames_.clear();
         songPositionStartFrames_.clear();
         for (int t = 0; t < 8; ++t) checkpoints_[t].clear();
+        restarts_.clear();
         // Both flags are read BEFORE the host calls stop(), which is what restores the master EQ and
         // the mixer faders — clearing them here is what makes the next session start clean.
         eqmActive_ = false;
@@ -597,11 +590,7 @@ class Sequencer {
             for (int t = 0; t < 8; ++t) liveSilent_[t] = false;
         }
 
-        for (int t = 0; t < 8; ++t) {
-            const int64_t f = rewind_song_track(t, currentFrame);
-            if (f >= 0) plan.frames[t] = f;
-        }
-        return plan;
+        return rewind_all_song_tracks(currentFrame);
     }
 
     /** Queue one channel to launch `songRow`. `immediate` = the next phrase boundary, else the next chain end. */
@@ -853,6 +842,64 @@ class Sequencer {
     }
 
     /**
+     * Rewind all eight SONG cursors, then put the song back into ONE lap.
+     *
+     * ⚠️⚠️ **THE SECOND HALF IS NOT OPTIONAL, AND IT IS WHY THE TWO ARE ONE FUNCTION.** The eight
+     * rewinds are independent by design — each track has its own boundary — but "which lap is this
+     * track in" is not a per-track fact the song can disagree with itself about. A rewind that lands
+     * before the loop point leaves the tracks that were carried across it stranded a lap ahead, and
+     * the song then waits for them: see SongRestart.
+     */
+    RollbackPlan rewind_all_song_tracks(int64_t currentFrame) {
+        RollbackPlan plan;
+        for (int t = 0; t < 8; ++t) {
+            const int64_t f = rewind_song_track(t, currentFrame);
+            if (f >= 0) plan.frames[t] = f;
+        }
+        undo_restarts_behind(plan);
+        return plan;
+    }
+
+    /**
+     * Undo every lap restart a rewind has just reached back across.
+     *
+     * A restart is spent the moment any cursor sits before the downbeat it put them all on: that
+     * track is still playing the previous lap, so nobody has started the next one yet. Every track
+     * the restart carried forward goes back to where it stood — a column that had run out goes back
+     * to having run out — and the lap ends where it always did, at the latest of those frames.
+     *
+     * The loop is for a song shorter than the lookahead, which can have two laps queued at once.
+     */
+    void undo_restarts_behind(RollbackPlan& plan) {
+        while (!restarts_.empty()) {
+            const SongRestart r = restarts_.back();   // by value: the pop below invalidates a reference
+            bool behind = false;
+            for (int t = 0; t < 8; ++t)
+                if (trackNextFrame_[t] < r.loopFrame) { behind = true; break; }
+            if (!behind) return;
+
+            for (int t = 0; t < 8; ++t) {
+                if (trackNextFrame_[t] < r.loopFrame) continue;   // never left the earlier lap
+                trackNextFrame_[t] = r.frame[t];
+                trackSongRow_[t]   = r.songRow[t];
+                trackChainRow_[t]  = r.chainRow[t];
+                trackDone_[t]      = r.done[t];
+                trackStates_[t]    = r.state[t];
+                rngs_[t]           = r.rng[t];
+                // Everything the unwound lap queued goes with it — the notes (the host's half, from
+                // the frame named here), this track's checkpoints, and its playhead entries.
+                plan.frames[t] = (plan.frames[t] < 0) ? r.loopFrame
+                                                      : std::min(plan.frames[t], r.loopFrame);
+                std::deque<Checkpoint>& ring = checkpoints_[t];
+                while (!ring.empty() && ring.back().frame >= r.loopFrame) ring.pop_back();
+                drop_positions_from(songPositionStartFrames_, r.loopFrame,
+                                    [&](const SongPos& p) { return p.track == t; });
+            }
+            restarts_.pop_back();
+        }
+    }
+
+    /**
      * Put one slot in the queue and rewind that track so the launch can still land on the boundary it
      * was aimed at.
      *
@@ -958,6 +1005,33 @@ class Sequencer {
         // nothing. It rests a bar, and the launch lands a bar late — on the offsets where the poll
         // happened to have crossed the boundary already, and nowhere else.
         int64_t liveLoopFrame = 0;
+    };
+
+    // ─── the lap restart, and why it needs a record of its own ───────────────────────────────────
+    //
+    // ⚠️⚠️ **THE RESTART IS THE ONE UNIT OF WORK THAT IS NOT A CHECKPOINT.** Every other unit belongs
+    // to ONE track and is rolled back on that track alone; the restart moves all eight at once, and
+    // it moves tracks that have RUN OUT — which have no boundary of their own anywhere past the frame
+    // they stopped at, so `rewind_song_track` has nothing to reach back across it with.
+    //
+    // That is what split a song into two laps at once. An edit made while the LONGEST column is still
+    // playing rolls that track back to a boundary inside the lap, while a SHORT column — run out,
+    // already carried forward to the loop point by the restart — has no earlier boundary left and
+    // stays in the NEXT lap. The long track then finishes its lap and goes silent waiting for a track
+    // that is a whole lap ahead of it, so the song loops late by the length of the short column with
+    // only the last notes' tails ringing over the gap.
+    //
+    // The restart is therefore recorded, and `undo_restarts_behind` puts every track back on the near
+    // side of it the moment a rewind lands there. ⚠️ It carries TrackState and the RNG for the reason
+    // Checkpoint does: what comes back has to be what was thrown away, or the lap returns re-timed.
+    struct SongRestart {
+        int64_t    loopFrame = 0;    // the downbeat the lap was restarted ON
+        int64_t    frame[8]{};       // …and where each track stood before it
+        int        songRow[8]{};
+        int        chainRow[8]{};
+        bool       done[8]{};
+        TrackState state[8]{};
+        Rng        rng[8];
     };
 
     int64_t getCurrentFrame() const { return currentFrame_; }
@@ -1215,6 +1289,21 @@ class Sequencer {
     void restart_all_tracks() {
         int64_t at = trackNextFrame_[0];
         for (int t = 1; t < 8; ++t) at = std::max(at, trackNextFrame_[t]);
+        // ⚠️ RECORDED BEFORE IT IS APPLIED — see SongRestart. A rewind that lands before `at` has to
+        // be able to put the other seven back on this side of the loop, and a track that had already
+        // run out keeps nothing of its own that says where it stopped.
+        SongRestart r;
+        r.loopFrame = at;
+        for (int t = 0; t < 8; ++t) {
+            r.frame[t]    = trackNextFrame_[t];
+            r.songRow[t]  = trackSongRow_[t];
+            r.chainRow[t] = trackChainRow_[t];
+            r.done[t]     = trackDone_[t];
+            r.state[t]    = trackStates_[t];
+            r.rng[t]      = rngs_[t];
+        }
+        restarts_.push_back(r);
+        if (restarts_.size() > RESTART_RING) restarts_.pop_front();
         for (int t = 0; t < 8; ++t) {
             trackNextFrame_[t] = at;
             trackSongRow_[t] = 0;
@@ -2378,6 +2467,13 @@ class Sequencer {
 
     // ── side-records: UI cursor + live-edit rollback + the EQM restore flag (S5, SC-4/SC-2) ──
     std::deque<Checkpoint> checkpoints_[8];                                // ring of 4, per track
+    // One entry per lap the song has started again — see SongRestart. ⚠️ NOT per track: the restart
+    // is the one thing the eight cursors do together, and undoing it for some of them is what leaves
+    // the song in two laps at once. Four is the checkpoints' depth for the same reason — a rewind
+    // reaches at most the lookahead ahead of the transport, and a song shorter than that can have
+    // more than one lap queued.
+    static constexpr size_t RESTART_RING = 4;
+    std::deque<SongRestart> restarts_;
     std::deque<std::pair<int, int64_t>> chainRowStartFrames_;              // (chainRow, startFrame)
     std::vector<std::pair<SongPos, int64_t>>
         songPositionStartFrames_;                                          // (SongPos → startFrame), insertion-ordered
