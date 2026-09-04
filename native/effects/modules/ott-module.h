@@ -17,9 +17,11 @@
 //   between -35 and -27 dBFS where neither compressor fires. This prevents
 //   the upward expander from lifting note tails and inter-note noise floor.
 //
-// Band-specific time constants (vitOTT-matched, ms attack / ms release):
+// Band-specific time constants (ms attack / ms release):
 //   Low:  2.8 / 40   Mid:  1.4 / 28   High: 0.7 / 15
 //   High band responds 4× faster than low → transient sparkle, no bass pump.
+//   ⚠️ These are OURS, not vitOTT's: vitOTT has ONE global attack/release pair for
+//   all three bands. Only the thresholds and the crossover points below are its.
 // ===========================================================================
 struct BandCompressor {
     daisysp::Compressor downward;
@@ -113,7 +115,7 @@ struct OttModule {
     void reset(float sr) {
         sampleRate = sr;
         xover.init(sr);
-        // vitOTT-matched band time constants: high band 4× faster than low.
+        // High band 4× faster than low — see the band table above the struct.
         bandLow.init(sr,  0.0028f, 0.040f);
         bandMid.init(sr,  0.0014f, 0.028f);
         bandHigh.init(sr, 0.0007f, 0.015f);
