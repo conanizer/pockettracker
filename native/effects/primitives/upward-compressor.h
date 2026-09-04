@@ -47,9 +47,9 @@ struct UpwardCompressor {
     // during the slopeRec attack ramp (see comment above struct).
     static constexpr float GAIN_SMOOTH = 0.970f;
     // dB below the threshold: full boost down to RANGE_DB, tapering to none by
-    // RANGE_DB + TAPER_DB. With the OTT's -35 dB threshold that is full boost to
-    // -65 dBFS and nothing below -80 dBFS — the same floor OttModule already
-    // treats as silence. Caps the boost at (1 - 1/ratio) x RANGE_DB.
+    // RANGE_DB + TAPER_DB. With the OTT's -30 dB threshold that is full boost to
+    // -60 dBFS and nothing below -75 dBFS, just above the -80 dBFS floor
+    // OttModule treats as silence. Caps the boost at (1 - 1/ratio) x RANGE_DB.
     static constexpr float RANGE_DB    = 30.f;
     static constexpr float TAPER_DB    = 15.f;
     int gainCounter = 0;
