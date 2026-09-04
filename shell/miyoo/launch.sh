@@ -5,6 +5,11 @@
 # ⚠️ /bin/sh, NOT bash. OnionOS's userland is busybox ash; there is no bash on the device, and a
 # `#!/bin/bash` here is an app that does nothing at all when you press A on it.
 #
+# ⚠️ IT IS NOT ONION THAT RUNS THIS DIRECTLY. The package installs as a PORT, so the chain is
+# Onion's ports launcher -> PocketTracker.port -> Emu/PORTS/launch_standalone.sh -> here. That
+# middle script already exports libs/ and clears LD_PRELOAD; both are repeated below so this file
+# still works when it is run on its own, which is how it is debugged over SSH.
+#
 # =============================================================================================
 #  This is NOT the PortMaster script and must not be made to look like one.
 # =============================================================================================
@@ -17,7 +22,7 @@
 #                the libs/ directory beside this script is load-bearing rather than a mistake.
 #
 # The gptokeyb warning in the PortMaster script does not apply either: OnionOS has no gptokeyb and
-# the buttons arrive as plain SDL keycodes, which is what config.json maps.
+# the buttons arrive as plain SDL keycodes, which is what the shipped key map sets.
 
 mydir=$(cd "$(dirname "$0")" && pwd)
 cd "$mydir" || exit 1
@@ -37,13 +42,14 @@ export SDL_VIDEODRIVER=mmiyoo
 export SDL_AUDIODRIVER=mmiyoo
 
 # ── Where songs live ─────────────────────────────────────────────────────────────────────────────
-# ⚠️⚠️ NOT this directory, and the reason is a NAME COLLISION rather than taste: Onion's app shelf
-# reads `$mydir/config.json` (label, icon, launch) and PocketTracker reads `config.json` in its own
-# root (folders, keyboard) — two different files that would be the same path.
+# ⚠️⚠️ NOT this directory, and not because it could not be: this is where a user's work lives, and
+# the SD card's top level is the one place they can reach it. Plug the card into a PC and Projects/,
+# Samples/, Soundfonts/, Instruments/, Renders/ and Themes/ are right there, rather than four levels
+# down inside a ports folder. The app creates all six at boot, so a card can be pulled, filled and
+# put back.
 #
-# The SD card's top level is also simply where a user can find their work: plug the card into a PC
-# and Projects/, Samples/, Soundfonts/, Instruments/, Renders/ and Themes/ are right there. The app
-# creates all six at boot, so a card can be pulled, filled and put back.
+# ⚠️ IT IS ALSO AN UPGRADE PATH. This path is what the App-shelf package used, so a tester who
+# replaces that package with this one keeps every song they have written.
 PT_HOME=/mnt/SDCARD/PocketTracker
 export POCKETTRACKER_HOME="$PT_HOME"
 mkdir -p "$PT_HOME"
@@ -108,6 +114,11 @@ fi
 # implements it there: it stops the server AND re-applies the user's volume to whichever process
 # claims the device next — which is us. Prefer it over killing the process ourselves for exactly
 # that second half.
+#
+# ⚠️⚠️ THE PORT SHORTCUT LEAVES THAT FLAG OFF ON PURPOSE, so this block is the only thing doing
+# it. Onion's launcher stops the server and starts the app immediately; the wait below is what
+# that path is missing, and the wait only runs when this script is the one that found a server
+# to stop.
 #
 # ⚠️ NOTHING HERE PUTS THE SERVER BACK. Onion restarts it on the way to the menu (`start_audioserver`
 # in .tmp_update/runtime.sh), and a restart from here would take the device away from the app we are
@@ -180,7 +191,7 @@ INFO_PANEL=/mnt/SDCARD/.tmp_update/bin/infoPanel
 if [ "$rc" != 0 ] && [ -x "$INFO_PANEL" ]; then
     LD_LIBRARY_PATH="/mnt/SDCARD/miyoo/lib:/config/lib:/lib" "$INFO_PANEL" \
         --title "PocketTracker" \
-        --message "PocketTracker could not start (exit $rc). The reason is in App/PocketTracker/log.txt on the card." \
+        --message "PocketTracker could not start (exit $rc). The reason is in log.txt, in the port's own folder: Roms/PORTS/Games/PocketTracker on the card." \
         > /dev/null 2>&1
 fi
 

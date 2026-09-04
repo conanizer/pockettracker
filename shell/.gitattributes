@@ -38,3 +38,21 @@ windows/*.txt text eol=crlf
 # else's clone, from a setting nobody touched. `git check-attr binary -- shell/windows/*.ico`
 # answers this rather than the file extension being trusted to be recognised.
 windows/*.ico binary
+
+# ⚠️⚠️ THE SAME SHEBANG BUG AS ABOVE, THROUGH A FILE THAT IS NOT NAMED `.sh`. Onion's ports list
+# only shows shortcuts ending in `.port`, and it runs them — so this one carries `#!/bin/sh` and is
+# executed by the device exactly as launch.sh is, while matching none of the rules above. Checked
+# out through core.autocrlf=true it would reach the card as CRLF and the entry would do nothing at
+# all when pressed.
+miyoo/*.port text eol=lf
+
+# The rest of the Miyoo package, for the reason the PortMaster block gives: these are copied into the
+# zip byte-for-byte, so leaving them unspecified makes the bytes a device receives depend on which OS
+# ran `git clone`. The key map is read by the app's own JSON parser and the README by a person, so
+# neither breaks today.
+miyoo/*.json text eol=lf
+miyoo/README.md text eol=lf
+
+# ⚠️ The port's artwork is BINARY, and the reasoning is the .ico line's: it is committed,
+# make-boxart.ps1 regenerates it, and no build runs that.
+miyoo/*.png binary

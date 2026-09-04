@@ -1,19 +1,31 @@
 # PocketTracker — Miyoo Mini / Mini+ (OnionOS)
 
+## Before you start
+
+PocketTracker installs as a **port**, so it appears in Onion's **Ports** list alongside your games —
+which is what makes Onion count your play time and launches and offer PocketTracker in the Game
+Switcher.
+
+⚠️ **That means Onion's Ports Collection has to be installed**, because it is what provides the Ports
+list itself. Open **Apps → Package Manager → Emu**, find **Ports Collection**, and make sure it is
+installed. Most Onion setups already have it. Without it there is no Ports list for PocketTracker to
+appear in.
+
 ## Install
 
 You need `pockettracker-miyoo.zip` and a way to write to the device's SD card. **Method A** works on
 any Mini and is the one to use if you are unsure. **Method B** needs a Mini+ and Wi-Fi, and saves
 opening the device.
 
-Either way, what has to end up on the card is this exact path:
+Either way, what has to end up on the card is these two exact paths:
 
 ```
-App/PocketTracker/launch.sh
+Roms/PORTS/Shortcuts/PocketTracker.port
+Roms/PORTS/Games/PocketTracker/launch.sh
 ```
 
-⚠️ If it lands one folder deeper — `App/pockettracker-miyoo/PocketTracker/…` — the app does not
-appear on the shelf at all, and nothing tells you why.
+⚠️ If it lands one folder deeper — `Roms/pockettracker-miyoo/PORTS/…` — PocketTracker does not appear
+in the list at all, and nothing tells you why.
 
 ### A. With the card in a PC
 
@@ -24,37 +36,47 @@ appear on the shelf at all, and nothing tells you why.
    nothing after it.
    - ⚠️ On Windows, *Extract All* fills the destination box in for you and adds a new folder named
      after the zip. Delete that last part so only the drive letter is left (`E:\`, not
-     `E:\pockettracker-miyoo\`). If that goes wrong, extract anywhere you like and drag the `App`
-     folder onto the card by hand — it merges with the `App` folder already there and adds
-     `PocketTracker` beside the apps you have.
-4. **Check the path.** Open the card and confirm `App\PocketTracker\launch.sh` is really there.
+     `E:\pockettracker-miyoo\`). If that goes wrong, extract anywhere you like and drag the `Roms`
+     folder onto the card by hand — it merges with the `Roms` folder already there and adds
+     PocketTracker to the ports you have.
+4. **Check the path.** Open the card and confirm `Roms\PORTS\Shortcuts\PocketTracker.port` is really
+   there.
 5. **Eject the card**, put it back in the device and switch it on.
-6. PocketTracker is on Onion's **Apps** shelf. Press A on it.
+6. PocketTracker is in the **Ports** list. Press A on it.
 
 ### B. Over Wi-Fi (Mini+ only)
 
 1. On the device, open **Tweaks → Network**, join your Wi-Fi, and turn on **Samba** (or **FTP**, if
    you would rather use an FTP client). The page shows the device's IP address — note it down.
-2. **Unzip the package on the PC first.** You want the `App` folder that comes out of it, not the zip.
+2. **Unzip the package on the PC first.** You want the `Roms` folder that comes out of it, not the zip.
 3. From the PC, open `\\<the IP address>` in Explorer, or point an FTP client at that address. What
    you are looking at is the top level of the card — the same view as method A.
-4. **Copy the `App` folder across.** It merges into the card's existing `App` folder and adds
-   `PocketTracker` beside your other apps. Copying takes a minute or two over Wi-Fi; let it finish.
-5. **Restart the device.** The shelf is only read at boot, so the app does not appear until then.
-6. PocketTracker is on the **Apps** shelf. Press A on it.
+4. **Copy the `Roms` folder across.** It merges into the card's existing `Roms` folder and adds
+   PocketTracker to your ports. Copying takes a minute or two over Wi-Fi; let it finish.
+5. **Restart the device.** The lists are only read at boot, so PocketTracker does not appear until
+   then.
+6. PocketTracker is in the **Ports** list. Press A on it.
+
+### Upgrading from the older package
+
+Earlier builds installed onto the **Apps** shelf instead. **Delete `App/PocketTracker` from the card**
+after installing this one, or you will have two of them. Your songs, samples, soundfonts and settings
+are not in there — they live in `PocketTracker/` at the top level of the card and are untouched.
 
 ### If it does not start
 
-**Not on the Apps shelf at all** — the files went in one folder too deep. Put the card back in the
-PC and check for `App/PocketTracker/launch.sh` exactly; if what you find is
-`App/pockettracker-miyoo/PocketTracker/…`, move the `PocketTracker` folder up one level.
+**Not in the Ports list at all** — either the Ports Collection is not installed (see the top of this
+file), or the files went in one folder too deep. Put the card back in the PC and check for
+`Roms/PORTS/Shortcuts/PocketTracker.port` exactly. If the entry is in the list but greyed out or
+missing after an update, run **~Import ports** at the top of the Ports list: it re-checks which ports
+have their files.
 
-**On the shelf, but pressing A does nothing** — `App/PocketTracker/log.txt` on the card holds the
-whole of that session's output and is overwritten each launch. That file is what to send if you
-report it. If there is no `log.txt` there at all, the launcher itself never ran, and saying so is
+**In the list, but pressing A does nothing** — `Roms/PORTS/Games/PocketTracker/log.txt` on the card
+holds the whole of that session's output and is overwritten each launch. That file is what to send if
+you report it. If there is no `log.txt` there at all, the launcher itself never ran, and saying so is
 the useful half of the report.
 
-**It starts and drops straight back to the shelf** — a message with an exit code is put up on
+**It starts and drops straight back to the list** — a message with an exit code is put up on
 the way out, and `log.txt` holds the detail behind it.
 
 You do not have to worry about file permissions on this device, whichever method you used: the card

@@ -50,8 +50,15 @@ STUBS=$CACHE/stubs
 BUILD=$SRC/build/miyoo-cmake
 OUT=$SRC/build/miyoo
 STAGE=$OUT/stage
-APPDIR=$STAGE/App/PocketTracker
-BIN=$APPDIR/pockettracker
+# ⚠️ THE INSTALL PATH IS THE FEATURE. Onion counts play time, launch count and the Game Switcher's
+# recent list only for what `check_is_game` in .tmp_update/runtime.sh accepts, and that test is
+# whether the launch command names /mnt/SDCARD/Roms/. The same files under App/ are recorded nowhere,
+# which is what this package used to be.
+PORTROOT=$STAGE/Roms/PORTS
+GAMEDIR=$PORTROOT/Games/PocketTracker
+SHORTCUT=$PORTROOT/Shortcuts/PocketTracker.port
+BOXART=$PORTROOT/Imgs/PocketTracker.png
+BIN=$GAMEDIR/pockettracker
 
 cd "$SRC"
 
@@ -145,12 +152,12 @@ cmake -S "$SRC/shell" -B "$BUILD" -G Ninja \
 cmake --build "$BUILD"
 
 echo
-echo "############ 3/5  stage the Onion APP package ############"
-# The zip extracts at the SD CARD ROOT, which is why the staging tree starts with `App/`:
+echo "############ 3/5  stage the Onion PORT package ############"
+# The zip extracts at the SD CARD ROOT, which is why the staging tree starts with `Roms/`:
 #
-#   App/PocketTracker/
-#   |- config.json          the Onion shelf entry (label / icon / launch)
-#   |- icon.png             74x74, Onion's own size
+#   Roms/PORTS/Shortcuts/PocketTracker.port     the list entry Onion runs
+#   Roms/PORTS/Imgs/PocketTracker.png           what the list draws beside it
+#   Roms/PORTS/Games/PocketTracker/
 #   |- launch.sh            the three mmiyoo exports, POCKETTRACKER_HOME, the config seed
 #   |- miyoo-config.json    the app's OWN config.json, seeded to $POCKETTRACKER_HOME on first run
 #   |- pockettracker        the armhf ELF
@@ -158,21 +165,26 @@ echo "############ 3/5  stage the Onion APP package ############"
 #   |- licenses/
 #   `- demo/                OPTIONAL: a starter song, copied to the user's folder on first launch
 #
-# ⚠️ THE TWO config.json FILES ARE DIFFERENT FILES and both would be `config.json` in this directory.
-# Onion owns the name here, so the app's copy travels as `miyoo-config.json` and launch.sh puts it
-# where the app looks. See the block in launch.sh.
+# ⚠️ THE SHORTCUT AND THE IMAGE ARE PAIRED BY BASE NAME, and that name is also what the play-time
+# database stores. `Imgs/PocketTracker.png` is the artwork committed as `boxart.png`, renamed here:
+# check 11 asserts the pair rather than trusting these two lines to stay in step.
 #
-# ⚠️ The APP shelf, not the Ports shelf. Ports' _required_files.txt / GameDataFile machinery exists
-# for engines that need licensed assets the user supplies; we ship a complete app.
+# ⚠️ THE PORTS SHELF, NOT THE APP SHELF, and the reason is not tidiness — see the note at PORTROOT.
+# Its `_required_files.txt` machinery is for engines needing licensed assets the user supplies and
+# does not apply to us; the shortcut's presence check simply names our own binary instead.
+#
+# ⚠️ IT COSTS A DEPENDENCY. `Emu/PORTS/launch_standalone.sh` comes from Onion's Ports Collection
+# package, so a device without it has no ports list to appear in. That is a README line, not
+# something this build can assert.
 rm -rf "$OUT"
-mkdir -p "$APPDIR/libs" "$APPDIR/licenses"
+mkdir -p "$GAMEDIR/libs" "$GAMEDIR/licenses" "$(dirname "$SHORTCUT")" "$(dirname "$BOXART")"
 
-cp "$SRC/shell/miyoo/config.json"        "$APPDIR/"
-cp "$SRC/shell/miyoo/icon.png"           "$APPDIR/"
-cp "$SRC/shell/miyoo/launch.sh"          "$APPDIR/"
-cp "$SRC/shell/miyoo/miyoo-config.json"  "$APPDIR/"
-cp "$SRC/shell/miyoo/README.md"          "$APPDIR/"
-chmod +x "$APPDIR/launch.sh"
+cp "$SRC/shell/miyoo/PocketTracker.port"  "$SHORTCUT"
+cp "$SRC/shell/miyoo/boxart.png"          "$BOXART"
+cp "$SRC/shell/miyoo/launch.sh"           "$GAMEDIR/"
+cp "$SRC/shell/miyoo/miyoo-config.json"   "$GAMEDIR/"
+cp "$SRC/shell/miyoo/README.md"           "$GAMEDIR/"
+chmod +x "$GAMEDIR/launch.sh" "$SHORTCUT"
 
 # ── The demo song, if this tree has one ──────────────────────────────────────────────────────────
 # ⚠️ OPTIONAL BY DESIGN, and the directory is gitignored. What is in there is other people's samples
@@ -185,9 +197,9 @@ chmod +x "$APPDIR/launch.sh"
 # `App` folder alone.
 DEMO_DIR=${DEMO_DIR:-$SRC/shell/miyoo/demo}
 if [ -d "$DEMO_DIR" ]; then
-    cp -r "$DEMO_DIR" "$APPDIR/demo"
-    echo "demo song          : staged from $DEMO_DIR ($(du -sh "$APPDIR/demo" | cut -f1))"
-    find "$APPDIR/demo" -type f -printf '  %P\n' | sort
+    cp -r "$DEMO_DIR" "$GAMEDIR/demo"
+    echo "demo song          : staged from $DEMO_DIR ($(du -sh "$GAMEDIR/demo" | cut -f1))"
+    find "$GAMEDIR/demo" -type f -printf '  %P\n' | sort
 else
     echo "demo song          : none ($DEMO_DIR absent) - packaging without one"
 fi
@@ -196,26 +208,26 @@ cp "$BUILD/pockettracker-sdl" "$BIN"
 chmod +x "$BIN"
 "${CROSS}strip" "$BIN"
 
-cp "$SDL2_LIBDIR/libSDL2-2.0.so.0"   "$APPDIR/libs/"
-cp "$NEON_SO"                        "$APPDIR/libs/"
+cp "$SDL2_LIBDIR/libSDL2-2.0.so.0"   "$GAMEDIR/libs/"
+cp "$NEON_SO"                        "$GAMEDIR/libs/"
 
 # PocketTracker is GPL-3.0 and statically links its decoders, so their notices ship with the binary
 # that contains them. `docs/licenses/THIRD-PARTY-NOTICES.md` is the single source of truth and the
 # check in step 4 derives the required list from native/vendor/ rather than from a hand-kept one.
-cp "$SRC/LICENSE"                                    "$APPDIR/licenses/LICENSE"
-cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"       "$APPDIR/licenses/"
-cp "$SRC/CREDITS.md"                                 "$APPDIR/licenses/CREDITS.md"
-cp "$SRC/native/vendor/ogg/COPYING"                  "$APPDIR/licenses/libogg-COPYING"
-cp "$SRC/native/vendor/opus/COPYING"                 "$APPDIR/licenses/libopus-COPYING"
-cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt" "$APPDIR/licenses/libopus-LICENSE_PLEASE_READ.txt"
-cp "$SRC/docs/licenses/OFL-1.1-LinuxBiolinum.txt"    "$APPDIR/licenses/OFL-1.1-LinuxBiolinum.txt"
+cp "$SRC/LICENSE"                                    "$GAMEDIR/licenses/LICENSE"
+cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"       "$GAMEDIR/licenses/"
+cp "$SRC/CREDITS.md"                                 "$GAMEDIR/licenses/CREDITS.md"
+cp "$SRC/native/vendor/ogg/COPYING"                  "$GAMEDIR/licenses/libogg-COPYING"
+cp "$SRC/native/vendor/opus/COPYING"                 "$GAMEDIR/licenses/libopus-COPYING"
+cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt" "$GAMEDIR/licenses/libopus-LICENSE_PLEASE_READ.txt"
+cp "$SRC/docs/licenses/OFL-1.1-LinuxBiolinum.txt"    "$GAMEDIR/licenses/OFL-1.1-LinuxBiolinum.txt"
 
 # ⚠️ THESE TWO SHIP ONLY HERE. Every other package links the device's own SDL2 and therefore owes it
 # no notice; this one carries the binary, so it carries SDL's zlib text and the fork's GPL-3.0 text
 # with it. Taken from the fork's own tree at the pinned commit rather than from a copy of our own.
-cp "$SDL2_SRC/LICENSE.txt" "$APPDIR/licenses/libSDL2-zlib-LICENSE.txt"
-cp "$SDL2_SRC/LICENSE"     "$APPDIR/licenses/libSDL2-miyoo-fork-GPL-3.0.txt"
-ls -1 "$APPDIR/licenses/"
+cp "$SDL2_SRC/LICENSE.txt" "$GAMEDIR/licenses/libSDL2-zlib-LICENSE.txt"
+cp "$SDL2_SRC/LICENSE"     "$GAMEDIR/licenses/libSDL2-miyoo-fork-GPL-3.0.txt"
+ls -1 "$GAMEDIR/licenses/"
 
 echo
 echo "############ 4/5  verify the ARTIFACT (not the build log) ############"
@@ -234,7 +246,7 @@ esac
 # stands in for the fork's unlicensed one. A library compiled by hand outside CMake picks up the
 # toolchain's defaults rather than toolchain-miyoo.cmake's flags, so it is exactly the file that
 # can end up built for a CPU the device does not have.
-for IMAGE in "$BIN" "$APPDIR/libs/libneonarmmiyoo.so"; do
+for IMAGE in "$BIN" "$GAMEDIR/libs/libneonarmmiyoo.so"; do
 echo "--- $(basename "$IMAGE")"
 
 # --- 2. the CPU it was compiled FOR ------------------------------------------------------------
@@ -281,11 +293,11 @@ if ! readelf -d "$BIN" | grep -q 'libSDL2-2.0.so.0'; then
     exit 1
 fi
 for L in libSDL2-2.0.so.0 libneonarmmiyoo.so; do
-    if [ ! -f "$APPDIR/libs/$L" ]; then
+    if [ ! -f "$GAMEDIR/libs/$L" ]; then
         echo "FAIL: libs/$L is ABSENT. This device has no system SDL2 - the app would not start."
         exit 1
     fi
-    echo "bundled            : libs/$L  ($(stat -c%s "$APPDIR/libs/$L") bytes)"
+    echo "bundled            : libs/$L  ($(stat -c%s "$GAMEDIR/libs/$L") bytes)"
 done
 if readelf -d "$BIN" | grep -q 'libstdc++'; then
     echo "FAIL: libstdc++ is a NEEDED. It was meant to be absorbed - the device's copy is unknown."
@@ -307,7 +319,7 @@ mkdir -p "$STUBS"
 for L in libmi_common libmi_sys libmi_gfx libmi_ao libcam_os_wrapper; do
     [ -f "$STUBS/$L.so" ] || "${CROSS}gcc" -shared -Wl,-soname,"$L.so" -o "$STUBS/$L.so" -x c "$CACHE/empty.c"
 done
-cp -f "$APPDIR/libs/libneonarmmiyoo.so" "$STUBS/"
+cp -f "$GAMEDIR/libs/libneonarmmiyoo.so" "$STUBS/"
 
 cat > "$CACHE/keycheck.c" <<'EOF'
 #include <stdio.h>
@@ -327,7 +339,7 @@ EOF
 
 # Every quoted string to the RIGHT of a colon inside the "keyboard" object — i.e. the key names,
 # never the button names.
-mapfile -t KEYNAMES < <(sed -n '/"keyboard"/,/^  }/p' "$APPDIR/miyoo-config.json" \
+mapfile -t KEYNAMES < <(sed -n '/"keyboard"/,/^  }/p' "$GAMEDIR/miyoo-config.json" \
     | sed 's/^[^:]*://' | grep -oE '"[^"]+"' | tr -d '"')
 echo
 echo "key names in miyoo-config.json : ${#KEYNAMES[@]}"
@@ -360,7 +372,7 @@ echo "keys bound twice   : ${DUPES:-none}"
 # --- 8. every statically linked component must have a notice -----------------------------------
 # ⚠️ DERIVED FROM THE TREE, NOT FROM A LIST SOMEONE MUST REMEMBER TO UPDATE — the same commit that
 # forgets the notice forgets the list entry. So the vendor directory IS the list.
-NOTICES="$APPDIR/licenses/THIRD-PARTY-NOTICES.md"
+NOTICES="$GAMEDIR/licenses/THIRD-PARTY-NOTICES.md"
 echo
 echo "licence notices:"
 MISSING=""
@@ -388,9 +400,9 @@ fi
 # library is a lazy-binding failure — the loader would let keycheck start and the device would
 # die at the first frame instead.
 echo
-WANT=$("${CROSS}gcc-nm" -D --undefined-only "$APPDIR/libs/libSDL2-2.0.so.0" \
+WANT=$("${CROSS}gcc-nm" -D --undefined-only "$GAMEDIR/libs/libSDL2-2.0.so.0" \
     | grep -oE '\b(neon_memcpy|scale[0-9]+x[0-9]+_n(16|32))\b' | sort -u)
-HAVE=$("${CROSS}gcc-nm" -D --defined-only "$APPDIR/libs/libneonarmmiyoo.so" \
+HAVE=$("${CROSS}gcc-nm" -D --defined-only "$GAMEDIR/libs/libneonarmmiyoo.so" \
     | grep -oE '\b(neon_memcpy|scale[0-9]+x[0-9]+_n(16|32))\b' | sort -u)
 WANT_N=$(printf '%s\n' "$WANT" | grep -c . || true)
 HAVE_N=$(printf '%s\n' "$HAVE" | grep -c . || true)
@@ -423,7 +435,7 @@ fi
 #
 # ⚠️ The paths are READ OUT of the .ptp, never listed here. A hand-typed list is a list that agrees
 # with itself while the project names something else entirely.
-if [ -d "$APPDIR/demo" ]; then
+if [ -d "$GAMEDIR/demo" ]; then
 echo
 # Anchor 1 is "/PocketTracker/"; anchor 2 is the last media sub-tree, kept whole so it re-roots as
 # "Samples/…". Only one of the three ever appears in a real path, so loop order is not a tie-break.
@@ -436,7 +448,7 @@ demo_tail() {
     printf '%s\n' "$best"
 }
 mapfile -t DEMO_REFS < <(
-    find "$APPDIR/demo" -name '*.ptp' -print0 | xargs -0 cat \
+    find "$GAMEDIR/demo" -name '*.ptp' -print0 | xargs -0 cat \
         | grep -oE '"(sampleFilePath|soundfontPath)":"[^"]+"' \
         | sed 's/^"[^"]*":"//; s/"$//' | sort -u)
 echo "demo media named   : ${#DEMO_REFS[@]}"
@@ -450,12 +462,12 @@ for REF in "${DEMO_REFS[@]}"; do
         # app_root_relative_tail returns "" and the app leaves the path as authored - unfindable here.
         echo "  UNROOTED  $REF"; DEMO_UNMET=$((DEMO_UNMET + 1)); continue
     fi
-    if [ -f "$APPDIR/demo/$TAIL" ]; then
+    if [ -f "$GAMEDIR/demo/$TAIL" ]; then
         echo "  ok        $TAIL"
     # The device's own last step: resolve_case_insensitive, for a project authored where storage did
     # not care about case. Reported rather than passed silently - it only works by that fallback.
-    elif FOUND=$(find "$APPDIR/demo" -ipath "$APPDIR/demo/$TAIL" -type f | head -1) && [ -n "$FOUND" ]; then
-        echo "  ok        $TAIL   (CASE DIFFERS on disk: ${FOUND#$APPDIR/demo/})"
+    elif FOUND=$(find "$GAMEDIR/demo" -ipath "$GAMEDIR/demo/$TAIL" -type f | head -1) && [ -n "$FOUND" ]; then
+        echo "  ok        $TAIL   (CASE DIFFERS on disk: ${FOUND#$GAMEDIR/demo/})"
     else
         echo "  MISSING   $TAIL   <- named by $REF"; DEMO_UNMET=$((DEMO_UNMET + 1))
     fi
@@ -468,24 +480,86 @@ if [ "$DEMO_UNMET" != "0" ]; then
 fi
 fi
 
+# --- 11. the shortcut, read back with ONION'S OWN PARSE ------------------------------------------
+# ⚠️⚠️ THE WHOLE PACKAGE HANGS OFF FOUR STRINGS IN ONE FILE, AND NONE OF THEM FAILS LOUDLY. A wrong
+# folder name makes Onion rename the shortcut to `.notfound` and the port is simply absent from the
+# list; a wrong executable name is a menu entry that does nothing when you press A. Neither says
+# anything, on the device or here.
+#
+# ⚠️ The values are lifted with Onion's own greps (Emu/PORTS/import.sh), NOT retyped: a comment line
+# in the shortcut carrying `GameDir=` is picked up as the real assignment, and that is a trap only
+# the real parse can find.
+echo
+port_field() {   # field name -> what Onion's import.sh would read out of the staged shortcut
+    grep "$1=" "$SHORTCUT" | cut -d "=" -f2 | grep -o '".*"' | tr -d '"'
+}
+P_DIR=$(port_field GameDir)
+P_EXE=$(port_field GameExecutable)
+P_DATA=$(port_field GameDataFile)
+printf 'shortcut GameDir   : %s\n'        "${P_DIR:-<EMPTY>}"
+printf 'shortcut executable: %s\n'        "${P_EXE:-<EMPTY>}"
+printf 'shortcut data file : %s\n'        "${P_DATA:-<EMPTY>}"
+# A field reading EMPTY - or reading two lines because a comment matched - is the failure this check
+# would otherwise report as a pass, since an empty name makes every test below vacuous.
+for F in "$P_DIR" "$P_EXE" "$P_DATA"; do
+    case "$F" in
+        "")  echo "FAIL: a field parsed EMPTY. The shortcut's assignments are not what import.sh reads."; exit 1 ;;
+        *"
+"*) echo "FAIL: a field parsed as MORE THAN ONE line - a comment in the shortcut carries an assignment."; exit 1 ;;
+    esac
+done
+[ "$P_DIR" = "$(basename "$GAMEDIR")" ] \
+    || { echo "FAIL: the shortcut names Games/$P_DIR, and this build staged Games/$(basename "$GAMEDIR")."; exit 1; }
+[ -x "$GAMEDIR/$P_EXE" ] \
+    || { echo "FAIL: $P_EXE is not an executable file in the staged game directory."; exit 1; }
+# Onion's presence check, character for character (launch_standalone.sh and import.sh both run it).
+# It is what decides whether the entry appears at all.
+FOUND_DATA=$(find "$GAMEDIR" -maxdepth 2 -type f -iname "$P_DATA" | head -1)
+echo "presence check finds: ${FOUND_DATA:-<NOTHING>}"
+[ -n "$FOUND_DATA" ] \
+    || { echo "FAIL: Onion would rename this shortcut to .notfound - the port never appears in the list."; exit 1; }
+
+# ⚠️ THE TRACKING CONDITION ITSELF, which is the only reason this package is a port at all: Onion
+# records play time and a Game Switcher entry when the launch command names /mnt/SDCARD/Roms/.
+# Asserted with runtime.sh's own grep, over the path this zip really installs to.
+INSTALL_PATH=/mnt/SDCARD/${SHORTCUT#"$STAGE"/}
+echo "installs to        : $INSTALL_PATH"
+echo "$INSTALL_PATH" | grep -q "/mnt/SDCARD/Roms/" \
+    || { echo "FAIL: that path is not under Roms/ - no play time, no Game Switcher, no launch count."; exit 1; }
+
+# ⚠️ Onion pairs the artwork with the shortcut by BASE NAME alone. A mismatch is no picture, and
+# nothing anywhere reports it.
+echo "artwork pairs with : $(basename "$BOXART" .png)  (shortcut: $(basename "$SHORTCUT" .port))"
+[ "$(basename "$BOXART" .png)" = "$(basename "$SHORTCUT" .port)" ] \
+    || { echo "FAIL: the image and the shortcut have different base names - the list shows no picture."; exit 1; }
+
+# ⚠️ Onion's own audio-handover flag must stay OFF. Its launcher stops the sound service and starts
+# the app in the same breath; launch.sh stops it and WAITS for the hardware to release, and that
+# wait is skipped when it finds nothing left to stop. Flipping this to 1 is a device that fails to
+# start, with nothing here or on screen to connect it to this line.
+KILLFLAG=$(grep '^KillAudioserver=' "$SHORTCUT" | cut -d= -f2)
+echo "audio flag         : KillAudioserver=$KILLFLAG   (want 0 - launch.sh owns the handover)"
+[ "$KILLFLAG" = "0" ] \
+    || { echo "FAIL: Onion would stop the sound server without the wait launch.sh does."; exit 1; }
+
 echo
 echo "############ 5/5  zip (extracts at the SD card root) ############"
 # ⚠️ MODES ARE SET HERE, NOT INHERITED. `zip` records whatever `stat` reports, and Onion runs
 # launch.sh — which, unlike the binary, cannot repair its own bit once the card is in the device.
-find "$APPDIR" -type f -exec chmod 644 {} +
-chmod 755 "$APPDIR/launch.sh" "$BIN" "$APPDIR/libs"/*.so*
+find "$PORTROOT" -type f -exec chmod 644 {} +
+chmod 755 "$GAMEDIR/launch.sh" "$SHORTCUT" "$BIN" "$GAMEDIR/libs"/*.so*
 # ⚠️ …and on a filesystem that carries no Unix modes — a Windows drive mounted under WSL is the one
 # that will actually happen — the chmod above is silently a no-op and every member is recorded 0777.
 # That still RUNS, so nothing here fails on it; it is said out loud instead, because "the package
 # came out with different permissions" is otherwise invisible until a user reports it.
-STAGED_MODE=$(stat -c%a "$APPDIR/config.json")
+STAGED_MODE=$(stat -c%a "$GAMEDIR/miyoo-config.json")
 if [ "$STAGED_MODE" != "644" ]; then
     echo "NOTE: this filesystem reports mode $STAGED_MODE where 644 was set, so it carries no Unix"
     echo "      modes and every zip member will be 0777. Fine for a test build; build a RELEASE on a"
     echo "      native Linux filesystem."
 fi
 rm -f "$OUT/pockettracker-miyoo.zip"
-( cd "$STAGE" && zip -r "$OUT/pockettracker-miyoo.zip" App -x '.*' )
+( cd "$STAGE" && zip -r "$OUT/pockettracker-miyoo.zip" Roms -x '.*' )
 echo
 ls -lh "$OUT/pockettracker-miyoo.zip"
 unzip -l "$OUT/pockettracker-miyoo.zip"
@@ -494,30 +568,31 @@ unzip -l "$OUT/pockettracker-miyoo.zip"
 # have failed to include, and the zip is what ships.
 echo
 echo "read back out of the zip:"
-MEMBERS=( App/PocketTracker/pockettracker
-          App/PocketTracker/launch.sh
-          App/PocketTracker/config.json
-          App/PocketTracker/miyoo-config.json
-          App/PocketTracker/icon.png
-          App/PocketTracker/README.md
-          App/PocketTracker/libs/libSDL2-2.0.so.0
-          App/PocketTracker/libs/libneonarmmiyoo.so
-          App/PocketTracker/licenses/LICENSE
-          App/PocketTracker/licenses/THIRD-PARTY-NOTICES.md
-          App/PocketTracker/licenses/CREDITS.md
-          App/PocketTracker/licenses/libogg-COPYING
-          App/PocketTracker/licenses/libopus-COPYING
-          App/PocketTracker/licenses/libopus-LICENSE_PLEASE_READ.txt
-          App/PocketTracker/licenses/OFL-1.1-LinuxBiolinum.txt
-          App/PocketTracker/licenses/libSDL2-zlib-LICENSE.txt
-          App/PocketTracker/licenses/libSDL2-miyoo-fork-GPL-3.0.txt )
+G=Roms/PORTS/Games/PocketTracker
+MEMBERS=( Roms/PORTS/Shortcuts/PocketTracker.port
+          Roms/PORTS/Imgs/PocketTracker.png
+          $G/pockettracker
+          $G/launch.sh
+          $G/miyoo-config.json
+          $G/README.md
+          $G/libs/libSDL2-2.0.so.0
+          $G/libs/libneonarmmiyoo.so
+          $G/licenses/LICENSE
+          $G/licenses/THIRD-PARTY-NOTICES.md
+          $G/licenses/CREDITS.md
+          $G/licenses/libogg-COPYING
+          $G/licenses/libopus-COPYING
+          $G/licenses/libopus-LICENSE_PLEASE_READ.txt
+          $G/licenses/OFL-1.1-LinuxBiolinum.txt
+          $G/licenses/libSDL2-zlib-LICENSE.txt
+          $G/licenses/libSDL2-miyoo-fork-GPL-3.0.txt )
 # ⚠️ An ARRAY, and the demo's members are APPENDED FROM THE STAGING TREE rather than typed: the file
 # names carry spaces, which the old unquoted `for M in a b c` list could not have held, and a demo
 # is a different set of files in every tree that has one. Nothing above check 10 reads the zip, so
 # without this the whole demo could be absent from it and every line here would still be green.
-if [ -d "$APPDIR/demo" ]; then
+if [ -d "$GAMEDIR/demo" ]; then
     while IFS= read -r M; do MEMBERS+=("$M"); done \
-        < <(cd "$STAGE" && find App/PocketTracker/demo -type f | LC_ALL=C sort)
+        < <(cd "$STAGE" && find "$G/demo" -type f | LC_ALL=C sort)
 fi
 for M in "${MEMBERS[@]}"; do
     # ⚠️ `|| BYTES=0` is what makes the failure READABLE: unzip exits 11 on a missing member, and
@@ -532,4 +607,6 @@ done
 
 echo
 echo "OK  $OUT/pockettracker-miyoo.zip"
-echo "    Extract at the SD card root; it lands in App/PocketTracker/ and appears on Onion's Apps shelf."
+echo "    Extract at the SD card root. It lands in Roms/PORTS/ and appears in Onion's ports list,"
+echo "    where play time, launch count and the Game Switcher are recorded. Needs Onion's Ports"
+echo "    Collection package installed."
