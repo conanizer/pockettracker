@@ -32,16 +32,22 @@ void draw_mascot(Canvas& c, int x, int y, Argb color) {
 
 }  // namespace
 
-void HelpPanelModule::draw(Canvas& c, int x, int y, HelpTopic topic, const Theme& t) const {
-    c.fill_rect(x, y, WIDTH, HEIGHT, t.vizBackground);
+void HelpPanelModule::draw(Canvas& c, int x, int y, HelpTopic topic, const Theme& t,
+                           int box_height) const {
+    c.fill_rect(x, y, WIDTH, box_height, t.vizBackground);
 
-    draw_mascot(c, x + MASCOT_MARGIN, y + MASCOT_MARGIN, t.vizWave);
+    // The block is HEIGHT tall whatever the box is; a taller box gets the surplus as air, split top
+    // and bottom. ⚠️ Clamped at zero rather than trusted: a box SHORTER than the strip would put a
+    // negative offset here and hang the mascot off the top edge.
+    const int top = y + (box_height > HEIGHT ? (box_height - HEIGHT) / 2 : 0);
+
+    draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, t.vizWave);
 
     const HelpEntry& e     = help_entry(topic);
     const char*      lines[3] = {e.line1, e.line2, e.line3};
     for (int i = 0; i < 3; ++i) {
         if (lines[i][0] == '\0') continue;   // a two-line entry simply leaves the third row empty
-        c.draw_text(lines[i], x + TEXT_X, y + TEXT_TOP + i * ROW_HEIGHT, t.vizWave, CHAR_SPACING,
+        c.draw_text(lines[i], x + TEXT_X, top + TEXT_TOP + i * ROW_HEIGHT, t.vizWave, CHAR_SPACING,
                     FONT_SCALE);
     }
 }

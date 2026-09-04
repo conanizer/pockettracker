@@ -84,6 +84,14 @@ static_assert(POOL_RAM_VALUE_X + InstrumentPoolModule::RAM_MAX_CHARS * CHAR_W - 
 static_assert(SIDE_SPACER + InstrumentPoolModule::RAM_LABEL_X + 3 * CHAR_W <= POOL_RAM_VALUE_X,
               "INST.POOL's RAM label overlaps its value");
 
+// ⚠️ THE SAMPLE EDITOR'S WAVEFORM IS THE HELP PANEL'S SECOND HOME, and only because it happens to be
+// the same width at the same left edge. Neither module knows about the other, so the agreement is
+// pinned here — widen the waveform and the panel would sit off-centre in it with no other symptom.
+static_assert(SampleEditorModule::WAVEFORM_W == HelpPanelModule::WIDTH,
+              "the waveform panel is no longer the width the help panel draws");
+static_assert(SampleEditorModule::WAVEFORM_H >= HelpPanelModule::HEIGHT,
+              "the waveform panel is too short to hold the help panel");
+
 class TrackerLayout {
 public:
     /**

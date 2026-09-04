@@ -71,9 +71,25 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     // than covering it, and the frame goes back to the normal furniture (scope strip, right bar). That
     // is Kotlin's, at PixelPerfectRenderer:474, and it is the right call: the EQ is 495×392 and would
     // sit in a 640×480 waveform's middle like a dialog nobody asked for.
+    //
+    // ── THE SAMPLE EDITOR'S HELP GOES IN THE WAVEFORM'S PLACE ──────────────────────────────
+    //
+    // ⚠️ It has no strip, and it does have the one 620-wide box on any screen that the cursor never
+    // lands on. The waveform is 620×155 at (SIDE_SPACER, WAVEFORM_Y) — the same left edge and the
+    // same width as the strip, 85px taller — so the panel needs nothing but a taller box to fill.
+    //
+    // ⚠️ Drawn AFTER the module and never over its "ARE YOU SURE?": `on_select` refuses to open help
+    // while that dialog is up, which is the only way the two could meet (every other button dismisses
+    // help before it reaches the arm that raises the dialog).
     if (full_screen_module(s)) {
-        if (s.currentScreen == ScreenType::FILE_BROWSER) fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
-        else                                             sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
+        if (s.currentScreen == ScreenType::FILE_BROWSER) {
+            fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
+        } else {
+            sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
+            if (s.helpOpen)
+                helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
+                                SampleEditorModule::WAVEFORM_H);
+        }
         if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
         return;
     }

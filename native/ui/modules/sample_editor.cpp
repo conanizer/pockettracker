@@ -467,7 +467,14 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
 void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEditorState& s,
                                        const Theme& t) const {
     const int wfLeft  = x + 10;
-    const int wfRight = x + 630;
+    const int wfRight = wfLeft + WAVEFORM_W;
+    /**
+     * The last column INSIDE the panel. ⚠️ `wfRight` is the right EDGE, one past it: a mark at the
+     * very end of the view lands there, in the frame margin, where nothing else paints — and the
+     * default selection puts E exactly there, so it is not a corner case. Every mark below tests the
+     * EDGE, so an end-of-view mark still shows, and draws at `wfLast`, so it shows inside.
+     */
+    const int wfLast  = wfRight - 1;
     const int midY    = y + WAVEFORM_H / 2;
 
     c.fill_rect(wfLeft, y, WAVEFORM_W, WAVEFORM_H, t.vizBackground);
@@ -516,12 +523,12 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
         // Test the UNCLAMPED position, draw the clamped one: an edge scrolled out of the window must
         // vanish, not pile up against the panel's border pretending to be there.
         if (sXf >= static_cast<float>(wfLeft) && sXf <= static_cast<float>(wfRight)) {
-            const int sX = std::clamp(static_cast<int>(sXf), wfLeft, wfRight);
+            const int sX = std::clamp(static_cast<int>(sXf), wfLeft, wfLast);
             v_line(c, sX, y, WAVEFORM_H, t.textTitle);
             c.draw_text("S", sX + 2, y + 3, t.textTitle, CHAR_SPACING, FONT_SCALE);
         }
         if (eXf >= static_cast<float>(wfLeft) && eXf <= static_cast<float>(wfRight)) {
-            const int eX = std::clamp(static_cast<int>(eXf), wfLeft, wfRight);
+            const int eX = std::clamp(static_cast<int>(eXf), wfLeft, wfLast);
             v_line(c, eX, y, WAVEFORM_H, t.textTitle);
             c.draw_text("E", eX - 17, y + 3, t.textTitle, CHAR_SPACING, FONT_SCALE);
         }
@@ -545,7 +552,8 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     auto boundary = [&](int64_t frame, bool active) {
         const float mXf = frame_x(static_cast<float>(frame));
         if (mXf < static_cast<float>(wfLeft) || mXf > static_cast<float>(wfRight)) return;
-        v_line(c, static_cast<int>(mXf), y, WAVEFORM_H, active ? t.textEmpty : t.textParam);
+        v_line(c, std::min(static_cast<int>(mXf), wfLast), y, WAVEFORM_H,
+               active ? t.textEmpty : t.textParam);
     };
 
     // ── The slice boundaries ─────────────────────────────────────────────────────────────────────
@@ -588,7 +596,8 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
         const float playFrame = s.playbackPosition * static_cast<float>(s.totalFrames);
         const float mXf       = frame_x(playFrame);
         if (mXf >= static_cast<float>(wfLeft) && mXf <= static_cast<float>(wfRight))
-            v_line(c, static_cast<int>(mXf), y, WAVEFORM_H, t.vizWave, /*thickness=*/2);
+            v_line(c, std::min(static_cast<int>(mXf), wfLast - 1), y, WAVEFORM_H, t.vizWave,
+                   /*thickness=*/2);
     }
 }
 

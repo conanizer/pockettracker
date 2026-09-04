@@ -37,6 +37,7 @@
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/effects_editor.h"
 #include "ui/modules/modulation.h"
+#include "ui/modules/sample_editor.h"
 #include "ui/modules/scale_editor.h"
 #include "ui/screen.h"
 #include "ui/settings_row_layout.h"
@@ -282,6 +283,45 @@ enum class HelpTopic {
     THEME_EQ_FILL,
     THEME_EQ_BORDER,
     THEME_EQ_TXT,
+
+    // ── The SAMPLE EDITOR ────────────────────────────────────────────────────────────────────────
+    // The one full-screen module that shows help: its waveform panel is the same 620 wide as the
+    // strip, and no cell lives there (help_panel.h). Its rows are sparse — 1, 2, 8, 10, 11, 13, 14,
+    // 16, 18, 19 — and the twelve OP BUTTONS get an entry each because a six-letter verb on a button
+    // is exactly the label that explains nothing.
+    SE_ZOOM,
+    SE_SOURCE,
+    SE_RATE,
+    SE_PITCH,
+    SE_DURATION,
+    SE_SNAP,
+    SE_SEL_START,
+    SE_SEL_END,
+    SE_SLICE_METHOD,
+    SE_SLICE_SENS,
+    SE_SLICE_BY,
+    SE_SLICE_INDEX,
+    SE_SLICE_POS,
+    SE_OP_CROP,
+    SE_OP_COPY,
+    SE_OP_CUT,
+    SE_OP_DUPL,
+    SE_OP_PASTE,
+    SE_OP_DEL,
+    SE_OP_NORM,
+    SE_OP_FADE_IN,
+    SE_OP_FADE_OUT,
+    SE_OP_SILENCE,
+    SE_OP_REVERSE,
+    SE_OP_UNDO,
+    SE_FX_TYPE,
+    SE_FX_VALUE,
+    SE_FX_APPLY,
+    SE_NAME,
+    SE_LOAD,
+    SE_SAVE,
+    SE_OVERWRITE,
+    SE_CHOP,
 
     COUNT
 };
@@ -671,6 +711,74 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"EQ BORDER: the spectrum line", "The outline drawn on top of", "that spectrum."},
     /* THEME_EQ_TXT */
     {"EQ TXT: the EQ scale marks", "The frequency labels across", "the EQ panel."},
+
+    // ── The sample editor ────────────────────────────────────────────────────────────────────────
+    /* SE_ZOOM */
+    {"ZOOM: how close the view is", "R+↑ zooms in, R+↓ out,", "from any cell on this screen."},
+    /* SE_SOURCE */
+    {"SOURCE: which side to edit", "LEFT, RIGHT or MONO. Only", "STEREO keeps both sides."},
+    /* SE_RATE */
+    {"RATE: how much detail to keep", "NORM and LOFI throw some", "away for good. HIGH keeps it."},
+    /* SE_PITCH */
+    {"PITCH: move the whole sample", "In semitones. It happens when", "you save, not before."},
+    /* SE_DURATION */
+    {"DURATION: the length to fit", "What SYNC on the EFFECT row", "stretches the sample to."},
+    /* SE_SNAP */
+    {"SNAP: stops edits clicking", "Puts a dragged edge where", "the wave crosses the middle."},
+    /* SE_SEL_START */
+    {"START: where editing begins", "A+←/→ drags it a little,", "A+↑/↓ a lot."},
+    /* SE_SEL_END */
+    {"END: where editing stops", "A+←/→ drags it a little,", "A+↑/↓ a lot."},
+    /* SE_SLICE_METHOD */
+    {"SLICE: how to cut it up", "TRANSIENT finds the hits,", "DIVIDE cuts equal parts."},
+    /* SE_SLICE_SENS */
+    {"SENS: how many hits to find", "Higher finds more of them,", "quiet ones included."},
+    /* SE_SLICE_BY */
+    {"BY: how many equal parts", "The sample is cut into this", "many, end to end."},
+    /* SE_SLICE_INDEX */
+    {"SLICE: which cut you are on", "A+D-PAD walks them. Under", "MANUAL, A cuts at the playhead."},
+    /* SE_SLICE_POS */
+    {"START: where this cut sits", "A+D-PAD drags it. A+B puts it", "back, or removes one you made."},
+    /* SE_OP_CROP */
+    {"CROP: keep only the selection", "Everything outside it is", "thrown away."},
+    /* SE_OP_COPY */
+    {"COPY: take the selection", "Puts it on the clipboard and", "changes nothing."},
+    /* SE_OP_CUT */
+    {"CUT: copy it, then remove it", "The sample gets shorter by", "the length you took."},
+    /* SE_OP_DUPL */
+    {"DUPL: repeat the selection", "Adds another copy of it on", "the end of the sample."},
+    /* SE_OP_PASTE */
+    {"PASTE: drop the clipboard in", "Inserts it at the start of", "the selection."},
+    /* SE_OP_DEL */
+    {"DEL: remove the selection", "The sample gets shorter by", "the length you cut."},
+    /* SE_OP_NORM */
+    {"NORM: as loud as it can go", "Lifts the selection until", "its loudest peak is full."},
+    /* SE_OP_FADE_IN */
+    {"FADE+: fade the selection in", "It rises from silence to", "full over its own length."},
+    /* SE_OP_FADE_OUT */
+    {"FADE-: fade the selection out", "It falls from full to", "silence over its length."},
+    /* SE_OP_SILENCE */
+    {"SLNC: empty the selection", "Wipes what is there and", "keeps the length."},
+    /* SE_OP_REVERSE */
+    {"REV: play it backwards", "Turns the selection around,", "end to start."},
+    /* SE_OP_UNDO */
+    {"UNDO: take back the last edit", "One step only, and it does", "not mean back to the file."},
+    /* SE_FX_TYPE */
+    {"EFFECT: bake one in for good", "OTT, DUST, DRIVE, EQ or the", "SYNC fit. APPLY does it."},
+    /* SE_FX_VALUE */
+    {"VALUE: what the effect uses", "An amount, or an EQ slot, or", "which way SYNC fits it."},
+    /* SE_FX_APPLY */
+    {"APPLY: do it, for good", "Bakes the effect into the", "audio. SYNC fits the length."},
+    /* SE_NAME */
+    {"NAME: what to call it", "A opens the keyboard. SAVE", "uses this for the file name."},
+    /* SE_LOAD */
+    {"LOAD: open another sample", "Into this same slot. Opens", "the file browser."},
+    /* SE_SAVE */
+    {"SAVE: write a new file", "Into the samples folder. It", "never replaces an old one."},
+    /* SE_OVERWRITE */
+    {"OVERWRITE: replace the file", "Writes back over the one", "this sample came from."},
+    /* SE_CHOP */
+    {"CHOP: every slice as a file", "Writes them into a Chops", "folder named after this one."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -1085,6 +1193,71 @@ inline HelpTopic theme_cell_topic(int row, int channel) {
     return (index >= 0 && index < count) ? THEME_COLOR_TOPICS[index] : HelpTopic::NONE;
 }
 
+
+/**
+ * The sample editor. Its rows are SPARSE — 1, 2, 8, 10, 11, 13, 14, 16, 18, 19 — and two of the cells
+ * change meaning under a mode, so both modes are asked for here rather than guessed:
+ *
+ *  · row 10 column 1 is SENS under TRANSIENT and BY under DIVIDE, and does not exist under the other
+ *    two methods (`slice_has_parameter`);
+ *  · row 19 column 3 is CHOP, which only exists when there are slices to chop.
+ *
+ * ⚠️ The two OP ROWS are indexed straight off the column, so the order here IS `ops_row1()` and
+ * `ops_row2()` in sample_editor.cpp. Reorder a button there and the wrong text comes up under it —
+ * which is why they are named in the same left-to-right order and nowhere else.
+ */
+inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method) {
+    static constexpr HelpTopic OPS_1[] = {HelpTopic::SE_OP_CROP,  HelpTopic::SE_OP_COPY,
+                                          HelpTopic::SE_OP_CUT,   HelpTopic::SE_OP_DUPL,
+                                          HelpTopic::SE_OP_PASTE, HelpTopic::SE_OP_DEL};
+    static constexpr HelpTopic OPS_2[] = {HelpTopic::SE_OP_NORM,    HelpTopic::SE_OP_FADE_IN,
+                                          HelpTopic::SE_OP_FADE_OUT, HelpTopic::SE_OP_SILENCE,
+                                          HelpTopic::SE_OP_REVERSE,  HelpTopic::SE_OP_UNDO};
+    const bool op_col = (column >= 0 && column < 6);
+
+    switch (row) {
+        case 1:
+            if (column == 0) return HelpTopic::SE_ZOOM;
+            if (column == 1) return HelpTopic::SE_SOURCE;
+            return (column == 2) ? HelpTopic::SE_RATE : HelpTopic::NONE;
+        case 2:
+            if (column == 0) return HelpTopic::SE_PITCH;
+            if (column == 1) return HelpTopic::SE_DURATION;
+            return (column == 2) ? HelpTopic::SE_SNAP : HelpTopic::NONE;
+
+        // Rows 3..8 are all the SELECTION: the cursor only ever rests on 8, but the D-pad drags an
+        // edge from any of them, and column is which edge.
+        case 3: case 4: case 5: case 6: case 7: case 8:
+            return (column == 1) ? HelpTopic::SE_SEL_END : HelpTopic::SE_SEL_START;
+
+        case 10:
+            if (column == 0) return HelpTopic::SE_SLICE_METHOD;
+            if (column != 1) return HelpTopic::NONE;
+            if (slice_method == SampleEditorModule::SLICE_TRANSIENT) return HelpTopic::SE_SLICE_SENS;
+            if (slice_method == SampleEditorModule::SLICE_DIVIDE)    return HelpTopic::SE_SLICE_BY;
+            return HelpTopic::NONE;
+        case 11:
+            return (column == 1) ? HelpTopic::SE_SLICE_POS : HelpTopic::SE_SLICE_INDEX;
+
+        case 13: return op_col ? OPS_1[column] : HelpTopic::NONE;
+        case 14: return op_col ? OPS_2[column] : HelpTopic::NONE;
+
+        case 16:
+            if (column == 0) return HelpTopic::SE_FX_TYPE;
+            if (column == 1) return HelpTopic::SE_FX_VALUE;
+            return (column == 2) ? HelpTopic::SE_FX_APPLY : HelpTopic::NONE;
+
+        case 18: return HelpTopic::SE_NAME;
+        case 19:
+            if (column == 0) return HelpTopic::SE_LOAD;
+            if (column == 1) return HelpTopic::SE_SAVE;
+            if (column == 2) return HelpTopic::SE_OVERWRITE;
+            return (column == 3) ? HelpTopic::SE_CHOP : HelpTopic::NONE;
+
+        default: return HelpTopic::NONE;   // the title bar and the four spacer rows
+    }
+}
+
 }  // namespace detail
 
 /**
@@ -1173,6 +1346,11 @@ inline HelpTopic help_topic(const AppState& s) {
             break;
         case ScreenType::SETTINGS:
             cell = detail::settings_cell_topic(s.settingsCursorRow, s.settingsCursorColumn);
+            break;
+        case ScreenType::SAMPLE_EDITOR:
+            cell = detail::sample_editor_cell_topic(s.sampleEditor.cursorRow,
+                                                    s.sampleEditor.cursorCol,
+                                                    s.sampleEditor.sliceMethod);
             break;
         case ScreenType::MIDI:
             cell = detail::midi_cell_topic(s.midiCursorRow);

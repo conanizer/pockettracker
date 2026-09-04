@@ -3295,19 +3295,27 @@ void InputDispatcher::on_select() {
 
     // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ Gated on there BEING a strip to draw it in. The compact panel takes the oscilloscope's 620×70
-    // and nothing else, and the two full-screen modules have neither — a toggle there would set a flag
-    // no frame reads, and the next screen you walked onto would come up holding help you never asked
-    // for. (`full_screen_module` is in ui/app_state.h, shared with the two questions layout.cpp asks.)
-    if (full_screen_module(s_)) return;
+    // ⚠️ **THE SAMPLE EDITOR REACHES THIS, AND THE FILE BROWSER DOES NOT — but only ONE of those two
+    // is decided here.** The browser is `Overlay::BROWSER`, which this handler does not arm for, so
+    // the modal rule at the top of the function has already returned: it has no 620-wide box to spare
+    // (nineteen file rows and two status bars fill all 640×480) and SELECT is its rename/delete/
+    // new-folder modifier besides. The sample editor is full-screen too but is neither — its WAVEFORM
+    // panel is the same 620 wide at the same left edge as the strip, and it is the one box on any
+    // screen the cursor never lands on, so the panel stands in its place (layout.cpp).
+    //
+    // ⚠️ The editor's "ARE YOU SURE?" is NOT an `Overlay`, so the modal rule did not see it — and
+    // SELECT is the one button `button_mapper.h` does not dismiss help on. This is the only way help
+    // could come up over that dialog, so it is refused here rather than guarded again when drawing.
+    if (on_sample_editor() && s_.sampleEditor.showConfirmClose) return;
+
     s_.helpOpen = !s_.helpOpen;
 }
 
 void InputDispatcher::on_help_dismiss() {
     // ⚠️ **THE PRESS IS NOT CONSUMED — it closes help and then does its normal job**, which is the
-    // whole reason help is not an `Overlay`. It covers the strip and never the editor, so there is
-    // nothing under it to protect from a stray press: closing it and swallowing the press would cost a
-    // button on every gesture and buy nothing.
+    // whole reason help is not an `Overlay`. It stands in a box that holds no cell — the visualizer
+    // strip, or the sample editor's waveform — so there is nothing under it to protect from a stray
+    // press: closing it and swallowing the press would cost a button on every gesture and buy nothing.
     s_.helpOpen = false;
 }
 
