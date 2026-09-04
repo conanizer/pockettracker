@@ -3281,7 +3281,12 @@ void InputDispatcher::on_select() {
     // ⚠️ NOT TO BE CONFUSED WITH THE A-DEFERRAL. `defer_a_to_release` holds A on the cells that open a
     // sub-screen so that a held A+DPAD can still dial the value underneath. That mechanism is required,
     // it is what makes those cells editable at all, and it has nothing to do with this handler.
-    if (overlay_swallows(Overlay::QWERTY)) return;
+    //
+    // ⚠️ THE TWO IN-PLACE OVERLAYS ARE NAMED HERE, and that is what puts help on them: the EQ editor
+    // and the theme editor stand in the module's place and leave the oscilloscope strip drawn, so the
+    // panel has somewhere to go. They are also the two screens whose cell names — EQ FILL, Q, MTR BG —
+    // say least on their own. SELECT does nothing else on either, so nothing is taken back.
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ)) return;
 
     // The keyboard's ABORT — the chord alias for the button on its own action row, and the one bare
     // SELECT that duplicates nothing: B backspaces here, so without it the only way to abandon a rename

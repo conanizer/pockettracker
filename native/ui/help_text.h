@@ -17,7 +17,8 @@
 //     margins, and a glyph advances CHAR_W. A longer line runs off the right edge, silently.
 //  3. ⚠️ **NO APOSTROPHE AND NO SEMICOLON.** `font5x5.h` has neither glyph and draws a BLANK, so
 //     "the sample's pitch" comes out as "THE SAMPLE S PITCH". The string is right, the width is
-//     right, only the pixels are wrong. Stick to letters, digits, and `: = - ( ) . / , +`.
+//     right, only the pixels are wrong. Stick to letters, digits, and `: = - ( ) . / , +` — plus
+//     the four arrows ← ↑ → ↓, the one thing above ASCII the font maps, each costing ONE column.
 //  4. Say what the cell DOES, not why it is shaped that way.
 //
 // Rules 2 and 3 are a `static_assert` over the whole table below (`help_table_ok`), so a line that
@@ -34,7 +35,11 @@
 
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
+#include "ui/modules/effects_editor.h"
+#include "ui/modules/modulation.h"
+#include "ui/modules/scale_editor.h"
 #include "ui/screen.h"
+#include "ui/settings_row_layout.h"
 
 namespace pt::ui {
 
@@ -145,6 +150,139 @@ enum class HelpTopic {
     // Appended, never inserted — HELP_ENTRIES is indexed by these values.
     INST_TRANSPOSE,
 
+    // PROJECT
+    PROJECT_TEMPO,
+    PROJECT_TRANSPOSE,
+    PROJECT_NAME,
+    PROJECT_SAVE,
+    PROJECT_LOAD,
+    PROJECT_NEW,
+    PROJECT_EXPORT_MIX,
+    PROJECT_EXPORT_STEMS,
+    PROJECT_COMPACT_SEQ,
+    PROJECT_COMPACT_INST,
+    PROJECT_SYSTEM,
+    PROJECT_MIDI,
+    PROJECT_EXIT,
+
+    // GROOVE — one editable column, so one entry
+    GROOVE_TIC,
+
+    // SCALE
+    SCALE_NAME,
+    SCALE_SAVE,
+    SCALE_LOAD,
+    SCALE_KEY,
+    SCALE_DEGREE,
+
+    // MODS — the row's meaning follows the slot's TYPE, so these are named after the parameter
+    MOD_TYPE,
+    MOD_DEST,
+    MOD_AMOUNT,
+    MOD_ATTACK,
+    MOD_HOLD,
+    MOD_DECAY,
+    MOD_SUSTAIN,
+    MOD_RELEASE,
+    MOD_OSC,
+    MOD_TRIG,
+    MOD_FREQ,
+
+    // INST.POOL — its four value columns ARE the instrument's own, so they reuse the INST_* entries
+    POOL_SLOT,
+
+    // MIXER
+    MIXER_TRACK_VOL,
+    MIXER_MASTER_VOL,
+    MIXER_REVERB_RETURN,
+    MIXER_DELAY_RETURN,
+    MIXER_MASTER_EQ,
+    MIXER_MASTER_FX,
+    MIXER_LIMITER,
+
+    // EFFECTS
+    FX_MASTER_TYPE,
+    FX_REVERB_SIZE,
+    FX_REVERB_DAMP,
+    FX_REVERB_EQ,
+    FX_DELAY_TIME,
+    FX_DELAY_FEEDBACK,
+    FX_DELAY_TO_REVERB,
+    FX_DELAY_EQ,
+
+    // SETTINGS
+    SET_LAYOUT,
+    SET_SKIN,
+    SET_SCALING,
+    SET_OVERLAY,
+    SET_OVERLAY_STRENGTH,
+    SET_BTN_SOUND,
+    SET_BTN_SOUND_VOL,
+    SET_BTN_VIBRO,
+    SET_BTN_VIBRO_POW,
+    SET_ABXY,
+    SET_KB_INSERT,
+    SET_CURSOR,
+    SET_NAV,
+    SET_FOLDER,
+    SET_NOTE_PREVIEW,
+    SET_VISUALIZER,
+    SET_THEME,
+    SET_TEMPLATE_SAVE,
+    SET_TEMPLATE_CLEAR,
+    SET_RESUME,
+    SET_TRACE,
+    SET_ENGINE,
+
+    // MIDI
+    MIDI_OUTPUT,
+    MIDI_INPUT,
+    MIDI_OFFSET,
+    MIDI_SYNC,
+    MIDI_PROG_CHG,
+    MIDI_IN_CHANNEL,
+    MIDI_PANIC,
+    MIDI_TEST,
+
+    // ── The two IN-PLACE OVERLAYS ────────────────────────────────────────────────────────────────
+    // Neither is a `ScreenType`: they stand in the editor's place and leave `currentScreen` alone,
+    // which is why their screen-level topics sit here rather than beside the sixteen above.
+    SCREEN_EQ,
+    EQ_TYPE,
+    EQ_FREQ,
+    EQ_GAIN,
+    EQ_Q,
+
+    SCREEN_THEME,
+    THEME_NAME,
+    THEME_SAVE,
+    THEME_LOAD,
+    // ⚠️ THE TWENTY-TWO COLOUR ROWS ARE IN `theme_color_rows()` ORDER (ui/theme.h) and are looked up
+    // BY POSITION — see THEME_COLOR_TOPICS below. Append here and there together, or a new colour row
+    // falls back to the screen text, which is the harmless direction and the only one reachable.
+    THEME_BACKGROUND,
+    THEME_ROW_4TH,
+    THEME_ROW_CURSOR,
+    THEME_ROW_SELECT,
+    THEME_TXT_TITLE,
+    THEME_TXT_PARAM,
+    THEME_TXT_VALUE,
+    THEME_TXT_CURSOR,
+    THEME_TXT_EMPTY,
+    THEME_TXT_SELECT,
+    THEME_TXT_PLAY,
+    THEME_VIZ_BG,
+    THEME_VIZ_LINE,
+    THEME_VIZ_WAVE,
+    THEME_MTR_BG,
+    THEME_MTR_LOW,
+    THEME_MTR_MID,
+    THEME_MTR_HIGH,
+    THEME_EQ_BG,
+    THEME_EQ_FILL,
+    THEME_EQ_BORDER,
+    THEME_EQ_TXT,
+
     COUNT
 };
 
@@ -198,13 +336,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
 
     // ── PHRASE ───────────────────────────────────────────────────────────────────────────────────
     /* PHRASE_NOTE */
-    {"NOTE: the pitch of a step", "A+LEFT/RIGHT one semitone,", "A+UP/DOWN one octave."},
+    {"NOTE: the pitch of a step", "A+←/→ steps a semitone,", "A+↑/↓ a whole octave."},
     /* PHRASE_VOLUME */
     {"VOL: how loud this step is", "00 is silent, FF is full.", "Empty keeps the last volume."},
     /* PHRASE_INSTRUMENT */
     {"INST: which sound to use", "Points at an instrument slot,", "00 to FF."},
     /* PHRASE_FX_TYPE */
-    {"FX: a command on this step", "Hold A and press UP to open", "the picker and read them all."},
+    {"FX: a command on this step", "A+↑/↓ opens the picker and", "shows what each one does."},
     /* PHRASE_FX_VALUE */
     {"FX VALUE: what it is set to", "The meaning comes from the FX", "to its left."},
 
@@ -214,7 +352,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* TABLE_VOLUME */
     {"V: volume, per tick", "00 is silent, FF is full.", "Empty leaves the volume be."},
     /* TABLE_FX_TYPE */
-    {"FX: a command on this tick", "Hold A and press UP to open", "the picker and read them all."},
+    {"FX: a command on this tick", "A+↑/↓ opens the picker and", "shows what each one does."},
     /* TABLE_FX_VALUE */
     {"FX VALUE: what it is set to", "The meaning comes from the FX", "to its left."},
 
@@ -297,6 +435,242 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     // ── Appended after the MIDI block, to match the enum ─────────────────────────────────────────
     /* INST_TRANSPOSE */
     {"TSP: scales and transpose", "OFF pins this instrument to the", "notes as written. ON follows."},
+
+    // ── PROJECT ──────────────────────────────────────────────────────────────────────────────────
+    /* PROJECT_TEMPO */
+    {"TEMPO: beats per minute", "20 to 999. A+↑/↓ steps by", "ten at a time."},
+    /* PROJECT_TRANSPOSE */
+    {"TSP: transpose the whole song", "Shifts every note. 00 leaves", "the pitch alone."},
+    /* PROJECT_NAME */
+    {"NAME: what the song is called", "A opens the keyboard. Each", "letter is its own cell."},
+    /* PROJECT_SAVE */
+    {"SAVE: write the song to disk", "Under the name on the NAME", "row above."},
+    /* PROJECT_LOAD */
+    {"LOAD: open another song", "Opens the file browser to", "pick one."},
+    /* PROJECT_NEW */
+    {"NEW: start an empty song", "Asks first. Starts from your", "template if you saved one."},
+    /* PROJECT_EXPORT_MIX */
+    {"MIX: render the song to WAV", "One file, with every track", "playing together."},
+    /* PROJECT_EXPORT_STEMS */
+    {"STEMS: render each track", "One WAV per track, so they", "can be mixed elsewhere."},
+    /* PROJECT_COMPACT_SEQ */
+    {"SEQ: clear unused patterns", "Empties every chain and", "phrase the song never plays."},
+    /* PROJECT_COMPACT_INST */
+    {"INST: clear unused sounds", "Empties instrument slots no", "phrase plays, and frees RAM."},
+    /* PROJECT_SYSTEM */
+    {"SETTINGS: how the app acts", "A opens the settings screen,", "B comes back here."},
+    /* PROJECT_MIDI */
+    {"MIDI: ports and sync", "A opens the MIDI screen,", "B comes back here."},
+    /* PROJECT_EXIT */
+    {"EXIT: leave PocketTracker", "Asks first. Save the song", "before you go."},
+
+    // ── GROOVE ───────────────────────────────────────────────────────────────────────────────────
+    /* GROOVE_TIC */
+    {"TIC: how long a step lasts", "In ticks. A on -- adds a", "step, A+B takes it away."},
+
+    // ── SCALE ────────────────────────────────────────────────────────────────────────────────────
+    /* SCALE_NAME */
+    {"NAME: the shape of the scale", "A+D-PAD walks the 38 built-in", "shapes."},
+    /* SCALE_SAVE */
+    {"SAVE: store this scale", "Writes a file you can load", "into any other project."},
+    /* SCALE_LOAD */
+    {"LOAD: recall a scale", "Replaces the twelve rows", "below it."},
+    /* SCALE_KEY */
+    {"KEY: the root of the song", "Every row below is named", "from here. All 16 share it."},
+    /* SCALE_DEGREE */
+    {"EN: is this note allowed", "ON keeps it. A note that is", "off is pulled to the nearest."},
+
+    // ── MODS ─────────────────────────────────────────────────────────────────────────────────────
+    /* MOD_TYPE */
+    {"TYPE: the shape it moves in", "AHD and ADSR are envelopes,", "LFO repeats. NONE is off."},
+    /* MOD_DEST */
+    {"DEST: what it moves", "The parameter this slot", "changes while a note plays."},
+    /* MOD_AMOUNT */
+    {"AMT: how far it moves", "00 does nothing, FF is the", "full swing."},
+    /* MOD_ATTACK */
+    {"ATK: time up to the peak", "00 is instant. Higher fades", "in more slowly."},
+    /* MOD_HOLD */
+    {"HOLD: time spent at the peak", "Before the decay starts.", ""},
+    /* MOD_DECAY */
+    {"DEC: time to fall away", "How long the drop after the", "peak takes."},
+    /* MOD_SUSTAIN */
+    {"SUS: the level it settles at", "Held for as long as the note", "is on."},
+    /* MOD_RELEASE */
+    {"REL: time to fall at the end", "Starts when the note stops.", ""},
+    /* MOD_OSC */
+    {"OSC: the LFO shape", "Triangle, sine, ramps and", "squares, plus two random."},
+    /* MOD_TRIG */
+    {"TRIG: how the LFO starts", "RETG restarts per note, ONCE", "runs once, HOLD freezes it."},
+    /* MOD_FREQ */
+    {"FREQ: how fast the LFO runs", "Higher is faster.", ""},
+
+    // ── INST.POOL ────────────────────────────────────────────────────────────────────────────────
+    /* POOL_SLOT */
+    {"SLOT: pick an instrument", "A on an empty slot loads a", "file. A+B clears the slot."},
+
+    // ── MIXER ────────────────────────────────────────────────────────────────────────────────────
+    /* MIXER_TRACK_VOL */
+    {"TRACK VOLUME: one fader", "00 is silent, FF is full.", "One column per track."},
+    /* MIXER_MASTER_VOL */
+    {"MIX: the master volume", "Everything passes through it", "on the way out."},
+    /* MIXER_REVERB_RETURN */
+    {"REV: the reverb return", "How loud the shared reverb", "comes back into the mix."},
+    /* MIXER_DELAY_RETURN */
+    {"DEL: the delay return", "How loud the shared delay", "comes back into the mix."},
+    /* MIXER_MASTER_EQ */
+    {"EQ: the master EQ preset", "A slot, 00 to 7F, or --.", "A opens the EQ editor."},
+    /* MIXER_MASTER_FX */
+    {"OTT/DUST: master bus depth", "How hard it works. EFFECTS", "picks which of the two."},
+    /* MIXER_LIMITER */
+    {"LIM: limiter pre-gain", "Pushes the mix harder into", "the limiter. 00 is off."},
+
+    // ── EFFECTS ──────────────────────────────────────────────────────────────────────────────────
+    /* FX_MASTER_TYPE */
+    {"MASTER: the bus effect", "OTT is a 3-band squeeze,", "DUST is a lo-fi chain."},
+    /* FX_REVERB_SIZE */
+    {"SIZE: how big the room is", "Higher makes the tail last", "longer."},
+    /* FX_REVERB_DAMP */
+    {"DAMP: how dark the tail is", "Higher takes more top end", "out of the reverb."},
+    /* FX_REVERB_EQ */
+    {"EQ: EQ on the reverb input", "A slot, or -- for none.", "A opens the EQ editor."},
+    /* FX_DELAY_TIME */
+    {"TIME: the gap between echoes", "B switches between a free", "value and note divisions."},
+    /* FX_DELAY_FEEDBACK */
+    {"FDBK: how many echoes", "Higher repeats for longer.", "Very high never stops."},
+    /* FX_DELAY_TO_REVERB */
+    {"REV: delay into the reverb", "Sends the echoes through the", "reverb as well."},
+    /* FX_DELAY_EQ */
+    {"EQ: EQ on the delay input", "A slot, or -- for none.", "A opens the EQ editor."},
+
+    // ── SETTINGS ─────────────────────────────────────────────────────────────────────────────────
+    /* SET_LAYOUT */
+    {"LAYOUT: how the app fits", "Fullscreen, landscape, or", "portrait with buttons."},
+    /* SET_SKIN */
+    {"SKIN: the button artwork", "Which set of on-screen", "buttons the portrait uses."},
+    /* SET_SCALING */
+    {"SCALING: how pixels are drawn", "INT keeps them sharp,", "BILINEAR smooths them."},
+    /* SET_OVERLAY */
+    {"OVERLAY: a picture on top", "Laid over the screen for a", "scanline or LCD look."},
+    /* SET_OVERLAY_STRENGTH */
+    {"STR: how strong it is", "00 is invisible, FF is the", "full picture."},
+    /* SET_BTN_SOUND */
+    {"BTN SOUND: a click per press", "For the on-screen buttons.", ""},
+    /* SET_BTN_SOUND_VOL */
+    {"VOL: how loud the click is", "00 is silent, FF is full.", ""},
+    /* SET_BTN_VIBRO */
+    {"BTN VIBRO: a buzz per press", "For the on-screen buttons.", ""},
+    /* SET_BTN_VIBRO_POW */
+    {"POW: how hard it buzzes", "LO is a tick, HI is a click.", "There is nothing in between."},
+    /* SET_ABXY */
+    {"ABXY: where A and B are", "Match it to the labels", "printed on your own pad."},
+    /* SET_KB_INSERT */
+    {"KB INSERT: where a letter goes", "BEFORE the keyboard cursor,", "or AFTER it."},
+    /* SET_CURSOR */
+    {"CURSOR: coming back to a screen", "REMEMBER keeps where you were,", "REFRESH goes to the top."},
+    /* SET_NAV */
+    {"NAV: what B+arrows walk", "SONG steps through the", "arrangement, POOL by number."},
+    /* SET_FOLDER */
+    {"FOLDER: where a load opens", "REMEMBER returns to the last", "folder used, REFRESH resets."},
+    /* SET_NOTE_PREVIEW */
+    {"NOTE PREV: hear what you type", "Plays the note as you enter", "it in a phrase."},
+    /* SET_VISUALIZER */
+    {"VISUALIZER: the top strip", "A scope, a meter per track,", "or a spectrum."},
+    /* SET_THEME */
+    {"THEME: the colours", "A opens the theme editor,", "where every colour is a row."},
+    /* SET_TEMPLATE_SAVE */
+    {"SAVE: this song as the start", "Every NEW project begins", "from it."},
+    /* SET_TEMPLATE_CLEAR */
+    {"CLEAR: forget the template", "NEW goes back to an empty", "song."},
+    /* SET_RESUME */
+    {"RESUME: after a crash", "ASK offers the recovered", "work, AUTO just opens it."},
+    /* SET_TRACE */
+    {"TRACE: write a debug log", "Records what the sequencer", "does. Off unless asked for."},
+    /* SET_ENGINE */
+    {"ENG: which sequencer runs", "A developer switch. Leave it", "where it is."},
+
+    // ── MIDI ─────────────────────────────────────────────────────────────────────────────────────
+    /* MIDI_OUTPUT */
+    {"OUTPUT: the cable out", "The device notes are sent", "to. OFF sends nothing."},
+    /* MIDI_INPUT */
+    {"INPUT: the cable in", "The device you play from.", "OFF listens to nothing."},
+    /* MIDI_OFFSET */
+    {"OFFSET: nudge the timing", "Minus sends earlier, plus", "later. In milliseconds."},
+    /* MIDI_SYNC */
+    {"SYNC: send a clock out", "24 pulses a beat, plus start", "and stop."},
+    /* MIDI_PROG_CHG */
+    {"PROG CHG: send patch changes", "Sends BANK and PROG from the", "instrument before a note."},
+    /* MIDI_IN_CHANNEL */
+    {"IN CH: what a track listens to", "One channel per track.", "-- ignores the input."},
+    /* MIDI_PANIC */
+    {"PANIC: silence everything", "A sends all notes off on", "every channel."},
+    /* MIDI_TEST */
+    {"TEST: prove the cable works", "A sends one C-4 on channel", "1 and says what happened."},
+
+    // ── The EQ editor ────────────────────────────────────────────────────────────────────────────
+    /* SCREEN_EQ */
+    {"EQ: three bands of tone", "The yellow curve is what the", "three add up to."},
+    /* EQ_TYPE */
+    {"TYPE: what this band does", "Shelves lift or drop one end,", "BELL a spot, cuts remove it."},
+    /* EQ_FREQ */
+    {"FREQ: where the band sits", "The frequency it works on,", "20 Hz up to 20 kHz."},
+    /* EQ_GAIN */
+    {"GAIN: how much to lift or cut", "Centre is flat. Up to 12 dB", "each way."},
+    /* EQ_Q */
+    {"Q: how wide the band is", "Low is broad and gentle,", "high is narrow and sharp."},
+
+    // ── The theme editor ─────────────────────────────────────────────────────────────────────────
+    /* SCREEN_THEME */
+    {"THEME: every colour, by row", "A+←/→ nudges a channel,", "A+↑/↓ moves it by 16."},
+    /* THEME_NAME */
+    {"THEME: the built-in palettes", "A+D-PAD walks them and", "replaces every colour below."},
+    /* THEME_SAVE */
+    {"SAVE: store this palette", "Writes a theme file you can", "load again or share."},
+    /* THEME_LOAD */
+    {"LOAD: recall a palette", "Replaces every colour row", "below."},
+    /* THEME_BACKGROUND */
+    {"BACKGROUND: behind it all", "The ground every screen is", "drawn on."},
+    /* THEME_ROW_4TH */
+    {"ROW 4TH: every fourth row", "The faint stripe that counts", "a grid off in fours."},
+    /* THEME_ROW_CURSOR */
+    {"ROW CURSOR: behind the cell", "The block under the cell you", "are standing on."},
+    /* THEME_ROW_SELECT */
+    {"ROW SELECT: behind a block", "The fill under a selection", "you have marked out."},
+    /* THEME_TXT_TITLE */
+    {"TXT TITLE: the headings", "Screen names, and the border", "around a pop-up box."},
+    /* THEME_TXT_PARAM */
+    {"TXT PARAM: the labels", "The name beside a value, and", "the column headers."},
+    /* THEME_TXT_VALUE */
+    {"TXT VALUE: the numbers", "Every value you can type or", "dial."},
+    /* THEME_TXT_CURSOR */
+    {"TXT CURSOR: ink on the cell", "The text inside the block you", "are standing on."},
+    /* THEME_TXT_EMPTY */
+    {"TXT EMPTY: the blanks", "The -- and --- a cell shows", "when nothing is set."},
+    /* THEME_TXT_SELECT */
+    {"TXT SELECT: ink in a block", "The text inside a selection.", ""},
+    /* THEME_TXT_PLAY */
+    {"TXT PLAY: the playhead", "The arrow marking where each", "track is playing."},
+    /* THEME_VIZ_BG */
+    {"VIZ BG: behind the top strip", "And the ground this help", "panel is drawn on."},
+    /* THEME_VIZ_LINE */
+    {"VIZ LINE: the centre line", "The rule across the middle", "of the scope."},
+    /* THEME_VIZ_WAVE */
+    {"VIZ WAVE: the waveform", "The scope trace, and the ink", "of this help panel."},
+    /* THEME_MTR_BG */
+    {"MTR BG: behind the meters", "And the fill of every pop-up", "box in the app."},
+    /* THEME_MTR_LOW */
+    {"MTR LOW: a quiet meter", "The bottom of a level bar on", "the mixer."},
+    /* THEME_MTR_MID */
+    {"MTR MID: a loud meter", "The middle of a level bar on", "the mixer."},
+    /* THEME_MTR_HIGH */
+    {"MTR HIGH: a meter near clip", "The top of a level bar on", "the mixer."},
+    /* THEME_EQ_BG */
+    {"EQ BG: behind the EQ curve", "The ground of the EQ editor", "panel."},
+    /* THEME_EQ_FILL */
+    {"EQ FILL: under the spectrum", "The block below the live", "spectrum in the EQ editor."},
+    /* THEME_EQ_BORDER */
+    {"EQ BORDER: the spectrum line", "The outline drawn on top of", "that spectrum."},
+    /* THEME_EQ_TXT */
+    {"EQ TXT: the EQ scale marks", "The frequency labels across", "the EQ panel."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -315,10 +689,28 @@ constexpr bool help_char_ok(char c) {
            c == ',' || c == '+';
 }
 
+/**
+ * One of the four arrows, at `s`? They are the only non-ASCII text a help line may hold: `font5x5.h`
+ * maps U+2190..U+2193 and nothing else above 127, and every other code point draws BLANK.
+ *
+ * ⚠️ Read one byte at a time so a truncated sequence at the end of the string stops at the
+ * terminator rather than reading past it.
+ */
+constexpr bool help_arrow_at(const char* s) {
+    if (static_cast<unsigned char>(s[0]) != 0xE2) return false;
+    if (static_cast<unsigned char>(s[1]) != 0x86) return false;
+    const auto tail = static_cast<unsigned char>(s[2]);
+    return tail >= 0x90 && tail <= 0x93;
+}
+
+// ⚠️ The budget is CODE POINTS, not bytes: `Canvas::draw_text` advances one column per code point,
+// so a three-byte arrow costs ONE of the HELP_MAX_CHARS.
 constexpr bool help_line_ok(const char* s) {
     int n = 0;
-    for (; s[n] != '\0'; ++n) {
-        if (!help_char_ok(s[n])) return false;
+    for (int i = 0; s[i] != '\0'; ++n) {
+        if (help_arrow_at(s + i)) { i += 3; continue; }
+        if (!help_char_ok(s[i])) return false;
+        ++i;
     }
     return n <= HELP_MAX_CHARS;
 }
@@ -337,7 +729,7 @@ static_assert(sizeof(HELP_ENTRIES) / sizeof(HELP_ENTRIES[0]) ==
               "HELP_ENTRIES has one entry per HelpTopic, in the enum order");
 static_assert(detail::help_table_ok(),
               "a help line is over HELP_MAX_CHARS, or holds a character font5x5 draws blank "
-              "(an apostrophe or a semicolon)");
+              "(an apostrophe, a semicolon, or a code point that is not one of the four arrows)");
 
 /** The three lines for `topic`. Out of range gives the empty entry rather than reading past the end. */
 inline const HelpEntry& help_entry(HelpTopic topic) {
@@ -489,6 +881,210 @@ inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int co
     }
 }
 
+/**
+ * PROJECT — two values, a name, and then rows that are BUTTONS.
+ *
+ * ⚠️ The button rows are read by COLUMN, and the column numbers are the DRAW order, not the reading
+ * order: on the PROJECT row column 1 is SAVE and column 2 is LOAD, which is the order the row itself
+ * lists them in (`project_editor.cpp`).
+ */
+inline HelpTopic project_cell_topic(int row, int column) {
+    if (row < 0 || row >= PROJECT_ROW_COUNT) return HelpTopic::NONE;
+    switch (static_cast<ProjectRow>(row)) {
+        case ProjectRow::TEMPO:     return HelpTopic::PROJECT_TEMPO;
+        case ProjectRow::TRANSPOSE: return HelpTopic::PROJECT_TRANSPOSE;
+        // Every character of the name is its own cursor column, and they all say the same thing.
+        case ProjectRow::NAME:      return HelpTopic::PROJECT_NAME;
+        case ProjectRow::PROJECT:
+            return column == 1   ? HelpTopic::PROJECT_SAVE
+                   : column == 2 ? HelpTopic::PROJECT_LOAD
+                                 : HelpTopic::PROJECT_NEW;
+        case ProjectRow::EXPORT:
+            return column == 1 ? HelpTopic::PROJECT_EXPORT_MIX : HelpTopic::PROJECT_EXPORT_STEMS;
+        case ProjectRow::COMPACT:
+            return column == 1 ? HelpTopic::PROJECT_COMPACT_SEQ : HelpTopic::PROJECT_COMPACT_INST;
+        case ProjectRow::SYSTEM:    return HelpTopic::PROJECT_SYSTEM;
+        case ProjectRow::MIDI:      return HelpTopic::PROJECT_MIDI;
+        case ProjectRow::EXIT:      return HelpTopic::PROJECT_EXIT;
+    }
+    return HelpTopic::NONE;
+}
+
+/** SCALE — the NAME row is the only one with more than one cell; the twelve below it are degrees. */
+inline HelpTopic scale_cell_topic(int row, int column) {
+    if (row == SCALE_NAME_ROW) {
+        if (column == SCALE_NAME_COL_SAVE) return HelpTopic::SCALE_SAVE;
+        if (column == SCALE_NAME_COL_LOAD) return HelpTopic::SCALE_LOAD;
+        return HelpTopic::SCALE_NAME;
+    }
+    if (row == SCALE_KEY_ROW) return HelpTopic::SCALE_KEY;
+    return (scale_row_degree(row) >= 0) ? HelpTopic::SCALE_DEGREE : HelpTopic::NONE;
+}
+
+/**
+ * MODS — the row's MEANING follows the slot's type, so this asks the same three questions the module
+ * asks (`modulation.cpp`): LFO first, then the AHD-shaped pair, then ADSR.
+ *
+ * ⚠️ Row 4 is HOLD on an AHD, DEC on an ADSR and TRIG on an LFO. There is no "the row 4 parameter",
+ * which is why this cannot be a plain table the way PHRASE's columns are.
+ */
+inline HelpTopic mod_cell_topic(songcore::ModType type, int row) {
+    const bool lfo = (type == songcore::ModType::LFO);
+    switch (row) {
+        case 0: return HelpTopic::MOD_TYPE;
+        case 1: return HelpTopic::MOD_DEST;
+        case 2: return HelpTopic::MOD_AMOUNT;
+        case 3: return lfo ? HelpTopic::MOD_OSC : HelpTopic::MOD_ATTACK;
+        case 4:
+            if (lfo) return HelpTopic::MOD_TRIG;
+            return is_ahd_shaped(type) ? HelpTopic::MOD_HOLD : HelpTopic::MOD_DECAY;
+        case 5:
+            if (lfo) return HelpTopic::MOD_FREQ;
+            return is_ahd_shaped(type) ? HelpTopic::MOD_DECAY : HelpTopic::MOD_SUSTAIN;
+        case 6: return HelpTopic::MOD_RELEASE;
+        default: return HelpTopic::NONE;
+    }
+}
+
+/**
+ * INST.POOL — its four value columns ARE the instrument's own fields, so they take the INSTRUMENT
+ * screen's entries rather than a second set that could drift from them. Only the name column, whose
+ * A and A+B belong to the pool alone, has text of its own.
+ */
+inline HelpTopic pool_cell_topic(int column) {
+    switch (column) {
+        case 1:  return HelpTopic::INST_VOLUME;
+        case 2:  return HelpTopic::INST_REVERB_SEND;
+        case 3:  return HelpTopic::INST_DELAY_SEND;
+        case 4:  return HelpTopic::INST_EQ;
+        default: return HelpTopic::POOL_SLOT;
+    }
+}
+
+/** MIXER — not a grid: rows 2 and 3 exist only on the master strip (column 8). See `mixer.h`. */
+inline HelpTopic mixer_cell_topic(int master_row, int column) {
+    if (master_row == 0)
+        return (column < 8) ? HelpTopic::MIXER_TRACK_VOL : HelpTopic::MIXER_MASTER_VOL;
+    if (master_row == 1) {
+        if (column == 0) return HelpTopic::MIXER_REVERB_RETURN;
+        if (column == 1) return HelpTopic::MIXER_DELAY_RETURN;
+        if (column == 8) return HelpTopic::MIXER_MASTER_EQ;
+        return HelpTopic::NONE;
+    }
+    if (column != 8) return HelpTopic::NONE;
+    if (master_row == 2) return HelpTopic::MIXER_MASTER_FX;
+    if (master_row == 3) return HelpTopic::MIXER_LIMITER;
+    return HelpTopic::NONE;
+}
+
+/** EFFECTS — eight editable rows, named by the module so the two cannot disagree about which is which. */
+inline HelpTopic effects_cell_topic(int row) {
+    switch (row) {
+        case EffectModule::ROW_MASTER_TYPE: return HelpTopic::FX_MASTER_TYPE;
+        case EffectModule::ROW_REV_SIZE:    return HelpTopic::FX_REVERB_SIZE;
+        case EffectModule::ROW_REV_DAMP:    return HelpTopic::FX_REVERB_DAMP;
+        case EffectModule::ROW_REV_EQ:      return HelpTopic::FX_REVERB_EQ;
+        case EffectModule::ROW_DLY_TIME:    return HelpTopic::FX_DELAY_TIME;
+        case EffectModule::ROW_DLY_FDBK:    return HelpTopic::FX_DELAY_FEEDBACK;
+        case EffectModule::ROW_DLY_REV:     return HelpTopic::FX_DELAY_TO_REVERB;
+        case EffectModule::ROW_DLY_EQ:      return HelpTopic::FX_DELAY_EQ;
+        default:                            return HelpTopic::NONE;
+    }
+}
+
+/**
+ * SETTINGS — column 2 is the row's SECOND cell where it has one (the skin, STR, VOL, POW, ENG), and
+ * on TEMPLATE it is the second BUTTON. Column 0 is the label and is unreachable, as on PROJECT.
+ */
+inline HelpTopic settings_cell_topic(int row, int column) {
+    if (row < 0 || row >= SETTINGS_ROW_COUNT) return HelpTopic::NONE;
+    const bool second = (column == 2);
+    switch (static_cast<SettingsRow>(row)) {
+        case SettingsRow::LAYOUT:     return second ? HelpTopic::SET_SKIN : HelpTopic::SET_LAYOUT;
+        case SettingsRow::SCALING:    return HelpTopic::SET_SCALING;
+        case SettingsRow::OVERLAY:
+            return second ? HelpTopic::SET_OVERLAY_STRENGTH : HelpTopic::SET_OVERLAY;
+        case SettingsRow::BTN_SOUND:
+            return second ? HelpTopic::SET_BTN_SOUND_VOL : HelpTopic::SET_BTN_SOUND;
+        case SettingsRow::BTN_VIBRO:
+            return second ? HelpTopic::SET_BTN_VIBRO_POW : HelpTopic::SET_BTN_VIBRO;
+        case SettingsRow::ABXY:       return HelpTopic::SET_ABXY;
+        case SettingsRow::KB_INSERT:  return HelpTopic::SET_KB_INSERT;
+        case SettingsRow::CURSOR:     return HelpTopic::SET_CURSOR;
+        case SettingsRow::NAV:        return HelpTopic::SET_NAV;
+        case SettingsRow::FOLDER:     return HelpTopic::SET_FOLDER;
+        case SettingsRow::NOTE_PREV:  return HelpTopic::SET_NOTE_PREVIEW;
+        case SettingsRow::VISUALIZER: return HelpTopic::SET_VISUALIZER;
+        case SettingsRow::THEME:      return HelpTopic::SET_THEME;
+        case SettingsRow::TEMPLATE:
+            return second ? HelpTopic::SET_TEMPLATE_CLEAR : HelpTopic::SET_TEMPLATE_SAVE;
+        case SettingsRow::RESUME:     return HelpTopic::SET_RESUME;
+        case SettingsRow::TRACE:      return second ? HelpTopic::SET_ENGINE : HelpTopic::SET_TRACE;
+    }
+    return HelpTopic::NONE;
+}
+
+/** MIDI — one topic per row. IN CH is eight cells that all mean the same thing, one per track. */
+inline HelpTopic midi_cell_topic(int row) {
+    if (row < 0 || row >= MIDI_ROW_COUNT) return HelpTopic::NONE;
+    switch (static_cast<MidiRow>(row)) {
+        case MidiRow::OUTPUT:   return HelpTopic::MIDI_OUTPUT;
+        case MidiRow::INPUT:    return HelpTopic::MIDI_INPUT;
+        case MidiRow::OFFSET:   return HelpTopic::MIDI_OFFSET;
+        case MidiRow::SYNC:     return HelpTopic::MIDI_SYNC;
+        case MidiRow::PROG_CHG: return HelpTopic::MIDI_PROG_CHG;
+        case MidiRow::IN_MAP:   return HelpTopic::MIDI_IN_CHANNEL;
+        case MidiRow::PANIC:    return HelpTopic::MIDI_PANIC;
+        case MidiRow::TEST:     return HelpTopic::MIDI_TEST;
+    }
+    return HelpTopic::NONE;
+}
+
+/** The EQ editor's cursor is one int over a 3×4 grid: band = row / 4, parameter = row % 4. */
+inline HelpTopic eq_cell_topic(int cursor_row) {
+    if (cursor_row < 0) return HelpTopic::NONE;
+    switch (cursor_row % 4) {
+        case 0:  return HelpTopic::EQ_TYPE;
+        case 1:  return HelpTopic::EQ_FREQ;
+        case 2:  return HelpTopic::EQ_GAIN;
+        default: return HelpTopic::EQ_Q;
+    }
+}
+
+/**
+ * The theme editor's colour rows, IN `theme_color_rows()` ORDER (ui/theme.h) — its row N is this
+ * array's entry N.
+ *
+ * ⚠️ A colour row added there and not here falls off the end and shows the screen text instead. That
+ * is the same fallback every unwritten cell in this file gets, and it is the only direction the
+ * mismatch can go: the lookup bounds itself on THIS array, so it can never read past either list.
+ */
+inline constexpr HelpTopic THEME_COLOR_TOPICS[] = {
+    HelpTopic::THEME_BACKGROUND, HelpTopic::THEME_ROW_4TH,     HelpTopic::THEME_ROW_CURSOR,
+    HelpTopic::THEME_ROW_SELECT, HelpTopic::THEME_TXT_TITLE,   HelpTopic::THEME_TXT_PARAM,
+    HelpTopic::THEME_TXT_VALUE,  HelpTopic::THEME_TXT_CURSOR,  HelpTopic::THEME_TXT_EMPTY,
+    HelpTopic::THEME_TXT_SELECT, HelpTopic::THEME_TXT_PLAY,    HelpTopic::THEME_VIZ_BG,
+    HelpTopic::THEME_VIZ_LINE,   HelpTopic::THEME_VIZ_WAVE,    HelpTopic::THEME_MTR_BG,
+    HelpTopic::THEME_MTR_LOW,    HelpTopic::THEME_MTR_MID,     HelpTopic::THEME_MTR_HIGH,
+    HelpTopic::THEME_EQ_BG,      HelpTopic::THEME_EQ_FILL,     HelpTopic::THEME_EQ_BORDER,
+    HelpTopic::THEME_EQ_TXT,
+};
+
+/**
+ * The theme editor. Row 0 is the palette row — its three cells are the name, SAVE and LOAD — and
+ * every row below it is one colour, whose three channels all say the same thing.
+ */
+inline HelpTopic theme_cell_topic(int row, int channel) {
+    if (row == 0) {
+        if (channel == 1) return HelpTopic::THEME_SAVE;
+        if (channel == 2) return HelpTopic::THEME_LOAD;
+        return HelpTopic::THEME_NAME;
+    }
+    const int index = row - 1;
+    const int count = static_cast<int>(sizeof(THEME_COLOR_TOPICS) / sizeof(THEME_COLOR_TOPICS[0]));
+    return (index >= 0 && index < count) ? THEME_COLOR_TOPICS[index] : HelpTopic::NONE;
+}
+
 }  // namespace detail
 
 /**
@@ -502,6 +1098,21 @@ inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int co
  * no arm here falls through to its screen topic, which is what makes an unfinished table harmless.
  */
 inline HelpTopic help_topic(const AppState& s) {
+    // ⚠️ THE TWO IN-PLACE OVERLAYS ARE ASKED FIRST, and they have to be: neither changes
+    // `currentScreen`, so the screen underneath is still the answer to every question about where the
+    // cursor is — and it is not on the canvas. Asking it would explain a cell nobody can see.
+    // ⚠️ The EQ editor outranks the theme editor because it is the one that can be up over the SAMPLE
+    // EDITOR (which is where it brings the strip back at all); the two can never be open together.
+    if (s.eq.isOpen) {
+        const HelpTopic eq = detail::eq_cell_topic(s.eq.cursorRow);
+        return (eq == HelpTopic::NONE) ? HelpTopic::SCREEN_EQ : eq;
+    }
+    if (s.themeEditor.isOpen) {
+        const HelpTopic th =
+            detail::theme_cell_topic(s.themeEditor.cursorRow, s.themeEditor.cursorChannel);
+        return (th == HelpTopic::NONE) ? HelpTopic::SCREEN_THEME : th;
+    }
+
     HelpTopic cell = HelpTopic::NONE;
 
     switch (s.currentScreen) {
@@ -528,6 +1139,43 @@ inline HelpTopic help_topic(const AppState& s) {
                 cell = detail::instrument_topic(ins.instrumentType, s.instrumentCursorRow,
                                                 s.instrumentCursorColumn);
             }
+            break;
+        case ScreenType::PROJECT:
+            cell = detail::project_cell_topic(s.projectCursorRow, s.projectCursorColumn);
+            break;
+        case ScreenType::GROOVE:
+            // One editable column, and the cursor is never anywhere else: the screen is 16 TIC cells.
+            cell = HelpTopic::GROOVE_TIC;
+            break;
+        case ScreenType::SCALE:
+            cell = detail::scale_cell_topic(s.scaleCursorRow, s.scaleCursorColumn);
+            break;
+        case ScreenType::MODS:
+            // Guarded like INSTRUMENT above, and for the same reason: the tools build an AppState
+            // with no project at all.
+            if (s.project != nullptr) {
+                const songcore::Instrument& ins =
+                    s.project->instruments[static_cast<size_t>(s.currentInstrument)];
+                // The cursor is (pair, side, row) here — the slot is which HALF of which pair.
+                const size_t slot = static_cast<size_t>(s.modCursorPair * 2 + s.modCursorSide);
+                if (slot < ins.modSlots.size())
+                    cell = detail::mod_cell_topic(ins.modSlots[slot].type, s.modCursorRow);
+            }
+            break;
+        case ScreenType::INST_POOL:
+            cell = detail::pool_cell_topic(s.poolCursorColumn);
+            break;
+        case ScreenType::MIXER:
+            cell = detail::mixer_cell_topic(s.mixerMasterRow, s.mixerCursorColumn);
+            break;
+        case ScreenType::EFFECTS:
+            cell = detail::effects_cell_topic(s.effectsCursorRow);
+            break;
+        case ScreenType::SETTINGS:
+            cell = detail::settings_cell_topic(s.settingsCursorRow, s.settingsCursorColumn);
+            break;
+        case ScreenType::MIDI:
+            cell = detail::midi_cell_topic(s.midiCursorRow);
             break;
         default:
             break;

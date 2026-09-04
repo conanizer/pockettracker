@@ -19,8 +19,6 @@ constexpr int VAL_X2  = 390;
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-bool is_ahd_shaped(ModType t) { return t == ModType::AHD || t == ModType::DRUM; }
-
 /** A list entry, or "???" if the stored index is out of range — Kotlin's `getOrElse { "???" }`. */
 std::string at_or_unknown(const std::vector<std::string>& list, int index) {
     if (index < 0 || index >= static_cast<int>(list.size())) return "???";

@@ -58,6 +58,18 @@ inline const std::vector<songcore::ModType>& user_mod_types() {
 }
 
 /**
+ * Does this type lay its rows out the way AHD does — ATK, HOLD, DEC rather than ATK, DEC, SUS, REL?
+ *
+ * ⚠️ It answers for the SCREEN, not for the engine: DRUM is its own envelope, and it shares AHD's
+ * three rows only because the two describe a shape with the same three times. Every reader of a MODS
+ * row below row 2 has to ask this — the labels, the values, the cursor context, the input handler and
+ * the help text all key on it — so it is asked in one place.
+ */
+inline bool is_ahd_shaped(songcore::ModType t) {
+    return t == songcore::ModType::AHD || t == songcore::ModType::DRUM;
+}
+
+/**
  * The row labels for a slot of this type. Its size is `mod_slot_row_count`.
  *
  * By reference to a static, like `user_mod_types` above and every other vocabulary in the tree: the
