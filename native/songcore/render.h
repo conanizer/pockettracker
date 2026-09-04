@@ -31,6 +31,13 @@
 //       whole render's peak.) render_to_wav now keeps going until the output has decayed below
 //       −90 dBFS, capped so a runaway feedback delay cannot render forever.
 //
+//   (c) …AND THEN NOTHING ENDED THE NOTES. A looping sample and a held SoundFont note do not decay,
+//       so waiting for the output to fall below −90 dBFS waited for the runaway cap: every such song
+//       exported to a file with TAIL_MAX_SECONDS of leftover ringing on the end, cut mid-waveform
+//       when it expired. The sequence running out now releases every track (scheduleReleaseAll) at
+//       the frame the last step ends on, so what follows the music is what a listener would expect
+//       to follow it — the notes' own release envelopes, the reverb and the delay repeats.
+//
 // Live playback cannot be affected by any of this: resetEffectState()'s only callers are here.
 
 #include <algorithm>
@@ -120,6 +127,11 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
 
     std::vector<float> buf(static_cast<size_t>(RENDER_CHUNK_FRAMES) * 2);
 
+    // ── the sequence ends, so the notes do (c) ──
+    // Queued now, at the exact frame the last step ends on, so it rides the same sample-accurate
+    // timeline as every other scheduled event rather than landing on a chunk boundary.
+    engine.scheduleReleaseAll(songFrames);
+
     // ── the song ──
     int64_t rendered = 0;
     while (rendered < songFrames) {
@@ -141,6 +153,10 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
     // being silently dropped. That is the right answer musically, but it means the "tail" is not
     // purely a decay — a project that keeps retriggering past the end will keep it alive, which is
     // what TAIL_MAX_SECONDS is ultimately guarding against.
+    //
+    // ⚠️ AND THE RELEASE ABOVE HAS ALREADY GONE BY when one of those notes starts, so a note the
+    // final step throws PAST the end is on its own: if it loops, it rings until the cap. Releasing
+    // repeatedly through the tail would cut those notes off at birth, which is the worse answer.
     if (progress) progress(1.0f);
     const int64_t maxTail = static_cast<int64_t>(TAIL_MAX_SECONDS) * sampleRate;
     int64_t tail = 0;

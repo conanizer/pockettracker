@@ -3089,6 +3089,12 @@ void AudioEngine::scheduleKeyRelease(int64_t targetFrame, int trackId) {
     killQueue.schedule(kill);
 }
 
+void AudioEngine::scheduleReleaseAll(int64_t targetFrame) {
+    // Every lane, the preview one included — a render owns the whole engine, and a lane with nothing
+    // sounding on it costs one queue entry that finds no voice.
+    for (int t = 0; t < SF_VOICE_COUNT; ++t) scheduleKeyRelease(targetFrame, t);
+}
+
 void AudioEngine::clearScheduledNotes() {
     noteQueue.clear();
     killQueue.clear();
