@@ -323,6 +323,13 @@ enum class HelpTopic {
     SE_OVERWRITE,
     SE_CHOP,
 
+    // ── Appended, because the value indexes HELP_ENTRIES ──────────────────────────────────────────
+    // These belong with the SETTINGS and PROJECT blocks above and are written here for that reason
+    // alone.
+    SET_METRONOME,
+    SET_METRONOME_VOL,
+    PROJECT_TAP,
+
     COUNT
 };
 
@@ -779,6 +786,12 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"OVERWRITE: replace the file", "Writes back over the one", "this sample came from."},
     /* SE_CHOP */
     {"CHOP: every slice as a file", "Writes them into a Chops", "folder named after this one."},
+    /* SET_METRONOME */
+    {"METRONOME: a click on the beat", "One click every four steps,", "while playing. Never exported."},
+    /* SET_METRONOME_VOL */
+    {"VOL: how loud the click is", "00 is silent, FF is full.", ""},
+    /* PROJECT_TAP */
+    {"TAP: set the tempo by feel", "Press A in time, at least twice.", "A pause starts a new count."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -999,7 +1012,8 @@ inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int co
 inline HelpTopic project_cell_topic(int row, int column) {
     if (row < 0 || row >= PROJECT_ROW_COUNT) return HelpTopic::NONE;
     switch (static_cast<ProjectRow>(row)) {
-        case ProjectRow::TEMPO:     return HelpTopic::PROJECT_TEMPO;
+        case ProjectRow::TEMPO:
+            return column == 2 ? HelpTopic::PROJECT_TAP : HelpTopic::PROJECT_TEMPO;
         case ProjectRow::TRANSPOSE: return HelpTopic::PROJECT_TRANSPOSE;
         // Every character of the name is its own cursor column, and they all say the same thing.
         case ProjectRow::NAME:      return HelpTopic::PROJECT_NAME;
@@ -1117,6 +1131,8 @@ inline HelpTopic settings_cell_topic(int row, int column) {
         case SettingsRow::BTN_VIBRO:
             return second ? HelpTopic::SET_BTN_VIBRO_POW : HelpTopic::SET_BTN_VIBRO;
         case SettingsRow::ABXY:       return HelpTopic::SET_ABXY;
+        case SettingsRow::METRONOME:
+            return second ? HelpTopic::SET_METRONOME_VOL : HelpTopic::SET_METRONOME;
         case SettingsRow::KB_INSERT:  return HelpTopic::SET_KB_INSERT;
         case SettingsRow::CURSOR:     return HelpTopic::SET_CURSOR;
         case SettingsRow::NAV:        return HelpTopic::SET_NAV;

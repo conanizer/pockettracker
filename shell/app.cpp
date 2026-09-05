@@ -1471,6 +1471,20 @@ int run(const AppConfig& cfg) {
         // resolved on TABLE. `now` because the meters poll on their own 60 ms cadence, not per frame.
         feed.poll(engineRef, host, state, static_cast<long long>(now));
 
+        // ── SETTINGS > METRONOME, pushed live ────────────────────────────────────────────────────
+        //
+        // Read here, once a frame, rather than pushed from the row that edits it — the same shape
+        // `touch.set_feedback_settings` uses above and for the same reason: two atomic stores cost
+        // nothing, and there is then no mutation site that has to remember to tell the engine. The
+        // GRID (the transport epoch and the beat length) comes from the host, which is the only thing
+        // that knows when a take started; this is only the switch and the level.
+        //
+        // 0x80 lands at -12 dBFS, which sits over a full mix without asking for headroom the master
+        // has already spent. The click is summed below the limiter (audio-engine.h), so the scale is
+        // the finished output's, not the mix bus's.
+        engineRef.setMetronome(state.settings.metronomeEnabled,
+                               static_cast<float>(state.settings.metronomeVolume) / 255.0f * 0.5f);
+
         // ⚠️ **SETTINGS > SCALING, APPLIED — AND UNTIL C4 NOTHING APPLIED IT.** `scalingBilinear` was
         // read from settings.json, written back to it, and drawn as the `SCALING: BILINEAR/INT` row,
         // and `SdlVideo::set_scaling` had ZERO call sites in the entire tree: the video stayed on its

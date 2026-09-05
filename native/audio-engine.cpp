@@ -2525,6 +2525,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     else
         masterChain.limiter.process(output, numFrames, channelCount);
 
+    // ⚠️ AFTER the master chain, and that placement is the point: a click run through the limiter
+    // would duck the whole mix on every beat, and one run through the master EQ would be coloured by
+    // a setting that has nothing to do with it. It is a monitor sitting on top of the finished block.
+    renderMetronome(output, numFrames, channelCount, sampleRate, blockStartFrame, offlineRender);
+
     // Only when an instrument is being monitored (EQ screen), and never block on the UI read.
     if (monitoredInstrId >= 0) {
         std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
@@ -3704,4 +3709,102 @@ void AudioEngine::setOfflineRendering(bool offline) {
 void AudioEngine::setTempo(int tempo) {
     // Clamp to a sane musical range; the table-advance divides by this so it must be > 0.
     currentTempo.store(std::max(1, tempo), std::memory_order_relaxed);
+}
+
+// ─── The metronome ───────────────────────────────────────────────────────────────────────────────
+
+void AudioEngine::setMetronome(bool enabled, float gain) {
+    metronomeOn.store(enabled, std::memory_order_relaxed);
+    metronomeGain.store(std::max(0.0f, std::min(1.0f, gain)), std::memory_order_relaxed);
+}
+
+void AudioEngine::startMetronome(int64_t startFrame, int64_t framesPerBeat) {
+    metronomeBeatFrames.store(framesPerBeat > 0 ? framesPerBeat : 0, std::memory_order_relaxed);
+    metronomeEpoch.store(startFrame, std::memory_order_relaxed);
+}
+
+void AudioEngine::setMetronomeBeat(int64_t framesPerBeat) {
+    if (framesPerBeat > 0) metronomeBeatFrames.store(framesPerBeat, std::memory_order_relaxed);
+}
+
+void AudioEngine::stopMetronome() {
+    metronomeEpoch.store(-1, std::memory_order_relaxed);
+}
+
+void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount, float sampleRate,
+                                  int64_t blockStartFrame, bool offlineRender) {
+    // An export carries the SONG, never the click that was helping the user write it. Also drops the
+    // click in flight, so a render started mid-beat cannot leak its tail into the first block back.
+    if (offlineRender) { metroClickPos_ = -1; return; }
+
+    const int64_t epoch = metronomeEpoch.load(std::memory_order_relaxed);
+    const int64_t beat  = metronomeBeatFrames.load(std::memory_order_relaxed);
+
+    if (epoch != metroEpoch_) {
+        // A new take. The grid is re-pinned to the transport's own start frame, which is what makes
+        // beat 0 the downbeat rather than "wherever the click happened to be".
+        metroEpoch_      = epoch;
+        metroBeatFrames_ = beat;
+        metroIndex_      = 0;
+        metroCount_      = 0;
+        metroClickPos_   = -1;
+    } else if (beat > 0 && beat != metroBeatFrames_) {
+        // TEMPO was turned mid-take. The epoch moves to where the NEXT beat was already going to
+        // fall and the index restarts, so that beat keeps its slot — no beat jumps, doubles or is
+        // lost — and every one after it takes the new spacing. songcore::MidiClock::rebase, same
+        // arithmetic and same reason.
+        metroEpoch_      = metroEpoch_ + metroIndex_ * metroBeatFrames_;
+        metroIndex_      = 0;
+        metroBeatFrames_ = beat;
+    }
+
+    if (!metronomeOn.load(std::memory_order_relaxed)) { metroClickPos_ = -1; return; }
+    const float gain = metronomeGain.load(std::memory_order_relaxed);
+    if (gain <= 0.0f) { metroClickPos_ = -1; return; }
+    if (metroEpoch_ < 0 || metroBeatFrames_ <= 0) return;   // nothing is playing
+
+    // ⚠️ The audio device can STALL AND RESUME — an Android suspend, a CFW power menu — and the frame
+    // counter then jumps by the whole stall at once. Walking the backlog one beat at a time would fire
+    // a click per block until it caught up; snap the grid to where the song actually is instead. The
+    // index still counts every beat the song passed, so the accent stays on the bar.
+    const int64_t behind = blockStartFrame - (metroEpoch_ + metroIndex_ * metroBeatFrames_);
+    if (behind > metroBeatFrames_) {
+        const int64_t skipped = behind / metroBeatFrames_;
+        metroIndex_ += skipped;
+        metroCount_ += skipped;
+    }
+
+    const int clickFrames = std::max(1, static_cast<int>(sampleRate * METRONOME_CLICK_SEC));
+
+    for (int i = 0; i < numFrames; i++) {
+        // A beat always restarts the click, rather than being dropped while one is still sounding:
+        // at 999 BPM a beat is shorter than the click, and a metronome that skips beats when it is
+        // pushed is worse than one that cuts its own tail.
+        if (blockStartFrame + i >= metroEpoch_ + metroIndex_ * metroBeatFrames_) {
+            const bool accent = (metroCount_ % METRONOME_BEATS_PER_BAR) == 0;
+            metroClickPhase_  = 0.0f;
+            metroClickStep_   = 2.0f * static_cast<float>(M_PI) *
+                                (accent ? METRONOME_ACCENT_HZ : METRONOME_BEAT_HZ) / sampleRate;
+            metroClickPos_    = 0;
+            metroIndex_++;
+            metroCount_++;
+        }
+        if (metroClickPos_ < 0) continue;
+
+        // A cubic decay from the first sample, which reaches exactly zero at the end of the window —
+        // an envelope that merely got small would step at the cut. The sine starts at phase 0, so
+        // there is no discontinuity at the onset either.
+        const float t   = static_cast<float>(metroClickPos_) / static_cast<float>(clickFrames);
+        const float env = (1.0f - t) * (1.0f - t) * (1.0f - t);
+        const float s   = sinf(metroClickPhase_) * env * gain;
+        metroClickPhase_ += metroClickStep_;
+        if (++metroClickPos_ >= clickFrames) metroClickPos_ = -1;
+
+        // Clamped, because this is summed BELOW the limiter: a loud mix plus a click can ask for more
+        // than the DAC has, and a hard clip on a 30 ms transient is inaudible where the wrap is not.
+        for (int ch = 0; ch < channelCount; ch++) {
+            float& out = output[i * channelCount + ch];
+            out = fmaxf(-1.0f, fminf(1.0f, out + s));
+        }
+    }
 }

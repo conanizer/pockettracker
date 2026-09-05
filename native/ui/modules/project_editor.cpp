@@ -102,6 +102,20 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     };
 
     param_row(ProjectRow::TEMPO,     "TEMPO",     pad3(p.tempo));
+
+    // ── TAP — the TEMPO row's second CELL ────────────────────────────────────────────────────────
+    //
+    // RIGHT from the value lands here; A on it taps the tempo by feel (the dispatcher owns the
+    // arithmetic). It is drawn like the buttons on the rows below, because that is what it is.
+    //
+    // ⚠️ **A CELL AND NOT A GESTURE ON THE VALUE BESIDE IT, AND THAT IS THE WHOLE REASON IT EXISTS.**
+    // A is the MODIFIER of A+DPAD and the mapper fires the plain-A handler on A's OWN PRESS, before
+    // the direction arrives — so a tap read off the value cell counted every A+UP the user made to
+    // nudge the BPM, and the tempo jumped to the interval between two edits. A cell of its own is the
+    // only place on this row where a bare A can mean something.
+    draw_cursor_cell(c, "TAP", valueX + 80, rowY(ProjectRow::TEMPO) + TEXT_PADDING,
+                     on_cell(ProjectRow::TEMPO, 2), t.textValue, t);
+
     param_row(ProjectRow::TRANSPOSE, "TRANSPOSE", hex2(p.transpose));
 
     // ── NAME — 20 characters, one per cursor column, in a 17-column window ───────────────────────
@@ -223,6 +237,13 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
 
     switch (static_cast<ProjectRow>(s.cursorRow)) {
         case ProjectRow::TEMPO: {
+            // Column 2 is TAP — a BUTTON, like the rows below it. Read-only to the generic edit path;
+            // plain A is the whole of its behaviour and the dispatcher owns that.
+            //
+            // ⚠️ Only column 2, deliberately. Columns 3..20 are unreachable (`project_row_max_column`
+            // stops at 2) and are left answering the tempo cell, which is what Kotlin's row-only
+            // `when` answered for every column and what `p3-input` still records for them.
+            if (s.cursorColumn == 2) return cc::read_only();
             // Decimal, not hex — but a HEX_BYTE context, because the type only decides how the value
             // STEPS and 20..999 steps the same way either way. A+UP/DOWN jumps by 10.
             CursorContext c = cc::hex_byte(p.tempo, 20, 999);
@@ -272,7 +293,11 @@ ProjectInputResult ProjectModule::handle_input(songcore::Project& project, int c
                                                int cursor_column, const InputAction& action) const {
     switch (static_cast<ProjectRow>(cursor_row)) {
         case ProjectRow::TEMPO:
-            if (action.type == ActionType::SET_VALUE)
+            // ⚠️ Guarded on the column, where TRANSPOSE below is not: column 2 is the TAP button and
+            // a button never writes the cell to its left. `cursor_context` already answers read_only
+            // there so no SET_VALUE can be resolved for it — this is the second lock on the same
+            // door, and it costs a comparison.
+            if (cursor_column != 2 && action.type == ActionType::SET_VALUE)
                 project.tempo = clamp(action.value, 20, 999);
             break;
 

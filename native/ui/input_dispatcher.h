@@ -608,6 +608,18 @@ class InputDispatcher {
     songcore::SongcoreHost& host_;
     FileSystem&             fs_;
     long long               now_ms_ = 0;
+    // ── TAP TEMPO (PROJECT > TEMPO, plain A) ─────────────────────────────────────────────────────
+    /** How many gaps between taps are averaged. Four taps in, the number has settled. */
+    static constexpr int       TAP_TEMPO_KEEP       = 4;
+    /** A longer silence than this is a new count, not a gap. 3 s is one beat at 20 BPM — the slowest
+     *  tempo the row accepts, so nothing inside the legal range can be mistaken for a pause. */
+    static constexpr long long TAP_TEMPO_TIMEOUT_MS = 3000;
+    /** Under this and it is a bouncing button, not a tap: 60 ms is 1000 BPM, past the row's ceiling. */
+    static constexpr long long TAP_TEMPO_MIN_MS     = 60;
+    long long tapTempoLastMs_ = 0;                    // 0 = no tap yet this count
+    long long tapTempoGaps_[TAP_TEMPO_KEEP] = {0};    // a ring of the most recent gaps, in ms
+    int       tapTempoCount_ = 0;                     // how many of them are filled (capped at KEEP)
+
     /** When the load in flight opened — what `LOADING_DELAY_MS` is measured from. */
     long long               loadStartMs_ = 0;
     /** …and when it was last drawn, which is what `LOADING_REPAINT_MS` paces. */
@@ -1148,6 +1160,16 @@ class InputDispatcher {
     // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
     /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
     void project_action();
+
+    /**
+     * TAP TEMPO — one press of A on the TEMPO row, in time with what you want to hear.
+     *
+     * The tempo is the average of the last `TAP_TEMPO_KEEP` gaps rather than the last one alone: a
+     * single gap makes the number jump on every uneven tap, and a human tapping by feel is uneven.
+     * The FIRST tap sets no tempo — there is no gap yet to measure — and a gap longer than
+     * `TAP_TEMPO_TIMEOUT_MS` starts a fresh count rather than averaging in a pause.
+     */
+    void tap_tempo();
     /** A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) do anything — the rest are A+DPAD. */
     void settings_action();
 

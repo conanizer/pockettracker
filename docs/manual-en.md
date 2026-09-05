@@ -1327,6 +1327,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 |---|---|
 | NAME | Project name. Tap A to edit it on the keyboard overlay; hold A + LEFT/RIGHT cycles the character under the cursor in place. |
 | TEMPO | BPM. |
+| TEMPO — TAP | Press RIGHT from the tempo value to reach **TAP**, then press A in time with the tempo you want and the number follows your taps. The first tap starts the count and each one after it refines the reading, so tap at least twice. Leave it alone for three seconds and the next press starts a fresh count. |
 | TRANSPOSE | Global semitone offset applied to all tracks. |
 
 ### File operations
@@ -1363,6 +1364,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | SCALING | INT / BILINEAR | Screen scaling algorithm. INT = crisp pixel-perfect integer scaling. BILINEAR = smooth subpixel scaling. |
 | BTN SOUND | ON / OFF (+ VOL) | Play a click sound on button press. The **VOL** sub-column to its right sets click volume (`00`–`FF`). |
 | BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
+| METRONOME | ON / OFF (+ VOL) | A click on every beat — one per four phrase steps — for as long as the song is playing, with an accent on the first beat of each bar. The **VOL** sub-column sets how loud it is (`00`–`FF`). You hear it while you work; it is never written into an exported WAV. |
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
 | NAV | POOL / SONG | What B + D-pad walks. **SONG** (the default) walks the arrangement: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds. **POOL** steps through the 00–FF chain and phrase pools instead, which is what earlier versions did — see §5.4. |

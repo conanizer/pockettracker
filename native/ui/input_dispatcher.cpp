@@ -1500,6 +1500,18 @@ void InputDispatcher::on_a_a() {
         return;
     }
 
+    // ⚠️ TAP TEMPO COUNTS EVERY PRESS, AND ITS FAST HALF ARRIVES HERE RATHER THAN AT `on_button_a`.
+    // The mapper routes a second A inside 300 ms to the double-tap handler, and 300 ms IS 200 BPM —
+    // squarely inside the row's 20..999 range. Without this arm every other tap above 200 BPM would
+    // be swallowed by the insert-position gate below and the tempo would settle at half what was
+    // tapped. Ahead of that gate for the same reason RESAMPLE is: PROJECT never arms an insert.
+    if (s_.currentScreen == ScreenType::PROJECT &&
+        s_.projectCursorRow == static_cast<int>(ProjectRow::TEMPO) &&
+        s_.projectCursorColumn == 2) {
+        tap_tempo();
+        return;
+    }
+
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
     // else is two separate A presses, and each of those already did something (they inserted the
     // LAST-EDITED item — see on_button_a).
@@ -2725,11 +2737,60 @@ void InputDispatcher::project_action() {
             else                    s_.shouldQuit = true;
             break;
 
-        // TEMPO / TRANSPOSE are A+DPAD cells. Plain A does nothing on them, as it does nothing on any
+        // TAP — the TEMPO row's second cell, and A on it alone.
+        //
+        // ⚠️⚠️ **THE COLUMN GUARD IS THE FEATURE, NOT A TIDY-UP.** This arm first ran on the whole
+        // row, and it counted every A+UP the user pressed to nudge the BPM: the mapper fires the
+        // plain-A handler on A's OWN PRESS, so a modifier held down to edit a value is also a bare A
+        // as far as this switch can tell. Reported from the device — "even when i just want to edit
+        // bpm by A+DPAD it changes tempo". The tap needs a cell nothing else is aimed at.
+        case ProjectRow::TEMPO:
+            if (s_.projectCursorColumn == 2) tap_tempo();
+            break;
+
+        // TRANSPOSE is an A+DPAD cell. Plain A does nothing on it, as it does nothing on any other
         // value cell in the app.
         default:
             break;
     }
+}
+
+void InputDispatcher::tap_tempo() {
+    const long long now = now_ms_;
+
+    // A gap this long is a pause, not a beat — start counting again from this tap.
+    if (tapTempoLastMs_ == 0 || now - tapTempoLastMs_ > TAP_TEMPO_TIMEOUT_MS) {
+        tapTempoLastMs_ = now;
+        tapTempoCount_  = 0;
+        return;
+    }
+
+    const long long gap = now - tapTempoLastMs_;
+    // A bounce, or two fingers on one press. Keep the anchor where it was so the NEXT tap still
+    // measures from the last real one rather than from the bounce.
+    if (gap < TAP_TEMPO_MIN_MS) return;
+    tapTempoLastMs_ = now;
+
+    // Shift the ring, newest last. Four entries is small enough that moving them beats the arithmetic
+    // of a write cursor, and it keeps the average a plain sum over `tapTempoCount_`.
+    for (int i = TAP_TEMPO_KEEP - 1; i > 0; --i) tapTempoGaps_[i] = tapTempoGaps_[i - 1];
+    tapTempoGaps_[0] = gap;
+    if (tapTempoCount_ < TAP_TEMPO_KEEP) ++tapTempoCount_;
+
+    long long sum = 0;
+    for (int i = 0; i < tapTempoCount_; ++i) sum += tapTempoGaps_[i];
+    const long long meanMs = sum / tapTempoCount_;
+    if (meanMs <= 0) return;
+
+    // Rounded, not truncated: 120 BPM taps in as a mean of 500 ms and must come out as 120, and a
+    // gap one millisecond either side of that must not read as 119.
+    const int bpm = static_cast<int>((60000 + meanMs / 2) / meanMs);
+
+    Project& p = host_.edit_project();
+    const int clamped = std::min(999, std::max(20, bpm));
+    if (p.tempo == clamped) return;   // no edit, so no dirty bump and no lookahead rollback
+    p.tempo = clamped;
+    mark_modified();
 }
 
 void InputDispatcher::settings_action() {

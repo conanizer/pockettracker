@@ -52,6 +52,7 @@ namespace pt::ui {
  * 13 FOLDER      REMEMBER / REFRESH                 (v0.9.4 D2a — remember the last sample folder)
  * 14 NAV         POOL / SONG                        (what B+D-pad walks: the 00..FF pool, or the song)
  * 15 ABXY        AUTO / XBOX / NINTENDO             (which face button is PRINTED A; only with a pad)
+ * 16 METRONOME   ON / OFF, + VOL                    (a click on every quarter note while playing)
  */
 enum class SettingsRow {
     LAYOUT     = 0,
@@ -82,9 +83,13 @@ enum class SettingsRow {
     // It DRAWS beside BTN SOUND / BTN VIBRO - the device-input cluster - and that is a POSITION, not
     // an identity; SETTINGS_DISPLAY_ORDER is where it is said.
     ABXY       = 15,
+    // APPENDED for the same reason as the three above it. It is NOT a device row - every platform
+    // has a metronome - but it DRAWS with the device cluster, which is a position and not an
+    // identity; SETTINGS_DISPLAY_ORDER is where that is said.
+    METRONOME  = 16,
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 16;
+inline constexpr int SETTINGS_ROW_COUNT = 17;
 
 // ─── Display / navigation order ──────────────────────────────────────────────────────────────────
 //
@@ -98,6 +103,7 @@ inline constexpr int SETTINGS_ROW_COUNT = 16;
 inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::LAYOUT,   SettingsRow::SCALING,   SettingsRow::OVERLAY,
     SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO, SettingsRow::ABXY,
+    SettingsRow::METRONOME,
     SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
     SettingsRow::FOLDER,    SettingsRow::NOTE_PREV,
     SettingsRow::VISUALIZER, SettingsRow::THEME,    SettingsRow::TEMPLATE,
@@ -115,10 +121,11 @@ inline int settings_display_index(SettingsRow row) {
 inline bool settings_row_gap_after(SettingsRow row) {
     switch (row) {
         case SettingsRow::OVERLAY:    // …before BTN SOUND
-        // The gap MOVED from BTN VIBRO to ABXY when ABXY joined the cluster, and the arithmetic is
-        // why it does not matter that ABXY is usually hidden: a hidden row still contributes its gap
-        // (settings_row_offset_y), so the air before KB INSERT is one row either way - what it was.
-        case SettingsRow::ABXY:       // …before KB INSERT
+        // The gap sits on whichever row is LAST in that cluster - it was BTN VIBRO, then ABXY, and
+        // now METRONOME. The arithmetic is why it does not matter that the rows above it are usually
+        // hidden: a hidden row still contributes its gap (settings_row_offset_y), so the air before
+        // KB INSERT is one row either way - what it was.
+        case SettingsRow::METRONOME:  // …before KB INSERT
         case SettingsRow::NOTE_PREV:  // …before VISUALIZER
         case SettingsRow::THEME:      // …before TEMPLATE
             // FOLDER and NAV sit mid-group between CURSOR and NOTE PREV (SETTINGS_DISPLAY_ORDER), so
@@ -141,8 +148,9 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
         case SettingsRow::RESUME:    return caps.autosave;
         case SettingsRow::TRACE:     return caps.debug;
 
-        // SCALING, KB INSERT, CURSOR, NAV, NOTE PREV, VISUALIZER, THEME and TEMPLATE are about the
-        // app, not the device. Every platform has them.
+        // SCALING, KB INSERT, CURSOR, NAV, NOTE PREV, VISUALIZER, THEME, TEMPLATE and METRONOME are
+        // about the app, not the device. Every platform has them — METRONOME draws with the device
+        // cluster but the engine makes its click, so there is no capability to gate it on.
         //
         // ⚠️ NAV IS DELIBERATELY NOT DEBUG-GATED, where a half-built feature normally would be. Under
         // NAV = SONG a phrase that is not placed in the arrangement cannot be reached at all, and this
@@ -198,6 +206,7 @@ inline bool settings_row_has_second_column(SettingsRow row, const PlatformCaps& 
         case SettingsRow::OVERLAY:   // STR
         case SettingsRow::BTN_SOUND: // VOL
         case SettingsRow::BTN_VIBRO: // POW
+        case SettingsRow::METRONOME: // VOL
         case SettingsRow::TEMPLATE:  // SAVE | CLEAR
             return true;
         case SettingsRow::TRACE:     return caps.engineToggle;  // ENG
@@ -356,6 +365,11 @@ inline int project_row_max_column(ProjectRow row) {
         case ProjectRow::PROJECT: return 3;   // SAVE | LOAD | NEW
         case ProjectRow::EXPORT:  return 2;   // MIX | STEMS
         case ProjectRow::COMPACT: return 2;   // SEQ | INST
+        // TEMPO's second column is TAP - a BUTTON, not a value. ⚠️ It has to be a cell the cursor
+        // stands on, and not a gesture on the value cell beside it: A is the MODIFIER of A+DPAD and
+        // its press fires the plain-A handler before the direction arrives, so a tap read off the
+        // value cell counts every A+UP the user makes to nudge the BPM.
+        case ProjectRow::TEMPO:   return 2;   // the value | TAP
         default:                  return 1;
     }
 }

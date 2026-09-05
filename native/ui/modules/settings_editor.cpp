@@ -117,6 +117,9 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     param_row(SettingsRow::ABXY, "ABXY",
               abxy_name(static_cast<AbxyLayout>(clamp(v.abxyIndex, 0, 2))));
 
+    dual_row(SettingsRow::METRONOME, "METRONOME", on_off(v.metronomeEnabled),
+             "VOL", hex2(v.metronomeVolume));
+
     param_row(SettingsRow::KB_INSERT, "KB INSERT", v.insertBefore ? "BEFORE" : "AFTER");
     param_row(SettingsRow::CURSOR,    "CURSOR",    v.cursorRemember ? "REMEMBER" : "REFRESH");
     param_row(SettingsRow::NAV,       "NAV",       v.navSongRelative ? "SONG" : "POOL");
@@ -209,6 +212,10 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
             if (s.cursorColumn == 1) return cc::toggle_binary(v.buttonVibroEnabled);
             return cc::toggle_binary(v.vibroPower >= 128);  // LO / HI, not a 0..255 knob
 
+        case SettingsRow::METRONOME:
+            if (s.cursorColumn == 1) return cc::toggle_binary(v.metronomeEnabled);
+            return cc::hex_byte(v.metronomeVolume, 0, 255);
+
         case SettingsRow::ABXY:       return cc::enum_cycle(v.abxyIndex, 3);
         case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
@@ -291,6 +298,13 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
                 if (cursor_column == 1)      v.buttonVibroEnabled = action.value > 0;
                 // LO/HI switch: store 64 (→EFFECT_TICK) or 255 (→EFFECT_CLICK). See the draw note.
                 else if (cursor_column == 2) v.vibroPower         = (action.value > 0) ? 255 : 64;
+            }
+            break;
+
+        case SettingsRow::METRONOME:
+            if (set) {
+                if (cursor_column == 1)      v.metronomeEnabled = action.value > 0;
+                else if (cursor_column == 2) v.metronomeVolume  = clamp(action.value, 0, 255);
             }
             break;
 

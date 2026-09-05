@@ -97,6 +97,18 @@ struct SettingsValues {
     // states, and unplugging the pad would forget the choice.
     bool touchButtonsWithPad = false;
 
+    // ── METRONOME — drawn with the cluster above, but on every platform ──────────────────────────
+    //
+    // A click on every quarter note while the transport runs, made by the audio engine (audio-engine.h)
+    // and never written into an export. OFF is today's behaviour, so an existing install is unchanged
+    // by the key being absent from its settings.json — the trap settings_store.h names.
+    //
+    // VOL is the click's level, on the same 00..FF scale as BTN SOUND's, and it is drawn whether the
+    // toggle is ON or OFF exactly as BTN SOUND's VOL is: a knob that vanishes cannot be set before the
+    // thing it belongs to is switched on.
+    bool metronomeEnabled = false;
+    int  metronomeVolume  = 0x80;
+
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
     // BILINEAR, not INTEGER: integer scaling only fills the screen on a display that is an exact
     // multiple of 640×480, and on everything else — the portrait overlay above all — it leaves the

@@ -238,6 +238,12 @@ whole block and not a per-voice gain: `VMV` and a `VTR`/`VMV` automation ramp bo
 parameter queue, which drains once per block, so a per-voice application would buy no extra
 resolution and would silently exclude the returns.
 
+The **metronome is the one thing that is not on that path at all.** Its click is summed in below the
+limiter, carries no event, and is muted whenever `isOfflineRendering` is set — so it is never
+compressed by the master chain, never visible to the trace tools, and never written into an export.
+Its grid is a quarter note measured from the transport's own start frame, which is the same grid the
+24 PPQN MIDI clock runs on; groove is per track and moves neither of them.
+
 ### Voices
 
 Two voice types — `SamplerVoice` and `SoundfontVoice` — both driven by the same note path. A

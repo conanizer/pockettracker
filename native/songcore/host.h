@@ -340,6 +340,7 @@ class SongcoreHost {
         if (engine_) {
             engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
             engine_->stopAll();               // …and the voices already sounding (instant — no fade)
+            engine_->stopMetronome();         // …and the click, which is not queued and not a voice
         }
         consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes/stopAll
         flush_trace();
@@ -364,6 +365,9 @@ class SongcoreHost {
         // must be released even when nothing is playing, because a LEN gate and a panic's note-offs are
         // things we OWE after the last note was scheduled. `pump` is idempotent on an empty queue.
         if (!midiPumpExternal_) external_.pump(seq_.clock());
+        // TEMPO is editable while playing, so the beat length is pushed rather than remembered —
+        // exactly as it is handed to `MidiClock::pump` on every call, and for the same reason.
+        if (engine_) engine_->setMetronomeBeat(frames_per_quarter());
         flush_trace();
     }
 
@@ -1297,7 +1301,21 @@ class SongcoreHost {
     int64_t after_play() {
         resync_soundfont_slots();
         flush_trace();
+        // Every play verb goes through here, which is what makes this the one place the metronome's
+        // grid can be pinned — the take's own start frame, so beat 0 is the downbeat by construction.
+        if (engine_) engine_->startMetronome(seq_.playback_start_frame(), frames_per_quarter());
         return seq_.playback_start_frame();
+    }
+
+    /**
+     * Frames in one quarter note at the LIVE tempo — four phrase steps (16ths).
+     *
+     * ⚠️ The same expression `ExternalConsumer::frames_per_quarter` uses, and for the same reason:
+     * multiplying the already-truncated `frames_per_step` keeps the beat on the rounded grid the
+     * scheduler puts notes on, rather than on a more accurate one they would drift away from.
+     */
+    int64_t frames_per_quarter() const {
+        return frames_per_step(project_.tempo, sampleRate_) * 4;
     }
 
     /**

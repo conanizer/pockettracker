@@ -70,6 +70,12 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.abxyIndex          = clamp(get_int(j, "abxy", values.abxyIndex), 0, 2);
     values.touchButtonsWithPad = get_bool(j, "touchButtonsWithPad", values.touchButtonsWithPad);
 
+    // METRONOME — a row EVERY platform has, so it is persisted here under the same rule NAV is.
+    // ⚠️ Both defaults are what the app already did (no click at all), so a settings.json written
+    // before this row existed leaves an upgrading user exactly where they were.
+    values.metronomeEnabled   = get_bool(j, "metronome", values.metronomeEnabled);
+    values.metronomeVolume    = clamp(get_int(j, "metronomeVolume", values.metronomeVolume), 0, 255);
+
     // ── MIDI (B4.3) — the CABLE's half. The song's half is in the .ptp. ──────────────────────────
     //
     // ⚠️ THE DEVICE IS A NAME AND NOT AN INDEX, and MIDI is the case that rule exists for: a port list
@@ -189,6 +195,8 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["navSongRelative"]    = values.navSongRelative;   // the NAV row — POOL / SONG
     j["abxy"]               = values.abxyIndex;            // the ABXY row - 0 AUTO, 1 XBOX, 2 NINTENDO
     j["touchButtonsWithPad"] = values.touchButtonsWithPad; // LAYOUT s FULL / PORTRAIT under a pad
+    j["metronome"]          = values.metronomeEnabled;     // the METRONOME row - the click and its VOL
+    j["metronomeVolume"]    = values.metronomeVolume;
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);

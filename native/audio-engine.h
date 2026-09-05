@@ -676,6 +676,30 @@ public:
     // 9=reverb-return-only, 10=delay-return-only. OTT/DUST/masterEQ are bypassed for non-zero modes.
     void setStemsMode(int mode) { stemsMode = mode; }
 
+    // ── The METRONOME ────────────────────────────────────────────────────────────────────────────
+    //
+    // A monitoring aid, and deliberately NOT part of the song: it carries no event, it is summed in
+    // AFTER the master chain rather than through it, and it is silent while isOfflineRendering — an
+    // export of a song written with the metronome on must not have a click baked into it.
+    //
+    // The grid is a QUARTER NOTE (four phrase steps) measured from the transport's own start frame,
+    // which is the same grid songcore::MidiClock puts its 24 PPQN ticks on, pinned the same way: a
+    // beat is `epoch + k * framesPerBeat`, never `next += period`, so there is no accumulator to drift.
+    // GROOVE is per track and cannot move it — a swung track swings against a steady click, which is
+    // what a metronome is for.
+
+    /** SETTINGS > METRONOME. `gain` is the click's peak amplitude; 0 silences it, as does `enabled`. */
+    void setMetronome(bool enabled, float gain);
+
+    /** The transport started at `startFrame` — pin beat 0, the accented one, to it. */
+    void startMetronome(int64_t startFrame, int64_t framesPerBeat);
+
+    /** The LIVE tempo, pushed once a poll. A change respaces the grid from the next beat onward. */
+    void setMetronomeBeat(int64_t framesPerBeat);
+
+    /** The transport ended. */
+    void stopMetronome();
+
 private:
     /** Backs lastLoadFailure(). Written by every load path, including the ones that succeed. */
     LoadFailure lastLoadFailure_ = LoadFailure::NONE;
@@ -693,6 +717,14 @@ private:
      * Repeat calls are free — a `thread_local` flag makes it a no-op after the first.
      */
     static void setFlushToZeroForCurrentThread();
+
+    /**
+     * Sum the metronome click into an already-finished block. Called from processAudioBlock, below
+     * the master chain, so the click is neither compressed by the limiter nor coloured by the bus FX
+     * — it is a monitor, not a part of the mix. Silent during an offline render.
+     */
+    void renderMetronome(float* output, int numFrames, int channelCount, float sampleRate,
+                         int64_t blockStartFrame, bool offlineRender);
 
     // ⚠️ THE GRANULARITY AT WHICH EVENTS ARE RESOLVED, and the size of every per-block buffer.
     // The two are ONE constant on purpose: the correctness limit is the tighter of the pair, so a
@@ -897,6 +929,30 @@ private:
     uint32_t noteSeedEntropy = 0x9E3779B9u;
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
+
+    // ── The metronome, across the thread boundary ────────────────────────────────────────────────
+    // Written by the UI/host thread, read once a block by the audio thread. Relaxed atomics for the
+    // same reason globalFrameCounter is one: it makes the read formally race-free at zero cost, and a
+    // block of slightly-stale tempo or volume is inaudible.
+    std::atomic<bool>    metronomeOn{false};
+    std::atomic<float>   metronomeGain{0.0f};       // the click's peak amplitude
+    std::atomic<int64_t> metronomeEpoch{-1};        // the transport's start frame; -1 = stopped
+    std::atomic<int64_t> metronomeBeatFrames{0};    // frames in a quarter note at the live tempo
+    // ⚠️ AUDIO THREAD ONLY, like trackGate above — the grid the block walks, and the click in flight.
+    // `metroIndex_` counts beats since the current epoch (it restarts when a tempo change rebases the
+    // grid); `metroCount_` counts them since the transport started, which is what the bar accent is on
+    // — reset the accent with the grid and every tempo nudge would move the downbeat.
+    int64_t metroEpoch_      = -1;
+    int64_t metroBeatFrames_ = 0;
+    int64_t metroIndex_      = 0;
+    int64_t metroCount_      = 0;
+    int     metroClickPos_   = -1;    // frames into the click being rendered; -1 = idle
+    float   metroClickPhase_ = 0.0f;  // the click oscillator's phase, in radians
+    float   metroClickStep_  = 0.0f;  // …and its per-frame advance
+    static constexpr float METRONOME_CLICK_SEC = 0.030f;  // one click, start to silence
+    static constexpr float METRONOME_ACCENT_HZ = 2093.0f; // the downbeat  (C7)
+    static constexpr float METRONOME_BEAT_HZ   = 1046.5f; // the other three (C6)
+    static constexpr int   METRONOME_BEATS_PER_BAR = 4;   // 16 phrase steps — one phrase
     // Set by a table row's EQM, consumed by takeTableMasterEqTouched(). Audio thread writes,
     // UI thread reads — atomic for that reason and no other; it is a one-way latch.
     std::atomic<bool> tableMasterEqTouched{false};
