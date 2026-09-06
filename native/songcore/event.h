@@ -183,6 +183,63 @@ constexpr uint8_t CC_SLOT_A = 128, CC_SLOT_B = 129, CC_SLOT_C = 130, CC_SLOT_D =
 constexpr uint8_t CC_TRACK_VOL  = 132;  // scheduleTrackVolume  (authored byte /255)
 constexpr uint8_t CC_MASTER_VOL = 133;  // scheduleMasterVolume (authored byte /255), TRACK_GLOBAL
 
+// ─── ENGINE-ONLY CC ids — the filter, switched ON (LPF / HPF / BPF) ──────────────────────────────
+//
+// ⭐ **THE ID CARRIES THE FILTER TYPE AND THE VALUE CARRIES THE CUTOFF**, which is the whole reason
+// there are three ids rather than one: a bus record holds one value, and these two numbers must
+// arrive on the SAME FRAME or the filter opens a block before it changes shape — an audible click at
+// the head of every sweep. Three ids is the cheapest way to say both things in one record.
+//
+// Engine-only for the same reason the two faders above are: MIDI 1.0 has a controller for a cutoff
+// (74, which CUT already sends) and none at all for a filter TYPE, so there is nothing to put on the
+// wire. `resolve_cc_param` maps them to -1 and `midi_out.h` drops them for free.
+//
+// ⚠️ Neither may reach a `& 0x7F` — 134 masks to CC 6 (data entry), 135 to CC 7 (channel volume),
+// 136 to CC 8 (balance).
+constexpr uint8_t CC_FILTER_LP  = 134;  // scheduleVoiceFilterMode(type 1) (authored byte /255)
+constexpr uint8_t CC_FILTER_HP  = 135;  // scheduleVoiceFilterMode(type 2)
+constexpr uint8_t CC_FILTER_BP  = 136;  // scheduleVoiceFilterMode(type 3)
+
+/** The FilterModule type a CC_FILTER_LP/HP/BP id turns on (1 lp | 2 hp | 3 bp), or 0 for any other. */
+constexpr int cc_filter_mode(int param) {
+    return param == CC_FILTER_LP ? 1 : param == CC_FILTER_HP ? 2 : param == CC_FILTER_BP ? 3 : 0;
+}
+
+// ─── ENGINE-ONLY CC ids — the two dirt commands ────────────────────────────────────────
+//
+// Engine-only for the reason the filter three and the two faders are: the controllers MIDI has for
+// grit are per-synth conventions rather than a standard, so there is nothing to put on the wire.
+// `resolve_cc_param` maps both to -1, so `midi_out.h` drops them for free.
+//
+// ⚠️ **137 IS RETIRED WITH THE COMMAND THAT USED IT** (a sample end point, effects.h). It is left
+// unused rather than reassigned, so no two builds can disagree about what an id on the bus means.
+//
+// ⚠️ CC_CRUSH's value is a byte carrying TWO 4-bit numbers, not a quantity. It survives the /255 and
+// *255 round trip because every byte does, but nothing may interpolate it — see effects.h.
+constexpr uint8_t CC_DRIVE      = 138;  // scheduleVoiceDrive     (authored byte /255)
+constexpr uint8_t CC_CRUSH      = 139;  // scheduleVoiceCrush     (authored byte /255, two nibbles)
+
+// ─── ENGINE-ONLY CC id — fine tune (FIN) ────────────────────────────────────────────────────────
+//
+// ⚠️ **MIDI HAS A FINE TUNE AND IT IS NOT A CC.** RPN 1 is the channel's master fine tuning, sent as
+// a four-message sequence, and it retunes the whole channel rather than the note this command aims
+// at. So there is nothing here to put on the wire either: `resolve_cc_param` maps it to -1 and
+// `midi_out.h` drops it, exactly as it does the three above.
+//
+// ⚠️ It may never reach a `& 0x7F` — 140 masks to CC 12 (effect control 1).
+constexpr uint8_t CC_FINE_TUNE  = 140;  // scheduleVoiceFineTune  (authored byte /255)
+
+// ─── ENGINE-ONLY CC id — the loop-window slide (LPO) ────────────────────────────────────────────
+//
+// ⚠️ **THE VALUE ON THIS LANE IS A STEP, NOT A POSITION**, which makes it the first CC here whose
+// records do not overwrite one another: two LPO cells on one note slide the window twice. Every
+// other id above carries "where the parameter now is", so a lost record there costs a value and a
+// lost record here costs a movement — the same distinction LGPT's relative play-head command draws.
+//
+// MIDI has no controller for it and could not carry it if it did (a wire CC is absolute), so
+// `resolve_cc_param` maps it to -1 and `midi_out.h` drops it, like the four above.
+constexpr uint8_t CC_LOOP_SLIDE = 141;  // scheduleVoiceLoopSlide (authored byte /255)
+
 /** Slot index 0-3 for CC_SLOT_A..D, or -1 for a literal controller number. */
 constexpr int cc_slot_index(uint8_t param) {
     return (param >= CC_SLOT_A && param <= CC_SLOT_D) ? param - CC_SLOT_A : -1;

@@ -172,9 +172,13 @@ inline int mod_dest_code(ModDest dest) {
     }
 }
 
+// ⚠️ **"off" IS THE ANSWER FOR ANY NAME THIS DOES NOT KNOW**, which is how a project written by a
+// newer build opens in an older one: the loop is lost rather than mis-read as the wrong mode. That is
+// the right way to fail and it is SILENT — worth knowing before adding a mode, not after.
 inline int loop_mode_code(const std::string& mode) {
     if (mode == "fwd") return 1;
     if (mode == "png") return 2;
+    if (mode == "osc") return 3;   // a forward loop, scan rate retuned — audio-defs.h
     return 0;
 }
 

@@ -892,6 +892,78 @@ template <typename V> static inline void voiceSetFilterRes(V& v, int res, float 
     voiceSetFilter(v, (int)v.params.base[PARAM_FILTER_CUT], res, sr);
 }
 
+// LPF / HPF / BPF — the one write that switches a filter ON.
+//
+// ⚠️ **IT DELIBERATELY SKIPS `voiceSetFilter`'s `enabled()` GUARD**, which is the whole difference:
+// that guard is what makes CUT and RES inert on an instrument whose FILTER TYPE is OFF, and turning
+// the filter on is what these three are for. Resonance rides along at whatever the voice currently
+// holds — the instrument's, or the last RES — because one FilterModule call takes all four numbers
+// and passing a fresh 0 here would silently undo a RES written on the step before.
+//
+// Per-note like the other two: a note-on rebuilds the chain from the instrument, so a filter opened
+// from a cell is gone by the next note with nothing to restore.
+template <typename V> static inline void voiceSetFilterMode(V& v, int type, int cut, float sr) {
+    const int res = (int)v.params.base[PARAM_FILTER_RES];
+    filterStore(v, cut, res);
+    int modCut = std::max(0, std::min(255, (int)(cut + v.modDestValues[PARAM_FILTER_CUT])));
+    int modRes = std::max(0, std::min(255, (int)(res + v.modDestValues[PARAM_FILTER_RES])));
+    v.chain.filter.setParams(type, modCut, modRes, v.chain.filter.drive, (int)sr);
+}
+
+// ─── DRV / CRU — two writes onto the per-block recompute's own inputs ────────────────────
+//
+// ⚠️ **THE SAMPLER RE-DERIVES BOTH FROM `params.base` EVERY BLOCK AND THE SF VOICE DOES NOT**,
+// and that is the whole difference between the overloads below — the same split `filterStore` makes,
+// for the same reason. A base write IS the command on a sampler voice; on an SF voice, whose chain is
+// set once at trigger, the module has to be written or the value would never be read at all.
+//
+// Per-note by construction: a note-on reseeds the bus and rebuilds the chain from the instrument, so
+// nothing is restored when the note ends.
+
+// LPO. ⚠️ **IT ADDS, WHERE EVERY OTHER SETTER ON THIS PAGE ASSIGNS** — the byte is a signed STEP in
+// sixteenths of the loop's own length, and the voice keeps the running total. Written on a table row
+// it therefore walks the window a step per tic, which is the shape the technique is actually used in.
+// Sampler-only, silently: a SoundFont voice has no sample position to slide.
+static inline void voiceSlideLoop(Voice& v, int byteValue) {
+    v.loopSlideSixteenths += loopSlideSixteenthsOf(byteValue);
+}
+static inline void voiceSlideLoop(SoundfontVoice&, int) {}
+
+static inline void voiceSetDrive(Voice& v, int drive) {
+    v.params.setBase(PARAM_DRIVE, (float)drive);
+}
+static inline void voiceSetDrive(SoundfontVoice& v, int drive) {
+    v.instrParams.drive = drive;   // this voice's own copy: what a later reset would read back
+    v.chain.drive.setDrive(drive);
+}
+
+// ⚠️ The cell is TWO numbers. The sampler passes 0 for downsample at the chain and quantizes the read
+// address instead — a different effect from the module's, and the reason the base write must carry
+// both halves rather than being handed to `crush.setParams` here.
+static inline void voiceSetCrush(Voice& v, int packed) {
+    v.params.setBase(PARAM_CRUSH,      (float)crushBitsOf(packed));
+    v.params.setBase(PARAM_DOWNSAMPLE, (float)crushDownsampleOf(packed));
+}
+static inline void voiceSetCrush(SoundfontVoice& v, int packed) {
+    v.instrParams.crush      = crushBitsOf(packed);
+    v.instrParams.downsample = crushDownsampleOf(packed);
+    v.chain.crush.setParams(v.instrParams.crush, v.instrParams.downsample);
+}
+
+// ─── FIN — the one command that lands in a bus slot the voices ALREADY reset ─────────────────────
+//
+// ⭐ It needs no field of its own: `PARAM_PITCH`'s BASE has been written to zero by both voice types'
+// trigger paths since the bus existed and read by neither, while the MOD half carries the table
+// transpose, the slides and the vibrato. Putting the fine tune in the base is therefore per-note by
+// construction — a trigger clears it — and it cannot collide with any of those.
+//
+// ⚠️ Both voice types have to READ it, and they read it in different places: the sampler folds it
+// into the playback rate (`getModulatedPlaybackRate`), the SoundFont voice into the pitch wheel
+// (`soundfont-voice.cpp`), which also has to count it as active pitch or it re-centres the wheel.
+template <typename V> static inline void voiceSetFineTune(V& v, int byteValue) {
+    v.params.setBase(PARAM_PITCH, fineTuneSemitonesOf(byteValue));
+}
+
 /** A 0-1 CC value back to the 00-FF byte the author typed. */
 static inline int filterByteOf(float value) {
     return std::max(0, std::min(255, (int)(value * 255.0f + 0.5f)));
@@ -1119,6 +1191,30 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
                 voiceSetFilterRes(voice, fxValue, sampleRate);
                 break;
 
+            // LPF / HPF / BPF on a table row. The reason they belong here as much as in a phrase: a
+            // table follows the INSTRUMENT, so one row gives every note that instrument ever plays a
+            // filter — including the CUT and RES rows above it, which without one are inert.
+            case FX_LPF: voiceSetFilterMode(voice, 1, fxValue, sampleRate); break;
+            case FX_HPF: voiceSetFilterMode(voice, 2, fxValue, sampleRate); break;
+            case FX_BPF: voiceSetFilterMode(voice, 3, fxValue, sampleRate); break;
+
+            // DRV / CRU on a table row — the same per-voice writes the FX column makes, once per
+            // tic. A table is where a dirt that rises while the note holds is actually written,
+            // because it wants a value per tic rather than one per step.
+            case FX_DRV: voiceSetDrive(voice, fxValue);     break;
+            case FX_CRU: voiceSetCrush(voice, fxValue);     break;
+
+            // FIN on a table row — a tuning per tic, which is where a chorus or a drifting detune is
+            // actually written. ⚠️ It shares no state with the table's TRANSPOSE column: that column
+            // drives the MOD half of the same bus slot and this writes the BASE, so the two add.
+            case FX_FIN: voiceSetFineTune(voice, fxValue);  break;
+
+            // LPO on a table row, which is where the slide is most of the point: a row under a HOP
+            // walks the loop window a step per tic for as long as the note holds, and that walk is
+            // the drone, the timestretch and the wavetable scan. ⚠️ It ACCUMULATES — a row that fires
+            // 100 tics has moved the window 100 steps, unlike every other arm here.
+            case FX_LPO: voiceSlideLoop(voice, fxValue);    break;
+
             // EQN / EQM on a table row: the same two writes the FX column's EQN and EQM make, once
             // per tic, reached directly rather than through the param queue because the voice is
             // already in hand — the queue's only job on that path is finding it.
@@ -1248,6 +1344,16 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
                 break;
             case FX_CUT: voiceSetFilterCut(voice, value, sampleRate); break;
             case FX_RES: voiceSetFilterRes(voice, value, sampleRate); break;
+            // A ramp over one of these moves the CUTOFF and re-asserts the same type every block, so
+            // a sweep cannot lose the filter it opened with half way through.
+            case FX_LPF: voiceSetFilterMode(voice, 1, value, sampleRate); break;
+            case FX_HPF: voiceSetFilterMode(voice, 2, value, sampleRate); break;
+            case FX_BPF: voiceSetFilterMode(voice, 3, value, sampleRate); break;
+            case FX_DRV: voiceSetDrive(voice, value);     break;
+            // A ramp over FIN is a glide: end to end is two semitones, spread over the AUS window.
+            case FX_FIN: voiceSetFineTune(voice, value);  break;
+            // ⚠️ No FX_CRU arm, and its ARMS row says `rampable = false` — a packed pair of nibbles
+            // is not a quantity to interpolate (songcore/effects.h). The default below drops it.
             default: break;   // the registry admits nothing else the table has an arm for
         }
     }
@@ -1487,6 +1593,63 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         }
                     if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
                         voiceSetFilterRes(sfVoices[upd.trackId], res, sampleRate);
+                    break;
+                }
+                // LPF / HPF / BPF — the type and the cutoff out of ONE record, so the filter opens at
+                // the cutoff it was told rather than a block before it. Unlike the two above this is
+                // NOT inert on a voice whose instrument declares no filter: it declares one.
+                case PARAM_UPDATE_FILTER_MODE: {
+                    int cut  = filterByteOf(upd.value);
+                    int type = (int)upd.value2;
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            voiceSetFilterMode(voices[v], type, cut, sampleRate); break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
+                        voiceSetFilterMode(sfVoices[upd.trackId], type, cut, sampleRate);
+                    break;
+                }
+                // DRV / CRU. One write each onto the input the per-block recompute already
+                // reads, so the change is audible in the block it lands in.
+                case PARAM_UPDATE_DRIVE:
+                case PARAM_UPDATE_CRUSH: {
+                    int byteValue = filterByteOf(upd.value);
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            if (upd.action == PARAM_UPDATE_DRIVE) voiceSetDrive(voices[v], byteValue);
+                            else                                  voiceSetCrush(voices[v], byteValue);
+                            break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive) {
+                        if (upd.action == PARAM_UPDATE_DRIVE) voiceSetDrive(sfVoices[upd.trackId], byteValue);
+                        else                                  voiceSetCrush(sfVoices[upd.trackId], byteValue);
+                    }
+                    break;
+                }
+                // FIN. Its own arm rather than a fourth branch of the chain above: one setter serves
+                // both voice types here, which is exactly what the three above cannot do.
+                case PARAM_UPDATE_FINE_TUNE: {
+                    int byteValue = filterByteOf(upd.value);
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            voiceSetFineTune(voices[v], byteValue); break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
+                        voiceSetFineTune(sfVoices[upd.trackId], byteValue);
+                    break;
+                }
+                // LPO. ⚠️ IT ADDS — every other arm in this switch assigns. The running total is in
+                // SIXTEENTHS of the loop's own length and the mix loop turns it into samples, which
+                // is what keeps sixteen small steps equal to one big one (sampler-voice.h).
+                //
+                // ⚠️ SAMPLER ONLY, and silently so: a SoundFont voice has no sample position to slide,
+                // the same silence OFF keeps.
+                case PARAM_UPDATE_LOOP_SLIDE: {
+                    int steps = loopSlideSixteenthsOf(filterByteOf(upd.value));
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            voices[v].loopSlideSixteenths += steps; break;
+                        }
                     break;
                 }
                 case PARAM_UPDATE_EQ_SLOT: {              // EQN — per-note EQ preset
@@ -1827,7 +1990,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
 
                     voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
-                                      note.trackId, rate, note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
+                                      note.trackId, rate, note.baseFrequency,
+                                      note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                                       sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
                     voices[v].instrId = note.sampleId;
@@ -1979,8 +2143,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         Voice& voice = voices[v];
         if (!voice.isActive || !voice.sampleData) continue;
 
-        float modulatedRate = getModulatedPlaybackRate(voice);
-
         int effDrive      = std::max(0, std::min(255, (int)(voice.params.base[PARAM_DRIVE]      + voice.modDestValues[PARAM_DRIVE])));
         int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
         int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
@@ -2006,7 +2168,39 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float rawLoop    = voice.params.base[PARAM_LOOP_START]   + voice.modDestValues[PARAM_LOOP_START];
             voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));
             voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
+
+            // ── LPO: slide the whole window, BOTH ends by the same amount ───────────────────────
+            //
+            // ⚠️⚠️ **BOTH BOUNDS OR NOTHING.** Moving one changes the loop's LENGTH, and on a looped
+            // note the length is the pitch — which is the exact opposite of what this command is for.
+            // The two lines below are the command.
+            //
+            // ⭐ The offset is derived from the RUNNING TOTAL, never accumulated as samples: on a
+            // loop length that is not a multiple of 16 each step rounds, and sixteen rounded steps
+            // do not add up to one loop. From the total, sixteen steps of `01` land exactly where one
+            // step of `10` lands, on every length.
+            //
+            // ⚠️ The COUNT is clamped, not just the offset. Clamping only the offset would let the
+            // count wind up past the end of the sample, so a step back would have an overshoot to
+            // unwind before the window moved at all. Clamped, the window simply STOPS — LGPT's
+            // behaviour, and a wrap would make a drone jump.
+            if (voice.loopSlideSixteenths != 0) {
+                const int len = voice.actualLoopEnd - voice.actualLoopStart;
+                if (len > 0) {
+                    const int maxSixteenths = (int)(((int64_t)(voice.actualEnd - voice.actualLoopEnd) * 16) / len);
+                    const int minSixteenths = (int)(((int64_t)(voice.actualStart - voice.actualLoopStart) * 16) / len);
+                    voice.loopSlideSixteenths = std::max(minSixteenths,
+                                                         std::min(voice.loopSlideSixteenths, maxSixteenths));
+                    const int off = (int)(((int64_t)voice.loopSlideSixteenths * len) / 16);
+                    voice.actualLoopStart += off;
+                    voice.actualLoopEnd   += off;
+                }
+            }
         }
+
+        // ⚠️ AFTER the loop bounds, not before: oscillator mode's rate is derived from the loop
+        // LENGTH, so reading it above would run a block behind every LPO slide and every loop edit.
+        float modulatedRate = getModulatedPlaybackRate(voice);
 
         // Honour the intra-block trigger offset: a note dispatched at blockStart+f must not
         // sound before frame f (kills/params stay block-quantized — onsets are the audible case).
@@ -2165,7 +2359,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // Active looping is bounded by LOOP END (region [loopStart, loopEnd]). Once loopReleasing
             // is set (ADSR note-off on a looping voice) the loop is abandoned: every mode runs forward
             // to actualEnd so the [loopEnd, end] tail plays out under the release envelope, then fades.
-            if (voice.loopMode == 2 && !voice.loopReleasing) {
+            if (voice.loopMode == LOOP_MODE_PINGPONG && !voice.loopReleasing) {
                 if (voice.loopingBack) {
                     voice.position -= modulatedRate;
                     if (voice.position <= voice.actualLoopStart) {
@@ -2182,7 +2376,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             } else if (voice.reverse && !voice.loopReleasing) {
                 voice.position -= modulatedRate;
                 if (voice.position <= voice.actualStart) {
-                    if (voice.loopMode == 1) {
+                    if (isForwardLoopMode(voice.loopMode)) {
                         voice.position = (double)voice.actualLoopStart;
                     } else {
                         voice.position = (double)voice.actualStart;
@@ -2192,7 +2386,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             } else {
                 voice.position += modulatedRate;
-                bool activeForwardLoop = (voice.loopMode == 1 && !voice.loopReleasing);
+                bool activeForwardLoop = (isForwardLoopMode(voice.loopMode) && !voice.loopReleasing);
                 double fwdBoundary = activeForwardLoop ? (double)voice.actualLoopEnd : (double)voice.actualEnd;
                 if (voice.position >= fwdBoundary) {
                     if (activeForwardLoop) {
@@ -3179,6 +3373,14 @@ void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
     if (fading >= 0) lanesOf(voices[fading].lanes, out);
 }
 
+bool AudioEngine::getVoiceLoopWindow(int trackId, int* startFrame, int* endFrame) {
+    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
+    if (live < 0) return false;
+    if (startFrame) *startFrame = voices[live].actualLoopStart;
+    if (endFrame)   *endFrame   = voices[live].actualLoopEnd;
+    return true;
+}
+
 int AudioEngine::getVoiceTableId(int trackId) {
     const int live = findTrackVoice(voices, trackId, /*fading=*/false);
     if (live >= 0) return voices[live].tableId;
@@ -3228,6 +3430,27 @@ void AudioEngine::scheduleVoiceFilterCut(int64_t targetFrame, int trackId, float
 
 void AudioEngine::scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res) {            // RES
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, res, PARAM_UPDATE_FILTER_RES, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceFilterMode(int64_t targetFrame, int trackId,                        // LPF/HPF/BPF
+                                          int type, float cut) {
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, cut, PARAM_UPDATE_FILTER_MODE, (float)type });
+}
+
+void AudioEngine::scheduleVoiceDrive(int64_t targetFrame, int trackId, float drive) {              // DRV
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, drive, PARAM_UPDATE_DRIVE, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceCrush(int64_t targetFrame, int trackId, float packed) {             // CRU
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, packed, PARAM_UPDATE_CRUSH, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceFineTune(int64_t targetFrame, int trackId, float fine) {            // FIN
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, fine, PARAM_UPDATE_FINE_TUNE, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceLoopSlide(int64_t targetFrame, int trackId, float step) {           // LPO
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, step, PARAM_UPDATE_LOOP_SLIDE, 0.0f });
 }
 
 void AudioEngine::scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot) {                // EQN
@@ -3663,9 +3886,35 @@ void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleR
 
 float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
     // modDestValues[PARAM_PITCH] accumulates: TABLE_PITCH + PITCH_SLIDE + VIBRATO + user mod slots.
+    // params.base[PARAM_PITCH] is FIN's fine tune — the same slot, its other half, cleared by every
+    // trigger. Read as a pair here so a fine tune and a table transpose add rather than replace.
     // voice.playbackRate has no transpose baked in; arpeggio adjusts it via setMidiNote().
-    float rateMod = powf(2.0f, voice.modDestValues[PARAM_PITCH] / 12.0f);
-    return voice.playbackRate * rateMod;
+    float rateMod = powf(2.0f,
+                         (voice.modDestValues[PARAM_PITCH] + voice.params.base[PARAM_PITCH]) / 12.0f);
+    const float rate = voice.playbackRate * rateMod;
+
+    // ── OSCILLATOR loop mode: one trip round the loop is one cycle of the played note ───────────
+    //
+    // ⭐⭐ **THE WHOLE MODE IS THIS ONE FACTOR, AND IT INHERITS EVERY PITCH SOURCE FOR FREE.**
+    // `rate × baseFrequency` is what the voice is sounding at right now — whatever moved it: the
+    // table transpose, FIN, a slide, vibrato, an arpeggio. Traversals per second is
+    // `rate × sampleRate / loopLength`, and the mode wants that to EQUAL the sounding frequency, so
+    // the rate is scaled by `loopLength × baseFrequency / sampleRate` and nothing else has to know.
+    //
+    // ⭐ The factor is 1.0 exactly when the loop is one cycle long at the sample's own base pitch —
+    // i.e. oscillator mode and forward mode agree precisely where you would expect them to, which is
+    // the arithmetic's own self-check.
+    //
+    // ⚠️ So in this mode the loop LENGTH is a TIMBRE control, not a pitch one: a longer window packs
+    // more of the file into each cycle. That is the opposite of a plain forward loop, where a short
+    // loop is what makes the pitch, and it is why LPO — which never changes the length — is the
+    // command this mode is built to be played with.
+    if (voice.loopMode == LOOP_MODE_OSCILLATOR && voice.baseFrequency > 0.0f) {
+        const int loopLength = voice.actualLoopEnd - voice.actualLoopStart;
+        const float sr = (float)getSampleRate();
+        if (loopLength > 0 && sr > 0.0f) return rate * ((float)loopLength * voice.baseFrequency / sr);
+    }
+    return rate;
 }
 
 void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {

@@ -444,8 +444,12 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     // so without this it would be wiped to center here and never reach the pitch wheel below.
     // pitchOffset likewise: a finished slide (advancePitchSlide clears pitchSliding at the
     // target) must keep applying its held offset — a stopped PBN stays bent, like the sampler.
+    // ⚠️ params.base[PARAM_PITCH] — FIN's fine tune — counts as active pitch for the same reason
+    // detuneSemitones does: it has no slide, vibrato or mod behind it, so an early return here would
+    // re-centre the wheel and the command would be silent on every SoundFont note.
     if (!pitchSliding && !vibratoActive && pitchOffset == 0.0f &&
-        modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f) {
+        modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f &&
+        params.base[PARAM_PITCH] == 0.0f) {
         tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
         tsf_channel_set_pitchwheel(h, _trackId, 8192);
         return;
@@ -459,7 +463,9 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     // detuneSemitones: static instrument detune (fractional, persists across slides)
     // pitchOffset: PSL/PBN pitch slide state (semitones, advanced above)
     // modDestValues[PARAM_PITCH]: accumulated from LFO/AHD routes targeting PITCH
-    float pitchMod = detuneSemitones + pitchOffset + modDestValues[PARAM_PITCH];
+    // params.base[PARAM_PITCH]: FIN's fine tune — the same slot's other half, cleared by every trigger
+    float pitchMod = detuneSemitones + pitchOffset + modDestValues[PARAM_PITCH]
+                   + params.base[PARAM_PITCH];
     if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 
     float clamped    = fmaxf(-PITCH_RANGE, fminf(PITCH_RANGE, pitchMod));

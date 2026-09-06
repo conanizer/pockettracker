@@ -38,8 +38,23 @@ struct Voice : public IAudioVoice {
     // pair every block, so a window those two cells cannot express is gone by the first block.
     int windowStartFrame;
     int windowEndFrame;
+    // ⚠️ **THE LOOP WINDOW'S POSITION IS A RUNNING COUNT OF SIXTEENTHS, AND THE BOUNDS ABOVE ARE IN
+    // SAMPLES. Two units on purpose.** LPO's step is a sixteenth of the loop's OWN length, so on a
+    // loop whose length is not a multiple of 16 each step rounds — and sixteen rounded steps do not
+    // add up to one loop. Keeping the TOTAL here and deriving the sample offset from it every block
+    // is what makes sixteen steps of `01` land exactly where one step of `10` lands.
+    //
+    // Clamped at apply time so it cannot wind up past either end of the sample: the window STOPS
+    // rather than wrapping, and one step back must move it back rather than unwinding an overshoot.
+    int loopSlideSixteenths;
+    // The frequency a `playbackRate` of 1.0 would sound at, so `rate × baseFrequency` is what this
+    // voice is sounding at right now, whatever moved the rate. ⚠️ Read ONLY by oscillator mode,
+    // which has to know how many samples one cycle of the played note is worth. It is a REQUIRED
+    // argument of trigger() rather than a defaulted one because a caller that forgot it would be
+    // silent — every mode but oscillator plays identically without it.
+    float baseFrequency;
     bool reverse;        // Play backwards
-    int loopMode;        // 0=off, 1=forward, 2=ping-pong
+    int loopMode;        // 0=off, 1=forward, 2=ping-pong, 3=oscillator (note-queue.h)
     bool loopingBack;    // For ping-pong mode direction
     // Set when an ADSR release begins on a looping voice: the loop is abandoned and playback runs
     // from the current position through to actualEnd (the [loopEnd, end] tail) under the release env.
@@ -102,6 +117,7 @@ struct Voice : public IAudioVoice {
               prevPanLeft(0.707f), prevPanRight(0.707f),
               actualStart(0), actualEnd(0), actualLoopStart(0), actualLoopEnd(0), loopEndNorm(255),
               windowStartFrame(-1), windowEndFrame(-1),
+              loopSlideSixteenths(0), baseFrequency(0.0f),
               reverse(false), loopMode(0), loopingBack(false), loopReleasing(false),
               tableId(-1),
               tableTranspose(0.0f), tableVolume(1.0f),
@@ -112,7 +128,8 @@ struct Voice : public IAudioVoice {
               fadeOutRemaining(0), fadeOutTotal(1), isFadingOut(false), startDelayFrames(0) {}
               // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
-    void trigger(float* sample, float* sampleRight, int length, int track, float rate, float instrVol, float phraseVol, float pan,
+    void trigger(float* sample, float* sampleRight, int length, int track, float rate, float baseFreq,
+                 float instrVol, float phraseVol, float pan,
                  const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
                  int endPointOverride = -1,
                  int tblId = -1,
@@ -181,6 +198,10 @@ struct Voice : public IAudioVoice {
         actualLoopEnd   = std::max(actualLoopStart + 1, std::min(actualLoopEnd, actualEnd));
         loopEndNorm     = instrParams.loopEnd;
         loopReleasing   = false;
+        // ⭐ THE LOOP SLIDE RESETS ON EVERY NOTE, which is what makes one LPO cell colour that note
+        // and leave the next one clean — the way the technique is used.
+        loopSlideSixteenths = 0;
+        baseFrequency       = baseFreq;
 
         // Set playback parameters
         reverse = instrParams.reverse;

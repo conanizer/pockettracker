@@ -426,6 +426,12 @@ public:
     // Get table ID for a voice
     int getVoiceTableId(int trackId);
 
+    // Where this track's sampler voice is looping RIGHT NOW, in sample frames — after LPO has slid
+    // it, which is the whole point. ⚠️ **THIS IS THE ONLY WAY TO SEE THE LOOP WINDOW AT ALL**: it is
+    // engine state that no event carries, it is re-derived every block, and neither the pixels nor
+    // the audio show it directly. Returns false when the track has no sampler voice.
+    bool getVoiceLoopWindow(int trackId, int* startFrame, int* endFrame);
+
     // Schedule a table-row jump (THO on an empty step) for the active sampler voice at targetFrame.
     void scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row);
 
@@ -439,6 +445,19 @@ public:
     void scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart);  // BCK
     void scheduleVoiceFilterCut(int64_t targetFrame, int trackId, float cut);          // CUT xx
     void scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res);          // RES xx
+    // ⚠️ TYPE AND CUTOFF IN ONE CALL, and therefore in one queue record on one frame — see
+    // PARAM_UPDATE_FILTER_MODE. `type` is 1 lp | 2 hp | 3 bp.
+    void scheduleVoiceFilterMode(int64_t targetFrame, int trackId, int type, float cut);  // LPF/HPF/BPF
+    void scheduleVoiceDrive(int64_t targetFrame, int trackId, float drive);           // DRV xx
+    // ⚠️ `packed` is a BYTE-VALUED 0-1 float carrying TWO nibbles, not a quantity — bits crushed in
+    // the high half, downsample in the low. Nothing may interpolate it (songcore/effects.h).
+    void scheduleVoiceCrush(int64_t targetFrame, int trackId, float packed);          // CRU xy
+    // ⚠️ It RETUNES A SOUNDING NOTE, unlike everything else on this list, which shapes one. 0.5 (the
+    // 0x80 byte) is in tune and the ends are a semitone either way.
+    void scheduleVoiceFineTune(int64_t targetFrame, int trackId, float fine);         // FIN xx
+    // ⚠️ `step` is a RELATIVE move and this call ACCUMULATES — the only one on this list that does.
+    // The byte is signed sixteenths of the loop's own length; two calls slide the window twice.
+    void scheduleVoiceLoopSlide(int64_t targetFrame, int trackId, float step);        // LPO xx
     void scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot);              // EQN xx
     void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
     // An AUS/AUF EQ morph tick. Not a slot: the bands are carried verbatim, because the setting a

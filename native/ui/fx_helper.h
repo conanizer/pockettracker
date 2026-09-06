@@ -33,18 +33,19 @@ inline constexpr int FX_GRID_COLS = 6;
  * The COUNT is a parameter because a build with the MIDI surfaces hidden (platform_caps.h `midi`)
  * shows the first songcore::EFFECT_TYPE_COUNT_NO_MIDI effects and needs one row fewer. Everything
  * else is derived from it, so the two shapes are the same code with a different number in it:
- * 42 effects → seven full rows, 36 → six.
+ * 50 effects → eight full rows and two centred in the ninth, 44 → seven and two in the eighth.
  *
- * ⚠️ A LAST ROW THAT DOES NOT FILL IS CENTRED, AND ITS EDGE CELLS ARE UNREACHABLE. With two left
- * over the columns are 2..3 and 0, 1, 4 and 5 hold nothing. Every navigation function has a case for
- * it, and they are not decoration: land on last-row column 0 and the highlight sits on a cell holding
- * no effect, so releasing A would commit the index one below the row's first — an effect the user
- * never pointed at.
+ * ⚠️ A LAST ROW THAT DOES NOT FILL IS CENTRED, AND ITS EDGE CELLS ARE UNREACHABLE. With one left over
+ * the only column is 2; with two they are 2..3. Every navigation function has a case for it, and they
+ * are not decoration: land on last-row column 0 and the highlight sits on a cell holding no effect,
+ * so releasing A would commit the index one below the row's first — an effect the user never pointed
+ * at.
  *
- * ⚠️⚠️ **NEITHER SHIPPING COUNT EXERCISES THAT PATH TODAY** — both divide by six exactly, so the
- * centring code is live, reachable and reached by nothing the app itself does. `ptinput` therefore
- * drives SYNTHETIC counts, one per remainder, so the coverage does not come and go with the length of
- * EFFECT_TYPES. Do not conclude from a green app that it works, and do not delete the cases.
+ * ⚠️ **WHICH REMAINDER THE SHIPPING COUNTS LAND ON MOVES EVERY TIME AN EFFECT IS APPENDED**, so the
+ * coverage must not depend on it: for two releases both counts divided by six exactly and the
+ * centring code was live, reachable, and reached by nothing the app itself did. `ptinput` therefore
+ * drives SYNTHETIC counts, one per remainder. Do not conclude from a green app that it works, and do
+ * not delete the cases.
  */
 struct FxGrid {
     int count        = songcore::EFFECT_TYPE_COUNT;  // visible effects
@@ -124,8 +125,9 @@ inline FxHelperState fx_helper_opened_at(int effect_index, const FxGrid& g = FX_
 //
 // Moving vertically INTO a centred last row rounds an unreachable column inward to the nearest cell
 // that holds an effect. From inside that row, up/down move straight in the same column, which is one
-// of the reachable ones and therefore valid on every row above it. When the last row is full — which
-// both shipping counts give — every clamp here is the identity and the rules collapse to a plain grid.
+// of the reachable ones and therefore valid on every row above it. When the last row is full every
+// clamp here is the identity and the rules collapse to a plain grid — which is what both shipping
+// counts gave for two releases, and what neither gives today.
 
 inline void fx_move_up(FxHelperState& s) {
     if (s.cursorRow == 0) {  // wrap to the last row, rounding an unreachable column inward
@@ -175,15 +177,15 @@ inline void fx_move_right(FxHelperState& s) {
 inline const std::vector<std::vector<std::string>>& effect_descriptions() {
     static const std::vector<std::vector<std::string>> d = {
         /* 00 --- */ {"---: No effect", "Empty FX slot"},
-        /* 01 ARC */ {"ARC: Arpeggio config", "x=mode(0=UP 1=DN 2=PP 3=RND)", "y=speed in ticks"},
-        /* 02 CHA */ {"CHA: Probability gate", "x=prob(0=never F=always 8=50%)", "y=target(0=note 1-3=FX slot)"},
-        /* 03 LAT */ {"LAT: Latency (delay trigger)", "xx=ticks before note fires"},
-        /* 04 GRV */ {"GRV: Groove assign", "xx=groove ID (00=disable)"},
-        /* 05 HOP */ {"HOP: Phrase/table jump", "y=target row (FF=stop track)", "table: x=repeat count"},
-        /* 06 TIC */ {"TIC: Table tick rate", "01-FB=ticks per row", "FC-FF=special modes"},
-        /* 07 ARP */ {"ARP: Arpeggio", "x=+semitones 1st note", "y=+semitones 2nd note", "configure speed with ARC"},
-        /* 08 KIL */ {"KIL: Kill voice", "xx=ticks of latency before stop", "00=immediate, 0C=next step"},
-        /* 09 OFF */ {"OFF: Sample offset", "xx=start point (00-FF)"},
+        /* 1 ARC */ {"ARC: Arpeggio config", "x=mode(0=UP 1=DN 2=PP 3=RND)", "y=speed in ticks"},
+        /* 2 CHA */ {"CHA: Probability gate", "x=prob(0=never F=always 8=50%)", "y=target(0=note 1-3=FX slot)"},
+        /* 3 LAT */ {"LAT: Latency (delay trigger)", "xx=ticks before note fires"},
+        /* 4 GRV */ {"GRV: Groove assign", "xx=groove ID (00=disable)"},
+        /* 5 HOP */ {"HOP: Phrase/table jump", "y=target row (FF=stop track)", "table: x=repeat count"},
+        /* 6 TIC */ {"TIC: Table tick rate", "01-FB=ticks per row", "FC-FF=special modes"},
+        /* 7 ARP */ {"ARP: Arpeggio", "x=+semitones 1st note", "y=+semitones 2nd note", "configure speed with ARC"},
+        /* 8 KIL */ {"KIL: Kill voice", "xx=ticks of latency before stop", "00=immediate, 0C=next step"},
+        /* 9 OFF */ {"OFF: Sample offset", "xx=start point (00-FF)"},
         /* 10 RND */ {"RND: Randomize FX", "randomizes previous FX column", "x=min nibble  y=max nibble"},
         /* 11 RNL */ {"RNL: Randomize left FX", "same as RND but targets", "FX column to the left"},
         /* 12 RPT */ {"RPT: Retrigger", "RX0: retrig every x ticks", "RXY(Y!=0): retrig y+vol ramp x"},
@@ -206,22 +208,30 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 29 VMV */ {"VMV: Master mixer fader", "xx=level (00=silent FF=max)", "replaces the MASTER fader", "resets to the MIXER on stop"},
         /* 30 AUS */ {"AUS: Automation start", "xx=curve 00=IN 80=LIN FF=OUT", "ramps the FX slot to its left", "to the value of the next AUF"},
         /* 31 AUF */ {"AUF: Automation finish", "xx=destination value", "ends the ramp an AUS opened", "one chain, or one table"},
-        /* 32 CUT */ {"CUT: Filter cutoff", "xx=cutoff (00=low FF=high)", "needs a FILTER TYPE in INST", "this note only"},
-        /* 33 RES */ {"RES: Filter resonance", "xx=resonance (00-FF)", "needs a FILTER TYPE in INST", "this note only"},
+        /* 32 CUT */ {"CUT: Filter cutoff", "xx=cutoff (00=low FF=high)", "needs a filter: INST or LPF", "this note only"},
+        /* 33 RES */ {"RES: Filter resonance", "xx=resonance (00-FF)", "needs a filter: INST or LPF", "this note only"},
         /* 34 SCA */ {"SCA: Track scale", "x=key (0=C 1=C# .. B=B)", "y=scale slot (0-F)", "holds till next SCA or stop"},
         /* 35 SCG */ {"SCG: Global scale", "x=key (0=C 1=C# .. B=B)", "y=scale slot (0-F)", "moves all 8 tracks at once"},
-        /* 36 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 37 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        /* 36 LPF */ {"LPF: Low-pass filter ON", "xx=cutoff (00=dark FF=open)", "switches the filter ON", "unlike CUT which only moves it"},
+        /* 37 HPF */ {"HPF: High-pass filter ON", "xx=cutoff (00=open FF=thin)", "switches the filter ON", "unlike CUT which only moves it"},
+        /* 38 BPF */ {"BPF: Band-pass filter ON", "xx=centre (00=low FF=high)", "switches the filter ON", "unlike CUT which only moves it"},
+        /* 39 DRV */ {"DRV: Overdrive", "xx=amount (00=clean FF=heavy)", "this note only"},
+        /* 40 CRU */ {"CRU: Bit crush + downsample", "x=bits crushed (0=off F=most)", "y=rate drop (0=off F=most)", "this note only"},
+        /* 41 FIN */ {"FIN: Fine tune", "00=flat 80=in tune FF=sharp", "one semitone either way", "bends a note already playing"},
+        /* 42 TSX */ {"TSX: Transpose multiplier", "xx=how far TSP moves a note", "01=normal 02=twice 00=never", "FF=the other way FE=2x that"},
+        /* 43 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
+        /* 44 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 45 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
         // ⚠️ **NO APOSTROPHE AND NO SEMICOLON IN A DESCRIPTION** — the font has neither glyph and draws
         // a BLANK, so "instrument's" renders as "INSTRUMENT S". It is silent: the string is right, the
         // width is right, only the pixels are wrong, and these lines are the only long prose in the UI.
         // ⚠️ Pre-existing, not new: BCK's "sampler; toggle live to scratch" has always drawn as
         // "SAMPLER  TOGGLE…". Caught by ptshot — the one tool here that looks at pixels. Stick to
         // letters, digits, and `: = - ( ) . /`, all of which are proven by the entries above.
-        /* 38 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 39 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 40 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 41 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 46 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 47 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 48 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 49 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

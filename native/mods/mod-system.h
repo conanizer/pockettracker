@@ -22,7 +22,10 @@
 enum ParamId {
     PARAM_VOL          = 0,  // Volume: 0.0–1.0
     PARAM_PAN          = 1,  // Pan: 0.0=left, 0.5=center, 1.0=right
-    PARAM_PITCH        = 2,  // Pitch offset in semitones from envelope/LFO mods (not PSL/PBN state)
+    // ⚠️ THE TWO HALVES OF THIS SLOT CARRY DIFFERENT THINGS AND BOTH ARE READ. `mod` is the envelope
+    // and LFO accumulation (not PSL/PBN state); `base` is FIN's fine tune, in semitones, cleared by
+    // every trigger. They add, which is why a fine tune and a table transpose do not fight.
+    PARAM_PITCH        = 2,  // Pitch offset in semitones
     PARAM_FILTER_CUT   = 3,  // Filter cutoff: 0–255 param units
     PARAM_FILTER_RES   = 4,  // Filter resonance: 0–255 param units
     PARAM_DRIVE        = 5,  // Drive pre-gain boost: 0–255

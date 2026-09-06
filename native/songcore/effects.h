@@ -131,6 +131,120 @@ constexpr int FX_RES      = 0x30;  // RES  filter resonance (00-FF)
 constexpr int FX_SCA      = 0x31;  // SCA  this track's scale: x = key, y = slot
 constexpr int FX_SCG      = 0x32;  // SCG  every track's scale, same byte layout
 
+// ─── The filter, switched ON from a cell ──────────────────────────────────────────────────────────
+//
+// ⚠️ **EACH ONE CARRIES A TYPE AND A CUTOFF TOGETHER, which is exactly what CUT and RES do not.** CUT
+// moves the filter the instrument declares; these three declare it. So an instrument whose FILTER TYPE
+// is OFF — the state a fresh instrument is in — can be given a filter from the FX column, and CUT/RES
+// become reachable on it without a trip to the INSTRUMENT screen first.
+//
+// ⚠️ **THE TYPE AND THE CUTOFF MUST LAND ON THE SAME FRAME.** They ride ONE bus record — the CC id
+// carries the type, its value carries the cutoff — rather than two, because a filter that opens one
+// block before it changes shape is an audible click at the head of every sweep.
+//
+// ⚠️ Three commands, three filters, and NOT a set to widen: the SVF also computes notch and peak, and
+// those two are reachable from nowhere at all today. Giving them a door is a one-line change to the
+// INSTRUMENT screen's type list, never a fourth and fifth command here.
+//
+// CUT keeps a job beside them: it moves the cutoff WITHOUT touching the type, which is what a sweep
+// over a filter that is already the right one needs.
+constexpr int FX_LPF      = 0x33;  // LPF  low-pass ON at this cutoff  (00-FF)
+constexpr int FX_HPF      = 0x34;  // HPF  high-pass ON at this cutoff (00-FF)
+constexpr int FX_BPF      = 0x35;  // BPF  band-pass ON at this cutoff (00-FF)
+
+/** The FilterModule type an LPF/HPF/BPF cell turns on (1 lp | 2 hp | 3 bp), or 0 for anything else. */
+inline constexpr int fx_filter_mode(int code) {
+    return code == FX_LPF ? 1 : code == FX_HPF ? 2 : code == FX_BPF ? 3 : 0;
+}
+
+// ─── The two dirt commands ────────────────────────────────────────────────
+//
+// Both write a value the sampler's per-block recompute already reads, so each takes effect while
+// the note is still sounding, and each is gone at the next note-on — the same per-note lifetime
+// CUT and RES have, and for the same reason: a trigger reseeds them from the instrument.
+//
+// ⚠️ **0x36 IS RETIRED AND MUST NEVER BE REUSED.** It was a sample-end command, cut before it
+// ever shipped: KIL's latency byte already ends a note where the writer wants it, and two ways to
+// stop a note early is one too many. A code is a saved cell's identity, so a project written while
+// it existed must not read back as something else.
+constexpr int FX_DRV      = 0x37;  // DRV  overdrive amount (00 = clean, FF = heavy)
+
+// ⚠️ **ONE CELL, TWO INDEPENDENT 4-BIT VALUES** — the left digit crushes bits, the right one drops the
+// sample rate. They are two different kinds of grit, both already 4-bit at the module, so one cell
+// carries both rather than two effect codes carrying half-empty bytes each.
+//
+// ⚠️ **AND THAT IS WHY CRU IS NOT IN THE RAMP REGISTRY.** It would pass the full-range assert — the
+// byte really does span 00-FF — but interpolating it sweeps the left digit while the right one wraps
+// F→0 sixteen times on the way. The byte is not a quantity, so a ramp over it is not a sweep.
+constexpr int FX_CRU      = 0x38;  // CRU  xy: x = bits crushed (0-F), y = downsample (0-F)
+
+/** The two halves of a CRU byte: bits to crush, and the downsample factor. Both 0 = clean. */
+inline constexpr int crush_cmd_bits(int value)       { return (value >> 4) & 0x0F; }
+inline constexpr int crush_cmd_downsample(int value) { return value & 0x0F; }
+
+// ─── The cents between the semitones ─────────────────────────────────────────────────────────────
+//
+// PIT moves a note in whole semitones; this fills the gap, one semitone either way in 256 steps of
+// 0.78 cents. The two therefore meet with no interval unreachable between them.
+//
+// ⚠️ **IT RETUNES THE NOTE THAT IS ALREADY SOUNDING**, which is what makes a ramp over it a pitch
+// bend of up to a semitone rather than a setting for the next note. On the step that also carries a
+// note it lands one frame behind the trigger (`voiceFxFrame`, scheduler.h), so the note it tunes is
+// that one — the same ordering CUT, RES and the sends all rely on.
+//
+// ⚠️ Per-note like those: a trigger reseeds the parameter bus, so the tuning is gone at the next note
+// with nothing to restore.
+constexpr int FX_FIN      = 0x39;  // FIN  fine tune (00 = a semitone flat, 80 = in tune, FF = sharp)
+
+// ─── How far a step follows the transposes ───────────────────────────────────────────────────────
+//
+// A SIGNED MULTIPLIER over the transpose the step would otherwise get: 01 normal, 02 twice as far,
+// 00 immune, FF the same distance the other way, FE twice as far the other way. Every product is a
+// whole number of semitones, so no note can land between two keys and no rounding rule exists to
+// disagree about — which is why the multiplier is signed rather than the divisor the request first
+// asked for.
+//
+// ⚠️ **IT SCALES THE CHAIN TSP COLUMN AND THE PROJECT TRANSPOSE TOGETHER**, because those are the
+// one quantity the scheduler carries and the same one the instrument's TRANSP. switch silences. A
+// command that moved with one and not the other would be a note whose pitch depends on which of two
+// screens the transpose was typed on.
+//
+// ⚠️ It is a PHRASE command with no table arm: a table row runs after its note has already been
+// scheduled, and by then the transpose is folded into the pitch and gone. The table-side want the
+// request describes — a drum kit that ignores the song transpose — is the instrument's TRANSP.
+// switch (model.h), which is read at the same site.
+constexpr int FX_TSX      = 0x3A;  // TSX  transpose multiplier (00 immune, 01 normal, FF mirrored)
+
+// ─── The loop window, slid ───────────────────────────────────────────────────────────────────────
+//
+// ⭐⭐ **IT MOVES BOTH ENDS OF THE LOOP TOGETHER, SO THE LOOP'S LENGTH NEVER CHANGES.** That is the
+// whole command: on a looped note the loop length is what sets the pitch, so a slider that preserved
+// only one end would be a pitch control. What changes is which part of the sample the loop is
+// reading — the note holds still and its tone moves.
+//
+// ⚠️ **THE UNIT IS SIXTEENTHS OF THE LOOP'S OWN LENGTH, SIGNED.** `10` is one whole loop, `01` a
+// sixteenth of one, `F0` a whole loop backwards. It is relative to the loop rather than to the file,
+// so one cell value does the same musical thing on a short loop and a long one and nobody has to
+// count samples. LGPT's equivalent counts raw samples in a 16-bit value; one byte cannot.
+//
+// ⚠️⚠️ **IT IS CUMULATIVE, AND THE RUNNING TOTAL IS KEPT IN SIXTEENTHS RATHER THAN IN SAMPLES.**
+// A loop whose length is not a multiple of 16 makes every step round, and sixteen rounded steps do
+// NOT add up to one loop — on a sample of back-to-back single-cycle waves that is a wave boundary
+// drifting further out with each step, silent and cumulative. The engine therefore keeps the count
+// and derives the sample offset from the TOTAL each block, so sixteen steps of `01` land exactly
+// where one step of `10` lands, always.
+//
+// ⚠️ The window STOPS at each end of the sample rather than wrapping — a wrap makes a drone jump —
+// and the count resets on every new note, so one cell colours that note and the next starts clean.
+//
+// ⭐ `00` is safely "no movement": the command is relative-only, so a zero step has an obvious
+// meaning and punches no hole in the range the way LGPT's absolute play-head command does.
+constexpr int FX_LPO      = 0x3B;  // LPO  slide the loop window, signed sixteenths of its own length
+
+/** A LPO byte to signed sixteenths of a loop length: 00-7F forward, 80-FF back. */
+inline constexpr int loop_slide_sixteenths(int value) { return (value & 0xFF) < 0x80 ? (value & 0xFF)
+                                                                                     : (value & 0xFF) - 256; }
+
 /** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
 inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
@@ -150,6 +264,9 @@ inline std::string effect_name(int code) {
         case FX_PAN: return "PAN"; case FX_RSEND: return "REV"; case FX_DSEND: return "DEL";
         case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
         case FX_CUT: return "CUT"; case FX_RES: return "RES";
+        case FX_LPF: return "LPF"; case FX_HPF: return "HPF"; case FX_BPF: return "BPF";
+        case FX_DRV: return "DRV"; case FX_CRU: return "CRU";
+        case FX_FIN: return "FIN"; case FX_TSX: return "TSX"; case FX_LPO: return "LPO";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
@@ -215,6 +332,18 @@ inline constexpr int EFFECT_TYPES[] = {
     // and what that costs is `ptinput`'s golden and nothing else: an FX cell holds an INDEX only
     // while it is a live cursor value, and a `.ptp` holds the effect CODE.
     FX_SCA, FX_SCG,
+    // The three that switch a filter ON. Appended for the reason CUT/RES and the scale pair were,
+    // and reading right after them because that is where someone looking for the filter will look.
+    FX_LPF, FX_HPF, FX_BPF,
+    // The two dirt commands. Appended for the same reason.
+    FX_DRV, FX_CRU,
+    // Fine tune, next to the pitch commands by subject and here by the same appending rule.
+    FX_FIN,
+    // The transpose multiplier, appended for the same reason. It sits after FIN rather than beside
+    // PIT because a code's position here is the picker's grid, and the grid is never re-ordered.
+    FX_TSX,
+    // The loop-window slider, appended for the same reason.
+    FX_LPO,
     // The MIDI commands (see the static_assert below — they must stay the LAST six)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
 };
@@ -280,6 +409,17 @@ struct ResolvedStepParams {
     std::optional<int> bckValue;
     std::optional<int> filterCutValue;    // CUT
     std::optional<int> filterResValue;    // RES
+    // LPF / HPF / BPF. ONE optional for all three, because what they emit is one write: the byte is
+    // the cutoff and `filterModeType` is the filter it turns on. Two of them on the same step then
+    // behave like every other pair in this bundle — last of slots 1→3 wins — instead of leaving the
+    // type from one and the cutoff from the other.
+    std::optional<int> filterModeValue;   // LPF/HPF/BPF cutoff byte
+    int filterModeType = 0;               // 1 lp | 2 hp | 3 bp; meaningless unless the above is set
+    std::optional<int> driveValue;        // DRV
+    std::optional<int> crushValue;        // CRU — both nibbles still packed, split at the engine
+    std::optional<int> fineTuneValue;     // FIN — authored byte, turned into semitones at the engine
+    std::optional<int> tsxMultiplier;     // TSX — already decoded to a signed multiplier
+    std::optional<int> loopSlideValue;    // LPO — already decoded to signed sixteenths of a loop
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
     // SCA / SCG: the authored byte, key and slot nibbles still packed. It is split at the point of
@@ -337,6 +477,18 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_BCK:    p.bckValue = value; break;
             case FX_CUT:    p.filterCutValue = value; break;
             case FX_RES:    p.filterResValue = value; break;
+            case FX_LPF: case FX_HPF: case FX_BPF:
+                p.filterModeValue = value;
+                p.filterModeType  = fx_filter_mode(type);
+                break;
+            case FX_DRV:    p.driveValue     = value; break;
+            case FX_CRU:    p.crushValue     = value; break;
+            case FX_FIN:    p.fineTuneValue  = value; break;
+            // Decoded here, the way PIT is, so the scheduler multiplies by a number rather than by
+            // a byte it would have to remember to sign-extend.
+            case FX_TSX:    p.tsxMultiplier = (value < 0x80) ? value : value - 256; break;
+            // Decoded here for the same reason TSX and PIT are.
+            case FX_LPO:    p.loopSlideValue = loop_slide_sixteenths(value); break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
             case FX_SCA:    p.scaleTrackByte = value; break;
@@ -358,6 +510,37 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
         }
     }
     return p;
+}
+
+/**
+ * How many semitones the chain TSP column and the project transpose actually move THIS step, after
+ * the instrument's TRANSP. switch and the step's own TSX have had their say.
+ *
+ * ⭐ **ONE FUNCTION BECAUSE THE SCHEDULER TRANSPOSES A STEP IN THREE PLACES** — the note, a REPEAT
+ * retrigger and the arpeggio all read the same figure, and a fourth site added later reads it too.
+ * The alternative is three call sites each remembering to ask the same two questions.
+ *
+ * **TRANSP. off wins over any TSX.** An instrument that does not follow transposition at all is not
+ * asking to be moved twice as far; the switch is a property of the sound, the command a property of
+ * one step.
+ *
+ * ⚠️ **A SLICED INSTRUMENT IS NOT A CASE HERE, AND MUST NOT BECOME ONE.** Its slice *selection* is
+ * already immune — `voice_derive.h` picks the slice from `note − transpose`, the raw phrase note —
+ * while its *pitch* deliberately follows, which is what lets a transposed chain move a chopped break
+ * up an octave. Refusing the transpose here would silently take that away. The guard `model.h`
+ * asks for around slices is against playing a DIFFERENT SLICE, and that guard is already in place.
+ *
+ * `instrumentId` is the step's raw instrument column, not a clamped index: an out-of-range or empty
+ * column asks no instrument's opinion and transposes exactly as it always did.
+ */
+inline int effective_transpose_semitones(int transposeSemitones, const Project& project,
+                                         int instrumentId,
+                                         const std::optional<int>& tsxMultiplier) {
+    if (instrumentId >= 0 && instrumentId < static_cast<int>(project.instruments.size()) &&
+        !project.instruments[static_cast<size_t>(instrumentId)].transposeEnabled) {
+        return 0;
+    }
+    return transposeSemitones * tsxMultiplier.value_or(1);
 }
 
 }  // namespace songcore

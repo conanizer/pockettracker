@@ -76,6 +76,23 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     // it — nothing to restore on stop(), unlike the two faders below.
     { FX_CUT,    CC_FILTER_CUT,  false, RampKind::BYTE },
     { FX_RES,    CC_FILTER_RES,  false, RampKind::BYTE },
+    // LPF / HPF / BPF ramp their CUTOFF and re-assert the same type on every tick, so a sweep that
+    // opens the filter on its first tick cannot lose it half way through. Nothing else about them is
+    // special here: a BYTE row over the full 00-FF range, like the two above.
+    { FX_LPF,    CC_FILTER_LP,   false, RampKind::BYTE },
+    { FX_HPF,    CC_FILTER_HP,   false, RampKind::BYTE },
+    { FX_BPF,    CC_FILTER_BP,   false, RampKind::BYTE },
+    // DRV. A per-note sweep like the filter rows above it — the note dirtying as it holds.
+    //
+    // ⚠️ **CRU IS DELIBERATELY ABSENT AND WOULD PASS THE ASSERT BELOW.** Its byte spans 00-FF, so
+    // the full-range check has nothing to object to — but the two halves are independent 4-bit
+    // numbers, and interpolating the byte wraps the right one sixteen times while sweeping the left.
+    // The omission is a judgement, so it is written down here rather than left to be re-litigated.
+    { FX_DRV,    CC_DRIVE,       false, RampKind::BYTE },
+    // FIN. The one ramp here that is a PITCH BEND — a sweep from one end of the byte to the other is
+    // a two-semitone glide, and it works because the command retunes the note that is already
+    // sounding rather than arming the next one (effects.h). Per-note like the rows above it.
+    { FX_FIN,    CC_FINE_TUNE,   false, RampKind::BYTE },
     // ⚠️ The master fader belongs to no track. Track-scoped, EngineConsumer's external-routing gate
     // would swallow it whenever the carrying track plays an EXTERNAL instrument (event.h) — so the
     // ramp must ride the same TRACK_GLOBAL lane the per-step VMV does, or it dies on exactly the

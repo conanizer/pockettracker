@@ -45,6 +45,25 @@ static_assert(::FX_EQN    == FX_EQN,    "audio-defs.h FX_EQN has drifted from ef
 static_assert(::FX_EQM    == FX_EQM,    "audio-defs.h FX_EQM has drifted from effects.h");
 static_assert(::FX_CUT    == FX_CUT,    "audio-defs.h FX_CUT has drifted from effects.h");
 static_assert(::FX_RES    == FX_RES,    "audio-defs.h FX_RES has drifted from effects.h");
+static_assert(::FX_LPF    == FX_LPF,    "audio-defs.h FX_LPF has drifted from effects.h");
+static_assert(::FX_HPF    == FX_HPF,    "audio-defs.h FX_HPF has drifted from effects.h");
+static_assert(::FX_BPF    == FX_BPF,    "audio-defs.h FX_BPF has drifted from effects.h");
+static_assert(::FX_DRV    == FX_DRV,    "audio-defs.h FX_DRV has drifted from effects.h");
+static_assert(::FX_CRU    == FX_CRU,    "audio-defs.h FX_CRU has drifted from effects.h");
+static_assert(::FX_FIN    == FX_FIN,    "audio-defs.h FX_FIN has drifted from effects.h");
+static_assert(::FX_LPO    == FX_LPO,    "audio-defs.h FX_LPO has drifted from effects.h");
+
+// …and CRU's nibble split, which is spelled on both sides of the seam for the same reason the codes
+// are. Checked over the whole byte rather than at a sample point: the two are three characters each
+// and the failure a typo would cause is a crush amount that is quietly the wrong grit.
+constexpr bool crush_split_matches_the_engine() {
+    for (int v = 0; v <= 255; ++v)
+        if (::crushBitsOf(v) != crush_cmd_bits(v) ||
+            ::crushDownsampleOf(v) != crush_cmd_downsample(v)) return false;
+    return true;
+}
+static_assert(crush_split_matches_the_engine(),
+              "audio-defs.h's CRU nibble split has drifted from effects.h's");
 
 // ─── …and the third list: what a TABLE row's AUS may ramp ────────────────────────────────────────
 //
@@ -66,13 +85,20 @@ constexpr bool table_arms_match_the_engine() {
         const int c = table_automation::ARMS[i].code;
         if (c != ::FX_HOP && c != ::FX_TIC && c != ::FX_KILL && c != ::FX_OFFSET &&
             c != ::FX_THO && c != ::FX_VOLUME && c != ::FX_EQN && c != ::FX_EQM &&
-            c != ::FX_CUT && c != ::FX_RES) return false;
+            c != ::FX_CUT && c != ::FX_RES &&
+            c != ::FX_LPF && c != ::FX_HPF && c != ::FX_BPF &&
+            c != ::FX_DRV && c != ::FX_CRU && c != ::FX_FIN &&
+            c != ::FX_LPO) return false;
     }
     return table_automation::arm_for(::FX_HOP)    && table_automation::arm_for(::FX_TIC)  &&
            table_automation::arm_for(::FX_KILL)   && table_automation::arm_for(::FX_OFFSET) &&
            table_automation::arm_for(::FX_THO)    && table_automation::arm_for(::FX_VOLUME) &&
            table_automation::arm_for(::FX_EQN)    && table_automation::arm_for(::FX_EQM)  &&
-           table_automation::arm_for(::FX_CUT)    && table_automation::arm_for(::FX_RES);
+           table_automation::arm_for(::FX_CUT)    && table_automation::arm_for(::FX_RES)  &&
+           table_automation::arm_for(::FX_LPF)    && table_automation::arm_for(::FX_HPF)  &&
+           table_automation::arm_for(::FX_BPF)    &&
+           table_automation::arm_for(::FX_DRV)    && table_automation::arm_for(::FX_CRU)  &&
+           table_automation::arm_for(::FX_FIN)    && table_automation::arm_for(::FX_LPO);
 }
 static_assert(table_arms_match_the_engine(),
               "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
@@ -181,6 +207,25 @@ class EngineConsumer : public IMidiConsumer {
                     // note-on. An instrument with FILTER TYPE = OFF runs no filter and swallows them.
                     case CC_FILTER_CUT:  engine_->scheduleVoiceFilterCut(ev.frame, ev.track, v);  break;
                     case CC_FILTER_RES:  engine_->scheduleVoiceFilterRes(ev.frame, ev.track, v);  break;
+                    // LPF / HPF / BPF — the id IS the filter type and `v` is the cutoff, so one
+                    // record switches the filter on and places it in the same frame. Engine-only ids
+                    // (event.h); `midi_out.h` drops them, there being no MIDI controller for a type.
+                    case CC_FILTER_LP:
+                    case CC_FILTER_HP:
+                    case CC_FILTER_BP:
+                        engine_->scheduleVoiceFilterMode(ev.frame, ev.track, cc_filter_mode(param), v);
+                        break;
+                    // DRV / CRU — engine-only ids (event.h) for parameters MIDI has no
+                    // controller for. Each writes the per-block recompute's own input, so the change
+                    // is audible in the block it lands in and gone at the next note-on.
+                    case CC_DRIVE:       engine_->scheduleVoiceDrive(ev.frame, ev.track, v);     break;
+                    case CC_CRUSH:       engine_->scheduleVoiceCrush(ev.frame, ev.track, v);     break;
+                    // FIN, the same shape — and engine-only for a different reason: MIDI's fine tune
+                    // is an RPN that retunes a whole channel, not this note (event.h).
+                    case CC_FINE_TUNE:   engine_->scheduleVoiceFineTune(ev.frame, ev.track, v);  break;
+                    // LPO. ⚠️ The one id here whose records ACCUMULATE rather than replace — the
+                    // engine adds each one to the voice's running count (event.h).
+                    case CC_LOOP_SLIDE:  engine_->scheduleVoiceLoopSlide(ev.frame, ev.track, v);  break;
                     // The mixer faders (VTR / VMV). Engine-only ids — `midi_out.h` drops both, which
                     // is the one place the two consumers are meant to disagree (event.h).
                     //

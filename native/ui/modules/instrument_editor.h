@@ -82,7 +82,7 @@ inline const std::vector<std::string>& filter_types() {
     return v;
 }
 inline const std::vector<std::string>& loop_modes() {
-    static const std::vector<std::string> v{"off", "fwd", "png"};
+    static const std::vector<std::string> v{"off", "fwd", "png", "osc"};
     return v;
 }
 

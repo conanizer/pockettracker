@@ -97,3 +97,58 @@ const int FX_EQN    = 0x23;  // EQN xx - per-voice EQ preset slot (00-7F)
 const int FX_EQM    = 0x24;  // EQM xx - master/mixer EQ preset slot (00-7F)
 const int FX_CUT    = 0x2F;  // CUT xx - filter cutoff   (inert when the instrument runs no filter)
 const int FX_RES    = 0x30;  // RES xx - filter resonance (likewise)
+// The three that switch one ON at a cutoff, so the two above are never inert after one of them.
+const int FX_LPF    = 0x33;  // LPF xx - low-pass  on, cutoff xx
+const int FX_HPF    = 0x34;  // HPF xx - high-pass on, cutoff xx
+const int FX_BPF    = 0x35;  // BPF xx - band-pass on, cutoff xx
+const int FX_DRV    = 0x37;  // DRV xx - overdrive amount
+const int FX_CRU    = 0x38;  // CRU xy - x = bits crushed, y = downsample; two 4-bit values in one cell
+const int FX_FIN    = 0x39;  // FIN xx - fine tune; 80 = in tune, one semitone either way
+// ─── The loop modes, as the engine numbers them ─────────────────────────────────────────────────
+//
+// ⚠️ **OSCILLATOR IS A FORWARD LOOP WITH ITS SCAN RATE RETUNED**, not a fourth kind of traversal:
+// everything about how the position walks between the two loop points is mode 1's, and the only
+// difference is the factor `getModulatedPlaybackRate` applies. So every branch that asks "is this
+// looping forward?" must ask `isForwardLoopMode`, never `== LOOP_MODE_FORWARD` — a site that missed
+// the new mode would play the note ONCE and stop, with no error anywhere.
+//
+// ⚠️ The project file stores the mode as a NAME, not as this number, so the numbering is the
+// engine's alone and appending here renumbers nothing a user has saved.
+const int LOOP_MODE_OFF        = 0;
+const int LOOP_MODE_FORWARD    = 1;
+const int LOOP_MODE_PINGPONG   = 2;
+const int LOOP_MODE_OSCILLATOR = 3;
+
+/** Does this mode loop FORWARD between the two loop points? */
+inline constexpr bool isForwardLoopMode(int mode) {
+    return mode == LOOP_MODE_FORWARD || mode == LOOP_MODE_OSCILLATOR;
+}
+
+// ⚠️ 0x3A (TSX) is deliberately absent: it is resolved before a note is scheduled and the engine
+// never sees it, so mirroring it here would be a constant with no reader.
+const int FX_LPO    = 0x3B;  // LPO xx - slide the loop window, signed sixteenths of its own length
+
+// LPO's byte as a signed count of sixteenths, the same decode songcore does. Both sides spell it
+// because the table engine reads the raw cell and the phrase path reads the resolved bundle.
+inline constexpr int loopSlideSixteenthsOf(int value) {
+    return (value & 0xFF) < 0x80 ? (value & 0xFF) : (value & 0xFF) - 256;
+}
+
+// FIN's byte as semitones: the cents between the whole semitones PIT steps in. 80 is unity, 00 is a
+// semitone flat and FF one step short of a semitone sharp, so one step is 1/128 of a semitone
+// (0.78 cents) and the two commands meet with no gap. Spelled here rather than in songcore because
+// the byte reaches the seam undivided and only the engine ever turns it into a pitch.
+inline constexpr float fineTuneSemitonesOf(int value) { return (value - 128) / 128.0f; }
+
+// ⚠️ The two claims here are the ones NOTHING ELSE CAN CATCH. A centre that is one step off detunes
+// every cell typed at 80 by 0.78 cents — under the ear, and under any render comparison that is not
+// looking for it. The endpoint is a second, independent claim: it fails for a wrong DIVISOR, which
+// the centre check passes either way.
+static_assert(fineTuneSemitonesOf(0x80) == 0.0f, "FIN's centre byte must be exactly in tune");
+static_assert(fineTuneSemitonesOf(0x00) == -1.0f, "FIN's low end must be exactly a semitone flat");
+
+// The two halves of a CRU byte. Spelled here because the engine does not see songcore/effects.h,
+// which spells them too; engine_consumer.h - the one file that sees both - asserts they agree over
+// every byte, exactly as it does for the effect codes above.
+inline constexpr int crushBitsOf(int value)       { return (value >> 4) & 0x0F; }
+inline constexpr int crushDownsampleOf(int value) { return value & 0x0F; }

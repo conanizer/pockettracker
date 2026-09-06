@@ -39,6 +39,15 @@ Write these into any phrase step to shape how a note plays:
 - **Reverb / delay send** — send a single note to the reverb or delay bus, independent of the instrument
 - **Filter cutoff / resonance** — move the instrument's own filter from a phrase step, on that note only;
   the same two cells work in a table, so a filter envelope can be written once per instrument
+- **Low-pass / high-pass / band-pass** — switch a filter *on* from a phrase step or a table row, at the
+  cutoff you name, on any instrument; all three can be swept with the automation pair
+- **Overdrive · bit crush · downsample** — the instrument's three dirt controls, written per note
+- **Fine tune** — the cents between the semitones, a semitone either way; it retunes a note that is
+  already playing, so a sweep of it is a glide
+- **Transpose multiplier** — set per step how far the chain and project transposes move a note: as
+  usual, further, not at all, or the opposite way, so one phrase can be reused across chains
+- **Loop window slide** — move a sample's whole loop through the file, from a phrase step or a table
+  row, without changing its length: the note holds its pitch while its tone moves
 - **EQ (per note / mixer)** — apply an EQ preset to one note, or automate the master EQ across the song
 - **Chance** — probability gate: set odds the note actually plays
 - **Randomize** — randomize any other FX value on the fly
@@ -67,7 +76,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
 - **SoundFont**: load SF2 and SF3 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
 - Only the chosen sound is loaded out of a SoundFont, not the bank around it — SF2 and SF3 alike, so banks of hundreds of megabytes are usable; the list of sounds inside a file opens instantly
-- Loop modes: no loop, forward loop, ping-pong loop
+- Loop modes: no loop, forward loop, ping-pong loop, and **oscillator** — which retunes the loop so one trip round it is one cycle of the note, playing any window of any sample in tune and turning the loop length into a tone control
 - Reverse playback
 - Non-destructive start and end point trimming
 - Per-instrument real-time effects: low/high/band-pass filter, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)

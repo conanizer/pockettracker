@@ -584,7 +584,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |
 | START | 00–FF | Sample start point (fraction of sample length). |
 | END | 00–FF | Sample end point. |
-| LOOP | OFF / FWD / PNG | Loop mode: off, forward, ping-pong. |
+| LOOP | OFF / FWD / PNG / OSC | Loop mode: off, forward, ping-pong, oscillator (see below). |
 | LOOP ST | 00–FF | Loop start point (fraction of sample length). |
 | LOOP END | 00–FF | Loop end point. `FF` = sample end. Loop region is [LOOP ST, LOOP END] — see below. |
 | REVERSE | OFF / ON | Reverse playback. |
@@ -636,7 +636,7 @@ into the mix before it, so master volume takes the reverb and delay down with ev
 the master to `00` really does end in silence, tails included.
 
 The last two stages can also be written from a phrase: `VTR` replaces the track fader and `VMV` the
-master one for as long as the song is playing (§21).
+master one for as long as the song is playing (§22).
 
 ### Slice playback
 
@@ -650,7 +650,7 @@ When slice markers exist on the sample (set via the SAMPLE EDITOR), the SLICE pa
 
 ### Loop region & release tail
 
-When **LOOP** is FWD or PNG, playback flows **START → LOOP END** once, then repeats the region **[LOOP ST, LOOP END]**. The sample's **END** no longer bounds the loop — it bounds the *release tail*.
+When **LOOP** is FWD, PNG or OSC, playback flows **START → LOOP END** once, then repeats the region **[LOOP ST, LOOP END]**. The sample's **END** no longer bounds the loop — it bounds the *release tail*.
 
 If the instrument also has an **ADSR** volume envelope (MODULATION screen), releasing the note — the note-off at the end of its step, or a **KIL** (`K00`) effect — leaves the loop and plays **LOOP END → END** once as the release tail, under the ADSR release stage. The sample therefore splits into three regions:
 
@@ -664,6 +664,29 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 
 > [!NOTE]
 > Set **LOOP END** below **END** to reserve a release tail. Leaving **LOOP END = FF** makes the loop run to the sample end (the classic behaviour) with no separate tail.
+
+### OSC — the loop as an oscillator
+
+In **FWD** and **PNG** the loop repeats at its own speed, so a short loop is heard as a low buzz and
+a shorter one as a higher buzz — the loop's length is a pitch.
+
+**OSC** turns that around. The loop is sped up or slowed down so that **one trip round it takes
+exactly one cycle of the note you played**, which means:
+
+- the note plays **in tune, at the pitch you wrote**, whatever the loop's length;
+- the loop's **length becomes a tone control** instead — a longer window packs more of the sample
+  into each cycle and sounds brighter and busier, a shorter one smoother;
+- **any** part of any sample becomes a playable oscillator, so a few seconds of noise, a vocal or a
+  field recording can be played as an instrument across the keyboard.
+
+Pair it with **LPO** (§22), which walks the loop through the sample without changing its length: the
+note stays in tune and its tone changes as it moves. That is the classic way to build a wavetable by
+hand — a sample holding one waveform after another, a loop about the size of one of them, and an
+`LPO` stepping from one to the next.
+
+> [!NOTE]
+> Anything that changes the loop's **length** in this mode changes the tone rather than the pitch —
+> including the instrument's own **END**, which caps the loop where it lands.
 
 ### Navigating instruments
 
@@ -908,7 +931,7 @@ threes under a volume moving in fours.
 
 ### Fades in a table
 
-`AUS` and `AUF` work on a table row as they do on a phrase step (§21), with **rows** as the span:
+`AUS` and `AUF` work on a table row as they do on a phrase step (§22), with **rows** as the span:
 
 ```
      N    VOL  FX1      FX2      FX3
@@ -916,7 +939,8 @@ threes under a volume moving in fours.
 0A   00   --   ---  00  AUF F0   ---  00   ← arrive at F0 eight rows later
 ```
 
-A table `AUS` can move **VOL**, **CUT**, **RES**, **EQN** and **EQM**; anything else to its left is
+A table `AUS` can move **VOL**, **CUT**, **RES**, **LPF**, **HPF**, **BPF**, **END**, **DRV**, **FIN**,
+**EQN** and **EQM**; anything else to its left is
 passed over. The fade follows the playhead of the column holding the value it is moving — `CUT` in
 FX1 above, so that fade runs at FX1's speed whichever column the `AUS` sits in. **HOP steers it** —
 back to the `AUS` row restarts it, into the middle picks it up there, past the `AUF` ends it. A `TIC`
@@ -1804,6 +1828,9 @@ skipping any that are not:
 | `VMV` | the master fader |
 | `CUT` | the filter cutoff |
 | `RES` | the filter resonance |
+| `LPF` `HPF` `BPF` | the cutoff of the filter they switch on |
+| `DRV` | the overdrive amount |
+| `FIN` | the fine tune — end to end is a two-semitone glide |
 | `EQN` | this track's EQ — **between two presets** (see below) |
 | `EQM` | the master EQ — **between two presets** (see below) |
 
@@ -1865,9 +1892,9 @@ Move the **instrument's own filter** on **this note only**: `CUT` sets the cutof
 resonance, both `00`–`FF`, the same two values as the FREQ and RES cells on the INSTRUMENT screen (§9).
 The next note starts from the instrument's values again.
 
-> ⚠️ **The instrument must have a FILTER TYPE.** `CUT` and `RES` move the filter the instrument declares —
-> they do not switch one on. On an instrument whose FILTER is `OFF` they do nothing at all. Set FILTER to
-> `LP`, `HP` or `BP` on the INSTRUMENT screen first, and the FX column takes it from there.
+> ⚠️ **The note must have a filter for these two to move.** `CUT` and `RES` move the filter that is
+> already there — they do not switch one on. Give the instrument a FILTER TYPE on the INSTRUMENT screen,
+> or write `LPF`, `HPF` or `BPF` in an earlier FX slot (next section), and the FX column takes it from there.
 
 Cutoff is exponential across the byte: `00` is 20 Hz, `FF` is 20 kHz, and each `+0x33` is roughly one
 decade. On a low-pass, small numbers are dark and large ones are open.
@@ -1881,6 +1908,139 @@ Both can be **ramped** with `AUS`/`AUF`, which is what a filter sweep is:
 
 Both also work in a **table**, once per tic, so a sweep written once follows every note that instrument
 plays — the shortest way to give a sample a filter envelope without spending a modulation slot.
+
+---
+
+### LPF `XX` · HPF `XX` · BPF `XX` — Switch a Filter On
+
+Give **this note** a low-pass, high-pass or band-pass at cutoff `XX`, whatever the instrument's own
+FILTER setting is. The value is the same `00`–`FF` cutoff `CUT` uses: `00` is 20 Hz, `FF` is 20 kHz.
+
+```
+    00    LPF 40                     ← this note plays through a low-pass at 40
+    04    HPF 90                     ← and this one through a high-pass at 90
+```
+
+The filter lasts for the note, like `CUT` and `RES` — the next note starts from the instrument's own
+setting again. `RES` written beside one of them sets its resonance, and `CUT` after it moves the cutoff
+without changing the type, which is what a sweep over an already-chosen filter needs.
+
+All three can be **ramped** with `AUS`/`AUF`, and all three work in a **table row**, once per tic — one
+row there gives every note that instrument plays a filter.
+
+---
+
+### DRV `XX` — Overdrive
+
+Overdrives **this note**, `00` clean through `FF` heavy — the same control the INSTRUMENT screen's
+DRIVE cell holds, written per note. The next note starts from the instrument's own value again.
+
+Ramps with `AUS`/`AUF`, and works on a table row, so a note can dirty up as it holds.
+
+---
+
+### CRU `XY` — Bit Crush + Downsample
+
+Two effects in one cell, each a single digit `0`–`F`:
+
+- **`X`** — bits crushed away. `0` is clean, `F` leaves about one bit.
+- **`Y`** — how far the sample rate is dropped. `0` is clean, `F` is the coarsest.
+
+```
+    00    CRU 80                     ← crushed bits, full rate
+    04    CRU 08                     ← full bit depth, badly downsampled
+    08    CRU 88                     ← both
+```
+
+The same two controls the INSTRUMENT screen holds, written per note, and gone at the next note. It can
+be used on a table row; it cannot be ramped, because the cell is two separate numbers rather than one
+value to slide.
+
+---
+
+### FIN `XX` — Fine Tune
+
+The cents between the semitones. `80` is in tune, `00` is a semitone flat, `FF` a semitone sharp, and
+each step is about 0.8 cents — so anything `PIT` steps over is reachable, and two voices a few steps
+apart beat against each other.
+
+```
+    00    C-4   FIN 84               ← a few cents sharp
+    04    C-4   FIN 7C               ← and a few flat, for a chorus against it
+```
+
+It **retunes the note that is already playing**, so it can be written on a step of its own to bend a
+held note, and an `AUS`/`AUF` ramp across the whole byte is a two-semitone glide. On the same step as
+a note it tunes that note. Gone at the next note, like `CUT` and `DRV`, and it works on a table row.
+
+---
+
+### TSX `XX` — Transpose Multiplier
+
+How far the chain's `TSP` column and the project's `TRANSPOSE` move this step. `01` is normal, `00`
+leaves the note exactly where it is written, higher values move it further, and `FF` downwards move
+it the opposite way.
+
+| Value | Where a `TSP` of `+3` puts a C-4 |
+|---|---|
+| no cell | D#4 — three up, as always |
+| `00` | C-4 — unmoved |
+| `01` | D#4 |
+| `02` | F#4 — six up |
+| `0C` | C-7 — an octave for every step of `TSP` |
+| `FF` | A-3 — three **down** |
+| `FE` | F#3 — six down |
+
+```
+    00    C-4 01  TSX 00               ← this note never moves
+    04    E-4 01                       ← this one follows the chain as usual
+    08    G-4 01  TSX 02               ← and this one moves twice as far
+```
+
+So one phrase can be reused across chains transposed differently, with the notes you want held still
+and the notes you want moved doing the moving.
+
+It applies to the step it is written on and to a phrase only — a `TSX` on a **table row does
+nothing**, because by the time a table runs its note has already been placed. To keep a whole
+instrument still, set `TSP` to `OFF` on the INSTRUMENT screen instead (§10); that switch wins over any
+`TSX`.
+
+---
+
+### LPO `XX` — Loop Window Slide
+
+Slides the **whole loop** through the sample — both ends together, so the loop keeps its length and
+the note keeps its pitch. Only the part of the sample the loop is reading changes, so what moves is
+the **tone**.
+
+The value is a signed step in **sixteenths of the loop's own length**, so it means the same thing on
+a short loop as on a long one and you never have to count samples.
+
+| Value | Moves the loop by |
+|---|---|
+| `01` | a sixteenth of itself |
+| `04` | a quarter |
+| `10` | one whole loop — the next window along |
+| `FF` | a sixteenth **backwards** |
+| `F0` | one whole loop backwards |
+| `00` | nothing |
+
+**It adds up.** Each `LPO` moves on from wherever the loop already is, so sixteen `01`s go exactly as
+far as one `10`. The count starts again at every new note, so one `LPO` colours that note and the
+next one starts clean. At either end of the sample the loop simply stops rather than wrapping round.
+
+```
+    00    C-4 01  LPO 10               ← the next window along
+    04            LPO 10               ← and the next
+    08            LPO F0               ← back one
+```
+
+It works on a **table row** too, and that is where most of its use is: a row with `LPO 01` under a
+`HOP` walks the loop onwards a step at a time for as long as the note is held — a drone whose tone
+keeps evolving, a stretched sound, or a step through a sample of stacked waveforms. Pair it with the
+**OSC** loop mode (§10) to keep everything in tune while it moves.
+
+It cannot be ramped with `AUS`/`AUF`, because each cell is a move rather than a position.
 
 ---
 
@@ -2594,6 +2754,14 @@ Open with **A** on an EQ cell.
 | AUF | Automation Finish | `XX` | Destination value; a later step, may be a later phrase of the same chain |
 | CUT | Filter Cutoff | `XX` | This note's filter cutoff (20 Hz–20 kHz, log). Needs a FILTER TYPE on the instrument |
 | RES | Filter Resonance | `XX` | This note's filter resonance. Needs a FILTER TYPE on the instrument |
+| LPF | Low-Pass On | `XX` | Switches a low-pass on for this note at cutoff `XX` |
+| HPF | High-Pass On | `XX` | Switches a high-pass on for this note at cutoff `XX` |
+| BPF | Band-Pass On | `XX` | Switches a band-pass on for this note at centre `XX` |
+| DRV | Overdrive | `XX` | This note's overdrive, `00` clean to `FF` heavy |
+| CRU | Crush + Downsample | `XY` | `X` = bits crushed, `Y` = rate drop; both `0` = clean |
+| FIN | Fine Tune | `XX` | `80` in tune, a semitone either way; retunes a note already playing |
+| TSX | Transpose Multiplier | `XX` | How far TSP moves this note: `01` normal, `00` not at all, `FF` the other way. Phrase only |
+| LPO | Loop Window Slide | `XX` | Slides the whole loop, length kept. `10` = one loop on, `FF` = a sixteenth back; adds up |
 | SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
 | SCG | Global Scale | `XY` | The same for all eight tracks |
 

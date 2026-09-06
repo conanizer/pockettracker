@@ -1870,6 +1870,14 @@ class Sequencer {
         ResolvedStepParams params = resolve_step_params(effectiveStep, targetFrame, instrVol);
         float instrVolWithVxx = params.volume;
 
+        // TSX and the instrument's TRANSP. switch, folded into the figure every site below already
+        // reads. Reassigned rather than given a second name deliberately: the note, the REPEAT
+        // retrigger and the arpeggio each transpose, and a fourth site added later must not be able
+        // to reach the unscaled value at all.
+        transposeSemitones = effective_transpose_semitones(transposeSemitones, project,
+                                                           effectiveStep.instrument,
+                                                           params.tsxMultiplier);
+
         float instrumentPan = hex_to_float(instrument.pan);
         float notePan = params.panValue.has_value() ? (*params.panValue / 255.0f) : instrumentPan;
 
@@ -2022,6 +2030,31 @@ class Sequencer {
                 router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
             if (params.filterResValue.has_value())
                 router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
+            // LPF / HPF / BPF — one record, because the type and the cutoff must not be a block apart.
+            // The type rides the CC ID rather than the value, which is the only way a one-value record
+            // can carry both (event.h).
+            if (params.filterModeValue.has_value())
+                router_.cc(voiceFxFrame, trackId,
+                           params.filterModeType == 1 ? CC_FILTER_LP :
+                           params.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
+                           *params.filterModeValue / 255.0f);
+            // DRV / CRU — `voiceFxFrame` for the same reason CUT and RES take it: on a step
+            // that also triggers, a param queued at the note's own frame reaches the voice the note
+            // REPLACES. CRU's byte goes over whole; the engine splits the nibbles.
+            if (params.driveValue.has_value())
+                router_.cc(voiceFxFrame, trackId, CC_DRIVE, *params.driveValue / 255.0f);
+            if (params.crushValue.has_value())
+                router_.cc(voiceFxFrame, trackId, CC_CRUSH, *params.crushValue / 255.0f);
+            // FIN — `voiceFxFrame` for the same reason, and here the +1 is what makes the command
+            // tune the note on its own step rather than the one it just replaced.
+            if (params.fineTuneValue.has_value())
+                router_.cc(voiceFxFrame, trackId, CC_FINE_TUNE, *params.fineTuneValue / 255.0f);
+            // LPO. The AUTHORED byte goes over, not the signed sixteenths it was resolved to — the
+            // lane is a byte lane and the engine has its own decode. `voiceFxFrame` for the reason
+            // FIN takes it: a slide on the same step as a note must move THAT note's window.
+            if (params.loopSlideValue.has_value())
+                router_.cc(voiceFxFrame, trackId, CC_LOOP_SLIDE,
+                           (*params.loopSlideValue & 0xFF) / 255.0f);
             if (params.eqnSlot.has_value())
                 router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
             // The mixer faders. They REPLACE the authored fader and hold until the next VTR/VMV — so,
