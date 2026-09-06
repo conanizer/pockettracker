@@ -97,7 +97,7 @@ a Linux filesystem where those bits do survive, and unzipping on a PC strips the
 | A, A | Double-tap to insert a new item |
 | R + D-pad | Move between screens — this is how you get everywhere |
 | L | Selection and clipboard modifier (L+A cut/paste, L+B+A clone) |
-| SELECT | The screen's context action (SELECT+A renames a file in the browser) |
+| SELECT | Help for the cell the cursor is on — three lines at the top of the screen, and any other button puts it away. In the file browser it is the file-management modifier instead (SELECT+A renames, SELECT+B deletes, SELECT+R makes a folder) |
 | START | Play / stop |
 
 On a Mini+ the second shoulder row does the same as the first: L2 is another L, R2 another R.

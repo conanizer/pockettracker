@@ -57,7 +57,8 @@ for the schema, the key-name spellings and the 8BitDo/XInput case that makes A a
 - **B button** = "Which item am I looking at" (previous/next phrase, chain, instrument…)
 - **L button** = "Clipboard and selection"
 - **R button** = "Navigate screens"
-- **SELECT** = "File management" — the modifier for rename, delete and new folder in the file browser
+- **SELECT** = "What is this?" — help for the cell under the cursor, and the modifier for rename, delete
+  and new folder in the file browser
 
 This creates a consistent, learnable pattern where:
 - You don't memorize different controls per screen
@@ -78,9 +79,9 @@ This creates a consistent, learnable pattern where:
 ### Basic Actions
 - **A button** - Insert value on empty cell
 - **B button** - Cancel / back / copy a selection
-- **SELECT** - Cancels the keyboard overlay, and is the modifier for the file browser's rename /
-  delete / new-folder chords. It does nothing on its own anywhere else — the button is held free for
-  the on-screen help panel.
+- **SELECT** - Shows help for the cell under the cursor: the visualizer strip at the top of the screen
+  becomes three lines describing it, and any other button puts it away. In the file browser it is the
+  modifier for the rename / delete / new-folder chords instead, and it cancels the keyboard overlay.
   ⚠️ SELECT does **not** delete — clearing a value is always **A + B**.
 - **START** - Play/Stop sequencer
 
@@ -314,7 +315,8 @@ A + DOWN                Decrement by large step (-16 or -12)
 A + B                   Delete value / reset it to its default
 B                       Cancel / Exit / Back / Copy a selection
 B on EFFECTS' TIME row  Switch the delay time between milliseconds and note lengths
-SELECT                  Cancel the keyboard overlay (and the file-management modifier)
+SELECT                  Help for the cell under the cursor (and the file-management modifier;
+                        cancels the keyboard overlay)
 START                   Play / Stop
 ```
 
