@@ -430,9 +430,9 @@ inline CursorContext character(char current) {
  *
  * `type_count` is how many of the list this build lets you reach — fewer where the MIDI commands at
  * the end of it are hidden (ui/platform_caps.h `midi`). It bounds the coarse A+UP/A+DOWN step; the
- * picker that A+UP/A+DOWN opens is bounded by its own grid (ui/fx_helper.h). ⚠️ It clamps the CURSOR,
- * never the CELL: a step that already holds a hidden effect keeps it and keeps drawing it, because
- * the value came off disk and this build is not the one that authored it.
+ * picker that A+UP/A+DOWN opens is bounded by its own group lists (ui/fx_helper.h). ⚠️ It clamps
+ * the CURSOR, never the CELL: a step that already holds a hidden effect keeps it and keeps drawing
+ * it, because the value came off disk and this build is not the one that authored it.
  */
 inline CursorContext effect_type(int current_type, int fx_slot,
                                  int type_count = songcore::EFFECT_TYPE_COUNT) {

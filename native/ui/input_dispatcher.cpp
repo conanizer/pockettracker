@@ -1109,7 +1109,7 @@ bool InputDispatcher::on_fx_type_column() const {
     }
 }
 
-int InputDispatcher::current_fx_type_index() const {
+int InputDispatcher::current_fx_type_code() const {
     const Project& p = *s_.project;
     int            code = 0;
 
@@ -1132,10 +1132,10 @@ int InputDispatcher::current_fx_type_index() const {
             default: break;
         }
     }
-    return songcore::effect_type_index(code);
+    return code;
 }
 
-// The one place the FX list's length is decided — the picker's grid and the FX column's own step
+// The one place the FX list's length is decided — the picker's group lists and the FX column's own step
 // both read it, and a build where those two disagreed would have a cell the picker cannot name.
 //
 // ⚠️ TWO TRIMS OFF ONE TAIL, SO THEY NEST RATHER THAN COMBINE: `LPO` is the entry directly below the
@@ -1315,8 +1315,8 @@ void InputDispatcher::on_a_up() {
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) {
-        s_.fxHelper = fx_helper_opened_at(current_fx_type_index(),
-                                          FxGrid::of(visible_effect_type_count()));
+        s_.fxHelper = fx_helper_opened_at(current_fx_type_code(),
+                                          fx_layout_for(visible_effect_type_count()));
         return;
     }
     // The TYPE cell is a three-stop cycle with no coarse step, so both axes walk it — and both go
@@ -1338,8 +1338,8 @@ void InputDispatcher::on_a_down() {
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) {
-        s_.fxHelper = fx_helper_opened_at(current_fx_type_index(),
-                                          FxGrid::of(visible_effect_type_count()));
+        s_.fxHelper = fx_helper_opened_at(current_fx_type_code(),
+                                          fx_layout_for(visible_effect_type_count()));
         return;
     }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }

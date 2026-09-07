@@ -917,8 +917,8 @@ class InputDispatcher {
     // ── FX helper ───────────────────────────────────────────────────────────────────────────────
     /** True when the cursor is on an FX-TYPE column (PHRASE 4/6/8, TABLE 3/5/7). */
     bool on_fx_type_column() const;
-    /** The index into EFFECT_TYPES the cursor's FX column currently holds. */
-    int  current_fx_type_index() const;
+    /** The effect CODE the cursor's FX column currently holds — where the picker opens. */
+    int  current_fx_type_code() const;
     /** Write an effect CODE into the FX column under the cursor. */
     void apply_fx_type_change(int effect_code);
 
