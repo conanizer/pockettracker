@@ -97,6 +97,11 @@ struct InstrumentEditorState {
     int         sfPresetCount = 0;
     int         sfPresetIndex = 0;
 
+    // Whether the LOOP cycle may be stepped onto `osc` (platform_caps.h `loopWindow`). Only the
+    // cursor asks — `draw` reads the instrument's own string, so a slot already set to `osc` keeps
+    // saying so on every build.
+    bool allowOscLoop = true;
+
     Theme theme = theme_classic();
 
     songcore::InstrumentType type() const { return instrument.instrumentType; }

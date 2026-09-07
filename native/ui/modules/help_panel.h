@@ -16,12 +16,13 @@
 // lines. Only the HEIGHT differs — 70 on the strip, 155 in the waveform — and the extra 85px is spent
 // as air above and below rather than on more text: a fourth line would exist on one screen only.
 //
-// ⚠️ **TWO COLOURS AND NO MORE: VIZ BG behind, VIZ WAVE in front.** They are the strip's own theme
-// keys, so the panel re-themes itself with the visualizer it stands in for, and a palette that made
-// the scope readable makes this readable too. The waveform panel's ground is VIZ BG as well, so the
-// same pair lands there unchanged — the wave's own TXT VALUE / TXT EMPTY are not borrowed, because
-// the guarantee that the text is legible belongs to the viz pair. The mascot is one bit deep for
-// exactly this reason — see ui/mascot_sprite.h.
+// ⚠️ **THREE COLOURS AND NO MORE: VIZ BG behind, VIZ WAVE for the text, TXT TITLE for the mascot.**
+// The first two are the strip's own theme keys, so the panel re-themes itself with the visualizer it
+// stands in for, and a palette that made the scope readable makes this readable too. The waveform
+// panel's ground is VIZ BG as well, so the pair lands there unchanged — the wave's own TXT VALUE /
+// TXT EMPTY are not borrowed, because the guarantee that the text is legible belongs to the viz pair.
+// The mascot takes the header colour instead, so it reads as a figure rather than as more text; it is
+// one bit deep for exactly that reason — see ui/mascot_sprite.h.
 //
 // The FULL overlay is a separate screen and not this file. ⚠️ One screen can never show this one:
 // FILE_BROWSER is 640×480 of file rows with no box to spare, and SELECT is its rename/delete chord.

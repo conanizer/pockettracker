@@ -11,7 +11,7 @@ namespace {
  * The sprite, as horizontal RUNS of lit pixels.
  *
  * ⚠️ A run rather than a pixel, and it is not micro-optimisation: `fill_rect` clips and blends per
- * CALL, so one call per lit pixel would be 1831 of them a frame where 313 will do. The bitmask is
+ * CALL, so one call per lit pixel would be 1464 of them a frame where 232 will do. The bitmask is
  * walked left to right and a run is closed at the first unlit column or at the right edge.
  */
 void draw_mascot(Canvas& c, int x, int y, Argb color) {
@@ -41,7 +41,7 @@ void HelpPanelModule::draw(Canvas& c, int x, int y, HelpTopic topic, const Theme
     // negative offset here and hang the mascot off the top edge.
     const int top = y + (box_height > HEIGHT ? (box_height - HEIGHT) / 2 : 0);
 
-    draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, t.vizWave);
+    draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, t.textTitle);
 
     const HelpEntry& e     = help_entry(topic);
     const char*      lines[3] = {e.line1, e.line2, e.line3};

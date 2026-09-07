@@ -97,6 +97,20 @@ struct PlatformCaps {
      */
     bool midi = false;
 
+    /**
+     * The LOOP-WINDOW pair, held back while what they should DO is still being decided: the `LPO`
+     * command (last of the non-MIDI entries in songcore::EFFECT_TYPES, so the picker and the FX
+     * column's step both stop one earlier) and `osc` in the instrument LOOP cycle.
+     *
+     * ⚠️ AUTHORING ONLY, on the `midi` rule above: a project made with them keeps drawing `LPO` and
+     * `osc`, and the engine keeps playing both. Hiding the display would leave a note sounding
+     * one way with a screen saying another.
+     *
+     * ⚠️ It can only be off while `midi` is off — `LPO` sits directly below the MIDI six and both
+     * are hidden by shortening the same tail (songcore/effects.h).
+     */
+    bool loopWindow = false;
+
     /** Kotlin's world: every device row, no exit. */
     static PlatformCaps android(bool debug_build) {
         PlatformCaps c;
@@ -108,6 +122,7 @@ struct PlatformCaps {
         c.engineToggle   = true;
         c.appExit        = false;
         c.midi           = debug_build;
+        c.loopWindow     = debug_build;
         return c;
     }
 
@@ -129,6 +144,7 @@ struct PlatformCaps {
         c.engineToggle   = false;
         c.appExit        = true;
         c.midi           = debug_build;
+        c.loopWindow     = debug_build;
         return c;
     }
 

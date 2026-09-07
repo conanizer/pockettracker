@@ -1,0 +1,8 @@
+Scales, help on SELECT, nine new effect commands, a metronome, and SoundFonts that now cost only the sound you play.
+
+• A SCALE screen — 38 built-in scales, a project key, and every note pulled onto the scale as it plays
+• LPF/HPF/BPF, DRV, CRU, FIN and TSX — filters, drive, crush, fine tuning and transpose, written per note
+• A metronome on SETTINGS, and TAP on PROJECT to set the tempo by ear
+• Only the chosen sound loads out of a SoundFont — huge banks are usable now
+• SELECT explains whatever cell the cursor is on
+• A slow load says what it is doing, and B stops it

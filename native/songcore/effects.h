@@ -368,6 +368,21 @@ static_assert(EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 0] == FX_MPG &&
               "the MIDI commands must stay the LAST six entries of EFFECT_TYPES — a build that hides "
               "them shortens the list, so anything after them would be hidden too");
 
+// ⚠️ `LPO` IS HIDDEN THE SAME WAY, AND IT IS THE ENTRY DIRECTLY BELOW THE MIDI SIX.
+// The loop-window slide and the OSCILLATOR loop mode it belongs with are held back from release
+// builds (native/ui/platform_caps.h `loopWindow`) while the shape of the command is still open. The
+// trick is the MIDI one and it works for the same reason — a TAIL can be trimmed without renaming
+// any remaining index, and a .ptp stores the CODE, so a cell typed in a build that has it reads back
+// as `LPO` in one that does not. ⚠️ **THERE IS NO WAY TO DROP AN ENTRY FROM THE MIDDLE OF THIS LIST**,
+// so hiding `LPO` requires the MIDI six to be hidden as well; the two trims nest, they do not
+// combine freely.
+inline constexpr int PREVIEW_EFFECT_COUNT     = 1;   // FX_LPO
+inline constexpr int EFFECT_TYPE_COUNT_STABLE = EFFECT_TYPE_COUNT_NO_MIDI - PREVIEW_EFFECT_COUNT;
+
+static_assert(EFFECT_TYPES[EFFECT_TYPE_COUNT_STABLE] == FX_LPO,
+              "LPO must sit directly below the MIDI six — a build that hides it shortens the list, "
+              "so an effect moved after it would be hidden too");
+
 /** Index of `code` in EFFECT_TYPES, or 0 (FX_NONE) if it is not a known effect — `indexOf(...) ?: 0`. */
 inline int effect_type_index(int code) {
     for (int i = 0; i < EFFECT_TYPE_COUNT; ++i)

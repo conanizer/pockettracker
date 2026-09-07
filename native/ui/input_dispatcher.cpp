@@ -456,6 +456,7 @@ CursorContext InputDispatcher::cursor_context() const {
             is.sfPresetName  = s_.sfPresetName;
             is.sfPresetCount = s_.sfPresetCount;
             is.sfPresetIndex = s_.sfPresetIndex;
+            is.allowOscLoop  = s_.caps.loopWindow;
             return instrument_.cursor_context(is);
         }
 
@@ -1134,8 +1135,16 @@ int InputDispatcher::current_fx_type_index() const {
     return songcore::effect_type_index(code);
 }
 
+// The one place the FX list's length is decided — the picker's grid and the FX column's own step
+// both read it, and a build where those two disagreed would have a cell the picker cannot name.
+//
+// ⚠️ TWO TRIMS OFF ONE TAIL, SO THEY NEST RATHER THAN COMBINE: `LPO` is the entry directly below the
+// MIDI six, so it can only be dropped once they are (songcore/effects.h). Written as a ladder for
+// that reason — a build showing MIDI shows LPO whatever `loopWindow` says.
 int InputDispatcher::visible_effect_type_count() const {
-    return s_.caps.midi ? songcore::EFFECT_TYPE_COUNT : songcore::EFFECT_TYPE_COUNT_NO_MIDI;
+    if (s_.caps.midi)       return songcore::EFFECT_TYPE_COUNT;
+    if (s_.caps.loopWindow) return songcore::EFFECT_TYPE_COUNT_NO_MIDI;
+    return songcore::EFFECT_TYPE_COUNT_STABLE;
 }
 
 void InputDispatcher::apply_fx_type_change(int effect_code) {

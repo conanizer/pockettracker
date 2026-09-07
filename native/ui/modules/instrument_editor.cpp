@@ -601,7 +601,14 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
             return cc::none();
 
         case 13:  // LOOP + START
-            if (col == 1) return cc::toggle_ternary(ins.loopMode, loop_modes());
+            if (col == 1) {
+                CursorContext c = cc::toggle_ternary(ins.loopMode, loop_modes());
+                // A ceiling rather than a second, shorter list, so `loop_modes()` stays the one place
+                // the modes are named. A slot already saved as `osc` still reads as `osc` here and
+                // still draws as `osc`; the cursor can step out of it and cannot climb back.
+                if (!s.allowOscLoop) c.maxValue = static_cast<int>(loop_modes().size()) - 2;
+                return c;
+            }
             if (col == 3) return cc::hex_byte(ins.sampleStart, 0, 255, -1, false, false, false, 0x00);
             return cc::none();
 

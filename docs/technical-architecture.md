@@ -458,6 +458,13 @@ cannot create MIDI data — no MIDI screen, no EXTERNAL instrument type, no MIDI
 it displays existing data faithfully, because all three are persisted in a `.ptp` and a build that
 drew them as something else would misrepresent the file on disk.
 
+The loop-window pair — the `LPO` effect and the `osc` loop mode — is held back the same way
+(`PlatformCaps::loopWindow`), on the same authoring-only terms. Hiding an effect works only on a
+**tail** of `EFFECT_TYPES`: a cell stores an index into that array while a `.ptp` stores the effect
+*code*, so shortening the list leaves every remaining index naming the effect it always named. `LPO`
+sits directly below the MIDI six for that reason, which also means the two trims nest — nothing can
+drop an entry from the middle of the list.
+
 ---
 
 ## Data Model and File Formats

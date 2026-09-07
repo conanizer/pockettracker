@@ -2184,18 +2184,44 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // count wind up past the end of the sample, so a step back would have an overshoot to
             // unwind before the window moved at all. Clamped, the window simply STOPS — LGPT's
             // behaviour, and a wrap would make a drone jump.
-            if (voice.loopSlideSixteenths != 0) {
-                const int len = voice.actualLoopEnd - voice.actualLoopStart;
-                if (len > 0) {
-                    const int maxSixteenths = (int)(((int64_t)(voice.actualEnd - voice.actualLoopEnd) * 16) / len);
-                    const int minSixteenths = (int)(((int64_t)(voice.actualStart - voice.actualLoopStart) * 16) / len);
-                    voice.loopSlideSixteenths = std::max(minSixteenths,
-                                                         std::min(voice.loopSlideSixteenths, maxSixteenths));
-                    const int off = (int)(((int64_t)voice.loopSlideSixteenths * len) / 16);
-                    voice.actualLoopStart += off;
-                    voice.actualLoopEnd   += off;
-                }
+            //
+            // ⚠️⚠️ **THE PLAYHEAD MOVES WITH THE WINDOW, AND THAT IS THE COMMAND'S WHOLE FEEL.** The
+            // window is not what travels — think of the window as fixed and the SAMPLE as sliding
+            // underneath it. So the playhead keeps its position WITHIN the loop and the material
+            // under it changes, right now, in the block the cell lands in.
+            //
+            // Leave the playhead where it is instead and both directions are wrong in their own way:
+            // forward, it has to run to the end of the old window before it ever enters the new one,
+            // so a whole-loop step is heard a loop late; backward, it is already past the new end, so
+            // it snaps to the loop start at an arbitrary phase and **that snap is an audible click** —
+            // certain on a whole-loop step, about one press in sixteen on a sixteenth.
+            //
+            // ⭐ Held as the offset LAST APPLIED, so the shift is a difference between two values both
+            // derived from the running total. Accumulating it per call would reintroduce the rounding
+            // drift the total exists to avoid, and a count that returns to zero would strand the
+            // playhead where the last slide left it.
+            const int len = voice.actualLoopEnd - voice.actualLoopStart;
+            int       off = 0;
+            if (voice.loopSlideSixteenths != 0 && len > 0) {
+                const int maxSixteenths = (int)(((int64_t)(voice.actualEnd - voice.actualLoopEnd) * 16) / len);
+                const int minSixteenths = (int)(((int64_t)(voice.actualStart - voice.actualLoopStart) * 16) / len);
+                voice.loopSlideSixteenths = std::max(minSixteenths,
+                                                     std::min(voice.loopSlideSixteenths, maxSixteenths));
+                off = (int)(((int64_t)voice.loopSlideSixteenths * len) / 16);
             }
+            if (off != voice.loopSlideFrames) {
+                // ⚠️ ONLY WHILE THE PLAYHEAD IS INSIDE THE LOOP. Before the first wrap it is still in
+                // the intro (start → loop start), and after a note-off on an ADSR voice it is running
+                // the release tail with the loop abandoned; neither is a position the window owns, and
+                // dragging it would walk a released note backwards into the loop it just left.
+                const int wasStart = voice.actualLoopStart + voice.loopSlideFrames;
+                const int wasEnd   = voice.actualLoopEnd   + voice.loopSlideFrames;
+                if (voice.position >= (double)wasStart && voice.position < (double)wasEnd)
+                    voice.position += (double)(off - voice.loopSlideFrames);
+                voice.loopSlideFrames = off;
+            }
+            voice.actualLoopStart += off;
+            voice.actualLoopEnd   += off;
         }
 
         // ⚠️ AFTER the loop bounds, not before: oscillator mode's rate is derived from the loop

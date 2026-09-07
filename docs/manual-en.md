@@ -550,7 +550,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 
 ### FX columns
 
-Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker and choose from the grid. Effects are listed in §21.
+Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker and choose from the grid. Effects are listed in §22.
 
 > [!WARNING]
 > Some effects (**ARP**, **RPT**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
@@ -584,7 +584,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |
 | START | 00–FF | Sample start point (fraction of sample length). |
 | END | 00–FF | Sample end point. |
-| LOOP | OFF / FWD / PNG / OSC | Loop mode: off, forward, ping-pong, oscillator (see below). |
+| LOOP | OFF / FWD / PNG | Loop mode: off, forward, ping-pong. |
 | LOOP ST | 00–FF | Loop start point (fraction of sample length). |
 | LOOP END | 00–FF | Loop end point. `FF` = sample end. Loop region is [LOOP ST, LOOP END] — see below. |
 | REVERSE | OFF / ON | Reverse playback. |
@@ -650,7 +650,7 @@ When slice markers exist on the sample (set via the SAMPLE EDITOR), the SLICE pa
 
 ### Loop region & release tail
 
-When **LOOP** is FWD, PNG or OSC, playback flows **START → LOOP END** once, then repeats the region **[LOOP ST, LOOP END]**. The sample's **END** no longer bounds the loop — it bounds the *release tail*.
+When **LOOP** is FWD or PNG, playback flows **START → LOOP END** once, then repeats the region **[LOOP ST, LOOP END]**. The sample's **END** no longer bounds the loop — it bounds the *release tail*.
 
 If the instrument also has an **ADSR** volume envelope (MODULATION screen), releasing the note — the note-off at the end of its step, or a **KIL** (`K00`) effect — leaves the loop and plays **LOOP END → END** once as the release tail, under the ADSR release stage. The sample therefore splits into three regions:
 
@@ -664,29 +664,6 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 
 > [!NOTE]
 > Set **LOOP END** below **END** to reserve a release tail. Leaving **LOOP END = FF** makes the loop run to the sample end (the classic behaviour) with no separate tail.
-
-### OSC — the loop as an oscillator
-
-In **FWD** and **PNG** the loop repeats at its own speed, so a short loop is heard as a low buzz and
-a shorter one as a higher buzz — the loop's length is a pitch.
-
-**OSC** turns that around. The loop is sped up or slowed down so that **one trip round it takes
-exactly one cycle of the note you played**, which means:
-
-- the note plays **in tune, at the pitch you wrote**, whatever the loop's length;
-- the loop's **length becomes a tone control** instead — a longer window packs more of the sample
-  into each cycle and sounds brighter and busier, a shorter one smoother;
-- **any** part of any sample becomes a playable oscillator, so a few seconds of noise, a vocal or a
-  field recording can be played as an instrument across the keyboard.
-
-Pair it with **LPO** (§22), which walks the loop through the sample without changing its length: the
-note stays in tune and its tone changes as it moves. That is the classic way to build a wavetable by
-hand — a sample holding one waveform after another, a loop about the size of one of them, and an
-`LPO` stepping from one to the next.
-
-> [!NOTE]
-> Anything that changes the loop's **length** in this mode changes the tone rather than the pitch —
-> including the instrument's own **END**, which caps the loop where it lands.
 
 ### Navigating instruments
 
@@ -2007,43 +1984,6 @@ instrument still, set `TSP` to `OFF` on the INSTRUMENT screen instead (§10); th
 
 ---
 
-### LPO `XX` — Loop Window Slide
-
-Slides the **whole loop** through the sample — both ends together, so the loop keeps its length and
-the note keeps its pitch. Only the part of the sample the loop is reading changes, so what moves is
-the **tone**.
-
-The value is a signed step in **sixteenths of the loop's own length**, so it means the same thing on
-a short loop as on a long one and you never have to count samples.
-
-| Value | Moves the loop by |
-|---|---|
-| `01` | a sixteenth of itself |
-| `04` | a quarter |
-| `10` | one whole loop — the next window along |
-| `FF` | a sixteenth **backwards** |
-| `F0` | one whole loop backwards |
-| `00` | nothing |
-
-**It adds up.** Each `LPO` moves on from wherever the loop already is, so sixteen `01`s go exactly as
-far as one `10`. The count starts again at every new note, so one `LPO` colours that note and the
-next one starts clean. At either end of the sample the loop simply stops rather than wrapping round.
-
-```
-    00    C-4 01  LPO 10               ← the next window along
-    04            LPO 10               ← and the next
-    08            LPO F0               ← back one
-```
-
-It works on a **table row** too, and that is where most of its use is: a row with `LPO 01` under a
-`HOP` walks the loop onwards a step at a time for as long as the note is held — a drone whose tone
-keeps evolving, a stretched sound, or a step through a sample of stacked waveforms. Pair it with the
-**OSC** loop mode (§10) to keep everything in tune while it moves.
-
-It cannot be ramped with `AUS`/`AUF`, because each cell is a move rather than a position.
-
----
-
 ### SCA `XY` — Track Scale · SCG `XY` — Global Scale
 
 Put a track on one of the project's 16 scales. `SCA` moves the track the command is written on; `SCG`
@@ -2761,7 +2701,6 @@ Open with **A** on an EQ cell.
 | CRU | Crush + Downsample | `XY` | `X` = bits crushed, `Y` = rate drop; both `0` = clean |
 | FIN | Fine Tune | `XX` | `80` in tune, a semitone either way; retunes a note already playing |
 | TSX | Transpose Multiplier | `XX` | How far TSP moves this note: `01` normal, `00` not at all, `FF` the other way. Phrase only |
-| LPO | Loop Window Slide | `XX` | Slides the whole loop, length kept. `10` = one loop on, `FF` = a sixteenth back; adds up |
 | SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
 | SCG | Global Scale | `XY` | The same for all eight tracks |
 

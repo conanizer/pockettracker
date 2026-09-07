@@ -47,6 +47,11 @@ struct Voice : public IAudioVoice {
     // Clamped at apply time so it cannot wind up past either end of the sample: the window STOPS
     // rather than wrapping, and one step back must move it back rather than unwinding an overshoot.
     int loopSlideSixteenths;
+    // The offset, IN SAMPLES, that the slide above was last applied at. Its only job is to give the
+    // mix loop a difference: when the window moves, the PLAYHEAD moves with it by the same amount, so
+    // the note keeps its position inside the loop and hears the new material immediately. Derived
+    // from the running count on both sides of the subtraction, never accumulated.
+    int loopSlideFrames;
     // The frequency a `playbackRate` of 1.0 would sound at, so `rate × baseFrequency` is what this
     // voice is sounding at right now, whatever moved the rate. ⚠️ Read ONLY by oscillator mode,
     // which has to know how many samples one cycle of the played note is worth. It is a REQUIRED
@@ -117,7 +122,7 @@ struct Voice : public IAudioVoice {
               prevPanLeft(0.707f), prevPanRight(0.707f),
               actualStart(0), actualEnd(0), actualLoopStart(0), actualLoopEnd(0), loopEndNorm(255),
               windowStartFrame(-1), windowEndFrame(-1),
-              loopSlideSixteenths(0), baseFrequency(0.0f),
+              loopSlideSixteenths(0), loopSlideFrames(0), baseFrequency(0.0f),
               reverse(false), loopMode(0), loopingBack(false), loopReleasing(false),
               tableId(-1),
               tableTranspose(0.0f), tableVolume(1.0f),
@@ -201,6 +206,7 @@ struct Voice : public IAudioVoice {
         // ⭐ THE LOOP SLIDE RESETS ON EVERY NOTE, which is what makes one LPO cell colour that note
         // and leave the next one clean — the way the technique is used.
         loopSlideSixteenths = 0;
+        loopSlideFrames     = 0;
         baseFrequency       = baseFreq;
 
         // Set playback parameters

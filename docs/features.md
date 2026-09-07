@@ -46,8 +46,6 @@ Write these into any phrase step to shape how a note plays:
   already playing, so a sweep of it is a glide
 - **Transpose multiplier** — set per step how far the chain and project transposes move a note: as
   usual, further, not at all, or the opposite way, so one phrase can be reused across chains
-- **Loop window slide** — move a sample's whole loop through the file, from a phrase step or a table
-  row, without changing its length: the note holds its pitch while its tone moves
 - **EQ (per note / mixer)** — apply an EQ preset to one note, or automate the master EQ across the song
 - **Chance** — probability gate: set odds the note actually plays
 - **Randomize** — randomize any other FX value on the fly
@@ -76,7 +74,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
 - **SoundFont**: load SF2 and SF3 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
 - Only the chosen sound is loaded out of a SoundFont, not the bank around it — SF2 and SF3 alike, so banks of hundreds of megabytes are usable; the list of sounds inside a file opens instantly
-- Loop modes: no loop, forward loop, ping-pong loop, and **oscillator** — which retunes the loop so one trip round it is one cycle of the note, playing any window of any sample in tune and turning the loop length into a tone control
+- Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
 - Non-destructive start and end point trimming
 - Per-instrument real-time effects: low/high/band-pass filter, 3-band EQ, overdrive, bitcrusher, sample rate reduction (Lo-Fi)
