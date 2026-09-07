@@ -465,6 +465,13 @@ The loop-window pair — the `LPO` effect and the `osc` loop mode — is held ba
 sits directly below the MIDI six for that reason, which also means the two trims nest — nothing can
 drop an entry from the middle of the list.
 
+The FX picker is a second list of the same effects, and deliberately not that array: its groups hold
+effect *codes* in their own reading order, so the picker can be re-ordered freely and a command can
+appear in two groups at once. Both lists are filtered by the same visible count, which is what stops
+a build from reaching a command through one and not the other. A group left with no effects is then
+dropped whole rather than drawn as an empty heading — which is how the MIDI group disappears, and why
+the blank entry each group offers is added *after* that decision and is never a member of one.
+
 ---
 
 ## Data Model and File Formats

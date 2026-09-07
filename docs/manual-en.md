@@ -550,7 +550,9 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 
 ### FX columns
 
-Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker and choose from the grid. Effects are listed in §22.
+Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker. Effects are listed in §22.
+
+The picker groups the commands by what they act on — **SEQUENCE**, **INSTRUMENT** and **GLOBAL** — and keeps one group open at a time. A closed group shows `→` after its name, the open one `↓`. Move past the last row of a group and the next one opens; every group starts with `---`, which clears the slot. Keep holding A while you look — the description above the grid follows the cursor — and release A on the command you want.
 
 > [!WARNING]
 > Some effects (**ARP**, **RPT**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
