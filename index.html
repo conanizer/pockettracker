@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PocketTracker — a music tracker for phones and handhelds</title>
-<meta name="description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux, PortMaster handhelds and the Miyoo Mini.">
+<meta name="description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux and PortMaster handhelds.">
 <meta name="theme-color" content="#030405">
 <link rel="icon" type="image/png" href="media/favicon.png">
 <link rel="canonical" href="https://conanizer.github.io/pockettracker/">
@@ -12,13 +12,13 @@
 <meta property="og:site_name" content="PocketTracker">
 <meta property="og:url" content="https://conanizer.github.io/pockettracker/">
 <meta property="og:title" content="PocketTracker — a music tracker for phones and handhelds">
-<meta property="og:description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux, PortMaster handhelds and the Miyoo Mini.">
+<meta property="og:description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux and PortMaster handhelds.">
 <meta property="og:image" content="https://conanizer.github.io/pockettracker/media/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="PocketTracker — a music tracker for phones and handhelds">
-<meta name="twitter:description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux, PortMaster handhelds and the Miyoo Mini.">
+<meta name="twitter:description" content="Music tracker for retro gaming handhelds and smartphones. Free and open source, with builds for Android, Windows, Linux and PortMaster handhelds.">
 <meta name="twitter:image" content="https://conanizer.github.io/pockettracker/media/og.png">
 </head>
 <body><style>
@@ -115,7 +115,7 @@
     color:var(--text); margin-bottom:18px; }
   /* no gaps: the bevels butt into one another and read as one ProTracker button strip */
   .plats{ display:flex; gap:0; flex-wrap:wrap; }
-  /* PORTMASTER is the longest label and a tab is only a fifth of the frame, so the tabs
+  /* PORTMASTER is the longest label and a tab is only a quarter of the frame, so the tabs
      buy their room from the side padding rather than from the type size. */
   .plats .btn{ --px:8px; flex:1 1 0; min-width:132px; -webkit-appearance:none; appearance:none; }
   /* every tab keeps the standard white label, so the selected one is told apart by depth alone:
@@ -245,7 +245,6 @@
         <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-windows"    id="t-windows">Windows</button>
         <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-linux"      id="t-linux">Linux</button>
         <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-portmaster" id="t-portmaster">PortMaster</button>
-        <button class="btn"    type="button" role="tab" aria-selected="false" aria-controls="p-miyoo"      id="t-miyoo">Miyoo Mini</button>
       </div>
 
       <div class="pane on" id="p-android" role="tabpanel" aria-labelledby="t-android">
@@ -315,24 +314,6 @@
           </ol>
           <p class="note">Let PortMaster unpack it rather than unzipping it yourself — unzipping on a PC and copying the files across can strip the permissions the port needs, and it then does nothing when you launch it.</p>
           <p class="note">For ArkOS, muOS, JELOS, Knulli, ROCKNIX and friends. The port uses your device's own SDL2, so it follows whatever your firmware already does about the screen and the audio.</p>
-        </div>
-      </div>
-      <div class="pane" id="p-miyoo" role="tabpanel" aria-labelledby="t-miyoo">
-        <div class="getrow">
-          <a class="btn" href="https://github.com/conanizer/pockettracker/releases/download/v0.9.8/PocketTracker-0.9.8-miyoo-mini.zip">Download</a>
-        </div>
-        <p class="meta">PocketTracker-0.9.8-miyoo-mini.zip · 1.9 MB · Miyoo Mini / Mini+ · OnionOS</p>
-        <div class="guide">
-          <p class="label">How to install</p>
-          <ol>
-            <li>On the device, open <b>Apps → Package Manager → Emu</b> and make sure <b>Ports Collection</b> is installed. It is what provides the Ports list PocketTracker appears in; most Onion setups already have it.</li>
-            <li>Switch the device off, take the SD card out and put it in a PC.</li>
-            <li>Extract the zip <b>at the top level of the card</b> — the drive letter on its own, nothing after it. On Windows, <i>Extract All</i> adds a folder named after the zip; delete that part of the destination box.</li>
-            <li>Check that <code>Roms\PORTS\Shortcuts\PocketTracker.port</code> is really on the card, then eject it and switch the device on.</li>
-            <li>PocketTracker is in the <b>Ports</b> list. Your files land in <code>PocketTracker/</code> at the top level of the card, created on first launch.</li>
-          </ol>
-          <p class="note">A Mini+ on Wi-Fi can skip the card: turn Samba on under <i>Tweaks → Network</i>, unzip on the PC and copy the <code>Roms</code> folder across, then restart the device.</p>
-          <p class="note">This build brings its own SDL2, because the Mini has none to borrow. It has 128 MB of RAM for the whole machine, firmware included, so short samples and a soundfont suit it better than long stereo ones.</p>
         </div>
       </div>
     </section>
@@ -449,7 +430,7 @@
       /* Open on the platform the visitor is actually on. Android is tested first because its user
          agent also says Linux, and it is the fallback too: there is no macOS or iOS build, so a Mac
          or an iPhone lands on the one platform its owner might still be carrying. A wrong guess
-         costs one click — the other four tabs are right there. */
+         costs one click — the other three tabs are right there. */
       var detect = function () {
         var data = navigator.userAgentData;
         var plat = (data && data.platform) || "";
