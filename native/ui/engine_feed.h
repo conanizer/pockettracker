@@ -20,6 +20,7 @@
 // the feed is what any *shell* constructs, and a tool simply does not construct one.
 
 #include <algorithm>
+#include <cmath>
 
 #include "audio-engine.h"
 #include "platform_memory.h"
@@ -55,8 +56,7 @@ public:
 
 private:
     /**
-     * The EQ editor's spectrum (S8) — the same shape as the MIXER's peaks above, and gated for the same
-     * two reasons: only while the screen that shows it is up, and only at the cadence Kotlin polls it.
+     * The EQ editor's spectrum (S8) — gated on one thing only: whether the screen that shows it is up.
      *
      * ⚠️ **The SOURCE depends on WHO OPENED THE EDITOR**, and that is the whole point of the call. An EQ
      * on the reverb send filters the reverb's INPUT; an instrument's EQ filters that instrument's voices;
@@ -64,10 +64,22 @@ private:
      * visualizer's own `spectrum` field holds — and the curve would sit on top of a signal the band is
      * not in, which is worse than drawing nothing: it looks right.
      *
-     * ⚠️ **Only every 50 ms.** Kotlin's is a `LaunchedEffect(eqEditorState.isOpen)` ticking at
-     * `delay(50)` — an FFT is not free, and at 20 Hz the bars already move faster than an eye tracks.
-     * The DRAW still runs at 60 Hz; it simply reads the last magnitudes again, exactly as the mixer's
-     * meters do between polls.
+     * ⚠️ **It polls every frame, and it must, because the OSCILLOSCOPE KEEPS DRAWING BESIDE IT.** The
+     * EQ editor replaces the module but not the furniture, so both spectra are on screen together,
+     * reading the same ring through the same transform. Anything slower than the visualizer's own
+     * cadence shows the same audio at two different ages, side by side, and reads as lag.
+     *
+     * An FFT is not free, but the cost went the other way: the window and the bin map are constants
+     * that `computeSpectrumFFT` used to rebuild per call, and caching them halved a poll. Per frame
+     * here now costs about 1.5x what every-50-ms used to, and the visualizer — which already polled
+     * per frame — got the same halving, so with a spectrum visualizer up the pair is cheaper than
+     * before.
+     *
+     * ⚠️ **The one case that got dearer is an OPEN EQ SCREEN OVER SILENCE.** The main loop stops
+     * DRAWING when nothing is audible but never stops POLLING, so this runs at frame rate with
+     * nothing to show. It is bounded and small — one poll, no audio-thread work, since the engine's
+     * capture gate keys on reads being recent rather than frequent — but it is the term to look at
+     * first if the handheld ever reads warm on this screen.
      *
      * The buffer is a member, not a local: `AppState::eqSpectrum` is a POINTER the module reads during
      * the draw, so what it points at has to outlive this call.
@@ -76,19 +88,14 @@ private:
         if (!state.eq.isOpen) {
             state.eqSpectrum      = nullptr;
             state.eqSpectrumCount = 0;
-            eqPolledMs_           = 0;
+            eqSmoothValid_        = false;
             return;
         }
-        // The rate goes with the spectrum, not on the 50 ms budget: the response curve is redrawn
-        // from it on any frame, and it is one int.
         state.eqSampleRate = host.sample_rate();
 
-        if (eqPolledMs_ != 0 && now_ms - eqPolledMs_ < EQ_POLL_MS) return;
-        eqPolledMs_ = now_ms;
-
         // 0 = master bus · 1 = the delay's input · 2 = the reverb's input · 3 = one instrument's voices.
-        // The sample editor's FX EQ has no live bus of its own (it is applied destructively on APPLY), so
-        // it watches the master, exactly as Kotlin's `else -> 0` arm does.
+        // The sample editor's FX EQ has no live bus of its own — it is applied destructively on APPLY —
+        // so it watches the master.
         int source  = 0;
         int instrId = -1;
         switch (state.eq.caller.kind) {
@@ -101,11 +108,55 @@ private:
             default: break;   // MASTER, SAMPLE_EDITOR_FX → the master bus
         }
 
-        if (host.spectrum_for_source(source, instrId, EQ_SPECTRUM_BINS, eqSpectrum_)) {
+        if (host.spectrum_for_source(source, instrId, EQ_SPECTRUM_BINS, eqSpectrumRaw_)) {
+            smooth_eq_spectrum(source, instrId, now_ms);
             state.eqSpectrum      = eqSpectrum_;
             state.eqSpectrumCount = EQ_SPECTRUM_BINS;
         }
     }
+
+    /**
+     * Analyser ballistics over the raw bins: fast up, slow down, one pole per bin.
+     *
+     * A single FFT frame is a NOISY estimate of a spectrum — two windows of the same steady tone
+     * differ by several dB from phase alone — so drawing every frame raw reads as twitch rather than
+     * as level. Rising fast keeps the edge of a transient; falling slowly is what lets the curve
+     * settle instead of flicker.
+     *
+     * It is a function of ELAPSED TIME, not of frames, so the curve behaves the same whether the
+     * screen runs at 60 fps or crawls. The gap clamp bounds a stalled frame (a load, a modal): one
+     * long gap would otherwise collapse the smoothing back into a jump.
+     *
+     * The state is per SOURCE. Switching which signal the editor watches — master to a send, one
+     * instrument to another — snaps rather than glides, since gliding would spend a quarter-second
+     * drawing a curve that is neither signal.
+     */
+    void smooth_eq_spectrum(int source, int instrId, long long now_ms) {
+        if (!eqSmoothValid_ || source != eqSmoothSource_ || instrId != eqSmoothInstr_) {
+            std::copy(eqSpectrumRaw_, eqSpectrumRaw_ + EQ_SPECTRUM_BINS, eqSpectrum_);
+            eqSmoothValid_  = true;
+            eqSmoothSource_ = source;
+            eqSmoothInstr_  = instrId;
+            eqSmoothMs_     = now_ms;
+            return;
+        }
+
+        long long dtMs = now_ms - eqSmoothMs_;
+        if (dtMs < 1)                dtMs = 1;
+        if (dtMs > EQ_SMOOTH_GAP_MS) dtMs = EQ_SMOOTH_GAP_MS;
+        eqSmoothMs_ = now_ms;
+
+        const float dt   = (float)dtMs;
+        const float rise = 1.0f - expf(-dt / EQ_RISE_MS);
+        const float fall = 1.0f - expf(-dt / EQ_FALL_MS);
+
+        for (int i = 0; i < EQ_SPECTRUM_BINS; i++) {
+            const float target = eqSpectrumRaw_[i];
+            float&      v      = eqSpectrum_[i];
+            v += (target - v) * (target > v ? rise : fall);
+        }
+    }
+
     /**
      * The USED RAM readout on PROJECT and INST.POOL.
      *
@@ -488,9 +539,21 @@ private:
      * straddling bins so a narrow peak cannot fall between two columns and vanish.
      */
     static constexpr int        EQ_SPECTRUM_BINS = 620;
-    static constexpr long long  EQ_POLL_MS       = 50;
-    float                       eqSpectrum_[EQ_SPECTRUM_BINS] = {};
-    long long                   eqPolledMs_                   = 0;
+    float                       eqSpectrum_[EQ_SPECTRUM_BINS]    = {};   // what the module draws
+    float                       eqSpectrumRaw_[EQ_SPECTRUM_BINS] = {};   // this frame's transform
+
+    /**
+     * The analyser time constants, in milliseconds to 63% of a step. Rise is short enough that a hit
+     * still reads as an edge; fall is long enough that a steady sound holds a shape the eye can read.
+     */
+    static constexpr float     EQ_RISE_MS       = 25.0f;
+    static constexpr float     EQ_FALL_MS       = 250.0f;
+    static constexpr long long EQ_SMOOTH_GAP_MS = 100;
+
+    bool      eqSmoothValid_  = false;
+    int       eqSmoothSource_ = -1;
+    int       eqSmoothInstr_  = -1;
+    long long eqSmoothMs_     = 0;
 };
 
 }  // namespace pt::ui
