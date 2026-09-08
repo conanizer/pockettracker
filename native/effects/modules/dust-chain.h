@@ -24,9 +24,22 @@ class DustChain
 public:
     DustChain() = default;
 
-    // Wow/drift delay-line latency — report to host via setLatencySamples().
+    // ⚠️ The chain delays its output by this much, ALWAYS — the wow/drift buffers run even when the
+    // stage is disabled, on purpose, so the figure never changes with the knob (see process()).
+    // Nothing compensates it on the master bus, where 2 ms is inaudible and constant. A DESTRUCTIVE
+    // caller must, or it buries silence at the head of the sample and loses the same off the tail,
+    // once per apply.
+    //
+    // ⚠️ It is the CENTRE, not the whole delay: wow and drift move the HF band around it by up to
+    // ±24 samples at full depth, and the drift is a random walk that starts wandering on the first
+    // sample — measured, a full-depth chain is already a sample off by the time its first sound
+    // arrives. **That wobble IS the effect.** Compensate the centre and leave the rest alone;
+    // a caller that tried to track the real delay would be removing the wow it asked for.
     static constexpr int kWowCenterDelay = 100;   // samples (≈ 2 ms at 48 kHz)
     static constexpr int kWowHfBufSize   = 256;   // > centerDelay + max modulation depth
+
+    // Ask, do not copy: a second site holding its own 100 is a second site to forget.
+    static constexpr int latencySamples() { return kWowCenterDelay; }
 
     void prepare(double sampleRate, int blockSize, int numChannels);
     void reset();
