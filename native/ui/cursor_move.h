@@ -37,7 +37,7 @@
 //     (track 0 ← master → track 0), because a mixer is a ring of channels rather than a document.
 //   • EFFECTS' rows CLAMP at both ends, and the order they are WALKED is the order they are DRAWN,
 //     which is not the order they are numbered (ui/effects_row_layout.h). It is the one screen with
-//     no cursor COLUMN: the delay's cells draw two to a line, so LEFT and RIGHT move to the row
+//     no cursor COLUMN: both sends' cells draw two to a line, so LEFT and RIGHT move to the row
 //     beside this one and the table alone knows which that is.
 //
 //   • PROJECT and SETTINGS are FORMS whose rows WRAP, and whose every row change snaps the column
@@ -284,7 +284,7 @@ inline void move_cursor_up(AppState& s) {
             break;
 
         // EFFECTS does NOT wrap — it clamps at both ends. A step is one DRAWN LINE, not one row
-        // number: the rows draw in an order of their own and the delay's draw two to a line, so the
+        // number: the rows draw in an order of their own and most draw two to a line, so the
         // table is the only thing that knows what is above what (ui/effects_row_layout.h). The column
         // is carried, and a single-cell line takes the cursor whichever column it comes down in.
         case ScreenType::EFFECTS:
@@ -521,8 +521,8 @@ inline void move_cursor_left(AppState& s) {
             return;
 
         // ⚠️ EFFECTS HAS NO COLUMN OF ITS OWN IN AppState — the row IS the column, because the display
-        // table says which side of the delay each row is drawn on. So a sideways move is a move to the
-        // row beside this one, and on the single-cell lines (both TYPEs, the reverb, both EQs) that is
+        // table says which side of its section each row is drawn on. So a sideways move is a move to the
+        // row beside this one, and on the single-cell lines (all three TYPEs, the delay's EQ) that is
         // this row again.
         case ScreenType::EFFECTS:
             s.effectsCursorRow = effects_step_column(s.effectsCursorRow, -1);
@@ -611,7 +611,7 @@ inline void move_cursor_right(AppState& s) {
             return;
         }
 
-        // …and right, onto the delay's second column. See the matching arm in move_cursor_left.
+        // …and right, onto a section's second column. See the matching arm in move_cursor_left.
         case ScreenType::EFFECTS:
             s.effectsCursorRow = effects_step_column(s.effectsCursorRow, +1);
             return;

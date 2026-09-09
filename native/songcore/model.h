@@ -609,6 +609,16 @@ struct Project {
     int ottDepth = 0, masterBusFx = 0, dustDepth = 0, limiterPreGain = 0;
     std::vector<EqPreset> eqPresets;              // Array(128){EqPreset(it)} — filled by factory
     int reverbFeedback = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbInputEq = -1;
+    // The reverb's character — three independent cells, no mode between them. The TYPE row on the
+    // EFFECTS screen writes these and SIZE and DAMP all at once from a preset, and then reads the
+    // name back by matching (effects/modules/reverb-presets.h); it is not stored, because after one
+    // turn of any of the five there is nothing for it to be.
+    //
+    // ⚠️⚠️ **THESE DEFAULTS ARE THE REVERB THAT SHIPPED, and they have to stay that way**: a project
+    // written before the cells existed loads without them, so the default is what it plays with. PRE
+    // is 00 (no line at all, not a short one), WIDE is 80 (the mid/side pair SKIPPED, not performed)
+    // and MOD is 40, which is exactly the wander the algorithm was fixed at.
+    int reverbPreDelay = 0x00, reverbWidth = 0x80, reverbMod = 0x40;
     int delayTime = 0x40;
     bool delaySync = false;
     int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;

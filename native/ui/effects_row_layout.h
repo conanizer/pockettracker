@@ -7,13 +7,13 @@
 // NUMBER are two different things, and the delay section has now been added to from both ends.
 //
 // ⚠️ A ROW'S NUMBER IS ITS IDENTITY. `tools/testdata/units/p3-input.txt` records 321 EFFECTS cases by
-// row NUMBER, so a row may be APPENDED but never INSERTED — which is why the four delay-character
-// rows are 8..11 while they draw among the rows numbered 4..7. EFFECTS_DISPLAY_LINES below is where
-// the position is said, and it is the only place.
+// row NUMBER, so a row may be APPENDED but never INSERTED — which is why the delay-character rows are
+// 8..11 and the reverb-character rows 12..15 while both draw among the rows numbered 1..7.
+// EFFECTS_DISPLAY_LINES below is where the position is said, and it is the only place.
 //
-// ⚠️ The delay's eight cells draw in TWO COLUMNS, so a drawn LINE is not a row: three of the delay's
-// lines carry a cell on each side. That is why everything below is addressed by line, and why the
-// cursor needs a sideways step as well as an up-and-down one.
+// ⚠️ Both sections draw in TWO COLUMNS, so a drawn LINE is not a row: six of the lines carry a cell on
+// each side. That is why everything below is addressed by line, and why the cursor needs a sideways
+// step as well as an up-and-down one.
 //
 // ⚠️ Unlike SETTINGS and PROJECT, no row here is conditional. The delay's character used to hide TONE
 // and WOBL under the types that read them; the cells are all independent now, so they are all always
@@ -36,6 +36,10 @@ namespace pt::ui {
  * 9  TONE    delay
  * 10 WOBL    delay
  * 11 PONG    delay
+ * 12 TYPE    reverb preset     — APPENDED, draws first in the reverb section
+ * 13 PRE     reverb
+ * 14 WIDE    reverb
+ * 15 MOD     reverb
  */
 enum class EffectsRow {
     MASTER_TYPE = 0,
@@ -50,9 +54,13 @@ enum class EffectsRow {
     DLY_TONE    = 9,
     DLY_WOBBLE  = 10,
     DLY_PONG    = 11,
+    REV_TYPE    = 12,
+    REV_PRE     = 13,
+    REV_WIDE    = 14,
+    REV_MOD     = 15,
 };
 
-inline constexpr int EFFECTS_ROW_COUNT = 12;
+inline constexpr int EFFECTS_ROW_COUNT = 16;
 
 /** The three sections, in the order they are drawn. Each gets a blank line and a header above it. */
 enum class EffectsSection { MASTER = 0, REVERB = 1, DELAY = 2 };
@@ -63,7 +71,11 @@ constexpr EffectsSection effects_row_section(EffectsRow row) {
         case EffectsRow::MASTER_TYPE: return EffectsSection::MASTER;
         case EffectsRow::REV_SIZE:
         case EffectsRow::REV_DAMP:
-        case EffectsRow::REV_EQ:      return EffectsSection::REVERB;
+        case EffectsRow::REV_EQ:
+        case EffectsRow::REV_TYPE:
+        case EffectsRow::REV_PRE:
+        case EffectsRow::REV_WIDE:
+        case EffectsRow::REV_MOD:     return EffectsSection::REVERB;
         default:                      return EffectsSection::DELAY;
     }
 }
@@ -84,22 +96,32 @@ struct EffectsDisplayLine {
         : cell{left, right}, paired(true) {}
 };
 
-inline constexpr int EFFECTS_LINE_COUNT = 9;
+inline constexpr int EFFECTS_LINE_COUNT = 10;
 
 /**
  * The order the rows are DRAWN and the D-pad walks — decoupled from the enum VALUE above, which stays
  * each row's identity.
  *
- * The delay reads as a pair of columns under TYPE: the three cells that shape the repeats themselves
- * on the left, the three that place and colour them on the right, and the two that are neither (the
- * preset, the EQ) across the top and the bottom. TYPE leads because it is the one that writes others.
+ * Both sends read as a pair of columns under a TYPE, and mostly the same way round: the cells that
+ * shape the effect's own character on the LEFT, the cells that size and colour it on the RIGHT. TYPE
+ * leads each because it is the one that writes the others.
+ *
+ * ⚠️ The reverb's last line is the deliberate exception — INP EQ on the LEFT and MOD on the right —
+ * so that both sends' EQ cells sit in the same column, at the foot of the screen. An EQ cell is the
+ * only one here that opens another screen rather than holding a value, and it is easier to find when
+ * the two of them line up than when each obeys its own section's grouping.
+ *
+ * ⚠️ The line count is what makes the screen fit its panel without scrolling, and it is now three
+ * lines short of the point where it would not. A row added to either section costs a LINE only if it
+ * has no partner — so the cheap place to add one is beside a cell that is currently alone.
  */
 inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = {
     {EffectsRow::MASTER_TYPE},
 
-    {EffectsRow::REV_SIZE},
-    {EffectsRow::REV_DAMP},
-    {EffectsRow::REV_EQ},
+    {EffectsRow::REV_TYPE},
+    {EffectsRow::REV_PRE,  EffectsRow::REV_SIZE},
+    {EffectsRow::REV_WIDE, EffectsRow::REV_DAMP},
+    {EffectsRow::REV_EQ,   EffectsRow::REV_MOD},
 
     {EffectsRow::DLY_TYPE},
     {EffectsRow::DLY_PONG,   EffectsRow::DLY_TIME},

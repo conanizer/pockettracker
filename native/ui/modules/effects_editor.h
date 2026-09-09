@@ -6,10 +6,10 @@
 // the delay's, and the two input EQ slots. Together with MIXER (which owns the *send levels* into
 // these buses) it is the whole of the project's global audio state.
 //
-// A FORM, like INSTRUMENT: rows with section headers between them, one column through the master and
-// reverb sections and two through the delay's, where the eight cells read as a pair of columns under
-// TYPE. The cursor walks EDITABLE cells while the screen draws those plus the headers and the blank
-// lines between them, and `ui/effects_row_layout.h` is the one table that turns one into the other —
+// A FORM, like INSTRUMENT: rows with section headers between them, one column through the master
+// section and two through the reverb's and the delay's, where each send's eight cells read as a pair
+// of columns under a TYPE. The cursor walks EDITABLE cells while the screen draws those plus the
+// headers and the blank lines between them, and `ui/effects_row_layout.h` turns one into the other —
 // which is what lets a header be inserted without renumbering every cursor row, and why both the
 // highlight and the column a cell is drawn in come from the table rather than from the cursor.
 //
@@ -30,7 +30,7 @@ namespace pt::ui {
 
 struct EffectState {
     const songcore::Project& project;
-    int   cursorRow = 0;   // 0..11 — see the ROW_* constants
+    int   cursorRow = 0;   // 0..15 — see the ROW_* constants
     Theme theme     = theme_classic();
 };
 
@@ -57,6 +57,10 @@ public:
     static constexpr int ROW_DLY_TONE    = static_cast<int>(EffectsRow::DLY_TONE);
     static constexpr int ROW_DLY_WOBBLE  = static_cast<int>(EffectsRow::DLY_WOBBLE);
     static constexpr int ROW_DLY_PONG    = static_cast<int>(EffectsRow::DLY_PONG);
+    static constexpr int ROW_REV_TYPE    = static_cast<int>(EffectsRow::REV_TYPE);     // a reverb preset
+    static constexpr int ROW_REV_PRE     = static_cast<int>(EffectsRow::REV_PRE);      // pre-delay
+    static constexpr int ROW_REV_WIDE    = static_cast<int>(EffectsRow::REV_WIDE);     // 80 = untouched
+    static constexpr int ROW_REV_MOD     = static_cast<int>(EffectsRow::REV_MOD);      // 40 = as it shipped
     static constexpr int MAX_CURSOR_ROW  = EFFECTS_ROW_COUNT - 1;
 
     /** The sync subdivisions, in the order kDelaySyncBeats[] has them in delay-module.h. */
@@ -64,6 +68,9 @@ public:
 
     /** The delay presets, in the order delay-presets.h has them, plus USER at the end. */
     static const std::vector<std::string>& delay_type_names();
+
+    /** The reverb presets, in the order reverb-presets.h has them, plus USER at the end. */
+    static const std::vector<std::string>& reverb_type_names();
 
     void draw(Canvas& c, int x, int y, const EffectState& s) const;
 

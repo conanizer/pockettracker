@@ -108,6 +108,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Mute and solo any track from the song or mixer screen, on the cursor or across a selection — the chord latches or stays momentary depending on which button you release first
 - True dBFS peak meters per track
 - Two send effects: reverb (Schroeder-Moorer algorithm) and a stereo delay
+- Reverb character: pre-delay, stereo width and tail modulation — with TYPE presets (ROOM, HALL, CAVE) that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with TYPE presets that set all three at once
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency
 - Reverb and delay each have their own 3-band EQ

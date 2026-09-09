@@ -798,6 +798,10 @@ void AudioEngine::setDelayReverbSend(int sendHex) {
     delayToReverbSend = sendHex / 255.0f;
 }
 
+void AudioEngine::setReverbCharacter(int preHex, int widthHex, int modHex) {
+    reverbSend.setCharacter(preHex, widthHex, modHex);
+}
+
 void AudioEngine::setReverbInputEq(int slot) { applyEqPresetToModule(reverbSend.inputEq, slot); }
 
 void AudioEngine::setDelayInputEq(int slot) { applyEqPresetToModule(delaySend.inputEq, slot); }

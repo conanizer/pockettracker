@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "effects/modules/delay-presets.h"
+#include "effects/modules/reverb-presets.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
@@ -22,6 +23,19 @@ int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 /** Which preset the delay's three cells are, or `kDelayPresetUser` when they are nobody's. */
 int delay_preset_of(const songcore::Project& p) {
     return delay_preset_match(p.delayPong, p.delayTone, p.delayWobble);
+}
+
+/**
+ * Which preset the reverb's five cells are, or `kReverbPresetUser` when they are nobody's.
+ *
+ * ⚠️ It reads SIZE and DAMP as well as the three new cells, unlike the delay's, whose TYPE leaves TIME
+ * and FDBK alone. A reverb's character IS its decay and its brightness — a preset that did not set
+ * them would be three cells of voicing on top of whatever tail happened to be there, which is not a
+ * ROOM or a HALL by any reading.
+ */
+int reverb_preset_of(const songcore::Project& p) {
+    return reverb_preset_match(p.reverbFeedback, p.reverbDamp, p.reverbPreDelay, p.reverbWidth,
+                               p.reverbMod);
 }
 
 }  // namespace
@@ -43,6 +57,17 @@ const std::vector<std::string>& EffectModule::delay_type_names() {
         // ⚠️ The name for "these cells are nobody's preset", at kDelayPresetUser. It is a LABEL and
         // not a preset: nothing can be applied from it, and the TYPE cell reaches it only by the
         // user turning one of the four cells below.
+        v.emplace_back("USER");
+        return v;
+    }();
+    return names;
+}
+
+const std::vector<std::string>& EffectModule::reverb_type_names() {
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> v;
+        for (int i = 0; i < kReverbPresetCount; ++i) v.emplace_back(kReverbPresets[i].name);
+        // The same "these cells are nobody's preset" label the delay's TYPE has, at kReverbPresetUser.
         v.emplace_back("USER");
         return v;
     }();
@@ -120,9 +145,18 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
 
     // ── Reverb ───────────────────────────────────────────────────────────────────────────────────
     header("REVERB", EffectsSection::REVERB);
+    // ⚠️ Read back from the five cells rather than stored, so it says USER the moment any of them is
+    // turned by hand. TYPE is a starting place, not a mode — same as the delay's below.
+    param("TYPE", ROW_REV_TYPE, reverb_type_names()[static_cast<size_t>(reverb_preset_of(p))]);
+
+    param("PRE",  ROW_REV_PRE,  hex2(p.reverbPreDelay));
     param("SIZE", ROW_REV_SIZE, hex2(p.reverbFeedback));
+
+    param("WIDE", ROW_REV_WIDE, hex2(p.reverbWidth));
     param("DAMP", ROW_REV_DAMP, hex2(p.reverbDamp));
+
     eq_param(ROW_REV_EQ, p.reverbInputEq);
+    param("MOD",  ROW_REV_MOD,  hex2(p.reverbMod));
 
     // ── Delay ────────────────────────────────────────────────────────────────────────────────────
     header("DELAY", EffectsSection::DELAY);
@@ -168,10 +202,28 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
             return c;
         }
 
+        case ROW_REV_TYPE: {
+            // A short named list, so it steps and wraps and does nothing else — no fast step, and no
+            // delete, because there is no empty preset.
+            //
+            // ⚠️ USER is inside the range only while the cells ARE nobody's preset — the same shape
+            // as the delay's TYPE below, and for the same reason: it is a place the cursor can LEAVE
+            // and never a place it can be sent.
+            const int cur = reverb_preset_of(p);
+            return cc::index_cycle(cur, cur == kReverbPresetUser ? kReverbPresetCount + 1
+                                                                 : kReverbPresetCount);
+        }
+
         case ROW_REV_SIZE:
             return cc::hex_byte(p.reverbFeedback, 0, 255, -1, false, false, false, /*def=*/0x60);
         case ROW_REV_DAMP:
             return cc::hex_byte(p.reverbDamp, 0, 255, -1, false, false, false, /*def=*/0x80);
+        case ROW_REV_PRE:
+            return cc::hex_byte(p.reverbPreDelay, 0, 255, -1, false, false, false, /*def=*/0x00);
+        case ROW_REV_WIDE:
+            return cc::hex_byte(p.reverbWidth, 0, 255, -1, false, false, false, /*def=*/0x80);
+        case ROW_REV_MOD:
+            return cc::hex_byte(p.reverbMod, 0, 255, -1, false, false, false, /*def=*/0x40);
         case ROW_REV_EQ:
             return cc::hex_byte(p.reverbInputEq < 0 ? -1 : p.reverbInputEq, 0, 127,
                                 /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
@@ -233,6 +285,37 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
         case ROW_REV_DAMP:
             if (!isSet) break;
             p.reverbDamp = clamp(action.value, 0, 255);
+            return {true};
+
+        case ROW_REV_TYPE: {
+            // ⚠️ **THE PRESET IS APPLIED AND THEN FORGOTTEN** — it writes the five cells and stores no
+            // name, so what the row reads afterwards is whatever those five now are. Landing on USER
+            // writes nothing, because USER is not a set of values: it is the absence of a match.
+            if (!isSet) break;
+            const int idx = clamp(action.value, 0, kReverbPresetCount);
+            if (idx >= kReverbPresetCount) return {false};
+            const ReverbPreset& r = kReverbPresets[idx];
+            p.reverbFeedback = r.size;
+            p.reverbDamp     = r.damp;
+            p.reverbPreDelay = r.pre;
+            p.reverbWidth    = r.width;
+            p.reverbMod      = r.mod;
+            return {true};
+        }
+
+        case ROW_REV_PRE:
+            if (!isSet) break;
+            p.reverbPreDelay = clamp(action.value, 0, 255);
+            return {true};
+
+        case ROW_REV_WIDE:
+            if (!isSet) break;
+            p.reverbWidth = clamp(action.value, 0, 255);
+            return {true};
+
+        case ROW_REV_MOD:
+            if (!isSet) break;
+            p.reverbMod = clamp(action.value, 0, 255);
             return {true};
 
         case ROW_REV_EQ:

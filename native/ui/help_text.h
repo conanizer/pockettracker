@@ -333,6 +333,10 @@ enum class HelpTopic {
     FX_DELAY_TONE,
     FX_DELAY_WOBBLE,
     FX_DELAY_PONG,
+    FX_REVERB_TYPE,
+    FX_REVERB_PRE,
+    FX_REVERB_WIDE,
+    FX_REVERB_MOD,
 
     COUNT
 };
@@ -804,6 +808,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"WOBL: tape speed wobble", "Makes the echoes drift in", "pitch. 00 holds them steady."},
     /* FX_DELAY_PONG */
     {"PONG: echoes bounce", "Repeats alternate left and", "right, ignoring the pan."},
+    /* FX_REVERB_TYPE */
+    {"TYPE: a starting point", "Sets the five cells around it.", "Change one and it says USER."},
+    /* FX_REVERB_PRE */
+    {"PRE: a gap before the tail", "The reverb starts late, so the", "sound stays in front of it."},
+    /* FX_REVERB_WIDE */
+    {"WIDE: how far it spreads", "00 is mono, 80 is normal,", "FF pushes it to the sides."},
+    /* FX_REVERB_MOD */
+    {"MOD: movement in the tail", "The tail drifts in pitch. 00", "holds it still and metallic."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -1126,6 +1138,10 @@ inline HelpTopic effects_cell_topic(int row) {
         case EffectModule::ROW_DLY_TONE:    return HelpTopic::FX_DELAY_TONE;
         case EffectModule::ROW_DLY_WOBBLE:  return HelpTopic::FX_DELAY_WOBBLE;
         case EffectModule::ROW_DLY_PONG:    return HelpTopic::FX_DELAY_PONG;
+        case EffectModule::ROW_REV_TYPE:    return HelpTopic::FX_REVERB_TYPE;
+        case EffectModule::ROW_REV_PRE:     return HelpTopic::FX_REVERB_PRE;
+        case EffectModule::ROW_REV_WIDE:    return HelpTopic::FX_REVERB_WIDE;
+        case EffectModule::ROW_REV_MOD:     return HelpTopic::FX_REVERB_MOD;
         default:                            return HelpTopic::NONE;
     }
 }

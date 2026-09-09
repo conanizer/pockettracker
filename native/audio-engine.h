@@ -546,6 +546,10 @@ public:
     // Set reverb params. feedbackHex/dampHex/wetHex: 00-FF. wetHex controls return gain.
     void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80);
 
+    // Set the reverb's character: the three cells that place and colour the tail. ⚠️ Each is NEUTRAL
+    // at the value a project written before they existed loads with — PRE 00, WIDE 80, MOD 40.
+    void setReverbCharacter(int preHex, int widthHex, int modHex);
+
     // Set delay params. syncMode false: timeOrSubdiv is hex 00-FF (0-2s).
     //                   syncMode true:  timeOrSubdiv is subdivision index 0-11, bpm used.
     //                   wetHex: 00-FF return gain.

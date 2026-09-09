@@ -18,13 +18,27 @@ https://opensource.org/license/lgpl-2-1/
  * them. `Init` now advances in floats, which is the unit `buf` is indexed in, and the array is the
  * count the eight lines really need.
  *
- * The two constants below are ONE fact: the size is what `kReverbParams` asks for at the highest
- * rate the lines are allowed to be built at, and reverbsc.cpp static_asserts them against that
- * table, so raising the rate without regrowing the array — or the reverse — will not compile.
- * `ReverbModule::MAX_SUPPORTED_RATE` reads the rate from here rather than repeating it, and a
- * device running faster than this gets its reverb built at this rate instead (reverb-module.h). */
+ * The three constants below are ONE fact: the size is what `kReverbParams` asks for at the highest
+ * rate the lines are allowed to be built at AND at the deepest modulation they are allowed to be
+ * driven at, and reverbsc.cpp static_asserts them against that table, so raising either without
+ * regrowing the array — or the reverse — will not compile. `ReverbModule::MAX_SUPPORTED_RATE` reads
+ * the rate from here rather than repeating it, and a device running faster than this gets its
+ * reverb built at this rate instead (reverb-module.h). */
 #define DSY_REVERBSC_MAX_RATE 48000.0f
-#define DSY_REVERBSC_MAX_SIZE 24726
+
+/* ⚠️ PT: THE LINES ARE SIZED FOR THE DEEPEST MODULATION, NOT FOR THE ONE CURRENTLY SET.
+ *
+ * `i_pitch_mod_` scales how far each line's read head wanders from its nominal delay, and upstream
+ * pinned it at 1 with no way to reach it. `SetPitchMod` opens it up to this ceiling — the MOD cell on
+ * the EFFECTS screen — which means a line may be asked for a longer delay than it was built for the
+ * moment the cell moves. Sizing every line at the ceiling once, at Init, is what makes that safe:
+ * changing the modulation afterwards can never need a byte the buffer does not already hold.
+ *
+ * ⚠️ Growing the lines is SONICALLY TRANSPARENT and must stay so — a line's effective delay is
+ * `buffer_size − read_pos`, which `InitDelayLine` sets from the delay TIME, and every index wraps
+ * modulo the size. The extra room is dead air above the read head, not a longer reverb. */
+#define DSY_REVERBSC_MAX_PITCHMOD 4.0f
+#define DSY_REVERBSC_MAX_SIZE 26160
 
 namespace daisysp
 {
@@ -67,6 +81,21 @@ class ReverbSc
         \param freq - low pass frequency. range: 0.0 to sample_rate / 2
     */
     inline void SetLpFreq(const float &freq) { lpfreq_ = freq; }
+
+    /** ⚠️ PT: how far the eight read heads wander, 0 to DSY_REVERBSC_MAX_PITCHMOD. Upstream fixed
+        this at 1 inside Init and exposed nothing; 1 is still what Init leaves it at, so a caller
+        that never touches it gets exactly the reverb that shipped.
+
+        0 stops the wander entirely and the tail turns static and metallic; above 1 the heads swing
+        wider and the tail takes on a chorus. ⚠️ It is read once per random line SEGMENT, not per
+        sample, so a change lands over the following segment — up to about a second — rather than
+        immediately. Clamped here because the delay lines are only sized to the ceiling. */
+    inline void SetPitchMod(const float &mod)
+    {
+        i_pitch_mod_ = mod < 0.0f ? 0.0f
+                                  : (mod > DSY_REVERBSC_MAX_PITCHMOD ? DSY_REVERBSC_MAX_PITCHMOD
+                                                                     : mod);
+    }
 
   private:
     void       NextRandomLineseg(ReverbScDl *lp, int n);

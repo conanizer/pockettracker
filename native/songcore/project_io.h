@@ -314,6 +314,9 @@ inline Project parse_project(const json& j) {
     p.reverbDamp      = get_int(j, "reverbDamp", p.reverbDamp);
     p.reverbWet       = get_int(j, "reverbWet", p.reverbWet);
     p.reverbInputEq   = get_int(j, "reverbInputEq", p.reverbInputEq);
+    p.reverbPreDelay  = get_int(j, "reverbPreDelay", p.reverbPreDelay);
+    p.reverbWidth     = get_int(j, "reverbWidth", p.reverbWidth);
+    p.reverbMod       = get_int(j, "reverbMod", p.reverbMod);
     p.delayTime       = get_int(j, "delayTime", p.delayTime);
     p.delaySync       = get_bool(j, "delaySync", p.delaySync);
     p.delayFeedback   = get_int(j, "delayFeedback", p.delayFeedback);
@@ -745,6 +748,9 @@ inline std::string serialize_project(const Project& p) {
     if (p.reverbDamp != 0x80)     w.field_int("reverbDamp", p.reverbDamp);
     if (p.reverbWet != 0x80)      w.field_int("reverbWet", p.reverbWet);
     if (p.reverbInputEq != -1)    w.field_int("reverbInputEq", p.reverbInputEq);
+    if (p.reverbPreDelay != 0)    w.field_int("reverbPreDelay", p.reverbPreDelay);
+    if (p.reverbWidth != 0x80)    w.field_int("reverbWidth", p.reverbWidth);
+    if (p.reverbMod != 0x40)      w.field_int("reverbMod", p.reverbMod);
     if (p.delayTime != 0x40)      w.field_int("delayTime", p.delayTime);
     if (p.delaySync)              w.field_bool("delaySync", p.delaySync);
     if (p.delayFeedback != 0x60)  w.field_int("delayFeedback", p.delayFeedback);

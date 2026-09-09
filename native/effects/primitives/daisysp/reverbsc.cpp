@@ -51,7 +51,8 @@ static constexpr int DelayLineMaxSamples(float sr, float i_pitch_mod, int n)
     return (int)(max_del * sr + 16.5);
 }
 
-/* ⚠️ PT: `aux_` is exactly what the eight lines ask for at the highest rate they may be built at.
+/* ⚠️ PT: `aux_` is exactly what the eight lines ask for at the highest rate they may be built at,
+ * and at the deepest modulation they may be driven at.
  *
  * The upper bound is what makes `Init` safe; the lower one is what keeps the array from silently
  * growing back. The slack is 8 rather than 0 because this sum is computed with constant-folded IEEE
@@ -61,15 +62,15 @@ static constexpr int kAuxFloatsNeeded()
 {
     int total = 0;
     for(int i = 0; i < 8; i++)
-        total += DelayLineMaxSamples(DSY_REVERBSC_MAX_RATE, 1, i);
+        total += DelayLineMaxSamples(DSY_REVERBSC_MAX_RATE, DSY_REVERBSC_MAX_PITCHMOD, i);
     return total;
 }
 static_assert(kAuxFloatsNeeded() <= DSY_REVERBSC_MAX_SIZE,
-              "ReverbSc::aux_ is smaller than the eight delay lines need at DSY_REVERBSC_MAX_RATE — "
-              "Init would refuse that rate, and ReverbModule would fall back to a rate it also "
-              "refuses");
+              "ReverbSc::aux_ is smaller than the eight delay lines need at DSY_REVERBSC_MAX_RATE "
+              "and DSY_REVERBSC_MAX_PITCHMOD — Init would refuse that rate, and ReverbModule would "
+              "fall back to a rate it also refuses");
 static_assert(DSY_REVERBSC_MAX_SIZE - kAuxFloatsNeeded() <= 8,
-              "ReverbSc::aux_ is carrying padding no delay line can reach — it is 396 KB of an "
+              "ReverbSc::aux_ is carrying padding no delay line can reach — it is 102 KB of an "
               "AudioEngine that must already be heap-allocated, so the slack is not free");
 
 int ReverbSc::Init(float sr)
@@ -98,7 +99,9 @@ int ReverbSc::Init(float sr)
     int i, n_floats = 0;
     for(i = 0; i < 8; i++)
     {
-        const int line = DelayLineMaxSamples(sr, 1, i);
+        /* ⚠️ PT: SIZED AT THE MODULATION CEILING, NOT AT `i_pitch_mod_` — the MOD cell moves after
+         * Init has run and a line must already hold the deepest swing it can be asked for. */
+        const int line = DelayLineMaxSamples(sr, DSY_REVERBSC_MAX_PITCHMOD, i);
         if(n_floats + line > DSY_REVERBSC_MAX_SIZE)
             return 1;
         delay_lines_[i].buf = (aux_) + n_floats;
@@ -141,7 +144,9 @@ int ReverbSc::InitDelayLine(ReverbScDl *lp, int n)
     /* int     i; */
 
     /* calculate length of delay line */
-    lp->buffer_size = DelayLineMaxSamples(sample_rate_, 1, n);
+    /* ⚠️ PT: the SAME ceiling `Init` tiled `aux_` with — the two must agree or a line will read or
+     * write past the slice it was given. */
+    lp->buffer_size = DelayLineMaxSamples(sample_rate_, DSY_REVERBSC_MAX_PITCHMOD, n);
     lp->dummy       = 0;
     lp->write_pos   = 0;
     /* set random seed */
