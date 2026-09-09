@@ -35,7 +35,10 @@
 //     eight track meters along row 0, drops to the two send returns on row 1, and reaches the master
 //     strip by continuing DOWN column 8. Its row-0 columns are the only ones in the app that WRAP
 //     (track 0 ← master → track 0), because a mixer is a ring of channels rather than a document.
-//   • EFFECTS is one column of eight rows, and they CLAMP at both ends.
+//   • EFFECTS' rows CLAMP at both ends, and the order they are WALKED is the order they are DRAWN,
+//     which is not the order they are numbered (ui/effects_row_layout.h). It is the one screen with
+//     no cursor COLUMN: the delay's cells draw two to a line, so LEFT and RIGHT move to the row
+//     beside this one and the table alone knows which that is.
 //
 //   • PROJECT and SETTINGS are FORMS whose rows WRAP, and whose every row change snaps the column
 //     back to 1 — their rows have 1, 2, 3 and 20 columns, so a carried column would land nowhere.
@@ -55,6 +58,7 @@
 #include <algorithm>
 
 #include "ui/app_state.h"
+#include "ui/effects_row_layout.h"
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/scale_editor.h"
 #include "ui/settings_row_layout.h"
@@ -279,8 +283,12 @@ inline void move_cursor_up(AppState& s) {
             // Row 0 (the meters): nothing above them — stay.
             break;
 
+        // EFFECTS does NOT wrap — it clamps at both ends. A step is one DRAWN LINE, not one row
+        // number: the rows draw in an order of their own and the delay's draw two to a line, so the
+        // table is the only thing that knows what is above what (ui/effects_row_layout.h). The column
+        // is carried, and a single-cell line takes the cursor whichever column it comes down in.
         case ScreenType::EFFECTS:
-            if (s.effectsCursorRow > 0) s.effectsCursorRow--;
+            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, -1);
             break;
 
         // PROJECT's rows WRAP, and every row change snaps the column back to 1 — you never arrive on
@@ -388,8 +396,9 @@ inline void move_cursor_down(AppState& s) {
             // A send return: nothing below it — stay.
             break;
 
+        // …and down. See move_cursor_up's arm.
         case ScreenType::EFFECTS:
-            if (s.effectsCursorRow < 7) s.effectsCursorRow++;
+            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, +1);
             break;
 
         case ScreenType::PROJECT:
@@ -511,11 +520,18 @@ inline void move_cursor_left(AppState& s) {
             s.settingsCursorColumn = 1;
             return;
 
+        // ⚠️ EFFECTS HAS NO COLUMN OF ITS OWN IN AppState — the row IS the column, because the display
+        // table says which side of the delay each row is drawn on. So a sideways move is a move to the
+        // row beside this one, and on the single-cell lines (both TYPEs, the reverb, both EQs) that is
+        // this row again.
+        case ScreenType::EFFECTS:
+            s.effectsCursorRow = effects_step_column(s.effectsCursorRow, -1);
+            return;
+
         // ⚠️ MIDI IS ONE COLUMN WIDE EXCEPT ON IN CH, AND SAYS SO OUT LOUD rather than falling into the
         // `default` and reaching the same answer by accident. It would, for the one-column rows: min ==
-        // max == 0 there. But the accident it would rely on is EFFECTS' documented bug two comments
-        // down — LEFT walking the SHARED `cursorColumn` on a screen that never reads it — and a screen
-        // that is correct only because another screen's bug is harmless is one row away from not being.
+        // max == 0 there. But a screen that is correct only because the fall-through happens to be
+        // harmless on it is one added row away from not being.
         case ScreenType::MIDI:
             if (static_cast<MidiRow>(s.midiCursorRow) == MidiRow::IN_MAP && s.midiCursorColumn > 1)
                 s.midiCursorColumn--;
@@ -525,13 +541,6 @@ inline void move_cursor_left(AppState& s) {
             break;
     }
     // GROOVE falls through here too, and correctly does nothing: min == max == 0.
-    //
-    // ⚠️ So does EFFECTS — and there it is not a no-op: min_cursor_column(EFFECTS) is 0, so LEFT walks
-    // the SHARED `cursorColumn` (SONG / CHAIN / PHRASE's) down to 0 while you are looking at a screen
-    // that never reads it. Kotlin does exactly this, for exactly the same reason (EFFECTS is not named
-    // in its `when`, so it lands in the `else`), and it is invisible on both platforms because
-    // `go_to_screen` restores or refreshes that column on the way back into the three screens that own
-    // it. Kept bug-for-bug rather than "fixed": the fix would be a divergence with no observable.
     const int minColumn = min_cursor_column(s.currentScreen);
     if (s.cursorColumn > minColumn) s.cursorColumn--;
 }
@@ -601,6 +610,11 @@ inline void move_cursor_right(AppState& s) {
                 s.settingsCursorColumn = 2;
             return;
         }
+
+        // …and right, onto the delay's second column. See the matching arm in move_cursor_left.
+        case ScreenType::EFFECTS:
+            s.effectsCursorRow = effects_step_column(s.effectsCursorRow, +1);
+            return;
 
         // One column, except IN CH's eight — see the matching arm in move_cursor_left for why it is
         // stated rather than left to the fall-through. ⚠️ The bound is the PROJECT's own vector, not

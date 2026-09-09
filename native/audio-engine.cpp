@@ -2335,27 +2335,47 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             procL *= scalar;
             procR *= scalar;
 
+            // ⚠️⚠️ **THE VOICE'S OWN FADES MUST REACH THE SENDS, AND THE TRACK FADER MUST NOT.**
+            // They are two different things that used to sit on the same side of the tap:
+            //
+            //   * `antiClick` and the KIL/steal fade-out are the VOICE's envelope — the ramps that
+            //     exist so a note never starts or stops on a discontinuity. A send that misses them
+            //     receives a waveform cut off mid-cycle, so a KIL that is clean on the dry signal
+            //     puts a click into the reverb and delay tails, which then ring on for seconds.
+            //   * `trackVol` is the MIXER fader, and it stays below the tap on purpose: sends are
+            //     pre-fader, so pulling a track down leaves its tails at full level (see below).
+            //
+            // The fade is resolved HERE, once, because it advances a counter and ends the voice —
+            // and it is applied to the dry path in its original position and order below, so the
+            // dry signal is arithmetically untouched by this.
+            const bool fading = voice.isFadingOut;
+            float voiceFade   = antiClick;
+            float fo          = 1.0f;
+            if (fading) {
+                fo = (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
+                voiceFade *= fo;
+                if (--voice.fadeOutRemaining <= 0) {
+                    voice.isFadingOut = false;
+                    voice.isActive = false;
+                }
+            }
+
             if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
-                revSendBufL[i] += procL * panL * voice.reverbSend;
-                revSendBufR[i] += procR * panR * voice.reverbSend;
+                revSendBufL[i] += procL * voiceFade * panL * voice.reverbSend;
+                revSendBufR[i] += procR * voiceFade * panR * voice.reverbSend;
             }
             if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
-                dlySendBufL[i] += procL * panL * voice.delaySend;
-                dlySendBufR[i] += procR * panR * voice.delaySend;
+                dlySendBufL[i] += procL * voiceFade * panL * voice.delaySend;
+                dlySendBufR[i] += procR * voiceFade * panR * voice.delaySend;
             }
 
             float globalMul = trackVol * antiClick;
             procL *= globalMul;
             procR *= globalMul;
 
-            if (voice.isFadingOut) {
-                float fo = (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
+            if (fading) {
                 procL *= fo;
                 procR *= fo;
-                if (--voice.fadeOutRemaining <= 0) {
-                    voice.isFadingOut = false;
-                    voice.isActive = false;
-                }
             }
 
             float sampleL = procL * panL;

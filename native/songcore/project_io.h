@@ -320,6 +320,9 @@ inline Project parse_project(const json& j) {
     p.delayWet        = get_int(j, "delayWet", p.delayWet);
     p.delayReverbSend = get_int(j, "delayReverbSend", p.delayReverbSend);
     p.delayInputEq    = get_int(j, "delayInputEq", p.delayInputEq);
+    p.delayPong       = get_bool(j, "delayPong", p.delayPong);
+    p.delayTone       = get_int(j, "delayTone", p.delayTone);
+    p.delayWobble     = get_int(j, "delayWobble", p.delayWobble);
     p.masterEqSlot    = get_int(j, "masterEqSlot", p.masterEqSlot);
     p.phrases     = parse_pool<Phrase>(j, "phrases", parse_phrase);
     p.chains      = parse_pool<Chain>(j, "chains", parse_chain);
@@ -748,6 +751,9 @@ inline std::string serialize_project(const Project& p) {
     if (p.delayWet != 0x80)       w.field_int("delayWet", p.delayWet);
     if (p.delayReverbSend != 0)   w.field_int("delayReverbSend", p.delayReverbSend);
     if (p.delayInputEq != -1)     w.field_int("delayInputEq", p.delayInputEq);
+    if (p.delayPong)              w.field_bool("delayPong", p.delayPong);
+    if (p.delayTone != 0xFF)      w.field_int("delayTone", p.delayTone);
+    if (p.delayWobble != 0)       w.field_int("delayWobble", p.delayWobble);
     if (p.masterEqSlot != -1)     w.field_int("masterEqSlot", p.masterEqSlot);
     emit_pool(w, "phrases",     p.phrases,     emit_phrase);
     emit_pool(w, "chains",      p.chains,      emit_chain);

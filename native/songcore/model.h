@@ -612,6 +612,16 @@ struct Project {
     int delayTime = 0x40;
     bool delaySync = false;
     int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;
+    // The delay's character — three independent cells, no mode between them. The TYPE row on the
+    // EFFECTS screen writes all three at once from a preset and then reads the name back by matching
+    // (effects/modules/delay-presets.h); it is not stored, because after one turn of any of these
+    // there is nothing for it to be.
+    //
+    // ⚠️⚠️ **THESE DEFAULTS ARE THE DELAY THAT SHIPPED, and they have to stay that way**: a project
+    // written before the cells existed loads without them, so the default is what it plays with. TONE
+    // is FF (the filter switched OUT, not merely open) and WOBL is 00.
+    bool delayPong = false;
+    int  delayTone = 0xFF, delayWobble = 0x00;
     int masterEqSlot = -1;
     std::vector<Phrase>     phrases;              // Array(256){Phrase(it)}
     std::vector<Chain>      chains;               // Array(256){Chain(it)}

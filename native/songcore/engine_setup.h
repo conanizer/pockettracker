@@ -120,6 +120,7 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
     engine.setReverbInputEq(project.reverbInputEq);
     engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
                           static_cast<float>(project.tempo), project.delayWet);
+    engine.setDelayCharacter(project.delayPong, project.delayTone, project.delayWobble);
     engine.setDelayInputEq(project.delayInputEq);
     engine.setDelayReverbSend(project.delayReverbSend);
     // The bank above is safe to re-push at any moment — `setEqBand` writes only the 128-slot store,

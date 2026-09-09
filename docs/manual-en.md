@@ -1244,10 +1244,18 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
+| TYPE | A starting point for the three character cells: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). Choosing one sets PONG, TONE and WOBL together; turn any of those afterwards and TYPE reads **USER**. |
+| PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. |
+| TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
+| WOBL | How far the tape speed drifts (`00`–`FF`), bending the pitch of the repeats. `00` holds them steady. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
 | EQ | Press A to open the EQ EDITOR for the delay return. |
+
+> [!NOTE]
+> **PONG places the repeats itself**, so it ignores where the instrument is panned — the bounce is
+> always left, right, left. With PONG off, an echo stays on the side its instrument sits on.
 
 The delay return volume is set on the MIXER screen (DEL row in master column).
 

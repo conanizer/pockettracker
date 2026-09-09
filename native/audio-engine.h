@@ -551,6 +551,10 @@ public:
     //                   wetHex: 00-FF return gain.
     void setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMode, float bpm = 120.0f, int wetHex = 0x80);
 
+    // Set the delay's character: the three cells that shape the repeats. ⚠️ Each is OFF at the value
+    // a project written before they existed loads with — pong off, TONE FF, WOBL 00.
+    void setDelayCharacter(bool pong, int toneHex, int wobbleHex);
+
     // Set delay→reverb send level. sendHex 00-FF: how much delay output feeds into reverb.
     void setDelayReverbSend(int sendHex);
 

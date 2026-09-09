@@ -790,6 +790,10 @@ void AudioEngine::setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMod
     delayReturnGain = wetHex / 255.0f;
 }
 
+void AudioEngine::setDelayCharacter(bool pong, int toneHex, int wobbleHex) {
+    delaySend.setCharacter(pong, toneHex, wobbleHex);
+}
+
 void AudioEngine::setDelayReverbSend(int sendHex) {
     delayToReverbSend = sendHex / 255.0f;
 }

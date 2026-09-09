@@ -329,6 +329,10 @@ enum class HelpTopic {
     SET_METRONOME,
     SET_METRONOME_VOL,
     PROJECT_TAP,
+    FX_DELAY_TYPE,
+    FX_DELAY_TONE,
+    FX_DELAY_WOBBLE,
+    FX_DELAY_PONG,
 
     COUNT
 };
@@ -792,6 +796,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"VOL: how loud the click is", "00 is silent, FF is full.", ""},
     /* PROJECT_TAP */
     {"TAP: set the tempo by feel", "Press A in time, at least twice.", "A pause starts a new count."},
+    /* FX_DELAY_TYPE */
+    {"TYPE: a starting point", "Sets the three cells below.", "Change one and it says USER."},
+    /* FX_DELAY_TONE */
+    {"TONE: how bright repeats are", "Lower makes each echo darker", "than the one before it."},
+    /* FX_DELAY_WOBBLE */
+    {"WOBL: tape speed wobble", "Makes the echoes drift in", "pitch. 00 holds them steady."},
+    /* FX_DELAY_PONG */
+    {"PONG: echoes bounce", "Repeats alternate left and", "right, ignoring the pan."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -1099,7 +1111,7 @@ inline HelpTopic mixer_cell_topic(int master_row, int column) {
     return HelpTopic::NONE;
 }
 
-/** EFFECTS — eight editable rows, named by the module so the two cannot disagree about which is which. */
+/** EFFECTS — the editable rows, named by the module so the two cannot disagree about which is which. */
 inline HelpTopic effects_cell_topic(int row) {
     switch (row) {
         case EffectModule::ROW_MASTER_TYPE: return HelpTopic::FX_MASTER_TYPE;
@@ -1110,6 +1122,10 @@ inline HelpTopic effects_cell_topic(int row) {
         case EffectModule::ROW_DLY_FDBK:    return HelpTopic::FX_DELAY_FEEDBACK;
         case EffectModule::ROW_DLY_REV:     return HelpTopic::FX_DELAY_TO_REVERB;
         case EffectModule::ROW_DLY_EQ:      return HelpTopic::FX_DELAY_EQ;
+        case EffectModule::ROW_DLY_TYPE:    return HelpTopic::FX_DELAY_TYPE;
+        case EffectModule::ROW_DLY_TONE:    return HelpTopic::FX_DELAY_TONE;
+        case EffectModule::ROW_DLY_WOBBLE:  return HelpTopic::FX_DELAY_WOBBLE;
+        case EffectModule::ROW_DLY_PONG:    return HelpTopic::FX_DELAY_PONG;
         default:                            return HelpTopic::NONE;
     }
 }
