@@ -1236,9 +1236,9 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 |---|---|
 | TYPE | A starting point for the whole section: **NORMAL** (the plain reverb), **ROOM** (tight, bright, close), **HALL** (a gap, then a long dark tail), **CAVE** (longest, darkest, widest). Choosing one sets SIZE, DAMP, PRE, WIDE and MOD together; turn any of those afterwards and TYPE reads **USER**. |
 | PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
-| SIZE | Room size (`00`–`FF`). Higher = longer reverb tail. |
+| SIZE | Length of the reverb tail (`00`–`FF`), from about half a second to about twenty-five. `FF` is a tail that never ends. The level stays where it is as you turn it. |
 | WIDE | Stereo width of the return (`00`–`FF`). `00` is mono, `80` leaves the image as the reverb makes it, `FF` pushes it to the sides. The level does not change with it. |
-| DAMP | High-frequency damping (`00`–`FF`). Higher = darker reverb. |
+| DAMP | Brightness of the tail (`00`–`FF`). `00` is dark, `FF` keeps the highs. |
 | MOD | Movement in the tail (`00`–`FF`). Higher makes the tail drift in pitch; `00` holds it still, which is bright and metallic. |
 | EQ | Press A to open the EQ EDITOR for the reverb return. |
 

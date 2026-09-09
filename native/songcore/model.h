@@ -618,7 +618,7 @@ struct Project {
     // written before the cells existed loads without them, so the default is what it plays with. PRE
     // is 00 (no line at all, not a short one), WIDE is 80 (the mid/side pair SKIPPED, not performed)
     // and MOD is 40, which is exactly the wander the algorithm was fixed at.
-    int reverbPreDelay = 0x00, reverbWidth = 0x80, reverbMod = 0x40;
+    int reverbPreDelay = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
     int delayTime = 0x40;
     bool delaySync = false;
     int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;

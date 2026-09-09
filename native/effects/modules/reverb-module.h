@@ -36,11 +36,16 @@ struct ReverbModule {
     // used, so nobody reads it as the device rate.
     static constexpr float MAX_SUPPORTED_RATE = DSY_REVERBSC_MAX_RATE;
 
-    // ⚠️⚠️ **THREE INDEPENDENT CELLS, EACH NEUTRAL AT ITS DEFAULT, AND THE DEFAULTS ARE THE REVERB
-    // THAT SHIPPED.** They are not a mode between them: any combination is legal, because the TYPE
-    // cell on screen only writes them and never comes back to ask. Each is gated so that at its
-    // default the arithmetic below is the arithmetic that was there before the cell existed — not
-    // merely close to it — which is what lets every project written until now play unchanged.
+    // ⚠️⚠️ **THREE INDEPENDENT CELLS, AND PRE AND WIDE ARE NEUTRAL AT THEIR DEFAULTS.** They are not
+    // a mode between them: any combination is legal, because the TYPE cell on screen only writes them
+    // and never comes back to ask. Those two are gated so that at their defaults the arithmetic below
+    // is skipped rather than performed as an identity — that is what keeps an old project's
+    // pre-delay and stereo image exactly as they were.
+    //
+    // ⚠️ **MOD IS NOT ONE OF THEM.** Its default is a real setting the algorithm is driven to, not a
+    // no-op: it is set on every `reset` and every push, and lowering it below what `Init` leaves
+    // behind is the whole point of the value chosen. There is nothing to gate — the call is made
+    // unconditionally and there is no cheaper path to fall back to.
     //
     // ⚠️ WIDE's neutral is 0x80 and not 00, because a width cell has to reach BOTH sides of "as it
     // is". The mid/side pair that reconstructs L and R exactly is not bit-identical to leaving them
@@ -51,7 +56,7 @@ struct ReverbModule {
     int preHex          = 0x00;     // 00 = the send goes straight in, as it always did
     int preDelaySamples = 0;        // derived from preHex and the rate — never written directly
     int widthHex        = 0x80;     // 0x80 = untouched; 00 = mono, FF = twice the sides
-    int modHex          = 0x40;     // 0x40 = the wander ReverbSc has always had; 00 = none
+    int modHex          = 0x10;     // 00 = none; 0x40 is the wander the algorithm is built around
 
     // The pre-delay ring, and one write head for both channels. Cleared with the reverb, because a
     // line holding the last project's audio would push it into the tail of the first block after a
@@ -60,14 +65,23 @@ struct ReverbModule {
     float preBufR[REVERB_PREDELAY_MAX_SAMPLES] = {};
     int   preWrite = 0;
 
+    // ⚠️ **RAMPED ACROSS THE BLOCK, because SIZE is edited while the reverb is sounding** and this
+    // gain moves nearly 20 dB across the cell — a step that size lands on a tail that is still
+    // ringing, where nothing downstream would hide it. The pre-delay above deliberately does NOT
+    // ramp; it is a voicing control set once, and this one is turned in front of the speakers.
+    float wetGain       = 1.0f;   // where the last block left it
+    float wetGainTarget = 1.0f;   // what SIZE last asked for
+
     void reset(float sr) {
         sampleRate = sr;
         if (reverb.Init(sr) != 0) {
             sampleRate = MAX_SUPPORTED_RATE;
             reverb.Init(MAX_SUPPORTED_RATE);
         }
-        reverb.SetFeedback(0x60 / 255.0f);
-        reverb.SetLpFreq(200.0f * powf(100.0f, 0x80 / 255.0f));
+        // The default cells, until the project pushes its own — `reverb_size_gain` is 1 at 0x60 by
+        // construction, so the ramp starts where a default project would already have it.
+        setParams(0x60, 0x80);
+        wetGain = wetGainTarget;
         // ⚠️ Both re-derived here rather than left to the next push, the way the echo's tone
         // coefficient is. `Init` puts the wander back to 1 whatever the cell said, and the pre-delay
         // is a count of FRAMES for a rate that has just changed — a caller that forgot would leave a
@@ -78,10 +92,13 @@ struct ReverbModule {
         clearPreDelay();
     }
 
-    // feedbackHex 00-FF → 0.0–1.0; dampHex 00-FF → LP 200Hz–20kHz
+    // SIZE and DAMP. ⚠️ The three mappings live in reverb-presets.h and the reasoning is there: a
+    // cell is a decay TIME and a corner in Hz, and the wet gain is what stops the time from also
+    // being a volume.
     void setParams(int feedbackHex, int dampHex) {
-        reverb.SetFeedback(feedbackHex / 255.0f);
-        reverb.SetLpFreq(200.0f * powf(100.0f, dampHex / 255.0f));
+        reverb.SetFeedback(reverb_size_feedback(feedbackHex));
+        reverb.SetLpFreq(reverb_damp_freq(dampHex));
+        wetGainTarget = reverb_size_gain(feedbackHex);
     }
 
     // The three character cells, together, because they arrive together from the project.
@@ -108,15 +125,18 @@ struct ReverbModule {
     // Process stereo send bus into stereo wet output. Always 100% wet. Writes to outL/outR.
     // inputEq applied stereo (independent L/R biquads) before the reverb algorithm.
     //
-    // ⚠️⚠️ **AT THE DEFAULT CELLS THIS LOOP MUST COLLAPSE TO EXACTLY `Process(l, r, &wl, &wr)`** —
-    // the reverb that was here before it had a character, with no term added on either side of it.
-    // The two gates below are what keeps that true; MOD needs none, because 0x40 maps to the 1.0
-    // `Init` sets and the call is the identity.
+    // ⚠️ **AT THE DEFAULT PRE AND WIDE CELLS THE TWO GATES BELOW ADD NOTHING TO EITHER SIDE OF
+    // `Process`** — that is what keeps an old project's pre-delay and stereo image untouched. MOD is
+    // not here at all; it lives inside the algorithm. The wet gain is NOT one of the gates either:
+    // it is derived from SIZE at every setting including the default, because the level it divides
+    // out is there at every setting too.
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         constexpr int ring     = static_cast<int>(REVERB_PREDELAY_MAX_SAMPLES);
         const bool    delayed  = preDelaySamples > 0;
         const bool    widening = widthHex != 0x80;
         const float   side     = widthHex / 128.0f;
+        const float   gainStep = numFrames > 0 ? (wetGainTarget - wetGain) / numFrames : 0.0f;
+        float         gain     = wetGain;
 
         // Both heads walked by hand rather than by `%` per frame: the ring is not a power of two, so
         // the modulo would be an integer division on every sample of every block.
@@ -146,9 +166,11 @@ struct ReverbModule {
                 wl = mid + sd;
                 wr = mid - sd;
             }
-            outL[i] = wl;
-            outR[i] = wr;
+            gain += gainStep;
+            outL[i] = wl * gain;
+            outR[i] = wr * gain;
         }
+        wetGain = wetGainTarget;
     }
 
   private:

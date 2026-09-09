@@ -750,7 +750,7 @@ inline std::string serialize_project(const Project& p) {
     if (p.reverbInputEq != -1)    w.field_int("reverbInputEq", p.reverbInputEq);
     if (p.reverbPreDelay != 0)    w.field_int("reverbPreDelay", p.reverbPreDelay);
     if (p.reverbWidth != 0x80)    w.field_int("reverbWidth", p.reverbWidth);
-    if (p.reverbMod != 0x40)      w.field_int("reverbMod", p.reverbMod);
+    if (p.reverbMod != 0x10)      w.field_int("reverbMod", p.reverbMod);
     if (p.delayTime != 0x40)      w.field_int("delayTime", p.delayTime);
     if (p.delaySync)              w.field_bool("delaySync", p.delaySync);
     if (p.delayFeedback != 0x60)  w.field_int("delayFeedback", p.delayFeedback);
