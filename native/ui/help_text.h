@@ -463,7 +463,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* INST_LOOP_START */
     {"LOOP ST: where a loop begins", "The point playback jumps back", "to. Needs LOOP switched on."},
     /* INST_SAMPLE_END */
-    {"END: where playback stops", "FF is the end of the file.", "Below that it cuts short."},
+    {"END: where playback stops", "Below FF it cuts short. Set", "under START to play to the end."},
     /* INST_LOOP_END */
     {"LOOP END: where a loop ends", "The point playback jumps back", "from. Needs LOOP on."},
     /* INST_REVERSE */

@@ -7,6 +7,29 @@
 #include "effects/instrument-chain.h"
 #include "table-lanes.h"
 
+// START and END are two independent free 0-255 cells with nothing constraining one against the
+// other, so an INVERTED pair is typeable and arrives here as end <= start. It means "from START to
+// the end of the sample" — the reading that keeps the cell the user just typed audible.
+//
+// ⚠️ DERIVED IN ONE PLACE because the window is computed TWICE: once at note-on, and again every
+// block so a mod route can move the endpoints while the note rings. Two repairs that disagree do not
+// cancel out — they give a note that starts where one says and stops where the other does. The
+// result is always a non-empty window, which the loop bounds and the mix loop both assume.
+inline void derive_sample_window(float startNorm, float endNorm, int length,
+                                 int& outStart, int& outEnd) {
+    if (length < 2) { outStart = 0; outEnd = std::max(0, length - 1); return; }
+    // double rather than int64: the per-block caller's endpoints carry a modulation offset and are
+    // floats. Plain float loses whole frames past 2^24 the way `position` does; int32 point × length
+    // overflows at ≈8.4M frames (~3 min at 44.1 kHz — easy to hit via video-audio extraction).
+    int s = (int)((double)startNorm * (double)length / 255.0);
+    int e = (int)((double)endNorm   * (double)length / 255.0);
+    s = std::max(0, std::min(s, length - 2));
+    e = std::min(e, length - 1);
+    if (e <= s) e = length - 1;
+    outStart = s;
+    outEnd   = e;
+}
+
 struct Voice : public IAudioVoice {
     bool isActive;
     int fadeInRemaining;     // Anti-click: counts down from DECLICK_SAMPLES to 0 at note start
@@ -162,32 +185,21 @@ struct Voice : public IAudioVoice {
         // Use startPointOverride if provided (Offset effect / slice start), otherwise use instrument default
         int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : instrParams.startPoint;
         int effectiveEndPoint   = (endPointOverride   >= 0) ? endPointOverride   : instrParams.endPoint;
-        // int64 math: point × length overflows int32 for samples ≳ 8.4M frames (~3 min at
-        // 44.1 kHz — easy to hit via video-audio extraction), silently breaking START/END.
-        actualStart = (int)(((int64_t)effectiveStartPoint * length) / 255);
-        actualEnd   = (int)(((int64_t)effectiveEndPoint   * length) / 255);
+        derive_sample_window((float)effectiveStartPoint, (float)effectiveEndPoint, length,
+                             actualStart, actualEnd);
         // The exact-frame window (note-queue.h) replaces the pair above when it is armed. A PER-NOTE
         // override still wins over it: an Offset effect or a slice boundary is about THIS note, while
         // the frame window is a property of the slot.
         const bool frameWindow = (startPointOverride < 0 && endPointOverride < 0 &&
+                                  length >= 2 &&
                                   instrParams.startFrame >= 0 &&
                                   instrParams.endFrame > instrParams.startFrame);
         if (frameWindow) {
-            actualStart = instrParams.startFrame;
-            actualEnd   = instrParams.endFrame;
+            actualStart = std::max(0, std::min(instrParams.startFrame, length - 2));
+            actualEnd   = std::max(actualStart + 1, std::min(instrParams.endFrame, length - 1));
         }
         actualLoopStart = (int)(((int64_t)instrParams.loopStart * length) / 255);
         actualLoopEnd   = (int)(((int64_t)instrParams.loopEnd   * length) / 255);
-
-        // Clamp to valid range
-        actualStart = std::max(0, std::min(actualStart, length - 1));
-        actualEnd = std::max(0, std::min(actualEnd, length - 1));
-
-        // Ensure start < end
-        if (actualStart >= actualEnd) {
-            actualStart = 0;
-            actualEnd = length - 1;
-        }
 
         // ⚠️ THE WINDOW IS CARRIED, CLAMPED, past this call. The mix loop re-derives actualStart and
         // actualEnd from PARAM_SAMPLE_START/END every block so a mod route can move them live, and those

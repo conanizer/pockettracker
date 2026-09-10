@@ -4502,12 +4502,14 @@ void InputDispatcher::init_sample_editor_state() {
         se.selectionStart = (static_cast<int64_t>(ins.sampleStart) * se.totalFrames) / 255;
         se.selectionEnd   = (static_cast<int64_t>(ins.sampleEnd) * se.totalFrames) / 255;
         // ⚠️ START and END are two independent free 0-255 cells, so an INVERTED window is typeable
-        // and arrives here as `start > end`. It opens on the WHOLE sample, which is not a repair
-        // chosen here — it is what `Voice::trigger` already does with the same pair, so the editor
+        // and arrives here as `start > end`. It runs to the END OF THE SAMPLE, which is not a repair
+        // chosen here — it is what `derive_sample_window` does with the same pair, so the editor
         // shows the region the engine plays. Drawn as-is it would show no selection at all (the
         // waveform lights `>= start && < end`), which reads as "nothing selected".
         if (se.selectionStart >= se.selectionEnd) {
-            se.selectionStart = 0;
+            // A START of 0xFF scales to the very last frame, so the tail it opens on has to be at
+            // least one frame wide or the repair draws as "nothing selected" all over again.
+            se.selectionStart = std::min<int64_t>(se.selectionStart, se.totalFrames - 1);
             se.selectionEnd   = se.totalFrames;
         }
     } else {

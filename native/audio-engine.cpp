@@ -2163,8 +2163,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             } else {
                 float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
                 float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
-                voice.actualStart = std::max(0,             std::min((int)(rawStart * sl / 255.0f), sl - 2));
-                voice.actualEnd   = std::max(voice.actualStart + 1, std::min((int)(rawEnd * sl / 255.0f), sl - 1));
+                derive_sample_window(rawStart, rawEnd, sl, voice.actualStart, voice.actualEnd);
             }
             float rawLoop    = voice.params.base[PARAM_LOOP_START]   + voice.modDestValues[PARAM_LOOP_START];
             voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));

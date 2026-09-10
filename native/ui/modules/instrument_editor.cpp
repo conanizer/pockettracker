@@ -609,6 +609,10 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
                 if (!s.allowOscLoop) c.maxValue = static_cast<int>(loop_modes().size()) - 2;
                 return c;
             }
+            // ⚠️ START and END are deliberately NOT bounded against each other. A HEX_BYTE WRAPS at
+            // its limits, so a floor of START+1 would send END from just under START to FF in one
+            // press — in the middle of the trim that put it there. An inverted pair has a defined
+            // sound instead (`derive_sample_window`: START → the end of the sample).
             if (col == 3) return cc::hex_byte(ins.sampleStart, 0, 255, -1, false, false, false, 0x00);
             return cc::none();
 
