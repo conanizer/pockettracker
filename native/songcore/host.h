@@ -637,8 +637,10 @@ class SongcoreHost {
      */
     void sync_sf_preset(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
+        const int was = routing_.sfSlot[id];
         songcore::sync_instrument_soundfont(*engine_, project_.instruments[static_cast<size_t>(id)],
                                             routing_);
+        if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
     }
 
     /**
@@ -647,14 +649,20 @@ class SongcoreHost {
      */
     bool request_sf_preset(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return true;
-        return songcore::request_instrument_soundfont(
+        const int was = routing_.sfSlot[id];
+        const bool taken = songcore::request_instrument_soundfont(
             *engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+        // An already-resident preset is answered on the spot rather than by the worker, and that
+        // answer moves the slot here instead of in poll_sf_load.
+        if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
+        return taken;
     }
 
     /** Install a finished background preset load. Called once a frame by the feed. */
     void poll_sf_load() {
         if (!engine_) return;
-        songcore::collect_instrument_soundfont(*engine_, project_, routing_);
+        if (songcore::collect_instrument_soundfont(*engine_, project_, routing_) >= 0)
+            notify_sf_slot_moved();
     }
 
     // ── ↕ the FILE verbs (Phase 3 S6a — what the browser's A button reaches) ─────────────────────
@@ -1277,6 +1285,22 @@ class SongcoreHost {
     bool trace_enabled() const { return traceEnabled_; }
 
   private:
+    /**
+     * A SoundFont slot moved under a playing take, so the lookahead has to be re-derived.
+     *
+     * ⚠️ **THE PATCH ROW'S EDIT AND THE SOUND IT NAMES DO NOT ARRIVE TOGETHER.** The edit rolls the
+     * lookahead back where it is typed (mark_modified), but a preset is a decode: the slot it lands in
+     * is not known for another settle plus a parse, and by then the walk has refilled the buffer with
+     * notes carrying the OLD slot — which the residency sweep then frees from under them. So the
+     * slot's ARRIVAL is a second edit, and says so here.
+     *
+     * Written once below the three loaders rather than at their call sites: every way to move a slot
+     * goes through one of them.
+     */
+    void notify_sf_slot_moved() {
+        if (seq_.is_playing()) notify_data_changed();
+    }
+
     // Drop what the rolled-back tracks had already queued. ⚠️ ONE FRAME PER TRACK, not one for the
     // engine: the eight song cursors have their own boundaries, so clearing every track from the
     // earliest of them would drop notes a track ahead of it had queued and is not going to schedule
