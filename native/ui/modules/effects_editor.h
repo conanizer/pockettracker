@@ -61,6 +61,9 @@ public:
     static constexpr int ROW_REV_PRE     = static_cast<int>(EffectsRow::REV_PRE);      // pre-delay
     static constexpr int ROW_REV_WIDE    = static_cast<int>(EffectsRow::REV_WIDE);     // 80 = untouched
     static constexpr int ROW_REV_MOD     = static_cast<int>(EffectsRow::REV_MOD);      // 40 = as it shipped
+    static constexpr int ROW_REV_ALGO    = static_cast<int>(EffectsRow::REV_ALGO);     // 0 = as it shipped
+    static constexpr int ROW_REV_DECAY   = static_cast<int>(EffectsRow::REV_DECAY);    // MVERB only
+    static constexpr int ROW_REV_DENSITY = static_cast<int>(EffectsRow::REV_DENSITY);  // MVERB only
     static constexpr int MAX_CURSOR_ROW  = EFFECTS_ROW_COUNT - 1;
 
     /** The sync subdivisions, in the order kDelaySyncBeats[] has them in delay-module.h. */

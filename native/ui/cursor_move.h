@@ -66,6 +66,10 @@
 
 namespace pt::ui {
 
+/** The reverb algorithm the EFFECTS rows are laid out for. ⚠️ No project = the shipping one, which is
+ *  also what a project that never wrote the field loads as. */
+inline int effects_algo_of(const AppState& s) { return s.project ? s.project->reverbAlgo : 0; }
+
 // ─── INSTRUMENT ──────────────────────────────────────────────────────────────────────────────────
 
 namespace detail {
@@ -288,7 +292,7 @@ inline void move_cursor_up(AppState& s) {
         // table is the only thing that knows what is above what (ui/effects_row_layout.h). The column
         // is carried, and a single-cell line takes the cursor whichever column it comes down in.
         case ScreenType::EFFECTS:
-            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, -1);
+            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, -1, effects_algo_of(s));
             break;
 
         // PROJECT's rows WRAP, and every row change snaps the column back to 1 — you never arrive on
@@ -398,7 +402,7 @@ inline void move_cursor_down(AppState& s) {
 
         // …and down. See move_cursor_up's arm.
         case ScreenType::EFFECTS:
-            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, +1);
+            s.effectsCursorRow = effects_next_row(s.effectsCursorRow, +1, effects_algo_of(s));
             break;
 
         case ScreenType::PROJECT:

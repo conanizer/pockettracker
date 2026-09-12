@@ -107,7 +107,8 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Mixer screen: volume for each of the 8 tracks and the master, plus send amounts to reverb and delay
 - Mute and solo any track from the song or mixer screen, on the cursor or across a selection — the chord latches or stays momentary depending on which button you release first
 - True dBFS peak meters per track
-- Two send effects: reverb (Schroeder-Moorer algorithm) and a stereo delay
+- Two send effects: a reverb and a stereo delay
+- Two reverb algorithms, chosen per project: OLD, an even wash, and MVERB, a denser tail with audible early reflections, its own room size and decay, and a density control
 - Reverb character: pre-delay, stereo width and tail modulation — with TYPE presets (ROOM, HALL, CAVE) that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with TYPE presets that set all three at once
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency

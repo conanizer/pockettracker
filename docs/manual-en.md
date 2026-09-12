@@ -1234,12 +1234,15 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 
 | Parameter | Description |
 |---|---|
-| TYPE | A starting point for the whole section: **NORMAL** (the plain reverb), **ROOM** (tight, bright, close), **HALL** (a gap, then a long dark tail), **CAVE** (longest, darkest, widest). Choosing one sets SIZE, DAMP, PRE, WIDE and MOD together; turn any of those afterwards and TYPE reads **USER**. |
-| PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
-| SIZE | Length of the reverb tail (`00`–`FF`), from about half a second to about twenty-five. `FF` is a tail that never ends. The level stays where it is as you turn it. |
-| WIDE | Stereo width of the return (`00`–`FF`). `00` is mono, `80` leaves the image as the reverb makes it, `FF` pushes it to the sides. The level does not change with it. |
-| DAMP | Brightness of the tail (`00`–`FF`). `00` is dark, `FF` keeps the highs. |
-| MOD | Movement in the tail (`00`–`FF`). Higher makes the tail drift in pitch; `00` holds it still, which is bright and metallic. |
+| TYPE | A starting point for the whole section: **NORMAL** (the plain reverb), **ROOM** (tight, bright, close), **HALL** (a gap, then a long dark tail), **CAVE** (longest, darkest, widest). Choosing one sets every cell in the section together — including DCAY and DENS, which only MVERB shows; turn any of them afterwards and TYPE reads **USER**. |
+| ALGO | Which reverb runs: **OLD**, an even wash, or **MVERB**, a denser tail with audible early reflections. Switching leaves every cell exactly as you set it — but SIZE and MOD mean different things to each, so the same numbers sound different, and MVERB shows two extra cells the old reverb has no counterpart for. Switching back returns the sound you had. |
+| PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. Same on both algorithms. |
+| SIZE | On **OLD**, the length of the tail (`00`–`FF`), about half a second to about twenty-five; `FF` never ends. On **MVERB**, the size of the *room* — how far apart its walls are — while DCAY below sets how long it rings. The level stays where it is as you turn it. |
+| WIDE | Stereo width of the return (`00`–`FF`). `00` is mono, `80` leaves the image as the reverb makes it, `FF` pushes it to the sides. The level does not change with it. Same on both algorithms. |
+| DAMP | Brightness of the tail (`00`–`FF`). `00` is dark, `FF` keeps the highs. Same on both algorithms. |
+| DCAY | **MVERB only**, and not shown on OLD. How long the tail rings (`00`–`FF`), separate from the room — so a small room can ring for a long time, or a big one die away fast. About half a second to about four; `FF` never ends. |
+| DENS | **MVERB only**, and not shown on OLD. How thick the reverb is (`00`–`FF`). Low is sparse and grainy, with the individual echoes audible; high smears them into a smooth wash. |
+| MOD / EARLY | On **OLD** it is labelled MOD and is movement in the tail (`00`–`FF`) — higher makes it drift in pitch, `00` holds it still, which is bright and metallic. On **MVERB** it is labelled EARLY and is how much of the early reflections you hear: `00` is the tail alone, `FF` is mostly the sound of the walls. |
 | EQ | Press A to open the EQ EDITOR for the reverb return. |
 
 The reverb return volume is set on the MIXER screen (REV row in master column).

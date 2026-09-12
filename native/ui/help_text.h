@@ -337,6 +337,9 @@ enum class HelpTopic {
     FX_REVERB_PRE,
     FX_REVERB_WIDE,
     FX_REVERB_MOD,
+    FX_REVERB_ALGO,
+    FX_REVERB_DECAY,
+    FX_REVERB_DENSITY,
 
     COUNT
 };
@@ -809,13 +812,19 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* FX_DELAY_PONG */
     {"PONG: echoes bounce", "Repeats alternate left and", "right, ignoring the pan."},
     /* FX_REVERB_TYPE */
-    {"TYPE: a starting point", "Sets the five cells around it.", "Change one and it says USER."},
+    {"TYPE: a starting point", "Sets the cells around it.", "Change one and it says USER."},
     /* FX_REVERB_PRE */
     {"PRE: a gap before the tail", "The reverb starts late, so the", "sound stays in front of it."},
     /* FX_REVERB_WIDE */
     {"WIDE: how far it spreads", "00 is mono, 80 is normal,", "FF pushes it to the sides."},
     /* FX_REVERB_MOD */
-    {"MOD: movement in the tail", "The tail drifts in pitch. 00", "holds it still and metallic."},
+    {"MOD / EARLY: set by ALGO", "OLD: the tail drifts in pitch.", "MVERB: how much of the walls."},
+    /* FX_REVERB_ALGO */
+    {"ALGO: which reverb sounds", "OLD is the soft wash. MVERB", "puts walls around the sound."},
+    /* FX_REVERB_DECAY */
+    {"DCAY: how long it rings", "MVERB only. Separate from the", "room, so a small one can ring."},
+    /* FX_REVERB_DENSITY */
+    {"DENS: how thick it is", "MVERB only. Low is grainy and", "sparse, high is smooth."},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -1142,6 +1151,9 @@ inline HelpTopic effects_cell_topic(int row) {
         case EffectModule::ROW_REV_PRE:     return HelpTopic::FX_REVERB_PRE;
         case EffectModule::ROW_REV_WIDE:    return HelpTopic::FX_REVERB_WIDE;
         case EffectModule::ROW_REV_MOD:     return HelpTopic::FX_REVERB_MOD;
+        case EffectModule::ROW_REV_ALGO:    return HelpTopic::FX_REVERB_ALGO;
+        case EffectModule::ROW_REV_DECAY:   return HelpTopic::FX_REVERB_DECAY;
+        case EffectModule::ROW_REV_DENSITY: return HelpTopic::FX_REVERB_DENSITY;
         default:                            return HelpTopic::NONE;
     }
 }

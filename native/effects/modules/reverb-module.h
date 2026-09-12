@@ -1,5 +1,6 @@
 #pragma once
 #include "../primitives/daisysp/reverbsc.h"
+#include "../primitives/mverb.h"
 #include "eq-module.h"
 #include "reverb-presets.h"
 #include <cmath>
@@ -16,15 +17,31 @@ static constexpr size_t REVERB_PREDELAY_MAX_SAMPLES = 7200;
 static constexpr float  kReverbPreDelayMaxSeconds   = 0.15f;
 
 // ===========================================================================
-// ReverbModule — Schroeder-Moorer stereo reverb send (DaisySP ReverbSc).
+// ReverbModule — the stereo reverb send, and the choice of WHICH reverb.
 //
 // Takes a mono send-bus sum, expands to stereo wet output.
 // inputEq is a pre-reverb EQ band (applied before the reverb algorithm).
+//
+// ⚠️⚠️ **TWO ALGORITHMS ARE RESIDENT AT ONCE AND ONLY ONE SOUNDS.** Between them they are ~390 KB, in
+// an `AudioEngine` that is heap-allocated precisely because of sizes like this. The alternative —
+// one algorithm on the heap, swapped when the cell changes — was rejected: a swap cannot allocate or
+// free on the audio thread, so it would need a handoff and a deferred free to save a quarter of a
+// megabyte on platforms that have hundreds of them. ⚠️ **THE COST IS PAID PER ALGORITHM ADDED**, so a
+// third one is the point at which this decision is worth re-opening rather than repeating.
+//
+// ⚠️ **THE SILENT ONE IS NOT RUNNING, so its lines still hold whatever they held when the cell last
+// moved.** Both are cleared together on `reset`, which is what stops a switch mid-project from
+// dropping a tail recorded minutes ago into the middle of a take.
+//
+// ⚠️ The pre-delay ring and the mid/side pair below are OUTSIDE both algorithms and are shared, so
+// PRE and WIDE mean one thing whichever is sounding. Everything else is read per algorithm — see
+// reverb-presets.h, where every mapping is a named function for this reason.
 // ===========================================================================
 struct ReverbModule {
-    daisysp::ReverbSc reverb;
-    EqModule          inputEq;
-    float             sampleRate = 44100.0f;   // the rate the delay lines were actually built at
+    daisysp::ReverbSc   reverb;                // algorithm 0 — the wash that shipped in 0.9.8
+    mverb::MVerb<float> tank;                  // algorithm 1 — the Dattorro tank with early reflections
+    EqModule            inputEq;
+    float               sampleRate = 44100.0f; // the rate the delay lines were actually built at
 
     // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array, sized for exactly this rate,
     // and refuses any rate whose lines will not fit. Its refusal leaves three buffer pointers
@@ -58,6 +75,23 @@ struct ReverbModule {
     int widthHex        = 0x80;     // 0x80 = untouched; 00 = mono, FF = twice the sides
     int modHex          = 0x10;     // 00 = none; 0x40 is the wander the algorithm is built around
 
+    // ⚠️ **0 IS THE REVERB THAT SHIPPED AND ITS NUMBER IS ITS IDENTITY** — append, never insert. A
+    // project written before the cell existed loads without it and lands here.
+    int algo = 0;
+
+    // ⚠️⚠️ **THE LAST SIZE CELL THE TANK WAS BUILT AT, AND IT EXISTS TO STOP A `memset`.** MVerb's SIZE
+    // *is* the lengths of its eight tank lines, so setting it re-lengths and clears them — ~180 KB of
+    // `memset` and a tail cut dead. The globals are re-pushed on EVERY project edit, so a caller that
+    // pushed SIZE unconditionally would silence the reverb every time the user typed a note. -1 is
+    // "never built", so the first push always lands.
+    int tankSizeHex = -1;
+
+    // What `setParams` last saw, kept so that a switch back to algorithm 0 can re-apply the cells
+    // `ReverbSc::Init` throws away. ⚠️ They are the CELLS and not the derived numbers, for the reason
+    // PRE is: the derivation is the mapping's job and it may change.
+    int sizeHex     = 0x60;
+    int dampHexCell = 0x80;
+
     // The pre-delay ring, and one write head for both channels. Cleared with the reverb, because a
     // line holding the last project's audio would push it into the tail of the first block after a
     // load — inaudible on the dry path and several seconds long on this one.
@@ -78,6 +112,14 @@ struct ReverbModule {
             sampleRate = MAX_SUPPORTED_RATE;
             reverb.Init(MAX_SUPPORTED_RATE);
         }
+        // ⚠️ **THE SECOND ALGORITHM SHARES THE FIRST'S CEILING, AND IT IS NOT OPTIONAL.** MVerb's read
+        // heads are set from `seconds × rate` while its buffers are sized for the design rate, so a
+        // rate above it would place a head past the end of a line. `sampleRate` is already the clamped
+        // rate by the time we get here, and the two ceilings are deliberately the same number.
+        static_assert(static_cast<int>(MAX_SUPPORTED_RATE) <= mverb::kMVerbDesignRate,
+                      "MVerb's lines are sized for kMVerbDesignRate; the reverb must never be built above it");
+        tank.setSampleRate(sampleRate);
+        tankSizeHex = -1;    // the lines were just rebuilt, so the next push must re-length them
         // The default cells, until the project pushes its own — `reverb_size_gain` is 1 at 0x60 by
         // construction, so the ramp starts where a default project would already have it.
         setParams(0x60, 0x80);
@@ -87,18 +129,72 @@ struct ReverbModule {
         // is a count of FRAMES for a rate that has just changed — a caller that forgot would leave a
         // 44.1 kHz pre-delay running on a device at 48, and drop a MOD the user had set.
         reverb.SetPitchMod(reverb_mod_scale(modHex));
+        // ⚠️ The second algorithm's cells re-derived here for the same reason, and its one remaining
+        // FIXED value with them: `setSampleRate` above rebuilt the tank from MVerb's own constructor
+        // defaults, so a caller that reset and then never pushed would run at the vendored input
+        // bandwidth rather than the open one this reverb wants.
+        tank.setParameter(mverb::MVerb<float>::EARLYMIX, mverb_early_param(modHex));
+        tank.setParameter(mverb::MVerb<float>::BANDWIDTHFREQ, kMverbBandwidth);
         updatePreDelaySamples();
         inputEq.reset(sr);
         clearPreDelay();
     }
 
-    // SIZE and DAMP. ⚠️ The three mappings live in reverb-presets.h and the reasoning is there: a
-    // cell is a decay TIME and a corner in Hz, and the wet gain is what stops the time from also
-    // being a volume.
-    void setParams(int feedbackHex, int dampHex) {
+    // SIZE and DAMP, pushed to BOTH algorithms — the cells are stored once and read twice, so the
+    // silent one stays in step and a switch does not need the project pushed again.
+    //
+    // ⚠️ Every mapping lives in reverb-presets.h and the reasoning is there: to algorithm 0 a cell is
+    // a decay TIME and a corner in Hz, and its wet gain is what stops the time from also being a
+    // volume; to algorithm 1 the same cell is a room's dimensions, and there is no gain to derive
+    // because that algorithm's level barely moves with it.
+    void setParams(int feedbackHex, int dampHex, int decayHex = 0x60, int densityHex = 0x99) {
+        sizeHex       = feedbackHex;
+        dampHexCell   = dampHex;
         reverb.SetFeedback(reverb_size_feedback(feedbackHex));
         reverb.SetLpFreq(reverb_damp_freq(dampHex));
         wetGainTarget = reverb_size_gain(feedbackHex);
+
+        tank.setParameter(mverb::MVerb<float>::DAMPINGFREQ, mverb_damp_param(dampHex));
+        tank.setParameter(mverb::MVerb<float>::DECAY, mverb_decay_param(decayHex));
+        tank.setParameter(mverb::MVerb<float>::DENSITY, mverb_density_param(densityHex));
+        // ⚠️⚠️ **GATED, AND THE GATE IS THE WHOLE REASON `tankSizeHex` EXISTS** — see its comment. SIZE
+        // re-lengths and clears eight delay lines, so pushing it unchanged would cut the tail dead on
+        // every project edit. DECAY and DAMP above are smoothed inside the algorithm and are free.
+        if (feedbackHex != tankSizeHex) {
+            tankSizeHex = feedbackHex;
+            tank.setParameter(mverb::MVerb<float>::SIZE, mverb_size_param(feedbackHex));
+        }
+    }
+
+    /**
+     * Which algorithm sounds. ⚠️ The voicing cells are NOT rewritten — see reverb-presets.h.
+     *
+     * ⚠️⚠️ **THE ONE BEING SWITCHED TO IS CLEARED, BECAUSE THE SILENT ONE IS FROZEN AND NOT DECAYING.**
+     * Its delay lines still hold whatever they held when the cell last moved, so without this a switch
+     * would drop a tail from minutes ago into the middle of a take — the same trap the pre-delay ring
+     * is cleared for, and worse here because the tail rings for seconds.
+     *
+     * ⚠️⚠️ **AND THE `algo == next` GUARD IS LOAD-BEARING, NOT AN OPTIMISATION.** The globals are
+     * re-pushed on every project edit, so without it typing a note would re-`Init` the reverb and cut
+     * its tail dead. It is also what keeps every existing project bit-identical: a project on
+     * algorithm 0 never reaches the clear at all.
+     */
+    void setAlgo(int algoIn) {
+        const int next = (algoIn >= 0 && algoIn < kReverbAlgoCount) ? algoIn : 0;
+        if (next == algo) return;
+        algo = next;
+        if (algo == 1) {
+            // Rebuilds its lines from the cells it is already holding, so nothing needs re-pushing.
+            tank.reset();
+        } else {
+            // ⚠️ `Init` clears the lines AND puts feedback, corner and wander back to ITS defaults, so
+            // the three cells are re-applied here rather than left to the caller's next push. The
+            // order `push_global_effects` happens to use is not something this module may rely on.
+            reverb.Init(sampleRate);
+            reverb.SetFeedback(reverb_size_feedback(sizeHex));
+            reverb.SetLpFreq(reverb_damp_freq(dampHexCell));
+            reverb.SetPitchMod(reverb_mod_scale(modHex));
+        }
     }
 
     // The three character cells, together, because they arrive together from the project.
@@ -120,6 +216,9 @@ struct ReverbModule {
         widthHex = widthHexIn;
         modHex   = modHexIn;
         reverb.SetPitchMod(reverb_mod_scale(modHex));
+        // The same cell, read the other way: a pitch wander above, the early reflections' share here.
+        tank.setParameter(mverb::MVerb<float>::EARLYMIX, mverb_early_param(modHex));
+        tank.setParameter(mverb::MVerb<float>::BANDWIDTHFREQ, kMverbBandwidth);
     }
 
     // Process stereo send bus into stereo wet output. Always 100% wet. Writes to outL/outR.
@@ -135,14 +234,22 @@ struct ReverbModule {
         const bool    delayed  = preDelaySamples > 0;
         const bool    widening = widthHex != 0x80;
         const float   side     = widthHex / 128.0f;
-        const float   gainStep = numFrames > 0 ? (wetGainTarget - wetGain) / numFrames : 0.0f;
-        float         gain     = wetGain;
+
+        // ⚠️ **ALGORITHM 1 HAS NO LEVEL TO DIVIDE OUT, SO ITS TARGET IS A CONSTANT.** `wetGainTarget`
+        // is algorithm 0's SIZE compensation and means nothing here; what algorithm 1 needs instead is
+        // the fixed trim that puts the two at the same loudness. Both ride the SAME ramp, so switching
+        // the cell while the reverb sounds slides between them rather than stepping.
+        const float target   = (algo == 1) ? kMverbOutputTrim : wetGainTarget;
+        const float gainStep = numFrames > 0 ? (target - wetGain) / numFrames : 0.0f;
+        float       gain     = wetGain;
 
         // Both heads walked by hand rather than by `%` per frame: the ring is not a power of two, so
         // the modulo would be an integer division on every sample of every block.
         int preRead = preWrite - preDelaySamples;
         if (preRead < 0) preRead += ring;
 
+        // The input stage — EQ and the pre-delay ring, both OUTSIDE the algorithms and shared by
+        // them. It lands in the output buffers, which every path below then reads back in place.
         for (int i = 0; i < numFrames; i++) {
             float l = inL[i], r = inR[i];
             if (inputEq.active) {
@@ -156,8 +263,25 @@ struct ReverbModule {
                 if (++preWrite >= ring) preWrite = 0;
                 if (++preRead >= ring) preRead = 0;
             }
-            float wl, wr;
-            reverb.Process(l, r, &wl, &wr);
+            outL[i] = l;
+            outR[i] = r;
+        }
+
+        // ⚠️ Both algorithms read index i and write index i in the same step, so running them over the
+        // output buffers in place is safe and saves a scratch pair the size of a sub-block.
+        if (algo == 1) {
+            tank.process(outL, outR, outL, outR, numFrames);
+        } else {
+            for (int i = 0; i < numFrames; i++) {
+                float wl, wr;
+                reverb.Process(outL[i], outR[i], &wl, &wr);
+                outL[i] = wl;
+                outR[i] = wr;
+            }
+        }
+
+        for (int i = 0; i < numFrames; i++) {
+            float wl = outL[i], wr = outR[i];
             if (widening) {
                 // ⚠️ The mid stays at unity whatever WIDE says, so a reverb turned to mono is not
                 // also turned down: only the difference between the channels is scaled.
@@ -170,7 +294,7 @@ struct ReverbModule {
             outL[i] = wl * gain;
             outR[i] = wr * gain;
         }
-        wetGain = wetGainTarget;
+        wetGain = target;
     }
 
   private:

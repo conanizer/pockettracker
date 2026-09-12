@@ -116,7 +116,9 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
             engine.setEqBand(slot, band, b.type, b.freq, b.gain, b.q);
         }
     }
-    engine.setReverbParams(project.reverbFeedback, project.reverbDamp, project.reverbWet);
+    engine.setReverbAlgo(project.reverbAlgo);
+    engine.setReverbParams(project.reverbFeedback, project.reverbDamp, project.reverbWet,
+                           project.reverbDecay, project.reverbDensity);
     engine.setReverbCharacter(project.reverbPreDelay, project.reverbWidth, project.reverbMod);
     engine.setReverbInputEq(project.reverbInputEq);
     engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,

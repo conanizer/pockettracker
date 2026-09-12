@@ -610,15 +610,35 @@ struct Project {
     std::vector<EqPreset> eqPresets;              // Array(128){EqPreset(it)} — filled by factory
     int reverbFeedback = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbInputEq = -1;
     // The reverb's character — three independent cells, no mode between them. The TYPE row on the
-    // EFFECTS screen writes these and SIZE and DAMP all at once from a preset, and then reads the
-    // name back by matching (effects/modules/reverb-presets.h); it is not stored, because after one
-    // turn of any of the five there is nothing for it to be.
+    // EFFECTS screen writes these, SIZE, DAMP, DCAY and DENS all at once from a preset, and then reads
+    // the name back by matching (effects/modules/reverb-presets.h); it is not stored, because after
+    // one turn of any of the seven there is nothing for it to be.
     //
-    // ⚠️⚠️ **THESE DEFAULTS ARE THE REVERB THAT SHIPPED, and they have to stay that way**: a project
-    // written before the cells existed loads without them, so the default is what it plays with. PRE
-    // is 00 (no line at all, not a short one), WIDE is 80 (the mid/side pair SKIPPED, not performed)
-    // and MOD is 40, which is exactly the wander the algorithm was fixed at.
+    // ⚠️⚠️ **THESE DEFAULTS ARE THE REVERB THAT SHIPPED, and PRE and WIDE have to stay that way**: a
+    // project written before the cells existed loads without them, so the default is what it plays
+    // with. PRE is 00 (no line at all, not a short one) and WIDE is 80 (the mid/side pair SKIPPED, not
+    // performed). ⚠️ MOD is the exception and is deliberately BELOW the 40 the algorithm was fixed at:
+    // a wander sized for a long tail is audible as detuning on a short one.
     int reverbPreDelay = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
+    // Which reverb algorithm sounds. ⚠️⚠️ **0 IS THE ONE THAT SHIPPED AND ITS NUMBER IS ITS IDENTITY**
+    // — append, never insert. A project written before the cell existed loads without it and lands
+    // here, so 0 must go on meaning exactly the reverb it has always meant.
+    //
+    // ⚠️ The cells above are NOT rewritten when this changes: each algorithm reads them its own
+    // way (effects/modules/reverb-presets.h), so a project keeps the numbers the user typed and hears
+    // them differently. That is why this is a field of its own and not a sixth preset row.
+    int reverbAlgo = 0;
+    // The two cells only algorithm 1 has, and they are hidden on the EFFECTS screen while algorithm 0
+    // is chosen. ⚠️ They are stored and serialized regardless, so switching away and back does not
+    // lose them — and a preset writes them on BOTH algorithms, so picking one while algorithm 0 is
+    // chosen moves two cells that are not on screen.
+    //
+    // ⚠️⚠️ **DCAY's DEFAULT IS THE SAME 0x60 AS SIZE'S ON PURPOSE.** Before it was a cell, algorithm 1
+    // derived its decay from the SIZE cell through the same curve — so a project that never touches
+    // DCAY plays the tail it played when the two were welded together, and splitting them changed no
+    // existing sound. ⚠️ DENS 0x99 is 0.6, which is the density the tank was voiced at when it was a
+    // constant, and for the same reason.
+    int reverbDecay = 0x60, reverbDensity = 0x99;
     int delayTime = 0x40;
     bool delaySync = false;
     int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;

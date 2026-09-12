@@ -15,9 +15,15 @@
 // each side. That is why everything below is addressed by line, and why the cursor needs a sideways
 // step as well as an up-and-down one.
 //
-// ⚠️ Unlike SETTINGS and PROJECT, no row here is conditional. The delay's character used to hide TONE
-// and WOBL under the types that read them; the cells are all independent now, so they are all always
-// there — which is the whole point of them.
+// ⚠️⚠️ TWO ROWS HERE ARE CONDITIONAL, AND THEY ARE THE ONLY TWO. DCAY and DENS exist on the second
+// reverb algorithm and have no counterpart in the first, so they are hidden when ALGO is OLD rather
+// than drawn dead. Everything else on this screen is unconditional — the delay's character used to
+// hide TONE and WOBL under the types that read them, and those cells are all independent now.
+//
+// ⚠️ Hidden rows are SKIPPED, NEVER RENUMBERED, exactly as in settings_row_layout.h: the cursor stores
+// a row's VALUE and DCAY is 17 whether it is on screen or not. `effects_layout` and `effects_next_row`
+// are the two functions that take the algorithm; `effects_cell_pos` and `effects_step_column` do not,
+// because a row's place in the static table above does not depend on what is visible.
 
 namespace pt::ui {
 
@@ -40,6 +46,9 @@ namespace pt::ui {
  * 13 PRE     reverb
  * 14 WIDE    reverb
  * 15 MOD     reverb
+ * 16 ALGO    reverb algorithm  — APPENDED, sits beside TYPE
+ * 17 DCAY    reverb            — APPENDED, MVERB only
+ * 18 DENS    reverb            — APPENDED, MVERB only
  */
 enum class EffectsRow {
     MASTER_TYPE = 0,
@@ -58,9 +67,12 @@ enum class EffectsRow {
     REV_PRE     = 13,
     REV_WIDE    = 14,
     REV_MOD     = 15,
+    REV_ALGO    = 16,
+    REV_DECAY   = 17,
+    REV_DENSITY = 18,
 };
 
-inline constexpr int EFFECTS_ROW_COUNT = 16;
+inline constexpr int EFFECTS_ROW_COUNT = 19;
 
 /** The three sections, in the order they are drawn. Each gets a blank line and a header above it. */
 enum class EffectsSection { MASTER = 0, REVERB = 1, DELAY = 2 };
@@ -75,7 +87,10 @@ constexpr EffectsSection effects_row_section(EffectsRow row) {
         case EffectsRow::REV_TYPE:
         case EffectsRow::REV_PRE:
         case EffectsRow::REV_WIDE:
-        case EffectsRow::REV_MOD:     return EffectsSection::REVERB;
+        case EffectsRow::REV_MOD:
+        case EffectsRow::REV_ALGO:
+        case EffectsRow::REV_DECAY:
+        case EffectsRow::REV_DENSITY: return EffectsSection::REVERB;
         default:                      return EffectsSection::DELAY;
     }
 }
@@ -96,7 +111,7 @@ struct EffectsDisplayLine {
         : cell{left, right}, paired(true) {}
 };
 
-inline constexpr int EFFECTS_LINE_COUNT = 10;
+inline constexpr int EFFECTS_LINE_COUNT = 11;
 
 /**
  * The order the rows are DRAWN and the D-pad walks — decoupled from the enum VALUE above, which stays
@@ -111,16 +126,27 @@ inline constexpr int EFFECTS_LINE_COUNT = 10;
  * only one here that opens another screen rather than holding a value, and it is easier to find when
  * the two of them line up than when each obeys its own section's grouping.
  *
- * ⚠️ The line count is what makes the screen fit its panel without scrolling, and it is now three
- * lines short of the point where it would not. A row added to either section costs a LINE only if it
- * has no partner — so the cheap place to add one is beside a cell that is currently alone.
+ * ⚠️ ALGO sits beside the reverb's TYPE rather than on a line of its own, which is why the reverb
+ * section is still four lines. The two belong together: TYPE picks a set of values and ALGO picks
+ * what reads them, and they are the only two cells here that are not a number.
+ *
+ * ⚠️⚠️ **TEN DRAWN LINES IS EXACTLY WHAT THE PANEL HOLDS, AND THE ELEVENTH SCROLLS IT.** Measured, not
+ * estimated: with ALGO on OLD the cursor reaches the delay's INP EQ with the screen still, and with
+ * the DCAY line shown it scrolls by one row to get there. That is graceful — the title stays pinned,
+ * the clip below keeps the rows off it, and every cell is still reachable — but it is a behaviour the
+ * screen did not have before, so **the next line added is not free.** (An earlier version of this
+ * comment claimed three lines of headroom. There were none.)
+ *
+ * A row added to either section costs a LINE only if it has no partner — so the cheap place to add one
+ * is beside a cell that is currently alone, and the DELAY's TYPE is the one that is left.
  */
 inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = {
     {EffectsRow::MASTER_TYPE},
 
-    {EffectsRow::REV_TYPE},
+    {EffectsRow::REV_TYPE, EffectsRow::REV_ALGO},
     {EffectsRow::REV_PRE,  EffectsRow::REV_SIZE},
     {EffectsRow::REV_WIDE, EffectsRow::REV_DAMP},
+    {EffectsRow::REV_DECAY, EffectsRow::REV_DENSITY},
     {EffectsRow::REV_EQ,   EffectsRow::REV_MOD},
 
     {EffectsRow::DLY_TYPE},
@@ -158,6 +184,24 @@ constexpr bool effects_lines_are_well_formed() {
 static_assert(detail::effects_lines_are_well_formed(),
               "EFFECTS_DISPLAY_LINES must draw every row exactly once, and pair only within a section");
 
+/**
+ * Is this row on screen at all?
+ *
+ * ⚠️ `algo` is the project's `reverbAlgo`. The two MVERB-only cells are the ONLY conditional rows on
+ * this screen; everything else answers true whatever is passed.
+ */
+constexpr bool effects_row_visible(EffectsRow row, int algo) {
+    if (row == EffectsRow::REV_DECAY || row == EffectsRow::REV_DENSITY) return algo == 1;
+    return true;
+}
+
+/** ⚠️ A line is hidden only when BOTH its cells are — the one conditional line pairs two of them. */
+constexpr bool effects_line_visible(int line, int algo) {
+    const EffectsDisplayLine& l = EFFECTS_DISPLAY_LINES[line];
+    if (effects_row_visible(l.cell[0], algo)) return true;
+    return l.paired && effects_row_visible(l.cell[1], algo);
+}
+
 /** Where a row sits on screen: which drawn line, and which of that line's two columns. */
 struct EffectsCellPos {
     int line;
@@ -185,11 +229,21 @@ struct EffectsLayout {
     int lineCount;
 };
 
-inline EffectsLayout effects_layout() {
+/**
+ * ⚠️ A hidden line contributes NOTHING — not its height and not a gap, unlike SETTINGS, whose hidden
+ * rows still leave the air before them. There is one conditional line here and it sits in the middle
+ * of a block, so a gap left behind would read as a missing row rather than as spacing.
+ *
+ * ⚠️ A hidden row's `rowLine` stays 0. Nothing should ask, because nothing draws it — but 0 is the
+ * title's line, which is inside the panel, so a caller that did ask gets a harmless answer instead of
+ * an index off the end.
+ */
+inline EffectsLayout effects_layout(int algo) {
     EffectsLayout out{};
     int line    = 0;    // line 0 is the "EFFECTS" title
     int section = -1;
     for (int i = 0; i < EFFECTS_LINE_COUNT; ++i) {
+        if (!effects_line_visible(i, algo)) continue;
         const EffectsDisplayLine& l          = EFFECTS_DISPLAY_LINES[i];
         const int                 rowSection = static_cast<int>(effects_row_section(l.cell[0]));
         if (rowSection != section) {
@@ -209,12 +263,19 @@ inline EffectsLayout effects_layout() {
  * The next row's VALUE one line up or down (+1 = down, −1 = up), keeping the column it is in. ⚠️ It
  * CLAMPS rather than wrapping, which is what this screen has always done and what the recorded
  * EFFECTS cases expect — unlike SETTINGS and PROJECT, whose rows wrap.
+ *
+ * ⚠️ Hidden lines are stepped OVER, so the walk cannot stop on one and cannot be stopped BY one: with
+ * ALGO on OLD, DAMP's line and INP EQ's line are neighbours. ⚠️ Starting FROM a hidden row still
+ * moves — a cursor left stranded there by a project load can walk itself out rather than being stuck.
  */
-inline int effects_next_row(int from, int delta) {
+inline int effects_next_row(int from, int delta, int algo) {
     const EffectsCellPos at   = effects_cell_pos(from);
-    const int            line = at.line + delta;
-    if (line < 0 || line >= EFFECTS_LINE_COUNT) return from;   // the clamp
-    return static_cast<int>(EFFECTS_DISPLAY_LINES[line].cell[at.column]);
+    const int            step = delta < 0 ? -1 : 1;
+    for (int line = at.line + step; line >= 0 && line < EFFECTS_LINE_COUNT; line += step) {
+        if (!effects_line_visible(line, algo)) continue;
+        return static_cast<int>(EFFECTS_DISPLAY_LINES[line].cell[at.column]);
+    }
+    return from;   // the clamp
 }
 
 /**

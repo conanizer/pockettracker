@@ -230,6 +230,18 @@ Reverb and delay are **send buses**, not inserts: a per-note or per-instrument s
 them, and the delay can additionally feed the reverb. Both have their own input EQ. `-1` is the
 documented bypass value for every EQ slot.
 
+The reverb holds **two algorithms resident at once and sounds one of them**, chosen by a per-project
+`reverbAlgo` whose number is its identity — append, never insert, and 0 is the algorithm that shipped.
+Only the tail is switched: the pre-delay ring and the mid/side width pair sit **outside** both, so PRE
+and WIDE have one implementation and one meaning either way. ⚠️ The other three cells do **not** cross
+— each algorithm owns its own reading of SIZE, DAMP and MOD, which is why every mapping is a named
+function in `reverb-presets.h` rather than arithmetic inside `setParams`. Switching the cell rewrites
+none of them. Two further cells belong to the second algorithm alone and are the screen's only
+conditional rows: they are stored and serialized whatever is selected, and **hidden rather than drawn
+dead** while the first is (`effects_row_layout.h` — skipped, never renumbered). ⚠️ Both being resident is deliberate: only one can sound, but a swap cannot allocate or
+free on the audio thread, so the ~390 KB is paid inside an `AudioEngine` that is heap-allocated for
+exactly this class of reason.
+
 Note where the two faders sit relative to that tap. A send is **pre-fader with respect to the track
 fader** and post-everything on the instrument, so pulling a track down leaves its tails alone. The
 **master fader is downstream of the returns** — it multiplies the summed bus, dry and wet together,

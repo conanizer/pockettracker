@@ -543,8 +543,15 @@ public:
     // REVERB / DELAY SEND METHODS
     // ===================================
 
+    // Which reverb algorithm sounds: 0 = the wash that shipped, 1 = the tank with early reflections.
+    // ⚠️ It does NOT rewrite the five voicing cells — each algorithm reads them its own way.
+    void setReverbAlgo(int algo);
+
     // Set reverb params. feedbackHex/dampHex/wetHex: 00-FF. wetHex controls return gain.
-    void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80);
+    // ⚠️ decayHex and densityHex reach the SECOND algorithm only — the first has no such controls.
+    // Their defaults are the struct defaults, so a caller that predates them changes nothing.
+    void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80, int decayHex = 0x60,
+                         int densityHex = 0x99);
 
     // Set the reverb's character: the three cells that place and colour the tail. ⚠️ Each is NEUTRAL
     // at the value a project written before they existed loads with — PRE 00, WIDE 80, MOD 40.
