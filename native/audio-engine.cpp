@@ -1401,21 +1401,31 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // that is set once per block, which is the very staircase this removes.
     float gateStart[SF_VOICE_COUNT];
     float gateEnd[SF_VOICE_COUNT];
+    // The same pair for the three BUS gates — the two send returns and the dry sum. See setBusMutes().
+    float revGateStart, revGateEnd, dlyGateStart, dlyGateEnd, dryGateStart, dryGateEnd;
     float masterVolSnapshot;
     int previewTrack;
     {
         std::lock_guard<std::mutex> lock(volumeMutex);
         // Per full swing, so the ramp is the same wall-clock length whatever the block size.
         const float gateStep = (float)numFrames / (float)MUTE_GATE_SAMPLES;
+        // One walk for every gate in the mixer, so a return cannot end up ramping differently from a
+        // track. `gate` is the member that remembers where it got to; start/end bracket THIS block.
+        const auto walk_gate = [&](float& gate, bool muted, float& start, float& end) {
+            const float target = muted ? 0.0f : 1.0f;
+            if (offlineRender) gate = target;   // a mute is a STATE in an export, not a gesture
+            start = gate;
+            if      (gate < target) gate = fminf(target, gate + gateStep);
+            else if (gate > target) gate = fmaxf(target, gate - gateStep);
+            end = gate;
+        };
         for (int t = 0; t < 8; t++) {
             trackVolSnapshot[t] = trackVolumes[t];
-            const float target  = trackMuted[t] ? 0.0f : 1.0f;
-            if (offlineRender) trackGate[t] = target;   // a mute is a STATE in an export, not a gesture
-            gateStart[t] = trackGate[t];
-            if      (trackGate[t] < target) trackGate[t] = fminf(target, trackGate[t] + gateStep);
-            else if (trackGate[t] > target) trackGate[t] = fmaxf(target, trackGate[t] - gateStep);
-            gateEnd[t]   = trackGate[t];
+            walk_gate(trackGate[t], trackMuted[t], gateStart[t], gateEnd[t]);
         }
+        walk_gate(revReturnGate,   revReturnMuted,   revGateStart, revGateEnd);
+        walk_gate(delayReturnGate, delayReturnMuted, dlyGateStart, dlyGateEnd);
+        walk_gate(dryGate,         dryMuted,         dryGateStart, dryGateEnd);
         masterVolSnapshot = masterVolume;
         previewTrack      = previewLaneTrack;
     }
@@ -2679,6 +2689,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
+    // ─── THE DRY GATE — every track's audio, summed, BELOW every send tap ────────────────────────
+    //
+    // ⚠️ It has to live here and nowhere else. Soloing a send return means "let me hear only what comes
+    // back from the reverb", and the reverb is fed by the tracks: taking the dry mix down as eight track
+    // mutes would stop the notes (both schedulers skip an inaudible track) and cut the SoundFont path's
+    // send with them, so the soloed return would have nothing to return. Everything above has already
+    // tapped the sends; this multiply is what the listener loses.
+    if (dryGateStart < 1.0f || dryGateEnd < 1.0f) {
+        for (int i = 0; i < numFrames; i++) {
+            const float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
+            const float g      = dryGateStart + (dryGateEnd - dryGateStart) * lerp_t;
+            output[i * channelCount]     *= g;
+            output[i * channelCount + 1] *= g;
+        }
+    }
+
     // SEND BUSES: delay first so its output can feed into reverb, then reverb
     {
         // revWet*/dlyWet* are engine members; process() fully overwrites them.
@@ -2704,10 +2730,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
         for (int i = 0; i < numFrames; i++) {
-            float rv  = revWetL[i] * reverbReturnGain;
-            float rvR = revWetR[i] * reverbReturnGain;
-            float dl  = dlyWetL[i] * delayReturnGain;
-            float dlR = dlyWetR[i] * delayReturnGain;
+            // ⚠️ The return's own mute rides HERE, below the module, so a muted reverb keeps building
+            // its tail while it is silent — unmuting drops you back into the tail the song has been
+            // feeding it, not into a reverb that starts from nothing.
+            const float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
+            const float rvGate = revGateStart + (revGateEnd - revGateStart) * lerp_t;
+            const float dlGate = dlyGateStart + (dlyGateEnd - dlyGateStart) * lerp_t;
+            float rv  = revWetL[i] * reverbReturnGain * rvGate;
+            float rvR = revWetR[i] * reverbReturnGain * rvGate;
+            float dl  = dlyWetL[i] * delayReturnGain * dlGate;
+            float dlR = dlyWetR[i] * delayReturnGain * dlGate;
             if (stemsMode == 0) {
                 output[i * channelCount]     += rv + dl;
                 output[i * channelCount + 1] += rvR + dlR;
@@ -3795,6 +3827,13 @@ void AudioEngine::setTrackMuted(int trackId, bool muted) {
     // both mix paths walk their gate to it over MUTE_GATE_SAMPLES, so a mute lands in ~5.8 ms rather
     // than in one sample. Voices keep running underneath — a mute is a gate, never a stop.
     LOGD("🔇 Track %d %s", trackId, muted ? "muted" : "unmuted");
+}
+
+void AudioEngine::setBusMutes(bool revMuted, bool dlyMuted, bool dryBusMuted) {
+    std::lock_guard<std::mutex> lock(volumeMutex);
+    revReturnMuted   = revMuted;
+    delayReturnMuted = dlyMuted;
+    dryMuted         = dryBusMuted;
 }
 
 void AudioEngine::setMasterVolume(float volume) {

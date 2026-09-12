@@ -504,6 +504,15 @@ public:
     // "Inaudible" is the caller's word: songcore folds solo into it (songcore/model.h track_audible).
     void setTrackMuted(int trackId, bool muted);
 
+    // The MIXER's other three gates: the reverb return, the delay return, and the DRY sum of all eight
+    // tracks. One call because they move together — a solo is a statement about the set, so soloing the
+    // reverb return silences the delay return and the dry sum in the same moment.
+    //
+    // ⚠️ The dry gate is NOT eight track mutes. It sits below every send tap, so the notes feeding a
+    // soloed return go on playing and go on feeding it; muting the tracks instead would solo the
+    // reverb into silence. songcore/model.h derives all three (reverb_return_audible, dry_audible).
+    void setBusMutes(bool revMuted, bool dlyMuted, bool dryBusMuted);
+
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
 
@@ -1042,6 +1051,11 @@ private:
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
     // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.
     int   previewLaneTrack = -1;
+    // The three bus gates, and where each has got to. Same ramp as the tracks', for the same reason:
+    // slamming a return or the whole dry mix to zero in one sample is a full-scale step in the output.
+    // ⚠️ The `*Gate` floats are AUDIO THREAD ONLY — advanced once per block and read nowhere else.
+    bool  revReturnMuted = false, delayReturnMuted = false, dryMuted = false;
+    float revReturnGate = 1.0f, delayReturnGate = 1.0f, dryGate = 1.0f;
     float masterVolume = 1.0f;
     float reverbReturnGain  = 0.5f;
     float delayReturnGain   = 0.5f;

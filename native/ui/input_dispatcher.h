@@ -747,19 +747,21 @@ class InputDispatcher {
 
     // ── The MUTE/SOLO chord's undo ───────────────────────────────────────────────────────────────
     // What the mix looked like when the chord started, so `on_r_combo_revert()` can put it back. All
-    // EIGHT tracks, not the one under the cursor: a chord over a selection touches several, and a
-    // SOLO changes what every other track can be heard doing.
+    // TEN channels — the eight tracks and the two send returns — not the one under the cursor: a chord
+    // over a selection touches several, and a SOLO changes what every other channel is heard doing.
     //
     // ⚠️ Taken on the FIRST toggle of a chord and not on every press, or holding R and muting three
     // channels in turn would leave the revert able to undo only the last of them.
+    static constexpr int MIX_CHANNELS = 10;
     struct MixSnapshot {
         bool live = false;
-        bool mute[8] = {false, false, false, false, false, false, false, false};
-        bool solo[8] = {false, false, false, false, false, false, false, false};
+        bool mute[MIX_CHANNELS] = {};
+        bool solo[MIX_CHANNELS] = {};
     };
     MixSnapshot mixSnapshot_{};
 
-    /** The channels a MUTE/SOLO chord applies to: the selection's columns, else the cursor's. */
+    /** The channels a MUTE/SOLO chord applies to — songcore mixer channel ids (0-7 tracks, 8 REV,
+     *  9 DEL): the selection's columns on SONG, else whatever the cursor is on. */
     void mute_solo_targets(int (&out)[8], int& count) const;
     /** Toggle `mute` (or `solo`) on those channels, arm the snapshot, and push the result. */
     void toggle_mute_solo(bool solo);

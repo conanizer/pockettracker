@@ -329,6 +329,10 @@ inline Project parse_project(const json& j) {
     p.delayPong       = get_bool(j, "delayPong", p.delayPong);
     p.delayTone       = get_int(j, "delayTone", p.delayTone);
     p.delayWobble     = get_int(j, "delayWobble", p.delayWobble);
+    p.reverbMute      = get_bool(j, "reverbMute", p.reverbMute);
+    p.reverbSolo      = get_bool(j, "reverbSolo", p.reverbSolo);
+    p.delayMute       = get_bool(j, "delayMute", p.delayMute);
+    p.delaySolo       = get_bool(j, "delaySolo", p.delaySolo);
     p.masterEqSlot    = get_int(j, "masterEqSlot", p.masterEqSlot);
     p.phrases     = parse_pool<Phrase>(j, "phrases", parse_phrase);
     p.chains      = parse_pool<Chain>(j, "chains", parse_chain);
@@ -766,6 +770,10 @@ inline std::string serialize_project(const Project& p) {
     if (p.delayPong)              w.field_bool("delayPong", p.delayPong);
     if (p.delayTone != 0xFF)      w.field_int("delayTone", p.delayTone);
     if (p.delayWobble != 0)       w.field_int("delayWobble", p.delayWobble);
+    if (p.reverbMute)             w.field_bool("reverbMute", p.reverbMute);
+    if (p.reverbSolo)             w.field_bool("reverbSolo", p.reverbSolo);
+    if (p.delayMute)              w.field_bool("delayMute", p.delayMute);
+    if (p.delaySolo)              w.field_bool("delaySolo", p.delaySolo);
     if (p.masterEqSlot != -1)     w.field_int("masterEqSlot", p.masterEqSlot);
     emit_pool(w, "phrases",     p.phrases,     emit_phrase);
     emit_pool(w, "chains",      p.chains,      emit_chain);

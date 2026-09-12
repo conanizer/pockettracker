@@ -106,6 +106,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Mixer screen: volume for each of the 8 tracks and the master, plus send amounts to reverb and delay
 - Mute and solo any track from the song or mixer screen, on the cursor or across a selection — the chord latches or stays momentary depending on which button you release first
+- The same chord works on the REV and DEL return strips: mute a send to drop it out of the mix, or solo one to hear the reverb or delay on its own while the tracks go on feeding it
 - True dBFS peak meters per track
 - Two send effects: a reverb and a stereo delay
 - Two reverb algorithms, chosen per project: OLD, an even wash, and MVERB, a denser tail with audible early reflections, its own room size and decay, and a density control

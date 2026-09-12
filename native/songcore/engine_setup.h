@@ -146,6 +146,10 @@ void push_mixer(Engine& engine, const Project& project, MixerHeld held = {}) {
         // it is what the SONG may have moved; the mute is what the user just typed.
         engine.setTrackMuted(i, !track_audible(project, i));
     }
+    // The other three channels the mute/solo chord can name, and never gated by `held` for the same
+    // reason the line above is not: on a press of the chord, this line IS the press.
+    engine.setBusMutes(!reverb_return_audible(project), !delay_return_audible(project),
+                       !dry_audible(project));
     if (!held.masterFader) engine.setMasterVolume(hex_to_float(project.masterVolume));
     engine.setOttDepth(project.ottDepth);
     engine.setMasterFx(project.masterBusFx);

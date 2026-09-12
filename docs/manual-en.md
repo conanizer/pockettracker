@@ -367,7 +367,7 @@ Works on the SONG and MIXER screens, while playing or stopped.
 
 | Input | Action |
 |---|---|
-| R + B | Mute / unmute the track under the cursor |
+| R + B | Mute / unmute the channel under the cursor |
 | R + A | Solo / unsolo it |
 | R + B or R + A over a selection | Applies to every track the selection covers |
 | L + R | Restore full playback on all tracks |
@@ -387,6 +387,10 @@ soloed.
 
 A track that is making no sound draws its numbers dimmed — its chain IDs on SONG, its fader value on
 MIXER — so soloing one track dims the other seven.
+
+**The send returns.** On MIXER the chord also works on the REV and DEL strips. Muting one drops that
+effect out of the mix; soloing one leaves you with just the reverb or just the delay, while the
+tracks go on playing and feeding it.
 
 ---
 

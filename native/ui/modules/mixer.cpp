@@ -92,9 +92,10 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
         const int  mX    = x + FIRST_METER_X + i * METER_SPACING;
         const bool isSel = (s.mixerMasterRow == 0 && s.cursorColumn == i);
 
-        // Muted, or unsoloed while another channel is soloed — either way this strip is contributing
-        // nothing, and the meter and the fader value both say so.
-        const bool audible = track_audible(p, i);
+        // Muted, or unsoloed while another channel is soloed, or with a SEND RETURN soloed over the top
+        // of it — either way this strip is contributing nothing to what you hear, and the meter and the
+        // fader value both say so.
+        const bool audible = track_audible(p, i) && dry_audible(p);
 
         // ⚠️ THE FADER CELL IS PAINTED BEFORE ITS METER, and the order is load-bearing: the volume sits
         // 2px under the meter, one short of a row's own 3px of padding, so the cell's top row lands on
@@ -121,12 +122,17 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const bool revSendSel = (s.mixerMasterRow == 1 && s.cursorColumn == 0);
     const bool delSendSel = (s.mixerMasterRow == 1 && s.cursorColumn == 1);
 
+    // The returns answer the same question the tracks do, with their own solo set: muted, or unsoloed
+    // while the other return is soloed.
+    const bool revAudible = reverb_return_audible(p);
+    const bool delAudible = delay_return_audible(p);
+
     draw_stereo_meter(c, x + FIRST_METER_X, y + SEND_METER_TOP, SEND_METER_H,
                       peak_at(s.reverbPeaks, 0), peak_at(s.reverbPeaks, 1), revSendSel,
-                      /*is_muted=*/false, t, 18, 19, advance);
+                      /*is_muted=*/!revAudible, t, 18, 19, advance);
     draw_stereo_meter(c, x + FIRST_METER_X + METER_SPACING, y + SEND_METER_TOP, SEND_METER_H,
                       peak_at(s.delayPeaks, 0), peak_at(s.delayPeaks, 1), delSendSel,
-                      /*is_muted=*/false, t, 20, 21, advance);
+                      /*is_muted=*/!delAudible, t, 20, 21, advance);
 
     // Both labels are centred on their meter pair: half the pair's width, less half the text's.
     const int revCX = x + FIRST_METER_X + (BAR_W + BAR_SEP + BAR_W) / 2;
@@ -140,9 +146,9 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
                 delSendSel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
 
     draw_cursor_cell(c, hex2(p.reverbWet), revCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y, revSendSel,
-                     t.textValue, t);
+                     revAudible ? t.textValue : t.textEmpty, t);
     draw_cursor_cell(c, hex2(p.delayWet), delCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y, delSendSel,
-                     t.textValue, t);
+                     delAudible ? t.textValue : t.textEmpty, t);
 
     // ── The master strip ─────────────────────────────────────────────────────────────────────────
     // Row 2 shows OTT *or* DUST — one control, two destinations, chosen by the EFFECTS screen's TYPE.

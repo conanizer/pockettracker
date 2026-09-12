@@ -572,9 +572,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* MIXER_MASTER_VOL */
     {"MIX: the master volume", "Everything passes through it", "on the way out."},
     /* MIXER_REVERB_RETURN */
-    {"REV: the reverb return", "How loud the shared reverb", "comes back into the mix."},
+    {"REV: the reverb return", "How loud the reverb comes", "back. R+B mutes, R+A solos."},
     /* MIXER_DELAY_RETURN */
-    {"DEL: the delay return", "How loud the shared delay", "comes back into the mix."},
+    {"DEL: the delay return", "How loud the delay comes", "back. R+B mutes, R+A solos."},
     /* MIXER_MASTER_EQ */
     {"EQ: the master EQ preset", "A slot, 00 to 7F, or --.", "A opens the EQ editor."},
     /* MIXER_MASTER_FX */

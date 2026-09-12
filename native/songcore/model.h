@@ -652,6 +652,12 @@ struct Project {
     // is FF (the filter switched OUT, not merely open) and WOBL is 00.
     bool delayPong = false;
     int  delayTone = 0xFF, delayWobble = 0x00;
+    // The two send RETURNS are mixer channels like the eight tracks, and they carry the same pair of
+    // performance flags. ⚠️ A SOLO here is a statement about the RETURNS and the dry sum, never about
+    // which tracks play: the notes feeding a soloed return must go on sounding, so this is deliberately
+    // not folded into `track_audible` — see `dry_audible` below.
+    bool reverbMute = false, reverbSolo = false;
+    bool delayMute  = false, delaySolo  = false;
     int masterEqSlot = -1;
     std::vector<Phrase>     phrases;              // Array(256){Phrase(it)}
     std::vector<Chain>      chains;               // Array(256){Chain(it)}
@@ -700,6 +706,49 @@ inline bool track_audible(const Project& p, const Track& t) {
 inline bool track_audible(const Project& p, int trackId) {
     if (trackId < 0 || trackId >= static_cast<int>(p.tracks.size())) return false;
     return track_audible(p, p.tracks[static_cast<size_t>(trackId)]);
+}
+
+// ── …and which of the two SEND RETURNS is ────────────────────────────────────────────────────────
+//
+// The same shape as the tracks above, derived for the same reason, but a SEPARATE solo set. Soloing a
+// track leaves the returns alone (the reverb is still fed, by the one track that plays); soloing a
+// return must not stop any track, because a return with nothing feeding it is silence — a solo into a
+// hole. So the two sets meet only at the DRY sum, which is what a soloed return takes down.
+inline bool any_send_solo(const Project& p) { return p.reverbSolo || p.delaySolo; }
+
+inline bool reverb_return_audible(const Project& p) {
+    return !p.reverbMute && (p.reverbSolo || !any_send_solo(p));
+}
+
+inline bool delay_return_audible(const Project& p) {
+    return !p.delayMute && (p.delaySolo || !any_send_solo(p));
+}
+
+/** Is the dry mix heard? A soloed return silences it — unless a TRACK is soloed too, which asks for
+ *  that track's dry signal alongside the return. */
+inline bool dry_audible(const Project& p) { return !any_send_solo(p) || any_solo(p); }
+
+// ── The mixer's ten channels ─────────────────────────────────────────────────────────────────────
+//
+// 0-7 are the song tracks, 8 and 9 the reverb and delay returns — the MIXER screen draws all ten as
+// strips, and a mute/solo gesture names one of them. ⚠️ Resolved in ONE place so that a chord's
+// snapshot, its toggle and its undo cannot disagree about where a channel's two flags live.
+constexpr int MIX_CH_REVERB = 8;
+constexpr int MIX_CH_DELAY  = 9;
+
+struct MixChannelFlags {
+    bool* mute = nullptr;
+    bool* solo = nullptr;
+};
+
+inline MixChannelFlags mix_channel_flags(Project& p, int ch) {
+    if (ch == MIX_CH_REVERB) return {&p.reverbMute, &p.reverbSolo};
+    if (ch == MIX_CH_DELAY)  return {&p.delayMute, &p.delaySolo};
+    if (ch >= 0 && ch < static_cast<int>(p.tracks.size())) {
+        Track& t = p.tracks[static_cast<size_t>(ch)];
+        return {&t.mute, &t.solo};
+    }
+    return {};
 }
 
 struct InstrumentPreset {

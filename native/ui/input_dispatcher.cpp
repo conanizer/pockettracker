@@ -2081,11 +2081,19 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
             return;
         }
         case ScreenType::MIXER:
+            // ⚠️ THE ROW IS PART OF THE ADDRESS. Row 0's columns 0..7 are the eight track faders, but
+            // row 1 puts the REV and DEL send returns under those same two columns — read the column
+            // alone and a chord aimed at a return lands on the track fader above it.
+            //
             // ⚠️ Column 8 is the MASTER strip and has no mute of its own — the chord is a no-op there
             // rather than muting track 8, which does not exist. The selection is not consulted: it
             // belongs to the grid editors, and a stale one from SONG must not reach across.
-            if (s_.mixerCursorColumn >= 0 && s_.mixerCursorColumn <= 7)
+            if (s_.mixerMasterRow == 0 && s_.mixerCursorColumn >= 0 && s_.mixerCursorColumn <= 7)
                 out[count++] = s_.mixerCursorColumn;
+            else if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 0)
+                out[count++] = songcore::MIX_CH_REVERB;
+            else if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 1)
+                out[count++] = songcore::MIX_CH_DELAY;
             return;
         default:
             return;   // every other screen: the chord is the consumed no-op it has always been
@@ -2104,22 +2112,24 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 
     Project& p = host_.edit_project();
 
-    // ⚠️ ALL EIGHT PAIRS, and only on the FIRST toggle of a chord. A revert has to undo everything the
-    // chord did — a selection touches several channels, and a solo changes what the other seven are
+    // ⚠️ ALL TEN PAIRS, and only on the FIRST toggle of a chord. A revert has to undo everything the
+    // chord did — a selection touches several channels, and a solo changes what every other channel is
     // heard doing — and re-snapshotting per press would leave it able to undo only the last one.
     if (!mixSnapshot_.live) {
-        for (int i = 0; i < 8 && i < static_cast<int>(p.tracks.size()); ++i) {
-            mixSnapshot_.mute[i] = p.tracks[static_cast<size_t>(i)].mute;
-            mixSnapshot_.solo[i] = p.tracks[static_cast<size_t>(i)].solo;
+        for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
+            const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
+            if (!f.mute) continue;
+            mixSnapshot_.mute[ch] = *f.mute;
+            mixSnapshot_.solo[ch] = *f.solo;
         }
         mixSnapshot_.live = true;
     }
 
     for (int i = 0; i < count; ++i) {
-        if (targets[i] >= static_cast<int>(p.tracks.size())) continue;
-        songcore::Track& t = p.tracks[static_cast<size_t>(targets[i])];
-        if (solo) t.solo = !t.solo;
-        else      t.mute = !t.mute;
+        const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, targets[i]);
+        if (!f.mute) continue;   // a channel the project does not have
+        bool& flag = solo ? *f.solo : *f.mute;
+        flag = !flag;
     }
 
     s_.lastClearable = AppState::Clearable::MUTE;
@@ -2135,6 +2145,7 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 void InputDispatcher::restore_full_playback() {
     Project& p = host_.edit_project();
     for (songcore::Track& t : p.tracks) { t.mute = false; t.solo = false; }
+    p.reverbMute = p.reverbSolo = p.delayMute = p.delaySolo = false;
     s_.lastClearable = AppState::Clearable::NONE;
     host_.push_globals();
 }
@@ -2168,9 +2179,11 @@ void InputDispatcher::on_r_combo_commit() {
 void InputDispatcher::on_r_combo_revert() {
     if (!mixSnapshot_.live) return;   // the chord armed on a screen that has no channels
     Project& p = host_.edit_project();
-    for (int i = 0; i < 8 && i < static_cast<int>(p.tracks.size()); ++i) {
-        p.tracks[static_cast<size_t>(i)].mute = mixSnapshot_.mute[i];
-        p.tracks[static_cast<size_t>(i)].solo = mixSnapshot_.solo[i];
+    for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
+        const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
+        if (!f.mute) continue;
+        *f.mute = mixSnapshot_.mute[ch];
+        *f.solo = mixSnapshot_.solo[ch];
     }
     mixSnapshot_.live = false;
     host_.push_globals();

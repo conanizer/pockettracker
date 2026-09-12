@@ -330,6 +330,13 @@ when the gate lifts — unmuting mid-phrase brings back that one stale note and 
 phrase boundary. The offline render is the single exception, deliberately: `scheduleSongRowRange`
 skips an inaudible track outright, because an export is a file you keep.
 
+The chord addresses ten channels, not eight: the reverb and delay **returns** carry the same mute and
+solo flags, in a solo set of their own — soloing a track must leave the returns alone, and soloing a
+return must not stop a track. A soloed return silences the dry mix through one gate over the summed
+bus, placed below every send tap and above the returns. Expressing that as eight track mutes would
+starve the return being soloed: the SoundFont send tap sits below its track's gate, and the offline
+render skips an inaudible track outright, so the reverb would be soloed into silence.
+
 **LIVE mode is a modifier on SONG, not a fifth transport mode.** The mode changes only what happens at
 a track's boundary — a launched song row re-enters itself instead of the cursor moving down the column
 — so everything that branches on the playback mode (the playhead readback, the live-edit rollback, the
