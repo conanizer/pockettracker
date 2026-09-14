@@ -630,7 +630,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* SET_FOLDER */
     {"FOLDER: where a load opens", "REMEMBER returns to the last", "folder used, REFRESH resets."},
     /* SET_NOTE_PREVIEW */
-    {"NOTE PREV: hear what you type", "Plays the note as you enter", "it in a phrase."},
+    {"NOTE PREV: hear what you type", "A phrase note plays for as", "long as you hold A on it."},
     /* SET_VISUALIZER */
     {"VISUALIZER: the top strip", "A scope, a meter per track,", "or a spectrum."},
     /* SET_THEME */

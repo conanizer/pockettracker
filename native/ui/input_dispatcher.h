@@ -855,8 +855,19 @@ class InputDispatcher {
      */
     void mark_dirty_and_arm_autosave();
 
-    /** Play the note an edit just wrote (SETTINGS "NOTE PREVIEW"). */
-    void preview_edited_note();
+    /**
+     * Sound the PHRASE note under the cursor for as long as A stays down (SETTINGS "NOTE PREV") —
+     * the insert, the A+DPAD edit and a bare A on a note that is already there all call it, and
+     * `on_a_released` is its only end. It gates itself: the NOTE column, a filled step, no selection.
+     *
+     * ⚠️ It rings with NO timed kill, so the release is the whole lifecycle. Every caller is an A
+     * handler, which is what makes that safe — the mapper always delivers A's release, focus loss
+     * included (SdlInput::reset). A caller that edits a note WITHOUT A held would leave it sounding
+     * until the next plain press.
+     */
+    void preview_held_note();
+    /** A phrase preview is sounding that the release of A must end. */
+    bool heldNotePreview_ = false;
 
     /**
      * The song cell the cursor last left SONG on, as a 0-based track — the TIE-BREAK a chain or

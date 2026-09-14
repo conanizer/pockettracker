@@ -548,18 +548,20 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             const PhraseInputResult r = phrase_.handle_input(ph, s_.cursorRow, s_.cursorColumn, action);
             if (!r.modified) return false;
 
-            // The "last edited" memory + the audition, exactly where Kotlin does them. Note the two
-            // guards: the STEP must have a note (editing the velocity of an empty step remembers
-            // nothing), and only an edit to the NOTE column auditions — dialling a velocity should
-            // not retrigger the voice under your fingers.
-            if (r.hasNote || r.hasVolume || r.hasInstrument) {
-                const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
-                if (step.note != Note::EMPTY()) {
-                    s_.lastEditedNote       = step.note;
-                    s_.lastEditedVolume     = step.volume;
-                    s_.lastEditedInstrument = step.instrument;
-                    if (s_.settings.notePreviewEnabled && r.hasNote) preview_edited_note();
-                }
+            // The "last edited" memory + the audition. Note the two guards: the STEP must have a note
+            // (editing the velocity of an empty step remembers nothing), and only an edit to the NOTE
+            // column auditions — dialling a velocity should not retrigger the voice under your fingers.
+            const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
+            if ((r.hasNote || r.hasVolume || r.hasInstrument) && step.note != Note::EMPTY()) {
+                s_.lastEditedNote       = step.note;
+                s_.lastEditedVolume     = step.volume;
+                s_.lastEditedInstrument = step.instrument;
+                if (r.hasNote) preview_held_note();
+            }
+            // A+B under a held audition: the note it was playing is gone, so is the sound.
+            if (heldNotePreview_ && step.note == Note::EMPTY()) {
+                heldNotePreview_ = false;
+                host_.stop_preview();
             }
             return true;
         }
@@ -764,15 +766,18 @@ int InputDispatcher::audition_track() const {
     return refs[static_cast<size_t>(s_.songCursorRow)] >= 0 ? track : -1;
 }
 
-void InputDispatcher::preview_edited_note() {
+void InputDispatcher::preview_held_note() {
+    if (!s_.settings.notePreviewEnabled || s_.selection.active) return;
+    if (s_.currentScreen != ScreenType::PHRASE || s_.cursorColumn != 1) return;
+
     const Project& p = *s_.project;
     const songcore::PhraseStep& step =
         p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+    if (step.note == Note::EMPTY()) return;
 
-    const int sr = std::max(44100, host_.sample_rate());
     host_.set_preview_track(audition_track());
-    host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note,
-                       songcore::frames_per_step(p.tempo, sr));
+    host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note, /*durationFrames=*/0);
+    heldNotePreview_ = true;
 }
 
 // ─── The three generic paths ─────────────────────────────────────────────────────────────────────
@@ -1379,6 +1384,13 @@ void InputDispatcher::on_a_right() {
 }
 
 void InputDispatcher::on_a_released() {
+    // Ahead of the overlay test: it is not an overlay's gesture, and nothing can start a second
+    // preview while A is down (START is refused under A), so this can only silence the one A began.
+    if (heldNotePreview_) {
+        heldNotePreview_ = false;
+        host_.stop_preview();
+    }
+
     // The FX helper commits on RELEASE, not on a press — which is what lets you hold A, read the
     // description of half a dozen effects, and let go on the one you want.
     if (top_overlay() != Overlay::FX_HELPER) return;
@@ -1524,8 +1536,12 @@ void InputDispatcher::on_a_a() {
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
     // else is two separate A presses, and each of those already did something (they inserted the
     // LAST-EDITED item — see on_button_a).
+    //
+    // ⚠️ The PHRASE audition is owed on BOTH exits. A second A inside 300 ms lands here and never
+    // reaches `on_button_a`, so a quick re-press on a note would otherwise be held in silence.
     if (!hasInsertPos_ || insertScreen_ != s_.currentScreen || insertRow_ != s_.cursorRow ||
         insertCol_ != s_.cursorColumn) {
+        preview_held_note();
         return;
     }
     hasInsertPos_ = false;
@@ -1571,11 +1587,12 @@ void InputDispatcher::on_a_a() {
         const int next  = first_from_wrapping(s_.lastEditedInstrument + 1, count, [&](int i) {
             return songcore::instrument_is_free(p.instruments[static_cast<size_t>(i)]);
         });
-        if (next < 0) return;
-
-        step.instrument         = next;
-        s_.lastEditedInstrument = next;
-        mark_modified();
+        if (next >= 0) {
+            step.instrument         = next;
+            s_.lastEditedInstrument = next;
+            mark_modified();
+        }
+        preview_held_note();
     }
 }
 
@@ -3127,7 +3144,11 @@ void InputDispatcher::on_button_a() {
             PhraseEditorState ps{ph};
             ps.cursorRow    = s_.cursorRow;
             ps.cursorColumn = s_.cursorColumn;
-            if (!phrase_.cursor_context(ps).capabilities.isEmpty) return;
+            // A on a note that is already there inserts nothing, but holding it is how you listen.
+            if (!phrase_.cursor_context(ps).capabilities.isEmpty) {
+                preview_held_note();
+                return;
+            }
 
             songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
             step.note       = s_.lastEditedNote;
@@ -3143,14 +3164,7 @@ void InputDispatcher::on_button_a() {
             insertRow_    = s_.cursorRow;
             insertCol_    = s_.cursorColumn;
 
-            if (s_.settings.notePreviewEnabled && step.note != Note::EMPTY()) {
-                // A WHOLE PHRASE long, not one step: this gesture lays a note down to listen to, and
-                // an audition that dies after a 16th note tells you nothing about a pad.
-                const int sr = std::max(44100, host_.sample_rate());
-                host_.set_preview_track(audition_track());
-                host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note,
-                                   songcore::frames_per_step(p.tempo, sr) * 16);
-            }
+            preview_held_note();
             break;
         }
 
