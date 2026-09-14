@@ -872,6 +872,8 @@ class SongcoreHost {
     // ── Reading the sample (the feed) ────────────────────────────────────────────────────────────
     int  sample_length(int id) const { return engine_ ? engine_->getSampleLength(id) : 0; }
     bool has_stereo_data(int id) const { return engine_ && engine_->hasStereoData(id); }
+    /** The depth the slot's sample came in at — the ceiling of the editor's BIT cell. */
+    int  sample_bit_depth(int id) const { return engine_ ? engine_->getSampleBitDepth(id) : 16; }
 
     /** The FILE's rate (deviceRate / ratio); 44100 when the slot is empty. See sample_edit.h. */
     int sample_rate_of(int id) const { return original_sample_rate(engine_, routing_, id); }
@@ -962,8 +964,8 @@ class SongcoreHost {
     }
 
     // ── The three that move the ratio, and therefore live in songcore (sample_edit.h) ────────────
-    void apply_rate_mode(int id, int factor) {
-        songcore::apply_rate_mode(engine_, routing_, rateCache_, id, factor);
+    void apply_rate_and_bits(int id, int factor, int bits) {
+        songcore::apply_rate_and_bits(engine_, routing_, rateCache_, id, factor, bits);
     }
     void pitch_shift_sample(int id, float semitones) {
         songcore::pitch_shift_sample(engine_, rateCache_, id, semitones);
@@ -1037,17 +1039,32 @@ class SongcoreHost {
     // ── SAVE and CHOP ────────────────────────────────────────────────────────────────────────────
 
     /** The edited PCM → a WAV at `path`, with its slice boundaries in the `cue ` chunk. */
+    /** `bits` 0 = the depth the sample was loaded at. */
     bool save_sample_wav(int id, const std::string& path, const std::vector<int>& cuePoints,
-                         int sourceMode, bool hasStereo) {
+                         int sourceMode, bool hasStereo, int bits = 0) {
         if (!engine_) return false;
-        return songcore::save_sample_wav(*engine_, routing_, id, path, cuePoints, sourceMode, hasStereo);
+        return songcore::save_sample_wav(*engine_, routing_, id, path, cuePoints, sourceMode, hasStereo,
+                                         bits);
+    }
+
+    /**
+     * After a SAVE that left the slot's buffer in place: that buffer is now what the file holds, so its
+     * depth becomes the saved one and the RATE/BIT original — and the ratio it would restore — are
+     * dropped. Left behind, the next session's first touch of RATE or BIT would bring back the audio
+     * from before the save.
+     */
+    void adopt_saved_sample(int id, int bits) {
+        if (!engine_) return;
+        const int depth = songcore::resolve_save_bits(*engine_, id, bits);
+        engine_->adoptSavedSampleFormat(id, depth, depth == 32 && engine_->isSampleFloat(id));
+        rateCache_.clear(id);
     }
 
     /** Every slice → its own WAV in `dir`. Returns how many were written. */
     int chop_sample(int id, const std::string& dir, const std::string& baseName,
-                    const std::vector<std::pair<int64_t, int64_t>>& slices) {
+                    const std::vector<std::pair<int64_t, int64_t>>& slices, int bits = 0) {
         if (!engine_) return 0;
-        return songcore::chop_sample(*engine_, routing_, id, dir, baseName, slices);
+        return songcore::chop_sample(*engine_, routing_, id, dir, baseName, slices, bits);
     }
 
     // ── ↕ live editing — the SDL shell's UI *is* the editing model ────────────────────────────────

@@ -88,6 +88,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Non-destructive editing: crop, copy, cut, paste within the waveform
 - Reverse, normalize, fade in, fade out, silence a selection
 - Undo last destructive operation
+- Save at the sample's own bit depth or lower — 32, 24, 16 or 8-bit WAV
 - Apply effects permanently: overdrive, bitcrusher, 3-band EQ, OTT compressor, dust (vinyl noise/wear)
 - Read the sample's own tempo off the header — the BPM it plays at for the bar count on the DURATION row
 - Pitch-shift to match a BPM target without changing length (repitch)

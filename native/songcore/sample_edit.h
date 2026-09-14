@@ -86,9 +86,14 @@ int original_sample_rate(Engine* engine, const Routing& routing, int id) {
  *
  * The ratio is always set RELATIVE TO THE ORIGINAL, never to the current value, so NORM → LOFI → NORM
  * lands back where NORM was instead of drifting an octave each time.
+ *
+ * `bits` is the BIT cell (32 / 24 / 16 / 8). It never moves the ratio, but it travels with the factor
+ * because the engine rebuilds the buffer from one cached original for both — a RATE change that did
+ * not know the bit depth would put the full depth back.
  */
 template <typename Engine>
-void apply_rate_mode(Engine* engine, Routing& routing, RateCache& cache, int id, int factor) {
+void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int id, int factor,
+                         int bits) {
     if (!engine || !RateCache::in_range(id)) return;
 
     if (factor <= 1) {
@@ -104,7 +109,7 @@ void apply_rate_mode(Engine* engine, Routing& routing, RateCache& cache, int id,
 
     // The playback base frequency is derived from the ratio at schedule time, so the write above IS the
     // whole pitch correction — there is no second cache to keep in step.
-    engine->applyRateMode(id, factor);
+    engine->applyRateAndBits(id, factor, bits);
 }
 
 /**
@@ -259,14 +264,23 @@ SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool 
  *
  * At the file's OWN rate, not the device's: an edit is not a resample, and a 22 kHz sample that came
  * back as 48 kHz would double in size for no audible gain.
+ *
+ * And at the depth `bits` names — the BIT cell's — or, for 0, the depth the sample was loaded at. A
+ * 24-bit sample is saved as 24 unless asked otherwise. 32 stays float only if the source was float.
  */
 template <typename Engine>
+int resolve_save_bits(Engine& engine, int id, int bits) {
+    return (bits > 0) ? bits : engine.getSampleBitDepth(id);
+}
+
+template <typename Engine>
 bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::string& path,
-                     const std::vector<int>& cuePoints, int sourceMode, bool hasStereo) {
+                     const std::vector<int>& cuePoints, int sourceMode, bool hasStereo, int bits = 0) {
     const SaveChannels ch = resolve_save_channels(engine, id, sourceMode, hasStereo);
     if (ch.left.empty()) return false;
+    const int depth = resolve_save_bits(engine, id, bits);
     return write_wav(path, ch.left, ch.right, original_sample_rate(&engine, routing, id), cuePoints,
-                     ch.channels);
+                     ch.channels, depth, depth == 32 && engine.isSampleFloat(id));
 }
 
 /**
@@ -280,9 +294,12 @@ bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::
  */
 template <typename Engine>
 int chop_sample(Engine& engine, const Routing& routing, int id, const std::string& dir,
-                const std::string& base_name, const std::vector<std::pair<int64_t, int64_t>>& slices) {
+                const std::string& base_name, const std::vector<std::pair<int64_t, int64_t>>& slices,
+                int bits = 0) {
     const int len = engine.getSampleLength(id);
     if (len <= 0 || slices.empty()) return 0;
+    const int  depth   = resolve_save_bits(engine, id, bits);   // the slices come out at SAVE's depth
+    const bool isFloat = depth == 32 && engine.isSampleFloat(id);
 
     std::vector<float> pcm(static_cast<size_t>(len));
     engine.getSampleData(id, pcm.data());
@@ -299,7 +316,8 @@ int chop_sample(Engine& engine, const Routing& routing, int id, const std::strin
 
         char suffix[8];
         std::snprintf(suffix, sizeof(suffix), "%02d", static_cast<int>(i));
-        if (write_wav_mono(dir + "/" + base_name + "_" + suffix + ".wav", slice, rate)) written++;
+        if (write_wav_mono(dir + "/" + base_name + "_" + suffix + ".wav", slice, rate, {}, depth, isFloat))
+            written++;
     }
     return written;
 }

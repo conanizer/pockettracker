@@ -732,6 +732,8 @@ Move the selection start and end markers to define a region for operations.
 | D-pad (on start/end marker row) | Move the active marker |
 | A + UP/DOWN | Jump marker by large step |
 
+A moved marker lands on the nearest **zero crossing** — the quietest place to cut, so a loop or a crop does not click. LEFT and RIGHT search their own channel, MONO the downmix, and STEREO looks for a frame where **both** channels are quiet.
+
 ### Non-destructive parameters
 
 These change playback behaviour without modifying the waveform data:
@@ -740,7 +742,7 @@ These change playback behaviour without modifying the waveform data:
 |---|---|---|
 | SOURCE | LEFT / RIGHT / STEREO / MONO | Which channel(s) of a stereo WAV to use. Non-destructive — never alters the file. SAVE/OVERWRITE applies SOURCE at write time. Opens on **STEREO** whenever the file has a right channel; a mono file reads MONO and the cell cannot be moved. |
 | RATE | HIGH / NORM / LOFI | Sample rate mode. NORM = original. LOFI = 8-bit lo-fi downsampling. |
-| SNAP | ON / OFF | With SNAP on, a selection edge you move lands on the nearest **zero crossing** instead of the exact frame — the quietest place to cut, and the way to avoid a click at the seam of a loop or a crop. It looks in the signal the cut will actually be made in: LEFT and RIGHT search their own channel, MONO searches the downmix it will save, and STEREO looks for the frame where **both** channels are quiet. Turn it off when you want a frame exactly where you put it. |
+| BIT | 32 / 24 / 16 / 8 | Bits per sample. Opens at the depth the file came in at, and offers only that depth and lower — a 16-bit file shows 16 / 8, a 24-bit one 24 / 16 / 8. Lower depths round the sound to coarser steps for grit. **SAVE, OVERWRITE and CHOP write the file at the depth shown.** It combines with RATE, and either can be set back while the editor is open. Not the instrument's CRUSH. |
 
 ### Destructive operations
 
@@ -822,7 +824,7 @@ where a plain A makes a new boundary.
 | A + B | MANUAL: delete it. TRANSIENT / DIVIDE: put it back where the mode had placed it |
 | A *(while the sample plays)* | MANUAL: cut a boundary at the playhead |
 
-Both steps scale with the zoom, as the selection edges do, and **SNAP** applies the same way.
+Both steps scale with the zoom, as the selection edges do, and a boundary lands on a zero crossing the same way.
 
 Under MANUAL the slice counter reaches one past the last slice: that slot is the next boundary, sitting
 on the one to its left, and moving it off is what creates it. A boundary may be dragged past its

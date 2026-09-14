@@ -1,7 +1,7 @@
 #ifndef POCKETTRACKER_SONGCORE_WAV_WRITER_H
 #define POCKETTRACKER_SONGCORE_WAV_WRITER_H
 
-// ─── 16-bit PCM WAV: the writer, the cue chunk, and the reader ───────────────────────────────────
+// ─── PCM WAV: the writers, the cue chunk, and the reader ─────────────────────────────────────────
 //
 // TWO writers, because the app writes WAVs for two unrelated reasons and they want opposite things:
 //
@@ -13,7 +13,8 @@
 //
 //   • `write_wav()` — the SAMPLE EDITOR (S6b). A sample is already in RAM in its entirety (the editor
 //     has been drawing it), it is small, and it carries something a render never does: CUE POINTS,
-//     one per slice boundary. The C++ twin of Kotlin's `core/storage/WavWriter.kt`.
+//     one per slice boundary. The C++ twin of Kotlin's `core/storage/WavWriter.kt`. It writes at the
+//     depth the editor's BIT cell chose — 8, 16, 24 or 32 — where the render is always 16.
 //
 // Byte-for-byte the same files the two Kotlin writers produced — the same RIFF/fmt/data header, the
 // same `cue ` chunk, and the same float→int16 conversion: clamp to ±1, scale by 32767, TRUNCATE
@@ -36,6 +37,7 @@
 // `pt_rename` — a `std::remove` here would be handed a string libc cannot see on a host whose
 // storage is URI-addressed, and the render would write its temp perfectly and then never appear.
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -226,6 +228,41 @@ inline void wav_put_tag(std::vector<uint8_t>& b, const char* tag) {
     b.insert(b.end(), tag, tag + 4);
 }
 
+/**
+ * One sample at the file's depth. 16 goes through `float_to_int16` so a 16-bit save stays byte-for-byte
+ * what it always was. The others ROUND to their own full scale (2^(bits−1)), which is what the loader
+ * divides by — so a buffer the BIT cell already put on an 8- or 24-bit grid is written exactly, and
+ * reads back as the same numbers. 8-bit WAV is UNSIGNED, centred on 128.
+ */
+inline void wav_put_sample(std::vector<uint8_t>& b, float v, int bits, bool isFloat) {
+    if (bits == 32 && isFloat) {
+        uint32_t u = 0;
+        std::memcpy(&u, &v, sizeof(u));
+        wav_put_u32(b, u);
+        return;
+    }
+    if (bits == 16) {
+        wav_put_u16(b, static_cast<uint16_t>(float_to_int16(v)));
+        return;
+    }
+    if (v < -1.0f) v = -1.0f;
+    else if (v > 1.0f) v = 1.0f;
+    const double  scale = static_cast<double>(int64_t{1} << (bits - 1));
+    const int64_t top   = static_cast<int64_t>(scale) - 1;
+    int64_t q = static_cast<int64_t>(std::floor(static_cast<double>(v) * scale + 0.5));
+    if (q > top) q = top;
+    if (q < -static_cast<int64_t>(scale)) q = -static_cast<int64_t>(scale);
+    if (bits == 8) {
+        b.push_back(static_cast<uint8_t>(q + 128));
+        return;
+    }
+    const uint32_t u = static_cast<uint32_t>(static_cast<int32_t>(q));
+    b.push_back(static_cast<uint8_t>(u & 0xFF));
+    b.push_back(static_cast<uint8_t>((u >> 8) & 0xFF));
+    b.push_back(static_cast<uint8_t>((u >> 16) & 0xFF));
+    if (bits == 32) b.push_back(static_cast<uint8_t>((u >> 24) & 0xFF));
+}
+
 /** Write `bytes` to `path` via "<path>.tmp" + rename, so a failed write leaves no partial file. */
 inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>& bytes) {
     const std::string tmp = path + ".tmp";
@@ -254,7 +291,8 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
 }  // namespace detail
 
 /**
- * Write a 16-bit PCM WAV, optionally with a `cue ` chunk marking slice boundaries.
+ * Write a PCM WAV at `bits` (8, 16, 24 or 32 — 32 as IEEE float when `isFloat`), optionally with a
+ * `cue ` chunk marking slice boundaries. Any other `bits` writes 16.
  *
  * `channels` is 1 (write `left` only) or 2 (interleave both) — the CALLER decides which, because only
  * it knows the editor's SOURCE mode: a stereo sample saved as SOURCE=LEFT is a mono file, and one
@@ -270,12 +308,15 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
  */
 inline bool write_wav(const std::string& path, const std::vector<float>& left,
                       const std::vector<float>& right, int sampleRate,
-                      const std::vector<int>& cuePoints = {}, int channels = 2) {
+                      const std::vector<int>& cuePoints = {}, int channels = 2, int bits = 16,
+                      bool isFloat = false) {
     if (channels == 2 && left.size() != right.size()) return false;
+    if (bits != 8 && bits != 16 && bits != 24 && bits != 32) bits = 16;
+    if (bits != 32) isFloat = false;
 
     const int64_t frames        = static_cast<int64_t>(left.size());
     const int     numChannels   = (channels < 1) ? 1 : (channels > 2 ? 2 : channels);
-    const int     blockAlign    = numChannels * 2;   // 16-bit
+    const int     blockAlign    = numChannels * (bits / 8);
     const int64_t dataSize      = frames * blockAlign;
 
     // WAV's size fields are 32-bit. A sample big enough to overflow one is not a sample.
@@ -297,20 +338,20 @@ inline bool write_wav(const std::string& path, const std::vector<float>& left,
     // fmt chunk (24 bytes)
     detail::wav_put_tag(b, "fmt ");
     detail::wav_put_u32(b, 16);                                                    // PCM fmt size
-    detail::wav_put_u16(b, 1);                                                     // AudioFormat = PCM
+    detail::wav_put_u16(b, isFloat ? 3 : 1);                                       // AudioFormat: PCM / float
     detail::wav_put_u16(b, static_cast<uint16_t>(numChannels));
     detail::wav_put_u32(b, static_cast<uint32_t>(sampleRate));
     detail::wav_put_u32(b, static_cast<uint32_t>(sampleRate * blockAlign));        // byte rate
     detail::wav_put_u16(b, static_cast<uint16_t>(blockAlign));
-    detail::wav_put_u16(b, 16);                                                    // bits per sample
+    detail::wav_put_u16(b, static_cast<uint16_t>(bits));                           // bits per sample
 
     // data chunk (8 + dataSize)
     detail::wav_put_tag(b, "data");
     detail::wav_put_u32(b, static_cast<uint32_t>(dataSize));
     for (int64_t i = 0; i < frames; ++i) {
         const size_t k = static_cast<size_t>(i);
-        detail::wav_put_u16(b, static_cast<uint16_t>(float_to_int16(left[k])));
-        if (numChannels == 2) detail::wav_put_u16(b, static_cast<uint16_t>(float_to_int16(right[k])));
+        detail::wav_put_sample(b, left[k], bits, isFloat);
+        if (numChannels == 2) detail::wav_put_sample(b, right[k], bits, isFloat);
     }
 
     // cue chunk (8 + 4 + n*24), one point per slice boundary
@@ -343,8 +384,8 @@ inline bool write_wav(const std::string& path, const std::vector<float>& left,
  * SAVE path is unaffected — it passes `channels` explicitly and writes a true mono file.
  */
 inline bool write_wav_mono(const std::string& path, const std::vector<float>& samples, int sampleRate,
-                           const std::vector<int>& cuePoints = {}) {
-    return write_wav(path, samples, samples, sampleRate, cuePoints, /*channels=*/2);
+                           const std::vector<int>& cuePoints = {}, int bits = 16, bool isFloat = false) {
+    return write_wav(path, samples, samples, sampleRate, cuePoints, /*channels=*/2, bits, isFloat);
 }
 
 /**

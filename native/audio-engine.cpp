@@ -55,7 +55,11 @@ AudioEngine::AudioEngine() {
         sampleBackupLengths[i] = 0;
         originalSamples[i] = nullptr;
         originalSamplesRight[i] = nullptr;
+        originalSamplesF[i] = nullptr;
+        originalSamplesRightF[i] = nullptr;
         originalSampleLengths[i] = 0;
+        sampleBitDepth[i] = 16;
+        sampleIsFloat[i]  = false;
     }
     for (int t = 0; t < SF_VOICE_COUNT; t++) tic00Cursor[t] = Tic00Cursor();
     globalFrameCounter.store(0, std::memory_order_relaxed);
@@ -116,8 +120,7 @@ AudioEngine::~AudioEngine() {
         if (samplesRight[i])         delete[] samplesRight[i];
         if (sampleBackups[i])        delete[] sampleBackups[i];
         if (sampleBackupsRight[i])   delete[] sampleBackupsRight[i];
-        if (originalSamples[i])      delete[] originalSamples[i];
-        if (originalSamplesRight[i]) delete[] originalSamplesRight[i];
+        freeRateCache(i);
     }
     delete[] sampleClipboard;
     delete[] sampleClipboardRight;
@@ -168,13 +171,9 @@ bool AudioEngine::loadSample(int id, const float* data, int length) {
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
     sampleBackupLengths[id] = 0;
-    // New file replaces the original — discard any cached rate-mode original.
-    if (originalSamples[id]) {
-        delete[] originalSamples[id];
-        originalSamples[id] = nullptr;
-        originalSampleLengths[id] = 0;
-    }
-    if (originalSamplesRight[id]) { delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr; }
+    // New file replaces the original — discard any cached rate-mode original. A float buffer handed
+    // in carries no depth of its own; a loader that knows better sets it after this returns.
+    setSampleSourceFormat(id, 16, false);
 
     samples[id] = newL;
     sampleLengths[id] = length;
@@ -211,12 +210,7 @@ bool AudioEngine::loadSampleStereo(int id, const float* left, const float* right
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
     sampleBackupLengths[id] = 0;
-    if (originalSamples[id]) {
-        delete[] originalSamples[id];
-        originalSamples[id] = nullptr;
-        originalSampleLengths[id] = 0;
-    }
-    if (originalSamplesRight[id]) { delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr; }
+    setSampleSourceFormat(id, 16, false);
 
     samples[id]      = newL;
     samplesRight[id] = newR;
@@ -247,9 +241,7 @@ bool AudioEngine::beginSampleLoad(int id, int channels, int estimatedFrames) {
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
     sampleBackupLengths[id] = 0;
-    delete[] originalSamples[id];      originalSamples[id] = nullptr;
-    delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr;
-    originalSampleLengths[id] = 0;
+    setSampleSourceFormat(id, 16, false);   // the chunks arrive as int16
     samples[id]       = newL;
     samplesRight[id]  = newR;
     sampleLengths[id] = 0;             // not playable until finalize
@@ -507,9 +499,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
         delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
         delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
         sampleBackupLengths[id] = 0;
-        delete[] originalSamples[id];      originalSamples[id] = nullptr;
-        delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr;
-        originalSampleLengths[id] = 0;
+        setSampleSourceFormat(id, bitsPerSample, isFloat);
         samples[id] = newL;
         samplesRight[id] = newR;
         sampleLengths[id] = totalFrames;
@@ -618,6 +608,21 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
         return 0;
     }
 
+    // A FLAC keeps its source depth, and the float decode above holds all of it. The depth is the 5 bits
+    // straddling bytes 20–21: "fLaC", a 4-byte block header, then STREAMINFO — whose place as the first
+    // block the format requires — with bits-per-sample minus one after the rate and channel fields.
+    if (std::strcmp(ext, "flac") == 0) {
+        if (FILE* ff = pt_fopen(path, "rb")) {
+            uint8_t head[22];
+            if (fread(head, 1, sizeof(head), ff) == sizeof(head) && std::memcmp(head, "fLaC", 4) == 0 &&
+                (head[4] & 0x7F) == 0) {
+                const int bits = (((head[20] & 0x01) << 4) | (head[21] >> 4)) + 1;
+                if (bits > 16) setSampleSourceFormat(id, bits > 24 ? 32 : 24, false);
+            }
+            fclose(ff);
+        }
+    }
+
     lastLoadFailure_ = LoadFailure::NONE;
     LOGD("loadSampleFromCompressed: id=%d %zu frames %s rate=%d (%s)",
          id, L.size(), R.empty() ? "mono" : "stereo", sr, ext);
@@ -644,6 +649,7 @@ int64_t AudioEngine::audio_memory_bytes() const {
         total += pcm(samples[id],         samplesRight[id],         sampleLengths[id],         4);
         total += pcm(sampleBackups[id],   sampleBackupsRight[id],   sampleBackupLengths[id],   2);
         total += pcm(originalSamples[id], originalSamplesRight[id], originalSampleLengths[id], 2);
+        total += pcm(originalSamplesF[id], originalSamplesRightF[id], originalSampleLengths[id], 4);
     }
     total += pcm(fxPreviewBackup, fxPreviewBackupRight, fxPreviewBackupLen,    4);
     total += pcm(sampleClipboard, sampleClipboardRight, sampleClipboardLength, 4);
@@ -670,11 +676,9 @@ void AudioEngine::clearSample(int id) {
     delete[] samplesRight[id];         samplesRight[id] = nullptr;
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
-    delete[] originalSamples[id];      originalSamples[id] = nullptr;
-    delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr;
+    setSampleSourceFormat(id, 16, false);
     sampleLengths[id]        = 0;
     sampleBackupLengths[id]  = 0;
-    originalSampleLengths[id] = 0;
     LOGD("Sample %d cleared from memory", id);
 }
 
@@ -705,12 +709,7 @@ void AudioEngine::clearAllSamples() {
             samplesRight[i] = nullptr;
         }
         sampleLengths[i] = 0;
-        if (originalSamples[i]) {
-            delete[] originalSamples[i];
-            originalSamples[i] = nullptr;
-            originalSampleLengths[i] = 0;
-        }
-        if (originalSamplesRight[i]) { delete[] originalSamplesRight[i]; originalSamplesRight[i] = nullptr; }
+        setSampleSourceFormat(i, 16, false);
     }
     LOGD("All samples cleared");
 }
@@ -2145,7 +2144,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Mix voices — try_lock so applyRateMode can swap buffers safely.
+    // Mix voices — try_lock so applyRateAndBits can swap buffers safely.
     // If the edit lock is held we skip one callback (~10ms silence) instead of crashing.
     {
     std::unique_lock<std::mutex> editLock(sampleEditMutex, std::try_to_lock);

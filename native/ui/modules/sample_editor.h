@@ -32,7 +32,7 @@
 //
 // ⚠️ **Rows 3..8 are the SELECTION, and their D-pad does not move the cursor — it drags an edge.**
 // A+UP/DOWN nudges the selection edge coarsely (±totalFrames/16), A+LEFT/RIGHT finely (±/256), both
-// scaled by the zoom and snapped to a zero crossing when SNAP is on. That is why `cursor_context()`
+// scaled by the zoom and snapped to a zero crossing (`snapEnabled`). That is why `cursor_context()`
 // answers `none()` for the whole range: there is no cell there to increment. The dispatcher handles it.
 
 #include <cstdint>
@@ -103,7 +103,14 @@ struct SampleEditorState {
     /** A PENDING shift, in semitones — nothing is resampled until SAVE bakes it (`bake_pending_pitch`). */
     int  pitchSemitones = 0;
     int  durationIndex  = 2;     // "1 BAR" — the target SYNC stretches/pitches to
-    bool snapEnabled    = true;  // snap a dragged selection edge to the nearest zero crossing
+    // BIT: the depth the sample came in at (8/16/24/32), and the depth it is at now — never above it.
+    // A DESTRUCTIVE requantise derived with RATE from one cached original, and the depth SAVE writes.
+    // ⚠️ Not the instrument's CRUSH: this rounds once into the buffer (`applyRateAndBits`).
+    int  sourceBitDepth = 16;
+    int  bitDepth       = 16;
+    // Snap a dragged selection edge to the nearest zero crossing. ⚠️ It has NO CELL at the moment — BIT
+    // took its place on row 2 — so it stays at this default for every session.
+    bool snapEnabled    = true;
 
     // ── The selection, in FRAMES (not the 0..255 the instrument stores) ──────────────────────────
     int64_t selectionStart = 0;
@@ -292,6 +299,8 @@ struct SampleEditorInputResult {
      * be drawn by ptshot — see ui/engine_feed.h).
      */
     bool rateModeChanged = false;
+    /** BIT is RATE's twin: the same rebuild, from the same cached original. */
+    bool bitDepthChanged = false;
 };
 
 class SampleEditorModule {
@@ -310,6 +319,12 @@ public:
     // ── The vocabularies ─────────────────────────────────────────────────────────────────────────
     static const std::vector<std::string>& source_values();    // LEFT / RIGHT / STEREO / MONO
     static const std::vector<std::string>& rate_values();      // HIGH / NORM / LOFI
+    /**
+     * BIT's choices for a sample that came in at `source_bits`: that depth and every standard one below
+     * it, highest first — a 24-bit file offers 24 / 16 / 8, a 16-bit one 16 / 8. There is no 12: WAV
+     * has no 12-bit format, and a BIT the file cannot say would be a lie on a PC.
+     */
+    static std::vector<std::string> bit_depth_choices(int source_bits);
     static const std::vector<std::string>& duration_values();  // 4 BAR … 1/32
 
     /**

@@ -1376,8 +1376,8 @@ class InputDispatcher {
      */
     void tap_slice_marker();
 
-    /** RATE (row 1, col 2) re-decimates the buffer — the one row-1 edit that changes the AUDIO. */
-    void apply_sample_rate_mode();
+    /** RATE (row 1, col 2) and BIT (row 2, col 2) rebuild the buffer — the two cells that change the AUDIO. */
+    void apply_sample_rate_and_bits();
 
     /** A on rows 13/14/16/18/19 — the twelve ops, the FX apply, the name, and the save buttons. */
     void sample_editor_confirm();

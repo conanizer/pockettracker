@@ -665,7 +665,7 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
 
         case ScreenType::SAMPLE_EDITOR: {
             const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
-            if (r.rateModeChanged) apply_sample_rate_mode();
+            if (r.rateModeChanged || r.bitDepthChanged) apply_sample_rate_and_bits();
 
             // ⚠️ `false`, and it is the honest answer rather than a shortcut. This function's question is
             // "did the LIVE DOCUMENT change?", and the sample editor's session state is not the document:
@@ -675,8 +675,8 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             // on the ZOOM cell, rolling the lookahead back sixty times a second under a playing song, for
             // an edit that did not change a single audible thing.
             //
-            // The one edit here that DOES reach the engine is RATE, which re-decimates the buffer — and it
-            // says so itself, in `apply_sample_rate_mode()` above, exactly where Kotlin says it.
+            // The edits here that DO reach the engine are RATE and BIT, which rebuild the buffer — and
+            // they say so themselves, in `apply_sample_rate_and_bits()` above.
             return false;
         }
 
@@ -4511,6 +4511,9 @@ void InputDispatcher::init_sample_editor_state() {
     se.totalFrames   = host_.sample_length(se.instrumentId);
     se.sampleRate    = host_.sample_rate_of(se.instrumentId);
     se.hasStereoData = host_.has_stereo_data(se.instrumentId);
+    // BIT opens at the sample's own depth, which is also the highest it can offer.
+    se.sourceBitDepth = host_.sample_bit_depth(se.instrumentId);
+    se.bitDepth       = se.sourceBitDepth;
 
     // ⚠️ SOURCE OPENS ON STEREO FOR A STEREO SAMPLE, and this is a SAVE decision rather than a display
     // one. The mode is what `resolve_save_channels` reads: every value but STEREO writes a ONE-CHANNEL
@@ -4870,14 +4873,14 @@ void InputDispatcher::tap_slice_marker() {
     select_current_slice();
 }
 
-// ─── RATE: the destructive one on row 1 ──────────────────────────────────────────────────────────
+// ─── RATE and BIT: the two cells that rebuild the audio ──────────────────────────────────────────
 
-void InputDispatcher::apply_sample_rate_mode() {
+void InputDispatcher::apply_sample_rate_and_bits() {
     SampleEditorState& se     = s_.sampleEditor;
     const int          factor = (se.rateMode == 1) ? 2 : (se.rateMode == 2) ? 4 : 1;
     const int          oldLen = se.totalFrames;
 
-    host_.apply_rate_mode(se.instrumentId, factor);
+    host_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth);
 
     // ⚠️ The 2-phrase lookahead has ALREADY scheduled notes against the OLD base frequency — they would
     // play the re-decimated buffer at double or half pitch. Rolling the schedule back is what makes the
@@ -5104,6 +5107,11 @@ void InputDispatcher::sample_editor_confirm() {
                 };
                 se.slicePosition = scale(se.slicePosition);
                 if (clear_pitch) se.pitchSemitones = 0;
+                // ⚠️ Both resamplers drop the engine's RATE/BIT original — the result IS the new
+                // original. Left at NORM or LOFI, RATE would describe a cache that no longer exists,
+                // and its next touch would decimate the audio a second time. BIT is KEPT: it is also
+                // the depth SAVE writes, and rounding a second time to the same grid changes nothing.
+                se.rateMode     = 0;
                 refresh_sample_view(/*reset_selection=*/true);
                 se.isModified = true;
             };
@@ -5225,6 +5233,7 @@ void InputDispatcher::bake_pending_pitch() {
     se.totalFrames    = newLen;
     se.pitchSemitones = 0;   // spent
     se.rateMode       = 0;   // the shifted buffer IS the new original — see sample_edit.h
+    // ⚠️ BIT is NOT reset. This runs on the way INTO a save, and BIT is the depth that save writes.
     se.waveformData   = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
                                               waveform_channel(se.sourceMode));
 
@@ -5298,11 +5307,13 @@ void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
     SampleEditorState& se   = s_.sampleEditor;
     const std::vector<int> cues = compute_slice_cue_points();
 
-    if (!host_.save_sample_wav(se.instrumentId, path, cues, se.sourceMode, se.hasStereoData)) {
+    if (!host_.save_sample_wav(se.instrumentId, path, cues, se.sourceMode, se.hasStereoData,
+                               se.bitDepth)) {
         s_.statusMessage = "SAVE FAILED";
         s_.statusSuccess = false;
         return;
     }
+    host_.adopt_saved_sample(se.instrumentId, se.bitDepth);
 
     // ⚠️ A MONO save is re-loaded from the file it just wrote, and that is not belt-and-braces. The
     // editor's buffer may still be STEREO (SOURCE=LEFT writes one channel of a two-channel sample), and
@@ -5354,7 +5365,7 @@ void InputDispatcher::sample_editor_chop() {
     fs_.create_folder(chops, base);
     const std::string dir = chops + "/" + base;
 
-    const int written = host_.chop_sample(se.instrumentId, dir, base, slices);
+    const int written = host_.chop_sample(se.instrumentId, dir, base, slices, se.bitDepth);
     s_.statusMessage   = written > 0 ? ("CHOPPED " + std::to_string(written)) : "CHOP FAILED";
     s_.statusSuccess   = written > 0;
 }

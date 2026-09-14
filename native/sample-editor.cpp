@@ -456,52 +456,131 @@ void AudioEngine::downsampleSample(int id, int factor) {
     // so they remain valid after decimation without adjustment.
 }
 
-void AudioEngine::applyRateMode(int id, int factor) {
+/**
+ * The sample editor's BIT cell: round a sample to the nearest step of a `bits`-bit grid.
+ *
+ * ⚠️ This is NOT the instrument's CRUSH. That one truncates (shift down, shift back) on every block;
+ * this rounds to the NEAREST step — mid-tread, so silence stays silence — once, into the buffer, with no
+ * dither. A dithered quantiser is cleaner and is not what someone asking for 8-bit wants.
+ *
+ * Exact in float for every source this app decodes: a 16- or 24-bit value is an integer over a power of
+ * two, so scaling by another power of two, adding a half and flooring introduces no rounding of its own.
+ * The top step is clamped — full scale rounds up to one step past what the grid can hold.
+ */
+static inline float quantizeToBits(float v, int bits) {
+    const float q   = static_cast<float>(1 << (bits - 1));
+    const float top = (q - 1.0f) / q;
+    float y = std::floor(v * q + 0.5f) / q;
+    if (y > top)   y = top;
+    if (y < -1.0f) y = -1.0f;
+    return y;
+}
+
+void AudioEngine::freeRateCache(int id) {
+    delete[] originalSamples[id];        originalSamples[id] = nullptr;
+    delete[] originalSamplesRight[id];   originalSamplesRight[id] = nullptr;
+    delete[] originalSamplesF[id];       originalSamplesF[id] = nullptr;
+    delete[] originalSamplesRightF[id];  originalSamplesRightF[id] = nullptr;
+    originalSampleLengths[id] = 0;
+}
+
+void AudioEngine::setSampleSourceFormat(int id, int bits, bool isFloat) {
+    if (id < 0 || id >= 256) return;
+    freeRateCache(id);
+    sampleBitDepth[id] = static_cast<uint8_t>(bits);
+    sampleIsFloat[id]  = isFloat;
+}
+
+int AudioEngine::getSampleBitDepth(int id) const {
+    return (id >= 0 && id < 256) ? sampleBitDepth[id] : 16;
+}
+
+bool AudioEngine::isSampleFloat(int id) const {
+    return id >= 0 && id < 256 && sampleIsFloat[id];
+}
+
+void AudioEngine::adoptSavedSampleFormat(int id, int bits, bool isFloat) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);   // the cache is freed under the same lock as a swap
+    setSampleSourceFormat(id, bits, isFloat);
+}
+
+void AudioEngine::applyRateAndBits(int id, int factor, int bits) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    if (factor < 1) factor = 1;
+    const int source = sampleBitDepth[id];
+    bits = std::max(1, std::min(source, bits));   // BIT never goes above the depth the sample came in at
 
     // Stop voices reading this buffer, then hold the edit lock so the callback's try_lock fails
     // during the swap — one silent period rather than a use-after-free crash.
     auto editLock = beginSampleEdit(id);
 
-    if (factor <= 1) {
-        // Restore HIGH: copy original (both channels) back, then discard cache.
-        if (!originalSamples[id]) return; // Already at HIGH, nothing to restore.
+    const bool haveCache = originalSamples[id] || originalSamplesF[id];
+    // One reader over whichever pair the slot holds.
+    const auto cached = [&](bool right, int i) -> float {
+        if (originalSamplesF[id]) return (right ? originalSamplesRightF[id] : originalSamplesF[id])[i];
+        return cacheI16ToF32((right ? originalSamplesRight[id] : originalSamples[id])[i]);
+    };
+    // ⚠️ A FUNCTION, not a value read here: on the first departure the cache does not exist yet, and a
+    // stereo test taken now answers "mono" — the rebuild then drops the right channel.
+    const auto stereoCache = [&] { return originalSamplesRightF[id] != nullptr || originalSamplesRight[id] != nullptr; };
+
+    if (factor == 1 && bits == source) {
+        // Back to HIGH at the source depth: copy the original (both channels) back, then discard it.
+        if (!haveCache) return;   // already there, nothing to restore
         int len = originalSampleLengths[id];
         float* newL = new float[len];
-        for (int i = 0; i < len; i++) newL[i] = cacheI16ToF32(originalSamples[id][i]);
+        for (int i = 0; i < len; i++) newL[i] = cached(false, i);
         float* newR = nullptr;
-        if (originalSamplesRight[id]) {
+        if (stereoCache()) {
             newR = new float[len];
-            for (int i = 0; i < len; i++) newR[i] = cacheI16ToF32(originalSamplesRight[id][i]);
+            for (int i = 0; i < len; i++) newR[i] = cached(true, i);
         }
         setSampleBuffers(id, newL, newR, len);
-        delete[] originalSamples[id];       originalSamples[id] = nullptr;
-        delete[] originalSamplesRight[id];  originalSamplesRight[id] = nullptr;
-        originalSampleLengths[id] = 0;
-    } else {
-        // Store original (both channels) on first rate change away from HIGH.
-        if (!originalSamples[id]) {
-            int len = sampleLengths[id];
+        freeRateCache(id);
+        return;
+    }
+
+    // Store the original (both channels) on the first departure. ⚠️ In FLOAT when the sample is deeper
+    // than 16 bits, so returning to 24 or 32 gives back what was loaded; int16 otherwise, at half the RAM.
+    if (!haveCache) {
+        int len = sampleLengths[id];
+        if (source > 16) {
+            originalSamplesF[id] = new float[len];
+            std::memcpy(originalSamplesF[id], samples[id], (size_t)len * sizeof(float));
+            if (samplesRight[id]) {
+                originalSamplesRightF[id] = new float[len];
+                std::memcpy(originalSamplesRightF[id], samplesRight[id], (size_t)len * sizeof(float));
+            }
+        } else {
             originalSamples[id] = new int16_t[len];
             for (int i = 0; i < len; i++) originalSamples[id][i] = f32ToCacheI16(samples[id][i]);
             if (samplesRight[id]) {
                 originalSamplesRight[id] = new int16_t[len];
                 for (int i = 0; i < len; i++) originalSamplesRight[id][i] = f32ToCacheI16(samplesRight[id][i]);
             }
-            originalSampleLengths[id] = len;
         }
-        // Always derive from the cached original so NORM→LOFI→NORM roundtrips are lossless.
-        int newLen = originalSampleLengths[id] / factor;
-        if (newLen < 1) return;
-        float* newL = new float[newLen];
-        for (int i = 0; i < newLen; i++) newL[i] = cacheI16ToF32(originalSamples[id][i * factor]);
-        float* newR = nullptr;
-        if (originalSamplesRight[id]) {
-            newR = new float[newLen];
-            for (int i = 0; i < newLen; i++) newR[i] = cacheI16ToF32(originalSamplesRight[id][i * factor]);
-        }
-        setSampleBuffers(id, newL, newR, newLen);
+        originalSampleLengths[id] = len;
     }
+
+    // Always derive from the cached original, so NORM→LOFI→NORM and 8→16→8 round-trip losslessly.
+    const bool requantise = bits < source;
+    int newLen = originalSampleLengths[id] / factor;
+    if (newLen < 1) return;
+    float* newL = new float[newLen];
+    for (int i = 0; i < newLen; i++) {
+        const float v = cached(false, i * factor);
+        newL[i] = requantise ? quantizeToBits(v, bits) : v;
+    }
+    float* newR = nullptr;
+    if (stereoCache()) {
+        newR = new float[newLen];
+        for (int i = 0; i < newLen; i++) {
+            const float v = cached(true, i * factor);
+            newR[i] = requantise ? quantizeToBits(v, bits) : v;
+        }
+    }
+    setSampleBuffers(id, newL, newR, newLen);
 }
 
 void AudioEngine::pitchShiftSample(int id, float semitones) {
@@ -511,9 +590,7 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
     auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
     // Pitch shift makes this buffer the new "original"; discard any RATE cache (both channels).
-    delete[] originalSamples[id];       originalSamples[id] = nullptr;
-    delete[] originalSamplesRight[id];  originalSamplesRight[id] = nullptr;
-    originalSampleLengths[id] = 0;
+    freeRateCache(id);
 
     float ratio  = std::pow(2.0f, semitones / 12.0f);
     int   oldLen = sampleLengths[id];
@@ -548,9 +625,7 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
     auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
     // Time-stretch makes this buffer the new "original"; discard any RATE cache (both channels).
-    delete[] originalSamples[id];       originalSamples[id] = nullptr;
-    delete[] originalSamplesRight[id];  originalSamplesRight[id] = nullptr;
-    originalSampleLengths[id] = 0;
+    freeRateCache(id);
 
     int oldLen = sampleLengths[id];
     std::vector<float> outL = sola::stretch(samples[id], oldLen, ratio, 44100.0f);

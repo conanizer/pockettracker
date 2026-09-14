@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 #include "ui/helpers.h"
 #include "ui/modules/confirm_dialog.h"
@@ -40,6 +41,13 @@ const std::vector<std::string>& SampleEditorModule::source_values() {
 }
 const std::vector<std::string>& SampleEditorModule::rate_values() {
     static const std::vector<std::string> v{"HIGH", "NORM", "LOFI"};
+    return v;
+}
+std::vector<std::string> SampleEditorModule::bit_depth_choices(int source_bits) {
+    std::vector<std::string> v;
+    for (const int bits : {32, 24, 16, 8})
+        if (bits <= source_bits) v.push_back(std::to_string(bits));
+    if (v.empty()) v.push_back("8");
     return v;
 }
 const std::vector<std::string>& SampleEditorModule::duration_values() {
@@ -352,14 +360,14 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
                         "RATE",   at(rate_values(), s.rateMode),           2);
     }
 
-    {   // Row 2 — PITCH / DURATION / SNAP
+    {   // Row 2 — PITCH / DURATION / BIT
         const int  ry  = y + 47;
         const bool cur = (s.cursorRow == 2);
         const std::string pitch = (s.pitchSemitones >= 0 ? "+" : "") + std::to_string(s.pitchSemitones);
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
-                        "PITCH",    pitch,                                 0,
+                        "PITCH",    pitch,                                  0,
                         "DURATION", at(duration_values(), s.durationIndex), 1,
-                        "SNAP",     s.snapEnabled ? "ON" : "OFF",          2);
+                        "BIT",      std::to_string(s.bitDepth),             2);
     }
 
     draw_waveform(c, x, y + WAVEFORM_Y, s, t);
@@ -641,7 +649,13 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 // and un-biases on the way out (handle_input). Kotlin does exactly this.
                 case 0: return cc::hex_byte(s.pitchSemitones + 24, 0, 48);
                 case 1: return cc::toggle_ternary(at(duration_values(), s.durationIndex), duration_values());
-                case 2: return cc::toggle_binary(s.snapEnabled);
+                case 2: {
+                    // An 8-bit sample has nowhere lower to go: the cell reads 8 and cannot move, as
+                    // SOURCE on a mono sample cannot.
+                    const std::vector<std::string> choices = bit_depth_choices(s.sourceBitDepth);
+                    if (choices.size() < 2) return cc::read_only();
+                    return cc::toggle_ternary(std::to_string(s.bitDepth), choices);
+                }
                 default: return cc::none();
             }
 
@@ -718,7 +732,14 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
             switch (s.cursorCol) {
                 case 0: s.pitchSemitones = v - 24;  r.modified = true; break;   // un-bias (see cursor_context)
                 case 1: s.durationIndex  = v;       r.modified = true; break;
-                case 2: s.snapEnabled    = (v == 1); r.modified = true; break;
+                case 2: {
+                    // RATE's twin: destructive, so the dispatcher rebuilds the buffer (applyRateAndBits).
+                    const int bits = std::atoi(at(bit_depth_choices(s.sourceBitDepth), v).c_str());
+                    if (bits != s.bitDepth) r.bitDepthChanged = true;
+                    s.bitDepth = bits;
+                    r.modified = true;
+                    break;
+                }
                 default: break;
             }
             break;
