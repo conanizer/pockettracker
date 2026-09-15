@@ -24,6 +24,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default also asks for the legacy `tools` package, which
+          # the SDK repository no longer serves — sdkmanager exits 1 on it.
+          packages: 'platform-tools'
 
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
