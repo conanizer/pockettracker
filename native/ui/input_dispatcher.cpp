@@ -2239,7 +2239,7 @@ void InputDispatcher::on_l_r() {
 
     // ── ONE PRESS UNDOES ONE THING, MOST RECENT FIRST ────────────────────────────────────────────
     //
-    // Two rungs: the mix (any track muted or soloed) and the selection with its buffer.
+    // Two rungs: the mix (any mixer channel muted or soloed) and the selection with its buffer.
     // `s_.lastClearable` says which the user touched last, and that one is tried first — clearing
     // both at once would throw away a selection someone built press by press just because they also
     // dropped a channel out of the mix.
@@ -2251,11 +2251,17 @@ void InputDispatcher::on_l_r() {
     // ⚠️ The SAMPLE_EDITOR exclusion covers this rung too, for the reason it covers the clipboard's:
     // L+R is reserved there for the editor's own selection, and one screen with two exclusion lists
     // is a special case someone has to remember.
+    //
+    // ⚠️ Asked over all MIX_CHANNELS through `mix_channel_flags` — the resolver the chord toggles with —
+    // so the REV and DEL strips count. A walk over `p.tracks` alone leaves a return muted on its own
+    // with no L+R to bring it back.
     const bool mix_touched = [&] {
         if (s_.currentScreen == ScreenType::SAMPLE_EDITOR) return false;
-        const Project& p = host_.project();
-        for (const songcore::Track& t : p.tracks)
-            if (t.mute || t.solo) return true;
+        Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
+        for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
+            const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
+            if (f.mute && (*f.mute || *f.solo)) return true;
+        }
         return false;
     }();
 
