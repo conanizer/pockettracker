@@ -1784,6 +1784,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS) {
 
                     SoundfontVoice& sv = sfVoices[t];
+                    // ⚠️ READ BEFORE `armNote`, which sets isActive unconditionally. This is the
+                    // question the chain setup below has to ask: is this channel's filter/EQ full of
+                    // a note that is still sounding? See InstrumentChain::reset's keepToneState.
+                    const bool wasSounding = sv.isActive;
                     float trkVol = trackVolSnapshot[t];
                     // This instrument's ADSR override (applied atomically inside fireArmedNote, before
                     // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
@@ -1822,7 +1826,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         sv.instrParams = InstrumentParams{};
                         for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
                     }
-                    sv.chain.reset(sampleRate);
+                    sv.chain.reset(sampleRate, /*keepToneState=*/wasSounding);
                     sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
                                               sv.instrParams.filterRes, sv.instrParams.filterDrive,
                                               (int)sampleRate);

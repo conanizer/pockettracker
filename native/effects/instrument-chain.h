@@ -32,11 +32,26 @@ struct InstrumentChain {
     EqModule       eq;    // 3-band parametric EQ (loShelf / bell / hiShelf)
 
     // sampleRate required for EqModule init; other modules don't need it here.
-    void reset(float sampleRate = 44100.0f) {
+    //
+    // ⚠️ `keepToneState` leaves the FILTER's and the EQ's integrators alone — everything else is
+    // cleared exactly as before, and the caller's setParams calls restore the parameters either way.
+    // A SoundFont chain belongs to the TRACK, not to the note: the note being stolen is still
+    // flowing through it when the next note is set up, so zeroing a resonant SVF steps its output to
+    // zero in one sample. The steal's declick ramp rides the filter's INPUT and cannot cover that.
+    // A sampler voice comes out of the pool silent, so it clears.
+    void reset(float sampleRate = 44100.0f, bool keepToneState = false) {
         crush.reset();
         drive.reset();
-        filter.reset();
-        eq.reset(sampleRate);
+        if (keepToneState) {
+            // Both are re-armed below by the caller — only the memory of the signal still passing
+            // through survives. Held at the same defaults reset() would have left them at, so a
+            // caller that then declines to set a filter type or an EQ band gets silence from them.
+            filter.type = 0;
+            eq.active   = false;
+        } else {
+            filter.reset();
+            eq.reset(sampleRate);
+        }
     }
 
     // Signal order: Crush → Drive → Filter → EQ
