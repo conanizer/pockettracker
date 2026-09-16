@@ -15,15 +15,33 @@ constexpr int FIRST_METER_X  = 10;
 
 constexpr int TRACK_METER_TOP = 24;
 constexpr int TRACK_METER_H   = 155;
-constexpr int TRACK_VOL_Y     = 182;   // TRACK_METER_TOP + TRACK_METER_H + 3
 
 constexpr int MASTER_METER_H  = 200;   // taller than a track's; same top
+
+// Background left between a meter's outline and the text row beside it — the same 3px a row already
+// pads its glyphs with, so the meter reads as one more row edge. Every text row that borders a meter
+// derives its baseline from the two helpers below, which is what keeps tracks, master and sends
+// clearing their outline by the identical amount; a lit cursor cell, 3px taller than its glyphs on
+// each side, still lands clear of it.
+constexpr int METER_TEXT_GAP = 3;
+
+/** Text baseline for a row sitting UNDER a meter of height `meter_h` that starts at `meter_top`. */
+constexpr int text_y_under(int meter_top, int meter_h) {
+    return meter_top + meter_h + 1 + METER_TEXT_GAP + TEXT_PADDING;
+}
+
+/** Text baseline for a row sitting ABOVE a meter that starts at `meter_top`. */
+constexpr int text_y_above(int meter_top) {
+    return meter_top - 1 - METER_TEXT_GAP - ROW_HEIGHT + TEXT_PADDING;
+}
+
+constexpr int TRACK_VOL_Y = text_y_under(TRACK_METER_TOP, TRACK_METER_H);   // 186
 
 // The send returns sit under the tracks: headers ABOVE the meters, wet values BELOW them.
 constexpr int SEND_METER_TOP = 234;
 constexpr int SEND_METER_H   = 112;
-constexpr int SEND_HEADER_Y  = 216;
-constexpr int SEND_VALUE_Y   = 350;
+constexpr int SEND_HEADER_Y  = text_y_above(SEND_METER_TOP);                 // 212
+constexpr int SEND_VALUE_Y   = text_y_under(SEND_METER_TOP, SEND_METER_H);   // 353
 
 // Every stereo pair — tracks, master and sends alike — is two slim bars with a 1px gutter.
 constexpr int BAR_W   = 20;
@@ -31,11 +49,11 @@ constexpr int BAR_SEP = 1;
 
 constexpr int MASTER_X = FIRST_METER_X + 8 * METER_SPACING;   // 434
 
-// The master strip's four value rows, starting level with the send meters.
-constexpr int MROW0_Y = TRACK_METER_TOP + MASTER_METER_H + 10;  // 234
-constexpr int MROW1_Y = MROW0_Y + ROW_HEIGHT;                   // 255
-constexpr int MROW2_Y = MROW1_Y + ROW_HEIGHT;                   // 276
-constexpr int MROW3_Y = MROW2_Y + ROW_HEIGHT;                   // 297
+// The master strip's four value rows, hanging off the bottom of its own (taller) meter.
+constexpr int MROW0_Y = text_y_under(TRACK_METER_TOP, MASTER_METER_H);  // 231
+constexpr int MROW1_Y = MROW0_Y + ROW_HEIGHT;                           // 252
+constexpr int MROW2_Y = MROW1_Y + ROW_HEIGHT;                           // 273
+constexpr int MROW3_Y = MROW2_Y + ROW_HEIGHT;                           // 294
 
 constexpr int MSTR_LABEL_X = MASTER_X - 65;   // 369
 constexpr int MSTR_VALUE_X = MASTER_X + 5;    // 439
@@ -97,16 +115,12 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
         // fader value both say so.
         const bool audible = track_audible(p, i) && dry_audible(p);
 
-        // ⚠️ THE FADER CELL IS PAINTED BEFORE ITS METER, and the order is load-bearing: the volume sits
-        // 2px under the meter, one short of a row's own 3px of padding, so the cell's top row lands on
-        // the meter's bottom BORDER. Drawn after, it would take a 36px bite out of the bright frame
-        // that says which strip is selected. The meter overdraws that one row instead.
-        draw_cursor_cell(c, hex2(p.tracks[static_cast<size_t>(i)].volume), mX + 5, y + TRACK_VOL_Y,
-                         isSel, audible ? t.textValue : t.textEmpty, t);
-
         draw_stereo_meter(c, mX, y + TRACK_METER_TOP, TRACK_METER_H, peak_at(s.trackPeaks, i * 2),
                           peak_at(s.trackPeaks, i * 2 + 1), isSel, /*is_muted=*/!audible,
                           t, i * 2, i * 2 + 1, advance);
+
+        draw_cursor_cell(c, hex2(p.tracks[static_cast<size_t>(i)].volume), mX + 5, y + TRACK_VOL_Y,
+                         isSel, audible ? t.textValue : t.textEmpty, t);
     }
 
     // ── The master meter ─────────────────────────────────────────────────────────────────────────
