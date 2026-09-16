@@ -255,11 +255,39 @@ void SoundfontVoice::hardStop() {
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
         tsf* h = soundfonts[slot].handle;
-        if (h && activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+        if (h) {
+            if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+            // ⚠️⚠️ AND THEN KILL WHAT THAT LEFT ALIVE, OR THE NEXT TAKE PLAYS IT.
+            //
+            // `tsf_channel_note_off` starts a RELEASE; it does not end a voice. `isActive` goes false
+            // on the line below, so the render loop never reaches this channel again and that release
+            // is never rendered to its end — TSF's voices sit FROZEN at whatever level they had
+            // reached, indefinitely.
+            //
+            // They come back at the next trigger, because the steal path renders the channel BEFORE
+            // it kills: pass one asks TSF for "the note being replaced", and on a restart that is a
+            // note last heard before the stop, arriving as a step out of silence. Measured on
+            // `test.sf2`: the first block of a restarted take stepped **0.28 — 74 % of the take's own
+            // peak** — where the same note on a COLD start steps 0.03.
+            //
+            // Killing here is free at every call site: each one either has the channel already at
+            // zero (the stop ramp's end, an ADSR that has finished, the render loop's silence
+            // detection) or wants it gone this instant (the render path's stopAll, a second preview
+            // stop). ⚠️ Under the slot mutex, which is what makes it safe from the UI thread.
+            struct tsf_voice* v    = h->voices;
+            struct tsf_voice* vEnd = v + h->voiceNum;
+            for (; v != vEnd; v++) {
+                if (v->playingPreset != -1 && v->playingChannel == _trackId) tsf_voice_kill(v);
+            }
+        }
     }
     activeNote      = -1;
     isActive        = false;
     isReleasingOnly = false;
+    // Whether the ramp ran to its end or a hard stop overtook it, the counters go with the note —
+    // a leftover total would scale the next note's first block.
+    stopFadeRemaining = 0;
+    stopFadeTotal     = 0;
     // ⚠️ A stop discards an armed note rather than letting it fire afterwards. A note fired into a
     // voice that has just been stopped is a note nothing will ever end: `isActive` is false, so the
     // render loop never reaches it again and never runs the silence detection that calls hardStop.
@@ -376,6 +404,12 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
     // when both fired: two notes 5.8 ms apart on one track, the second stealing the first.
     hasArmedNote = true;
     isActive     = true;   // the render pass skips an inactive voice, and it is the one that fires this
+    // Clear any stale transport-stop ramp, exactly as Voice::trigger() clears a stale fade-out and for
+    // the same reason: startStopFade() runs on the UI thread and can land just after a hardStop() on
+    // this one, leaving counters on a slot that is about to sound again. A new note starts at full
+    // level or it starts fading the moment it is heard.
+    stopFadeRemaining = 0;
+    stopFadeTotal     = 0;
     return true;
 }
 

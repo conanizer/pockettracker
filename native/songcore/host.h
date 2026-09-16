@@ -339,7 +339,11 @@ class SongcoreHost {
         external_.panic();
         if (engine_) {
             engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
-            engine_->stopAll();               // …and the voices already sounding (instant — no fade)
+            // …and the voices already sounding. RAMPED, not cut: a sustained note ended where its
+            // waveform happens to be is a full-scale step, and it is handed to the instrument's
+            // filter, the reverb and delay sends and the master bus on its way out. The audio thread
+            // finishes the ramp — the voices are still sounding when this returns.
+            engine_->stopAllRamped();
             engine_->stopMetronome();         // …and the click, which is not queued and not a voice
         }
         consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes/stopAll

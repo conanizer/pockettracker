@@ -56,6 +56,33 @@ struct SoundfontVoice : public IAudioVoice {
     // Release tail: true after noteOff() — keeps rendering while TSF decays to silence.
     bool  isReleasingOnly  = false;
 
+    // ── The transport-stop ramp ─────────────────────────────────────────────────────────────────
+    // The counter the SF mix loop multiplies into the mute gate, so a stop takes the note down over
+    // KILL_FADE_SAMPLES instead of ending it where its waveform happened to be. Zero means no ramp.
+    //
+    // ⚠️ THE RAMP IS OURS, NOT TSF'S, for the reason the steal path already gives: TSF holds its
+    // amplitude envelope flat across 64-sample blocks, so asking it to release quickly buys a smaller
+    // step and not a smooth one. Riding the gate also puts the ramp ABOVE the send tap and BELOW the
+    // track's filter — a send that missed it would ring the click on for the length of the tail.
+    int   stopFadeRemaining = 0;
+    int   stopFadeTotal     = 0;
+
+    /**
+     * Begin the transport-stop ramp. Called from the UI thread; the audio thread finishes it and
+     * calls hardStop() when it reaches zero.
+     *
+     * `stopFadeTotal` is written BEFORE `stopFadeRemaining` for the reason Voice::startFadeOut gives:
+     * the mix loop must never see a live counter beside a stale total.
+     */
+    void startStopFade(int fadeSamples) {
+        if (!isActive || stopFadeRemaining > 0) return;
+        // An armed note is discarded rather than fired into a voice that is on its way out — the same
+        // rule hardStop() states, and here it also stops a note_on landing mid-ramp.
+        hasArmedNote     = false;
+        stopFadeTotal    = (fadeSamples > 0) ? fadeSamples : 1;
+        stopFadeRemaining = stopFadeTotal;
+    }
+
     // Intra-block onset offset (same contract as Voice::startDelayFrames): the SF render
     // pass starts this channel's tsf render at this offset within the trigger block so a
     // mid-block targetFrame doesn't sound at the block start, then zeroes it.

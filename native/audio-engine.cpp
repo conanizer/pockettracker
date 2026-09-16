@@ -749,6 +749,23 @@ void AudioEngine::stopAll() {
     LOGD("stopAll: voices and SF notes cleared, stream stays running");
 }
 
+void AudioEngine::stopAllRamped() {
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].isActive) voices[i].startFadeOut(KILL_FADE_SAMPLES);
+        else                    voices[i].stop();   // idle slot: clear any stale fade state
+    }
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
+        if (sfVoices[t].isActive) sfVoices[t].startStopFade(KILL_FADE_SAMPLES);
+        else                      sfVoices[t].hardStop();
+        tic00Cursor[t] = Tic00Cursor();  // as stopAll(): PLAY starts at row 0
+    }
+    // The deadline the audio thread reclaims the slots at — see processAudioBlock, which is also
+    // where it says why a fade counter alone does not get there.
+    stopRampEndFrame.store(globalFrameCounter.load(std::memory_order_relaxed) + KILL_FADE_SAMPLES,
+                           std::memory_order_relaxed);
+    LOGD("stopAllRamped: every sounding voice is fading out");
+}
+
 int AudioEngine::getActiveVoiceCount() {
     int count = 0;
     for (int i = 0; i < MAX_VOICES; i++) {
@@ -1481,6 +1498,28 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // relaxed load is enough and avoids re-loading it per frame below).
     const int64_t blockStartFrame = globalFrameCounter.load(std::memory_order_relaxed);
     const int64_t blockEnd = blockStartFrame + numFrames - 1;
+
+    // ⚠️ THE TRANSPORT-STOP RAMP HAS A DEADLINE, AND THE POOL IS ONLY EIGHT SLOTS.
+    //
+    // stopAllRamped() arms a fade and leaves the audio thread to finish it, which is right for the
+    // audio and not enough for the slots: a voice whose playhead has already run off the end of its
+    // sample mixes ONE frame per block (the bounds check pins the position and breaks), so its fade
+    // counter falls by 1 a block and the slot is held for ~256 blocks. The instant stop used to
+    // collect those voices as a side effect; nothing else ever did. Three of eight slots held after
+    // every stop is what pushes the NEXT take's allocator into step 3/4, where it preempts a fading
+    // voice and clicks — the very thing the ramp is here to remove.
+    //
+    // By this frame the ramp is over and every voice it armed is at zero, so ending them is silent.
+    // Only voices that are FADING are touched: a note triggered by a restart is not, and one that
+    // began fading inside the ramp window was within KILL_FADE_SAMPLES of silence anyway.
+    {
+        const int64_t rampEnd = stopRampEndFrame.load(std::memory_order_relaxed);
+        if (rampEnd >= 0 && blockStartFrame >= rampEnd) {
+            stopRampEndFrame.store(-1, std::memory_order_relaxed);
+            for (int i = 0; i < MAX_VOICES; i++)
+                if (voices[i].isFadingOut) voices[i].stop();
+        }
+    }
     paramUpdateQueue.drainUntil(blockEnd, paramBatch);
     killQueue.drainUntil(blockEnd, killBatch);
     noteQueue.drainUntil(blockEnd, noteBatch);
@@ -2615,13 +2654,25 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // post-fader where the sampler's is pre-fader, and a muted SF track has always taken its
             // reverb and delay down with it. The gate cannot ride the channel volume — that is set
             // once per block, which is exactly the staircase the ramp exists to remove.
+            // ⚠️ THE TRANSPORT-STOP RAMP RIDES HERE, on the gate and for the gate's own reason: it has
+            // to be per sample (a per-block value is the staircase both ramps exist to remove), it has
+            // to sit BELOW the filter so a stop cannot slam the chain under a note still ringing
+            // through it, and it has to be ABOVE the send tap so the reverb and delay are fed the
+            // faded signal rather than a waveform cut off mid-cycle.
+            bool stopFadeDone = false;
             for (int i = 0; i < numFrames; i++) {
                 float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
                 float L = sfBuf[i * 2];
                 float R = sfBuf[i * 2 + 1];
                 sv.chain.filter.setInterpolatedCoeffs(lerp_t);
                 sv.chain.processStereo(L, R);
-                const float gate = gateStart[t] + (gateEnd[t] - gateStart[t]) * lerp_t;
+                float gate = gateStart[t] + (gateEnd[t] - gateStart[t]) * lerp_t;
+                if (sv.stopFadeRemaining > 0) {
+                    gate *= (float)sv.stopFadeRemaining / (float)sv.stopFadeTotal;
+                    if (--sv.stopFadeRemaining <= 0) stopFadeDone = true;
+                } else if (stopFadeDone) {
+                    gate = 0.0f;   // the ramp ended inside this block; the rest of it is silence
+                }
                 sfBuf[i * 2]     = L * gate;
                 sfBuf[i * 2 + 1] = R * gate;
             }
@@ -2674,6 +2725,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
                 if (!adsrReleasing) sv.hardStop();
             }
+
+            // The ramp reached zero inside this block, and its last faded samples are already summed
+            // into the bus above. Ending the voice here — not where the button was pressed — is the
+            // whole difference between a stop that ramps and a stop that cuts.
+            if (stopFadeDone) sv.hardStop();
         }
     }
 

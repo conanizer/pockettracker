@@ -238,7 +238,28 @@ public:
     void setInstrumentFrameWindow(int instrumentId, int startFrame, int endFrame);
 
     void stopTrack(int trackId);
+
+    /**
+     * End every sounding voice IMMEDIATELY. Nobody is listening when this is called: the render path
+     * runs it to clear the previous take out of the engine before it schedules, and the whole point
+     * there is that no audio from before the call may reach the output. The transport uses
+     * stopAllRamped() instead.
+     */
     void stopAll();
+
+    /**
+     * The STOP BUTTON's version — the same end state, reached over KILL_FADE_SAMPLES instead of in
+     * one sample. A sustained note ended where its waveform happened to be is a full-scale step, and
+     * the master bus obligingly carries it: OTT and DUST both compress, which lifts it further.
+     *
+     * Both pools ramp, and each ramp sits where that pool's audio is already fully formed — after the
+     * instrument's filter and above the reverb/delay send tap — so the tails are fed a signal that
+     * fades rather than one that stops mid-cycle and rings the click on for seconds.
+     *
+     * ⚠️ The ramp is finished by the AUDIO thread: this call only arms it, so the voices are still
+     * sounding when it returns. Anything that must be silent immediately wants stopAll().
+     */
+    void stopAllRamped();
 
     // Platform hook: the audio shell installs a callback that restarts the output stream if the
     // platform paused it (Oboe today; ALSA/SDL on Linux). The Kotlin path called
@@ -984,6 +1005,11 @@ private:
     // getCurrentFrame() JNI — atomic (relaxed) makes that formally race-free at zero cost on arm64
     // and keeps the planned Linux port correct on unknown hardware.
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
+
+    // The frame the transport-stop ramp is over at, or −1 when no stop is in flight. Armed by
+    // stopAllRamped() (UI thread), consumed by processAudioBlock, which is where the reason it has
+    // to exist at all is written down.
+    std::atomic<int64_t> stopRampEndFrame{-1};
 
     // Session entropy mixed into per-note RNG seeds (RND/DRNK LFO). Reseeded from the wall
     // clock at construction and at every resetFrameCounter() (= offline-render start): seeds
