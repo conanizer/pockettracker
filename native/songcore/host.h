@@ -452,7 +452,9 @@ class SongcoreHost {
     MediaLoadResult load_media(const std::string& baseDir) {
         lastMediaLoad_ = MediaLoadResult();
         if (!engine_) return lastMediaLoad_;
-        lastMediaLoad_ = load_project_media(*engine_, project_, baseDir, appRoot_, routing_);
+        mediaRoots_.baseDir = baseDir;
+        lastMediaLoad_ =
+            load_project_media(*engine_, project_, baseDir, mediaRoots_.appRoot, routing_);
         return lastMediaLoad_;
     }
 
@@ -477,7 +479,7 @@ class SongcoreHost {
      * ⚠️ Leave it UNSET and every load behaves exactly as before — which is precisely what the host tools
      * do, so their goldens do not move. Only a caller that sets it gets the relocation.
      */
-    void set_app_root(std::string root) { appRoot_ = std::move(root); }
+    void set_app_root(std::string root) { mediaRoots_.appRoot = std::move(root); }
 
     // ── ↓ the LIVE param push (engine_setup.h) ───────────────────────────────────────────────────
     //
@@ -618,20 +620,23 @@ class SongcoreHost {
     // is loaded — and they read the FILE's index, so they also answer for a bank too large to load.
     int sf_preset_count(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
-        return soundfont_preset_count(*engine_, project_.instruments[static_cast<size_t>(id)]);
+        return soundfont_preset_count(*engine_, project_.instruments[static_cast<size_t>(id)],
+                                      mediaRoots_);
     }
     int sf_preset_index(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
-        return soundfont_preset_index(*engine_, project_.instruments[static_cast<size_t>(id)]);
+        return soundfont_preset_index(*engine_, project_.instruments[static_cast<size_t>(id)],
+                                      mediaRoots_);
     }
     std::string sf_preset_name(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return "---";
-        return soundfont_preset_name(*engine_, project_.instruments[static_cast<size_t>(id)]);
+        return soundfont_preset_name(*engine_, project_.instruments[static_cast<size_t>(id)],
+                                     mediaRoots_);
     }
     void set_sf_preset_by_index(int id, int index) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
         songcore::set_soundfont_preset_by_index(*engine_, project_.instruments[static_cast<size_t>(id)],
-                                                index);
+                                                index, mediaRoots_);
     }
 
     /**
@@ -643,7 +648,7 @@ class SongcoreHost {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
         const int was = routing_.sfSlot[id];
         songcore::sync_instrument_soundfont(*engine_, project_.instruments[static_cast<size_t>(id)],
-                                            routing_);
+                                            routing_, mediaRoots_);
         if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
     }
 
@@ -655,7 +660,7 @@ class SongcoreHost {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return true;
         const int was = routing_.sfSlot[id];
         const bool taken = songcore::request_instrument_soundfont(
-            *engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+            *engine_, project_.instruments[static_cast<size_t>(id)], routing_, mediaRoots_);
         // An already-resident preset is answered on the spot rather than by the worker, and that
         // answer moves the slot here instead of in poll_sf_load.
         if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
@@ -665,7 +670,7 @@ class SongcoreHost {
     /** Install a finished background preset load. Called once a frame by the feed. */
     void poll_sf_load() {
         if (!engine_) return;
-        if (songcore::collect_instrument_soundfont(*engine_, project_, routing_) >= 0)
+        if (songcore::collect_instrument_soundfont(*engine_, project_, routing_, mediaRoots_) >= 0)
             notify_sf_slot_moved();
     }
 
@@ -844,7 +849,7 @@ class SongcoreHost {
         if (j.is_discarded() || !j.is_object()) return false;
 
         const InstrumentPreset ip = parse_instrument_preset(j);
-        const bool sourceOk = apply_instrument_preset(engine_, project_, id, ip, routing_);
+        const bool sourceOk = apply_instrument_preset(engine_, project_, id, ip, routing_, mediaRoots_);
         invalidate_tables();   // the preset may have brought a table with it
         push_instrument(id);
         return sourceOk;
@@ -1384,7 +1389,7 @@ class SongcoreHost {
     void resync_soundfont_slots() {
         if (!engine_) return;
         for (const Instrument& ins : project_.instruments)
-            songcore::sync_instrument_soundfont(*engine_, ins, routing_);
+            songcore::sync_instrument_soundfont(*engine_, ins, routing_, mediaRoots_);
     }
 
     /**
@@ -1492,7 +1497,8 @@ class SongcoreHost {
 
     Project project_ = make_default_project();
     std::string projectSha_ = "-";
-    std::string appRoot_;   // set_app_root(); "" ⇒ no media re-rooting (the tools' default)
+    // set_app_root() plus the last load_media(); both empty ⇒ no resolving at all (the tools' default)
+    MediaRoots mediaRoots_;
     Routing routing_;
 
     /**

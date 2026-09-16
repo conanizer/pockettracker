@@ -173,7 +173,7 @@ inline bool path_is_absolute(const std::string& path) {
 // the Project's stored string is NOT rewritten, so a re-save stays portable back to the phone.
 //
 // ⭐ app_root EMPTY ⇒ the whole exception is skipped ⇒ byte-for-byte the old two-line behaviour. Every
-// host TOOL leaves it empty (SongcoreHost::appRoot_ defaults to ""), which is why not one golden moves;
+// host TOOL leaves it empty (SongcoreHost::mediaRoots_ defaults to ""), which is why not one golden moves;
 // only the SDL shell, which calls set_app_root() at boot, ever re-roots.
 inline std::string resolve_media_path(const std::string& path, const std::string& base_dir,
                                       const std::string& app_root) {
@@ -192,6 +192,17 @@ inline std::string resolve_media_path(const std::string& path, const std::string
     // path already exists exactly, so goldens/tools — whose paths match the disk — are byte-for-byte
     // unchanged; it only ever lists a directory on a real miss.
     return resolve_case_insensitive(resolved);
+}
+
+// The two folders a stored media path resolves against, carried together so that every caller
+// resolves the same way. Both empty ⇒ paths are used exactly as written.
+struct MediaRoots {
+    std::string baseDir;   // the project file's folder — a relative path joins onto it
+    std::string appRoot;   // this install's app folder — where a foreign absolute path is re-rooted
+};
+
+inline std::string resolve_media_path(const std::string& path, const MediaRoots& roots) {
+    return resolve_media_path(path, roots.baseDir, roots.appRoot);
 }
 
 }  // namespace songcore

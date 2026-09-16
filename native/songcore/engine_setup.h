@@ -116,9 +116,9 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
             engine.setEqBand(slot, band, b.type, b.freq, b.gain, b.q);
         }
     }
-    engine.setReverbAlgo(project.reverbAlgo);
     engine.setReverbParams(project.reverbFeedback, project.reverbDamp, project.reverbWet,
-                           project.reverbDecay, project.reverbDensity);
+                           project.reverbSize);
+    engine.setReverbAlgo(project.reverbAlgo);
     engine.setReverbCharacter(project.reverbPreDelay, project.reverbWidth, project.reverbMod);
     engine.setReverbInputEq(project.reverbInputEq);
     engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
@@ -374,22 +374,35 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
 // loaded, and for banks far too large to load at all. Reading the file's index is a few kilobytes and
 // touches no sample data; the engine caches it by path.
 
+/**
+ * The instrument's SoundFont spelled so it opens on THIS install — empty when it has none.
+ *
+ * ⚠️ **Every engine call below goes through this; none may use `ins.soundfontPath` directly.** The
+ * document keeps the path as written, which off another install names nothing here — and the resolved
+ * spelling is also what the loader put in the engine's slots, so it is what a slot compare needs.
+ */
+inline std::string instrument_soundfont_path(const Instrument& ins, const MediaRoots& roots) {
+    if (!ins.soundfontPath.has_value()) return std::string();
+    return resolve_media_path(*ins.soundfontPath, roots);
+}
+
 /** How many presets the instrument's SoundFont file contains, or 0 when it has none. */
 template <typename Engine>
-int soundfont_preset_count(Engine& engine, const Instrument& ins) {
-    if (!ins.soundfontPath.has_value()) return 0;
-    return engine.getSoundfontFilePresetCount(ins.soundfontPath->c_str());
+int soundfont_preset_count(Engine& engine, const Instrument& ins, const MediaRoots& roots) {
+    const std::string path = instrument_soundfont_path(ins, roots);
+    if (path.empty()) return 0;
+    return engine.getSoundfontFilePresetCount(path.c_str());
 }
 
 /** The list INDEX of the instrument's current bank+preset, or 0 when not found. */
 template <typename Engine>
-int soundfont_preset_index(Engine& engine, const Instrument& ins) {
-    if (!ins.soundfontPath.has_value()) return 0;
-    const char* path = ins.soundfontPath->c_str();
-    const int count = engine.getSoundfontFilePresetCount(path);
+int soundfont_preset_index(Engine& engine, const Instrument& ins, const MediaRoots& roots) {
+    const std::string path = instrument_soundfont_path(ins, roots);
+    if (path.empty()) return 0;
+    const int count = engine.getSoundfontFilePresetCount(path.c_str());
     for (int i = 0; i < count; ++i) {
         int bank = -1, preset = -1;
-        if (!engine.getSoundfontFilePresetAt(path, i, &bank, &preset)) continue;
+        if (!engine.getSoundfontFilePresetAt(path.c_str(), i, &bank, &preset)) continue;
         if (bank == ins.sfBank && preset == ins.sfPreset) return i;
     }
     return 0;
@@ -397,9 +410,10 @@ int soundfont_preset_index(Engine& engine, const Instrument& ins) {
 
 /** The display name of the instrument's current preset — "---" when there is no SoundFont. */
 template <typename Engine>
-std::string soundfont_preset_name(Engine& engine, const Instrument& ins) {
-    if (!ins.soundfontPath.has_value()) return "---";
-    return engine.getSoundfontFilePresetName(ins.soundfontPath->c_str(), ins.sfBank, ins.sfPreset);
+std::string soundfont_preset_name(Engine& engine, const Instrument& ins, const MediaRoots& roots) {
+    const std::string path = instrument_soundfont_path(ins, roots);
+    if (path.empty()) return "---";
+    return engine.getSoundfontFilePresetName(path.c_str(), ins.sfBank, ins.sfPreset);
 }
 
 /**
@@ -410,10 +424,12 @@ std::string soundfont_preset_name(Engine& engine, const Instrument& ins) {
  * moving — see its note on why the two are separate.
  */
 template <typename Engine>
-bool set_soundfont_preset_by_index(Engine& engine, Instrument& ins, int index) {
-    if (!ins.soundfontPath.has_value()) return false;
+bool set_soundfont_preset_by_index(Engine& engine, Instrument& ins, int index,
+                                   const MediaRoots& roots) {
+    const std::string path = instrument_soundfont_path(ins, roots);
+    if (path.empty()) return false;
     int bank = -1, preset = -1;
-    if (!engine.getSoundfontFilePresetAt(ins.soundfontPath->c_str(), index, &bank, &preset) || bank < 0)
+    if (!engine.getSoundfontFilePresetAt(path.c_str(), index, &bank, &preset) || bank < 0)
         return false;
     ins.sfBank   = bank;
     ins.sfPreset = preset;
@@ -473,9 +489,12 @@ void release_unreferenced_soundfonts(Engine& engine, const Routing& routing) {
  * have orphaned the preset this instrument was on a moment ago.
  */
 template <typename Engine>
-bool sync_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& routing) {
-    if (ins.instrumentType != InstrumentType::SOUNDFONT || !ins.soundfontPath.has_value()) return false;
-    const char* path = ins.soundfontPath->c_str();
+bool sync_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& routing,
+                               const MediaRoots& roots) {
+    if (ins.instrumentType != InstrumentType::SOUNDFONT) return false;
+    const std::string resolved = instrument_soundfont_path(ins, roots);
+    if (resolved.empty()) return false;
+    const char* path = resolved.c_str();
     if (engine.soundfontSlotHolds(routing.sfSlot[ins.id], path, ins.sfBank, ins.sfPreset)) return true;
 
     const int slot = engine.loadSoundfont(ins.id, path, ins.sfBank, ins.sfPreset);
@@ -502,9 +521,12 @@ bool sync_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& r
  * queued, deliberately: by the time a queue was consulted the row would have moved on again.
  */
 template <typename Engine>
-bool request_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& routing) {
-    if (ins.instrumentType != InstrumentType::SOUNDFONT || !ins.soundfontPath.has_value()) return true;
-    const char* path = ins.soundfontPath->c_str();
+bool request_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& routing,
+                                  const MediaRoots& roots) {
+    if (ins.instrumentType != InstrumentType::SOUNDFONT) return true;
+    const std::string resolved = instrument_soundfont_path(ins, roots);
+    if (resolved.empty()) return true;
+    const char* path = resolved.c_str();
     if (engine.soundfontSlotHolds(routing.sfSlot[ins.id], path, ins.sfBank, ins.sfPreset)) return true;
 
     int ready = -1;
@@ -526,7 +548,8 @@ bool request_instrument_soundfont(Engine& engine, const Instrument& ins, Routing
  * holds the transport, so only the caller can shorten that.
  */
 template <typename Engine>
-int collect_instrument_soundfont(Engine& engine, const Project& project, Routing& routing) {
+int collect_instrument_soundfont(Engine& engine, const Project& project, Routing& routing,
+                                 const MediaRoots& roots) {
     int id = -1, slot = -1;
     if (!engine.collectSoundfontLoad(&id, &slot)) return -1;
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return -1;
@@ -536,10 +559,10 @@ int collect_instrument_soundfont(Engine& engine, const Project& project, Routing
     // is left unrouted, and the sweep below reclaims it. Routing a stale answer would put the
     // instrument back on a preset the user has already scrolled past.
     const Instrument& ins = project.instruments[static_cast<size_t>(id)];
+    const std::string resolved = instrument_soundfont_path(ins, roots);
     bool moved = false;
-    if (slot >= 0 && ins.instrumentType == InstrumentType::SOUNDFONT &&
-        ins.soundfontPath.has_value() &&
-        engine.soundfontSlotHolds(slot, ins.soundfontPath->c_str(), ins.sfBank, ins.sfPreset)) {
+    if (slot >= 0 && ins.instrumentType == InstrumentType::SOUNDFONT && !resolved.empty() &&
+        engine.soundfontSlotHolds(slot, resolved.c_str(), ins.sfBank, ins.sfPreset)) {
         moved = routing.sfSlot[id] != slot;
         routing.sfSlot[id] = slot;
     }
@@ -768,7 +791,7 @@ bool load_instrument_soundfont(Engine* engine, Project& project, int id, const s
  */
 template <typename Engine>
 bool apply_instrument_preset(Engine* engine, Project& project, int id, const InstrumentPreset& preset,
-                             Routing& routing) {
+                             Routing& routing, const MediaRoots& roots) {
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return false;
 
     Instrument&       dst = project.instruments[static_cast<size_t>(id)];
@@ -790,7 +813,9 @@ bool apply_instrument_preset(Engine* engine, Project& project, int id, const Ins
 
     if (src.instrumentType == InstrumentType::SOUNDFONT) {
         if (!src.soundfontPath.has_value()) return true;   // params-only preset
-        if (!load_instrument_soundfont(engine, project, id, *src.soundfontPath, routing)) return false;
+        // A .pti authored on another install names its .sf2 under THAT install's root.
+        const std::string sfPath = resolve_media_path(*src.soundfontPath, roots);
+        if (!load_instrument_soundfont(engine, project, id, sfPath, routing)) return false;
 
         // load_instrument_soundfont selected the file's FIRST preset. The one the .pti saved wins —
         // but only if this file still has it: a preset validated against a different .sf2 (or an .sf2
@@ -798,11 +823,11 @@ bool apply_instrument_preset(Engine* engine, Project& project, int id, const Ins
         // behaviour and the recoverable one.
         Instrument& ins = project.instruments[static_cast<size_t>(id)];
         if (engine && ins.soundfontPath.has_value() &&
-            engine->getSoundfontFilePresetName(ins.soundfontPath->c_str(), src.sfBank, src.sfPreset) != "---") {
+            engine->getSoundfontFilePresetName(sfPath.c_str(), src.sfBank, src.sfPreset) != "---") {
             ins.sfBank   = src.sfBank;
             ins.sfPreset = src.sfPreset;
             // the first preset is loaded; this is not it, and the sweep inside drops the one that was
-            sync_instrument_soundfont(*engine, ins, routing);
+            sync_instrument_soundfont(*engine, ins, routing, roots);
         }
         return true;
     }
