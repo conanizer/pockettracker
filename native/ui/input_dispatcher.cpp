@@ -2524,7 +2524,12 @@ void InputDispatcher::reset_editing_context() {
     s_.cursorRow = 0; s_.cursorColumn = 1;
     s_.songScrollPosition = 0;
     s_.instrumentCursorRow = 0; s_.instrumentCursorColumn = 1;
+    // ⚠️ BOTH halves of the mixer cursor, and the row is not optional. Resetting the column alone left
+    // the pair at (OTT, track 0) or (LIM, track 0) — rows that exist only in the master strip, over a
+    // column that has no such row. Nothing draws highlighted there and no edit dispatches: load a
+    // project with the cursor down the master strip and the mixer came back with no cursor on it.
     s_.mixerCursorColumn = 0;
+    s_.mixerMasterRow    = 0;
     s_.effectsCursorRow  = 0;
     s_.tableCursorRow = 0; s_.tableCursorColumn = 1;
     s_.grooveCursorRow = 0;
@@ -2537,9 +2542,9 @@ void InputDispatcher::reset_editing_context() {
     s_.chainCursorRow = 0;  s_.chainCursorColumn = 1;
     s_.phraseCursorRow = 0; s_.phraseCursorColumn = 1;
 
-    // ⚠️ NOT mixerMasterRow, NOT the SETTINGS cursor, NOT poolCursorColumn: Kotlin leaves all three
-    // alone (the pool's ROW is currentInstrument, which IS reset above). Match the quirk exactly —
-    // ptdispatch §32 pins the negatives too.
+    // ⚠️ NOT the SETTINGS cursor and NOT poolCursorColumn: both persist, and both survive it — the
+    // pool's ROW is currentInstrument, which IS reset above, and SETTINGS has a visibility guard of
+    // its own on entry. The mixer ROW is reset with its column because those two are one address.
     s_.selection = Selection{};
 
     // ⚠️ …AND UNDER NAV = SONG THE THREE REMEMBER SLOTS ABOVE ARE THE POINTER, so "reset to 0" aims it

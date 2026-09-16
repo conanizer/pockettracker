@@ -355,6 +355,17 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
         s.settingsCursorColumn = 1;
     }
 
+    // ⚠️ THE SAME BOUNDS CHECK FOR THE MIXER, and for the same reason: its two ints describe a grid
+    // that is not rectangular, so a pair carried in under REMEMBER can name a cell the screen does not
+    // draw — no cursor anywhere, and A+DPAD editing nothing. Row 0 is the one row that exists in every
+    // column, so a lost cursor comes back on the fader above where it was rather than at the far left.
+    if (r.screen == ScreenType::MIXER && !mixer_cell_exists(s.mixerMasterRow, s.mixerCursorColumn)) {
+        s.mixerMasterRow    = 0;
+        s.mixerCursorColumn = (s.mixerCursorColumn >= 0 && s.mixerCursorColumn <= 8)
+                                  ? s.mixerCursorColumn
+                                  : 0;
+    }
+
     // SONG's viewport must contain its cursor, whichever branch above set it.
     if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.cursorRow);
 

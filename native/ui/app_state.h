@@ -616,6 +616,23 @@ inline bool full_screen_module(const AppState& s) {
 }
 
 /**
+ * Is (row, column) a cell the MIXER actually draws?
+ *
+ * ⚠️ The mixer cursor is two INDEPENDENT ints over a grid that is not rectangular — rows 2 and 3 exist
+ * only in the master strip, and row 1 only under REV, DEL and the master. Every other pair draws
+ * nothing at all: no cell is highlighted, the module answers `cc::none()`, and the cursor is simply
+ * GONE until the user walks it back. The D-pad table (ui/cursor_move.h) can only ever step from one
+ * real cell to another — but anything that writes ONE of the two ints on its own can land between
+ * them, which is why the question is asked here rather than trusted to each such site.
+ */
+inline bool mixer_cell_exists(int row, int column) {
+    if (column < 0 || column > 8) return false;
+    if (row == 0) return true;                   // eight track faders + the master fader
+    if (row == 1) return column == 0 || column == 1 || column == 8;   // REV, DEL, master EQ
+    return (row == 2 || row == 3) && column == 8;                     // OTT|DUST and LIM
+}
+
+/**
  * SONG shows 16 of its 256 rows; keep `cursorRow` inside that window. `scrollSongToRow` in Kotlin.
  *
  * Lives here rather than beside the cursor table because three unrelated things move the song row —
