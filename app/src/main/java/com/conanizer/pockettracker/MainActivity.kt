@@ -2,6 +2,7 @@ package com.conanizer.pockettracker
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -356,9 +357,38 @@ class MainActivity : SDLActivity() {
     @Keep
     fun setLandscapeAllowed(allowed: Boolean) {
         runOnUiThread {
+            val view = window.decorView
+            view.removeCallbacks(portraitCheck)
             requestedOrientation =
                 if (allowed) ActivityInfo.SCREEN_ORIENTATION_FULL_USER
                 else         ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            if (!allowed) view.postDelayed(portraitCheck, ORIENTATION_SETTLE_MS)
+        }
+    }
+
+    /**
+     * ⚠️⚠️ **A DEVICE THAT IGNORES THE PORTRAIT REQUEST LEAVES THE APP UNABLE TO WAKE UP, so the
+     * request is checked and handed back when it did not take.** Asking for an orientation is a
+     * request, not a setting: a landscape-only handheld panel — and any ROM that ignores orientation
+     * requests outright — simply stays landscape. Nothing looks wrong at the time, and the damage
+     * lands at the *next* resume: `SDLSurface.surfaceChanged` refuses a surface whose shape disagrees
+     * with a portrait request ("Skip .. Surface is not ready"), nothing ever retries it, and
+     * `SDLActivity.handleNativeState` therefore never calls `nativeResume` — the SDL thread stays
+     * parked in its pause semaphore and the screen is black until the app is relaunched.
+     *
+     * So: if the configuration is still landscape once a rotation would have finished, the device
+     * refused, and rotation goes back to what SDL hands a resizable window. The on-screen buttons are
+     * unaffected — the layout gate owns those; only the permission to rotate is given up.
+     *
+     * ⚠️ `Log.w`, not `Log.i`: `proguard-rules.pro` strips `v`/`d`/`i` from release, which is exactly
+     * the build this runs in.
+     */
+    private val portraitCheck = Runnable {
+        if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT &&
+            resources.configuration.orientation != Configuration.ORIENTATION_PORTRAIT) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            Log.w(TAG, "portrait request refused by this device - rotation handed back, " +
+                       "or SDL would refuse the next surface and the app could not wake")
         }
     }
 
@@ -770,6 +800,10 @@ class MainActivity : SDLActivity() {
 
     private companion object {
         const val TAG = "PocketTrackerSDL"
+
+        /** How long a rotation the device DID accept has to complete, before [portraitCheck] reads
+         *  the configuration back and concludes it was refused. */
+        const val ORIENTATION_SETTLE_MS = 2000L
 
         /**
          * Bump this when a later phase has new keys to migrate, and add an arm for them.

@@ -1315,7 +1315,18 @@ int run(const AppConfig& cfg) {
                        (e.type == SDL_WINDOWEVENT &&
                         (e.window.event == SDL_WINDOWEVENT_EXPOSED ||
                          e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-                         e.window.event == SDL_WINDOWEVENT_RESIZED))) {
+                         e.window.event == SDL_WINDOWEVENT_RESIZED ||
+                         e.window.event == SDL_WINDOWEVENT_SHOWN ||
+                         e.window.event == SDL_WINDOWEVENT_RESTORED ||
+                         e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED))) {
+                // ⚠️ **A SCREEN THAT WENT OFF AND CAME BACK IS NOT ALWAYS A BACKGROUND/FOREGROUND
+                // PAIR.** A short sleep can blank the panel while Android leaves the activity running:
+                // no pause, no re-expose, no resize — the only thing SDL delivers is the focus going
+                // away and coming back. The window is blank and the canvas is unchanged, which is the
+                // one combination the pixel gate below reads as "already on screen", so the screen
+                // stays black until an edit or a cursor move happens to change a pixel. Focus, SHOWN
+                // and RESTORED join the list for that: each costs one forced present, on an event
+                // that arrives when a human is looking at the screen anyway.
                 // ⚠️ **A ROTATION IS A SURFACE SWAP, AND ON A PORTRAIT-NATIVE PHONE THE FIRST ONE
                 // HAPPENS AT BOOT.** The window opens in the device's portrait, then SDL requests
                 // SENSOR_LANDSCAPE (windowed=false) and Android rotates — replacing the SurfaceView's
