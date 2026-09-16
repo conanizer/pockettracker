@@ -15,7 +15,12 @@
 // SDL shell redraws at 60 Hz, so counting its draws would expire the hold in 0.75 s and make the
 // meters fall visibly faster than Android's. `peaksVersion` is what closes that gap: the feed bumps it
 // once per 60 ms poll (ui/engine_feed.h), and the hold only steps when it moves. Same constants, same
-// wall-clock behaviour, on both platforms — see the note on `advance` in the .cpp.
+// wall-clock behaviour, on both platforms — see the note on `steps` in the .cpp.
+//
+// ⚠️ It steps as far as the version MOVED, not once per draw that finds it moved. The feed bumps it by
+// every 60 ms slot that went by, including slots spent on another screen where neither this draw nor
+// that poll was running, so a marker caught mid-fall resumes at the clock's position rather than the
+// one it was parked at.
 //
 // The CURSOR here is (mixerMasterRow, cursorColumn) and it is not a grid — see ui/cursor_move.h:
 //   row 0: cols 0..7 = track volumes, col 8 = master MIX
@@ -105,7 +110,7 @@ private:
 
     void draw_stereo_meter(Canvas& c, int x, int y, int h, float level_l, float level_r,
                            bool is_selected, bool is_muted, const Theme& t, int peak_idx_l,
-                           int peak_idx_r, bool advance);
+                           int peak_idx_r, unsigned steps);
     void draw_segmented_bar(Canvas& c, int x, int y, int h, int bar_h_px, const Theme& t) const;
     void draw_peak_marker(Canvas& c, int x, int y, int h, int peak_idx, const Theme& t) const;
     void update_peak(int idx, int level_px, bool is_muted);

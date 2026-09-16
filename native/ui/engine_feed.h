@@ -286,20 +286,42 @@ private:
      * The manual decay is the mirror of `decayWaveform`: with the transport stopped the audio callback
      * is not running, so nothing is decaying the peaks and the meters would freeze mid-level at the
      * moment of the stop.
+     *
+     * ⚠️ **One step per poll SLOT that has gone by, not one per poll.** Both halves of a meter's fall —
+     * the engine's level and the module's marker — only move when this runs, and this only runs on the
+     * MIXER. A fall caught part-way by leaving the screen would otherwise resume from where it parked,
+     * however long ago that was, so the meters stood frozen until the user came back and then started
+     * falling again. Replaying the missed slots lands them where the clock says they should be, and
+     * costs nothing while away.
      */
     void poll_peaks(AudioEngine& engine, AppState& state, long long now_ms) {
+        // Stamped on EVERY screen, before the gate: the audio callback writes the peaks itself, so they
+        // are only ever stale while the transport is stopped. Without this, a stretch of playback spent
+        // on another screen would be replayed as decay on the way back.
+        if (state.isPlaying) peaksLiveMs_ = now_ms;
+
         if (state.currentScreen != ScreenType::MIXER) return;
-        if (peaksPolledMs_ != 0 && now_ms - peaksPolledMs_ < PEAK_POLL_MS) return;
-        peaksPolledMs_ = now_ms;
+
+        const bool first = (peaksPolledMs_ == 0);
+        if (!first && now_ms - peaksPolledMs_ < PEAK_POLL_MS) return;
+
+        // How long the meters have stood un-advanced: since the last poll, or since the transport last
+        // wrote them, whichever is LATER. Under a running transport that is zero, so a spell of playback
+        // on another screen replays as the single slot it owes and not as its whole length.
+        const long long stale = now_ms - std::max(peaksPolledMs_, peaksLiveMs_);
+        peaksPolledMs_        = now_ms;
+
+        long long steps = (first || stale < PEAK_POLL_MS) ? 1 : stale / PEAK_POLL_MS;
+        if (steps > PEAK_CATCHUP_SLOTS) steps = PEAK_CATCHUP_SLOTS;
 
         if (!state.isPlaying) {
-            engine.decayPeaks();
+            for (long long i = 0; i < steps; ++i) engine.decayPeaks();
             engine.decayWaveform();
         }
         engine.getTrackPeaks(state.trackPeaks);
         engine.getMasterPeaks(state.masterPeaks);
         engine.getSendPeaks(state.sendPeaks);
-        state.peaksVersion++;
+        state.peaksVersion += static_cast<unsigned>(steps);
     }
 
     /**
@@ -529,6 +551,16 @@ private:
     /** Kotlin's `delay(60)` between peak reads. See poll_peaks — it is a contract, not a throttle. */
     static constexpr long long PEAK_POLL_MS = 60;
     long long                  peaksPolledMs_ = 0;
+
+    /**
+     * The most slots one catch-up replays — 6 s, past the point where both halves of a fall have
+     * reached zero (the engine's peaks scale by 0.92 a slot; a marker holds 45 slots and then steps
+     * 5 px a slot down a 200 px meter). A longer absence has nothing left to replay.
+     */
+    static constexpr long long PEAK_CATCHUP_SLOTS = 100;
+
+    /** When the transport last wrote the peaks itself. Stamped on every screen. */
+    long long peaksLiveMs_ = 0;
 
     /**
      * The EQ editor's spectrum: Kotlin's `delay(50)`, and its 620 bins.
