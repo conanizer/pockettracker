@@ -33,7 +33,14 @@ struct MasterChain {
         masterEq.reset(sampleRate);
     }
 
+    // ⚠️ IDEMPOTENT ON PURPOSE — a re-push of the SAME fx must not touch the chain. `push_mixer`
+    // sends this line on every mute, every solo and every fader nudge (every 100 ms while a volume
+    // key repeats), so a reset here lands mid-signal: cleared biquads, a cleared wow/drift delay
+    // line, the compressor's envelope back at silence and its makeup gain snapped to 1. That is a
+    // click per gesture, and only DUST has the state for it — OTT is untouched by this call either
+    // way, which is exactly the asymmetry that was heard.
     void setMasterFx(int fx) {
+        if (fx == masterFx) return;
         masterFx = fx;
         if (fx == 1) {
             dust.reset();
