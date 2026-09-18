@@ -388,7 +388,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         // FILE arm falls back to, so no reachable case changes.
         Argb textColor = t.textValue;
         if (isCursor) {
-            textColor = t.textCursor;
+            textColor = cursor_cell_ink(t);
         } else {
             switch (item.kind) {
                 case BrowserItem::Kind::PARENT: textColor = COLOR_PARENT; break;
@@ -401,7 +401,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
             }
         }
 
-        if (isCursor) c.draw_text(">", x + 10, rowY + TEXT_PADDING, t.textCursor, CHAR_SPACING, FONT_SCALE);
+        if (isCursor) c.draw_text(">", x + 10, rowY + TEXT_PADDING, cursor_cell_ink(t), CHAR_SPACING, FONT_SCALE);
 
         // ⚠️ **20 is the FILE limit and it exists because of the size column at x+370** — a granted
         // tree has no size and no date, so nothing is under it to run into, and clipping one at 20 cut

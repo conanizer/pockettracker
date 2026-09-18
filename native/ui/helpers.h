@@ -130,7 +130,7 @@ inline constexpr int MODAL_BORDER = 3;
  * dim: it COVERS the editor outright. So the box's own chrome is here and the screen's is not.
  */
 inline void draw_modal_box(Canvas& c, int x, int y, int boxW, int boxH, const Theme& t) {
-    c.fill_rect(x, y, boxW, boxH, t.meterBackground);
+    c.fill_rect(x, y, boxW, boxH, t.background);
     // Ring 0 is the line the box has always had, on its own rect; the rest step outward one at a time.
     for (int r = 0; r < MODAL_BORDER; ++r)
         c.stroke_rect(x - r, y - r, boxW + 2 * r, boxH + 2 * r, t.textTitle);
@@ -158,13 +158,39 @@ inline Argb row_bg_color(int index, const Theme& t) {
     return (index % 4 == 0) ? t.rowEvery4th : t.background;
 }
 
+// ─── The two cursor inks ─────────────────────────────────────────────────────────────────────────
+//
+// ⚠️⚠️ "THE CURSOR COLOUR" IS TWO DIFFERENT ROLES AND THEY TAKE OPPOSITE COLOURS. Both are named here
+// so a new screen picks one deliberately instead of reaching for whichever it remembers:
+//
+//   * `cursor_cell_ink` — text that sits INSIDE the cursor's bar. The bar is `rowCursor`, so the ink
+//     is `background`: the cell inverts, which is what makes a cursor readable at a glance on a grid
+//     of identical cells.
+//   * `cursor_mark_ink` — text that says WHICH row or column the cursor is in, with no bar behind it.
+//     A row number, a column heading, the label of the row the cursor is on. `rowCursor` itself, on
+//     the plain ground — the same colour as the bar, so one accent says "you are here" everywhere.
+//
+// ⚠️ NEITHER IS A ROW OF THE THEME EDITOR, and that is the point. They used to be one row (TXT CURSOR)
+// which could be set to anything, including a colour invisible on its own bar. Reading them off the
+// ground beside them means the pair cannot disagree — and it leaves `rowCursor` as the single accent a
+// palette dials to move every cursor in the app at once.
+
+/** Text inside the cursor's bar. See above. */
+inline Argb cursor_cell_ink(const Theme& t) { return t.background; }
+
+/** Text marking the cursor's row or column, with no bar behind it. See above. */
+inline Argb cursor_mark_ink(const Theme& t) { return t.rowCursor; }
+
+/** Text inside a selected cell — `rowSelection` is the bar, `rowEvery4th` reads on it. */
+inline Argb selection_cell_ink(const Theme& t) { return t.rowEvery4th; }
+
 /**
  * A grid's column header, which is how the cursor says WHICH COLUMN now that it no longer paints a
  * whole row. `lo`..`hi` is a range because an FX header stands over two cursor columns: a name and
  * its value are one column to the reader and two to the cursor.
  */
 inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
-    return (cursor_column >= lo && cursor_column <= hi) ? t.textCursor : t.textParam;
+    return (cursor_column >= lo && cursor_column <= hi) ? cursor_mark_ink(t) : t.textParam;
 }
 
 // ─── The playback marker ─────────────────────────────────────────────────────────────────────────
@@ -196,11 +222,11 @@ inline bool blink_on(int phase_ms, bool fast) {
 
 // ─── Cells ───────────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ A CURSOR IS `rowCursor` BEHIND AND `textCursor` IN FRONT, EVERYWHERE, AND NEITHER IS DERIVED
-// FROM THE OTHER. A shade mixed out of `textCursor` looks like a reasonable highlight and reads as
-// one, but it answers to no row of the theme editor: a user who sets ROW CURS sees every grid in the
-// app change and that one cell not. It is the same trap `eqFill` was in (theme.h) — a colour with no
-// key of its own. Two theme rows exist for this; a cell that wants to stand out uses them.
+// ⚠️ A CURSOR IS `rowCursor` BEHIND AND `background` IN FRONT, EVERYWHERE — `cursor_cell_ink` above,
+// and a cell that wants to stand out uses the pair rather than mixing a shade of its own. A shade
+// mixed out of the accent looks like a reasonable highlight and reads as one, but it answers to no row
+// of the theme editor: a user who sets ROW CURSOR sees every grid in the app change and that one cell
+// not. It is the same trap `eqFill` was in (theme.h) — a colour with no key of its own.
 
 /**
  * A grid row's cells, painted left to right, with the standard colour priority per cell:
@@ -212,8 +238,10 @@ inline bool blink_on(int phase_ms, bool fast) {
  * ⚠️ AND THE SELECTION OUTRANKS THE CURSOR IN THE BACKGROUND WHILE LOSING TO IT IN THE TEXT. That is
  * not a contradiction: the cursor is always inside the selection it is dragging, so a cursor
  * background would punch a hole in the one region the screen is trying to show as a block. The
- * region stays one unbroken colour and the cursor says where its edge is with its INK alone — which
- * means `rowCursor` is a colour seen only when no selection is up.
+ * region stays one unbroken colour and the cursor says where its edge is with its INK alone. ⚠️ WHICH
+ * IS WHY THE TWO INKS ARE A SHADE APART RATHER THAN OPPOSITES: inside a selection the cursor's cell is
+ * the one cell reading `background` where its neighbours read `rowEvery4th`, and that difference has
+ * to be visible without breaking the block up.
  *
  * ⚠️ AND A SELECTION IS ONE BLOCK, WHICH IS WHY THIS IS AN OBJECT AND NOT A FREE FUNCTION. The
  * gutter between two columns belongs to neither cell, and its width is not something a call site
@@ -255,8 +283,8 @@ class RowCells {
         // cell then opens a fresh block at its own edge instead of reaching back across it.
         selectedRight_ = is_selected ? right : -1;
 
-        const Argb color = is_cursor     ? t_.textCursor
-                           : is_selected ? t_.textSelection
+        const Argb color = is_cursor     ? cursor_cell_ink(t_)
+                           : is_selected ? selection_cell_ink(t_)
                            : is_empty    ? t_.textEmpty
                                          : value_color;
         c_.draw_text(text, x, textY_, color, CHAR_SPACING, FONT_SCALE);
@@ -281,8 +309,8 @@ inline void draw_cell(Canvas& c, const std::string& text, int x, int text_y, boo
  * cell's RESTING colour (a value, a button, a name), which the cursor's own ink replaces.
  *
  * ⚠️ These screens carry "which row" on the row's LABEL rather than on a row number: the label takes
- * `textCursor` while the cursor is anywhere on its row, and it is not a cell — no fill — unless the
- * cursor can actually land on it.
+ * `cursor_mark_ink` while the cursor is anywhere on its row, and it is not a cell — no fill — unless
+ * the cursor can actually land on it.
  */
 inline void draw_cursor_cell(Canvas& c, const std::string& text, int x, int text_y, bool is_cursor,
                              Argb color, const Theme& t) {
@@ -308,12 +336,12 @@ inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool i
         c.fill_rect(value_x - CHAR_SPACING, text_y - TEXT_PADDING, w, ROW_HEIGHT, t.rowCursor);
     }
 
-    const Argb value_color   = is_cursor      ? t.textCursor
+    const Argb value_color   = is_cursor      ? cursor_cell_ink(t)
                                : (eq_slot < 0) ? t.textEmpty
                                                : t.textValue;
     c.draw_text(eq_str, value_x, text_y, value_color, CHAR_SPACING, FONT_SCALE);
     if (show_arrow) {
-        c.draw_text(">", value_x + 2 * CHAR_W, text_y, is_cursor ? t.textCursor : t.textValue,
+        c.draw_text(">", value_x + 2 * CHAR_W, text_y, is_cursor ? cursor_cell_ink(t) : t.textValue,
                     CHAR_SPACING, FONT_SCALE);
     }
 }

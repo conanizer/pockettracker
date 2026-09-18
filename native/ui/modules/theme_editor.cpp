@@ -48,12 +48,11 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
     };
 
     // One rule for every value on a row, and it is worth naming once rather than writing eleven times:
-    // the cursor's own CHANNEL is `textCursor`, the other channels of the cursor's ROW are `textValue`
-    // (so you can read the colour you are dialling), and every row you are not on is `textParam`.
-    const auto value_color = [&](bool on_row, int channel) {
-        if (on_row && es.cursorChannel == channel) return t.textCursor;
-        if (on_row)                                return t.textValue;
-        return t.textParam;
+    // the other channels of the cursor's ROW are `textValue` (so you can read the colour you are
+    // dialling) and every row you are not on is `textParam`. ⚠️ The cursor's OWN channel is not a case
+    // here — it is a cell, and a cell's ink comes from the painter, which inverts it against the bar.
+    const auto value_color = [&](bool on_row, int /*channel*/) {
+        return on_row ? t.textValue : t.textParam;
     };
     const auto on_cell = [&](bool on_row, int channel) {
         return on_row && es.cursorChannel == channel;
@@ -66,7 +65,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int  ty     = ry + TEXT_PADDING;
 
         c.draw_text("THEME", x + NAME_COL_X, ty,
-                    on_row ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
         // ⚠️ CLIPPED, and the budget is the gap to SAVE's column. A name is user-typed and unbounded;
         // unclipped it does not merely spill off the panel, it paints over SAVE and LOAD — the two
@@ -94,7 +93,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         const int            ty     = ry + TEXT_PADDING;
 
         c.draw_text(row.label, x + NAME_COL_X, ty,
-                    on_row ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
         const int r = static_cast<int>((color >> 16) & 0xFF);
         const int g = static_cast<int>((color >> 8) & 0xFF);

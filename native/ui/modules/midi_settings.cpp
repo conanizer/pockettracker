@@ -107,7 +107,7 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
 
     const auto row_of = [&](MidiRow row, const char* name, const std::string& value) {
         c.draw_text(name, labelX, rowY(row) + TEXT_PADDING,
-                    on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value, valueX, rowY(row) + TEXT_PADDING, on_row(row), t.textValue, t);
     };
 
@@ -164,7 +164,7 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
                         CHAR_SPACING, FONT_SCALE);
         }
 
-        c.draw_text("IN CH", labelX, mapY + TEXT_PADDING, onMap ? t.textCursor : t.textParam,
+        c.draw_text("IN CH", labelX, mapY + TEXT_PADDING, onMap ? cursor_mark_ink(t) : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
 
         for (int i = 0; i < tracks; ++i) {

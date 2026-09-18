@@ -107,7 +107,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
         const std::string value = s.sfPresetName.empty() ? num : num + " " + s.sfPresetName;
 
         const bool onRow = (s.cursorRow == currentRow);
-        c.draw_text("PATCH", nameX, rowY + TEXT_PADDING, onRow ? t.textCursor : t.textParam,
+        c.draw_text("PATCH", nameX, rowY + TEXT_PADDING, onRow ? cursor_mark_ink(t) : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value, valueX, rowY + TEXT_PADDING, onRow, t.textValue, t);
         rowY += ROW_HEIGHT; currentRow++;
@@ -254,7 +254,7 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
 // ─── Draw helpers ────────────────────────────────────────────────────────────────────────────────
 
 // ⚠️ NO ROW BACKGROUND ANYWHERE ON THIS SCREEN. The cursor is the CELL it is on, as it is on every
-// grid; what says WHICH ROW is the label beside it, which takes `textCursor` while the cursor is
+// grid; what says WHICH ROW is the label beside it, which takes `cursor_mark_ink` while the cursor is
 // anywhere along its row. A label is only a CELL — only filled — where the cursor can land on it.
 
 void InstrumentEditorModule::draw_parameter_row(Canvas& c, int y, int name_x, int value_x,
@@ -265,7 +265,7 @@ void InstrumentEditorModule::draw_parameter_row(Canvas& c, int y, int name_x, in
     const bool onRow = cursor_on_name || cursor_on_value;
 
     draw_cursor_cell(c, name, name_x, textY, cursor_on_name,
-                     onRow ? t.textCursor : t.textParam, t);
+                     onRow ? cursor_mark_ink(t) : t.textParam, t);
     draw_cursor_cell(c, value, value_x, textY, cursor_on_value, t.textValue, t);
 }
 
@@ -283,9 +283,9 @@ void InstrumentEditorModule::draw_dual_row(Canvas& c, int y, int name_x, int val
     const bool c1 = onRow && cursor_column == 1;
     const bool c3 = onRow && cursor_column == 3;
 
-    c.draw_text(n1, name_x, textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n1, name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v1, value_x, textY, c1, t.textValue, t);
-    c.draw_text(n2, name2X, textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n2, name2X, textY, c3 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v2, value2X, textY, c3, t.textValue, t);
 }
 
@@ -302,11 +302,11 @@ void InstrumentEditorModule::draw_triple_row(Canvas& c, int x, int y, int name_x
     const bool c3 = onRow && cursor_column == 3;
     const bool c5 = onRow && cursor_column == 5;
 
-    c.draw_text(n1, name_x,        textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n1, name_x,        textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v1, x + TRIPLE_V1, textY, c1, t.textValue, t);
-    c.draw_text(n2, x + TRIPLE_N2, textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n2, x + TRIPLE_N2, textY, c3 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v2, x + TRIPLE_V2, textY, c3, t.textValue, t);
-    c.draw_text(n3, x + TRIPLE_N3, textY, c5 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n3, x + TRIPLE_N3, textY, c5 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v3, x + TRIPLE_V3, textY, c5, t.textValue, t);
 }
 
@@ -335,7 +335,7 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     // TYPE's value sits under the ROOT/VOL column; the source LOAD and EDIT are the two buttons to its
     // right. LOAD and EDIT are BUTTONS — `textValue` even unselected, because a dim label would read as
     // a parameter name rather than as something you can press.
-    c.draw_text("TYPE", name_x, textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("TYPE", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, typeText, x + TYPE_VALUE, textY, c1, t.textValue, t);
 
     // ⚠️ Both buttons are drawn only where they DO something, and `instrument_row_layout.h` caps the
@@ -357,7 +357,7 @@ void InstrumentEditorModule::draw_name_row(Canvas& c, int y, int name_x, int val
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (s.cursorRow == this_row);
 
-    c.draw_text("NAME", name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("NAME", name_x, textY, onRow ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
     // "______" until a sample or SF2 is loaded (or the user names the slot) — the auto-generated
     // "INSTxx" is treated as "unset", never shown. songcore::instrument_has_default_name is the single
@@ -380,7 +380,7 @@ void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, in
     // The INSTRUMENT PRESET row: SAVE (col 2) and LOAD (col 3) a .pti. Named "INST PRESET" so it is not
     // confused with the source LOAD on the TYPE row above, nor the SoundFont PATCH selector below it.
     // SAVE and LOAD line up under the TYPE row's LOAD and EDIT (BTN_COL2 / BTN_COL3).
-    c.draw_text("INST PRESET", name_x, textY, onRow ? t.textCursor : t.textParam, CHAR_SPACING,
+    c.draw_text("INST PRESET", name_x, textY, onRow ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                 FONT_SCALE);
     draw_cursor_cell(c, "SAVE", x + BTN_COL2, textY, onRow && cursor_column == 2, t.textValue, t);
     draw_cursor_cell(c, "LOAD", x + BTN_COL3, textY, onRow && cursor_column == 3, t.textValue, t);
@@ -396,7 +396,7 @@ void InstrumentEditorModule::draw_eq_row(Canvas& c, int y, int name_x, int value
     const bool c1 = onRow && cursor_column == 1;
     const bool c3 = onRow && cursor_column == 3;
 
-    c.draw_text("EQ", name_x, textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("EQ", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     // The shared painter, so this cell cannot drift from the pool's or the mixer's: "--" when
     // unassigned, and a trailing ">" that says the cell opens the EQ editor.
     draw_eq_cell(c, value_x, textY, eq_slot, c1, t);
@@ -405,7 +405,7 @@ void InstrumentEditorModule::draw_eq_row(Canvas& c, int y, int name_x, int value
     // slices to put beside the EQ and the row stays a SINGLE. The offsets are `draw_dual_row`'s, so
     // the pair that IS drawn lands where every other second column on the screen does.
     if (n2.empty()) return;
-    c.draw_text(n2, name_x + 230, textY, c3 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(n2, name_x + 230, textY, c3 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v2, value_x + 220, textY, c3, t.textValue, t);
 }
 

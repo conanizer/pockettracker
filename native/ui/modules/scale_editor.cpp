@@ -92,7 +92,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     const int keyY = nameY + ROW_HEIGHT;
 
     const bool keyCursor = (s.cursorRow == SCALE_KEY_ROW);
-    c.draw_text("KEY", labelX, keyY, keyCursor ? t.textCursor : t.textParam, CHAR_SPACING,
+    c.draw_text("KEY", labelX, keyY, keyCursor ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                 FONT_SCALE);
     // In the VALUE column, not beside its label: the label is three characters wide and the note
     // column starts inside it. Every parameter screen in the app puts a value here anyway.
@@ -104,7 +104,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
     const int columnHeaderY = keyY + ROW_HEIGHT + 14;
-    c.draw_text("EN", valueX, columnHeaderY, t.textCursor, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("EN", valueX, columnHeaderY, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
 
     // ── The twelve degrees ───────────────────────────────────────────────────────────────────────
     const int dataStartY = columnHeaderY + ROW_HEIGHT;
@@ -130,7 +130,7 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
         // The row number is the DEGREE (0-B), the same gutter every grid draws; the note name beside
         // it is what that degree sounds like in the current key, and it moves when the key does.
         draw_cell(c, hex1(degree), labelX, rowY, /*is_cursor=*/false, /*is_selected=*/false,
-                  /*is_empty=*/false, isCursor ? t.textCursor : t.textEmpty, t);
+                  /*is_empty=*/false, isCursor ? cursor_mark_ink(t) : t.textEmpty, t);
 
         // An out-of-scale note is drawn dim on its own row too, so the screen reads as the set of
         // notes you can play rather than as twelve switches.

@@ -83,7 +83,7 @@ void InstrumentPoolModule::draw_row(Canvas& c, int x, int rowY, int slot, const 
 
     // The slot number is this table's row-number gutter: it lights across the whole selected row, and
     // it is what says which row while the cursor itself covers one cell of it.
-    c.draw_text(hex2(slot), x + ID_X, textY, selected ? t.textCursor : t.textParam, CHAR_SPACING,
+    c.draw_text(hex2(slot), x + ID_X, textY, selected ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                 FONT_SCALE);
 
     // An unnamed slot draws a dim underscore run the full width of the name column, so an empty pool

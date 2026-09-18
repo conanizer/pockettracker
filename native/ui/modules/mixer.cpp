@@ -165,9 +165,9 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     // The two headers are these cells' LABELS — they sit above rather than beside, but they do the
     // same job the label does on every other screen: say which of the two the cursor is on.
     c.draw_text("REV", revCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y,
-                revSendSel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                revSendSel ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     c.draw_text("DEL", delCX - (3 * CHAR_W) / 2, y + SEND_HEADER_Y,
-                delSendSel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                delSendSel ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
     draw_cursor_cell(c, hex2(p.reverbWet), revCX - (2 * CHAR_W) / 2, y + SEND_VALUE_Y, revSendSel,
                      revAudible ? t.textValue : t.textEmpty, t);
@@ -191,14 +191,14 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     // that is what says the master strip is the one being edited, and it is a different question from
     // which of its four rows the cursor is down on.
     const auto master_row = [&](const char* label, int row_y, const std::string& value, bool sel) {
-        c.draw_text(label, x + MSTR_LABEL_X, y + row_y, sel ? t.textCursor : t.textParam,
+        c.draw_text(label, x + MSTR_LABEL_X, y + row_y, sel ? cursor_mark_ink(t) : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value, x + MSTR_VALUE_X, y + row_y, sel, t.textValue, t);
     };
 
     master_row("MIX", MROW0_Y, hex2(p.masterVolume), mixSel);
 
-    c.draw_text("EQ", x + MSTR_LABEL_X, y + MROW1_Y, eqSel ? t.textCursor : t.textParam,
+    c.draw_text("EQ", x + MSTR_LABEL_X, y + MROW1_Y, eqSel ? cursor_mark_ink(t) : t.textParam,
                 CHAR_SPACING, FONT_SCALE);
     draw_eq_cell(c, x + MSTR_VALUE_X, y + MROW1_Y, p.masterEqSlot, eqSel, t);
 
@@ -209,7 +209,7 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
 void MixerModule::draw_stereo_meter(Canvas& c, int x, int y, int h, float level_l, float level_r,
                                     bool is_selected, bool is_muted, const Theme& t, int peak_idx_l,
                                     int peak_idx_r, unsigned steps) {
-    const Argb border = is_selected ? t.textCursor : t.meterBorder;
+    const Argb border = is_selected ? t.rowCursor : t.meterBorder;
     const int  rX     = x + BAR_W + BAR_SEP;
 
     // One border around the pair (both bars + the gutter between them), then each channel's trough.

@@ -260,9 +260,13 @@ Both keyboard and gamepad work simultaneously.
 
 #### Help on SELECT
 
-Tap **SELECT** and the visualizer strip at the top of the screen becomes three lines describing the cell the cursor is on. Any other button puts it away.
+Tap **SELECT** for help on the cell the cursor is on. **SETTINGS → HELP** chooses what you get:
 
-The panel uses the theme's **VIZ BG** and **VIZ WAVE** colours. It is not available on the file browser or the sample editor — both of those use the whole screen and have no visualizer strip.
+- **SHORT** — the visualizer strip at the top of the screen becomes three lines describing the cell. Tap **SELECT** again, or press any other button, to put it away. On the sample editor it appears in place of the waveform. The file browser has no room for it, so there it shows nothing.
+- **FULL** — a help screen over everything: the same text, and a longer description where one has been written. Any button closes it, and that press does nothing else.
+- **OFF** — **SELECT** shows no help.
+
+The strip uses the theme's **VIZ BG** and **VIZ WAVE** colours.
 
 ---
 
@@ -370,7 +374,7 @@ Works on the SONG and MIXER screens, while playing or stopped.
 | R + B | Mute / unmute the channel under the cursor |
 | R + A | Solo / unsolo it |
 | R + B or R + A over a selection | Applies to every track the selection covers |
-| L + R | Restore full playback on all tracks |
+| L + R | Restore full playback — every track and both send returns |
 
 The sound stops the instant you press, notes already ringing included.
 
@@ -720,8 +724,9 @@ The waveform fills the top portion of the screen. A playback cursor shows the cu
 |---|---|
 | R + UP/DOWN | Zoom in / out, from any row |
 | A + LEFT/RIGHT | Zoom in / out (cursor on the ZOOM cell) |
-| D-pad LEFT/RIGHT | Scroll the view (when zoomed in) |
 | START | Preview current sample (respects SOURCE mode) |
+
+Zoomed in, the view centres on the marker the cursor is on, and follows the playback cursor when the audio would leave the view.
 
 ### Selection
 
@@ -729,8 +734,9 @@ Move the selection start and end markers to define a region for operations.
 
 | Input | Action |
 |---|---|
-| D-pad (on start/end marker row) | Move the active marker |
-| A + UP/DOWN | Jump marker by large step |
+| A + LEFT/RIGHT (on START or END) | Move that marker by a fine step |
+| A + UP/DOWN | Move it by a coarse step |
+| A + B | Put it back at the start / end of the sample |
 
 A moved marker lands on the nearest **zero crossing** — the quietest place to cut, so a loop or a crop does not click. LEFT and RIGHT search their own channel, MONO the downmix, and STEREO looks for a frame where **both** channels are quiet.
 
@@ -752,8 +758,10 @@ These modify the waveform in memory (UNDO is available after each operation).
 |---|---|
 | CROP | Trim sample to current selection. |
 | COPY | Copy selection to clipboard. |
-| CUT | Copy selection to clipboard and silence it. |
+| CUT | Copy selection to clipboard and remove it — the sample gets shorter. |
+| DUPL | Copy the selection and add it on to the end of the sample. |
 | PASTE | Insert clipboard at selection start. |
+| DEL | Remove the selection without copying it. |
 | NORMALIZE | Scale amplitude so peak = 0 dBFS. |
 | FADE IN | Apply a linear fade-in over the selection. |
 | FADE OUT | Apply a linear fade-out over the selection. |
@@ -1112,16 +1120,16 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 
 | Dest | Affects |
 |---|---|
-| VOLUME | Amplitude |
+| VOL | Amplitude |
 | PAN | Stereo position |
 | PITCH | Pitch in semitones |
 | FINE | Fine pitch (same range as PITCH) |
-| CUTOFF | Filter cutoff |
+| CUT | Filter cutoff |
 | RES | Filter resonance |
-| SMPSTRT | Sample start point |
-| MOD AMT | Depth of the next mod slot |
-| MOD RATE | Speed of the next mod slot |
-| MOD BOTH | Both depth and speed of the next mod slot |
+| STA | Sample start point |
+| MOD A | Depth of the next mod slot |
+| MOD R | Speed of the next mod slot |
+| MOD B | Both depth and speed of the next mod slot |
 
 ### Layout
 
@@ -1136,22 +1144,24 @@ The screen shows two mod slots side by side (MOD1+MOD2, then MOD3+MOD4).
 **LFO parameters:** TYPE, DEST, AMT, OSC, TRIG (trigger mode), FREQ
 
 **LFO trigger modes:**
-- FREE — phase never resets
-- RETRIG — phase resets to 0 on each new note
+- FREE — runs on its own clock and never restarts
+- RETG — starts the wave over on each new note
+- HOLD — takes one value from the clock when the note starts and keeps it for the whole note
+- ONCE — starts over on each new note, plays one cycle and stops there
 
-**LFO shapes:** TRI, SIN, RMP+, RMP−, EXP+, EXP−, SQU+, SQU−, RANDOM, DRUNK
+**LFO shapes:** TRI, SIN, RMP+, RMP−, EXP+, EXP−, SQU+, SQU−, RND (jumps between random values), DRK (wanders)
 
 ### Mod-to-mod routing
 
-When DEST is **MOD AMT**, **MOD RATE**, or **MOD BOTH**, the slot modulates the next slot (circular: slot 4 → slot 1).
+When DEST is **MOD A**, **MOD R**, or **MOD B**, the slot modulates the next slot (circular: slot 4 → slot 1).
 
-Example: MOD1 (LFO) with DEST=MOD AMT targeting MOD2 (AHD) — the LFO rhythmically swells the envelope depth.
+Example: MOD1 (LFO) with DEST=MOD A targeting MOD2 (AHD) — the LFO rhythmically swells the envelope depth.
 
 > [!TIP]
 > Mod-to-mod routing is **circular** — slot 4 targets slot 1. Plan your slot order before setting up complex chains: the modulator should always be a lower-numbered slot than its target, except for the wraparound case.
 
 > [!TIP]
-> **LFO RETRIG** mode resets the phase on every new note, giving a predictable and consistent modulation shape on each hit. Use **FREE** only when you want the LFO to drift independently of your notes — useful for slow pad movement but unpredictable on drums.
+> **LFO RETG** mode resets the phase on every new note, giving a predictable and consistent modulation shape on each hit. Use **FREE** only when you want the LFO to drift independently of your notes — useful for slow pad movement but unpredictable on drums.
 
 ### Controls
 
@@ -1168,26 +1178,32 @@ Example: MOD1 (LFO) with DEST=MOD AMT targeting MOD2 (AHD) — the LFO rhythmica
 
 ## 16. MIXER Screen
 
-The MIXER screen shows all 8 tracks plus a master column with real-time dBFS peak meters. This is where you balance levels, control reverb/delay return volumes, and open per-track EQs.
+The MIXER screen shows all 8 tracks, the two effect returns and the master strip, each with a real-time dBFS peak meter. This is where you balance levels, set how loud the reverb and delay come back, and shape the whole mix.
 
 Navigate here: **R+DOWN** from any Row 2 screen.
 
 ```
-  T0   T1   T2   T3   T4   T5   T6   T7   MST
-  ██   ██   ██   ██   --   --   --   --   ██
-  ██   ██   ██   --                       REV ██
-  ██   --   --                            DEL ██
-  80   80   80   80   80   80   80   80   80
+  T1   T2   T3   T4   T5   T6   T7   T8   MASTER
+  ██   ██   ██   ██   ██   ██   ██   ██    ██
+  FF   FF   FF   FF   FF   FF   FF   FF
+
+  REV  DEL                          MIX  FF
+  ██   ██                           EQ   --
+  80   80                           OTT  00
+                                    LIM  00
 ```
 
-Each track column shows a peak meter and a volume value (`00`–`FF`, `80` = 0 dB / unity).
+Each track strip shows a peak meter and a volume value (`00`–`FF`, `FF` = full level).
 
-The **master column** has two additional rows above the volume:
-- **REV** — return gain for the reverb send bus (`00`–`FF`)
-- **DEL** — return gain for the delay send bus (`00`–`FF`)
+Under the tracks:
+- **REV** and **DEL** — how loud the reverb and delay returns come back into the mix (`00`–`FF`)
+- **MIX** — the master volume
+- **EQ** — the master EQ slot; press A to open the EQ EDITOR
+- **OTT** / **DUST** — depth of the master bus effect chosen on the EFFECTS screen
+- **LIM** — how hard the mix is pushed into the final limiter (`00` = no push)
 
-The master volume is applied to everything below it — the eight tracks **and** the reverb and delay
-returns — so pulling MST down takes the tails with it.
+The master volume is applied to everything — the eight tracks **and** the reverb and delay
+returns — so pulling MIX down takes the tails with it.
 
 Both kinds of fader can also be moved from a phrase while the song plays: `VTR` writes the fader of the
 track it is on, `VMV` writes the master (§21), and `AUS`/`AUF` fade either of them smoothly. The numbers
@@ -1199,8 +1215,8 @@ faders back there.
 | Value | Level |
 |---|---|
 | `00` | Silent |
-| `80` | Unity (0 dB) |
-| `FF` | Maximum (+6 dB) |
+| `80` | About half (−6 dB) |
+| `FF` | Full level (0 dB) — where every fader starts |
 
 ### Meter zones
 
@@ -1216,14 +1232,14 @@ The master column also has stereo send peak meters showing REV and DEL bus level
 > Red meters mean the master limiter is working hard. The output won't clip, but heavy limiting can colour the sound. Lower individual track volumes to give the limiter more headroom.
 
 > [!TIP]
-> Start all tracks at `80` (unity), balance them by ear, then bring the master down if needed. It's easier to level-match tracks at unity than to compensate after boosting everything.
+> Every fader starts at `FF`, which is full level — a fader can only turn a track down, never boost it. Balance by pulling the louder tracks down rather than looking for more on the quiet ones.
 
 ### Controls
 
 | Input | Action |
 |---|---|
 | D-pad LEFT/RIGHT | Select track / column |
-| D-pad UP/DOWN | Move between rows (track volume, or REV/DEL/VOL in master) |
+| D-pad UP/DOWN | Move between rows (track faders, REV/DEL, MIX/EQ/OTT/LIM) |
 | A + LEFT/RIGHT | Increase / decrease value by 1 |
 | A + UP/DOWN | Increase / decrease value by 16 |
 | A (on the master EQ cell) | Open EQ EDITOR. A + LEFT/RIGHT picks the EQ slot. |
@@ -1316,13 +1332,12 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 
 | Type | Description |
 |---|---|
-| PEAK | Boost or cut at FREQ with width Q |
-| LOW SHELF | Shelving EQ below FREQ |
-| HIGH SHELF | Shelving EQ above FREQ |
-| LP | Low-pass filter at FREQ |
-| HP | High-pass filter at FREQ |
-| NOTCH | Notch (band-reject) at FREQ |
 | OFF | Bypass this band |
+| LOSHELF | Lift or cut everything below FREQ |
+| LOWCUT | Remove everything below FREQ (high-pass) |
+| BELL | Lift or cut around FREQ, as wide as Q |
+| HISHELF | Lift or cut everything above FREQ |
+| HICUT | Remove everything above FREQ (low-pass) |
 
 ### Controls
 
@@ -1395,6 +1410,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 26). |
 | NOTE PREV | ON / OFF | On the PHRASE screen, play the note under the cursor for as long as you hold **A** — when you insert it, change it with A + D-pad, or just hold A on it. Not in selection mode. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
+| HELP | OFF / SHORT / FULL | What a tap of **SELECT** shows: nothing, three lines in the visualizer strip, or a full help screen (see §5.2, *Help on SELECT*). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 | ABXY | AUTO / XBOX / NINTENDO | Which face button your controller has **printed** A. Appears only while a controller is attached. **AUTO** trusts the controller and is right for a handheld's built-in pad and for a real Switch pad. Use **NINTENDO** if A is the right-hand button but the app reads it as B - common with 8BitDo pads in XInput mode, which report themselves as Xbox controllers. **XBOX** = A is the bottom button. Keyboard keys are never affected. |
@@ -1440,22 +1456,20 @@ The top row lets you cycle through built-in themes and save or load custom theme
 
 Move between positions with D-pad LEFT/RIGHT.
 
-### Rows 1–22 — Color parameters
+### Rows 1–19 — Color parameters
 
 Each row edits one color in the theme. The color preview swatch is shown on the right. Cursor moves between **R**, **G**, **B** channels with D-pad LEFT/RIGHT.
 
 | Label | What it colors |
 |---|---|
-| BACKGROUND | Module fill and default row background |
-| ROW 4TH | Beat-accent rows (every 4th step) |
-| ROW CURSOR | The cell the cursor is on in a grid (SONG, CHAIN, PHRASE, TABLE, GROOVE); the whole row on list screens such as SETTINGS |
+| BACKGROUND | Module fill and default row background; also the text inside the cursor's block |
+| ROW 4TH | Beat-accent rows (every 4th step); also the text inside a selected cell |
+| ROW CURSOR | The palette's accent. The block behind the cell the cursor is on (or the whole row on list screens such as SETTINGS), every row number and column heading that marks where the cursor is, the EQ EDITOR's response curve, and the frame around a selected mixer meter |
 | ROW SELECT | The selected cells during copy/paste |
 | TXT TITLE | Screen header text (e.g., "PHRASE", "INSTRUMENT") |
 | TXT PARAM | Inactive parameter labels |
 | TXT VALUE | Inactive parameter values |
-| TXT CURSOR | Text under the cursor, and the row number and column heading that mark where it is |
 | TXT EMPTY | Empty / placeholder cells |
-| TXT SELECT | Text in the selected cells |
 | TXT PLAY | The `>` playback marker |
 | VIZ BG | Visualizer background |
 | VIZ LINE | Visualizer center line |
@@ -1464,12 +1478,11 @@ Each row edits one color in the theme. The color preview swatch is shown on the 
 | MTR LOW | Meter green zone (below −6 dBFS) |
 | MTR MID | Meter yellow zone (−6 to 0 dBFS) |
 | MTR HIGH | Meter red zone (≥ 0 dBFS) |
-| EQ BG | EQ EDITOR spectrum panel background |
 | EQ FILL | Shading under the EQ EDITOR's spectrum curve |
-| EQ BORDER | The EQ EDITOR's spectrum curve itself |
+| EQ BORDER | The EQ EDITOR's spectrum outline and its 0 dB line |
 | EQ TXT | Frequency labels on the EQ EDITOR's spectrum |
 
-A theme file saved before these rows existed loads with them set to what the screen drew previously — the EQ rows from the theme's own colors, TXT SELECT from VIZ WAVE, TXT PLAY from the marker color that theme already showed — so an older `.ptt` looks unchanged until you edit them.
+ROW CURSOR and ROW SELECT are the two blocks text is read *against*, so pick them bright enough for BACKGROUND and ROW 4TH to show up on them. A theme file saved by an older version still loads, and keeps every color it named; the three rows that are no longer listed are simply not drawn any more.
 
 ### Controls
 
@@ -2594,9 +2607,8 @@ exports and sample-editor saves keep their own folders.
 |---|---|
 | R + UP / DOWN | Zoom in / out, from any row |
 | A + LEFT / RIGHT | Zoom in / out (cursor on the ZOOM cell) |
-| D-pad LEFT / RIGHT | Scroll (when zoomed) |
-| D-pad (on marker row) | Move selection marker |
-| A + D-pad (on slice position) | Move the boundary — UP/DOWN fine, LEFT/RIGHT coarse |
+| A + D-pad (on START / END) | Move the selection marker — LEFT/RIGHT fine, UP/DOWN coarse |
+| A + D-pad (on slice position) | Move the boundary — LEFT/RIGHT fine, UP/DOWN coarse |
 | A + B (on slice row) | Delete the boundary (MANUAL), or reset it (TRANSIENT / DIVIDE) |
 | A (on slice row, while playing) | Cut a boundary at the playhead (MANUAL) |
 | A (on EQ-effect slot) | Open EQ EDITOR |
@@ -2746,7 +2758,7 @@ Note offsets:  C   C#  D   D#  E   F   F#  G   G#  A   A#  B
 ```
 
 - **Middle C** = `C-4` = MIDI 60
-- **VOL/PAN center** = `80` (unity / center pan)
+- **Full volume** = `FF` · **PAN center** = `80`
 - **+1 octave** = +12 semitones = `0C`
 - **+1 perfect fifth** = +7 semitones = `07`
 

@@ -302,7 +302,7 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     const int    vy     = y + HEADER_H + ROW_H;
     const int    bottom = VIS_H;  // panel-relative
 
-    c.fill_rect(x, vy, WIDTH, VIS_H, t.eqBg);
+    c.fill_rect(x, vy, WIDTH, VIS_H, t.background);
 
     // ── The spectrum, one sample per pixel column ────────────────────────────────────────────────
     // Log-mapped bins come out of the engine already, so bin → pixel is a straight rescale. Fewer than
@@ -336,10 +336,15 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
 
     // ── The dB grid ─────────────────────────────────────────────────────────────────────────────
     // Axis-aligned, so a "line" here is simply a 1px (or 2px, at 0 dB) rect.
+    //
+    // ⚠️ 0 dB TAKES THE SAME COLOUR AS THE SPECTRUM OUTLINE, ON PURPOSE — the two are the panel's
+    // reference marks and the response curve is the reading, so the reading must never be mistaken for
+    // a reference. They were told apart by width alone, and 2px of one blue against 2px of another is
+    // not telling them apart.
     const int dbLevels[] = {-12, -6, 0, 6, 12};
     for (int db : dbLevels) {
         const int  lineY = db_to_pixel(static_cast<float>(db));
-        const Argb col   = (db == 0) ? t.vizCenterLine : t.rowEvery4th;
+        const Argb col   = (db == 0) ? t.eqBorder : t.rowEvery4th;
         c.fill_rect(x, vy + lineY, WIDTH, (db == 0) ? 2 : 1, col);
     }
 
@@ -380,7 +385,10 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
 
         int curveY[WIDTH];
         for (int xi = 0; xi < WIDTH; ++xi) curveY[xi] = db_to_pixel(curveCacheDb_[xi]);
-        stroke_column_curve(c, x, vy, curveY, WIDTH, t.textCursor, 2);
+        // ⚠️ THE PALETTE'S ACCENT, AND THICKER THAN EVERY REFERENCE MARK ON THE PANEL. It is the one
+        // thing on this screen the user is editing, and it crosses the 0 dB line and the spectrum
+        // outline constantly — both of which it has to stay legible ON TOP OF, not merely beside.
+        stroke_column_curve(c, x, vy, curveY, WIDTH, t.rowCursor, 3);
     }
 
     c.fill_rect(x, vy + VIS_H, WIDTH, 1, t.vizCenterLine);  // separator
@@ -414,15 +422,14 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
         // The cursor is ONE cell — the band × parameter it is on. The parameter label says which row
         // and the band header above says which column, which is the pair every grid uses; the row the
         // D-pad sweeps along is still readable, because the two bands the cursor is not on print
-        // `textEmpty` while the whole cursor row's label prints `textCursor`.
-        c.draw_text(kParamLabels[pi], x + 6, rowY + 3, isParSel ? t.textCursor : t.textEmpty,
+        // `textEmpty` while the whole cursor row's label prints `cursor_mark_ink`.
+        c.draw_text(kParamLabels[pi], x + 6, rowY + 3, isParSel ? cursor_mark_ink(t) : t.textEmpty,
                     CHAR_SPACING, FONT_SCALE);
 
         for (int bi = 0; bi < 3; ++bi) {
             const bool isCursor = (bi == curBand && isParSel);
-            const Argb col      = isCursor      ? t.textCursor
-                                  : (bi == curBand) ? t.textValue
-                                                    : t.textEmpty;
+            // The cursor's own cell is not a case: the painter inverts its ink against the bar.
+            const Argb col      = (bi == curBand) ? t.textValue : t.textEmpty;
 
             std::string text = "--";
             if (haveSlot) {

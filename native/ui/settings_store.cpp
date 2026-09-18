@@ -76,6 +76,9 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.metronomeEnabled   = get_bool(j, "metronome", values.metronomeEnabled);
     values.metronomeVolume    = clamp(get_int(j, "metronomeVolume", values.metronomeVolume), 0, 255);
 
+    // HELP — OFF / SHORT / FULL. Absent → SHORT, which is what SELECT already did.
+    values.helpMode           = clamp(get_int(j, "help", values.helpMode), 0, 2);
+
     // ── MIDI (B4.3) — the CABLE's half. The song's half is in the .ptp. ──────────────────────────
     //
     // ⚠️ THE DEVICE IS A NAME AND NOT AN INDEX, and MIDI is the case that rule exists for: a port list
@@ -197,6 +200,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["touchButtonsWithPad"] = values.touchButtonsWithPad; // LAYOUT s FULL / PORTRAIT under a pad
     j["metronome"]          = values.metronomeEnabled;     // the METRONOME row - the click and its VOL
     j["metronomeVolume"]    = values.metronomeVolume;
+    j["help"]               = values.helpMode;             // the HELP row - 0 OFF, 1 SHORT, 2 FULL
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);

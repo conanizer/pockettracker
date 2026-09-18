@@ -35,6 +35,11 @@ bool editor_overlay_up(const AppState& s) {
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
     draw_frame(c, s);
 
+    // The full help overlay covers everything, on every screen — here rather than with the other modals
+    // at the end of `draw_frame` for the load strip's reason below: the FILE BROWSER returns early from
+    // that function, and the browser is the one screen that has no other help.
+    if (s.helpFull && s.project) helpOverlay_.draw(c, help_topic(s), s.theme);
+
     // ⚠️⚠️ **OUTSIDE `draw_frame`, AND THAT IS THE WHOLE POINT.** The file browser and the sample
     // editor return from the MIDDLE of that function, and those two screens are where every load the
     // user starts begins — a load drawn at the end of the frame is skipped by an early return that has

@@ -113,7 +113,7 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
 
             if (isCursor) c.fill_rect(cellX, cellY, CELL_W, ROW_HEIGHT, t.rowCursor);
 
-            const Argb color = isCursor                     ? t.textCursor
+            const Argb color = isCursor                     ? cursor_cell_ink(t)
                                : (code == songcore::FX_NONE) ? t.textEmpty
                                                              : t.textValue;
             const int nameX = cellX + (CELL_W - run_advance(3)) / 2;

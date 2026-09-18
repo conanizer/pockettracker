@@ -53,6 +53,7 @@ namespace pt::ui {
  * 14 NAV         POOL / SONG                        (what B+D-pad walks: the 00..FF pool, or the song)
  * 15 ABXY        AUTO / XBOX / NINTENDO             (which face button is PRINTED A; only with a pad)
  * 16 METRONOME   ON / OFF, + VOL                    (a click on every quarter note while playing)
+ * 17 HELP        OFF / SHORT / FULL                 (what SELECT shows: nothing, the panel, the overlay)
  */
 enum class SettingsRow {
     LAYOUT     = 0,
@@ -87,9 +88,12 @@ enum class SettingsRow {
     // has a metronome - but it DRAWS with the device cluster, which is a position and not an
     // identity; SETTINGS_DISPLAY_ORDER is where that is said.
     METRONOME  = 16,
+    // APPENDED like the rows above it. It DRAWS under VISUALIZER — the compact help stands in the
+    // visualizer's box — and that is a position; SETTINGS_DISPLAY_ORDER says it.
+    HELP       = 17,
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 17;
+inline constexpr int SETTINGS_ROW_COUNT = 18;
 
 // ─── Display / navigation order ──────────────────────────────────────────────────────────────────
 //
@@ -106,7 +110,8 @@ inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::METRONOME,
     SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
     SettingsRow::FOLDER,    SettingsRow::NOTE_PREV,
-    SettingsRow::VISUALIZER, SettingsRow::THEME,    SettingsRow::TEMPLATE,
+    SettingsRow::VISUALIZER, SettingsRow::HELP,     SettingsRow::THEME,
+    SettingsRow::TEMPLATE,
     SettingsRow::RESUME,    SettingsRow::TRACE,
 };
 

@@ -99,7 +99,7 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
     // cursor row — that is what now says which row is being edited — and column 0 is a real cursor
     // position, so it goes through the painter and gets the cell background when the cursor is on it.
     cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false,
-               (index == s.cursorRow) ? t.textCursor : t.textEmpty);
+               (index == s.cursorRow) ? cursor_mark_ink(t) : t.textEmpty);
 
     // Transpose is always shown — 0x00 is "no transpose", drawn dim, but it is still a value.
     cells.cell(hex2(row.transpose), transposeX, cur(1), sel(1),

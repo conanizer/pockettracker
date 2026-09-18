@@ -72,7 +72,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
     // It still lights on the cursor row, though — with the row no longer painted, the row number is
     // the only thing saying which of 256 rows is being edited.
     c.draw_text(hex2(absolute_row), stepX, textY,
-                (absolute_row == s.cursorRow) ? t.textCursor
+                (absolute_row == s.cursorRow) ? cursor_mark_ink(t)
                 : (absolute_row % 4 == 0)     ? t.textParam
                                               : t.textEmpty,
                 CHAR_SPACING, FONT_SCALE);

@@ -131,7 +131,7 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
         const int  ry    = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx    = x + LABEL_X[effects_cell_pos(row).column];
         const bool sel   = (s.cursorRow == row);
-        c.draw_text(name, lx, ry, sel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text(name, lx, ry, sel ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, text, lx + VALUE_GAP, ry, sel, t.textValue, t);
     };
 
@@ -140,7 +140,7 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
         const int  ry  = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx  = x + LABEL_X[effects_cell_pos(row).column];
         const bool sel = (s.cursorRow == row);
-        c.draw_text("INP EQ", lx, ry, sel ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("INP EQ", lx, ry, sel ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_eq_cell(c, lx + VALUE_GAP, ry, eq_slot, sel, t);
     };
 

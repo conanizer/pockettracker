@@ -3,8 +3,8 @@
 // ─── The THEME EDITOR ────────────────────────────────────────────────────────────────────────────
 //
 // The 1:1 twin of `ui/modules/ThemeEditorModule.kt`, and the last screen in the Kotlin dispatcher the
-// port had not reached. Eighteen rows: the THEME row on top (the built-in cycle, SAVE, LOAD) and the
-// seventeen colours under it, each an R/G/B triple with a live swatch. The list is taller than the
+// port had not reached. Twenty rows: the THEME row on top (the built-in cycle, SAVE, LOAD) and the
+// nineteen colours under it, each an R/G/B triple with a live swatch. The list is taller than the
 // panel, so it scrolls — the same idea as SONG and the file browser.
 //
 // ⚠️ IT HAS NO CursorContext, AND THAT IS NOT AN OVERSIGHT. Kotlin's `handleGenericInput` opens with

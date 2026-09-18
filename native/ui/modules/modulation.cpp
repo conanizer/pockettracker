@@ -142,7 +142,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
                 // across the row could only ever have said the first.
                 const bool onCell = isCursorRow && activePair && (s.cursorSide == side);
 
-                c.draw_text(label, x + nameX, textY, onCell ? t.textCursor : t.textParam,
+                c.draw_text(label, x + nameX, textY, onCell ? cursor_mark_ink(t) : t.textParam,
                             CHAR_SPACING, FONT_SCALE);
                 draw_cursor_cell(c, value, x + valX, textY, onCell, t.textValue, t);
             };

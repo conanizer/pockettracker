@@ -302,7 +302,7 @@ std::string SampleEditorState::bpm_display() const {
 namespace {
 
 // ⚠️ NO ROW BACKGROUND ANYWHERE ON THIS SCREEN. The cursor is the CELL it is on, as it is on every
-// grid; the label beside a cell is what says which row, and it takes `textCursor` with it.
+// grid; the label beside a cell is what says which row, and it takes `cursor_mark_ink` with it.
 
 /** Three label/value pairs across one row — rows 1 and 2 are both built from this. */
 void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, const Theme& t,
@@ -310,7 +310,7 @@ void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, con
                      const std::string& l2, const std::string& v2, int c2,
                      const std::string& l3, const std::string& v3, int c3) {
     auto on          = [&](int col) { return is_cur_row && cur_col == col; };
-    auto label_color = [&](int col) { return on(col) ? t.textCursor : t.textParam; };
+    auto label_color = [&](int col) { return on(col) ? cursor_mark_ink(t) : t.textParam; };
 
     c.draw_text(l1, x + 10,  ty, label_color(c1), CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, v1, x + 110, ty, on(c1), t.textValue, t);
@@ -376,7 +376,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + content_y(8);
         const bool cur = (s.cursorRow == 8);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("SELECTION", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING,
+        c.draw_text("SELECTION", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                     FONT_SCALE);
         draw_cursor_cell(c, hex8(s.selectionStart), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
@@ -388,7 +388,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + content_y(10);
         const bool cur = (s.cursorRow == 10);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("SLICE", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("SLICE", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, at(slice_methods(), s.sliceMethod), x + 175, ty,
                          cur && s.cursorCol == 0, t.textValue, t);
         if (slice_has_parameter(s.sliceMethod)) {
@@ -396,7 +396,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
             const std::string lbl   = (s.sliceMethod == SLICE_TRANSIENT) ? "SENS" : "BY";
             const std::string val   = hex2(s.sliceMethod == SLICE_TRANSIENT ? s.sliceSensitivity
                                                                             : s.sliceDivisions);
-            c.draw_text(lbl, x + 335, ty, onVal ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+            c.draw_text(lbl, x + 335, ty, onVal ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
             draw_cursor_cell(c, val, x + 410, ty, onVal, t.textValue, t);
         }
     }
@@ -431,7 +431,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + content_y(16);
         const bool cur = (s.cursorRow == 16);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("EFFECT", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("EFFECT", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, at(fx_types(), s.fxType), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
 
@@ -452,7 +452,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int  ry  = y + content_y(18);
         const bool cur = (s.cursorRow == 18);
         const int ty = ry + TEXT_PADDING;
-        c.draw_text("NAME", x + 10, ty, cur ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+        c.draw_text("NAME", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, s.sampleName, x + 120, ty, cur, t.textValue, t);
     }
 
@@ -548,7 +548,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     auto highlight_slice = [&](int64_t start, int64_t end) {
         const int sX = std::clamp(static_cast<int>(frame_x(static_cast<float>(start))), wfLeft, wfRight);
         const int eX = std::clamp(static_cast<int>(frame_x(static_cast<float>(end))),   wfLeft, wfRight);
-        if (eX > sX) c.fill_rect(sX, y, eX - sX, WAVEFORM_H, with_alpha(t.textCursor, 0.1f));
+        if (eX > sX) c.fill_rect(sX, y, eX - sX, WAVEFORM_H, with_alpha(t.rowCursor, 0.1f));
     };
 
     /**

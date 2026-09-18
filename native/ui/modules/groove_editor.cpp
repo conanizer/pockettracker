@@ -47,7 +47,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
         // across the cursor row to say which row, the header to say which column.
         draw_cell(c, hex1(index), stepX, rowY, isCursor && s.cursorColumn == 0,
                   /*is_selected=*/false, /*is_empty=*/false,
-                  isCursor ? t.textCursor : t.textEmpty, t);
+                  isCursor ? cursor_mark_ink(t) : t.textEmpty, t);
 
         draw_cell(c, isEndMarker ? "--" : hex2(tickValue), tickX, rowY,
                   isCursor && s.cursorColumn == 1, /*is_selected=*/false,

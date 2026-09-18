@@ -61,7 +61,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     const int  lastRow = static_cast<int>(project_last_row(s.caps));
 
     // The cursor is the CELL it is on, as it is on every grid. What says WHICH ROW here is the row's
-    // own label, which takes textCursor while the cursor is anywhere along the row — including on a
+    // own label, which takes `cursor_mark_ink` while the cursor is anywhere along the row — including on a
     // column the label itself is not, which is why this collapses to "on the row".
     const auto on_row = [&](ProjectRow row) { return s.cursorRow == static_cast<int>(row); };
     const auto on_cell = [&](ProjectRow row, int column) {
@@ -70,7 +70,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     const auto label = [&](ProjectRow row, const char* text) {
         c.draw_text(text, labelX, rowY(row) + TEXT_PADDING,
-                    on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     };
 
     // ── A single-value row: TEMPO, TRANSPOSE, SYSTEM, EXIT ───────────────────────────────────────

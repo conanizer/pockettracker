@@ -3394,7 +3394,11 @@ void InputDispatcher::on_select() {
     // and the theme editor stand in the module's place and leave the oscilloscope strip drawn, so the
     // panel has somewhere to go. They are also the two screens whose cell names — EQ FILL, Q, MTR BG —
     // say least on their own. SELECT does nothing else on either, so nothing is taken back.
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ)) return;
+    //
+    // ⚠️⚠️ **THE BROWSER IS NAMED TOO, and it is the one arm here that can break a working gesture.**
+    // SELECT is the modifier of its rename, delete and new-folder chords. That stays safe only because
+    // this handler runs on a RELEASE no other press interrupted — see the comment above.
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     // The keyboard's ABORT — the chord alias for the button on its own action row, and the one bare
     // SELECT that duplicates nothing: B backspaces here, so without it the only way to abandon a rename
@@ -3403,28 +3407,42 @@ void InputDispatcher::on_select() {
 
     // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ **THE SAMPLE EDITOR REACHES THIS, AND THE FILE BROWSER DOES NOT — but only ONE of those two
-    // is decided here.** The browser is `Overlay::BROWSER`, which this handler does not arm for, so
-    // the modal rule at the top of the function has already returned: it has no 620-wide box to spare
-    // (nineteen file rows and two status bars fill all 640×480) and SELECT is its rename/delete/
-    // new-folder modifier besides. The sample editor is full-screen too but is neither — its WAVEFORM
-    // panel is the same 620 wide at the same left edge as the strip, and it is the one box on any
-    // screen the cursor never lands on, so the panel stands in its place (layout.cpp).
-    //
     // ⚠️ The editor's "ARE YOU SURE?" is NOT an `Overlay`, so the modal rule did not see it — and
     // SELECT is the one button `button_mapper.h` does not dismiss help on. This is the only way help
     // could come up over that dialog, so it is refused here rather than guarded again when drawing.
     if (on_sample_editor() && s_.sampleEditor.showConfirmClose) return;
 
-    s_.helpOpen = !s_.helpOpen;
+    // SETTINGS > HELP picks the one form SELECT raises. FULL is the overlay everywhere; SHORT is the
+    // compact panel, and a second SELECT puts it away.
+    //
+    // ⚠️ THE FILE BROWSER HAS NO BOX FOR THE COMPACT PANEL — nineteen file rows and two status bars fill
+    // all 640×480 — so under SHORT it shows nothing. The SAMPLE EDITOR is full-screen too but does have
+    // one: its WAVEFORM panel is the strip's width, and the panel stands in its place.
+    switch (static_cast<HelpMode>(s_.settings.helpMode)) {
+        case HelpMode::OFF:
+            return;
+        case HelpMode::FULL:
+            s_.helpOpen = false;
+            s_.helpFull = true;
+            return;
+        case HelpMode::SHORT:
+            if (on_browser()) return;
+            s_.helpOpen = !s_.helpOpen;
+            return;
+    }
 }
 
 void InputDispatcher::on_help_dismiss() {
-    // ⚠️ **THE PRESS IS NOT CONSUMED — it closes help and then does its normal job**, which is the
-    // whole reason help is not an `Overlay`. It stands in a box that holds no cell — the visualizer
-    // strip, or the sample editor's waveform — so there is nothing under it to protect from a stray
-    // press: closing it and swallowing the press would cost a button on every gesture and buy nothing.
+    // ⚠️ **FOR THE COMPACT PANEL THE PRESS IS NOT CONSUMED — it closes help and then does its normal
+    // job.** That panel stands in a box that holds no cell — the visualizer strip, or the sample
+    // editor's waveform — so there is nothing under it to protect from a stray press: swallowing the
+    // press would cost a button on every gesture and buy nothing.
+    //
+    // ⚠️⚠️ **THE FULL OVERLAY IS THE OPPOSITE**, and that half is not decided here: it covers cells, so
+    // the mapper consumes the press that closes it. Clearing both flags in one place is what keeps the
+    // two from ever being up together.
     s_.helpOpen = false;
+    s_.helpFull = false;
 }
 
 void InputDispatcher::on_stop_preview() {

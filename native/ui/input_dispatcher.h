@@ -329,8 +329,8 @@ class InputDispatcher {
     void on_button_b();
     void on_button_a();
     /**
-     * Bare SELECT toggles the compact HELP panel, and aborts the keyboard. Nothing else is bound to
-     * it, on any screen.
+     * Bare SELECT raises help — the compact panel or the full overlay, as SETTINGS > HELP says — and
+     * aborts the keyboard. Nothing else is bound to it, on any screen.
      *
      * ⚠️ **Called on the RELEASE**, and only when SELECT went down and came back up with no other
      * button touched in between (ui/button_mapper.h). SELECT+A/B/R on the browser is a separate
@@ -339,12 +339,17 @@ class InputDispatcher {
     void on_select();
 
     /**
-     * Any button that is not SELECT has gone down: put the help panel away.
+     * A button has gone down: put the help away — the compact panel on any press but SELECT, the full
+     * overlay on any press at all.
      *
-     * ⚠️ Called by the MAPPER on every plain press, like `on_stop_preview` beside it, because the
-     * mapper is the one layer every press passes through. The press is NOT consumed — see the handler.
+     * ⚠️ Called by the MAPPER, like `on_stop_preview` beside it, because the mapper is the one layer
+     * every press passes through. Whether the press is then CONSUMED is the mapper's decision, and it
+     * asks `help_full_open()` first: the full overlay consumes it, the compact panel does not.
      */
     void on_help_dismiss();
+
+    /** Is the full help overlay up? Asked by the mapper before it routes a press anywhere. */
+    bool help_full_open() const { return s_.helpFull; }
     /** START: play/stop. What it plays depends on the screen you are on. */
     void on_start();
 
@@ -974,6 +979,7 @@ class InputDispatcher {
         FX_HELPER = 1u << 4,
         BROWSER   = 1u << 5,
         LOADING   = 1u << 6,
+        HELP      = 1u << 7,
     };
 
     friend constexpr Overlay operator|(Overlay a, Overlay b) {
@@ -998,6 +1004,10 @@ class InputDispatcher {
         // on the screen underneath.
         if (s_.loading.running) return Overlay::LOADING;
         if (confirm_open())     return Overlay::CONFIRM;
+        // The full help can be raised over the browser and over the two in-place editors, so it ranks
+        // above them. It can never share the screen with a confirm or the keyboard — SELECT is refused
+        // under the first and aborts the second — nor with the FX picker, which SELECT does not reach.
+        if (s_.helpFull)        return Overlay::HELP;
         if (qwerty_open())      return Overlay::QWERTY;
         if (theme_open())       return Overlay::THEME;
         if (eq_open())          return Overlay::EQ;

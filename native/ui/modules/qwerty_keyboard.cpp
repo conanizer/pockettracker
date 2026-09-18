@@ -245,7 +245,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, t.rowCursor);
         if (idx < textLen) {
             c.draw_text(std::string(1, s.text[static_cast<size_t>(idx)]), px, textRowY + 3,
-                        isCursor ? t.textCursor : t.textValue, CS, FS);
+                        isCursor ? cursor_cell_ink(t) : t.textValue, CS, FS);
         }
     }
 
@@ -265,9 +265,9 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
             const int  spaceX  = BOXX + (BOXW - spaceW) / 2;
             const bool cursor  = (s.keyCursorRow == r);
             c.fill_rect(spaceX, rowY, spaceW, CELLH,
-                        cursor ? t.rowCursor : t.meterBackground);
+                        cursor ? t.rowCursor : t.background);
             c.draw_text("SPACE", spaceX + (spaceW - 5 * CHARW) / 2, rowY + 3,
-                        cursor ? t.textCursor : t.textParam, CS, FS);
+                        cursor ? cursor_cell_ink(t) : t.textParam, CS, FS);
             continue;
         }
 
@@ -277,11 +277,11 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
             const bool cursor = (s.keyCursorRow == r && s.keyCursorCol == col);
 
             c.fill_rect(cellX, rowY, CELLW - 1, CELLH,
-                        cursor ? t.rowCursor : t.meterBackground);
+                        cursor ? t.rowCursor : t.background);
 
             c.draw_text(std::string(1, row[static_cast<size_t>(col)]),
                         cellX + (CELLW - 1 - 5 * FS) / 2, rowY + 3,
-                        cursor ? t.textCursor : t.textValue, CS, FS);
+                        cursor ? cursor_cell_ink(t) : t.textValue, CS, FS);
         }
     }
 
@@ -301,12 +301,12 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         const bool cursor = (s.keyCursorRow == actionRow && s.keyCursorCol == col);
 
         c.fill_rect(btnX, actionRowY, ABTNW, CELLH,
-                    cursor ? t.rowCursor : t.meterBackground);
+                    cursor ? t.rowCursor : t.background);
 
         const std::string label = labels[col];
         const int         lw    = static_cast<int>(label.size()) * ACHARW;
         c.draw_text(label, btnX + (ABTNW - lw) / 2, actionRowY + (CELLH - 5 * AFS) / 2,
-                    cursor ? t.textCursor : t.textParam, CS, AFS);
+                    cursor ? cursor_cell_ink(t) : t.textParam, CS, AFS);
     }
 }
 

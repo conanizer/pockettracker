@@ -65,12 +65,9 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
         barW -= w + GAP;
     }
 
-    // ⚠️⚠️ **THE FILL IS `textValue` AND MUST NOT BE `textCursor`, WHICH IS THE OBVIOUS WRONG ANSWER.**
-    // TXT CURSOR is an INK colour — the app paints it in FRONT of `rowCursor`, never as a block on a
-    // dark ground — and under BLUE it is a dark navy (`0x224466`) chosen to be read against that
-    // light row. As a fill on the strip's near-black it is a barely visible smudge, and the one theme
-    // it fails on is the one whose cursor inverts. TXT VALUE is bright in all four palettes and is a
-    // theme row, so a hand-made palette gets the same guarantee.
+    // ⚠️ A BACKGROUND ROLE USED AS A BLOCK, WHICH IS WHAT IT IS FOR. The bar is a filled shape on the
+    // strip's own near-black, not text, so it takes a GROUND colour one step up from the strip rather
+    // than any of the ink roles — an ink chosen to be read against something else is a smudge here.
     c.fill_rect(INSET, BAR_Y, barW, BAR_H, t.rowEvery4th);
     c.stroke_rect(INSET, BAR_Y, barW, BAR_H, t.textParam);
 

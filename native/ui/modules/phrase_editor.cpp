@@ -89,7 +89,7 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     // ROW's number lights, whatever column the cursor is in, because that is what now says which row
     // is being edited. Column 0 is a real cursor position, so the number goes through the painter and
     // gets the cell background when the cursor is actually on it.
-    const Argb stepColor = (index == s.cursorRow) ? t.textCursor
+    const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
                            : (index % 4 == 0)     ? t.textParam
                                                   : t.textEmpty;
     cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);

@@ -69,7 +69,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
         c.draw_text(name, labelX, ry + TEXT_PADDING,
-                    on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
@@ -79,7 +79,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
         c.draw_text(name, labelX, ry + TEXT_PADDING,
-                    on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value1, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
         // The sublabel is textParam whether or not the cursor is on the row — Kotlin's ternary picks
         // textParam on both arms, which is a tell that it was written and then thought better of.
@@ -132,6 +132,11 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::VISUALIZER, "VISUALIZER", names[static_cast<size_t>(index)]);
     }
 
+    {
+        static constexpr const char* HELP_NAMES[3] = {"OFF", "SHORT", "FULL"};
+        param_row(SettingsRow::HELP, "HELP", HELP_NAMES[clamp(v.helpMode, 0, 2)]);
+    }
+
     // THEME shows the name and a ">" — the arrow is the promise that A opens something, and it does:
     // the theme editor is its own module (theme_editor.cpp), opened by InputDispatcher and drawn over
     // this one.
@@ -151,7 +156,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         const SettingsRow row = SettingsRow::TEMPLATE;
         const int ry = rowY(row);
         c.draw_text("TEMPLATE", labelX, ry + TEXT_PADDING,
-                    on_row(row) ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+                    on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         const char* options[2] = {"SAVE", "CLEAR"};
         for (int i = 0; i < 2; ++i) {
             draw_cursor_cell(c, options[i], val1X + i * 80, ry + TEXT_PADDING,
@@ -226,6 +231,8 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
         case SettingsRow::VISUALIZER:
             return cc::enum_cycle(static_cast<int>(s.theme.visualizerType),
                                   static_cast<int>(visualizer_names().size()));
+
+        case SettingsRow::HELP:       return cc::enum_cycle(v.helpMode, 3);
 
         // A opens the theme editor.
         case SettingsRow::THEME:      return cc::read_only();
@@ -324,6 +331,10 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
                 const int index = (action.value >= 0 && action.value < count) ? action.value : 0;
                 theme.visualizerType = static_cast<VisualizerType>(index);
             }
+            break;
+
+        case SettingsRow::HELP:
+            if (set) v.helpMode = clamp(action.value, 0, 2);
             break;
 
         // A-only rows. Nothing to set — the dispatcher owns what A does.

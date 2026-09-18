@@ -27,25 +27,45 @@ struct Theme {
     // ── Row backgrounds ──────────────────────────────────────────────────────────────────────────
     Argb background   = 0xFF0A0A0A;  // module fill + default row
     Argb rowEvery4th  = 0xFF151515;  // beat-accent rows (every 4th)
-    Argb rowCursor    = 0xFF333333;  // cursor row highlight
+
+    // ⚠️ THE ACCENT OF THE WHOLE PALETTE, not just a row highlight, and that is why it is bright here
+    // rather than the near-black grey it was. It is the bar behind the cursor cell, the ink of every
+    // "you are here" marker that has no bar (a row number, a column heading, the label of the row the
+    // cursor is on), the EQ response curve and the selected meter's frame. `background` is the ink
+    // that reads ON it, so anything dark enough to lose that ink makes the cursor cell unreadable.
+    Argb rowCursor    = 0xFFFFFF00;  // the accent — cursor bar, active labels, the EQ curve
     // ⚠️ NO EDITOR ROW, AND IT PAINTS NOTHING — it is the SEED for `textPlayhead` below, and that is
     // its whole job since the full-row playback highlight was deleted. A `.ptt` written before TXT PLAY
     // existed carries only this, and `derive_borrowed_colors` is what turns it back into the marker
     // colour that file has always drawn.
     Argb rowPlayback  = 0xFF004400;  // the pre-TXT PLAY seed
-    Argb rowSelection = 0xFF1A3A1A;  // selection region
+
+    // ⚠️ A SECOND BRIGHT GROUND, ON THE SAME TERMS AS `rowCursor` — `rowEvery4th` is the ink that reads
+    // on it. The two grounds are meant to be told apart at a glance and NOT to be far apart: a
+    // selection and a cursor are both "the thing you are working on", and a big luminance gap between
+    // them reads as two unrelated states.
+    Argb rowSelection = 0xFF00CC00;  // selection region
 
     // ── Text roles ───────────────────────────────────────────────────────────────────────────────
     Argb textTitle  = 0xFF00FFFF;  // screen headers (cyan)
     Argb textParam  = 0xFF808080;  // inactive param label
     Argb textValue  = 0xFFFFFFFF;  // inactive param value
-    Argb textCursor = 0xFFFFFF00;  // cursor-highlighted cell (yellow)
     Argb textEmpty  = 0xFF666666;  // empty / placeholder
 
-    // ⚠️ NOT AN INDEPENDENT DEFAULT — `derive_borrowed_colors` computes it, as it does the EQ four
-    // below, and that function is the authority. The literal here is only what a bare `Theme t;`
-    // gets, and it is CLASSIC's own `vizWave`.
-    Argb textSelection = 0xFF00FF00;  // = vizWave — a selected cell's ink
+    // ── Three colours nothing draws any more ─────────────────────────────────────────────────────
+    //
+    // ⚠️ DEAD TO THE SCREEN, ALIVE TO THE FILE FORMAT, AND THAT IS WHY THEY ARE STILL HERE. The cursor
+    // cell's ink is now `background` and the selected cell's is `rowEvery4th`, both read straight off
+    // the ground beside them; the EQ panel fills with `background`. Deleting the fields would delete
+    // three keys from the `.ptt`, which is a file-format break for every theme already on an SD card —
+    // so they are still parsed, still written on the same terms as before, and simply never read by a
+    // draw. `theme_color_rows()` no longer lists them, so nothing can dial them either.
+    //
+    // ⚠️ `derive_borrowed_colors` STILL COMPUTES `textSelection` AND `eqBg` FROM THE SAME SOURCES, and
+    // must keep doing so: it is the yardstick `serialize_theme` omits a key against, so changing it
+    // would rewrite the bytes of files a previous build wrote.
+    Argb textCursor = 0xFFFFFF00;  // unused; was the cursor cell's ink
+    Argb textSelection = 0xFF00FF00;  // unused; = vizWave
 
     // ⚠️ NOT AN INDEPENDENT DEFAULT EITHER — `derive_borrowed_colors` lifts it out of `rowPlayback`,
     // which is what keeps a `.ptt` that never named this key drawing the marker it has always drawn.
@@ -71,9 +91,13 @@ struct Theme {
     // ⚠️ THESE VALUES ARE NOT INDEPENDENT DEFAULTS — they are what `derive_borrowed_colors` computes
     // for the CLASSIC palette, and that function is the authority. Every producer of a Theme runs it;
     // the literals here are only what a bare `Theme t;` gets, and they are the same four numbers.
-    Argb eqBg     = 0xFF0A0A0A;  // = vizBackground
+    //
+    // ⚠️ `eqBorder` DRAWS TWO THINGS — the spectrum's outline and the 0 dB line under the response
+    // curve — so it is the panel's whole "reference" colour. They were separate and looked identical:
+    // the 0 dB line borrowed vizCenterLine, which on a blue palette is a shade off the curve's own.
+    Argb eqBg     = 0xFF0A0A0A;  // unused; = vizBackground
     Argb eqFill   = 0xFF222222;  // = darken(textParam, 0.27f)
-    Argb eqBorder = 0xFF808080;  // = textParam
+    Argb eqBorder = 0xFF808080;  // = textParam — the spectrum outline AND the 0 dB line
     Argb eqTxt    = 0xFF333333;  // = vizCenterLine
 
     // ── Mixer dBFS meters ────────────────────────────────────────────────────────────────────────
@@ -159,11 +183,17 @@ inline void derive_borrowed_colors(Theme& t) {
 // a bug waiting for someone to add a colour. Three consumers read it (the module draws it, the
 // dispatcher's colour nudge indexes it, and the ptinput golden sweeps it) and none may re-derive it.
 //
-// ⚠️ TWENTY-TWO ROWS, TWENTY-FOUR COLOURS — `meterBorder` and `rowPlayback` HAVE NO ROW. Both are
-// fields on the theme and both are serialized into a `.ptt`: the first is read by the mixer's meter
-// frames and has simply never had a way to edit it; the second is the seed TXT PLAY defaults from,
-// and a row for it would be a second control over one colour, which is how one of the two becomes a
-// lie.
+// ⚠️ NINETEEN ROWS, TWENTY-FOUR COLOURS — five fields have no row, and they are serialized into a
+// `.ptt` all the same:
+//
+//   * `meterBorder` — read by the mixer's meter frames, and simply never given a way to edit it.
+//   * `rowPlayback` — the seed TXT PLAY defaults from. A row for it would be a second control over
+//     one colour, which is how one of the two becomes a lie.
+//   * `textCursor`, `textSelection`, `eqBg` — nothing draws them at all any more (see the struct).
+//     Their rows went because the colour each one named is now read off the ground beside it: the
+//     cursor cell's ink is `background`, the selected cell's is `rowEvery4th`, the EQ panel's fill is
+//     `background`. A row per colour that can only ever hold ONE right answer is a row that can be
+//     set wrong, and three of them were.
 //
 // ⚠️ THE ROW ORDER IS GROUPED BY PREFIX and the groups are what a reader scans by, so a new colour
 // joins its group rather than landing at the end. ⚠️⚠️ BUT THE POSITION IS A NUMBER, NOT A LABEL:
@@ -192,9 +222,7 @@ inline const std::vector<ThemeColorRow>& theme_color_rows() {
         {"TXT TITLE",  &Theme::textTitle},
         {"TXT PARAM",  &Theme::textParam},
         {"TXT VALUE",  &Theme::textValue},
-        {"TXT CURSOR", &Theme::textCursor},
         {"TXT EMPTY",  &Theme::textEmpty},
-        {"TXT SELECT", &Theme::textSelection},
         {"TXT PLAY",   &Theme::textPlayhead},
         {"VIZ BG",     &Theme::vizBackground},
         {"VIZ LINE",   &Theme::vizCenterLine},
@@ -203,7 +231,6 @@ inline const std::vector<ThemeColorRow>& theme_color_rows() {
         {"MTR LOW",    &Theme::meterLow},
         {"MTR MID",    &Theme::meterMid},
         {"MTR HIGH",   &Theme::meterHigh},
-        {"EQ BG",      &Theme::eqBg},
         {"EQ FILL",    &Theme::eqFill},
         {"EQ BORDER",  &Theme::eqBorder},
         {"EQ TXT",     &Theme::eqTxt},
@@ -222,13 +249,12 @@ inline Theme theme_amber() {
     t.name          = "AMBER";
     t.background    = 0xFF0A0808;
     t.rowEvery4th   = 0xFF151212;
-    t.rowCursor     = 0xFF382400;
+    t.rowCursor     = 0xFFFFBB00;
     t.rowPlayback   = 0xFF332200;
-    t.rowSelection  = 0xFF3A2A00;
+    t.rowSelection  = 0xFFCC6600;
     t.textTitle     = 0xFFFFBB00;
     t.textParam     = 0xFF806040;
     t.textValue     = 0xFFEECC88;
-    t.textCursor    = 0xFFFFBB00;
     t.textEmpty     = 0xFF664422;
     t.vizBackground = 0xFF0A0808;
     t.vizCenterLine = 0xFF382404;
@@ -244,13 +270,12 @@ inline Theme theme_amber() {
 inline Theme theme_blue() {
     Theme t;
     t.name          = "BLUE";
-    t.rowCursor     = 0xFF4486AA;
+    t.rowCursor     = 0xFF66AEDC;
     t.rowPlayback   = 0xFF002266;
-    t.rowSelection  = 0xFF002266;
+    t.rowSelection  = 0xFF3E7FA8;
     t.textTitle     = 0xFF88CEFF;
     t.textParam     = 0xFF4486AA;
     t.textValue     = 0xFFAADDFF;
-    t.textCursor    = 0xFF224466;
     t.textEmpty     = 0xFF224466;
     t.vizCenterLine = 0xFF112244;
     t.vizWave       = 0xFF0082BA;
@@ -259,11 +284,10 @@ inline Theme theme_blue() {
     t.meterMid      = 0xFF004499;
     t.meterHigh     = 0xFF6050A0;
     derive_borrowed_colors(t);
-    // ⚠️ AFTER THE DERIVE, AND THAT ORDER IS THE POINT — these three are dialled, not borrowed, so the
-    // derive would overwrite them. The outline sits a shade off TXT PARAM, the selected cell keeps the
-    // brighter blue the wave used to be, and the playback marker is the deep blue TXT EMPTY carries.
+    // ⚠️ AFTER THE DERIVE, AND THAT ORDER IS THE POINT — these two are dialled, not borrowed, so the
+    // derive would overwrite them. The outline sits a shade off TXT PARAM, and the playback marker is
+    // the deep blue TXT EMPTY carries.
     t.eqBorder      = 0xFF4488AA;
-    t.textSelection = 0xFF0088CC;
     t.textPlayhead  = 0xFF224466;
     return t;
 }
@@ -271,13 +295,12 @@ inline Theme theme_blue() {
 inline Theme theme_mono() {
     Theme t;
     t.name          = "MONO";
-    t.rowCursor     = 0xFF808080;
+    t.rowCursor     = 0xFFE8E8E8;
     t.rowPlayback   = 0xFF444444;
-    t.rowSelection  = 0xFF505050;
+    t.rowSelection  = 0xFFA8A8A8;
     t.textTitle     = 0xFFFFFFFF;
     t.textParam     = 0xFFC0C0C0;
     t.textValue     = 0xFFC0C0C0;
-    t.textCursor    = 0xFF303030;
     t.textEmpty     = 0xFF444444;
     t.vizCenterLine = 0xFF222222;
     t.vizWave       = 0xFFCCCCCC;

@@ -448,9 +448,10 @@ struct AppState {
     // The port's fourth modal, and the SECOND partial one: it lets START through to the transport, as the
     // EQ editor does. That is what makes VIZ BG / VIZ LINE / VIZ WAVE dialable — they are the oscilloscope
     // strip, which keeps drawing above the panel, and an oscilloscope with the transport stopped is a
-    // flat line. Six more colours the editor previews simply by DRAWING ITSELF in them (background,
-    // rowCursor, and the four text roles); the remaining eight it can only show as a swatch, because the
-    // pixels they describe live on screens this overlay has replaced.
+    // flat line. A handful more the editor previews simply by DRAWING ITSELF in them — `background`,
+    // `rowCursor` and the title/param/value inks, which is also the pair that inverts on a cursor cell
+    // right there on the row being dialled. The rest it can only show as a swatch, because the pixels
+    // they describe live on screens this overlay has replaced.
     //
     // ⚠️ Unlike the EQ's pass-through, there is NO evidence in the Kotlin that this one is deliberate —
     // `handleStart` simply has no theme guard where every other handler has one. The effect is right, so
@@ -534,8 +535,8 @@ struct AppState {
 
     // ── HELP ON SELECT ───────────────────────────────────────────────────────────────────────────
     //
-    // Is the help panel standing in for the visualizer? A tap of SELECT toggles it, and the next
-    // press of anything else puts it away — see ui/button_mapper.h.
+    // Is the help panel standing in for the visualizer? Under SETTINGS > HELP = SHORT a tap of SELECT
+    // raises it, a second one or a press of anything else puts it away — see ui/button_mapper.h.
     //
     // ⚠️ **NOT AN OVERLAY, and deliberately not in the `Overlay` set.** It covers only the 620×70
     // strip, never the editor, so it swallows no button and blocks no gesture: every screen underneath
@@ -545,6 +546,13 @@ struct AppState {
     //
     // ⚠️ Not persisted. The app opens with the visualizer, whatever the last session was reading.
     bool helpOpen = false;
+
+    // Is the FULL help overlay up? A tap of SELECT raises it under SETTINGS > HELP = FULL.
+    //
+    // ⚠️⚠️ **THIS ONE IS AN OVERLAY, and every fact above about `helpOpen` is inverted for it.** It
+    // covers the editor, so it is in the `Overlay` stack and in `modal_backdrop_active`, and the press
+    // that closes it is consumed (ui/button_mapper.h). Never both flags at once.
+    bool helpFull = false;
 
     // ── The render (PROJECT → EXPORT) ────────────────────────────────────────────────────────────
     //
@@ -585,16 +593,16 @@ struct AppState {
  * Is a modal that paints the full-canvas MODAL_BACKDROP up? (B4) — the shell asks this to extend the
  * dim into the letterbox bars so the scrim does not stop at the 4:3 edge.
  *
- * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog and
- * the FX-helper overlay (draw_fx_helper — the phrase screen's FX picker). The EQ and theme editors are
- * NOT here: they REPLACE the module in place and leave the rest of the frame bright, so scrimming the
- * bars for them would invert the seam (dim bars, bright tracker). Derived from the state, never from each
- * call site remembering — the modal-predicate rule.
+ * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog, the
+ * full help overlay and the FX-helper overlay (draw_fx_helper — the phrase screen's FX picker). The EQ
+ * and theme editors are NOT here: they REPLACE the module in place and leave the rest of the frame
+ * bright, so scrimming the bars for them would invert the seam (dim bars, bright tracker). Derived from
+ * the state, never from each call site remembering — the modal-predicate rule.
  */
 inline bool modal_backdrop_active(const AppState& s) {
     // ⚠️ A LOAD IS NOT HERE. It draws a status strip across the top and dims nothing — opening a file
     // asks the user no question, and a screen that goes dark for one reads as far more than it is.
-    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen;
+    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.helpFull;
 }
 
 /**

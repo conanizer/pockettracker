@@ -32,6 +32,7 @@
 #include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
+#include "ui/modules/help_overlay.h"
 #include "ui/modules/help_panel.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
@@ -157,6 +158,7 @@ private:
 
     OscilloscopeModule    oscilloscope_;
     HelpPanelModule       helpPanel_;    // drawn INSTEAD of the oscilloscope while help is up
+    HelpOverlayModule     helpOverlay_;  // the full help, over everything
     PhraseEditorModule    phraseEditor_;
     ChainEditorModule     chainEditor_;
     SongEditorModule      songEditor_;

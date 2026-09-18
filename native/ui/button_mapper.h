@@ -28,9 +28,9 @@
 // below can be measured rather than re-read.
 //
 // ⚠️ **A `Dispatcher` must provide every `on_*` named below plus `defer_a_to_release()`,
-// `defer_b_to_release()` and `on_a_deferred()`.** A template only type-checks what it instantiates,
-// so a typo here is caught by the shell's own instantiation (which is a full build, every session)
-// and by ptmapper's.
+// `defer_b_to_release()`, `on_a_deferred()` and `help_full_open()`.** A template only type-checks what
+// it instantiates, so a typo here is caught by the shell's own instantiation (which is a full build,
+// every session) and by ptmapper's.
 
 #include "ui/buttons.h"
 
@@ -177,6 +177,21 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         // synthesizes a repeat as another PRESSED and never interleaves a release, so this arrives
         // only when the button actually came up.
         if (is_dpad(e.button)) d.on_dpad_released();
+        return;
+    }
+
+    // ── THE FULL HELP OVERLAY: any press closes it, and goes NO further ──────────────────────────
+    //
+    // ⚠️⚠️ **CONSUMED, THE OPPOSITE OF THE COMPACT PANEL BELOW.** The overlay covers the editor, so a
+    // press that closed it and then fell through would edit a cell the user could not see. SELECT
+    // included: its release finds no armed tap and does nothing, so the overlay cannot reopen itself.
+    //
+    // ⚠️ The ringing audition is still silenced, on the same terms as the plain press below — the
+    // overlay is gone by the time it is asked, so no modal rule stands in its way.
+    if (d.help_full_open()) {
+        ms.selectPressedAlone = false;
+        d.on_help_dismiss();
+        if (e.button != Button::START && !m.a) d.on_stop_preview();
         return;
     }
 

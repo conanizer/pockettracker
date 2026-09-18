@@ -36,6 +36,9 @@
 
 namespace pt::ui {
 
+/** SETTINGS > HELP. ⚠️ The value is what settings.json stores — append, never reorder. */
+enum class HelpMode { OFF = 0, SHORT = 1, FULL = 2 };
+
 /**
  * Everything SETTINGS edits. Lives in AppState, and the shell round-trips it through settings.json.
  *
@@ -108,6 +111,13 @@ struct SettingsValues {
     // thing it belongs to is switched on.
     bool metronomeEnabled = false;
     int  metronomeVolume  = 0x80;
+
+    // ── HELP — what a tap of SELECT shows: 0 OFF, 1 SHORT, 2 FULL (`HelpMode`) ───────────────────
+    //
+    // SHORT is the compact panel in the visualizer's box and FULL the overlay over the whole screen.
+    // ⚠️ SHORT is the default because it is what an existing install already does on SELECT — a
+    // settings.json written before this row existed has no key and lands here.
+    int  helpMode         = 1;
 
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
     // BILINEAR, not INTEGER: integer scaling only fills the screen on a display that is an exact

@@ -79,7 +79,7 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
             const int         labelW = Canvas::text_width(label, CHAR_SPACING, FONT_SCALE);
 
             c.draw_text(label, cellX + (CELL_WIDTH - labelW) / 2, cellY + 3,
-                        isCurrent ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+                        isCurrent ? cursor_mark_ink(t) : t.textValue, CHAR_SPACING, FONT_SCALE);
         }
     }
 }
