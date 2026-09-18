@@ -44,10 +44,17 @@ constexpr int MAP_CELL_PITCH = 44;
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-/** The OFFSET row's value: a sign, two digits and its unit — "+00 MS", "-25 MS". */
-std::string offset_text(int ms) {
+/**
+ * The OFFSET row's value: a sign, two digits and its unit — "+00 MS", "-25 MS".
+ *
+ * ⭐ AUTO prints the derived number BESIDE the word rather than instead of it. "AUTO" alone would
+ * make the one row whose job is alignment refuse to say what alignment it had chosen, on a screen
+ * whose whole purpose is dialling that number against a cable.
+ */
+std::string offset_text(int ms, bool automatic) {
     const int a = ms < 0 ? -ms : ms;
-    return std::string(ms < 0 ? "-" : "+") + dec2(a) + " MS";
+    const std::string n = std::string(ms < 0 ? "-" : "+") + dec2(a) + " MS";
+    return automatic ? "AUTO " + n : n;
 }
 
 /**
@@ -127,7 +134,8 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     row_of(MidiRow::OUTPUT, "OUTPUT", device_text(s.deviceNames,   s.deviceIndex));
     row_of(MidiRow::INPUT,  "INPUT",  device_text(s.inDeviceNames, s.inDeviceIndex));
 
-    row_of(MidiRow::OFFSET,   "OFFSET",   offset_text(s.settings.midiOffsetMs));
+    row_of(MidiRow::OFFSET,   "OFFSET",   offset_text(midi_offset_in_force(s.settings, s.autoOffsetMs),
+                                                      s.settings.midiOffsetAuto));
     // ⚠️ The value says what the switch DOES, not merely that it is on — "ON  24 PPQN" is the whole of
     // this row's documentation, on a device with no manual and no tooltip. It is the same reasoning as
     // OUTPUT's port count above: a row has pixels to spare exactly when its value is the boring one.
@@ -224,9 +232,14 @@ CursorContext MidiModule::cursor_context(const MidiState& s) const {
             // ordinary offset — one millisecond early. Left at the default, the context would report
             // `isEmpty` at that one value and A+DPAD would go dead on it: an offset you could dial past
             // but not away from, on the one screen whose purpose is dialling it.
-            CursorContext c = cc::hex_byte(s.settings.midiOffsetMs, -99, 99,
+            CursorContext c = cc::hex_byte(midi_offset_in_force(s.settings, s.autoOffsetMs), -99, 99,
                                            /*empty_value=*/-1000);
             c.largeStep = 10;   // A+UP/DOWN walks it in tens, like TEMPO
+            // ⚠️ **AUTO IS NOT `isEmpty`, AND IT CANNOT BE.** The dial stays live on an automatic row —
+            // it hands over the derived number as the starting point, which is what makes "nudge it
+            // from where the app put it" the one gesture. Only A+B is conditional: it is the way BACK,
+            // so it is offered exactly when there is something to go back from.
+            c.capabilities.canDelete = !s.settings.midiOffsetAuto;
             return c;
         }
 
@@ -301,11 +314,23 @@ MidiInputResult MidiModule::handle_input(songcore::Project& project, SettingsVal
         }
 
         case MidiRow::OFFSET: {
-            if (!isSet) break;
-            const int ms = clamp(action.value, -99, 99);
-            if (ms != settings.midiOffsetMs) {
-                settings.midiOffsetMs = ms;
-                r.offsetChanged       = true;
+            if (isSet) {
+                const int ms = clamp(action.value, -99, 99);
+                // ⚠️ **THE FLAG IS HALF THE STATE, AND COMPARING THE NUMBER ALONE MISSES IT.** Under
+                // AUTO the dial starts from the DERIVED value while the stored one is whatever was
+                // last typed — so a nudge that happens to land back on the stored number would leave
+                // AUTO on and report "nothing changed", and the row would spring back under the
+                // user's thumb.
+                if (ms != settings.midiOffsetMs || settings.midiOffsetAuto) {
+                    settings.midiOffsetMs   = ms;
+                    settings.midiOffsetAuto = false;
+                    r.offsetChanged         = true;
+                }
+            } else if (action.type == ActionType::DELETE && !settings.midiOffsetAuto) {
+                // A+B, the same "clear this cell" gesture as everywhere else — here it clears the
+                // user's number and gives the row back to the device.
+                settings.midiOffsetAuto = true;
+                r.offsetChanged         = true;
             }
             break;
         }

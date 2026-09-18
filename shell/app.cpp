@@ -588,8 +588,29 @@ int run(const AppConfig& cfg) {
     state.midiIn  = cfg.midiIn;
     if (!cfg.midiInDevice.empty())  state.settings.midiInDevice  = cfg.midiInDevice;
     if (!cfg.midiOutDevice.empty()) state.settings.midiOutDevice = cfg.midiOutDevice;
-    if (cfg.midiOffsetMs != 0)      state.settings.midiOffsetMs  = cfg.midiOffsetMs;
+    if (cfg.midiOffsetMs != 0) {
+        state.settings.midiOffsetMs   = cfg.midiOffsetMs;
+        // ⚠️ …and AUTO off with it, or the override would land in settings.json and change nothing
+        // audible: the derived value would still be the one in force.
+        state.settings.midiOffsetAuto = false;
+    }
     if (cfg.midiSyncOut >= 0)       state.settings.midiSyncOut   = cfg.midiSyncOut != 0;
+
+    // ── The OFFSET row's AUTO: how far ahead of the speakers the cable runs ──────────────────────
+    //
+    // A message is released the moment its block of sound is handed to the DEVICE, not when it is
+    // heard — so the cable leads our own audio by the whole output latency. One fixed lead, the same
+    // for every note, and exactly the kind of number a user should not have to find by ear.
+    //
+    // ⚠️ It is the lead the APP CAN SEE: one buffer. Whatever the driver queues behind that is not in
+    // it and no platform here can report it, so this lands close rather than exact — which is why the
+    // row stays dialable and an explicit value still wins.
+    {
+        const int rate = audio.sampleRate();
+        const AudioBackend::OutputLatency lat = audio.outputLatency();
+        if (rate > 0 && lat.frames > 0)
+            state.midiAutoOffsetMs = (lat.frames * 1000 + rate / 2) / rate;
+    }
 
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
@@ -606,9 +627,13 @@ int run(const AppConfig& cfg) {
     // which device is open. See InputDispatcher::boot_midi_port.
     dispatch.boot_midi_port();
     if (cfg.midiOut) {
-        std::printf("midi:    OUT %s (offset %+d ms, sync %s)\n",
+        // ⚠️ The offset printed is the one IN FORCE, never the stored number — under AUTO those are
+        // different values, and a boot line stating the one nobody is sending with would be the
+        // lying instrument in its cheapest form.
+        std::printf("midi:    OUT %s (offset %+d ms%s, sync %s)\n",
                     cfg.midiOut->is_open() ? state.settings.midiOutDevice.c_str() : "OFF",
-                    state.settings.midiOffsetMs,
+                    ui::midi_offset_in_force(state.settings, state.midiAutoOffsetMs),
+                    state.settings.midiOffsetAuto ? " AUTO" : "",
                     state.settings.midiSyncOut ? "ON 24 PPQN" : "off");
     }
 

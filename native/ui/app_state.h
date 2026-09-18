@@ -357,6 +357,16 @@ struct AppState {
     /** The MIDI screen's one-shot readout — "PANIC SENT", "TEST SENT", "NO PORT". */
     std::string midiStatusText;
 
+    /**
+     * What the OFFSET row's AUTO uses: the output latency the audio device reported, in ms.
+     *
+     * ⚠️ **A PLATFORM FACT AND NOT A SETTING** — the shell writes it once, after the device has
+     * negotiated, and it is never saved. pt-ui has no backend to ask, which is why it arrives here
+     * rather than being read where it is used. 0 until something fills it in, and 0 is the behaviour
+     * this row had before AUTO existed.
+     */
+    int midiAutoOffsetMs = 0;
+
     // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
     // The app's first true modal: while it is open it owns every button, and `isOpen` is checked
     // before any other arm in every handler that can reach it.

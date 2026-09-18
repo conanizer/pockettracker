@@ -178,9 +178,22 @@ struct SettingsValues {
     // owners of which port is open" bug B4.3 already paid for once.
     std::string midiInDevice = "OFF";
 
-    // Signed milliseconds; positive = MIDI leaves LATER than the audio. Our own output has tens of ms
-    // of latency that the cable does not, so the user nudges the two into line by ear (plan §4.3).
+    // Signed milliseconds; positive = MIDI leaves LATER than the audio. A message is released the
+    // moment its block of sound is handed to the DEVICE, so the cable always runs ahead of our own
+    // speakers by the whole output latency — a fixed lead, not jitter, and the same for every note.
+    //
+    // ⚠️ **READ IT THROUGH `midi_offset_in_force()`, NEVER DIRECTLY** — while AUTO is on it is the
+    // value the user dialled LAST, not the value in force, and the two rows of this comment are the
+    // only warning a call site gets.
     int         midiOffsetMs  = 0;
+
+    // AUTO: derive the offset from what the audio device says it is holding, instead of using the
+    // number above. On by default because the derived figure beats 0 ms on every device measured,
+    // and 0 was what a user who never found this row got.
+    //
+    // ⚠️ It is the LEAD THE APP CAN SEE — one buffer. A driver queuing more behind that is not in it,
+    // so this lands close rather than exact, and dialling it off by ear stays the last word.
+    bool        midiOffsetAuto = true;
 
     // SYNC OUT — the 24 PPQN clock, Start/Stop/Continue and the song position (plan phase C).
     //

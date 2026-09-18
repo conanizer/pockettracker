@@ -93,6 +93,11 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // program wanted, and would do it on the say-so of nobody.
     values.midiInDevice       = get_string(j, "midi_in_device", values.midiInDevice);
     values.midiOffsetMs       = clamp(get_int(j, "midi_offset_ms", values.midiOffsetMs), -99, 99);
+    // ⚠️ **MUST FOLLOW THE LINE ABOVE — ITS FALLBACK IS READ OFF THAT VALUE.** Absent from every
+    // settings.json written before AUTO existed, and a blanket `true` would be the upgrade undoing
+    // the user's own measurement: a file carrying a number had it dialled in BY EAR against this
+    // desk's real cable. A file at 0 never had one dialled at all, so AUTO is a straight improvement.
+    values.midiOffsetAuto     = get_bool(j, "midi_offset_auto", values.midiOffsetMs == 0);
     // Phase C. Absent → false, which is both the default and what every settings.json written before
     // phase C says: a file from yesterday must not silently start driving a drum machine today.
     values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
@@ -210,6 +215,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["midi_out_device"]    = values.midiOutDevice;
     j["midi_in_device"]     = values.midiInDevice;   // E2 — the INPUT port, a NAME for the same reason
     j["midi_offset_ms"]     = values.midiOffsetMs;
+    j["midi_offset_auto"]   = values.midiOffsetAuto;
     j["midi_sync_out"]      = values.midiSyncOut;   // phase C — the clock + transport switch
 
     // The Android device rows — see the matching block in load_settings for why these are written on

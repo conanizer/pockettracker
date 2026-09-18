@@ -64,6 +64,13 @@ struct MidiState {
     const std::vector<std::string>& deviceNames;
     const std::vector<std::string>& inDeviceNames;
 
+    /**
+     * What the OFFSET row uses while AUTO is on: the output latency the audio device reported at
+     * boot, in milliseconds. A platform fact, so it arrives the same way the port lists above do —
+     * pt-ui has no audio backend to ask.
+     */
+    int autoOffsetMs = 0;
+
     int cursorRow    = 0;   // a MidiRow
     /**
      * 1 on every row but IN CH, where it is 1..`MIDI_IN_MAP_COLUMNS` — one per track. Column 0 is the
@@ -81,6 +88,20 @@ struct MidiState {
     PlatformCaps caps{};
     Theme        theme = theme_classic();
 };
+
+/**
+ * The offset the cable is actually being sent with — the derived one under AUTO, the dialled one
+ * otherwise. Clamped to the row's range so a device holding more than the row can display still
+ * yields a number this screen can paint.
+ *
+ * ⭐ Every reader goes through here: the row, the cursor context, the boot push and the apply. The
+ * alternative is four sites each remembering to check the flag, which is the arrangement that only
+ * has to be forgotten once to leave the value round-tripping correctly and reaching nobody.
+ */
+inline int midi_offset_in_force(const SettingsValues& s, int autoOffsetMs) {
+    if (!s.midiOffsetAuto) return s.midiOffsetMs;
+    return autoOffsetMs < -99 ? -99 : (autoOffsetMs > 99 ? 99 : autoOffsetMs);
+}
 
 struct MidiInputResult {
     bool projectModified = false;   // PROG CHG and IN CH — the rows that dirty the SONG

@@ -511,6 +511,7 @@ CursorContext InputDispatcher::cursor_context() const {
             ms.cursorColumn   = s_.midiCursorColumn;
             ms.deviceIndex    = s_.midiDeviceIndex;
             ms.inDeviceIndex  = s_.midiInDeviceIndex;
+            ms.autoOffsetMs   = s_.midiAutoOffsetMs;
             ms.caps           = s_.caps;
             return midi_.cursor_context(ms);
         }
@@ -658,7 +659,8 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             // The side effects the module cannot perform itself — it has no port and no OS.
             if (r.deviceChanged)   apply_midi_device();
             if (r.inDeviceChanged) apply_midi_in_device();
-            if (r.offsetChanged)   host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+            if (r.offsetChanged)   host_.set_midi_offset_ms(
+                                       midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
             if (r.syncChanged)     host_.set_midi_sync_out(s_.settings.midiSyncOut);
             return r.projectModified;
         }
@@ -2875,7 +2877,7 @@ void InputDispatcher::boot_midi_port() {
     // ever opens, and forgetting it is the "a setting that round-trips is not a setting that is
     // applied" bug in its purest form: the value would sit correct in settings.json, be drawn correctly
     // on the screen, and change nothing anybody could hear.
-    host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+    host_.set_midi_offset_ms(midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
     // SYNC (phase C) for exactly the same reason, and it is the more dangerous of the two to forget:
     // OFFSET being unapplied is a few milliseconds nobody measures, but SYNC being unapplied means a
     // user who turned it on last session, saw ON when they came back, and got no clock at all.
