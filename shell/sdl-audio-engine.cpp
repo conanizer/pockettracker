@@ -52,7 +52,7 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
     // ⚠️ `numFrames` and not the constant we asked for: this is the size the DEVICE chose, which on the
     // Flip is 940 where 512 was requested. Relaxed atomics only — nothing here may block. Off unless
     // POCKETTRACKER_LATENCY=1, and one cached bool when it is.
-    latency::audio_callback(numFrames);
+    latency::audio_callback(numFrames, self->sampleRate_);
 
     // Pure SDL glue — the exact mirror of OboeAudioEngine::onAudioReady. processLiveBlock does
     // everything: sets flush-to-zero, CLEARS the buffer (SDL does not hand us a zeroed one), bails

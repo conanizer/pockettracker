@@ -10,6 +10,15 @@ OboeAudioEngine::~OboeAudioEngine() {
     closeStream();
 }
 
+void OboeAudioEngine::setPlatformDefaults(int sampleRate, int framesPerBurst) {
+    platformRate_  = sampleRate;
+    platformBurst_ = framesPerBurst;
+    // Oboe reads these globals when a builder leaves a value unspecified, which is how the numbers
+    // reach the OpenSL ES path — there is no per-builder way to say "the device's own".
+    if (sampleRate > 0)     oboe::DefaultStreamValues::SampleRate    = sampleRate;
+    if (framesPerBurst > 0) oboe::DefaultStreamValues::FramesPerBurst = framesPerBurst;
+}
+
 bool OboeAudioEngine::openStream() {
     // OpenSL ES does NOT trigger CCodec/C2 codec enumeration that spams 2000+ log lines
     // and blocks for up to 35 seconds on some Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
@@ -19,7 +28,13 @@ bool OboeAudioEngine::openStream() {
     builder.setDataCallback(this);
     builder.setFormat(oboe::AudioFormat::Float);
     builder.setChannelCount(oboe::ChannelCount::Stereo);
-    builder.setSampleRate(44100);
+
+    // ⚠️⚠️ **NO setSampleRate, AND THAT IS THE POINT OF THIS WHOLE PATH.** Naming 44100 on hardware
+    // that runs 48000 inserts a resampler, and a resampled stream commonly loses the fast mixer path
+    // whichever API is underneath — which costs far more than picking the rate ever bought. Left
+    // unspecified it opens at whatever `setPlatformDefaults` was told, and every consumer already
+    // reads the result back: the callback passes the stream's own rate per block, and
+    // `setDeviceSampleRate` below re-derives the send and master chains' coefficients from it.
 
     // Attempt 1: OpenSL ES LowLatency Exclusive (best latency, no CCodec spam).
     builder.setAudioApi(oboe::AudioApi::OpenSLES);
@@ -59,12 +74,25 @@ bool OboeAudioEngine::openStream() {
         return false;
     }
 
-    LOGD("Stream opened: %d Hz, bufSz=%d, api=%s, perf=%s, sharing=%s",
+    // One burst playing while the next is filled — the smallest buffer that is not starved, and the
+    // figure Oboe's own guidance starts from. ⚠️ **ASKED, NOT SET**: the stream may round it or refuse
+    // it outright (OpenSL ES largely fixes its queue at open), so the boot line below reads the result
+    // back rather than repeating the request. ⭐ If a device crackles, this multiplier is the dial.
+    constexpr int kBurstsPerBuffer = 2;
+    const int burst = stream->getFramesPerBurst();
+    if (burst > 0) {
+        stream->setBufferSizeInFrames(burst * kBurstsPerBuffer);
+    }
+
+    LOGD("Stream opened: %d Hz, burst=%d, bufSz=%d, api=%s, perf=%s, sharing=%s "
+         "(platform said %d Hz / %d frames)",
          stream->getSampleRate(),
+         burst,
          stream->getBufferSizeInFrames(),
          oboe::convertToText(stream->getAudioApi()),
          oboe::convertToText(stream->getPerformanceMode()),
-         oboe::convertToText(stream->getSharingMode()));
+         oboe::convertToText(stream->getSharingMode()),
+         platformRate_, platformBurst_);
 
     // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
     // keep our own copy for AudioBackend::sampleRate() — see the header for why the shell is not

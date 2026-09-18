@@ -44,6 +44,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>     // atoi — the AudioManager properties come back as decimal strings
 #include <memory>
 #include <mutex>
 #include <string>
@@ -408,6 +409,106 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
                         "log pump thread did not start - console goes to logcat only");
 }
 
+// ─── What the speaker actually runs at ───────────────────────────────────────────────────────────
+
+/**
+ * Read one `AudioManager` property as an int, or 0 if the platform will not say.
+ *
+ * ⚠️ **THE PROPERTY NAME IS READ OFF THE FRAMEWORK CLASS, NOT SPELLED OUT HERE.** Both constants are
+ * public static Strings on `android.media.AudioManager`, so taking them from the field costs one JNI
+ * lookup and cannot drift from the platform. Spelling the value in a literal would compile forever
+ * and be wrong in silence.
+ *
+ * ⚠️ Every name below belongs to the FRAMEWORK, so R8 has nothing to rename and this needs no
+ * `-keep` — unlike a callback that resolves into our own Kotlin, which does.
+ */
+int audio_manager_property(JNIEnv* env, jobject audioManager, jclass amClass,
+                           const char* constantField) {
+    const jfieldID fid = env->GetStaticFieldID(amClass, constantField, "Ljava/lang/String;");
+    if (fid == nullptr) { env->ExceptionClear(); return 0; }
+    const jstring key = (jstring)env->GetStaticObjectField(amClass, fid);
+    if (key == nullptr) return 0;
+
+    const jmethodID getProperty = env->GetMethodID(amClass, "getProperty",
+                                                   "(Ljava/lang/String;)Ljava/lang/String;");
+    if (getProperty == nullptr) { env->ExceptionClear(); env->DeleteLocalRef(key); return 0; }
+
+    const jstring val = (jstring)env->CallObjectMethod(audioManager, getProperty, key);
+    env->DeleteLocalRef(key);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return 0; }
+    if (val == nullptr) return 0;
+
+    const char* chars = env->GetStringUTFChars(val, nullptr);
+    const int   out   = chars ? std::atoi(chars) : 0;
+    if (chars) env->ReleaseStringUTFChars(val, chars);
+    env->DeleteLocalRef(val);
+    return out;
+}
+
+/**
+ * The device's own output rate and burst size, for Oboe to open at instead of guessing.
+ *
+ * ⚠️ **ONLY JAVA KNOWS THESE**, which is why the query lives in this file rather than in the audio
+ * backend: `AudioManager` is the only thing on Android that will name the rate the HAL mixes at and
+ * the block size it hands out. Asking for anything else costs a resampler, and a resampled stream
+ * commonly loses the fast path — the largest single cost on this platform.
+ *
+ * Both come back 0 when the platform declines, on an old device, or if anything in the chain is
+ * missing; the backend then leaves Oboe's own defaults alone. Failure is quiet on purpose — this is
+ * a hint that makes audio faster, never a thing the app needs to start.
+ */
+void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
+    sampleRate = framesPerBurst = 0;
+
+    JNIEnv* env      = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    jobject activity = (jobject)SDL_AndroidGetActivity();   // ⚠️ a LOCAL ref SDL leaves us to release
+    if (env == nullptr || activity == nullptr) return;
+
+    // ⚠️ **EVERY LOOKUP IS CLEARED THE MOMENT IT MISSES.** A failed FindClass or GetStaticFieldID
+    // leaves an exception PENDING, and the next JNI call made under one is a programming error that
+    // CheckJNI aborts the process for. These are framework names so a miss should be impossible —
+    // which is exactly why getting it wrong would only ever be found on somebody else's device.
+    jclass  actClass = env->GetObjectClass(activity);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    jclass  ctxClass = env->FindClass("android/content/Context");
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    jclass  amClass  = env->FindClass("android/media/AudioManager");
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    jobject am       = nullptr;
+
+    if (actClass && ctxClass && amClass) {
+        const jfieldID audioSvc = env->GetStaticFieldID(ctxClass, "AUDIO_SERVICE",
+                                                        "Ljava/lang/String;");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        const jmethodID getService = env->GetMethodID(actClass, "getSystemService",
+                                                      "(Ljava/lang/String;)Ljava/lang/Object;");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+
+        if (audioSvc && getService) {
+            jstring name = (jstring)env->GetStaticObjectField(ctxClass, audioSvc);
+            am = env->CallObjectMethod(activity, getService, name);
+            if (env->ExceptionCheck()) { env->ExceptionClear(); am = nullptr; }
+            if (name) env->DeleteLocalRef(name);
+        }
+    }
+
+    if (am != nullptr) {
+        sampleRate     = audio_manager_property(env, am, amClass, "PROPERTY_OUTPUT_SAMPLE_RATE");
+        framesPerBurst = audio_manager_property(env, am, amClass, "PROPERTY_OUTPUT_FRAMES_PER_BUFFER");
+        env->DeleteLocalRef(am);
+    }
+
+    if (actClass) env->DeleteLocalRef(actClass);
+    if (ctxClass) env->DeleteLocalRef(ctxClass);
+    if (amClass)  env->DeleteLocalRef(amClass);
+    env->DeleteLocalRef(activity);
+
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "device audio: rate=%d burst=%d%s", sampleRate, framesPerBurst,
+                        (sampleRate == 0 && framesPerBurst == 0)
+                                ? " (platform would not say - Oboe keeps its own defaults)" : "");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -477,6 +578,13 @@ int main(int argc, char** argv) {
     auto engine = std::make_unique<AudioEngine>();
 
     OboeAudioEngine audio(engine.get());
+
+    // ⚠️ BEFORE openStream, not after: these are what the stream opens AT. Asked here because SDL is
+    // up by now and the query needs its JNI env and the activity.
+    int deviceRate = 0, deviceBurst = 0;
+    query_device_audio_defaults(deviceRate, deviceBurst);
+    audio.setPlatformDefaults(deviceRate, deviceBurst);
+
     if (!audio.openStream()) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "openStream failed - no audio device");
         SDL_Quit();

@@ -29,6 +29,19 @@ public:
     explicit OboeAudioEngine(AudioEngine* core);
     ~OboeAudioEngine() override;
 
+    /**
+     * The device's OWN output rate and burst size, handed in before openStream().
+     *
+     * ⚠️⚠️ **THE OpenSL ES PATH CANNOT ASK THE DEVICE ITSELF, AND IT IS THE PATH THAT SHIPS.**
+     * AAudio opens at the native rate when none is requested; OpenSL ES has no such query and falls
+     * back to Oboe's built-in guess for both numbers. So across the three attempts this backend makes
+     * first, these two values are the only thing standing between the stream and a resampler.
+     *
+     * Best effort, and the two are independent: a value <= 0 leaves Oboe's own default alone, so a
+     * platform that answers for one and not the other still gets the half it knows.
+     */
+    void setPlatformDefaults(int sampleRate, int framesPerBurst);
+
     bool openStream() override;
     void closeStream() override;
     void resumeStream() override;
@@ -52,7 +65,7 @@ public:
      */
     void setPaused(bool paused) override;
 
-    /** The rate the device actually negotiated, not the 44100 we asked for. */
+    /** The rate the device actually negotiated. Nothing asks for a rate any more — see openStream. */
     int sampleRate() const override { return sampleRate_; }
 
     /**
@@ -78,4 +91,10 @@ private:
     // ask is the thing the AudioBackend seam exists to stop the shell doing.
     int sampleRate_   = 0;
     int bufferFrames_ = 0;  // the stream's own buffer — the floor `outputLatency` falls back to
+
+    // What the platform said it runs at, or 0 where it would not say. Kept only so the boot line can
+    // print what was ASKED beside what was negotiated — the request itself goes into Oboe's global
+    // defaults in setPlatformDefaults, not into the builder.
+    int platformRate_  = 0;
+    int platformBurst_ = 0;
 };

@@ -152,7 +152,7 @@ inline void frame_tick(bool isPlaying) {
  * `frames` is what the device actually handed over, not what was asked for. That distinction is the
  * whole of §11's warning about a boot line printing 512 while the device runs 940.
  */
-inline void audio_callback(int frames) {
+inline void audio_callback(int frames, int sampleRate) {
     if (!enabled()) return;
     State&         s = state();
     const uint64_t t = now_ns();
@@ -161,9 +161,11 @@ inline void audio_callback(int frames) {
     const uint64_t last = s.lastCbNs.exchange(t, std::memory_order_relaxed);
     if (last != 0) {
         const int bin = s.playing.load(std::memory_order_relaxed);
-        // "Ran long" is twice the nominal block; "back to back" is a tenth of it. Both are computed
-        // from `frames`, so they follow whatever the device negotiated rather than a constant.
-        const uint64_t nominal = uint64_t(frames) * 1000000000ull / 44100ull;
+        // "Ran long" is twice the nominal block; "back to back" is a tenth of it. Both follow the
+        // frames AND the rate the device negotiated — a nominal taken at a constant 44100 is 8.8%
+        // loose in both directions on a 48 kHz device, which is what Android now opens at.
+        const uint64_t sr      = uint64_t(sampleRate > 0 ? sampleRate : 44100);
+        const uint64_t nominal = uint64_t(frames) * 1000000000ull / sr;
         s.cb[bin].add(t - last, nominal * 2, nominal / 10);
     }
 }
