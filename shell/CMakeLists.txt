@@ -162,9 +162,12 @@ add_executable(pockettracker-sdl
 target_compile_definitions(pockettracker-sdl PRIVATE "PT_VERSION_STRING=\"${PT_VERSION}\"")
 
 # winmm — `midiOutShortMsg` and friends (midi-out-winmm.cpp). In every Windows install; no package,
-# no COM, no manifest capability.
+# no manifest capability.
+#
+# ole32 — the audio endpoint query in sdl-audio-engine.cpp, which is the one place this shell does use
+# COM. Same terms as winmm: a system library, present everywhere, nothing to ship beside it.
 if(WIN32)
-    target_link_libraries(pockettracker-sdl PRIVATE winmm)
+    target_link_libraries(pockettracker-sdl PRIVATE winmm ole32)
 
     # ⚠️ NO CONSOLE WINDOW. A console-subsystem exe opens a black window beside the app for the whole
     # session, and on Windows that window IS the only place the program's output ever went. The

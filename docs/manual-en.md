@@ -1275,7 +1275,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 |---|---|
 | TYPE | A starting point for the three character cells: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). Choosing one sets PONG, TONE and WOBL together; turn any of those afterwards and TYPE reads **USER**. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | WOBL | How far the tape speed drifts (`00`–`FF`), bending the pitch of the repeats. `00` holds them steady. |
@@ -2150,7 +2150,7 @@ Two details worth knowing:
 
 - Format: `.wav` (8/16/24/32-bit PCM or float; mono or stereo)
 - Stereo WAV files are supported natively — SOURCE mode on the instrument or sample editor selects LEFT / RIGHT / STEREO / MONO non-destructively
-- Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files automatically
+- Sample rates: any — PocketTracker compensates the pitch of a file recorded at a different rate automatically
 - Loaded via: INSTRUMENT screen → **TYPE** row → **LOAD** → **A** → file browser
 - SF2 and SF3 files are loaded the same way
 - **Compressed audio** (`.mp3`, `.flac`, `.ogg`, `.opus`, `.m4a`) loads directly as a sample — decoded into memory with **no WAV file written** and no slice markers. The instrument remembers the original file path, so it is re-decoded automatically each time the project is reopened. FLAC is lossless, so it is the best choice when you want a small file with no quality loss. (`.opus` and `.m4a` are common voice-recording formats — phone memos, messaging-app exports.)
@@ -2180,7 +2180,7 @@ sample — handy for grabbing a sound straight from a clip without a separate co
 
 ### WAV exports
 
-- Format: 16-bit stereo WAV, 44100 Hz
+- Format: 16-bit stereo WAV, at the rate your device runs (48000 Hz on most hardware)
 - Location: `<home>/Renders/`
 - Filenames: `ProjectName_0001.wav`, `_0002.wav`, … (auto-incremented)
 - Triggered from: PROJECT screen → EXPORT → MIX

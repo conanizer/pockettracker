@@ -194,8 +194,10 @@ a headless tool drive any platform's UI and compare the results.
 
 A sample-accurate queue system in C++.
 
-- **44.1 kHz stereo.** Android uses Oboe (OpenSL ES Exclusive → Shared → None/Shared → AAudio
-  Exclusive); every other platform uses SDL audio.
+- **Stereo float, at the device's own rate.** A rate is asked for, never assumed: whatever the device
+  negotiates is what the engine is told, and every pitch ratio and filter coefficient is derived from
+  it rather than from a constant. Android uses Oboe (OpenSL ES Exclusive → Shared → None/Shared →
+  AAudio Exclusive); every other platform uses SDL audio.
 - **The audio device is opened exactly once**, at startup, and never reopened.
 - `AudioEngine` **must be heap-allocated** — its DSP scratch buffers, spectrum rings and 256-slot
   table pool blow a 1 MB stack instantly.
@@ -683,8 +685,15 @@ delivers every press twice by two paths with conflicting meanings.
 
 **Renderer creation falls back.** `SDL_RENDERER_ACCELERATED` means *require*, not *prefer*, so
 `SDL_CreateRenderer` fails outright on hardware with no accelerated driver. The shell tries
-accelerated+vsync → accelerated → anything, and paces the frame itself when there is no vsync (a spun
-core is a battery bug on a handheld).
+accelerated+vsync → accelerated → anything.
+
+**The frame loop runs at two rates, and it owns the only wait.** Input, incoming MIDI and the
+sequencer's refill are pumped every few milliseconds; the drawing, and the per-frame derivations that
+feed it, run once per refresh. Nothing else may pace the loop — with vsync `SDL_RenderPresent` blocks,
+but a tick that draws nothing never reaches it, and a spun core is a battery bug on a handheld. The
+next frame is anchored on the present's *return*, which is a vblank: a deadline that is a fraction
+short of the real refresh walks into the vblank a frame at a time until the present is blocking most
+of a refresh with nothing being polled behind it.
 
 **Signal handling: a handler may only set a flag.** "SIGTERM → autosave" read literally is a heap-lock
 deadlock — hundreds of KB of JSON, none of it async-signal-safe — which hangs in exactly the case it

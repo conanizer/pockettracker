@@ -7,6 +7,14 @@
 #include <cstdint>
 #include <cstdlib>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#endif
+
 namespace {
 
 /**
@@ -29,13 +37,147 @@ uint64_t now_ns() {
     return (c / freq) * 1000000000ull + ((c % freq) * 1000000000ull) / freq;
 }
 
-// Frames per callback. 512 @ 44.1 kHz ≈ 11.6 ms — the same order as Oboe's low-latency burst on
-// device. It is ABOVE the engine's PROCESS_SUBBLOCK and that is fine: processLiveBlock chunks to it,
-// so this number is a latency choice and never a correctness one. Handhelds may want more.
-constexpr int FRAMES_PER_CALLBACK = 512;  // device rounds up to its own period (940 on the Flip) regardless
+// Frames per callback. 512 @ 48 kHz ≈ 10.7 ms. It is ABOVE the engine's PROCESS_SUBBLOCK and that is
+// fine: processLiveBlock chunks to it, so this number is a latency choice and never a correctness one.
+//
+// ⚠️ **IT IS A REQUEST, AND NOTHING MEASURED HAS EVER GRANTED IT** — WASAPI hands back its own 10 ms
+// period (480 frames at 48 kHz) for anything from 64 to 2048, and the Flip's ALSA its own 1024. Only
+// the size read back in openStream is the one the callback actually runs at.
+constexpr int FRAMES_PER_CALLBACK = 512;
 
-// What we ask for. The device is free to say otherwise — see openStream.
-constexpr int PREFERRED_RATE = 44100;
+// The rate to ask for when the platform cannot be asked what it actually runs. ⚠️ A REQUEST, never an
+// assumption: `SDL_AUDIO_ALLOW_FREQUENCY_CHANGE` is set, so hardware that really runs 44.1 answers
+// 44.1 — on the backends that report it.
+//
+// ⚠️⚠️ **48000 BECAUSE ASKING FOR 44100 BOUGHT A SILENT CONVERSION ON EVERY DEVICE MEASURED.** The
+// layer that converts is also the layer that answers questions about itself: ALSA's plug accepts any
+// rate, so the app was told 44100 while the driver read 48000, and the odd 940-frame callback it
+// reported was the hardware's own 1024-frame period divided by 44100/48000. Asked for 48000 the same
+// device reports 1024. ⚠️ It removes a conversion and NOT latency — the buffer's duration is
+// unchanged (21.32 → 21.33 ms on that device).
+//
+// ⚠️⚠️ **ON WINDOWS THIS IS A FALLBACK AND NOTHING MORE** — `windows_endpoint_rate()` below. A desktop
+// commonly has several outputs at different rates, and which one is in charge changes the moment a
+// headset connects, so any fixed request there is right only by luck.
+constexpr int PREFERRED_RATE = 48000;
+
+#ifdef _WIN32
+/**
+ * What the DEFAULT output endpoint actually runs at, or 0 if Windows cannot be asked.
+ *
+ * ⚠️⚠️ **SDL CANNOT ANSWER THIS, AND — WORSE — IT NEVER REPORTS THE MISMATCH.** When the requested
+ * rate differs from the endpoint's, `SDL_wasapi.c` sets `AUTOCONVERTPCM` and then OVERWRITES the
+ * format with what was asked for, so `SDL_AUDIO_ALLOW_FREQUENCY_CHANGE` can never fire and the boot
+ * line reports the request back as though it were the hardware. Measured: with a 44.1 kHz headset as
+ * the default output, asking 48000 gave `48000 Hz, 480 frames` with a resampler in the path, and the
+ * only way to tell was asking the OS which endpoint held the process's audio session.
+ *
+ * ⚠️ `eConsole` is by definition the endpoint SDL opens when it is passed a null device name. It is
+ * NOT an enumeration index — index 0 is whatever was listed first and need not be the default at all,
+ * which is exactly how an earlier diagnostic came to print a rate unrelated to the open stream.
+ *
+ * ⚠️ A device switched between this call and `SDL_OpenAudioDevice` costs one converted session, which
+ * is no worse than the fixed request it replaces.
+ */
+int windows_endpoint_rate() {
+    // RPC_E_CHANGED_MODE means COM is already up on this thread in the other apartment — usable, but
+    // not ours to shut down. Only a call that SUCCEEDED gets a matching CoUninitialize.
+    const HRESULT co            = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool    weInitialised = SUCCEEDED(co);
+
+    int                  rate    = 0;
+    IMMDeviceEnumerator* devices = nullptr;
+    if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                   __uuidof(IMMDeviceEnumerator),
+                                   reinterpret_cast<void**>(&devices)))) {
+        IMMDevice* endpoint = nullptr;
+        if (SUCCEEDED(devices->GetDefaultAudioEndpoint(eRender, eConsole, &endpoint))) {
+            IAudioClient* client = nullptr;
+            if (SUCCEEDED(endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                             reinterpret_cast<void**>(&client)))) {
+                WAVEFORMATEX* mix = nullptr;
+                if (SUCCEEDED(client->GetMixFormat(&mix)) && mix != nullptr) {
+                    rate = int(mix->nSamplesPerSec);
+                    CoTaskMemFree(mix);
+                }
+                client->Release();
+            }
+            endpoint->Release();
+        }
+        devices->Release();
+    }
+
+    if (weInitialised) CoUninitialize();
+    return rate;
+}
+#endif
+
+/** Where the requested rate came from — printed on the boot line, so a reading stays attributable. */
+enum class RateSource { DEVICE, FALLBACK, ENV };
+
+const char* rate_source_text(RateSource s) {
+    switch (s) {
+        case RateSource::ENV:    return "env";
+        case RateSource::DEVICE: return "the device";
+        case RateSource::FALLBACK: break;
+    }
+    return "fallback";
+}
+
+/**
+ * The size to ask for — `POCKETTRACKER_AUDIO_FRAMES` overrides the default.
+ *
+ * A diagnostic and deliberately NOT a setting: it sweeps a device for the smallest buffer that
+ * device will honour, without a rebuild per size. Rounded DOWN to a power of two (SDL's contract for
+ * `samples`) and clamped to 32..8192 — a bad value is refused on stderr, since a request that lands
+ * as garbage looks exactly like a device that ignored it.
+ */
+int requested_frames() {
+    const char* v = std::getenv("POCKETTRACKER_AUDIO_FRAMES");
+    if (v == nullptr || *v == '\0') return FRAMES_PER_CALLBACK;
+
+    const long n = std::strtol(v, nullptr, 10);
+    if (n < 32 || n > 8192) {
+        std::fprintf(stderr, "POCKETTRACKER_AUDIO_FRAMES=%s out of range (32..8192), using %d\n", v,
+                     FRAMES_PER_CALLBACK);
+        return FRAMES_PER_CALLBACK;
+    }
+    int pow2 = 32;
+    while (pow2 * 2 <= int(n)) pow2 *= 2;
+    return pow2;
+}
+
+/**
+ * The rate to ask the device for, and where that number came from.
+ *
+ * Three sources, in order. `POCKETTRACKER_AUDIO_RATE` wins — it is the diagnostic that forces a
+ * conversion on purpose, which is the only way to measure what one costs. Then the platform's own
+ * answer, where a platform has one. Then the fallback constant.
+ *
+ * ⚠️ **ONLY WINDOWS CAN BE ASKED.** SDL's ALSA backend stores a null device spec, so the probe there
+ * reports zeros — read off the source and confirmed on the device. The Flip's 48000 request therefore
+ * stands on its own measurement rather than on anything queried at runtime.
+ */
+int requested_rate(RateSource& source) {
+    if (const char* v = std::getenv("POCKETTRACKER_AUDIO_RATE"); v != nullptr && *v != '\0') {
+        const long n = std::strtol(v, nullptr, 10);
+        if (n >= 8000 && n <= 192000) {
+            source = RateSource::ENV;
+            return int(n);
+        }
+        std::fprintf(stderr, "POCKETTRACKER_AUDIO_RATE=%s out of range (8000..192000), ignoring\n", v);
+    }
+
+#ifdef _WIN32
+    if (const int hw = windows_endpoint_rate(); hw >= 8000 && hw <= 192000) {
+        source = RateSource::DEVICE;
+        return hw;
+    }
+#endif
+
+    source = RateSource::FALLBACK;
+    return PREFERRED_RATE;
+}
 
 }  // namespace
 
@@ -100,11 +242,15 @@ bool SdlAudioEngine::openStream() {
         return false;
     }
 
+    const int  askedFrames = requested_frames();
+    RateSource rateSource  = RateSource::FALLBACK;
+    const int  askedRate   = requested_rate(rateSource);
+
     SDL_AudioSpec want{};
-    want.freq     = PREFERRED_RATE;
+    want.freq     = askedRate;
     want.format   = AUDIO_F32SYS;
     want.channels = 2;
-    want.samples  = FRAMES_PER_CALLBACK;
+    want.samples  = Uint16(askedFrames);
     want.callback = &SdlAudioEngine::audioCallback;
     want.userdata = this;
 
@@ -143,11 +289,16 @@ bool SdlAudioEngine::openStream() {
 
     SDL_PauseAudioDevice(device_, 0);
 
-    // Printed from the stored field, not from `got`, so the line and `outputLatency()` cannot drift
-    // apart and quietly disagree about what the device is doing.
-    std::printf("audio:   %d Hz, %d ch, %d frames/callback (%.1f ms at least), driver=%s\n",
+    // Printed from the stored fields, not from `got`, so the line and `outputLatency()` cannot drift
+    // apart and quietly disagree about what the device is doing. What was ASKED is printed beside
+    // what was negotiated, never instead of it — the two differing is the normal case, and it is the
+    // only way to tell a device that rounded the request from one that ignored it.
+    //
+    // ⚠️ Neither half is a reading of the HARDWARE. See PREFERRED_RATE.
+    std::printf("audio:   %d Hz, %d ch, %d frames/callback (%.1f ms at least), asked %d Hz (%s) / %d "
+                "frames, driver=%s\n",
                 sampleRate_, channels_, bufferFrames_, 1000.0 * bufferFrames_ / sampleRate_,
-                SDL_GetCurrentAudioDriver());
+                askedRate, rate_source_text(rateSource), askedFrames, SDL_GetCurrentAudioDriver());
     return true;
 }
 
