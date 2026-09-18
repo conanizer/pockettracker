@@ -1300,10 +1300,16 @@ int run(const AppConfig& cfg) {
                 // Reload the PNGs + adopt the scalars only when the choice actually changed (or on the
                 // first frame). This is where the D7 asset seam is finally driven by a setting.
                 if (state.settings.skinIndex != loadedSkinIdx) {
-                    skin.load(video.renderer(), d.id, cfg.console);
-                    portrait.set_skin(d.casingFillArgb, d.labelRgb, d.bezelThicknessX);
+                    skin.load(video.renderer(), d.id, cfg.console, d.art);
+                    portrait.set_skin(d.casingFillArgb, d.labelRgb, d.bezelThicknessX, d.art);
                     loadedSkinIdx = state.settings.skinIndex;
                 }
+
+                // The chromeless skins draw in the LIVE theme's colours, so they are pushed every
+                // frame, not at load: a theme edit or swap must restyle the controls straight away, and
+                // the art they tint was uploaded colourless exactly so nothing has to be reloaded when
+                // it does. Inert for the chrome skins, which draw in their own table's scalars.
+                portrait.set_theme(state.theme.background, state.theme.textValue);
             } else {
                 state.settings.skinCount = 0;   // no skin column on a fullscreen (controller) layout
                 if (!padChoice) { state.settings.layoutCount = 1; state.settings.layoutIndex = 0; }

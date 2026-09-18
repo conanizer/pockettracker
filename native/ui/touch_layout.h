@@ -529,6 +529,71 @@ inline Portrait2Skin portrait2_skin(int deviceW, int deviceH, float density,
     return s;
 }
 
+// ─── PORTRAIT2 BARE: the same cluster, no chrome, and the screen gets the rest ────────────────────
+//
+// The band geometry for a skin that ships BUTTON ART ONLY — no vent panel, no branding strip, no
+// button backing and no bezel. Two bands instead of four:
+//
+//     ┌───────────────┐  the SCREEN area — FULL DEVICE WIDTH, no border, the frame centred in it
+//     │               │
+//     ├───────────────┤
+//     │  [buttons...]  │  the cluster — `portrait2_rects` fills it, exactly as in the skinned layout
+//     └───────────────┘
+//
+// ⚠️ The point of it is the WIDTH. `portrait2_skin` spends 135X on a bezel and then insets the frame
+// by the bezel border on each side, so the picture is always narrower than the device; here there is
+// no border to inset by and no branding band to pay for, so the screen area IS the device width and
+// the frame grows to fill it.
+//
+// The cluster's own arithmetic is UNCHANGED — same 141.75X band, same `portrait2_rects` inside it —
+// so a button lands in the same place relative to its neighbours as it does under the skinned layout,
+// and the two share one hit-test. Only the bands around it differ.
+inline Portrait2Skin portrait2_skin_bare(int deviceW, int deviceH) {
+    // The cluster wants the FULL device width (X = deviceW/135, the skinned layout's case-A unit),
+    // which fixes its height at 141.75X and leaves the screen everything above it.
+    //
+    // When that would leave the screen too short to show a full-width 4:3 frame, the CLUSTER gives way
+    // — X shrinks until the frame fits, taking the buttons down with it. That is the one direction
+    // worth yielding in: this layout exists to make the tracker bigger, so a squarer screen should
+    // spend its scarce height on the picture, not on the keys.
+    const float wantScreenH = static_cast<float>(deviceW) * DESIGN_FRAME_H / DESIGN_FRAME_W;
+
+    float X = static_cast<float>(deviceW) / GRID_UNITS;
+    if (static_cast<float>(deviceH) - X * 141.75f < wantScreenH)
+        X = (static_cast<float>(deviceH) - wantScreenH) / 141.75f;
+    X = std::max(X, 1.0f);   // the same floor `portrait2` puts on its unit — never a zero-width cluster
+
+    // Derive the band height from the FLOORED X rather than the other way round, so the cluster's
+    // height and the button sizes inside it can never disagree. Capped at the screen so a pathological
+    // (landscape, or tiny) input cannot push the cluster off the bottom.
+    const int buttonAreaH = std::min(static_cast<int>(X * 141.75f), std::max(deviceH, 0));
+    const int screenH     = deviceH - buttonAreaH;
+    const int contentW    = static_cast<int>(X * GRID_UNITS);
+    const int contentX    = (deviceW - contentW) / 2;   // centred, as the skinned layout centres its column
+
+    Portrait2Skin s;
+    s.x = X;
+
+    // topPanel and branding stay EMPTY — there is no art for them and no band to fill. `bezel` is the
+    // screen area itself: full width, no border, so the inner area is the same rect. Keeping the two
+    // fields (rather than only `innerBezel`) means `PortraitSkin::screen_rect` and the modal scrim read
+    // the same field in both layouts.
+    s.bezel      = {0, 0, deviceW, screenH};
+    s.innerBezel = s.bezel;
+    s.buttons    = {contentX, screenH, contentW, buttonAreaH};
+
+    // The frame: the same integer scale-and-centre the skinned layout uses, over the whole width.
+    const int scaleX  = (deviceW + 1) / DESIGN_FRAME_W;
+    const int scaleY  = (screenH + 1) / DESIGN_FRAME_H;
+    const int scale   = std::max(std::min(scaleX, scaleY), 1);
+    const int renderW = DESIGN_FRAME_W * scale;
+    const int renderH = DESIGN_FRAME_H * scale;
+    s.frame = {std::max(0, (deviceW - renderW) / 2), std::max(0, (screenH - renderH) / 2),
+               renderW, renderH};
+
+    return s;
+}
+
 /** Which button in `box` contains the box-local point, if any. Draw order == first hit; the oracle
  *  asserts the rects never overlap, so first-hit is the only hit. */
 inline bool hit(const BoxRects& box, int px, int py, Button& out) {

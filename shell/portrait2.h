@@ -19,6 +19,27 @@
 //   │  [buttons...]  │  band 4  button cluster    (SkinPiece::ButtonBacking) — the ten portrait2_rects
 //   └───────────────┘
 //
+// ── THREE SKINS IN ONE RENDERER ───────────────────────────────────────────────────────────────────
+//
+// The above is the CHROME art (amiga / amiga-2). A skin whose `SkinArt` in device_skin.h is anything
+// else is drawn by this same class from a different starting point: `portrait2_skin_bare` instead of
+// `portrait2_skin`, so there are no bands at all — just the tracker across the FULL device width and
+// the button cluster below it. Both such skins tint their art at blit time to the live tracker theme,
+// so two colours reach the screen: the theme's background, which is the casing clear, and its TXT
+// VALUE, which is every key. They differ only in what the art is and therefore whether text goes over
+// it — BITMAP ships a character per button and needs none; TRANSPARENT ships the bare square and wide
+// shapes and gets the same labels the chrome skins draw, in that same TXT VALUE.
+//
+//   ┌───────────────┐  the tracker — full device width, no bezel, no border
+//   │    640×480    │
+//   ├───────────────┤
+//   │  [buttons...]  │  the same cluster, the same `portrait2_rects`, the same hit-test
+//   └───────────────┘
+//
+// The CLUSTER arithmetic is shared, which is the point: only the bands around it differ, so a button
+// is in the same place relative to its neighbours under either skin and `SdlTouch` needs to know
+// nothing about which one is up.
+//
 // The buttons are hit-testable. `PortraitSkin` exposes the cluster rect + the ten box-local button rects
 // (`cluster_rect()` / `button_rects()`) — the SAME geometry it draws — and `SdlTouch::layout_portrait2`
 // hit-tests them, feeding fingers through `SdlInput`'s own press/release exactly as the landscape panels
@@ -30,6 +51,7 @@
 
 #include <SDL.h>
 
+#include "skin.h"   // SkinArt — stored by value below, so the definition is needed here
 #include "ui/touch_layout.h"
 
 #include <cstdint>
@@ -38,7 +60,6 @@ class SdlInput;
 
 namespace ptshell {
 
-class Skin;
 class Font;
 
 class PortraitSkin {
@@ -96,15 +117,33 @@ public:
      * hardcodes amiga-2. Defaults (below) are amiga-2, so an un-set instance behaves as it did before
      * selection existed.
      */
-    void set_skin(uint32_t casingArgb, uint32_t labelRgb, float bezelThicknessX) {
-        casing_    = casingArgb;
-        labelRgb_  = labelRgb;
-        bezelX_    = bezelThicknessX;
+    void set_skin(uint32_t casingArgb, uint32_t labelRgb, float bezelThicknessX, SkinArt art) {
+        casing_   = casingArgb;
+        labelRgb_ = labelRgb;
+        bezelX_   = bezelThicknessX;
+        art_      = art;
+    }
+
+    /**
+     * The LIVE tracker theme's two colours, pushed every frame (unlike `set_skin`, which changes only
+     * when the user picks a different skin). The two CHROMELESS skins are drawn in these and nothing
+     * else: the ground is `background` and the keys — art and labels alike — are `textValue`, so the
+     * controls restyle themselves the moment a theme is edited or swapped, with no reload and nothing
+     * to keep in step.
+     *
+     * ⚠️ They must be pushed BEFORE `casing_argb()` and `signature()` are read for the frame, because
+     * both answer with them off the Chrome path.
+     */
+    void set_theme(uint32_t backgroundArgb, uint32_t textValueArgb) {
+        themeBg_  = backgroundArgb;
+        themeInk_ = textValueArgb;
     }
 
     /** The casing colour the whole output is cleared to before the bands composite over it — it shows
-     *  at the sides when the skin is narrower than the device (case C) and in any bottom gap. */
-    uint32_t casing_argb() const { return casing_; }
+     *  at the sides when the skin is narrower than the device (case C) and in any bottom gap. On a
+     *  chromeless skin it is the tracker's own background: there the clear is not a surround to the art
+     *  but the art's own ground, the one colour the keys sit on. */
+    uint32_t casing_argb() const { return chromeless() ? themeBg_ : casing_; }
 
     /** UNDERLAY (drawn after the casing clear, BEFORE the frame): the four chrome bands and the inner
      *  bezel the frame lands on. A missing piece is a no-op, so an incomplete theme shows casing through
@@ -113,7 +152,10 @@ public:
      *  `innerBezelArgb` fills the bezel's padded inner area — the letterbox gap around the frame. It is
      *  the LIVE pt-ui theme's `background`, NOT black: Kotlin painted this black, but the shell matches
      *  it to the tracker's own background so the frame and the gap around it read as one surface — the
-     *  same reasoning (and the same colour) as the landscape letterbox in `SdlVideo::present`. */
+     *  same reasoning (and the same colour) as the landscape letterbox in `SdlVideo::present`.
+     *
+     *  ⚠️ A chromeless skin has no bands at all, and this draws NOTHING for one — not even the inner
+     *  fill, which would only repaint the casing colour over itself. Its ground is the casing clear. */
     void draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t innerBezelArgb) const;
 
     /** OVERLAY (drawn AFTER the frame): the ten buttons on the backing band, each in its PNG variant
@@ -122,7 +164,13 @@ public:
      *  via `draw_text` too — a real glyph, because Helvetica ships no arrows — falling back to `font`'s
      *  shell-drawn line arrow when `arrowFont` did not load. Both fonts are mutable: they cache glyph
      *  textures on first use. If `font` itself did not load, the whole cluster falls back to the 5×5
-     *  label font, so a missing .otf shows blocky labels rather than none. */
+     *  label font, so a missing .otf shows blocky labels rather than none.
+     *
+     *  ⚠️ The BITMAP skin takes NONE of that path: its art carries each button's character already, so
+     *  it blits one image per button tinted to the theme's TXT VALUE and draws no text at all. Neither
+     *  font is touched there, and a missing .otf cannot affect it. The TRANSPARENT skin does take it —
+     *  its art is only the shape — with the blit tinted and the label drawn in the theme's TXT VALUE
+     *  rather than the skin table's constant. */
     void draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, Font& arrowFont,
                       const SdlInput& input) const;
 
@@ -135,13 +183,30 @@ public:
     uint64_t signature(const SdlInput& input) const;
 
 private:
+    // ⚠️ CHROMELESS is derived from the art set, not stored beside it. Everything that is not the
+    // bands-and-casing skin shares one shape — the bare band layout, the theme background as its
+    // ground, and its art tinted to the theme's TXT VALUE — and only what sits ON a button differs.
+    // A second flag would let the two drift; this cannot.
+    bool chromeless() const { return art_ != SkinArt::Chrome; }
+
+    /** The colour a button's art and its label are drawn in. A chromeless skin follows the live theme;
+     *  a chrome skin uses its own table constant, which is matched to its casing art. */
+    uint32_t ink_rgb() const { return (chromeless() ? themeInk_ : labelRgb_) & 0x00FFFFFFu; }
+
     // The current skin's scalars, defaulting to amiga-2 (the shell's prior hardcode) so an un-set
-    // instance is unchanged. `set_skin` swaps in NORM/DARK from the device-skin table (device_skin.h)
-    // when the SETTINGS skin column changes. amiga-2: casing 0xFF56606C, white label, bezel 3 skin-X
-    // units (a bezel PNG, so density is irrelevant — see portrait2_skin).
+    // instance is unchanged. `set_skin` swaps in the chosen row of the device-skin table
+    // (device_skin.h) when the SETTINGS skin column changes. amiga-2: casing 0xFF56606C, white label,
+    // bezel 3 skin-X units (a bezel PNG, so density is irrelevant — see portrait2_skin).
     uint32_t casing_   = 0xFF56606C;
     uint32_t labelRgb_ = 0xFFFFFF;
     float    bezelX_   = 3.0f;
+    SkinArt  art_      = SkinArt::Chrome;
+
+    // The live theme's two colours, used only by a chromeless skin. The defaults are a readable
+    // white-on-black, so an instance that somehow draws before `set_theme` shows the controls rather
+    // than black on black.
+    uint32_t themeBg_  = 0xFF000000;
+    uint32_t themeInk_ = 0xFFFFFFFF;
 
     bool active_ = false;
     int  outW_   = 0;

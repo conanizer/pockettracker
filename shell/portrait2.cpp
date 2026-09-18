@@ -41,6 +41,27 @@ SkinPiece piece_for(const Skin& skin, Button b, bool pressed) {
     }
 }
 
+// The Bitmap skin's art selection: one image per button, in its pressed or normal state. Unlike
+// `piece_for` above there is no sharing and no fallback — every button has its own file, and a missing
+// one is a `Skin::draw` no-op that leaves a gap exactly where the absent art is, which is the most
+// findable way for an incomplete set to fail.
+SkinPiece bitmap_piece_for(Button b, bool pressed) {
+    switch (b) {
+        case Button::L_SHIFT:    return pressed ? SkinPiece::BmpLShiftPressed : SkinPiece::BmpLShiftNormal;
+        case Button::R_SHIFT:    return pressed ? SkinPiece::BmpRShiftPressed : SkinPiece::BmpRShiftNormal;
+        case Button::A:          return pressed ? SkinPiece::BmpAPressed      : SkinPiece::BmpANormal;
+        case Button::B:          return pressed ? SkinPiece::BmpBPressed      : SkinPiece::BmpBNormal;
+        case Button::SELECT:     return pressed ? SkinPiece::BmpSelPressed    : SkinPiece::BmpSelNormal;
+        case Button::START:      return pressed ? SkinPiece::BmpStartPressed  : SkinPiece::BmpStartNormal;
+        case Button::DPAD_UP:    return pressed ? SkinPiece::BmpUpPressed     : SkinPiece::BmpUpNormal;
+        case Button::DPAD_DOWN:  return pressed ? SkinPiece::BmpDownPressed   : SkinPiece::BmpDownNormal;
+        case Button::DPAD_LEFT:  return pressed ? SkinPiece::BmpLeftPressed   : SkinPiece::BmpLeftNormal;
+        case Button::DPAD_RIGHT: return pressed ? SkinPiece::BmpRightPressed  : SkinPiece::BmpRightNormal;
+        // The cluster holds those ten and nothing else; this arm exists for the enum, not for a case.
+        default:                 return pressed ? SkinPiece::BmpRightPressed  : SkinPiece::BmpRightNormal;
+    }
+}
+
 // A PORTRAIT2 button's label, ported one-for-one from `VirtualControlsPortrait2`'s per-button call: the
 // text (or, for the D-pad, an `Arrow` the shell draws itself — Helvetica has no arrow glyphs), which
 // SIZE class it uses (large = A/B and the arrows; small = Sel/Start and the L/R shift), and which X
@@ -115,8 +136,14 @@ void PortraitSkin::layout(int outW, int outH, bool enabled, bool fit) {
     // The bands + the frame-in-bezel, host-checked by `pttouch --positions`. density=1 and the dp
     // fallback are inert for amiga-2 (its bezelThicknessX > 0), so the only inputs that decide the
     // geometry are the output size and the skin unit X the function derives from it.
-    geom_  = tl::portrait2_skin(outW, outH, /*density=*/1.0f, /*bezelThicknessDp=*/9.0f,
-                                /*bezelThicknessX=*/bezelX_);
+    //
+    // A CHROMELESS skin takes the BARE layout instead: no bands to place, so the screen area is the
+    // whole device width and the cluster hangs off the bottom. Same struct, same cluster arithmetic
+    // below — only where the two rects land differs, which is why this is one call site and not two
+    // renderers.
+    geom_ = chromeless() ? tl::portrait2_skin_bare(outW, outH)
+                         : tl::portrait2_skin(outW, outH, /*density=*/1.0f, /*bezelThicknessDp=*/9.0f,
+                                              /*bezelThicknessX=*/bezelX_);
 
     // SETTINGS > SCALING decides where the 640×480 frame lands inside the bezel. INTEGER uses the
     // pre-computed integer-scaled, centred `geom_.frame` (the tracker's own black canvas hides the gap).
@@ -143,6 +170,12 @@ void PortraitSkin::layout(int outW, int outH, bool enabled, bool fit) {
 
 void PortraitSkin::draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t innerBezelArgb) const {
     if (!active_) return;
+
+    // A chromeless skin has no panels, no branding, no backing and no bezel. Its ground is the casing
+    // clear, which is already this same theme background — so filling the screen area here would paint
+    // the colour over itself, and every band draw below would be a no-op against a theme that ships
+    // none of that art. Leaving early says so once instead of four times.
+    if (chromeless()) return;
 
     // Band 1 — the vent panel (absent in case C, so guard on empty()).
     if (!geom_.topPanel.empty()) skin.draw(r, SkinPiece::TopPanel, to_sdl(geom_.topPanel));
@@ -175,6 +208,21 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
     const int ox = geom_.buttons.x;
     const int oy = geom_.buttons.y;
 
+    // ── The BITMAP skin: one tinted image per button, and no text anywhere ───────────────────────
+    //
+    // The art already carries each button's character, so everything the path below this — the
+    // Helvetica metrics, the size classes, the X/Y offsets, the arrow font and its baseline anchoring —
+    // has nothing to do here. Drawing a label over art that has one is the only way to get this wrong,
+    // so the path does not have a font to draw one with.
+    if (art_ == SkinArt::Bitmap) {
+        for (int i = 0; i < buttons_.count; ++i) {
+            const tl::ButtonRect& br = buttons_.r[i];
+            const SDL_Rect        dst{br.x + ox, br.y + oy, br.w, br.h};
+            skin.draw_tinted(r, bitmap_piece_for(br.button, input.is_held(br.button)), dst, ink_rgb());
+        }
+        return;
+    }
+
     // The Helvetica label metrics, IN PIXELS. Density cancels for on-screen size exactly as it does for
     // positions (touch_layout.h): Kotlin draws `largeSp.sp` at `largeSp * density` px, and
     // largeSp = x*11/density, so the pixel size is x*11 — which is what `portrait2(..., density=1)`
@@ -184,17 +232,26 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
     const tl::Portrait2 fm = tl::portrait2(geom_.buttons.w, std::max(geom_.buttons.h, 100), 1.0f);
     const auto          R = [](float v) { return static_cast<int>(std::lround(v)); };
 
+    // ONE colour for the shape and the character on it. The TRANSPARENT skin's art is a bare outline
+    // authored in white, so it takes its colour from the same tint the label does; the chrome skins'
+    // art is finished casing art and must not be multiplied by anything, which is the whole of the
+    // difference below.
+    const uint32_t ink   = ink_rgb();
+    const bool     tinted = chromeless();
+
     for (int i = 0; i < buttons_.count; ++i) {
         const tl::ButtonRect& br = buttons_.r[i];
         const SDL_Rect        dst{br.x + ox, br.y + oy, br.w, br.h};
         const bool            pressed = input.is_held(br.button);
         // FillBounds: RenderCopy stretches the button PNG to the cell — Compose's ContentScale.FillBounds.
         // A missing piece is a Skin::draw no-op, so an incomplete theme shows the backing through.
-        skin.draw(r, piece_for(skin, br.button, pressed), dst);
+        const SkinPiece piece = piece_for(skin, br.button, pressed);
+        if (tinted) skin.draw_tinted(r, piece, dst, ink);
+        else        skin.draw(r, piece, dst);
 
         // No Helvetica (asset missing / unparseable) → the shared 5×5 label font, as before it existed.
         if (!useHelv) {
-            draw_label(r, br.button, dst, labelRgb_);
+            draw_label(r, br.button, dst, ink);
             continue;
         }
 
@@ -216,17 +273,17 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
                 // which share that bottom edge with the (larger) full-size render.
                 const float apx  = px * ARROW_PX_FRAC;
                 const int   yTop = dst.y + offY + arrowFont.ascent_px(px) - arrowFont.ascent_px(apx);
-                arrowFont.draw_text(arrow_utf8(lab.dir), dst.x + offX, yTop, apx, labelRgb_);
+                arrowFont.draw_text(arrow_utf8(lab.dir), dst.x + offX, yTop, apx, ink);
             } else {
                 const int      baseline = dst.y + offY + font.ascent_px(px);
                 const int      capH     = R(px * CAP_HEIGHT_FRAC);
                 const int      side     = R(px * ARROW_BOX_FRAC);
                 const SDL_Rect abox{dst.x + offX, baseline - capH / 2 - side / 2, side, side};
-                font.draw_arrow(lab.dir, abox, labelRgb_);
+                font.draw_arrow(lab.dir, abox, ink);
             }
         } else {
             // Top-start + offset, like Kotlin's `Text` with `Alignment.TopStart` and a start/top padding.
-            font.draw_text(lab.text, dst.x + offX, dst.y + offY, px, labelRgb_);
+            font.draw_text(lab.text, dst.x + offX, dst.y + offY, px, ink);
         }
     }
 }
@@ -238,6 +295,22 @@ uint64_t PortraitSkin::signature(const SdlInput& input) const {
     for (int i = 0; i < buttons_.count; ++i)
         if (input.is_held(buttons_.r[i].button))
             bits |= (1ull << static_cast<int>(buttons_.r[i].button));
+
+    // ⚠️ A CHROMELESS skin's INK colour belongs in here. It is the live theme's TXT VALUE, applied at
+    // blit time, so editing that one colour restyles the whole cluster without moving a canvas pixel or
+    // changing the casing clear — the two things the C7 gate otherwise compares. Left out, the buttons
+    // would keep the old colour until something else happened to force a frame: the gate's
+    // blind-channel shape exactly, the same one the button HIGHLIGHT hits one panel over.
+    //
+    // Bits 10-15, which nothing else uses: the ten button flags end at bit 9, geometry starts at 16.
+    // Six bits means this is a FOLD, not the colour — two inks in 64 can share a code, so it is the net
+    // under the canvas compare rather than a channel of its own. Exactness would cost a documented
+    // field; catching the case where the canvas genuinely did not change does not need it.
+    if (chromeless()) {
+        const uint32_t ink = ink_rgb();
+        const uint32_t f   = (ink ^ (ink >> 12)) ^ ((ink ^ (ink >> 12)) >> 6);
+        bits ^= static_cast<uint64_t>(f & 0x3Fu) << 10;
+    }
 
     // Geometry too, so a rotate/resize that moves the skin forces a repaint even with the same buttons
     // held. Bit 62 marks "portrait active" — distinct from SdlTouch's bit 63 — so a landscape↔portrait
