@@ -14,7 +14,7 @@
 class AudioEngine;  // portable core — full definition pulled in by the .cpp only
 
 // `AudioBackend` since convergence C3 — the shared shell (shell/app.cpp) reaches its device through
-// those five methods and nothing else, so `shell/android-main.cpp` hands it one of these where the
+// those six methods and nothing else, so `shell/android-main.cpp` hands it one of these where the
 // desktop hands it an `SdlAudioEngine` and app.cpp does not change a character. The interface was
 // derived from SdlAudioEngine's shape and this class already matched three of it; see
 // native/audio-backend.h for why the virtuals cost nothing (they are lifecycle, never the callback).
@@ -55,6 +55,15 @@ public:
     /** The rate the device actually negotiated, not the 44100 we asked for. */
     int sampleRate() const override { return sampleRate_; }
 
+    /**
+     * The real figure when the platform gives Oboe a timestamp, the app's own buffer when it does not.
+     *
+     * ⚠️ **NOT FROM THE AUDIO CALLBACK.** Oboe's own note: on Android before R, asking a running
+     * stream for its timestamp from inside the data callback can stall it. Every caller here is the
+     * shell, on the frame loop or on the way out.
+     */
+    OutputLatency outputLatency() const override;
+
     oboe::DataCallbackResult onAudioReady(
             oboe::AudioStream* audioStream,
             void* audioData,
@@ -67,5 +76,6 @@ private:
     // Cached at openStream, exactly as SdlAudioEngine caches its own: the shell may ask for the rate
     // after closeStream has reset the stream pointer, and reaching into a platform stream object to
     // ask is the thing the AudioBackend seam exists to stop the shell doing.
-    int sampleRate_ = 0;
+    int sampleRate_   = 0;
+    int bufferFrames_ = 0;  // the stream's own buffer — the floor `outputLatency` falls back to
 };

@@ -19,8 +19,9 @@
 //
 // ⚠️ **THIS IS NOT IN THE REAL-TIME PATH, AND THAT IS WHY IT IS ALLOWED TO BE VIRTUAL.** The audio
 // callback never comes through here: SDL calls `SdlAudioEngine::audioCallback` and Oboe calls
-// `OboeAudioEngine::onAudioReady`, each straight into `AudioEngine::processLiveBlock`. The five
-// methods below are lifecycle — open once, close once, pause around an offline render, ask the rate.
+// `OboeAudioEngine::onAudioReady`, each straight into `AudioEngine::processLiveBlock`. The six
+// methods below are lifecycle — open once, close once, pause around an offline render, ask the rate,
+// ask the latency.
 // A vtable on a handful of per-session calls costs nothing measurable; a vtable in the callback would
 // have been a different question and this interface deliberately does not pose it.
 //
@@ -62,6 +63,24 @@ class AudioBackend {
 
     /** The rate the device actually negotiated, not the one we asked for. */
     virtual int sampleRate() const = 0;
+
+    /**
+     * How long a frame written by the callback waits before it is heard, in frames at `sampleRate()`.
+     *
+     * ⚠️ **`measured` false means the number is a FLOOR, not the latency.** It is the app's own
+     * buffer and nothing else: whatever the driver queues behind it is not in it, and on a handheld
+     * that hidden term can be as large again. Only Oboe can ever report the real figure, and only
+     * when the platform hands it a timestamp — SDL has no API for it at all. Anything that turns
+     * this into a number a user reads has to say which of the two it got.
+     *
+     * 0 before a device is open; after `closeStream` it keeps the last device's figure, exactly as
+     * `sampleRate()` does, because the shell asks both while shutting down.
+     */
+    struct OutputLatency {
+        int  frames   = 0;
+        bool measured = false;
+    };
+    virtual OutputLatency outputLatency() const = 0;
 };
 
 #endif  // POCKETTRACKER_AUDIO_BACKEND_H

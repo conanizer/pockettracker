@@ -26,7 +26,7 @@
 
 class AudioEngine;
 
-// `AudioBackend` since convergence C0.2 — the shared shell reaches its device through those five
+// `AudioBackend` since convergence C0.2 — the shared shell reaches its device through those six
 // methods and nothing else, so that C3 can hand it `OboeAudioEngine` on Android without app.cpp
 // changing a character. The interface came from THIS class's shape; see audio-backend.h for why the
 // virtuals cost nothing (they are lifecycle, never the callback).
@@ -60,13 +60,23 @@ class SdlAudioEngine : public AudioBackend {
     // The rate the device actually negotiated, not the one we asked for.
     int sampleRate() const override { return sampleRate_; }
 
+    /**
+     * Always a FLOOR, never the latency — `measured` is false here and cannot become true.
+     *
+     * SDL2 has no call that reports device latency: `SDL_GetQueuedAudioSize` is for queued audio and
+     * says nothing about a callback device. So this reports the one term the app can see, its own
+     * negotiated buffer, and leaves the driver's queue to the microphone.
+     */
+    OutputLatency outputLatency() const override { return {bufferFrames_, false}; }
+
   private:
     static void SDLCALL audioCallback(void* userdata, Uint8* out, int lenBytes);
 
-    AudioEngine*      core_       = nullptr;
-    SDL_AudioDeviceID device_     = 0;
-    int               sampleRate_ = 0;
-    int               channels_   = 0;
+    AudioEngine*      core_         = nullptr;
+    SDL_AudioDeviceID device_       = 0;
+    int               sampleRate_   = 0;
+    int               channels_     = 0;
+    int               bufferFrames_ = 0;  // what the device chose, not FRAMES_PER_CALLBACK
 };
 
 #endif  // POCKETTRACKER_SDL_AUDIO_ENGINE_H

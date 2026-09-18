@@ -1,6 +1,7 @@
 #include "sdl-audio-engine.h"
 
 #include "audio-engine.h"
+#include "latency_probe.h"
 
 #include <cstdio>
 #include <cstdint>
@@ -47,6 +48,11 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
 
     // SDL hands us a byte length; the engine wants frames.
     const int numFrames = lenBytes / int(sizeof(float)) / self->channels_;
+
+    // ⚠️ `numFrames` and not the constant we asked for: this is the size the DEVICE chose, which on the
+    // Flip is 940 where 512 was requested. Relaxed atomics only — nothing here may block. Off unless
+    // POCKETTRACKER_LATENCY=1, and one cached bool when it is.
+    latency::audio_callback(numFrames);
 
     // Pure SDL glue — the exact mirror of OboeAudioEngine::onAudioReady. processLiveBlock does
     // everything: sets flush-to-zero, CLEARS the buffer (SDL does not hand us a zeroed one), bails
@@ -125,9 +131,10 @@ bool SdlAudioEngine::openStream() {
     }
 
     // Set BEFORE the device is unpaused: SDL_OpenAudioDevice opens it paused, so the callback
-    // cannot fire until the SDL_PauseAudioDevice below — no race on these two fields.
-    sampleRate_ = got.freq;
-    channels_   = got.channels;
+    // cannot fire until the SDL_PauseAudioDevice below — no race on these three fields.
+    sampleRate_   = got.freq;
+    channels_     = got.channels;
+    bufferFrames_ = got.samples;  // ⚠️ the SIZE THE DEVICE CHOSE — 441 here, 940 on the Flip, 512 asked
 
     // Hand the negotiated rate to the core, which caches it for getSampleRate() and every bit of
     // pitch/tic math. Same contract as OboeAudioEngine::openStream — the core never reaches into a
@@ -136,8 +143,10 @@ bool SdlAudioEngine::openStream() {
 
     SDL_PauseAudioDevice(device_, 0);
 
-    std::printf("audio:   %d Hz, %d ch, %d frames/callback (%.1f ms), driver=%s\n", sampleRate_,
-                channels_, got.samples, 1000.0 * got.samples / sampleRate_,
+    // Printed from the stored field, not from `got`, so the line and `outputLatency()` cannot drift
+    // apart and quietly disagree about what the device is doing.
+    std::printf("audio:   %d Hz, %d ch, %d frames/callback (%.1f ms at least), driver=%s\n",
+                sampleRate_, channels_, bufferFrames_, 1000.0 * bufferFrames_ / sampleRate_,
                 SDL_GetCurrentAudioDriver());
     return true;
 }

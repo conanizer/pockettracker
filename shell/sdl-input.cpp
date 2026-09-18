@@ -378,12 +378,12 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
 void SdlInput::tick(uint64_t now_ms) {
     if (!repeatActive_ || now_ms < repeatNextMs_) return;
 
-    // ONE repeat per frame, and the next deadline is measured from NOW rather than from the missed
+    // ONE repeat per tick, and the next deadline is measured from NOW rather than from the missed
     // one. A catch-up loop here would be a bug with teeth: stall the loop for half a second — drag the
-    // window, hit a slow frame on an A53 — and it would flush five queued repeats in a single frame,
+    // window, hit a slow frame on an A53 — and it would flush five queued repeats in a single tick,
     // so a held A+UP would jump the value by 5 in one go. "At least 100 ms apart, quantised to the
-    // frame" is also what Kotlin's Handler.postDelayed actually delivers, since its repeat is posted
-    // to the same main-thread message queue the UI is draining.
+    // poll tick" is also what Kotlin's Handler.postDelayed actually delivers, since its repeat is
+    // posted to the same main-thread message queue the UI is draining.
     // The repeat carries the modifiers as they stand NOW, not as they stood when the D-pad went down.
     // That is deliberate and it is Kotlin's behaviour: press A after UP is already repeating and the
     // repeat starts editing rather than moving, with no need to remember what began it.

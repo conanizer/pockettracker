@@ -70,7 +70,7 @@ public:
 
     /**
      * Upload the canvas and present it — unless the result would be identical to what is already on
-     * screen, in which case this does nothing but pace the frame. Returns true if it really presented.
+     * screen, in which case this does nothing at all. Returns true if it really presented.
      *
      * @param letterboxArgb  What the bars around the frame are painted (a `pt::ui::Argb`,
      *                       0xAARRGGBB). A PARAMETER rather than a setter on purpose: it is a pure
@@ -114,10 +114,6 @@ public:
                          const std::function<void(SDL_Renderer*)>& underlay,
                          const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
                          uint32_t modalScrimArgb = 0, const SDL_Rect& scrimBounds = {0, 0, 0, 0});
-
-    /** Pace a frame that drew nothing — see the .cpp. The app loop calls this when it skips the
-     *  draw entirely, so a still screen costs the same wall-clock as a moving one. */
-    void idle_frame();
 
     /**
      * Force the NEXT present, whatever the pixels say — the frame on screen is no longer the one we
@@ -177,7 +173,23 @@ public:
      *  both work in (SDL finger events are normalised to it). */
     void output_size(int& w, int& h) const { SDL_GetRendererOutputSize(renderer_, &w, &h); }
 
-    /** False when the renderer gave us no vsync — `present` then paces the frame itself. */
+    /**
+     * The panel's refresh rate in Hz, or 0 when the platform will not say.
+     *
+     * ⚠️ The app loop needs the REAL period, not 16 ms: a deadline 0.67 ms short of a 60 Hz refresh
+     * walks forward through the vblank a frame at a time, and with vsync every step of that walk is
+     * added to the wait inside `SDL_RenderPresent`. Asked live, because a window dragged to a second
+     * monitor lands on a different panel.
+     */
+    int refresh_hz() const {
+        SDL_DisplayMode mode{};
+        if (!window_ || SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(window_), &mode) != 0)
+            return 0;
+        return mode.refresh_rate;
+    }
+
+    /** False when the renderer gave us no vsync. The app loop's frame deadline holds the draw to
+     *  60 Hz either way — see THE TWO RATES in app.cpp — so this reports, it does not decide. */
     bool vsync() const { return vsync_; }
 
 private:
@@ -186,8 +198,8 @@ private:
     int      frame_top(int outH, int h) const;
 
     /** The shared body of `present` and `present_skinned`: the C7 pixel gate, the streaming-texture
-     *  upload, clear → underlay → frame → overlay → flip, and the pacing. The two public entries differ
-     *  only in where the frame lands (`dest`) and whether anything draws behind it (`underlay`). */
+     *  upload, and clear → underlay → frame → overlay → flip. The two public entries differ only in
+     *  where the frame lands (`dest`) and whether anything draws behind it (`underlay`). */
     bool present_impl(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& dest,
                       const std::function<void(SDL_Renderer*)>& underlay,
                       const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
@@ -196,23 +208,17 @@ private:
     /** One line naming the driver, the panel, the output size and the letterbox. See the .cpp. */
     void describe() const;
 
-    static constexpr Uint64 FRAME_MS = 16;  // ~60 Hz, when we have to pace it ourselves
-
     SDL_Window*   window_   = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture*  texture_  = nullptr;
     ScalingMode   scaling_  = ScalingMode::INTEGER;
     bool          topAnchor_ = false;
     bool          vsync_    = false;
-    Uint64        lastPresentMs_ = 0;
 
     /** The last renderer output size `present` saw, so a change can re-`describe()` itself. Zero
      *  until the first present, which is what suppresses a duplicate line at boot. See the .cpp. */
     int lastOutW_ = 0;
     int lastOutH_ = 0;
-
-    /** Pace a frame without presenting one. Shared by `present`'s skip path and `idle_frame`. */
-    void pace();
 
     // ── The idle-redraw net (C7) ─────────────────────────────────────────────────────────────────
     // The last frame actually PUT ON SCREEN, so an identical one can be dropped. This is the C++

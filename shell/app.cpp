@@ -26,6 +26,7 @@
 #include "font.h"
 #include "portrait2.h"
 
+#include "latency_probe.h"   // POCKETTRACKER_LATENCY=1 — the loop period and the callback gap
 #include "midi-in.h"      // the platform's IMidiIn, or nothing (E2: Windows only)
 #include "midi-sender.h"
 #include "sdl-input.h"
@@ -983,7 +984,74 @@ int run(const AppConfig& cfg) {
     // that were drawn and then found byte-identical to what was already there (gate 1 being
     // conservative, gate 2 catching it). On a still screen `drew` should stop climbing while the
     // frame counter keeps going; if `skip` stays 0 the feature is not working, whatever it looks like.
-    long long drawn = 0, presented = 0, skipped = 0;
+    // `poll` is the same accounting for the split below: it must climb while `drew` stands still.
+    long long drawn = 0, presented = 0, skipped = 0, polls = 0;
+
+    // ── THE TWO RATES ────────────────────────────────────────────────────────────────────────────
+    //
+    // The loop has two jobs and they do not want the same clock. Everything that decides how soon the
+    // app NOTICES something — the event drain, the input tick, the button dispatch, the MIDI-in pump
+    // and the lookahead refill — runs every POLL_MS. Everything that ends in a pixel, and the
+    // per-frame derivations that feed it, runs every FRAME_MS. Both used to run at the display's
+    // rate, so an arriving press or MIDI byte waited a mean 8 ms before anything looked at it.
+    //
+    // ⚠️⚠️ **THE PER-FRAME BLOCK MUST STAY SLOW, AND IT IS THE REASON THIS IS A SPLIT RATHER THAN A
+    // FASTER LOOP.** It is layout selection, controller re-derivation, an SDL output-size query, a
+    // hot-plug gate and the skin decisions — at 250 Hz it would cost more than the split saves, on
+    // the device least able to afford it.
+    //
+    // ⚠️⚠️ **THE FRAME IS SCHEDULED FROM THE PANEL, NOT FROM A CONSTANT, AND WITH VSYNC THAT IS THE
+    // DIFFERENCE BETWEEN A 5 ms POLL AND A 14 ms ONE.** `SDL_RenderPresent` BLOCKS until the display
+    // is ready and nothing is polled while it does. A flat 16 ms deadline against a 16.67 ms refresh
+    // steps a third of a millisecond earlier into each vblank, so the block grows a frame at a time
+    // until it is nearly a whole refresh long — measured, the poll period went to 13.8 ms under a
+    // running transport while an idle screen held 4.7. So the next frame is anchored on the present's
+    // RETURN, which IS a vblank, and starts half a period before the following one: the draw gets
+    // that half to finish in and the display's wait lands in the loop's own paced wait, where input
+    // is still being looked at. FRAME_MS is only the fallback for a platform that will not name a
+    // refresh rate.
+    //
+    // ⚠️ The half-period is the draw's budget, and the invariant it rests on is one the app needs
+    // anyway: **a frame must draw in less than half a refresh.** Overrun it and the present misses
+    // its vblank and waits for the next — a dropped frame, which is visible, where being early only
+    // costs a little of the block back.
+    //
+    // ⚠️ THE FAST RATE IS PAID FOR IN WAKE-UPS, SO IT IS ONLY SPENT WHILE SOMETHING IS ARRIVING —
+    // see `busy` below. A still app polls at POLL_IDLE_MS, which is the rate the whole loop ran at
+    // before the split, so standing still costs a handheld exactly what it always did.
+    constexpr Uint64 POLL_MS      = 4;
+    constexpr Uint64 POLL_IDLE_MS = 16;
+    constexpr Uint64 QUIET_MS     = 1000;   // input this recent still counts as something arriving
+    constexpr Uint64 FRAME_MS     = 16;
+    Uint64 nextFrameMs = 0;   // when the next drawn frame is due — 0 so the first tick draws
+    Uint64 lastPollMs  = 0;   // what the wait below measures against
+    Uint64 lastInputMs = 0;   // …and what tells the wait whether anyone is here
+
+    // ⚠️⚠️ **THE ONLY PLACE THIS LOOP SLEEPS, AND WITHOUT IT IT BURNS A WHOLE CORE.** With vsync it
+    // used to be `SDL_RenderPresent` that blocked and paced the entire app; a tick that draws nothing
+    // reaches no present at all, so the wait has to be here and every path out of the body has to
+    // reach it. Measured from the last TICK rather than from now, so a present that blocked past the
+    // next tick is followed by one immediately instead of adding its own wait on top of the block.
+    //
+    // ⚠️⚠️ **`busy` IS A LIST OF CHANNELS THAT DELIVER WITH NO SDL EVENT BEHIND THEM**, and that is
+    // the whole test — the transport's refill, a voice still sounding, an open MIDI port. Input needs
+    // no term of its own beyond the hold-off: the press that ends a quiet spell is the only one that
+    // pays the slow rate, and it re-arms the fast one for every press behind it. A first note also
+    // makes itself audible, so a jam on a stopped transport is fast from its second note on.
+    //
+    // ⚠️ Nothing here may sleep past a frame that is already due, or the idle rate beats against the
+    // panel's and anything that animates without input — a falling meter, a status line clearing —
+    // steps twice in one frame and then not at all.
+    const auto pace_tick = [&] {
+        const Uint64 t    = SDL_GetTicks64();
+        const bool   busy = state.isPlaying || audibleEdge ||
+                            (cfg.midiIn && cfg.midiIn->open_index() >= 0) ||
+                            t - lastInputMs < QUIET_MS;
+        Uint64 due = lastPollMs + (busy ? POLL_MS : POLL_IDLE_MS);
+        if (nextFrameMs < due) due = nextFrameMs;
+        if (due > t) SDL_Delay(static_cast<Uint32>(due - t));
+        lastPollMs = SDL_GetTicks64();
+    };
 
     // ── ROTATION / RESIZE SETTLING (C7's blind spot on Android) ──────────────────────────────────
     //
@@ -1015,14 +1083,32 @@ int run(const AppConfig& cfg) {
     // last edit, long before the user navigated to EXPORT and pressed A — but it is not zero.
     while (running && !state.shouldQuit &&
            !(cfg.terminate_requested && cfg.terminate_requested())) {
-        // One clock reading per frame, handed to everything that needs it. The input layer's repeat
+        ++polls;
+
+        // ⚠️ FIRST in the body, and that placement is the measurement: what this samples is the period
+        // of the WHOLE iteration, the wait at the foot of the loop included, which is exactly the wait
+        // an input serves before anything looks at it. Anywhere lower and it would time a fragment of
+        // the loop and report a latency nobody experiences. Off unless POCKETTRACKER_LATENCY=1.
+        //
+        // The transport flag is the last frame's — it is refreshed from the host further down — and
+        // one frame of lag is nothing to a bin that holds hundreds of samples. Moving the call down to
+        // get a fresher flag would cost the thing the call is for.
+        latency::poll_tick(state.isPlaying);
+
+        // One clock reading per tick, handed to everything that needs it. The input layer's repeat
         // is a function of time, so it takes the clock rather than reaching for it.
         const Uint64 now = SDL_GetTicks64();
 
-        // Lay the touch panels into the CURRENT letterbox bars before polling, so a finger arriving
-        // this frame hits the geometry that is actually on screen. A rotate or resize is absorbed the
-        // next frame; the call is a handful of int ops and a no-op when there is no touchscreen.
-        {
+        // Whether this tick also draws. Read ONCE, because the per-frame work is in two pieces — the
+        // derivations above the event drain and the drawing below it — and they must agree about
+        // which tick they are on.
+        const bool frameDue = now >= nextFrameMs;
+
+        // Lay the touch panels into the CURRENT letterbox bars before the drain below, so a finger
+        // hits the geometry that is actually on screen. ⚠️ On a tick that draws nothing the layout is
+        // up to FRAME_MS old — which is the staleness a rotate or resize always had, since this was
+        // only ever recomputed once a frame.
+        if (frameDue) {
             int outW = 0, outH = 0;
             video.output_size(outW, outH);
 
@@ -1407,6 +1493,13 @@ int run(const AppConfig& cfg) {
             ui::handle_button(be, dispatch, mapper, now);
         }
 
+        // Somebody is here — which is what keeps the poll rate fast (see `pace_tick`). Derived from
+        // the flag both drains above already set rather than stamped at each of them, so a third
+        // source of input cannot arrive without this noticing. ⚠️ `sawInput` is cleared once a FRAME
+        // and this reads it once a TICK, so it re-stamps for the rest of the frame — which only ever
+        // extends the hold-off, never shortens it.
+        if (sawInput) lastInputMs = now;
+
         // ── The scripted-run hooks (dev only; both are 0 unless an env var set them) ─────────────
         if ((autoplayMs || quitAfterMs) && firstFrameMs == 0) firstFrameMs = now;
         if (autoplayMs && !autoplayFired && now - firstFrameMs >= autoplayMs) {
@@ -1446,19 +1539,26 @@ int run(const AppConfig& cfg) {
         // ⚠️ **IMMEDIATELY ABOVE THE DRAIN, and E5's Android backend is why there is a call here at
         // all.** A POLLED input backend (`MidiManager`, which delivers to Kotlin on a binder thread)
         // fetches its bytes here; the winmm and ALSA backends push from their own threads and this is a
-        // no-op for them. Move it below `host.poll()` and every Android MIDI byte waits an extra frame —
+        // no-op for them. Move it below `host.poll()` and every Android MIDI byte waits an extra tick —
         // invisible on the two platforms that ignore the call, which is exactly why the ordering is
         // written down in midi-in-base.h as well.
         if (cfg.midiIn) cfg.midiIn->pump();
 
-        // The lookahead pump — the same call, on the same 60 Hz cadence, that PixelPerfectRenderer's
-        // loop makes on Android. ⚠️ Since B3 it no longer releases the MIDI queue when the sender
-        // thread is running (host.h's set_midi_pump_external) — the scheduler's lookahead is still all
-        // its own. ⚠️ Since E2 it also DRAINS the MIDI-in queue, which is why a live key's latency is
-        // this loop's period and not something a backend chose.
+        // The lookahead pump. ⚠️ Since B3 it no longer releases the MIDI queue when the sender thread
+        // is running (host.h's set_midi_pump_external) — the scheduler's lookahead is still all its
+        // own. ⚠️ Since E2 it also DRAINS the MIDI-in queue, which is why a live key's latency is this
+        // loop's period and not something a backend chose. It is work-conserving: called four times as
+        // often it refills a quarter as much, and returns at once while the buffer is deep enough.
         host.poll();
 
+        // ── The tick ends here unless a frame is due ─────────────────────────────────────────────
+        //
+        // Everything above answers "has anything arrived?"; everything below turns the answer into
+        // pixels. See THE TWO RATES above the loop.
+        if (!frameDue) { pace_tick(); continue; }
+
         state.isPlaying = host.is_playing();
+        latency::frame_tick(state.isPlaying);
         // Eight asks, one per track, because there is no ninth answer that covers them all. A track
         // with no position hands back −1 in every field and the screens draw no marker for it —
         // which is what makes auditioning a phrase leave CHAIN and SONG alone (ui/playhead.h).
@@ -1530,7 +1630,7 @@ int run(const AppConfig& cfg) {
         //      comparison. ⚠️ It is also why gate 1 may be conservative and never has to be clever.
         //
         // ⚠️ The LOOP does not slow down — only the DRAWING stops. Input, `host.poll()` and the
-        // lifecycle watcher all still run every frame at 60 Hz. Kotlin could afford `delay(50L)` when
+        // lifecycle watcher all still run on every POLL_MS tick. Kotlin could afford `delay(50L)` when
         // idle because its visualizer was a separate coroutine; here that would be 50 ms of input lag.
         // ⚠️ `has_pending_timed_work()` is the third term and it is NOT covered by the pixel net: the
         // status line clears itself 3 s after it is set, with no input, and a frame that is never
@@ -1584,14 +1684,29 @@ int run(const AppConfig& cfg) {
             // press highlight is not skipped as an unchanged canvas. The portrait/landscape branch, the
             // CRT overlay (D6) and the C7 signatures all live in `present_current` (declared above the
             // render hooks), so the dispatcher's synchronous repaint takes the identical path.
-            if (present_current()) ++presented;
+            const bool didPresent = present_current();
+            if (didPresent) ++presented;
             drewOnce = true;
+
+            // ⚠️ **ANCHORED ON THE PRESENT'S RETURN — see THE TWO RATES.** With vsync that instant IS
+            // a vblank, so the next frame starts half a period before the following one and the
+            // display's wait is spent in the loop's paced wait instead of inside this call. A frame
+            // that was DRAWN but not presented (the C7 pixel gate found it identical) blocked on
+            // nothing, so it anchors on the plain deadline below like a skipped one.
+            if (didPresent) {
+                const Uint64 hz     = static_cast<Uint64>(video.refresh_hz());
+                const Uint64 period = (hz >= 30 && hz <= 240) ? 1000ull / hz : FRAME_MS;
+                nextFrameMs = SDL_GetTicks64() + period - period / 2;
+            }
         } else {
             ++skipped;
-            // Nothing drawn — but the frame must still take its 16 ms, or the loop spins hot and the
-            // idle path costs MORE than the busy one. See SdlVideo::pace().
-            video.idle_frame();
         }
+
+        // The frame that neither presented nor blocked has no vblank to measure from, so it keeps the
+        // plain deadline. Re-anchored only when the loop has fallen a whole frame behind, so a stall
+        // costs one late frame and never a burst of catch-up ones.
+        if (nextFrameMs <= now) nextFrameMs = SDL_GetTicks64() + FRAME_MS;
+
         audibleEdge   = audible;     // so the first silent frame is still drawn (the flattened scope)
         timedWorkEdge = timedWork;   // …and the frame a timer's own work vanishes on
         sawInput      = false;
@@ -1611,13 +1726,15 @@ int run(const AppConfig& cfg) {
             const ui::TrackPlayhead& t0 = state.playheads[0];
             std::printf(
                 "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d"
-                "   drew %lld skip %lld same %lld\n",
+                "   drew %lld skip %lld same %lld poll %lld\n",
                 host.is_playing() ? "play" : "stop",
                 static_cast<long long>(engineRef.getCurrentFrame()), t0.songRow, t0.chainRow,
                 t0.step, engineRef.getActiveVoiceCount(), ui::screen_label(state.currentScreen),
-                state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented);
+                state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented, polls);
             std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
         }
+
+        pace_tick();
     }
 
     // ── Leaving ──────────────────────────────────────────────────────────────────────────────────
@@ -1739,6 +1856,11 @@ int run(const AppConfig& cfg) {
         midiJitter.report(senderOn ? "B3 sender thread" : "60 Hz frame loop (pre-B3)", audio.sampleRate(),
                           host.project().tempo);
     }
+
+    // ⚠️ BEFORE `audio.closeStream()`, which takes the negotiated frame count away with the device —
+    // and with it the only chance of a MEASURED output latency rather than the buffer-sized floor.
+    // 100 frames is `MIDI_IN_LEAD_FRAMES` / `preview_note`'s lead-in — the same number on both paths.
+    latency::report(audio.sampleRate(), /*leadFrames=*/100, audio.outputLatency());
 
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();

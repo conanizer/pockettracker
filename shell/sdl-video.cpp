@@ -292,24 +292,6 @@ int SdlVideo::frame_top(int outH, int h) const {
     return std::max(0, (outH / 2 - h) / 2);
 }
 
-/**
- * Pace a frame that presented nothing.
- *
- * ⚠️⚠️ **THIS IS THE TRAP IN C7 AND IT INVERTS THE FEATURE IF MISSED.** With vsync it is
- * `SDL_RenderPresent` that BLOCKS until the display is ready — that call is what paces the entire app
- * loop. Skip it to save power and nothing blocks at all: the loop spins as fast as the CPU allows,
- * burning a whole core to avoid a blit. The idle path would then cost MORE than the busy one, which
- * is the exact opposite of what C7 exists for. So every path that does not present must pace here.
- */
-void SdlVideo::pace() {
-    const Uint64 now     = SDL_GetTicks64();
-    const Uint64 elapsed = now - lastPresentMs_;
-    if (elapsed < FRAME_MS) SDL_Delay(static_cast<Uint32>(FRAME_MS - elapsed));
-    lastPresentMs_ = SDL_GetTicks64();
-}
-
-void SdlVideo::idle_frame() { pace(); }
-
 void SdlVideo::invalidate_backbuffer(bool texture_lost) {
     // GL context loss (an Android DEVICE reset) takes the streaming texture with it — recreate it, or
     // the forced present below uploads into a dead handle. A plain re-expose keeps the texture.
@@ -395,7 +377,6 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
         dest.x == lastDest_.x && dest.y == lastDest_.y && dest.w == lastDest_.w &&
         dest.h == lastDest_.h &&
         std::memcmp(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t)) == 0) {
-        pace();          // ⚠️ never skip this — see pace() for why it inverts the feature
         return false;
     }
 
@@ -499,21 +480,10 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
     lastModalScrim_ = modalScrimArgb;
     haveLast_       = true;
 
-    // ── Pacing ───────────────────────────────────────────────────────────────────────────────────
-    // With vsync, SDL_RenderPresent blocks until the display is ready and the whole app loop rides
-    // the refresh — nothing to do. WITHOUT it (the software renderer, or a driver that ignored the
-    // flag) nothing blocks at all, and the loop would spin as fast as the CPU allows: a pegged core,
-    // a hot device and a flat battery, on hardware chosen for none of those. So the pacing has to
-    // live wherever the vsync decision does, which is here.
-    //
-    // ⚠️ The timestamp is stamped EITHER WAY, and that is C7's doing: with vsync the present itself
-    // paced us and there is nothing to wait for, but `lastPresentMs_` is what the SKIP path measures
-    // against — leave it stale through a run of vsync'd frames and the first skipped frame computes a
-    // huge elapsed, delays nothing, and spins one frame hot before self-correcting.
-    if (!vsync_) {
-        pace();
-    } else {
-        lastPresentMs_ = SDL_GetTicks64();
-    }
+    // ⚠️ **NOTHING HERE PACES ANYTHING, AND THAT IS DELIBERATE — THE APP LOOP OWNS BOTH RATES.**
+    // With vsync `SDL_RenderPresent` still blocks until the display is ready, but that is no longer
+    // what keeps the app from spinning: the loop polls input far faster than it draws, so a wait
+    // inside a call it only sometimes reaches could not pace it. See THE TWO RATES in app.cpp — the
+    // frame deadline is what holds the draw to 60 Hz on a renderer that gave us no vsync.
     return true;
 }

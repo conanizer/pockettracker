@@ -68,8 +68,10 @@ bool OboeAudioEngine::openStream() {
 
     // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
     // keep our own copy for AudioBackend::sampleRate() — see the header for why the shell is not
-    // allowed to reach into the stream object and ask.
-    sampleRate_ = stream->getSampleRate();
+    // allowed to reach into the stream object and ask. Same for the buffer, which outputLatency()
+    // falls back to.
+    sampleRate_   = stream->getSampleRate();
+    bufferFrames_ = stream->getBufferSizeInFrames();
     if (core) {
         core->setDeviceSampleRate(sampleRate_);
     }
@@ -80,8 +82,28 @@ bool OboeAudioEngine::openStream() {
         return false;
     }
 
-    LOGD("Stream started OK");
+    // AFTER the start, because a stream that has presented no frames has no timestamp to compute a
+    // real latency from — ask before this and every device on earth reports the floor.
+    const OutputLatency lat = outputLatency();
+    LOGD("Stream started OK — output latency %d frames (%.1f ms), %s", lat.frames,
+         sampleRate_ > 0 ? 1000.0 * lat.frames / sampleRate_ : 0.0,
+         lat.measured ? "measured" : "the buffer alone; the driver's queue is not in it");
     return true;
+}
+
+AudioBackend::OutputLatency OboeAudioEngine::outputLatency() const {
+    // Asked live, not cached: the buffer Oboe hands out grows and shrinks under an underrun, so a
+    // figure taken once at boot would go stale on exactly the device that needed watching.
+    if (stream) {
+        const oboe::ResultWithValue<double> ms = stream->calculateLatencyMillis();
+        if (ms && sampleRate_ > 0) {
+            return {int(ms.value() * sampleRate_ / 1000.0 + 0.5), true};
+        }
+        // ⚠️ Expected on the shipping path, not a defect: openStream takes OpenSL ES first, and only
+        // AAudio implements this. The floor is then the same class of number SDL reports.
+        return {stream->getBufferSizeInFrames(), false};
+    }
+    return {bufferFrames_, false};
 }
 
 void OboeAudioEngine::closeStream() {
