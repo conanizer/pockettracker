@@ -1253,11 +1253,15 @@ class SongcoreHost {
      * it. An external synth has no voice allocator to save us — a note-on we fail to answer sounds
      * until the gear is power-cycled. On a lane holding no external note the consumer's `active_` flag
      * says so and it costs a branch.
+     *
+     * `cut` ends the lane in ~6 ms with no release tail — letting go of the A that holds a phrase
+     * note's audition. Without it the instrument's own release plays out, as any other stop does.
      */
-    void stop_preview() {
+    void stop_preview(bool cut = false) {
         if (!engine_) return;
         const int64_t now = engine_->getCurrentFrame();
-        engine_->scheduleKill(now, AudioEngine::PREVIEW_LANE);
+        if (cut) engine_->scheduleCut(now, AudioEngine::PREVIEW_LANE);
+        else     engine_->scheduleKill(now, AudioEngine::PREVIEW_LANE);
         preview_note_off(now);
         // ⚠️ AN AUDITIONED TABLE CAN CARRY AN EQM, and the master bus outlives the lane that moved it.
         // The TABLE screen's START runs the table on the screen through the preview lane, so this is

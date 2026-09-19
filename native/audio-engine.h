@@ -428,6 +428,10 @@ public:
     // a KIL fades it. ADSR/TRIG release and the looping soft-kill are identical in both.
     void scheduleKeyRelease(int64_t targetFrame, int trackId);
 
+    // Schedule a CUT: every voice on the track fades out over KILL_FADE_SAMPLES and ends, whatever
+    // release the instrument has — a SoundFont's REL tail and an ADSR release included.
+    void scheduleCut(int64_t targetFrame, int trackId);
+
     // Let go of every track at once — what the END OF A RENDER'S SEQUENCE does to the notes still
     // sounding (songcore::render_to_wav).
     // ⚠️ A KEY RELEASE, NOT A KILL, and that is the whole point: an instrument with a release

@@ -1791,6 +1791,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sfVoices[kill.trackId].noteOff();
                 }
                 LOGT("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
+            } else if (kill.mode == KILL_CUT) {
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
+                        voices[v].startFadeOut(KILL_FADE_SAMPLES);
+                    }
+                }
+                // SF: the transport-stop ramp, not a note-off — it ends in hardStop, so no TSF release
+                // and no ADSR release outlive it.
+                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
+                    sfVoices[kill.trackId].startStopFade(KILL_FADE_SAMPLES);
+                }
             } else {
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (voices[v].trackId == kill.trackId && voices[v].isActive) {
@@ -3422,6 +3433,14 @@ void AudioEngine::scheduleKeyRelease(int64_t targetFrame, int trackId) {
     kill.targetFrame = targetFrame;
     kill.trackId     = trackId;
     kill.mode        = KILL_KEY_OFF;
+    killQueue.schedule(kill);
+}
+
+void AudioEngine::scheduleCut(int64_t targetFrame, int trackId) {
+    ScheduledKill kill{};
+    kill.targetFrame = targetFrame;
+    kill.trackId     = trackId;
+    kill.mode        = KILL_CUT;
     killQueue.schedule(kill);
 }
 

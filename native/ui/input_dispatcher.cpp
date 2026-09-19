@@ -562,7 +562,7 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             // A+B under a held audition: the note it was playing is gone, so is the sound.
             if (heldNotePreview_ && step.note == Note::EMPTY()) {
                 heldNotePreview_ = false;
-                host_.stop_preview();
+                host_.stop_preview(/*cut=*/true);
             }
             return true;
         }
@@ -1390,7 +1390,7 @@ void InputDispatcher::on_a_released() {
     // preview while A is down (START is refused under A), so this can only silence the one A began.
     if (heldNotePreview_) {
         heldNotePreview_ = false;
-        host_.stop_preview();
+        host_.stop_preview(/*cut=*/true);
     }
 
     // The FX helper commits on RELEASE, not on a press — which is what lets you hold A, read the

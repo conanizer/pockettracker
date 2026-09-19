@@ -104,6 +104,7 @@ enum KillMode : uint8_t {
     KILL_HARD    = 0,   // K00 / killTrack — declick fade, whatever the instrument is
     KILL_SOFT    = 1,   // KIL's soft note-off — ADSR release, else a declick fade
     KILL_KEY_OFF = 2,   // a KEY released (MIDI in, plan §4.1) — a one-shot IGNORES it and plays out
+    KILL_CUT     = 3,   // a held audition let go of — KILL_FADE_SAMPLES and gone, no release tail at all
 };
 
 struct ScheduledKill {
