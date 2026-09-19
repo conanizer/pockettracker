@@ -24,6 +24,7 @@
 struct SoundfontVoice : public IAudioVoice {
     int   sfSlot      = -1;    // soundfonts[] index that owns this voice (-1 = unassigned)
     int   _trackId    = -1;    // Track index = MIDI channel on the shared tsf* handle
+    int   instrId     = -1;    // Instrument of the current note (-1 = preview); for the instrument spectrum
     bool  isActive    = false;
     int   activeNote  = -1;
     float noteVolume  = 1.0f;  // Note-only volume (instrument × phrase × V-effect)

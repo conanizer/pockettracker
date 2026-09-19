@@ -1868,6 +1868,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.resetPitchState();
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
                     sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
+                    sv.instrId = note.sampleId;
 
                     // M8-style: a TIC in the table's last row overrides the instrument tic rate —
                     // one rate per FX column.
@@ -2727,6 +2728,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 if (octaWanted) {
                     trackWaveAccumL[t][i] += outL;
                     trackWaveAccumR[t][i] += outR;
+                }
+                if (monitoredInstrId >= 0 && sv.instrId == monitoredInstrId) {
+                    instrSpectrumTempL[i] += 0.5f * (outL + outR);
                 }
             }
             float trackPeak = fmaxf(trackPeakL, trackPeakR);
