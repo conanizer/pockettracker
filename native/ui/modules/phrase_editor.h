@@ -60,6 +60,10 @@ struct PhraseEditorState {
     // the CHAIN WALKS the phrase appears in, not about the phrase in front of you — and the phrase's
     // own id is what finds them (`find_ramp_cells`). Without it the editor pairs within the phrase.
     const songcore::Project* project = nullptr;
+
+    // The instrument an EMPTY note cell will be given when A types into it — the NOTE cell's scale
+    // depends on it (a sliced or TSP-off instrument is typed chromatically). A filled cell uses its own.
+    int insertInstrument = -1;
 };
 
 /** What `handle_input` did — the edits the caller must echo to the engine (note preview, etc.). */

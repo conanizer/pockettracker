@@ -137,9 +137,19 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
             // command offers that command's notes. ⚠️ It is a walk of the AUTHORED cells above the
             // cursor, never the sequencer's live scale — see `phrase_scale_at_row` for why that
             // distinction is the whole safety argument.
+            //
+            // ⚠️ The same two exemptions the playback quantizer makes (`apply_track_scale`): a note
+            // that selects a slice is not a pitch, and a TSP-off instrument ignores the scale — so
+            // typing must offer every note, or slices between scale degrees cannot be reached.
             unsigned mask = 0x0FFFu;
             int      key  = 0;
-            if (s.project != nullptr) {
+            const int  instId = isEmpty ? s.insertInstrument : step.instrument;
+            const bool exempt = s.project != nullptr && instId >= 0 &&
+                                  instId < static_cast<int>(s.project->instruments.size()) && [&] {
+                const songcore::Instrument& ins = s.project->instruments[static_cast<size_t>(instId)];
+                return !ins.transposeEnabled || songcore::note_selects_slice(ins, -1);
+            }();
+            if (s.project != nullptr && !exempt) {
                 const songcore::ScaleAt at =
                     songcore::phrase_scale_at_row(s.phrase, s.cursorRow, s.project->scaleKey);
                 mask = songcore::scale_mask(songcore::scale_at(*s.project, at.slot));

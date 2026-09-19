@@ -425,6 +425,7 @@ CursorContext InputDispatcher::cursor_context() const {
             // semitones with no error anywhere. `layout.cpp` sets this on its own PhraseEditorState;
             // the two are separate objects and setting one is not setting the other.
             ps.project          = &p;
+            ps.insertInstrument = s_.lastEditedInstrument;
             return phrase_.cursor_context(ps);
         }
         case ScreenType::TABLE: {
