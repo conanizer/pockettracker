@@ -1153,6 +1153,7 @@ private:
     float dlyWetL[PROCESS_SUBBLOCK], dlyWetR[PROCESS_SUBBLOCK];           // delay wet output
     float instrSpectrumTempL[PROCESS_SUBBLOCK];                           // mono sum of a monitored instrument's voices
     float sfBuf[PROCESS_SUBBLOCK * 2];                                    // per-track SF render (interleaved stereo)
+    float sfNoteBuf[PROCESS_SUBBLOCK * 2];                                // a stealing note's own pass, gained apart from the old one
     float trackWaveAccumL[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];        // OCTA per-track accumulators
     float trackWaveAccumR[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];
     bool  trackWasActive[TRACK_WAVEFORM_COUNT];             // OCTA: lane had a non-fading voice this block

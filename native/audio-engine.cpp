@@ -851,6 +851,16 @@ void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_
     if (lastRow.fx3Type == FX_TIC) out[2] = lastRow.fx3Value;
 }
 
+// Scale an interleaved stereo buffer by a gain moving linearly from `from` to `to`, reaching `to` on
+// the last frame — the same per-sample ramp the mute gate uses.
+static inline void applyGainRamp(float* buf, int frames, float from, float to) {
+    for (int i = 0; i < frames; i++) {
+        const float g = from + (to - from) * (float)(i + 1) / (float)frames;
+        buf[i * 2]     *= g;
+        buf[i * 2 + 1] *= g;
+    }
+}
+
 // Per-voice-type table FX behaviour, resolved at compile time inside processTableTick:
 //   KIL:    sampler = declicked kill fade; SF = noteOff (TSF plays its own release).
 //   OFFSET: sampler repositions playback; SF voices have no sample position — ignored.
@@ -2521,20 +2531,29 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             updateVoiceModulation(sv, numFrames, (float)sampleRate);
 
-            float noteVol = sv.modDestValues[PARAM_VOL];
+            // The note's gain at the end of this block, and — for a note armed this block — at its
+            // onset, where an envelope with an attack starts from zero. A finished AHD/ADSR still
+            // counts: its value is 0, and skipping it would bring the note back at full volume.
+            float noteVol   = sv.modDestValues[PARAM_VOL];
+            float onsetVol  = noteVol;
+            bool  hasVolEnv = false, volEnvDone = true;
             for (int m = 0; m < 4; m++) {
                 VoiceModSlot& mod = sv.voiceMods[m];
                 if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
-                // Skip completed mods — don't silence the channel during TSF's release tail.
-                // AHD/DRUM done at stage 4, ADSR/TRIG done at stage 5.
-                if ((mod.type == 1 || mod.type == 4) && mod.stage == 4) continue;
-                if ((mod.type == 2 || mod.type == 5) && mod.stage == 5) continue;
                 if (mod.type == 3) {  // LFO: bipolar tremolo
-                    noteVol = fmaxf(0.0f, noteVol * (1.0f + mod.envValue * mod.effectiveAmt));
-                } else {  // AHD/DRUM/ADSR/TRIG: unipolar gain reduction
-                    noteVol = fmaxf(0.0f, noteVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
+                    noteVol  = fmaxf(0.0f, noteVol  * (1.0f + mod.envValue * mod.effectiveAmt));
+                    onsetVol = fmaxf(0.0f, onsetVol * (1.0f + mod.envValue * mod.effectiveAmt));
+                } else if (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5) {
+                    // Unipolar gain reduction. AHD/DRUM are done at stage 4, ADSR/TRIG at stage 5.
+                    hasVolEnv = true;
+                    if (mod.stage < ((mod.type == 2 || mod.type == 5) ? 5 : 4)) volEnvDone = false;
+                    const float onsetEnv = mod.attackSamples > 0 ? 0.0f : 1.0f;
+                    noteVol  = fmaxf(0.0f, noteVol  + (mod.envValue - 1.0f) * mod.effectiveAmt);
+                    onsetVol = fmaxf(0.0f, onsetVol + (onsetEnv     - 1.0f) * mod.effectiveAmt);
                 }
             }
+            sv.volGainFrom = sv.hasArmedNote ? onsetVol : sv.volGain;
+            sv.volGainTo   = noteVol;
             // PAN modulation. A SoundFont voice has no panLeft/panRight gains in the mix loop — TSF
             // pans on its own channel — so the modulated value goes back through
             // tsf_channel_set_pan instead, guarded by the same |mod| > 0.001 test the sampler path
@@ -2553,30 +2572,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 std::lock_guard<std::mutex> sfLock(soundfonts[volSlot].mutex);
                 tsf* h = soundfonts[volSlot].handle;
                 if (h) {
-                    tsf_channel_set_volume(h, t, noteVol * trkVol);
+                    tsf_channel_set_volume(h, t, trkVol);   // the note's own gain rides the buffer
                     if (panModded) tsf_channel_set_pan(h, t, modPan);
                 }
             }
 
-            // When releasing with ADSR/TRIG VOL mods: stop as soon as all have finished
-            // so the channel volume doesn't jump back to the base level after release.
-            // (Without this, the mod would be skipped at stage 5, making the channel loud
-            // again for one block before TSF silence detection fires.)
-            if (sv.isReleasingOnly) {
-                bool hasAdsrVolMod  = false;
-                bool allAdsrVolDone = true;
-                for (int m = 0; m < 4; m++) {
-                    const VoiceModSlot& mod = sv.voiceMods[m];
-                    if (mod.dest == 1 && (mod.type == 2 || mod.type == 5) && mod.stage > 0) {
-                        hasAdsrVolMod = true;
-                        if (mod.stage < 5) allAdsrVolDone = false;
-                    }
-                }
-                if (hasAdsrVolMod && allAdsrVolDone) {
-                    sv.hardStop();
-                    continue;
-                }
-            }
+            // Every VOL envelope has finished: the note is over, or — with AMT below FF — held at a
+            // level it can no longer leave. Either way it ends, faded from where this block's ramp
+            // leaves it, so a partial AMT cannot end in a step. (An armed note's envelopes have
+            // only just started, so this never ends a note before it is heard.)
+            if (hasVolEnv && volEnvDone && !sv.hasArmedNote) sv.startStopFade(DECLICK_SAMPLES);
 
             // If filter mod is active, snapshot then recompute coefficients via InstrumentChain.
             sv.chain.filter.snapshotCoeffs();
@@ -2615,6 +2620,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 tsf* h = soundfonts[slot].handle;
                 if (h && !sv.hasArmedNote) {
                     tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                    applyGainRamp(sfBuf, numFrames, sv.volGainFrom, sv.volGainTo);
                     rendered = true;
                 } else if (h) {
                     // ⚠️⚠️ A NOTE THAT STEALS ANOTHER IS RENDERED IN TWO PASSES WITH A FADE BETWEEN THEM,
@@ -2643,6 +2649,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     const int rampStart = std::max(0, fadeEnd - DECLICK_SAMPLES);
                     const int rampLen   = fadeEnd - rampStart;
                     tsf_render_float_channel(h, t, sfBuf, fadeEnd, 0 /* overwrite */);
+                    // The old note keeps the gain it ended the last block on — the new note's
+                    // envelope has already replaced the mods, and must not reach the note it cuts.
+                    applyGainRamp(sfBuf, fadeEnd, sv.volGain, sv.volGain);
                     for (int i = rampStart; i < fadeEnd; i++) {
                         const float g = (float)(fadeEnd - i - 1) / (float)(rampLen > 1 ? rampLen - 1 : 1);
                         sfBuf[i * 2]     *= g;
@@ -2650,15 +2659,19 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     // Now the old voices can be cut: the samples they contributed are already at zero.
                     sv.fireArmedNote(h);
-                    // ⚠️ MIXING, not overwrite — [sfStart, fadeEnd) still holds the tail of the ramp.
-                    if (numFrames - sfStart > 0) {
-                        tsf_render_float_channel(h, t, sfBuf + sfStart * 2, numFrames - sfStart,
-                                                 1 /* mixing */);
+                    // Rendered apart and ADDED — [sfStart, fadeEnd) still holds the tail of the fade,
+                    // and the two notes carry different gains across it.
+                    const int noteFrames = numFrames - sfStart;
+                    if (noteFrames > 0) {
+                        tsf_render_float_channel(h, t, sfNoteBuf, noteFrames, 0 /* overwrite */);
+                        applyGainRamp(sfNoteBuf, noteFrames, sv.volGainFrom, sv.volGainTo);
+                        for (int i = 0; i < noteFrames * 2; i++) sfBuf[sfStart * 2 + i] += sfNoteBuf[i];
                     }
                     rendered = true;
                 }
             }
             if (!rendered) continue;
+            sv.volGain = sv.volGainTo;
 
             // ⚠️ THE MUTE GATE IS APPLIED HERE, and it has to be ABOVE the send tap below: the fader
             // itself reaches this path through `tsf_channel_set_volume`, which makes a SoundFont send
@@ -3883,7 +3896,7 @@ void AudioEngine::applyTrackVolume(int trackId, float volume) {
     if (sv.isActive && slot >= 0 && slot < MAX_SOUNDFONTS) {
         std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
         tsf* h = soundfonts[slot].handle;
-        if (h) tsf_channel_set_volume(h, trackId, sv.noteVolume * volume);
+        if (h) tsf_channel_set_volume(h, trackId, volume);   // the note gain rides the SF buffer
     }
 }
 

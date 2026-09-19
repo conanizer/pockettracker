@@ -27,7 +27,7 @@ struct SoundfontVoice : public IAudioVoice {
     bool  isActive    = false;
     int   activeNote  = -1;
     float noteVolume  = 1.0f;  // Note-only volume (instrument × phrase × V-effect)
-    float trackVolume = 1.0f;  // Cached track volume; combined with noteVolume for TSF channel
+    float trackVolume = 1.0f;  // Cached track fader — the TSF channel volume, and nothing else
 
     // Static per-instrument detune in semitones (fractional). Independent of PSL/PBN so it survives
     // pitch slides; folded into pitchMod every block. Set at note trigger, NOT cleared by resetPitchState.
@@ -55,6 +55,14 @@ struct SoundfontVoice : public IAudioVoice {
 
     // Release tail: true after noteOff() — keeps rendering while TSF decays to silence.
     bool  isReleasingOnly  = false;
+
+    // The note's gain — VOL, table and phrase volume and the VOL mods — ramped per sample over the
+    // rendered block. ⚠️ It must NOT go through tsf_channel_set_volume: that is one value per block,
+    // and a fast envelope becomes a staircase that clicks at every block boundary. The channel volume
+    // carries the track fader alone. `volGain` is where the last block ended; From/To are this block's.
+    float volGain     = 1.0f;
+    float volGainFrom = 1.0f;
+    float volGainTo   = 1.0f;
 
     // ── The transport-stop ramp ─────────────────────────────────────────────────────────────────
     // The counter the SF mix loop multiplies into the mute gate, so a stop takes the note down over

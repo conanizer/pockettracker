@@ -342,13 +342,8 @@ void SoundfontVoice::noteOff() {
 }
 
 void SoundfontVoice::setVolume(float v) {
+    // Stored only: the note gain is applied to the rendered buffer each block, never to the channel.
     noteVolume = v;
-    int slot = sfSlot;
-    if (slot >= 0 && slot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-        tsf* h = soundfonts[slot].handle;
-        if (h) tsf_channel_set_volume(h, _trackId, v * trackVolume);
-    }
 }
 
 void SoundfontVoice::setPan(float pan) {
@@ -440,7 +435,7 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
         }
     }
     tsf_channel_set_pan(h, _trackId, a.pan);
-    tsf_channel_set_volume(h, _trackId, a.noteVol * a.trkVol);
+    tsf_channel_set_volume(h, _trackId, a.trkVol);   // the note gain rides the render (volGain)
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
     // Apply THIS instrument's ADSR override atomically, under the slot mutex the caller holds, right
     // before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own
