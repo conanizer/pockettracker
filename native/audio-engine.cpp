@@ -2470,7 +2470,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 trackWaveAccumR[voice.trackId][i] += sampleR;
             }
             if (monitoredInstrId >= 0 && voice.instrId == monitoredInstrId) {
-                instrSpectrumTempL[i] += sampleL;
+                instrSpectrumTempL[i] += 0.5f * (sampleL + sampleR);
             }
 
             if (!voice.isActive) break;
@@ -2805,9 +2805,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
             if (lock.owns_lock()) {
                 for (int i = 0; i < numFrames; i++) {
-                    delaySpectrumBuffer[delaySpectrumWriteIdx] = dlyWetL[i];
+                    delaySpectrumBuffer[delaySpectrumWriteIdx] = 0.5f * (dlyWetL[i] + dlyWetR[i]);
                     delaySpectrumWriteIdx = (delaySpectrumWriteIdx + 1) % SPECTRUM_SIZE;
-                    reverbSpectrumBuffer[reverbSpectrumWriteIdx] = revWetL[i];
+                    reverbSpectrumBuffer[reverbSpectrumWriteIdx] = 0.5f * (revWetL[i] + revWetR[i]);
                     reverbSpectrumWriteIdx = (reverbSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
                 }
             }
@@ -2944,7 +2944,9 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
         if (lock.owns_lock()) {
             for (int i = 0; i < numFrames; i++) {
-                spectrumBuffer[spectrumWriteIdx] = output[i * channelCount];
+                spectrumBuffer[spectrumWriteIdx] = channelCount > 1
+                    ? 0.5f * (output[i * channelCount] + output[i * channelCount + 1])
+                    : output[i * channelCount];
                 spectrumWriteIdx = (spectrumWriteIdx + 1) % SPECTRUM_SIZE;
             }
         }
