@@ -1282,7 +1282,12 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
             }
         }
 
-        if (shouldProcessRow) processTableRow(voice, rows[L.row], lane, shouldAdvance, sampleRate);
+        // ⚠️ A HOP or THO does not consume the tic — it moves the lane and the row it lands on plays
+        // here, in this same tic. Bounded at one table's worth of rows so a HOP onto itself, or a
+        // ring of them, cannot spin the audio thread; a ring with no playable row simply sounds
+        // nothing, which is what a table of pure jumps deserves.
+        for (int steered = 0; shouldProcessRow && steered <= 16; ++steered)
+            if (!processTableRow(voice, rows[L.row], lane, shouldAdvance, sampleRate)) break;
         // ⚠️ A HOP FF in an EARLIER lane can have cleared tableId this same block. Stop reading the
         // table copy the moment it does — the remaining lanes are already down.
         if (voice.tableId < 0) break;
@@ -1306,12 +1311,21 @@ void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
 //
 // ⚠️ And a lane reads **exactly one** FX slot: its own. `KIL VOL OFFSET CUT RES EQN EQM` are global
 // effects any column may carry, but `HOP`, `TIC` and `THO` steer the lane they are written in.
+//
+// ⚠️⚠️ **A ROW THAT STEERS THE LANE IS NEVER HEARD.** `HOP` and `THO` have no tic of their own: the
+// lane resolves them and the row they land on is the row that plays. Letting one play would put a
+// tic of the table's DEFAULTS in front of every loop — no transpose, no filter, full volume — which
+// is an untransposed grace note before the transposed one, and a burst of raw sample under a closed
+// filter. The caller re-enters on `true` until a row actually plays.
 template <typename V>
-void AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool shouldAdvance,
+bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool shouldAdvance,
                                   float sampleRate) {
     TableLane& L = voice.lanes[lane];
 
-    if (lane == 0) {
+    const uint8_t laneFxType = (lane == 0) ? row.fx1Type : (lane == 1) ? row.fx2Type : row.fx3Type;
+    const bool steers = (laneFxType == FX_HOP || laneFxType == FX_THO);
+
+    if (lane == 0 && !steers) {
         // playbackRate does not include transpose; getModulatedPlaybackRate reads
         // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
         int semitones = transposeToSemitones(row.transpose);
@@ -1479,7 +1493,17 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
     if (hopExecuted && hopTarget >= 0) {
         L.row = hopTarget % 16;
         LOGT("📋 Table HOP: track %d column %d jumped to row %d", voice.getTrackId(), lane + 1, L.row);
-    } else if (shouldAdvance) {
+        return L.active && voice.tableId >= 0;
+    }
+    // A HOP whose repeat count is spent still does not play: it is stepped past, and the row after
+    // it is the one that plays. ⚠️ Unconditionally, NOT under `shouldAdvance` — a lane that does not
+    // advance on its own (TIC 00 and the two map modes) would otherwise sit on a row that can never
+    // sound.
+    if (steers && L.active) {
+        L.row = (L.row + 1) % 16;
+        return voice.tableId >= 0;
+    }
+    if (shouldAdvance) {
         L.row = (L.row + 1) % 16;
     }
 
@@ -1487,6 +1511,7 @@ void AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
         LOGT("📋 Table %d loop: track=%d, transpose=%.0f, vol=%.2f",
              voice.tableId, voice.getTrackId(), voice.tableTranspose, voice.tableVolume);
     }
+    return false;
 }
 
 // ─── AUS / AUF on a table row ────────────────────────────────────────────────────────────────────
@@ -3798,11 +3823,22 @@ static int findTrackVoice(Voice* voices, int trackId, bool fading) {
     return -1;
 }
 
+// ⚠️⚠️ **THE ROW IN FORCE IS `lastProcessed`, NOT `row`.** The lane's cursor has already been moved
+// on — advanced, or HOPped — to the row that comes NEXT, so drawing it puts the marker a row ahead of
+// what is being heard, and parks it on rows that never sound: a `HOP` row is resolved without ever
+// playing, so `row` rests on it while the row it jumped to is the one making the sound. `row` is the
+// honest answer only before the lane has consumed anything, where it is where the lane will start.
+// Same pairing the AUS/AUF ramp reads, and for the same reason.
+static inline int laneMarker(int row, int lastProcessed) {
+    return lastProcessed >= 0 ? lastProcessed : row;
+}
+
 // ⚠️ A column that has executed `HOP FF` reads −1, the same "no position" the whole call answers with
 // — the marker for that column disappears while its neighbours keep moving, which is the only honest
 // drawing of a table with one column stopped.
 static void lanesOf(const TableLane (&lanes)[TABLE_LANES], int out[TABLE_LANES]) {
-    for (int l = 0; l < TABLE_LANES; ++l) out[l] = lanes[l].active ? lanes[l].row : -1;
+    for (int l = 0; l < TABLE_LANES; ++l)
+        out[l] = lanes[l].active ? laneMarker(lanes[l].row, lanes[l].lastProcessed) : -1;
 }
 
 void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
@@ -3817,7 +3853,8 @@ void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
         // The table the voice last RAN — a chain's routers have bookmarks too, and the screen is
         // showing the one that made the sound.
         if (const Tic00Cursor* c = tic00Slot(trackId, tic00Sounding[trackId], /*create=*/false)) {
-            for (int l = 0; l < TABLE_LANES; ++l) out[l] = c->active[l] ? c->row[l] : -1;
+            for (int l = 0; l < TABLE_LANES; ++l)
+                out[l] = c->active[l] ? laneMarker(c->row[l], c->lastProcessed[l]) : -1;
             return;
         }
     }
@@ -3841,7 +3878,8 @@ bool AudioEngine::getTableRowsFor(int trackId, int tableId, int out[TABLE_LANES]
         // No voice is carrying it: a TIC00 table between notes, or one a hit only ROUTED through,
         // which is the same place kept the same way.
         if (const Tic00Cursor* c = tic00Slot(trackId, tableId, /*create=*/false)) {
-            for (int l = 0; l < TABLE_LANES; ++l) out[l] = c->active[l] ? c->row[l] : -1;
+            for (int l = 0; l < TABLE_LANES; ++l)
+                out[l] = c->active[l] ? laneMarker(c->row[l], c->lastProcessed[l]) : -1;
             return true;
         }
     }

@@ -722,7 +722,9 @@ public:
     // actually consumes a row. Split out so that processTableTick has ONE exit and the AUS/AUF ramp
     // below it runs on EVERY block — the row work returning early is what used to end the tick, and
     // a ramp that only moved on a row change would be sixteen values instead of a fade.
-    template <typename V> void processTableRow(V& voice, const TableRow& row, int lane,
+    // Returns true when the row only STEERED the lane (HOP / THO) and the lane has been moved to
+    // the row that must play in this same tic — see the steering note at the definition.
+    template <typename V> bool processTableRow(V& voice, const TableRow& row, int lane,
                                                bool shouldAdvance, float sampleRate);
 
     // The AUS/AUF ramps a table declares, applied to one voice at the position it is standing on.
