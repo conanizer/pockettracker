@@ -227,6 +227,25 @@ set(ENGINE_CORE_SOURCES
         effects/primitives/daisysp/crossfade.cpp
         effects/primitives/daisysp/balance.cpp
         effects/primitives/daisysp/reverbsc.cpp
+        # The Dragonfly Reverb algorithms (reverb ALGO 1..6) and the freeverb3 subset they run on.
+        effects/primitives/dragonfly/dragonfly-reverb.cpp
+        effects/primitives/dragonfly/freeverb/allpass.cpp
+        effects/primitives/dragonfly/freeverb/biquad.cpp
+        effects/primitives/dragonfly/freeverb/comb.cpp
+        effects/primitives/dragonfly/freeverb/delay.cpp
+        effects/primitives/dragonfly/freeverb/delayline.cpp
+        effects/primitives/dragonfly/freeverb/earlyref.cpp
+        effects/primitives/dragonfly/freeverb/efilter.cpp
+        effects/primitives/dragonfly/freeverb/nrev.cpp
+        effects/primitives/dragonfly/freeverb/nrevb.cpp
+        effects/primitives/dragonfly/freeverb/progenitor.cpp
+        effects/primitives/dragonfly/freeverb/progenitor2.cpp
+        effects/primitives/dragonfly/freeverb/revbase.cpp
+        effects/primitives/dragonfly/freeverb/slot.cpp
+        effects/primitives/dragonfly/freeverb/strev.cpp
+        effects/primitives/dragonfly/freeverb/utils.cpp
+        effects/primitives/dragonfly/freeverb/zrev.cpp
+        effects/primitives/dragonfly/freeverb/zrev2.cpp
         effects/modules/dust-chain.cpp
         effects/soundpipe/pareq.c
 )
@@ -303,6 +322,16 @@ else()
     # own /Od-Debug, /O2-Release defaults: no real-time constraint applies to a host tool.
     target_compile_options(pockettracker PRIVATE $<IF:$<CONFIG:Debug>,-O2,-O3>)
 endif()
+
+# freeverb3 is compiled for float samples, and names its own headers from the dragonfly/ root
+# (`#include "freeverb/utils.hpp"`, `#include "fv3_config.h"`). Both are scoped to those files, so
+# neither the define nor the extra root reaches the rest of the engine or anything that links it.
+file(GLOB PT_DRAGONFLY_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly/freeverb/*.cpp)
+set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES
+        COMPILE_DEFINITIONS LIBFV3_FLOAT
+        INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly)
 
 # Include paths: root (for audio-defs.h, sampler-voice.h, etc.),
 #   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h).

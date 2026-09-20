@@ -851,9 +851,8 @@ void AudioEngine::setInstrumentSendLevels(int instrId, int reverbSend, int delay
     instrumentParams[instrId].delaySend  = delaySend  / 255.0f;
 }
 
-void AudioEngine::setReverbParams(int feedbackHex, int dampHex, int wetHex, int decayHex,
-                                   int densityHex) {
-    reverbSend.setParams(feedbackHex, dampHex, decayHex, densityHex);
+void AudioEngine::setReverbParams(int feedbackHex, int dampHex, int wetHex, int sizeHex) {
+    reverbSend.setParams(feedbackHex, dampHex, sizeHex);
     reverbReturnGain = wetHex / 255.0f;
 }
 

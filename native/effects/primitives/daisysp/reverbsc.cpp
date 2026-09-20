@@ -48,11 +48,13 @@ static constexpr int DelayLineMaxSamples(float sr, float i_pitch_mod, int n)
      * line, which C++17 forbids inside a constant expression. The arithmetic is unchanged. */
     float max_del = kReverbParams[n][0];
     max_del += (kReverbParams[n][1] * (float)i_pitch_mod * 1.125);
+    /* ⚠️ PT: and at the largest room, which scales the time and the wander depth together. */
+    max_del *= DSY_REVERBSC_MAX_ROOM;
     return (int)(max_del * sr + 16.5);
 }
 
 /* ⚠️ PT: `aux_` is exactly what the eight lines ask for at the highest rate they may be built at,
- * and at the deepest modulation they may be driven at.
+ * at the deepest modulation they may be driven at, and in the largest room.
  *
  * The upper bound is what makes `Init` safe; the lower one is what keeps the array from silently
  * growing back. The slack is 8 rather than 0 because this sum is computed with constant-folded IEEE
@@ -70,7 +72,7 @@ static_assert(kAuxFloatsNeeded() <= DSY_REVERBSC_MAX_SIZE,
               "and DSY_REVERBSC_MAX_PITCHMOD — Init would refuse that rate, and ReverbModule would "
               "fall back to a rate it also refuses");
 static_assert(DSY_REVERBSC_MAX_SIZE - kAuxFloatsNeeded() <= 8,
-              "ReverbSc::aux_ is carrying padding no delay line can reach — it is 102 KB of an "
+              "ReverbSc::aux_ is carrying padding no delay line can reach — it is 240 KB of an "
               "AudioEngine that must already be heap-allocated, so the slack is not free");
 
 int ReverbSc::Init(float sr)
@@ -80,6 +82,9 @@ int ReverbSc::Init(float sr)
     feedback_      = 0.97;
     lpfreq_        = 10000;
     i_pitch_mod_   = 1;
+    room_          = 1;
+    rate_          = 1;
+    processed_     = false;
     i_skip_init_   = 0;
     damp_fact_     = 1.0;
     prv_lpfreq_    = 0.0;
@@ -122,7 +127,8 @@ void ReverbSc::NextRandomLineseg(ReverbScDl *lp, int n)
     if(lp->seed_val >= 0x8000)
         lp->seed_val -= 0x10000;
     /* length of next segment in samples */
-    lp->rand_line_cnt = (int)((sample_rate_ / kReverbParams[n][2]) + 0.5);
+    /* ⚠️ PT: `rate_` slows or quickens the wander, `room_` scales where it wanders to. */
+    lp->rand_line_cnt = (int)((sample_rate_ / (kReverbParams[n][2] * rate_)) + 0.5);
     prv_del           = (float)lp->write_pos;
     prv_del -= ((float)lp->read_pos
                 + ((float)lp->read_pos_frac / (float)DELAYPOS_SCALE));
@@ -131,10 +137,19 @@ void ReverbSc::NextRandomLineseg(ReverbScDl *lp, int n)
     prv_del = prv_del / sample_rate_; /* previous delay time in seconds */
     nxt_del = (float)lp->seed_val * kReverbParams[n][1] / 32768.0;
     /* next delay time in seconds */
-    nxt_del = kReverbParams[n][0] + (nxt_del * (float)i_pitch_mod_);
+    nxt_del = (kReverbParams[n][0] + (nxt_del * (float)i_pitch_mod_)) * room_;
     /* calculate phase increment per sample */
     phs_inc_val           = (prv_del - nxt_del) / (float)lp->rand_line_cnt;
     phs_inc_val           = phs_inc_val * sample_rate_ + 1.0;
+    /* ⚠️ PT: A GUARD, NOT A VOICING. The wander alone keeps this within a few percent of 1, but a
+     * room change glides the head across the whole difference in one segment. Below 0 the head would
+     * run backwards and the fractional arithmetic above breaks; at 8 the fixed-point increment
+     * overflows. Clamped, a glide that wanted more simply finishes over the following segments,
+     * because `prv_del` is measured from where the head really is. */
+    if(phs_inc_val < 0.25f)
+        phs_inc_val = 0.25f;
+    if(phs_inc_val > 4.0f)
+        phs_inc_val = 4.0f;
     lp->read_pos_frac_inc = (int)(phs_inc_val * DELAYPOS_SCALE + 0.5);
 }
 
@@ -153,7 +168,7 @@ int ReverbSc::InitDelayLine(ReverbScDl *lp, int n)
     lp->seed_val = (int)(kReverbParams[n][3] + 0.5);
     /* set initial delay time */
     read_pos     = (float)lp->seed_val * kReverbParams[n][1] / 32768;
-    read_pos     = kReverbParams[n][0] + (read_pos * (float)i_pitch_mod_);
+    read_pos     = (kReverbParams[n][0] + (read_pos * (float)i_pitch_mod_)) * room_;
     read_pos     = (float)lp->buffer_size - (read_pos * sample_rate_);
     lp->read_pos = (int)read_pos;
     read_pos     = (read_pos - (float)lp->read_pos) * (float)DELAYPOS_SCALE;
@@ -167,6 +182,22 @@ int ReverbSc::InitDelayLine(ReverbScDl *lp, int n)
         lp->buf[i] = 0;
     }
     return REVSC_OK;
+}
+
+void ReverbSc::SetRoom(float room, float rate)
+{
+    const float prev_room = room_, prev_rate = rate_;
+    room_ = room < DSY_REVERBSC_MIN_ROOM ? DSY_REVERBSC_MIN_ROOM
+                                         : (room > DSY_REVERBSC_MAX_ROOM ? DSY_REVERBSC_MAX_ROOM : room);
+    rate_ = rate > 0.0f ? rate : 1.0f;
+    /* Nothing has been written yet, so re-placing the heads loses nothing — and it is what stops a
+     * render from opening on a glide out of the default room.
+     * ⚠️ ONLY WHEN SOMETHING MOVED. Re-placing re-reads the wander depth as it is NOW, and callers set
+     * that after Init; doing it for an unchanged room would start the default room's heads somewhere
+     * other than where Init put them, and the default would stop being the reverb that shipped. */
+    if(!processed_ && (room_ != prev_room || rate_ != prev_rate))
+        for(int i = 0; i < 8; i++)
+            InitDelayLine(&delay_lines_[i], i);
 }
 
 int ReverbSc::Process(const float &in1,
@@ -185,6 +216,7 @@ int ReverbSc::Process(const float &in1,
     //if (init_done_ <= 0) return REVSC_NOT_OK;
     if(init_done_ <= 0)
         return REVSC_NOT_OK;
+    processed_ = true;
 
     /* calculate tone filter coefficient if frequency changed */
     if(lpfreq_ != prv_lpfreq_)

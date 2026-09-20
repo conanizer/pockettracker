@@ -110,7 +110,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - The same chord works on the REV and DEL return strips: mute a send to drop it out of the mix, or solo one to hear the reverb or delay on its own while the tracks go on feeding it
 - True dBFS peak meters per track
 - Two send effects: a reverb and a stereo delay
-- Two reverb algorithms, chosen per project: OLD, an even wash, and MVERB, a denser tail with audible early reflections, its own room size and decay, and a density control
+- Reverb room size and decay set separately — a small room can ring long, a big one die fast
 - Reverb character: pre-delay, stereo width and tail modulation — with TYPE presets (ROOM, HALL, CAVE) that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with TYPE presets that set all three at once
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency

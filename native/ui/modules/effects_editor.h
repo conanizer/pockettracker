@@ -46,7 +46,7 @@ public:
     // The editable rows, named. ⚠️ The VALUES live in ui/effects_row_layout.h and are appended-to
     // there, never renumbered: the recorded EFFECTS cases speak in these numbers.
     static constexpr int ROW_MASTER_TYPE = static_cast<int>(EffectsRow::MASTER_TYPE);  // OTT / DUST
-    static constexpr int ROW_REV_SIZE    = static_cast<int>(EffectsRow::REV_SIZE);     // reverb feedback
+    static constexpr int ROW_REV_DECAY   = static_cast<int>(EffectsRow::REV_DECAY);    // the tail's length
     static constexpr int ROW_REV_DAMP    = static_cast<int>(EffectsRow::REV_DAMP);
     static constexpr int ROW_REV_EQ      = static_cast<int>(EffectsRow::REV_EQ);       // −1 = off, else a slot
     static constexpr int ROW_DLY_TIME    = static_cast<int>(EffectsRow::DLY_TIME);     // 00..FF, or 0..B synced
@@ -61,9 +61,8 @@ public:
     static constexpr int ROW_REV_PRE     = static_cast<int>(EffectsRow::REV_PRE);      // pre-delay
     static constexpr int ROW_REV_WIDE    = static_cast<int>(EffectsRow::REV_WIDE);     // 80 = untouched
     static constexpr int ROW_REV_MOD     = static_cast<int>(EffectsRow::REV_MOD);      // 40 = as it shipped
+    static constexpr int ROW_REV_SIZE    = static_cast<int>(EffectsRow::REV_SIZE);     // the room; 60 = as shipped
     static constexpr int ROW_REV_ALGO    = static_cast<int>(EffectsRow::REV_ALGO);     // 0 = as it shipped
-    static constexpr int ROW_REV_DECAY   = static_cast<int>(EffectsRow::REV_DECAY);    // MVERB only
-    static constexpr int ROW_REV_DENSITY = static_cast<int>(EffectsRow::REV_DENSITY);  // MVERB only
     static constexpr int MAX_CURSOR_ROW  = EFFECTS_ROW_COUNT - 1;
 
     /** The sync subdivisions, in the order kDelaySyncBeats[] has them in delay-module.h. */

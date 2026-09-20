@@ -588,19 +588,18 @@ public:
     // REVERB / DELAY SEND METHODS
     // ===================================
 
-    // Which reverb algorithm sounds: 0 = the wash that shipped, 1 = the tank with early reflections.
-    // ⚠️ It does NOT rewrite the five voicing cells — each algorithm reads them its own way.
-    void setReverbAlgo(int algo);
-
-    // Set reverb params. feedbackHex/dampHex/wetHex: 00-FF. wetHex controls return gain.
-    // ⚠️ decayHex and densityHex reach the SECOND algorithm only — the first has no such controls.
-    // Their defaults are the struct defaults, so a caller that predates them changes nothing.
-    void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80, int decayHex = 0x60,
-                         int densityHex = 0x99);
+    // Set reverb params, all 00-FF. feedbackHex is DCAY, the tail's length; sizeHex is SIZE, the room.
+    // wetHex controls return gain. ⚠️ sizeHex's default 0x60 is the room the reverb always had, so a
+    // caller that predates it changes nothing.
+    void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80, int sizeHex = 0x60);
 
     // Set the reverb's character: the three cells that place and colour the tail. ⚠️ Each is NEUTRAL
     // at the value a project written before they existed loads with — PRE 00, WIDE 80, MOD 40.
     void setReverbCharacter(int preHex, int widthHex, int modHex);
+
+    // Which reverb algorithm reads the cells above, 0 = the one that shipped. ⚠️ It rewrites none of
+    // them. Any thread; the audio thread switches at its next block.
+    void setReverbAlgo(int algo);
 
     // Set delay params. syncMode false: timeOrSubdiv is hex 00-FF (0-2s).
     //                   syncMode true:  timeOrSubdiv is subdivision index 0-11, bpm used.

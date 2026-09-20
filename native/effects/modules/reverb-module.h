@@ -1,6 +1,6 @@
 #pragma once
 #include "../primitives/daisysp/reverbsc.h"
-#include "../primitives/mverb.h"
+#include "../primitives/dragonfly/dragonfly-reverb.h"
 #include "eq-module.h"
 #include "reverb-presets.h"
 #include <cmath>
@@ -17,31 +17,19 @@ static constexpr size_t REVERB_PREDELAY_MAX_SAMPLES = 7200;
 static constexpr float  kReverbPreDelayMaxSeconds   = 0.15f;
 
 // ===========================================================================
-// ReverbModule — the stereo reverb send, and the choice of WHICH reverb.
+// ReverbModule — the stereo reverb send.
 //
 // Takes a mono send-bus sum, expands to stereo wet output.
 // inputEq is a pre-reverb EQ band (applied before the reverb algorithm).
 //
-// ⚠️⚠️ **TWO ALGORITHMS ARE RESIDENT AT ONCE AND ONLY ONE SOUNDS.** Between them they are ~390 KB, in
-// an `AudioEngine` that is heap-allocated precisely because of sizes like this. The alternative —
-// one algorithm on the heap, swapped when the cell changes — was rejected: a swap cannot allocate or
-// free on the audio thread, so it would need a handoff and a deferred free to save a quarter of a
-// megabyte on platforms that have hundreds of them. ⚠️ **THE COST IS PAID PER ALGORITHM ADDED**, so a
-// third one is the point at which this decision is worth re-opening rather than repeating.
-//
-// ⚠️ **THE SILENT ONE IS NOT RUNNING, so its lines still hold whatever they held when the cell last
-// moved.** Both are cleared together on `reset`, which is what stops a switch mid-project from
-// dropping a tail recorded minutes ago into the middle of a take.
-//
-// ⚠️ The pre-delay ring and the mid/side pair below are OUTSIDE both algorithms and are shared, so
-// PRE and WIDE mean one thing whichever is sounding. Everything else is read per algorithm — see
-// reverb-presets.h, where every mapping is a named function for this reason.
+// ⚠️ The pre-delay ring and the mid/side pair below are OUTSIDE the algorithm. Every cell's mapping
+// lives in reverb-presets.h as a named function, so the UI and this module read one definition.
 // ===========================================================================
 struct ReverbModule {
-    daisysp::ReverbSc   reverb;                // algorithm 0 — the wash that shipped in 0.9.8
-    mverb::MVerb<float> tank;                  // algorithm 1 — the Dattorro tank with early reflections
-    EqModule            inputEq;
-    float               sampleRate = 44100.0f; // the rate the delay lines were actually built at
+    daisysp::ReverbSc reverb;
+    DragonflyReverb   dragonfly;   // algorithms 1..6; allocates nothing until one of them sounds
+    EqModule          inputEq;
+    float             sampleRate = 44100.0f; // the rate the delay lines were actually built at
 
     // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array, sized for exactly this rate,
     // and refuses any rate whose lines will not fit. Its refusal leaves three buffer pointers
@@ -75,23 +63,6 @@ struct ReverbModule {
     int widthHex        = 0x80;     // 0x80 = untouched; 00 = mono, FF = twice the sides
     int modHex          = 0x10;     // 00 = none; 0x40 is the wander the algorithm is built around
 
-    // ⚠️ **0 IS THE REVERB THAT SHIPPED AND ITS NUMBER IS ITS IDENTITY** — append, never insert. A
-    // project written before the cell existed loads without it and lands here.
-    int algo = 0;
-
-    // ⚠️⚠️ **THE LAST SIZE CELL THE TANK WAS BUILT AT, AND IT EXISTS TO STOP A `memset`.** MVerb's SIZE
-    // *is* the lengths of its eight tank lines, so setting it re-lengths and clears them — ~180 KB of
-    // `memset` and a tail cut dead. The globals are re-pushed on EVERY project edit, so a caller that
-    // pushed SIZE unconditionally would silence the reverb every time the user typed a note. -1 is
-    // "never built", so the first push always lands.
-    int tankSizeHex = -1;
-
-    // What `setParams` last saw, kept so that a switch back to algorithm 0 can re-apply the cells
-    // `ReverbSc::Init` throws away. ⚠️ They are the CELLS and not the derived numbers, for the reason
-    // PRE is: the derivation is the mapping's job and it may change.
-    int sizeHex     = 0x60;
-    int dampHexCell = 0x80;
-
     // The pre-delay ring, and one write head for both channels. Cleared with the reverb, because a
     // line holding the last project's audio would push it into the tail of the first block after a
     // load — inaudible on the dry path and several seconds long on this one.
@@ -99,12 +70,25 @@ struct ReverbModule {
     float preBufR[REVERB_PREDELAY_MAX_SAMPLES] = {};
     int   preWrite = 0;
 
-    // ⚠️ **RAMPED ACROSS THE BLOCK, because SIZE is edited while the reverb is sounding** and this
-    // gain moves nearly 20 dB across the cell — a step that size lands on a tail that is still
+    // ⚠️ **RAMPED ACROSS THE BLOCK, because DCAY and SIZE are edited while the reverb is sounding** and
+    // this gain moves nearly 20 dB across them — a step that size lands on a tail that is still
     // ringing, where nothing downstream would hide it. The pre-delay above deliberately does NOT
     // ramp; it is a voicing control set once, and this one is turned in front of the speakers.
     float wetGain       = 1.0f;   // where the last block left it
-    float wetGainTarget = 1.0f;   // what SIZE last asked for
+    float wetGainTarget = 1.0f;   // what DCAY and SIZE last asked of algorithm 0
+
+    // Which algorithm the project asks for, and which one the last block actually ran. ⚠️ They differ
+    // for exactly one block after a switch, and that block is where the reverb that is starting has
+    // its stale tail emptied — it stopped being fed when it went quiet, so it still holds whatever it
+    // was ringing then.
+    int algo         = 0;
+    int soundingAlgo = 0;
+    // The cells, kept so algorithm 0 can be rebuilt when it comes back.
+    int decayHex = 0x60, dampHex = 0x80, sizeHex = 0x60;
+
+    // Algorithms 1..6 take a block at a time, so the send is pre-delayed into these first.
+    static constexpr int kDragonflyBlock = 256;
+    float dfInL[kDragonflyBlock], dfInR[kDragonflyBlock];
 
     void reset(float sr) {
         sampleRate = sr;
@@ -112,90 +96,40 @@ struct ReverbModule {
             sampleRate = MAX_SUPPORTED_RATE;
             reverb.Init(MAX_SUPPORTED_RATE);
         }
-        // ⚠️ **THE SECOND ALGORITHM SHARES THE FIRST'S CEILING, AND IT IS NOT OPTIONAL.** MVerb's read
-        // heads are set from `seconds × rate` while its buffers are sized for the design rate, so a
-        // rate above it would place a head past the end of a line. `sampleRate` is already the clamped
-        // rate by the time we get here, and the two ceilings are deliberately the same number.
-        static_assert(static_cast<int>(MAX_SUPPORTED_RATE) <= mverb::kMVerbDesignRate,
-                      "MVerb's lines are sized for kMVerbDesignRate; the reverb must never be built above it");
-        tank.setSampleRate(sampleRate);
-        tankSizeHex = -1;    // the lines were just rebuilt, so the next push must re-length them
-        // The default cells, until the project pushes its own — `reverb_size_gain` is 1 at 0x60 by
-        // construction, so the ramp starts where a default project would already have it.
-        setParams(0x60, 0x80);
+        dragonfly.setRate(sr);
+        dragonfly.requestClear();
+        // The default cells, until the project pushes its own — `reverb_decay_gain` is 1 at the
+        // defaults by construction, so the ramp starts where a default project would already have it.
+        setParams(0x60, 0x80, 0x60);
         wetGain = wetGainTarget;
         // ⚠️ Both re-derived here rather than left to the next push, the way the echo's tone
         // coefficient is. `Init` puts the wander back to 1 whatever the cell said, and the pre-delay
         // is a count of FRAMES for a rate that has just changed — a caller that forgot would leave a
         // 44.1 kHz pre-delay running on a device at 48, and drop a MOD the user had set.
         reverb.SetPitchMod(reverb_mod_scale(modHex));
-        // ⚠️ The second algorithm's cells re-derived here for the same reason, and its one remaining
-        // FIXED value with them: `setSampleRate` above rebuilt the tank from MVerb's own constructor
-        // defaults, so a caller that reset and then never pushed would run at the vendored input
-        // bandwidth rather than the open one this reverb wants.
-        tank.setParameter(mverb::MVerb<float>::EARLYMIX, mverb_early_param(modHex));
-        tank.setParameter(mverb::MVerb<float>::BANDWIDTHFREQ, kMverbBandwidth);
         updatePreDelaySamples();
         inputEq.reset(sr);
         clearPreDelay();
     }
 
-    // SIZE and DAMP, pushed to BOTH algorithms — the cells are stored once and read twice, so the
-    // silent one stays in step and a switch does not need the project pushed again.
+    // DCAY, DAMP and SIZE. ⚠️ The feedback is derived from DCAY AND SIZE together — see
+    // `reverb_decay_feedback` — so turning SIZE changes the room without changing how long it rings.
     //
-    // ⚠️ Every mapping lives in reverb-presets.h and the reasoning is there: to algorithm 0 a cell is
-    // a decay TIME and a corner in Hz, and its wet gain is what stops the time from also being a
-    // volume; to algorithm 1 the same cell is a room's dimensions, and there is no gain to derive
-    // because that algorithm's level barely moves with it.
-    void setParams(int feedbackHex, int dampHex, int decayHex = 0x60, int densityHex = 0x99) {
-        sizeHex       = feedbackHex;
-        dampHexCell   = dampHex;
-        reverb.SetFeedback(reverb_size_feedback(feedbackHex));
+    // ⚠️ SIZE is pushed on every project edit and needs no gate: `SetRoom` sets targets the read heads
+    // glide to, and pushing the same room again moves nothing.
+    void setParams(int decayHexIn, int dampHexIn, int sizeHexIn = 0x60) {
+        decayHex = decayHexIn;
+        dampHex  = dampHexIn;
+        sizeHex  = sizeHexIn;
+        reverb.SetRoom(reverb_room_scale(sizeHex), reverb_mod_rate(sizeHex));
+        reverb.SetFeedback(reverb_decay_feedback(decayHex, sizeHex));
         reverb.SetLpFreq(reverb_damp_freq(dampHex));
-        wetGainTarget = reverb_size_gain(feedbackHex);
-
-        tank.setParameter(mverb::MVerb<float>::DAMPINGFREQ, mverb_damp_param(dampHex));
-        tank.setParameter(mverb::MVerb<float>::DECAY, mverb_decay_param(decayHex));
-        tank.setParameter(mverb::MVerb<float>::DENSITY, mverb_density_param(densityHex));
-        // ⚠️⚠️ **GATED, AND THE GATE IS THE WHOLE REASON `tankSizeHex` EXISTS** — see its comment. SIZE
-        // re-lengths and clears eight delay lines, so pushing it unchanged would cut the tail dead on
-        // every project edit. DECAY and DAMP above are smoothed inside the algorithm and are free.
-        if (feedbackHex != tankSizeHex) {
-            tankSizeHex = feedbackHex;
-            tank.setParameter(mverb::MVerb<float>::SIZE, mverb_size_param(feedbackHex));
-        }
+        wetGainTarget = reverb_decay_gain(decayHex, sizeHex);
+        dragonfly.setCells(decayHex, sizeHex, dampHex, modHex);
     }
 
-    /**
-     * Which algorithm sounds. ⚠️ The voicing cells are NOT rewritten — see reverb-presets.h.
-     *
-     * ⚠️⚠️ **THE ONE BEING SWITCHED TO IS CLEARED, BECAUSE THE SILENT ONE IS FROZEN AND NOT DECAYING.**
-     * Its delay lines still hold whatever they held when the cell last moved, so without this a switch
-     * would drop a tail from minutes ago into the middle of a take — the same trap the pre-delay ring
-     * is cleared for, and worse here because the tail rings for seconds.
-     *
-     * ⚠️⚠️ **AND THE `algo == next` GUARD IS LOAD-BEARING, NOT AN OPTIMISATION.** The globals are
-     * re-pushed on every project edit, so without it typing a note would re-`Init` the reverb and cut
-     * its tail dead. It is also what keeps every existing project bit-identical: a project on
-     * algorithm 0 never reaches the clear at all.
-     */
-    void setAlgo(int algoIn) {
-        const int next = (algoIn >= 0 && algoIn < kReverbAlgoCount) ? algoIn : 0;
-        if (next == algo) return;
-        algo = next;
-        if (algo == 1) {
-            // Rebuilds its lines from the cells it is already holding, so nothing needs re-pushing.
-            tank.reset();
-        } else {
-            // ⚠️ `Init` clears the lines AND puts feedback, corner and wander back to ITS defaults, so
-            // the three cells are re-applied here rather than left to the caller's next push. The
-            // order `push_global_effects` happens to use is not something this module may rely on.
-            reverb.Init(sampleRate);
-            reverb.SetFeedback(reverb_size_feedback(sizeHex));
-            reverb.SetLpFreq(reverb_damp_freq(dampHexCell));
-            reverb.SetPitchMod(reverb_mod_scale(modHex));
-        }
-    }
+    /** ALGO, 0..kReverbAlgoCount-1. Takes effect at the next block. */
+    void setAlgo(int a) { algo = (a >= 0 && a < kReverbAlgoCount) ? a : 0; }
 
     // The three character cells, together, because they arrive together from the project.
     //
@@ -216,9 +150,7 @@ struct ReverbModule {
         widthHex = widthHexIn;
         modHex   = modHexIn;
         reverb.SetPitchMod(reverb_mod_scale(modHex));
-        // The same cell, read the other way: a pitch wander above, the early reflections' share here.
-        tank.setParameter(mverb::MVerb<float>::EARLYMIX, mverb_early_param(modHex));
-        tank.setParameter(mverb::MVerb<float>::BANDWIDTHFREQ, kMverbBandwidth);
+        dragonfly.setCells(decayHex, sizeHex, dampHex, modHex);
     }
 
     // Process stereo send bus into stereo wet output. Always 100% wet. Writes to outL/outR.
@@ -227,20 +159,29 @@ struct ReverbModule {
     // ⚠️ **AT THE DEFAULT PRE AND WIDE CELLS THE TWO GATES BELOW ADD NOTHING TO EITHER SIDE OF
     // `Process`** — that is what keeps an old project's pre-delay and stereo image untouched. MOD is
     // not here at all; it lives inside the algorithm. The wet gain is NOT one of the gates either:
-    // it is derived from SIZE at every setting including the default, because the level it divides
-    // out is there at every setting too.
+    // it is derived at every setting including the default, because the level it divides out is
+    // there at every setting too.
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
+        const int  want     = algo;
+        const bool switched = want != soundingAlgo;
+        if (switched && want == kReverbAlgoOld) {
+            // ⚠️ Rebuilt rather than resumed: it went silent mid-tail and would replay it.
+            reverb.Init(sampleRate);
+            setParams(decayHex, dampHex, sizeHex);
+            reverb.SetPitchMod(reverb_mod_scale(modHex));
+        }
+        soundingAlgo = want;
+        if (want != kReverbAlgoOld) {
+            processDragonfly(want, switched, inL, inR, outL, outR, numFrames);
+            return;
+        }
+
         constexpr int ring     = static_cast<int>(REVERB_PREDELAY_MAX_SAMPLES);
         const bool    delayed  = preDelaySamples > 0;
         const bool    widening = widthHex != 0x80;
         const float   side     = widthHex / 128.0f;
 
-        // ⚠️ **ALGORITHM 1 HAS NO LEVEL TO DIVIDE OUT, SO ITS TARGET IS A CONSTANT.** `wetGainTarget`
-        // is algorithm 0's SIZE compensation and means nothing here; what algorithm 1 needs instead is
-        // the fixed trim that puts the two at the same loudness. Both ride the SAME ramp, so switching
-        // the cell while the reverb sounds slides between them rather than stepping.
-        const float target   = (algo == 1) ? kMverbOutputTrim : wetGainTarget;
-        const float gainStep = numFrames > 0 ? (target - wetGain) / numFrames : 0.0f;
+        const float gainStep = numFrames > 0 ? (wetGainTarget - wetGain) / numFrames : 0.0f;
         float       gain     = wetGain;
 
         // Both heads walked by hand rather than by `%` per frame: the ring is not a power of two, so
@@ -248,8 +189,6 @@ struct ReverbModule {
         int preRead = preWrite - preDelaySamples;
         if (preRead < 0) preRead += ring;
 
-        // The input stage — EQ and the pre-delay ring, both OUTSIDE the algorithms and shared by
-        // them. It lands in the output buffers, which every path below then reads back in place.
         for (int i = 0; i < numFrames; i++) {
             float l = inL[i], r = inR[i];
             if (inputEq.active) {
@@ -263,25 +202,8 @@ struct ReverbModule {
                 if (++preWrite >= ring) preWrite = 0;
                 if (++preRead >= ring) preRead = 0;
             }
-            outL[i] = l;
-            outR[i] = r;
-        }
-
-        // ⚠️ Both algorithms read index i and write index i in the same step, so running them over the
-        // output buffers in place is safe and saves a scratch pair the size of a sub-block.
-        if (algo == 1) {
-            tank.process(outL, outR, outL, outR, numFrames);
-        } else {
-            for (int i = 0; i < numFrames; i++) {
-                float wl, wr;
-                reverb.Process(outL[i], outR[i], &wl, &wr);
-                outL[i] = wl;
-                outR[i] = wr;
-            }
-        }
-
-        for (int i = 0; i < numFrames; i++) {
-            float wl = outL[i], wr = outR[i];
+            float wl, wr;
+            reverb.Process(l, r, &wl, &wr);
             if (widening) {
                 // ⚠️ The mid stays at unity whatever WIDE says, so a reverb turned to mono is not
                 // also turned down: only the difference between the channels is scaled.
@@ -294,10 +216,63 @@ struct ReverbModule {
             outL[i] = wl * gain;
             outR[i] = wr * gain;
         }
-        wetGain = target;
+        wetGain = wetGainTarget;
     }
 
   private:
+    /**
+     * Algorithms 1..6: the same INP EQ, pre-delay and WIDE as algorithm 0, around a Dragonfly engine
+     * that takes the send a block at a time. ⚠️ No wet gain from DCAY here — `reverb_decay_gain` is
+     * fitted to algorithm 0's loop, and each Dragonfly engine carries its own fixed trim instead. The
+     * ramp still runs, so switching from algorithm 0 glides from its gain to 1 rather than stepping.
+     */
+    void processDragonfly(int want, bool switched, const float* inL, const float* inR, float* outL,
+                          float* outR, int numFrames) {
+        constexpr int ring     = static_cast<int>(REVERB_PREDELAY_MAX_SAMPLES);
+        const bool    delayed  = preDelaySamples > 0;
+        const bool    widening = widthHex != 0x80;
+        const float   side     = widthHex / 128.0f;
+
+        const float gainStep = numFrames > 0 ? (1.0f - wetGain) / numFrames : 0.0f;
+        float       gain     = wetGain;
+
+        int preRead = preWrite - preDelaySamples;
+        if (preRead < 0) preRead += ring;
+
+        for (int done = 0; done < numFrames;) {
+            const int n = numFrames - done < kDragonflyBlock ? numFrames - done : kDragonflyBlock;
+            for (int i = 0; i < n; i++) {
+                float l = inL[done + i], r = inR[done + i];
+                if (inputEq.active) inputEq.processStereo(l, r);
+                if (delayed) {
+                    preBufL[preWrite] = l;
+                    preBufR[preWrite] = r;
+                    l = preBufL[preRead];
+                    r = preBufR[preRead];
+                    if (++preWrite >= ring) preWrite = 0;
+                    if (++preRead >= ring) preRead = 0;
+                }
+                dfInL[i] = l;
+                dfInR[i] = r;
+            }
+            dragonfly.process(want, switched && done == 0, dfInL, dfInR, outL + done, outR + done, n);
+            for (int i = 0; i < n; i++) {
+                float wl = outL[done + i], wr = outR[done + i];
+                if (widening) {
+                    const float mid = (wl + wr) * 0.5f;
+                    const float sd  = (wl - wr) * 0.5f * side;
+                    wl = mid + sd;
+                    wr = mid - sd;
+                }
+                gain += gainStep;
+                outL[done + i] = wl * gain;
+                outR[done + i] = wr * gain;
+            }
+            done += n;
+        }
+        wetGain = 1.0f;
+    }
+
     // The one writer of `preDelaySamples`, because it has two inputs and both move: the cell and the
     // device rate. ⚠️ It CLAMPS SILENTLY — see the ceiling's own comment at the top of this file.
     void updatePreDelaySamples() {

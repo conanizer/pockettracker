@@ -38,7 +38,14 @@ https://opensource.org/license/lgpl-2-1/
  * `buffer_size − read_pos`, which `InitDelayLine` sets from the delay TIME, and every index wraps
  * modulo the size. The extra room is dead air above the read head, not a longer reverb. */
 #define DSY_REVERBSC_MAX_PITCHMOD 4.0f
-#define DSY_REVERBSC_MAX_SIZE 26160
+
+/* ⚠️ PT: AND FOR THE LARGEST ROOM. `SetRoom` scales every line's delay time and its wander depth by
+ * one factor, up to this ceiling, so the lines are sized for it at Init for the same reason they are
+ * sized for the deepest modulation. It is the other half of the array's budget: the size below is
+ * both ceilings multiplied together, and reverbsc.cpp checks it against the table. */
+#define DSY_REVERBSC_MAX_ROOM 2.34f
+#define DSY_REVERBSC_MIN_ROOM 0.5f
+#define DSY_REVERBSC_MAX_SIZE 61030
 
 namespace daisysp
 {
@@ -97,11 +104,29 @@ class ReverbSc
                                                                      : mod);
     }
 
+    /** ⚠️ PT: the room's dimensions and how fast its wander moves. Upstream had neither.
+
+        `room` multiplies every line's delay time AND its wander depth (clamped to DSY_REVERBSC_MIN_ROOM
+        .. DSY_REVERBSC_MAX_ROOM); `rate` multiplies how often each line picks a new wander target.
+        1 and 1 are what Init leaves, and they are exactly the reverb that shipped.
+
+        ⚠️ **A ROOM CHANGED WHILE THE REVERB SOUNDS IS A GLIDE, NOT A CLEAR.** Each read head reaches
+        its new length over its next random segment, so the tail bends in pitch for up to about a
+        second instead of cutting out. ⚠️ **BEFORE THE FIRST `Process` the lines are re-placed at the
+        new length at once** — they hold nothing yet, and a render must not spend its first second
+        gliding out of the default room.
+
+        ⚠️ The loop gain is NOT touched: a longer line at the same feedback is a longer tail, so the
+        caller derives the feedback from the decay time AND the room it asked for. */
+    void SetRoom(float room, float rate);
+
   private:
     void       NextRandomLineseg(ReverbScDl *lp, int n);
     int        InitDelayLine(ReverbScDl *lp, int n);
     float      feedback_, lpfreq_;
     float      i_sample_rate_, i_pitch_mod_, i_skip_init_;
+    float      room_, rate_;
+    bool       processed_;     // false from Init until the first Process — see SetRoom
     float      sample_rate_;
     float      damp_fact_;
     float      prv_lpfreq_;

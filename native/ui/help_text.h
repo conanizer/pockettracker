@@ -365,10 +365,9 @@ enum class HelpTopic {
     FX_REVERB_PRE,
     FX_REVERB_WIDE,
     FX_REVERB_MOD,
-    FX_REVERB_ALGO,
     FX_REVERB_DECAY,
-    FX_REVERB_DENSITY,
     SE_BIT,
+    FX_REVERB_ALGO,
     SET_HELP,
 
     COUNT
@@ -2004,15 +2003,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* FX_REVERB_WIDE */
     {"WIDE: how far it spreads", "00 is mono, 80 is normal,", "FF pushes it to the sides."},
     /* FX_REVERB_MOD */
-    {"MOD / EARLY: set by ALGO", "OLD: the tail drifts in pitch.", "MVERB: how much of the walls."},
-    /* FX_REVERB_ALGO */
-    {"ALGO: which reverb sounds", "OLD is the soft wash. MVERB", "puts walls around the sound."},
+    {"MOD: movement in the tail", "The tail drifts in pitch. 00", "holds it still and metallic."},
     /* FX_REVERB_DECAY */
-    {"DCAY: how long it rings", "MVERB only. Separate from the", "room, so a small one can ring."},
-    /* FX_REVERB_DENSITY */
-    {"DENS: how thick it is", "MVERB only. Low is grainy and", "sparse, high is smooth."},
+    {"DCAY: how long it rings", "Higher rings longer. FF never", "stops, whatever the room."},
     /* SE_BIT */
     {"BIT: bits per sample", "The file depth, or lower for", "grit. SAVE writes at this depth."},
+    /* FX_REVERB_ALGO */
+    {"ALGO: which reverb", "OLD, or a Dragonfly HALL, ROOM,", "PLATE, FOIL, TANK or EARLY."},
     /* SET_HELP */
     {"HELP: what SELECT shows", "SHORT uses the top strip, FULL", "a big page. OFF shows nothing."},
 };
@@ -2361,6 +2358,7 @@ inline HelpTopic mixer_cell_topic(int master_row, int column) {
 inline HelpTopic effects_cell_topic(int row) {
     switch (row) {
         case EffectModule::ROW_MASTER_TYPE: return HelpTopic::FX_MASTER_TYPE;
+        case EffectModule::ROW_REV_DECAY:   return HelpTopic::FX_REVERB_DECAY;
         case EffectModule::ROW_REV_SIZE:    return HelpTopic::FX_REVERB_SIZE;
         case EffectModule::ROW_REV_DAMP:    return HelpTopic::FX_REVERB_DAMP;
         case EffectModule::ROW_REV_EQ:      return HelpTopic::FX_REVERB_EQ;
@@ -2377,8 +2375,6 @@ inline HelpTopic effects_cell_topic(int row) {
         case EffectModule::ROW_REV_WIDE:    return HelpTopic::FX_REVERB_WIDE;
         case EffectModule::ROW_REV_MOD:     return HelpTopic::FX_REVERB_MOD;
         case EffectModule::ROW_REV_ALGO:    return HelpTopic::FX_REVERB_ALGO;
-        case EffectModule::ROW_REV_DECAY:   return HelpTopic::FX_REVERB_DECAY;
-        case EffectModule::ROW_REV_DENSITY: return HelpTopic::FX_REVERB_DENSITY;
         default:                            return HelpTopic::NONE;
     }
 }
