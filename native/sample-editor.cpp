@@ -845,6 +845,11 @@ void AudioEngine::setInstrumentEqSlot(int instrId, int slot) {
     instrumentParams[instrId].eqActive = any;
 }
 
+void AudioEngine::setProgram(int instrumentId, const songcore::Program& program,
+                             const int64_t* markers, int count) {
+    programs.set(instrumentId, program, markers, count);
+}
+
 void AudioEngine::setInstrumentSendLevels(int instrId, int reverbSend, int delaySend) {
     if (instrId < 0 || instrId >= 256) return;
     instrumentParams[instrId].reverbSend = reverbSend / 255.0f;

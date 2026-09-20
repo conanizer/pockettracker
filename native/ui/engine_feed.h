@@ -244,18 +244,17 @@ private:
         }
 
         // ── The TABLE screen's playing rows, one per FX column ───────────────────────────────────
-        // Resolved HERE, at 60 Hz, and not in the draw pass — it costs up to 16 engine reads, and a
-        // draw pass runs on every cursor move as well as every frame.
+        // Resolved HERE, at 60 Hz, and not in the draw pass — it costs up to eight engine reads, and
+        // a draw pass runs on every cursor move as well as every frame.
         //
-        // ⚠️ The FIRST track running this table answers for all three columns, exactly as it answered
-        // for the one row before: the columns belong to the table, and a second track playing the
-        // same table has its own three cursors that this screen has no room to show.
+        // ⚠️ The FIRST track standing in this table answers for all three columns, exactly as it
+        // answered for the one row before: the columns belong to the table, and a second track
+        // playing the same table has its own three cursors that this screen has no room to show.
         for (int l = 0; l < TABLE_LANES; ++l) state.tablePlaybackRows[l] = -1;
         if (state.currentScreen == ScreenType::TABLE && state.isPlaying) {
             for (int trackId = 0; trackId < 8; ++trackId) {
-                if (engine.getVoiceTableId(trackId) != state.currentTable) continue;
                 int rows[TABLE_LANES];
-                engine.getVoiceTableRows(trackId, rows);
+                if (!engine.getTableRowsFor(trackId, state.currentTable, rows)) continue;
                 bool any = false;
                 for (int l = 0; l < TABLE_LANES; ++l) any |= (rows[l] >= 0);
                 if (!any) continue;

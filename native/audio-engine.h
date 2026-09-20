@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
+#include "songcore/program.h"   // Program / ProgramTable — an instrument as the numbers a note needs
 #include "sampler-voice.h"
 #include "soundfont-voice.h"
 #include "soundfont-trim.h"
@@ -401,6 +402,21 @@ public:
                       float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f,
                       int tableStartRow = -1);
 
+    /**
+     * Schedule a note by INSTRUMENT NUMBER, leaving what it sounds like undecided.
+     *
+     * ⚠️ **This is the sequencer's path, and the difference from scheduleNote() is WHEN.** The two
+     * above are handed a sound — a sample id, a frequency, an SF slot — worked out about two phrases
+     * before anyone hears it. This one is handed a number, and the engine resolves it against its
+     * program table at the trigger, which is the only moment a table row could have changed it.
+     *
+     * `tempo` is the tempo at SCHEDULE time: it sets the tick→frame scale for this note's PSL and
+     * vibrato, and must be the same one the derivation would have used then.
+     */
+    void scheduleProgramNote(int64_t targetFrame, int trackId, int instrumentId,
+                             const songcore::NoteOnPayload& noteOn, int tempo,
+                             bool rootAudition = false);
+
     // Store a per-instrument SF2 ADSR override. Keyed by instrument id and
     // applied atomically at note trigger, so instruments sharing a de-duplicated handle don't clash.
     void setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel);
@@ -461,6 +477,13 @@ public:
 
     // Get table ID for a voice
     int getVoiceTableId(int trackId);
+
+    // Where this track stands in ONE NAMED table, false when it is not in that table at all.
+    //
+    // ⚠️ A table a hit only ROUTED through has no voice of its own, so asking a voice what it is
+    // running cannot see it — and the screen would draw no marker on a table that is being read on
+    // every hit. The table's own bookmark is the answer whenever no voice is carrying it.
+    bool getTableRowsFor(int trackId, int tableId, int out[TABLE_LANES]);
 
     // Where this track's sampler voice is looping RIGHT NOW, in sample frames — after LPO has slid
     // it, which is the whole point. ⚠️ **THIS IS THE ONLY WAY TO SEE THE LOOP WINDOW AT ALL**: it is
@@ -576,6 +599,17 @@ public:
     // Map an instrument to an EQ preset slot (-1 = off).
     // Copies the preset into instrumentParams[instrId] for use at next note trigger.
     void setInstrumentEqSlot(int instrId, int slot);
+
+    /**
+     * One instrument's PROGRAM — the flat facts a note is derived from (type, sample, root, detune,
+     * SF slot/bank/preset, slice markers). Pushed from the UI thread whenever the instrument changes;
+     * read on the audio thread when a note actually fires.
+     *
+     * ⚠️ `markers`/`count` are COPIED. The Program's own `sliceMarkers` pointer is not kept — it
+     * points into the caller's project, which the audio thread must never follow.
+     */
+    void setProgram(int instrumentId, const songcore::Program& program,
+                    const int64_t* markers, int count);
 
     // ===================================
     // SEND LEVEL METHODS
@@ -861,7 +895,43 @@ private:
         // ended would both draw a marker on the row it stopped at and resume there on the next note.
         bool active[TABLE_LANES]        = {true, true, true};
     };
-    Tic00Cursor tic00Cursor[SF_VOICE_COUNT];
+    // ⚠️ **ONE BOOKMARK PER TABLE, NOT PER TRACK**, and that is what makes an INS on a table row work.
+    // A hit can pass THROUGH one table on its way to another instrument: the table it passed through
+    // keeps its place so the next hit reads the next row down, while the table the voice actually runs
+    // keeps its own. Keyed by tableId within the track — a free slot is claimed on first use.
+    static constexpr int TIC00_SLOTS = 8;
+    Tic00Cursor tic00Cursor[SF_VOICE_COUNT][TIC00_SLOTS];
+    // Which table the track's voice last RAN, so the TABLE screen still has one answer to draw.
+    // -1 = none; cleared with the cursors above, never left at 0 (which is a real table id).
+    int tic00Sounding[SF_VOICE_COUNT];
+
+    /** This track's bookmark for `tableId`; null when there is none and `create` is false. */
+    Tic00Cursor* tic00Slot(int trackId, int tableId, bool create);
+    /** Rewind every track's bookmarks — what a transport stop does. */
+    void resetTic00Cursors();
+
+    /**
+     * Follow the INS cells on the tables a hit passes through, and answer which instrument sounds.
+     *
+     * A hit is a PATH: the step names an instrument, that instrument's table is consulted, and if the
+     * row it is standing on says INS then the hit is handed to that instrument, which brings its own
+     * table, which may hand it on again. Every table it passes through keeps its place, so the next
+     * hit reads the next row down — that is what makes a sixteen-row rotation work.
+     *
+     * ⚠️ **The tables passed through are ROUTERS: they shape nothing and do not tick on the note.**
+     * The voice runs the LAST table only. An INS met later, while the note holds, is not read.
+     *
+     * Returns the instrument that sounds, or -1 for silence — an empty slot, or external gear, which
+     * has no way to answer yet. `note.tableId` is left holding the table the voice should run.
+     *
+     * ⚠️ Runs on the AUDIO THREAD, at the trigger. Bounded by CHAIN_MAX_LINKS and allocation-free.
+     */
+    static constexpr int CHAIN_MAX_LINKS = 4;
+    int resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId);
+
+    // Chain rolls (a CHA gating a switch, an RNL picking the instrument) happen on the audio thread,
+    // so they use the engine's lock-free PRNG rather than the sequencer's.
+    uint32_t chainRngState = 0x9E3779B9u;
 
     float* samples[256];
     float* samplesRight[256];          // right channel for stereo samples (null = mono)
@@ -973,6 +1043,19 @@ private:
 
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
+    // The engine's own copy of every instrument, keyed by INSTRUMENT id — not by sampleId, which two
+    // instruments can share. Written from the UI thread, read at the trigger. See setProgram().
+    songcore::ProgramTable programs;
+
+    /**
+     * Fill in a deferred note's sound, at the moment it fires. Returns false when the instrument it
+     * landed on has nothing to play — an empty slot, or a SoundFont that never loaded — and the note
+     * is then dropped rather than sounded on whatever the voice held before.
+     *
+     * ⚠️ Runs on the AUDIO THREAD. Everything it reads is POD in the program table; nothing here may
+     * allocate, lock or touch the project.
+     */
+    bool resolveScheduledNote(ScheduledNote& note);
     // Per-instrument SF2 ADSR envelope override: stored keyed by instrument id
     // (always unique) and applied atomically in fireArmedNote, so two instruments sharing one de-duplicated
     // tsf handle never collide on the shared preset-region patch. -1 = keep the SF2 preset's own value.

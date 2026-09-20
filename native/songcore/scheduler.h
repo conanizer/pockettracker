@@ -42,6 +42,7 @@
 #include <vector>
 #include "model.h"
 #include "timing.h"
+#include "program.h"     // clampi / clampf, which live beside the derivation that needs them lowest
 #include "effects.h"
 #include "automation.h"
 #include "rng.h"
@@ -55,8 +56,8 @@ namespace songcore {
 // not scheduling, and the UI needs them without pulling the whole sequencer in.
 
 // ─── small helpers ───────────────────────────────────────────────────────────────────────────────
-inline int   clampi(int v, int lo, int hi)       { return v < lo ? lo : (v > hi ? hi : v); }
-inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi ? hi : v); }
+// clampi / clampf MOVED to program.h — the note derivation runs below the sequencer and cannot
+// include this header. Callers here are unchanged; it comes back in through the include above.
 // hex_to_float MOVED to model.h (MIDI phase E) — the MIDI-in router needs it and has no business
 // including the sequencer, exactly as note_to_midi moved for the UI. Callers here are unchanged.
 

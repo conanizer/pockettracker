@@ -25,11 +25,9 @@
 
 #include <cstdint>
 #include "model.h"
+#include "program.h"   // TICS_PER_STEP lives there now — the note derivation needs it lowest
 
 namespace songcore {
-
-// Tics per phrase step. Mirrors TrackerData.TICS_PER_STEP — do not hardcode 12 anywhere else.
-constexpr int TICS_PER_STEP = 12;
 
 // Frames per phrase step (one 16th note) at `tempo` BPM and `sample_rate` Hz:
 // msPerStep = 60000 / tempo / 4, then × sampleRate / 1000. The evaluation order and the truncating

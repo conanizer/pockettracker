@@ -400,7 +400,7 @@ class SongcoreHost {
         // what makes it render as silence rather than as chaos.
         external_.panic();
         router_.remove_consumer(&external_);
-        songcore::prepare_render(*engine_, project_, startRow, endRow);
+        songcore::prepare_render(*engine_, project_, routing_, startRow, endRow);
         consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes()
         sync_clock();                   // the frame counter is back at 0 — re-read it
     }
@@ -495,14 +495,14 @@ class SongcoreHost {
     // could not see it.
     void push_params() {
         if (!engine_) return;
-        push_live_params(*engine_, project_);
+        push_live_params(*engine_, project_, routing_);
     }
 
     /** One instrument's params — what an INSTRUMENT / MODS / pool edit pushes. Cheap and idempotent. */
     void push_instrument(int id) {
         if (!engine_) return;
         if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
-        push_instrument_params(*engine_, project_.instruments[id], project_.tempo, sampleRate_);
+        push_instrument_params(*engine_, project_.instruments[id], routing_, project_.tempo, sampleRate_);
     }
 
     /**

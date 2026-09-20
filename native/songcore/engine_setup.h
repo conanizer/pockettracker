@@ -48,20 +48,67 @@ namespace songcore {
 // RenderController.setupInstrumentParams, for one instrument. Kotlin's SF branch and sampler branch
 // push the *same* three things — applySoundfontFilterOverrides is just updateInstrumentPlaybackParams
 // under another name — so there is deliberately one path here, not two.
+// ⚠️ **THIS IS THE ONE SEAM THAT MEANS "INSTRUMENT N CHANGED, TELL THE ENGINE"**, and the program
+// snapshot rides on it for that reason: the engine resolves a note from its own copy of the
+// instrument, so a copy refreshed anywhere else would be one more thing every future caller has to
+// remember. Every media load, preset load and INSTRUMENT-screen edit already comes through here.
 template <typename Engine>
-void push_instrument_params(Engine& engine, const Instrument& ins, int tempo, int sampleRate) {
+void push_instrument_params(Engine& engine, const Instrument& ins, const Routing& routing,
+                            int tempo, int sampleRate) {
     push_instrument_playback_params(engine, ins);
     push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate);
+
+    const int   sid   = ins.sampleId;
+    const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing.sampleRateRatio[sid] : 1.0f;
+    const int   slot  = (ins.id >= 0 && ins.id < POOL_INSTRUMENTS) ? routing.sfSlot[ins.id] : -1;
+    const Program p = make_program(ins, ratio, slot);
+    engine.setProgram(ins.id, p, p.sliceMarkers, p.sliceCount);
 }
 
 // The pre-render sweep: every instrument any step on an AUDIBLE track in rows [startRow, endRow] plays.
+//
+// ⚠️ **AND EVERY INSTRUMENT AN `INS` ON A TABLE ROW CAN HAND THE HIT TO.** A step names one
+// instrument; the tables it passes through can route it to others that no step mentions, and the
+// engine treats an instrument it holds no program for as EMPTY — which is SILENCE, not a wrong sound.
+// So the set the RENDER must hold is wider than the set the song "uses", and widening it here rather
+// than in `collect_used_instruments` keeps that function what its name and its golden say it is.
 template <typename Engine>
-void push_used_instrument_params(Engine& engine, const Project& project, int startRow, int endRow) {
+void push_used_instrument_params(Engine& engine, const Project& project, const Routing& routing,
+                                 int startRow, int endRow) {
     const int sampleRate = engine.getSampleRate();
     const int count      = static_cast<int>(project.instruments.size());
+    const int tableCount = static_cast<int>(project.tables.size());
+
+    bool wanted[POOL_INSTRUMENTS] = {false};
+    std::vector<int> pending;
     for (const int id : collect_used_instruments(project, startRow, endRow)) {
-        if (id < 0 || id >= count) continue;
-        push_instrument_params(engine, project.instruments[id], project.tempo, sampleRate);
+        if (id < 0 || id >= POOL_INSTRUMENTS || wanted[id]) continue;
+        wanted[id] = true;
+        pending.push_back(id);
+    }
+
+    // A table id defaults to its instrument's id, so following the INS cells is the same walk the
+    // engine makes at the trigger. Each instrument is visited once, so the chain's depth cannot run away.
+    while (!pending.empty()) {
+        const int id = pending.back();
+        pending.pop_back();
+        if (id >= tableCount) continue;
+        for (const TableRow& row : project.tables[id].rows) {
+            const int fxType[3]  = {row.fx1Type,  row.fx2Type,  row.fx3Type};
+            const int fxValue[3] = {row.fx1Value, row.fx2Value, row.fx3Value};
+            for (int s = 0; s < 3; ++s) {
+                if (fxType[s] != FX_INS) continue;
+                const int next = fxValue[s] & 0x7F;
+                if (next >= POOL_INSTRUMENTS || wanted[next]) continue;
+                wanted[next] = true;
+                pending.push_back(next);
+            }
+        }
+    }
+
+    for (int id = 0; id < count && id < POOL_INSTRUMENTS; ++id) {
+        if (!wanted[id]) continue;
+        push_instrument_params(engine, project.instruments[id], routing, project.tempo, sampleRate);
     }
 }
 
@@ -71,10 +118,10 @@ void push_used_instrument_params(Engine& engine, const Project& project, int sta
 // make that assumption for a second: you can sit on the INSTRUMENT screen and audition slot 7F while no
 // step in the song refers to it, and its filter and drive must already be in the engine when you do.
 template <typename Engine>
-void push_all_instrument_params(Engine& engine, const Project& project) {
+void push_all_instrument_params(Engine& engine, const Project& project, const Routing& routing) {
     const int sampleRate = engine.getSampleRate();
     for (const Instrument& ins : project.instruments) {
-        push_instrument_params(engine, ins, project.tempo, sampleRate);
+        push_instrument_params(engine, ins, routing, project.tempo, sampleRate);
     }
 }
 
@@ -175,10 +222,11 @@ void apply_master_bus_for_render(Engine& engine, const Project& project) {
 // uses. This is what makes a render a pure function of the project — see songcore::prepare_render,
 // which calls it right after AudioEngine::resetEffectState() has wiped the chains back to defaults.
 template <typename Engine>
-void push_project_params(Engine& engine, const Project& project, int startRow, int endRow) {
+void push_project_params(Engine& engine, const Project& project, const Routing& routing,
+                         int startRow, int endRow) {
     engine.setTempo(project.tempo);
     push_mixer(engine, project);
-    push_used_instrument_params(engine, project, startRow, endRow);
+    push_used_instrument_params(engine, project, routing, startRow, endRow);
 }
 
 /**
@@ -204,10 +252,10 @@ void push_project_params(Engine& engine, const Project& project, int startRow, i
  * push_instrument).
  */
 template <typename Engine>
-void push_live_params(Engine& engine, const Project& project) {
+void push_live_params(Engine& engine, const Project& project, const Routing& routing) {
     engine.setTempo(project.tempo);
     push_mixer(engine, project);
-    push_all_instrument_params(engine, project);
+    push_all_instrument_params(engine, project, routing);
 }
 
 // ─── media: opens files, produces the Routing ────────────────────────────────────────────────────

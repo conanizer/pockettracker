@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdint>
 #include "audio-defs.h"
+#include "songcore/program.h"   // NoteOnPayload — a queued note carries it until the trigger
 
 // ===================================
 // SOUNDFONT INFRASTRUCTURE (TinySoundFont)
@@ -86,6 +87,16 @@ struct ScheduledNote {
     int  sfBank      = 0;       // SF2 bank number (0-127)
     int  sfPreset    = 0;       // SF2 preset number within bank (0-127)
     float detuneSemitones = 0.0f; // SF: static fine pitch offset in semitones (instrument detune)
+
+    // ── Deferred resolution: the instrument as a NUMBER ──────────────────────────────────────────
+    // ⚠️ **A NOTE IS QUEUED ABOUT TWO PHRASES BEFORE IT SOUNDS.** When `instrumentId >= 0` every
+    // field above is still UNSET and gets derived at the trigger instead, from the engine's program
+    // table — which is what lets a table row name a different instrument on the hit itself.
+    // -1 means the note arrived already derived (previews, retrigger, MIDI in, the file browser).
+    int instrumentId = -1;
+    songcore::NoteOnPayload noteOn{};   // the note-level half: pitch, velocity, pan, PSL/PBN/vibrato
+    int  tempo        = 120;            // the tempo the note was SCHEDULED at — its tick→frame scale
+    bool rootAudition = false;          // INSTRUMENT-screen root preview; the sequencer never sets it
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {

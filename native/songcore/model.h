@@ -35,6 +35,7 @@
 // The event schema — for the CC-slot ids `resolve_cc_param` below translates. event.h depends on
 // nothing but <cstdint>/<cstring>, so this stays a leaf-ward include and no cycle is possible.
 #include "event.h"
+#include "program.h"   // PROGRAM_SLOTS — the engine's program table is one row per instrument
 
 namespace songcore {
 
@@ -46,6 +47,8 @@ constexpr int POOL_PHRASES     = 256;
 constexpr int POOL_CHAINS      = 256;
 constexpr int POOL_TRACKS      = 8;
 constexpr int POOL_INSTRUMENTS = 128;
+static_assert(POOL_INSTRUMENTS == PROGRAM_SLOTS,
+              "the engine's program table is one row per instrument — the two sizes are one number");
 constexpr int POOL_TABLES      = 128;
 constexpr int POOL_GROOVES     = 128;
 constexpr int POOL_EQPRESETS   = 128;

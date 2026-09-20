@@ -91,14 +91,15 @@ struct RenderOptions {
 // master EQ bypassed) — without the re-push, the render would silently come out with default reverb
 // and delay instead of the project's.
 template <typename Engine>
-void prepare_render(Engine& engine, const Project& project, int startRow, int endRow) {
+void prepare_render(Engine& engine, const Project& project, const Routing& routing,
+                    int startRow, int endRow) {
     engine.setOfflineRendering(true);   // the live stream goes silent so it can't eat the note queue
     engine.stopAll();
     engine.clearScheduledNotes();
     engine.resetFrameCounter();         // also re-seeds noteSeedEntropy — per-render RND/DRNK LFO
                                         // variation is deliberate, and stays
     engine.resetEffectState();          // (a): no inherited reverb tail, delay buffer or LCG position
-    push_project_params(engine, project, startRow, endRow);
+    push_project_params(engine, project, routing, startRow, endRow);
 }
 
 // ─── render ──────────────────────────────────────────────────────────────────────────────────────

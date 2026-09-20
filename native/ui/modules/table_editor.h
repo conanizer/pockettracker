@@ -15,8 +15,8 @@
 //   • ITS TRANSPOSE IS NEVER "--". `0x00` means no transpose and is drawn dim, but it is still drawn —
 //     unlike the volume, where −1 is a genuine "leave it alone" and shows "--".
 //
-// The playback rows are the rows the ENGINE's voice is on, not ones the sequencer reports: the
-// layout resolves them per frame from `getVoiceTableId`/`getVoiceTableRows` (see ui/engine_feed.h).
+// The playback rows are the rows the ENGINE is standing on, not ones the sequencer reports: the
+// layout resolves them per frame from `getTableRowsFor` (see ui/engine_feed.h).
 // Hence the −1 sentinel below where the Kotlin has `Int?`.
 //
 // ⚠️ **THERE ARE THREE OF THEM, one per FX column**, because each column has its own playhead and its

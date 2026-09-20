@@ -69,6 +69,7 @@ Write these into any phrase step to shape how a note plays:
 Each instrument has its own 16-row mini-sequencer. It loops continuously while the note plays and lets you automate volume, pitch, and effects row by row — great for programmed arpeggios, tremolo, and rhythmic gating without using up phrase FX slots.
 
 - EQ per note and master EQ from a table row, alongside the filter cells
+- Hand a note on to another instrument from a table row — that instrument brings its own table, so one hand-off can lead to another; at one row per trigger a column of them rotates through instruments
 - Effect automation in a table too — mark a start and a finish **row** and the value between them glides; HOP steers the fade, so a looped section can restart or continue it
 
 ## Instruments

@@ -61,7 +61,7 @@ AudioEngine::AudioEngine() {
         sampleBitDepth[i] = 16;
         sampleIsFloat[i]  = false;
     }
-    for (int t = 0; t < SF_VOICE_COUNT; t++) tic00Cursor[t] = Tic00Cursor();
+    resetTic00Cursors();
     globalFrameCounter.store(0, std::memory_order_relaxed);
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;  // vary RND/DRNK per app session
 
@@ -744,8 +744,9 @@ void AudioEngine::stopAll() {
     // Stop all soundfont notes on all tracks (incl. the preview lane)
     for (int t = 0; t < SF_VOICE_COUNT; t++) {
         sfVoices[t].hardStop();
-        tic00Cursor[t] = Tic00Cursor();  // transport stop rewinds every TIC00 table: PLAY starts at row 0
     }
+    // Transport stop rewinds every TIC00 table, router or sounding: PLAY starts at row 0.
+    resetTic00Cursors();
     LOGD("stopAll: voices and SF notes cleared, stream stays running");
 }
 
@@ -757,8 +758,8 @@ void AudioEngine::stopAllRamped() {
     for (int t = 0; t < SF_VOICE_COUNT; t++) {
         if (sfVoices[t].isActive) sfVoices[t].startStopFade(KILL_FADE_SAMPLES);
         else                      sfVoices[t].hardStop();
-        tic00Cursor[t] = Tic00Cursor();  // as stopAll(): PLAY starts at row 0
     }
+    resetTic00Cursors();   // as stopAll(): PLAY starts at row 0
     // The deadline the audio thread reclaims the slots at — see processAudioBlock, which is also
     // where it says why a fade counter alone does not get there.
     stopRampEndFrame.store(globalFrameCounter.load(std::memory_order_relaxed) + KILL_FADE_SAMPLES,
@@ -840,6 +841,192 @@ void AudioEngine::setFlushToZeroForCurrentThread() {
 //
 // ⚠️ This is the one row where a TIC does not act when the playhead reaches it: it is read at TRIGGER,
 // so the rate is in force from row 0. A TIC anywhere else takes effect when its lane arrives.
+void AudioEngine::resetTic00Cursors() {
+    for (int t = 0; t < SF_VOICE_COUNT; ++t) {
+        for (int s = 0; s < TIC00_SLOTS; ++s) tic00Cursor[t][s] = Tic00Cursor();
+        tic00Sounding[t] = -1;
+    }
+}
+
+// ⚠️ A track runs out of slots only with a chain deeper than the cap plus a table per link, and then
+// the OLDEST-numbered slot is reused rather than the lookup failing: one table forgetting its place
+// costs a rotation restarting, where refusing the bookmark would cost the switch itself.
+AudioEngine::Tic00Cursor* AudioEngine::tic00Slot(int trackId, int tableId, bool create) {
+    if (trackId < 0 || trackId >= SF_VOICE_COUNT || tableId < 0) return nullptr;
+    Tic00Cursor* row = tic00Cursor[trackId];
+    for (int s = 0; s < TIC00_SLOTS; ++s)
+        if (row[s].tableId == tableId) return &row[s];
+    if (!create) return nullptr;
+    for (int s = 0; s < TIC00_SLOTS; ++s) {
+        if (row[s].tableId < 0) { row[s] = Tic00Cursor(); row[s].tableId = tableId; return &row[s]; }
+    }
+    row[0] = Tic00Cursor();
+    row[0].tableId = tableId;
+    return &row[0];
+}
+
+// Defined below, beside the table tick and the trigger that are their other callers.
+static inline int tic00RowAfter(int tableRow, int lastProcessedRow);
+static inline int tic00RowAfter(const TableLane& lane);
+static int findTrackVoice(Voice* voices, int trackId, bool fading);
+
+// A table row's three FX slots, as (type, value) pairs — slot 1 is index 0.
+static inline void rowFx(const TableRow& r, int type[3], int value[3]) {
+    type[0] = r.fx1Type; value[0] = r.fx1Value;
+    type[1] = r.fx2Type; value[1] = r.fx2Value;
+    type[2] = r.fx3Type; value[2] = r.fx3Value;
+}
+
+int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId) {
+    int tableId = (tableIdOverride >= 0) ? tableIdOverride : instrumentId;
+    int visited[CHAIN_MAX_LINKS];
+    int visitedCount = 0;
+
+    for (int link = 0; link < CHAIN_MAX_LINKS; ++link) {
+        if (outTableId) *outTableId = tableId;
+
+        // Silence beats a fallback: an empty slot and external gear both mean "this instrument
+        // cannot answer", and a hit that quietly played something else is the bug that started this.
+        // Link 0 is exempt from the empty test — the scheduler already made it, before any pushes.
+        if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
+        const songcore::Program& p = programs.programs[instrumentId];
+        if (p.type == songcore::PROGRAM_EXTERNAL) return -1;   // until the cable is a program too
+        if (link > 0 && !p.hasSample && !p.hasSoundfont) return -1;
+
+        // A table reached twice on one hit would loop forever; stop and sound where we stand.
+        for (int i = 0; i < visitedCount; ++i) if (visited[i] == tableId) return instrumentId;
+        if (tableId < 0 || tableId >= 256) return instrumentId;
+
+        TableRow rows[16];
+        {
+            std::lock_guard<std::mutex> lock(tableMutex);
+            if (!tables[tableId].loaded) return instrumentId;
+            for (int i = 0; i < 16; ++i) rows[i] = tables[tableId].rows[i];
+        }
+
+        // A table with no INS anywhere in it cannot route, so it is left completely alone — no place
+        // is kept for it and nothing below can touch how its voice plays it.
+        bool routes = false;
+        for (int r = 0; r < 16 && !routes; ++r) {
+            int t3[3], v3[3];
+            rowFx(rows[r], t3, v3);
+            for (int s = 0; s < 3; ++s) routes |= (t3[s] == FX_INS);
+        }
+        if (!routes) return instrumentId;
+
+        // ⚠️ **THE ROW IS THE ONE THE TABLE IS STANDING ON FOR THIS TRIGGER — THE SAME ROW THE VOICE
+        // WOULD START AT, BY THE SAME RULE.** There is ONE place per table, not a separate one for
+        // routing: at TIC00 it steps on a row per trigger (which is the rotation) and at every other
+        // rate it starts at row 0 each note, exactly as a table with no INS in it does. So when no
+        // switch is found, the voice below picks up this same row and that row's transpose, volume
+        // and FX apply to the note — they are in the path, not part of the switch.
+        // Row 15's TIC overrides the instrument's rate per column — `effectiveTicRatesFor`'s rule,
+        // read off the copy already in hand rather than taking the table lock a second time.
+        int rates[TABLE_LANES] = {p.tableTicRate, p.tableTicRate, p.tableTicRate};
+        if (rows[15].fx1Type == FX_TIC) rates[0] = rows[15].fx1Value;
+        if (rows[15].fx2Type == FX_TIC) rates[1] = rows[15].fx2Value;
+        if (rows[15].fx3Type == FX_TIC) rates[2] = rows[15].fx3Value;
+
+        const Tic00Cursor* cur = tic00Slot(trackId, tableId, /*create=*/false);
+        const int liveVoice = findTrackVoice(voices, trackId, /*fading=*/false);
+
+        int laneRow[TABLE_LANES] = {0, 0, 0};
+        for (int l = 0; l < TABLE_LANES; ++l) {
+            if (rates[l] != 0x00) continue;   // not a per-trigger column: it starts at the top
+            if (liveVoice >= 0 && voices[liveVoice].tableId == tableId &&
+                voices[liveVoice].lanes[l].ticRate == 0x00) {
+                laneRow[l] = tic00RowAfter(voices[liveVoice].lanes[l]) & 0x0F;
+            } else if (cur && cur->ticRate[l] == 0x00 && cur->active[l]) {
+                laneRow[l] = tic00RowAfter(cur->row[l], cur->lastProcessed[l]) & 0x0F;
+            }
+        }
+
+        // HOP steers the rotation, so a router follows it before it reads anything on the row —
+        // per COLUMN, like everywhere else, to the row in its low nibble. `HOP FF` stops its column
+        // and needs nothing here: the row it stands on carries no switch. The repeat count does not
+        // carry between hits, because `reset_table_lanes` places a lane fresh at every trigger, so a
+        // counted HOP jumps on every hit exactly as one in a TIC00 table does.
+        for (int l = 0; l < TABLE_LANES; ++l) {
+            uint16_t seen = 0;
+            for (;;) {
+                if (seen & (uint16_t)(1u << laneRow[l])) break;   // round again: stand where we are
+                seen |= (uint16_t)(1u << laneRow[l]);
+                int t3[3], v3[3];
+                rowFx(rows[laneRow[l]], t3, v3);
+                if (t3[l] != FX_HOP || v3[l] == 0xFF) break;
+                laneRow[l] = v3[l] & 0x0F;
+            }
+        }
+
+        // ⚠️ **EACH COLUMN IS READ AT ITS OWN ROW**, the rule the rest of the table already follows.
+        // At TIC 00 — the mode this feature is for — all three stand on the same row anyway.
+        int type[3], value[3], slotRow[3];
+        for (int s = 0; s < 3; ++s) {
+            int t3[3], v3[3];
+            rowFx(rows[laneRow[s]], t3, v3);
+            type[s] = t3[s]; value[s] = v3[s]; slotRow[s] = laneRow[s];
+        }
+
+        // CHA decides whether the switch fires at all: on a failed roll its low nibble clears that
+        // slot, and a cleared INS is simply a row with no switch on it.
+        for (int s = 0; s < 3; ++s) {
+            if (type[s] != FX_CHA) continue;
+            const int odds  = (value[s] >> 4) & 0x0F;
+            const int target = value[s] & 0x0F;
+            if (static_cast<int>(xorshift32(chainRngState) % 15u) < odds) continue;   // passed
+            if (target >= 1 && target <= 3) type[target - 1] = 0;
+        }
+
+        // RNL adds a random 0..xx to the slot on its LEFT, so an RNL beside an INS IS the instrument
+        // number — the pool-picker. Read wherever it sits: it configures the switch, it is not in
+        // the path through the row.
+        for (int s = 1; s < 3; ++s) {
+            if (type[s] != FX_RNL || type[s - 1] != FX_INS) continue;
+            const int range = value[s] & 0xFF;
+            if (range > 0) value[s - 1] += static_cast<int>(xorshift32(chainRngState) % (uint32_t)(range + 1));
+            if (value[s - 1] > 127) value[s - 1] = 127;   // INS's own ceiling
+        }
+
+        // ⚠️ **THE ROTATION MOVES ON EVERY HIT, SWITCH OR NO SWITCH**, and it is written before the
+        // row is judged for exactly that reason: a row with no INS on it would otherwise freeze the
+        // table on that row, and every later hit would read it again and never reach the rows past it.
+        // ⚠️ **LEFTMOST WINS** — the signal leaves at the first switch it meets, so anything past it
+        // on the row is not part of the path.
+        int next = -1;
+        for (int s = 0; s < 3; ++s) {
+            if (type[s] == FX_INS) { next = value[s] & 0x7F; break; }
+        }
+        // No switch here, so this instrument sounds and its voice runs this table from `laneRow` —
+        // which is where the voice would have started anyway, so nothing has to be handed down.
+        if (next < 0) return instrumentId;
+
+        // ⚠️ **THE HIT LEAVES, SO NOTHING ELSE WILL MOVE THIS TABLE ON.** No voice runs it, so the
+        // step the voice would have made has to be made here or the next trigger reads the same row
+        // for ever. Only a per-trigger column has a place to keep; the others start at the top anyway.
+        for (int l = 0; l < TABLE_LANES; ++l) {
+            if (rates[l] != 0x00) continue;
+            Tic00Cursor* c = tic00Slot(trackId, tableId, /*create=*/true);
+            if (!c) break;
+            c->row[l]           = slotRow[l];
+            c->lastProcessed[l] = slotRow[l];   // "this row has been used" — the next trigger steps on
+            c->ticRate[l]       = 0x00;
+            c->active[l]        = true;
+        }
+        if (visitedCount < CHAIN_MAX_LINKS) visited[visitedCount++] = tableId;
+
+        instrumentId = next;
+        tableId      = next;   // the next link brings its OWN table
+    }
+
+    // The depth cap was hit. Sound where we stand rather than following further.
+    if (outTableId) *outTableId = tableId;
+    if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
+    const songcore::Program& last = programs.programs[instrumentId];
+    if (last.type == songcore::PROGRAM_EXTERNAL) return -1;
+    if (!last.hasSample && !last.hasSoundfont) return -1;
+    return instrumentId;
+}
+
 void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_LANES]) {
     for (int l = 0; l < TABLE_LANES; ++l) out[l] = fallback;
     if (tableId < 0 || tableId >= 256) return;
@@ -1830,6 +2017,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         while (noteIdx < noteBatch.size() && noteBatch[noteIdx].targetFrame <= currentFrame) {
             ScheduledNote note = noteBatch[noteIdx++];
 
+            // ⚠️ **THE INSTRUMENT IS CHOSEN HERE, NOT WHERE THE NOTE WAS QUEUED.** A sequencer note
+            // arrives as a number and becomes a sound on this line; everything below then runs on a
+            // fully derived note and cannot tell the two paths apart.
+            if (note.instrumentId >= 0 && !resolveScheduledNote(note)) continue;   // nothing to play
+
             // ---- SOUNDFONT PATH ----
             // Tracks use the master tsf* handle via MIDI channels (channel = trackId).
             // No per-track clone creation — tsf_load_memory() never runs on the audio thread.
@@ -1952,9 +2144,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // has nothing to carry and starts wherever the trigger says.
             int savedTableRows[TABLE_LANES] = {-1, -1, -1};
             bool wasTIC00Mode = false;
+            // ⚠️ …and it must be THIS table. A chain hands the note on, so the voice still sounding on
+            // this track can be running a different table entirely, and its row means nothing here.
             for (int v = 0; v < MAX_VOICES; v++) {
                 if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut
-                    && voices[v].tableId >= 0) {
+                    && voices[v].tableId >= 0 && voices[v].tableId == note.tableId) {
                     for (int l = 0; l < TABLE_LANES; ++l) {
                         if (voices[v].lanes[l].ticRate != 0x00) continue;
                         wasTIC00Mode = true;
@@ -1969,14 +2163,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // every time, so how far it got depended on the instrument's ROOT note (root → playback
             // rate → how long a one-shot lasts): a low root never left the first row or two.
             if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
-                note.tableId >= 0 && tic00Cursor[note.trackId].tableId == note.tableId) {
-                const Tic00Cursor& c = tic00Cursor[note.trackId];
-                for (int l = 0; l < TABLE_LANES; ++l) {
-                    if (c.ticRate[l] != 0x00 || !c.active[l]) continue;
-                    wasTIC00Mode = true;
-                    savedTableRows[l] = tic00RowAfter(c.row[l], c.lastProcessed[l]);
-                    LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from track cursor)",
-                         savedTableRows[l], note.trackId, l + 1);
+                note.tableId >= 0) {
+                if (const Tic00Cursor* c = tic00Slot(note.trackId, note.tableId, /*create=*/false)) {
+                    for (int l = 0; l < TABLE_LANES; ++l) {
+                        if (c->ticRate[l] != 0x00 || !c->active[l]) continue;
+                        wasTIC00Mode = true;
+                        savedTableRows[l] = tic00RowAfter(c->row[l], c->lastProcessed[l]);
+                        LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from table cursor)",
+                             savedTableRows[l], note.trackId, l + 1);
+                    }
                 }
             }
 
@@ -2134,13 +2329,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         if (anyTic00 && !voices[v].isFadingOut) {
             const int t = voices[v].trackId;
             if (t >= 0 && t < SF_VOICE_COUNT) {
-                Tic00Cursor& c = tic00Cursor[t];
-                c.tableId = voices[v].tableId;
-                for (int l = 0; l < TABLE_LANES; ++l) {
-                    c.row[l]           = voices[v].lanes[l].row;
-                    c.lastProcessed[l] = voices[v].lanes[l].lastProcessed;
-                    c.ticRate[l]       = voices[v].lanes[l].ticRate;
-                    c.active[l]        = voices[v].lanes[l].active;
+                if (Tic00Cursor* c = tic00Slot(t, voices[v].tableId, /*create=*/true)) {
+                    for (int l = 0; l < TABLE_LANES; ++l) {
+                        c->row[l]           = voices[v].lanes[l].row;
+                        c->lastProcessed[l] = voices[v].lanes[l].lastProcessed;
+                        c->ticRate[l]       = voices[v].lanes[l].ticRate;
+                        c->active[l]        = voices[v].lanes[l].active;
+                    }
+                    tic00Sounding[t] = voices[v].tableId;   // what the TABLE screen draws
                 }
             }
         }
@@ -3026,6 +3222,86 @@ void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
     noteQueue.schedule(note);
 }
 
+void AudioEngine::scheduleProgramNote(int64_t targetFrame, int trackId, int instrumentId,
+                                      const songcore::NoteOnPayload& noteOn, int tempo,
+                                      bool rootAudition) {
+    ScheduledNote note{};
+    note.targetFrame  = targetFrame;
+    note.trackId      = trackId;
+    note.instrumentId = instrumentId;   // >= 0 is what marks this note as still undecided
+    note.noteOn       = noteOn;
+    note.tempo        = tempo;
+    note.rootAudition = rootAudition;
+    noteQueue.schedule(note);
+}
+
+bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
+    // Follow any INS cells the hit passes through. With no INS anywhere this returns the instrument
+    // it was given and the table it would have used, so the ordinary note path is unchanged.
+    int chainTableId = -1;
+    const int sounding = resolveChain(note.trackId, note.instrumentId, note.noteOn.tableId,
+                                      &chainTableId);
+    if (sounding < 0) return false;                 // an empty slot, or external gear: silence
+    note.instrumentId  = sounding;
+    note.noteOn.tableId = chainTableId;             // the voice runs the LAST link's table
+
+    const songcore::Program p = programs.view(note.instrumentId);
+    const songcore::DerivedNote d =
+        songcore::derive_note(note.noteOn, note.targetFrame, note.trackId, note.instrumentId, p,
+                              note.tempo, deviceSampleRate.load(std::memory_order_relaxed),
+                              getSampleLength(p.sampleId), note.rootAudition);
+    if (!d.valid) return false;
+
+    note.isSoundfont = d.isSoundfont;
+    if (d.isSoundfont) {
+        const songcore::SoundfontNoteArgs& a = d.soundfont;
+        note.sfSlot             = a.sfSlot;
+        note.midiNote           = a.midiNote;
+        note.midiVelocity       = a.midiVelocity;
+        note.volume             = a.vol;
+        note.phraseVolume       = a.phraseVol;
+        note.pan                = a.pan;
+        note.sfBank             = a.bank;
+        note.sfPreset           = a.preset;
+        note.sampleId           = a.sampleId;
+        note.frequency          = 440.0f;
+        note.baseFrequency      = 440.0f;
+        note.startPointOverride = -1;
+        note.tableId            = a.tableId;
+        note.tableTicRate       = a.tableTicRate;
+        note.noteOctave         = a.noteOctave;
+        note.notePitch          = a.notePitch;
+        note.pslInitialOffset   = a.pslInitialOffset;
+        note.pslDuration        = a.pslDuration;
+        note.pbnRate            = a.pbnRate;
+        note.vibratoSpeed       = a.vibratoSpeed;
+        note.vibratoDepth       = a.vibratoDepth;
+        note.tableStartRow      = a.tableStartRow;
+        note.detuneSemitones    = a.detuneSemitones;
+    } else {
+        const songcore::SamplerNoteArgs& a = d.sampler;
+        note.sampleId           = a.sampleId;
+        note.frequency          = a.frequency;
+        note.baseFrequency      = a.baseFrequency;
+        note.volume             = a.volume;
+        note.phraseVolume       = a.phraseVolume;
+        note.pan                = a.pan;
+        note.startPointOverride = a.startPointOverride;
+        note.endPointOverride   = a.endPointOverride;
+        note.tableId            = a.tableId;
+        note.tableTicRate       = a.tableTicRate;
+        note.noteOctave         = a.noteOctave;
+        note.notePitch          = a.notePitch;
+        note.pslInitialOffset   = a.pslInitialOffset;
+        note.pslDuration        = a.pslDuration;
+        note.pbnRate            = a.pbnRate;
+        note.vibratoSpeed       = a.vibratoSpeed;
+        note.vibratoDepth       = a.vibratoDepth;
+        note.tableStartRow      = a.tableStartRow;
+    }
+    return true;
+}
+
 void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
                                         int midiNote, int midiVelocity, float vol, float pan,
                                         int bank, int preset,
@@ -3538,14 +3814,41 @@ void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
         const SoundfontVoice& sv = sfVoices[trackId];
         if (sv.isActive && sv.tableId >= 0) { lanesOf(sv.lanes, out); return; }
-        const Tic00Cursor& c = tic00Cursor[trackId];
-        if (c.tableId >= 0) {
-            for (int l = 0; l < TABLE_LANES; ++l) out[l] = c.active[l] ? c.row[l] : -1;
+        // The table the voice last RAN — a chain's routers have bookmarks too, and the screen is
+        // showing the one that made the sound.
+        if (const Tic00Cursor* c = tic00Slot(trackId, tic00Sounding[trackId], /*create=*/false)) {
+            for (int l = 0; l < TABLE_LANES; ++l) out[l] = c->active[l] ? c->row[l] : -1;
             return;
         }
     }
     const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
     if (fading >= 0) lanesOf(voices[fading].lanes, out);
+}
+
+// Same precedence as getVoiceTableRows — live voice, SF voice, the table's bookmark, a fading voice
+// last — but every source has to be in the table that was ASKED for.
+bool AudioEngine::getTableRowsFor(int trackId, int tableId, int out[TABLE_LANES]) {
+    for (int l = 0; l < TABLE_LANES; ++l) out[l] = -1;
+    if (tableId < 0) return false;
+
+    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
+    if (live >= 0 && voices[live].tableId == tableId) { lanesOf(voices[live].lanes, out); return true; }
+
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
+        const SoundfontVoice& sv = sfVoices[trackId];
+        if (sv.isActive && sv.tableId == tableId) { lanesOf(sv.lanes, out); return true; }
+
+        // No voice is carrying it: a TIC00 table between notes, or one a hit only ROUTED through,
+        // which is the same place kept the same way.
+        if (const Tic00Cursor* c = tic00Slot(trackId, tableId, /*create=*/false)) {
+            for (int l = 0; l < TABLE_LANES; ++l) out[l] = c->active[l] ? c->row[l] : -1;
+            return true;
+        }
+    }
+
+    const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
+    if (fading >= 0 && voices[fading].tableId == tableId) { lanesOf(voices[fading].lanes, out); return true; }
+    return false;
 }
 
 bool AudioEngine::getVoiceLoopWindow(int trackId, int* startFrame, int* endFrame) {
@@ -3563,7 +3866,7 @@ int AudioEngine::getVoiceTableId(int trackId) {
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
         const SoundfontVoice& sv = sfVoices[trackId];
         if (sv.isActive) return sv.tableId;
-        if (tic00Cursor[trackId].tableId >= 0) return tic00Cursor[trackId].tableId;
+        if (tic00Sounding[trackId] >= 0) return tic00Sounding[trackId];
     }
     const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
     return fading >= 0 ? voices[fading].tableId : -1;

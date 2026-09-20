@@ -87,6 +87,8 @@ const int MUTE_GATE_SAMPLES = 256;
 // defined and where the UI, the file format and the scheduler all read it from. Only effects the C++
 // TABLE engine processes are listed here; the phrase-level ones (ARP/ARC/REP/…) are songcore's.
 // ===================================
+const int FX_CHA    = 0x04;  // CHA xy - chance gate; on a failed roll y=0 skips, y=1-3 clears that slot
+const int FX_RNL    = 0x11;  // RNL xx - add a random 0..xx to the value in the slot to its LEFT
 const int FX_HOP    = 0x08;  // Hxx - Table hop (repeat-count jump, FF = stop table)
 const int FX_TIC    = 0x09;  // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
 const int FX_KILL   = 0x0B;  // K00 - Kill voice
@@ -104,6 +106,7 @@ const int FX_BPF    = 0x35;  // BPF xx - band-pass on, cutoff xx
 const int FX_DRV    = 0x37;  // DRV xx - overdrive amount
 const int FX_CRU    = 0x38;  // CRU xy - x = bits crushed, y = downsample; two 4-bit values in one cell
 const int FX_FIN    = 0x39;  // FIN xx - fine tune; 80 = in tune, one semitone either way
+const int FX_INS    = 0x3C;  // INS xx - play this hit on instrument xx; on a table row it is a SWITCH
 // ─── The loop modes, as the engine numbers them ─────────────────────────────────────────────────
 //
 // ⚠️ **OSCILLATOR IS A FORWARD LOOP WITH ITS SCAN RATE RETUNED**, not a fourth kind of traversal:

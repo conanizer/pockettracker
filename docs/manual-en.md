@@ -2038,7 +2038,19 @@ at random, counting up from the one `INS` names.
     04    C-4 00  INS 08               ← always instrument 08
 ```
 
-It needs a note on the same step, and it works in a phrase only — on a table row it does nothing.
+It needs a note on the same step.
+
+`INS` works on a **table row** too, where it hands the note on instead: the note passes through the
+table as far as the row carrying `INS`, leaves there, and plays on that instrument — which brings its
+own table, so one `INS` can lead to another. Everything to the left of the `INS` on that row still
+shapes the note; anything to its right is not read. A row with no `INS` plays your own instrument,
+with that row's transpose, volume and effects as usual.
+
+With `TIC 00` the table reads one row per note, so a column of `INS` cells rotates through
+instruments — a new one each time the note retriggers. `HOP` on the same FX column loops that
+rotation. At any other tic rate the row read is always row 0.
+
+An `INS` naming an empty instrument is silent, rather than falling back to the instrument you played.
 
 ---
 
@@ -2758,7 +2770,7 @@ Open with **A** on an EQ cell.
 | CRU | Crush + Downsample | `XY` | `X` = bits crushed, `Y` = rate drop; both `0` = clean |
 | FIN | Fine Tune | `XX` | `80` in tune, a semitone either way; retunes a note already playing |
 | TSX | Transpose Multiplier | `XX` | How far TSP moves this note: `01` normal, `00` not at all, `FF` the other way. Phrase only |
-| INS | Instrument | `XX` | This note plays instrument `XX` (00–7F); randomize it with RND or RNL. Phrase only |
+| INS | Instrument | `XX` | This note plays instrument `XX` (00–7F); randomize it with RND or RNL. On a table row it hands the note on to that instrument and its table |
 | SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
 | SCG | Global Scale | `XY` | The same for all eight tracks |
 
