@@ -46,11 +46,22 @@ inline UsedRefs collect_used_refs(const Project& project) {
     // triggers or configures anything at playback (scheduleStepWithEffects reads it only when
     // hasNote), so an instrument referenced solely by note-less steps is genuinely unused and gets
     // compacted away. Kotlin's rule, and its reasoning.
+    bool sawIns = false, sawRandom = false;
     for (int phraseId : used.phrases) {
         if (phraseId >= static_cast<int>(project.phrases.size())) continue;
-        for (const PhraseStep& step : project.phrases[static_cast<size_t>(phraseId)].steps)
-            if (!step_is_empty(step)) used.instruments.insert(step.instrument);
+        for (const PhraseStep& step : project.phrases[static_cast<size_t>(phraseId)].steps) {
+            if (step_has_fx(step, FX_RND) || step_has_fx(step, FX_RNL)) sawRandom = true;
+            if (!step_is_empty(step)) {
+                used.instruments.insert(step.instrument);
+                // An INS cell's instrument is played too, so COMPACT must not wipe it.
+                const int ins = step_ins_instrument(step);
+                if (ins >= 0) { used.instruments.insert(ins); sawIns = true; }
+            }
+        }
     }
+    // ⚠️ A randomized INS can land on any instrument, so COMPACT keeps them all.
+    if (sawIns && sawRandom)
+        for (int i = 0; i < static_cast<int>(project.instruments.size()); ++i) used.instruments.insert(i);
 
     return used;
 }

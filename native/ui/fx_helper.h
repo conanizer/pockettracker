@@ -76,6 +76,7 @@ inline constexpr int FX_SEQUENCE_CODES[] = {
     songcore::FX_KILL,
     songcore::FX_HOP, songcore::FX_THO, songcore::FX_TBL, songcore::FX_TIC,
     songcore::FX_GRV, songcore::FX_LAT, songcore::FX_CHA, songcore::FX_RND, songcore::FX_RNL,
+    songcore::FX_INS,   // beside RND/RNL, which it is made to be driven by
     songcore::FX_ARC, songcore::FX_ARPEGGIO,
     // The TRACK scale. Its global twin is in GLOBAL, where it moves all eight tracks at once.
     songcore::FX_SCA,
@@ -381,8 +382,8 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 7 ARP */ {"ARP: Arpeggio", "x=+semitones 1st note", "y=+semitones 2nd note", "configure speed with ARC"},
         /* 8 KIL */ {"KIL: Kill voice", "xx=ticks of latency before stop", "00=immediate, 0C=next step"},
         /* 9 OFF */ {"OFF: Sample offset", "xx=start point (00-FF)"},
-        /* 10 RND */ {"RND: Randomize FX", "randomizes previous FX column", "x=min nibble  y=max nibble"},
-        /* 11 RNL */ {"RNL: Randomize left FX", "same as RND but targets", "FX column to the left"},
+        /* 10 RND */ {"RND: Randomize FX", "adds 0 to xx to the last FX", "above it in this column", "00=no change  stops at FF"},
+        /* 11 RNL */ {"RNL: Randomize left FX", "adds 0 to xx to the FX at left", "in FX1: x=note y=instrument", "00=no change  stops at FF"},
         /* 12 RPT */ {"RPT: Retrigger", "RX0: retrig every x ticks", "RXY(Y!=0): retrig y+vol ramp x"},
         /* 13 TBL */ {"TBL: Table override", "xx=table ID for this note"},
         /* 14 THO */ {"THO: Table hop", "xx=target row in current table"},
@@ -414,19 +415,20 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 40 CRU */ {"CRU: Bit crush + downsample", "x=bits crushed (0=off F=most)", "y=rate drop (0=off F=most)", "this note only"},
         /* 41 FIN */ {"FIN: Fine tune", "00=flat 80=in tune FF=sharp", "one semitone either way", "bends a note already playing"},
         /* 42 TSX */ {"TSX: Transpose multiplier", "xx=how far TSP moves a note", "01=normal 02=twice 00=never", "FF=the other way FE=2x that"},
-        /* 43 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
-        /* 44 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 45 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        /* 43 INS */ {"INS: Instrument for this note", "xx=instrument (00-7F)", "RNL beside or RND below it", "picks a random instrument"},
+        /* 44 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
+        /* 45 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 46 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
         // ⚠️ **NO APOSTROPHE AND NO SEMICOLON IN A DESCRIPTION** — the font has neither glyph and draws
         // a BLANK, so "instrument's" renders as "INSTRUMENT S". It is silent: the string is right, the
         // width is right, only the pixels are wrong, and these lines are the only long prose in the UI.
         // ⚠️ Pre-existing, not new: BCK's "sampler; toggle live to scratch" has always drawn as
         // "SAMPLER  TOGGLE…". Caught by ptshot — the one tool here that looks at pixels. Stick to
         // letters, digits, and `: = - ( ) . /`, all of which are proven by the entries above.
-        /* 46 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 47 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 48 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 49 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 47 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 48 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 49 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 50 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <functional>
 #include <set>
+#include "effects.h"   // step_ins_instrument
 #include "model.h"
 
 namespace songcore {
@@ -53,11 +54,19 @@ inline void for_each_step_in_song_range(const Project& project, int start_row, i
 inline std::set<int> collect_used_instruments(const Project& project, int start_row, int end_row) {
     std::set<int> used;
     int n = static_cast<int>(project.instruments.size());
+    bool sawIns = false, sawRandom = false;
     for_each_step_in_song_range(project, start_row, end_row, /*include_inaudible=*/false,
         [&](const PhraseStep& step) {
-            if (!step_is_empty(step) && step.instrument >= 0 && step.instrument < n)
-                used.insert(step.instrument);
+            if (step_has_fx(step, FX_RND) || step_has_fx(step, FX_RNL)) sawRandom = true;
+            if (step_is_empty(step)) return;
+            if (step.instrument >= 0 && step.instrument < n) used.insert(step.instrument);
+            // An INS cell plays its instrument instead.
+            const int ins = step_ins_instrument(step);
+            if (ins >= 0 && ins < n) { used.insert(ins); sawIns = true; }
         });
+    // ⚠️ A randomized INS can land on any instrument, and one missing here exports with default params.
+    if (sawIns && sawRandom)
+        for (int i = 0; i < n; ++i) used.insert(i);
     return used;
 }
 

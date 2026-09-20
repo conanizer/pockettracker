@@ -1769,8 +1769,8 @@ class Sequencer {
 
     // CHA gate + RND/RNL randomize, evaluated before effect resolution. The byte-exact goldens are
     // random-free (SC-1): with no CHA/RND/RNL slot present this returns (step, skipNote=false)
-    // unchanged, which is why they can be compared at all. The draws themselves are measured instead
-    // by tools/ptrandom, against the same draws taken from the real Kotlin sequencer (S7).
+    // unchanged, which is why they can be compared at all. The draws themselves are checked instead
+    // by tools/ptrandom, as ranges and distributions.
     PhraseStep applyChanceAndRandomize(const PhraseStep& step, TrackState& trackState, bool& skipNote) {
         bool hasNote = !step_empty(step);
         skipNote = false;
@@ -1789,39 +1789,49 @@ class Sequencer {
                 }
             }
         }
+        // The M8 rule: RND/RNL ADD a random 0..XY to the value already there, and stop at the effect's
+        // ceiling. 00 adds nothing and draws nothing. In FX1, RNL adds 0..X to the note and 0..Y to
+        // the instrument instead.
+        const int lastInstrument = (project_ && !project_->instruments.empty())
+                                 ? static_cast<int>(project_->instruments.size()) - 1 : 127;
+        int instOffset = 0;
+        auto add_random = [this](int base, int range, int ceiling) {
+            const int added = range > 0 ? rng_range(0, range + 1) : 0;
+            return clampi(base + added, 0, ceiling);
+        };
         for (int slot = 1; slot <= 3; ++slot) {
             int fxType = step_fx_type(effectiveStep, slot);
             int fxValue = step_fx_value(effectiveStep, slot);
-            int minNibble = (fxValue >> 4) & 0x0F;
-            int maxNibble = fxValue & 0x0F;
             if (fxType == FX_RND) {
                 int prevType = trackState.lastColFxType[slot];
                 if (prevType == 0x00) continue;
-                int minVal = minNibble << 4;
-                int maxVal = (maxNibble << 4) | 0x0F;
-                int randomValue = (minVal <= maxVal) ? rng_range(minVal, maxVal + 1) : rng_range(maxVal, minVal + 1);
-                step_set_fx(effectiveStep, slot, prevType, randomValue);
+                int base = trackState.lastColFxValue[slot];
+                step_set_fx(effectiveStep, slot, prevType, add_random(base, fxValue, effect_value_max(prevType)));
             } else if (fxType == FX_RNL) {
                 if (slot == 1) {
                     if (hasNote) {
                         int noteMidi = note_to_midi(step.note);
                         if (noteMidi >= 0) {
-                            int noteRange = minNibble, instRange = maxNibble;
-                            int noteOffset = noteRange > 0 ? rng_range(-noteRange, noteRange + 1) : 0;
-                            int instOffset = instRange > 0 ? rng_range(-instRange, instRange + 1) : 0;
-                            effectiveStep.note = note_from_midi(clampi(noteMidi + noteOffset, 0, 127));
-                            effectiveStep.instrument = clampi(step.instrument + instOffset, 0, 255);
+                            int noteRange = (fxValue >> 4) & 0x0F, instRange = fxValue & 0x0F;
+                            effectiveStep.note = note_from_midi(add_random(noteMidi, noteRange, 127));
+                            instOffset = instRange > 0 ? rng_range(0, instRange + 1) : 0;
+                            effectiveStep.instrument = clampi(step.instrument + instOffset, 0, lastInstrument);
                         }
                     }
                 } else {
                     int targetSlot = slot - 1;
-                    int minVal = minNibble << 4;
-                    int maxVal = (maxNibble << 4) | 0x0F;
-                    int randomValue = (minVal <= maxVal) ? rng_range(minVal, maxVal + 1) : rng_range(maxVal, minVal + 1);
-                    step_set_fx_value(effectiveStep, targetSlot, randomValue);
+                    int targetType = step_fx_type(effectiveStep, targetSlot);
+                    int base = step_fx_value(effectiveStep, targetSlot);
+                    step_set_fx_value(effectiveStep, targetSlot,
+                                      add_random(base, fxValue, effect_value_max(targetType)));
                 }
             }
         }
+        // INS reads the step RND/RNL have just rewritten, so a randomized INS value is the one heard,
+        // and an FX1 RNL's instrument offset lands on top of it rather than being overwritten.
+        const int insInstrument = step_ins_instrument(effectiveStep);
+        if (hasNote && insInstrument >= 0)
+            effectiveStep.instrument = clampi(insInstrument + instOffset, 0, lastInstrument);
         return effectiveStep;
     }
 

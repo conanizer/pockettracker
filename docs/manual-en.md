@@ -1663,15 +1663,23 @@ Persists across steps. Cancel with new note, new FX in same column, or KIL.
 
 ### RND `XY` — Randomize
 
-Randomizes the **previously active FX** value on this track.
+Plays the last effect written higher up in the same FX column again, with a random amount from `00`
+to `XY` added to its value. `00` adds nothing; the value never goes past `FF`.
 
-- `X` = downward range, `Y` = upward range
+```
+    00    C-4 00  VOL 80
+    04    C-4 00  RND 10               ← VOL 80 to VOL 90
+```
 
 ---
 
 ### RNL `XY` — Randomize Left
 
-Randomizes the FX value in the column immediately to the left. Same `X`/`Y` semantics as RND.
+Adds a random amount from `00` to `XY` to the effect in the column to its left.
+
+In the first FX column there is no effect to its left, so it randomizes the note and the instrument
+instead: the note goes up by `0` to `X` semitones, and the instrument number goes up by `0` to `Y`.
+`C-4 04 RNL 53` plays anything from C-4 to F-4, on instrument 04 to 07.
 
 ---
 
@@ -2015,6 +2023,22 @@ It applies to the step it is written on and to a phrase only — a `TSX` on a **
 nothing**, because by the time a table runs its note has already been placed. To keep a whole
 instrument still, set `TSP` to `OFF` on the INSTRUMENT screen instead (§10); that switch wins over any
 `TSX`.
+
+---
+
+### INS `XX` — Instrument
+
+The note on this step plays instrument `XX` instead of the one in its `I` column. `00`–`7F`.
+
+Put `RNL` to its right, or an `RND` further down the same FX column, and each note picks an instrument
+at random, counting up from the one `INS` names.
+
+```
+    00    C-4 00  INS 04  RNL 03       ← instrument 04, 05, 06 or 07, a new pick every pass
+    04    C-4 00  INS 08               ← always instrument 08
+```
+
+It needs a note on the same step, and it works in a phrase only — on a table row it does nothing.
 
 ---
 
@@ -2708,8 +2732,8 @@ Open with **A** on an EQ cell.
 | PVB | Vibrato | `XY` | X=speed, Y=depth — **persists** |
 | PVX | Extreme Vibrato | `XY` | 4× deeper, 2× faster than PVB |
 | RPT | Repeat/Retrigger | `XY` | Y=0: every X ticks; Y≠0: fade — **persists** |
-| RND | Randomize | `XY` | Randomizes previous FX value |
-| RNL | Randomize Left | `XY` | Randomizes FX in column to the left |
+| RND | Randomize | `XY` | Adds `00`–`XY` at random to the last FX above it in the column |
+| RNL | Randomize Left | `XY` | Adds `00`–`XY` at random to the FX on its left; in FX1, `X` = note, `Y` = instrument |
 | SLI | Slice Index | `XX` | Direct slice selection |
 | TBL | Table Set | `XX` | Override instrument's table |
 | THO | Table Hop | `XX` | Jump table to row 0X |
@@ -2734,6 +2758,7 @@ Open with **A** on an EQ cell.
 | CRU | Crush + Downsample | `XY` | `X` = bits crushed, `Y` = rate drop; both `0` = clean |
 | FIN | Fine Tune | `XX` | `80` in tune, a semitone either way; retunes a note already playing |
 | TSX | Transpose Multiplier | `XX` | How far TSP moves this note: `01` normal, `00` not at all, `FF` the other way. Phrase only |
+| INS | Instrument | `XX` | This note plays instrument `XX` (00–7F); randomize it with RND or RNL. Phrase only |
 | SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
 | SCG | Global Scale | `XY` | The same for all eight tracks |
 

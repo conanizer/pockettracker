@@ -49,6 +49,8 @@ Write these into any phrase step to shape how a note plays:
 - **EQ (per note / mixer)** — apply an EQ preset to one note, or automate the master EQ across the song
 - **Chance** — probability gate: set odds the note actually plays
 - **Randomize** — randomize any other FX value on the fly
+- **Instrument per note** — play a note on another instrument from an FX cell; with Randomize beside it,
+  each note picks an instrument at random
 - **Table override** — switch which table an instrument follows
 - **Groove assign** — set groove pattern per track from a phrase step
 - **Scale (track / global)** — move one track, or all eight, onto one of the project's scales and a key

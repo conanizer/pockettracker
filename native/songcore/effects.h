@@ -245,6 +245,19 @@ constexpr int FX_LPO      = 0x3B;  // LPO  slide the loop window, signed sixteen
 inline constexpr int loop_slide_sixteenths(int value) { return (value & 0xFF) < 0x80 ? (value & 0xFF)
                                                                                      : (value & 0xFF) - 256; }
 
+// INS xx: the note on this step plays instrument `xx` instead of the one in its I column. Applied
+// with CHA/RND/RNL before resolution, and AFTER them, so an RND or RNL can pick the instrument.
+// Phrase only, and only on a step with a note — it chooses what a note triggers, not a voice.
+constexpr int FX_INS      = 0x3C;  // INS  play this note on instrument xx
+
+/** The instrument an INS cell on this step names, or -1. Rightmost wins, as in the scheduler. */
+inline int step_ins_instrument(const PhraseStep& s) {
+    if (s.fx3Type == FX_INS) return s.fx3Value & 0xFF;
+    if (s.fx2Type == FX_INS) return s.fx2Value & 0xFF;
+    if (s.fx1Type == FX_INS) return s.fx1Value & 0xFF;
+    return -1;
+}
+
 /** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
 inline int fx_cc_slot(int code) {
     return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
@@ -267,6 +280,7 @@ inline std::string effect_name(int code) {
         case FX_LPF: return "LPF"; case FX_HPF: return "HPF"; case FX_BPF: return "BPF";
         case FX_DRV: return "DRV"; case FX_CRU: return "CRU";
         case FX_FIN: return "FIN"; case FX_TSX: return "TSX"; case FX_LPO: return "LPO";
+        case FX_INS: return "INS";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
@@ -290,7 +304,7 @@ inline constexpr int effect_value_max(int effect_type) {
     if (effect_type == FX_SCA || effect_type == FX_SCG) return 0xBF;
     return (effect_type == FX_TBL || effect_type == FX_GRV ||
             effect_type == FX_EQN || effect_type == FX_EQM ||
-            effect_type == FX_MPG) ? 127 : 255;
+            effect_type == FX_MPG || effect_type == FX_INS) ? 127 : 255;
 }
 
 /**
@@ -342,6 +356,9 @@ inline constexpr int EFFECT_TYPES[] = {
     // The transpose multiplier, appended for the same reason. It sits after FIN rather than beside
     // PIT because a code's position here is the picker's grid, and the grid is never re-ordered.
     FX_TSX,
+    // Play this note on another instrument. Above LPO, not after it: LPO is hidden in release
+    // builds by trimming the tail, and INS must stay visible.
+    FX_INS,
     // The loop-window slider, appended for the same reason.
     FX_LPO,
     // The MIDI commands (see the static_assert below — they must stay the LAST six)

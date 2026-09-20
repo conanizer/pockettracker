@@ -28,12 +28,11 @@
 //
 //     Kotlin                           songcore                  used by
 //     Random.nextInt(bound)       →    next_int(bound)           CHA roll: nextInt(15) → 0..14
-//     Random.nextInt(from, until) →    next_int(from, until)     RND/RNL value, RNL note/inst offset
+//     Random.nextInt(from, until) →    next_int(from, until)     RND/RNL: the amount added, 0..XY
 //     listOf(a, b, c).random()    →    next_int(3) as an index   ARP RANDOM
 //
-// Half-open at the top, and `from` may be NEGATIVE — RNL draws its note and instrument offsets as
-// nextInt(-range, range + 1), i.e. the inclusive band [-range, +range]. Get either end wrong and the
-// FX quietly loses a semitone at one edge, which no ear and no golden would ever catch.
+// Half-open at the top: RND/RNL draw next_int(0, range + 1) so that `range` itself can come out.
+// Get the end wrong and the FX quietly never reaches its top value, which no ear would catch.
 //
 // Seeding matches Kotlin's default too: a fresh Sequencer seeds itself from the platform, so two
 // runs of the same song differ — as they always have on the Kotlin path. That is why the audio
@@ -81,9 +80,8 @@ class Rng {
 
     /// Uniform over [from, until), `from` may be negative. Mirrors nextInt(from, until).
     int next_int(int from, int until) {
-        // Kotlin throws when until <= from. Both call sites already order their bounds (RND/RNL swap
-        // min and max when the nibbles are inverted), and RNL guards range > 0 before drawing — so
-        // this arm is unreachable, and returning `from` keeps it total rather than undefined.
+        // Kotlin throws when until <= from. Every call site draws only when its range is above zero,
+        // so this arm is unreachable, and returning `from` keeps it total rather than undefined.
         if (until <= from) return from;
         int64_t span = static_cast<int64_t>(until) - static_cast<int64_t>(from);
         return from + static_cast<int>(bounded(static_cast<uint32_t>(span)));
