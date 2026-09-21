@@ -18,6 +18,7 @@
 #include "ui/layout.h"
 #include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE — the C7 audible test
 #include "ui/scale_io.h"              // seed_scale_bank — the factory scales, as .pts files
+#include "ui/groove_io.h"             // seed_groove_bank — the factory grooves, as .ptg files
 #include "ui/settings_store.h"
 
 #include "device_skin.h"
@@ -369,6 +370,7 @@ int run(const AppConfig& cfg) {
     filesystem.soundfonts_directory();
     filesystem.themes_directory();
     filesystem.scales_directory();
+    filesystem.grooves_directory();
     std::printf("files:   %s\n", cfg.appRoot.c_str());
 
     // ⚠️ The app's OWN files need not live in the tree just named — on Android they do not, because
@@ -537,6 +539,11 @@ int run(const AppConfig& cfg) {
     if (const int seeded = ui::seed_scale_bank(filesystem); seeded > 0)
         std::printf("files:   seeded %d factory scales in %s\n", seeded,
                     filesystem.scales_directory().c_str());
+
+    // The factory grooves, on exactly the terms above.
+    if (const int seeded = ui::seed_groove_bank(filesystem); seeded > 0)
+        std::printf("files:   seeded %d factory grooves in %s\n", seeded,
+                    filesystem.grooves_directory().c_str());
 
     // `folders` → the dispatcher's browse start dirs. An override is root-relative unless absolute,
     // is re-rooted when it was authored under another install's root, and falls back to the built-in

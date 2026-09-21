@@ -58,7 +58,8 @@ enum class QwertyContext {
     PROJECT_NAME,     // the project's name (PROJECT row 2) — plain text, no file touched
     THEME_SAVE,       // write the live theme to `contextExtra`/<text>.ptt, and name it <text> (S9)
     RESAMPLE,         // render the SONG selection to `<Resampled>/<text>.wav`, then auto-instrument it
-    SCALE_SAVE        // write the SCALE screen's slot to `contextExtra`/<text>.pts, and name it <text>
+    SCALE_SAVE,       // write the SCALE screen's slot to `contextExtra`/<text>.pts, and name it <text>
+    GROOVE_SAVE       // write the GROOVE screen's slot to `contextExtra`/<text>.ptg, and name it <text>
 };
 
 /** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */

@@ -86,6 +86,18 @@ struct AppState {
     int tableCursorRow    = 0;
     int tableCursorColumn = 1;  // starts on transpose
     int grooveCursorRow   = 0;
+    // GROOVE. The tick grid and the panel beside it each keep their own row, both live at once: the
+    // swing percentage reports on the group the TICK cursor is in, so walking into the panel to set
+    // QNT must not move the number QNT governs. `grooveCursorColumn` says which of the two has the
+    // cursor (ui/modules/groove_editor.h).
+    int grooveCursorColumn = 1;
+    int groovePanelRow     = 0;
+    int groovePanelColumn  = 0;  // the SAVE/LOAD row only
+    /**
+     * The quantize pointer: how A+DPAD edits a groove step. ⚠️ NOT A SETTING — it is never written to
+     * the song or to settings.json, and it resets to OFF here on app start and on loading a project.
+     */
+    int grooveQuantize     = 0;
     int scaleCursorRow    = 0;
     // ⚠️ Read on the SCALE screen's NAME row and nowhere else — that is the only row there with more
     // than one cell. It is NOT what `InputDispatcher::cursor_column()` answers for SCALE: that one
@@ -285,7 +297,8 @@ struct AppState {
         LOAD_SAMPLE_EDITOR, // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
         LOAD_PROJECT,       // a .ptp — the whole document, from PROJECT's LOAD button (S7)
         LOAD_THEME,         // a .ptt — and back into the THEME EDITOR, which raised the browser (S9)
-        LOAD_SCALE          // a .pts into the slot the SCALE screen is showing
+        LOAD_SCALE,         // a .pts into the slot the SCALE screen is showing
+        LOAD_GROOVE         // a .ptg into the slot the GROOVE screen is showing
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 

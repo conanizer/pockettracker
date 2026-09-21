@@ -322,7 +322,10 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
                 s.tableCursorRow = 0; s.tableCursorColumn = 1;
                 break;
             case ScreenType::GROOVE:
-                s.grooveCursorRow = 0;
+                s.grooveCursorRow    = 0;
+                s.grooveCursorColumn = GROOVE_COL_TICK;
+                s.groovePanelRow     = 0;
+                s.groovePanelColumn  = 0;
                 break;
             case ScreenType::INSTRUMENT:
                 s.instrumentCursorRow = 0; s.instrumentCursorColumn = 1;

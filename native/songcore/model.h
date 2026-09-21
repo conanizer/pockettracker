@@ -371,9 +371,32 @@ inline int mod_slot_row_count(const ModSlot& s) {
     return 1;
 }
 
+/**
+ * What a groove holds before anything has been typed into it: two steps of the neutral length, then
+ * fourteen end markers.
+ *
+ * ⚠️ A NEW GROOVE IS NOT BLANK, AND THIS IS AUDIBLY NOTHING. Twelve tics is exactly one plain step,
+ * so a default groove and no groove at all play identically. What the two steps buy is the GROOVE
+ * screen: they are the pair its swing setting bends, so a fresh slot already shows the thing you are
+ * about to edit instead of sixteen dashes.
+ *
+ * ⚠️ AN ALL-BLANK GROOVE STAYS LEGAL and still means "no groove" — `groove_step_duration` falls back
+ * to the plain step when nothing is active. Deleting both steps is how you get there.
+ *
+ * ⚠️ The 12 is `TICS_PER_STEP`, spelled out because `timing.h` includes THIS file and so cannot be
+ * included back. `groove_bank.h` static-asserts that the two still agree.
+ */
+inline std::vector<int> default_groove_steps() {
+    std::vector<int> s(16, -1);
+    s[0] = 12;
+    s[1] = 12;
+    return s;
+}
+
 struct Groove {
     int id = 0;
-    std::vector<int> steps = std::vector<int>(16, -1);  // IntArray(16){-1}
+    std::string name;  // "" = unnamed; the screen then names it by its steps (groove_bank.h)
+    std::vector<int> steps = default_groove_steps();
     Groove() = default;
     explicit Groove(int id_) : id(id_) {}
 };

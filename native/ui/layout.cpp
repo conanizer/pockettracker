@@ -253,7 +253,10 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
             case ScreenType::GROOVE: {
                 GrooveState gs{p.grooves[static_cast<size_t>(s.currentGroove)]};
                 gs.cursorRow    = s.grooveCursorRow;
-                gs.cursorColumn = 1;  // the tick column is the only editable one
+                gs.cursorColumn = s.grooveCursorColumn;
+                gs.panelRow     = s.groovePanelRow;
+                gs.panelColumn  = s.groovePanelColumn;
+                gs.quantize     = s.grooveQuantize;
                 gs.theme        = t;
                 grooveModule_.draw(c, moduleX, EDITOR_Y, gs);
                 break;

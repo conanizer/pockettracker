@@ -820,6 +820,9 @@ class InputDispatcher {
     /** "What is under the cursor?" — the ONE place that asks which screen is up. */
     CursorContext cursor_context() const;
 
+    /** The GROOVE screen's cursor state, assembled once for both the context and the edit. */
+    GrooveState groove_state(const songcore::Project& p) const;
+
     /** Apply a resolved action to the live document. True if anything changed. */
     bool apply_edit(const InputAction& action);
 
@@ -1179,6 +1182,12 @@ class InputDispatcher {
 
     /** Apply the typed name and write `<dir>/<name>.pts`. The QWERTY's SCALE_SAVE arm. */
     void save_scale_as(const std::string& dir, const std::string& typed_text);
+
+    /** A on the GROOVE screen's panel: the SAVE and LOAD cells. Every other panel row ignores it. */
+    void groove_row_action();
+
+    /** Apply the typed name and write `<dir>/<name>.ptg`. The QWERTY's GROOVE_SAVE arm. */
+    void save_groove_as(const std::string& dir, const std::string& typed_text);
 
     // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
     /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */

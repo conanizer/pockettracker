@@ -497,7 +497,7 @@ Project
 ├── chains[256]           16 phrase slots + a transpose each
 ├── phrases[256]          16 steps: note, volume, instrument, 3 × (FX type, FX value)
 ├── tables[128]           16 rows: transpose, volume, 3 × (FX type, FX value)
-├── grooves[128]          16 step lengths in tics
+├── grooves[128]          16 step lengths in tics, and a name
 ├── instruments[128]      sampler | SoundFont | external
 ├── eqPresets[128]        the shared EQ slot bank
 ├── mixer, master bus, reverb, delay

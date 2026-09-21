@@ -9,6 +9,7 @@
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 #include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
 #include "ui/scale_io.h"         // .pts — save_scale_file / load_scale_file / the factory seed
+#include "ui/groove_io.h"        // .ptg — save_groove_file / load_groove_file / the factory seed
 #include "load_progress.h"       // begin_load / end_load — where the engine reports a slow load
 
 #include <algorithm>
@@ -400,6 +401,21 @@ bool InputDispatcher::on_globals_screen() const {
     return s_.currentScreen == ScreenType::MIXER || s_.currentScreen == ScreenType::EFFECTS;
 }
 
+/**
+ * The GROOVE screen's state, assembled once. The cursor context and the edit both need all five
+ * fields — where the tick cursor is, where the panel cursor is, and the quantize pointer — so they
+ * read it from here rather than each building their own and drifting apart.
+ */
+GrooveState InputDispatcher::groove_state(const Project& p) const {
+    GrooveState gs{p.grooves[static_cast<size_t>(s_.currentGroove)]};
+    gs.cursorRow    = s_.grooveCursorRow;
+    gs.cursorColumn = s_.grooveCursorColumn;
+    gs.panelRow     = s_.groovePanelRow;
+    gs.panelColumn  = s_.groovePanelColumn;
+    gs.quantize     = s_.grooveQuantize;
+    return gs;
+}
+
 CursorContext InputDispatcher::cursor_context() const {
     const Project& p = *s_.project;
     switch (s_.currentScreen) {
@@ -435,12 +451,8 @@ CursorContext InputDispatcher::cursor_context() const {
             ts.effectTypeCount = visible_effect_type_count();
             return table_.cursor_context(ts);
         }
-        case ScreenType::GROOVE: {
-            GrooveState gs{p.grooves[static_cast<size_t>(s_.currentGroove)]};
-            gs.cursorRow    = s_.grooveCursorRow;
-            gs.cursorColumn = 1;
-            return groove_.cursor_context(gs);
-        }
+        case ScreenType::GROOVE:
+            return groove_.cursor_context(groove_state(p));
         case ScreenType::SCALE: {
             ScaleState cs{p.scales[static_cast<size_t>(s_.currentScale)]};
             cs.key          = p.scaleKey;
@@ -574,11 +586,15 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
                               s_.tableCursorColumn, action)
                 .modified;
 
-        case ScreenType::GROOVE:
-            return groove_
-                .handle_input(p.grooves[static_cast<size_t>(s_.currentGroove)], s_.grooveCursorRow,
-                              /*cursor_column=*/1, action)
-                .modified;
+        case ScreenType::GROOVE: {
+            const GrooveInputResult r = groove_.handle_input(
+                p.grooves[static_cast<size_t>(s_.currentGroove)], groove_state(p), action);
+            // ⚠️ The quantize pointer is NOT part of the song, so it comes back rather than being
+            // written through the Groove — and moving it must not report a modification, or setting
+            // an editing aid would dirty the project and arm an autosave.
+            if (r.newQuantize >= 0) s_.grooveQuantize = r.newQuantize;
+            return r.modified;
+        }
 
         case ScreenType::SCALE: {
             // ⚠️ The KEY row is the one cell on this screen that does NOT edit the object the module
@@ -1063,6 +1079,62 @@ void InputDispatcher::save_scale_as(const std::string& dir, const std::string& t
 
     const bool ok = save_scale_file(fs_, dir + "/" + file, slot);
     s_.statusMessage = ok ? "SCALE SAVED" : "SAVE FAILED";
+    s_.statusSuccess = ok;
+}
+
+// ─── The GROOVE screen's SAVE / LOAD cells ───────────────────────────────────────────────────────
+
+void InputDispatcher::groove_row_action() {
+    const songcore::Groove& groove =
+        host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
+
+    switch (groove_file_action(s_.groovePanelRow, s_.groovePanelColumn)) {
+        case GrooveFileAction::SAVE: {
+            // Seeded with the SANITIZED name the panel is showing, so what you are shown is what the
+            // file will be called — and the panel shows a name even for a slot that stores none,
+            // which is why it is `groove_display_name` and not `groove.name`.
+            const std::string seed = sanitize_groove_filename(songcore::groove_display_name(groove));
+            open_qwerty(QwertyContext::GROOVE_SAVE, seed.empty() ? "GROOVE" : seed, "SAVE GROOVE:",
+                        fs_.grooves_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
+            break;
+        }
+        case GrooveFileAction::LOAD:
+            // GROOVE is a SCREEN, so the browser simply replaces it and `previousScreen` brings the
+            // user back — nothing has to be closed first, as it does for the theme editor's overlay.
+            // And like the scale browser, this one starts at the built-in folder: `folders` in
+            // config.json names five categories and grooves is not one of them.
+            open_file_browser(AppState::BrowserPurpose::LOAD_GROOVE, fs_.grooves_directory(),
+                              {GROOVE_FILE_EXT});
+            break;
+        case GrooveFileAction::NONE:
+            break;
+    }
+}
+
+void InputDispatcher::save_groove_as(const std::string& dir, const std::string& typed_text) {
+    // The scale save's two-names rule, on a groove: the FILENAME is sanitized so it survives a FAT32
+    // card, the name IN the file is what was typed. An empty field keeps the name the panel was
+    // showing rather than blanking it, and falls back to "GROOVE" for the file — never `.ptg`, which
+    // is a dotfile the browser does not list.
+    const std::string safe = sanitize_groove_filename(typed_text);
+    const std::string file = (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
+
+    songcore::Groove& slot = host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)];
+
+    // ⚠️ THE SLOT ADOPTS THE NAME IT WAS SAVED UNDER, as the scale slot does. The name is the only
+    // thing on the panel that says which file this slot is, and adopting it is also what clears the
+    // `*`: the slot now matches the shape it is named after, because that shape is the one just
+    // written.
+    const std::string want = !typed_text.empty()          ? typed_text
+                           : !slot.name.empty()           ? slot.name
+                                                          : songcore::groove_display_name(slot);
+    if (slot.name != want) {
+        slot.name = want;
+        mark_modified();
+    }
+
+    const bool ok = save_groove_file(fs_, dir + "/" + file, slot);
+    s_.statusMessage = ok ? "GROOVE SAVED" : "SAVE FAILED";
     s_.statusSuccess = ok;
 }
 
@@ -1756,6 +1828,14 @@ void InputDispatcher::on_b_up() {
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(-1)) return;
 
+    // B+UP/DOWN sets the GROOVE screen's quantize pointer from ANY cell on it — the gesture is free
+    // here (it is a page jump on SONG and the pool alone) and it means the editing aid can be armed
+    // without leaving the step you are editing.
+    if (s_.currentScreen == ScreenType::GROOVE) {
+        s_.grooveQuantize = (s_.grooveQuantize + 1) % GROOVE_QUANTIZE_COUNT;
+        return;
+    }
+
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
     // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
     if (s_.currentScreen == ScreenType::INST_POOL) {
@@ -1771,6 +1851,12 @@ void InputDispatcher::on_b_up() {
 void InputDispatcher::on_b_down() {
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(+1)) return;
+
+    if (s_.currentScreen == ScreenType::GROOVE) {
+        s_.grooveQuantize =
+            (s_.grooveQuantize + GROOVE_QUANTIZE_COUNT - 1) % GROOVE_QUANTIZE_COUNT;
+        return;
+    }
 
     if (s_.currentScreen == ScreenType::INST_POOL) {
         const int last = static_cast<int>(s_.project->instruments.size()) - 1;
@@ -2535,7 +2621,12 @@ void InputDispatcher::reset_editing_context() {
     s_.mixerMasterRow    = 0;
     s_.effectsCursorRow  = 0;
     s_.tableCursorRow = 0; s_.tableCursorColumn = 1;
-    s_.grooveCursorRow = 0;
+    s_.grooveCursorRow = 0; s_.grooveCursorColumn = GROOVE_COL_TICK;
+    s_.groovePanelRow = 0;  s_.groovePanelColumn  = 0;
+    // ⚠️ The quantize pointer resets with the project, and that is the whole of its persistence — it
+    // is an editing aid, not a setting, and a song that arrives with one armed would edit differently
+    // from the same song opened fresh.
+    s_.grooveQuantize = 0;
     s_.modCursorRow = 0; s_.modCursorPair = 0; s_.modCursorSide = 0;
     s_.projectCursorRow = 0; s_.projectCursorColumn = 1;
 
@@ -3143,6 +3234,13 @@ void InputDispatcher::on_button_a() {
     // the run of "A on a button", and not up among the modal guards.
     if (s_.currentScreen == ScreenType::SCALE) {
         scale_row_action();
+        return;
+    }
+
+    // A on the GROOVE screen's panel. ⚠️ It must NOT return for the tick grid — a bare A there lays a
+    // step down on an empty row, which is the insert arm further below.
+    if (s_.currentScreen == ScreenType::GROOVE && s_.grooveCursorColumn == GROOVE_COL_PANEL) {
+        groove_row_action();
         return;
     }
 
@@ -4089,6 +4187,25 @@ void InputDispatcher::browser_confirm() {
             s_.statusSuccess = true;
             return;
         }
+
+        case AppState::BrowserPurpose::LOAD_GROOVE: {
+            // The scale load's two guards, and for the same two reasons: a COPY so a mangled file
+            // cannot leave a slot half-overwritten and so the slot keeps its `id` — which is what
+            // `GRV` in a phrase names — and the extension re-checked because the D-pad can walk out
+            // of the Grooves folder.
+            songcore::Groove loaded = host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
+            if (ext != GROOVE_FILE_EXT || !load_groove_file(fs_, path, loaded)) {
+                b.statusMessage = "LOAD FAILED";
+                b.statusSuccess = false;
+                return;
+            }
+            host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)] = loaded;
+            mark_modified();
+            close_file_browser();
+            s_.statusMessage = "GROOVE LOADED";
+            s_.statusSuccess = true;
+            return;
+        }
     }
 
     if (!ok) {
@@ -4382,6 +4499,10 @@ void InputDispatcher::qwerty_apply() {
             // ⚠️ `k.contextExtra`, for the same reason the arm above it takes one: the live keyboard is
             // cleared before any of these run, so reading `s_.qwerty` here writes to the filesystem root.
             save_scale_as(k.contextExtra, text);
+            break;
+
+        case QwertyContext::GROOVE_SAVE:
+            save_groove_as(k.contextExtra, text);
             break;
 
         case QwertyContext::SAMPLE_NAME: {

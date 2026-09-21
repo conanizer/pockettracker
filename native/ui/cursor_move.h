@@ -60,6 +60,7 @@
 #include "ui/app_state.h"
 #include "ui/effects_row_layout.h"
 #include "ui/instrument_row_layout.h"
+#include "ui/modules/groove_editor.h"
 #include "ui/modules/scale_editor.h"
 #include "ui/settings_row_layout.h"
 #include "ui/song_pointer.h"
@@ -236,8 +237,18 @@ inline void move_cursor_up(AppState& s) {
         case ScreenType::TABLE:
             s.tableCursorRow = (s.tableCursorRow > 0) ? s.tableCursorRow - 1 : 15;
             break;
+        // ⚠️ THE PANEL WRAPS WITHIN ITSELF and the tick row stays where it was. Walking off the
+        // panel's last row into the 12 grid rows beside it would put the cursor on a cell that is not
+        // drawn; wrapping also means the swing readout — which follows the TICK row — holds still
+        // while the panel is being walked.
         case ScreenType::GROOVE:
-            s.grooveCursorRow = (s.grooveCursorRow > 0) ? s.grooveCursorRow - 1 : 15;
+            if (s.grooveCursorColumn == GROOVE_COL_PANEL) {
+                s.groovePanelRow =
+                    (s.groovePanelRow > 0) ? s.groovePanelRow - 1 : GROOVE_PANEL_ROWS - 1;
+                s.groovePanelColumn = 0;
+            } else {
+                s.grooveCursorRow = (s.grooveCursorRow > 0) ? s.grooveCursorRow - 1 : 15;
+            }
             break;
         case ScreenType::SCALE:
             s.scaleCursorRow =
@@ -351,7 +362,13 @@ inline void move_cursor_down(AppState& s) {
             s.tableCursorRow = (s.tableCursorRow < 15) ? s.tableCursorRow + 1 : 0;
             break;
         case ScreenType::GROOVE:
-            s.grooveCursorRow = (s.grooveCursorRow < 15) ? s.grooveCursorRow + 1 : 0;
+            if (s.grooveCursorColumn == GROOVE_COL_PANEL) {
+                s.groovePanelRow =
+                    (s.groovePanelRow < GROOVE_PANEL_ROWS - 1) ? s.groovePanelRow + 1 : 0;
+                s.groovePanelColumn = 0;
+            } else {
+                s.grooveCursorRow = (s.grooveCursorRow < 15) ? s.grooveCursorRow + 1 : 0;
+            }
             break;
         case ScreenType::SCALE:
             s.scaleCursorRow =
@@ -470,6 +487,17 @@ inline void move_cursor_left(AppState& s) {
             if (s.scaleCursorRow == SCALE_NAME_ROW && s.scaleCursorColumn > 0) s.scaleCursorColumn--;
             return;
 
+        // The panel's cells first, then out of the panel and back to the tick column. The tick row
+        // is untouched, so LEFT returns you to the step you left.
+        case ScreenType::GROOVE:
+            if (s.grooveCursorColumn != GROOVE_COL_PANEL) return;
+            if (s.groovePanelColumn > 0) {
+                s.groovePanelColumn--;
+            } else {
+                s.grooveCursorColumn = GROOVE_COL_TICK;
+            }
+            return;
+
         case ScreenType::INSTRUMENT: {
             const int minColumn = detail::instrument_left_column(
                 detail::instrument_type_of(s), s.instrumentCursorRow, s.instrumentCursorColumn);
@@ -559,6 +587,18 @@ inline void move_cursor_right(AppState& s) {
             if (s.scaleCursorRow == SCALE_NAME_ROW &&
                 s.scaleCursorColumn < SCALE_NAME_COL_COUNT - 1)
                 s.scaleCursorColumn++;
+            return;
+
+        // ⚠️ RIGHT FROM ANY OF THE SIXTEEN TICK ROWS ENTERS THE PANEL, not only from the four it is
+        // drawn beside: the panel is four rows tall and the grid is sixteen, so anchoring the door to
+        // the row you happen to be on would leave three quarters of the screen with no way in. The
+        // panel keeps whichever row it was last on.
+        case ScreenType::GROOVE:
+            if (s.grooveCursorColumn != GROOVE_COL_PANEL) {
+                s.grooveCursorColumn = GROOVE_COL_PANEL;
+            } else if (s.groovePanelColumn < groove_panel_cell_count(s.groovePanelRow) - 1) {
+                s.groovePanelColumn++;
+            }
             return;
 
         case ScreenType::INSTRUMENT: {

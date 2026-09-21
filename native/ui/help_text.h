@@ -36,6 +36,7 @@
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/effects_editor.h"
+#include "ui/modules/groove_editor.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/sample_editor.h"
 #include "ui/modules/scale_editor.h"
@@ -369,6 +370,11 @@ enum class HelpTopic {
     SE_BIT,
     FX_REVERB_ALGO,
     SET_HELP,
+    GROOVE_NAME,
+    GROOVE_SAVE,
+    GROOVE_LOAD,
+    GROOVE_QNT,
+    GROOVE_SWG,
 
     COUNT
 };
@@ -2012,6 +2018,51 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"ALGO: which reverb", "OLD, or a Dragonfly HALL, ROOM,", "PLATE, FOIL, TANK or EARLY."},
     /* SET_HELP */
     {"HELP: what SELECT shows", "SHORT uses the top strip, FULL", "a big page. OFF shows nothing."},
+    /* GROOVE_NAME */
+    {"NAME: the shape of the groove", "A+D-PAD walks the built-in", "grooves.",
+     {"Steps through the built-in",
+      "grooves. Landing on one replaces",
+      "every tick beside it, so save a",
+      "groove you built before moving.",
+      "A star means the ticks no longer",
+      "match the name."},
+     {"A+D-PAD picks a built-in groove",
+      "A+B goes back to STRAIGHT"}},
+    /* GROOVE_SAVE */
+    {"SAVE: store this groove", "Writes a file you can load", "into any other project.",
+     {"Names this groove and writes it",
+      "to the Grooves folder, so LOAD",
+      "can bring it into any song."},
+     {"A opens the keyboard to name it",
+      "START on the keyboard saves",
+      "SELECT on the keyboard cancels"}},
+    /* GROOVE_LOAD */
+    {"LOAD: recall a groove", "Replaces the ticks beside it.", "",
+     {"Opens the file browser on your",
+      "saved grooves. Loading one",
+      "replaces every tick in this",
+      "slot, and every track playing it",
+      "hears the change."},
+     {"A picks the groove under you",
+      "B goes back without loading"}},
+    /* GROOVE_QNT */
+    {"QNT: keep the bar in place", "Armed, an edit shortens the", "partner step by as much.",
+     {"OFF edits one step on its own.",
+      "Armed, changing a step moves its",
+      "partner the other way, so the",
+      "pair still adds up and the bar",
+      "line does not shift."},
+     {"A+D-PAD picks OFF or a fraction",
+      "B+up/down sets it from any cell",
+      "A+D-PAD on a tick moves the pair"}},
+    /* GROOVE_SWG */
+    {"SWG: how far the swing is", "A readout. 50 is even, 66.7", "is a triplet feel.",
+     {"The first half of the group the",
+      "TIC cursor is in, as a share of",
+      "the whole. It follows the ticks,",
+      "not this panel, so setting QNT",
+      "does not move it."},
+     {"Nothing - it only reports"}},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -2285,6 +2336,19 @@ inline HelpTopic project_cell_topic(int row, int column) {
         case ProjectRow::EXIT:      return HelpTopic::PROJECT_EXIT;
     }
     return HelpTopic::NONE;
+}
+
+/** GROOVE — the tick column is one cell repeated sixteen times; the panel beside it is four rows. */
+inline HelpTopic groove_cell_topic(int column, int panel_row, int panel_column) {
+    if (column != GROOVE_COL_PANEL) return HelpTopic::GROOVE_TIC;
+    switch (panel_row) {
+        case GROOVE_PANEL_NAME: return HelpTopic::GROOVE_NAME;
+        case GROOVE_PANEL_FILE:
+            return panel_column == 0 ? HelpTopic::GROOVE_SAVE : HelpTopic::GROOVE_LOAD;
+        case GROOVE_PANEL_QNT:  return HelpTopic::GROOVE_QNT;
+        case GROOVE_PANEL_SWG:  return HelpTopic::GROOVE_SWG;
+        default:                return HelpTopic::NONE;
+    }
 }
 
 /** SCALE — the NAME row is the only one with more than one cell; the twelve below it are degrees. */
@@ -2598,8 +2662,8 @@ inline HelpTopic help_topic(const AppState& s) {
             cell = detail::project_cell_topic(s.projectCursorRow, s.projectCursorColumn);
             break;
         case ScreenType::GROOVE:
-            // One editable column, and the cursor is never anywhere else: the screen is 16 TIC cells.
-            cell = HelpTopic::GROOVE_TIC;
+            cell = detail::groove_cell_topic(s.grooveCursorColumn, s.groovePanelRow,
+                                             s.groovePanelColumn);
             break;
         case ScreenType::SCALE:
             cell = detail::scale_cell_topic(s.scaleCursorRow, s.scaleCursorColumn);

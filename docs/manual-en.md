@@ -69,10 +69,10 @@ PocketTracker holds no storage permission, so it can only see folders you hand i
 > ADD FOLDER...
 ```
 
-Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its six sub-folders inside it the moment it needs them:
+Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its eight sub-folders inside it the moment it needs them:
 
 ```
-Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/
+Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/  Scales/  Grooves/
 ```
 
 Anything already in the folder is left exactly as it is — so if you have used PocketTracker before, pick your existing `Documents/PocketTracker` and every project, sample and theme is where it was.
@@ -88,7 +88,7 @@ That top-level list of granted folders is a screen with two gestures of its own,
 
 | | |
 |---|---|
-| **SELECT + A** | **Make this the home folder.** The app's six sub-folders move to it — meaning it starts *looking* in the new place; nothing on disk is moved or copied. Confirm with **A**. |
+| **SELECT + A** | **Make this the home folder.** The app's eight sub-folders move to it — meaning it starts *looking* in the new place; nothing on disk is moved or copied. Confirm with **A**. |
 | **SELECT + B** | **Forget this folder.** Hands the access back to Android and removes the row. Confirm with **A**. |
 
 The folder currently in use is marked `(HOME)`. One whose directory has been deleted or unplugged since you granted it is marked `(MISSING)` — the app will not use a missing folder as its home, and `SELECT + B` is how you clear the row.
@@ -125,7 +125,7 @@ Resampled instruments and CHOP exports are saved to:
 <home>/Samples/Chops/{name}/
 ```
 
-On Linux, Windows and PortMaster handhelds there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same six sub-folders live in it.
+On Linux, Windows and PortMaster handhelds there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same eight sub-folders live in it.
 
 ---
 
@@ -966,10 +966,26 @@ Navigate here: **R+UP** from PHRASE or CHAIN (column 2).
 A groove is a list of up to 16 tick values. The track cycles through the list: step 1 takes groove row 0 ticks, step 2 takes groove row 1 ticks, and so on. The list loops when exhausted.
 
 ```
-     TIC
-00   0C    ← 12 ticks (even)
-01   --    ← end of list, loop
+GROOVE 00                     LEN: 2
+
+     TIC        STRAIGHT
+00   0C         SAVE  LOAD
+01   0C         QNT   1/16
+02   --         SWG   50.0%
+03   --
 ```
+
+A new groove holds **two steps of 12 ticks**, which is the pair swing works on. It plays exactly the same as no groove at all, so a fresh groove changes nothing until you edit it. Clearing both rows with A+B gives an empty groove, which also plays even.
+
+`00` is a real value and means **skip this row**: the phrase row is not played and takes no time. That is what makes triplets fit — see below.
+
+### The panel
+
+| Row | What it does |
+|---|---|
+| Name | The groove this slot was taken from. A+LEFT/RIGHT steps through the built-in grooves and loads the one you land on. **SAVE** and **LOAD** write and read groove files — see below. A `*` means the ticks no longer match the name. |
+| QNT | The quantize pointer — see below. |
+| SWG | Read-only. How long the first half of the group is, as a share of the whole. `50.0%` is even, `66.7%` is a triplet feel. It follows the **TIC** cursor, not the panel, so changing QNT never moves the number. |
 
 ### Swing example
 
@@ -982,15 +998,36 @@ A groove is a list of up to 16 tick values. The track cycles through the list: s
 
 ### Triplet example
 
+Three triplets fill one beat, but a phrase always counts **four** rows to a beat. The fourth row is `00` — skipped, costing no time — so the three notes sit in the four-row space the grid already draws and the phrase stays the same length as every other track's:
+
 ```
      TIC
-00   08
-01   08
-02   08
-03   --    ← 3 × 8 = 24 ticks = same total as 2 × 12
+00   10
+01   10
+02   10
+03   00    ← skipped: 16+16+16 = 48 ticks over 4 rows, same as 4 × 12
+04   --
 ```
 
-Default: all grooves start empty. An empty groove plays even timing (12 ticks per step, no swing).
+> [!NOTE]
+> Sixteenth-note triplets cannot be written this way, and there is no preset for them. Three of them fill an *eighth*, which is only two rows — so they would need three played rows inside a two-row space, and a `00` can only ever add a row, never remove one. They are still possible by typing ticks by hand on a phrase whose length you have chosen to suit them.
+
+### QNT — keeping the bar in place
+
+Set it on the panel with A+LEFT/RIGHT, or with **B+UP/DOWN** from anywhere on the screen. It is an editing aid only: nothing is saved with the song, and it goes back to OFF when the app starts or a project loads.
+
+| QNT | A+D-pad on a tick row |
+|---|---|
+| OFF | Moves that one step on its own. A+LEFT/RIGHT by 1, A+UP/DOWN by 16 |
+| 1/16 · 1/8 · 1/4 · 1/2 | Moves the step by 1 **and its partner the other way by 1**, so the pair still adds up and the bar line does not shift |
+
+Armed, both A axes do the same move of 1, because one tick is exactly one step on the classic swing ladder. Any edit that would push either side outside `00`–`FF` is refused outright rather than half-applied. OFF is what you want for lengthening a single step, or for typing a `00`.
+
+### Built-in grooves, and groove files
+
+The name row cycles a built-in list: **STRAIGHT**, the six `16TH` and six `8TH` swing settings (54 / 58 / 62 / 66 / 71 / 75, the same numbers drum machines have used since the MPC60 — each one tick apart), then **TRIPLET 8**, **TRIPLET 4**, **HALFTIME** and **DOUBLETIME**. Landing on one replaces every tick in the slot, so save a groove you have built before stepping off it.
+
+**SAVE** names the slot and writes it to `PocketTracker/Grooves` as a `.ptg` file; **LOAD** reads one back into the slot you are looking at. The built-ins are written into that folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and the name row still offers them all.
 
 ### Assigning grooves
 
@@ -1007,10 +1044,12 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 | Input | Action |
 |---|---|
 | D-pad UP/DOWN | Move between rows |
-| A | On a `--` row, add a step at 12 ticks |
-| A + LEFT/RIGHT | Edit tick value |
+| D-pad RIGHT / LEFT | Move into the panel and back |
+| A | On a `--` row, add a step at 12 ticks. On SAVE or LOAD, press the button |
+| A + LEFT/RIGHT | Edit tick value. On the name row, step through the built-in grooves. On QNT, change it |
 | A + UP/DOWN | Edit tick value (large step) |
-| A + B | Clear row |
+| A + B | Clear row. On the name row, back to STRAIGHT |
+| B + UP/DOWN | Set QNT from anywhere on the screen |
 | B + LEFT/RIGHT | Previous / next groove |
 
 ---
@@ -2667,9 +2706,12 @@ exports and sample-editor saves keep their own folders.
 | Input | Action |
 |---|---|
 | D-pad UP / DOWN | Move between rows |
-| A + LEFT / RIGHT | Edit tick value |
+| D-pad RIGHT / LEFT | Move into the panel and back |
+| A | SAVE / LOAD, or add a step on a `--` row |
+| A + LEFT / RIGHT | Edit tick value, pick a built-in groove, or set QNT |
 | A + UP / DOWN | Large step |
-| A + B | Clear row |
+| A + B | Clear row, or back to STRAIGHT |
+| B + UP / DOWN | Set QNT |
 | B + LEFT / RIGHT | Previous / next groove |
 
 ---

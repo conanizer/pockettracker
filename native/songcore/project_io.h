@@ -165,7 +165,11 @@ inline ModSlot parse_mod_slot(const json& j) {
 
 inline Groove parse_groove(const json& j, int index) {
     Groove g(get_int(j, "id", index));
+    g.name  = get_str(j, "name", g.name);
     g.steps = parse_int_array(j, "steps", g.steps);
+    // The GROOVE screen indexes all sixteen directly with a cursor row, and a hand-edited or
+    // half-written file could hand it fewer. Same repair `parse_chain` makes, for the same reason.
+    g.steps.resize(16, -1);
     return g;
 }
 
@@ -594,6 +598,10 @@ inline void emit_mod_slot(JsonWriter& w, const ModSlot& m) {
 inline void emit_groove(JsonWriter& w, const Groove& g) {
     w.begin_object();
     w.field_int("id", g.id);
+    if (!g.name.empty()) w.field_string("name", g.name);
+    // ⚠️ `steps` has NEVER been default-guarded, and leaving it that way is what lets the default
+    // change: every project on disk already writes all sixteen values, so an old song's blank grooves
+    // load back blank whatever a fresh Groove is born with.
     emit_int_array(w, "steps", g.steps);
     w.end_object();
 }
