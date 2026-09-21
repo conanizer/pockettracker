@@ -302,7 +302,10 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     const int    vy     = y + HEADER_H + ROW_H;
     const int    bottom = VIS_H;  // panel-relative
 
-    c.fill_rect(x, vy, WIDTH, VIS_H, t.background);
+    // ⚠️ `eqBg`, NOT `background` — the panel has its own ground so a generated palette can choose
+    // whether it sits on the screen's ground or on the visualizer's. It derives from `vizBackground`,
+    // which every palette written so far holds equal to `background`, so nothing on disk changes look.
+    c.fill_rect(x, vy, WIDTH, VIS_H, t.eqBg);
 
     // ── The spectrum, one sample per pixel column ────────────────────────────────────────────────
     // Log-mapped bins come out of the engine already, so bin → pixel is a straight rescale. Fewer than
@@ -360,6 +363,10 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     constexpr int LABEL_GAP = 2;
     for (const Marker& m : markers) {
         const int fx = freq_to_pixel(m.hz);
+        // ⚠️ A GRID LINE IS MEANT TO BE A HAIR OFF THE PANEL, exactly as ROW 4TH is off BACKGROUND —
+        // it is a guide, not a mark, and what it has to read against is the SPECTRUM crossing it,
+        // which contrasts with the panel for its own reasons. Holding it to an ink's contrast floor
+        // would make the panel look ruled.
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
         const int w  = Canvas::text_width(m.label, CHAR_SPACING, 2);
         const int tx = (fx <= 0) ? x + fx + LABEL_GAP : x + fx - LABEL_GAP - w;

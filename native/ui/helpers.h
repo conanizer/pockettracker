@@ -17,6 +17,7 @@
 
 #include "canvas.h"
 #include "theme.h"
+#include "theme_rules.h"   // theme_polarity — the mascot's inversion reads the same one the roller does
 #include "songcore/effects.h"
 #include "songcore/model.h"
 
@@ -183,6 +184,26 @@ inline Argb cursor_mark_ink(const Theme& t) { return t.rowCursor; }
 
 /** Text inside a selected cell — `rowSelection` is the bar, `rowEvery4th` reads on it. */
 inline Argb selection_cell_ink(const Theme& t) { return t.rowEvery4th; }
+
+/**
+ * The mascot's two colours, given the panel it stands on.
+ *
+ * ⚠️ **THE ART IS A LIGHT FIGURE**, one bit deep and tinted at the draw. Drawn the same way on a
+ * light palette it becomes a dark silhouette, which reads as a NEGATIVE of the character rather than
+ * as the character — so there the pair swaps and the figure is punched out of a patch of TXT TITLE.
+ *
+ * ⚠️ The polarity is `background`'s, never the panel's: the two mascots stand on different panels
+ * (the strip's and a modal's), and deriving it per panel would invert one and not the other.
+ */
+struct MascotInk {
+    Argb figure;     ///< the colour the lit pixels take
+    Argb backdrop;   ///< filled behind the sprite FIRST, and only when `inverted`
+    bool inverted;
+};
+inline MascotInk mascot_ink(const Theme& t, Argb panel) {
+    return (theme_polarity(t) < 0) ? MascotInk{panel, t.textTitle, true}
+                                   : MascotInk{t.textTitle, panel, false};
+}
 
 /**
  * A grid's column header, which is how the cursor says WHICH COLUMN now that it no longer paints a

@@ -3,9 +3,9 @@
 // ─── The THEME EDITOR ────────────────────────────────────────────────────────────────────────────
 //
 // The 1:1 twin of `ui/modules/ThemeEditorModule.kt`, and the last screen in the Kotlin dispatcher the
-// port had not reached. Twenty rows: the THEME row on top (the built-in cycle, SAVE, LOAD) and the
-// nineteen colours under it, each an R/G/B triple with a live swatch. The list is taller than the
-// panel, so it scrolls — the same idea as SONG and the file browser.
+// port had not reached. Two header rows — THEME (the built-in cycle, SAVE, LOAD) and RANDOMIZE (the
+// colour scheme and ROLL) — and one row per colour under them, each an R/G/B triple with a live
+// swatch. The list is taller than the panel, so it scrolls — the same idea as SONG and the browser.
 //
 // ⚠️ IT HAS NO CursorContext, AND THAT IS NOT AN OVERSIGHT. Kotlin's `handleGenericInput` opens with
 // `if (themeEditorState.isOpen) return` — the whole cursor-context system is bypassed, and the four
@@ -20,10 +20,12 @@
 // instead of a copy of their arithmetic living in the test. (S6a's lesson, one layer up: a fixture that
 // re-derives the thing it is measuring cannot catch the thing it is measuring.)
 
+#include <cstdint>
 #include <string>
 
 #include "ui/canvas.h"
 #include "ui/theme.h"
+#include "ui/theme_random.h"
 
 namespace pt::ui {
 
@@ -31,12 +33,63 @@ namespace pt::ui {
 struct ThemeEditorState {
     bool isOpen = false;
 
-    /** 0 = the THEME row; 1..`max_row()` = a colour row (`theme_color_rows()[cursorRow - 1]`). */
+    /** 0 = THEME, 1 = RANDOMIZE, 2..`max_row()` = a colour row — see `theme_color_index`. */
     int cursorRow = 0;
 
-    /** On the THEME row: 0 = the name, 1 = SAVE, 2 = LOAD. On a colour row: 0 = R, 1 = G, 2 = B. */
+    /**
+     * On THEME: 0 = name, 1 = SAVE, 2 = LOAD. On RANDOMIZE: 0 = the scheme, 1 = ROLL. On a colour
+     * row: 0 = R, 1 = G, 2 = B.
+     *
+     * ⚠️ THE ROWS DO NOT ALL HAVE THE SAME NUMBER OF CHANNELS, so the cursor's ring is a function of
+     * the row rather than a constant 3 — see `theme_channel_count`.
+     */
     int cursorChannel = 0;
+
+    /**
+     * ⚠️ SESSION STATE, DELIBERATELY. Locks are not written to settings.json: a lock the user set
+     * days ago and has forgotten is a row that silently refuses to change, with nothing on screen
+     * old enough to explain why.
+     */
+    ThemeLocks  locks{};
+    ThemeScheme scheme = ThemeScheme::ANALOG;
+
+    /** Advanced every roll, so holding RAND walks a sequence instead of re-rolling one palette. */
+    uint32_t seed = 0x5EED0001u;
+
+    /**
+     * A failed roll's message, and ONLY that.
+     *
+     * ⚠️ **THE CLASH MESSAGE IS NOT STORED HERE — it is DERIVED in the draw** from the palette and
+     * the cursor. Storing it would mean every future site that moves the cursor or changes a colour
+     * has to remember to refresh it, and the cost of forgetting is a line of text describing a
+     * palette that no longer exists. A failed roll is an EVENT and has nowhere to be derived from,
+     * which is why that one is state.
+     */
+    std::string message;
 };
+
+// ─── The two header rows, and the one place the colour list is indexed ───────────────────────────
+//
+// ⚠️ **NOTHING MAY WRITE `cursorRow - 2` ITSELF.** The offset was 1 while THEME was the only header
+// row, it is 2 now, and it is read by the draw, the nudge, the lock, the re-roll, the clash message
+// and the help lookup — six sites, one of which silently edits the wrong colour if it is missed.
+
+inline constexpr int THEME_ROW_THEME  = 0;   ///< the name, SAVE and LOAD
+inline constexpr int THEME_ROW_RANDOM = 1;   ///< the scheme and ROLL
+inline constexpr int THEME_FIRST_COLOR_ROW = 2;
+
+/** Which colour a cursor row is on, or −1 when it is on a header row. */
+inline int theme_color_index(int cursorRow) {
+    const int index = cursorRow - THEME_FIRST_COLOR_ROW;
+    return (index >= 0 && index < static_cast<int>(theme_color_rows().size())) ? index : -1;
+}
+
+/** THEME: name, SAVE, LOAD. RANDOMIZE: the scheme, ROLL. A colour row: R, G, B. */
+inline int theme_channel_count(int cursorRow) {
+    if (cursorRow == THEME_ROW_THEME)  return 3;
+    if (cursorRow == THEME_ROW_RANDOM) return 2;
+    return 3;
+}
 
 /** What the module is handed to draw one frame. */
 struct ThemeState {
@@ -49,7 +102,9 @@ struct ThemeState {
 /**
  * Nudge one channel of the colour under the cursor. Kotlin's `AppInputDispatcher.adjustThemeColor`.
  *
- * `row` is the CURSOR row (1..17); row 0 is the THEME header and is rejected, as Kotlin rejects it.
+ * ⚠️ `row` IS THE COLOUR'S OWN 1-BASED POSITION, NOT THE CURSOR ROW — `theme_color_index() + 1`.
+ * The two were the same number while THEME was the only header row above the list, and they are not
+ * any more. 0 and anything past the list are rejected, as Kotlin rejects them.
  * `delta` is ±0x01 from A+RIGHT / A+LEFT and ±0x10 from A+UP / A+DOWN.
  *
  * ⚠️ Each channel CLAMPS at 0 and 255 — it does not wrap. Rolling 0xFF over to 0x00 would take a
@@ -62,7 +117,7 @@ struct ThemeState {
  */
 inline void theme_adjust_color(Theme& theme, int row, int channel, int delta) {
     const auto& rows = theme_color_rows();
-    if (row < 1 || row > static_cast<int>(rows.size())) return;   // row 0 = the THEME header
+    if (row < 1 || row > static_cast<int>(rows.size())) return;   // 0 = not on a colour at all
 
     Argb Theme::* field = rows[static_cast<size_t>(row) - 1].field;
     const Argb current = theme.*field;
@@ -137,14 +192,16 @@ public:
     static constexpr int HEIGHT = 392;
 
     /**
-     * The last cursor row — one per colour, after the THEME row at 0. The list scrolls; the cursor
+     * The last cursor row — one per colour, after the two header rows. The list scrolls; the cursor
      * does not clamp, it WRAPS.
      *
      * ⚠️ DERIVED FROM THE ROW TABLE, not typed. A colour added to `theme_color_rows()` is a row the
      * module draws; if this were a constant it would also be a row the cursor could never reach, and
      * the only symptom would be a colour that quietly cannot be edited.
      */
-    static int max_row() { return static_cast<int>(theme_color_rows().size()); }
+    static int max_row() {
+        return THEME_FIRST_COLOR_ROW + static_cast<int>(theme_color_rows().size()) - 1;
+    }
 
     void draw(Canvas& c, int x, int y, const ThemeState& s) const;
 
@@ -160,15 +217,32 @@ public:
 
 private:
     static constexpr int NAME_COL_X = 10;
+
+    /**
+     * The clash mark, between the longest label and the R column.
+     *
+     * ⚠️ IT IS THE ONLY GAP ON THE ROW. The swatch runs to within 10px of the panel's edge, so there
+     * is nothing free to its right; `BACKGROUND` is ten characters and ends at 180, and R starts at
+     * 230, which leaves exactly one character of air here.
+     */
+    static constexpr int WARN_COL_X = 200;
+
     static constexpr int R_COL_X    = 230;
     static constexpr int G_COL_X    = 267;
     static constexpr int B_COL_X    = 304;
     static constexpr int SWATCH_X   = 350;
     static constexpr int SWATCH_W   = WIDTH - SWATCH_X - 10;   // 150
 
-    static constexpr int THEME_NAME_X = 165;
-    static constexpr int SAVE_LABEL_X = 310;
-    static constexpr int LOAD_LABEL_X = 390;
+    static constexpr int THEME_NAME_X   = 105;
+    static constexpr int SAVE_LABEL_X   = 354;
+    static constexpr int LOAD_LABEL_X   = 432;
+
+    // ⚠️ THE RANDOMIZE ROW'S FIRST CELL CANNOT SIT UNDER THE THEME NAME'S. Its label is nine
+    // characters where `THEME` is five, so it runs to 163 and the name column starts at 105. The
+    // scheme cell takes the next clear space instead, and `SPLIT-COMP` — the longest of the seven —
+    // is what sets how far right it may start before it reaches ROLL.
+    static constexpr int SCHEME_LABEL_X = 175;
+    static constexpr int ROLL_LABEL_X   = SAVE_LABEL_X;
 };
 
 }  // namespace pt::ui

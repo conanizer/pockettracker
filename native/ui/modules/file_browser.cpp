@@ -386,9 +386,15 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         // enumerators, but a scoped enum can legally hold a value outside them, so gcc is right that
         // this could be read uninitialized (-Wmaybe-uninitialized). `textValue` is the same colour the
         // FILE arm falls back to, so no reachable case changes.
+        // ⚠️ A SELECTED ROW INVERTS, exactly as a selected cell does everywhere else in the app.
+        // `rowSelection` is a bright ground, so a name left in its own bright ink sits on it unread —
+        // grey on grey once a palette is monochrome. The row's KIND stops colouring it while it is
+        // selected, which is the same trade the cursor arm above already makes.
         Argb textColor = t.textValue;
         if (isCursor) {
             textColor = cursor_cell_ink(t);
+        } else if (isSel) {
+            textColor = selection_cell_ink(t);
         } else {
             switch (item.kind) {
                 case BrowserItem::Kind::PARENT: textColor = COLOR_PARENT; break;

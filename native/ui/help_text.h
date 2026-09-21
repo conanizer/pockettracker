@@ -290,6 +290,8 @@ enum class HelpTopic {
     THEME_NAME,
     THEME_SAVE,
     THEME_LOAD,
+    THEME_SCHEME,
+    THEME_ROLL,
     // ⚠️ THE NINETEEN COLOUR ROWS ARE IN `theme_color_rows()` ORDER (ui/theme.h) and are looked up
     // BY POSITION — see THEME_COLOR_TOPICS below. Append here and there together, or a new colour row
     // falls back to the screen text, which is the harmless direction and the only one reachable.
@@ -1640,6 +1642,23 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "replaces every colour."},
      {"A opens the file browser",
       "A there loads it, B goes back"}},
+    /* THEME_SCHEME */
+    {"SCHEME: how the hues relate", "A+D-PAD picks the rule the", "rolled colours follow.",
+     {"ALL takes any hue. The rest pick",
+      "from one base colour: the same",
+      "hue, its neighbours, its",
+      "opposite, or an even spread of",
+      "three or four around the wheel."},
+     {"A+D-PAD picks the scheme"}},
+    /* THEME_ROLL */
+    {"ROLL: a whole new palette", "A rolls one. L+A holds a row,", "R+A re-rolls just that row.",
+     {"Builds a palette in the scheme",
+      "beside this, keeping every row",
+      "you have held. A held row shows",
+      "a star and is never rolled."},
+     {"A rolls a palette",
+      "L+A on a colour row holds it",
+      "R+A on a colour row re-rolls it"}},
     /* THEME_BACKGROUND */
     {"BACKGROUND: behind it all", "The ground every screen sits", "on, and the ink in a cursor.",
      {},
@@ -2524,16 +2543,19 @@ inline constexpr HelpTopic THEME_COLOR_TOPICS[] = {
 };
 
 /**
- * The theme editor. Row 0 is the palette row — its three cells are the name, SAVE and LOAD — and
- * every row below it is one colour, whose three channels all say the same thing.
+ * The theme editor. Two header rows — THEME (the name, SAVE, LOAD) and RANDOMIZE (the scheme and
+ * ROLL) — and every row below them is one colour, whose three channels all say the same thing.
  */
 inline HelpTopic theme_cell_topic(int row, int channel) {
-    if (row == 0) {
+    if (row == THEME_ROW_THEME) {
         if (channel == 1) return HelpTopic::THEME_SAVE;
         if (channel == 2) return HelpTopic::THEME_LOAD;
         return HelpTopic::THEME_NAME;
     }
-    const int index = row - 1;
+    if (row == THEME_ROW_RANDOM) {
+        return (channel == 1) ? HelpTopic::THEME_ROLL : HelpTopic::THEME_SCHEME;
+    }
+    const int index = theme_color_index(row);
     const int count = static_cast<int>(sizeof(THEME_COLOR_TOPICS) / sizeof(THEME_COLOR_TOPICS[0]));
     return (index >= 0 && index < count) ? THEME_COLOR_TOPICS[index] : HelpTopic::NONE;
 }

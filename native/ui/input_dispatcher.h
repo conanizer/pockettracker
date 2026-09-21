@@ -1158,11 +1158,20 @@ class InputDispatcher {
      */
     bool port_open() const { return s_.midiOut != nullptr && s_.midiOut->is_open(); }
 
-    /** The D-pad: UP/DOWN walk the 18 rows (WRAPPING), LEFT/RIGHT the 3 channels (WRAPPING). */
+    /** The D-pad: UP/DOWN walk the rows (WRAPPING), LEFT/RIGHT the row's own channels (WRAPPING). */
     void theme_move_cursor(int d_row, int d_channel);
 
-    /** A on the THEME row: column 1 = SAVE (raises the keyboard), column 2 = LOAD (raises the browser). */
+    /** A on the THEME row: 1 = roll a palette, 2 = SAVE (the keyboard), 3 = LOAD (the browser). */
     void theme_row_action();
+
+    /** A+DPAD: the built-in cycle, the style ring, or a colour channel — one per cell. */
+    void theme_dpad_edit(int cycleDelta, int nudge);
+
+    /** Generate a palette. `rowOnly` holds every row but the cursor's. L+A locks, R+A rolls one row. */
+    void theme_roll_palette(bool rowOnly);
+
+    /** Drop a failed roll's message. The clash line is derived in the draw, not stored. */
+    void theme_refresh_message();
 
     /**
      * Apply the typed name and write `<dir>/<name>.ptt`. The QWERTY's THEME_SAVE arm.

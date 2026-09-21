@@ -959,21 +959,98 @@ void InputDispatcher::on_dpad_right() {
 
 void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
     // ⚠️ BOTH AXES WRAP, and neither clamps — which makes this the only cursor in the app that wraps in
-    // BOTH directions. The rows are the THEME row plus one per colour, the channels a ring of three,
-    // and the argument is the mixer's row 0 again: a list of colours is a ring you scroll, not a
-    // document you reach the end of. The panel SCROLLS to follow the row (only 16 rows fit), so
-    // wrapping from the last row to row 0 also scrolls the list back to the top.
+    // BOTH directions. The rows are the two header rows plus one per colour, and the argument is the
+    // mixer's row 0 again: a list of colours is a ring you scroll, not a document you reach the end
+    // of. The panel SCROLLS to follow the row (only 16 rows fit), so wrapping from the last row to
+    // row 0 also scrolls the list back to the top.
     if (d_row != 0) {
         const int row = s_.themeEditor.cursorRow;
         const int max = ThemeEditorModule::max_row();
         s_.themeEditor.cursorRow = (d_row < 0) ? (row > 0 ? row - 1 : max)
                                                : (row < max ? row + 1 : 0);
     }
+    // ⚠️ THE RING'S SIZE IS A FUNCTION OF THE ROW — RANDOMIZE carries two cells where the others
+    // carry three — and it is read AFTER the row has moved, so stepping onto a shorter row from a
+    // colour row's B channel cannot leave the cursor on a cell that row does not have.
+    const int last = theme_channel_count(s_.themeEditor.cursorRow) - 1;
     if (d_channel != 0) {
         const int ch = s_.themeEditor.cursorChannel;
-        s_.themeEditor.cursorChannel = (d_channel < 0) ? (ch > 0 ? ch - 1 : 2)
-                                                       : (ch < 2 ? ch + 1 : 0);
+        s_.themeEditor.cursorChannel = (d_channel < 0) ? (ch > 0 ? ch - 1 : last)
+                                                       : (ch < last ? ch + 1 : 0);
     }
+    if (s_.themeEditor.cursorChannel > last) s_.themeEditor.cursorChannel = last;
+
+    theme_refresh_message();
+}
+
+/**
+ * A+DPAD in the theme editor, which means three different things depending on the cell.
+ *
+ * ⚠️ WRITTEN ONCE AND CALLED FROM ALL FOUR DIRECTIONS, because the THEME row grew a cell: an arm per
+ * direction meant four places to remember that channel 1 is now the style, and the cost of missing
+ * one is a gesture that works on three edges and silently does nothing on the fourth.
+ */
+void InputDispatcher::theme_dpad_edit(int cycleDelta, int nudge) {
+    ThemeEditorState& es = s_.themeEditor;
+
+    const int color = theme_color_index(es.cursorRow);
+    if (color >= 0) {
+        theme_adjust_color(s_.theme, color + 1, es.cursorChannel, nudge);
+        theme_refresh_message();
+        return;
+    }
+    if (es.cursorRow == THEME_ROW_RANDOM) {
+        // The scheme cell, a ring like every other value in the app. ROLL is a button and there is
+        // nothing on it to dial.
+        if (es.cursorChannel == 0) {
+            const int cur = static_cast<int>(es.scheme);
+            es.scheme = static_cast<ThemeScheme>(
+                ((cur + cycleDelta) % THEME_SCHEME_COUNT + THEME_SCHEME_COUNT) % THEME_SCHEME_COUNT);
+        }
+        return;
+    }
+    // The THEME row: the NAME cell steps the built-in palettes; SAVE and LOAD are buttons.
+    if (es.cursorChannel == 0) theme_cycle_builtin(s_.theme, cycleDelta);
+}
+
+/**
+ * Drop a failed roll's message.
+ *
+ * ⚠️ IT ONLY CLEARS. The clash line is derived in the draw from the palette and the cursor, so the
+ * one thing input owes it is not to leave a stale EVENT standing in front of it.
+ */
+void InputDispatcher::theme_refresh_message() { s_.themeEditor.message.clear(); }
+
+/**
+ * Roll the palette. `rowOnly` re-rolls one row with the other eighteen held, which is the same
+ * solver with far more of its inputs fixed — and therefore far likelier to fail.
+ */
+void InputDispatcher::theme_roll_palette(bool rowOnly) {
+    ThemeEditorState& es = s_.themeEditor;
+
+    ThemeLocks locks = es.locks;
+    if (rowOnly) {
+        // ⚠️ "This row only" is expressed as "everything else is locked", so there is ONE solver and
+        // one place the rules live. A second code path for a single row is a second set of rules.
+        const int target = theme_color_index(es.cursorRow);
+        for (size_t i = 0; i < locks.row.size(); ++i) locks.row[i] = (static_cast<int>(i) != target);
+    }
+
+    es.seed = es.seed * 1664525u + 1013904223u;
+    const ThemeRollResult r = theme_roll(s_.theme, locks, es.scheme, es.seed);
+
+    if (!r.ok) {
+        // ⚠️ THE PALETTE IS LEFT ALONE. A roll that cannot satisfy the rules must not hand back its
+        // best attempt — a half-legal palette the user did not ask for is worse than no change, and
+        // they would have no way to tell the two apart.
+        es.message = rowOnly ? "ROW UNSOLVABLE" : "LOCKS UNSOLVABLE";
+        return;
+    }
+
+    const std::string keepName = s_.theme.name;
+    s_.theme      = r.theme;
+    s_.theme.name = keepName;
+    theme_refresh_message();
 }
 
 /**
@@ -997,6 +1074,11 @@ static std::string sanitize_theme_filename(const std::string& name) {
 }
 
 void InputDispatcher::theme_row_action() {
+    if (s_.themeEditor.cursorRow == THEME_ROW_RANDOM) {
+        // ROLL — a whole palette, in the scheme the cell beside it is showing.
+        if (s_.themeEditor.cursorChannel == 1) theme_roll_palette(/*rowOnly=*/false);
+        return;
+    }
     switch (s_.themeEditor.cursorChannel) {
         case 1: {   // SAVE — name it, then write it
             // ⚠️ The keyboard opens WITHOUT closing the editor, which is why every handler tests
@@ -1385,9 +1467,7 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 void InputDispatcher::on_a_up() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
-        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, +1);
-        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
-                                s_.themeEditor.cursorChannel, +0x10);
+        theme_dpad_edit(+1, +0x10);
         return;
     }
     if (eq_open()) { generic_input(pt::ui::increment_fast); return; }
@@ -1408,9 +1488,7 @@ void InputDispatcher::on_a_up() {
 void InputDispatcher::on_a_down() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
-        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, -1);
-        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
-                                s_.themeEditor.cursorChannel, -0x10);
+        theme_dpad_edit(-1, -0x10);
         return;
     }
     if (eq_open()) { generic_input(pt::ui::decrement_fast); return; }
@@ -1429,9 +1507,7 @@ void InputDispatcher::on_a_down() {
 void InputDispatcher::on_a_left() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
-        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, -1);
-        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
-                                s_.themeEditor.cursorChannel, -0x01);
+        theme_dpad_edit(-1, -0x01);
         return;
     }
     if (eq_open()) { generic_input(pt::ui::decrement); return; }
@@ -1445,9 +1521,7 @@ void InputDispatcher::on_a_left() {
 void InputDispatcher::on_a_right() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
     if (theme_open()) {
-        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, +1);
-        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
-                                s_.themeEditor.cursorChannel, +0x01);
+        theme_dpad_edit(+1, +0x01);
         return;
     }
     if (eq_open()) { generic_input(pt::ui::increment); return; }
@@ -2098,7 +2172,19 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
-    if (overlay_swallows(Overlay::BROWSER)) return;
+    // ⚠️⚠️ THE THEME EDITOR HAS TO BE NAMED HERE. The guard answers for the layers this handler
+    // serves, and leaving the editor out of the set meant the gesture was thrown away one line above
+    // the arm that implements it — the lock did nothing on a device, with nothing on screen to say
+    // why. Any arm below that tests for a layer must appear in this set.
+    if (overlay_swallows(Overlay::THEME | Overlay::BROWSER)) return;
+
+    // ⚠️ MUST RETURN, like every other theme-editor arm: `currentScreen` is still SETTINGS underneath,
+    // and falling through would run the grid selection's cut/paste on a screen the user cannot see.
+    if (theme_open()) {
+        const int color = theme_color_index(s_.themeEditor.cursorRow);
+        if (color >= 0) s_.themeEditor.locks.toggle(color);
+        return;
+    }
 
     // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
     // outside one it pastes" shape as the grid editors below, over files instead of cells.
@@ -2262,6 +2348,12 @@ void InputDispatcher::on_r_b() {
 }
 
 void InputDispatcher::on_r_a() {
+    // ⚠️ BEFORE the mute/solo guard, which would return on any screen but SONG and MIXER and take the
+    // gesture with it. The editor is an overlay standing on SETTINGS, so it never reaches that test.
+    if (theme_open()) {
+        if (theme_color_index(s_.themeEditor.cursorRow) >= 0) theme_roll_palette(/*rowOnly=*/true);
+        return;
+    }
     if (!mute_solo_chord_live()) return;
     toggle_mute_solo(/*solo=*/true);
 }
@@ -3203,7 +3295,7 @@ void InputDispatcher::on_button_a() {
     // cell the cursor is parked on. Fall through and A would RE-OPEN the editor that is already open,
     // resetting the cursor to row 0 under the user's thumb.
     if (theme_open()) {
-        if (s_.themeEditor.cursorRow == 0) theme_row_action();
+        if (theme_color_index(s_.themeEditor.cursorRow) < 0) theme_row_action();
         return;
     }
 

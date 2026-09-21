@@ -52,14 +52,14 @@ struct Theme {
     Argb textValue  = 0xFFFFFFFF;  // inactive param value
     Argb textEmpty  = 0xFF666666;  // empty / placeholder
 
-    // ── Three colours nothing draws any more ─────────────────────────────────────────────────────
+    // ── Two colours nothing draws any more ───────────────────────────────────────────────────────
     //
     // ⚠️ DEAD TO THE SCREEN, ALIVE TO THE FILE FORMAT, AND THAT IS WHY THEY ARE STILL HERE. The cursor
     // cell's ink is now `background` and the selected cell's is `rowEvery4th`, both read straight off
-    // the ground beside them; the EQ panel fills with `background`. Deleting the fields would delete
-    // three keys from the `.ptt`, which is a file-format break for every theme already on an SD card —
-    // so they are still parsed, still written on the same terms as before, and simply never read by a
-    // draw. `theme_color_rows()` no longer lists them, so nothing can dial them either.
+    // the ground beside them. Deleting the fields would delete two keys from the `.ptt`, which is a
+    // file-format break for every theme already on an SD card — so they are still parsed, still
+    // written on the same terms as before, and simply never read by a draw. `theme_color_rows()` no
+    // longer lists them, so nothing can dial them either.
     //
     // ⚠️ `derive_borrowed_colors` STILL COMPUTES `textSelection` AND `eqBg` FROM THE SAME SOURCES, and
     // must keep doing so: it is the yardstick `serialize_theme` omits a key against, so changing it
@@ -95,7 +95,10 @@ struct Theme {
     // ⚠️ `eqBorder` DRAWS TWO THINGS — the spectrum's outline and the 0 dB line under the response
     // curve — so it is the panel's whole "reference" colour. They were separate and looked identical:
     // the 0 dB line borrowed vizCenterLine, which on a blue palette is a shade off the curve's own.
-    Argb eqBg     = 0xFF0A0A0A;  // unused; = vizBackground
+    // ⚠️ THE SPECTRUM PANEL'S GROUND, AND IT HAS NO EDITOR ROW ON PURPOSE. A generated palette picks
+    // it as a COPY of `background` or of `vizBackground` — never a near-value, which reads as a
+    // rendering fault rather than as a panel — so a row would be a second, disagreeing control.
+    Argb eqBg     = 0xFF0A0A0A;  // = vizBackground
     Argb eqFill   = 0xFF222222;  // = darken(textParam, 0.27f)
     Argb eqBorder = 0xFF808080;  // = textParam — the spectrum outline AND the 0 dB line
     Argb eqTxt    = 0xFF333333;  // = vizCenterLine
@@ -189,11 +192,12 @@ inline void derive_borrowed_colors(Theme& t) {
 //   * `meterBorder` — read by the mixer's meter frames, and simply never given a way to edit it.
 //   * `rowPlayback` — the seed TXT PLAY defaults from. A row for it would be a second control over
 //     one colour, which is how one of the two becomes a lie.
-//   * `textCursor`, `textSelection`, `eqBg` — nothing draws them at all any more (see the struct).
-//     Their rows went because the colour each one named is now read off the ground beside it: the
-//     cursor cell's ink is `background`, the selected cell's is `rowEvery4th`, the EQ panel's fill is
-//     `background`. A row per colour that can only ever hold ONE right answer is a row that can be
-//     set wrong, and three of them were.
+//   * `textCursor`, `textSelection` — nothing draws them at all any more (see the struct). Their rows
+//     went because the colour each one named is now read off the ground beside it: the cursor cell's
+//     ink is `background` and the selected cell's is `rowEvery4th`. A row per colour that can only
+//     ever hold ONE right answer is a row that can be set wrong, and both of them were.
+//   * `eqBg` — drawn, but only ever a COPY of another ground, so a row would be a second control
+//     over one decision.
 //
 // ⚠️ THE ROW ORDER IS GROUPED BY PREFIX and the groups are what a reader scans by, so a new colour
 // joins its group rather than landing at the end. ⚠️⚠️ BUT THE POSITION IS A NUMBER, NOT A LABEL:
@@ -299,7 +303,10 @@ inline Theme theme_mono() {
     t.rowPlayback   = 0xFF444444;
     t.rowSelection  = 0xFFA8A8A8;
     t.textTitle     = 0xFFFFFFFF;
-    t.textParam     = 0xFFC0C0C0;
+    // ⚠️ A SHADE OFF TXT VALUE, AND THE GAP IS THE POINT. These two were the same grey, so a value,
+    // the label beside it and the placeholder under it all read alike — the one pair in any shipped
+    // palette the editor's clash mark has ever been right about. Dialled by hand on a device.
+    t.textParam     = 0xFF8B8E8E;
     t.textValue     = 0xFFC0C0C0;
     t.textEmpty     = 0xFF444444;
     t.vizCenterLine = 0xFF222222;
@@ -308,10 +315,6 @@ inline Theme theme_mono() {
     t.meterMid      = 0xFF808080;
     t.meterHigh     = 0xFF444444;
     derive_borrowed_colors(t);
-    // ⚠️ AFTER THE DERIVE — dialled, not borrowed. TXT PARAM is bright here, so the derived fill and
-    // outline would both come out too light to read the curve against; these two are set by hand.
-    t.eqFill        = 0xFF444444;
-    t.eqBorder      = 0xFF808080;
     return t;
 }
 

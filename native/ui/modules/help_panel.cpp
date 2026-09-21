@@ -14,7 +14,12 @@ namespace {
  * CALL, so one call per lit pixel would be 1464 of them a frame where 232 will do. The bitmask is
  * walked left to right and a run is closed at the first unlit column or at the right edge.
  */
-void draw_mascot(Canvas& c, int x, int y, Argb color) {
+void draw_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
+    // ⚠️ ONE fill for the whole patch, before the runs — filling per row would blend the panel's
+    // colour under every run boundary and leave a seam down the figure.
+    if (ink.inverted) c.fill_rect(x, y, MASCOT_W, MASCOT_H, ink.backdrop);
+    const Argb color = ink.figure;
+
     for (int row = 0; row < MASCOT_H; ++row) {
         int runStart = -1;
         // ⚠️ MASCOT_W inclusive, so the last column closes a run that reaches the right edge.
@@ -41,7 +46,7 @@ void HelpPanelModule::draw(Canvas& c, int x, int y, HelpTopic topic, const Theme
     // negative offset here and hang the mascot off the top edge.
     const int top = y + (box_height > HEIGHT ? (box_height - HEIGHT) / 2 : 0);
 
-    draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, t.textTitle);
+    draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, mascot_ink(t, t.vizBackground));
 
     const HelpEntry& e     = help_entry(topic);
     const char*      lines[3] = {e.line1, e.line2, e.line3};

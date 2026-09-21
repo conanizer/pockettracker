@@ -12,7 +12,11 @@ namespace {
  * The large sprite as horizontal RUNS of lit pixels — one `fill_rect` per run, not per pixel, for the
  * compact panel's reason (`help_panel.cpp`): the canvas clips and blends per call.
  */
-void draw_large_mascot(Canvas& c, int x, int y, Argb color) {
+void draw_large_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
+    // The compact panel's rule (`help_panel.cpp`): one fill for the patch, before the runs.
+    if (ink.inverted) c.fill_rect(x, y, MASCOT_LARGE_W, MASCOT_LARGE_H, ink.backdrop);
+    const Argb color = ink.figure;
+
     for (int row = 0; row < MASCOT_LARGE_H; ++row) {
         int runStart = -1;
         // ⚠️ MASCOT_LARGE_W inclusive, so the last column closes a run that reaches the right edge.
@@ -40,7 +44,9 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
     draw_modal_backdrop(c);
     draw_modal_box(c, BOX_X, boxY, BOX_W, boxH, t);
 
-    draw_large_mascot(c, MASCOT_X, boxY + MASCOT_DY, t.textTitle);
+    // ⚠️ The modal's ground is `meterBackground`, not `background` — that is the panel this one
+    // stands on, and the one it must invert against.
+    draw_large_mascot(c, MASCOT_X, boxY + MASCOT_DY, mascot_ink(t, t.meterBackground));
 
     const std::string title(e.line1, static_cast<size_t>(help_title_length(e.line1)));
     c.draw_text(title, row_x(0), boxY + row_dy(0) + TEXT_PADDING, t.textTitle, CHAR_SPACING,
