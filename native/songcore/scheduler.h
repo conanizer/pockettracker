@@ -100,6 +100,19 @@ struct SongPos {
     int chainRow = 0;
 };
 
+// Which ROW of a phrase one track is on, as the scheduler queued it.
+//
+// ⚠️⚠️ **THE MARKER CANNOT BE ARITHMETIC OFF THE PHRASE'S START FRAME, AND THAT IS WHAT IT USED TO
+// BE.** `elapsed / framesPerStep` assumes every phrase is sixteen plain steps. A HOP ends one early,
+// a groove makes its rows longer or shorter, and a `00` groove step skips a row for no time at all —
+// so the count walked on through rows nothing was playing. The walk already knows each row's real
+// start frame, so it stamps one of these as it passes and the marker reads back what was scheduled
+// instead of re-deriving it from a length that is not the length.
+struct StepPos {
+    int track = 0;
+    int step  = 0;
+};
+
 // What notify_data_changed() asks the host to drop, per track: the frame that track's lookahead was
 // rolled back to, or −1 for "this one has nothing queued past now". ⚠️ A single frame cannot express
 // this once the eight cursors are independent — see notify_data_changed.
@@ -164,6 +177,20 @@ struct TrackState {
 
     int   hopTargetRow = -1;
     bool  trackStopped = false;
+    /**
+     * Phrases in a row that scheduled NOTHING because their entry row hopped.
+     *
+     * ⚠️⚠️ A HOP ROW COSTS NO TIME, SO A RING OF THEM COSTS NO TIME EITHER — and a transport that
+     * schedules zero frames for ever never fills its buffer, so the track falls silent with no marker
+     * and no way to tell that from a bug. `HOP 00` on row 0 of a phrase previewed on its own is the
+     * one-line way to write it. The count bounds the ring and stops the track, which is the same
+     * outcome `HOP FF` has and the one thing here that is visible from outside.
+     *
+     * ⚠️ It is not a cycle DETECTOR: entering a phrase on a hop row is legitimate — it is how a chain
+     * steps over a phrase — so only an unbroken run of them is refused, never a single one. Any row
+     * that plays resets it.
+     */
+    int   emptyHops = 0;
 
     bool  pitchBendActive = false;
     bool  vibratoActive = false;
@@ -269,11 +296,27 @@ class Sequencer {
         if (trackId >= 0 && playbackMode_ != PlaybackMode::SONG && trackId != playbackTrack_) return pos;
 
         int64_t currentFrame = getCurrentFrame();
-        int64_t elapsedFrames = currentFrame - playbackStartFrame_;
         int tempo = currentProject_ ? currentProject_->tempo : 120;
         int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         if (framesPerStep <= 0) return pos;   // unreachable for any legal tempo; a 60 Hz UI poll must not divide by zero
-        int64_t framesPerPhrase = framesPerStep * 16;
+
+        // ⚠️⚠️ **THE ENTRY IN FORCE IS THE LATEST ONE AT OR BEFORE NOW, NOT THE FIRST INSIDE A NOMINAL
+        // PHRASE WINDOW** — and the window is what was wrong. `into < framesPerPhrase` assumes a
+        // phrase is sixteen plain steps, so a phrase a HOP cut short was still "inside its window"
+        // long after the next one had begun and, being first in the list, went on winning the lookup.
+        // A lookahead entry cannot win either way: its frame is in the future, which the `<=` excludes.
+        //
+        // ⚠️ THE PRUNE HORIZON IS GENEROUS FOR THE SAME REASON. A HALFTIME groove makes a phrase twice
+        // `framesPerPhrase`, and pruning on the nominal length would throw away the entry that is
+        // still sounding — the marker would vanish mid-phrase.
+        const int64_t framesPerPhrase   = framesPerStep * 16;
+        const int64_t positionHorizon   = framesPerPhrase * 4;
+
+        // Which ROW the walk actually put under this frame. −1 until the first row is stamped.
+        prune_past(phraseStepStartFrames_, currentFrame, positionHorizon);
+        const int stepInForce =
+            step_in_force(trackId >= 0 ? trackId : playbackTrack_, currentFrame);
+        if (stepInForce < 0) return pos;
 
         switch (playbackMode_) {
             case PlaybackMode::PHRASE: {
@@ -282,43 +325,44 @@ class Sequencer {
                 // does, where the UI read `row`) leaves `phraseStep` at its default, so the PHRASE
                 // screen's marker sits frozen on step 0 for the whole loop while CHAIN and SONG —
                 // which fill both — move normally. Same shape as the two arms below.
-                pos.phraseStep = clampi(static_cast<int>((elapsedFrames % framesPerPhrase) / framesPerStep), 0, 15);
+                pos.phraseStep = stepInForce;
                 pos.row = pos.phraseStep;
                 pos.phraseId = currentPhraseId_;
                 return pos;
             }
             case PlaybackMode::CHAIN: {
-                prune_past(chainRowStartFrames_, currentFrame, framesPerPhrase);
-                for (const auto& e : chainRowStartFrames_) {
-                    int64_t into = currentFrame - e.second;
-                    if (into >= 0 && into < framesPerPhrase) {
-                        pos.chainRow = e.first;
-                        pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
-                        pos.chainId = currentChainId_;
-                        pos.phraseId = project_ ? phrase_at(*project_, pos.chainId, pos.chainRow) : -1;
-                        break;
-                    }
+                prune_past(chainRowStartFrames_, currentFrame, positionHorizon);
+                const std::pair<int, int64_t>* held = nullptr;
+                for (const auto& e : chainRowStartFrames_)
+                    if (e.second <= currentFrame && (held == nullptr || e.second >= held->second))
+                        held = &e;
+                if (held != nullptr) {
+                    pos.chainRow = held->first;
+                    pos.phraseStep = stepInForce;
+                    pos.chainId = currentChainId_;
+                    pos.phraseId = project_ ? phrase_at(*project_, pos.chainId, pos.chainRow) : -1;
                 }
                 pos.row = pos.phraseStep;
                 return pos;
             }
             case PlaybackMode::SONG: {
-                prune_past(songPositionStartFrames_, currentFrame, framesPerPhrase);
+                prune_past(songPositionStartFrames_, currentFrame, positionHorizon);
+                const std::pair<SongPos, int64_t>* held = nullptr;
                 for (const auto& e : songPositionStartFrames_) {
                     if (trackId >= 0 && e.first.track != trackId) continue;
-                    int64_t into = currentFrame - e.second;
-                    if (into >= 0 && into < framesPerPhrase) {
-                        pos.songRow = e.first.songRow;
-                        pos.chainRow = e.first.chainRow;
-                        pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
-                        // ⭐ Re-derived from the project rather than banked in SongPos, so an edit to
-                        // the song cell or the chain row under a running track shows the phrase the
-                        // NEXT lap will play, not the one the entry was queued from.
-                        if (project_) {
-                            pos.chainId  = chain_at(*project_, e.first.track, pos.songRow);
-                            pos.phraseId = phrase_at(*project_, pos.chainId, pos.chainRow);
-                        }
-                        break;
+                    if (e.second <= currentFrame && (held == nullptr || e.second >= held->second))
+                        held = &e;
+                }
+                if (held != nullptr) {
+                    pos.songRow = held->first.songRow;
+                    pos.chainRow = held->first.chainRow;
+                    pos.phraseStep = stepInForce;
+                    // ⭐ Re-derived from the project rather than banked in SongPos, so an edit to
+                    // the song cell or the chain row under a running track shows the phrase the
+                    // NEXT lap will play, not the one the entry was queued from.
+                    if (project_) {
+                        pos.chainId  = chain_at(*project_, held->first.track, pos.songRow);
+                        pos.phraseId = phrase_at(*project_, pos.chainId, pos.chainRow);
                     }
                 }
                 pos.row = pos.phraseStep;
@@ -365,10 +409,13 @@ class Sequencer {
         if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
         // PHRASE: resetting nextFrameToSchedule_ is enough
         while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
-        // …and the marker's side-record with them — see drop_positions_from. PHRASE has none:
-        // its step is arithmetic off the start frame, so there is nothing to go stale.
+        // …and the marker's side-records with them — see drop_positions_from.
+        // ⚠️ PHRASE HAS ONE NOW. It used to have none, because its step was arithmetic off the start
+        // frame and arithmetic cannot go stale; the row stamps can, so both modes drop them here.
         if (playbackMode_ == PlaybackMode::CHAIN)
             drop_positions_from(chainRowStartFrames_, cp.frame, [](int) { return true; });
+        drop_positions_from(phraseStepStartFrames_, cp.frame,
+                            [&](const StepPos& s) { return s.track == t; });
         plan.frames[t] = cp.frame;
         return plan;
     }
@@ -445,6 +492,7 @@ class Sequencer {
         nextFrameToSchedule_ = playbackStartFrame_;
         nextChainRowToSchedule_ = 0;
         chainRowStartFrames_.clear();
+        phraseStepStartFrames_.clear();
         int firstRow = findNextNonEmptyChainRow(0, chain);
         if (firstRow >= 0) {
             int phraseId = chain_phrase_ref(chain, firstRow);
@@ -479,6 +527,7 @@ class Sequencer {
             liveLoopFrame_[t]  = playbackStartFrame_;
         }
         songPositionStartFrames_.clear();
+        phraseStepStartFrames_.clear();
     }
 
     void stop() {
@@ -487,6 +536,7 @@ class Sequencer {
         playbackMode_ = PlaybackMode::STOPPED;
         chainRowStartFrames_.clear();
         songPositionStartFrames_.clear();
+        phraseStepStartFrames_.clear();
         for (int t = 0; t < 8; ++t) checkpoints_[t].clear();
         restarts_.clear();
         // Both flags are read BEFORE the host calls stop(), which is what restores the master EQ and
@@ -839,6 +889,8 @@ class Sequencer {
         while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
         drop_positions_from(songPositionStartFrames_, cp.frame,
                             [&](const SongPos& p) { return p.track == trackId; });
+        drop_positions_from(phraseStepStartFrames_, cp.frame,
+                            [&](const StepPos& s) { return s.track == trackId; });
         return cp.frame;
     }
 
@@ -895,6 +947,8 @@ class Sequencer {
                 while (!ring.empty() && ring.back().frame >= r.loopFrame) ring.pop_back();
                 drop_positions_from(songPositionStartFrames_, r.loopFrame,
                                     [&](const SongPos& p) { return p.track == t; });
+                drop_positions_from(phraseStepStartFrames_, r.loopFrame,
+                                    [&](const StepPos& s) { return s.track == t; });
             }
             restarts_.pop_back();
         }
@@ -942,6 +996,7 @@ class Sequencer {
         }
         trackChainRow_[trackId] = 0;
         trackStates_[trackId].trackStopped = false;
+        trackStates_[trackId].emptyHops = 0;
         liveLoopFrame_[trackId] = trackNextFrame_[trackId];   // a lap begins here
         q.firesAt = trackNextFrame_[trackId];
         return true;
@@ -1077,6 +1132,40 @@ class Sequencer {
     // frame is still the pair's second, which is all it reads.
     void put_song_position(int trackId, int songRow, int chainRow, int64_t frame) {
         songPositionStartFrames_.emplace_back(SongPos{trackId, songRow, chainRow}, frame);
+    }
+
+    /**
+     * Stamp the row the walk is standing on. Called once per row that actually PLAYS — a groove `00`
+     * skips the row before this, which is right: nothing sounds there, so the marker must not stop on
+     * it either.
+     *
+     * ⚠️ IT IS THE ONE PLACE THAT KNOWS A ROW'S REAL START FRAME, which is the whole point: the
+     * groove length and the HOP are already folded into `frameOffset` here, and any second derivation
+     * of "where is row N" would be a copy of this arithmetic that could drift from it.
+     *
+     * ⚠️ CAPPED, because the RENDER path schedules a whole song through here and nothing reads a
+     * playhead offline — `prune_past` only runs on a read, so without this the list would grow with
+     * the length of the render. The cap is far above any live lookahead (16 rows × 8 tracks × the
+     * buffered phrases), so it never bites during playback; when it does, the oldest half goes, and
+     * those are frames the transport passed long ago.
+     */
+    void put_phrase_step_position(int trackId, int step, int64_t frame) {
+        if (phraseStepStartFrames_.size() >= STEP_POSITION_CAP)
+            phraseStepStartFrames_.erase(
+                phraseStepStartFrames_.begin(),
+                phraseStepStartFrames_.begin() + static_cast<long>(STEP_POSITION_CAP / 2));
+        phraseStepStartFrames_.emplace_back(StepPos{trackId, step}, frame);
+    }
+
+    /** The row `trackId` is on at `currentFrame`: the latest one stamped at or before it, else −1. */
+    int step_in_force(int trackId, int64_t currentFrame) const {
+        int     step  = -1;
+        int64_t stamp = 0;
+        for (const auto& e : phraseStepStartFrames_) {
+            if (e.first.track != trackId || e.second > currentFrame) continue;
+            if (step < 0 || e.second >= stamp) { stamp = e.second; step = e.first.step; }
+        }
+        return step;
     }
 
     // Drop entries that are definitely in the past (> 1 phrase ago) — Kotlin prunes both containers
@@ -1269,6 +1358,7 @@ class Sequencer {
         trackSongRow_[trackId]++;
         trackChainRow_[trackId] = 0;
         trackStates_[trackId].trackStopped = false;
+        trackStates_[trackId].emptyHops = 0;
     }
 
     // The snapshot every unit of work takes before it commits, written once below the three sites
@@ -1311,6 +1401,7 @@ class Sequencer {
             trackChainRow_[t] = 0;
             trackDone_[t] = false;
             trackStates_[t].trackStopped = false;
+            trackStates_[t].emptyHops = 0;
         }
     }
 
@@ -1469,6 +1560,7 @@ class Sequencer {
             // The one place a chain-boundary queue can land, and the one place a loop happens.
             trackChainRow_[trackId] = 0;
             trackState.trackStopped = false;
+            trackState.emptyHops    = 0;   // a track rejoining starts the hop-ring count clean
 
             // ⚠️⚠️ A LAP THAT COST NOTHING RESTS INSTEAD OF LOOPING — see liveLoopFrame_. Re-entering
             // it would leave this track the furthest-behind cursor on every pass and starve the other
@@ -1608,10 +1700,32 @@ class Sequencer {
 
             ScheduleStepResult stepResult = scheduleStepWithEffects(step, targetFrame, stepDuration, trackId,
                                                                     transposeSemitones, trackState, stepIndex);
+
+            // ⚠️⚠️ A HOP ROW COSTS NOTHING — NO TIME, NO MARKER, NO RAMP TIC. It is not a row that
+            // plays and then jumps; it is the jump. So the walk leaves before `frameOffset` moves,
+            // before the playhead is stamped and before a fade is advanced over a span the transport
+            // is about to leave. ⚠️ `localGrooveStep` does not move either: the row consumed no step,
+            // so the groove must resume where it stood or the next phrase enters on the wrong tic.
+            if (stepResult.hopTriggered) {
+                if (anyGrooveActive) trackState.grooveStep = localGrooveStep;
+                // A hop that leaves with nothing played is one link in a possible ring — see
+                // TrackState::emptyHops. A hop that follows real rows breaks it.
+                if (frameOffset == 0) {
+                    if (++trackState.emptyHops > MAX_EMPTY_HOPS) trackState.trackStopped = true;
+                } else {
+                    trackState.emptyHops = 0;
+                }
+                return SchedulePhraseResult{rowsScheduled, true, trackState.trackStopped, frameOffset};
+            }
+
+            // The playhead's side-record, stamped as the walk passes — never derived from a nominal
+            // step length afterwards. See put_phrase_step_position.
+            put_phrase_step_position(trackId, stepIndex, targetFrame);
+
             // AFTER the step's own events, and inside the same iteration: a ramp is emitted as the walk
-            // passes over it, never ahead of it. The HOP check below is what makes that matter — a fade
-            // baked into frames the transport then jumps away from would go on moving the parameter
-            // after the phrase had ended.
+            // passes over it, never ahead of it. The HOP return above is what makes that matter — a
+            // fade baked into frames the transport then jumps away from would go on moving the
+            // parameter after the phrase had ended.
             if (!ramps.empty())
                 emit_ramp_ticks(ramps, rampLast, stepResult.effectiveStep, stepIndex, targetFrame,
                                 stepDuration, trackId, stepResult.noteFrame, stepResult.fxFrame);
@@ -1619,14 +1733,10 @@ class Sequencer {
             frameOffset += stepDuration;
             if (currentGrooveActive) localGrooveStep++;
             if (stepResult.noteScheduled) scheduledNotes++;
-
-            if (stepResult.hopTriggered) {
-                if (anyGrooveActive) trackState.grooveStep = localGrooveStep;
-                return SchedulePhraseResult{rowsScheduled, true, trackState.trackStopped, frameOffset};
-            }
         }
 
         if (anyGrooveActive) trackState.grooveStep = localGrooveStep;
+        if (rowsScheduled > 0) trackState.emptyHops = 0;
         return SchedulePhraseResult{rowsScheduled, false, false, frameOffset};
     }
 
@@ -1880,6 +1990,29 @@ class Sequencer {
 
         ResolvedStepParams params = resolve_step_params(effectiveStep, targetFrame, instrVol);
         float instrVolWithVxx = params.volume;
+
+        // ⚠️⚠️ **A ROW THAT HOPS IS NEVER HEARD** — the rule a TABLE's steering row has always
+        // followed (`processTableRow`, audio-engine.cpp), now the phrase's too. The jump is the row's
+        // WHOLE content: no note, no effects, and **no time**, so a HOP costs a row but not a step and
+        // a four-row loop lasts four rows. A note typed beside a HOP does not sound — put it on the
+        // row above, which costs a row and nothing else.
+        //
+        // ⚠️ THE DECISION IS THE RESOLVED STEP'S, NOT THE TYPED ONE. A `CHA` aimed at the HOP's own
+        // slot can gate it away, and a row whose hop did not fire has to play like any other — so this
+        // sits below `applyChanceAndRandomize`, where the dice have already been thrown, and not in
+        // the walk above where only the authored bytes are visible.
+        //
+        // ⚠️ STEP 1 has already run, and that is deliberate: a running REPEAT or ARPEGGIO ends at a
+        // hop exactly as it did before. Leaving the phrase was always where they stopped, and this
+        // change is about what the row PLAYS, not about what the track carries out of it.
+        if (params.hopValue.has_value()) {
+            if (*params.hopValue == 0xFF) trackState.trackStopped = true;
+            else                          trackState.hopTargetRow = *params.hopValue & 0x0F;
+            ScheduleStepResult hop;
+            hop.hopTriggered  = true;
+            hop.effectiveStep = effectiveStep;
+            return hop;
+        }
 
         // TSX and the instrument's TRANSP. switch, folded into the figure every site below already
         // reads. Reassigned rather than given a second name deliberately: the note, the REPEAT
@@ -2517,10 +2650,16 @@ class Sequencer {
     // reaches at most the lookahead ahead of the transport, and a song shorter than that can have
     // more than one lap queued.
     static constexpr size_t RESTART_RING = 4;
+    // The ring bound for TrackState::emptyHops. Sixteen is a full chain of pass-through phrases,
+    // which is legitimate; past that nothing is going to play.
+    static constexpr int MAX_EMPTY_HOPS = 32;
     std::deque<SongRestart> restarts_;
     std::deque<std::pair<int, int64_t>> chainRowStartFrames_;              // (chainRow, startFrame)
     std::vector<std::pair<SongPos, int64_t>>
         songPositionStartFrames_;                                          // (SongPos → startFrame), insertion-ordered
+    // Every phrase ROW the walk has stamped — see put_phrase_step_position.
+    static constexpr size_t STEP_POSITION_CAP = 2048;
+    std::vector<std::pair<StepPos, int64_t>> phraseStepStartFrames_;
     bool eqmActive_ = false;
     int  mixerVolTracks_ = 0;      // bit N: a VTR has moved track N's fader this take
     bool masterVolActive_ = false; // …and a VMV has moved the master's

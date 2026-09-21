@@ -377,7 +377,11 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 2 CHA */ {"CHA: Probability gate", "x=prob(0=never F=always 8=50%)", "y=target(0=note 1-3=FX slot)"},
         /* 3 LAT */ {"LAT: Latency (delay trigger)", "xx=ticks before note fires"},
         /* 4 GRV */ {"GRV: Groove assign", "xx=groove ID (00=disable)"},
-        /* 5 HOP */ {"HOP: Phrase/table jump", "y=target row (FF=stop track)", "table: x=repeat count"},
+        // ⚠️ "y=target row" alone reads as a row in THIS phrase, which is the one thing it is not:
+        // the phrase ENDS here and the NEXT one starts at y. A user went looking for a way to move
+        // on to the next phrase while holding the command that already does it.
+        /* 5 HOP */ {"HOP: Jump to the next phrase", "This row does not play at all",
+                     "y=row it starts on (x unused)", "FF=stop track for this chain"},
         /* 6 TIC */ {"TIC: Table tick rate", "01-FB=ticks per row", "FC-FF=special modes"},
         /* 7 ARP */ {"ARP: Arpeggio", "x=+semitones 1st note", "y=+semitones 2nd note", "configure speed with ARC"},
         /* 8 KIL */ {"KIL: Kill voice", "xx=ticks of latency before stop", "00=immediate, 0C=next step"},

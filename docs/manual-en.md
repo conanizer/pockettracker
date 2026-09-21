@@ -1610,12 +1610,17 @@ Switches the current track to use groove `XX` from this step onward.
 
 ### HOP `XY` — Hop / Jump
 
-- In a **phrase**: ends the phrase at this step; the **next** phrase starts at row `Y` (`X` is ignored).
+- In a **phrase**: the row is **not played** — no note, no effects, no time. The phrase ends here and the **next** phrase starts at row `Y` (`X` is ignored). A note typed on the same row will not sound; put it on the row above, which costs a row and no time.
 - In a **table**: jumps **its own FX column's** playhead to table row `Y`, `X` times before falling through (`X` = 0: forever).
 - `HOP FF` in a **phrase**: **stops the track** — in SONG mode until the next song row; in PHRASE/CHAIN playback the track stays silent until you stop.
 - `HOP FF` in a **table**: stops **that FX column** only. The table ends when all three have stopped.
 
 `HOP 00` at the end of a section = infinite loop of that section.
+
+A `HOP` row costs no time in either place, so a four-row loop lasts exactly four rows.
+
+> [!NOTE]
+> In **PHRASE** playback there is no next phrase — the same one repeats — so a `HOP` there loops back into the phrase you are previewing rather than moving on. Play the chain or the song to hear what it will really do. A phrase whose first row is a `HOP` has nothing to play at all, and falls silent.
 
 ---
 
