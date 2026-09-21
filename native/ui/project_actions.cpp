@@ -1,5 +1,6 @@
 #include "ui/project_actions.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -93,25 +94,48 @@ ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState
 
 // ─── EXPORT → MIX ────────────────────────────────────────────────────────────────────────────────
 
+namespace {
+
+/**
+ * The rows a render will actually cover. An unset range means the whole song, which is the answer
+ * every caller outside the RENDER dialog wants — and it is derived here, once, rather than at the two
+ * call sites that would otherwise each have to remember the fallback.
+ */
+songcore::SongBounds resolve_range(const songcore::Project& project, const RenderRange& range) {
+    if (range.startRow < 0) return songcore::find_song_bounds(project);
+    songcore::SongBounds b;
+    b.startRow = range.startRow;
+    b.endRow   = std::max(range.startRow, range.endRow);
+    // ⚠️ A range over rows nobody has written to is EMPTY, not a file of silence. The dialog can be
+    // pointed at any row in the song, and a render that produced a minute of nothing would read as a
+    // broken export rather than as an empty selection.
+    for (int row = b.startRow; row <= b.endRow; ++row)
+        if (songcore::song_row_filled(project, row)) return b;
+    return songcore::SongBounds();
+}
+
+}  // namespace
+
 ActionResult render_mix(songcore::SongcoreHost& host, FileSystem& fs, AppState& s,
-                        const std::function<void(float)>& progress) {
+                        const RenderRange& range, const std::function<void(float)>& progress) {
     (void)s;
 
-    const songcore::SongBounds bounds = songcore::find_song_bounds(host.project());
+    const songcore::SongBounds bounds = resolve_range(host.project(), range);
     if (bounds.empty()) return ActionResult{false, "SONG IS EMPTY"};
 
     const std::string safeName = songcore::safe_project_name(host.project().name);
     const std::string path     = unique_render_path(fs, fs.renders_directory(), safeName);
 
-    // The whole song, master bus and all — and the file is LONGER than the song, because the render
-    // runs on past the last step until the reverb tail, the delay repeats and the note releases have
-    // decayed (songcore/render.h, S6b).
+    // Master bus and all — and the file is LONGER than the rows asked for, because the render runs on
+    // past the last step until the reverb tail, the delay repeats and the note releases have decayed
+    // (songcore/render.h, S6b).
     songcore::RenderOptions opts;
     opts.stemsMode      = 0;
     opts.applyMasterBus = true;
 
     const songcore::RenderStats stats =
-        host.render_song_range_to_wav(bounds.startRow, bounds.endRow, path, opts, progress);
+        host.render_song_range_to_wav(bounds.startRow, bounds.endRow, path, opts, progress,
+                                      range.repeat);
 
     if (!stats.ok || stats.totalFrames <= 0) return ActionResult{false, "EXPORT FAILED"};
     return ActionResult{true, "EXPORTED!"};
@@ -120,13 +144,16 @@ ActionResult render_mix(songcore::SongcoreHost& host, FileSystem& fs, AppState& 
 // ─── EXPORT → STEMS ──────────────────────────────────────────────────────────────────────────────
 
 ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState& s,
-                          const std::function<void(float)>& progress) {
+                          const RenderRange& range, const std::function<void(float)>& progress) {
     (void)s;
 
-    const songcore::SongBounds bounds = songcore::find_song_bounds(host.project());
+    // ⚠️ RESOLVED ONCE, ABOVE THE PASS LOOP, and held. Every stem must cover the same rows, and a
+    // range recomputed per pass is a set of files that no longer line up in a DAW.
+    const songcore::SongBounds bounds = resolve_range(host.project(), range);
     if (bounds.empty()) return ActionResult{false, "SONG IS EMPTY"};
 
-    const std::vector<songcore::StemPass> passes = songcore::stems_plan(host.project());
+    const std::vector<songcore::StemPass> passes =
+        songcore::stems_plan(host.project(), bounds.startRow, bounds.endRow);
     if (passes.empty()) return ActionResult{false, "NO ACTIVE TRACKS"};
 
     // Renders/<name>/ — one folder per project, so a stems set does not scatter across the renders
@@ -165,7 +192,8 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
 
         const songcore::RenderStats stats =
             host.render_song_range_to_wav(bounds.startRow, bounds.endRow, path, opts,
-                                          progress ? slice : std::function<void(float)>());
+                                          progress ? slice : std::function<void(float)>(),
+                                          range.repeat);
 
         // ⚠️ Stop at the first pass that fails, and say how many landed. A stems set is one
         // full-length WAV per active track — the largest write this app makes — so the reason a pass

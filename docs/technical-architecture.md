@@ -332,6 +332,20 @@ bus, placed below every send tap and above the returns. Expressing that as eight
 starve the return being soloed: the SoundFont send tap sits below its track's gate, and the offline
 render skips an inaudible track outright, so the reverb would be soloed into silence.
 
+**A song row the walk cannot enter is the end of a BLOCK, and the boundary is derived in one place.**
+A track runs its own run of consecutive playable cells and loops back to that run's first row for
+ever; there is no whole-song restart, and therefore no unit of work that moves all eight tracks at
+once. That mattered structurally: the restart needed a rollback record of its own precisely because it
+was the one multi-track unit, and a per-track loop is an ordinary unit with an ordinary checkpoint
+behind it. ⚠️ A cell naming a chain whose **first** row is empty is a boundary too — the one case
+where "the cell names a chain" is not enough — while a later hole in the same chain is still walked
+over. Three sites ask the question (the start, the step down, the walk back up) and all three ask the
+same predicate, so none of them can drift.
+
+⚠️ **The bounded walk and the unbounded one are the same function**, told apart by whether a last row
+was supplied: a block that loops for ever has no length, so a render would never end. An export plays
+its range once through and a track that meets a boundary inside the range is finished there.
+
 **LIVE mode is a modifier on SONG, not a fifth transport mode.** The mode changes only what happens at
 a track's boundary — a launched song row re-enters itself instead of the cursor moving down the column
 — so everything that branches on the playback mode (the playhead readback, the live-edit rollback, the
@@ -644,13 +658,25 @@ a WAV.
   a different project rendered in between. Engine state surviving from one render to the next was a
   real bug; back-to-back renders would be the weaker test.
 - **The tail is appended**: a render whose last note is still ringing continues until the audio
-  decays to zero, rather than stopping dead at full amplitude. A runaway cap bounds it.
+  decays to zero, rather than stopping dead at full amplitude. A runaway cap bounds it. ⚠️ What ends
+  the notes at the range's last frame is a **KIL, not a key release** — a key release is defined to
+  leave a one-shot alone so a live keyboard cannot cut a drum hit short, and at the end of a render
+  that is the one place the definition is wrong.
+- **A repeat is one scheduling pass**, never a file joined to itself: the engine is not told the range
+  ended, so tails and table positions cross every seam. ⚠️ Every track restarts at the **longest**
+  one's end rather than its own — blocks of unequal length drift apart within a pass, so per-track
+  restarts would compound that drift with each repetition.
+- **The row range is resolved once, above the stem loop**, and held. Recomputing it per pass is a set
+  of stems that no longer line up. The same range decides which tracks earn a stem at all, so
+  exporting one part does not write a silent file per track that plays elsewhere in the song.
 - **Live and render must be identical.** `push_live_params` and `prepare_render` push the same
   parameters, and a standing test asserts a live-configured engine and a render-configured engine
   produce byte-identical audio. They did not always: the shell once played a project on the engine's
   factory defaults while rendering it correctly.
 
-Export modes: full mix, per-track stems, and resampling a song selection into a new sample.
+Export modes: full mix, per-track stems, and resampling a song selection into a new sample. The first
+two are one modal panel over the PROJECT screen with the output chosen on the way in, rather than two
+actions that render on the spot.
 
 ---
 

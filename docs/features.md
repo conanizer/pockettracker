@@ -18,6 +18,7 @@ Everything you can do with PocketTracker.
 - 256 phrases, 256 chains, 8 tracks, 128 grooves
 - Use HOP to jump between phrases mid-sequence — create odd time signatures and generative loops
 - Every track runs its own column of the song at its own pace: all 8 start together, then each moves on as soon as its own chain ends, so a 2-row chain beside a 16-row one loops eight times instead of waiting. A `>` marker on the song, chain and phrase screens shows where each track has got to
+- Keep several sketches in one project: a track plays down its column until it hits an empty cell, then loops the run of cells it is in. A song row left empty on all 8 tracks therefore splits the arrangement into parts that never play into one another — park an idea further down the song and it stays isolated until you start it. Nothing waits for anybody, so parts of different lengths drift apart; a track that should go quiet for a few bars and come back in step needs a chain of empty phrases there rather than a gap
 - LIVE mode (B+LEFT/RIGHT on the song screen): the song grid becomes a scene launcher. START queues the chain under the cursor to start when that channel's current chain ends, pressed again to start at the next bar instead; a launched chain repeats until you queue something else. L+START launches the whole row as one scene, R+START silences a single channel, and a blinking marker shows what is waiting
 
 ## Sequence Effects
@@ -125,6 +126,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Export the full song mix as a stereo WAV file
 - Export each track as a separate stereo WAV stem, with reverb and delay send returns rendered alongside
+- Choose which song rows go into the file, and how many times they are played into it — R+UP/DOWN steps the range from one part of the song to the next, so one sketch out of several exports on its own. A repeat is played through again in the same pass, so reverb tails and delay repeats carry across the join
 - Offline render: same DSP chain as real-time playback, sample-accurate
 
 ## File Management

@@ -7,6 +7,7 @@
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
+#include "ui/modules/render_dialog.h"
 #include "ui/song_pointer.h"   // NAV = SONG — the cell the CHAIN/PHRASE headers read out
 
 namespace pt::ui {
@@ -421,6 +422,7 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     // LAST, over everything, including the right bar and the status line — an overlay is modal, and
     // its backdrop dims the whole frame. (The EQ editor and the theme editor join them here.)
     draw_fx_helper(c, s.fxHelper, t);
+    draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);
     if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
     draw_confirm_dialog(c, s.confirm, t);
 }

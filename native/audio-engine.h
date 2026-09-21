@@ -448,14 +448,14 @@ public:
     // release the instrument has — a SoundFont's REL tail and an ADSR release included.
     void scheduleCut(int64_t targetFrame, int trackId);
 
-    // Let go of every track at once — what the END OF A RENDER'S SEQUENCE does to the notes still
-    // sounding (songcore::render_to_wav).
-    // ⚠️ A KEY RELEASE, NOT A KILL, and that is the whole point: an instrument with a release
-    // envelope — a sampler ADSR/TRIG, and every SoundFont preset, which always has one — fades by
-    // its OWN release, a LOOPING sample gets the declicked fade because nothing else would ever end
-    // it, and a one-shot with no envelope is left alone to play out. Without it a held SoundFont note
-    // or a looped sample rings until the render's runaway cap cuts the file mid-waveform.
-    void scheduleReleaseAll(int64_t targetFrame);
+    // End every track at once — what the END OF A RENDER'S RANGE does to the notes still sounding
+    // (songcore::render_to_wav).
+    // ⚠️ A KIL, NOT A KEY RELEASE, and that is the whole point: what follows the last row of a render
+    // must be the TAILS and nothing else. An instrument with a release envelope — a sampler ADSR/TRIG,
+    // and every SoundFont preset, which always has one — fades by its OWN release; everything else
+    // gets the declicked fade, INCLUDING a one-shot, which a key release would leave to play out. A
+    // drum loop half-way through its bar at the end of the range is exactly that case.
+    void scheduleNoteOffAll(int64_t targetFrame);
 
     // Clear all scheduled notes
     void clearScheduledNotes();

@@ -377,9 +377,10 @@ class SongcoreHost {
 
     // ── ↓ the render path (RenderController.scheduleSongForRender / scheduleSelectionForRender) ───
     // Returns the total frame span scheduled. trackFilter == nullptr renders every track.
-    int64_t schedule_song_range(int startRow, int endRow, const std::set<int>* trackFilter) {
+    int64_t schedule_song_range(int startRow, int endRow, const std::set<int>* trackFilter,
+                                int repeat = 1) {
         sync_clock();
-        int64_t frames = seq_.scheduleSongRowRange(startRow, endRow, trackFilter);
+        int64_t frames = seq_.scheduleSongRowRange(startRow, endRow, trackFilter, repeat);
         flush_trace();
         return frames;
     }
@@ -423,12 +424,16 @@ class SongcoreHost {
     }
 
     // prepare → schedule → render → finish, with songcore's own sequencer in the middle.
+    //
+    // `repeat` plays the range that many times in ONE scheduling pass — see scheduleSongRowRange: a
+    // file rendered once and concatenated would cut the reverb and the delay at every join.
     RenderStats render_song_range_to_wav(int startRow, int endRow, const std::string& path,
                                          const RenderOptions& opts = RenderOptions(),
-                                         const std::function<void(float)>& progress = nullptr) {
+                                         const std::function<void(float)>& progress = nullptr,
+                                         int repeat = 1) {
         if (!engine_) return RenderStats();
         prepare_render(startRow, endRow);
-        const int64_t songFrames = schedule_song_range(startRow, endRow, nullptr);
+        const int64_t songFrames = schedule_song_range(startRow, endRow, nullptr, repeat);
         RenderStats stats = render_to_wav(path, songFrames, opts.stemsMode, opts.applyMasterBus, progress);
         finish_render();
         return stats;

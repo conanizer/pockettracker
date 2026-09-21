@@ -44,21 +44,33 @@ std::string unique_render_path(FileSystem& fs, const std::string& dir, const std
 ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState& s);
 
 /**
- * PROJECT → EXPORT → MIX. One WAV of the whole song, with the master bus, into Renders/.
+ * WHICH song rows a render covers, and how many times over — the RENDER dialog's three rows, already
+ * resolved (no AUTO, no OFF) by the time they reach here.
+ *
+ * ⚠️ `startRow < 0` means THE WHOLE SONG, which is what every caller outside the dialog wants.
+ */
+struct RenderRange {
+    int startRow = -1;
+    int endRow   = -1;
+    int repeat   = 1;
+};
+
+/**
+ * PROJECT → EXPORT → MIX. One WAV of `range`, with the master bus, into Renders/.
  *
  * SYNCHRONOUS, and the caller must have silenced the audio device first — see the shell. `progress`
  * is called from inside the render; the shell repaints the frame from it, which is what a
  * single-threaded app does instead of a coroutine.
  */
 ActionResult render_mix(songcore::SongcoreHost& host, FileSystem& fs, AppState& s,
-                        const std::function<void(float)>& progress);
+                        const RenderRange& range, const std::function<void(float)>& progress);
 
 /**
- * PROJECT → EXPORT → STEMS. One WAV per active track, plus the reverb and delay returns, into
- * `Renders/<name>/`. Stems bypass the master bus by design.
+ * PROJECT → EXPORT → STEMS. One WAV per track ACTIVE IN THE RANGE, plus the reverb and delay returns,
+ * into `Renders/<name>/`. Stems bypass the master bus by design.
  */
 ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState& s,
-                          const std::function<void(float)>& progress);
+                          const RenderRange& range, const std::function<void(float)>& progress);
 
 // ─── SONG selection → RESAMPLE ─────────────────────────────────────────────────────────────────
 //

@@ -914,7 +914,9 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 // press there must move the KEY cursor, not the file cursor.
 
 void InputDispatcher::on_dpad_up() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER |
+                         Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_move_cursor(-1); return; }
     if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(-1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, -1); return; }
@@ -923,7 +925,9 @@ void InputDispatcher::on_dpad_up() {
 }
 
 void InputDispatcher::on_dpad_down() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER |
+                         Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_move_cursor(+1); return; }
     if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(+1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, +1); return; }
@@ -1465,7 +1469,8 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 //                      on a colour row, nudge the cursor's channel by ±0x10.
 
 void InputDispatcher::on_a_up() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_edit(+render_dialog_coarse_step()); return; }
     if (theme_open()) {
         theme_dpad_edit(+1, +0x10);
         return;
@@ -1486,7 +1491,8 @@ void InputDispatcher::on_a_up() {
 }
 
 void InputDispatcher::on_a_down() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_edit(-render_dialog_coarse_step()); return; }
     if (theme_open()) {
         theme_dpad_edit(-1, -0x10);
         return;
@@ -1505,7 +1511,8 @@ void InputDispatcher::on_a_down() {
 }
 
 void InputDispatcher::on_a_left() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_edit(-1); return; }
     if (theme_open()) {
         theme_dpad_edit(-1, -0x01);
         return;
@@ -1519,7 +1526,8 @@ void InputDispatcher::on_a_left() {
 }
 
 void InputDispatcher::on_a_right() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_edit(+1); return; }
     if (theme_open()) {
         theme_dpad_edit(+1, +0x01);
         return;
@@ -1958,7 +1966,10 @@ void InputDispatcher::on_b_down() {
 // and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
 
 void InputDispatcher::on_r_up() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER | Overlay::RENDER)) return;
+    // R+UP/DOWN steps the RENDER dialog's range to the previous or next part of the song — the one
+    // gesture on that panel that moves two values at once, because a part is a start and an end.
+    if (render_dialog_open()) { render_dialog_step_section(-1); return; }
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(+1); return; }
     // Sample-editor ZOOM IN (v0.9.4 C3): R+UP/R+DOWN drive `zoomLevel` (0=1×…4=16×) without hopping to
@@ -1976,7 +1987,8 @@ void InputDispatcher::on_r_up() {
 }
 
 void InputDispatcher::on_r_down() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER | Overlay::RENDER)) return;
+    if (render_dialog_open()) { render_dialog_step_section(+1); return; }
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(-1); return; }
     if (on_sample_editor()) {   // ZOOM OUT — see on_r_up
@@ -2791,6 +2803,81 @@ void InputDispatcher::load_project_done(const std::string& path) {
     s_.statusSuccess = (failed == 0);
 }
 
+// ─── The RENDER dialog ───────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::open_render_dialog(RenderDialogState::Output output) {
+    if (s_.isRendering) return;
+
+    RenderDialogState& rd = s_.renderDialog;
+    rd.isOpen    = true;
+    rd.output    = output;
+    rd.cursorRow = static_cast<int>(RenderRow::SONG_START);
+    // ⚠️ The SONG screen's SAVED cursor, not the live one: this is raised from PROJECT, and the live
+    // `cursorRow` is PROJECT's own row by then (go_to_screen parks the song cursor on the way out).
+    rd.startRow = songcore::song_section_start(host_.project(), s_.songCursorRow);
+    rd.endRow   = -1;   // AUTO — follow the section, however it is edited between now and the render
+}
+
+void InputDispatcher::render_dialog_move_cursor(int delta) {
+    const int last = static_cast<int>(RenderRow::COUNT) - 1;
+    s_.renderDialog.cursorRow = std::max(0, std::min(last, s_.renderDialog.cursorRow + delta));
+}
+
+void InputDispatcher::render_dialog_edit(int delta) {
+    RenderDialogState& rd = s_.renderDialog;
+    if (s_.isRendering) return;
+
+    switch (static_cast<RenderRow>(rd.cursorRow)) {
+        case RenderRow::SONG_START: {
+            rd.startRow = std::max(0, std::min(255, rd.startRow + delta));
+            // A start that has walked past a hand-typed end drags the end with it, rather than
+            // leaving the panel describing a range that runs backwards.
+            if (rd.endRow >= 0 && rd.endRow < rd.startRow) rd.endRow = rd.startRow;
+            break;
+        }
+        case RenderRow::SONG_END: {
+            // ⚠️ AUTO SITS BELOW THE SMALLEST NUMBER, which is SONG START — an end above the start is
+            // the only end that means anything, so that is where the value column runs out and the
+            // rule takes over. Stepping UP off AUTO lands on the row AUTO was resolving to, so the
+            // number the panel was already showing is the number you start dialling from.
+            if (rd.endRow < 0) {
+                if (delta > 0) rd.endRow = render_dialog_end_row(rd, host_.project());
+                break;
+            }
+            const int next = rd.endRow + delta;
+            rd.endRow = (next < rd.startRow) ? -1 : std::min(255, next);
+            break;
+        }
+        case RenderRow::REPEAT: {
+            // Same shape: OFF sits below 2. There is no "×1" — that is what OFF says.
+            const int next = rd.repeat + delta;
+            rd.repeat = next < 2 ? 1 : std::min(RENDER_REPEAT_MAX, next);
+            break;
+        }
+        case RenderRow::RENDER:
+        case RenderRow::COUNT:
+            break;
+    }
+}
+
+void InputDispatcher::render_dialog_step_section(int delta) {
+    if (s_.isRendering) return;
+    RenderDialogState& rd = s_.renderDialog;
+    // ⚠️ IT MOVES THE WHOLE RANGE, from any row of the panel. The gesture names a PART of the song,
+    // and a part is a start and an end together — so the end goes back to AUTO rather than staying
+    // pointed at a row in the section you just left.
+    rd.startRow = songcore::adjacent_section_start(host_.project(), rd.startRow, delta);
+    rd.endRow   = -1;
+}
+
+void InputDispatcher::render_dialog_fire() {
+    if (s_.isRendering) return;
+    export_song(s_.renderDialog.output == RenderDialogState::Output::STEMS);
+    // ⚠️ CLOSED ON THE WAY OUT, whether it worked or not: the answer ("EXPORTED!", "STEMS: 2 OF 5")
+    // is on the status line, and the status line is under this panel's dim.
+    s_.renderDialog.isOpen = false;
+}
+
 void InputDispatcher::export_song(bool stems) {
     if (s_.isRendering) return;   // a second press while one runs is a mis-press, not a request
 
@@ -2808,8 +2895,14 @@ void InputDispatcher::export_song(bool stems) {
         if (render_.repaint) render_.repaint();      // the EXPORT row's "43%" — a readout, not a decoration
     };
 
-    const ActionResult r = stems ? render_stems(host_, fs_, s_, progress)
-                                 : render_mix(host_, fs_, s_, progress);
+    // The panel's rows, with AUTO resolved against the project as it stands right now.
+    RenderRange range;
+    range.startRow = s_.renderDialog.startRow;
+    range.endRow   = render_dialog_end_row(s_.renderDialog, host_.project());
+    range.repeat   = s_.renderDialog.repeat;
+
+    const ActionResult r = stems ? render_stems(host_, fs_, s_, range, progress)
+                                 : render_mix(host_, fs_, s_, range, progress);
 
     s_.isRendering    = false;
     s_.renderProgress = 0.0f;
@@ -2910,8 +3003,11 @@ void InputDispatcher::project_action() {
             break;
 
         case ProjectRow::EXPORT:
-            if (s_.projectCursorColumn == 1)      export_song(/*stems=*/false);
-            else if (s_.projectCursorColumn == 2) export_song(/*stems=*/true);
+            // ⚠️ NEITHER BUTTON RENDERS ANY MORE — they open the RENDER panel, which asks WHICH rows
+            // and fires from its own row. Which button was pressed is still what picks stereo WAV or
+            // stems; it is simply answered on the way in rather than on the way out.
+            if (s_.projectCursorColumn == 1)      open_render_dialog(RenderDialogState::Output::MIX);
+            else if (s_.projectCursorColumn == 2) open_render_dialog(RenderDialogState::Output::STEMS);
             break;
 
         case ProjectRow::COMPACT:
@@ -3254,7 +3350,14 @@ void InputDispatcher::on_button_a() {
     // only the FX helper. It is still here so that a layer added tomorrow is INERT on A rather than
     // inserting a chain on the screen hidden behind it.
     if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
-                         Overlay::BROWSER)) return;
+                         Overlay::BROWSER | Overlay::RENDER)) return;
+
+    // A on the RENDER dialog fires it — from the RENDER row alone. The three rows above are dialled
+    // with A+DPAD and have nothing for a bare A to confirm.
+    if (render_dialog_open()) {
+        if (s_.renderDialog.is_on(RenderRow::RENDER)) render_dialog_fire();
+        return;
+    }
 
     // ⚠️ THE CONFIRM DIALOG IS CHECKED FIRST, ahead of the keyboard and the browser both. It is the
     // topmost modal — drawn last, over everything — and a dialog owns the buttons of whatever it is
@@ -3428,7 +3531,12 @@ void InputDispatcher::on_button_b() {
     // Every layer below is ARMED — B closes or answers on each of them. Here for the same reason as
     // on_button_a's: a layer added tomorrow is inert on B rather than closing the browser behind it.
     if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
-                         Overlay::BROWSER)) return;
+                         Overlay::BROWSER | Overlay::RENDER)) return;
+
+    // B closes the RENDER dialog, and there is nothing to lose by it — the panel writes nothing into
+    // the project. ⚠️ Not while a render RUNS: the frame loop is inside the render, so the press
+    // cannot arrive until it is over and the dialog has closed itself.
+    if (render_dialog_open()) { s_.renderDialog.isOpen = false; return; }
 
     // B is the NO of "A=YES  B=NO", and it is checked first for the same reason A's accept is: the
     // dialog owns the buttons of the screen underneath it.

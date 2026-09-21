@@ -386,7 +386,7 @@ class Sequencer {
 
         // SONG's eight cursors: the rewind is shared with a LIVE launch and with leaving LIVE — see
         // rewind_song_track, which carries the note about the TrackState and the RNG coming back with
-        // the position, and rewind_all_song_tracks, which keeps the eight of them in one lap.
+        // the position.
         if (playbackMode_ == PlaybackMode::SONG) return rewind_all_song_tracks(currentFrame);
 
         // PHRASE and CHAIN schedule one track only, so only that track has anything queued.
@@ -538,7 +538,6 @@ class Sequencer {
         songPositionStartFrames_.clear();
         phraseStepStartFrames_.clear();
         for (int t = 0; t < 8; ++t) checkpoints_[t].clear();
-        restarts_.clear();
         // Both flags are read BEFORE the host calls stop(), which is what restores the master EQ and
         // the mixer faders — clearing them here is what makes the next session start clean.
         eqmActive_ = false;
@@ -761,10 +760,9 @@ class Sequencer {
                 // sixteen-row chain beside it is still running, which is the whole feature; the
                 // per-track walk is in schedule_track_unit().
                 //
-                // ⚠️ THE STEP CAP IS LOAD-BEARING, not a nervous guard. A song row nobody has
-                // authored costs ZERO frames, so a project of empty rows would advance its cursors
-                // forever without the buffer ever filling. The lock-step arm this replaces was
-                // bounded the same way, by doing exactly one row per poll.
+                // ⚠️ THE STEP CAP IS LOAD-BEARING, not a nervous guard: it bounds the work one poll
+                // can do. The lock-step arm this replaces was bounded the same way, by doing exactly
+                // one row per poll.
                 for (int step = 0; step < SONG_STEPS_PER_POLL; ++step) {
                     int nextTrack = -1;
                     int64_t earliest = 0;
@@ -775,10 +773,10 @@ class Sequencer {
                             earliest = trackNextFrame_[t];
                         }
                     }
-                    // Every column has run out → the song starts again, all eight together. One
-                    // restart per poll: the lap after it is scheduled by the next poll, exactly as
-                    // the old arm advanced one row per poll.
-                    if (nextTrack < 0) { restart_all_tracks(); break; }
+                    // ⭐ NOTHING LEFT TO FILL, AND THE TRANSPORT KEEPS RUNNING. A track only finishes
+                    // now by being silenced at its start row, and a block loops for ever, so all eight
+                    // done means PLAY landed on a row nothing is written on. STOP is the only end.
+                    if (nextTrack < 0) break;
                     if (earliest - currentFrame >= minBuffer) break;
                     schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase);
                 }
@@ -792,16 +790,49 @@ class Sequencer {
     // trackFilter == nullptr schedules all tracks; inaudible ones (muted, or unsoloed while another
     // track is soloed) are always skipped. Mirrors scheduleSongRowRange; ptplay only uses the full
     // (null-filter) form.
-    int64_t scheduleSongRowRange(int startRow, int endRow, const std::set<int>* trackFilter = nullptr) {
+    //
+    // `repeat` plays the range that many times over, END TO END IN ONE PASS — never once per file
+    // stitched together afterwards. The engine is never told the range ended, so the reverb tail, the
+    // delay repeats, the note releases and the table positions cross every seam exactly as they do
+    // when a part loops under the transport; a concatenation would put an audible cut at each join.
+    int64_t scheduleSongRowRange(int startRow, int endRow, const std::set<int>* trackFilter = nullptr,
+                                 int repeat = 1) {
         const Project& project = *project_;
-        for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
-        int64_t framesPerStep = frames_per_step(project.tempo, sampleRate_);
+        const int64_t framesPerStep   = frames_per_step(project.tempo, sampleRate_);
+        const int64_t framesPerPhrase = framesPerStep * 16;
         router_.t_play("RENDER", "rows=" + hex2(startRow) + "-" + hex2(endRow), 0, project.tempo, sampleRate_);
 
-        const int64_t framesPerPhrase = framesPerStep * 16;
+        // ⚠️ THE REPETITIONS ARE SQUARED UP, not butted onto each track's own end. Blocks of unequal
+        // length drift apart inside one pass (that is the rule this tracker now plays by), so a track
+        // restarting at its OWN last frame would slide further out of step with every repetition until
+        // the parts no longer line up at all. They all restart together at the longest one's end —
+        // which is where the same part would come round again under the transport.
+        //
+        // ⚠️ A pass that schedules NOTHING ends the loop: a range with no playable cell in it would
+        // otherwise be walked `repeat` times for no frames, and that is the shape that becomes a hang
+        // if the dialog's maximum ever grows.
+        if (repeat < 1) repeat = 1;
+        int64_t passStart = 0;
+        for (int pass = 0; pass < repeat; ++pass) {
+            const int64_t passEnd = schedule_range_pass(project, startRow, endRow, trackFilter,
+                                                        passStart, framesPerStep, framesPerPhrase);
+            if (passEnd <= passStart) break;
+            passStart = passEnd;
+        }
+
+        router_.t_stop();
+        return passStart;
+    }
+
+  private:
+    /** One play-through of `startRow..endRow`, beginning at `passStart`. Returns the frame it ends on. */
+    int64_t schedule_range_pass(const Project& project, int startRow, int endRow,
+                                const std::set<int>* trackFilter, int64_t passStart,
+                                int64_t framesPerStep, int64_t framesPerPhrase) {
+        for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
 
         for (int trackId = 0; trackId < 8; ++trackId) {
-            trackNextFrame_[trackId] = 0;
+            trackNextFrame_[trackId] = passStart;
             trackSongRow_[trackId]   = startRow;
             trackChainRow_[trackId]  = 0;
             // ⚠️ THE RENDER SKIPS AN INAUDIBLE TRACK; THE LIVE ARM ABOVE DOES NOT, AND THE
@@ -841,13 +872,11 @@ class Sequencer {
             schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase, endRow, false);
         }
 
-        int64_t endFrame = 0;
-        for (int t = 0; t < 8; ++t) endFrame = std::max(endFrame, trackNextFrame_[t]);
-        router_.t_stop();
-        return endFrame;
+        int64_t passEnd = passStart;
+        for (int t = 0; t < 8; ++t) passEnd = std::max(passEnd, trackNextFrame_[t]);
+        return passEnd;
     }
 
-  private:
     static int clamp_track(int trackId) { return (trackId >= 0 && trackId < 8) ? trackId : 0; }
 
     /**
@@ -895,13 +924,13 @@ class Sequencer {
     }
 
     /**
-     * Rewind all eight SONG cursors, then put the song back into ONE lap.
+     * Rewind all eight SONG cursors.
      *
-     * ⚠️⚠️ **THE SECOND HALF IS NOT OPTIONAL, AND IT IS WHY THE TWO ARE ONE FUNCTION.** The eight
-     * rewinds are independent by design — each track has its own boundary — but "which lap is this
-     * track in" is not a per-track fact the song can disagree with itself about. A rewind that lands
-     * before the loop point leaves the tracks that were carried across it stranded a lap ahead, and
-     * the song then waits for them: see SongRestart.
+     * ⭐ EIGHT INDEPENDENT REWINDS AND NOTHING ELSE, because there is no longer one lap for the song
+     * to disagree with itself about: a track loops its OWN block, and that loop is an ordinary unit of
+     * work with an ordinary checkpoint behind it. While the whole song restarted on one downbeat, the
+     * restart moved tracks that had run out — which own no boundary past the frame they stopped at —
+     * and it needed a record of its own to be undone by.
      */
     RollbackPlan rewind_all_song_tracks(int64_t currentFrame) {
         RollbackPlan plan;
@@ -909,49 +938,7 @@ class Sequencer {
             const int64_t f = rewind_song_track(t, currentFrame);
             if (f >= 0) plan.frames[t] = f;
         }
-        undo_restarts_behind(plan);
         return plan;
-    }
-
-    /**
-     * Undo every lap restart a rewind has just reached back across.
-     *
-     * A restart is spent the moment any cursor sits before the downbeat it put them all on: that
-     * track is still playing the previous lap, so nobody has started the next one yet. Every track
-     * the restart carried forward goes back to where it stood — a column that had run out goes back
-     * to having run out — and the lap ends where it always did, at the latest of those frames.
-     *
-     * The loop is for a song shorter than the lookahead, which can have two laps queued at once.
-     */
-    void undo_restarts_behind(RollbackPlan& plan) {
-        while (!restarts_.empty()) {
-            const SongRestart r = restarts_.back();   // by value: the pop below invalidates a reference
-            bool behind = false;
-            for (int t = 0; t < 8; ++t)
-                if (trackNextFrame_[t] < r.loopFrame) { behind = true; break; }
-            if (!behind) return;
-
-            for (int t = 0; t < 8; ++t) {
-                if (trackNextFrame_[t] < r.loopFrame) continue;   // never left the earlier lap
-                trackNextFrame_[t] = r.frame[t];
-                trackSongRow_[t]   = r.songRow[t];
-                trackChainRow_[t]  = r.chainRow[t];
-                trackDone_[t]      = r.done[t];
-                trackStates_[t]    = r.state[t];
-                rngs_[t]           = r.rng[t];
-                // Everything the unwound lap queued goes with it — the notes (the host's half, from
-                // the frame named here), this track's checkpoints, and its playhead entries.
-                plan.frames[t] = (plan.frames[t] < 0) ? r.loopFrame
-                                                      : std::min(plan.frames[t], r.loopFrame);
-                std::deque<Checkpoint>& ring = checkpoints_[t];
-                while (!ring.empty() && ring.back().frame >= r.loopFrame) ring.pop_back();
-                drop_positions_from(songPositionStartFrames_, r.loopFrame,
-                                    [&](const SongPos& p) { return p.track == t; });
-                drop_positions_from(phraseStepStartFrames_, r.loopFrame,
-                                    [&](const StepPos& s) { return s.track == t; });
-            }
-            restarts_.pop_back();
-        }
     }
 
     /**
@@ -1061,33 +1048,6 @@ class Sequencer {
         // nothing. It rests a bar, and the launch lands a bar late — on the offsets where the poll
         // happened to have crossed the boundary already, and nowhere else.
         int64_t liveLoopFrame = 0;
-    };
-
-    // ─── the lap restart, and why it needs a record of its own ───────────────────────────────────
-    //
-    // ⚠️⚠️ **THE RESTART IS THE ONE UNIT OF WORK THAT IS NOT A CHECKPOINT.** Every other unit belongs
-    // to ONE track and is rolled back on that track alone; the restart moves all eight at once, and
-    // it moves tracks that have RUN OUT — which have no boundary of their own anywhere past the frame
-    // they stopped at, so `rewind_song_track` has nothing to reach back across it with.
-    //
-    // That is what split a song into two laps at once. An edit made while the LONGEST column is still
-    // playing rolls that track back to a boundary inside the lap, while a SHORT column — run out,
-    // already carried forward to the loop point by the restart — has no earlier boundary left and
-    // stays in the NEXT lap. The long track then finishes its lap and goes silent waiting for a track
-    // that is a whole lap ahead of it, so the song loops late by the length of the short column with
-    // only the last notes' tails ringing over the gap.
-    //
-    // The restart is therefore recorded, and `undo_restarts_behind` puts every track back on the near
-    // side of it the moment a rewind lands there. ⚠️ It carries TrackState and the RNG for the reason
-    // Checkpoint does: what comes back has to be what was thrown away, or the lap returns re-timed.
-    struct SongRestart {
-        int64_t    loopFrame = 0;    // the downbeat the lap was restarted ON
-        int64_t    frame[8]{};       // …and where each track stood before it
-        int        songRow[8]{};
-        int        chainRow[8]{};
-        bool       done[8]{};
-        TrackState state[8]{};
-        Rng        rng[8];
     };
 
     int64_t getCurrentFrame() const { return currentFrame_; }
@@ -1224,27 +1184,6 @@ class Sequencer {
     // business. What replaced the shared cursor is written here rather than in the arm above so the
     // poll reads as "fill the track that is furthest behind" and nothing more.
 
-    // The last song row this track has a chain on; −1 when the column is empty. It is what "the
-    // column ran out" MEANS — an empty cell in the middle is a rest, not an ending, which is the
-    // deliberate divergence from LGPT and M8 (both treat the first blank as terminal).
-    static int last_filled_song_row(const Project& project, int trackId) {
-        const std::vector<int>& refs = project.tracks[trackId].chainRefs;
-        for (int r = static_cast<int>(refs.size()) - 1; r >= 0; --r)
-            if (refs[r] >= 0 && refs[r] < 256) return r;
-        return -1;
-    }
-
-    // How many rows of a chain hold a phrase. ⚠️ A COUNT, and it is now used only where a count is
-    // meant: the lock-step arm used it as an INDEX BOUND, so a chain with a hole in it lost every
-    // row past the hole, and two goldens recorded that as the specification.
-    static int chain_filled_rows(const Project& project, int chainId) {
-        if (chainId < 0 || chainId >= 256) return 0;
-        const Chain& chain = project.chains[chainId];
-        int n = 0;
-        for (int i = 0; i < CHAIN_ROWS; ++i) if (!chain_is_empty(chain, i)) n++;
-        return n;
-    }
-
     // The chain a track has authored on one song row, or −1 for a blank cell. ⚠️ An out-of-range id
     // is a blank too — a column is a plain vector and the pools are 0..255.
     static int song_cell_chain(const Project& project, int trackId, int songRow) {
@@ -1254,92 +1193,33 @@ class Sequencer {
         return (id >= 0 && id < 256) ? id : -1;
     }
 
-    // Is the rest on a blank cell over?
-    //
-    // ⚠️⚠️ THE QUESTION IS "HAS ANYONE ELSE REACHED THE NEXT ROW", NOT "HOW LONG IS THIS ROW". A
-    // blank cell is how a track is told to wait, and a track that arrives at one EARLY — its own
-    // chain on the row above being shorter than its neighbours' — has to wait LONGER, not the same.
-    // A length measured from this row alone carries that lead straight through the blank, and the
-    // next chain in the column then starts ahead of everybody else's.
-    //
-    // ⭐ Asking the live cursors also FOLLOWS a groove or a HOP on the track being waited for, which
-    // song_row_span can only approximate. When every track arrives together the two answers are the
-    // same, so an arrangement that never runs a track ahead is unchanged.
-    //
-    // ⚠️ A TRACK RESTING ON A BLANK OF ITS OWN IS NOT WAITED FOR — two of them would wait on each
-    // other for ever, and the song would never move. It is read off the cell rather than kept as a
-    // flag, so no rollback can leave it stale.
-    //
-    // ⚠️ The RENDER path marks inaudible tracks done before the walk starts, so a rest waiting on a
-    // MUTED neighbour falls back to the span there and can end earlier than it does live. That is
-    // the asymmetry scheduleSongRowRange already documents, reaching one row further than it did.
-    bool blank_cell_rest_is_over(const Project& project, int trackId, int songRow,
-                                 int barsRested) const {
-        const int64_t here = trackNextFrame_[trackId];
-        bool someone_to_wait_for = false;
-        for (int t = 0; t < 8; ++t) {
-            if (t == trackId || trackDone_[t]) continue;
-            if (trackSongRow_[t] > songRow) return true;               // already turned the row
-            if (track_still_holds_row(project, t, songRow, here)) someone_to_wait_for = true;
-        }
-        return !someone_to_wait_for && barsRested >= song_row_span(project, songRow);
+    /**
+     * Can the walk ENTER this song cell? The one definition of a block boundary.
+     *
+     * ⚠️⚠️ A CELL THE WALK CANNOT ENTER IS THE END OF A BLOCK, NOT A REST. A track that runs into one
+     * loops back to the top of the block it is in and plays it again, for ever — what M8 and
+     * LittleGPTracker both do, and what lets unrelated sketches sit in one project without running
+     * into each other. The price is theirs too: nothing waits for anybody, so blocks of unequal
+     * length drift apart, and a track that should go quiet for a few bars and come back in step needs
+     * a chain of empty phrases in those cells rather than a gap.
+     *
+     * ⚠️ A CHAIN WHOSE FIRST ROW IS EMPTY IS A BOUNDARY, not a short chain — LGPT's rule, and the one
+     * case where "the cell names a chain" is not enough. Later holes in the same chain are still
+     * walked over (`next_chain_row_no_wrap`): a hole ending a chain was a bug here once.
+     *
+     * ⭐ DERIVED IN ONE PLACE. Every site that asks "is this cell part of the block" — the start, the
+     * step down, the walk back up — asks it here, so none of them can drift.
+     */
+    static bool song_cell_plays(const Project& project, int trackId, int songRow) {
+        const int chainId = song_cell_chain(project, trackId, songRow);
+        return chainId >= 0 && !chain_is_empty(project.chains[chainId], 0);
     }
 
-    // Is track `t` still standing on song row `songRow` or an earlier one, at frame `here`?
-    //
-    // ⚠️⚠️ "ITS CURSOR SAYS THAT ROW" IS NOT "IT IS STILL PLAYING THAT ROW", AND THE DIFFERENCE IS
-    // ONE BAR IN BOTH DIRECTIONS. A track keeps its song row until the unit AFTER its chain runs
-    // out, and the eight cursors are filled one at a time in frame order — so a track whose row has
-    // just ended still reads as standing there, and waiting for it costs an extra bar on a song
-    // where nobody was ahead of anybody. Four goldens said exactly that. But the row it has just
-    // SCHEDULED is still sounding, and not waiting for that ends the rest a bar early.
-    //
-    // Both are answered by the same two questions — has it rows left to play here, and is its clock
-    // committed past mine — plus what it has authored between there and here.
-    //
-    // ⭐ A track resting on a blank cell of its own holds nothing, which is what stops two resting
-    // tracks from waiting on each other for ever. Read off the cell, so no rollback can leave it
-    // stale.
-    bool track_still_holds_row(const Project& project, int t, int songRow, int64_t here) const {
-        const int otherRow = trackSongRow_[t];
-        const int chainId  = song_cell_chain(project, t, otherRow);
-        if (chainId >= 0) {
-            if (next_chain_row_no_wrap(project.chains[chainId], trackChainRow_[t]) >= 0) return true;
-            if (trackNextFrame_[t] > here) return true;    // its last chain row is still sounding
-        }
-        // Anything authored between where it stands and the row being rested on is still to come.
-        for (int r = otherRow + 1; r <= songRow; ++r)
-            if (song_cell_chain(project, t, r) >= 0) return true;
-        return false;
-    }
-
-    // How long a song row is, in phrases, as AUTHORED: the longest column standing on it. It is the
-    // FALLBACK length of a rest — what a blank cell costs when there is no other track left to wait
-    // for. blank_cell_rest_is_over is the rule; this is what it falls back to.
-    //
-    // ⚠️ There is nothing else to derive it from once the cursors are independent, and it has to
-    // cost SOMETHING: a track that drops out for eight rows and comes back must come back where it
-    // always did, or every song already written with a gap in it is silently re-timed. A row nobody
-    // has authored spans zero phrases and costs nothing, which is what the old arm did too.
-    //
-    // ⚠️⚠️ **THE CALLER SPENDS THIS ONE PHRASE AT A TIME AND ASKS AGAIN EACH TIME.** It must never be
-    // multiplied out into a single jump. A rest is often several phrases long, the lookahead is two,
-    // and the user is editing the very chains this reads: a resting track that banked the whole span
-    // in one go is holding a number no later edit can reach — lengthen a neighbour's chain while the
-    // rest is playing and the track still comes back on the old, shorter answer. It has no
-    // checkpoint to roll back to either, because a jump is not a schedule. Reloading the project was
-    // the only thing that cleared it.
-    //
-    // ⚠️ It is still the NOMINAL length — a groove or a HOP on another track makes the row itself a
-    // little longer or shorter, so a resting track can rejoin slightly early or late.
-    static int song_row_span(const Project& project, int songRow) {
-        int span = 0;
-        for (int t = 0; t < 8; ++t) {
-            const std::vector<int>& refs = project.tracks[t].chainRefs;
-            if (songRow < 0 || songRow >= static_cast<int>(refs.size())) continue;
-            span = std::max(span, chain_filled_rows(project, refs[songRow]));
-        }
-        return span;
+    /** The first row of the block `songRow` sits in — the row a track loops back to. */
+    static int block_start_row(const Project& project, int trackId, int songRow) {
+        int row = songRow;
+        while (row > 0 && song_cell_plays(project, trackId, row - 1)) row--;
+        return row;
     }
 
     // The next row at or after `startRow` holding a phrase, or −1 when the chain has no more.
@@ -1352,13 +1232,28 @@ class Sequencer {
         return -1;
     }
 
-    // One song row finished for this track: drop the per-row state and move on. It costs nothing —
-    // every phrase and every bar of rest inside the row has already been paid for, one at a time.
-    void advance_track_song_row(int trackId) {
-        trackSongRow_[trackId]++;
+    /**
+     * One song row finished for this track: step down the column, or LOOP BACK to the top of its
+     * block. It costs nothing — every phrase inside the row has already been paid for, one at a time.
+     *
+     * ⚠️⚠️ A RENDER ENDS THE TRACK WHERE PLAYBACK WOULD LOOP. A block that loops for ever has no
+     * length, so an export would never finish: it plays its range once through, and `lastSongRow`
+     * (≥ 0 only there) is what says which of the two this is. Repetition in a file is the render
+     * range's own count, never this.
+     */
+    void advance_track_song_row(const Project& project, int trackId, int lastSongRow) {
+        const int from = trackSongRow_[trackId];
         trackChainRow_[trackId] = 0;
         trackStates_[trackId].trackStopped = false;
         trackStates_[trackId].emptyHops = 0;
+
+        const bool bounded = lastSongRow >= 0;
+        if ((!bounded || from + 1 <= lastSongRow) && song_cell_plays(project, trackId, from + 1)) {
+            trackSongRow_[trackId] = from + 1;
+            return;
+        }
+        if (bounded) { trackDone_[trackId] = true; return; }
+        trackSongRow_[trackId] = block_start_row(project, trackId, from);
     }
 
     // The snapshot every unit of work takes before it commits, written once below the three sites
@@ -1374,38 +1269,8 @@ class Sequencer {
         save_checkpoint(trackId, cp);
     }
 
-    // Every column has run out. The song starts again with all eight together on one downbeat, at
-    // the latest of their end frames — the same loop point the shared cursor had when it wrapped
-    // past the longest column, and the reason a jam does not stop on its own.
-    void restart_all_tracks() {
-        int64_t at = trackNextFrame_[0];
-        for (int t = 1; t < 8; ++t) at = std::max(at, trackNextFrame_[t]);
-        // ⚠️ RECORDED BEFORE IT IS APPLIED — see SongRestart. A rewind that lands before `at` has to
-        // be able to put the other seven back on this side of the loop, and a track that had already
-        // run out keeps nothing of its own that says where it stopped.
-        SongRestart r;
-        r.loopFrame = at;
-        for (int t = 0; t < 8; ++t) {
-            r.frame[t]    = trackNextFrame_[t];
-            r.songRow[t]  = trackSongRow_[t];
-            r.chainRow[t] = trackChainRow_[t];
-            r.done[t]     = trackDone_[t];
-            r.state[t]    = trackStates_[t];
-            r.rng[t]      = rngs_[t];
-        }
-        restarts_.push_back(r);
-        if (restarts_.size() > RESTART_RING) restarts_.pop_front();
-        for (int t = 0; t < 8; ++t) {
-            trackNextFrame_[t] = at;
-            trackSongRow_[t] = 0;
-            trackChainRow_[t] = 0;
-            trackDone_[t] = false;
-            trackStates_[t].trackStopped = false;
-            trackStates_[t].emptyHops = 0;
-        }
-    }
-
-    // Advance ONE track by one unit of work: a phrase, a rest, or the end of its column.
+    // Advance ONE track by one unit of work: a phrase, a bar sat out, or the end of its block.
+    // In SONG the end of a block is a LOOP, never an ending - see advance_track_song_row.
     //
     // `lastSongRow` bounds the walk for the RENDER path, which plays a range rather than a column;
     // −1 means the track's own column end. `takeCheckpoint` is false there for the same reason —
@@ -1423,44 +1288,31 @@ class Sequencer {
         }
 
         TrackState& trackState = trackStates_[trackId];
-        const std::vector<int>& refs = project.tracks[trackId].chainRefs;
         const int songRow = trackSongRow_[trackId];
 
-        // ⚠️ RE-DERIVED PER UNIT, never cached at play time: the project is edited underneath a
-        // running transport (host.h `edit_project`), so a column length latched at T PLAY would keep
-        // playing rows the user has just cleared.
-        const int lastRow = (lastSongRow >= 0) ? lastSongRow : last_filled_song_row(project, trackId);
-        if (lastRow < 0 || songRow > lastRow) { trackDone_[trackId] = true; return; }
-
-        const int chainId = (songRow < static_cast<int>(refs.size())) ? refs[songRow] : -1;
-
-        // ⭐ A BLANK CELL AND A SHORT CHAIN ARE NOT THE SAME THING. A blank is how a track is told to
-        // WAIT FOR THE OTHERS, so it lasts until one of them starts the next song row; a cell that
-        // NAMES a chain is played for as long as that chain has rows — however few — because not
-        // waiting is the request.
+        // ⚠️⚠️ A CELL THE WALK CANNOT ENTER SILENCES THIS TRACK UNTIL STOP — it does NOT back up.
+        // Pressing PLAY on a row where this column is blank means the track has nothing to play there,
+        // and LGPT's upward search would answer with a block from somewhere ELSE in the arrangement:
+        // launch an idea on two tracks and the other six start playing an older one. Silence is what
+        // isolating a sketch means.
         //
-        // ⚠️⚠️ ONE BAR PER UNIT, AND THE QUESTION ASKED AGAIN ON EVERY ONE — see
-        // blank_cell_rest_is_over. The rest is never banked as a single jump; `trackChainRow_` counts
-        // the bars spent, exactly as it counts chain rows for a cell that has a chain in it.
-        if (chainId < 0 || chainId >= 256) {
-            if (blank_cell_rest_is_over(project, trackId, songRow, trackChainRow_[trackId])) {
-                advance_track_song_row(trackId);
-                return;
-            }
-            checkpoint_track(trackId, songRow, trackChainRow_[trackId], takeCheckpoint);
-            trackNextFrame_[trackId] += framesPerPhrase;
-            trackChainRow_[trackId]++;
+        // ⚠️ RE-DERIVED PER UNIT, never cached at play time: the project is edited underneath a
+        // running transport (host.h `edit_project`), so a boundary latched at T PLAY would keep playing
+        // rows the user has just cleared.
+        if ((lastSongRow >= 0 && songRow > lastSongRow) ||
+            !song_cell_plays(project, trackId, songRow)) {
+            trackDone_[trackId] = true;
             return;
         }
 
-        const Chain& chain = project.chains[chainId];
+        const Chain& chain = project.chains[song_cell_chain(project, trackId, songRow)];
 
         // HOP FF stopped this track: it sits out the rest of its chain and rejoins on the next song
         // row, which is what the lock-step arm did by skipping it for the row's remaining rows.
         // ⚠️ A bar at a time, for the same reason the rest above is.
         if (trackState.trackStopped) {
             const int satOut = next_chain_row_no_wrap(chain, trackChainRow_[trackId]);
-            if (satOut < 0) { advance_track_song_row(trackId); return; }
+            if (satOut < 0) { advance_track_song_row(project, trackId, lastSongRow); return; }
             checkpoint_track(trackId, songRow, satOut, takeCheckpoint);
             trackNextFrame_[trackId] += framesPerPhrase;
             trackChainRow_[trackId] = satOut + 1;
@@ -1468,7 +1320,7 @@ class Sequencer {
         }
 
         const int chainRow = next_chain_row_no_wrap(chain, trackChainRow_[trackId]);
-        if (chainRow < 0) { advance_track_song_row(trackId); return; }   // the chain is spent
+        if (chainRow < 0) { advance_track_song_row(project, trackId, lastSongRow); return; }   // the chain is spent
 
         checkpoint_track(trackId, songRow, chainRow, takeCheckpoint);
 
@@ -2604,8 +2456,9 @@ class Sequencer {
 
     // ─── SONG's eight cursors ────────────────────────────────────────────────────────────────────
     // One per track, and the reason SONG has no shared frame, song row or chain row left: a track
-    // whose chain runs short moves on alone. `trackDone_` is a column that has run out — it stays
-    // silent until every other track has run out too, which is when the song loops.
+    // whose chain runs short moves on alone. `trackDone_` is a track with nothing to play at all:
+    // SONG loops each block for ever, so it is set only by PLAY landing on a cell this column leaves
+    // blank, and the track is then silent until STOP. A RENDER sets it at the end of the range.
     int64_t trackNextFrame_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     int  trackSongRow_[8]  = {0, 0, 0, 0, 0, 0, 0, 0};
     int  trackChainRow_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -2644,16 +2497,9 @@ class Sequencer {
 
     // ── side-records: UI cursor + live-edit rollback + the EQM restore flag (S5, SC-4/SC-2) ──
     std::deque<Checkpoint> checkpoints_[8];                                // ring of 4, per track
-    // One entry per lap the song has started again — see SongRestart. ⚠️ NOT per track: the restart
-    // is the one thing the eight cursors do together, and undoing it for some of them is what leaves
-    // the song in two laps at once. Four is the checkpoints' depth for the same reason — a rewind
-    // reaches at most the lookahead ahead of the transport, and a song shorter than that can have
-    // more than one lap queued.
-    static constexpr size_t RESTART_RING = 4;
     // The ring bound for TrackState::emptyHops. Sixteen is a full chain of pass-through phrases,
     // which is legitimate; past that nothing is going to play.
     static constexpr int MAX_EMPTY_HOPS = 32;
-    std::deque<SongRestart> restarts_;
     std::deque<std::pair<int, int64_t>> chainRowStartFrames_;              // (chainRow, startFrame)
     std::vector<std::pair<SongPos, int64_t>>
         songPositionStartFrames_;                                          // (SongPos → startFrame), insertion-ordered

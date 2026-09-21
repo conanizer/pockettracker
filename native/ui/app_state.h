@@ -26,6 +26,7 @@
 #include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/qwerty_keyboard.h"
+#include "ui/modules/render_dialog.h"
 #include "ui/modules/sample_editor.h"
 #include "ui/modules/theme_editor.h"
 #include "ui/modules/settings_editor.h"
@@ -586,6 +587,11 @@ struct AppState {
     bool  isRendering    = false;
     float renderProgress = 0.0f;
 
+    // …and WHICH ROWS of the song go into the file. PROJECT → EXPORT → MIX / STEMS raises this panel
+    // rather than rendering the whole project, which is what makes a single sketch inside a project
+    // exportable now that a block loops rather than running on (ui/modules/render_dialog.h).
+    RenderDialogState renderDialog{};
+
     // ── Is there unsaved work? ───────────────────────────────────────────────────────────────────
     //
     // TrackerController's `projectVersion` / `savedProjectVersion`. The counter is bumped in exactly
@@ -617,7 +623,8 @@ struct AppState {
  * dim into the letterbox bars so the scrim does not stop at the 4:3 edge.
  *
  * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog, the
- * full help overlay and the FX-helper overlay (draw_fx_helper — the phrase screen's FX picker). The EQ
+ * full help overlay, the render dialog and the FX-helper overlay (draw_fx_helper — the phrase screen's
+ * FX picker). The EQ
  * and theme editors are NOT here: they REPLACE the module in place and leave the rest of the frame
  * bright, so scrimming the bars for them would invert the seam (dim bars, bright tracker). Derived from
  * the state, never from each call site remembering — the modal-predicate rule.
@@ -625,7 +632,8 @@ struct AppState {
 inline bool modal_backdrop_active(const AppState& s) {
     // ⚠️ A LOAD IS NOT HERE. It draws a status strip across the top and dims nothing — opening a file
     // asks the user no question, and a screen that goes dark for one reads as far more than it is.
-    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.helpFull;
+    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.helpFull ||
+           s.renderDialog.isOpen;
 }
 
 /**

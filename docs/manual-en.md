@@ -428,6 +428,13 @@ PROJECT
 - A **PHRASE** is a short pattern of 16 steps — like a bar of music.
 - A **CHAIN** is a sequence of up to 16 phrases. Each phrase slot can have a **transpose** value to shift pitch without duplicating the phrase.
 - The **SONG** arranges chains across 8 tracks. All 8 start together on the row you press START from, and each then moves down its own column as its own chains end.
+- A track moves down its column until it reaches an empty cell, then loops back to the top of the run of cells it is in and plays it again. A song row left empty on **all 8 tracks** therefore splits the arrangement into separate **parts**, and a part loops until you press STOP — so one project can hold several unrelated sketches that never play into each other.
+
+> [!NOTE]
+> Nothing waits for anybody. Two parts of different lengths drift apart as they loop, and a track
+> whose cell is empty on the row you pressed START from stays silent for that run. To drop a track
+> out for a few bars and bring it back in step, put a chain of empty phrases in those rows rather
+> than leaving a gap.
 
 All values (chain IDs, phrase IDs, instrument IDs, etc.) are hexadecimal, ranging from `00` to `FF`.
 
@@ -1412,13 +1419,41 @@ Navigate here: **R+UP** from SONG or CHAIN.
 |---|---|
 | SAVE | Save project to `.ptp` file (press A to confirm). |
 | LOAD | Open file browser to load a project. |
-| EXPORT — MIX | Render the full song to a stereo WAV (offline, faster than real-time). |
-| EXPORT — STEMS | Render each active track to its own stereo WAV stem, plus reverb and delay send returns. |
+| EXPORT — MIX | Open the RENDER panel, set to a stereo WAV (offline, faster than real-time). |
+| EXPORT — STEMS | Open the RENDER panel, set to one stereo WAV stem per active track, plus reverb and delay send returns. |
 | CLEAN SEQ | Remove unused chains and phrases (with confirmation dialog). |
 | CLEAN INST | Remove unused instruments (with confirmation dialog). |
 | SETTINGS | Open the SETTINGS screen (press A). |
 
 WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's home folder (section 2) — with auto-incremented filenames (`ProjectName_0001.wav`). Stems are written to a per-project subfolder — `Renders/ProjectName/ProjectName_1.wav`, `_2.wav`, … — plus `_reverb.wav` / `_delay.wav` when those sends are in use.
+
+### The RENDER panel
+
+Either EXPORT button opens the same panel; which one you pressed is what decides whether you get a
+stereo mix or a set of stems.
+
+| Row | What it does |
+|---|---|
+| SONG START | The first song row of the export. |
+| SONG END | The last song row, or **AUTO** — run to the end of the part SONG START is in. A+LEFT below SONG START's number returns to AUTO. |
+| REPEAT | How many times the chosen rows are played into the file, `x2`–`x16`, or **OFF** for once. A+LEFT below `x2` returns to OFF. |
+| RENDER | Press **A** to write the file. The percentage appears on this row while it runs. |
+
+| Control | Action |
+|---|---|
+| D-pad UP/DOWN | Move between rows |
+| A + LEFT/RIGHT | Change the value by one |
+| A + UP/DOWN | Change SONG START / SONG END by 16 rows |
+| R + UP/DOWN | Move the whole range to the previous or next part of the song |
+| B | Close the panel |
+
+A **part** is a run of song rows with a fully empty row above and below it — the same blocks playback
+loops (section 6). Since each part loops on its own, a project can hold several unrelated sketches;
+this panel is how you export one of them without the others.
+
+> [!TIP]
+> REPEAT plays the rows through again in a single pass rather than joining several files, so the
+> reverb tail, the delay repeats and any tables carry across each repeat with no seam.
 
 > [!WARNING]
 > **CLEAN SEQ** and **CLEAN INST** are **permanent** — there is no undo. Save your project before running them, in case you remove something you still needed.

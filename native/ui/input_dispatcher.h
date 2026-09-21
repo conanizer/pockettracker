@@ -983,6 +983,7 @@ class InputDispatcher {
         BROWSER   = 1u << 5,
         LOADING   = 1u << 6,
         HELP      = 1u << 7,
+        RENDER    = 1u << 8,
     };
 
     friend constexpr Overlay operator|(Overlay a, Overlay b) {
@@ -1007,6 +1008,9 @@ class InputDispatcher {
         // on the screen underneath.
         if (s_.loading.running) return Overlay::LOADING;
         if (confirm_open())     return Overlay::CONFIRM;
+        // The render dialog opens from PROJECT alone and can share the screen with nothing — but it
+        // IS up while a render runs, and a load inside one would rank above it, so it sits here.
+        if (s_.renderDialog.isOpen) return Overlay::RENDER;
         // The full help can be raised over the browser and over the two in-place editors, so it ranks
         // above them. It can never share the screen with a confirm or the keyboard — SELECT is refused
         // under the first and aborts the second — nor with the FX picker, which SELECT does not reach.
@@ -1282,6 +1286,42 @@ class InputDispatcher {
 
     /** EXPORT. Renders SYNCHRONOUSLY; `on_render_progress_` repaints the frame from inside it. */
     void export_song(bool stems);
+
+    // ── The RENDER dialog (ui/modules/render_dialog.h) ──────────────────────────────────────────
+
+    /**
+     * PROJECT → EXPORT → MIX / STEMS. The range starts on the section the SONG cursor is parked in
+     * and SONG END starts on AUTO, so the common ask — "export the part I am looking at" — needs no
+     * dialling. ⚠️ REPEAT is deliberately KEPT between openings: it is a preference about the file,
+     * not a place in the song, and re-typing it for the stems pass after the mix pass is the one
+     * thing this panel would otherwise cost.
+     */
+    void open_render_dialog(RenderDialogState::Output output);
+
+    bool render_dialog_open() const { return s_.renderDialog.isOpen; }
+
+    /**
+     * A+UP/DOWN's step on the panel: a page of song rows, or ONE repetition.
+     *
+     * ⚠️ REPEAT HAS NO COARSE STEP WORTH THE NAME — it runs OFF..×16, so a page would be the whole
+     * range in one press. Both axes walking it by one is the same answer the TYPE cell and the theme
+     * presets give for the same reason, and it keeps the row from having an edge that does nothing.
+     */
+    int render_dialog_coarse_step() const {
+        return s_.renderDialog.is_on(RenderRow::REPEAT) ? 1 : 16;
+    }
+
+    /** UP/DOWN on the panel. Clamps at both ends — four rows are not a ring worth wrapping. */
+    void render_dialog_move_cursor(int delta);
+
+    /** A+DPAD on the panel. `delta` is the step; the row under the cursor decides what it means. */
+    void render_dialog_edit(int delta);
+
+    /** R+UP/DOWN: move the whole range to the previous or next section of the song. */
+    void render_dialog_step_section(int delta);
+
+    /** A on the RENDER row. Fires the output the dialog was opened for, then closes. */
+    void render_dialog_fire();
 
     /**
      * SONG-selection RESAMPLE — the APPLY of the RESAMPLE keyboard. Renders the live selection to a WAV

@@ -34,9 +34,9 @@
 //   (c) …AND THEN NOTHING ENDED THE NOTES. A looping sample and a held SoundFont note do not decay,
 //       so waiting for the output to fall below −90 dBFS waited for the runaway cap: every such song
 //       exported to a file with TAIL_MAX_SECONDS of leftover ringing on the end, cut mid-waveform
-//       when it expired. The sequence running out now releases every track (scheduleReleaseAll) at
-//       the frame the last step ends on, so what follows the music is what a listener would expect
-//       to follow it — the notes' own release envelopes, the reverb and the delay repeats.
+//       when it expired. The range running out now KILs every track (scheduleNoteOffAll) at the frame
+//       the last row ends on, so what follows the music is what a listener would expect to follow it —
+//       the notes' own release envelopes, the reverb and the delay repeats.
 //
 // Live playback cannot be affected by any of this: resetEffectState()'s only callers are here.
 
@@ -128,10 +128,15 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
 
     std::vector<float> buf(static_cast<size_t>(RENDER_CHUNK_FRAMES) * 2);
 
-    // ── the sequence ends, so the notes do (c) ──
-    // Queued now, at the exact frame the last step ends on, so it rides the same sample-accurate
+    // ── the range ends, so the notes do (c) ──
+    // Queued now, at the exact frame the last row ends on, so it rides the same sample-accurate
     // timeline as every other scheduled event rather than landing on a chunk boundary.
-    engine.scheduleReleaseAll(songFrames);
+    //
+    // ⚠️ IT IS A KIL, and the frame is the one a KIL written on the first step of the row AFTER the
+    // range would land on. What follows the music in the file is therefore the TAILS alone — the
+    // release envelopes, the SoundFont releases, the reverb and the delay repeats — and not the rest
+    // of whatever bar each track happened to be in the middle of.
+    engine.scheduleNoteOffAll(songFrames);
 
     // ── the song ──
     int64_t rendered = 0;
@@ -223,6 +228,71 @@ inline SongBounds find_song_bounds(const Project& project) {
     return b;
 }
 
+// ─── SECTIONS: the run of rows a render range defaults to ────────────────────────────────────────
+//
+// A SECTION is a run of consecutive song rows with content, bounded above and below by a row blank on
+// EVERY track. It is the arrangement's own unit now that a track loops its block rather than running
+// on (scheduler.h `song_cell_plays`), and it is what SONG START / SONG END default to.
+//
+// ⚠️ NOT the scheduler's block, and the difference is load-bearing. A block is ONE TRACK's run of
+// playable cells; a section is the full width. A render has to pick rows for all eight tracks at once,
+// so it cannot use per-track boundaries — and a section is exactly the span inside which every track's
+// block is contained.
+
+/** Does any track have a chain on this row? A row where none does is a section boundary. */
+inline bool song_row_filled(const Project& project, int row) {
+    if (row < 0 || row >= 256) return false;
+    for (const Track& track : project.tracks) {
+        if (row < static_cast<int>(track.chainRefs.size()) &&
+            track.chainRefs[static_cast<size_t>(row)] >= 0 &&
+            track.chainRefs[static_cast<size_t>(row)] <= 255)
+            return true;
+    }
+    return false;
+}
+
+/**
+ * The first row of the section `row` sits in.
+ *
+ * ⚠️ A BLANK ROW BELONGS TO THE SECTION BELOW IT, not to the one above. The cursor is parked in a gap
+ * far more often than on the last row of a part — you scroll down through the blanks to reach the next
+ * sketch — so answering "the part you are heading towards" is the answer that needs no correcting.
+ * With nothing below, it falls back to the nearest part above, and on an empty song to row 0.
+ */
+inline int song_section_start(const Project& project, int row) {
+    if (row < 0) row = 0;
+    int at = -1;
+    for (int r = row; r < 256; ++r) if (song_row_filled(project, r)) { at = r; break; }
+    if (at < 0) for (int r = row; r >= 0; --r) if (song_row_filled(project, r)) { at = r; break; }
+    if (at < 0) return 0;
+    while (at > 0 && song_row_filled(project, at - 1)) --at;
+    return at;
+}
+
+/** The last row of the section starting at `startRow` — what SONG END's AUTO resolves to. */
+inline int song_section_end(const Project& project, int startRow) {
+    if (startRow < 0) startRow = 0;
+    int at = startRow;
+    while (at < 255 && song_row_filled(project, at + 1)) ++at;
+    return at;
+}
+
+/**
+ * The start of the section before or after the one `row` is in — R+UP/DOWN in the render dialog.
+ * Returns `row`'s own section when there is none that way, so the gesture clamps rather than wrapping.
+ */
+inline int adjacent_section_start(const Project& project, int row, int delta) {
+    const int here = song_section_start(project, row);
+    if (delta > 0) {
+        for (int r = song_section_end(project, here) + 1; r < 256; ++r)
+            if (song_row_filled(project, r)) return r;
+        return here;
+    }
+    for (int r = here - 1; r >= 0; --r)
+        if (song_row_filled(project, r)) return song_section_start(project, r);
+    return here;
+}
+
 // ─── the STEMS plan (RenderController.renderStemsToWav, the pure half) ───────────────────────────
 //
 // WHICH stems a project has — deliberately NOT where they are written. Building the paths needs to
@@ -251,17 +321,24 @@ struct StemPass {
 };
 
 /**
- * The passes a stems render will make.
+ * The passes a stems render will make, over the row range `startRow..endRow` (−1, −1 = the whole
+ * song).
  *
- * A track earns a stem when it is NOT MUTED and has at least one chain reference in the song. The
- * two send returns earn one when any instrument the song actually uses feeds them. ⚠️ The track
+ * A track earns a stem when it is NOT MUTED and has at least one chain reference IN THE RANGE. The
+ * two send returns earn one when any instrument the range actually uses feeds them. ⚠️ The track
  * stems are numbered SEQUENTIALLY (_1.._N), not by track index — Kotlin's, and it means a song using
  * tracks 1, 4 and 7 yields _1, _2, _3.
+ *
+ * ⚠️ THE RANGE IS WHAT DECIDES, not the song. Exporting one part of an arrangement must not write a
+ * silent file per track that plays somewhere else in it — the empty stems are the whole reason this
+ * asks per-range rather than per-project.
  */
-inline std::vector<StemPass> stems_plan(const Project& project) {
+inline std::vector<StemPass> stems_plan(const Project& project, int startRow = -1, int endRow = -1) {
     std::vector<StemPass> passes;
 
-    const SongBounds bounds = find_song_bounds(project);
+    SongBounds bounds;
+    if (startRow >= 0 && endRow >= startRow) { bounds.startRow = startRow; bounds.endRow = endRow; }
+    else                                       bounds = find_song_bounds(project);
     if (bounds.empty()) return passes;
 
     std::vector<int> activeTracks;
@@ -269,7 +346,8 @@ inline std::vector<StemPass> stems_plan(const Project& project) {
         const Track& track = project.tracks[static_cast<size_t>(id)];
         if (!track_audible(project, track)) continue;
         bool hasChain = false;
-        for (int row = 0; row < 256 && row < static_cast<int>(track.chainRefs.size()); ++row) {
+        for (int row = bounds.startRow; row <= bounds.endRow && row < 256 &&
+                                        row < static_cast<int>(track.chainRefs.size()); ++row) {
             const int ref = track.chainRefs[static_cast<size_t>(row)];
             if (ref >= 0 && ref <= 255) { hasChain = true; break; }
         }
