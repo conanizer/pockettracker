@@ -1321,7 +1321,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§22) writes the same time from a phrase or a table. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |
-| FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
+| FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. From about `E0` the repeats stop fading and the delay begins to sing: around `F0` they hang almost forever, and above it they bloom into a steady tone that keeps going after the input stops. Turn WOBL up to make that tone drift. |
 | WOBL | How far the tape speed drifts (`00`–`FF`), bending the pitch of the repeats. `00` holds them steady. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
 | EQ | Press A to open the EQ EDITOR for the delay return. |
@@ -1336,7 +1336,7 @@ The delay return volume is set on the MIXER screen (DEL row in master column).
 > Setting **Delay REV** above `00` feeds the delay output into the reverb — this creates a "delay into reverb" effect popular in ambient, dub, and post-rock music. Start around `40` and adjust to taste.
 
 > [!WARNING]
-> **FDBK** values near `FF` create near-infinite delay tails that can clip the output. Start around `60`–`80` and increase carefully while listening to the master meter.
+> **FDBK** values near `FF` make the delay self-oscillate: the tone holds at a steady level of its own and does not stop when you stop playing. Pull FDBK back below `E0` to end it. Start around `60`–`80` and increase carefully while listening to the master meter.
 
 ### Master bus
 

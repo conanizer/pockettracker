@@ -117,6 +117,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Reverb room size and decay set separately — a small room can ring long, a big one die fast
 - Reverb character: pre-delay, stereo width and tail modulation — with TYPE presets (ROOM, HALL, CAVE) that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with TYPE presets that set all three at once
+- Push the delay's feedback past `E0` and it self-oscillates — the repeats bloom into a steady singing tone that carries on after the input stops
 - Write the delay time from a phrase or a table with `TIM`, and fade it with AUS/AUF — the repeats bend in pitch as the time moves, like a tape delay
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency
 - Reverb and delay each have their own 3-band EQ
