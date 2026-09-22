@@ -583,6 +583,19 @@ class InputDispatcher {
     void boot_midi_in_port();
 
     /**
+     * A knob on the controller moved and the song has a mapping for it (`songcore/midi_map.h`).
+     * Returns true if it drove anything.
+     *
+     * ⚠️ **NOT `mark_modified()`, AND THAT IS THE POINT.** That one pushes the WHOLE mixer and every
+     * global effect, and rolls the lookahead back, for one number — priced for a human pressing a
+     * button once, not for a knob arriving thirty times a second. The host writes the value and
+     * pushes the one thing that carries it; what is left here is the half that is genuinely owed
+     * every time: the document is dirty, and the crash autosave's debounce re-arms, so a sweep
+     * writes one recovery file after it stops rather than one per message.
+     */
+    bool midi_mapped_cc(int controller, int value);
+
+    /**
      * The app has come back to the front — re-list the file browser if that is what is on screen.
      * A no-op on every other screen, and on a listing nothing has changed under.
      *

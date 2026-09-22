@@ -35,6 +35,7 @@
 #include "../byte_source.h"     // pt_fopen — every media open below goes through it
 #include "../load_progress.h"   // LoadSpan — one bar over a whole project's worth of files
 #include "media_path.h"      // resolve_media_path and the path helpers a media load resolves through
+#include "midi_map.h"     // MapDestId — what a mapped knob's push switches on
 #include "model.h"
 #include "scheduler.h"    // hex_to_float (VolumeUtils.hexToFloat)
 #include "traversal.h"    // collect_used_instruments
@@ -212,6 +213,70 @@ void push_mixer(Engine& engine, const Project& project, MixerHeld held = {}) {
     engine.setDustDepth(project.dustDepth);
     engine.setLimiterPreGain(project.limiterPreGain);
     push_global_effects(engine, project, held);
+}
+
+// ── A MAPPED KNOB'S PUSH: the ONE thing that moved ───────────────────────────────────────────────
+//
+// ⭐⭐ **THE RIGHT-SIZED VERB, AND HERE IT IS THE WHOLE DESIGN RATHER THAN AN OPTIMISATION.** A knob
+// arrives ~30 times a second (measured), and `push_mixer` above is ~140 engine calls including all
+// 128 EQ slots. Routing a mapped CC through it would spend a screenful of work per byte for one
+// number — so each destination pushes the call that carries it, and nothing else.
+//
+// ⚠️⚠️ **AND IT IS NEVER GATED BY `MixerHeld`**, which is the opposite of what `push_mixer` does two
+// functions up. A mapped knob is a PRESS: the same argument written beside the mute/solo lines there
+// — "on a press this line IS the press". Gate it and a knob mapped to a fader a running `VTR` owns
+// writes the value, moves the number on screen, and is heard by nobody until the transport stops:
+// the "saved and not heard" failure this project has already paid for once. The hand wins, which is
+// also where Ableton and Bitwig land.
+//
+// ⚠️ Returns false for a destination this function does not push — an instrument parameter, whose
+// verb is `push_instrument(id)` (it needs the routing and the sample rate, which are the host's).
+template <typename Engine>
+bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scopeIndex) {
+    switch (dest) {
+        case MapDestId::TRACK_VOL:
+            if (scopeIndex < 0 || scopeIndex >= static_cast<int>(p.tracks.size())) return false;
+            engine.setTrackVolume(scopeIndex, hex_to_float(p.tracks[scopeIndex].volume));
+            return true;
+        case MapDestId::MASTER_VOL:
+            engine.setMasterVolume(hex_to_float(p.masterVolume));
+            return true;
+
+        // The four that share one setter, and the three that share the other. A setter taking the
+        // whole group is not a reason to push the group's neighbours too — they are simply the
+        // arguments it asks for, and they are the values already in the project.
+        case MapDestId::REV_DCAY:
+        case MapDestId::REV_DAMP:
+        case MapDestId::REV_WET:
+        case MapDestId::REV_SIZE:
+            engine.setReverbParams(p.reverbFeedback, p.reverbDamp, p.reverbWet, p.reverbSize);
+            return true;
+        case MapDestId::REV_PRE:
+        case MapDestId::REV_WIDE:
+        case MapDestId::REV_MOD:
+            engine.setReverbCharacter(p.reverbPreDelay, p.reverbWidth, p.reverbMod);
+            return true;
+
+        case MapDestId::DLY_TIME:
+        case MapDestId::DLY_FDBK:
+        case MapDestId::DLY_WET:
+            engine.setDelayParams(p.delayTime, p.delayFeedback, p.delaySync,
+                                  static_cast<float>(p.tempo), p.delayWet);
+            return true;
+        case MapDestId::DLY_TONE:
+        case MapDestId::DLY_WOBL:
+            engine.setDelayCharacter(p.delayPong, p.delayTone, p.delayWobble);
+            return true;
+        case MapDestId::DLY_SEND:
+            engine.setDelayReverbSend(p.delayReverbSend);
+            return true;
+
+        case MapDestId::OTT_DEPTH:  engine.setOttDepth(p.ottDepth);             return true;
+        case MapDestId::DUST_DEPTH: engine.setDustDepth(p.dustDepth);           return true;
+        case MapDestId::LIMIT_PRE:  engine.setLimiterPreGain(p.limiterPreGain); return true;
+
+        default: return false;   // NONE, and every INSTRUMENT-scoped id
+    }
 }
 
 // RenderController.applyMasterBusForRender. The *ForRender variants reset the module rather than

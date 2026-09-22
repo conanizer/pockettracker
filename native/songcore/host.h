@@ -373,6 +373,10 @@ class SongcoreHost {
         // record the engine has already run past. Draining first also means a key pressed this frame is
         // routed against the clock this frame read, not the one the pass has moved on to.
         poll_midi_in(seq_.clock() + MIDI_IN_LEAD_FRAMES);
+        // ⚠️ BETWEEN THE DRAIN AND THE PASS, and that is the whole point of deferring it: a mapped
+        // knob's lookahead roll has to happen before the pass it is meant to affect, and once for
+        // every message the drain just handed over rather than once each.
+        flush_mapped_edits();
         seq_.updatePlaybackBuffer();
         // ⚠️ The MIDI queue is released HERE — unless a sender thread has taken the job (B3) — and it
         // must be released even when nothing is playing, because a LEN gate and a panic's note-offs are
@@ -532,6 +536,66 @@ class SongcoreHost {
     void push_globals() {
         if (!engine_) return;
         push_mixer(*engine_, project_, held_by_song());
+    }
+
+    // ── ↕ a mapped knob (midi_map.h) ─────────────────────────────────────────────────────────────
+
+    /**
+     * A knob the song has a mapping for moved. Writes the value into the project and makes it heard.
+     * Returns how many mappings that controller drove — 0 means nothing is mapped to it.
+     *
+     * ⭐ **THE VALUE IS WRITTEN THE INSTANT THE KNOB MOVES.** Nothing waits for the end of a
+     * "gesture": a knob has no button-up, so there is nothing to wait for. What is deferred is the
+     * AUTOSAVE, on the debounce every other edit already uses — the dispatcher's job, not this one.
+     *
+     * ⚠️ **ONE CONTROLLER MAY DRIVE SEVERAL DESTINATIONS** (a macro knob), so this is a sweep of the
+     * list rather than a lookup, and every match is applied.
+     *
+     * ⚠️ **A MAPPING WHOSE DESTINATION HAS GONE IS SKIPPED, NOT DELETED** — the instrument slot was
+     * cleared, the track index is out of range. It stays in the song and the list screen greys it.
+     */
+    int apply_mapped_cc(int controller, int value) {
+        int applied = 0;
+        for (const MidiMapping& m : project_.midiMappings) {
+            if (m.controller != controller) continue;
+            const MapDest* d = map_dest(m.dest);
+            if (!d) continue;   // an id from a newer version — the row greys, the knob does nothing
+
+            if (!write_mapped(project_, m, scale_cc(value, m.rangeMin, m.rangeMax))) continue;
+            ++applied;
+            if (!engine_) continue;
+
+            if (d->scope == MapScope::INSTRUMENT) {
+                push_instrument(m.scopeIndex);
+                // ⚠️⚠️ **VOL AND PAN ARE BAKED INTO A NOTE WHEN IT IS EMITTED, and nothing else in the
+                // catalogue is.** `Sequencer::emit_note` reads the instrument's volume and pan and
+                // puts them in the record; every other mapped parameter is engine state a running
+                // voice reads, so pushing it IS delivering it. Those two therefore have to reach
+                // notes the lookahead has already scheduled — the "a value read two phrases before
+                // it is heard" shape — and that is what the roll below is for.
+                if (d->id == MapDestId::INS_VOL || d->id == MapDestId::INS_PAN)
+                    mappedNotifyDue_ = true;
+            } else {
+                push_mapped_dest(*engine_, project_, d->id, m.scopeIndex);
+                release_song_hold(d->id, m.scopeIndex);
+            }
+        }
+        return applied;
+    }
+
+    /**
+     * The one expensive thing a mapped knob can owe, paid AT MOST ONCE PER POLL rather than per
+     * message.
+     *
+     * ⚠️ `notify_data_changed()` rolls the lookahead back to the next phrase boundary. At a knob's
+     * ~30 messages a second that is the scheduler never getting to schedule ahead, which is audible
+     * as stutter and gets blamed on the audio buffer. One poll is the cap, and it is free: the
+     * messages of a poll were drained together anyway.
+     */
+    void flush_mapped_edits() {
+        if (!mappedNotifyDue_) return;
+        mappedNotifyDue_ = false;
+        if (is_playing()) notify_data_changed();
     }
 
     /**
@@ -1330,6 +1394,25 @@ class SongcoreHost {
     bool trace_enabled() const { return traceEnabled_; }
 
   private:
+    /**
+     * A mapped knob IS the press, so whatever the running take had claimed on that destination is
+     * the hand's now — `MixerHeld` would otherwise make the next ordinary edit's push skip exactly
+     * the fader the knob is moving, and the knob would be saved and not heard.
+     *
+     * ⚠️ A TABLE's own TIM latch is deliberately left alone: it is a one-way arm for the restore in
+     * `stop()`, not a gate, and consuming it here would leave the delay restored by nobody.
+     */
+    void release_song_hold(MapDestId id, int scopeIndex) {
+        switch (id) {
+            case MapDestId::TRACK_VOL:  seq_.release_mixer_vol_track(scopeIndex); break;
+            case MapDestId::MASTER_VOL: seq_.release_master_vol();                break;
+            case MapDestId::DLY_TIME:   seq_.release_delay_time();                break;
+            default: break;
+        }
+    }
+
+    bool mappedNotifyDue_ = false;   // a mapped INS VOL/PAN owes the lookahead a roll this poll
+
     /**
      * A SoundFont slot moved under a playing take, so the lookahead has to be re-derived.
      *

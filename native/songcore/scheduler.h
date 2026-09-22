@@ -450,6 +450,16 @@ class Sequencer {
     int  mixer_vol_tracks() const { return mixerVolTracks_; }
     bool master_vol_active() const { return masterVolActive_; }
 
+    // ⚠️ **THE HAND TAKES A FADER BACK FROM THE SONG.** A mapped knob (or anything else that IS the
+    // press rather than a re-push of authored state) moves a fader the song may be driving, and the
+    // flags above are what would make the next ordinary edit's push skip it — so the mover says here
+    // that the take does not own it any more. The song can take it again: the next VTR sets the bit.
+    void release_mixer_vol_track(int track) {
+        if (track >= 0 && track < 8) mixerVolTracks_ &= ~(1 << track);
+    }
+    void release_master_vol() { masterVolActive_ = false; }
+    void release_delay_time() { delayTimeActive_ = false; }
+
     // True once a TIM has taken the delay's echo time over this session — the same BEFORE-stop() edge
     // and the same reason as the two above: the command REPLACES the DELAY screen's time and nothing
     // later puts it back, so without the restore the next PLAY starts on whatever the song faded to.

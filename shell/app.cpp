@@ -69,10 +69,65 @@ struct MidiInConsole : songcore::IMidiInObserver {
     uint64_t records  = 0;
     uint64_t silent   = 0;       // messages that produced no bus record at all
 
+    // ── What a turning knob costs, as a number ───────────────────────────────────────────────────
+    //
+    // A controller sweeping a knob is a stream of CCs, and every design that answers one with work —
+    // writing a value, pushing it to the engine — has to be priced against how fast they really
+    // arrive. Nothing in this tree had ever observed that, so the counters are here rather than in a
+    // tool: only the app has a real port open.
+    //
+    // ⚠️ `perDrain` is the one that decides whether collapsing several CCs into one apply is worth
+    // anything: the drain runs every POLL_MS, so a busiest-drain of 1 means there is nothing to
+    // collapse at that rate. The 16 ms window is the same question asked at the DRAWING rate, where a
+    // collapse has more to gather, and the 1 s one is the peak RATE — the mean over a whole session
+    // is diluted by every moment nobody was turning anything.
+    //
+    // ⚠️ The maxima count every CC, whatever its controller number, so two knobs turned at once read
+    // as one busy stream. That over-states what a single mapping would see, never under-states it.
+    //
+    // ⚠️ Every message a single drain hands over carries the SAME timestamp — the drain's, not the
+    // wire's — so a window can never split a drain, and the finest thing measurable here is a drain.
+    uint64_t ccTotal   = 0;
+    uint64_t ccFirstMs = 0;      // wall clock of the first and last CC — the span the rate is over
+    uint64_t ccLastMs  = 0;
+    uint64_t ccDrains  = 0;      // drains that carried at least one CC
+    uint64_t ccMaxPerDrain = 0;
+    uint64_t drain     = 0;      // bumped by the frame loop, immediately above host.poll()
+
+    /** Most CCs seen inside one window of `width` ms. Windows are fixed, so a burst that straddles a
+     *  boundary is counted as two — the number is a floor, never an over-statement. */
+    struct Window {
+        uint64_t width;
+        uint64_t id  = ~0ull;    // a value no window index can have, so the first CC opens one
+        uint64_t n   = 0;
+        uint64_t max = 0;
+
+        void add(uint64_t nowMs) {
+            const uint64_t w = nowMs / width;
+            if (w != id) { id = w; n = 0; }
+            if (++n > max) max = n;
+        }
+    };
+    Window w16{16}, w100{100}, w1000{1000};
+
+    void count_cc(uint64_t nowMs) {
+        if (ccTotal++ == 0) ccFirstMs = nowMs;
+        ccLastMs = nowMs;
+
+        if (drain != ccDrain_) { ccDrain_ = drain; ccInDrain_ = 0; ++ccDrains; }
+        ++ccInDrain_;
+        if (ccInDrain_ > ccMaxPerDrain) ccMaxPerDrain = ccInDrain_;
+
+        w16.add(nowMs);
+        w100.add(nowMs);
+        w1000.add(nowMs);
+    }
+
     void on_midi_in(const songcore::MidiInMessage& m, const songcore::Event* ev, int n) override {
         ++messages;
         records += static_cast<uint64_t>(n < 0 ? 0 : n);
         if (n <= 0) ++silent;
+        if (m.status == songcore::EV_CC) count_cc(static_cast<uint64_t>(SDL_GetTicks64()));
         if (!trace) return;
 
         // ⚠️ The bytes are RECONSTRUCTED from the message rather than remembered from the wire, so a
@@ -88,6 +143,11 @@ struct MidiInConsole : songcore::IMidiInObserver {
         std::printf("\n");
         std::fflush(stdout);
     }
+
+  private:
+    // ⚠️ Starts at a value no drain index can have, so the very first CC opens a run of its own
+    // instead of joining drain 0.
+    uint64_t ccDrain_ = ~0ull, ccInDrain_ = 0;
 };
 
 struct BackgroundContext {
@@ -1582,6 +1642,11 @@ int run(const AppConfig& cfg) {
         // written down in midi-in-base.h as well.
         if (cfg.midiIn) cfg.midiIn->pump();
 
+        // Which drain the CCs about to be handed over belong to. See the rate meter's note: it is the
+        // quantum an apply would be collapsed into, so it has to be counted where the drain is, not
+        // where the frame is.
+        ++midiInConsole.drain;
+
         // The lookahead pump. ⚠️ Since B3 it no longer releases the MIDI queue when the sender thread
         // is running (host.h's set_midi_pump_external) — the scheduler's lookahead is still all its
         // own. ⚠️ Since E2 it also DRAINS the MIDI-in queue, which is why a live key's latency is this
@@ -1839,6 +1904,22 @@ int run(const AppConfig& cfg) {
                     host.midi_in_thru() ? "on" : "OFF (loopback)",
                     static_cast<unsigned long long>(host.midi_in_thru_sent()),
                     static_cast<unsigned long long>(host.midi_in_thru_suppressed()));
+
+        // ⭐ The rate a knob really turns at. Printed only when a CC actually arrived, so a run with
+        // none says nothing rather than printing a confident 0/s.
+        if (midiInConsole.ccTotal > 0) {
+            const uint64_t spanMs = midiInConsole.ccLastMs - midiInConsole.ccFirstMs;
+            std::printf("         CC: %llu in %.2f s = %.0f/s mean; PEAK %llu/s (busiest second), "
+                        "%llu per 100 ms, %llu per 16 ms, %llu per drain; %llu drains carried one\n",
+                        static_cast<unsigned long long>(midiInConsole.ccTotal),
+                        spanMs / 1000.0,
+                        spanMs > 0 ? midiInConsole.ccTotal * 1000.0 / spanMs : 0.0,
+                        static_cast<unsigned long long>(midiInConsole.w1000.max),
+                        static_cast<unsigned long long>(midiInConsole.w100.max),
+                        static_cast<unsigned long long>(midiInConsole.w16.max),
+                        static_cast<unsigned long long>(midiInConsole.ccMaxPerDrain),
+                        static_cast<unsigned long long>(midiInConsole.ccDrains));
+        }
     }
 
     //

@@ -772,6 +772,12 @@ void InputDispatcher::mark_modified(bool table_touched) {
     if (host_.is_playing()) host_.notify_data_changed();
 }
 
+bool InputDispatcher::midi_mapped_cc(int controller, int value) {
+    if (host_.apply_mapped_cc(controller, value) == 0) return false;
+    mark_dirty_and_arm_autosave();
+    return true;
+}
+
 int InputDispatcher::remembered_song_track() const { return s_.songCursorColumn - 1; }
 
 int InputDispatcher::audition_track() const {

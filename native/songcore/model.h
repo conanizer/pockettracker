@@ -483,6 +483,30 @@ struct MidiCcSlot {
 
 constexpr int MIDI_CC_SLOTS = 4;
 
+/**
+ * One of the controller's knobs pointed at one parameter of this song — the data half of
+ * `midi_map.h`, which holds the catalogue `dest` indexes into and everything that reads or writes
+ * through it.
+ *
+ * ⚠️ `dest` is a `MapDestId`, and **a number there is a number in someone's saved song**: the
+ * catalogue appends, never inserts. `scopeIndex` says WHICH track or instrument, and it is resolved
+ * when the mapping is learned rather than followed from the cursor. The range is in the
+ * destination's own units and may be inverted (min > max).
+ */
+struct MidiMapping {
+    uint8_t controller = 0;   // the CC number the knob sends, 0-127
+    uint8_t dest       = 0;   // 0 = empty
+    uint8_t scopeIndex = 0;
+    int     rangeMin   = 0;
+    int     rangeMax   = 255;
+
+    bool operator==(const MidiMapping& o) const {
+        return controller == o.controller && dest == o.dest && scopeIndex == o.scopeIndex &&
+               rangeMin == o.rangeMin && rangeMax == o.rangeMax;
+    }
+    bool operator!=(const MidiMapping& o) const { return !(*this == o); }
+};
+
 struct Instrument {
     int id = 0;
     std::string name = default_instrument_name(0);
@@ -699,6 +723,17 @@ struct Project {
     int  midiSyncOut = 0;               // 0 OFF | 1 CLOCK | 2 TRANSPORT | 3 CLOCK+TRANSPORT (phase C)
     bool midiSendProgramChange = true;
     std::vector<int> midiInputChannels = std::vector<int>(POOL_TRACKS, -1);  // per-track input channel
+
+    /**
+     * Which of this controller's knobs moves which parameter (`midi_map.h`).
+     *
+     * ⚠️ IN THE SONG because a mapping names song content — "instrument 3's cutoff" only means
+     * something beside a song that has an instrument 3. The CHANNEL those knobs arrive on is the
+     * opposite: it describes the cable on this desk, so it lives in settings.json.
+     *
+     * ⚠️ A COUNT, NOT 128 SLOTS. Empty is empty; each learn appends one.
+     */
+    std::vector<MidiMapping> midiMappings;
 };
 
 // ── Which tracks are making sound ────────────────────────────────────────────────────────────────
