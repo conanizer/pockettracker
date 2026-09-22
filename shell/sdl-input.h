@@ -117,8 +117,8 @@ public:
     void handle_event(const SDL_Event& e, uint64_t now_ms);
 
     /**
-     * Once per frame. Emits the synthetic repeat presses — 400 ms to the first, then one every
-     * 100 ms, exactly as `InputMapper.startKeyRepeat` does.
+     * Once per frame. Emits the synthetic repeat presses — 400 ms to the first, then a train that
+     * TIGHTENS with the hold: see the REPEAT_ constants.
      */
     void tick(uint64_t now_ms);
 
@@ -180,8 +180,21 @@ private:
     /** One trace line. `mapped` false prints the reason it went nowhere. */
     void trace(const char* source, const char* what, bool mapped, Button b) const;
 
+    // A held button speeds UP; it never moves more than one step at a time. That distinction is the
+    // whole design: a multiplied step jumps 2 then 4 rows per frame, which reads as a stutter however
+    // fast the frames come, while a tightening interval stays one row a frame and simply arrives more
+    // often. The ramp is linear in the hold's elapsed time.
+    //
+    // ⚠️ `tick` emits AT MOST ONE repeat per frame, so the real cadence is these intervals rounded UP
+    // to a whole 16 ms frame: 64 → 4 frames (~15/s), 48 → 3 (~21/s), 32 → 2 (~31/s). Picking values
+    // near frame multiples is what keeps the ramp from alternating between two frame counts.
     static constexpr uint64_t REPEAT_INITIAL_DELAY = 400;  // ms before the first repeat
-    static constexpr uint64_t REPEAT_INTERVAL      = 100;  // ms between repeats
+    static constexpr uint64_t REPEAT_INTERVAL_SLOW = 64;   // ms between the first repeats
+    static constexpr uint64_t REPEAT_INTERVAL_FAST = 32;   // ms once the ramp has run out
+    static constexpr uint64_t REPEAT_RAMP_MS       = 1200; // ms of repeating to get from one to the other
+
+    /** The gap to the next repeat, for a train that has been running `repeating_ms`. */
+    static uint64_t repeat_interval(uint64_t repeating_ms);
 
     bool held_[static_cast<size_t>(Button::COUNT)] = {false};
 
@@ -197,6 +210,10 @@ private:
     bool     repeatActive_ = false;
     Button   repeatButton_ = Button::DPAD_UP;
     uint64_t repeatNextMs_ = 0;
+
+    /** When the repeat TRAIN starts — the press plus the initial delay, not the press. The ramp is
+     *  measured from here, so the silent first 400 ms does not count towards it. */
+    uint64_t repeatTrainMs_ = 0;
 
     /** Whether B currently counts as repeatable — see set_b_repeatable. */
     bool bRepeatable_ = false;

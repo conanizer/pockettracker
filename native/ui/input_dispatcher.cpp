@@ -1555,18 +1555,6 @@ void InputDispatcher::on_a_released() {
     s_.fxHelper = FxHelperState{};
 }
 
-void InputDispatcher::on_dpad_released() {
-    // Both accelerations are keyed off "the last call looked like part of the same gesture", so
-    // ending the gesture is all this has to do — the next press then reads as fresh on its own terms.
-    // `lastBrowserMoveDelta_ = 0` is that statement for the browser: a delta is never 0, so the next
-    // call cannot match it.
-    //
-    // The gap tests in both functions STAY. They are no longer the discriminator, but they still
-    // cover the case a release cannot reach: a repeat train that outlives whatever produced it.
-    lastBrowserMoveDelta_    = 0;
-    textCursorRepeatStreak_  = 0;
-}
-
 void InputDispatcher::on_a_deferred() {
     // The mapper is holding this press. Nothing acts here — the one thing recorded is the number that
     // will have MOVED by the time A comes back up. Every other deferred cell opens something that reads
@@ -2088,20 +2076,10 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
     }
 }
 
-int InputDispatcher::text_cursor_repeat_step() {
-    const long long dt = now_ms_ - lastTextCursorMoveMs_;
-    lastTextCursorMoveMs_ = now_ms_;
-    if (dt > 250) { textCursorRepeatStreak_ = 0; return 1; }   // fresh gesture / the 400 ms initial gap
-    ++textCursorRepeatStreak_;
-    if (textCursorRepeatStreak_ < 4) return 1;                 // settle in at 1 char/repeat
-    if (textCursorRepeatStreak_ < 9) return 2;                 // then 2×
-    return 4;                                                  // then 4× — ~40 chars/s at the 100 ms cadence
-}
-
 void InputDispatcher::on_r_left() {
     if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) {
-        for (int n = text_cursor_repeat_step(); n > 0; --n) move_text_cursor_left(s_.qwerty);
+        move_text_cursor_left(s_.qwerty);
         return;
     }
     if (on_sample_editor()) return;   // see on_r_right
@@ -2116,7 +2094,7 @@ void InputDispatcher::on_r_left() {
 void InputDispatcher::on_r_right() {
     if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) {
-        for (int n = text_cursor_repeat_step(); n > 0; --n) move_text_cursor_right(s_.qwerty);
+        move_text_cursor_right(s_.qwerty);
         return;
     }
     // ⚠️ SWALLOWED on the sample editor, for the reason the EQ overlay is: it has no cell in the 5×5
@@ -4122,33 +4100,10 @@ void InputDispatcher::refresh_browser_on_foreground() {
 
 // ─── The browser's cursor ────────────────────────────────────────────────────────────────────────
 
-int InputDispatcher::browser_repeat_factor(int delta) {
-    const long long dt = now_ms_ - lastBrowserMoveMs_;
-    lastBrowserMoveMs_ = now_ms_;
-
-    // > 250 ms apart is a fresh press or a deliberate tap, not a hold: the shell's own initial-delay
-    // gap is 400 ms and its repeat cadence 100 ms, so the threshold sits between them with room on
-    // both sides. A different direction is a fresh gesture too, however fast it arrives.
-    if (dt > 250 || delta != lastBrowserMoveDelta_) {
-        lastBrowserMoveDelta_ = delta;
-        browserHoldStartMs_   = now_ms_;
-        return 1;
-    }
-    const long long held = now_ms_ - browserHoldStartMs_;
-    if (held >= BROWSER_ACCEL_X4_MS) return 4;
-    if (held >= BROWSER_ACCEL_X2_MS) return 2;
-    return 1;
-}
-
 void InputDispatcher::browser_move_cursor(int delta, bool page) {
     FileBrowserState& b     = s_.fileBrowser;
     const int         total = static_cast<int>(b.items.size());
     if (total == 0) return;
-
-    // Scaled here rather than at the four D-pad call sites, so a row step and a page jump accelerate
-    // by the one rule and neither can be forgotten. It is a no-op for anything that is not a held
-    // repeat, and `delta` carries the direction the factor keys off.
-    delta *= browser_repeat_factor(delta);
 
     // ⚠️ UP/DOWN WRAP; the LEFT/RIGHT page jump CLAMPS. That asymmetry is Kotlin's and it is the right
     // one: wrapping a single step off the end of a list is a convenience, but a PAGE that wrapped would
@@ -4156,8 +4111,8 @@ void InputDispatcher::browser_move_cursor(int delta, bool page) {
     if (page) {
         b.cursor = std::min(std::max(b.cursor + delta, 0), total - 1);
     } else {
-        // ⚠️ Modulo TWICE, not `+ total` once: `delta` is no longer bounded to ±1 now that a hold
-        // scales it, and one addition of `total` only covers a step smaller than the whole list.
+        // ⚠️ Modulo TWICE, not `+ total` once: a page step is larger than 1, and one addition of
+        // `total` only covers a step smaller than the whole list.
         b.cursor = ((b.cursor + delta) % total + total) % total;
     }
 

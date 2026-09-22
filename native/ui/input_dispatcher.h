@@ -258,16 +258,6 @@ class InputDispatcher {
     void on_a_released();
 
     /**
-     * Release of any direction: ends both hold accelerations.
-     *
-     * ⚠️ It is the ONLY thing that can. Both of them measure the gap between calls, and a gap cannot
-     * separate a sustained hold from fast repeated taps — which is what made the file browser take
-     * off under a tapped D-pad (issue #32). The shell synthesizes a repeat as another PRESSED and
-     * never interleaves a release, so this fires exactly when the button came up.
-     */
-    void on_dpad_released();
-
-    /**
      * A went down on a cell the mapper is DEFERRING (`defer_a_to_release`), so nothing has fired yet
      * and nothing fires here. It exists for the one thing a release cannot recover: the instant.
      *
@@ -634,50 +624,12 @@ class InputDispatcher {
     /** See set_media_base_dir. Empty means "relative paths stay relative" (resolve_media_path). */
     std::string mediaBaseDir_{};
 
-    // ── The qwerty text cursor's HOLD ACCELERATION (v0.9.4 C2) ───────────────────────────────────
+    // ── HOLD ACCELERATION lives in the SHELL ─────────────────────────────────────────────────────
     //
-    // The shell repeats a held R+LEFT/RIGHT at a flat 100 ms, but R+dpad is context-blind there — it
-    // is ALSO screen navigation and (C3) sample-editor zoom — so the acceleration cannot live in the
-    // shell without speeding those up too. It lives HERE, in the qwerty branch of on_r_left/on_r_right,
-    // where the meaning is known. It is derived from the CADENCE of the calls: a sustained hold arrives
-    // ~100 ms apart and builds a streak; a fresh press or a pause (the 400 ms initial-delay gap, or a
-    // deliberate tap) is > 250 ms apart and resets it. No shell change, no ButtonEvent change, and it
-    // touches nothing but the text cursor.
-    long long lastTextCursorMoveMs_ = 0;
-    int       textCursorRepeatStreak_ = 0;
-
-    /** 1, then 2, then 4 characters per repeat, by how long R+LEFT/RIGHT has been held. */
-    int text_cursor_repeat_step();
-
-    // ── The FILE BROWSER's hold acceleration ─────────────────────────────────────────────────────
-    //
-    // Same reasoning as the text cursor above, same place, same reason it cannot live in the shell:
-    // the shell's repeat is context-blind and a plain D-pad is also the tracker's cell cursor. This one
-    // measures the ELAPSED HOLD rather than counting repeats, so it says "after 1.5 s" and "after 3 s"
-    // directly instead of restating the shell's 400/100 ms cadence as repeat counts that would rot if
-    // either constant moved.
-
-    // Both are wall-clock time SINCE THE BUTTON WENT DOWN, minus the shell's 400 ms initial repeat
-    // delay: that first gap is wider than the 250 ms same-gesture threshold, so the sustained train —
-    // and this clock — starts on the SECOND press, 400 ms in. Written as the subtractions they are,
-    // because the 1500 and the 3000 are the request and the 400 is the shell's. ⚠️ Restated from
-    // `shell/sdl-input.h`, not included from it: pt-ui does not link the shell, and must not.
-    static constexpr long long BROWSER_ACCEL_X2_MS = 1500 - 400;
-    static constexpr long long BROWSER_ACCEL_X4_MS = 3000 - 400;
-
-    long long browserHoldStartMs_   = 0;
-    long long lastBrowserMoveMs_    = 0;
-    int       lastBrowserMoveDelta_ = 0;
-
-    /**
-     * 1 unit per repeat, then 2 at 1.5 s of hold, then 4 at 3 s.
-     *
-     * The unit is the caller's — a row for UP/DOWN, a screenful for LEFT/RIGHT — so both pairs
-     * accelerate in their own terms. `delta` is also the gesture's IDENTITY: a change of direction
-     * starts a fresh hold even inside the repeat cadence, or three seconds of DOWN would make the first
-     * tap of RIGHT jump four whole pages.
-     */
-    int browser_repeat_factor(int delta);
+    // ⚠️ A press handler here is one step, always — a row, a character, a screenful. Holding a
+    // direction arrives as more presses, closer together (`shell/sdl-input.h`); it never arrives as a
+    // bigger step. Scaling one here would put a 2- or 4-row jump back into a cursor the eye is
+    // tracking, which is the stutter the ramp exists to remove.
 
     // ── The autosave's DEBOUNCE (S10) ────────────────────────────────────────────────────────────
     //

@@ -238,9 +238,10 @@ void SdlInput::press(Button b, uint64_t now_ms) {
     // B joins the D-pad only while `set_b_repeatable` says so — the qwerty overlay, where B is a
     // backspace. Everywhere else B is COPY / BACK / CANCEL and must fire exactly once per press.
     if (is_dpad(b) || (b == Button::B && bRepeatable_)) {
-        repeatActive_ = true;
-        repeatButton_ = b;
-        repeatNextMs_ = now_ms + REPEAT_INITIAL_DELAY;
+        repeatActive_  = true;
+        repeatButton_  = b;
+        repeatNextMs_  = now_ms + REPEAT_INITIAL_DELAY;
+        repeatTrainMs_ = repeatNextMs_;
     }
 }
 
@@ -375,20 +376,26 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
     }
 }
 
+uint64_t SdlInput::repeat_interval(uint64_t repeating_ms) {
+    if (repeating_ms >= REPEAT_RAMP_MS) return REPEAT_INTERVAL_FAST;
+    const uint64_t span = REPEAT_INTERVAL_SLOW - REPEAT_INTERVAL_FAST;
+    return REPEAT_INTERVAL_SLOW - span * repeating_ms / REPEAT_RAMP_MS;
+}
+
 void SdlInput::tick(uint64_t now_ms) {
     if (!repeatActive_ || now_ms < repeatNextMs_) return;
 
     // ONE repeat per tick, and the next deadline is measured from NOW rather than from the missed
     // one. A catch-up loop here would be a bug with teeth: stall the loop for half a second — drag the
     // window, hit a slow frame on an A53 — and it would flush five queued repeats in a single tick,
-    // so a held A+UP would jump the value by 5 in one go. "At least 100 ms apart, quantised to the
-    // poll tick" is also what Kotlin's Handler.postDelayed actually delivers, since its repeat is
-    // posted to the same main-thread message queue the UI is draining.
+    // so a held A+UP would jump the value by 5 in one go — and one step at a time is exactly what the
+    // ramp is for.
+    //
     // The repeat carries the modifiers as they stand NOW, not as they stood when the D-pad went down.
     // That is deliberate and it is Kotlin's behaviour: press A after UP is already repeating and the
     // repeat starts editing rather than moving, with no need to remember what began it.
     queue_.push_back({repeatButton_, ButtonAction::PRESSED, mods_now()});
-    repeatNextMs_ = now_ms + REPEAT_INTERVAL;
+    repeatNextMs_ = now_ms + repeat_interval(now_ms > repeatTrainMs_ ? now_ms - repeatTrainMs_ : 0);
 }
 
 bool SdlInput::poll(ButtonEvent& out) {
