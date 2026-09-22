@@ -43,9 +43,19 @@ constexpr int SEND_METER_H   = 112;
 constexpr int SEND_HEADER_Y  = text_y_above(SEND_METER_TOP);                 // 212
 constexpr int SEND_VALUE_Y   = text_y_under(SEND_METER_TOP, SEND_METER_H);   // 353
 
-// Every stereo pair — tracks, master and sends alike — is two slim bars with a 1px gutter.
+// The outline's thickness, and it grows in DIFFERENT DIRECTIONS on the two axes. Sideways it grows
+// OUT, where there is only background. Top and bottom it grows IN, because the rows above and below
+// clear the outline by a gap derived from the meter's outer edge (`text_y_above`/`text_y_under`) —
+// growing outward there would eat that gap instead of the trough.
+constexpr int METER_BORDER = 2;
+// What the inward half costs the trough: one row off the top, one off the bottom.
+constexpr int METER_INSET = METER_BORDER - 1;
+
+// Every stereo pair — tracks, master and sends alike — is two slim bars with a gutter between them.
+// The gutter is left unpainted out of the outline's own rect, so it IS the outline colour and takes
+// the outline's width: the pair reads as one framed object with a wall down it, not as two meters.
 constexpr int BAR_W   = 20;
-constexpr int BAR_SEP = 1;
+constexpr int BAR_SEP = METER_BORDER;
 
 constexpr int MASTER_X = FIRST_METER_X + 8 * METER_SPACING;   // 434
 
@@ -212,13 +222,18 @@ void MixerModule::draw_stereo_meter(Canvas& c, int x, int y, int h, float level_
     const Argb border = is_selected ? t.rowCursor : t.meterBorder;
     const int  rX     = x + BAR_W + BAR_SEP;
 
-    // One border around the pair (both bars + the gutter between them), then each channel's trough.
-    c.fill_rect(x - 1, y - 1, BAR_W + BAR_SEP + BAR_W + 2, h + 2, border);
-    c.fill_rect(x, y, BAR_W, h, t.meterBackground);
-    c.fill_rect(rX, y, BAR_W, h, t.meterBackground);
+    // ⚠️ `y`/`h` stay the meter's OUTER box — the text rows either side are placed off it — and the
+    // trough is what everything drawn inside measures against.
+    const int inY = y + METER_INSET;
+    const int inH = h - 2 * METER_INSET;
 
-    const int lhPx = level_to_height_px(level_l, h);
-    const int rhPx = level_to_height_px(level_r, h);
+    // One border around the pair (both bars + the gutter between them), then each channel's trough.
+    c.fill_rect(x - METER_BORDER, y - 1, BAR_W + BAR_SEP + BAR_W + 2 * METER_BORDER, h + 2, border);
+    c.fill_rect(x, inY, BAR_W, inH, t.meterBackground);
+    c.fill_rect(rX, inY, BAR_W, inH, t.meterBackground);
+
+    const int lhPx = level_to_height_px(level_l, inH);
+    const int rhPx = level_to_height_px(level_r, inH);
 
     // Replaying a step with the level held is what the missed refreshes did anyway: past the first, the
     // fall is a function of the counter alone.
@@ -229,13 +244,13 @@ void MixerModule::draw_stereo_meter(Canvas& c, int x, int y, int h, float level_
 
     // A muted track shows an empty trough — its peaks are forced to zero above, so the marker falls too.
     if (!is_muted) {
-        draw_segmented_bar(c, x, y, h, lhPx, t);
-        draw_segmented_bar(c, rX, y, h, rhPx, t);
+        draw_segmented_bar(c, x, inY, inH, lhPx, t);
+        draw_segmented_bar(c, rX, inY, inH, rhPx, t);
     }
 
     // After the bars, so a marker resting on the trough is still visible.
-    draw_peak_marker(c, x, y, h, peak_idx_l, t);
-    draw_peak_marker(c, rX, y, h, peak_idx_r, t);
+    draw_peak_marker(c, x, inY, inH, peak_idx_l, t);
+    draw_peak_marker(c, rX, inY, inH, peak_idx_r, t);
 }
 
 void MixerModule::draw_segmented_bar(Canvas& c, int x, int y, int h, int bar_h_px,

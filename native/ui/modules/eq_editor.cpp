@@ -34,10 +34,15 @@ constexpr float kDefaultSampleRate = 44100.0f;
  * dotted staircase.
  */
 void stroke_column_curve(Canvas& c, int x0, int y_top, const int* y, int n, Argb color,
-                         int thickness) {
+                         int thickness, int panel_h) {
+    // ⚠️ A STROKE GROWS DOWNWARD FROM ITS SAMPLE, so a curve resting on the floor would hang
+    // `thickness − 1` rows BELOW the panel — over the separator that closes it, which draws after and
+    // splits the stroke down its middle. Lifting the sample keeps the line its full width and sitting
+    // ON the floor, which is where a reading pinned at the bottom of the scale belongs.
+    const int floorY = panel_h - thickness;
     for (int i = 0; i < n; ++i) {
-        const int y0 = y[i];
-        const int y1 = (i + 1 < n) ? y[i + 1] : y[i];
+        const int y0 = std::min(y[i], floorY);
+        const int y1 = std::min((i + 1 < n) ? y[i + 1] : y[i], floorY);
         const int lo = std::min(y0, y1);
         const int hi = std::max(y0, y1);
         c.fill_rect(x0 + i, y_top + lo, 1, (hi - lo) + thickness, color);
@@ -334,7 +339,7 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         // dB and frequency lines while the area under it stays behind them, and the two halves of one
         // shape then sit on opposite sides of the grid.
         fill_under_curve(c, x, vy, specY, WIDTH, bottom, t.eqFill);
-        stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1);
+        stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1, VIS_H);
     }
 
     // ── The dB grid ─────────────────────────────────────────────────────────────────────────────
@@ -395,7 +400,7 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         // ⚠️ THE PALETTE'S ACCENT, AND THICKER THAN EVERY REFERENCE MARK ON THE PANEL. It is the one
         // thing on this screen the user is editing, and it crosses the 0 dB line and the spectrum
         // outline constantly — both of which it has to stay legible ON TOP OF, not merely beside.
-        stroke_column_curve(c, x, vy, curveY, WIDTH, t.rowCursor, 3);
+        stroke_column_curve(c, x, vy, curveY, WIDTH, t.rowCursor, 3, VIS_H);
     }
 
     c.fill_rect(x, vy + VIS_H, WIDTH, 1, t.vizCenterLine);  // separator
