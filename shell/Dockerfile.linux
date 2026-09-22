@@ -1,0 +1,57 @@
+# The desktop-Linux build container — the same argument as Dockerfile.portmaster, one target over.
+#
+# ⚠️ `ubuntu:20.04` is the GLIBC FLOOR, and on the desktop it is easier to get wrong than on the
+# handheld, because the wrong binary RUNS on the box that built it. glibc symbols are versioned: a
+# build on this repo's WSL box (Ubuntu 24.04, glibc 2.39) demands GLIBC_2.38 and GLIBCXX_3.4.29 —
+# measured, not assumed — and dies on Ubuntu 22.04, Debian 12 or Mint 21 with `version GLIBC_2.38
+# not found` before it prints a line. 20.04's glibc 2.31 is at or below every distribution a tester
+# is plausibly on, and a lower floor costs nothing: the binary is the same code either way.
+#
+#     readelf -V <binary> | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1     # must be <= 2.31
+#
+# ⚠️ SDL2 IS BUILT HERE AS A LINK SDK AND IS NEVER SHIPPED, exactly as in build-portmaster.sh. The
+# desktop package links `libSDL2-2.0.so.0` and the user's own distribution provides it at run time —
+# theirs is the copy that knows their display server and their audio daemon. So this build is
+# configured with no video or audio backends at all; it exists only to resolve symbols, and SDL2
+# exports its whole public API regardless of which backends were compiled in.
+#
+# ⚠️ 2.0.18 rather than 20.04's own 2.0.10, and rather than the newest: the shell calls
+# SDL_GetTicks64(), which landed in exactly 2.0.18. Pinning it low turns the runtime requirement into
+# a link-time guarantee — you cannot link a symbol that is not in the .so you linked against — so
+# reaching for a newer SDL API fails HERE rather than on a tester's machine. It is the same pin, for
+# the same reason, as SDL2_TAG in build-portmaster.sh; raise the two together or not at all.
+#
+# ⚠️ CMake comes from Kitware, not apt — 20.04 ships 3.16 and this tree needs 3.22+.
+#
+#     docker build -t pockettracker-linux -f shell/Dockerfile.linux shell/
+#     docker run --rm -v "$PWD:/src" pockettracker-linux bash /src/shell/build-linux.sh
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+ARG CMAKE_VERSION=3.28.3
+ARG SDL2_TAG=release-2.0.18
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ninja-build \
+        git \
+        pkg-config \
+        wget \
+        ca-certificates \
+        file \
+    && wget -qO- "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+       | tar xz -C /opt \
+    && ln -s "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake" /usr/local/bin/cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${SDL2_TAG}" https://github.com/libsdl-org/SDL.git /tmp/sdl2-src \
+    && cmake -S /tmp/sdl2-src -B /tmp/sdl2-build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF \
+    && cmake --build /tmp/sdl2-build \
+    && cmake --install /tmp/sdl2-build \
+    && rm -rf /tmp/sdl2-src /tmp/sdl2-build
+
+WORKDIR /src
