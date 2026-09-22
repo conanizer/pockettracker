@@ -143,6 +143,7 @@ struct MixerHeld {
     int  faderTracks = 0;       // bit N: a VTR has moved track N's fader this take
     bool masterFader = false;   // a VMV has moved the master fader
     bool masterEq    = false;   // an EQM has moved the master bus off the project's slot
+    bool delayTime   = false;   // a TIM has taken the delay's echo time off the DELAY screen's
 };
 
 // AppInputDispatcher.pushGlobalEffectsToBackend — the state that lives ONLY in the engine and so
@@ -168,8 +169,16 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
     engine.setReverbAlgo(project.reverbAlgo);
     engine.setReverbCharacter(project.reverbPreDelay, project.reverbWidth, project.reverbMod);
     engine.setReverbInputEq(project.reverbInputEq);
-    engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
-                          static_cast<float>(project.tempo), project.delayWet);
+    // ⚠️ THE TIME IS SKIPPED WHILE A TIM OWNS IT, AND THE REST OF THE DELAY IS NOT. Same granularity,
+    // and for the same reason, as the per-fader skip above: every EFFECTS edit pushes through here, so
+    // a blanket skip would mean that once any TIM had run, no FDBK or WET the user typed could be heard
+    // until the transport stopped.
+    if (held.delayTime) {
+        engine.setDelayFeedbackWet(project.delayFeedback, project.delayWet);
+    } else {
+        engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
+                              static_cast<float>(project.tempo), project.delayWet);
+    }
     engine.setDelayCharacter(project.delayPong, project.delayTone, project.delayWobble);
     engine.setDelayInputEq(project.delayInputEq);
     engine.setDelayReverbSend(project.delayReverbSend);

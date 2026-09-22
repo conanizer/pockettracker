@@ -332,6 +332,15 @@ class SongcoreHost {
                 engine_->setTrackVolume(i, hex_to_float(project_.tracks[static_cast<size_t>(i)].volume));
             engine_->setMasterVolume(hex_to_float(project_.masterVolume));
         }
+        // The delay's echo time a TIM took over, for the identical reason and in the identical
+        // window. ⚠️ TWO SOURCES ARM IT, one per side of the seam, exactly as the master EQ above has:
+        // a phrase cell goes through the scheduler and a TABLE row is applied by the engine itself.
+        // Read the engine's latch UNCONDITIONALLY, or it survives into the next take.
+        const bool table_tim = engine_ && engine_->takeTableDelayTimeTouched();
+        if (engine_ && (seq_.delay_time_active() || table_tim) && seq_.has_live_project()) {
+            engine_->setDelayTime(project_.delayTime, project_.delaySync,
+                                  static_cast<float>(project_.tempo));
+        }
         sync_clock();
         seq_.stop();
         // The transport ends: every note the cable is holding, ended NOW (not queued — the queue is
@@ -542,6 +551,7 @@ class SongcoreHost {
         held.faderTracks = seq_.mixer_vol_tracks();
         held.masterFader = seq_.master_vol_active();
         held.masterEq    = seq_.eqm_active() || engine_->tableMasterEqTouchedPeek();
+        held.delayTime   = seq_.delay_time_active() || engine_->tableDelayTimeTouchedPeek();
         return held;
     }
 

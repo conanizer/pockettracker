@@ -98,6 +98,11 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     // ramp must ride the same TRACK_GLOBAL lane the per-step VMV does, or it dies on exactly the
     // tracks a master fade is most often written on.
     { FX_VMV,    CC_MASTER_VOL,  true,  RampKind::BYTE },
+    // TIM — the delay's echo time. ⭐ **THE RAMP IS THE POINT OF THE COMMAND, not a bonus**: the head
+    // glides to each new time and a moving head shifts pitch, so a span of these is the tape swoop.
+    // Global, and with the same restore debt, for the reason VMV above it is: the send belongs to no
+    // track (event.h).
+    { FX_TIM,    CC_DELAY_TIME,  true,  RampKind::BYTE },
     // ── The EQ presets. No CC id: what these emit is a band set, not a controller value ───────────
     //
     // ⚠️ EQN IS A PER-VOICE SWEEP, not a per-track one. `applyEqPresetToModule` writes the sounding

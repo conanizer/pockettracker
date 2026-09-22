@@ -862,12 +862,20 @@ void AudioEngine::setReverbParams(int feedbackHex, int dampHex, int wetHex, int 
 }
 
 void AudioEngine::setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMode, float bpm, int wetHex) {
-    if (syncMode) {
-        delaySend.setParamsSync(timeOrSubdiv, feedbackHex, bpm);
-    } else {
-        delaySend.setParamsFree(timeOrSubdiv, feedbackHex);
-    }
-    delayReturnGain = wetHex / 255.0f;
+    setDelayTime(timeOrSubdiv, syncMode, bpm);
+    setDelayFeedbackWet(feedbackHex, wetHex);
+}
+
+// The two halves on their own, because a take a TIM is driving owns the TIME and nothing else: a
+// globals push has to leave that alone while still carrying FDBK and WET through (engine_setup.h).
+void AudioEngine::setDelayTime(int timeOrSubdiv, bool syncMode, float bpm) {
+    if (syncMode) delaySend.setTimeSync(timeOrSubdiv, bpm);
+    else          delaySend.setTimeFree(timeOrSubdiv);
+}
+
+void AudioEngine::setDelayFeedbackWet(int feedbackHex, int wetHex) {
+    delaySend.feedback = feedbackHex / 255.0f;
+    delayReturnGain    = wetHex / 255.0f;
 }
 
 void AudioEngine::setDelayCharacter(bool pong, int toneHex, int wobbleHex) {

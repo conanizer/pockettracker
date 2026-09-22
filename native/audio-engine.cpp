@@ -1463,6 +1463,22 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
                 tableMasterEqTouched.store(true, std::memory_order_relaxed);
                 break;
 
+            // TIM on a table row — the delay's echo time, once per tic, which is where the command is
+            // most of the fun: a row under a HOP walks the time a step per tic, and the head glides to
+            // each one, so the repeats bend continuously.
+            //
+            // ⚠️ IT IS GLOBAL AND THE VOICES ARE NOT. Two voices standing on different rows of the same
+            // table write it in turn and the last one in the block wins — exactly what EQM above does,
+            // and for the same reason: a shared bus reached from a per-voice walk. A TIM belongs in a
+            // table one instrument drives, not in one eight tracks share.
+            //
+            // ⚠️ Latched like EQM, and for the identical reason: the send outlives every voice, so
+            // stop() has to put the DELAY screen's own time back (host.h).
+            case FX_TIM:
+                delaySend.setTimeFree(fxValue);
+                tableDelayTimeTouched.store(true, std::memory_order_relaxed);
+                break;
+
             case FX_TIC:
                 // The rate of the COLUMN it is written in — that is what lets one table carry two
                 // speeds at once. (Row 15's TIC is read at trigger instead; effectiveTicRatesFor.)
@@ -1591,6 +1607,12 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
             case FX_DRV: voiceSetDrive(voice, value);     break;
             // A ramp over FIN is a glide: end to end is two semitones, spread over the AUS window.
             case FX_FIN: voiceSetFineTune(voice, value);  break;
+            // …and a ramp over TIM is the tape swoop — see the per-row arm for what it writes and why
+            // it is latched.
+            case FX_TIM:
+                delaySend.setTimeFree(value);
+                tableDelayTimeTouched.store(true, std::memory_order_relaxed);
+                break;
             // ⚠️ No FX_CRU arm, and its ARMS row says `rampable = false` — a packed pair of nibbles
             // is not a quantity to interpolate (songcore/effects.h). The default below drops it.
             default: break;   // the registry admits nothing else the table has an arm for
@@ -1972,6 +1994,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 case PARAM_UPDATE_MASTER_VOL: {           // VMV — the master fader (global)
                     applyMasterVolume(upd.value);
                     masterVolSnapshot = upd.value;
+                    break;
+                }
+                case PARAM_UPDATE_DELAY_TIME: {           // TIM — the delay's echo time (global)
+                    delaySend.setTimeFree(filterByteOf(upd.value));
                     break;
                 }
                 default: {                                // PARAM_UPDATE_MOD_SOURCE — Vxx phraseVol
@@ -4292,6 +4318,11 @@ void AudioEngine::scheduleTrackVolume(int64_t targetFrame, int trackId, float vo
 
 void AudioEngine::scheduleMasterVolume(int64_t targetFrame, float volume) {
     paramUpdateQueue.schedule({ targetFrame, -1, 0, volume, PARAM_UPDATE_MASTER_VOL, 0.0f });
+}
+
+// TIM. Global like VMV above, and carries no track for the same reason.
+void AudioEngine::scheduleDelayTime(int64_t targetFrame, float time) {
+    paramUpdateQueue.schedule({ targetFrame, -1, 0, time, PARAM_UPDATE_DELAY_TIME, 0.0f });
 }
 
 void AudioEngine::setOttDepth(int depth) {

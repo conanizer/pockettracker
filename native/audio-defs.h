@@ -107,6 +107,7 @@ const int FX_DRV    = 0x37;  // DRV xx - overdrive amount
 const int FX_CRU    = 0x38;  // CRU xy - x = bits crushed, y = downsample; two 4-bit values in one cell
 const int FX_FIN    = 0x39;  // FIN xx - fine tune; 80 = in tune, one semitone either way
 const int FX_INS    = 0x3C;  // INS xx - play this hit on instrument xx; on a table row it is a SWITCH
+const int FX_TIM    = 0x3D;  // TIM xx - the delay's echo time, free scale (00-FF = 0-2 s); GLOBAL
 // ─── The loop modes, as the engine numbers them ─────────────────────────────────────────────────
 //
 // ⚠️ **OSCILLATOR IS A FORWARD LOOP WITH ITS SCAN RATE RETUNED**, not a fourth kind of traversal:

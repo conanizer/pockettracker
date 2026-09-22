@@ -52,6 +52,7 @@ static_assert(::FX_DRV    == FX_DRV,    "audio-defs.h FX_DRV has drifted from ef
 static_assert(::FX_CRU    == FX_CRU,    "audio-defs.h FX_CRU has drifted from effects.h");
 static_assert(::FX_FIN    == FX_FIN,    "audio-defs.h FX_FIN has drifted from effects.h");
 static_assert(::FX_LPO    == FX_LPO,    "audio-defs.h FX_LPO has drifted from effects.h");
+static_assert(::FX_TIM    == FX_TIM,    "audio-defs.h FX_TIM has drifted from effects.h");
 
 // …and CRU's nibble split, which is spelled on both sides of the seam for the same reason the codes
 // are. Checked over the whole byte rather than at a sample point: the two are three characters each
@@ -88,7 +89,7 @@ constexpr bool table_arms_match_the_engine() {
             c != ::FX_CUT && c != ::FX_RES &&
             c != ::FX_LPF && c != ::FX_HPF && c != ::FX_BPF &&
             c != ::FX_DRV && c != ::FX_CRU && c != ::FX_FIN &&
-            c != ::FX_LPO) return false;
+            c != ::FX_LPO && c != ::FX_TIM) return false;
     }
     return table_automation::arm_for(::FX_HOP)    && table_automation::arm_for(::FX_TIC)  &&
            table_automation::arm_for(::FX_KILL)   && table_automation::arm_for(::FX_OFFSET) &&
@@ -98,7 +99,8 @@ constexpr bool table_arms_match_the_engine() {
            table_automation::arm_for(::FX_LPF)    && table_automation::arm_for(::FX_HPF)  &&
            table_automation::arm_for(::FX_BPF)    &&
            table_automation::arm_for(::FX_DRV)    && table_automation::arm_for(::FX_CRU)  &&
-           table_automation::arm_for(::FX_FIN)    && table_automation::arm_for(::FX_LPO);
+           table_automation::arm_for(::FX_FIN)    && table_automation::arm_for(::FX_LPO) &&
+           table_automation::arm_for(::FX_TIM);
 }
 static_assert(table_arms_match_the_engine(),
               "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
@@ -237,6 +239,10 @@ class EngineConsumer : public IMidiConsumer {
                     // never claims.
                     case CC_TRACK_VOL:   engine_->scheduleTrackVolume(ev.frame, ev.track, v);    break;
                     case CC_MASTER_VOL:  engine_->scheduleMasterVolume(ev.frame, v);             break;
+                    // TIM — the delay's echo time. Global like the master fader above it, and not
+                    // gated for the same reason: a shared send carries every track's audio, so it
+                    // must move whatever track the command was typed on.
+                    case CC_DELAY_TIME:  engine_->scheduleDelayTime(ev.frame, v);                break;
                     // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION.
                     // Attack/release (72/73) and the GP drive/crush pair are real sampler params — but
                     // they are INSTRUMENT-STATIC in this engine (setInstrumentParams), and only the ids

@@ -98,6 +98,7 @@ inline constexpr int FX_INSTRUMENT_CODES[] = {
 
 inline constexpr int FX_GLOBAL_CODES[] = {
     songcore::FX_VTR, songcore::FX_VMV, songcore::FX_EQM,
+    songcore::FX_TIM,   // the shared delay's echo time — the one send parameter a cell can drive
     songcore::FX_SCG,   // the scale command that moves all eight tracks — SCA, the per-track one, is in SEQUENCE
     songcore::FX_AUS, songcore::FX_AUF,
 };
@@ -420,19 +421,21 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 41 FIN */ {"FIN: Fine tune", "00=flat 80=in tune FF=sharp", "one semitone either way", "bends a note already playing"},
         /* 42 TSX */ {"TSX: Transpose multiplier", "xx=how far TSP moves a note", "01=normal 02=twice 00=never", "FF=the other way FE=2x that"},
         /* 43 INS */ {"INS: Instrument for this note", "xx=instrument (00-7F)", "RNL beside or RND below it", "picks a random instrument"},
-        /* 44 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
-        /* 45 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 46 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        /* 44 TIM */ {"TIM: Delay echo time", "xx=time (00-FF = 0-2 sec)", "repeats bend as the time moves",
+                      "holds till next TIM or stop"},
+        /* 45 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
+        /* 46 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 47 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
         // ⚠️ **NO APOSTROPHE AND NO SEMICOLON IN A DESCRIPTION** — the font has neither glyph and draws
         // a BLANK, so "instrument's" renders as "INSTRUMENT S". It is silent: the string is right, the
         // width is right, only the pixels are wrong, and these lines are the only long prose in the UI.
         // ⚠️ Pre-existing, not new: BCK's "sampler; toggle live to scratch" has always drawn as
         // "SAMPLER  TOGGLE…". Caught by ptshot — the one tool here that looks at pixels. Stick to
         // letters, digits, and `: = - ( ) . /`, all of which are proven by the entries above.
-        /* 47 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 48 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 49 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 50 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 48 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 49 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 50 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 51 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

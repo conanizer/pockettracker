@@ -281,6 +281,10 @@ enum ParamUpdateAction {
     // this"; this one adds a signed STEP to a running count the voice keeps, so two records slide
     // the window twice and a dropped record loses a movement rather than a value. Appended, as ever.
     PARAM_UPDATE_LOOP_SLIDE,      // active sampler voice: loop window += value*255 sixteenths [LPO]
+    // ⚠️ THE THIRD ACTION THAT TOUCHES NO VOICE (the two mixer faders above are the others), and the
+    // only one that reaches a SEND BUS. It needs no snapshot write of its own: the delay module owns
+    // its head position and moves it per sample from inside its own `process`. Appended, as ever.
+    PARAM_UPDATE_DELAY_TIME,      // global: the delay's echo time = value*255, free scale      [TIM]
 };
 
 // One EQ setting as AUTHORED HEX — the domain the project file and the FX cells are written in, not

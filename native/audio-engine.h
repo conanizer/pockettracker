@@ -525,6 +525,7 @@ public:
     void scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& bands);
     void scheduleTrackVolume(int64_t targetFrame, int trackId, float volume);          // VTR xx
     void scheduleMasterVolume(int64_t targetFrame, float volume);                      // VMV xx
+    void scheduleDelayTime(int64_t targetFrame, float time);                           // TIM xx
 
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
@@ -640,6 +641,11 @@ public:
     //                   wetHex: 00-FF return gain.
     void setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMode, float bpm = 120.0f, int wetHex = 0x80);
 
+    // The same, split in two — for the one caller that must push a delay whose TIME the running song
+    // has taken over with a TIM (songcore/engine_setup.h).
+    void setDelayTime(int timeOrSubdiv, bool syncMode, float bpm = 120.0f);
+    void setDelayFeedbackWet(int feedbackHex, int wetHex);
+
     // Set the delay's character: the three cells that shape the repeats. ⚠️ Each is OFF at the value
     // a project written before they existed loads with — pong off, TONE FF, WOBL 00.
     void setDelayCharacter(bool pong, int toneHex, int wobbleHex);
@@ -668,6 +674,11 @@ public:
     // is currently overridden rather than to discharge the restore. ⚠️ Anyone asking mid-take must use
     // this one: `take` would disarm stop(), and the bus would then keep the table's preset forever.
     bool tableMasterEqTouchedPeek() const { return tableMasterEqTouched.load(std::memory_order_relaxed); }
+
+    // The same pair for a TABLE row's TIM, which takes the delay's echo time over the same way an EQM
+    // takes the master bus and needs the same restore from the same two sides of the seam.
+    bool takeTableDelayTimeTouched() { return tableDelayTimeTouched.exchange(false, std::memory_order_relaxed); }
+    bool tableDelayTimeTouchedPeek() const { return tableDelayTimeTouched.load(std::memory_order_relaxed); }
 
     // Set OTT depth (0=bypass, 255=full wet). Enables/disables OTT module.
     void setOttDepth(int depth);
@@ -1134,6 +1145,8 @@ private:
     // Set by a table row's EQM, consumed by takeTableMasterEqTouched(). Audio thread writes,
     // UI thread reads — atomic for that reason and no other; it is a one-way latch.
     std::atomic<bool> tableMasterEqTouched{false};
+    // …and by a table row's TIM, for the identical reason.
+    std::atomic<bool> tableDelayTimeTouched{false};
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
 
     // Oscilloscope waveform buffer (circular buffer for recent output)

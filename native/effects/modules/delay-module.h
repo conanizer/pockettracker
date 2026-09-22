@@ -58,6 +58,27 @@ static constexpr float kDelayWobbleMaxSeconds = 0.007f;
 
 static constexpr float kDelayTwoPi = 6.28318530717958647692f;
 
+// ─── How the read head reaches a new TIME ────────────────────────────────────────────────────────
+//
+// It GLIDES there instead of jumping, and the pitch shift everyone knows from a tape echo is not an
+// effect added on top — it is what a read head moving through the buffer at a rate other than 1
+// unavoidably does. Output frame `n` is `buffer[n - D(n)]`, so the playback ratio is `1 - D'(n)`: a
+// shortening delay reads forward faster and pitches UP, a lengthening one pitches DOWN.
+//
+// ⚠️ **A JUMP IS A DISCONTINUITY IN THE OUTPUT**, which is the click a turned TIME knob used to make,
+// and a knob held down is a click per step — the "robotic" stutter, not a resampling artefact.
+//
+// One-pole toward the target, so a small step settles quickly and a big one starts fast and eases in.
+// ⚠️ **AND A CAP ON THE RATE, which is what keeps the sound musical rather than a screech**: without
+// it a half-second jump would start the head moving at four samples per sample — two octaves up, or
+// backwards. Half a sample per sample is an octave down at worst, and a jump from the shortest echo
+// to the longest takes about two seconds to arrive, which is roughly how long moving a real tape head
+// that far takes.
+static constexpr float kDelayGlideSeconds = 0.08f;
+static constexpr float kDelayGlideMaxRate = 0.5f;
+// Near enough to have arrived, in samples of delay — a twentieth of a sample is four microseconds.
+static constexpr float kDelayGlideEpsilon = 0.05f;
+
 // ===========================================================================
 // DelayModule — stereo tap-delay send (DaisySP DelayLine).
 //
@@ -90,6 +111,16 @@ struct DelayModule {
     // which is why every write of one goes through `setDelaySamples`.
     float delaySamples = 22050.0f;
 
+    // Where the read head actually IS, which is `delaySamples` except while a TIME change is being
+    // glided to. ⚠️ **THE HEAD, NOT THE TARGET, IS WHAT THE WOBBLE SWINGS AROUND AND WHAT THE LINES
+    // ARE READ AT** — the target is only where it is heading.
+    float headSamples = 22050.0f;
+
+    // ⚠️ **A LOAD AND A RESET PLACE THE HEAD, THEY DO NOT MOVE IT.** Armed by `reset`, spent by the
+    // first TIME written after it, so opening a project whose echo is set differently from the last
+    // one starts there instead of swooping down to it over two seconds.
+    bool snapNextTime = true;
+
     // Per-channel regeneration state, cleared with the lines: a filter holding the last project's
     // audio, or a phase left mid-drift, would otherwise ring into the first block after a load.
     float toneStateL = 0.0f, toneStateR = 0.0f;
@@ -103,7 +134,12 @@ struct DelayModule {
         feedback = 0x60 / 255.0f;
         // Default: 1/4 note at 120 BPM = 500 ms (index 2)
         float defaultSamples = 1.0f * (60.0f / 120.0f) * sr;
+        snapNextTime = true;
         setDelaySamples(defaultSamples);
+        // ⚠️ RE-ARMED AFTER THE DEFAULT IS PLACED, because `resetEffectState` leaves the module at
+        // FACTORY defaults and the caller re-pushes the project's own values immediately after
+        // (engine_setup.h). That re-push is still part of the load, so it must land rather than glide.
+        snapNextTime = true;
         toneStateL = toneStateR = 0.0f;
         wowPhase = flutterPhase = 0.0f;
         // ⚠️ Re-derived here, not left to the next push: the cutoff is a fraction of the RATE, and
@@ -114,15 +150,29 @@ struct DelayModule {
 
     // Free mode: timeHex 00-FF → 0–2 seconds
     void setParamsFree(int timeHex, int feedbackHex) {
-        setDelaySamples((timeHex / 255.0f) * 2.0f * sampleRate);
+        setTimeFree(timeHex);
         feedback = feedbackHex / 255.0f;
     }
 
     // Sync mode: subdivIdx 0–11 (see kDelaySyncBeats), BPM from project
     void setParamsSync(int subdivIdx, int feedbackHex, float bpm) {
+        setTimeSync(subdivIdx, bpm);
+        feedback = feedbackHex / 255.0f;
+    }
+
+    // The TIME alone. `TIM` writes this one and the two above leave it to it, so there is a single
+    // place a delay time is turned into a head position whichever screen or cell asked for it.
+    //
+    // ⚠️ **TIM IS ALWAYS THE FREE SCALE, EVEN WHILE THE SCREEN READS 1/8T.** A ramp needs 256 values
+    // in a row to slide through, and the twelve subdivisions are a list rather than a scale — an AUS
+    // over them would jump between named divisions instead of sliding.
+    void setTimeFree(int timeHex) {
+        setDelaySamples((timeHex / 255.0f) * 2.0f * sampleRate);
+    }
+
+    void setTimeSync(int subdivIdx, float bpm) {
         if (subdivIdx < 0 || subdivIdx >= kDelaySyncCount) subdivIdx = 2;
         setDelaySamples(kDelaySyncBeats[subdivIdx] * (60.0f / bpm) * sampleRate);
-        feedback = feedbackHex / 255.0f;
     }
 
     // How far the read head swings, in frames, at the current TIME and WOBL. ⚠️ Public and stated
@@ -130,7 +180,7 @@ struct DelayModule {
     // LFO rate — so anything measuring the wobble must read the same number `process` uses rather
     // than recomputing it from the constants and drifting away from the code.
     float wobbleDepthSamples() const {
-        const float proportional = wobble * delaySamples * kDelayWobbleFraction;
+        const float proportional = wobble * headSamples * kDelayWobbleFraction;
         const float ceiling      = wobble * kDelayWobbleMaxSeconds * sampleRate;
         return fminf(proportional, ceiling);
     }
@@ -145,7 +195,7 @@ struct DelayModule {
     // when WOBL is up — where flattening the swing against the clamp would have been heard.
     float wobbleCentreSamples() const {
         const float ceiling = static_cast<float>(DELAY_MAX_SAMPLES) - 3.0f - wobbleDepthSamples();
-        return fminf(delaySamples, fmaxf(2.0f, ceiling));
+        return fminf(headSamples, fmaxf(2.0f, ceiling));
     }
 
     // The three character cells, together, because they arrive together from the project.
@@ -175,6 +225,14 @@ struct DelayModule {
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         const bool drifting = wobble > 0.0f;
         const bool filtered = toneHex < 0xFF;
+        // ⚠️ A GLIDE IS THE THIRD WAY THE HEAD CAN BE SOMEWHERE OTHER THAN `Read()`'s position, and it
+        // borrows the wobble's interpolated read rather than adding one of its own. It ends by landing
+        // EXACTLY on the target (below the loop), so a delay whose TIME nobody touches is back to
+        // `Read()` on the very next block and the default arithmetic is untouched.
+        const bool gliding = fabsf(delaySamples - headSamples) > kDelayGlideEpsilon;
+        const bool moving  = drifting || gliding;
+        const float glideCoeff  = 1.0f / (kDelayGlideSeconds * sampleRate);
+        const float headAtStart = headSamples;
 
         // The drift is evaluated at the block's two ends and interpolated across it, the way the
         // track mute gate is, and it costs two sines per block rather than two per frame. ⚠️ The
@@ -201,11 +259,18 @@ struct DelayModule {
             }
 
             float readL, readR;
-            if (drifting) {
+            if (moving) {
+                if (gliding) {
+                    // One pole toward the target, rate-capped. The head's SPEED is the pitch shift —
+                    // see the constants — so this line is the whole tape effect.
+                    float rate = (delaySamples - headSamples) * glideCoeff;
+                    rate = fmaxf(-kDelayGlideMaxRate, fminf(rate, kDelayGlideMaxRate));
+                    headSamples += rate;
+                }
                 // ⚠️ Clamped to leave ReadHermite its four taps — it reads t−1 through t+2, so a
                 // position at either end of the line would wrap past the write head and pull the
                 // OLDEST audio in the buffer out as if it were the newest.
-                float pos = wobbleCentre + drift;
+                float pos = wobbleCentre + (headSamples - headAtStart) + drift;
                 pos = fmaxf(2.0f, fminf(pos, static_cast<float>(DELAY_MAX_SAMPLES) - 3.0f));
                 readL = delL.ReadHermite(pos);
                 readR = delR.ReadHermite(pos);
@@ -242,6 +307,12 @@ struct DelayModule {
             outL[i] = readL;
             outR[i] = readR;
         }
+
+        // ⚠️ **ARRIVAL IS EXACT, AND IT HAS TO BE.** A one-pole only approaches, so without this the
+        // head would creep for ever and `Read()` — which is where the default arithmetic lives — would
+        // never come back.
+        if (gliding && fabsf(delaySamples - headSamples) <= kDelayGlideEpsilon)
+            headSamples = delaySamples;
     }
 
   private:
@@ -251,11 +322,15 @@ struct DelayModule {
         toneCoeff = fminf(1.0f, fmaxf(0.0f, coeff));
     }
 
-    // The one writer of the delay time, because it has two homes: the lines' own copy and the base
-    // position the drifting tap needs. Two setters wrote both before there was a tap.
+    // The one writer of the delay time, because it has three homes: the lines' own copy, the target
+    // the head glides to, and — on a load — the head itself.
     void setDelaySamples(float samples) {
         samples      = fmaxf(1.0f, fminf(samples, (float)(DELAY_MAX_SAMPLES - 1)));
         delaySamples = samples;
+        if (snapNextTime) {
+            headSamples  = samples;
+            snapNextTime = false;
+        }
         delL.SetDelay(samples);
         delR.SetDelay(samples);
     }

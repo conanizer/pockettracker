@@ -450,6 +450,11 @@ class Sequencer {
     int  mixer_vol_tracks() const { return mixerVolTracks_; }
     bool master_vol_active() const { return masterVolActive_; }
 
+    // True once a TIM has taken the delay's echo time over this session — the same BEFORE-stop() edge
+    // and the same reason as the two above: the command REPLACES the DELAY screen's time and nothing
+    // later puts it back, so without the restore the next PLAY starts on whatever the song faded to.
+    bool delay_time_active() const { return delayTimeActive_; }
+
     bool has_live_project() const { return currentProject_ != nullptr; }
 
     // ── transport starts ──
@@ -543,6 +548,7 @@ class Sequencer {
         eqmActive_ = false;
         mixerVolTracks_ = 0;
         masterVolActive_ = false;
+        delayTimeActive_ = false;
         playbackTrack_ = 0;
         // Full per-track reset: playback is a pure function of the project (see PlaybackController.stop).
         for (int i = 0; i < 8; ++i) {
@@ -1642,6 +1648,7 @@ class Sequencer {
             // CC the ramp actually sends, which is the thing that moves it.
             if (r.ccId == CC_TRACK_VOL)  mixerVolTracks_ |= 1 << clampi(trackId, 0, 7);
             if (r.ccId == CC_MASTER_VOL) masterVolActive_ = true;
+            if (r.ccId == CC_DELAY_TIME) delayTimeActive_ = true;
             // ⚠️ EQM carries the same debt, and is keyed the same way — on what the ramp MOVES, not on
             // the cell that declared it. A morph left the master EQ somewhere no preset names, and
             // without this nothing puts the project's value back on stop().
@@ -2065,6 +2072,13 @@ class Sequencer {
                 router_.cc(effectiveTargetFrame, TRACK_GLOBAL, CC_MASTER_VOL,
                            *params.masterVolValue / 255.0f);
                 masterVolActive_ = true;
+            }
+            if (params.delayTimeValue.has_value()) {
+                // TRACK_GLOBAL for the reason VMV above takes it — the delay send belongs to no track,
+                // and the track lane is where the external gate would swallow it (event.h).
+                router_.cc(effectiveTargetFrame, TRACK_GLOBAL, CC_DELAY_TIME,
+                           *params.delayTimeValue / 255.0f);
+                delayTimeActive_ = true;
             }
             if (params.eqmSlot.has_value()) {
                 // Master/mixer EQ — global, persists until the next EQM; the host restores the mixer
@@ -2509,6 +2523,7 @@ class Sequencer {
     bool eqmActive_ = false;
     int  mixerVolTracks_ = 0;      // bit N: a VTR has moved track N's fader this take
     bool masterVolActive_ = false; // …and a VMV has moved the master's
+    bool delayTimeActive_ = false; // …and a TIM has taken over the delay's echo time
 
     // Per-retrigger additive volume delta for RPT (Rxy), indexed by ramp nibble. Same constants as
     // PlaybackController.REPEAT_RAMP_DELTAS (single source of the ramp curve).

@@ -1319,7 +1319,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 |---|---|
 | TYPE | A starting point for the three character cells: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). Choosing one sets PONG, TONE and WOBL together; turn any of those afterwards and TYPE reads **USER**. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§22) writes the same time from a phrase or a table. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | WOBL | How far the tape speed drifts (`00`–`FF`), bending the pitch of the repeats. `00` holds them steady. |
@@ -1888,6 +1888,27 @@ It belongs to no track, so it works from any of them: a `VMV` on track 8 fades t
 
 ---
 
+### TIM `XX` — Delay Time
+
+Sets the shared delay's **echo time** to `XX` (`00`–`FF` = 0 to 2 seconds) — the same range the DELAY
+screen's `TIME` dial covers in free mode.
+
+`XX` always means that free range, **even when the DELAY screen is set to SYNC**: the twelve tempo
+divisions are a list rather than a scale, and a fade needs a scale to slide through. A `TIM` therefore
+takes the delay off the tempo grid until the next one.
+
+Like `VTR` and `VMV` it belongs to no track, works from any of them, persists until the next `TIM`, and
+is restored when playback stops.
+
+The delay's read head **glides** to a new time rather than jumping to it, and a moving head plays the
+repeats back at a different speed — so the echoes bend in pitch on the way, the way a tape delay does.
+A `TIM` under `AUS`/`AUF` is a long tape swoop; a single `TIM` is a shorter one.
+
+It also works on a **table** row, where it fires once per tick — that is where the fastest and finest
+bends are written.
+
+---
+
 ### AUS `XX` — Automation Start · AUF `XX` — Automation Finish
 
 `AUS` and `AUF` are a **pair**, and together they fade a parameter smoothly from one value to another
@@ -1924,6 +1945,7 @@ skipping any that are not:
 | `DEL` | the delay send |
 | `VTR` | this track's fader |
 | `VMV` | the master fader |
+| `TIM` | the delay time — the repeats bend in pitch as it moves |
 | `CUT` | the filter cutoff |
 | `RES` | the filter resonance |
 | `LPF` `HPF` `BPF` | the cutoff of the filter they switch on |
@@ -2841,6 +2863,7 @@ Open with **A** on an EQ cell.
 | EQM | EQ (mixer) | `XX` | Master EQ preset slot; holds till next EQM, resets on stop |
 | VTR | Track Fader | `XX` | This track's MIXER fader; replaces it, **persists**, restored on stop |
 | VMV | Master Fader | `XX` | The master fader, from any track; replaces it, **persists**, restored on stop |
+| TIM | Delay Time | `XX` | The delay's echo time (00–FF = 0–2 s), from any track; the repeats bend in pitch as it moves. Replaces the DELAY screen's time, **persists**, restored on stop |
 | AUS | Automation Start | `XX` = curve | Fades the automatable effect to its LEFT (00=ease-in 80=linear FF=ease-out) |
 | AUF | Automation Finish | `XX` | Destination value; a later step, may be a later phrase of the same chain |
 | CUT | Filter Cutoff | `XX` | This note's filter cutoff (20 Hz–20 kHz, log). Needs a FILTER TYPE on the instrument |

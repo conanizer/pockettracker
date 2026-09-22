@@ -240,6 +240,19 @@ constexpr uint8_t CC_FINE_TUNE  = 140;  // scheduleVoiceFineTune  (authored byte
 // `resolve_cc_param` maps it to -1 and `midi_out.h` drops it, like the four above.
 constexpr uint8_t CC_LOOP_SLIDE = 141;  // scheduleVoiceLoopSlide (authored byte /255)
 
+// ─── ENGINE-ONLY CC id — the delay's echo time (TIM) ─────────────────────────────────────────────
+//
+// ⚠️ **IT RIDES TRACK_GLOBAL, for the reason CC_MASTER_VOL does** (see the note above it): the delay
+// is a shared send belonging to no track, so a TIM typed on the phrase of a track playing an EXTERNAL
+// instrument must still move it — and a track-scoped record is exactly what EngineConsumer's routing
+// gate swallows there.
+//
+// Engine-only like the five above: MIDI has no controller for another box's delay time, so
+// `resolve_cc_param` maps it to -1 and `midi_out.h` drops it for free.
+//
+// ⚠️ It may never reach a `& 0x7F` — 142 masks to CC 14 (undefined).
+constexpr uint8_t CC_DELAY_TIME = 142;  // scheduleDelayTime (authored byte /255), TRACK_GLOBAL
+
 /** Slot index 0-3 for CC_SLOT_A..D, or -1 for a literal controller number. */
 constexpr int cc_slot_index(uint8_t param) {
     return (param >= CC_SLOT_A && param <= CC_SLOT_D) ? param - CC_SLOT_A : -1;

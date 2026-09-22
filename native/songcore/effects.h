@@ -250,6 +250,24 @@ inline constexpr int loop_slide_sixteenths(int value) { return (value & 0xFF) < 
 // Phrase only, and only on a step with a note — it chooses what a note triggers, not a voice.
 constexpr int FX_INS      = 0x3C;  // INS  play this note on instrument xx
 
+// ─── The delay's echo time, from a cell ──────────────────────────────────────────────────────────
+//
+// ⭐⭐ **IT IS THE FREE 00-FF SCALE WHATEVER THE DELAY SCREEN IS SET TO** — the same 0-2 seconds the
+// TIME dial spans in free mode, and not the twelve tempo subdivisions it offers in sync mode. Two
+// reasons, and the second is the one with teeth: a ramp needs a continuous range to slide through,
+// and a list of named divisions is not one, so an AUS over subdivisions would step between 1/4 and
+// 1/8 instead of sliding between them. A cell whose meaning changed with a screen toggle would also
+// make the same song play differently depending on a setting saved beside it.
+//
+// ⚠️ **IT REPLACES THE SCREEN'S TIME AND HOLDS UNTIL THE TRANSPORT STOPS**, exactly as VTR/VMV replace
+// a fader and EQM replaces the master EQ — so it carries the same debt they do: `MixerHeld`
+// (engine_setup.h) keeps a mid-take globals push from wiping it, and `SongcoreHost::stop()` puts the
+// project's own time back. A delay left on the song's last TIM would make the next PLAY start wrong.
+//
+// ⚠️ The head GLIDES to a new time rather than jumping (delay-module.h), so a TIM — and far more a
+// ramp of them — is heard as a tape-style pitch bend in the repeats, not as a jump cut.
+constexpr int FX_TIM      = 0x3D;  // TIM  delay echo time, free scale (00-FF = 0-2 s), global
+
 /** The instrument an INS cell on this step names, or -1. Rightmost wins, as in the scheduler. */
 inline int step_ins_instrument(const PhraseStep& s) {
     if (s.fx3Type == FX_INS) return s.fx3Value & 0xFF;
@@ -280,7 +298,7 @@ inline std::string effect_name(int code) {
         case FX_LPF: return "LPF"; case FX_HPF: return "HPF"; case FX_BPF: return "BPF";
         case FX_DRV: return "DRV"; case FX_CRU: return "CRU";
         case FX_FIN: return "FIN"; case FX_TSX: return "TSX"; case FX_LPO: return "LPO";
-        case FX_INS: return "INS";
+        case FX_INS: return "INS"; case FX_TIM: return "TIM";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
@@ -359,6 +377,8 @@ inline constexpr int EFFECT_TYPES[] = {
     // Play this note on another instrument. Above LPO, not after it: LPO is hidden in release
     // builds by trimming the tail, and INS must stay visible.
     FX_INS,
+    // The delay's echo time. Above LPO for the reason INS is: the tail is what a release build trims.
+    FX_TIM,
     // The loop-window slider, appended for the same reason.
     FX_LPO,
     // The MIDI commands (see the static_assert below — they must stay the LAST six)
@@ -461,6 +481,7 @@ struct ResolvedStepParams {
     std::optional<int> scaleGlobalByte;  // SCG
     std::optional<int> trackVolValue;   // VTR (authored byte)
     std::optional<int> masterVolValue;  // VMV (authored byte)
+    std::optional<int> delayTimeValue;  // TIM (authored byte, always the free 0-2 s scale)
     // MIDI phase D. `ccSlotValue[i]` is slot A..D's authored 00-FF byte; the controller NUMBER it
     // moves is the instrument's, resolved consumer-side (see the FX_CCA note above).
     std::optional<int> midiProgram;                    // MPG
@@ -527,6 +548,7 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_SCG:    p.scaleGlobalByte = value; break;
             case FX_VTR:    p.trackVolValue = value; break;
             case FX_VMV:    p.masterVolValue = value; break;
+            case FX_TIM:    p.delayTimeValue = value; break;
             case FX_TBL:    p.tableOverride = value; break;
             case FX_THO:    p.tableHopTarget = value; break;
             case FX_GRV:    p.grooveId = value; break;
