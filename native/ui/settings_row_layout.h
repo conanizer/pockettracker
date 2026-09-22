@@ -421,10 +421,11 @@ enum class MidiRow {
     INPUT    = 1,   // <device name> | OFF   — the cable      (phase E3)
     OFFSET   = 2,   // -99..+99 MS           — the cable
     SYNC     = 3,   // ON | OFF              — the cable (phase C: 24 PPQN clock + transport)
-    PROG_CHG = 4,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
-    IN_MAP   = 5,   // 8 cells, -- | 01..16  — the project (per-track input channel, phase E3)
-    PANIC    = 6,   // A: ALL NOTES OFF
-    TEST     = 7,   // A: C-4 CH 1
+    CTL_CH   = 4,   // -- | 01..16           — the cable: which channel carries MAPPING knobs
+    PROG_CHG = 5,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
+    IN_MAP   = 6,   // 8 cells, -- | 01..16  — the project (per-track input channel, phase E3)
+    PANIC    = 7,   // A: ALL NOTES OFF
+    TEST     = 8,   // A: C-4 CH 1
 };
 
 // ⚠️ ROWS ARE INSERTED HERE, NOT APPENDED, and unlike B4.3's PROJECT row that is safe: nothing in the
@@ -434,7 +435,9 @@ enum class MidiRow {
 // grouping: OUTPUT/INPUT/OFFSET/SYNC describe THIS MACHINE'S CABLE and live in settings.json, PROG CHG
 // and IN CH describe THE SONG and travel in the .ptp, and the last two are actions. INPUT sits beside
 // OUTPUT rather than after SYNC because the question a user arrives with is "which cables am I on".
-constexpr int MIDI_ROW_COUNT = 8;
+// CTL CH ends the cable group because it is the row IN CH below it must be read against: the two
+// divide the incoming channels between them, one for knobs and the rest for keys.
+constexpr int MIDI_ROW_COUNT = 9;
 
 /** The IN CH row is eight cells wide — one per track — and they are cursor COLUMNS 1..8. */
 constexpr int MIDI_IN_MAP_COLUMNS = 8;

@@ -583,19 +583,6 @@ class InputDispatcher {
     void boot_midi_in_port();
 
     /**
-     * A knob on the controller moved and the song has a mapping for it (`songcore/midi_map.h`).
-     * Returns true if it drove anything.
-     *
-     * ⚠️ **NOT `mark_modified()`, AND THAT IS THE POINT.** That one pushes the WHOLE mixer and every
-     * global effect, and rolls the lookahead back, for one number — priced for a human pressing a
-     * button once, not for a knob arriving thirty times a second. The host writes the value and
-     * pushes the one thing that carries it; what is left here is the half that is genuinely owed
-     * every time: the document is dirty, and the crash autosave's debounce re-arms, so a sweep
-     * writes one recovery file after it stops rather than one per message.
-     */
-    bool midi_mapped_cc(int controller, int value);
-
-    /**
      * The app has come back to the front — re-list the file browser if that is what is on screen.
      * A no-op on every other screen, and on a listing nothing has changed under.
      *
@@ -697,6 +684,19 @@ class InputDispatcher {
 
     /** The watcher, run once a frame by set_now(). */
     void run_instrument_entry_push();
+
+    /**
+     * The same shape, for a mapped knob: the host writes the value and pushes it from the MIDI drain,
+     * and this notices — once a frame — that it did, so the song is marked modified and the crash
+     * autosave re-arms.
+     *
+     * ⚠️ **A COUNT WATCHED, NOT A CALL RECEIVED.** The drain runs below this layer and cannot reach
+     * the dirty flag; a callback plumbed down to it would put a UI concern on the path a knob sweeps
+     * at ~30 messages a second. Watching the number is also what collapses a whole sweep into one
+     * bump per frame.
+     */
+    void     run_mapped_cc_dirty();
+    uint64_t mappedCcSeen_ = 0;
 
     /**
      * Load the autosave into the live document — and LEAVE IT DIRTY.

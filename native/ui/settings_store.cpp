@@ -101,6 +101,12 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // Phase C. Absent → false, which is both the default and what every settings.json written before
     // phase C says: a file from yesterday must not silently start driving a drum machine today.
     values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
+    // The knob channel. Absent → OFF, which is the only safe upgrade: an existing install has
+    // mappings for nothing, and a channel guessed here would take CCs away from the tracks that are
+    // already routing them.
+    values.midiControlChannel = get_int(j, "midi_control_channel", values.midiControlChannel);
+    if (values.midiControlChannel < -1 || values.midiControlChannel > 15)
+        values.midiControlChannel = -1;
 
     // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
     // flips the cap on is the session that must add the key, or the setting resets to ASK on every
@@ -217,6 +223,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["midi_offset_ms"]     = values.midiOffsetMs;
     j["midi_offset_auto"]   = values.midiOffsetAuto;
     j["midi_sync_out"]      = values.midiSyncOut;   // phase C — the clock + transport switch
+    j["midi_control_channel"] = values.midiControlChannel;   // -1 = OFF, else 0-15 (shown 01-16)
 
     // The Android device rows — see the matching block in load_settings for why these are written on
     // every platform a full phase before any of them is displayed. On the shell they are simply their

@@ -209,6 +209,23 @@ class SongcoreHost {
         for (int i = 0; i < n; ++i) {
             if (!midiInParser_.feed(buf[i])) continue;
             ++midiInMessages_;
+
+            // ⚠️⚠️ **A CC ON THE CONTROL CHANNEL IS A MAPPING KNOB AND IS NOT ROUTED TO A TRACK.**
+            // Without this line one knob does two jobs: an incoming CC already moves the instrument
+            // of whichever track names its channel (volume, pan, the two sends), so a mapped knob
+            // arriving there would move its destination AND that track's pan. Reserving one channel
+            // is M8's answer and it is the only one that keeps both features usable at once.
+            //
+            // ⚠️ The observer is still told, with no records, because the message DID arrive — the
+            // same argument as the `k == 0` call below.
+            if (const MidiInMessage& m = midiInParser_.message();
+                controlChannel_ >= 0 && m.status == EV_CC &&
+                static_cast<int>(m.channel) == controlChannel_) {
+                mappedCcWrites_ += static_cast<uint64_t>(apply_mapped_cc(m.data1, m.data2));
+                if (midiInObserver_) midiInObserver_->on_midi_in(m, ev, 0);
+                continue;
+            }
+
             const int k = midiInRouter_.route(midiInParser_.message(), frame, ev,
                                               MidiInputRouter::MAX_EVENTS);
             total += k;
@@ -539,6 +556,23 @@ class SongcoreHost {
     }
 
     // ── ↕ a mapped knob (midi_map.h) ─────────────────────────────────────────────────────────────
+
+    /**
+     * Which incoming channel carries MAPPING knobs: −1 for none, else 0-15. It is a setting, not the
+     * song's — see the CTL CH row — so it is pushed here the way the MIDI offset is.
+     */
+    void set_midi_control_channel(int ch) { controlChannel_ = (ch < 0 || ch > 15) ? -1 : ch; }
+    int  midi_control_channel() const { return controlChannel_; }
+
+    /**
+     * How many mapped destinations have been moved by the cable, ever.
+     *
+     * ⭐ **A COUNTER RATHER THAN A CALLBACK, and that is what keeps the dirty flag off the hot path.**
+     * The UI layer owns "the document changed" and the autosave debounce; it reads this once a frame
+     * and marks the song dirty if it moved, so a sweep of ~30 messages a second costs one bump per
+     * frame instead of one per message — and nothing has to be plumbed back down through the drain.
+     */
+    uint64_t mapped_cc_writes() const { return mappedCcWrites_; }
 
     /**
      * A knob the song has a mapping for moved. Writes the value into the project and makes it heard.
@@ -1411,7 +1445,9 @@ class SongcoreHost {
         }
     }
 
-    bool mappedNotifyDue_ = false;   // a mapped INS VOL/PAN owes the lookahead a roll this poll
+    bool     mappedNotifyDue_ = false;   // a mapped INS VOL/PAN owes the lookahead a roll this poll
+    int      controlChannel_  = -1;      // -1 = no channel is reserved for mapping knobs
+    uint64_t mappedCcWrites_  = 0;
 
     /**
      * A SoundFont slot moved under a playing take, so the lookahead has to be re-derived.

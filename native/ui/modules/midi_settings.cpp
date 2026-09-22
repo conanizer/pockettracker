@@ -140,6 +140,13 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     // this row's documentation, on a device with no manual and no tooltip. It is the same reasoning as
     // OUTPUT's port count above: a row has pixels to spare exactly when its value is the boring one.
     row_of(MidiRow::SYNC,     "SYNC",     s.settings.midiSyncOut ? "ON  24 PPQN" : "OFF");
+    // ⚠️ The value spells out what the channel is FOR, for SYNC's reason one line up: on its own a
+    // bare channel number on a screen that already has eight of them below it says nothing about
+    // which of the two kinds of incoming channel this is.
+    row_of(MidiRow::CTL_CH,   "CTL CH",
+           s.settings.midiControlChannel < 0
+               ? std::string("OFF")
+               : dec2(s.settings.midiControlChannel + 1) + "  MAPPED KNOBS");
     row_of(MidiRow::PROG_CHG, "PROG CHG", s.project.midiSendProgramChange ? "ON" : "OFF");
 
     // ── IN CH — the per-track input channel map (plan §7, §8.1's "TRACK INPUT MAP") ──────────────
@@ -246,6 +253,14 @@ CursorContext MidiModule::cursor_context(const MidiState& s) const {
         case MidiRow::SYNC:
             return cc::toggle_binary(s.settings.midiSyncOut);
 
+        // The same cell as one of IN CH's, and deliberately so: both are "a channel, or none", so
+        // both delete to −1 and both show 01..16 over a stored 0..15.
+        case MidiRow::CTL_CH: {
+            const int ch = s.settings.midiControlChannel;
+            return cc::hex_byte(ch, /*min=*/0, /*max=*/15, /*empty_value=*/-1,
+                                /*can_delete=*/ch >= 0, /*can_insert=*/ch < 0);
+        }
+
         case MidiRow::PROG_CHG:
             return cc::toggle_binary(s.project.midiSendProgramChange);
 
@@ -342,6 +357,16 @@ MidiInputResult MidiModule::handle_input(songcore::Project& project, SettingsVal
                 settings.midiSyncOut = on;
                 r.syncChanged        = true;
             }
+            break;
+        }
+
+        case MidiRow::CTL_CH: {
+            if (!isSet) break;
+            // Clamped here as well as in the context, for OFFSET's reason: A+B hands over the empty
+            // value, and everything else has to land inside 0..15 whatever the action carried.
+            const int v = action.value;
+            settings.midiControlChannel = (v < 0) ? -1 : (v > 15 ? 15 : v);
+            r.controlChannelChanged     = true;
             break;
         }
 

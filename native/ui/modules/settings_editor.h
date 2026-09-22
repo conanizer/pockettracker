@@ -208,6 +208,21 @@ struct SettingsValues {
     // must not be given either surprise.
     bool        midiSyncOut   = false;
 
+    // CTL CH — the channel a knob has to arrive on to be a MAPPING knob (`songcore/midi_map.h`).
+    // −1 = OFF, otherwise 0-15 (shown 01-16, as every channel in this app is).
+    //
+    // ⚠️ **IT IS A SETTING AND THE MAPPINGS ARE THE SONG'S, WHICH IS THE SAME SPLIT THIS SCREEN
+    // ALREADY TEACHES**: *"instrument 3's cutoff"* only means something beside a song that has an
+    // instrument 3, while *"my controller sends its knobs on channel 16"* describes the desk.
+    //
+    // ⚠️ **AND THE ROW IS NOT DECORATION — WITHOUT IT ONE KNOB DOES TWO JOBS.** An incoming CC is
+    // already routed to whichever track names its channel, where it moves that track's instrument
+    // (volume, pan, the two sends). A mapping CC arriving on the same channel would do both at once.
+    // So a CC on THIS channel is a mapping CC and is not routed to a track; a CC on any other channel
+    // routes exactly as it did before. Default OFF: nothing changes until the user says which knob
+    // channel is theirs.
+    int         midiControlChannel = -1;
+
     // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
     // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already
     // being handed, so it needs no second channel. Note that Android deliberately CARRIES IT ACROSS a

@@ -130,6 +130,7 @@ void InputDispatcher::set_now(long long now_ms) {
     run_due_status_dismiss();           // the status line's auto-dismiss (parity finding 5)
     run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
     run_selection_recency();            // which rung L+R takes first
+    run_mapped_cc_dirty();              // a knob on the cable moved something in the song
 }
 
 // ─── A slow load ─────────────────────────────────────────────────────────────────────────────────
@@ -679,6 +680,8 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             if (r.offsetChanged)   host_.set_midi_offset_ms(
                                        midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
             if (r.syncChanged)     host_.set_midi_sync_out(s_.settings.midiSyncOut);
+            if (r.controlChannelChanged)
+                host_.set_midi_control_channel(s_.settings.midiControlChannel);
             return r.projectModified;
         }
 
@@ -772,10 +775,18 @@ void InputDispatcher::mark_modified(bool table_touched) {
     if (host_.is_playing()) host_.notify_data_changed();
 }
 
-bool InputDispatcher::midi_mapped_cc(int controller, int value) {
-    if (host_.apply_mapped_cc(controller, value) == 0) return false;
+void InputDispatcher::run_mapped_cc_dirty() {
+    const uint64_t writes = host_.mapped_cc_writes();
+    if (writes == mappedCcSeen_) return;
+    mappedCcSeen_ = writes;
+
+    // ⚠️ **ONCE A FRAME, NOT ONCE A MESSAGE, AND THAT IS THE WHOLE REASON THIS IS A POLL.** A swept
+    // knob writes ~30 times a second; the document is equally dirty after the first of them and after
+    // the thirtieth, and the autosave's debounce only has to be re-armed while the sweep is still
+    // going. ⚠️ The dirty FLAG is still immediate in the sense that matters — within a frame of the
+    // first message — because a sweep that did not mark the song modified is a sweep the "you have
+    // unsaved work" question never asks about.
     mark_dirty_and_arm_autosave();
-    return true;
 }
 
 int InputDispatcher::remembered_song_track() const { return s_.songCursorColumn - 1; }
@@ -3211,6 +3222,10 @@ void InputDispatcher::apply_midi_device() {
 // ─── MIDI IN (phase E2) ──────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::boot_midi_in_port() {
+    // ⚠️ AT BOOT, not only when the row is touched: the channel is remembered in settings.json, so a
+    // session that never opens the MIDI screen must still have its knobs reaching their mappings.
+    // The same reason the port itself is opened here rather than waiting for a pick.
+    host_.set_midi_control_channel(s_.settings.midiControlChannel);
     refresh_midi_in_devices();
     if (s_.midiInDeviceIndex != 0) apply_midi_in_device();
     // ⚠️ UNCONDITIONALLY, and after the OUT port's own boot (app.cpp calls them in that order): with no

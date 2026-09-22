@@ -109,6 +109,7 @@ struct MidiInputResult {
     bool inDeviceChanged = false;   // INPUT  — likewise, and the sink goes with it (E2's rule)
     bool offsetChanged   = false;   // OFFSET — the dispatcher must push it to the consumer
     bool syncChanged     = false;   // SYNC   — likewise; and turning it OFF owes the device a Stop
+    bool controlChannelChanged = false;  // CTL CH — the host must be told which channel carries knobs
 };
 
 class MidiModule {
