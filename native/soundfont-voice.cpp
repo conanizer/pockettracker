@@ -243,6 +243,31 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 
 SoundfontEntry soundfonts[MAX_SOUNDFONTS];
 
+/**
+ * Above this release time, TSF's own envelope is smooth enough to hear as a fade rather than a
+ * staircase — below it, the note ends on OUR ramp instead. See the measurement in `noteOff`.
+ */
+static constexpr float SF_RELEASE_RAMP_MAX_SECS = 0.1f;
+
+/**
+ * The longest release, in seconds, among the TSF voices sounding on `channel` — the time the note
+ * would take to end if TSF were left to do it. 0 when nothing is sounding there.
+ *
+ * ⚠️ Read off the VOICE and not off its region: `tsf_preset_apply_overrides` rewrites a region's
+ * envelope, so the region can already be carrying the next instrument's SF REL while this note is
+ * still playing the one it captured at note-on. The caller holds the slot mutex.
+ */
+static float longest_release(tsf* h, int channel) {
+    float longest = 0.0f;
+    struct tsf_voice* v    = h->voices;
+    struct tsf_voice* vEnd = v + h->voiceNum;
+    for (; v != vEnd; v++) {
+        if (v->playingPreset == -1 || v->playingChannel != channel) continue;
+        if (v->ampenv.parameters.release > longest) longest = v->ampenv.parameters.release;
+    }
+    return longest;
+}
+
 // ── SoundfontVoice method implementations ──────────────────────────────────
 
 // NOTE on the `int slot = sfSlot;` snapshots below: detach() (JNI thread, SF2 eviction) sets
@@ -310,6 +335,7 @@ void SoundfontVoice::noteOff() {
     // TSF REL path (no ADSR/TRIG VOL mod):
     //   Send note_off now so TSF's own release envelope (configured via the SF REL
     //   parameter) plays out. Silence detection in the render loop fires hardStop().
+    //   ⚠️ …unless that release is SHORT, in which case the note ends on our own ramp — see below.
     bool hasActiveAdsrVolMod = false;
     for (int m = 0; m < 4; m++) {
         const VoiceModSlot& mod = voiceMods[m];
@@ -331,13 +357,38 @@ void SoundfontVoice::noteOff() {
             }
         }
     } else {
+        // Set when the note is ending on OUR ramp, which keeps `activeNote` — the ramp's end calls
+        // hardStop(), and that is what sends TSF the note-off.
+        bool ownRamp = false;
         int slot = sfSlot;
         if (slot >= 0 && slot < MAX_SOUNDFONTS) {
             std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
             tsf* h = soundfonts[slot].handle;
-            if (h && activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+            if (h && activeNote >= 0) {
+                // ⚠️⚠️ **A SHORT RELEASE IS RUN AS OUR OWN RAMP, BECAUSE TSF CANNOT FADE ONE.** Its
+                // amplitude envelope is computed once per 64-sample render chunk and held flat across
+                // it — the same granularity the steal path fades around by hand. A release of a few
+                // milliseconds therefore lands as ONE step: measured on a preset carrying the SF2's
+                // own near-instant release, the first chunk after a key-up stepped **48 % of the
+                // note's peak**, and the same measurement reads 22 % at a 32 ms release and reaches
+                // the waveform's own floor only around 100 ms. That is a crack on every key release
+                // and on every KIL, and it is the one thing a keyboard does that a phrase does not.
+                //
+                // So below the threshold TSF is NOT told the note is over: it holds the note at
+                // sustain while the ramp takes the rendered samples down per sample over the time
+                // the release would have taken, never faster than the declick fade. Above it, TSF's
+                // own release is smooth enough and is left exactly as it was — a pad keeps its tail.
+                const float rel = longest_release(h, _trackId);
+                if (rel < SF_RELEASE_RAMP_MAX_SECS) {
+                    const int want = static_cast<int>(rel * h->outSampleRate);
+                    startStopFade(want > KILL_FADE_SAMPLES ? want : KILL_FADE_SAMPLES);
+                    ownRamp = true;
+                } else {
+                    tsf_channel_note_off(h, _trackId, activeNote);
+                }
+            }
         }
-        activeNote = -1;
+        if (!ownRamp) activeNote = -1;
     }
 }
 
@@ -371,7 +422,7 @@ void SoundfontVoice::setMidiNote(int midiNote) {
 }
 
 bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
-                             float noteVol, float trkVol, float pan,
+                             float noteVol, float pan,
                              int bank, int preset, int trackId,
                              int envAtk, int envDec, int envSus, int envRel) {
     // The handle must be read inside the lock (loadSoundfont eviction can tsf_close it concurrently).
@@ -388,13 +439,12 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
     sfSlot      = slot;
     _trackId    = trackId;
     noteVolume  = noteVol;
-    trackVolume = trkVol;
 
     // ⚠️ activeNote is deliberately NOT moved to the new note here. Until the arm fires, the note this
     // channel is SOUNDING is still the old one, and activeNote is what hardStop() and noteOff() send
     // TSF's note_off for. Writing the new note now would aim those at a key nothing is holding.
     armed = ArmedNote{slot, midiNote, midiVelocity, bank, preset,
-                      noteVol, trkVol, pan, envAtk, envDec, envSus, envRel};
+                      noteVol, pan, envAtk, envDec, envSus, envRel};
     // ⚠️ A second arm in the same sub-block REPLACES the first, which is what the audible result was
     // when both fired: two notes 5.8 ms apart on one track, the second stealing the first.
     hasArmedNote = true;
@@ -435,7 +485,9 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
         }
     }
     tsf_channel_set_pan(h, _trackId, a.pan);
-    tsf_channel_set_volume(h, _trackId, a.trkVol);   // the note gain rides the render (volGain)
+    // ⚠️ THE CHANNEL VOLUME IS LEFT ALONE, at TSF's own unity. Both gains that would go through it —
+    // the note's (volGain) and the track fader — are ramps applied to the rendered samples instead,
+    // because a channel volume can only change at a render boundary.
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
     // Apply THIS instrument's ADSR override atomically, under the slot mutex the caller holds, right
     // before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own

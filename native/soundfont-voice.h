@@ -28,7 +28,6 @@ struct SoundfontVoice : public IAudioVoice {
     bool  isActive    = false;
     int   activeNote  = -1;
     float noteVolume  = 1.0f;  // Note-only volume (instrument × phrase × V-effect)
-    float trackVolume = 1.0f;  // Cached track fader — the TSF channel volume, and nothing else
 
     // Static per-instrument detune in semitones (fractional). Independent of PSL/PBN so it survives
     // pitch slides; folded into pitchMod every block. Set at note trigger, NOT cleared by resetPitchState.
@@ -59,8 +58,9 @@ struct SoundfontVoice : public IAudioVoice {
 
     // The note's gain — VOL, table and phrase volume and the VOL mods — ramped per sample over the
     // rendered block. ⚠️ It must NOT go through tsf_channel_set_volume: that is one value per block,
-    // and a fast envelope becomes a staircase that clicks at every block boundary. The channel volume
-    // carries the track fader alone. `volGain` is where the last block ended; From/To are this block's.
+    // and a fast envelope becomes a staircase that clicks at every block boundary — which is why the
+    // track fader does not go through it either. `volGain` is where the last block ended; From/To
+    // are this block's.
     float volGain     = 1.0f;
     float volGainFrom = 1.0f;
     float volGainTo   = 1.0f;
@@ -102,7 +102,7 @@ struct SoundfontVoice : public IAudioVoice {
     // armNote() for why the note_on cannot happen where the note is scheduled.
     struct ArmedNote {
         int   slot = -1, midiNote = 0, midiVelocity = 0, bank = 0, preset = 0;
-        float noteVol = 1.0f, trkVol = 1.0f, pan = 0.5f;
+        float noteVol = 1.0f, pan = 0.5f;
         int   envAtk = -1, envDec = -1, envSus = -1, envRel = -1;
     };
     bool      hasArmedNote = false;
@@ -159,9 +159,8 @@ struct SoundfontVoice : public IAudioVoice {
     // ── Audio-thread-only methods (no lock needed) ──────────────────────────
 
     // Arm a new note. Called from processAudioBlock's dispatch pass (audio thread).
-    // noteVol = instrument × phrase volume.
-    // trkVol  = current track mixer volume (fetched from trackVolumes[] at call site).
-    // TSF channel volume = noteVol * trkVol so per-track mixing works on the shared handle.
+    // noteVol = instrument × phrase volume. ⚠️ Neither it nor the track fader reaches the TSF
+    // channel: both ride the rendered buffer as per-sample ramps (see volGain above).
     //
     // ⚠️⚠️ **IT ARMS; IT DOES NOT SOUND.** The note_on happens in `fireArmedNote`, which the SF render
     // pass calls at this note's exact intra-block frame — AFTER it has rendered the frames before it.
@@ -177,7 +176,7 @@ struct SoundfontVoice : public IAudioVoice {
     // as it was, still sounding whatever it was sounding, which is the point: the eighty lines of
     // chain/envelope/mod setup that follow a trigger belong to a note that is actually going to play.
     bool armNote(int slot, int midiNote, int midiVelocity,
-                 float noteVol, float trkVol, float pan,
+                 float noteVol, float pan,
                  int bank, int preset, int trackId,
                  int envAtk, int envDec, int envSus, int envRel);
 
@@ -221,7 +220,6 @@ struct SoundfontVoice : public IAudioVoice {
         sfSlot         = -1;
         _trackId       = -1;
         noteVolume     = 1.0f;
-        trackVolume    = 1.0f;
         isReleasingOnly = false;
         tableId        = -1;
         startDelayFrames = 0;

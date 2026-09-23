@@ -1164,6 +1164,37 @@ static inline void voiceSetCrush(SoundfontVoice& v, int packed) {
     v.chain.crush.setParams(v.instrParams.crush, v.instrParams.downsample);
 }
 
+// ─── REV / DEL — the send levels, the same per-voice-type split ──────────────────────────────────
+static inline void voiceSetSends(Voice& v, float rev, float dly) {
+    v.reverbSend = rev;
+    v.delaySend  = dly;
+}
+static inline void voiceSetSends(SoundfontVoice& v, float rev, float dly) {
+    v.instrParams.reverbSend = rev;   // the SF send tap reads this copy, not the engine's
+    v.instrParams.delaySend  = dly;
+}
+
+// ─── A SOUNDING VOICE RE-READS ITS INSTRUMENT ────────────────────────────────────────────────────
+//
+// ⚠️ **A TRIGGER COPIES THE INSTRUMENT INTO THE VOICE**, which is what makes an edit to the filter,
+// the drive, the crush or the sends silent until the next note — the note you are hearing is running
+// on the copy it took. This is the same write the FX arms above make, with the values coming from the
+// instrument instead of a cell, and it is aimed at an INSTRUMENT rather than a track: a knob names a
+// parameter of instrument 3, not of whatever track 3 happens to be playing.
+//
+// ⚠️ It therefore ENDS a live override an FX cell had made on those same parameters — the hand that
+// just moved the instrument wins, exactly as it does everywhere else a press meets a running take.
+template <typename V>
+static inline void voiceReloadInstrument(V& v, const InstrumentParams& ip, float sampleRate) {
+    // Mode before resonance: the mode call is the one that can switch the filter ON, and it carries
+    // whatever resonance the voice holds — so the resonance write has to come after it, not before.
+    voiceSetFilterMode(v, ip.filterType, ip.filterCut, sampleRate);
+    voiceSetFilterRes(v, ip.filterRes, sampleRate);
+    voiceSetDrive(v, ip.drive);
+    voiceSetCrush(v, ((ip.crush & 0x0F) << 4) | (ip.downsample & 0x0F));
+    voiceSetSends(v, ip.reverbSend, ip.delaySend);
+}
+
 // ─── FIN — the one command that lands in a bus slot the voices ALREADY reset ─────────────────────
 //
 // ⭐ It needs no field of its own: `PARAM_PITCH`'s BASE has been written to zero by both voice types'
@@ -1648,7 +1679,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // track out over its first 5.8 ms, it must start silent. Also used by the visualizer gates below.
     const bool offlineRender = isOfflineRendering.load(std::memory_order_relaxed);
 
-    float trackVolSnapshot[SF_VOICE_COUNT];
+    // ⚠️ A FADER IS A PAIR, NOT A NUMBER, for the same reason the gate below is: its value at the
+    // block's first frame and at its last, interpolated per sample by both mix paths. A fader that
+    // jumps at a block edge steps the waveform, and a knob sending 0-127 steps it ~0.8% per message
+    // — a tick per message, thirty times a second. ⚠️ SNAPPED under an export, like the gate: a
+    // render must be the same samples every time, and nothing in one is a gesture.
+    float trackVolStart[SF_VOICE_COUNT];
+    float trackVolEnd[SF_VOICE_COUNT];
     // ⚠️ THE MUTE IS NO LONGER FOLDED INTO THE FADER — it is a RAMP now, and a ramp cannot be carried
     // by one per-block number. The gate arrives as its value at the block's first frame and its value
     // at the last, and both read sites interpolate between them per sample exactly as pan and the
@@ -1663,7 +1700,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float gateEnd[SF_VOICE_COUNT];
     // The same pair for the three BUS gates — the two send returns and the dry sum. See setBusMutes().
     float revGateStart, revGateEnd, dlyGateStart, dlyGateEnd, dryGateStart, dryGateEnd;
-    float masterVolSnapshot;
+    float masterVolStart, masterVolSnapshot;   // …and the master fader, same pair, same reason
     int previewTrack;
     {
         std::lock_guard<std::mutex> lock(volumeMutex);
@@ -1679,24 +1716,33 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             else if (gate > target) gate = fmaxf(target, gate - gateStep);
             end = gate;
         };
+        // The fader's walk, and it reaches its target within the block rather than chasing it over
+        // several: one block is already long enough to carry a full swing without a step (that is
+        // what MUTE_GATE_SAMPLES is), so anything longer would only be lag.
+        const auto walk_fader = [&](float& ramp, float target, float& start, float& end) {
+            if (offlineRender) ramp = target;
+            start = ramp;
+            end = ramp = target;
+        };
         for (int t = 0; t < 8; t++) {
-            trackVolSnapshot[t] = trackVolumes[t];
+            walk_fader(trackVolRamp[t], trackVolumes[t], trackVolStart[t], trackVolEnd[t]);
             walk_gate(trackGate[t], trackMuted[t], gateStart[t], gateEnd[t]);
         }
         walk_gate(revReturnGate,   revReturnMuted,   revGateStart, revGateEnd);
         walk_gate(delayReturnGate, delayReturnMuted, dlyGateStart, dlyGateEnd);
         walk_gate(dryGate,         dryMuted,         dryGateStart, dryGateEnd);
-        masterVolSnapshot = masterVolume;
+        walk_fader(masterVolRamp, masterVolume, masterVolStart, masterVolSnapshot);
         previewTrack      = previewLaneTrack;
     }
     // The preview lane borrows the fader of the channel the audition came from — the lane is a ninth
     // voice with no fader of its own, and an instrument you can only hear at full dry level tells you
     // nothing about how it sits in the mix. -1 (no origin) keeps the neutral gain it has always had.
     //
-    // ⚠️ THE ASSIGNMENT SITS AFTER THE SNAPSHOT LOOP, not in the setter: reading trackVolSnapshot here
-    // is what makes it the LIVE fader, so a VTR or a mixer move lands in the audition it is aimed at.
-    const bool previewBorrows      = (previewTrack >= 0 && previewTrack < 8);
-    trackVolSnapshot[PREVIEW_LANE] = previewBorrows ? trackVolSnapshot[previewTrack] : 1.0f;
+    // ⚠️ THE ASSIGNMENT SITS AFTER THE SNAPSHOT LOOP, not in the setter: reading the fader here
+    // is what makes it the LIVE one, so a VTR or a mixer move lands in the audition it is aimed at.
+    const bool previewBorrows   = (previewTrack >= 0 && previewTrack < 8);
+    trackVolStart[PREVIEW_LANE] = previewBorrows ? trackVolStart[previewTrack] : 1.0f;
+    trackVolEnd[PREVIEW_LANE]   = previewBorrows ? trackVolEnd[previewTrack]   : 1.0f;
     // …and the gate comes with it: an audition off a muted channel stayed silent when the mute was a
     // fold into the fader, and it has to keep doing that now the gate is carried separately.
     gateStart[PREVIEW_LANE]        = previewBorrows ? gateStart[previewTrack] : 1.0f;
@@ -1980,6 +2026,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // what the mix loops below actually read; the member is what survives to the next
                 // block. Write one and the fader moves a block late, write the other and it moves for
                 // one block and springs back.
+                //
+                // ⚠️ AND BOTH ENDS OF THE PAIR, WHICH KEEPS A SONG'S OWN RAMP EXACTLY AS IT WAS. A
+                // `VTR` already moves in per-block steps of its own choosing and a render must
+                // reproduce them to the sample; the smoothing above is for a fader a HAND moved
+                // between blocks, which is the one that arrives as an unannounced step.
                 case PARAM_UPDATE_TRACK_VOL: {            // VTR — this track's mixer fader
                     if (upd.trackId >= 0 && upd.trackId < 8) {
                         // Both take the authored value: the mute is no longer folded in here, it is a
@@ -1987,17 +2038,33 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         // moving under a muted track exactly as before, so unmuting lands on wherever
                         // the ramp has got to rather than on where it started.
                         applyTrackVolume(upd.trackId, upd.value);
-                        trackVolSnapshot[upd.trackId] = upd.value;
+                        trackVolStart[upd.trackId] = trackVolEnd[upd.trackId] = upd.value;
+                        trackVolRamp[upd.trackId]  = upd.value;
                     }
                     break;
                 }
                 case PARAM_UPDATE_MASTER_VOL: {           // VMV — the master fader (global)
                     applyMasterVolume(upd.value);
-                    masterVolSnapshot = upd.value;
+                    masterVolStart = masterVolSnapshot = masterVolRamp = upd.value;
                     break;
                 }
                 case PARAM_UPDATE_DELAY_TIME: {           // TIM — the delay's echo time (global)
                     delaySend.setTimeFree(filterByteOf(upd.value));
+                    break;
+                }
+                // An instrument was edited — a knob, a screen, a preset. Every voice still sounding
+                // on it re-reads the parameters a trigger would have copied. ⚠️ BY INSTRUMENT, not by
+                // track: the same instrument can be sounding on several at once.
+                case PARAM_UPDATE_INSTRUMENT: {
+                    const int id = upd.instrId;
+                    if (id < 0 || id >= 256) break;
+                    const InstrumentParams& ip = instrumentParams[id];
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].instrId == id)
+                            voiceReloadInstrument(voices[v], ip, sampleRate);
+                    for (int t = 0; t < SF_VOICE_COUNT; t++)
+                        if (sfVoices[t].isActive && sfVoices[t].instrId == id)
+                            voiceReloadInstrument(sfVoices[t], ip, sampleRate);
                     break;
                 }
                 default: {                                // PARAM_UPDATE_MOD_SOURCE — Vxx phraseVol
@@ -2091,7 +2158,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     // question the chain setup below has to ask: is this channel's filter/EQ full of
                     // a note that is still sounding? See InstrumentChain::reset's keepToneState.
                     const bool wasSounding = sv.isActive;
-                    float trkVol = trackVolSnapshot[t];
                     // This instrument's ADSR override (applied atomically inside fireArmedNote, before
                     // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
                     int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
@@ -2100,7 +2166,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         eAtk = eo.atk; eDec = eo.dec; eSus = eo.sus; eRel = eo.rel;
                     }
                     if (!sv.armNote(note.sfSlot, note.midiNote, note.midiVelocity,
-                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t,
+                                    note.volume, note.pan, note.sfBank, note.sfPreset, t,
                                     eAtk, eDec, eSus, eRel)) {
                         LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)",
                              note.sfSlot, note.trackId);
@@ -2598,10 +2664,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // ⚠️ SF_VOICE_COUNT, not 8: the preview lane is index 8 and now carries a real fader.
             // Bounded at 8 the sampler path would hold unity while the SoundFont path (which indexes
             // the same array by trackId with no such clamp) followed it — two readings of one array.
-            // ⚠️ THE MUTE GATE RIDES ALONG HERE, interpolated across the block on the same `t` as pan:
-            // it is the only thing between a mute press and a full-scale step in the output.
+            // ⚠️ THE FADER AND THE MUTE GATE BOTH RIDE HERE, interpolated across the block on the same
+            // `t` as pan: together they are everything between a mixer move and a step in the output.
             float trackVol = (voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT)
-                           ? trackVolSnapshot[voice.trackId]
+                           ? (trackVolStart[voice.trackId]
+                              + (trackVolEnd[voice.trackId] - trackVolStart[voice.trackId]) * t)
                              * (gateStart[voice.trackId]
                                 + (gateEnd[voice.trackId] - gateStart[voice.trackId]) * t)
                            : 1.0f;
@@ -2811,18 +2878,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             // Snapshot sfSlot ONCE into a local: eviction (JNI thread) calls detach() which sets
             // sv.sfSlot = -1 at any moment — re-reading the member after the >= 0 check indexes
-            // soundfonts[-1] (out of bounds → garbage tsf* → SIGSEGV in tsf_channel_set_volume).
+            // soundfonts[-1] (out of bounds → garbage tsf* → SIGSEGV inside TSF).
             int volSlot = sv.sfSlot;
-            if (volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
-                float trkVol = trackVolSnapshot[t];
+            if (panModded && volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
                 // Read the handle INSIDE the slot mutex: loadSoundfont's eviction path can
                 // tsf_close + null it concurrently; a stale pointer here is a use-after-free.
                 std::lock_guard<std::mutex> sfLock(soundfonts[volSlot].mutex);
                 tsf* h = soundfonts[volSlot].handle;
-                if (h) {
-                    tsf_channel_set_volume(h, t, trkVol);   // the note's own gain rides the buffer
-                    if (panModded) tsf_channel_set_pan(h, t, modPan);
-                }
+                if (h) tsf_channel_set_pan(h, t, modPan);
             }
 
             // Every VOL envelope has finished: the note is over, or — with AMT below FF — held at a
@@ -2921,11 +2984,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!rendered) continue;
             sv.volGain = sv.volGainTo;
 
+            // ⚠️ THE TRACK FADER IS APPLIED TO THE RENDERED SAMPLES, NOT TO THE TSF CHANNEL. A channel
+            // volume is one value per render call, so the fader could only step at a block edge — the
+            // staircase a knob turns into a tick per message. Here it is a ramp, like the note's own
+            // gain two lines up. It stays ABOVE the chain, where the channel volume had it, so an
+            // instrument's drive and filter hear the same signal they always did.
+            if (trackVolStart[t] != 1.0f || trackVolEnd[t] != 1.0f)
+                applyGainRamp(sfBuf, numFrames, trackVolStart[t], trackVolEnd[t]);
+
             // ⚠️ THE MUTE GATE IS APPLIED HERE, and it has to be ABOVE the send tap below: the fader
-            // itself reaches this path through `tsf_channel_set_volume`, which makes a SoundFont send
-            // post-fader where the sampler's is pre-fader, and a muted SF track has always taken its
-            // reverb and delay down with it. The gate cannot ride the channel volume — that is set
-            // once per block, which is exactly the staircase the ramp exists to remove.
+            // is already in the buffer, which makes a SoundFont send post-fader where the sampler's is
+            // pre-fader, and a muted SF track has always taken its reverb and delay down with it.
             // ⚠️ THE TRANSPORT-STOP RAMP RIDES HERE, on the gate and for the gate's own reason: it has
             // to be per sample (a per-block value is the staircase both ramps exist to remove), it has
             // to sit BELOW the filter so a stop cannot slam the chain under a note still ringing
@@ -3103,17 +3172,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // and limiter — the limiter still sees a post-fader signal, so pulling the master down still backs
     // it off rather than being squashed flat by it.
     //
-    // One multiply for the whole block is not an approximation of the per-voice one it replaces: the
-    // param queue drains completely (above the mix loops), so masterVolSnapshot already held a single
-    // value for the entire block. A VMV ramp moves the fader once per block either way.
+    // ⚠️ IT RAMPS ACROSS THE BLOCK, like every other fader here: a `VMV` moves it once per block and
+    // nothing is lost by that, but a knob moves it between blocks and a step in the summed bus is the
+    // one a listener hears most clearly. Start and end are equal unless something moved it.
     //
     // The meters and visualiser accumulators were filled pre-master and are scaled to match, so every
-    // reading stays post-master as it was.
+    // reading stays post-master as it was — by the value the block ENDS on, which is the fader the
+    // screen is showing.
     //
     // The `!= 1.0f` skip is an optimisation and nothing more — multiplying by exactly 1.0f is the
     // identity in IEEE 754, so a project at the default master FF takes the same samples either way.
-    if (masterVolSnapshot != 1.0f) {
-        for (int i = 0; i < numFrames * channelCount; i++) output[i] *= masterVolSnapshot;
+    if (masterVolStart != 1.0f || masterVolSnapshot != 1.0f) {
+        for (int i = 0; i < numFrames; i++) {
+            const float g = masterVolStart
+                          + (masterVolSnapshot - masterVolStart) * (float)(i + 1) / (float)numFrames;
+            for (int c = 0; c < channelCount; c++) output[i * channelCount + c] *= g;
+        }
         for (int t = 0; t < 8; t++) {
             framePeaksPerTrackL[t] *= masterVolSnapshot;
             framePeaksPerTrackR[t] *= masterVolSnapshot;
@@ -4258,19 +4332,14 @@ void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
 // the difference that forces the split is the LOGD below them: `processAudioBlock` contains no log
 // call at all (audio-defs.h states it as an invariant), and a ramp emitting one CC per tick would put
 // an fprintf on the audio thread a hundred times a second whenever POCKETTRACKER_LOG is set. So the
-// setters are the helpers plus a log line, and the queue arms call the helpers directly — one copy of
-// what "set this fader" means, rather than the SF-cache rule written out twice.
+// setters are the helpers plus a log line, and the queue arms call the helpers directly.
+//
+// ⚠️ SETTING THE VALUE IS ALL THERE IS TO DO — both mix paths re-read it every block and ramp to it,
+// so nothing has to be poked into a voice or a TSF channel from here.
 void AudioEngine::applyTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
-    { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
-    SoundfontVoice& sv = sfVoices[trackId];
-    sv.trackVolume = volume;
-    int slot = sv.sfSlot;  // snapshot once — detach() can set the member to -1 concurrently
-    if (sv.isActive && slot >= 0 && slot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-        tsf* h = soundfonts[slot].handle;
-        if (h) tsf_channel_set_volume(h, trackId, volume);   // the note gain rides the SF buffer
-    }
+    std::lock_guard<std::mutex> lock(volumeMutex);
+    trackVolumes[trackId] = volume;
 }
 
 void AudioEngine::applyMasterVolume(float volume) {
@@ -4323,6 +4392,18 @@ void AudioEngine::scheduleMasterVolume(int64_t targetFrame, float volume) {
 // TIM. Global like VMV above, and carries no track for the same reason.
 void AudioEngine::scheduleDelayTime(int64_t targetFrame, float time) {
     paramUpdateQueue.schedule({ targetFrame, -1, 0, time, PARAM_UPDATE_DELAY_TIME, 0.0f });
+}
+
+void AudioEngine::refreshSoundingInstrument(int instrumentId) {
+    if (instrumentId < 0 || instrumentId >= 256) return;
+    // ⚠️ NAMED RATHER THAN POSITIONAL: this is the one record that carries the instrument, and the
+    // field sits past `eqBands` at the end of the struct where nothing else initialises.
+    ScheduledParamUpdate update{};
+    update.targetFrame = globalFrameCounter.load(std::memory_order_relaxed);
+    update.trackId     = -1;
+    update.action      = PARAM_UPDATE_INSTRUMENT;
+    update.instrId     = instrumentId;
+    paramUpdateQueue.schedule(update);
 }
 
 void AudioEngine::setOttDepth(int depth) {

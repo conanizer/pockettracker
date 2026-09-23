@@ -251,7 +251,7 @@ enum ParamUpdateAction {
     PARAM_UPDATE_EQ_SLOT,         // active voice: apply eqPresets[(int)value] to chain.eq ((int)value<0 = bypass) [EQN]
     PARAM_UPDATE_MASTER_EQ,       // global: apply master EQ preset (int)value ((int)value<0 = bypass) [EQM]
     // ⚠️ THE MIXER FADERS ARE THE ONLY TWO ACTIONS THAT TOUCH NO VOICE, and their apply arms carry a
-    // trap the others do not: processAudioBlock SNAPSHOTS trackVolumes[]/masterVolume once, above the
+    // trap the others do not: processAudioBlock reads trackVolumes[]/masterVolume once, above the
     // frame loop, and the hot loops read the snapshot. Writing only the member would apply a whole
     // block late — audible as a ramp that lags, and invisible to anything that only reads back the
     // member. Both arms write the member AND the in-scope snapshot.
@@ -285,6 +285,12 @@ enum ParamUpdateAction {
     // only one that reaches a SEND BUS. It needs no snapshot write of its own: the delay module owns
     // its head position and moves it per sample from inside its own `process`. Appended, as ever.
     PARAM_UPDATE_DELAY_TIME,      // global: the delay's echo time = value*255, free scale      [TIM]
+    // ⚠️ THE ONE ACTION SCOPED TO AN INSTRUMENT RATHER THAN A TRACK, and the only one that carries no
+    // value: a voice copies its instrument's filter, drive, crush and sends when it is triggered, so
+    // an edit to any of them is inaudible until the next note unless the voices already sounding are
+    // told to read them again. It names the instrument in `instrId` and the engine re-reads the rest.
+    // Appended, like everything else here — an action's number is its identity.
+    PARAM_UPDATE_INSTRUMENT,      // every sounding voice of `instrId` re-reads that instrument
 };
 
 // One EQ setting as AUTHORED HEX — the domain the project file and the FX cells are written in, not
@@ -309,6 +315,7 @@ struct ScheduledParamUpdate {
     // ⚠️ LAST, and defaulted: every other call site aggregate-initialises this struct positionally and
     // stops before here. A field inserted above instead would silently re-bind all of them.
     EqBandsHex eqBands{};    // PARAM_UPDATE_EQ_BANDS / PARAM_UPDATE_MASTER_EQ_BANDS only
+    int instrId = -1;        // PARAM_UPDATE_INSTRUMENT only — which instrument's voices re-read it
 
     bool operator>(const ScheduledParamUpdate& other) const {
         return targetFrame > other.targetFrame;

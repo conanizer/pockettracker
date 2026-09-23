@@ -561,11 +561,22 @@ class SongcoreHost {
         push_live_params(*engine_, project_, routing_);
     }
 
-    /** One instrument's params — what an INSTRUMENT / MODS / pool edit pushes. Cheap and idempotent. */
+    /**
+     * One instrument's params — what an INSTRUMENT / MODS / pool edit pushes. Cheap and idempotent.
+     *
+     * ⚠️ **AND THE NOTES ALREADY SOUNDING ON IT ARE TOLD**, which the push above does not do on its
+     * own: a voice COPIES its instrument's filter, drive, crush and sends when it is triggered, so
+     * without the second call an edit — a mapped knob, a screen cell, a preset — is inaudible until
+     * the next note. Here rather than at the call sites because every edit path already comes
+     * through this one function.
+     */
     void push_instrument(int id) {
         if (!engine_) return;
         if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
         push_instrument_params(*engine_, project_.instruments[id], routing_, project_.tempo, sampleRate_);
+        // ⚠️ `sampleId`, because that is the index the params were just written at — the engine keys
+        // its per-instrument playback params by it, and a voice remembers the same number.
+        engine_->refreshSoundingInstrument(project_.instruments[id].sampleId);
     }
 
     /**

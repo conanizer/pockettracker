@@ -527,6 +527,19 @@ public:
     void scheduleMasterVolume(int64_t targetFrame, float volume);                      // VMV xx
     void scheduleDelayTime(int64_t targetFrame, float time);                           // TIM xx
 
+    /**
+     * An instrument's parameters were edited — make the notes ALREADY SOUNDING on it hear that.
+     *
+     * ⚠️ **A TRIGGER COPIES THE INSTRUMENT INTO THE VOICE**, so a filter, drive, crush or send edit
+     * is otherwise silent until the next note: the note playing is running on the copy it took. Every
+     * live edit path (a mapped knob, the INSTRUMENT screen, a preset) calls this right after pushing
+     * the instrument, and the copy is refreshed on the audio thread like every other live write.
+     *
+     * ⚠️ No frame: it lands at the next drain, which is where a hand's edit belongs — there is no
+     * step it has to be aligned to, unlike an FX cell's.
+     */
+    void refreshSoundingInstrument(int instrumentId);
+
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
 
@@ -1195,6 +1208,13 @@ private:
     // else, which is why it needs no atomic and no lock of its own. Starts open: an engine that has
     // never been told about a mute must not fade its first block in.
     float trackGate[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    // ⚠️ WHERE EACH FADER HAS GOT TO — a fader moves across a block, it does not jump at its edge.
+    // A knob sending 0-127 steps a gain by ~0.8% per message, and a step in a gain is a step in the
+    // waveform: audible as a tick per message. Both mix paths read the pair (this value, the current
+    // target) and interpolate per sample, exactly as the mute gate above does.
+    // ⚠️ AUDIO THREAD ONLY, like the gates: advanced once per block inside processAudioBlock.
+    float trackVolRamp[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    float masterVolRamp   = 1.0f;
     // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
     // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.
