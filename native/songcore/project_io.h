@@ -34,9 +34,11 @@
 //       - fields with NO default (ids, Note.pitch/octave, InstrumentPreset.instrument) : always.
 //   * enums serialise by entry NAME; every number is an integer (no floats in this schema).
 
+#include "midi_map.h"
 #include "model.h"
 #include "../vendor/nlohmann/json.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <optional>
@@ -286,6 +288,34 @@ inline Instrument parse_instrument(const json& j, int index) {
     return i;
 }
 
+/**
+ * ⚠️ **A DESTINATION THIS BUILD DOES NOT KNOW IS KEPT, NOT DROPPED.** `map_dest` returns null for an
+ * id written by a newer version; the list screen greys that row and says so, and the mapping is still
+ * there when that version opens the song again. Dropping it here would delete a user's work on the
+ * strength of a downgrade.
+ *
+ * The two repairs are the ones a hand-written file could otherwise push past a cell's own bounds: a
+ * controller is seven bits on the wire, and a range is in the destination's units. ⚠️ Each end of the
+ * range is clamped on its own, so an INVERTED range (min > max) survives — that is how a mapping is
+ * made to run backwards.
+ */
+inline MidiMapping parse_midi_mapping(const json& j) {
+    MidiMapping m;
+    m.controller = (uint8_t)std::clamp(get_int(j, "controller", m.controller), 0, 127);
+    m.dest       = (uint8_t)std::clamp(get_int(j, "dest", m.dest), 0, 255);
+    m.scopeIndex = (uint8_t)std::clamp(get_int(j, "scopeIndex", m.scopeIndex), 0, 255);
+    m.rangeMin   = get_int(j, "rangeMin", m.rangeMin);
+    m.rangeMax   = get_int(j, "rangeMax", m.rangeMax);
+    if (const MapDest* d = map_dest(m.dest)) {
+        m.rangeMin = std::clamp(m.rangeMin, d->min, d->max);
+        m.rangeMax = std::clamp(m.rangeMax, d->min, d->max);
+    }
+    // ⚠️ The scope index is NOT clamped against the pools: they are still whatever the file held at
+    // this point and `normalize_project` only ever pads them. An index past the end is the "the
+    // destination has gone" case `map_dest_present` already answers, and the screen greys the row.
+    return m;
+}
+
 template <class T, class F>
 inline std::vector<T> parse_pool(const json& j, const char* k, F&& parse_elem) {
     std::vector<T> v;
@@ -351,6 +381,15 @@ inline Project parse_project(const json& j) {
       if (it != j.end() && it->is_array())
           for (size_t t = 0; t < p.midiInputChannels.size() && t < it->size(); ++t)
               if ((*it)[t].is_number()) p.midiInputChannels[t] = (*it)[t].get<int>(); }
+    // ⚠️ Truncated at the cap rather than taken whole: every incoming CC sweeps this list, ~30 times
+    // a second per knob, so its length is a cost the audio path pays. Only a hand-written file can be
+    // longer — the screen's ADD row refuses past the same number.
+    { auto it = j.find("midiMappings");
+      if (it != j.end() && it->is_array())
+          for (const auto& e : *it) {
+              if ((int)p.midiMappings.size() >= MIDI_MAP_MAX) break;
+              if (e.is_object()) p.midiMappings.push_back(parse_midi_mapping(e));
+          } }
     return p;
 }
 
@@ -808,6 +847,25 @@ inline std::string serialize_project(const Project& p) {
         w.key("midiInputChannels");
         w.begin_array();
         for (int c : p.midiInputChannels) { w.element(); w.value_int(c); }
+        w.end_array();
+    }
+    // ⚠️ OMITTED WHOLE WHEN THERE ARE NONE, and that is what keeps every .ptp already on disk — and
+    // the nine goldens — byte-identical: a song that has never opened the MAPPING screen emits not one
+    // new byte. Inside a mapping the fields are guarded against their own struct defaults, the same
+    // rule as everywhere above, so the common row is `{"controller":74,"dest":5}`.
+    if (!p.midiMappings.empty()) {
+        w.key("midiMappings");
+        w.begin_array();
+        for (const MidiMapping& m : p.midiMappings) {
+            w.element();
+            w.begin_object();
+            if (m.controller != 0)  w.field_int("controller", m.controller);
+            if (m.dest != 0)        w.field_int("dest", m.dest);
+            if (m.scopeIndex != 0)  w.field_int("scopeIndex", m.scopeIndex);
+            if (m.rangeMin != 0)    w.field_int("rangeMin", m.rangeMin);
+            if (m.rangeMax != 255)  w.field_int("rangeMax", m.rangeMax);
+            w.end_object();
+        }
         w.end_array();
     }
     w.end_object();

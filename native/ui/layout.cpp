@@ -7,6 +7,7 @@
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
+#include "ui/modules/map_picker_overlay.h"
 #include "ui/modules/render_dialog.h"
 #include "ui/song_pointer.h"   // NAV = SONG — the cell the CHAIN/PHRASE headers read out
 
@@ -379,6 +380,7 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
                 // "text the module paints but does not own" arrangement the DEVICE rows above use, and
                 // for the same reason: only the platform can name what an index means.
                 MidiState ms{p, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
+                ms.lastCcChannel  = s.midiInCcChannel;
                 ms.cursorRow    = s.midiCursorRow;
                 ms.cursorColumn = s.midiCursorColumn;
                 ms.deviceIndex   = s.midiDeviceIndex;
@@ -388,6 +390,15 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
                 ms.caps          = s.caps;
                 ms.theme         = t;
                 midi_.draw(c, moduleX, EDITOR_Y, ms);
+                break;
+            }
+
+            case ScreenType::MIDI_MAP: {
+                MidiMapState mm{p};
+                mm.cursorRow    = s.midiMapCursorRow;
+                mm.cursorColumn = s.midiMapCursorColumn;
+                mm.theme        = t;
+                midiMap_.draw(c, moduleX, EDITOR_Y, mm);
                 break;
             }
 
@@ -422,6 +433,7 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     // LAST, over everything, including the right bar and the status line — an overlay is modal, and
     // its backdrop dims the whole frame. (The EQ editor and the theme editor join them here.)
     draw_fx_helper(c, s.fxHelper, t);
+    draw_map_picker(c, s.mapPicker, t);
     draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);
     if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
     draw_confirm_dialog(c, s.confirm, t);

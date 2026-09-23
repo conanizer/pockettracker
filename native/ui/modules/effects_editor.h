@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "songcore/midi_map.h"
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
@@ -77,6 +78,13 @@ public:
     void draw(Canvas& c, int x, int y, const EffectState& s) const;
 
     CursorContext cursor_context(const EffectState& s) const;
+
+    /**
+     * What the row under the cursor is CALLED, for MIDI learn. The rows that pick a PRESET or a MODE
+     * — the master FX type, the two EQ slots, the two algorithm rows, PONG — decline: a knob sweeping
+     * a list of reverb algorithms is not a parameter, it is a page turn.
+     */
+    songcore::MapTarget map_target(const EffectState& s) const;
 
     EffectInputResult handle_input(songcore::Project& project, int cursor_row,
                                    const InputAction& action) const;

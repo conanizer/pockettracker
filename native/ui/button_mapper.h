@@ -28,9 +28,9 @@
 // below can be measured rather than re-read.
 //
 // ⚠️ **A `Dispatcher` must provide every `on_*` named below plus `defer_a_to_release()`,
-// `defer_b_to_release()`, `on_a_deferred()` and `help_full_open()`.** A template only type-checks what
-// it instantiates, so a typo here is caught by the shell's own instantiation (which is a full build,
-// every session) and by ptmapper's.
+// `defer_b_to_release()`, `on_a_deferred()`, `on_r_held(bool)` and `help_full_open()`.** A template
+// only type-checks what it instantiates, so a typo here is caught by the shell's own instantiation
+// (which is a full build, every session) and by ptmapper's.
 
 #include "ui/buttons.h"
 
@@ -119,6 +119,16 @@ struct MapperState {
 template <class Dispatcher>
 void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_t now) {
     const ButtonMods& m = e.mods;
+
+    // ── R's HELD STATE IS PUBLISHED, ABOVE EVERY ARM AND EVERY EARLY RETURN ──────────────────────
+    //
+    // ⚠️⚠️ **THE ONE GESTURE HERE THAT IS NOT A CHORD OF BUTTONS.** MIDI learn is "hold R and turn a
+    // knob", and a knob is a CC on a cable — it never becomes a `ButtonEvent`, so no arm below can
+    // ever see it. The matrix cannot answer that gesture; all it can do is say when R is down.
+    //
+    // ⚠️ It sits at the very top because several arms return early, and a latch that could be skipped
+    // by one of them would leave R "held" after it came up — every later knob would learn.
+    if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
 
     // ── RELEASE ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {

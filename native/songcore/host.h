@@ -210,20 +210,48 @@ class SongcoreHost {
             if (!midiInParser_.feed(buf[i])) continue;
             ++midiInMessages_;
 
-            // ⚠️⚠️ **A CC ON THE CONTROL CHANNEL IS A MAPPING KNOB AND IS NOT ROUTED TO A TRACK.**
-            // Without this line one knob does two jobs: an incoming CC already moves the instrument
-            // of whichever track names its channel (volume, pan, the two sends), so a mapped knob
-            // arriving there would move its destination AND that track's pan. Reserving one channel
-            // is M8's answer and it is the only one that keeps both features usable at once.
+            // ⚠️⚠️ **A KNOB IS NOTICED ON EVERY CHANNEL, NOT ONLY THE RESERVED ONE**, and that is
+            // what makes the feature findable. "Your knob is on channel 6" is exactly the sentence a
+            // user needs while `CTL CH` is still OFF — and OFF is the default, so it is the sentence
+            // every new install needs first. The UI layer decides what to say; this only records.
+            if (const MidiInMessage& cc = midiInParser_.message(); cc.status == EV_CC) {
+                lastCcChannel_ = static_cast<int>(cc.channel);
+                if (learnArmed_) {
+                    learnController_ = cc.data1;
+                    learnChannel_    = static_cast<int>(cc.channel);
+                    ++learnEvents_;
+                }
+            }
+
+            // ⚠️⚠️ **A CC IS OFFERED TO THE MAPPINGS FIRST, AND ONE THAT DRIVES SOMETHING IS CONSUMED.**
+            // One knob must not do two jobs: an incoming CC already moves the instrument of whichever
+            // track names its channel (volume, pan, the two sends), so a mapped knob arriving there
+            // would move its destination AND that track's pan.
+            //
+            // ⭐ **CLAIMED, NOT RESERVED, AND THAT IS WHAT LETS `ALL` BE THE DEFAULT.** A CC that
+            // drives NO mapping falls straight through to the router below and behaves exactly as it
+            // did before this feature existed — so an install with no mappings is untouched whatever
+            // this channel says, and a narrowed channel restricts which knobs may be offered rather
+            // than which may be heard.
             //
             // ⚠️ The observer is still told, with no records, because the message DID arrive — the
             // same argument as the `k == 0` call below.
             if (const MidiInMessage& m = midiInParser_.message();
-                controlChannel_ >= 0 && m.status == EV_CC &&
-                static_cast<int>(m.channel) == controlChannel_) {
-                mappedCcWrites_ += static_cast<uint64_t>(apply_mapped_cc(m.data1, m.data2));
-                if (midiInObserver_) midiInObserver_->on_midi_in(m, ev, 0);
-                continue;
+                m.status == EV_CC &&
+                ctl_ch_covers(controlChannel_, static_cast<int>(m.channel))) {
+                // ⚠️ **WHILE LEARN IS ARMED THE KNOB NAMES AND DOES NOT DRIVE.** Otherwise holding `R`
+                // to point a knob at a new parameter would also sweep whatever that knob already
+                // drove — the user would hear the old destination move while aiming at the new one.
+                // (The naming itself happened above, for every channel.)
+                if (learnArmed_) {
+                    if (midiInObserver_) midiInObserver_->on_midi_in(m, ev, 0);
+                    continue;
+                }
+                if (const int driven = apply_mapped_cc(m.data1, m.data2); driven > 0) {
+                    mappedCcWrites_ += static_cast<uint64_t>(driven);
+                    if (midiInObserver_) midiInObserver_->on_midi_in(m, ev, 0);
+                    continue;
+                }
             }
 
             const int k = midiInRouter_.route(midiInParser_.message(), frame, ev,
@@ -558,10 +586,17 @@ class SongcoreHost {
     // ── ↕ a mapped knob (midi_map.h) ─────────────────────────────────────────────────────────────
 
     /**
-     * Which incoming channel carries MAPPING knobs: −1 for none, else 0-15. It is a setting, not the
-     * song's — see the CTL CH row — so it is pushed here the way the MIDI offset is.
+     * Which incoming channel may carry MAPPING knobs: 0-15 for one, `MIDI_CTL_CH_ALL` for any, −1 for
+     * none. It is a setting, not the song's — see the CTL CH row — so it is pushed here the way the
+     * MIDI offset is.
+     *
+     * ⚠️ −1 is this object's start state and has no row behind it: the screen offers `ALL` and the
+     * sixteen channels, and pushes one of them at boot. A tool that builds a bare host gets "no knobs
+     * yet", which is the honest answer before anything has been configured.
      */
-    void set_midi_control_channel(int ch) { controlChannel_ = (ch < 0 || ch > 15) ? -1 : ch; }
+    void set_midi_control_channel(int ch) {
+        controlChannel_ = (ch < 0 || ch > MIDI_CTL_CH_ALL) ? -1 : ch;
+    }
     int  midi_control_channel() const { return controlChannel_; }
 
     /**
@@ -573,6 +608,33 @@ class SongcoreHost {
      * frame instead of one per message — and nothing has to be plumbed back down through the drain.
      */
     uint64_t mapped_cc_writes() const { return mappedCcWrites_; }
+
+    /**
+     * MIDI LEARN is armed — the user is holding `R` — so the next knob on the control channel names a
+     * destination instead of driving one.
+     *
+     * ⚠️⚠️ **THE ARM IS PUSHED DOWN, THE RESULT IS WATCHED BACK UP, AND NEITHER CROSSES AS A CALL.**
+     * The drain runs below the UI layer and cannot ask which cell the cursor is on; the UI layer
+     * cannot be called from the drain without putting itself on a path a knob sweeps ~30 times a
+     * second. So this half is a bool the UI sets when `R` goes down, and the other half is the same
+     * watched-counter shape `mapped_cc_writes()` already uses.
+     */
+    void set_midi_learn_armed(bool on) { learnArmed_ = on; }
+    bool midi_learn_armed() const { return learnArmed_; }
+
+    /** Moves once per knob seen while learn was armed; the controller and CHANNEL are the ones it saw. */
+    uint64_t midi_learn_events() const { return learnEvents_; }
+    int      midi_learn_controller() const { return learnController_; }
+    int      midi_learn_channel() const { return learnChannel_; }
+
+    /**
+     * The channel the last incoming CC arrived on, whatever channel that was, or −1 for none yet.
+     *
+     * ⚠️ **THE ANSWER TO "WHICH CHANNEL IS MY CONTROLLER ON?", which the `CTL CH` row otherwise asks
+     * the user to already know.** It defaults to OFF, so a fresh install cannot map anything until
+     * that number is found — and this is where the cable itself says it.
+     */
+    int last_cc_channel() const { return lastCcChannel_; }
 
     /**
      * A knob the song has a mapping for moved. Writes the value into the project and makes it heard.
@@ -1448,6 +1510,11 @@ class SongcoreHost {
     bool     mappedNotifyDue_ = false;   // a mapped INS VOL/PAN owes the lookahead a roll this poll
     int      controlChannel_  = -1;      // -1 = no channel is reserved for mapping knobs
     uint64_t mappedCcWrites_  = 0;
+    bool     learnArmed_      = false;   // `R` is down: the next knob NAMES rather than drives
+    uint64_t learnEvents_     = 0;
+    int      learnController_ = -1;
+    int      learnChannel_    = -1;
+    int      lastCcChannel_   = -1;      // whatever channel the cable last carried a CC on
 
     /**
      * A SoundFont slot moved under a playing take, so the lookahead has to be re-derived.

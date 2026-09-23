@@ -424,8 +424,12 @@ enum class MidiRow {
     CTL_CH   = 4,   // -- | 01..16           — the cable: which channel carries MAPPING knobs
     PROG_CHG = 5,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
     IN_MAP   = 6,   // 8 cells, -- | 01..16  — the project (per-track input channel, phase E3)
-    PANIC    = 7,   // A: ALL NOTES OFF
-    TEST     = 8,   // A: C-4 CH 1
+    // ⚠️ THE FIRST ROW ON THIS SCREEN THAT IS A DOOR RATHER THAN A VALUE. It sits with the two
+    // actions below it rather than in the settings/song halves above, because what A does on it is
+    // its whole content — the same shape PROJECT's SYSTEM and MIDI rows have.
+    MAPPING  = 7,   // A: the mapping list   — the project (phase 3)
+    PANIC    = 8,   // A: ALL NOTES OFF
+    TEST     = 9,   // A: C-4 CH 1
 };
 
 // ⚠️ ROWS ARE INSERTED HERE, NOT APPENDED, and unlike B4.3's PROJECT row that is safe: nothing in the
@@ -437,7 +441,7 @@ enum class MidiRow {
 // OUTPUT rather than after SYNC because the question a user arrives with is "which cables am I on".
 // CTL CH ends the cable group because it is the row IN CH below it must be read against: the two
 // divide the incoming channels between them, one for knobs and the rest for keys.
-constexpr int MIDI_ROW_COUNT = 9;
+constexpr int MIDI_ROW_COUNT = 10;
 
 /** The IN CH row is eight cells wide — one per track — and they are cursor COLUMNS 1..8. */
 constexpr int MIDI_IN_MAP_COLUMNS = 8;

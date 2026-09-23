@@ -97,6 +97,10 @@ cmake-build-*/
 # run must not reconfigure the tree a device session is using, and one CMake cache cannot serve two
 # build types anyway.
 /shell/build-release-linux/
+# An MSVC tree built WITHOUT NDEBUG, so `PlatformCaps::debug` is true and the MIDI screens exist. It
+# is a separate directory for the same reason as the two above: `shell/build` is the Release tree the
+# Windows package is cut from, and reconfiguring it would silently ship a debug binary.
+/shell/build-testing/
 
 # OS-specific files
 # macOS

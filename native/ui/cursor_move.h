@@ -61,6 +61,7 @@
 #include "ui/effects_row_layout.h"
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/groove_editor.h"
+#include "ui/modules/midi_map_editor.h"
 #include "ui/modules/scale_editor.h"
 #include "ui/settings_row_layout.h"
 #include "ui/song_pointer.h"
@@ -325,6 +326,19 @@ inline void move_cursor_up(AppState& s) {
             s.midiCursorColumn = 1;
             break;
 
+        // ⚠️ THE MAPPING LIST'S ROWS ARE HOMOGENEOUS, so the column is CARRIED rather than snapped
+        // back to 1 — walking a table and losing your column on every step is what the grids never
+        // do. It is then clamped, because two rows do have fewer cells: the ADD row at the bottom
+        // has one, and a destination with no scope number has five.
+        case ScreenType::MIDI_MAP:
+            if (s.project) {
+                const int rows = midi_map_row_count(*s.project);
+                s.midiMapCursorRow = (s.midiMapCursorRow > 0) ? s.midiMapCursorRow - 1 : rows - 1;
+                s.midiMapCursorColumn =
+                    midi_map_clamp_column(*s.project, s.midiMapCursorRow, s.midiMapCursorColumn);
+            }
+            break;
+
         // Off the top step, under NAV = SONG: the pointer climbs to the previous FILLED chain row and
         // the cursor lands on the last step of whatever phrase sits there. The move itself is the same
         // wrap either way — only the pointer is extra — so the assignment below is said once.
@@ -431,6 +445,16 @@ inline void move_cursor_down(AppState& s) {
         case ScreenType::MIDI:
             s.midiCursorRow = (s.midiCursorRow < MIDI_ROW_COUNT - 1) ? s.midiCursorRow + 1 : 0;
             s.midiCursorColumn = 1;
+            break;
+
+        // The carried column and its clamp — see the matching arm in move_cursor_up.
+        case ScreenType::MIDI_MAP:
+            if (s.project) {
+                const int rows = midi_map_row_count(*s.project);
+                s.midiMapCursorRow = (s.midiMapCursorRow < rows - 1) ? s.midiMapCursorRow + 1 : 0;
+                s.midiMapCursorColumn =
+                    midi_map_clamp_column(*s.project, s.midiMapCursorRow, s.midiMapCursorColumn);
+            }
             break;
 
         // …and off the bottom step it descends. See move_cursor_up's arm.
@@ -565,6 +589,14 @@ inline void move_cursor_left(AppState& s) {
                 s.midiCursorColumn--;
             return;
 
+        // ⚠️ Through the clamp, not a bare `--`: the SCOPE cell is not drawn on a destination that
+        // has none, and a step onto it would highlight a gap.
+        case ScreenType::MIDI_MAP:
+            if (s.project && s.midiMapCursorColumn > 1)
+                s.midiMapCursorColumn = midi_map_clamp_column(
+                    *s.project, s.midiMapCursorRow, s.midiMapCursorColumn - 1, /*prefer=*/-1);
+            return;
+
         default:
             break;
     }
@@ -667,6 +699,15 @@ inline void move_cursor_right(AppState& s) {
             if (s.midiCursorColumn < last) s.midiCursorColumn++;
             return;
         }
+
+        // ⚠️ The bound is the ROW's, not the screen's — the ADD row has one cell — and the step goes
+        // through the clamp because the SCOPE cell in the middle is not drawn on every destination.
+        case ScreenType::MIDI_MAP:
+            if (s.project &&
+                s.midiMapCursorColumn < midi_map_max_column(*s.project, s.midiMapCursorRow))
+                s.midiMapCursorColumn = midi_map_clamp_column(
+                    *s.project, s.midiMapCursorRow, s.midiMapCursorColumn + 1, /*prefer=*/+1);
+            return;
 
         default:
             break;

@@ -3,6 +3,7 @@
 #include "songcore/timing.h"
 #include "songcore/traversal.h"
 #include "ui/cursor_move.h"
+#include "ui/helpers.h"        // dec2 — a MIDI channel is the one number this app shows in decimal
 #include "ui/lifecycle.h"        // the crash-recovery autosave — write / clear / load (S10)
 #include "ui/navigation.h"
 #include "ui/song_pointer.h"     // NAV = SONG — the pointer, the entry gate and the load-time clamp
@@ -131,6 +132,10 @@ void InputDispatcher::set_now(long long now_ms) {
     run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
     run_selection_recency();            // which rung L+R takes first
     run_mapped_cc_dirty();              // a knob on the cable moved something in the song
+    run_midi_learn();                   // …or, with R held, was pointed at the cell under the cursor
+    // The cable reporting which channel its knobs are on — one copy a frame, for a screen that is
+    // built in two places and can ask no host of its own.
+    s_.midiInCcChannel = host_.last_cc_channel();
 }
 
 // ─── A slow load ─────────────────────────────────────────────────────────────────────────────────
@@ -521,6 +526,7 @@ CursorContext InputDispatcher::cursor_context() const {
 
         case ScreenType::MIDI: {
             MidiState ms{*s_.project, s_.settings, s_.midiDeviceNames, s_.midiInDeviceNames};
+            ms.lastCcChannel  = s_.midiInCcChannel;
             ms.cursorRow      = s_.midiCursorRow;
             ms.cursorColumn   = s_.midiCursorColumn;
             ms.deviceIndex    = s_.midiDeviceIndex;
@@ -528,6 +534,13 @@ CursorContext InputDispatcher::cursor_context() const {
             ms.autoOffsetMs   = s_.midiAutoOffsetMs;
             ms.caps           = s_.caps;
             return midi_.cursor_context(ms);
+        }
+
+        case ScreenType::MIDI_MAP: {
+            MidiMapState mm{p};
+            mm.cursorRow    = s_.midiMapCursorRow;
+            mm.cursorColumn = s_.midiMapCursorColumn;
+            return midiMap_.cursor_context(mm);
         }
 
         case ScreenType::SAMPLE_EDITOR:
@@ -685,6 +698,18 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             return r.projectModified;
         }
 
+        // ⚠️ THE MAPPINGS ARE THE SONG'S, so every edit here dirties it — unlike the cable rows above,
+        // and like PROG CHG. ⚠️ Nothing is pushed to the engine: a mapping says what a knob WILL do,
+        // and until one turns, no parameter has moved.
+        case ScreenType::MIDI_MAP: {
+            const MidiMapInputResult r = midiMap_.handle_input(p, s_.midiMapCursorRow,
+                                                               s_.midiMapCursorColumn, action);
+            // A delete leaves the cursor one past the end of a list that just got shorter — and the
+            // ADD row is where it should land, which is exactly the row that is now under it.
+            if (r.rowDeleted) clamp_midi_map_cursor();
+            return r.modified;
+        }
+
         case ScreenType::SAMPLE_EDITOR: {
             const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
             if (r.rateModeChanged || r.bitDepthChanged) apply_sample_rate_and_bits();
@@ -786,6 +811,101 @@ void InputDispatcher::run_mapped_cc_dirty() {
     // going. ⚠️ The dirty FLAG is still immediate in the sense that matters — within a frame of the
     // first message — because a sweep that did not mark the song modified is a sweep the "you have
     // unsaved work" question never asks about.
+    mark_dirty_and_arm_autosave();
+}
+
+// ─── MIDI learn — hold R, turn a knob ────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_r_held(bool down) { host_.set_midi_learn_armed(down); }
+
+songcore::MapTarget InputDispatcher::map_target() const {
+    const Project& p = *s_.project;
+
+    // ⚠️ A modal owns the screen while it is up, and the cursor underneath it is not what the user is
+    // aiming at. The same rule every button obeys here — a knob is simply the one "press" that can
+    // arrive without going through the mapper.
+    if (modal_backdrop_active(s_) || s_.eq.isOpen) return {};
+
+    switch (s_.currentScreen) {
+        case ScreenType::MIXER: {
+            MixerState ms{p};
+            ms.cursorColumn   = s_.mixerCursorColumn;
+            ms.mixerMasterRow = s_.mixerMasterRow;
+            return mixer_.map_target(ms);
+        }
+
+        case ScreenType::EFFECTS: {
+            EffectState es{p};
+            es.cursorRow = s_.effectsCursorRow;
+            return effects_.map_target(es);
+        }
+
+        case ScreenType::INSTRUMENT: {
+            InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+            is.cursorRow    = s_.instrumentCursorRow;
+            is.cursorColumn = s_.instrumentCursorColumn;
+            // ⚠️ WHICH instrument is this layer's to say — the module holds one by reference and has
+            // never known its number. "Instrument 3's cutoff" is finished here or nowhere.
+            songcore::MapTarget t = instrument_.map_target(is);
+            t.scope = static_cast<uint8_t>(s_.currentInstrument);
+            return t;
+        }
+
+        // Every other screen names no parameter. A phrase step, a chain row, a file name and a
+        // settings row are not values a knob sweeps, and the catalogue deliberately does not hold
+        // everything the cursor can sit on.
+        default:
+            return {};
+    }
+}
+
+void InputDispatcher::run_midi_learn() {
+    const uint64_t events = host_.midi_learn_events();
+    if (events == learnSeen_) return;
+    learnSeen_ = events;
+
+    // ⚠️⚠️ **THE KNOB CAME IN ON A CHANNEL NOTHING IS LISTENING TO, AND SAYING WHICH ONE IS THE
+    // WHOLE POINT.** `CTL CH` is OFF by default — it has to be, or a guessed channel would steal CCs
+    // the tracks are already routing — so on a fresh install this gesture CANNOT work until that row
+    // is set, and the user has no way to know what number to put there. The cable knows. It says so.
+    if (!songcore::ctl_ch_covers(host_.midi_control_channel(), host_.midi_learn_channel())) {
+        s_.statusMessage = "KNOB ON CH " + dec2(host_.midi_learn_channel() + 1) + " - SET CTL CH";
+        s_.statusSuccess = false;
+        return;
+    }
+
+    const songcore::MapTarget target = map_target();
+    if (!target.named()) {
+        // ⚠️ SAID OUT LOUD, because the alternative is a gesture with no feedback at all: a knob that
+        // learns nothing looks exactly like a knob that is not plugged in.
+        s_.statusMessage = "NOTHING HERE TO MAP";
+        s_.statusSuccess = false;
+        return;
+    }
+
+    const int cc  = host_.midi_learn_controller();
+    const int row = songcore::learn_mapping(*s_.project, target, cc);
+    if (row < 0) {
+        s_.statusMessage = "MAPPING LIST FULL";
+        s_.statusSuccess = false;
+        return;
+    }
+
+    // ⚠️ The SCOPE is said out loud, in the numbering the mapping list already uses — a track from 1,
+    // an instrument in hex from 00. "MAPPED 4A > INS CUT" on a screen showing eight instruments does
+    // not tell the user which one the knob now owns.
+    const songcore::MapDest* d = songcore::map_dest(target.id);
+    std::string where = d ? d->name : "?";
+    if (d && d->scope == songcore::MapScope::TRACK)
+        where += " " + std::to_string(target.scope + 1);
+    else if (d && d->scope == songcore::MapScope::INSTRUMENT)
+        where += " " + songcore::hex2(target.scope);
+    s_.statusMessage = "MAPPED " + songcore::hex2(cc) + " > " + where;
+    s_.statusSuccess = true;
+
+    // ⚠️ Dirty, and NOTHING PUSHED — the same split the mapping screen's own edits make. A mapping
+    // says what a knob WILL do; until one turns, no parameter has moved and the engine has nothing to
+    // be told.
     mark_dirty_and_arm_autosave();
 }
 
@@ -1292,6 +1412,34 @@ bool InputDispatcher::on_fx_type_column() const {
     }
 }
 
+// ─── The mapping destination picker ──────────────────────────────────────────────────────────────
+
+bool InputDispatcher::on_map_dest_cell() const {
+    if (s_.currentScreen != ScreenType::MIDI_MAP) return false;
+    const Project& p = *s_.project;
+    if (s_.midiMapCursorRow < 0 ||
+        s_.midiMapCursorRow >= static_cast<int>(p.midiMappings.size()))
+        return false;   // the ADD row — a plain A is its whole behaviour
+    return s_.midiMapCursorColumn == static_cast<int>(MapCol::GROUP) ||
+           s_.midiMapCursorColumn == static_cast<int>(MapCol::PARAM);
+}
+
+void InputDispatcher::apply_map_picker_choice() {
+    const songcore::MapDest* d = s_.mapPicker.selected();
+    s_.mapPicker = MapPickerState{};
+    if (d == nullptr || !on_map_dest_cell()) return;
+
+    Project& p = host_.edit_project();
+    // ⚠️ `take_dest` and not a field write: a new destination brings its own RANGE and clears its
+    // SCOPE, which is the whole reason that function exists rather than three copies of it.
+    if (songcore::take_dest(p.midiMappings[static_cast<size_t>(s_.midiMapCursorRow)], *d))
+        mark_dirty_and_arm_autosave();
+
+    // ⚠️ No cursor clamp, and that is a claim rather than an omission: the picker opens only on GROUP
+    // and PARAM, and those two columns exist on every destination. It is the SCOPE column to their
+    // right that comes and goes, and the cursor cannot be sitting in it here.
+}
+
 int InputDispatcher::current_fx_type_code() const {
     const Project& p = *s_.project;
     int            code = 0;
@@ -1486,7 +1634,8 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 //                      on a colour row, nudge the cursor's channel by ±0x10.
 
 void InputDispatcher::on_a_up() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
+                         Overlay::MAP_PICK)) return;
     if (render_dialog_open()) { render_dialog_edit(+render_dialog_coarse_step()); return; }
     if (theme_open()) {
         theme_dpad_edit(+1, +0x10);
@@ -1494,11 +1643,17 @@ void InputDispatcher::on_a_up() {
     }
     if (eq_open()) { generic_input(pt::ui::increment_fast); return; }
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
+    if (s_.mapPicker.isOpen) { map_picker_move_up(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) {
         s_.fxHelper = fx_helper_opened_at(current_fx_type_code(),
                                           fx_layout_for(visible_effect_type_count()));
+        return;
+    }
+    if (on_map_dest_cell()) {
+        s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
+            s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
         return;
     }
     // The TYPE cell is a three-stop cycle with no coarse step, so both axes walk it — and both go
@@ -1508,7 +1663,8 @@ void InputDispatcher::on_a_up() {
 }
 
 void InputDispatcher::on_a_down() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
+                         Overlay::MAP_PICK)) return;
     if (render_dialog_open()) { render_dialog_edit(-render_dialog_coarse_step()); return; }
     if (theme_open()) {
         theme_dpad_edit(-1, -0x10);
@@ -1516,6 +1672,7 @@ void InputDispatcher::on_a_down() {
     }
     if (eq_open()) { generic_input(pt::ui::decrement_fast); return; }
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
+    if (s_.mapPicker.isOpen) { map_picker_move_down(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) {
@@ -1523,12 +1680,18 @@ void InputDispatcher::on_a_down() {
                                           fx_layout_for(visible_effect_type_count()));
         return;
     }
+    if (on_map_dest_cell()) {
+        s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
+            s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
+        return;
+    }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement_fast);
 }
 
 void InputDispatcher::on_a_left() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
+                         Overlay::MAP_PICK)) return;
     if (render_dialog_open()) { render_dialog_edit(-1); return; }
     if (theme_open()) {
         theme_dpad_edit(-1, -0x01);
@@ -1536,6 +1699,7 @@ void InputDispatcher::on_a_left() {
     }
     if (eq_open()) { generic_input(pt::ui::decrement); return; }
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
+    if (s_.mapPicker.isOpen) { map_picker_move_left(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
@@ -1543,7 +1707,8 @@ void InputDispatcher::on_a_left() {
 }
 
 void InputDispatcher::on_a_right() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
+                         Overlay::MAP_PICK)) return;
     if (render_dialog_open()) { render_dialog_edit(+1); return; }
     if (theme_open()) {
         theme_dpad_edit(+1, +0x01);
@@ -1551,6 +1716,7 @@ void InputDispatcher::on_a_right() {
     }
     if (eq_open()) { generic_input(pt::ui::increment); return; }
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
+    if (s_.mapPicker.isOpen) { map_picker_move_right(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
@@ -1565,8 +1731,9 @@ void InputDispatcher::on_a_released() {
         host_.stop_preview(/*cut=*/true);
     }
 
-    // The FX helper commits on RELEASE, not on a press — which is what lets you hold A, read the
-    // description of half a dozen effects, and let go on the one you want.
+    // Both pickers commit on RELEASE, not on a press — which is what lets you hold A, read your way
+    // through the list, and let go on the one you want.
+    if (top_overlay() == Overlay::MAP_PICK) { apply_map_picker_choice(); return; }
     if (top_overlay() != Overlay::FX_HELPER) return;
     apply_fx_type_change(s_.fxHelper.selected_effect_code());
     s_.fxHelper = FxHelperState{};
@@ -3336,10 +3503,54 @@ void InputDispatcher::midi_action() {
             break;
         }
 
+        // The door into the mapping list. It carries no port and no cable, so unlike PANIC and TEST
+        // it needs nothing refreshed on the way in — only the cursor put back inside a list whose
+        // length belongs to whichever song is loaded now.
+        case MidiRow::MAPPING: {
+            clamp_midi_map_cursor();
+            s_.midiMapReturnScreen = s_.currentScreen;
+            NavResult nav;
+            nav.screen = ScreenType::MIDI_MAP;
+            nav.column = s_.previousColumn;
+            go_to_screen(s_, nav);
+            break;
+        }
+
         // OUTPUT / OFFSET / PROG CHG are A+DPAD cells — the app-wide rule that single A is for actions.
         default:
             break;
     }
+}
+
+void InputDispatcher::clamp_midi_map_cursor() {
+    const songcore::Project& p    = host_.project();
+    const int                rows = midi_map_row_count(p);   // always ≥ 1 — the ADD row
+    s_.midiMapCursorRow    = std::clamp(s_.midiMapCursorRow, 0, rows - 1);
+    s_.midiMapCursorColumn = midi_map_clamp_column(p, s_.midiMapCursorRow, s_.midiMapCursorColumn);
+}
+
+void InputDispatcher::midi_map_action() {
+    // The ADD row is the only one a bare A means anything on; every cell above it is an A+DPAD cell,
+    // which is the app-wide rule that a single A is for actions.
+    songcore::Project& p = host_.edit_project();
+    if (s_.midiMapCursorRow != static_cast<int>(p.midiMappings.size())) return;
+    if (static_cast<int>(p.midiMappings.size()) >= songcore::MIDI_MAP_MAX) return;
+
+    // ⚠️ **A NEW ROW POINTS AT SOMETHING REAL FROM THE FIRST FRAME.** A mapping with no destination
+    // would be a row whose parameter cell has nothing to cycle and whose range has no units — so it
+    // starts on the catalogue's first entry, across that destination's whole range, and the user
+    // dials it from there. Track 1's fader is also the one destination every project has.
+    songcore::MidiMapping m;
+    m.controller = 0;
+    m.dest       = static_cast<uint8_t>(songcore::MAP_DESTS[0].id);
+    m.scopeIndex = 0;
+    m.rangeMin   = songcore::MAP_DESTS[0].min;
+    m.rangeMax   = songcore::MAP_DESTS[0].max;
+    p.midiMappings.push_back(m);
+
+    // The cursor stays on the row it pressed A on, which is now the new mapping rather than the ADD
+    // row — the row the user is about to edit, with the ADD row still one step below it.
+    mark_modified();
 }
 
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
@@ -3520,6 +3731,7 @@ void InputDispatcher::on_button_a() {
         case ScreenType::PROJECT:  project_action();  break;
         case ScreenType::SETTINGS: settings_action(); break;
         case ScreenType::MIDI:     midi_action();     break;
+        case ScreenType::MIDI_MAP: midi_map_action(); break;
 
         default:
             break;
@@ -3609,6 +3821,18 @@ void InputDispatcher::on_button_b() {
         s_.selection.exit();
         NavResult nav;
         nav.screen = s_.midiReturnScreen;
+        nav.column = s_.previousColumn;
+        go_to_screen(s_, nav);
+        return;
+    }
+
+    // …and the mapping list leaves the same way, one level further in. It is reached only from MIDI,
+    // so its way back is MIDI — but it is stored rather than written down, for the reason the two
+    // blocks above store theirs.
+    if (s_.currentScreen == ScreenType::MIDI_MAP) {
+        s_.selection.exit();
+        NavResult nav;
+        nav.screen = s_.midiMapReturnScreen;
         nav.column = s_.previousColumn;
         go_to_screen(s_, nav);
         return;
@@ -3955,7 +4179,10 @@ void InputDispatcher::on_start() {
         // picks the cable and sets the OFFSET, and both are dialled BY EAR against a song that is
         // playing — a MIDI screen you had to leave to start the transport would make its own OFFSET row
         // untunable.
-        case ScreenType::MIDI: host_.play_song(0); break;
+        // ⭐ …and the mapping list for the same reason, doubled: the VAL column only moves while
+        // something is making sound, so a range is dialled against a playing song or not at all.
+        case ScreenType::MIDI:
+        case ScreenType::MIDI_MAP: host_.play_song(0); break;
 
         // PHRASE, GROOVE, SCALE… — Kotlin's `togglePlayback()` else-arm. The phrase is asked through
         // the chain on screen first: the same phrase may sit in five chains, and the one you are

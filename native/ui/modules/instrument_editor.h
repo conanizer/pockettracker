@@ -65,6 +65,7 @@
 #include <string>
 #include <vector>
 
+#include "songcore/midi_map.h"
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
@@ -135,6 +136,20 @@ public:
     void draw(Canvas& c, int x, int y, const InstrumentEditorState& s) const;
 
     CursorContext cursor_context(const InstrumentEditorState& s) const;
+
+    /**
+     * What the cell under the cursor is CALLED, for MIDI learn.
+     *
+     * ⚠️⚠️ **THE SCOPE IS LEFT AT 0 — THE CALLER FILLS IN WHICH INSTRUMENT.** This state holds one
+     * instrument by reference and has never known its number; the dispatcher does. Every answer here
+     * is therefore half a target.
+     *
+     * ⚠️⚠️ **THE TYPE SELECTS THE ROW MAP, AND THAT IS THE WHOLE REASON THIS FUNCTION EXISTS.** A
+     * SoundFont's PATCH row pushes everything below it down by one, so row 12 is `EQ + SLICE` on a
+     * sampler and `REV` on a SoundFont. A mapping stored as a row number would point at a different
+     * knob after a type change, silently.
+     */
+    songcore::MapTarget map_target(const InstrumentEditorState& s) const;
 
     /** Apply a resolved action to the instrument. Its own `instrumentType` selects the row map. */
     InstrumentInputResult handle_input(songcore::Instrument& ins, int cursor_row, int cursor_column,

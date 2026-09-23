@@ -30,6 +30,7 @@
 // Rows 2 and 3 exist ONLY in column 8. Every other (row, column) pair is unreachable by navigation,
 // and `cursor_context` answers `none()` there — which is what makes the unreachable states harmless.
 
+#include "songcore/midi_map.h"
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
@@ -85,6 +86,9 @@ public:
     bool peaks_at_rest() const;
 
     CursorContext cursor_context(const MixerState& s) const;
+
+    /** What the cell under the cursor is CALLED, for MIDI learn. The EQ slot has no name and declines. */
+    songcore::MapTarget map_target(const MixerState& s) const;
 
     /**
      * Apply a resolved action. Takes the PROJECT, not a cell: the mixer's cells live in six different

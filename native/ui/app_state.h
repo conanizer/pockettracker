@@ -22,6 +22,7 @@
 #include "theme.h"
 #include "ui/folder_config.h"
 #include "ui/fx_helper.h"
+#include "ui/map_picker.h"
 #include "ui/modules/confirm_dialog.h"
 #include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
@@ -146,9 +147,14 @@ struct AppState {
     int projectCursorRow    = 0;
     int projectCursorColumn = 1;
 
-    // MIDI (B4.3). Five rows, one column — ui/modules/midi_settings.h.
+    // MIDI (B4.3). One column but for IN CH — ui/modules/midi_settings.h.
     int midiCursorRow    = 0;
     int midiCursorColumn = 1;
+
+    // MIDI MAPPING. ⚠️ THE ROW COUNT IS THE SONG'S, not a constant: one per mapping plus the ADD
+    // row. A cursor left past the end by a delete is clamped on the way in and after every edit.
+    int midiMapCursorRow    = 0;
+    int midiMapCursorColumn = 1;
 
     // SETTINGS. `settingsCursorRow` is a SettingsRow — the row's NUMBER, which is its identity on
     // BOTH platforms, not its position in this platform's filtered list.
@@ -280,6 +286,11 @@ struct AppState {
     // (ui/fx_helper.h). While it is open it OWNS the D-pad — the cursor underneath must not move.
     FxHelperState fxHelper{};
 
+    // ── The mapping DESTINATION picker ───────────────────────────────────────────────────────────
+    // The same gesture over a mapping row's GROUP or PARAMETER cell, and the same bargain: A+UP/DOWN
+    // opens it, releasing A commits the highlighted destination (ui/map_picker.h).
+    MapPickerState mapPicker{};
+
     // ── The file browser, and why it was opened (S6a) ────────────────────────────────────────────
     FileBrowserState fileBrowser{};
 
@@ -329,6 +340,9 @@ struct AppState {
 
     /** Where B goes from MIDI. Same two-questions-two-answers argument as the field above. */
     ScreenType midiReturnScreen = ScreenType::PROJECT;
+
+    /** …and from the mapping list, which is only ever reached from MIDI. */
+    ScreenType midiMapReturnScreen = ScreenType::MIDI;
 
     // ── MIDI (plan §8.1, phase B4.3) ────────────────────────────────────────────────────────────
     //
@@ -380,6 +394,17 @@ struct AppState {
      * this row had before AUTO existed.
      */
     int midiAutoOffsetMs = 0;
+
+    /**
+     * The channel the cable last carried a CC on, or −1 for none since launch. Another platform fact,
+     * arriving the same way: the dispatcher copies it off the host once a frame, because the MIDI
+     * screen is drawn from HERE and has no host to ask.
+     *
+     * ⚠️ Copied in `set_now`, not by whichever reader happens to need it — the MIDI screen is built in
+     * two separate places (the layout's draw and the dispatcher's cursor context), and a value pushed
+     * lazily by one of them is stale the moment the other one reads it.
+     */
+    int midiInCcChannel = -1;
 
     // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
     // The app's first true modal: while it is open it owns every button, and `isOpen` is checked
@@ -622,18 +647,18 @@ struct AppState {
  * Is a modal that paints the full-canvas MODAL_BACKDROP up? (B4) — the shell asks this to extend the
  * dim into the letterbox bars so the scrim does not stop at the 4:3 edge.
  *
- * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog, the
- * full help overlay, the render dialog and the FX-helper overlay (draw_fx_helper — the phrase screen's
- * FX picker). The EQ
- * and theme editors are NOT here: they REPLACE the module in place and leave the rest of the frame
- * bright, so scrimming the bars for them would invert the seam (dim bars, bright tracker). Derived from
- * the state, never from each call site remembering — the modal-predicate rule.
+ * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog,
+ * the full help overlay, the render dialog, the FX-helper overlay (the phrase screen's FX picker) and
+ * the mapping destination picker. The EQ and theme editors are NOT here: they REPLACE the module in
+ * place and leave the rest of the frame bright, so scrimming the bars for them would invert the seam
+ * (dim bars, bright tracker). Derived from the state, never from each call site remembering — the
+ * modal-predicate rule.
  */
 inline bool modal_backdrop_active(const AppState& s) {
     // ⚠️ A LOAD IS NOT HERE. It draws a status strip across the top and dims nothing — opening a file
     // asks the user no question, and a screen that goes dark for one reads as far more than it is.
-    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.helpFull ||
-           s.renderDialog.isOpen;
+    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.mapPicker.isOpen ||
+           s.helpFull || s.renderDialog.isOpen;
 }
 
 /**

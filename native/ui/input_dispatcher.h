@@ -69,6 +69,7 @@
 // does (ui/selection.h).
 
 #include "songcore/host.h"
+#include "songcore/midi_map.h"
 #include "ui/app_state.h"
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
@@ -82,6 +83,7 @@
 #include "ui/modules/scale_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
+#include "ui/modules/midi_map_editor.h"
 #include "ui/modules/midi_settings.h"
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
@@ -289,6 +291,15 @@ class InputDispatcher {
     void on_r_b();
     /** R+A: toggle SOLO, same targeting. */
     void on_r_a();
+    /**
+     * R went down or came up — the arming half of MIDI learn (`hold R, turn a knob`).
+     *
+     * ⚠️ **THE ONLY HANDLER HERE THAT IS TOLD ABOUT A BUTTON'S STATE RATHER THAN ABOUT A GESTURE**,
+     * and it has to be: the other half of this gesture is a CC on a cable, which never becomes a
+     * button event. It only forwards to the host, which is the layer the drain can reach.
+     */
+    void on_r_held(bool down);
+
     /** R came up first: the chord's changes stand. Drops the snapshot. */
     void on_r_combo_commit();
     /** A/B came up first: put every track's mute and solo back the way the chord found them. */
@@ -699,6 +710,24 @@ class InputDispatcher {
     uint64_t mappedCcSeen_ = 0;
 
     /**
+     * The other half of the same shape: a knob turned while `R` was held, so the cell under the
+     * cursor is pointed at it.
+     *
+     * ⚠️ **A SWEEP IS ONE LEARN, NOT THIRTY.** The count is watched once a frame and the mapping is
+     * written for whichever controller was seen last — and `learn_mapping` re-points an existing row
+     * rather than appending, so even a learn spread over several frames cannot fill the list.
+     */
+    void     run_midi_learn();
+    uint64_t learnSeen_ = 0;
+
+    /**
+     * What the cell under the cursor is CALLED — the module's second answer, beside
+     * `cursor_context()`. `NONE` on every screen that has no destination to name, which is most of
+     * them: a phrase step, a chain row and a file name are not parameters a knob can sweep.
+     */
+    songcore::MapTarget map_target() const;
+
+    /**
      * Load the autosave into the live document — and LEAVE IT DIRTY.
      *
      * ⚠️ **The dirty flag is the whole difference between this and a LOAD, and it is deliberate on both
@@ -768,6 +797,7 @@ class InputDispatcher {
     ProjectModule          project_{};
     SettingsModule         settings_{};
     MidiModule             midi_{};
+    MidiMapModule          midiMap_{};
     EqModule               eq_{};   // stateful: it caches its response curve — see eq_editor.h
 
     /**
@@ -908,6 +938,15 @@ class InputDispatcher {
     /** Write an effect CODE into the FX column under the cursor. */
     void apply_fx_type_change(int effect_code);
 
+    // ── The mapping destination picker ──────────────────────────────────────────────────────────
+    /**
+     * True when the cursor is on a mapping row's GROUP or PARAMETER cell — the two the picker stands
+     * in for. ⚠️ Not the ADD row: there is no mapping there yet to point anywhere.
+     */
+    bool on_map_dest_cell() const;
+    /** Point the mapping under the cursor at the picked destination, and close. */
+    void apply_map_picker_choice();
+
     // ── A,A / L+B+A helpers ─────────────────────────────────────────────────────────────────────
     void cycle_current_item(int delta);
 
@@ -949,6 +988,7 @@ class InputDispatcher {
         LOADING   = 1u << 6,
         HELP      = 1u << 7,
         RENDER    = 1u << 8,
+        MAP_PICK  = 1u << 9,
     };
 
     friend constexpr Overlay operator|(Overlay a, Overlay b) {
@@ -984,6 +1024,9 @@ class InputDispatcher {
         if (theme_open())       return Overlay::THEME;
         if (eq_open())          return Overlay::EQ;
         if (s_.fxHelper.isOpen) return Overlay::FX_HELPER;
+        // The destination picker is the FX picker one screen over, and is disjoint from it by
+        // construction: one opens only on a PHRASE/TABLE FX column, the other only on a mapping row.
+        if (s_.mapPicker.isOpen) return Overlay::MAP_PICK;
         if (on_browser())       return Overlay::BROWSER;
         return Overlay::NONE;
     }
@@ -1186,6 +1229,16 @@ class InputDispatcher {
     // ── MIDI: the screen, the port and the two buttons (phase B4.3) ─────────────────────────────
     /** A on MIDI: only PANIC and TEST do anything — OUTPUT / OFFSET / PROG CHG are A+DPAD. */
     void midi_action();
+
+    /** A on the mapping list — the ADD row, and nothing else on that screen answers a bare press. */
+    void midi_map_action();
+
+    /**
+     * Put the mapping cursor back inside a list whose length just changed. ⚠️ Owed on the way IN as
+     * well as after a delete: the list is the SONG's, so loading a different project underneath a
+     * remembered cursor is the same situation arriving by another door.
+     */
+    void clamp_midi_map_cursor();
 
     /**
      * Re-enumerate the ports and re-resolve the saved device NAME against the fresh list.

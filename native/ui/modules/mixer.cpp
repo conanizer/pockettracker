@@ -337,6 +337,41 @@ CursorContext MixerModule::cursor_context(const MixerState& s) const {
     return cc::none();
 }
 
+// ─── What the cursor is standing on, by NAME ─────────────────────────────────────────────────────
+//
+// ⚠️ The same (row, column) table `cursor_context` above reads, answering the other question. The two
+// must agree about which cells exist: a cell this names but that one calls `none()` would be a
+// mapping onto something the user cannot edit by hand.
+
+songcore::MapTarget MixerModule::map_target(const MixerState& s) const {
+    using songcore::MapDestId;
+    const int col = s.cursorColumn;
+
+    // ⚠️ The cursor here is two INDEPENDENT ints over a grid that is not rectangular, so the pair can
+    // land where nothing is drawn — and `col` indexes `tracks` a line below. The row arms take care
+    // of the gaps; this one takes care of the ends.
+    if (col < 0 || col > 8) return {};
+
+    if (s.mixerMasterRow == 0)
+        return col < 8 ? songcore::MapTarget{MapDestId::TRACK_VOL, static_cast<uint8_t>(col)}
+                       : songcore::MapTarget{MapDestId::MASTER_VOL, 0};
+
+    // The two send returns. Their WET is the mixer's; everything else about those buses is EFFECTS'.
+    if (s.mixerMasterRow == 1 && col == 0) return {MapDestId::REV_WET, 0};
+    if (s.mixerMasterRow == 1 && col == 1) return {MapDestId::DLY_WET, 0};
+
+    if (col == 8) {
+        switch (s.mixerMasterRow) {
+            // ⚠️ Row 2 is ONE cell drawing whichever of the two master effects is switched on, so the
+            // name it answers with depends on the project — not on the cursor.
+            case 2: return {s.project.masterBusFx == 0 ? MapDestId::OTT_DEPTH : MapDestId::DUST_DEPTH, 0};
+            case 3: return {MapDestId::LIMIT_PRE, 0};
+            default: break;   // row 1 is the master EQ SLOT — a choice of preset, not a value to sweep
+        }
+    }
+    return {};
+}
+
 // ─── Input ───────────────────────────────────────────────────────────────────────────────────────
 
 MixerInputResult MixerModule::handle_input(songcore::Project& p, int cursor_row, int cursor_column,

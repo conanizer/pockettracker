@@ -304,6 +304,13 @@ int run(const AppConfig& cfg) {
     // print a version that is quietly a lie.
     std::printf("PocketTracker %s\n", PT_VERSION_STRING);
 
+    // ⚠️ WHICH BUILD THIS IS, said out loud beside the version. The MIDI authoring surfaces and the
+    // developer rows exist only on a debug build (ui/platform_caps.h), so a user hunting for a row
+    // that is simply not in their binary has nothing else to tell them apart — the version string is
+    // the same on both.
+    std::printf("build:   %s  (MIDI authoring %s)\n", cfg.caps.debug ? "debug" : "release",
+                cfg.caps.midi ? "visible" : "hidden");
+
     AudioEngine&  engineRef  = *cfg.engine;
     AudioBackend& audio      = *cfg.audio;
     ui::FileSystem& filesystem = *cfg.filesystem;

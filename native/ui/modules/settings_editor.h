@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "songcore/midi_map.h"   // MIDI_CTL_CH_ALL — what the CTL CH row starts on
 #include "ui/canvas.h"
 #include "ui/cursor.h"
 #include "ui/platform_caps.h"
@@ -218,10 +219,13 @@ struct SettingsValues {
     // ⚠️ **AND THE ROW IS NOT DECORATION — WITHOUT IT ONE KNOB DOES TWO JOBS.** An incoming CC is
     // already routed to whichever track names its channel, where it moves that track's instrument
     // (volume, pan, the two sends). A mapping CC arriving on the same channel would do both at once.
-    // So a CC on THIS channel is a mapping CC and is not routed to a track; a CC on any other channel
-    // routes exactly as it did before. Default OFF: nothing changes until the user says which knob
-    // channel is theirs.
-    int         midiControlChannel = -1;
+    //
+    // ⚠️⚠️ **`ALL` BY DEFAULT — M8's, and it is only safe because a CC is CLAIMED RATHER THAN
+    // RESERVED** (songcore/midi_map.h): a CC that drives a mapping is consumed, one that drives
+    // nothing routes exactly as it always did. So an install with no mappings is untouched, and the
+    // first knob a user maps works without their having to know the channel it sends on — which was
+    // the whole cost of defaulting this to OFF.
+    int         midiControlChannel = songcore::MIDI_CTL_CH_ALL;
 
     // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
     // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already

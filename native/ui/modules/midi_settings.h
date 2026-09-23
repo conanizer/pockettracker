@@ -85,6 +85,13 @@ struct MidiState {
     /** A one-shot readout under the actions — "PANIC SENT", "TEST SENT", "NO PORT". */
     std::string statusText{};
 
+    /**
+     * The channel the cable last carried a CC on, or −1 for none since launch. The `CTL CH` row
+     * prints it WHILE IT IS OFF, and that is the row's only way of being self-answering: it asks for
+     * a channel number the user is not expected to know, and this is the controller telling them.
+     */
+    int lastCcChannel = -1;
+
     PlatformCaps caps{};
     Theme        theme = theme_classic();
 };

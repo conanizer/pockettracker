@@ -37,6 +37,7 @@
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
 #include "ui/modules/loading_strip.h"
+#include "ui/modules/midi_map_editor.h"
 #include "ui/modules/midi_settings.h"
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
@@ -173,6 +174,7 @@ private:
     ProjectModule         project_;
     SettingsModule        settings_;
     MidiModule            midi_;
+    MidiMapModule         midiMap_;
     NavigationMapModule   navigationMap_;
     FileBrowserModule     fileBrowser_;   // full-screen: draw() returns before the furniture
     SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width

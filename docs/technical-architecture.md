@@ -486,6 +486,11 @@ cannot create MIDI data — no MIDI screen, no EXTERNAL instrument type, no MIDI
 it displays existing data faithfully, because all three are persisted in a `.ptp` and a build that
 drew them as something else would misrepresent the file on disk.
 
+A project also carries the **controller mappings** — which knob moves which parameter — and they are
+the one MIDI surface a release build obeys without being able to show it: the apply path sits in the
+host's MIDI drain, not behind the screen that authors it. The channel those knobs arrive on is in
+`settings.json` instead, because it describes the cable on this desk rather than the song.
+
 The loop-window pair — the `LPO` effect and the `osc` loop mode — is held back the same way
 (`PlatformCaps::loopWindow`), on the same authoring-only terms. Hiding an effect works only on a
 **tail** of `EFFECT_TYPES`: a cell stores an index into that array while a `.ptp` stores the effect
@@ -645,6 +650,16 @@ Cursor behaviour is a `CursorContext`: what the cell holds, what it can do (incr
 delete, insert), its range and its step sizes. The five generic handlers (`on_a`, `on_b`,
 `on_a_left`, `on_a_right`, `on_a_b`) turn a button into an `InputAction` without ever asking which
 screen is up.
+
+That makes a cursor position a **seat and not a name**, which is fine for editing and not enough for
+anything that has to be *stored*. MIDI mapping is the one feature that needs the name, so three
+screens answer a second question beside `cursor_context()` — what this cell is CALLED, from an
+append-only catalogue — and decline everywhere else. The same seat is a different parameter on two
+instrument types, so a stored `(row, column)` would point somewhere else after a type change.
+
+⚠️ MIDI learn is also **the one gesture the combo matrix cannot resolve**: it is "hold R and turn a
+knob", and a knob is a CC on a cable that never becomes a button event. The matrix publishes R's held
+state and nothing more; the arm lives on the host, which is the layer the MIDI drain can reach.
 
 ---
 

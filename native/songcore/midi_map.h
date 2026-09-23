@@ -40,6 +40,37 @@ enum class MapScope : uint8_t {
 };
 
 /**
+ * Which cluster a destination belongs to — how a person picks one out of twenty-eight.
+ *
+ * ⚠️ **NOT DERIVABLE FROM `MapScope`**: MASTER, REVERB and DELAY all have no scope index, so the
+ * scope cannot tell them apart. It is a second axis and it is stored as one.
+ *
+ * ⚠️ A group is a READING aid and never an identity — nothing outside the screen stores it, so
+ * regrouping a destination is free where renumbering its id is not.
+ */
+enum class MapGroup : uint8_t {
+    TRACK,
+    MASTER,
+    REVERB,
+    DELAY,
+    INSTRUMENT,
+};
+
+inline constexpr int MAP_GROUP_COUNT = 5;
+
+/** Three characters, because the list row spends its width on the parameter name beside it. */
+inline const char* map_group_name(MapGroup g) {
+    switch (g) {
+        case MapGroup::TRACK:      return "TRK";
+        case MapGroup::MASTER:     return "MIX";
+        case MapGroup::REVERB:     return "REV";
+        case MapGroup::DELAY:      return "DLY";
+        case MapGroup::INSTRUMENT: return "INS";
+    }
+    return "---";
+}
+
+/**
  * ⚠️⚠️ **APPEND ONLY. A NUMBER HERE IS A NUMBER IN SOMEONE'S SAVED SONG.**
  *
  * Which parameters are in the list at all is a decision, not a sweep of everything editable: a
@@ -84,47 +115,68 @@ enum class MapDestId : uint8_t {
 
 struct MapDest {
     MapDestId   id;
-    const char* name;   // what the list's DEST column prints
+    /**
+     * The name the PICKER prints, read under its section heading — so the instrument's ten drop the
+     * group's word, while `REV WET` and `DLY WET` keep theirs: those two share a heading and would
+     * otherwise be two cells called `WET`.
+     */
+    const char* name;
     MapScope    scope;
     int         min;    // the destination's own range, and the bound on a mapping's own
     int         max;
+    MapGroup    group;
+    /**
+     * The name the list row's own cell prints, with the group's word dropped — the group is in the
+     * cell beside it, so `REV REV DCAY` would say it twice.
+     *
+     * ⚠️ **FIVE CHARACTERS IS A HARD CEILING**, set by the list row's column budget
+     * (`midi_map_editor.cpp`): the row is CC, VAL, MIN, MAX, group, scope and this, and the panel
+     * affords 28. A sixth character is drawn off the panel's right edge, where the clip eats it.
+     */
+    const char* cell;
 };
 
-// ⚠️ The order of this array carries nothing — `map_dest()` searches by id. Keeping it grouped the
-// way the screens are is for the reader only.
+// ⚠️ `map_dest()` searches by id, so this array's order carries no IDENTITY — but since the screen
+// cycles a group's parameters in array order, it does carry the ORDER THEY ARE DIALLED IN. Reordering
+// is a cosmetic change; renumbering an id is not, and never becomes one.
 inline constexpr MapDest MAP_DESTS[] = {
-    {MapDestId::TRACK_VOL,  "TRACK VOL",  MapScope::TRACK,      0, 255},
-    {MapDestId::MASTER_VOL, "MASTER VOL", MapScope::NONE,       0, 255},
+    {MapDestId::TRACK_VOL,  "TRACK VOL",  MapScope::TRACK,      0, 255, MapGroup::TRACK,      "VOL"},
 
-    {MapDestId::REV_DCAY,   "REV DCAY",   MapScope::NONE,       0, 255},
-    {MapDestId::REV_DAMP,   "REV DAMP",   MapScope::NONE,       0, 255},
-    {MapDestId::REV_WET,    "REV WET",    MapScope::NONE,       0, 255},
-    {MapDestId::REV_SIZE,   "REV SIZE",   MapScope::NONE,       0, 255},
-    {MapDestId::REV_PRE,    "REV PRE",    MapScope::NONE,       0, 255},
-    {MapDestId::REV_WIDE,   "REV WIDE",   MapScope::NONE,       0, 255},
-    {MapDestId::REV_MOD,    "REV MOD",    MapScope::NONE,       0, 255},
+    // ⚠️ The master fader sits after the two colour effects so the PICKER's rows come out as the two
+    // a reader wants (`ui/map_picker.h`): the array's order is the reading order there, and it is
+    // free to change — only an id is identity.
+    {MapDestId::OTT_DEPTH,  "OTT",        MapScope::NONE,       0, 255, MapGroup::MASTER,     "OTT"},
+    {MapDestId::DUST_DEPTH, "DUST",       MapScope::NONE,       0, 255, MapGroup::MASTER,     "DUST"},
+    {MapDestId::MASTER_VOL, "MIX VOL",    MapScope::NONE,       0, 255, MapGroup::MASTER,     "VOL"},
+    {MapDestId::LIMIT_PRE,  "LIMITER",    MapScope::NONE,       0, 255, MapGroup::MASTER,     "LIMIT"},
 
-    {MapDestId::DLY_TIME,   "DLY TIME",   MapScope::NONE,       0, 255},
-    {MapDestId::DLY_FDBK,   "DLY FDBK",   MapScope::NONE,       0, 255},
-    {MapDestId::DLY_WET,    "DLY WET",    MapScope::NONE,       0, 255},
-    {MapDestId::DLY_TONE,   "DLY TONE",   MapScope::NONE,       0, 255},
-    {MapDestId::DLY_WOBL,   "DLY WOBL",   MapScope::NONE,       0, 255},
-    {MapDestId::DLY_SEND,   "DLY>REV",    MapScope::NONE,       0, 255},
+    {MapDestId::REV_DCAY,   "REV DCAY",   MapScope::NONE,       0, 255, MapGroup::REVERB,     "DCAY"},
+    {MapDestId::REV_DAMP,   "REV DAMP",   MapScope::NONE,       0, 255, MapGroup::REVERB,     "DAMP"},
+    {MapDestId::REV_WET,    "REV WET",    MapScope::NONE,       0, 255, MapGroup::REVERB,     "WET"},
+    {MapDestId::REV_SIZE,   "REV SIZE",   MapScope::NONE,       0, 255, MapGroup::REVERB,     "SIZE"},
+    {MapDestId::REV_PRE,    "REV PRE",    MapScope::NONE,       0, 255, MapGroup::REVERB,     "PRE"},
+    {MapDestId::REV_WIDE,   "REV WIDE",   MapScope::NONE,       0, 255, MapGroup::REVERB,     "WIDE"},
+    {MapDestId::REV_MOD,    "REV MOD",    MapScope::NONE,       0, 255, MapGroup::REVERB,     "MOD"},
 
-    {MapDestId::OTT_DEPTH,  "OTT",        MapScope::NONE,       0, 255},
-    {MapDestId::DUST_DEPTH, "DUST",       MapScope::NONE,       0, 255},
-    {MapDestId::LIMIT_PRE,  "LIMIT PRE",  MapScope::NONE,       0, 255},
+    {MapDestId::DLY_TIME,   "DLY TIME",   MapScope::NONE,       0, 255, MapGroup::DELAY,      "TIME"},
+    {MapDestId::DLY_FDBK,   "DLY FDBK",   MapScope::NONE,       0, 255, MapGroup::DELAY,      "FDBK"},
+    {MapDestId::DLY_WET,    "DLY WET",    MapScope::NONE,       0, 255, MapGroup::DELAY,      "WET"},
+    {MapDestId::DLY_TONE,   "DLY TONE",   MapScope::NONE,       0, 255, MapGroup::DELAY,      "TONE"},
+    {MapDestId::DLY_WOBL,   "DLY WOBL",   MapScope::NONE,       0, 255, MapGroup::DELAY,      "WOBL"},
+    {MapDestId::DLY_SEND,   "DLY>REV",    MapScope::NONE,       0, 255, MapGroup::DELAY,      ">REV"},
 
-    {MapDestId::INS_VOL,    "INS VOL",    MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_PAN,    "INS PAN",    MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_CUT,    "INS CUT",    MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_RES,    "INS RES",    MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_DRIVE,  "INS DRIVE",  MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_CRUSH,  "INS CRUSH",  MapScope::INSTRUMENT, 0,  15},
-    {MapDestId::INS_DWN,    "INS DWNSMP", MapScope::INSTRUMENT, 0,  15},
-    {MapDestId::INS_REV,    "INS REV",    MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_DLY,    "INS DLY",    MapScope::INSTRUMENT, 0, 255},
-    {MapDestId::INS_DETUNE, "INS DETUNE", MapScope::INSTRUMENT, 0, 255},
+    {MapDestId::INS_VOL,    "VOL",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "VOL"},
+    {MapDestId::INS_PAN,    "PAN",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "PAN"},
+    {MapDestId::INS_CUT,    "FREQ",       MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "FREQ"},
+    {MapDestId::INS_RES,    "RES",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "RES"},
+    {MapDestId::INS_DRIVE,  "DRIVE",      MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "DRIVE"},
+    {MapDestId::INS_CRUSH,  "CRUSH",      MapScope::INSTRUMENT, 0,  15, MapGroup::INSTRUMENT, "CRUSH"},
+    // ⚠️ The names are the INSTRUMENT screen's own words, so a mapping and the row it moves are read
+    // the same way. The five-character cell is the one place that cannot follow — `DWNSMPL` is seven.
+    {MapDestId::INS_DWN,    "DWNSMPL",    MapScope::INSTRUMENT, 0,  15, MapGroup::INSTRUMENT, "DWNSM"},
+    {MapDestId::INS_REV,    "REV",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "REV"},
+    {MapDestId::INS_DLY,    "DEL",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "DEL"},
+    {MapDestId::INS_DETUNE, "DETUNE",     MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "DTUNE"},
 };
 
 inline constexpr int MAP_DEST_COUNT = static_cast<int>(sizeof(MAP_DESTS) / sizeof(MAP_DESTS[0]));
@@ -138,6 +190,44 @@ inline const MapDest* map_dest(MapDestId id) {
 
 inline const MapDest* map_dest(uint8_t id) { return map_dest(static_cast<MapDestId>(id)); }
 
+// ─── Picking one out of twenty-eight ─────────────────────────────────────────────────────────────
+//
+// ⭐ The list screen never shows the catalogue: a mapping's destination is TWO cells, a group and a
+// parameter within it, each cycled like any other cell in the app. Five groups, at most ten deep, so
+// the longest reach is ten steps and nothing new has to be drawn.
+//
+// ⚠️ The three below walk MAP_DESTS in ARRAY order, which is therefore the order a group's
+// parameters are dialled in.
+
+/** How many destinations `g` holds. */
+inline int map_group_size(MapGroup g) {
+    int n = 0;
+    for (const MapDest& d : MAP_DESTS)
+        if (d.group == g) ++n;
+    return n;
+}
+
+/** The `index`-th destination of `g`, or null when the group is shorter than that. */
+inline const MapDest* map_dest_in_group(MapGroup g, int index) {
+    int n = 0;
+    for (const MapDest& d : MAP_DESTS)
+        if (d.group == g && n++ == index) return &d;
+    return nullptr;
+}
+
+/** Where `id` sits inside its own group, or 0 for an id this build does not know. */
+inline int map_index_in_group(MapDestId id) {
+    const MapDest* self = map_dest(id);
+    if (!self) return 0;
+    int n = 0;
+    for (const MapDest& d : MAP_DESTS) {
+        if (d.group != self->group) continue;
+        if (d.id == id) return n;
+        ++n;
+    }
+    return 0;
+}
+
 /**
  * ⚠️ **A COUNT PLUS THAT MANY ENTRIES, NEVER A FIXED 128-SLOT ARRAY** (`Project::midiMappings`). The
  * list GROWS: a song with no mappings carries none, and the screen shows its headers and nothing
@@ -148,6 +238,31 @@ inline const MapDest* map_dest(uint8_t id) { return map_dest(static_cast<MapDest
  * from the list being flat.
  */
 inline constexpr int MIDI_MAP_MAX = 128;
+
+/**
+ * The control channel's "any channel" value — M8's `ALL`, and the DEFAULT here for the reason M8
+ * picks it: a controller's knob channel is a number most people do not know, and a setting that has
+ * to be right before anything works at all is a setting nobody gets past.
+ *
+ * ⚠️⚠️ **IT IS SAFE AS A DEFAULT ONLY BECAUSE A CC IS CLAIMED, NOT RESERVED.** An incoming CC is
+ * offered to the mappings first; one that DRIVES something is consumed, and one that drives nothing
+ * routes to its track exactly as it always did. So `ALL` costs an install with no mappings nothing —
+ * and the moment a knob is mapped, that knob stops doing its old job, which is what the user asked
+ * for by mapping it. A channel number narrows the offer; it does not change the rule.
+ */
+inline constexpr int MIDI_CTL_CH_ALL = 16;
+
+/**
+ * Does the control-channel setting let a knob arriving on `channel` drive a mapping?
+ *
+ * ⚠️ **THE ONE READING OF THAT SETTING.** The MIDI drain asks it to decide whether to offer a CC to
+ * the mappings, and the learn gesture asks it to decide whether to refuse and say where the knob
+ * really is. Written twice, the two would disagree about `ALL` the first time either changed — which
+ * is precisely how it was written the first time, and the check caught it.
+ */
+inline bool ctl_ch_covers(int setting, int channel) {
+    return setting == MIDI_CTL_CH_ALL || (setting >= 0 && setting == channel);
+}
 
 /**
  * A 0-127 controller value into the destination's own units. ⭐ **THE ONE PLACE THAT CONVERSION
@@ -169,6 +284,10 @@ inline int scale_cc(int cc, int lo, int hi) {
  * Does this mapping still point at something? ⚠️ **A "NO" MUST NOT DELETE THE ROW** — the screen
  * greys it and says why, because a mapping silently dropped when a slot was cleared for a minute is
  * one the user has to notice is missing before they can make it again.
+ *
+ * ⚠️ The slot question is `instrument_is_free` (model.h) and not a path test written out here. An
+ * EXTERNAL instrument owns no file at all, so a path test calls its slot empty — and its VOL and PAN
+ * are real, reaching the cable as note velocity and CC 10.
  */
 inline bool map_dest_present(const Project& p, const MidiMapping& m) {
     const MapDest* d = map_dest(m.dest);
@@ -177,11 +296,8 @@ inline bool map_dest_present(const Project& p, const MidiMapping& m) {
         case MapScope::NONE:  return true;
         case MapScope::TRACK: return m.scopeIndex < p.tracks.size();
         case MapScope::INSTRUMENT:
-            // The empty-slot convention, one place, as everywhere else: an instrument is empty iff it
-            // has no sample path — not `sampleId < 0`, not an empty name.
             return m.scopeIndex < p.instruments.size() &&
-                   (p.instruments[m.scopeIndex].sampleFilePath.has_value() ||
-                    p.instruments[m.scopeIndex].soundfontPath.has_value());
+                   !instrument_is_free(p.instruments[m.scopeIndex]);
     }
     return false;
 }
@@ -284,6 +400,73 @@ inline int read_mapped(const Project& p, const MidiMapping& m) {
         case MapDestId::INS_DETUNE: return p.instruments[at].detune;
     }
     return -1;
+}
+
+// ─── Learning one ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the cell under the cursor names — the SECOND question a screen answers, beside
+ * `cursor_context()`. That one says *what kind of value this is*; this one says *what it is called*,
+ * and a screen that cannot name a cell declines with `NONE`.
+ *
+ * ⚠️ **THE SCOPE IS RESOLVED HERE, AT LEARN TIME, AND STORED.** "Instrument 3's cutoff", never "the
+ * cutoff of whatever instrument is selected" — the second reading changes meaning the moment the
+ * cursor moves, which is not something a saved mapping may do.
+ */
+struct MapTarget {
+    MapDestId id    = MapDestId::NONE;
+    uint8_t   scope = 0;
+
+    bool named() const { return id != MapDestId::NONE; }
+};
+
+/**
+ * Point an existing mapping at `d`. Returns false when it already pointed there.
+ *
+ * ⚠️ **A NEW DESTINATION BRINGS ITS OWN RANGE WITH IT.** The range is in the destination's units, so
+ * carrying 00..FF onto a crush (0..F) would leave a mapping whose ends the crush cannot reach and
+ * whose numbers the CRUSH cell has never shown. ⚠️ And the scope goes with it: "instrument 3's
+ * cutoff" does not survive becoming a track's fader.
+ *
+ * One function, because THREE things point a mapping somewhere — the group cell, the parameter cell
+ * and the picker overlay — and a fourth would otherwise be one more site to remember.
+ */
+inline bool take_dest(MidiMapping& m, const MapDest& d) {
+    if (m.dest == static_cast<uint8_t>(d.id)) return false;
+    m.dest       = static_cast<uint8_t>(d.id);
+    m.rangeMin   = d.min;
+    m.rangeMax   = d.max;
+    m.scopeIndex = 0;
+    return true;
+}
+
+/**
+ * Point `controller` at `target`. Returns the row it landed on, or −1 when the list is full.
+ *
+ * ⚠️ **ONE DESTINATION TAKES ONE MAPPING; ONE CONTROLLER MAY DRIVE MANY** (M8's asymmetry). So
+ * learning a destination that already has a row RE-POINTS that row rather than adding a second one —
+ * otherwise the parameter would be driven by two knobs at once and follow whichever moved last.
+ *
+ * ⭐ A re-pointed row KEEPS ITS RANGE. The range is the user's own work and the destination has not
+ * changed, so only the knob does; a new row takes the destination's full range, as the ADD row does.
+ */
+inline int learn_mapping(Project& p, const MapTarget& target, int controller) {
+    const MapDest* d = map_dest(target.id);
+    if (!d) return -1;
+    const uint8_t dest  = static_cast<uint8_t>(target.id);
+    const uint8_t scope = d->scope == MapScope::NONE ? 0 : target.scope;
+    const uint8_t cc    = static_cast<uint8_t>(std::clamp(controller, 0, 127));
+
+    for (size_t i = 0; i < p.midiMappings.size(); ++i) {
+        MidiMapping& m = p.midiMappings[i];
+        if (m.dest != dest || m.scopeIndex != scope) continue;
+        m.controller = cc;
+        return static_cast<int>(i);
+    }
+
+    if (static_cast<int>(p.midiMappings.size()) >= MIDI_MAP_MAX) return -1;
+    p.midiMappings.push_back({cc, dest, scope, d->min, d->max});
+    return static_cast<int>(p.midiMappings.size()) - 1;
 }
 
 }  // namespace songcore

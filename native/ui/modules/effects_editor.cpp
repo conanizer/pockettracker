@@ -277,6 +277,36 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
     }
 }
 
+// ─── What the cursor is standing on, by NAME ─────────────────────────────────────────────────────
+
+songcore::MapTarget EffectModule::map_target(const EffectState& s) const {
+    using songcore::MapDestId;
+    switch (static_cast<EffectsRow>(s.cursorRow)) {
+        case EffectsRow::REV_DECAY:  return {MapDestId::REV_DCAY, 0};
+        case EffectsRow::REV_DAMP:   return {MapDestId::REV_DAMP, 0};
+        case EffectsRow::REV_PRE:    return {MapDestId::REV_PRE,  0};
+        case EffectsRow::REV_WIDE:   return {MapDestId::REV_WIDE, 0};
+        case EffectsRow::REV_MOD:    return {MapDestId::REV_MOD,  0};
+        case EffectsRow::REV_SIZE:   return {MapDestId::REV_SIZE, 0};
+        case EffectsRow::DLY_TIME:   return {MapDestId::DLY_TIME, 0};
+        case EffectsRow::DLY_FDBK:   return {MapDestId::DLY_FDBK, 0};
+        case EffectsRow::DLY_REV:    return {MapDestId::DLY_SEND, 0};
+        case EffectsRow::DLY_TONE:   return {MapDestId::DLY_TONE, 0};
+        case EffectsRow::DLY_WOBBLE: return {MapDestId::DLY_WOBL, 0};
+        // ⚠️ The two WET cells are NOT here. They are the send returns and they live on the MIXER,
+        // which is where the catalogue's `REV WET` and `DLY WET` are learned.
+        case EffectsRow::MASTER_TYPE:
+        case EffectsRow::REV_EQ:
+        case EffectsRow::DLY_EQ:
+        case EffectsRow::DLY_TYPE:
+        case EffectsRow::DLY_PONG:
+        case EffectsRow::REV_TYPE:
+        case EffectsRow::REV_ALGO:
+            break;
+    }
+    return {};
+}
+
 // ─── Input ───────────────────────────────────────────────────────────────────────────────────────
 
 EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_row,

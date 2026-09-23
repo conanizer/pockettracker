@@ -86,6 +86,33 @@ std::string device_text(const std::vector<std::string>& names, int index) {
  */
 std::string map_cell_text(int channel) { return channel < 0 ? "--" : dec2(channel + 1); }
 
+/**
+ * The CTL CH row's value: which channels may carry a mapping knob, and — when the answer cannot see
+ * the knobs that are actually arriving — where they are instead.
+ *
+ * ⚠️ The report is the row's only way of being self-answering. It asks for a channel number, and a
+ * controller's knob channel is a thing most people have never had to know; the cable is the only
+ * thing on the machine that can say it.
+ */
+/**
+ * The CTL CH cycle: `ALL` first, then the sixteen channels. Seventeen stops, no empty one.
+ *
+ * ⚠️ Two functions rather than one arithmetic expression at each site, because the row's STORED value
+ * is not its cursor value: `ALL` is 16 on disk and 0 in the cycle, so that it is the first thing
+ * A+LEFT reaches rather than sitting past channel 16.
+ */
+constexpr int CTL_CH_OPTIONS = 17;
+int ctl_ch_index(int stored) { return stored == songcore::MIDI_CTL_CH_ALL ? 0 : stored + 1; }
+int ctl_ch_stored(int index) { return index <= 0 ? songcore::MIDI_CTL_CH_ALL : index - 1; }
+
+std::string ctl_ch_text(const MidiState& s) {
+    const int ch = s.settings.midiControlChannel;
+    if (ch == songcore::MIDI_CTL_CH_ALL) return "ALL  MAPPED KNOBS";
+    if (s.lastCcChannel >= 0 && s.lastCcChannel != ch)
+        return dec2(ch + 1) + "  KNOBS ON " + dec2(s.lastCcChannel + 1);
+    return dec2(ch + 1) + "  MAPPED KNOBS";
+}
+
 /** The stored channel for a cursor COLUMN (1-based), or −1 for a column that names no track. */
 int map_channel_at(const songcore::Project& p, int column) {
     const int track = column - 1;
@@ -143,10 +170,11 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     // ⚠️ The value spells out what the channel is FOR, for SYNC's reason one line up: on its own a
     // bare channel number on a screen that already has eight of them below it says nothing about
     // which of the two kinds of incoming channel this is.
-    row_of(MidiRow::CTL_CH,   "CTL CH",
-           s.settings.midiControlChannel < 0
-               ? std::string("OFF")
-               : dec2(s.settings.midiControlChannel + 1) + "  MAPPED KNOBS");
+    // ⚠️ …and when the row CANNOT SEE the knobs that are arriving, it says where they are instead.
+    // That is the one state a user cannot get out of on their own: the row asks for a channel number
+    // and nothing else on the machine knows it. On ALL, and on the channel that matches, there is
+    // nothing to report — the same pixel-budget argument as OUTPUT's port count two rows up.
+    row_of(MidiRow::CTL_CH,   "CTL CH", ctl_ch_text(s));
     row_of(MidiRow::PROG_CHG, "PROG CHG", s.project.midiSendProgramChange ? "ON" : "OFF");
 
     // ── IN CH — the per-track input channel map (plan §7, §8.1's "TRACK INPUT MAP") ──────────────
@@ -189,8 +217,16 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
         }
     }
 
-    // The two action rows. Drawn like PROJECT's SYSTEM and EXIT, because they are the same kind of
+    // The three action rows. Drawn like PROJECT's SYSTEM and EXIT, because they are the same kind of
     // thing: a row whose whole content is what A does on it.
+    //
+    // ⭐ MAPPING carries the COUNT, which is the one thing about the list worth knowing from outside
+    // it — and on a screen where every other row is a cable setting, "NONE YET" is what says the
+    // feature exists at all.
+    {
+        const int n = static_cast<int>(s.project.midiMappings.size());
+        row_of(MidiRow::MAPPING, "MAPPING", n > 0 ? "A: " + dec2(n) + " MAPPED" : "A: NONE YET");
+    }
     row_of(MidiRow::PANIC, "PANIC", "A: ALL NOTES OFF");
     row_of(MidiRow::TEST,  "TEST",  "A: C-4 CH 1");
 
@@ -255,17 +291,19 @@ CursorContext MidiModule::cursor_context(const MidiState& s) const {
 
         // The same cell as one of IN CH's, and deliberately so: both are "a channel, or none", so
         // both delete to −1 and both show 01..16 over a stored 0..15.
-        case MidiRow::CTL_CH: {
-            const int ch = s.settings.midiControlChannel;
-            return cc::hex_byte(ch, /*min=*/0, /*max=*/15, /*empty_value=*/-1,
-                                /*can_delete=*/ch >= 0, /*can_insert=*/ch < 0);
-        }
+        // ⚠️⚠️ **A CYCLE OF SEVENTEEN, NOT A HEX BYTE WITH AN EMPTY STATE.** It was the latter, and the
+        // cell advertised an INSERT that the write-back below did not accept — so the row sat on its
+        // own empty value and A+D-PAD moved nothing, for ever. A cycle has no state to be stuck in.
+        case MidiRow::CTL_CH:
+            return cc::enum_cycle(ctl_ch_index(s.settings.midiControlChannel), CTL_CH_OPTIONS);
 
         case MidiRow::PROG_CHG:
             return cc::toggle_binary(s.project.midiSendProgramChange);
 
         // The action rows. Read-only to the generic edit path; plain A is the whole of their behaviour
-        // and the dispatcher owns it, because it is the only layer that can reach a cable.
+        // and the dispatcher owns it — it is the only layer that can reach a cable, and the only one
+        // that can change which screen is up.
+        case MidiRow::MAPPING:
         case MidiRow::PANIC:
         case MidiRow::TEST:
             return cc::read_only();
@@ -362,11 +400,9 @@ MidiInputResult MidiModule::handle_input(songcore::Project& project, SettingsVal
 
         case MidiRow::CTL_CH: {
             if (!isSet) break;
-            // Clamped here as well as in the context, for OFFSET's reason: A+B hands over the empty
-            // value, and everything else has to land inside 0..15 whatever the action carried.
-            const int v = action.value;
-            settings.midiControlChannel = (v < 0) ? -1 : (v > 15 ? 15 : v);
-            r.controlChannelChanged     = true;
+            settings.midiControlChannel =
+                ctl_ch_stored(clamp(action.value, 0, CTL_CH_OPTIONS - 1));
+            r.controlChannelChanged = true;
             break;
         }
 
@@ -380,6 +416,7 @@ MidiInputResult MidiModule::handle_input(songcore::Project& project, SettingsVal
             r.projectModified             = true;
             break;
 
+        case MidiRow::MAPPING:
         case MidiRow::PANIC:
         case MidiRow::TEST:
             break;

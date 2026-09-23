@@ -37,6 +37,7 @@
 #include "ui/instrument_row_layout.h"
 #include "ui/modules/effects_editor.h"
 #include "ui/modules/groove_editor.h"
+#include "ui/modules/midi_map_editor.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/sample_editor.h"
 #include "ui/modules/scale_editor.h"
@@ -117,6 +118,7 @@ enum class HelpTopic {
     SCREEN_SETTINGS,
     SCREEN_SAMPLE_EDITOR,
     SCREEN_MIDI,
+    SCREEN_MIDI_MAP,
 
     // SONG
     SONG_CELL,
@@ -276,6 +278,16 @@ enum class HelpTopic {
     MIDI_IN_CHANNEL,
     MIDI_PANIC,
     MIDI_TEST,
+    MIDI_CTL_CH,
+    MIDI_MAPPING,
+
+    // MIDI MAPPING — one topic per column of a mapping row, plus the row that adds one
+    MAP_CC,
+    MAP_MIN,
+    MAP_MAX,
+    MAP_DEST,
+    MAP_SCOPE,
+    MAP_ADD,
 
     // ── The two IN-PLACE OVERLAYS ────────────────────────────────────────────────────────────────
     // Neither is a `ScreenType`: they stand in the editor's place and leave `currentScreen` alone,
@@ -577,6 +589,21 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "sends, and the timing."},
      {"A+D-PAD changes a value",
       "A on PANIC or TEST sends it",
+      "START plays the song from 00",
+      "B goes back"}},
+    /* SCREEN_MIDI_MAP */
+    {"MAPPING: knobs to controls", "A knob on your controller", "moves a value in the song.",
+     {"One line per knob: the CC number",
+      "it sends, the value it is moving",
+      "right now, the range it moves it",
+      "across, and which control that",
+      "is. The knob has to be on the",
+      "channel the CTL CH row names.",
+      "A line also appears when you",
+      "hold R on a value and turn."},
+     {"A+D-PAD changes a value",
+      "A on the last line adds one",
+      "A+B on the name removes a line",
       "START plays the song from 00",
       "B goes back"}},
 
@@ -1575,6 +1602,84 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "and says whether it went out -",
       "a quick check of the cable."},
      {"A sends the test note"}},
+    /* MIDI_CTL_CH */
+    {"CTL CH: the knob channel", "Which channels may carry", "mapped knobs. ALL by default.",
+     {"A knob that moves a mapped",
+      "control is used up and does not",
+      "also play a track. One that",
+      "moves nothing carries on as",
+      "before, so ALL costs you",
+      "nothing until you map a knob.",
+      "",
+      "Narrow it if two devices clash."},
+     {"A+←/→ steps ALL, 01..16"}},
+    /* MIDI_MAPPING */
+    {"MAPPING: knobs to controls", "A opens the list of knobs", "and what each one moves.",
+     {"The list of mapped knobs, and",
+      "the one place to add, change or",
+      "remove one. Saved with the song.",
+      "",
+      "Or stand on any value on MIXER,",
+      "EFFECTS or INSTRUMENT, hold R",
+      "and turn a knob. Needs a device",
+      "on the INPUT row."},
+     {"A opens the list"}},
+
+    // ── The MIDI mapping list ────────────────────────────────────────────────────────────────────
+    /* MAP_CC */
+    {"CC: which knob", "The controller number the", "knob sends. 00 to 7F.",
+     {"The number your knob sends. Most",
+      "controllers let you set it, and",
+      "most print it on the knob."},
+     {"A+←/→ steps 1",
+      "A+↑/↓ steps 16"}},
+    /* MAP_MIN */
+    {"MIN: the low end", "Where the knob puts the", "control turned all the way down.",
+     {"The value the control takes at",
+      "the bottom of the knob. Put MIN",
+      "above MAX and the knob works",
+      "backwards."},
+     {"A+←/→ steps 1",
+      "A+↑/↓ steps 16",
+      "A+B sets it back to the lowest"}},
+    /* MAP_MAX */
+    {"MAX: the high end", "Where the knob puts the", "control turned all the way up.",
+     {"The value the control takes at",
+      "the top of the knob. Put MAX",
+      "below MIN and the knob works",
+      "backwards."},
+     {"A+←/→ steps 1",
+      "A+↑/↓ steps 16",
+      "A+B sets it back to the highest"}},
+    /* MAP_DEST */
+    {"DEST: what the knob moves", "A group, then a control", "inside it.",
+     {"Two cells: the group - track,",
+      "master, reverb, delay or",
+      "instrument - and the control",
+      "inside it. Picking a new one",
+      "brings its own MIN and MAX.",
+      "",
+      "A+↑/↓ shows all of them at",
+      "once - hold A, look, let go."},
+     {"A+←/→ steps through the list",
+      "A+↑/↓ opens the full list",
+      "A+B removes this line"}},
+    /* MAP_SCOPE */
+    {"WHICH ONE: track or slot", "Which track or which", "instrument this line moves.",
+     {"A track fader or an instrument",
+      "control needs to say WHICH one.",
+      "It is fixed here, so moving the",
+      "cursor later changes nothing."},
+     {"A+←/→ steps 1",
+      "A+↑/↓ steps 16"}},
+    /* MAP_ADD */
+    {"ADD: a new knob", "A adds a line, then set", "the CC and what it moves.",
+     {"Adds a line to the list. It",
+      "starts on track 1 volume across",
+      "the whole range - set the CC",
+      "number and the control from",
+      "there. 128 lines at most."},
+     {"A adds a line"}},
 
     // ── The EQ editor ────────────────────────────────────────────────────────────────────────────
     /* SCREEN_EQ */
@@ -2214,6 +2319,7 @@ inline HelpTopic help_screen_topic(ScreenType screen) {
         case ScreenType::SETTINGS:      return HelpTopic::SCREEN_SETTINGS;
         case ScreenType::SAMPLE_EDITOR: return HelpTopic::SCREEN_SAMPLE_EDITOR;
         case ScreenType::MIDI:          return HelpTopic::SCREEN_MIDI;
+        case ScreenType::MIDI_MAP:      return HelpTopic::SCREEN_MIDI_MAP;
     }
     return HelpTopic::NONE;
 }
@@ -2514,10 +2620,28 @@ inline HelpTopic midi_cell_topic(int row) {
         case MidiRow::INPUT:    return HelpTopic::MIDI_INPUT;
         case MidiRow::OFFSET:   return HelpTopic::MIDI_OFFSET;
         case MidiRow::SYNC:     return HelpTopic::MIDI_SYNC;
+        case MidiRow::CTL_CH:   return HelpTopic::MIDI_CTL_CH;
         case MidiRow::PROG_CHG: return HelpTopic::MIDI_PROG_CHG;
         case MidiRow::IN_MAP:   return HelpTopic::MIDI_IN_CHANNEL;
+        case MidiRow::MAPPING:  return HelpTopic::MIDI_MAPPING;
         case MidiRow::PANIC:    return HelpTopic::MIDI_PANIC;
         case MidiRow::TEST:     return HelpTopic::MIDI_TEST;
+    }
+    return HelpTopic::NONE;
+}
+
+/**
+ * A mapping row's columns. ⚠️ The ADD row has no columns at all, so the CALLER decides which of the
+ * two questions this is — see `help_topic`.
+ */
+inline HelpTopic midi_map_cell_topic(int column) {
+    switch (static_cast<MapCol>(column)) {
+        case MapCol::CC:    return HelpTopic::MAP_CC;
+        case MapCol::MIN:   return HelpTopic::MAP_MIN;
+        case MapCol::MAX:   return HelpTopic::MAP_MAX;
+        case MapCol::GROUP:
+        case MapCol::PARAM: return HelpTopic::MAP_DEST;
+        case MapCol::SCOPE: return HelpTopic::MAP_SCOPE;
     }
     return HelpTopic::NONE;
 }
@@ -2730,6 +2854,15 @@ inline HelpTopic help_topic(const AppState& s) {
             break;
         case ScreenType::MIDI:
             cell = detail::midi_cell_topic(s.midiCursorRow);
+            break;
+
+        // ⚠️ The ADD row is the one past the end of the list, and it has its own topic rather than a
+        // column's — it is a button, and the columns above it do not exist on it.
+        case ScreenType::MIDI_MAP:
+            cell = (s.project && s.midiMapCursorRow >=
+                                     static_cast<int>(s.project->midiMappings.size()))
+                       ? HelpTopic::MAP_ADD
+                       : detail::midi_map_cell_topic(s.midiMapCursorColumn);
             break;
         default:
             break;

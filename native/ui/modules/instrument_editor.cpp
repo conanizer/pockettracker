@@ -631,6 +631,58 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     }
 }
 
+// ─── What the cursor is standing on, by NAME ─────────────────────────────────────────────────────
+
+songcore::MapTarget InstrumentEditorModule::map_target(const InstrumentEditorState& s) const {
+    using songcore::MapDestId;
+    const int row = s.cursorRow;
+    const int col = s.cursorColumn;
+
+    // EXTERNAL owns no gain stage, no filter and no loop — every row of it is a byte sent down the
+    // cable. VOL and PAN are the two that survive the trip (velocity and CC 10), so they are the two
+    // that can be swept from a knob.
+    if (s.is_external()) {
+        if (row == 7 && col == 1) return {MapDestId::INS_VOL, 0};
+        if (row == 7 && col == 3) return {MapDestId::INS_PAN, 0};
+        return {};
+    }
+
+    const bool sf  = s.is_soundfont();
+    const int  off = sf ? 1 : 0;   // the SoundFont's PATCH row pushes everything below it down
+
+    if (row == 2 && col == 3) return {MapDestId::INS_DETUNE, 0};
+    if (row == 3) {
+        if (col == 1) return {MapDestId::INS_VOL, 0};
+        if (col == 5) return {MapDestId::INS_PAN, 0};   // column 3 is TSP, a switch
+        return {};
+    }
+    if (row == 7 + off && col == 1) return {MapDestId::INS_DRIVE, 0};   // column 3 is the filter TYPE
+    if (row == 8 + off) {
+        if (col == 1) return {MapDestId::INS_CRUSH, 0};
+        if (col == 3) return {MapDestId::INS_CUT, 0};
+        return {};
+    }
+    if (row == 9 + off) {
+        if (col == 1) return {MapDestId::INS_DWN, 0};
+        if (col == 3) return {MapDestId::INS_RES, 0};
+        return {};
+    }
+
+    // The two sends. On a SoundFont they are a row each and the value is any column but the label's;
+    // on a sampler they share one row. Below them both layouts are EQ, slices and the loop window —
+    // slots and boundaries, not values a knob sweeps.
+    if (sf) {
+        if (row == 12 && col != 0) return {MapDestId::INS_REV, 0};
+        if (row == 13 && col != 0) return {MapDestId::INS_DLY, 0};
+        return {};
+    }
+    if (row == 11) {
+        if (col == 1) return {MapDestId::INS_REV, 0};
+        if (col == 3) return {MapDestId::INS_DLY, 0};
+    }
+    return {};
+}
+
 // ─── Input ───────────────────────────────────────────────────────────────────────────────────────
 
 InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int row, int col,

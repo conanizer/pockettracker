@@ -411,12 +411,14 @@ add_library(pt-ui STATIC
         ui/modules/eq_editor.cpp
         ui/modules/file_browser.cpp
         ui/modules/fx_helper_overlay.cpp
+        ui/modules/map_picker_overlay.cpp
         ui/modules/groove_editor.cpp
         ui/modules/help_overlay.cpp
         ui/modules/help_panel.cpp
         ui/modules/instrument_editor.cpp
         ui/modules/instrument_pool.cpp
         ui/modules/loading_strip.cpp
+        ui/modules/midi_map_editor.cpp
         ui/modules/midi_settings.cpp
         ui/modules/mixer.cpp
         ui/modules/modulation.cpp

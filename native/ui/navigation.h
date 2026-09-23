@@ -110,6 +110,25 @@ inline bool exits_sideways_to_main_row(ScreenType s) {
     return s == ScreenType::PROJECT || s == ScreenType::GROOVE || s == ScreenType::MODS ||
            s == ScreenType::MIXER   || s == ScreenType::EFFECTS;
 }
+
+/**
+ * A POPUP — a screen with no cell in the navigation grid at all: no column of its own, and not one of
+ * the shared rows that borrow the column they were entered from.
+ *
+ * ⚠️⚠️ **R+DPAD MUST NOT MOVE OFF ONE, AND `B` IS THE ONLY WAY OUT** (docs/input-system.md says so).
+ * `navigate_up` and `navigate_down` already do, in their `default` arm — which names the popups. LEFT
+ * and RIGHT did not: they reached the "not on the main row" arm instead, where `screen_column`
+ * answers −1 and `main_screen_for_column(-1)` falls through to PHRASE. **So SETTINGS, MIDI and MIDI
+ * MAPPING closed themselves on R+LEFT and landed the user on a screen they had not asked for**, which
+ * is how it was reported.
+ *
+ * ⭐ DERIVED from the two facts above rather than listing screen names, so a popup added later is
+ * covered without this file being touched — and it cannot drift from `screen_column`, which is what
+ * the navigation MAP is painted from.
+ */
+inline bool is_popup(ScreenType s) {
+    return screen_column(s) == -1 && !exits_sideways_to_main_row(s);
+}
 }  // namespace detail
 
 inline NavResult navigate_up(const NavState& s) {
@@ -166,6 +185,9 @@ inline NavResult navigate_down(const NavState& s) {
 }
 
 inline NavResult navigate_left(const NavState& s) {
+    // A popup has no cell to move from — B is its way out. See `is_popup`.
+    if (detail::is_popup(s.currentScreen)) return {s.currentScreen, s.previousColumn};
+
     // The instrument-pool fast-jump pair, R+LEFT half: out of the pool exits left to PHRASE, and out
     // of an INSTRUMENT that was ENTERED from the pool returns to it. (A normally-entered INSTRUMENT
     // still goes to PHRASE — which is exactly what instrumentFromPool is for.)
@@ -203,6 +225,9 @@ inline NavResult navigate_left(const NavState& s) {
 }
 
 inline NavResult navigate_right(const NavState& s) {
+    // …and the same on the way back. See `navigate_left`.
+    if (detail::is_popup(s.currentScreen)) return {s.currentScreen, s.previousColumn};
+
     // R+RIGHT out of the pool jumps to INSTRUMENT and MARKS it, so R+LEFT comes back to the pool.
     if (s.currentScreen == ScreenType::INST_POOL) return {ScreenType::INSTRUMENT, 3, true};
     // …and that row-0 instrument has nothing to its right — stay, rather than fall through to TABLE.

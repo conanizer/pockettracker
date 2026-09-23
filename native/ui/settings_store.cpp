@@ -101,12 +101,16 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // Phase C. Absent → false, which is both the default and what every settings.json written before
     // phase C says: a file from yesterday must not silently start driving a drum machine today.
     values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
-    // The knob channel. Absent → OFF, which is the only safe upgrade: an existing install has
-    // mappings for nothing, and a channel guessed here would take CCs away from the tracks that are
-    // already routing them.
+    // The knob channel: 0-15 for one, `MIDI_CTL_CH_ALL` for any. Absent → ALL, which is safe as an
+    // upgrade because a CC is CLAIMED rather than reserved (songcore/midi_map.h) — an install with no
+    // mappings has nothing to claim, so not one byte of its cable behaves differently.
+    //
+    // ⚠️ Out of range → ALL, and that also carries the ONE file this ever wrote a `-1` into: the row
+    // offered an OFF it could not leave, because its write-back ignored the very action the cell
+    // advertised. A value no user could have chosen is not a value worth preserving.
     values.midiControlChannel = get_int(j, "midi_control_channel", values.midiControlChannel);
-    if (values.midiControlChannel < -1 || values.midiControlChannel > 15)
-        values.midiControlChannel = -1;
+    if (values.midiControlChannel < 0 || values.midiControlChannel > songcore::MIDI_CTL_CH_ALL)
+        values.midiControlChannel = songcore::MIDI_CTL_CH_ALL;
 
     // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
     // flips the cap on is the session that must add the key, or the setting resets to ASK on every
