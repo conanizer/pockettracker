@@ -87,13 +87,23 @@ std::string device_text(const std::vector<std::string>& names, int index) {
 std::string map_cell_text(int channel) { return channel < 0 ? "--" : dec2(channel + 1); }
 
 /**
- * The CTL CH row's value: which channels may carry a mapping knob, and — when the answer cannot see
- * the knobs that are actually arriving — where they are instead.
+ * One IN INS cell: `--` for "whatever the track is playing", else the instrument in the base the
+ * instrument screen shows it in.
  *
- * ⚠️ The report is the row's only way of being self-answering. It asks for a channel number, and a
- * controller's knob channel is a thing most people have never had to know; the cable is the only
- * thing on the machine that can say it.
+ * ⚠️ HEX, where the channel above it is DECIMAL, and the two sitting in one column is not an
+ * inconsistency to iron out: a channel is a number on the back of a keyboard and is printed the way
+ * that keyboard prints it; an instrument is a slot in this app and is printed the way every other
+ * screen here prints it.
  */
+std::string map_instrument_text(int id) { return id < 0 ? "--" : hex2(id); }
+
+/** The stored instrument for a cursor COLUMN (1-based), or −1 for auto / a column naming no track. */
+int map_instrument_at(const songcore::Project& p, int column) {
+    const int track = column - 1;
+    if (track < 0 || track >= static_cast<int>(p.midiInputInstruments.size())) return -1;
+    return p.midiInputInstruments[static_cast<size_t>(track)];
+}
+
 /**
  * The CTL CH cycle: `ALL` first, then the sixteen channels. Seventeen stops, no empty one.
  *
@@ -105,6 +115,14 @@ constexpr int CTL_CH_OPTIONS = 17;
 int ctl_ch_index(int stored) { return stored == songcore::MIDI_CTL_CH_ALL ? 0 : stored + 1; }
 int ctl_ch_stored(int index) { return index <= 0 ? songcore::MIDI_CTL_CH_ALL : index - 1; }
 
+/**
+ * The CTL CH row's value: which channels may carry a mapping knob, and — when the answer cannot see
+ * the knobs that are actually arriving — where they are instead.
+ *
+ * ⚠️ The report is the row's only way of being self-answering. It asks for a channel number, and a
+ * controller's knob channel is a thing most people have never had to know; the cable is the only
+ * thing on the machine that can say it.
+ */
 std::string ctl_ch_text(const MidiState& s) {
     const int ch = s.settings.midiControlChannel;
     if (ch == songcore::MIDI_CTL_CH_ALL) return "ALL  MAPPED KNOBS";
@@ -189,7 +207,7 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     // costs no extra height. ⭐ `ptshot` is the only tool that can see whether those two lines line up
     // — the same reason it caught the OUTPUT row's overprint.
     {
-        const bool onMap    = on_row(MidiRow::IN_MAP);
+        const bool onMap    = on_row(MidiRow::IN_MAP) || on_row(MidiRow::IN_INS);
         const int  mapY     = rowY(MidiRow::IN_MAP);
         const int  headerY  = mapY - ROW_HEIGHT;
         const int  cellX    = x + MAP_CELL_X;
@@ -207,13 +225,24 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
                         CHAR_SPACING, FONT_SCALE);
         }
 
-        c.draw_text("IN CH", labelX, mapY + TEXT_PADDING, onMap ? cursor_mark_ink(t) : t.textParam,
+        const bool onCh  = on_row(MidiRow::IN_MAP);
+        const bool onIns = on_row(MidiRow::IN_INS);
+        const int  insY  = rowY(MidiRow::IN_INS);
+
+        c.draw_text("IN CH", labelX, mapY + TEXT_PADDING, onCh ? cursor_mark_ink(t) : t.textParam,
+                    CHAR_SPACING, FONT_SCALE);
+        // ⚠️ "INS", not "IN INS": the label column is read downwards, and IN CH above it already says
+        // that this pair is the input map. The word that distinguishes the two rows is the one drawn.
+        c.draw_text("INS", labelX, insY + TEXT_PADDING, onIns ? cursor_mark_ink(t) : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
 
         for (int i = 0; i < tracks; ++i) {
             draw_cursor_cell(c, map_cell_text(s.project.midiInputChannels[static_cast<size_t>(i)]),
                              cellX + MAP_CELL_PITCH * i, mapY + TEXT_PADDING,
-                             onMap && (s.cursorColumn == i + 1), t.textValue, t);
+                             onCh && (s.cursorColumn == i + 1), t.textValue, t);
+            draw_cursor_cell(c, map_instrument_text(map_instrument_at(s.project, i + 1)),
+                             cellX + MAP_CELL_PITCH * i, insY + TEXT_PADDING,
+                             onIns && (s.cursorColumn == i + 1), t.textValue, t);
         }
     }
 
@@ -268,6 +297,16 @@ CursorContext MidiModule::cursor_context(const MidiState& s) const {
             const int ch = map_channel_at(s.project, s.cursorColumn);
             return cc::hex_byte(ch, /*min=*/0, /*max=*/15, /*empty_value=*/-1,
                                 /*can_delete=*/ch >= 0, /*can_insert=*/ch < 0);
+        }
+
+        case MidiRow::IN_INS: {
+            // The cell above it exactly, over the instrument pool's range instead of the sixteen
+            // channels: −1 is empty and means "whatever this track is playing", which is what the
+            // row did before it existed.
+            const int id = map_instrument_at(s.project, s.cursorColumn);
+            return cc::hex_byte(id, /*min=*/0, /*max=*/songcore::POOL_INSTRUMENTS - 1,
+                                /*empty_value=*/-1,
+                                /*can_delete=*/id >= 0, /*can_insert=*/id < 0);
         }
 
         case MidiRow::OFFSET: {
@@ -363,6 +402,22 @@ MidiInputResult MidiModule::handle_input(songcore::Project& project, SettingsVal
             else if (action.type == ActionType::INSERT_DEFAULT) ch = 0;    // channel 1, shown 01
 
             r.projectModified = (ch != before);
+            break;
+        }
+
+        case MidiRow::IN_INS: {
+            // The song's, like the channel above it: which instrument a track answers a keyboard on
+            // is part of how the song is played.
+            const int track = cursor_column - 1;
+            if (track < 0 || track >= static_cast<int>(project.midiInputInstruments.size())) break;
+            int& id = project.midiInputInstruments[static_cast<size_t>(track)];
+
+            const int before = id;
+            if (isSet) id = clamp(action.value, 0, songcore::POOL_INSTRUMENTS - 1);
+            else if (action.type == ActionType::DELETE)         id = -1;  // back to "what it plays"
+            else if (action.type == ActionType::INSERT_DEFAULT) id = 0;   // instrument 00
+
+            r.projectModified = (id != before);
             break;
         }
 

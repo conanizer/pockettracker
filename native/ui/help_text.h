@@ -280,6 +280,7 @@ enum class HelpTopic {
     MIDI_TEST,
     MIDI_CTL_CH,
     MIDI_MAPPING,
+    MIDI_IN_INSTRUMENT,
 
     // MIDI MAPPING — one topic per column of a mapping row, plus the row that adds one
     MAP_CC,
@@ -1624,6 +1625,19 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "and turn a knob. Needs a device",
       "on the INPUT row."},
      {"A opens the list"}},
+    /* MIDI_IN_INSTRUMENT */
+    {"INS: what the keys play", "One instrument per track.", "-- plays what the track plays.",
+     {"The instrument each track plays",
+      "a live key on. -- follows what",
+      "the track itself plays.",
+      "",
+      "Tracks sharing a channel AND an",
+      "instrument share a chord, one",
+      "note each: set four the same",
+      "for four-note chords."},
+     {"A+→ on -- picks 00",
+      "A+←/→ steps 1",
+      "A+B sets it back to --"}},
 
     // ── The MIDI mapping list ────────────────────────────────────────────────────────────────────
     /* MAP_CC */
@@ -2623,6 +2637,7 @@ inline HelpTopic midi_cell_topic(int row) {
         case MidiRow::CTL_CH:   return HelpTopic::MIDI_CTL_CH;
         case MidiRow::PROG_CHG: return HelpTopic::MIDI_PROG_CHG;
         case MidiRow::IN_MAP:   return HelpTopic::MIDI_IN_CHANNEL;
+        case MidiRow::IN_INS:   return HelpTopic::MIDI_IN_INSTRUMENT;
         case MidiRow::MAPPING:  return HelpTopic::MIDI_MAPPING;
         case MidiRow::PANIC:    return HelpTopic::MIDI_PANIC;
         case MidiRow::TEST:     return HelpTopic::MIDI_TEST;

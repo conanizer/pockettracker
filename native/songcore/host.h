@@ -391,6 +391,10 @@ class SongcoreHost {
         // The transport ends: every note the cable is holding, ended NOW (not queued — the queue is
         // dropped). `seq_.stop()` does not reach the router, so this cannot ride an event.
         external_.panic();
+        // …and the keys the INCOMING cable is holding. The voices below are about to be ramped down,
+        // so a track the input router still believes is busy would make the next chord steal from a
+        // note that is already over.
+        midiInRouter_.release_all_keys();
         if (engine_) {
             engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
             // …and the voices already sounding. RAMPED, not cut: a sustained note ended where its

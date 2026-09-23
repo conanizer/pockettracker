@@ -424,12 +424,16 @@ enum class MidiRow {
     CTL_CH   = 4,   // -- | 01..16           — the cable: which channel carries MAPPING knobs
     PROG_CHG = 5,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
     IN_MAP   = 6,   // 8 cells, -- | 01..16  — the project (per-track input channel, phase E3)
+    // ⚠️ DIRECTLY UNDER THE CHANNEL ROW AND SHARING ITS HEADER, because the two cells above each
+    // other are one answer: track 3 listens to channel 1 and plays instrument 0C. Apart they are two
+    // eight-cell rows nobody can line up by eye.
+    IN_INS   = 7,   // 8 cells, -- | 00..7F  — the project (per-track input instrument)
     // ⚠️ THE FIRST ROW ON THIS SCREEN THAT IS A DOOR RATHER THAN A VALUE. It sits with the two
     // actions below it rather than in the settings/song halves above, because what A does on it is
     // its whole content — the same shape PROJECT's SYSTEM and MIDI rows have.
-    MAPPING  = 7,   // A: the mapping list   — the project (phase 3)
-    PANIC    = 8,   // A: ALL NOTES OFF
-    TEST     = 9,   // A: C-4 CH 1
+    MAPPING  = 8,   // A: the mapping list   — the project (phase 3)
+    PANIC    = 9,   // A: ALL NOTES OFF
+    TEST     = 10,  // A: C-4 CH 1
 };
 
 // ⚠️ ROWS ARE INSERTED HERE, NOT APPENDED, and unlike B4.3's PROJECT row that is safe: nothing in the
@@ -441,18 +445,26 @@ enum class MidiRow {
 // OUTPUT rather than after SYNC because the question a user arrives with is "which cables am I on".
 // CTL CH ends the cable group because it is the row IN CH below it must be read against: the two
 // divide the incoming channels between them, one for knobs and the rest for keys.
-constexpr int MIDI_ROW_COUNT = 10;
+constexpr int MIDI_ROW_COUNT = 11;
 
-/** The IN CH row is eight cells wide — one per track — and they are cursor COLUMNS 1..8. */
+/** The two map rows are eight cells wide — one per track — and they are cursor COLUMNS 1..8. */
 constexpr int MIDI_IN_MAP_COLUMNS = 8;
 
 /**
+ * The per-track rows: eight cells under one header, and the cursor CARRIES its column between them.
+ * Derived rather than listed at each site — the column rule, the header and the gap all ask it.
+ */
+inline bool midi_row_is_track_map(MidiRow row) {
+    return row == MidiRow::IN_MAP || row == MidiRow::IN_INS;
+}
+
+/**
  * Group gaps: after PROG CHG (the single-value rows end and the track map begins — the blank row is
- * also where the map's `1 2 3 4 5 6 7 8` header is drawn) and after IN CH (the values end, the two
- * actions begin).
+ * also where the map's `1 2 3 4 5 6 7 8` header is drawn) and after the map (the values end, the two
+ * actions begin). ⚠️ NOT between the two map rows: they share the header above them.
  */
 inline bool midi_row_gap_after(MidiRow row) {
-    return row == MidiRow::PROG_CHG || row == MidiRow::IN_MAP;
+    return row == MidiRow::PROG_CHG || row == MidiRow::IN_INS;
 }
 
 /** How far down the panel a MIDI row is drawn, in pixels from the first row's top. */

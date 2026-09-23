@@ -723,6 +723,17 @@ struct Project {
     int  midiSyncOut = 0;               // 0 OFF | 1 CLOCK | 2 TRANSPORT | 3 CLOCK+TRANSPORT (phase C)
     bool midiSendProgramChange = true;
     std::vector<int> midiInputChannels = std::vector<int>(POOL_TRACKS, -1);  // per-track input channel
+    /**
+     * Which instrument a track plays a live key on — one per track, −1 = whatever the track last
+     * played (`TrackInstruments`, falling back to the one the INSTRUMENT screen is showing).
+     *
+     * ⚠️ **IT IS ALSO THE POLYPHONY GROUPING.** Tracks that listen to the same channel AND resolve to
+     * the same instrument share a chord between them, one note each; tracks resolving to different
+     * instruments each get the whole chord. So eight tracks on channel 1 with one instrument is an
+     * eight-voice piano, and two pairs is a two-voice layer of two sounds — both out of the same
+     * field, with no mode to set. See `MidiInputRouter`.
+     */
+    std::vector<int> midiInputInstruments = std::vector<int>(POOL_TRACKS, -1);
 
     /**
      * Which of this controller's knobs moves which parameter (`midi_map.h`).

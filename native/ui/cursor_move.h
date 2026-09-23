@@ -317,13 +317,16 @@ inline void move_cursor_up(AppState& s) {
             s.settingsCursorColumn = 1;
             break;
 
-        // MIDI wraps over a fixed eight — no caps filter, because every row is on every platform.
+        // MIDI wraps over its rows — no caps filter, because every row is on every platform.
         // ⚠️ The column resets to 1, which matters since E3 gave IN CH eight of them: leaving the
         // cursor on column 6 while stepping onto a one-column row would put it on a cell that is not
         // drawn, and `cursor_context` would answer for a track the screen is not showing.
+        // ⚠️ …EXCEPT BETWEEN THE TWO MAP ROWS, where it is CARRIED: they are one table read
+        // downwards — track 3's channel and track 3's instrument — and a step that lost the column
+        // would make the pair unreadable exactly where it has to be read together.
         case ScreenType::MIDI:
             s.midiCursorRow = (s.midiCursorRow > 0) ? s.midiCursorRow - 1 : MIDI_ROW_COUNT - 1;
-            s.midiCursorColumn = 1;
+            if (!midi_row_is_track_map(static_cast<MidiRow>(s.midiCursorRow))) s.midiCursorColumn = 1;
             break;
 
         // ⚠️ THE MAPPING LIST'S ROWS ARE HOMOGENEOUS, so the column is CARRIED rather than snapped
@@ -442,9 +445,10 @@ inline void move_cursor_down(AppState& s) {
             s.settingsCursorColumn = 1;
             break;
 
+        // The carried column and its rule — see the matching arm in move_cursor_up.
         case ScreenType::MIDI:
             s.midiCursorRow = (s.midiCursorRow < MIDI_ROW_COUNT - 1) ? s.midiCursorRow + 1 : 0;
-            s.midiCursorColumn = 1;
+            if (!midi_row_is_track_map(static_cast<MidiRow>(s.midiCursorRow))) s.midiCursorColumn = 1;
             break;
 
         // The carried column and its clamp — see the matching arm in move_cursor_up.
@@ -585,7 +589,7 @@ inline void move_cursor_left(AppState& s) {
         // max == 0 there. But a screen that is correct only because the fall-through happens to be
         // harmless on it is one added row away from not being.
         case ScreenType::MIDI:
-            if (static_cast<MidiRow>(s.midiCursorRow) == MidiRow::IN_MAP && s.midiCursorColumn > 1)
+            if (midi_row_is_track_map(static_cast<MidiRow>(s.midiCursorRow)) && s.midiCursorColumn > 1)
                 s.midiCursorColumn--;
             return;
 
@@ -693,7 +697,7 @@ inline void move_cursor_right(AppState& s) {
         // the constant: a project carrying fewer than eight tracks must not offer a ninth cell that
         // `handle_input` will then refuse.
         case ScreenType::MIDI: {
-            if (static_cast<MidiRow>(s.midiCursorRow) != MidiRow::IN_MAP) return;
+            if (!midi_row_is_track_map(static_cast<MidiRow>(s.midiCursorRow))) return;
             const int tracks = s.project ? static_cast<int>(s.project->midiInputChannels.size()) : 0;
             const int last   = std::min(MIDI_IN_MAP_COLUMNS, tracks);
             if (s.midiCursorColumn < last) s.midiCursorColumn++;
