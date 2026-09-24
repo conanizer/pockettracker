@@ -1156,7 +1156,12 @@ class InputDispatcher {
 
     bool theme_open() const { return s_.themeEditor.isOpen; }
 
-    void open_theme_editor()  { s_.themeEditor = ThemeEditorState{}; s_.themeEditor.isOpen = true; }
+    // The roll's seed starts from the frame clock, so each opening walks a different sequence of palettes.
+    void open_theme_editor() {
+        s_.themeEditor = ThemeEditorState{};
+        s_.themeEditor.isOpen = true;
+        s_.themeEditor.seed ^= static_cast<uint32_t>(now_ms_);
+    }
     void close_theme_editor() { s_.themeEditor = ThemeEditorState{}; }
 
     /**
