@@ -20,12 +20,17 @@ void OboeAudioEngine::setPlatformDefaults(int sampleRate, int framesPerBurst) {
 }
 
 bool OboeAudioEngine::openStream() {
+    // ⚠️ Cleared BEFORE the attempt, not after a successful one: a stream dying while this runs
+    // raises it again, and clearing on the way out would erase that second death.
+    deviceLost_.store(false, std::memory_order_relaxed);
+
     // OpenSL ES does NOT trigger CCodec/C2 codec enumeration that spams 2000+ log lines
     // and blocks for up to 35 seconds on some Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
     // Try OpenSL ES first; fall back to AAudio only if OpenSL ES is unavailable.
 
     oboe::AudioStreamBuilder builder;
     builder.setDataCallback(this);
+    builder.setErrorCallback(this);  // on the builder, so all four attempts below carry it
     builder.setFormat(oboe::AudioFormat::Float);
     builder.setChannelCount(oboe::ChannelCount::Stereo);
 
@@ -167,6 +172,13 @@ void OboeAudioEngine::setPaused(bool paused) {
         // as an intermittently corrupted WAV export with nothing in the log to explain it.
         LOGE("setPaused(%d) failed: %s", (int)paused, oboe::convertToText(r));
     }
+}
+
+void OboeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*audioStream*/, oboe::Result error) {
+    deviceLost_.store(true, std::memory_order_relaxed);
+    // The repair is silent when it works, so a stream rebuilt in 10 ms and one that never died look
+    // the same in the log without this line.
+    LOGE("Stream lost (%s) - the frame loop will reopen it", oboe::convertToText(error));
 }
 
 oboe::DataCallbackResult OboeAudioEngine::onAudioReady(

@@ -7,6 +7,7 @@
 // (e.g. AlsaAudioEngine) that drives the same core the same way — the core stays untouched.
 // ───────────────────────────────────────────────────────────────────────────────────────────────
 #include <oboe/Oboe.h>
+#include <atomic>
 #include <memory>
 
 #include "audio-backend.h"
@@ -22,7 +23,9 @@ class AudioEngine;  // portable core — full definition pulled in by the .cpp o
 // Constructed by `android-main.cpp`'s `main()` for the SDL app — the one owner since convergence
 // Phase E deleted the JNI facade (`jni-bridge.cpp`) that used to build a separate instance for the
 // Compose app. Nothing here is a singleton and nothing here may become one.
-class OboeAudioEngine : public oboe::AudioStreamDataCallback, public AudioBackend {
+class OboeAudioEngine : public oboe::AudioStreamDataCallback,
+                        public oboe::AudioStreamErrorCallback,
+                        public AudioBackend {
 public:
     // Borrows the core (owned by android-main's `main`); does not take ownership. The owner destroys
     // the shell before the core, so no callback can run against a freed core.
@@ -82,6 +85,16 @@ public:
             void* audioData,
             int32_t numFrames) override;
 
+    /**
+     * The stream died and Oboe has already closed it. ⚠️ **RAISES A FLAG AND NOTHING ELSE** — it runs
+     * on an Oboe thread while the shell may be inside any other method here, so reopening (or even
+     * dropping `stream`) would race all of them. The frame loop owns the repair; same rule as the
+     * SIGTERM handler in `shell/main.cpp`.
+     */
+    void onErrorAfterClose(oboe::AudioStream* audioStream, oboe::Result error) override;
+
+    bool deviceLost() const override { return deviceLost_.load(std::memory_order_relaxed); }
+
 private:
     AudioEngine* core;
     std::shared_ptr<oboe::AudioStream> stream;
@@ -97,4 +110,8 @@ private:
     // defaults in setPlatformDefaults, not into the builder.
     int platformRate_  = 0;
     int platformBurst_ = 0;
+
+    // Raised on Oboe's error thread, read by the frame loop, cleared when a reopen is ATTEMPTED (see
+    // openStream) rather than when one succeeds.
+    std::atomic<bool> deviceLost_{false};
 };

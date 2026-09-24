@@ -81,6 +81,17 @@ class AudioBackend {
         bool measured = false;
     };
     virtual OutputLatency outputLatency() const = 0;
+
+    /**
+     * Did the platform take the device away while it was open? The shell sees nothing of that —
+     * the loop runs, the transport counts, and the only symptom is silence — so the backend says.
+     *
+     * ⚠️ **FALSE IS "NOTHING TO REPORT", NOT "THE DEVICE IS FINE"**, which is why it is not pure.
+     * Only Oboe reports it, and only on the AAudio path it falls back to: OpenSL ES has no notion of
+     * it (the platform re-routes an AudioTrack rather than killing it), and SDL's event for it is
+     * not routed here.
+     */
+    virtual bool deviceLost() const { return false; }
 };
 
 #endif  // POCKETTRACKER_AUDIO_BACKEND_H

@@ -155,7 +155,12 @@ struct BackgroundContext {
     ui::InputDispatcher* dispatch   = nullptr;
     ui::FileSystem*      filesystem = nullptr;
     ui::AppState*        state      = nullptr;
+    AudioBackend*        audio      = nullptr;
     bool                 console    = false;
+
+    // Raised by the watcher, cleared by the frame loop when it has reopened the device. No lock: the
+    // watcher runs ON the loop's own thread — see on_app_event.
+    bool audioClosed = false;
 };
 
 /**
@@ -246,6 +251,21 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
                         c->filesystem->settings_path().c_str());
             break;
     }
+
+    // ── 4. The audio device goes back to the system ──
+    //
+    // ⚠️ **A STREAM LEFT OPEN ACROSS A BACKGROUNDING COMES BACK DEAD.** The callback thread is not
+    // frozen with this one, so it keeps pulling from an engine nobody is pumping; once the platform
+    // freezes the whole process those pulls go unanswered, and a track that underruns long enough is
+    // retired by the audio server without telling the client. The stream still reads as started and
+    // the callback never fires again — the reported bug, with the playhead moving in silence.
+    //
+    // LAST because a close blocks on the callback in flight, and nothing here is worth delaying the
+    // autosave for. The frame loop reopens on its first tick after the thaw.
+    c->audio->closeStream();
+    c->audioClosed = true;
+    if (c->console) std::printf("lifecycle: backgrounded - audio device released\n");
+
     std::fflush(stdout);
 
     return 0;  // watchers do not consume; the event still reaches the queue
@@ -940,7 +960,7 @@ int run(const AppConfig& cfg) {
     // autosave over the one still being decided about. Removed below the loop — `bg` is a stack
     // object and the watcher must not outlive it. See on_app_event for why this is not a thread
     // boundary despite what the plan assumed.
-    BackgroundContext bg{&host, &dispatch, &filesystem, &state, cfg.console};
+    BackgroundContext bg{&host, &dispatch, &filesystem, &state, &audio, cfg.console};
     SDL_AddEventWatch(on_app_event, &bg);
 
     // The banner and the once-a-second status line below are the two HIGH-VOLUME things this file
@@ -1125,6 +1145,8 @@ int run(const AppConfig& cfg) {
     Uint64 nextFrameMs = 0;   // when the next drawn frame is due — 0 so the first tick draws
     Uint64 lastPollMs  = 0;   // what the wait below measures against
     Uint64 lastInputMs = 0;   // …and what tells the wait whether anyone is here
+
+    Uint64 audioReopenMs = 0;  // when the next reopen attempt may run; 0 = at once
 
     // ⚠️⚠️ **THE ONLY PLACE THIS LOOP SLEEPS, AND WITHOUT IT IT BURNS A WHOLE CORE.** With vsync it
     // used to be `SDL_RenderPresent` that blocked and paced the entire app; a tick that draws nothing
@@ -1604,6 +1626,29 @@ int run(const AppConfig& cfg) {
         // and this reads it once a TICK, so it re-stamps for the rest of the frame — which only ever
         // extends the hold-off, never shortens it.
         if (sawInput) lastInputMs = now;
+
+        // ── THE AUDIO DEVICE COMES BACK ──────────────────────────────────────────────────────────
+        //
+        // Two ways to lose it — handed back on the way into the background, or taken away while open
+        // (audio-backend.h) — and one repair. Not hung off a foreground event: this loop only runs
+        // while the app is in front, and the second case has no event behind it at all.
+        //
+        // ⚠️ The close is not redundant. After a background it is a no-op; after a lost device it is
+        // what lets go of the stream object, which is this thread's job alone.
+        //
+        // ⚠️ Retried on a DEADLINE rather than a count — the app is silent until this succeeds, so
+        // there is no attempt at which giving up is the better answer. Inert on desktop.
+        if ((bg.audioClosed || audio.deviceLost()) && now >= audioReopenMs) {
+            audio.closeStream();
+            if (audio.openStream()) {
+                bg.audioClosed = false;
+                std::printf("audio:   device reopened\n");
+            } else {
+                audioReopenMs = now + 500;
+                std::printf("audio:   reopen FAILED - retrying\n");
+            }
+            std::fflush(stdout);
+        }
 
         // ── The scripted-run hooks (dev only; both are 0 unless an env var set them) ─────────────
         if ((autoplayMs || quitAfterMs) && firstFrameMs == 0) firstFrameMs = now;
