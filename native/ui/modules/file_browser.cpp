@@ -397,8 +397,8 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
             textColor = selection_cell_ink(t);
         } else {
             switch (item.kind) {
-                case BrowserItem::Kind::PARENT: textColor = COLOR_PARENT; break;
-                case BrowserItem::Kind::ACTION: textColor = COLOR_ACTION; break;
+                case BrowserItem::Kind::PARENT:
+                case BrowserItem::Kind::ACTION:
                 case BrowserItem::Kind::FOLDER: textColor = t.textTitle; break;
                 case BrowserItem::Kind::FILE:
                     textColor = ext_matches(item.extension, video_extensions()) ? COLOR_VIDEO
