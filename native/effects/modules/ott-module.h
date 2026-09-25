@@ -67,11 +67,12 @@ struct BandCompressor {
         applySettings();
     }
 
+    // daisysp::fmax, not fmaxf: on gcc without -ffast-math fmaxf is a libm call, six per frame here.
     inline void process(float& L, float& R) {
-        downward.Process(fmaxf(fabsf(L), fabsf(R)));
+        downward.Process(daisysp::fmax(fabsf(L), fabsf(R)));
         L = downward.Apply(L);
         R = downward.Apply(R);
-        upward.Process(fmaxf(fabsf(L), fabsf(R)));
+        upward.Process(daisysp::fmax(fabsf(L), fabsf(R)));
         L = upward.Apply(L) * makeupLin;
         R = upward.Apply(R) * makeupLin;
     }
@@ -218,6 +219,14 @@ struct OttModule {
                 warmupRemaining = WARMUP_SAMPLES;
             }
             silenceCounter = 0;
+        }
+
+        // Idle: past the reset span, a block of exact zeros is passed through untouched. The next
+        // signal resets the DSP anyway, so running it on nothing would only spend the CPU.
+        if (silenceCounter >= SILENCE_RESET_FRAMES) {
+            bool zero = true;
+            for (int i = 0; i < numFrames * channelCount && zero; i++) zero = buf[i] == 0.0f;
+            if (zero) return;
         }
 
         for (int i = 0; i < numFrames; i++) {

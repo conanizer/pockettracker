@@ -1,9 +1,11 @@
 #pragma once
 #include "../primitives/daisysp/reverbsc.h"
 #include "../primitives/dragonfly/dragonfly-reverb.h"
+#include "../primitives/bus-sleep.h"
 #include "eq-module.h"
 #include "reverb-presets.h"
 #include <cmath>
+#include <cstring>
 
 // The pre-delay line, per channel: 0.15 s at 48 kHz.
 //
@@ -92,6 +94,7 @@ struct ReverbModule {
 
     void reset(float sr) {
         sampleRate = sr;
+        sleep.reset();
         if (reverb.Init(sr) != 0) {
             sampleRate = MAX_SUPPORTED_RATE;
             reverb.Init(MAX_SUPPORTED_RATE);
@@ -153,6 +156,20 @@ struct ReverbModule {
     }
 
     // Process stereo send bus into stereo wet output. Always 100% wet. Writes to outL/outR.
+    // Asleep after a second of silence in and out (the pre-delay is the longest a sound hides).
+    void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
+        if (sleep.skip(inL, inR, numFrames)) {
+            std::memset(outL, 0, sizeof(float) * static_cast<size_t>(numFrames));
+            std::memset(outR, 0, sizeof(float) * static_cast<size_t>(numFrames));
+            return;
+        }
+        run(inL, inR, outL, outR, numFrames);
+        sleep.observe(inL, inR, outL, outR, numFrames, static_cast<int>(sampleRate));
+    }
+
+  private:
+    BusSleep sleep;
+
     // inputEq applied stereo (independent L/R biquads) before the reverb algorithm.
     //
     // ⚠️ **AT THE DEFAULT PRE AND WIDE CELLS THE TWO GATES BELOW ADD NOTHING TO EITHER SIDE OF
@@ -160,7 +177,7 @@ struct ReverbModule {
     // not here at all; it lives inside the algorithm. The wet gain is NOT one of the gates either:
     // it is derived at every setting including the default, because the level it divides out is
     // there at every setting too.
-    void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
+    void run(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         const int  want     = algo;
         const bool switched = want != soundingAlgo;
         if (switched && want == kReverbAlgoOld) {

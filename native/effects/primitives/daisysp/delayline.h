@@ -70,15 +70,16 @@ class DelayLine
     inline void Write(const T sample)
     {
         line_[write_ptr_] = sample;
-        write_ptr_        = (write_ptr_ - 1 + max_size) % max_size;
+        write_ptr_        = write_ptr_ == 0 ? max_size - 1 : write_ptr_ - 1;
     }
 
     /** returns the next sample of type T in the delay line, interpolated if necessary.
     */
     inline const T Read() const
     {
-        T a = line_[(write_ptr_ + delay_) % max_size];
-        T b = line_[(write_ptr_ + delay_ + 1) % max_size];
+        const size_t i = Wrap(write_ptr_ + delay_);
+        T a = line_[i];
+        T b = line_[Wrap(i + 1)];
         return a + (b - a) * frac_;
     }
 
@@ -87,21 +88,23 @@ class DelayLine
     {
         int32_t delay_integral   = static_cast<int32_t>(delay);
         float   delay_fractional = delay - static_cast<float>(delay_integral);
-        const T a = line_[(write_ptr_ + delay_integral) % max_size];
-        const T b = line_[(write_ptr_ + delay_integral + 1) % max_size];
+        const size_t i = Wrap(write_ptr_ + delay_integral);
+        const T a = line_[i];
+        const T b = line_[Wrap(i + 1)];
         return a + (b - a) * delay_fractional;
     }
 
+    // ⚠️ `delay` must lie in [0, max_size): the index is wrapped once, not reduced.
     inline const T ReadHermite(float delay) const
     {
         int32_t delay_integral   = static_cast<int32_t>(delay);
         float   delay_fractional = delay - static_cast<float>(delay_integral);
 
-        int32_t     t     = (write_ptr_ + delay_integral + max_size);
-        const T     xm1   = line_[(t - 1) % max_size];
-        const T     x0    = line_[(t) % max_size];
-        const T     x1    = line_[(t + 1) % max_size];
-        const T     x2    = line_[(t + 2) % max_size];
+        const size_t t    = Wrap(write_ptr_ + delay_integral);
+        const T     xm1   = line_[t == 0 ? max_size - 1 : t - 1];
+        const T     x0    = line_[t];
+        const T     x1    = line_[Wrap(t + 1)];
+        const T     x2    = line_[Wrap(t + 2)];
         const float c     = (x1 - xm1) * 0.5f;
         const float v     = x0 - x1;
         const float w     = c + v;
@@ -113,13 +116,16 @@ class DelayLine
 
     inline const T Allpass(const T sample, size_t delay, const T coefficient)
     {
-        T read  = line_[(write_ptr_ + delay) % max_size];
+        T read  = line_[Wrap(write_ptr_ + delay)];
         T write = sample + coefficient * read;
         Write(write);
         return -write * coefficient + read;
     }
 
   private:
+    // One compare instead of a `%` per tap: every index here is below 2 × max_size.
+    static inline size_t Wrap(size_t i) { return i >= max_size ? i - max_size : i; }
+
     float  frac_;
     size_t write_ptr_;
     size_t delay_;

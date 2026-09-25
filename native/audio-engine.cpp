@@ -42,6 +42,13 @@ int sfStreamRead(void* f, void* ptr, unsigned int size) {
 int sfStreamSkip(void* f, unsigned int count) {
     return std::fseek((FILE*)f, (long)count, SEEK_CUR) == 0;
 }
+
+// A meter's running peak. Not fmaxf, which without -ffast-math is a libm call, per sample here;
+// a NaN is ignored the same way.
+inline float peak_hold(float peak, float x) {
+    x = fabsf(x);
+    return x > peak ? x : peak;
+}
 }  // namespace
 
 AudioEngine::AudioEngine() {
@@ -2746,8 +2753,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
-                framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
-                framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
+                framePeaksPerTrackL[voice.trackId] = peak_hold(framePeaksPerTrackL[voice.trackId], sampleL);
+                framePeaksPerTrackR[voice.trackId] = peak_hold(framePeaksPerTrackR[voice.trackId], sampleR);
             }
             // OCTA per-track capture: tracks 0-7 plus the preview lane (PREVIEW_TRACK_ID == PREVIEW_LANE).
             // Gated on octaWanted: the accumulators are only zeroed/read when OCTA is shown.
@@ -3013,8 +3020,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 float outR = sfBuf[i * 2 + 1];
                 // Pre-master, like the sampler path's sampleL/sampleR — the master fader is applied to
                 // the summed bus below, and the meters and OCTA accumulators are scaled by it there.
-                trackPeakL = fmaxf(trackPeakL, fabsf(outL));
-                trackPeakR = fmaxf(trackPeakR, fabsf(outR));
+                trackPeakL = peak_hold(trackPeakL, outL);
+                trackPeakR = peak_hold(trackPeakR, outR);
                 if (stemsMode == 0 || t == stemsMode - 1) {
                     output[i * 2]     += outL;
                     output[i * 2 + 1] += outR;
@@ -3148,10 +3155,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 output[i * channelCount + 1] += dlR;
             }
             // modes 1-8: no send returns (dry track stems)
-            frameSendPeakRevL = fmaxf(frameSendPeakRevL, fabsf(rv));
-            frameSendPeakRevR = fmaxf(frameSendPeakRevR, fabsf(rvR));
-            frameSendPeakDelL = fmaxf(frameSendPeakDelL, fabsf(dl));
-            frameSendPeakDelR = fmaxf(frameSendPeakDelR, fabsf(dlR));
+            frameSendPeakRevL = peak_hold(frameSendPeakRevL, rv);
+            frameSendPeakRevR = peak_hold(frameSendPeakRevR, rvR);
+            frameSendPeakDelL = peak_hold(frameSendPeakDelL, dl);
+            frameSendPeakDelR = peak_hold(frameSendPeakDelR, dlR);
         }
     }
 

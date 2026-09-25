@@ -1,6 +1,7 @@
 #pragma once
 #include "../primitives/daisysp/delayline.h"
 #include "../primitives/daisysp/dsp.h"
+#include "../primitives/bus-sleep.h"
 #include "delay-presets.h"
 #include "eq-module.h"
 #include <cmath>
@@ -169,8 +170,11 @@ struct DelayModule {
     float oscHpL = 0.0f, oscHpR = 0.0f, oscLpL = 0.0f, oscLpR = 0.0f;
     float oscHpCoeff = 0.0f, oscLpCoeff = 0.0f;
 
+    BusSleep sleep;
+
     void reset(float sr) {
         sampleRate = sr;
+        sleep.reset();
         delL.Init();
         delR.Init();
         inputEq.reset(sr);
@@ -280,6 +284,14 @@ struct DelayModule {
     // 20 kHz is not transparent), WOBL 00 goes back to `Read()` (`ReadHermite` is a different
     // interpolator even at a standing position), and PONG off leaves each side to itself.
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
+        if (sleep.skip(inL, inR, numFrames)) {
+            // The line is quiet, so a TIME change made meanwhile can land now instead of gliding
+            // under the next sound.
+            headSamples = delaySamples;
+            std::memset(outL, 0, sizeof(float) * static_cast<size_t>(numFrames));
+            std::memset(outR, 0, sizeof(float) * static_cast<size_t>(numFrames));
+            return;
+        }
         const bool  drifting = wobble > 0.0f;
         const bool  filtered = toneHex < 0xFF;
         // ⚠️ Every term below is scaled by this, so at the onset step itself the band, the extra gain
@@ -398,6 +410,9 @@ struct DelayModule {
         // never come back.
         if (gliding && fabsf(delaySamples - headSamples) <= kDelayGlideEpsilon)
             headSamples = delaySamples;
+
+        // The span is the whole line: an echo can sit in it that long while the output is silent.
+        sleep.observe(inL, inR, outL, outR, numFrames, static_cast<int>(DELAY_MAX_SAMPLES));
     }
 
   private:

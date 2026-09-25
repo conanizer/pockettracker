@@ -13,6 +13,7 @@ https://opensource.org/licenses/MIT.
 #define DSY_CORE_DSP
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <random>
 #include <cmath>
 
@@ -127,9 +128,24 @@ About 25% performance increase over std::log10f
 */
 inline float fastlog2f(float f)
 {
-    float frac;
-    int   exp;
-    frac = frexpf(fabsf(f), &exp);
+    // frexpf, done on the bits for a normal float: the library call is most of this function's
+    // cost, and the compressors take a log every sample. Exactly frexpf's answer; zero, denormals,
+    // inf and NaN still go to the library.
+    float    frac;
+    int      exp;
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof bits);
+    const uint32_t e = (bits >> 23) & 0xFFu;
+    if(e != 0u && e != 0xFFu)
+    {
+        exp  = static_cast<int>(e) - 126;
+        bits = (bits & 0x007FFFFFu) | (126u << 23);
+        std::memcpy(&frac, &bits, sizeof frac);
+    }
+    else
+    {
+        frac = frexpf(fabsf(f), &exp);
+    }
     f    = 1.23149591368684f;
     f *= frac;
     f += -4.11852516267426f;
