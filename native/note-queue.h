@@ -97,6 +97,7 @@ struct ScheduledNote {
     songcore::NoteOnPayload noteOn{};   // the note-level half: pitch, velocity, pan, PSL/PBN/vibrato
     int  tempo        = 120;            // the tempo the note was SCHEDULED at — its tick→frame scale
     bool rootAudition = false;          // INSTRUMENT-screen root preview; the sequencer never sets it
+    uint32_t gen = 0;                   // stamped by the queue, never by a caller — see CancelLedger
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
@@ -122,6 +123,7 @@ struct ScheduledKill {
     int64_t targetFrame;     // Exact audio frame to trigger kill
     int trackId;             // Which track to kill (0-7)
     KillMode mode = KILL_HARD;
+    uint32_t gen = 0;        // stamped by the queue, never by a caller — see CancelLedger
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledKill& other) const {
@@ -129,19 +131,69 @@ struct ScheduledKill {
     }
 };
 
+// A live edit rolls one track's lookahead back and drops what that track had already queued from
+// the rollback frame on. The drop is LAZY: the UI only records "generation g of lane L ended at frame
+// F" here, and the audio thread skips an entry at drain time when a cancel issued after it was queued
+// reaches its frame. Nothing walks or rebuilds the heap, and the UI holds the queue mutex for a push
+// and nothing longer — so the audio thread, which drains under the same mutex, never waits on a
+// rebuild the UI thread was preempted in the middle of.
+//
+// ⚠️ The check scans every cancel since the entry's generation, not just the latest: two rollbacks
+// at different frames both bound what they threw away, and a note queued between them is kept.
+// The history is a ring of HISTORY cancels per lane; an entry that outlives more than that is treated
+// as cancelled. A kept entry drains before the next phrase boundary, so reaching that takes HISTORY
+// edits on one track inside one phrase.
+class CancelLedger {
+public:
+    static constexpr int LANES   = 10;   // tracks 0-8 (8 is the preview lane) + one for trackId -1
+    static constexpr int HISTORY = 64;   // a power of two: the slot is `gen & (HISTORY - 1)`
+
+    static int lane(int trackId) { return (trackId >= 0 && trackId < LANES - 1) ? trackId : LANES - 1; }
+
+    uint32_t current(int trackId) const { return gen_[lane(trackId)].load(std::memory_order_relaxed); }
+
+    // UI thread. `trackId < 0` ends every lane's generation, the global one included.
+    void cancel(int64_t fromFrame, int trackId) {
+        if (trackId < 0) { for (int l = 0; l < LANES; ++l) cancelLane(l, fromFrame); return; }
+        cancelLane(lane(trackId), fromFrame);
+    }
+
+    // Audio thread. True when a cancel issued after generation `gen` covers `targetFrame`.
+    bool cancelled(uint32_t gen, int trackId, int64_t targetFrame) const {
+        const int l = lane(trackId);
+        const uint32_t now = gen_[l].load(std::memory_order_acquire);
+        if (now - gen > (uint32_t)HISTORY) return true;
+        for (uint32_t g = gen; g != now; ++g)
+            if (from_[l][g & (HISTORY - 1)].load(std::memory_order_relaxed) <= targetFrame) return true;
+        return false;
+    }
+
+private:
+    void cancelLane(int l, int64_t fromFrame) {
+        const uint32_t g = gen_[l].load(std::memory_order_relaxed);
+        from_[l][g & (HISTORY - 1)].store(fromFrame, std::memory_order_relaxed);
+        gen_[l].store(g + 1, std::memory_order_release);   // publishes the slot write above
+    }
+    std::atomic<uint32_t> gen_[LANES]{};
+    std::atomic<int64_t>  from_[LANES][HISTORY]{};
+};
+
 // Thread-safe note queue
-// Audio callback pops notes, Kotlin thread pushes notes
+// Audio callback pops notes, the UI thread pushes notes
 class NoteQueue {
 private:
     // Min-heap: earliest targetFrame is always on top
     std::priority_queue<ScheduledNote, std::vector<ScheduledNote>, std::greater<ScheduledNote>> queue;
     std::mutex mutex;
+    CancelLedger cancels;
 
 public:
     // Schedule a note to be played at exact frame
     void schedule(const ScheduledNote& note) {
         std::lock_guard<std::mutex> lock(mutex);
-        queue.push(note);
+        ScheduledNote stamped = note;
+        stamped.gen = cancels.current(note.trackId);
+        queue.push(stamped);
         // LOGT, not LOGD: the audio callback takes this mutex once per block (drainUntil), so
         // an always-on logging syscall while holding it is a priority-inversion / dropout hazard.
         LOGT("📅 Scheduled note: frame=%lld, sample=%d, track=%d, freq=%.2f",
@@ -151,10 +203,12 @@ public:
     // Drain every note with targetFrame <= maxFrame into `out` (ascending frame order, since the
     // heap pops earliest-first) under a SINGLE lock. Lets the audio callback dispatch a whole
     // block's worth of notes without taking this mutex once per frame. `out` is appended to.
+    // A note a rollback cancelled is popped here and goes nowhere.
     void drainUntil(int64_t maxFrame, std::vector<ScheduledNote>& out) {
         std::lock_guard<std::mutex> lock(mutex);
         while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
-            out.push_back(queue.top());
+            const ScheduledNote& n = queue.top();
+            if (!cancels.cancelled(n.gen, n.trackId, n.targetFrame)) out.push_back(n);
             queue.pop();
         }
     }
@@ -168,21 +222,14 @@ public:
         LOGD("🗑️ Note queue cleared");
     }
 
-    // Clear only notes scheduled at or after fromFrame (keeps earlier notes intact).
+    // Drop the notes already queued at or after fromFrame (earlier ones play). O(1), no lock: the
+    // notes stay in the heap and are skipped when drained — see CancelLedger.
     //
     // ⚠️ `trackId >= 0` clears ONE track's, and the sequencer needs that: the eight song tracks each
     // roll their lookahead back to their own phrase boundary, so a live edit must drop exactly the
     // notes the track being rolled back is about to schedule again — and nothing another track has
     // already queued past that frame and will not.
-    void clearFrom(int64_t fromFrame, int trackId = -1) {
-        std::lock_guard<std::mutex> lock(mutex);
-        std::vector<ScheduledNote> keep;
-        while (!queue.empty()) {
-            ScheduledNote n = queue.top(); queue.pop();
-            if (n.targetFrame < fromFrame || (trackId >= 0 && n.trackId != trackId)) keep.push_back(n);
-        }
-        for (auto& n : keep) queue.push(n);
-    }
+    void clearFrom(int64_t fromFrame, int trackId = -1) { cancels.cancel(fromFrame, trackId); }
 };
 
 // Thread-safe kill queue (for Kill effect K00)
@@ -190,12 +237,15 @@ class KillQueue {
 private:
     std::priority_queue<ScheduledKill, std::vector<ScheduledKill>, std::greater<ScheduledKill>> queue;
     std::mutex mutex;
+    CancelLedger cancels;
 
 public:
     // Schedule a kill event at exact frame
     void schedule(const ScheduledKill& kill) {
         std::lock_guard<std::mutex> lock(mutex);
-        queue.push(kill);
+        ScheduledKill stamped = kill;
+        stamped.gen = cancels.current(kill.trackId);
+        queue.push(stamped);
         // LOGT, not LOGD — see NoteQueue::schedule.
         LOGT("🔪 Scheduled kill: frame=%lld, track=%d", (long long)kill.targetFrame, kill.trackId);
     }
@@ -204,7 +254,8 @@ public:
     void drainUntil(int64_t maxFrame, std::vector<ScheduledKill>& out) {
         std::lock_guard<std::mutex> lock(mutex);
         while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
-            out.push_back(queue.top());
+            const ScheduledKill& k = queue.top();
+            if (!cancels.cancelled(k.gen, k.trackId, k.targetFrame)) out.push_back(k);
             queue.pop();
         }
     }
@@ -218,17 +269,9 @@ public:
         LOGD("🗑️ Kill queue cleared");
     }
 
-    // Clear only kills scheduled at or after fromFrame; `trackId >= 0` clears one track's. See
+    // Drop the kills queued at or after fromFrame; `trackId >= 0` clears one track's. See
     // NoteQueue::clearFrom for why the filter exists.
-    void clearFrom(int64_t fromFrame, int trackId = -1) {
-        std::lock_guard<std::mutex> lock(mutex);
-        std::vector<ScheduledKill> keep;
-        while (!queue.empty()) {
-            ScheduledKill k = queue.top(); queue.pop();
-            if (k.targetFrame < fromFrame || (trackId >= 0 && k.trackId != trackId)) keep.push_back(k);
-        }
-        for (auto& k : keep) queue.push(k);
-    }
+    void clearFrom(int64_t fromFrame, int trackId = -1) { cancels.cancel(fromFrame, trackId); }
 };
 
 // Action discriminator for ScheduledParamUpdate. Live PBN/PVB/PVX/THO mutations are routed
@@ -316,6 +359,7 @@ struct ScheduledParamUpdate {
     // stops before here. A field inserted above instead would silently re-bind all of them.
     EqBandsHex eqBands{};    // PARAM_UPDATE_EQ_BANDS / PARAM_UPDATE_MASTER_EQ_BANDS only
     int instrId = -1;        // PARAM_UPDATE_INSTRUMENT only — which instrument's voices re-read it
+    uint32_t gen = 0;        // stamped by the queue, never by a caller — see CancelLedger
 
     bool operator>(const ScheduledParamUpdate& other) const {
         return targetFrame > other.targetFrame;
@@ -326,18 +370,22 @@ class ParamUpdateQueue {
 private:
     std::priority_queue<ScheduledParamUpdate, std::vector<ScheduledParamUpdate>, std::greater<ScheduledParamUpdate>> queue;
     std::mutex mutex;
+    CancelLedger cancels;
 
 public:
     void schedule(const ScheduledParamUpdate& update) {
         std::lock_guard<std::mutex> lock(mutex);
-        queue.push(update);
+        ScheduledParamUpdate stamped = update;
+        stamped.gen = cancels.current(update.trackId);
+        queue.push(stamped);
     }
 
     // Drain every update with targetFrame <= maxFrame into `out` (ascending order). See NoteQueue.
     void drainUntil(int64_t maxFrame, std::vector<ScheduledParamUpdate>& out) {
         std::lock_guard<std::mutex> lock(mutex);
         while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
-            out.push_back(queue.top());
+            const ScheduledParamUpdate& u = queue.top();
+            if (!cancels.cancelled(u.gen, u.trackId, u.targetFrame)) out.push_back(u);
             queue.pop();
         }
     }
@@ -350,15 +398,7 @@ public:
     // `trackId >= 0` clears one track's — see NoteQueue::clearFrom. ⚠️ The two GLOBAL actions
     // (PARAM_UPDATE_MASTER_EQ / _VOL) carry the trackId of the track that AUTHORED them, and go with
     // it: the track being rolled back is the one that will emit them again.
-    void clearFrom(int64_t fromFrame, int trackId = -1) {
-        std::lock_guard<std::mutex> lock(mutex);
-        std::vector<ScheduledParamUpdate> keep;
-        while (!queue.empty()) {
-            ScheduledParamUpdate u = queue.top(); queue.pop();
-            if (u.targetFrame < fromFrame || (trackId >= 0 && u.trackId != trackId)) keep.push_back(u);
-        }
-        for (auto& u : keep) queue.push(u);
-    }
+    void clearFrom(int64_t fromFrame, int trackId = -1) { cancels.cancel(fromFrame, trackId); }
 };
 
 // Pre-converted EQ band params (Hz/dB/Q) — populated by setInstrumentEqSlot().

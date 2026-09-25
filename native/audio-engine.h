@@ -1216,12 +1216,16 @@ private:
     std::mutex peakMutex;
     static constexpr float PEAK_DECAY = 0.95f;  // Decay rate per callback (smooth falloff)
 
-    // Real-time volume control (can be changed without rescheduling notes)
-    float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    // The mixer's targets, written by the setters (UI thread, and the VTR/VMV arms on the audio
+    // thread) and read ONCE per block where the ramps below are walked. Atomics, not a lock: the
+    // audio thread must never wait on a fader move, and a value landing a block late is inaudible.
+    // ⚠️ RELAXED everywhere — each is a single number nothing else is ordered against.
+    static_assert(std::atomic<float>::is_always_lock_free, "a fader write must not take a lock");
+    std::atomic<float> trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     // ⚠️ A SEPARATE GATE, NOT A FADER VALUE. Folding the mute into trackVolumes would make a VTR
     // ramp — which writes the fader from the audio thread — un-mute the track it lands on. The two
     // stay independent and are multiplied where the block snapshots them.
-    bool  trackMuted[8] = {false, false, false, false, false, false, false, false};
+    std::atomic<bool>  trackMuted[8] = {false, false, false, false, false, false, false, false};
     // Where the gate has actually GOT TO, chasing trackMuted at MUTE_GATE_SAMPLES per full swing.
     // ⚠️ AUDIO THREAD ONLY — it is advanced once per block inside processAudioBlock and read nowhere
     // else, which is why it needs no atomic and no lock of its own. Starts open: an engine that has
@@ -1236,18 +1240,19 @@ private:
     float masterVolRamp   = 1.0f;
     // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
-    // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.
-    int   previewLaneTrack = -1;
+    // audition it is aimed at. Written by the UI thread, read once per block.
+    std::atomic<int>   previewLaneTrack{-1};
     // The three bus gates, and where each has got to. Same ramp as the tracks', for the same reason:
     // slamming a return or the whole dry mix to zero in one sample is a full-scale step in the output.
     // ⚠️ The `*Gate` floats are AUDIO THREAD ONLY — advanced once per block and read nowhere else.
-    bool  revReturnMuted = false, delayReturnMuted = false, dryMuted = false;
+    std::atomic<bool>  revReturnMuted{false}, delayReturnMuted{false}, dryMuted{false};
     float revReturnGate = 1.0f, delayReturnGate = 1.0f, dryGate = 1.0f;
-    float masterVolume = 1.0f;
-    float reverbReturnGain  = 0.5f;
-    float delayReturnGain   = 0.5f;
-    float delayToReverbSend = 0.0f;
-    std::mutex volumeMutex;
+    std::atomic<float> masterVolume{1.0f};
+    // The two return levels and the delay→reverb feed: the EFFECTS screen writes them, the block
+    // reads them once at the send mix. Atomic for the same reason as the faders above.
+    std::atomic<float> reverbReturnGain{0.5f};
+    std::atomic<float> delayReturnGain{0.5f};
+    std::atomic<float> delayToReverbSend{0.0f};
 
     // Send buses (reverb and delay)
     ReverbModule reverbSend;

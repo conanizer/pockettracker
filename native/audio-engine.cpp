@@ -1671,10 +1671,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
 
-    // Snapshot real-time volumes ONCE per block under a single lock, then read them lock-free in the
-    // hot loops below. Previously volumeMutex was taken per-sample-per-voice (~350k locks/sec/voice) —
-    // pure overhead plus a dropout hazard if the Kotlin thread held the lock during setTrackVolume/
-    // setMasterVolume. One block of slightly-stale volume is inaudible.
+    // Snapshot the mixer's targets ONCE per block, then read the snapshot in the hot loops below.
+    // The targets are atomics the setters write from the UI thread; one block of a stale value is
+    // inaudible, and the audio thread never waits on a fader move.
 
     // ⚠️ HOISTED ABOVE THE SNAPSHOT because the mute gate reads it: an export must not FADE a muted
     // track out over its first 5.8 ms, it must start silent. Also used by the visualizer gates below.
@@ -1704,7 +1703,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float masterVolStart, masterVolSnapshot;   // …and the master fader, same pair, same reason
     int previewTrack;
     {
-        std::lock_guard<std::mutex> lock(volumeMutex);
         // Per full swing, so the ramp is the same wall-clock length whatever the block size.
         const float gateStep = (float)numFrames / (float)MUTE_GATE_SAMPLES;
         // One walk for every gate in the mixer, so a return cannot end up ramping differently from a
@@ -1726,14 +1724,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             end = ramp = target;
         };
         for (int t = 0; t < 8; t++) {
-            walk_fader(trackVolRamp[t], trackVolumes[t], trackVolStart[t], trackVolEnd[t]);
-            walk_gate(trackGate[t], trackMuted[t], gateStart[t], gateEnd[t]);
+            walk_fader(trackVolRamp[t], trackVolumes[t].load(std::memory_order_relaxed), trackVolStart[t], trackVolEnd[t]);
+            walk_gate(trackGate[t], trackMuted[t].load(std::memory_order_relaxed), gateStart[t], gateEnd[t]);
         }
-        walk_gate(revReturnGate,   revReturnMuted,   revGateStart, revGateEnd);
-        walk_gate(delayReturnGate, delayReturnMuted, dlyGateStart, dlyGateEnd);
-        walk_gate(dryGate,         dryMuted,         dryGateStart, dryGateEnd);
-        walk_fader(masterVolRamp, masterVolume, masterVolStart, masterVolSnapshot);
-        previewTrack      = previewLaneTrack;
+        walk_gate(revReturnGate,   revReturnMuted.load(std::memory_order_relaxed),   revGateStart, revGateEnd);
+        walk_gate(delayReturnGate, delayReturnMuted.load(std::memory_order_relaxed), dlyGateStart, dlyGateEnd);
+        walk_gate(dryGate,         dryMuted.load(std::memory_order_relaxed),         dryGateStart, dryGateEnd);
+        walk_fader(masterVolRamp, masterVolume.load(std::memory_order_relaxed), masterVolStart, masterVolSnapshot);
+        previewTrack      = previewLaneTrack.load(std::memory_order_relaxed);
     }
     // The preview lane borrows the fader of the channel the audition came from — the lane is a ninth
     // voice with no fader of its own, and an instrument you can only hear at full dry level tells you
@@ -2038,14 +2036,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         // separate gate multiplied at the two read sites. The fader therefore keeps
                         // moving under a muted track exactly as before, so unmuting lands on wherever
                         // the ramp has got to rather than on where it started.
-                        applyTrackVolume(upd.trackId, upd.value);
+                        trackVolumes[upd.trackId].store(upd.value, std::memory_order_relaxed);
                         trackVolStart[upd.trackId] = trackVolEnd[upd.trackId] = upd.value;
                         trackVolRamp[upd.trackId]  = upd.value;
                     }
                     break;
                 }
                 case PARAM_UPDATE_MASTER_VOL: {           // VMV — the master fader (global)
-                    applyMasterVolume(upd.value);
+                    masterVolume.store(upd.value, std::memory_order_relaxed);
                     masterVolStart = masterVolSnapshot = masterVolRamp = upd.value;
                     break;
                 }
@@ -3083,17 +3081,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     }
 
     // Per-track waveform capture for OCTA visualizer — only when OCTA is being displayed.
+    // try_lock: the UI holds this mutex while it copies or decays the scopes, and a block that
+    // finds it held skips the capture rather than wait. A scope missing one block is invisible.
     if (octaWanted) {
-        std::lock_guard<std::mutex> lock(waveformMutex);
-        for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) trackHasVoice[t] = trackWasActive[t];
-        for (int i = 0; i < numFrames; i++) {
-            for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
-                // × masterVolSnapshot because the accumulators are filled pre-master: OCTA shows what
-                // leaves the master fader, so a master fade takes the scopes down with it.
-                trackWaveformBuffer[t][trackWaveformIndex] =
-                    (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f * masterVolSnapshot;
+        std::unique_lock<std::mutex> lock(waveformMutex, std::try_to_lock);
+        if (lock.owns_lock()) {
+            for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) trackHasVoice[t] = trackWasActive[t];
+            for (int i = 0; i < numFrames; i++) {
+                for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
+                    // × masterVolSnapshot because the accumulators are filled pre-master: OCTA shows
+                    // what leaves the master fader, so a master fade takes the scopes down with it.
+                    trackWaveformBuffer[t][trackWaveformIndex] =
+                        (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f * masterVolSnapshot;
+                }
+                trackWaveformIndex = (trackWaveformIndex + 1) % WAVEFORM_SIZE;
             }
-            trackWaveformIndex = (trackWaveformIndex + 1) % WAVEFORM_SIZE;
         }
     }
 
@@ -3117,10 +3119,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     {
         // revWet*/dlyWet* are engine members; process() fully overwrites them.
         delaySend.process(dlySendBufL, dlySendBufR, dlyWetL, dlyWetR, numFrames);
-        if (delayToReverbSend > 0.0001f) {
+        const float dlyToRev = delayToReverbSend.load(std::memory_order_relaxed);
+        if (dlyToRev > 0.0001f) {
             for (int i = 0; i < numFrames; i++) {
-                revSendBufL[i] += dlyWetL[i] * delayToReverbSend;
-                revSendBufR[i] += dlyWetR[i] * delayToReverbSend;
+                revSendBufL[i] += dlyWetL[i] * dlyToRev;
+                revSendBufR[i] += dlyWetR[i] * dlyToRev;
             }
         }
         reverbSend.process(revSendBufL, revSendBufR, revWetL, revWetR, numFrames);
@@ -3137,6 +3140,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             }
         }
+        const float rvReturn = reverbReturnGain.load(std::memory_order_relaxed);
+        const float dlReturn = delayReturnGain.load(std::memory_order_relaxed);
         for (int i = 0; i < numFrames; i++) {
             // ⚠️ The return's own mute rides HERE, below the module, so a muted reverb keeps building
             // its tail while it is silent — unmuting drops you back into the tail the song has been
@@ -3144,10 +3149,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             const float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
             const float rvGate = revGateStart + (revGateEnd - revGateStart) * lerp_t;
             const float dlGate = dlyGateStart + (dlyGateEnd - dlyGateStart) * lerp_t;
-            float rv  = revWetL[i] * reverbReturnGain * rvGate;
-            float rvR = revWetR[i] * reverbReturnGain * rvGate;
-            float dl  = dlyWetL[i] * delayReturnGain * dlGate;
-            float dlR = dlyWetR[i] * delayReturnGain * dlGate;
+            float rv  = revWetL[i] * rvReturn * rvGate;
+            float rvR = revWetR[i] * rvReturn * rvGate;
+            float dl  = dlyWetL[i] * dlReturn * dlGate;
+            float dlR = dlyWetR[i] * dlReturn * dlGate;
             if (stemsMode == 0) {
                 output[i * channelCount]     += rv + dl;
                 output[i * channelCount + 1] += rvR + dlR;
@@ -3256,14 +3261,20 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         processed += chunk;
     }
 
+    // The master scope and the meters below take their mutex with try_lock, as the spectrum does:
+    // the UI holds each one while it copies or decays, and the audio thread never waits for that. A
+    // block that finds the lock held skips its capture — one block missing from a scope or a meter
+    // is invisible.
     {
-        std::lock_guard<std::mutex> lock(waveformMutex);
-        for (int i = 0; i < numFrames; i++) {
-            waveformDownsampleCounter++;
-            if (waveformDownsampleCounter >= WAVEFORM_DOWNSAMPLE) {
-                waveformBuffer[waveformIndex] = output[i * channelCount];
-                waveformIndex = (waveformIndex + 1) % WAVEFORM_SIZE;
-                waveformDownsampleCounter = 0;
+        std::unique_lock<std::mutex> lock(waveformMutex, std::try_to_lock);
+        if (lock.owns_lock()) {
+            for (int i = 0; i < numFrames; i++) {
+                waveformDownsampleCounter++;
+                if (waveformDownsampleCounter >= WAVEFORM_DOWNSAMPLE) {
+                    waveformBuffer[waveformIndex] = output[i * channelCount];
+                    waveformIndex = (waveformIndex + 1) % WAVEFORM_SIZE;
+                    waveformDownsampleCounter = 0;
+                }
             }
         }
     }
@@ -3284,36 +3295,37 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
 
     // Update peak levels for mixer meters (live-only — not needed during WAV export)
     {
-        std::lock_guard<std::mutex> lock(peakMutex);
+        std::unique_lock<std::mutex> lock(peakMutex, std::try_to_lock);
+        if (lock.owns_lock()) {
+            for (int t = 0; t < 8; t++) {
+                trackPeaksL[t] *= PEAK_DECAY;
+                trackPeaksR[t] *= PEAK_DECAY;
+            }
+            masterPeakL *= PEAK_DECAY;
+            masterPeakR *= PEAK_DECAY;
 
-        for (int t = 0; t < 8; t++) {
-            trackPeaksL[t] *= PEAK_DECAY;
-            trackPeaksR[t] *= PEAK_DECAY;
+            for (int t = 0; t < 8; t++) {
+                trackPeaksL[t] = fmaxf(trackPeaksL[t], framePeaksPerTrackL[t]);
+                trackPeaksR[t] = fmaxf(trackPeaksR[t], framePeaksPerTrackR[t]);
+            }
+
+            float maxL = 0.0f, maxR = 0.0f;
+            for (int i = 0; i < numFrames; i++) {
+                float absL = fabsf(output[i * channelCount]);
+                float absR = fabsf(output[i * channelCount + 1]);
+                if (absL > maxL) maxL = absL;
+                if (absR > maxR) maxR = absR;
+            }
+            masterPeakL = fmaxf(masterPeakL, maxL);
+            masterPeakR = fmaxf(masterPeakR, maxR);
+
+            sendPeakRevL *= PEAK_DECAY; sendPeakRevR *= PEAK_DECAY;
+            sendPeakDelL *= PEAK_DECAY; sendPeakDelR *= PEAK_DECAY;
+            sendPeakRevL = fmaxf(sendPeakRevL, frameSendPeakRevL);
+            sendPeakRevR = fmaxf(sendPeakRevR, frameSendPeakRevR);
+            sendPeakDelL = fmaxf(sendPeakDelL, frameSendPeakDelL);
+            sendPeakDelR = fmaxf(sendPeakDelR, frameSendPeakDelR);
         }
-        masterPeakL *= PEAK_DECAY;
-        masterPeakR *= PEAK_DECAY;
-
-        for (int t = 0; t < 8; t++) {
-            trackPeaksL[t] = fmaxf(trackPeaksL[t], framePeaksPerTrackL[t]);
-            trackPeaksR[t] = fmaxf(trackPeaksR[t], framePeaksPerTrackR[t]);
-        }
-
-        float maxL = 0.0f, maxR = 0.0f;
-        for (int i = 0; i < numFrames; i++) {
-            float absL = fabsf(output[i * channelCount]);
-            float absR = fabsf(output[i * channelCount + 1]);
-            if (absL > maxL) maxL = absL;
-            if (absR > maxR) maxR = absR;
-        }
-        masterPeakL = fmaxf(masterPeakL, maxL);
-        masterPeakR = fmaxf(masterPeakR, maxR);
-
-        sendPeakRevL *= PEAK_DECAY; sendPeakRevR *= PEAK_DECAY;
-        sendPeakDelL *= PEAK_DECAY; sendPeakDelR *= PEAK_DECAY;
-        sendPeakRevL = fmaxf(sendPeakRevL, frameSendPeakRevL);
-        sendPeakRevR = fmaxf(sendPeakRevR, frameSendPeakRevR);
-        sendPeakDelL = fmaxf(sendPeakDelL, frameSendPeakDelL);
-        sendPeakDelR = fmaxf(sendPeakDelR, frameSendPeakDelR);
     }
 }
 
@@ -4343,13 +4355,11 @@ void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
 // so nothing has to be poked into a voice or a TSF channel from here.
 void AudioEngine::applyTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    trackVolumes[trackId] = volume;
+    trackVolumes[trackId].store(volume, std::memory_order_relaxed);
 }
 
 void AudioEngine::applyMasterVolume(float volume) {
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    masterVolume = volume;
+    masterVolume.store(volume, std::memory_order_relaxed);
 }
 
 void AudioEngine::setTrackVolume(int trackId, float volume) {
@@ -4360,7 +4370,7 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
 
 void AudioEngine::setTrackMuted(int trackId, bool muted) {
     if (trackId < 0 || trackId >= 8) return;
-    { std::lock_guard<std::mutex> lock(volumeMutex); trackMuted[trackId] = muted; }
+    trackMuted[trackId].store(muted, std::memory_order_relaxed);
     // Nothing else is needed to silence what is ringing: the next block picks the new target up and
     // both mix paths walk their gate to it over MUTE_GATE_SAMPLES, so a mute lands in ~5.8 ms rather
     // than in one sample. Voices keep running underneath — a mute is a gate, never a stop.
@@ -4368,10 +4378,9 @@ void AudioEngine::setTrackMuted(int trackId, bool muted) {
 }
 
 void AudioEngine::setBusMutes(bool revMuted, bool dlyMuted, bool dryBusMuted) {
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    revReturnMuted   = revMuted;
-    delayReturnMuted = dlyMuted;
-    dryMuted         = dryBusMuted;
+    revReturnMuted.store(revMuted, std::memory_order_relaxed);
+    delayReturnMuted.store(dlyMuted, std::memory_order_relaxed);
+    dryMuted.store(dryBusMuted, std::memory_order_relaxed);
 }
 
 void AudioEngine::setMasterVolume(float volume) {
@@ -4380,8 +4389,7 @@ void AudioEngine::setMasterVolume(float volume) {
 }
 
 void AudioEngine::setPreviewTrack(int trackId) {
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    previewLaneTrack = (trackId >= 0 && trackId < 8) ? trackId : -1;
+    previewLaneTrack.store((trackId >= 0 && trackId < 8) ? trackId : -1, std::memory_order_relaxed);
 }
 
 // The sample-accurate faces of the same two faders — what a VTR / VMV effect schedules. VMV is global
