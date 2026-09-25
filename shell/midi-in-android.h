@@ -28,6 +28,7 @@ class AndroidMidiIn : public MidiInBase {
 
     /** The frame loop's call: ask the Kotlin side for whatever arrived since last frame. */
     void pump() override;
+    bool polled() const override { return true; }
 
   private:
     struct Hooks {

@@ -10,7 +10,10 @@
 //
 // ⚠️ The three differ in ONE thing above the platform line — how a byte gets here. winmm and ALSA PUSH
 // (a system callback, a reader thread of ours); Android is POLLED through `pump()` below. That is one
-// virtual with an empty default, not a second mechanism — see the note on it.
+// virtual with an empty default, not a second mechanism — see the note on it. ⚠️ Since the drain moved
+// to the audio thread the difference has a cost the frame loop has to know about: a pushed byte reaches
+// the engine's next block on its own, a polled one waits for the loop's next tick — so `polled()` is
+// what keeps the loop's fast rate for the one backend that still needs it.
 //
 // ⚠️ **IT ALSO OWNS THE SINK, AND THAT IS NOT TIDINESS.** A backend's bytes arrive on a thread nobody
 // chose, and `deliver()` below is the ONE door they come through — so it is the one place that can
@@ -66,20 +69,20 @@ class MidiInBase : public songcore::IMidiIn {
     int open_index() const { return openIndex_; }
 
     /**
-     * Called once a frame, immediately before the drain. A no-op for a backend that PUSHES.
+     * Called once a tick by the frame loop. A no-op for a backend that PUSHES.
      *
      * ⚠️ **IT EXISTS FOR ANDROID (E5) AND IT IS NOT A SECOND MECHANISM.** winmm calls us on its own
      * callback thread and ALSA gets a reader thread of ours; `MidiManager` delivers on a binder thread
      * to the Kotlin side, and this backend fetches from there rather than having Kotlin call down —
-     * midi-in-android.cpp argues why, and the short version is that it costs nothing, because the bytes
-     * a push would deposit are not looked at until `SongcoreHost::poll()` drains them on this same
-     * frame anyway.
-     *
-     * ⚠️ **THE CALL SITE MUST STAY IMMEDIATELY ABOVE `host.poll()`** (app.cpp). Below it, every pumped
-     * byte waits a whole extra frame; that would be invisible on the two platforms whose backends
-     * ignore this call, which is precisely what makes it worth writing down here.
+     * midi-in-android.cpp says why. ⚠️ It is no longer free: the drain runs on the audio thread, so a
+     * pushed byte is heard in the engine's next block while a pumped one first waits for this call.
+     * On Android the loop's tick is still in the path; `polled()` below is how the loop knows.
      */
     virtual void pump() {}
+
+    /** True for a backend whose bytes only arrive through `pump()` — the frame loop must keep ticking
+     *  fast while such a port is open. False for a backend that pushes from its own thread. */
+    virtual bool polled() const { return false; }
 
     // ⚠️ Both of these are ATOMIC because they race with the callback thread by construction:
     // `set_sink(nullptr)` is what a shutting-down app uses to guarantee no further delivery, and it is

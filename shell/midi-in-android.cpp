@@ -28,11 +28,15 @@
 // This does the opposite — `pump()` on the frame loop asks Kotlin for whatever has arrived — and the
 // reasons are, in order:
 //
-//   1. ⭐ **IT COSTS NOTHING IN LATENCY, which is the argument that decides it.** The bytes a push would
-//      deposit in `MidiInQueue` are not looked at until `SongcoreHost::poll()` drains them, and that is
-//      once a frame. `pump()` is called from the same loop, immediately before that drain — so a byte
-//      that arrives at any point in a frame is parsed in the same frame either way. A push would move
-//      the same byte to a different waiting room.
+//   1. ⚠️ **IT USED TO COST NOTHING IN LATENCY, AND IT NOW COSTS THE LOOP's TICK.** When this was
+//      written the bytes were drained by `SongcoreHost::poll()` on this same loop, so pumping just
+//      before it was free. The drain has since moved to the AUDIO thread (native/songcore/midi_in.h):
+//      a pushed byte reaches the engine's next block on its own, a pumped one first waits for this
+//      loop's next tick (`POLL_MS`, 4 ms, kept fast while this port is open — `polled()`). Removing
+//      that tick means a Kotlin `external fun` calling down from the binder thread into
+//      `MidiInBase::deliver` (points 2 and 3 are what it costs), or pumping from the B3 sender
+//      thread, which is already an SDL thread attached to the JVM at a 1 ms cadence. Neither has been
+//      tried on a device; the frame loop stays the pump until one is.
 //   2. **It keeps the JNI direction single.** Every native↔Kotlin call in this app is an UP-call
 //      resolved by name, with one `-keep` pattern in proguard-rules.pro protecting all of them and one
 //      "hooks resolved" log line saying whether R8 broke them. A `native` method declared in Kotlin is a

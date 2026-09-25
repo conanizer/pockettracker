@@ -180,8 +180,9 @@ struct DelayModule {
         snapNextTime = true;
         setDelaySamples(defaultSamples);
         // ⚠️ RE-ARMED AFTER THE DEFAULT IS PLACED, because `resetEffectState` leaves the module at
-        // FACTORY defaults and the caller re-pushes the project's own values immediately after
-        // (engine_setup.h). That re-push is still part of the load, so it must land rather than glide.
+        // FACTORY defaults and the project's own time is pushed straight after (a render's push, or
+        // the engine's own replay on a device reopen). That push is still part of the load, so it must
+        // land rather than glide.
         snapNextTime = true;
         toneStateL = toneStateR = 0.0f;
         oscHpL = oscHpR = oscLpL = oscLpR = 0.0f;

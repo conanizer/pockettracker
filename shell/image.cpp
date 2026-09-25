@@ -15,7 +15,14 @@
 #define STB_IMAGE_IMPLEMENTATION
 // Resolves via the PUBLIC native/ include root the engine exports (inherited through pt-ui). No
 // include line is restated here — the same reasoning as audio-decoders.cpp reaching stb_vorbis.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"   // vendored, not ours to fix
+#endif
 #include "vendor/stb_image/stb_image.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace ptshell {
 namespace {

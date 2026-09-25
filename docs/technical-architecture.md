@@ -486,10 +486,21 @@ cannot create MIDI data — no MIDI screen, no EXTERNAL instrument type, no MIDI
 it displays existing data faithfully, because all three are persisted in a `.ptp` and a build that
 drew them as something else would misrepresent the file on disk.
 
+**MIDI in is drained on the audio thread.** A port's bytes land in a lock-free ring; the engine
+empties it at the top of every live block, parses, routes and puts each record into its own queues
+stamped at that block's first frame, so a key sounds in the block after its bytes arrive. The router
+never reads the project: it reads a `MidiRoute`, a flat snapshot of the routing facts the host builds
+on the UI thread and publishes through a sequence lock whenever they change. Everything that needs
+the project — the controller mappings, MIDI thru, the counters a screen shows — runs on the UI thread
+from a second ring the drain fills, one poll behind the sound. The engine resolves a live note from
+the same copies it resolves a sequenced one from, which is why every table and instrument setting is
+pushed when it changes rather than a note ahead of when it is needed.
+
 A project also carries the **controller mappings** — which knob moves which parameter — and they are
-the one MIDI surface a release build obeys without being able to show it: the apply path sits in the
-host's MIDI drain, not behind the screen that authors it. The channel those knobs arrive on is in
-`settings.json` instead, because it describes the cable on this desk rather than the song.
+the one MIDI surface a release build obeys without being able to show it: the drain withholds a
+claimed controller from the tracks and the host applies it to the song, neither behind the screen
+that authors it. The channel those knobs arrive on is in `settings.json` instead, because it
+describes the cable on this desk rather than the song.
 
 The loop-window pair — the `LPO` effect and the `osc` loop mode — is held back the same way
 (`PlatformCaps::loopWindow`), on the same authoring-only terms. Hiding an effect works only on a

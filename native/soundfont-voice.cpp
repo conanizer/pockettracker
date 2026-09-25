@@ -184,11 +184,12 @@ void* sf_guarded_realloc(void* ptr, size_t size) {
     // be the allocation that exhausts the machine.
     if (size > held && sf_alloc_would_exhaust(size, held)) return nullptr;
 
+    // The book-keeping moves BEFORE the realloc: after it `ptr` may already be freed, and a freed
+    // pointer is not something to look up, even as a key. A refused realloc puts the entry back.
+    sf_forget_big_block(ptr);
     void* out = std::realloc(ptr, size);
-    if (out) {
-        sf_forget_big_block(ptr);
-        sf_remember_big_block(out, size);
-    }
+    if (out) sf_remember_big_block(out, size);
+    else     sf_remember_big_block(ptr, held);
     return out;
 }
 
@@ -225,7 +226,14 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 #define TSF_PROGRESS(i, n)     sf_load_progress((i), (n))
 
 #define TSF_IMPLEMENTATION
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"   // vendored, not ours to fix
+#endif
 #include "vendor/tsf/tsf.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #include "soundfont-voice.h"
 #include "mods/modules/pitch-slide-module.h"  // advancePitchSlide (shared with sampler path)
@@ -276,6 +284,7 @@ static float longest_release(tsf* h, int channel) {
 // to a local once, validate the local, and index with the local only.
 
 void SoundfontVoice::hardStop() {
+    pendingTsfOffAt = -1;   // every voice on the channel is killed below
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
@@ -319,7 +328,9 @@ void SoundfontVoice::hardStop() {
     hasArmedNote = false;
 }
 
-void SoundfontVoice::noteOff() {
+void SoundfontVoice::noteOff() { noteOffAt(0); }
+
+void SoundfontVoice::noteOffAt(int atFrame) {
     isReleasingOnly = true;
     // Same reason as hardStop's: an arm this block that a note-off in the SAME block supersedes (a
     // sampler note taking the track, a KIL) must not sound after the thing that ended it.
@@ -381,8 +392,12 @@ void SoundfontVoice::noteOff() {
                 const float rel = longest_release(h, _trackId);
                 if (rel < SF_RELEASE_RAMP_MAX_SECS) {
                     const int want = static_cast<int>(rel * h->outSampleRate);
-                    startStopFade(want > KILL_FADE_SAMPLES ? want : KILL_FADE_SAMPLES);
+                    startStopFade(want > KILL_FADE_SAMPLES ? want : KILL_FADE_SAMPLES, atFrame);
                     ownRamp = true;
+                } else if (atFrame > 0) {
+                    // Sent by the render pass at that frame, between the two halves of the render.
+                    pendingTsfOffAt   = atFrame;
+                    pendingTsfOffNote = activeNote;
                 } else {
                     tsf_channel_note_off(h, _trackId, activeNote);
                 }
@@ -460,6 +475,7 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
 
 void SoundfontVoice::fireArmedNote(tsf* h) {
     hasArmedNote = false;
+    pendingTsfOffAt = -1;   // the note it was for is killed below
     if (!h) return;
     const ArmedNote a = armed;
 

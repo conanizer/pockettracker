@@ -167,8 +167,6 @@ template <typename Engine>
 void preview_instrument_dry(Engine& engine, const Instrument& ins, int slotId, float sampleRateRatio) {
     if (ins.instrumentType == InstrumentType::SOUNDFONT) return;   // no waveform to edit
 
-    constexpr float C4_HZ = 261.63f;
-
     // ROOT × detune is the pitch it plays at; C-4 × the rate ratio is what "unity" means for this file.
     // Their quotient is the resampling rate, so a 22 kHz sample plays at its own pitch, and dialling
     // ROOT up transposes the audition — which is what makes ROOT audible at all.

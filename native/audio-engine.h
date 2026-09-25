@@ -269,6 +269,29 @@ public:
     std::function<void()> onResumeRequested;
     void requestResume() { if (onResumeRequested) onResumeRequested(); }
 
+    /**
+     * Live input — a MIDI keyboard — drained on the AUDIO thread.
+     *
+     * The source is asked once per live block, at the top of processAudioBlock, before the queues
+     * drain: what it schedules at the block's first frame is picked up by that same drain and sounds
+     * in the block it arrived in. While an export owns the engine it is asked to discard instead,
+     * so bytes that arrive during a render are not saved up to fire as a burst afterwards.
+     *
+     * ⚠️ Both calls run on the audio thread and must obey its rules (the host's implementation is
+     * songcore's MidiInPipeline, which was written for it). ⚠️ Set before the stream opens and
+     * cleared after it closes: the pointer is read by a callback that a close waits for, and by
+     * nothing else.
+     */
+    struct LiveInputSource {
+        virtual ~LiveInputSource() = default;
+        virtual void drainLiveInput(int64_t blockStartFrame) = 0;
+        virtual void discardLiveInput() = 0;
+    };
+    void setLiveInput(LiveInputSource* source) { liveInput.store(source, std::memory_order_release); }
+
+    /** The tempo the engine is running at (setTempo). A live note is scheduled at this one. */
+    int tempo() const { return currentTempo.load(std::memory_order_relaxed); }
+
     // The ninth voice: every audition — sampler, sample, note, SF instrument — plays HERE rather than
     // on one of the 8 song tracks, which is what lets you hear a note you are dialling in without
     // stealing a voice from the song under it. Kotlin names the same lane PREVIEW_TRACK_ID.
@@ -630,7 +653,7 @@ public:
     // ===================================
 
     // Set reverb/delay send levels for an instrument (00-FF each, converted to float).
-    void setInstrumentSendLevels(int instrId, int reverbSend, int delaySend);
+    void setInstrumentSendLevels(int instrId, int reverbHex, int delayHex);
 
     // ===================================
     // REVERB / DELAY SEND METHODS
@@ -762,10 +785,10 @@ public:
                                                float sampleRate);
 
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
-    void triggerNoteOff(int trackId);
+    void triggerNoteOff(int trackId, int atFrame = 0);   // atFrame: frame inside the current block (audio thread only)
 
     // The same, for a live KEY that was let go of — a one-shot ignores it (MIDI plan §4.1).
-    void triggerKeyRelease(int trackId);
+    void triggerKeyRelease(int trackId, int atFrame = 0);   // atFrame: frame inside the current block (audio thread only)
 
     // Clear all modulation slots for an instrument
     void clearInstrumentModulation(int sampleId);
@@ -793,10 +816,10 @@ public:
     // ReverbSc's LCG kept walking, the same song rendered differently every time. A render must be a
     // function of the project, not of playback history.
     //
-    // ⚠️ This is NOT a state-only reset: the module reset()s also re-apply their factory DEFAULTS
-    // (reverb feedback 0x60, delay 500 ms, master EQ bypassed). The caller MUST re-push the project's
-    // FX afterwards or it silently renders with default reverb/delay — songcore::prepare_render does
-    // exactly that, via engine_setup.h. Live playback never calls this.
+    // ⚠️ This is NOT a state-only reset: the module reset()s also put their factory DEFAULTS back
+    // (reverb decay 0x60, delay 500 ms, master EQ bypassed). A render pushes the whole project right
+    // after it (songcore::prepare_render); a device reopen at another rate goes through
+    // setDeviceSampleRate, which replays `busSettings` itself. Never from the audio thread.
     void resetEffectState();
 
     // Get current frame counter
@@ -895,6 +918,25 @@ private:
     // The rate the send and master buses were last built at. Only setDeviceSampleRate touches it, and
     // only to notice that a re-init is owed — the coefficients are the buses' own, not readable back.
     int effectsSampleRate = 44100;
+
+    // The last value every bus setter received. setDeviceSampleRate replays it after rebuilding the
+    // buses, so a device that comes back at another rate keeps the song's reverb, delay and master EQ.
+    // ⚠️ Every bus setter records here BEFORE touching its module; one that does not is the reopen
+    // bug again. UI thread only — a table row's EQM reaches the master EQ without passing through.
+    struct BusSettings {
+        int   reverbDecay = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbSize = 0x60;
+        int   reverbPre = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
+        int   reverbAlgo = 0, reverbInputEq = -1;
+        int   delayTime = 2;   bool delaySync = true;   float delayBpm = 120.0f;   // 1/4 at 120 = 500 ms
+        int   delayFeedback = 0x60, delayWet = 0x80;
+        bool  delayPong = false;   int delayTone = 0xFF, delayWobble = 0x00;
+        int   delayInputEq = -1, delayReverbSend = 0;
+        int   masterEqSlot = -1;
+        int   ottDepth = 0, masterFx = 0, dustDepth = 0, limiterPreGain = 0;
+        bool  pushed = false;   // nothing is replayed until a setter has run
+    };
+    BusSettings busSettings;
+    void replayBusSettings();
 
     Voice voices[MAX_VOICES];
 
@@ -1131,6 +1173,7 @@ private:
     uint32_t noteSeedEntropy = 0x9E3779B9u;
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
+    std::atomic<LiveInputSource*> liveInput{nullptr};   // see setLiveInput
 
     // ── The metronome, across the thread boundary ────────────────────────────────────────────────
     // Written by the UI/host thread, read once a block by the audio thread. Relaxed atomics for the
@@ -1197,12 +1240,16 @@ private:
     std::mutex peakMutex;
     static constexpr float PEAK_DECAY = 0.95f;  // Decay rate per callback (smooth falloff)
 
-    // Real-time volume control (can be changed without rescheduling notes)
-    float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    // The mixer's targets, written by the setters (UI thread, and the VTR/VMV arms on the audio
+    // thread) and read ONCE per block where the ramps below are walked. Atomics, not a lock: the
+    // audio thread must never wait on a fader move, and a value landing a block late is inaudible.
+    // ⚠️ RELAXED everywhere — each is a single number nothing else is ordered against.
+    static_assert(std::atomic<float>::is_always_lock_free, "a fader write must not take a lock");
+    std::atomic<float> trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     // ⚠️ A SEPARATE GATE, NOT A FADER VALUE. Folding the mute into trackVolumes would make a VTR
     // ramp — which writes the fader from the audio thread — un-mute the track it lands on. The two
     // stay independent and are multiplied where the block snapshots them.
-    bool  trackMuted[8] = {false, false, false, false, false, false, false, false};
+    std::atomic<bool>  trackMuted[8] = {false, false, false, false, false, false, false, false};
     // Where the gate has actually GOT TO, chasing trackMuted at MUTE_GATE_SAMPLES per full swing.
     // ⚠️ AUDIO THREAD ONLY — it is advanced once per block inside processAudioBlock and read nowhere
     // else, which is why it needs no atomic and no lock of its own. Starts open: an engine that has
@@ -1217,18 +1264,19 @@ private:
     float masterVolRamp   = 1.0f;
     // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
-    // audition it is aimed at. Written by the UI thread, read once per block under volumeMutex.
-    int   previewLaneTrack = -1;
+    // audition it is aimed at. Written by the UI thread, read once per block.
+    std::atomic<int>   previewLaneTrack{-1};
     // The three bus gates, and where each has got to. Same ramp as the tracks', for the same reason:
     // slamming a return or the whole dry mix to zero in one sample is a full-scale step in the output.
     // ⚠️ The `*Gate` floats are AUDIO THREAD ONLY — advanced once per block and read nowhere else.
-    bool  revReturnMuted = false, delayReturnMuted = false, dryMuted = false;
+    std::atomic<bool>  revReturnMuted{false}, delayReturnMuted{false}, dryMuted{false};
     float revReturnGate = 1.0f, delayReturnGate = 1.0f, dryGate = 1.0f;
-    float masterVolume = 1.0f;
-    float reverbReturnGain  = 0.5f;
-    float delayReturnGain   = 0.5f;
-    float delayToReverbSend = 0.0f;
-    std::mutex volumeMutex;
+    std::atomic<float> masterVolume{1.0f};
+    // The two return levels and the delay→reverb feed: the EFFECTS screen writes them, the block
+    // reads them once at the send mix. Atomic for the same reason as the faders above.
+    std::atomic<float> reverbReturnGain{0.5f};
+    std::atomic<float> delayReturnGain{0.5f};
+    std::atomic<float> delayToReverbSend{0.0f};
 
     // Send buses (reverb and delay)
     ReverbModule reverbSend;

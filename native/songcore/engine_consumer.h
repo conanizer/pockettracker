@@ -91,16 +91,16 @@ constexpr bool table_arms_match_the_engine() {
             c != ::FX_DRV && c != ::FX_CRU && c != ::FX_FIN &&
             c != ::FX_LPO && c != ::FX_TIM) return false;
     }
-    return table_automation::arm_for(::FX_HOP)    && table_automation::arm_for(::FX_TIC)  &&
-           table_automation::arm_for(::FX_KILL)   && table_automation::arm_for(::FX_OFFSET) &&
-           table_automation::arm_for(::FX_THO)    && table_automation::arm_for(::FX_VOLUME) &&
-           table_automation::arm_for(::FX_EQN)    && table_automation::arm_for(::FX_EQM)  &&
-           table_automation::arm_for(::FX_CUT)    && table_automation::arm_for(::FX_RES)  &&
-           table_automation::arm_for(::FX_LPF)    && table_automation::arm_for(::FX_HPF)  &&
-           table_automation::arm_for(::FX_BPF)    &&
-           table_automation::arm_for(::FX_DRV)    && table_automation::arm_for(::FX_CRU)  &&
-           table_automation::arm_for(::FX_FIN)    && table_automation::arm_for(::FX_LPO) &&
-           table_automation::arm_for(::FX_TIM);
+    return table_automation::has_arm(::FX_HOP)    && table_automation::has_arm(::FX_TIC)  &&
+           table_automation::has_arm(::FX_KILL)   && table_automation::has_arm(::FX_OFFSET) &&
+           table_automation::has_arm(::FX_THO)    && table_automation::has_arm(::FX_VOLUME) &&
+           table_automation::has_arm(::FX_EQN)    && table_automation::has_arm(::FX_EQM)  &&
+           table_automation::has_arm(::FX_CUT)    && table_automation::has_arm(::FX_RES)  &&
+           table_automation::has_arm(::FX_LPF)    && table_automation::has_arm(::FX_HPF)  &&
+           table_automation::has_arm(::FX_BPF)    &&
+           table_automation::has_arm(::FX_DRV)    && table_automation::has_arm(::FX_CRU)  &&
+           table_automation::has_arm(::FX_FIN)    && table_automation::has_arm(::FX_LPO) &&
+           table_automation::has_arm(::FX_TIM);
 }
 static_assert(table_arms_match_the_engine(),
               "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
@@ -148,6 +148,86 @@ class EngineConsumer : public IMidiConsumer {
     int  track_mask() const { return trackMask_; }
     void clear_track_mask() { trackMask_ = 0; }
 
+    /**
+     * Every table the engine does not hold yet, pushed now. The note path pushes lazily, one table
+     * before the note that needs it; a live key is scheduled by the audio thread with no push in
+     * front of it, so the host calls this from its poll instead. Both go through the same cache, so
+     * neither pushes what the other already has.
+     */
+    void push_tables(const Project& project) {
+        if (!engine_) return;
+        const int count = static_cast<int>(project.tables.size());
+        for (int id = 0; id < count && id < POOL_TABLES; ++id) {
+            if (tableLoaded_[id]) continue;
+            push_table(*engine_, project, id);
+            tableLoaded_[id] = true;
+        }
+    }
+
+    /** A live key's record, already played by the engine: only LEARN from it here — which instrument
+     *  the track is playing — so the next track-scoped event on the bus resolves the way the key did. */
+    void observe_live(const Event& ev) { tracks_.observe(ev); }
+
+    /**
+     * One resolved controller onto the engine's live-parameter queues. ⚠️ THE ONE TABLE for a CC,
+     * shared by the bus consumer above and by a live key's drain (host.h), so a controller means the
+     * same thing from a phrase and from a cable.
+     */
+    template <typename Engine>
+    static void apply_cc(Engine& engine, int64_t frame, uint8_t track, int param, float v) {
+        switch (param) {
+            case CC_VOLUME:      engine.scheduleTrackPhraseVol(frame, track, v);  break;
+            case CC_PAN:         engine.scheduleVoicePan(frame, track, v);        break;
+            case CC_REVERB_SEND: engine.scheduleVoiceReverbSend(frame, track, v); break;
+            case CC_DELAY_SEND:  engine.scheduleVoiceDelaySend(frame, track, v);  break;
+            // CUT / RES. Both write the SOUNDING voice's own filter and are gone with it, so there
+            // is no restore on stop() — the instrument's values come back with the next note-on. An
+            // instrument with FILTER TYPE = OFF runs no filter and swallows them.
+            case CC_FILTER_CUT:  engine.scheduleVoiceFilterCut(frame, track, v);  break;
+            case CC_FILTER_RES:  engine.scheduleVoiceFilterRes(frame, track, v);  break;
+            // LPF / HPF / BPF — the id IS the filter type and `v` is the cutoff, so one record
+            // switches the filter on and places it in the same frame. Engine-only ids (event.h);
+            // `midi_out.h` drops them, there being no MIDI controller for a type.
+            case CC_FILTER_LP:
+            case CC_FILTER_HP:
+            case CC_FILTER_BP:
+                engine.scheduleVoiceFilterMode(frame, track, cc_filter_mode(param), v);
+                break;
+            // DRV / CRU — engine-only ids (event.h) for parameters MIDI has no controller for. Each
+            // writes the per-block recompute's own input, so the change is audible in the block it
+            // lands in and gone at the next note-on.
+            case CC_DRIVE:       engine.scheduleVoiceDrive(frame, track, v);     break;
+            case CC_CRUSH:       engine.scheduleVoiceCrush(frame, track, v);     break;
+            // FIN, the same shape — and engine-only for a different reason: MIDI's fine tune is an
+            // RPN that retunes a whole channel, not this note (event.h).
+            case CC_FINE_TUNE:   engine.scheduleVoiceFineTune(frame, track, v);  break;
+            // LPO. ⚠️ The one id here whose records ACCUMULATE rather than replace — the engine adds
+            // each one to the voice's running count (event.h).
+            case CC_LOOP_SLIDE:  engine.scheduleVoiceLoopSlide(frame, track, v);  break;
+            // The mixer faders (VTR / VMV). Engine-only ids — `midi_out.h` drops both, which is the
+            // one place the two consumers are meant to disagree (event.h).
+            //
+            // ⚠️ VTR IS SUBJECT TO THE EXTERNAL GATE AND VMV IS NOT, and that asymmetry is the right
+            // one rather than an oversight: a track playing an EXTERNAL instrument makes no audio
+            // HERE, so its fader has nothing to move, while the master fader carries every other
+            // track and must move whatever track the effect was typed on. VMV rides TRACK_GLOBAL,
+            // which the gate cannot resolve to an instrument and so never claims.
+            case CC_TRACK_VOL:   engine.scheduleTrackVolume(frame, track, v);    break;
+            case CC_MASTER_VOL:  engine.scheduleMasterVolume(frame, v);          break;
+            // TIM — the delay's echo time. Global like the master fader above it, and not gated for
+            // the same reason: a shared send carries every track's audio, so it must move whatever
+            // track the command was typed on.
+            case CC_DELAY_TIME:  engine.scheduleDelayTime(frame, v);             break;
+            // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION. Attack/release
+            // (72/73) and the GP drive/crush pair are real sampler params — but they are
+            // INSTRUMENT-STATIC in this engine (setInstrumentParams), and only the ids above have an
+            // entry in the sample-accurate ParamUpdateQueue. Wiring one means a new queue entry and a
+            // per-voice override in the DSP, which is what CUT/RES cost; until then a `CCA` pointing
+            // at 72 moves external gear and nothing here.
+            default: break;
+        }
+    }
+
     void consume(const Event& ev) override {
         if (!engine_ || !project_) return;
 
@@ -191,68 +271,15 @@ class EngineConsumer : public IMidiConsumer {
                 }
                 break;
 
-            case EV_CC: {
-                const float v = f32_from_bits(ev.cc.valueBits);
+            case EV_CC:
                 // A symbolic slot id (CCA-CCD) names a controller the INSTRUMENT chose, so it is
                 // resolved here — against the same instrument the routing gate above just used —
                 // and then treated as any other controller number. That is what makes one FX column
                 // drive a sampler and an external synth: `CCA` on an instrument whose slot A is CC 10
                 // pans this engine's voice and pans the gear, from the same phrase (plan §6/§8.3).
-                const int param = resolve_cc(instr, ev.cc.param);
-                switch (param) {
-                    case CC_VOLUME:      engine_->scheduleTrackPhraseVol(ev.frame, ev.track, v);  break;
-                    case CC_PAN:         engine_->scheduleVoicePan(ev.frame, ev.track, v);        break;
-                    case CC_REVERB_SEND: engine_->scheduleVoiceReverbSend(ev.frame, ev.track, v); break;
-                    case CC_DELAY_SEND:  engine_->scheduleVoiceDelaySend(ev.frame, ev.track, v);  break;
-                    // CUT / RES. Both write the SOUNDING voice's own filter and are gone with it, so
-                    // there is no restore on stop() — the instrument's values come back with the next
-                    // note-on. An instrument with FILTER TYPE = OFF runs no filter and swallows them.
-                    case CC_FILTER_CUT:  engine_->scheduleVoiceFilterCut(ev.frame, ev.track, v);  break;
-                    case CC_FILTER_RES:  engine_->scheduleVoiceFilterRes(ev.frame, ev.track, v);  break;
-                    // LPF / HPF / BPF — the id IS the filter type and `v` is the cutoff, so one
-                    // record switches the filter on and places it in the same frame. Engine-only ids
-                    // (event.h); `midi_out.h` drops them, there being no MIDI controller for a type.
-                    case CC_FILTER_LP:
-                    case CC_FILTER_HP:
-                    case CC_FILTER_BP:
-                        engine_->scheduleVoiceFilterMode(ev.frame, ev.track, cc_filter_mode(param), v);
-                        break;
-                    // DRV / CRU — engine-only ids (event.h) for parameters MIDI has no
-                    // controller for. Each writes the per-block recompute's own input, so the change
-                    // is audible in the block it lands in and gone at the next note-on.
-                    case CC_DRIVE:       engine_->scheduleVoiceDrive(ev.frame, ev.track, v);     break;
-                    case CC_CRUSH:       engine_->scheduleVoiceCrush(ev.frame, ev.track, v);     break;
-                    // FIN, the same shape — and engine-only for a different reason: MIDI's fine tune
-                    // is an RPN that retunes a whole channel, not this note (event.h).
-                    case CC_FINE_TUNE:   engine_->scheduleVoiceFineTune(ev.frame, ev.track, v);  break;
-                    // LPO. ⚠️ The one id here whose records ACCUMULATE rather than replace — the
-                    // engine adds each one to the voice's running count (event.h).
-                    case CC_LOOP_SLIDE:  engine_->scheduleVoiceLoopSlide(ev.frame, ev.track, v);  break;
-                    // The mixer faders (VTR / VMV). Engine-only ids — `midi_out.h` drops both, which
-                    // is the one place the two consumers are meant to disagree (event.h).
-                    //
-                    // ⚠️ VTR IS SUBJECT TO THE EXTERNAL GATE ABOVE AND VMV IS NOT, and that asymmetry
-                    // is the right one rather than an oversight: a track playing an EXTERNAL instrument
-                    // makes no audio HERE, so its fader has nothing to move, while the master fader
-                    // carries every other track and must move whatever track the effect was typed on.
-                    // VMV rides TRACK_GLOBAL, which the gate cannot resolve to an instrument and so
-                    // never claims.
-                    case CC_TRACK_VOL:   engine_->scheduleTrackVolume(ev.frame, ev.track, v);    break;
-                    case CC_MASTER_VOL:  engine_->scheduleMasterVolume(ev.frame, v);             break;
-                    // TIM — the delay's echo time. Global like the master fader above it, and not
-                    // gated for the same reason: a shared send carries every track's audio, so it
-                    // must move whatever track the command was typed on.
-                    case CC_DELAY_TIME:  engine_->scheduleDelayTime(ev.frame, v);                break;
-                    // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION.
-                    // Attack/release (72/73) and the GP drive/crush pair are real sampler params — but
-                    // they are INSTRUMENT-STATIC in this engine (setInstrumentParams), and only the ids
-                    // above have an entry in the sample-accurate ParamUpdateQueue. Wiring one means a
-                    // new queue entry and a per-voice override in the DSP, which is what CUT/RES cost;
-                    // until then a `CCA` pointing at 72 moves external gear and nothing here.
-                    default: break;
-                }
+                apply_cc(*engine_, ev.frame, ev.track, resolve_cc(instr, ev.cc.param),
+                         f32_from_bits(ev.cc.valueBits));
                 break;
-            }
 
             // ⚠️ NO ENGINE PATH EXISTS FOR EITHER, AND SAYING SO IS THE POINT OF THE ARMS.
             //   • MPG: this engine has no notion of a program. The soundfont module does (a TSF

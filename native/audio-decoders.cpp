@@ -414,7 +414,7 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
     for (unsigned s = 0; s < tr->sample_count; s++) {
         unsigned fbytes = 0, ts = 0, dur = 0;
         MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, (unsigned)atrack, s, &fbytes, &ts, &dur);
-        if (fbytes == 0 || ofs < 0 || (uint64_t)ofs + fbytes > (uint64_t)fsize) continue;
+        if (fbytes == 0 || (uint64_t)ofs + fbytes > (uint64_t)fsize) continue;   // fbytes 0 = no frame
 
         NeAACDecFrameInfo fi;
         void* pcm = NeAACDecDecode(dec, &fi, buf.data() + ofs, fbytes);

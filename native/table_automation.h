@@ -83,6 +83,9 @@ inline constexpr const Arm* arm_for(int fxCode) {
     return nullptr;
 }
 
+/** The same question as a yes/no, for the compile-time checks. */
+inline constexpr bool has_arm(int fxCode) { return arm_for(fxCode) != nullptr; }
+
 /** Is this byte a slot an EQ-preset ramp may use as an endpoint? */
 inline constexpr bool is_eq_slot(int value) { return value >= 0 && value < EQ_PRESET_SLOTS; }
 

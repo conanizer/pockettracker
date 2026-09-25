@@ -38,7 +38,9 @@
 //       the last row ends on, so what follows the music is what a listener would expect to follow it —
 //       the notes' own release envelopes, the reverb and the delay repeats.
 //
-// Live playback cannot be affected by any of this: resetEffectState()'s only callers are here.
+// Live playback is not affected by any of this: the one other caller of resetEffectState() is the
+// engine itself, when the device comes back at another rate — and it puts the song's bus settings
+// back on its own (AudioEngine::setDeviceSampleRate).
 
 #include <algorithm>
 #include <cmath>

@@ -850,13 +850,16 @@ void AudioEngine::setProgram(int instrumentId, const songcore::Program& program,
     programs.set(instrumentId, program, markers, count);
 }
 
-void AudioEngine::setInstrumentSendLevels(int instrId, int reverbSend, int delaySend) {
+void AudioEngine::setInstrumentSendLevels(int instrId, int reverbHex, int delayHex) {
     if (instrId < 0 || instrId >= 256) return;
-    instrumentParams[instrId].reverbSend = reverbSend / 255.0f;
-    instrumentParams[instrId].delaySend  = delaySend  / 255.0f;
+    instrumentParams[instrId].reverbSend = reverbHex / 255.0f;
+    instrumentParams[instrId].delaySend  = delayHex  / 255.0f;
 }
 
 void AudioEngine::setReverbParams(int feedbackHex, int dampHex, int wetHex, int sizeHex) {
+    busSettings.reverbDecay = feedbackHex; busSettings.reverbDamp = dampHex;
+    busSettings.reverbWet   = wetHex;      busSettings.reverbSize = sizeHex;
+    busSettings.pushed = true;
     reverbSend.setParams(feedbackHex, dampHex, sizeHex);
     reverbReturnGain = wetHex / 255.0f;
 }
@@ -869,34 +872,54 @@ void AudioEngine::setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMod
 // The two halves on their own, because a take a TIM is driving owns the TIME and nothing else: a
 // globals push has to leave that alone while still carrying FDBK and WET through (engine_setup.h).
 void AudioEngine::setDelayTime(int timeOrSubdiv, bool syncMode, float bpm) {
+    busSettings.delayTime = timeOrSubdiv; busSettings.delaySync = syncMode; busSettings.delayBpm = bpm;
+    busSettings.pushed = true;
     if (syncMode) delaySend.setTimeSync(timeOrSubdiv, bpm);
     else          delaySend.setTimeFree(timeOrSubdiv);
 }
 
 void AudioEngine::setDelayFeedbackWet(int feedbackHex, int wetHex) {
+    busSettings.delayFeedback = feedbackHex; busSettings.delayWet = wetHex; busSettings.pushed = true;
     delaySend.feedback = feedbackHex / 255.0f;
     delayReturnGain    = wetHex / 255.0f;
 }
 
 void AudioEngine::setDelayCharacter(bool pong, int toneHex, int wobbleHex) {
+    busSettings.delayPong = pong; busSettings.delayTone = toneHex; busSettings.delayWobble = wobbleHex;
+    busSettings.pushed = true;
     delaySend.setCharacter(pong, toneHex, wobbleHex);
 }
 
 void AudioEngine::setDelayReverbSend(int sendHex) {
+    busSettings.delayReverbSend = sendHex; busSettings.pushed = true;
     delayToReverbSend = sendHex / 255.0f;
 }
 
 void AudioEngine::setReverbCharacter(int preHex, int widthHex, int modHex) {
+    busSettings.reverbPre = preHex; busSettings.reverbWidth = widthHex; busSettings.reverbMod = modHex;
+    busSettings.pushed = true;
     reverbSend.setCharacter(preHex, widthHex, modHex);
 }
 
-void AudioEngine::setReverbAlgo(int algo) { reverbSend.setAlgo(algo); }
+void AudioEngine::setReverbAlgo(int algo) {
+    busSettings.reverbAlgo = algo; busSettings.pushed = true;
+    reverbSend.setAlgo(algo);
+}
 
-void AudioEngine::setReverbInputEq(int slot) { applyEqPresetToModule(reverbSend.inputEq, slot); }
+void AudioEngine::setReverbInputEq(int slot) {
+    busSettings.reverbInputEq = slot; busSettings.pushed = true;
+    applyEqPresetToModule(reverbSend.inputEq, slot);
+}
 
-void AudioEngine::setDelayInputEq(int slot) { applyEqPresetToModule(delaySend.inputEq, slot); }
+void AudioEngine::setDelayInputEq(int slot) {
+    busSettings.delayInputEq = slot; busSettings.pushed = true;
+    applyEqPresetToModule(delaySend.inputEq, slot);
+}
 
-void AudioEngine::setMasterEqSlot(int slot) { applyEqPresetToModule(masterChain.masterEq, slot); }
+void AudioEngine::setMasterEqSlot(int slot) {
+    busSettings.masterEqSlot = slot; busSettings.pushed = true;
+    applyEqPresetToModule(masterChain.masterEq, slot);
+}
 
 void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                                       int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
