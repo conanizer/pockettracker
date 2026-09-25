@@ -792,8 +792,6 @@ void clear_preview_slots(Engine& engine) {
  */
 template <typename Engine>
 int preview_sample_file(Engine& engine, const std::string& path) {
-    constexpr float C4_HZ = 261.63f;
-
     engine.scheduleKill(engine.getCurrentFrame(), Engine::PREVIEW_LANE);   // the previous audition
 
     const int fileRate = load_sample_file(engine, PREVIEW_SAMPLE_SLOT, path);

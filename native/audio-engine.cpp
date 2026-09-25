@@ -104,7 +104,8 @@ void AudioEngine::setDeviceSampleRate(int sr) {
     deviceSampleRate.store(sr, std::memory_order_relaxed);
     if (sr == effectsSampleRate) return;
     effectsSampleRate = sr;
-    resetEffectState();   // reads getSampleRate(), i.e. the value just stored
+    resetEffectState();     // reads getSampleRate(), i.e. the value just stored
+    replayBusSettings();    // the buses are at factory defaults now; the song's own values go back
 }
 
 AudioEngine::~AudioEngine() {
@@ -1490,8 +1491,8 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
                 break;
 
             case FX_EQM:
-                setMasterEqSlot(fxValue);
-                tableMasterEqTouched.store(true, std::memory_order_relaxed);
+                applyEqPresetToModule(masterChain.masterEq, fxValue);   // not setMasterEqSlot: a table's
+                tableMasterEqTouched.store(true, std::memory_order_relaxed);   // override is not the song's
                 break;
 
             // TIM on a table row — the delay's echo time, once per tic, which is where the command is
@@ -2002,7 +2003,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     break;
                 }
                 case PARAM_UPDATE_MASTER_EQ: {            // EQM — master/mixer EQ preset (global)
-                    setMasterEqSlot((int)upd.value);
+                    applyEqPresetToModule(masterChain.masterEq, (int)upd.value);   // audio thread: not the setter
                     break;
                 }
                 // The two morph arms. Same targets as the two above, reached the same way — only the
@@ -2312,8 +2313,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             //           Produces at most a ~1ms click but prevents silence.
             // ---------------------------------------------------------------
 
+            // A note with no sample behind it must not touch the track: fading the playing voice for
+            // a note that cannot sound would silence the track for nothing (a preview of an empty slot).
+            const bool haveSample = note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId];
+
             // Step 1: mono per track — fade whatever is still playing on this track
-            for (int v = 0; v < MAX_VOICES; v++) {
+            for (int v = 0; haveSample && v < MAX_VOICES; v++) {
                 if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
                     voices[v].startFadeOut();
                 }
@@ -2351,7 +2356,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             if (targetSlot != -1) {
                 int v = targetSlot;
-                if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
+                if (haveSample) {
                     // Per-track mono across voice types: a sampler note replaces an SF note
                     // still sounding on this track. noteOff (not hardStop) so the SF release
                     // plays out musically — findActiveVoiceForTrack skips releasing SF voices,
@@ -2415,7 +2420,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
                     LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                          (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
-                         note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+                         note.tableId, effectiveTicRates[0], note.noteOctave, note.notePitch, startRows[0]);
                 } else {
                     if (note.sampleId < 0 || note.sampleId >= 256) {
                         LOGT("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
@@ -4407,28 +4412,32 @@ void AudioEngine::refreshSoundingInstrument(int instrumentId) {
 }
 
 void AudioEngine::setOttDepth(int depth) {
-    float d = depth / 255.0f;
-    masterChain.ott.setDepth(d);
+    busSettings.ottDepth = depth; busSettings.pushed = true;
+    masterChain.ott.setDepth(depth / 255.0f);
 }
 
 void AudioEngine::setOttDepthForRender(int depth) {
-    float d = depth / 255.0f;
-    masterChain.ott.resetForRender(d);
+    busSettings.ottDepth = depth; busSettings.pushed = true;
+    masterChain.ott.resetForRender(depth / 255.0f);
 }
 
 void AudioEngine::setMasterFx(int fx) {
+    busSettings.masterFx = fx; busSettings.pushed = true;
     masterChain.setMasterFx(fx);
 }
 
 void AudioEngine::setDustDepth(int depth) {
+    busSettings.dustDepth = depth; busSettings.pushed = true;
     masterChain.setDustDepth(depth / 255.0f);
 }
 
 void AudioEngine::setDustDepthForRender(int depth) {
+    busSettings.dustDepth = depth; busSettings.pushed = true;
     masterChain.setDustDepthForRender(depth / 255.0f);
 }
 
 void AudioEngine::setLimiterPreGain(int depth) {
+    busSettings.limiterPreGain = depth; busSettings.pushed = true;
     masterChain.setLimiterPreGain(1.0f + (depth / 255.0f) * 3.0f);
 }
 
@@ -4622,8 +4631,29 @@ void AudioEngine::resetEffectState() {
     reverbSend.reset(sr);   // zeroes the delay lines AND reseeds ReverbSc's random-lineseg LCG
     delaySend.reset(sr);    // zeroes both delay lines
     masterChain.reset(sr);  // OTT bands, DUST, limiter envelope, master EQ
-    // Everything above is now at FACTORY DEFAULTS, not at the project's values — the caller re-pushes.
-    LOGD("🎬 Effect chains reset to clean state (caller must re-push the project's FX)");
+    // Everything above is now at FACTORY DEFAULTS, not at the project's values. A render pushes the
+    // project next; a device reopen replays `busSettings` (setDeviceSampleRate). Not replayed HERE:
+    // a render must be a function of the project alone, so nothing may depend on what was pushed
+    // before the reset — the two renders ptrender compares would otherwise take different paths.
+    LOGD("🎬 Effect chains reset to clean state");
+}
+
+void AudioEngine::replayBusSettings() {
+    if (!busSettings.pushed) return;
+    const BusSettings s = busSettings;   // the setters below record into the live copy
+    setReverbParams(s.reverbDecay, s.reverbDamp, s.reverbWet, s.reverbSize);
+    setReverbAlgo(s.reverbAlgo);
+    setReverbCharacter(s.reverbPre, s.reverbWidth, s.reverbMod);
+    setReverbInputEq(s.reverbInputEq);
+    setDelayParams(s.delayTime, s.delayFeedback, s.delaySync, s.delayBpm, s.delayWet);
+    setDelayCharacter(s.delayPong, s.delayTone, s.delayWobble);
+    setDelayInputEq(s.delayInputEq);
+    setDelayReverbSend(s.delayReverbSend);
+    setMasterEqSlot(s.masterEqSlot);
+    setOttDepth(s.ottDepth);
+    setMasterFx(s.masterFx);
+    setDustDepth(s.dustDepth);
+    setLimiterPreGain(s.limiterPreGain);
 }
 
 int64_t AudioEngine::getFrameCounter() {

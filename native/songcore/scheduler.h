@@ -1483,7 +1483,6 @@ class Sequencer {
 
         if (trackState.trackStopped) return SchedulePhraseResult{0, false, true, 0};
 
-        int64_t framesPerTic = framesPerStep / TICS_PER_STEP;
         int localGrooveStep = trackState.grooveStep;
         bool anyGrooveActive = false;
 
@@ -2180,16 +2179,8 @@ class Sequencer {
             }
         }
 
-        // STEP 2.5: HOP
-        bool hopTriggered = false;
-        if (params.hopValue.has_value()) {
-            hopTriggered = true;
-            if (*params.hopValue == 0xFF) {
-                trackState.trackStopped = true;
-            } else {
-                trackState.hopTargetRow = *params.hopValue & 0x0F;
-            }
-        }
+        // A row that hops returned above, so from here on the step is a played one.
+        const bool hopTriggered = false;
 
         // STEP 3: REPEAT
         int newRepeatColumn = 0;

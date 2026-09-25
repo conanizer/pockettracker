@@ -630,7 +630,7 @@ public:
     // ===================================
 
     // Set reverb/delay send levels for an instrument (00-FF each, converted to float).
-    void setInstrumentSendLevels(int instrId, int reverbSend, int delaySend);
+    void setInstrumentSendLevels(int instrId, int reverbHex, int delayHex);
 
     // ===================================
     // REVERB / DELAY SEND METHODS
@@ -793,10 +793,10 @@ public:
     // ReverbSc's LCG kept walking, the same song rendered differently every time. A render must be a
     // function of the project, not of playback history.
     //
-    // ⚠️ This is NOT a state-only reset: the module reset()s also re-apply their factory DEFAULTS
-    // (reverb feedback 0x60, delay 500 ms, master EQ bypassed). The caller MUST re-push the project's
-    // FX afterwards or it silently renders with default reverb/delay — songcore::prepare_render does
-    // exactly that, via engine_setup.h. Live playback never calls this.
+    // ⚠️ This is NOT a state-only reset: the module reset()s also put their factory DEFAULTS back
+    // (reverb decay 0x60, delay 500 ms, master EQ bypassed). A render pushes the whole project right
+    // after it (songcore::prepare_render); a device reopen at another rate goes through
+    // setDeviceSampleRate, which replays `busSettings` itself. Never from the audio thread.
     void resetEffectState();
 
     // Get current frame counter
@@ -895,6 +895,25 @@ private:
     // The rate the send and master buses were last built at. Only setDeviceSampleRate touches it, and
     // only to notice that a re-init is owed — the coefficients are the buses' own, not readable back.
     int effectsSampleRate = 44100;
+
+    // The last value every bus setter received. setDeviceSampleRate replays it after rebuilding the
+    // buses, so a device that comes back at another rate keeps the song's reverb, delay and master EQ.
+    // ⚠️ Every bus setter records here BEFORE touching its module; one that does not is the reopen
+    // bug again. UI thread only — a table row's EQM reaches the master EQ without passing through.
+    struct BusSettings {
+        int   reverbDecay = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbSize = 0x60;
+        int   reverbPre = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
+        int   reverbAlgo = 0, reverbInputEq = -1;
+        int   delayTime = 2;   bool delaySync = true;   float delayBpm = 120.0f;   // 1/4 at 120 = 500 ms
+        int   delayFeedback = 0x60, delayWet = 0x80;
+        bool  delayPong = false;   int delayTone = 0xFF, delayWobble = 0x00;
+        int   delayInputEq = -1, delayReverbSend = 0;
+        int   masterEqSlot = -1;
+        int   ottDepth = 0, masterFx = 0, dustDepth = 0, limiterPreGain = 0;
+        bool  pushed = false;   // nothing is replayed until a setter has run
+    };
+    BusSettings busSettings;
+    void replayBusSettings();
 
     Voice voices[MAX_VOICES];
 

@@ -298,11 +298,12 @@ else()
     # -ffinite-math-only, which can corrupt Vorbis decode/setup — so build the decoder TUs WITHOUT it
     # (dr_mp3/dr_flac don't need it either; the perf delta on a one-shot file decode is negligible). The
     # per-source flag is appended after the target's -ffast-math, so -fno-fast-math wins for these files.
+    set_source_files_properties(audio-decoders.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
+    # The two vendored decoders: the same flag, plus their warnings silenced (see -Wall below).
     set_source_files_properties(
-            audio-decoders.cpp
             vendor/stb_vorbis/stb_vorbis.c
             vendor/minimp4/minimp4_impl.c
-            PROPERTIES COMPILE_OPTIONS "-fno-fast-math"
+            PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-w"
     )
 
     # songcore's scheduling math is REQUIRED to be IEEE-exact (event-schema §5/§6: its float params are
@@ -321,6 +322,26 @@ else()
     # native breakpoints, so the loss of -O0 debuggability is a non-issue here.) MSVC keeps CMake's
     # own /Od-Debug, /O2-Release defaults: no real-time constraint applies to a host tool.
     target_compile_options(pockettracker PRIVATE $<IF:$<CONFIG:Debug>,-O2,-O3>)
+
+    # Warnings on, for OUR files. The vendored sources compiled into this target are silenced per
+    # file below (their warnings are not ours to fix), and the two vendored headers our TUs include
+    # (tsf.h, stb_image.h) are wrapped in a diagnostic push/pop at the include. ⚠️ Not `-Werror`
+    # here: the count is zero on gcc, and clang and MSVC have not been through it yet.
+    target_compile_options(pockettracker PRIVATE -Wall -Wextra -Wshadow)
+    set_source_files_properties(
+            effects/soundpipe/pareq.c
+            kissfft/kiss_fft.c
+            kissfft/kiss_fftr.c
+            effects/primitives/daisysp/svf.cpp
+            effects/primitives/daisysp/overdrive.cpp
+            effects/primitives/daisysp/decimator.cpp
+            effects/primitives/daisysp/limiter.cpp
+            effects/primitives/daisysp/compressor.cpp
+            effects/primitives/daisysp/crossfade.cpp
+            effects/primitives/daisysp/balance.cpp
+            effects/primitives/daisysp/reverbsc.cpp
+            PROPERTIES COMPILE_OPTIONS "-w"
+    )
 endif()
 
 # freeverb3 is compiled for float samples, and names its own headers from the dragonfly/ root
@@ -332,6 +353,9 @@ file(GLOB PT_DRAGONFLY_SOURCES CONFIGURE_DEPENDS
 set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES
         COMPILE_DEFINITIONS LIBFV3_FLOAT
         INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly)
+if(NOT MSVC)
+    set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")   # vendored
+endif()
 
 # Include paths: root (for audio-defs.h, sampler-voice.h, etc.),
 #   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h).
@@ -482,6 +506,7 @@ if(MSVC)
     target_compile_options(pt-ui PRIVATE /fp:precise)
 else()
     target_compile_options(pt-ui PRIVATE -fno-fast-math -ffp-contract=off)
+    target_compile_options(pt-ui PRIVATE -Wall -Wextra -Wshadow)   # zero on gcc; see the engine's note
 endif()
 
 # ─── The Android SDL app: pt-ui's first real linker (convergence C3) ───────────────────────────

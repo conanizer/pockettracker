@@ -426,15 +426,15 @@ inline ThemeRollResult theme_roll(const Theme& base, const ThemeLocks& locks, Th
             // ⚠️ The SHORT way round: 350° to 10° passes through 0, not through 180.
             const double arc   = std::fmod(hHigh - hLow + 540.0, 360.0) - 180.0;
             const double hMid  = hLow + 0.5 * arc;
-            const double base   = rng.range(0.02, 0.08);
+            const double trough = rng.range(0.02, 0.08);
             const double rise   = rng.range(0.03, 0.09);
             // ⚠️ The ramp may run either way — MONO's shipped meters get DARKER as they get loud — so
             // only the ORDER is fixed and the direction is part of the roll. Every rung is still
             // measured away from the trough, so neither end can fall through its floor.
             const bool   up     = rng.chance(0.5);
-            const double eL = base + (up ? 0.0 : 2.0 * rise);
-            const double eM = base + rise;
-            const double eH = base + (up ? 2.0 * rise : 0.0);
+            const double eL = trough + (up ? 0.0 : 2.0 * rise);
+            const double eM = trough + rise;
+            const double eH = trough + (up ? 2.0 * rise : 0.0);
             const auto bar = [&](double extra, double hue) {
                 return ink_at(away(t.meterBackground, FLOOR_SUPPORT, extra), hue, 0.16 * ctx.chromaScale,
                               t.meterBackground, FLOOR_SUPPORT);

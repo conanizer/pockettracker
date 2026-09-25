@@ -184,11 +184,12 @@ void* sf_guarded_realloc(void* ptr, size_t size) {
     // be the allocation that exhausts the machine.
     if (size > held && sf_alloc_would_exhaust(size, held)) return nullptr;
 
+    // The book-keeping moves BEFORE the realloc: after it `ptr` may already be freed, and a freed
+    // pointer is not something to look up, even as a key. A refused realloc puts the entry back.
+    sf_forget_big_block(ptr);
     void* out = std::realloc(ptr, size);
-    if (out) {
-        sf_forget_big_block(ptr);
-        sf_remember_big_block(out, size);
-    }
+    if (out) sf_remember_big_block(out, size);
+    else     sf_remember_big_block(ptr, held);
     return out;
 }
 
@@ -225,7 +226,14 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 #define TSF_PROGRESS(i, n)     sf_load_progress((i), (n))
 
 #define TSF_IMPLEMENTATION
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"   // vendored, not ours to fix
+#endif
 #include "vendor/tsf/tsf.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #include "soundfont-voice.h"
 #include "mods/modules/pitch-slide-module.h"  // advancePitchSlide (shared with sampler path)

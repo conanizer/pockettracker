@@ -91,16 +91,16 @@ constexpr bool table_arms_match_the_engine() {
             c != ::FX_DRV && c != ::FX_CRU && c != ::FX_FIN &&
             c != ::FX_LPO && c != ::FX_TIM) return false;
     }
-    return table_automation::arm_for(::FX_HOP)    && table_automation::arm_for(::FX_TIC)  &&
-           table_automation::arm_for(::FX_KILL)   && table_automation::arm_for(::FX_OFFSET) &&
-           table_automation::arm_for(::FX_THO)    && table_automation::arm_for(::FX_VOLUME) &&
-           table_automation::arm_for(::FX_EQN)    && table_automation::arm_for(::FX_EQM)  &&
-           table_automation::arm_for(::FX_CUT)    && table_automation::arm_for(::FX_RES)  &&
-           table_automation::arm_for(::FX_LPF)    && table_automation::arm_for(::FX_HPF)  &&
-           table_automation::arm_for(::FX_BPF)    &&
-           table_automation::arm_for(::FX_DRV)    && table_automation::arm_for(::FX_CRU)  &&
-           table_automation::arm_for(::FX_FIN)    && table_automation::arm_for(::FX_LPO) &&
-           table_automation::arm_for(::FX_TIM);
+    return table_automation::has_arm(::FX_HOP)    && table_automation::has_arm(::FX_TIC)  &&
+           table_automation::has_arm(::FX_KILL)   && table_automation::has_arm(::FX_OFFSET) &&
+           table_automation::has_arm(::FX_THO)    && table_automation::has_arm(::FX_VOLUME) &&
+           table_automation::has_arm(::FX_EQN)    && table_automation::has_arm(::FX_EQM)  &&
+           table_automation::has_arm(::FX_CUT)    && table_automation::has_arm(::FX_RES)  &&
+           table_automation::has_arm(::FX_LPF)    && table_automation::has_arm(::FX_HPF)  &&
+           table_automation::has_arm(::FX_BPF)    &&
+           table_automation::has_arm(::FX_DRV)    && table_automation::has_arm(::FX_CRU)  &&
+           table_automation::has_arm(::FX_FIN)    && table_automation::has_arm(::FX_LPO) &&
+           table_automation::has_arm(::FX_TIM);
 }
 static_assert(table_arms_match_the_engine(),
               "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
