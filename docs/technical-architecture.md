@@ -491,11 +491,6 @@ note-on on a track names it. Both consumers use the same resolver, so they canno
 All three shipping platforms have MIDI in and out (winmm on Windows, ALSA on Linux, the Android MIDI
 API on Android), with a 24 PPQN clock, transport messages and song-position pointer.
 
-**The MIDI authoring surfaces are hidden in release builds** (`PlatformCaps::midi`). A release build
-cannot create MIDI data — no MIDI screen, no EXTERNAL instrument type, no MIDI effect commands — but
-it displays existing data faithfully, because all three are persisted in a `.ptp` and a build that
-drew them as something else would misrepresent the file on disk.
-
 **MIDI in is drained on the audio thread.** A port's bytes land in a lock-free ring; the engine
 empties it at the top of every live block, parses, routes and puts each record into its own queues
 stamped at that block's first frame, so a key sounds in the block after its bytes arrive. The router
@@ -506,14 +501,17 @@ from a second ring the drain fills, one poll behind the sound. The engine resolv
 the same copies it resolves a sequenced one from, which is why every table and instrument setting is
 pushed when it changes rather than a note ahead of when it is needed.
 
-A project also carries the **controller mappings** — which knob moves which parameter — and they are
-the one MIDI surface a release build obeys without being able to show it: the drain withholds a
-claimed controller from the tracks and the host applies it to the song, neither behind the screen
-that authors it. The channel those knobs arrive on is in `settings.json` instead, because it
-describes the cable on this desk rather than the song.
+A project also carries the **controller mappings** — which knob moves which parameter. The drain
+withholds a claimed controller from the tracks and the host applies it to the song, neither behind
+the screen that authors it. The channel those knobs arrive on is in `settings.json` instead, because
+it describes the cable on this desk rather than the song.
 
-The loop-window pair — the `LPO` effect and the `osc` loop mode — is held back the same way
-(`PlatformCaps::loopWindow`), on the same authoring-only terms. Hiding an effect works only on a
+The `osc` loop mode is held back from release builds (`PlatformCaps::loopWindow`) on authoring-only
+terms: a build that hides it cannot create it, but displays and plays a project that has it, since
+drawing persisted data as something else would misrepresent the file on disk. The MIDI authoring
+surfaces sit behind the same kind of flag (`PlatformCaps::midi`), on in every shipping profile, and
+the `LPO` effect behind `loopWindow` as well — which is why it shows wherever MIDI does. Hiding an
+effect works only on a
 **tail** of `EFFECT_TYPES`: a cell stores an index into that array while a `.ptp` stores the effect
 *code*, so shortening the list leaves every remaining index naming the effect it always named. `LPO`
 sits directly below the MIDI six for that reason, which also means the two trims nest — nothing can

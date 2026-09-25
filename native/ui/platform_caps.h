@@ -92,8 +92,8 @@ struct PlatformCaps {
      * nothing on screen to explain it. So a build with this off cannot CREATE MIDI data, and renders
      * whatever it finds truthfully.
      *
-     * Kept separate from `debug` (rather than read off it at each site) so that the release the
-     * feature ships in flips one line here, without also un-hiding the developer rows.
+     * On in every profile a shell runs, release included. `android()` keeps it debug-only because it
+     * reproduces Kotlin's recorded row map.
      */
     bool midi = false;
 
@@ -106,8 +106,9 @@ struct PlatformCaps {
      * `osc`, and the engine keeps playing both. Hiding the display would leave a note sounding
      * one way with a screen saying another.
      *
-     * ⚠️ It can only be off while `midi` is off — `LPO` sits directly below the MIDI six and both
-     * are hidden by shortening the same tail (songcore/effects.h).
+     * ⚠️ It can hide `LPO` only while `midi` is off — `LPO` sits directly below the MIDI six and both
+     * are hidden by shortening the same tail (songcore/effects.h). With MIDI shown, as in every
+     * shipping profile, this flag hides `osc` alone.
      */
     bool loopWindow = false;
 
@@ -143,7 +144,7 @@ struct PlatformCaps {
         c.autosave       = true;
         c.engineToggle   = false;
         c.appExit        = true;
-        c.midi           = debug_build;
+        c.midi           = true;
         c.loopWindow     = debug_build;
         return c;
     }
