@@ -284,6 +284,7 @@ static float longest_release(tsf* h, int channel) {
 // to a local once, validate the local, and index with the local only.
 
 void SoundfontVoice::hardStop() {
+    pendingTsfOffAt = -1;   // every voice on the channel is killed below
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
@@ -327,7 +328,9 @@ void SoundfontVoice::hardStop() {
     hasArmedNote = false;
 }
 
-void SoundfontVoice::noteOff() {
+void SoundfontVoice::noteOff() { noteOffAt(0); }
+
+void SoundfontVoice::noteOffAt(int atFrame) {
     isReleasingOnly = true;
     // Same reason as hardStop's: an arm this block that a note-off in the SAME block supersedes (a
     // sampler note taking the track, a KIL) must not sound after the thing that ended it.
@@ -389,8 +392,12 @@ void SoundfontVoice::noteOff() {
                 const float rel = longest_release(h, _trackId);
                 if (rel < SF_RELEASE_RAMP_MAX_SECS) {
                     const int want = static_cast<int>(rel * h->outSampleRate);
-                    startStopFade(want > KILL_FADE_SAMPLES ? want : KILL_FADE_SAMPLES);
+                    startStopFade(want > KILL_FADE_SAMPLES ? want : KILL_FADE_SAMPLES, atFrame);
                     ownRamp = true;
+                } else if (atFrame > 0) {
+                    // Sent by the render pass at that frame, between the two halves of the render.
+                    pendingTsfOffAt   = atFrame;
+                    pendingTsfOffNote = activeNote;
                 } else {
                     tsf_channel_note_off(h, _trackId, activeNote);
                 }
@@ -468,6 +475,7 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
 
 void SoundfontVoice::fireArmedNote(tsf* h) {
     hasArmedNote = false;
+    pendingTsfOffAt = -1;   // the note it was for is killed below
     if (!h) return;
     const ArmedNote a = armed;
 

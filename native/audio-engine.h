@@ -762,10 +762,10 @@ public:
                                                float sampleRate);
 
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
-    void triggerNoteOff(int trackId);
+    void triggerNoteOff(int trackId, int atFrame = 0);   // atFrame: frame inside the current block (audio thread only)
 
     // The same, for a live KEY that was let go of — a one-shot ignores it (MIDI plan §4.1).
-    void triggerKeyRelease(int trackId);
+    void triggerKeyRelease(int trackId, int atFrame = 0);   // atFrame: frame inside the current block (audio thread only)
 
     // Clear all modulation slots for an instrument
     void clearInstrumentModulation(int sampleId);

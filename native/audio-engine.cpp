@@ -2090,42 +2090,42 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // A live key let go of (MIDI plan §4.1). The three-way rule is inside
                 // SamplerVoice::keyRelease — and the ONLY difference from a KIL is the one-shot arm,
                 // which does nothing at all here and a declicked fade there.
-                triggerKeyRelease(kill.trackId);
+                triggerKeyRelease(kill.trackId, frame);
                 // SF: unchanged. TSF owns its own release envelope, a SoundFont preset always HAS one,
                 // and "a one-shot with no envelope" is a sampler-only shape — there is nothing for the
                 // §4.1 rule to decide on this side.
                 if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].noteOff();
+                    sfVoices[kill.trackId].noteOffAt(frame);
                 }
                 LOGT("🎹 Key release: track %d at frame %lld", kill.trackId, (long long)currentFrame);
             } else if (kill.mode == KILL_SOFT) {
-                triggerNoteOff(kill.trackId);  // Sampler: trigger ADSR release
+                triggerNoteOff(kill.trackId, frame);  // Sampler: trigger ADSR release
                 // SF: noteOff (TSF handles its own release envelope internally)
                 if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].noteOff();
+                    sfVoices[kill.trackId].noteOffAt(frame);
                 }
                 LOGT("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
             } else if (kill.mode == KILL_CUT) {
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].startFadeOut(KILL_FADE_SAMPLES);
+                        voices[v].startFadeOut(KILL_FADE_SAMPLES, frame);
                     }
                 }
                 // SF: the transport-stop ramp, not a note-off — it ends in hardStop, so no TSF release
                 // and no ADSR release outlive it.
                 if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].startStopFade(KILL_FADE_SAMPLES);
+                    sfVoices[kill.trackId].startStopFade(KILL_FADE_SAMPLES, frame);
                 }
             } else {
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].startFadeOut(KILL_FADE_SAMPLES);  // soft deliberate cut, not a steal
+                        voices[v].startFadeOut(KILL_FADE_SAMPLES, frame);  // soft deliberate cut, not a steal
                         LOGT("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
                     }
                 }
                 // SF: soft kill so TSF's internal release envelope can play out.
                 if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].noteOff();
+                    sfVoices[kill.trackId].noteOffAt(frame);
                 }
             }
         }
@@ -2318,7 +2318,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // Step 1: mono per track — fade whatever is still playing on this track
             for (int v = 0; haveSample && v < MAX_VOICES; v++) {
                 if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
-                    voices[v].startFadeOut();
+                    voices[v].startFadeOut(DECLICK_SAMPLES, frame);   // …from the new note's own frame
                 }
             }
 
@@ -2361,7 +2361,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     // so mid-note params already target the new sampler voice meanwhile.
                     if (note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
                         sfVoices[note.trackId].isActive && !sfVoices[note.trackId].isReleasingOnly) {
-                        sfVoices[note.trackId].noteOff();
+                        sfVoices[note.trackId].noteOffAt(frame);
                     }
                     float rate = note.frequency / note.baseFrequency;
 
@@ -2618,8 +2618,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // LENGTH, so reading it above would run a block behind every LPO slide and every loop edit.
         float modulatedRate = getModulatedPlaybackRate(voice);
 
-        // Honour the intra-block trigger offset: a note dispatched at blockStart+f must not
-        // sound before frame f (kills/params stay block-quantized — onsets are the audible case).
+        // Honour the intra-block trigger offset: a note dispatched at blockStart+f must not sound
+        // before frame f. The fade has the same offset (fadeStartFrame, held in the loop below);
+        // params stay block-quantized — they are ramped across the block, and the ramp is the
+        // anti-click.
         int startFrame = 0;
         if (voice.startDelayFrames > 0) {
             startFrame = std::min(voice.startDelayFrames, numFrames);
@@ -2738,7 +2740,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // The fade is resolved HERE, once, because it advances a counter and ends the voice —
             // and it is applied to the dry path in its original position and order below, so the
             // dry signal is arithmetically untouched by this.
-            const bool fading = voice.isFadingOut;
+            // A fade dispatched at frame f of this block is held until the loop reaches f.
+            const bool fading = voice.isFadingOut && i >= voice.fadeStartFrame;
             float voiceFade   = antiClick;
             float fo          = 1.0f;
             if (fading) {
@@ -2933,7 +2936,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
                 tsf* h = soundfonts[slot].handle;
                 if (h && !sv.hasArmedNote) {
-                    tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                    // A note-off dispatched mid-block is sent between the two halves of the render,
+                    // so TSF's release begins on its frame. TSF steps its envelope per render call
+                    // (in 64-sample chunks from the call's first frame), which is what makes the
+                    // split land it exactly.
+                    const int offAt = sv.pendingTsfOffAt;
+                    if (offAt > 0 && offAt < numFrames) {
+                        tsf_render_float_channel(h, t, sfBuf, offAt, 0 /* overwrite */);
+                        tsf_channel_note_off(h, t, sv.pendingTsfOffNote);
+                        tsf_render_float_channel(h, t, sfBuf + offAt * 2, numFrames - offAt, 0 /* overwrite */);
+                    } else {
+                        // Pending at 0: carried over from a block that did not render this voice.
+                        if (offAt >= 0) tsf_channel_note_off(h, t, sv.pendingTsfOffNote);
+                        tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                    }
+                    sv.pendingTsfOffAt = -1;
                     applyGainRamp(sfBuf, numFrames, sv.volGainFrom, sv.volGainTo);
                     rendered = true;
                 } else if (h) {
@@ -3012,8 +3029,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 sv.chain.processStereo(L, R);
                 float gate = gateStart[t] + (gateEnd[t] - gateStart[t]) * lerp_t;
                 if (sv.stopFadeRemaining > 0) {
-                    gate *= (float)sv.stopFadeRemaining / (float)sv.stopFadeTotal;
-                    if (--sv.stopFadeRemaining <= 0) stopFadeDone = true;
+                    if (i >= sv.stopFadeStartFrame) {   // a ramp dispatched mid-block waits for its frame
+                        gate *= (float)sv.stopFadeRemaining / (float)sv.stopFadeTotal;
+                        if (--sv.stopFadeRemaining <= 0) stopFadeDone = true;
+                    }
                 } else if (stopFadeDone) {
                     gate = 0.0f;   // the ramp ended inside this block; the rest of it is silence
                 }
@@ -3078,6 +3097,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // whole difference between a stop that ramps and a stop that cuts.
             if (stopFadeDone) sv.hardStop();
         }
+    }
+
+    // The intra-block frames above were for THIS block. A voice the block did not mix (the sample
+    // edit lock was held, the handle was gone) keeps its fade or note-off and takes it from the
+    // next block's first frame — one block late, never one block early.
+    for (int v = 0; v < MAX_VOICES; v++) voices[v].fadeStartFrame = 0;
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
+        sfVoices[t].stopFadeStartFrame = 0;
+        if (sfVoices[t].pendingTsfOffAt > 0) sfVoices[t].pendingTsfOffAt = 0;
     }
 
     // Per-track waveform capture for OCTA visualizer — only when OCTA is being displayed.
@@ -4550,18 +4578,18 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
     }
 }
 
-void AudioEngine::triggerNoteOff(int trackId) {
+void AudioEngine::triggerNoteOff(int trackId, int atFrame) {
     // The release-vs-fade decision lives in Voice::noteOff — one implementation.
     for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].noteOff();
+        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].noteOffAt(atFrame);
     }
 }
 
-void AudioEngine::triggerKeyRelease(int trackId) {
+void AudioEngine::triggerKeyRelease(int trackId, int atFrame) {
     // …and the key-release decision lives in Voice::keyRelease, for the same reason: this loop is
     // allocation, not policy. The two differ in exactly one arm (see sampler-voice.h).
     for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].keyRelease();
+        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].keyRelease(atFrame);
     }
 }
 

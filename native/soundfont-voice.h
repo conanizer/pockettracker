@@ -75,6 +75,17 @@ struct SoundfontVoice : public IAudioVoice {
     // track's filter — a send that missed it would ring the click on for the length of the tail.
     int   stopFadeRemaining = 0;
     int   stopFadeTotal     = 0;
+    // The frame inside the current block the ramp starts at — the twin of Voice::fadeStartFrame.
+    // The gate loop holds the counter until it reaches this frame; the engine zeroes it after
+    // every block.
+    int   stopFadeStartFrame = 0;
+
+    // A TSF note-off dispatched at frame `pendingTsfOffAt` of the current block. The render pass
+    // splits the channel's render there and sends it between the halves, so the release begins on
+    // that frame rather than the block's first one. -1 = nothing pending. Superseded by anything
+    // that ends the channel's voices outright (hardStop, an armed note firing).
+    int   pendingTsfOffAt   = -1;
+    int   pendingTsfOffNote = -1;
 
     /**
      * Begin the transport-stop ramp. Called from the UI thread; the audio thread finishes it and
@@ -83,8 +94,9 @@ struct SoundfontVoice : public IAudioVoice {
      * `stopFadeTotal` is written BEFORE `stopFadeRemaining` for the reason Voice::startFadeOut gives:
      * the mix loop must never see a live counter beside a stale total.
      */
-    void startStopFade(int fadeSamples) {
+    void startStopFade(int fadeSamples, int atFrame = 0) {
         if (!isActive || stopFadeRemaining > 0) return;
+        stopFadeStartFrame = atFrame;
         // An armed note is discarded rather than fired into a voice that is on its way out — the same
         // rule hardStop() states, and here it also stops a note_on landing mid-ramp.
         hasArmedNote     = false;
@@ -119,6 +131,9 @@ struct SoundfontVoice : public IAudioVoice {
     // isActive stays true so the audio block keeps calling tsf_render_float_channel.
     // The render loop detects silence and calls hardStop() to clean up.
     void noteOff() override;
+    // The same, at frame `atFrame` of the current block: the audio thread's dispatch loop passes
+    // the frame a KIL or key release was stamped for; a UI-thread caller uses noteOff().
+    void noteOffAt(int atFrame);
 
     void setVolume(float v) override;
 
@@ -223,6 +238,7 @@ struct SoundfontVoice : public IAudioVoice {
         isReleasingOnly = false;
         tableId        = -1;
         startDelayFrames = 0;
+        pendingTsfOffAt = -1;
         hasArmedNote   = false;  // the slot it was armed against is the one being unloaded
     }
 };

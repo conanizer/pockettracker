@@ -138,6 +138,10 @@ struct Voice : public IAudioVoice {
     // start — up to one audio burst early. The mix loop skips this many frames on the trigger
     // block, then zeroes it. Always < the trigger block's numFrames when set.
     int startDelayFrames;
+    // The fade's twin of startDelayFrames: a KIL, note-off, key release or steal dispatched at
+    // frame f of the current block starts fading at f, not at the block's first frame. The mix
+    // loop holds the counter until it reaches this frame; the engine zeroes it after every block.
+    int fadeStartFrame;
 
     Voice() : isActive(false), fadeInRemaining(0), sampleData(nullptr), sampleDataRight(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
@@ -153,7 +157,7 @@ struct Voice : public IAudioVoice {
               triggerOctave(4), triggerPitch(0),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
-              fadeOutRemaining(0), fadeOutTotal(1), isFadingOut(false), startDelayFrames(0) {}
+              fadeOutRemaining(0), fadeOutTotal(1), isFadingOut(false), startDelayFrames(0), fadeStartFrame(0) {}
               // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
     void trigger(float* sample, float* sampleRight, int length, int track, float rate, float baseFreq,
@@ -325,6 +329,7 @@ struct Voice : public IAudioVoice {
         isFadingOut = false;               // Clear any stale fade state from previous use
         fadeOutRemaining = 0;
         startDelayFrames = 0;              // Dispatch loop sets the real offset after trigger()
+        fadeStartFrame = 0;
         isActive = true;
     }
 
@@ -333,6 +338,7 @@ struct Voice : public IAudioVoice {
         isFadingOut = false;
         fadeOutRemaining = 0;
         startDelayFrames = 0;
+        fadeStartFrame = 0;
     }
 
     // Begin a smooth fade-out instead of a hard stop (used by voice stealing).
@@ -341,8 +347,11 @@ struct Voice : public IAudioVoice {
     // trackId is preserved (NOT cleared) so that Step-1 in the voice allocator
     // can recycle this fading slot directly when the same track fires again,
     // preventing voice-count explosion during simultaneous multi-track triggers.
-    void startFadeOut(int fadeSamples = DECLICK_SAMPLES) {
+    // `atFrame`: the frame inside the current block the fade starts at (0 = now). Only the audio
+    // thread's dispatch loop passes one; a UI-thread caller cannot know the block's phase.
+    void startFadeOut(int fadeSamples = DECLICK_SAMPLES, int atFrame = 0) {
         if (isFadingOut) return;  // Already fading — don't restart
+        fadeStartFrame = atFrame;
         // isActive stays true: slot stays reserved for the duration of the fade.
         // The counters are written BEFORE isFadingOut: stopTrack() calls this from the JNI
         // thread, and the mix loop must never observe isFadingOut=true with a stale zero
@@ -384,12 +393,16 @@ struct Voice : public IAudioVoice {
         return hasRelease;
     }
 
-    void noteOff() override {
-        // THE release decision for sampler voices — AudioEngine::triggerNoteOff delegates
-        // here (they used to be two drifted copies). Promote live ADSR/TRIG VOL mods
-        // (attack/decay/sustain, with a nonzero release configured) to the release stage;
-        // an already-releasing mod also counts. No release envelope → declicked kill fade.
-        if (!releaseVolMods()) startFadeOut(KILL_FADE_SAMPLES);  // deliberate note-off, not a steal
+    void noteOff() override { noteOffAt(0); }
+
+    // THE release decision for sampler voices — AudioEngine::triggerNoteOff delegates here (they
+    // used to be two drifted copies). Promote live ADSR/TRIG VOL mods (attack/decay/sustain, with a
+    // nonzero release configured) to the release stage; an already-releasing mod also counts. No
+    // release envelope → declicked kill fade, starting at `atFrame` of the current block.
+    // The envelope path takes no frame: the mod matrix runs once per block, so a release stage
+    // begins on a block edge whatever frame asked for it.
+    void noteOffAt(int atFrame) {
+        if (!releaseVolMods()) startFadeOut(KILL_FADE_SAMPLES, atFrame);  // deliberate note-off, not a steal
     }
 
     /**
@@ -408,9 +421,9 @@ struct Voice : public IAudioVoice {
      * A voice with a release envelope AND a loop takes the same `loopReleasing` path as a KIL — the
      * loop is abandoned so playback runs out into the tail while the envelope releases.
      */
-    void keyRelease() {
+    void keyRelease(int atFrame = 0) {
         if (releaseVolMods()) return;
-        if (loopMode != 0) startFadeOut(KILL_FADE_SAMPLES);   // nothing else would ever end it
+        if (loopMode != 0) startFadeOut(KILL_FADE_SAMPLES, atFrame);   // nothing else would ever end it
         // else: a one-shot with no envelope. Deliberately silent — the sample plays to its end.
     }
 
