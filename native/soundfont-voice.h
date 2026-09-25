@@ -16,13 +16,11 @@
 // One shared instance avoids a per-track tsf_load_memory() call that would otherwise stall the
 // audio callback for hundreds of ms and use 8× the SF2 file size in RAM.
 //
-// Thread safety:
-//   audio thread : armNote(), applyPitchMod()     — holds soundfonts[slot].mutex.
-//   audio thread : tsf_render_float()             — holds soundfonts[slot].mutex.
-//   audio thread : fireArmedNote()                — the CALLER's lock; it takes none of its own.
-//   JNI thread   : hardStop(), setVolume(), etc.  — holds soundfonts[slot].mutex.
+// Thread safety: every method runs on the audio thread (or on a render while the device is paused),
+// and takes no lock — see SoundfontEntry for why the handle it loads cannot be closed under it.
 struct SoundfontVoice : public IAudioVoice {
     int   sfSlot      = -1;    // soundfonts[] index that owns this voice (-1 = unassigned)
+    uint32_t sfGen    = 0;     // soundfonts[sfSlot].gen when armed; the engine detaches a stale one
     int   _trackId    = -1;    // Track index = MIDI channel on the shared tsf* handle
     int   instrId     = -1;    // Instrument of the current note (-1 = preview); for the instrument spectrum
     bool  isActive    = false;
@@ -42,7 +40,6 @@ struct SoundfontVoice : public IAudioVoice {
     float vibratoSpeed     = 0.0f;
     float vibratoDepth     = 0.0f;
     bool  vibratoActive    = false;
-    // Written from JNI thread, read+cleared on audio thread — ARM64 bool write is atomic.
     bool  needsPitchReset  = false;
 
     // Table state — mirrors Voice table fields; populated from scheduleSoundfontNote.
@@ -88,11 +85,7 @@ struct SoundfontVoice : public IAudioVoice {
     int   pendingTsfOffNote = -1;
 
     /**
-     * Begin the transport-stop ramp. Called from the UI thread; the audio thread finishes it and
-     * calls hardStop() when it reaches zero.
-     *
-     * `stopFadeTotal` is written BEFORE `stopFadeRemaining` for the reason Voice::startFadeOut gives:
-     * the mix loop must never see a live counter beside a stale total.
+     * Begin the transport-stop ramp; the render pass finishes it and calls hardStop() at zero.
      */
     void startStopFade(int fadeSamples, int atFrame = 0) {
         if (!isActive || stopFadeRemaining > 0) return;
@@ -124,7 +117,6 @@ struct SoundfontVoice : public IAudioVoice {
     bool active()     const override { return isActive; }
     int  getTrackId() const override { return _trackId; }
 
-    // Called from JNI thread (stop button) or audio thread (kill note queue).
     void hardStop() override;
 
     // Soft note-off: tell TSF to start its internal release envelope, keep rendering until silence.
@@ -144,7 +136,7 @@ struct SoundfontVoice : public IAudioVoice {
     void setMidiNote(int midiNote) override;
 
     // ── Pitch effect interface ───────────────────────────────────────────────
-    // All pitch setters only write state fields — no TSF calls, safe from JNI thread.
+    // All pitch setters only write state fields — no TSF calls.
     void setPitchBendRaw(float ratePerFrame) override {
         if (fabsf(ratePerFrame) < 0.000001f) {
             pitchSliding   = false;
@@ -195,9 +187,8 @@ struct SoundfontVoice : public IAudioVoice {
                  int bank, int preset, int trackId,
                  int envAtk, int envDec, int envSus, int envRel);
 
-    // Fire the armed note into `h`. ⚠️ The caller must already hold `soundfonts[sfSlot].mutex` and
-    // must have read `h` from the handle under it — this is called from inside the render pass's lock.
-    // Clears `hasArmedNote` either way.
+    // Fire the armed note into `h`, the handle the render pass loaded for this block. Clears
+    // `hasArmedNote` either way.
     void fireArmedNote(tsf* h);
 
     // Reset pitch state after a new note trigger.

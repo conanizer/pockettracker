@@ -218,6 +218,16 @@ queue it came from. Draining each queue to exhaustion in turn would collapse the
 index and apply them in queue order instead, which silently drops every effect whose note has not
 started yet.
 
+**The audio thread waits for nothing, allocates nothing and frees nothing, and the UI never writes
+what it reads.** A setter records its value and publishes it — per-instrument data and the tables in a
+two-sided copy (`StagedTable`, `TableStore`), the bus settings as one sequence-locked record whose
+groups each carry a number — and the block takes it in right after the queues drain, so an edit made
+before an event was queued is in force when that event runs. The screen reads the voices the same
+way, from a view the block publishes as it ends. What has to be built or freed goes by handover
+instead: a reverb engine is built by the control thread and taken at the next block, a SoundFont is
+closed only after the block that might hold its handle has ended, and a replaced sample buffer ends
+the voices still pointing at it through a per-slot generation rather than a stop from the UI.
+
 ### Signal path
 
 ```

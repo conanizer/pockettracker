@@ -49,7 +49,7 @@ AudioEngine::AudioEngine() {
         samples[i] = nullptr;
         samplesRight[i] = nullptr;
         sampleLengths[i] = 0;
-        instrumentParams[i] = InstrumentParams();
+        sampleGen[i] = 0;
         sampleBackups[i] = nullptr;
         sampleBackupsRight[i] = nullptr;
         sampleBackupLengths[i] = 0;
@@ -105,7 +105,9 @@ void AudioEngine::setDeviceSampleRate(int sr) {
     if (sr == effectsSampleRate) return;
     effectsSampleRate = sr;
     resetEffectState();     // reads getSampleRate(), i.e. the value just stored
-    replayBusSettings();    // the buses are at factory defaults now; the song's own values go back
+    // The buses are at factory defaults now; the next block puts the song's own values back.
+    prepareReverb();   // …and the reverb's engine, rebuilt at the new rate, is waiting for it
+    busReplayRequested.store(true, std::memory_order_release);
 }
 
 AudioEngine::~AudioEngine() {
@@ -159,14 +161,6 @@ bool AudioEngine::loadSample(int id, const float* data, int length) {
     // one callback (~10 ms of silence) rather than crashing on a freed pointer.
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
-    // Stop any voice that is currently playing this sample so its sampleData
-    // pointer can't be followed after we free the buffer below.
-    for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].instrId == id && voices[i].isActive) voices[i].stop();
-    }
-
-    if (samples[id]) delete[] samples[id];
-    if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
     // New file also invalidates the sample editor's undo backup — keeping it would hold RAM and
     // let undoSample restore the PREVIOUS sample's audio onto this one.
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
@@ -176,8 +170,7 @@ bool AudioEngine::loadSample(int id, const float* data, int length) {
     // in carries no depth of its own; a loader that knows better sets it after this returns.
     setSampleSourceFormat(id, 16, false);
 
-    samples[id] = newL;
-    sampleLengths[id] = length;
+    setSampleBuffers(id, newL, nullptr, length);   // the voices playing the old one end at the next mix
 
     LOGD("Sample %d: %d frames (mono)", id, length);
     return true;
@@ -201,21 +194,13 @@ bool AudioEngine::loadSampleStereo(int id, const float* left, const float* right
 
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
-    for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].instrId == id && voices[i].isActive) voices[i].stop();
-    }
-
-    if (samples[id]) delete[] samples[id];
-    if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
     // Same as loadSample: a new file invalidates the old sample's undo backup.
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
     sampleBackupLengths[id] = 0;
     setSampleSourceFormat(id, 16, false);
 
-    samples[id]      = newL;
-    samplesRight[id] = newR;
-    sampleLengths[id] = length;
+    setSampleBuffers(id, newL, newR, length);
 
     LOGD("Sample %d: %d frames (stereo)", id, length);
     return true;
@@ -233,19 +218,12 @@ bool AudioEngine::beginSampleLoad(int id, int channels, int estimatedFrames) {
     if (!newL || (ch == 2 && !newR)) { delete[] newL; delete[] newR; return false; }
 
     std::lock_guard<std::mutex> lock(sampleEditMutex);
-    // Stop any voice on this slot, then free every stale per-slot buffer (mirror loadSampleFromWavFile).
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
-    }
-    delete[] samples[id];
-    delete[] samplesRight[id];
+    // Free every stale per-slot buffer (mirror loadSampleFromWavFile).
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
     sampleBackupLengths[id] = 0;
     setSampleSourceFormat(id, 16, false);   // the chunks arrive as int16
-    samples[id]       = newL;
-    samplesRight[id]  = newR;
-    sampleLengths[id] = 0;             // not playable until finalize
+    setSampleBuffers(id, newL, newR, 0);    // not playable until finalize
     streamLoadId       = id;
     streamLoadChannels = ch;
     streamLoadCapacity = estimatedFrames;
@@ -278,6 +256,7 @@ int AudioEngine::finalizeSampleLoad(int id) {
     if (id != streamLoadId) return 0;
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     sampleLengths[id] = streamLoadFilled;   // publish actual frames; the unfilled tail is never reached
+    touchSample(id);                        // a voice started on the empty slot ends
     int frames = streamLoadFilled;
     streamLoadId = -1; streamLoadChannels = 0; streamLoadCapacity = 0; streamLoadFilled = 0;
     LOGD("Streaming sample load: id=%d %d frames", id, frames);
@@ -288,12 +267,7 @@ void AudioEngine::cancelSampleLoad(int id) {
     // Decode failed/aborted — free the partially-filled buffer so it doesn't linger or play as garbage.
     if (id != streamLoadId) return;
     std::lock_guard<std::mutex> lock(sampleEditMutex);
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
-    }
-    delete[] samples[id];      samples[id] = nullptr;
-    delete[] samplesRight[id]; samplesRight[id] = nullptr;
-    sampleLengths[id] = 0;
+    setSampleBuffers(id, nullptr, nullptr, 0);
     streamLoadId = -1; streamLoadChannels = 0; streamLoadCapacity = 0; streamLoadFilled = 0;
 }
 
@@ -487,23 +461,16 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
         if (newR) std::memset(newR + frameIdx, 0, (size_t)(totalFrames - frameIdx) * sizeof(float));
     }
 
-    // Swap into the slot under the edit lock (audio thread try_locks it in the mix loop), stopping
-    // any voice reading the old buffer first — same discipline as loadSample. Free EVERY stale
-    // per-slot buffer: a fresh file makes the old sample's undo/rate caches meaningless.
+    // Swap into the slot under the edit lock (audio thread try_locks it in the mix loop) — same
+    // discipline as loadSample. Free EVERY stale per-slot buffer: a fresh file makes the old
+    // sample's undo/rate caches meaningless.
     {
         std::lock_guard<std::mutex> lock(sampleEditMutex);
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
-        }
-        delete[] samples[id];
-        delete[] samplesRight[id];
         delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
         delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
         sampleBackupLengths[id] = 0;
         setSampleSourceFormat(id, bitsPerSample, isFloat);
-        samples[id] = newL;
-        samplesRight[id] = newR;
-        sampleLengths[id] = totalFrames;
+        setSampleBuffers(id, newL, newR, totalFrames);
     }
 
     lastLoadFailure_ = LoadFailure::NONE;
@@ -668,17 +635,12 @@ int64_t AudioEngine::audio_memory_bytes() const {
 void AudioEngine::clearSample(int id) {
     if (id < 0 || id >= 256) return;
     std::lock_guard<std::mutex> lock(sampleEditMutex);
-    for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].instrId == id && voices[i].isActive) voices[i].stop();
-    }
     // Free every per-slot buffer so a sample doesn't linger in memory after the slot is repurposed
     // (e.g. switching the instrument to SoundFont). delete[] nullptr is a safe no-op.
-    delete[] samples[id];              samples[id] = nullptr;
-    delete[] samplesRight[id];         samplesRight[id] = nullptr;
+    setSampleBuffers(id, nullptr, nullptr, 0);
     delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
     setSampleSourceFormat(id, 16, false);
-    sampleLengths[id]        = 0;
     sampleBackupLengths[id]  = 0;
     LOGD("Sample %d cleared from memory", id);
 }
@@ -688,12 +650,7 @@ void AudioEngine::clearAllSamples() {
     // try_to_lock so it skips its mix block rather than reading freed memory.
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
-    // Stop all voices inside the lock so we know the audio thread can't be
-    // mid-read when we free the buffers below.
-    for (int i = 0; i < MAX_VOICES; i++) {
-        voices[i].stop();
-    }
-    // Clear queues to prevent re-triggering stopped voices.
+    // Clear queues to prevent re-triggering the voices the swap below ends.
     // Each queue method acquires its own internal mutex; no deadlock risk
     // because the audio thread cannot hold those mutexes while we hold sampleEditMutex.
     noteQueue.clear();
@@ -701,15 +658,7 @@ void AudioEngine::clearAllSamples() {
     paramUpdateQueue.clear();
 
     for (int i = 0; i < 256; i++) {
-        if (samples[i]) {
-            delete[] samples[i];
-            samples[i] = nullptr;
-        }
-        if (samplesRight[i]) {
-            delete[] samplesRight[i];
-            samplesRight[i] = nullptr;
-        }
-        sampleLengths[i] = 0;
+        setSampleBuffers(i, nullptr, nullptr, 0);   // every sampler voice ends at the next mix
         setSampleSourceFormat(i, 16, false);
     }
     LOGD("All samples cleared");
@@ -717,28 +666,8 @@ void AudioEngine::clearAllSamples() {
 
 // Sample editor operations live in sample-editor.cpp.
 
-void AudioEngine::stopTrack(int trackId) {
-    // Fade instead of hard stop: this is the preview-stop path (new preview supersedes the old
-    // one / user stops it), and a mid-waveform stop() clicks on sustained material.
-    for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].trackId == trackId && voices[i].isActive) {
-            voices[i].startFadeOut(KILL_FADE_SAMPLES);
-        }
-    }
-    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
-        SoundfontVoice& sv = sfVoices[trackId];
-        // Preview lane: first stop starts TSF's release envelope (click-free, musical stop for the
-        // "any button stops the preview" UX); a second stop while releasing hard-cuts so a long-REL
-        // sound can't ignore the user. Song tracks keep the immediate hard stop.
-        if (trackId == PREVIEW_LANE && sv.isActive && !sv.isReleasingOnly) {
-            sv.noteOff();
-        } else {
-            sv.hardStop();
-        }
-    }
-}
-
 void AudioEngine::stopAll() {
+    stopRampRequested.store(false, std::memory_order_relaxed);   // superseded: nothing is left to ramp
     for (int i = 0; i < MAX_VOICES; i++) {
         voices[i].stop();
     }
@@ -752,6 +681,10 @@ void AudioEngine::stopAll() {
 }
 
 void AudioEngine::stopAllRamped() {
+    stopRampRequested.store(true, std::memory_order_release);
+}
+
+void AudioEngine::startStopRamp(int64_t blockStartFrame) {
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].isActive) voices[i].startFadeOut(KILL_FADE_SAMPLES);
         else                    voices[i].stop();   // idle slot: clear any stale fade state
@@ -763,29 +696,25 @@ void AudioEngine::stopAllRamped() {
     resetTic00Cursors();   // as stopAll(): PLAY starts at row 0
     // The deadline the audio thread reclaims the slots at — see processAudioBlock, which is also
     // where it says why a fade counter alone does not get there.
-    stopRampEndFrame.store(globalFrameCounter.load(std::memory_order_relaxed) + KILL_FADE_SAMPLES,
-                           std::memory_order_relaxed);
-    LOGD("stopAllRamped: every sounding voice is fading out");
+    stopRampEndFrame.store(blockStartFrame + KILL_FADE_SAMPLES, std::memory_order_relaxed);
 }
 
 int AudioEngine::getActiveVoiceCount() {
+    const VoiceView& view = voiceView();
     int count = 0;
     for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].isActive) {
-            count++;
-        }
+        if (view.sampler[i].active) count++;
     }
     return count;
 }
 
 void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
     for (int t = 0; t < trackCount; t++) out[t] = -1;
+    const VoiceView& view = voiceView();
     for (int v = 0; v < MAX_VOICES; v++) {
-        if (!voices[v].isActive) continue;
-        int t = voices[v].trackId;
-        if (t >= 0 && t < trackCount && out[t] == -1) {
-            out[t] = voices[v].noteOctave * 12 + voices[v].notePitch;
-        }
+        if (!view.sampler[v].active) continue;
+        int t = view.sampler[v].trackId;
+        if (t >= 0 && t < trackCount && out[t] == -1) out[t] = view.sampler[v].note;
     }
     // ⚠️ THE SOUNDFONT POOL IS A SECOND VOICE POOL AND THE MONITOR HAS TO READ BOTH. `voices[]` holds
     // samplers only, so a track playing an SF2 instrument reported no note at all — the note column
@@ -796,8 +725,8 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
     // track supersedes an SF note still releasing on it (that is what the note-off at the sampler
     // trigger site means), so whichever pool answered first is the one still being played.
     for (int t = 0; t < SF_VOICE_COUNT && t < trackCount; t++) {
-        if (out[t] == -1 && sfVoices[t].isActive) {
-            out[t] = sfVoices[t].noteOctave * 12 + sfVoices[t].notePitch;
+        if (out[t] == -1 && view.sf[t].active) {
+            out[t] = view.sf[t].note;
         }
     }
 }
@@ -890,7 +819,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         // cannot answer", and a hit that quietly played something else is the bug that started this.
         // Link 0 is exempt from the empty test — the scheduler already made it, before any pushes.
         if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
-        const songcore::Program& p = programs.programs[instrumentId];
+        const songcore::Program& p = programs[instrumentId].program;
         if (p.type == songcore::PROGRAM_EXTERNAL) return -1;   // until the cable is a program too
         if (link > 0 && !p.hasSample && !p.hasSoundfont) return -1;
 
@@ -899,11 +828,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         if (tableId < 0 || tableId >= 256) return instrumentId;
 
         TableRow rows[16];
-        {
-            std::lock_guard<std::mutex> lock(tableMutex);
-            if (!tables[tableId].loaded) return instrumentId;
-            for (int i = 0; i < 16; ++i) rows[i] = tables[tableId].rows[i];
-        }
+        if (!tables.read(tableId, rows)) return instrumentId;
 
         // A table with no INS anywhere in it cannot route, so it is left completely alone — no place
         // is kept for it and nothing below can touch how its voice plays it.
@@ -1022,7 +947,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
     // The depth cap was hit. Sound where we stand rather than following further.
     if (outTableId) *outTableId = tableId;
     if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
-    const songcore::Program& last = programs.programs[instrumentId];
+    const songcore::Program& last = programs[instrumentId].program;
     if (last.type == songcore::PROGRAM_EXTERNAL) return -1;
     if (!last.hasSample && !last.hasSoundfont) return -1;
     return instrumentId;
@@ -1031,9 +956,9 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
 void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_LANES]) {
     for (int l = 0; l < TABLE_LANES; ++l) out[l] = fallback;
     if (tableId < 0 || tableId >= 256) return;
-    std::lock_guard<std::mutex> lock(tableMutex);
-    if (!tables[tableId].loaded) return;
-    const TableRow& lastRow = tables[tableId].rows[15];
+    TableRow rows[16];
+    if (!tables.read(tableId, rows)) return;
+    const TableRow& lastRow = rows[15];
     if (lastRow.fx1Type == FX_TIC) out[0] = lastRow.fx1Value;
     if (lastRow.fx2Type == FX_TIC) out[1] = lastRow.fx2Value;
     if (lastRow.fx3Type == FX_TIC) out[2] = lastRow.fx3Value;
@@ -1237,21 +1162,11 @@ static inline int tic00RowAfter(const TableLane& lane) {
 //   TICFF (0xFF): 200Hz mode — advance ~1 row per 5ms
 template <typename V>
 void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
-    // ONE tableMutex acquisition per voice per block: read the loaded flag AND copy the whole table.
-    //
     // ⚠️ THE WHOLE TABLE, not just the current row, because the AUS/AUF pairing below is re-derived
     // from every row on every block — that is what lets a backwards HOP resume a ramp mid-span with
-    // nothing stored per voice. 128 bytes inside a lock the block already takes, rather than a
-    // second acquisition for the ramps.
-    bool tableLoaded = false;
+    // nothing stored per voice.
     TableRow rows[16];
-    {
-        std::lock_guard<std::mutex> lock(tableMutex);
-        tableLoaded = tables[voice.tableId].loaded;
-        if (tableLoaded)
-            for (int i = 0; i < 16; ++i) rows[i] = tables[voice.tableId].rows[i];
-    }
-    if (!tableLoaded) return;
+    if (!tables.read(voice.tableId, rows)) return;
 
     // How far each lane is through the row it is standing on, for the ramp's sub-row interpolation.
     // 0 in the three non-advancing TIC modes, which hold the row still by design.
@@ -1668,6 +1583,19 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // calls this function directly. ⚠️ A block larger than this would also resolve events too
     // coarsely — see the constant. Silence is the safe answer to both.
     if (numFrames > PROCESS_SUBBLOCK) return;
+
+    // What waitForAudioBlockBoundary() watches: while this is set, a SoundFont handle this block
+    // loaded may still be in use. seq_cst on both sides — see the wait. On the way out, whichever
+    // return is taken, the block also publishes what the screen reads of the voices.
+    struct InBlock {
+        AudioEngine& e;
+        explicit InBlock(AudioEngine& en) : e(en) { e.audioInBlock.store(true); }
+        ~InBlock() {
+            e.publishVoiceView();
+            e.audioBlocksDone.fetch_add(1);
+            e.audioInBlock.store(false);
+        }
+    } inBlock(*this);
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
 
@@ -1788,6 +1716,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     const int64_t blockStartFrame = globalFrameCounter.load(std::memory_order_relaxed);
     const int64_t blockEnd = blockStartFrame + numFrames - 1;
 
+    // A SoundFont freed since a voice was armed: the voice lets go before anything this block can
+    // reach the slot, which may by now hold a different font.
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
+        SoundfontVoice& sv = sfVoices[t];
+        if (sv.sfSlot >= 0 && sv.sfGen != soundfonts[sv.sfSlot].gen.load()) sv.detach();
+    }
+
     // ⚠️ THE TRANSPORT-STOP RAMP HAS A DEADLINE, AND THE POOL IS ONLY EIGHT SLOTS.
     //
     // stopAllRamped() arms a fade and leaves the audio thread to finish it, which is right for the
@@ -1801,6 +1736,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // By this frame the ramp is over and every voice it armed is at zero, so ending them is silent.
     // Only voices that are FADING are touched: a note triggered by a restart is not, and one that
     // began fading inside the ramp window was within KILL_FADE_SAMPLES of silence anyway.
+    if (stopRampRequested.exchange(false, std::memory_order_acquire)) startStopRamp(blockStartFrame);
     {
         const int64_t rampEnd = stopRampEndFrame.load(std::memory_order_relaxed);
         if (rampEnd >= 0 && blockStartFrame >= rampEnd) {
@@ -1818,6 +1754,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     paramUpdateQueue.drainUntil(blockEnd, paramBatch);
     killQueue.drainUntil(blockEnd, killBatch);
     noteQueue.drainUntil(blockEnd, noteBatch);
+    // What the control thread set is taken in AFTER the drain: an edit it made before queuing an event
+    // (a knob, then the reload of the instrument) is then always in force when that event runs. And
+    // before the dispatch, so a table's EQM or TIM this block lands on top of the song's setting.
+    // ⚠️ The instrument data FIRST: the bus EQs are applied from the EQ presets it carries.
+    syncInstrumentData();
+    applyBusSettings();
     size_t paramIdx = 0, killIdx = 0, noteIdx = 0;
 
     // ⚠️ **THE THREE BATCHES ARE ONE TIMELINE, NOT THREE.** Each loop below takes everything due
@@ -2394,12 +2336,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                             startRows[l] = savedTableRows[l];
                     }
 
+                    // The generation BEFORE the buffers: the UI bumps it after storing them, so a
+                    // mismatch here can only make the mix end the voice, never read a stale pointer.
+                    const uint32_t gen = sampleGen[note.sampleId].load();
                     voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
                                       note.trackId, rate, note.baseFrequency,
                                       note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                                       sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
                     voices[v].instrId = note.sampleId;
+                    voices[v].sampleGen = gen;
                     voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
 
                     // pslDuration is already in audio frames — songcore/voice_derive.h multiplies the
@@ -2548,8 +2494,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice& voice = voices[v];
         if (!voice.isActive || !voice.sampleData) continue;
+        // The slot's buffers changed since this voice was triggered: its pointer may be freed.
+        if (voice.sampleGen != sampleGen[voice.instrId].load(std::memory_order_relaxed)) {
+            voice.stop();
+            continue;
+        }
 
-        int effDrive      = std::max(0, std::min(255, (int)(voice.params.base[PARAM_DRIVE]      + voice.modDestValues[PARAM_DRIVE])));
+        int effDrive     = std::max(0, std::min(255, (int)(voice.params.base[PARAM_DRIVE]      + voice.modDestValues[PARAM_DRIVE])));
         int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
         int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
         voice.chain.drive.setDrive(effDrive);
@@ -2897,15 +2848,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             const bool panModded = fabsf(sv.params.mod[PARAM_PAN]) > 0.001f;
             const float modPan = panModded ? fmaxf(0.0f, fminf(1.0f, sv.params.get(PARAM_PAN))) : 0.0f;
 
-            // Snapshot sfSlot ONCE into a local: eviction (JNI thread) calls detach() which sets
-            // sv.sfSlot = -1 at any moment — re-reading the member after the >= 0 check indexes
-            // soundfonts[-1] (out of bounds → garbage tsf* → SIGSEGV inside TSF).
             int volSlot = sv.sfSlot;
             if (panModded && volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
-                // Read the handle INSIDE the slot mutex: loadSoundfont's eviction path can
-                // tsf_close + null it concurrently; a stale pointer here is a use-after-free.
-                std::lock_guard<std::mutex> sfLock(soundfonts[volSlot].mutex);
-                tsf* h = soundfonts[volSlot].handle;
+                tsf* h = soundfonts[volSlot].handle.load();
                 if (h) tsf_channel_set_pan(h, t, modPan);
             }
 
@@ -2932,7 +2877,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
         for (int t = 0; t < SF_VOICE_COUNT; t++) {
             SoundfontVoice& sv = sfVoices[t];
-            // Local sfSlot snapshot — see the volSlot comment above (detach() race).
             int slot = sv.sfSlot;
             if (!sv.isActive || slot < 0 || slot >= MAX_SOUNDFONTS) continue;
 
@@ -2946,10 +2890,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             bool rendered = false;
             {
-                // Handle must be read INSIDE the lock: capturing it before would let
-                // loadSoundfont's eviction tsf_close it between the read and the render.
-                std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-                tsf* h = soundfonts[slot].handle;
+                tsf* h = soundfonts[slot].handle.load();   // valid until this block ends
                 if (h && !sv.hasArmedNote) {
                     // A note-off dispatched mid-block is sent between the two halves of the render,
                     // so TSF's release begins on its frame. TSF steps its envelope per render call
@@ -3432,7 +3373,7 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
     note.instrumentId  = sounding;
     note.noteOn.tableId = chainTableId;             // the voice runs the LAST link's table
 
-    const songcore::Program p = programs.view(note.instrumentId);
+    const songcore::Program p = programView(note.instrumentId);
     const songcore::DerivedNote d =
         songcore::derive_note(note.noteOn, note.targetFrame, note.trackId, note.instrumentId, p,
                               note.tempo, deviceSampleRate.load(std::memory_order_relaxed),
@@ -3528,10 +3469,30 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
     noteQueue.schedule(note);
 }
 
+// Audio thread. The stored row's `sliceMarkers` is null — a self-pointer would not survive the
+// copy between the two sides — so it is re-pointed here, at this thread's own copy of the markers.
+songcore::Program AudioEngine::programView(int id) const {
+    if (id < 0 || id >= songcore::PROGRAM_SLOTS) return songcore::Program{};
+    songcore::Program p = programs[id].program;
+    p.sliceMarkers = programs[id].markers;
+    return p;
+}
+
+// Audio thread, once per block: take in every per-instrument record the control thread published.
+void AudioEngine::syncInstrumentData() {
+    instrumentParams.sync();
+    instrumentModSlots.sync();
+    programs.sync();
+    sfEnvOverrides.sync();
+    eqPresets.sync();
+    eqPresetHex.sync();
+}
+
 void AudioEngine::setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel) {
     if (instrumentId < 0 || instrumentId >= 256) return;
-    SfEnvOverride& o = sfEnvOverrides[instrumentId];
+    SfEnvOverride& o = sfEnvOverrides.edit(instrumentId);
     o.atk = atk; o.dec = dec; o.sus = sus; o.rel = rel;
+    sfEnvOverrides.publish(instrumentId);
 }
 
 // ===================================
@@ -3544,13 +3505,13 @@ void AudioEngine::setSoundfontEnvelopeOverride(int instrumentId, int atk, int de
 
 void AudioEngine::freeSoundfontSlot(int slot) {
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
-    for (int t = 0; t < SF_VOICE_COUNT; t++) {
-        if (sfVoices[t].sfSlot == slot) sfVoices[t].detach();
-    }
-    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-    if (soundfonts[slot].handle) {
-        tsf_close(soundfonts[slot].handle);
-        soundfonts[slot].handle = nullptr;
+    // The voices on this slot are detached by the audio thread's next block (the generation), and
+    // the handle is closed only once the block that may have loaded it has ended.
+    tsf* h = soundfonts[slot].handle.exchange(nullptr);
+    soundfonts[slot].gen.fetch_add(1);
+    if (h) {
+        waitForAudioBlockBoundary();
+        tsf_close(h);
     }
     soundfonts[slot].instrumentId = -1;
     soundfonts[slot].filePath.clear();
@@ -3563,6 +3524,16 @@ void AudioEngine::freeSoundfontSlot(int slot) {
  * written except `lastLoadFailure_`'s answer, which comes back through `failure` instead — this runs
  * on the background worker as often as on the calling thread.
  */
+// ⚠️ Everything tsf would otherwise allocate on the AUDIO thread, done here: it grows its voice array
+// on a note that finds none free, and its channel array on the first call naming a new channel. So
+// both are sized now — a voice pool no preset here comes near, and a channel per SoundFont voice.
+// With a fixed pool tsf takes the voice furthest into its release instead of growing.
+static void readyForAudio(tsf* h, int sampleRate) {
+    tsf_set_output(h, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
+    tsf_set_max_voices(h, 128);
+    tsf_channel_set_pan(h, SF_VOICE_COUNT - 1, 0.5f);   // creates channels 0..8, each at its default
+}
+
 tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFailure* failure) {
     *failure = LoadFailure::NONE;
 
@@ -3581,7 +3552,7 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
             trimmed.size() <= static_cast<size_t>(INT_MAX)) {
             tsf* small = tsf_load_memory(trimmed.data(), static_cast<int>(trimmed.size()));
             if (small) {
-                tsf_set_output(small, TSF_STEREO_INTERLEAVED, getSampleRate(), 0.0f);
+                readyForAudio(small, getSampleRate());
                 return small;
             }
             // ⚠️ Asked before anything else, for the reason the whole-bank path below states: a cancel
@@ -3639,15 +3610,14 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
     // Configured before publication, for the same reason the trimmed path is: a voice that sees the
     // handle must see it ready. `tsf_set_output` is not a read the audio thread can be racing,
     // because nothing else has the pointer yet.
-    tsf_set_output(loaded, TSF_STEREO_INTERLEAVED, getSampleRate(), 0.0f);
+    readyForAudio(loaded, getSampleRate());
     return loaded;
 }
 
 /**
  * Give a parsed handle a slot, evicting the least-recently-used one if every slot is taken.
  *
- * ⚠️ Slot-table work only, and only on the thread that owns it. The mutex is taken to PUBLISH the
- * pointer — a store — and never across a parse.
+ * ⚠️ Slot-table work only, and only on the thread that owns it — never across a parse.
  */
 int AudioEngine::installSoundfont(tsf* handle, int instrumentId, const char* path, int bank,
                                   int preset) {
@@ -3673,13 +3643,12 @@ int AudioEngine::installSoundfont(tsf* handle, int instrumentId, const char* pat
         LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, instrumentId);
     }
 
-    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-    soundfonts[slot].handle       = handle;
     soundfonts[slot].instrumentId = instrumentId;
     soundfonts[slot].filePath     = path;
     soundfonts[slot].bank         = bank;
     soundfonts[slot].preset       = preset;
     soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);
+    soundfonts[slot].handle.store(handle);   // last: the audio thread may use it from here on
     LOGD("🎹 Loaded soundfont slot %d: %s [%d:%d]", slot, path, bank, preset);
     return slot;
 }
@@ -3810,8 +3779,7 @@ void AudioEngine::discardSoundfontLoad() {
 
 bool AudioEngine::soundfontSlotHolds(int slot, const char* path, int bank, int preset) {
     if (slot < 0 || slot >= MAX_SOUNDFONTS || !path) return false;
-    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-    return soundfonts[slot].handle != nullptr && soundfonts[slot].filePath == path &&
+    return soundfonts[slot].handle.load() != nullptr && soundfonts[slot].filePath == path &&
            soundfonts[slot].bank == bank && soundfonts[slot].preset == preset;
 }
 
@@ -3819,8 +3787,7 @@ int AudioEngine::soundfontSlotCount() const { return MAX_SOUNDFONTS; }
 
 bool AudioEngine::soundfontSlotSound(int slot, std::string& path, int& bank, int& preset) {
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return false;
-    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-    if (!soundfonts[slot].handle) return false;
+    if (!soundfonts[slot].handle.load()) return false;
     path   = soundfonts[slot].filePath;
     bank   = soundfonts[slot].bank;
     preset = soundfonts[slot].preset;
@@ -3947,21 +3914,20 @@ void AudioEngine::clearScheduledNotesFrom(int64_t fromFrame, int trackId) {
 void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
     if (tableId < 0 || tableId >= 256) return;
 
-    std::lock_guard<std::mutex> lock(tableMutex);
-    Table& table = tables[tableId];
-
+    TableRow rows[16];
     for (int row = 0; row < 16; row++) {
         int offset = row * 8;
-        table.rows[row].transpose = (int8_t)rowData[offset + 0];
-        table.rows[row].volume = rowData[offset + 1];
-        table.rows[row].fx1Type = rowData[offset + 2];
-        table.rows[row].fx1Value = rowData[offset + 3];
-        table.rows[row].fx2Type = rowData[offset + 4];
-        table.rows[row].fx2Value = rowData[offset + 5];
-        table.rows[row].fx3Type = rowData[offset + 6];
-        table.rows[row].fx3Value = rowData[offset + 7];
+        rows[row].transpose = (int8_t)rowData[offset + 0];
+        rows[row].volume = rowData[offset + 1];
+        rows[row].fx1Type = rowData[offset + 2];
+        rows[row].fx1Value = rowData[offset + 3];
+        rows[row].fx2Type = rowData[offset + 4];
+        rows[row].fx2Value = rowData[offset + 5];
+        rows[row].fx3Type = rowData[offset + 6];
+        rows[row].fx3Value = rowData[offset + 7];
     }
-    table.loaded = true;
+    std::lock_guard<std::mutex> lock(tableWriteMutex);   // writers only; the audio thread never takes it
+    tables.write(tableId, rows);
 
     LOGD("📋 Loaded table %d", tableId);
 }
@@ -4003,25 +3969,64 @@ static void lanesOf(const TableLane (&lanes)[TABLE_LANES], int out[TABLE_LANES])
         out[l] = lanes[l].active ? laneMarker(lanes[l].row, lanes[l].lastProcessed) : -1;
 }
 
+// Audio thread, end of every block: what the voice getters below answer from.
+void AudioEngine::publishVoiceView() {
+    VoiceView v;
+    for (int i = 0; i < MAX_VOICES; i++) {
+        const Voice& src = voices[i];
+        VoiceView::Sampler& d = v.sampler[i];
+        d.active    = src.isActive;
+        d.fading    = src.isFadingOut;
+        d.trackId   = src.trackId;
+        d.instrId   = src.instrId;
+        d.tableId   = src.tableId;
+        d.note      = src.noteOctave * 12 + src.notePitch;
+        d.loopStart = src.actualLoopStart;
+        d.loopEnd   = src.actualLoopEnd;
+        d.sampleGen = src.sampleGen;
+        d.position  = src.position;
+        lanesOf(src.lanes, d.lanes);
+    }
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
+        const SoundfontVoice& src = sfVoices[t];
+        v.sf[t].active  = src.isActive;
+        v.sf[t].tableId = src.tableId;
+        v.sf[t].note    = src.noteOctave * 12 + src.notePitch;
+        lanesOf(src.lanes, v.sf[t].lanes);
+        v.tic00Sounding[t].tableId = tic00Sounding[t];
+        for (int s = 0; s < TIC00_SLOTS; ++s) {
+            const Tic00Cursor& c = tic00Cursor[t][s];
+            v.tic00[t][s].tableId = c.tableId;
+            for (int l = 0; l < TABLE_LANES; ++l)
+                v.tic00[t][s].lanes[l] = c.active[l] ? laneMarker(c.row[l], c.lastProcessed[l]) : -1;
+        }
+    }
+    voiceViewPublisher.publish(v);
+}
+
+static void copyLanes(const int (&from)[TABLE_LANES], int out[TABLE_LANES]) {
+    for (int l = 0; l < TABLE_LANES; ++l) out[l] = from[l];
+}
+
 void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
     for (int l = 0; l < TABLE_LANES; ++l) out[l] = -1;
+    const VoiceView& v = voiceView();
 
-    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
-    if (live >= 0) { lanesOf(voices[live].lanes, out); return; }
+    const int live = v.trackVoice(trackId, /*fadingOne=*/false);
+    if (live >= 0) { copyLanes(v.sampler[live].lanes, out); return; }
 
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
-        const SoundfontVoice& sv = sfVoices[trackId];
-        if (sv.isActive && sv.tableId >= 0) { lanesOf(sv.lanes, out); return; }
+        const VoiceView::Sf& sv = v.sf[trackId];
+        if (sv.active && sv.tableId >= 0) { copyLanes(sv.lanes, out); return; }
         // The table the voice last RAN — a chain's routers have bookmarks too, and the screen is
         // showing the one that made the sound.
-        if (const Tic00Cursor* c = tic00Slot(trackId, tic00Sounding[trackId], /*create=*/false)) {
-            for (int l = 0; l < TABLE_LANES; ++l)
-                out[l] = c->active[l] ? laneMarker(c->row[l], c->lastProcessed[l]) : -1;
+        if (const VoiceView::Bookmark* b = v.bookmark(trackId, v.tic00Sounding[trackId].tableId)) {
+            copyLanes(b->lanes, out);
             return;
         }
     }
-    const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
-    if (fading >= 0) lanesOf(voices[fading].lanes, out);
+    const int fading = v.trackVoice(trackId, /*fadingOne=*/true);
+    if (fading >= 0) copyLanes(v.sampler[fading].lanes, out);
 }
 
 // Same precedence as getVoiceTableRows — live voice, SF voice, the table's bookmark, a fading voice
@@ -4029,47 +4034,48 @@ void AudioEngine::getVoiceTableRows(int trackId, int out[TABLE_LANES]) {
 bool AudioEngine::getTableRowsFor(int trackId, int tableId, int out[TABLE_LANES]) {
     for (int l = 0; l < TABLE_LANES; ++l) out[l] = -1;
     if (tableId < 0) return false;
+    const VoiceView& v = voiceView();
 
-    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
-    if (live >= 0 && voices[live].tableId == tableId) { lanesOf(voices[live].lanes, out); return true; }
+    const int live = v.trackVoice(trackId, /*fadingOne=*/false);
+    if (live >= 0 && v.sampler[live].tableId == tableId) { copyLanes(v.sampler[live].lanes, out); return true; }
 
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
-        const SoundfontVoice& sv = sfVoices[trackId];
-        if (sv.isActive && sv.tableId == tableId) { lanesOf(sv.lanes, out); return true; }
+        const VoiceView::Sf& sv = v.sf[trackId];
+        if (sv.active && sv.tableId == tableId) { copyLanes(sv.lanes, out); return true; }
 
         // No voice is carrying it: a TIC00 table between notes, or one a hit only ROUTED through,
         // which is the same place kept the same way.
-        if (const Tic00Cursor* c = tic00Slot(trackId, tableId, /*create=*/false)) {
-            for (int l = 0; l < TABLE_LANES; ++l)
-                out[l] = c->active[l] ? laneMarker(c->row[l], c->lastProcessed[l]) : -1;
+        if (const VoiceView::Bookmark* b = v.bookmark(trackId, tableId)) {
+            copyLanes(b->lanes, out);
             return true;
         }
     }
 
-    const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
-    if (fading >= 0 && voices[fading].tableId == tableId) { lanesOf(voices[fading].lanes, out); return true; }
+    const int fading = v.trackVoice(trackId, /*fadingOne=*/true);
+    if (fading >= 0 && v.sampler[fading].tableId == tableId) { copyLanes(v.sampler[fading].lanes, out); return true; }
     return false;
 }
 
 bool AudioEngine::getVoiceLoopWindow(int trackId, int* startFrame, int* endFrame) {
-    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
+    const VoiceView& v = voiceView();
+    const int live = v.trackVoice(trackId, /*fadingOne=*/false);
     if (live < 0) return false;
-    if (startFrame) *startFrame = voices[live].actualLoopStart;
-    if (endFrame)   *endFrame   = voices[live].actualLoopEnd;
+    if (startFrame) *startFrame = v.sampler[live].loopStart;
+    if (endFrame)   *endFrame   = v.sampler[live].loopEnd;
     return true;
 }
 
 int AudioEngine::getVoiceTableId(int trackId) {
-    const int live = findTrackVoice(voices, trackId, /*fading=*/false);
-    if (live >= 0) return voices[live].tableId;
+    const VoiceView& v = voiceView();
+    const int live = v.trackVoice(trackId, /*fadingOne=*/false);
+    if (live >= 0) return v.sampler[live].tableId;
 
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
-        const SoundfontVoice& sv = sfVoices[trackId];
-        if (sv.isActive) return sv.tableId;
-        if (tic00Sounding[trackId] >= 0) return tic00Sounding[trackId];
+        if (v.sf[trackId].active) return v.sf[trackId].tableId;
+        if (v.tic00Sounding[trackId].tableId >= 0) return v.tic00Sounding[trackId].tableId;
     }
-    const int fading = findTrackVoice(voices, trackId, /*fading=*/true);
-    return fading >= 0 ? voices[fading].tableId : -1;
+    const int fading = v.trackVoice(trackId, /*fadingOne=*/true);
+    return fading >= 0 ? v.sampler[fading].tableId : -1;
 }
 
 void AudioEngine::scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row) {
@@ -4465,33 +4471,33 @@ void AudioEngine::refreshSoundingInstrument(int instrumentId) {
 }
 
 void AudioEngine::setOttDepth(int depth) {
-    busSettings.ottDepth = depth; busSettings.pushed = true;
-    masterChain.ott.setDepth(depth / 255.0f);
+    busSettings.ottDepth = depth; busSettings.ottForRender = false;
+    recordBus(BUS_OTT);
 }
 
 void AudioEngine::setOttDepthForRender(int depth) {
-    busSettings.ottDepth = depth; busSettings.pushed = true;
-    masterChain.ott.resetForRender(depth / 255.0f);
+    busSettings.ottDepth = depth; busSettings.ottForRender = true;
+    recordBus(BUS_OTT);
 }
 
 void AudioEngine::setMasterFx(int fx) {
-    busSettings.masterFx = fx; busSettings.pushed = true;
-    masterChain.setMasterFx(fx);
+    busSettings.masterFx = fx;
+    recordBus(BUS_MASTER_FX);
 }
 
 void AudioEngine::setDustDepth(int depth) {
-    busSettings.dustDepth = depth; busSettings.pushed = true;
-    masterChain.setDustDepth(depth / 255.0f);
+    busSettings.dustDepth = depth; busSettings.dustForRender = false;
+    recordBus(BUS_DUST);
 }
 
 void AudioEngine::setDustDepthForRender(int depth) {
-    busSettings.dustDepth = depth; busSettings.pushed = true;
-    masterChain.setDustDepthForRender(depth / 255.0f);
+    busSettings.dustDepth = depth; busSettings.dustForRender = true;
+    recordBus(BUS_DUST);
 }
 
 void AudioEngine::setLimiterPreGain(int depth) {
-    busSettings.limiterPreGain = depth; busSettings.pushed = true;
-    masterChain.setLimiterPreGain(1.0f + (depth / 255.0f) * 3.0f);
+    busSettings.limiterPreGain = depth;
+    recordBus(BUS_LIMITER);
 }
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
@@ -4535,7 +4541,7 @@ void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
                                           float sustainLevel, float lfoHz, int oscShape,
                                           int releaseSamples, int lfoTrigMode) {
     if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
-    InstrumentModSlot& slot = instrumentModSlots[sampleId][slotIndex];
+    InstrumentModSlot& slot = instrumentModSlots.edit(sampleId)[slotIndex];
     slot.type = type;
     slot.dest = dest;
     slot.amount = amount;
@@ -4547,6 +4553,7 @@ void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
     slot.oscShape = oscShape;
     slot.lfoTrigMode = lfoTrigMode;
     slot.releaseSamples = releaseSamples;
+    instrumentModSlots.publish(sampleId);
 }
 
 void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate) {
@@ -4613,8 +4620,9 @@ void AudioEngine::triggerKeyRelease(int trackId, int atFrame) {
 void AudioEngine::clearInstrumentModulation(int sampleId) {
     if (sampleId < 0 || sampleId >= 256) return;
     for (int m = 0; m < 4; m++) {
-        instrumentModSlots[sampleId][m] = InstrumentModSlot();
+        instrumentModSlots.edit(sampleId)[m] = InstrumentModSlot();
     }
+    instrumentModSlots.publish(sampleId);
 }
 
 void AudioEngine::updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate) {
@@ -4691,22 +4699,47 @@ void AudioEngine::resetEffectState() {
     LOGD("🎬 Effect chains reset to clean state");
 }
 
-void AudioEngine::replayBusSettings() {
-    if (!busSettings.pushed) return;
-    const BusSettings s = busSettings;   // the setters below record into the live copy
-    setReverbParams(s.reverbDecay, s.reverbDamp, s.reverbWet, s.reverbSize);
-    setReverbAlgo(s.reverbAlgo);
-    setReverbCharacter(s.reverbPre, s.reverbWidth, s.reverbMod);
-    setReverbInputEq(s.reverbInputEq);
-    setDelayParams(s.delayTime, s.delayFeedback, s.delaySync, s.delayBpm, s.delayWet);
-    setDelayCharacter(s.delayPong, s.delayTone, s.delayWobble);
-    setDelayInputEq(s.delayInputEq);
-    setDelayReverbSend(s.delayReverbSend);
-    setMasterEqSlot(s.masterEqSlot);
-    setOttDepth(s.ottDepth);
-    setMasterFx(s.masterFx);
-    setDustDepth(s.dustDepth);
-    setLimiterPreGain(s.limiterPreGain);
+// Control thread: build the reverb's engine for what the record now says, BEFORE the record is
+// published — so the block that applies the new ALGO or SIZE finds the engine already waiting.
+void AudioEngine::prepareReverb() {
+    const BusSettings& s = busSettings;
+    reverbSend.dragonfly.prepare(s.reverbAlgo, s.reverbDecay, s.reverbSize, s.reverbDamp, s.reverbMod,
+                                 static_cast<float>(getSampleRate()));
+}
+
+// Audio thread, top of the block: apply every bus group whose sequence number moved since this
+// thread last applied it — or every group, after setDeviceSampleRate rebuilt the buses.
+void AudioEngine::applyBusSettings() {
+    busPublisher.read(busLive, busSeen);
+    const bool all = busReplayRequested.exchange(false, std::memory_order_acquire) && busLive.pushed;
+    const BusSettings& s = busLive;
+    const auto due = [&](BusGroup g) {
+        if (!all && s.seq[g] == busApplied[g]) return false;
+        busApplied[g] = s.seq[g];
+        return true;
+    };
+    if (due(BUS_REVERB_PARAMS)) reverbSend.setParams(s.reverbDecay, s.reverbDamp, s.reverbSize);
+    if (due(BUS_REVERB_ALGO))   reverbSend.setAlgo(s.reverbAlgo);
+    if (due(BUS_REVERB_CHAR))   reverbSend.setCharacter(s.reverbPre, s.reverbWidth, s.reverbMod);
+    if (due(BUS_REVERB_INEQ))   applyEqPresetToModule(reverbSend.inputEq, s.reverbInputEq);
+    if (due(BUS_DELAY_TIME)) {
+        if (s.delaySync) delaySend.setTimeSync(s.delayTime, s.delayBpm);
+        else             delaySend.setTimeFree(s.delayTime);
+    }
+    if (due(BUS_DELAY_FEEDBACK)) delaySend.feedback = s.delayFeedback / 255.0f;
+    if (due(BUS_DELAY_CHAR))     delaySend.setCharacter(s.delayPong, s.delayTone, s.delayWobble);
+    if (due(BUS_DELAY_INEQ))     applyEqPresetToModule(delaySend.inputEq, s.delayInputEq);
+    if (due(BUS_MASTER_EQ))      applyEqPresetToModule(masterChain.masterEq, s.masterEqSlot);
+    if (due(BUS_OTT)) {
+        if (s.ottForRender) masterChain.ott.resetForRender(s.ottDepth / 255.0f);
+        else                masterChain.ott.setDepth(s.ottDepth / 255.0f);
+    }
+    if (due(BUS_MASTER_FX)) masterChain.setMasterFx(s.masterFx);
+    if (due(BUS_DUST)) {
+        if (s.dustForRender) masterChain.setDustDepthForRender(s.dustDepth / 255.0f);
+        else                 masterChain.setDustDepth(s.dustDepth / 255.0f);
+    }
+    if (due(BUS_LIMITER)) masterChain.setLimiterPreGain(1.0f + (s.limiterPreGain / 255.0f) * 3.0f);
 }
 
 int64_t AudioEngine::getFrameCounter() {

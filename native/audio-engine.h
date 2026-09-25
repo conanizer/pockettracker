@@ -18,7 +18,9 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
+#include <array>
 #include "songcore/program.h"   // Program / ProgramTable — an instrument as the numbers a note needs
+#include "songcore/seqlock.h"   // SeqPublisher — the bus settings, published to the audio thread
 #include "sampler-voice.h"
 #include "soundfont-voice.h"
 #include "soundfont-trim.h"
@@ -238,13 +240,14 @@ public:
     // it. −1 (or an inverted pair) disarms. See InstrumentParams::startFrame.
     void setInstrumentFrameWindow(int instrumentId, int startFrame, int endFrame);
 
-    void stopTrack(int trackId);
-
     /**
      * End every sounding voice IMMEDIATELY. Nobody is listening when this is called: the render path
      * runs it to clear the previous take out of the engine before it schedules, and the whole point
      * there is that no audio from before the call may reach the output. The transport uses
      * stopAllRamped() instead.
+     *
+     * ⚠️ It writes the voices directly, so only the thread that owns them may call it: the audio
+     * thread, or a render while the device is paused.
      */
     void stopAll();
 
@@ -257,8 +260,9 @@ public:
      * instrument's filter and above the reverb/delay send tap — so the tails are fed a signal that
      * fades rather than one that stops mid-cycle and rings the click on for seconds.
      *
-     * ⚠️ The ramp is finished by the AUDIO thread: this call only arms it, so the voices are still
-     * sounding when it returns. Anything that must be silent immediately wants stopAll().
+     * ⚠️ A REQUEST: the audio thread starts the ramp at the top of its next block and finishes it, so
+     * the voices are still sounding when this returns. It touches no voice, so the UI may call it
+     * while a block runs. Anything that must be silent now wants stopAll().
      */
     void stopAllRamped();
 
@@ -819,7 +823,8 @@ public:
     // ⚠️ This is NOT a state-only reset: the module reset()s also put their factory DEFAULTS back
     // (reverb decay 0x60, delay 500 ms, master EQ bypassed). A render pushes the whole project right
     // after it (songcore::prepare_render); a device reopen at another rate goes through
-    // setDeviceSampleRate, which replays `busSettings` itself. Never from the audio thread.
+    // setDeviceSampleRate, which asks the audio thread to apply `busSettings` again. Never from the
+    // audio thread.
     void resetEffectState();
 
     // Get current frame counter
@@ -919,10 +924,19 @@ private:
     // only to notice that a re-init is owed — the coefficients are the buses' own, not readable back.
     int effectsSampleRate = 44100;
 
-    // The last value every bus setter received. setDeviceSampleRate replays it after rebuilding the
-    // buses, so a device that comes back at another rate keeps the song's reverb, delay and master EQ.
-    // ⚠️ Every bus setter records here BEFORE touching its module; one that does not is the reopen
-    // bug again. UI thread only — a table row's EQM reaches the master EQ without passing through.
+    // ⚠️ **A BUS SETTER NEVER TOUCHES ITS MODULE.** It records the value here, bumps its group's
+    // sequence number and publishes the record; the audio thread applies each group whose number moved
+    // at the top of its next block (applyBusSettings). One setter call is one apply, even with an
+    // unchanged value — the STOP restores of a TIM's echo time and a table's EQM depend on that.
+    // The record is also what setDeviceSampleRate replays after rebuilding the buses at a new rate.
+    // Control thread only (the UI, or a render while the device is paused) — a table row's EQM and
+    // TIM reach their modules on the audio thread without passing through.
+    enum BusGroup {
+        BUS_REVERB_PARAMS, BUS_REVERB_ALGO, BUS_REVERB_CHAR, BUS_REVERB_INEQ,
+        BUS_DELAY_TIME, BUS_DELAY_FEEDBACK, BUS_DELAY_CHAR, BUS_DELAY_INEQ,
+        BUS_MASTER_EQ, BUS_OTT, BUS_MASTER_FX, BUS_DUST, BUS_LIMITER,
+        BUS_GROUPS
+    };
     struct BusSettings {
         int   reverbDecay = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbSize = 0x60;
         int   reverbPre = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
@@ -933,10 +947,24 @@ private:
         int   delayInputEq = -1, delayReverbSend = 0;
         int   masterEqSlot = -1;
         int   ottDepth = 0, masterFx = 0, dustDepth = 0, limiterPreGain = 0;
+        bool  ottForRender = false, dustForRender = false;   // snap rather than glide (…ForRender)
         bool  pushed = false;   // nothing is replayed until a setter has run
+        uint32_t seq[BUS_GROUPS] = {};
     };
-    BusSettings busSettings;
-    void replayBusSettings();
+    BusSettings               busSettings;       // the control thread's record
+    SeqPublisher<BusSettings> busPublisher;
+    void recordBus(BusGroup g) {
+        ++busSettings.seq[g];
+        busSettings.pushed = true;
+        busPublisher.publish(busSettings);
+    }
+    // Audio thread: its copy, and the sequence number of each group it last applied.
+    BusSettings       busLive;
+    uint32_t          busSeen = 0;
+    uint32_t          busApplied[BUS_GROUPS] = {};
+    std::atomic<bool> busReplayRequested{false};   // setDeviceSampleRate: apply every group again
+    void applyBusSettings();
+    void prepareReverb();   // control thread — the one place the reverb's engines are allocated
 
     Voice voices[MAX_VOICES];
 
@@ -975,6 +1003,46 @@ private:
 
     /** This track's bookmark for `tableId`; null when there is none and `create` is false. */
     Tic00Cursor* tic00Slot(int trackId, int tableId, bool create);
+
+    // ⚠️ **WHAT THE SCREEN READS OF THE VOICES.** The audio thread publishes this at the end of every
+    // block; every voice getter the UI calls answers from its copy and never from the voices, which
+    // change under it. A table column's `lanes` entry is the marker it draws, −1 for none.
+    struct VoiceView {
+        struct Sampler {
+            bool     active = false, fading = false;
+            int      trackId = -1, instrId = -1, tableId = -1, note = -1, loopStart = 0, loopEnd = 0;
+            uint32_t sampleGen = 0;
+            double   position  = 0.0;
+            int      lanes[TABLE_LANES] = {-1, -1, -1};
+        } sampler[MAX_VOICES];
+        struct Sf {
+            bool active = false;
+            int  tableId = -1, note = -1;
+            int  lanes[TABLE_LANES] = {-1, -1, -1};
+        } sf[SF_VOICE_COUNT];
+        struct Bookmark {
+            int tableId = -1;
+            int lanes[TABLE_LANES] = {-1, -1, -1};
+        } tic00[SF_VOICE_COUNT][TIC00_SLOTS];
+        struct Sounding { int tableId = -1; } tic00Sounding[SF_VOICE_COUNT];
+        /** The bookmark this track keeps for `tableId`, or null. */
+        const Bookmark* bookmark(int trackId, int tableId) const {
+            if (trackId < 0 || trackId >= SF_VOICE_COUNT || tableId < 0) return nullptr;
+            for (const Bookmark& b : tic00[trackId]) if (b.tableId == tableId) return &b;
+            return nullptr;
+        }
+        /** The first sounding sampler voice on the track that is (or is not) fading; −1 for none. */
+        int trackVoice(int trackId, bool fadingOne) const {
+            for (int v = 0; v < MAX_VOICES; v++)
+                if (sampler[v].active && sampler[v].fading == fadingOne && sampler[v].trackId == trackId) return v;
+            return -1;
+        }
+    };
+    SeqPublisher<VoiceView> voiceViewPublisher;
+    void publishVoiceView();              // audio thread
+    VoiceView voiceView_;                 // the UI's copy
+    uint32_t  voiceViewSeen_ = 0;
+    const VoiceView& voiceView() { voiceViewPublisher.read(voiceView_, voiceViewSeen_); return voiceView_; }
     /** Rewind every track's bookmarks — what a transport stop does. */
     void resetTic00Cursors();
 
@@ -1001,10 +1069,18 @@ private:
     // so they use the engine's lock-free PRNG rather than the sequencer's.
     uint32_t chainRngState = 0x9E3779B9u;
 
-    float* samples[256];
-    float* samplesRight[256];          // right channel for stereo samples (null = mono)
-    int    sampleLengths[256];         // ONE length for both channels — samplesRight[id], when non-null,
-                                       // always has exactly this length (kept in lockstep by every edit op)
+    // Written by the UI under sampleEditMutex; read by the trigger with no lock, hence atomic.
+    //
+    // ⚠️ A voice keeps its own copy of the pointer and length, so what keeps it off a freed buffer is
+    // `sampleGen`: every change of a slot's buffers bumps it AFTER the new pointers are stored, and the
+    // mix — under the same mutex — ends any voice triggered on an older generation before reading it.
+    // Go through setSampleBuffers / touchSample, which do the bump; the UI never stops a voice.
+    std::atomic<float*>   samples[256];
+    std::atomic<float*>   samplesRight[256];    // right channel for stereo samples (null = mono)
+    std::atomic<int>      sampleLengths[256];   // ONE length for both channels — samplesRight[id], when
+                                                // non-null, always has exactly this length
+    std::atomic<uint32_t> sampleGen[256];
+    void touchSample(int id) { sampleGen[id].fetch_add(1); }   // caller holds sampleEditMutex
     // Undo + RATE-HIGH caches exist only to RESTORE the working buffer, never to play directly, so
     // they are stored as int16 to halve their RAM. Bit-exact for the 16-bit-sourced
     // WAVs that dominate (decoder reads those as v/32768); ~-96 dBFS requantization otherwise.
@@ -1042,9 +1118,10 @@ private:
 
     // Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
     // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
-    // read a stale or short right channel. Pass newR=nullptr for a mono result.
+    // read a stale or short right channel. Pass newR=nullptr for a mono result. Caller holds
+    // sampleEditMutex; the voices playing the old buffers end at the next mix (sampleGen).
     void setSampleBuffers(int id, float* newL, float* newR, int newLen);
-    // Stop voices reading slot `id`'s buffers, then acquire sampleEditMutex. EVERY destructive
+    // Acquire sampleEditMutex and end every voice playing slot `id` (touchSample). EVERY destructive
     // sample-editor op must hold the returned lock while mutating/freeing the slot's buffers so
     // the audio thread's try_lock fails (one silent block) instead of reading freed memory.
     std::unique_lock<std::mutex> beginSampleEdit(int id);
@@ -1053,10 +1130,21 @@ private:
     void applyEqPresetToModule(EqModule& eq, int slot);
     // The same write, from band VALUES rather than a slot — an AUS/AUF morph tick (EqBandsHex).
     void applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands);
-    // Release one SoundFont slot. Order matters — detach the per-track voices FIRST (so the render
-    // pass stops touching the slot), then close the handle under the slot mutex. The only place a
-    // slot is ever freed: LRU eviction, unloadSoundfont and clearAllSoundfonts all route through it.
+    // Release one SoundFont slot: take the handle out, bump the slot's generation, wait for the audio
+    // block in flight to end, close it. The only place a slot is ever freed: LRU eviction,
+    // unloadSoundfont and clearAllSoundfonts all route through it. Never on the audio thread.
     void freeSoundfontSlot(int slot);
+
+    // ⚠️ A block that is running when this is called may hold a pointer it loaded before the caller
+    // unpublished it; this returns once that block has ended (at once if none is running). The caller
+    // must have unpublished the pointer FIRST — the two seq_cst sides are what make that sufficient.
+    // Never on the audio thread: it would wait for itself.
+    void waitForAudioBlockBoundary() {
+        const uint64_t seen = audioBlocksDone.load();
+        while (audioInBlock.load() && audioBlocksDone.load() == seen) std::this_thread::yield();
+    }
+    std::atomic<bool>     audioInBlock{false};
+    std::atomic<uint64_t> audioBlocksDone{0};
 
     // ── the two halves of a load, split so one of them can run somewhere else ─────────────────────
     //
@@ -1109,11 +1197,20 @@ private:
      */
     int soundfontFileIndexSlot(const char* path);
 
-    InstrumentParams instrumentParams[256];
-    InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
+    // ⚠️ **EVERY PER-INSTRUMENT TABLE BELOW IS A StagedTable:** a setter edits the control thread's
+    // copy and publishes it; the audio thread reads its own copy, pulled at one point in its block
+    // (syncInstrumentData). A setter that forgets to publish is an edit nobody hears.
+    StagedTable<InstrumentParams, 256>                        instrumentParams;
+    StagedTable<std::array<InstrumentModSlot, 4>, 256>        instrumentModSlots;   // [sampleId][slot]
     // The engine's own copy of every instrument, keyed by INSTRUMENT id — not by sampleId, which two
-    // instruments can share. Written from the UI thread, read at the trigger. See setProgram().
-    songcore::ProgramTable programs;
+    // instruments can share. Read at the trigger through programView(). See setProgram().
+    struct ProgramRow {
+        songcore::Program program;
+        int64_t           markers[songcore::PROGRAM_SLICE_MARKERS];
+    };
+    StagedTable<ProgramRow, songcore::PROGRAM_SLOTS> programs;
+    songcore::Program programView(int id) const;   // audio thread
+    void syncInstrumentData();                      // audio thread
 
     /**
      * Fill in a deferred note's sound, at the moment it fires. Returns false when the instrument it
@@ -1128,10 +1225,10 @@ private:
     // (always unique) and applied atomically in fireArmedNote, so two instruments sharing one de-duplicated
     // tsf handle never collide on the shared preset-region patch. -1 = keep the SF2 preset's own value.
     struct SfEnvOverride { int atk = -1, dec = -1, sus = -1, rel = -1; };
-    SfEnvOverride sfEnvOverrides[256];
+    StagedTable<SfEnvOverride, 256> sfEnvOverrides;
 
-    Table tables[256];             // 256 tables, each with 16 rows
-    std::mutex tableMutex;         // Protect table data during load/access
+    TableStore tables;             // 256 tables; the audio thread reads them without a lock
+    std::mutex tableWriteMutex;
 
     NoteQueue noteQueue;             // Thread-safe queue of scheduled notes
     KillQueue killQueue;             // Thread-safe queue of scheduled kill events
@@ -1160,10 +1257,11 @@ private:
     // and keeps the planned Linux port correct on unknown hardware.
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
 
-    // The frame the transport-stop ramp is over at, or −1 when no stop is in flight. Armed by
-    // stopAllRamped() (UI thread), consumed by processAudioBlock, which is where the reason it has
-    // to exist at all is written down.
+    // The frame the transport-stop ramp is over at, or −1 when no stop is in flight. Audio thread;
+    // processAudioBlock is where the reason it has to exist at all is written down.
     std::atomic<int64_t> stopRampEndFrame{-1};
+    std::atomic<bool>    stopRampRequested{false};   // stopAllRamped() → the next block's top
+    void startStopRamp(int64_t blockStartFrame);
 
     // Session entropy mixed into per-note RNG seeds (RND/DRNK LFO). Reseeded from the wall
     // clock at construction and at every resetFrameCounter() (= offline-render start): seeds
@@ -1286,7 +1384,8 @@ private:
     // EQ preset bank (128 slots; pre-converted from hex to Hz/dB/Q)
     struct EqPresetBank {
         EqBandData bands[3];
-    } eqPresets[128];
+    };
+    StagedTable<EqPresetBank, 128> eqPresets;
     // ⚠️ THE SAME 128 PRESETS AS AUTHORED HEX, and the bank above cannot answer for them. A morph
     // interpolates the AUTHORED bytes — that is what makes a frequency sweep linear in log-frequency
     // — and Hz/dB/Q is a one-way conversion: interpolating those instead walks a different path
@@ -1294,7 +1393,7 @@ private:
     // above the seam, where the model still has the hex; a TABLE morph happens here.
     //
     // Both arrays are written in exactly one place, `setEqBand`, and always together.
-    EqBandsHex eqPresetHex[128];
+    StagedTable<EqBandsHex, 128> eqPresetHex;
 
     // Per-track waveform buffers for OCTA visualizer.
     // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE, declared public above): all

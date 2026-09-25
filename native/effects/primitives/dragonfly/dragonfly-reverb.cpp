@@ -50,6 +50,7 @@ double size_m(int sizeHex, double lo, double hi) { return lo + (hi - lo) * sizeH
 // ─── Engines ─────────────────────────────────────────────────────────────────────────────────────
 
 struct Engine {
+    int   algo = 0;
     float rate = 0.0f;
     Cells applied;   // what `apply` last saw; -1 forces every setter
     virtual ~Engine() = default;
@@ -369,12 +370,31 @@ std::unique_ptr<Engine> make_engine(int algo) {
 }  // namespace
 
 struct DragonflyReverb::Impl {
-    std::atomic<int>   decay{0x60}, size{0x60}, damp{0x80}, mod{0x10};
-    std::atomic<float> rate{48000.0f};
-    std::atomic<bool>  clearRequested{false};
+    std::atomic<int>  decay{0x60}, size{0x60}, damp{0x80}, mod{0x10};
+    std::atomic<bool> clearRequested{false};
 
+    // The audio thread's engines, one per algorithm, each built by `prepare` and handed over.
     std::unique_ptr<Engine> engines[kReverbAlgoCount];
     float                   inL[kBlock], inR[kBlock];
+
+    // The handover: one engine waiting to be taken, and the ones it replaced, waiting to be freed.
+    std::atomic<Engine*>  pending{nullptr};
+    static constexpr int  kRetired = 8;
+    std::atomic<Engine*>  retired[kRetired] = {};
+
+    // The control thread's own record of what it last handed over for each algorithm — everything
+    // an engine has to be REBUILT for. The other cells are applied to a running engine.
+    struct Key {
+        int   size = -1, program = -1;
+        float rate = 0.0f;
+        bool operator==(const Key& o) const { return size == o.size && program == o.program && rate == o.rate; }
+    };
+    Key built[kReverbAlgoCount];
+
+    ~Impl() {
+        delete pending.load();
+        for (auto& r : retired) delete r.load();
+    }
 };
 
 DragonflyReverb::DragonflyReverb() : impl(std::make_unique<Impl>()) {}
@@ -387,41 +407,73 @@ void DragonflyReverb::setCells(int decayHex, int sizeHex, int dampHex, int modHe
     impl->mod.store(std::clamp(modHex, 0, 255), std::memory_order_relaxed);
 }
 
-void DragonflyReverb::setRate(float sampleRate) {
-    impl->rate.store(sampleRate, std::memory_order_relaxed);
-}
-
 void DragonflyReverb::requestClear() { impl->clearRequested.store(true, std::memory_order_relaxed); }
+
+// EARLY's MOD picks a reflection program, and loading one allocates — so for EARLY it is a rebuild.
+static int early_program(int modHex) { return std::min(7, modHex / 32); }
+
+void DragonflyReverb::prepare(int algo, int decayHex, int sizeHex, int dampHex, int modHex,
+                              float sampleRate) {
+    Impl& m = *impl;
+    for (auto& r : m.retired) delete r.exchange(nullptr, std::memory_order_acquire);
+    if (algo <= 0 || algo >= kReverbAlgoCount) return;
+
+    const Impl::Key want{sizeHex, algo == kReverbAlgoEarly ? early_program(modHex) : -1, sampleRate};
+    if (m.built[algo] == want) return;
+
+    std::unique_ptr<Engine> e = make_engine(algo);
+    e->algo = algo;
+    e->setRate(sampleRate);
+    e->rate = sampleRate;
+    const Cells cells{std::clamp(decayHex, 0, 255), std::clamp(sizeHex, 0, 255),
+                      std::clamp(dampHex, 0, 255), std::clamp(modHex, 0, 255)};
+    e->apply(cells);
+    e->applied = cells;
+    // A handover the audio thread never took is thrown away here, and its algorithm forgotten, so
+    // selecting that algorithm again builds it again.
+    if (Engine* untaken = m.pending.exchange(e.release(), std::memory_order_acq_rel)) {
+        m.built[untaken->algo] = Impl::Key{};
+        delete untaken;
+    }
+    m.built[algo] = want;
+}
 
 void DragonflyReverb::process(int algo, bool switched, const float* inL, const float* inR,
                               float* outL, float* outR, int numFrames) {
-    if (algo <= 0 || algo >= kReverbAlgoCount) {
+    Impl& m = *impl;
+
+    // Take a handed-over engine — only when there is a slot to park the one it replaces in, since
+    // that one is freed by the control thread and never here.
+    if (Engine* p = m.pending.load(std::memory_order_acquire)) {
+        int park = -1;
+        for (int i = 0; i < Impl::kRetired && park < 0; ++i)
+            if (!m.retired[i].load(std::memory_order_relaxed)) park = i;
+        if (park >= 0 && m.pending.compare_exchange_strong(p, nullptr, std::memory_order_acq_rel)) {
+            Engine* old = m.engines[p->algo].release();
+            m.engines[p->algo].reset(p);
+            if (old) m.retired[park].store(old, std::memory_order_release);
+        }
+    }
+
+    if (algo <= 0 || algo >= kReverbAlgoCount || !m.engines[algo]) {
+        // Nothing built for it yet: the control thread builds an engine when its algorithm is chosen,
+        // and nothing is allocated here.
         std::memset(outL, 0, sizeof(float) * numFrames);
         std::memset(outR, 0, sizeof(float) * numFrames);
         return;
     }
-    Impl& m = *impl;
+    Engine& e = *m.engines[algo];
 
-    std::unique_ptr<Engine>& slot = m.engines[algo];
-    if (!slot) {
-        slot     = make_engine(algo);
-        switched = false;   // nothing in it to replay
-    }
-    Engine& e = *slot;
-
-    const float rate = m.rate.load(std::memory_order_relaxed);
-    if (e.rate != rate) {
-        e.setRate(rate);
-        e.rate    = rate;
-        e.applied = Cells{};   // a rate change re-derives every coefficient
-    }
     const bool clear = m.clearRequested.exchange(false, std::memory_order_relaxed);
     if (switched || clear) e.mute();
 
-    const Cells want{m.decay.load(std::memory_order_relaxed), m.size.load(std::memory_order_relaxed),
-                     m.damp.load(std::memory_order_relaxed), m.mod.load(std::memory_order_relaxed)};
-    if (want.decay != e.applied.decay || want.size != e.applied.size ||
-        want.damp != e.applied.damp || want.mod != e.applied.mod) {
+    // The cells a running engine can take without allocating. SIZE (and EARLY's program) are left
+    // as the engine was built: a change to them arrives as a new engine from `prepare`.
+    Cells want{m.decay.load(std::memory_order_relaxed), e.applied.size,
+               m.damp.load(std::memory_order_relaxed), m.mod.load(std::memory_order_relaxed)};
+    if (algo == kReverbAlgoEarly && early_program(want.mod) != early_program(e.applied.mod))
+        want.mod = e.applied.mod;
+    if (want.decay != e.applied.decay || want.damp != e.applied.damp || want.mod != e.applied.mod) {
         e.apply(want);
         e.applied = want;
     }

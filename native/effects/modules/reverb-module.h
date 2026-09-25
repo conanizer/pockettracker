@@ -96,7 +96,6 @@ struct ReverbModule {
             sampleRate = MAX_SUPPORTED_RATE;
             reverb.Init(MAX_SUPPORTED_RATE);
         }
-        dragonfly.setRate(sr);
         dragonfly.requestClear();
         // The default cells, until the project pushes its own — `reverb_decay_gain` is 1 at the
         // defaults by construction, so the ramp starts where a default project would already have it.

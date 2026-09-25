@@ -60,6 +60,7 @@
 #include "midi_map.h"   // the knob gate: ctl_ch_covers, which CCs a mapping claims
 #include "model.h"
 #include "router.h"     // TrackInstruments — the shared "whose track is this?" rule
+#include "seqlock.h"
 
 namespace songcore {
 
@@ -427,51 +428,8 @@ inline MidiRoute build_midi_route(const Project& p, const TrackInstruments& lear
     return r;
 }
 
-/**
- * One writer publishes a `MidiRoute`, one reader copies it out without ever waiting.
- *
- * A sequence lock: the writer bumps `seq_` to odd, writes, bumps to even; the reader copies and
- * keeps the copy only if `seq_` was even and unchanged across it. The words are atomics so the
- * overlap is defined; a reader that lands on a write in progress keeps the route it already had,
- * which is at most one poll old.
- */
-class MidiRoutePublisher {
-  public:
-    /** UI thread. */
-    void publish(const MidiRoute& r) {
-        uint64_t words[WORDS] = {0};
-        std::memcpy(words, &r, sizeof r);
-        const uint32_t s = seq_.load(std::memory_order_relaxed);
-        seq_.store(s + 1, std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release);
-        for (size_t i = 0; i < WORDS; ++i) words_[i].store(words[i], std::memory_order_relaxed);
-        seq_.store(s + 2, std::memory_order_release);
-    }
-
-    /** The consumer. True when `out` now holds a route newer than `seen` (which is updated). */
-    bool read(MidiRoute& out, uint32_t& seen) const {
-        for (int attempt = 0; attempt < 4; ++attempt) {
-            const uint32_t s1 = seq_.load(std::memory_order_acquire);
-            if (s1 & 1u) continue;            // a write is in progress: try once more, then keep ours
-            if (s1 == seen) return false;     // nothing new
-            uint64_t words[WORDS];
-            for (size_t i = 0; i < WORDS; ++i) words[i] = words_[i].load(std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_acquire);
-            if (seq_.load(std::memory_order_relaxed) != s1) continue;
-            std::memcpy(&out, words, sizeof out);
-            seen = s1;
-            return true;
-        }
-        return false;
-    }
-
-    bool published() const { return seq_.load(std::memory_order_acquire) != 0; }
-
-  private:
-    static constexpr size_t WORDS = (sizeof(MidiRoute) + 7) / 8;
-    std::atomic<uint32_t> seq_{0};
-    std::atomic<uint64_t> words_[WORDS] = {};
-};
+/** The route, published by the UI thread and copied out by the drain without waiting. */
+using MidiRoutePublisher = SeqPublisher<MidiRoute>;
 
 // ─── The router — channel to track, track to instrument, message to bus record ──────────────────
 

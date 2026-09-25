@@ -5,6 +5,7 @@
 #include <string>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include "audio-defs.h"
 #include "songcore/program.h"   // NoteOnPayload — a queued note carries it until the trigger
 
@@ -20,9 +21,13 @@ struct tsf;
 // ⚠️ `SfBigBlock g_sfBig[MAX_SOUNDFONTS + 2]` in soundfont-voice.cpp sizes off this.
 static const int MAX_SOUNDFONTS = 12;
 
+// ⚠️ **The audio thread reads `handle` and `gen` and nothing else; every other field is the UI's.**
+// It takes no lock: a handle it loaded stays valid until its block ends, because `freeSoundfontSlot`
+// swaps the pointer out and waits for that block boundary before `tsf_close`. A voice records `gen`
+// when it is armed, and one whose slot has been freed since is detached at the top of the next block.
 struct SoundfontEntry {
-    tsf* handle = nullptr;
-    std::mutex mutex;            // Protects handle from concurrent audio/JNI access
+    std::atomic<tsf*>     handle{nullptr};
+    std::atomic<uint32_t> gen{0};  // bumped by every free
     int instrumentId = -1;       // Which Instrument slot owns this (-1 = free)
     // ⚠️ **The IDENTITY of a slot is the path AND the bank AND the preset**, because what is loaded
     // is one preset trimmed out of the file rather than the file. Two instruments on the same .sf2 at
@@ -527,13 +532,72 @@ struct TableRow {
                  fx3Type(0), fx3Value(0) {}
 };
 
-struct Table {
-    TableRow rows[16];      // 16 rows per table
-    bool loaded;            // Whether this table has been loaded from Kotlin
+static_assert(sizeof(TableRow) == 8, "a table row is one 64-bit word in TableStore");
 
-    Table() : loaded(false) {
-        // Rows initialized by default constructor
+/**
+ * The engine's 256 tables: one writer (the UI's `loadTable`), readers on the audio thread that never
+ * wait.
+ *
+ * Each table has two copies. The writer fills the one readers are NOT pointed at and then points
+ * them at it, so a reader always finds a finished copy; a sequence number per copy catches the one
+ * case that can still tear — two writes landing inside a single 128-byte read — and the reader
+ * simply reads again. The rows are atomic words so the overlap is defined behaviour.
+ */
+class TableStore {
+  public:
+    static constexpr int TABLES = 256;
+    static constexpr int ROWS   = 16;
+
+    /** Writer. The caller serialises writers. */
+    void write(int id, const TableRow (&rows)[ROWS]) {
+        Entry& e = entries_[id];
+        const int next = e.current.load(std::memory_order_relaxed) ^ 1;
+        Copy& c = e.copies[next];
+        const uint32_t s = c.seq.load(std::memory_order_relaxed);
+        c.seq.store(s + 1, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
+        for (int r = 0; r < ROWS; ++r) {
+            uint64_t w;
+            std::memcpy(&w, &rows[r], sizeof w);
+            c.rows[r].store(w, std::memory_order_relaxed);
+        }
+        c.seq.store(s + 2, std::memory_order_release);
+        e.current.store(next, std::memory_order_release);
+        e.loaded.store(true, std::memory_order_release);
     }
+
+    /** Any thread, never waits. False when the table has never been loaded. */
+    bool read(int id, TableRow (&out)[ROWS]) const {
+        const Entry& e = entries_[id];
+        if (!e.loaded.load(std::memory_order_acquire)) return false;
+        // ⚠️ Bounded: a retry needs the writer to have finished a whole copy during our read, so
+        // eight in a row cannot happen at editing speed. If it ever did, the table is skipped for
+        // this call rather than read torn.
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            const Copy& c = e.copies[e.current.load(std::memory_order_acquire)];
+            const uint32_t s1 = c.seq.load(std::memory_order_acquire);
+            if (s1 & 1u) continue;
+            uint64_t words[ROWS];
+            for (int r = 0; r < ROWS; ++r) words[r] = c.rows[r].load(std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_acquire);
+            if (c.seq.load(std::memory_order_relaxed) != s1) continue;
+            std::memcpy(out, words, sizeof words);
+            return true;
+        }
+        return false;
+    }
+
+  private:
+    struct Copy {
+        std::atomic<uint32_t> seq{0};
+        std::atomic<uint64_t> rows[ROWS] = {};
+    };
+    struct Entry {
+        Copy copies[2];
+        std::atomic<int>  current{0};
+        std::atomic<bool> loaded{false};
+    };
+    Entry entries_[TABLES];
 };
 
 // Convert unsigned transpose byte to signed semitones

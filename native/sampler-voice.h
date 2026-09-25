@@ -42,6 +42,7 @@ struct Voice : public IAudioVoice {
     double position;
     int trackId;
     int instrId = -1;        // Instrument index (= sampleId); used for per-instrument spectrum capture
+    uint32_t sampleGen = 0;  // AudioEngine::sampleGen[instrId] when triggered; the mix ends a stale one
     float playbackRate;
     float basePlaybackRate;  // Original rate without table transpose
     float volume;
@@ -347,15 +348,11 @@ struct Voice : public IAudioVoice {
     // trackId is preserved (NOT cleared) so that Step-1 in the voice allocator
     // can recycle this fading slot directly when the same track fires again,
     // preventing voice-count explosion during simultaneous multi-track triggers.
-    // `atFrame`: the frame inside the current block the fade starts at (0 = now). Only the audio
-    // thread's dispatch loop passes one; a UI-thread caller cannot know the block's phase.
+    // `atFrame`: the frame inside the current block the fade starts at (0 = now).
     void startFadeOut(int fadeSamples = DECLICK_SAMPLES, int atFrame = 0) {
         if (isFadingOut) return;  // Already fading — don't restart
         fadeStartFrame = atFrame;
         // isActive stays true: slot stays reserved for the duration of the fade.
-        // The counters are written BEFORE isFadingOut: stopTrack() calls this from the JNI
-        // thread, and the mix loop must never observe isFadingOut=true with a stale zero
-        // counter (that would end the voice with the hard cut the fade exists to prevent).
         fadeOutTotal = (fadeSamples > 0) ? fadeSamples : 1;
         fadeOutRemaining = fadeOutTotal;
         isFadingOut = true;

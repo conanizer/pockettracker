@@ -243,11 +243,8 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 // SOUNDFONT INFRASTRUCTURE (TinySoundFont)
 // ===================================
 // Supports up to MAX_SOUNDFONTS simultaneously loaded soundfont files.
-// tsf is NOT thread-safe — each entry has its own mutex.
-// The mutex is held by:
-//   • audio thread   — armNote(), applyPitchMod(), tsf_render_float() (and, under that last one's
-//                      lock, fireArmedNote())
-//   • JNI/main thread — hardStop(), setVolume(), setPan(), unloadSoundfont()
+// tsf is NOT thread-safe, and only the audio thread calls into a loaded handle — see SoundfontEntry
+// for how the UI frees one without a lock.
 
 SoundfontEntry soundfonts[MAX_SOUNDFONTS];
 
@@ -263,7 +260,7 @@ static constexpr float SF_RELEASE_RAMP_MAX_SECS = 0.1f;
  *
  * ⚠️ Read off the VOICE and not off its region: `tsf_preset_apply_overrides` rewrites a region's
  * envelope, so the region can already be carrying the next instrument's SF REL while this note is
- * still playing the one it captured at note-on. The caller holds the slot mutex.
+ * still playing the one it captured at note-on.
  */
 static float longest_release(tsf* h, int channel) {
     float longest = 0.0f;
@@ -278,17 +275,11 @@ static float longest_release(tsf* h, int channel) {
 
 // ── SoundfontVoice method implementations ──────────────────────────────────
 
-// NOTE on the `int slot = sfSlot;` snapshots below: detach() (JNI thread, SF2 eviction) sets
-// sfSlot = -1 at any moment. Checking the member and then re-reading it to index soundfonts[]
-// is a TOCTOU race — soundfonts[-1] is out of bounds and yields a garbage tsf*. Always copy
-// to a local once, validate the local, and index with the local only.
-
 void SoundfontVoice::hardStop() {
     pendingTsfOffAt = -1;   // every voice on the channel is killed below
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-        tsf* h = soundfonts[slot].handle;
+        tsf* h = soundfonts[slot].handle.load();
         if (h) {
             if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
             // ⚠️⚠️ AND THEN KILL WHAT THAT LEFT ALIVE, OR THE NEXT TAKE PLAYS IT.
@@ -307,7 +298,7 @@ void SoundfontVoice::hardStop() {
             // Killing here is free at every call site: each one either has the channel already at
             // zero (the stop ramp's end, an ADSR that has finished, the render loop's silence
             // detection) or wants it gone this instant (the render path's stopAll, a second preview
-            // stop). ⚠️ Under the slot mutex, which is what makes it safe from the UI thread.
+            // stop).
             struct tsf_voice* v    = h->voices;
             struct tsf_voice* vEnd = v + h->voiceNum;
             for (; v != vEnd; v++) {
@@ -373,8 +364,7 @@ void SoundfontVoice::noteOffAt(int atFrame) {
         bool ownRamp = false;
         int slot = sfSlot;
         if (slot >= 0 && slot < MAX_SOUNDFONTS) {
-            std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-            tsf* h = soundfonts[slot].handle;
+            tsf* h = soundfonts[slot].handle.load();
             if (h && activeNote >= 0) {
                 // ⚠️⚠️ **A SHORT RELEASE IS RUN AS OUR OWN RAMP, BECAUSE TSF CANNOT FADE ONE.** Its
                 // amplitude envelope is computed once per 64-sample render chunk and held flat across
@@ -419,8 +409,7 @@ void SoundfontVoice::setPan(float pan) {
     params.setBase(PARAM_PAN, pan);
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-        tsf* h = soundfonts[slot].handle;
+        tsf* h = soundfonts[slot].handle.load();
         if (h) tsf_channel_set_pan(h, _trackId, pan);
     }
 }
@@ -428,8 +417,7 @@ void SoundfontVoice::setPan(float pan) {
 void SoundfontVoice::setMidiNote(int midiNote) {
     int slot = sfSlot;
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
-    std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-    tsf* h = soundfonts[slot].handle;
+    tsf* h = soundfonts[slot].handle.load();
     if (!h) return;
     if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
     tsf_channel_note_on(h, _trackId, midiNote, noteVolume);
@@ -440,18 +428,14 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
                              float noteVol, float pan,
                              int bank, int preset, int trackId,
                              int envAtk, int envDec, int envSus, int envRel) {
-    // The handle must be read inside the lock (loadSoundfont eviction can tsf_close it concurrently).
-    //
-    // ⚠️ The lock is taken BEFORE any member is written, so a slot whose handle has gone leaves this
-    // voice untouched rather than half-retargeted at a note that never sounds. The handle is only
-    // READ here — the answer is a hint by the time fireArmedNote re-reads it under its own lock, and
-    // that is exactly what it is for: the caller's eighty lines of setup are worth doing on it.
-    {
-        std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-        if (!soundfonts[slot].handle) return false;
-    }
+    // ⚠️ Checked BEFORE any member is written, so a slot whose handle has gone leaves this voice
+    // untouched rather than half-retargeted at a note that never sounds. The generation is read
+    // first: a free between the two reads then makes the voice stale, never the other way round.
+    const uint32_t gen = soundfonts[slot].gen.load();
+    if (!soundfonts[slot].handle.load()) return false;
 
     sfSlot      = slot;
+    sfGen       = gen;
     _trackId    = trackId;
     noteVolume  = noteVol;
 
@@ -464,10 +448,8 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
     // when both fired: two notes 5.8 ms apart on one track, the second stealing the first.
     hasArmedNote = true;
     isActive     = true;   // the render pass skips an inactive voice, and it is the one that fires this
-    // Clear any stale transport-stop ramp, exactly as Voice::trigger() clears a stale fade-out and for
-    // the same reason: startStopFade() runs on the UI thread and can land just after a hardStop() on
-    // this one, leaving counters on a slot that is about to sound again. A new note starts at full
-    // level or it starts fading the moment it is heard.
+    // Clear any stale transport-stop ramp, exactly as Voice::trigger() clears a stale fade-out: a new
+    // note starts at full level or it starts fading the moment it is heard.
     stopFadeRemaining = 0;
     stopFadeTotal     = 0;
     return true;
@@ -505,8 +487,7 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
     // the note's (volGain) and the track fader — are ramps applied to the rendered samples instead,
     // because a channel volume can only change at a render boundary.
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
-    // Apply THIS instrument's ADSR override atomically, under the slot mutex the caller holds, right
-    // before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own
+    // Apply THIS instrument's ADSR override right before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own
     // override even when instruments share a de-duplicated handle — the next trigger re-patches and
     // re-captures, and playing voices are immune. -1 fields keep the SF2 value.
     tsf_preset_apply_overrides(h, a.bank, a.preset, a.envAtk, a.envDec, a.envSus, a.envRel);
@@ -518,11 +499,7 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
 void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     int slot = sfSlot;
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
-    // Slot mutex held for the whole function: handle read + every pitch-wheel call below must
-    // not interleave with loadSoundfont's eviction tsf_close. The function is short and the
-    // lock is uncontended except during an actual SF2 load.
-    std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);
-    tsf* h = soundfonts[slot].handle;
+    tsf* h = soundfonts[slot].handle.load();
     if (!h) return;
 
     constexpr float PITCH_RANGE = 48.0f;

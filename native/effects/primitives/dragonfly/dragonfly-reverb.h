@@ -9,13 +9,14 @@
 // mapping from a cell to a freeverb setter lives in the .cpp, beside the engine that reads it.
 //
 // ⚠️⚠️ **FREEVERB REALLOCATES ITS DELAY LINES WHEN A ROOM'S SIZE OR THE RATE CHANGES** (`setRSFactor`,
-// `setSampleRate`, `loadPresetReflection`). The setters here therefore only RECORD the cells, from any
-// thread; everything that touches freeverb runs inside `process`, on the audio thread, the way the
-// plugin's own `run` defers its parameters. The UI thread never frees a line the audio thread is
-// reading — but a SIZE edit still allocates on the audio thread, which can cost a block.
+// `setSampleRate`, `loadPresetReflection`), so the audio thread never does either. `prepare` — the
+// control thread, whenever the algorithm, SIZE, EARLY's program or the rate changes — builds a whole
+// engine at those values and hands it over; `process` takes it at its next block and parks the one it
+// replaced for the next `prepare` to free. The other cells are applied to the running engine inside
+// `process`, which allocates nothing. A new engine starts silent, as freeverb's own resize did.
 //
-// ⚠️ An engine is built the first time its algorithm SOUNDS, not before: a project on algorithm 0
-// never allocates any of this.
+// ⚠️ An engine is built when its algorithm is CHOSEN, not before: a project on algorithm 0 never
+// allocates any of this.
 //
 // Kept behind an opaque pointer so the freeverb headers, their `LIBFV3_FLOAT` define and their
 // include path stay inside one translation unit instead of reaching every file that includes the
@@ -35,14 +36,18 @@ class DragonflyReverb {
     /** The four cells the algorithms read, 00-FF each. Any thread. */
     void setCells(int decayHex, int sizeHex, int dampHex, int modHex);
 
-    /** The device rate. Any thread; an engine rebuilds its lines at the next block it sounds. */
-    void setRate(float sampleRate);
+    /**
+     * Make sure the engine for `algo` is built at this SIZE, program and rate, building it here if not.
+     * The control thread only (the UI, or a render while the device is paused) — this allocates.
+     */
+    void prepare(int algo, int decayHex, int sizeHex, int dampHex, int modHex, float sampleRate);
 
     /** Empty every tail before the next block. Any thread. */
     void requestClear();
 
     /**
-     * Stereo in, stereo wet out, `algo` 1..6. Audio thread only.
+     * Stereo in, stereo wet out, `algo` 1..6. Audio thread only; silent until `prepare` has built
+     * the algorithm.
      * ⚠️ `switched` must be true on the first block after the send was sounding a DIFFERENT algorithm:
      * an engine that sat idle still holds the tail it had when it stopped, and would replay it.
      */
