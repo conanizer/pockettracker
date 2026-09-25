@@ -269,6 +269,29 @@ public:
     std::function<void()> onResumeRequested;
     void requestResume() { if (onResumeRequested) onResumeRequested(); }
 
+    /**
+     * Live input — a MIDI keyboard — drained on the AUDIO thread.
+     *
+     * The source is asked once per live block, at the top of processAudioBlock, before the queues
+     * drain: what it schedules at the block's first frame is picked up by that same drain and sounds
+     * in the block it arrived in. While an export owns the engine it is asked to discard instead,
+     * so bytes that arrive during a render are not saved up to fire as a burst afterwards.
+     *
+     * ⚠️ Both calls run on the audio thread and must obey its rules (the host's implementation is
+     * songcore's MidiInPipeline, which was written for it). ⚠️ Set before the stream opens and
+     * cleared after it closes: the pointer is read by a callback that a close waits for, and by
+     * nothing else.
+     */
+    struct LiveInputSource {
+        virtual ~LiveInputSource() = default;
+        virtual void drainLiveInput(int64_t blockStartFrame) = 0;
+        virtual void discardLiveInput() = 0;
+    };
+    void setLiveInput(LiveInputSource* source) { liveInput.store(source, std::memory_order_release); }
+
+    /** The tempo the engine is running at (setTempo). A live note is scheduled at this one. */
+    int tempo() const { return currentTempo.load(std::memory_order_relaxed); }
+
     // The ninth voice: every audition — sampler, sample, note, SF instrument — plays HERE rather than
     // on one of the 8 song tracks, which is what lets you hear a note you are dialling in without
     // stealing a voice from the song under it. Kotlin names the same lane PREVIEW_TRACK_ID.
@@ -1150,6 +1173,7 @@ private:
     uint32_t noteSeedEntropy = 0x9E3779B9u;
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
+    std::atomic<LiveInputSource*> liveInput{nullptr};   // see setLiveInput
 
     // ── The metronome, across the thread boundary ────────────────────────────────────────────────
     // Written by the UI/host thread, read once a block by the audio thread. Relaxed atomics for the

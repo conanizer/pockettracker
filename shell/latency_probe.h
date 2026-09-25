@@ -191,7 +191,7 @@ inline void print_bin(const char* what, const Bin& b, const char* unit) {
  * noise, and a session where the transport never ran would otherwise print a playing row of zeros that
  * reads like a result.
  */
-inline void report(int sampleRate, int leadFrames, AudioBackend::OutputLatency out) {
+inline void report(int sampleRate, bool inputPolled, AudioBackend::OutputLatency out) {
     if (!enabled()) return;
     State&     s  = state();
     const int  fr = s.frames.load(std::memory_order_relaxed);
@@ -224,29 +224,42 @@ inline void report(int sampleRate, int leadFrames, AudioBackend::OutputLatency o
                     "    handed %d. One of the two is not reading the device.\n", out.frames, fr);
     }
 
-    // The sum, and the missing term named beside it. The poll row is HALVED because a gesture arrives
-    // uniformly inside the period, so the average wait is half of it — the worst case is the whole.
+    // The sum, and the missing term named beside it. A waiting row is HALVED because a gesture
+    // arrives uniformly inside the period, so the average wait is half of it — the worst case is the
+    // whole. ⚠️ The poll is in a MIDI key's path only for a backend the loop has to pump (Android);
+    // a pushed byte waits for the audio thread's next block and nothing else — the drain runs there
+    // and stamps the block's first frame, so there is no lead-in row any more.
     const Bin&   busiest = s.poll[1].n.load(std::memory_order_relaxed) >= s.poll[0].n.load(std::memory_order_relaxed)
                                ? s.poll[1] : s.poll[0];
-    const double loopMean = busiest.meanMs();
-    const double loopMax  = busiest.maxMs();
-    const double leadMs   = 1000.0 * double(leadFrames) / double(sr);
-    const double outMs    = out.frames > 0 ? 1000.0 * double(out.frames) / double(sr) : 0.0;
+    const Bin&   cbBusy  = s.cb[1].n.load(std::memory_order_relaxed) >= s.cb[0].n.load(std::memory_order_relaxed)
+                               ? s.cb[1] : s.cb[0];
+    const double loopMean  = busiest.meanMs();
+    const double loopMax   = busiest.maxMs();
+    const bool   cbSeen    = cbBusy.n.load(std::memory_order_relaxed) > 0;
+    const double blockMean = cbSeen ? cbBusy.meanMs() : (fr > 0 ? 1000.0 * double(fr) / double(sr) : 0.0);
+    const double blockMax  = cbSeen ? cbBusy.maxMs()  : blockMean;
+    const double outMs     = out.frames > 0 ? 1000.0 * double(out.frames) / double(sr) : 0.0;
+    const double pollMs    = inputPolled ? loopMean / 2.0 : 0.0;
 
     std::printf("\n  gesture -> sound, as far as this process can see it\n");
-    std::printf("    waiting for the poll to look    %5.2f mean, %5.2f worst ms\n", loopMean / 2.0, loopMax);
-    std::printf("    the note's lead-in              %5.2f ms   (%d frames at %d Hz)\n", leadMs, leadFrames, sr);
+    if (inputPolled)
+        std::printf("    waiting for the poll to pump    %5.2f mean, %5.2f worst ms   (a polled MIDI port)\n",
+                    loopMean / 2.0, loopMax);
+    else
+        std::printf("    the poll                        not in the path: the port pushes, the audio thread drains\n");
+    std::printf("    waiting for the next audio block %5.2f mean, %5.2f worst ms  (%s)\n", blockMean / 2.0, blockMax,
+                cbSeen ? "the callback's own period" : "nominal — the callback never reported");
     std::printf("    the output path                 %5.2f ms   (%d frames, %s)\n", outMs, out.frames,
                 out.measured ? "the platform's own figure, its queue included"
                              : "the app's buffer alone, read back from the device");
     std::printf("    ------------------------------------------------------------------\n");
     if (out.measured) {
         std::printf("    total                           %5.2f ms — every term accounted for, and the\n",
-                    loopMean / 2.0 + leadMs + outMs);
+                    pollMs + blockMean / 2.0 + outMs);
         std::printf("    last one is still the platform's claim about itself. One ptlat recording settles it.\n");
     } else {
         std::printf("    at least                        %5.2f ms, and the driver's own queue is NOT in\n",
-                    loopMean / 2.0 + leadMs + outMs);
+                    pollMs + blockMean / 2.0 + outMs);
         std::printf("    that sum — it is the term ptlat exists for. Nothing in this process can hear\n"
                     "    its own speaker.\n");
     }

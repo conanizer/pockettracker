@@ -244,6 +244,29 @@ void push_instrument_playback_params(Engine& engine, const Instrument& ins) {
                                filter_type_code(ins.filterType), ins.filterCut, ins.filterRes);
 }
 
+// One table, in the 16 × 8 byte layout `AudioEngine::loadTable` reads. The note path pushes it
+// lazily (below) and the host pushes it eagerly for a live key (engine_consumer.h); one packer, so
+// the two cannot disagree about a byte.
+template <typename Engine>
+void push_table(Engine& engine, const Project& project, int tableId) {
+    if (tableId < 0 || tableId >= static_cast<int>(project.tables.size())) return;
+    const Table& table = project.tables[static_cast<size_t>(tableId)];
+    uint8_t rowData[128] = {0};
+    for (int rowIndex = 0; rowIndex < 16 && rowIndex < static_cast<int>(table.rows.size()); ++rowIndex) {
+        const TableRow& row = table.rows[static_cast<size_t>(rowIndex)];
+        uint8_t* p = rowData + rowIndex * 8;
+        p[0] = static_cast<uint8_t>(row.transpose);
+        p[1] = static_cast<uint8_t>(row.volume);     // -1 → 0xFF
+        p[2] = static_cast<uint8_t>(row.fx1Type);
+        p[3] = static_cast<uint8_t>(row.fx1Value);
+        p[4] = static_cast<uint8_t>(row.fx2Type);
+        p[5] = static_cast<uint8_t>(row.fx2Value);
+        p[6] = static_cast<uint8_t>(row.fx3Type);
+        p[7] = static_cast<uint8_t>(row.fx3Value);
+    }
+    engine.loadTable(tableId, rowData);
+}
+
 // ─── The NoteOn plan ─────────────────────────────────────────────────────────────────────────────
 // The exact sequence of engine calls a NoteOn produces — a TEMPLATE over the engine, not a call into
 // a concrete one, for a specific reason: AudioEngine satisfies it as-is (same method names), and
@@ -298,19 +321,8 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
             if (tableLoaded[tableId]) continue;
 
             const Table& table = project.tables[tableId];
-            uint8_t rowData[128] = {0};
             for (int rowIndex = 0; rowIndex < 16 && rowIndex < static_cast<int>(table.rows.size()); ++rowIndex) {
                 const TableRow& row = table.rows[rowIndex];
-                uint8_t* p = rowData + rowIndex * 8;
-                p[0] = static_cast<uint8_t>(row.transpose);
-                p[1] = static_cast<uint8_t>(row.volume);     // -1 → 0xFF, as Kotlin's toByte() gives
-                p[2] = static_cast<uint8_t>(row.fx1Type);
-                p[3] = static_cast<uint8_t>(row.fx1Value);
-                p[4] = static_cast<uint8_t>(row.fx2Type);
-                p[5] = static_cast<uint8_t>(row.fx2Value);
-                p[6] = static_cast<uint8_t>(row.fx3Type);
-                p[7] = static_cast<uint8_t>(row.fx3Value);
-
                 // A table id defaults to its instrument's id, so an INS value names the next table too.
                 const int fxType[3]  = {row.fx1Type,  row.fx2Type,  row.fx3Type};
                 const int fxValue[3] = {row.fx1Value, row.fx2Value, row.fx3Value};
@@ -322,7 +334,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
                     pending[top++] = next;
                 }
             }
-            engine.loadTable(tableId, rowData);
+            push_table(engine, project, tableId);
             tableLoaded[tableId] = true;
         }
     };

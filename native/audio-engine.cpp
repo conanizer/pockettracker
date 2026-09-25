@@ -1809,6 +1809,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 if (voices[i].isFadingOut) voices[i].stop();
         }
     }
+    // A live key's bytes are turned into records HERE, stamped at this block's first frame, so the
+    // drain just below picks them up and the key sounds in the block its bytes arrived in. Never
+    // during an export: a render is the same samples every time, and a key is not part of the song.
+    if (!offlineRender) {
+        if (LiveInputSource* live = liveInput.load(std::memory_order_acquire)) live->drainLiveInput(blockStartFrame);
+    }
     paramUpdateQueue.drainUntil(blockEnd, paramBatch);
     killQueue.drainUntil(blockEnd, killBatch);
     noteQueue.drainUntil(blockEnd, noteBatch);
@@ -3272,8 +3278,10 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         output[i] = 0.0f;
     }
 
-    // During offline WAV render: output silence and let renderOffline process the queue.
+    // During offline WAV render: output silence and let renderOffline process the queue. The keys
+    // pressed meanwhile are dropped, not saved up — see setLiveInput.
     if (isOfflineRendering.load()) {
+        if (LiveInputSource* live = liveInput.load(std::memory_order_acquire)) live->discardLiveInput();
         return;
     }
 

@@ -178,8 +178,18 @@ private:
     std::atomic<int64_t>  from_[LANES][HISTORY]{};
 };
 
+/** A vector with room for the queue's typical load, to seed a heap with — see NoteQueue's constructor. */
+template <typename T>
+inline std::vector<T> reserved() {
+    std::vector<T> v;
+    v.reserve(64);
+    return v;
+}
+
 // Thread-safe note queue
-// Audio callback pops notes, the UI thread pushes notes
+// Audio callback pops notes; the UI thread pushes notes, and so does the audio thread itself for a
+// live key (from inside its own drain, before the block's drainUntil — never from another thread
+// than those two).
 class NoteQueue {
 private:
     // Min-heap: earliest targetFrame is always on top
@@ -188,6 +198,11 @@ private:
     CancelLedger cancels;
 
 public:
+    // The heap's storage is reserved once: a live key schedules from INSIDE the audio callback, and a
+    // push that grew the vector there would be an allocation on the audio thread. 64 is the same
+    // typical bound the per-block drain buffers use; past it the vector grows, once.
+    NoteQueue() : queue(std::greater<ScheduledNote>(), reserved<ScheduledNote>()) {}
+
     // Schedule a note to be played at exact frame
     void schedule(const ScheduledNote& note) {
         std::lock_guard<std::mutex> lock(mutex);
@@ -240,6 +255,8 @@ private:
     CancelLedger cancels;
 
 public:
+    KillQueue() : queue(std::greater<ScheduledKill>(), reserved<ScheduledKill>()) {}   // see NoteQueue
+
     // Schedule a kill event at exact frame
     void schedule(const ScheduledKill& kill) {
         std::lock_guard<std::mutex> lock(mutex);
@@ -373,6 +390,8 @@ private:
     CancelLedger cancels;
 
 public:
+    ParamUpdateQueue() : queue(std::greater<ScheduledParamUpdate>(), reserved<ScheduledParamUpdate>()) {}   // see NoteQueue
+
     void schedule(const ScheduledParamUpdate& update) {
         std::lock_guard<std::mutex> lock(mutex);
         ScheduledParamUpdate stamped = update;

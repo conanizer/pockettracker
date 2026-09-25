@@ -71,15 +71,20 @@ class SongcoreHost {
         // when a device is picked would attach mid-song with no idea what is already sounding.
         router_.add_consumer(&external_);
 
-        // MIDI in (phase E). Wired here and never again: the router reads the live Project (which is
-        // replaced IN PLACE by push_project, so the pointer stays good) and the SAME `TrackInstruments`
-        // the cable's own consumer keeps, so a live key and a sequenced note cannot disagree about
-        // which instrument a track is playing. Nothing here opens or touches a port.
-        midiInRouter_.set_project(&project_);
-        midiInRouter_.set_track_instruments(&external_.track_instruments());
+        // MIDI in. The drain runs on the ENGINE's thread — see the block below — and the engine is
+        // told where it is here, once. Nothing here opens or touches a port.
+        midiLive_.pipeline = &midiIn_;
+        midiLive_.engine   = engine_;
+        if (engine_) engine_->setLiveInput(&midiLive_);
     }
 
-    ~SongcoreHost() { set_trace(false, ""); }
+    // ⚠️ The engine's live-input pointer names a member of THIS object, so it is withdrawn here. The
+    // caller's job is the ordering: the audio stream must be closed before the host is destroyed,
+    // which the shell does (app.cpp closes the stream, then returns from run()).
+    ~SongcoreHost() {
+        if (engine_) engine_->setLiveInput(nullptr);
+        set_trace(false, "");
+    }
 
     MidiRouter& router() { return router_; }
     Sequencer&  sequencer() { return seq_; }
@@ -111,34 +116,38 @@ class SongcoreHost {
     void set_midi_pump_external(bool external) { midiPumpExternal_ = external; }
     bool midi_pump_external() const { return midiPumpExternal_; }
 
-    // ── ↕ MIDI in (MIDI plan phase E2) ───────────────────────────────────────────────────────────
+    // ── ↕ MIDI in ────────────────────────────────────────────────────────────────────────────────
     //
     // The mirror of the block above, and the same division of labour: the PORT is the platform's
-    // (`IMidiIn`, opened by the shell), and everything from the first byte onwards is here — the queue
-    // that crosses the backend's thread, the parser, the router, and the one place that drains them.
+    // (`IMidiIn`, opened by the shell), and everything from the first byte onwards is songcore's — the
+    // ring that crosses the backend's thread, the parser, the router, and the one place that drains
+    // them (`MidiInPipeline`, midi_in.h).
     //
-    // ⚠️ **THE HOST OWNS THE DRAIN, NOT THE SHELL**, for the reason `poll()` owns the lookahead: three
-    // platforms will each open a port their own way (winmm now, ALSA and `MidiManager` at E5) and the
-    // thing that happens to the bytes afterwards must be the same code on all three. A shell that
-    // drained for itself would be one drain per platform, diverging in one of them.
+    // ⚠️⚠️ **THE DRAIN RUNS ON THE AUDIO THREAD, NOT HERE.** The engine calls `midiLive_` at the top
+    // of every live block; a key is routed and scheduled at that block's first frame and sounds in it.
+    // No frame-loop poll and no lead-in sit between the cable and the voice any more. What this
+    // thread does, from `poll()`, is the two halves the audio thread cannot: it PUBLISHES the routing
+    // facts the drain routes against (`arm_midi_in`), and it takes back what the drain handled
+    // (`drain_midi_in`) to apply the mapped knobs, send MIDI thru, keep the bookkeeping and tell the
+    // observer. A host with no engine runs the drain from `poll()` itself: same code, same order.
 
     /**
      * Where a backend delivers its bytes — `IMidiIn::set_sink(&host.midi_in_sink())`.
      *
      * ⚠️ Called from a thread this class knows nothing about, which is exactly what `MidiInQueue` is
-     * for: the sink is a lock and a memcpy and NOTHING else, and everything with an opinion (parsing,
-     * routing, the observer) runs on the frame loop in `poll()`.
+     * for: a lock-free ring and NOTHING else. Everything with an opinion runs in the drain.
      */
-    MidiInQueue& midi_in_sink() { return midiInQueue_; }
+    MidiInQueue& midi_in_sink() { return midiIn_.sink(); }
 
-    /** The routing policy's counters and the channel map's reader. See midi_in.h. */
-    MidiInputRouter& midi_in_router() { return midiInRouter_; }
-    const MidiParser& midi_in_parser() const { return midiInParser_; }
+    /** The routing policy's counters and the parser's, for the screens and the exit report. */
+    const MidiInputRouter& midi_in_router() const { return midiIn_.router(); }
+    const MidiParser&      midi_in_parser() const { return midiIn_.parser(); }
+    const MidiInPipeline&  midi_in_pipeline() const { return midiIn_; }
 
     /**
-     * Told about every message drained, with the records it produced. E2's is the shell's console;
-     * E4's is the injection into the engine. Nullable — with none, the drain still runs and still
-     * counts, because the counters are how "no cable" is told from "no track listening".
+     * Told about every message the drain handled, with the records it produced, one poll later. The
+     * shell's is its console. Nullable — with none, the drain still runs and still counts, because
+     * the counters are how "no cable" is told from "no track listening".
      */
     void set_midi_in_observer(IMidiInObserver* obs) { midiInObserver_ = obs; }
 
@@ -146,12 +155,13 @@ class SongcoreHost {
      * The instrument a live key plays on a track the sequencer has not touched yet — the one the UI is
      * showing (midi_in.h says why this exists at all: without it a correctly configured keyboard is
      * SILENT on a stopped song, which is the "not configured looks like broken" failure verbatim).
-     * Pushed every frame by the shell, because the user moves the cursor between frames.
+     * Pushed every frame by the shell, because the user moves the cursor between frames; it reaches
+     * the drain with the next route the poll publishes.
      */
-    void set_midi_in_instrument(int instrumentId) { midiInRouter_.set_fallback_instrument(instrumentId); }
+    void set_midi_in_instrument(int instrumentId) { midiInFallback_ = instrumentId; }
 
     /**
-     * MIDI THRU — whether a live key on a track whose instrument is EXTERNAL reaches the CABLE (E4).
+     * MIDI THRU — whether a live key on a track whose instrument is EXTERNAL reaches the CABLE.
      *
      * ⭐ **ON is the feature; OFF exists for exactly one configuration, and it is not a preference.**
      * Playing external gear from a keyboard through the tracker is the obvious use of an input port,
@@ -170,103 +180,29 @@ class SongcoreHost {
     void set_midi_in_thru(bool on) { midiInThru_ = on; }
     bool midi_in_thru() const { return midiInThru_; }
 
-    /** Bytes that reached the queue, and complete messages the parser made of them. */
-    uint64_t midi_in_bytes() const { return midiInBytes_; }
-    uint64_t midi_in_messages() const { return midiInMessages_; }
+    /** Bytes that reached the ring, and complete messages the parser made of them. */
+    uint64_t midi_in_bytes() const { return midiIn_.bytes(); }
+    uint64_t midi_in_messages() const { return midiIn_.messages(); }
 
-    /** Records handed to the ENGINE consumer, to the cable, and withheld from the cable by thru (E4). */
-    uint64_t midi_in_injected() const { return midiInInjected_; }
+    /** Records the drain handed to the engine, to the cable, and withheld from the cable by thru. */
+    uint64_t midi_in_injected() const { return midiIn_.injected(); }
     uint64_t midi_in_thru_sent() const { return midiInThruSent_; }
     uint64_t midi_in_thru_suppressed() const { return midiInThruSuppressed_; }
 
     /**
-     * Forget everything mid-flight — the queue's parked bytes and the parser's half-assembled message.
+     * Forget everything mid-flight — the ring's parked bytes and the parser's half-assembled message.
      *
      * ⚠️ Called when a port CLOSES, and it is not housekeeping: a cable pulled between a status byte
      * and its data leaves running status in force, so the next port's first data byte would complete a
      * note nobody played, on the previous device's channel.
+     *
+     * ⚠️ A REQUEST, honoured by the drain at the top of its next block — the parser is the audio
+     * thread's, and this thread may not touch it. With no engine this thread is the drain, and the
+     * request is honoured at once.
      */
     void reset_midi_in() {
-        midiInQueue_.clear();
-        midiInParser_.reset();
-    }
-
-    /**
-     * Drain → parse → route → **inject**, at `frame`. Returns the number of bus records produced.
-     *
-     * Called by `poll()` with the transport clock; a test calls it directly with a frame of its own.
-     */
-    int poll_midi_in(int64_t frame) {
-        // The buffer is the ring's whole capacity, so ONE drain always empties it: a second pass could
-        // only pick up bytes that arrived during this one, and those belong to the next frame anyway.
-        uint8_t buf[MidiInQueue::CAPACITY];
-        const int n = midiInQueue_.drain(buf, static_cast<int>(sizeof buf));
-        if (n <= 0) return 0;
-        midiInBytes_ += static_cast<uint64_t>(n);
-
-        int total = 0;
-        Event ev[MidiInputRouter::MAX_EVENTS];
-        for (int i = 0; i < n; ++i) {
-            if (!midiInParser_.feed(buf[i])) continue;
-            ++midiInMessages_;
-
-            // ⚠️⚠️ **A KNOB IS NOTICED ON EVERY CHANNEL, NOT ONLY THE RESERVED ONE**, and that is
-            // what makes the feature findable. "Your knob is on channel 6" is exactly the sentence a
-            // user needs while `CTL CH` is still OFF — and OFF is the default, so it is the sentence
-            // every new install needs first. The UI layer decides what to say; this only records.
-            if (const MidiInMessage& cc = midiInParser_.message(); cc.status == EV_CC) {
-                lastCcChannel_ = static_cast<int>(cc.channel);
-                if (learnArmed_) {
-                    learnController_ = cc.data1;
-                    learnChannel_    = static_cast<int>(cc.channel);
-                    ++learnEvents_;
-                }
-            }
-
-            // ⚠️⚠️ **A CC IS OFFERED TO THE MAPPINGS FIRST, AND ONE THAT DRIVES SOMETHING IS CONSUMED.**
-            // One knob must not do two jobs: an incoming CC already moves the instrument of whichever
-            // track names its channel (volume, pan, the two sends), so a mapped knob arriving there
-            // would move its destination AND that track's pan.
-            //
-            // ⭐ **CLAIMED, NOT RESERVED, AND THAT IS WHAT LETS `ALL` BE THE DEFAULT.** A CC that
-            // drives NO mapping falls straight through to the router below and behaves exactly as it
-            // did before this feature existed — so an install with no mappings is untouched whatever
-            // this channel says, and a narrowed channel restricts which knobs may be offered rather
-            // than which may be heard.
-            //
-            // ⚠️ The observer is still told, with no records, because the message DID arrive — the
-            // same argument as the `k == 0` call below.
-            if (const MidiInMessage& m = midiInParser_.message();
-                m.status == EV_CC &&
-                ctl_ch_covers(controlChannel_, static_cast<int>(m.channel))) {
-                // ⚠️ **WHILE LEARN IS ARMED THE KNOB NAMES AND DOES NOT DRIVE.** Otherwise holding `R`
-                // to point a knob at a new parameter would also sweep whatever that knob already
-                // drove — the user would hear the old destination move while aiming at the new one.
-                // (The naming itself happened above, for every channel.)
-                if (learnArmed_) {
-                    if (midiInObserver_) midiInObserver_->on_midi_in(m, ev, 0);
-                    continue;
-                }
-                if (const int driven = apply_mapped_cc(m.data1, m.data2); driven > 0) {
-                    mappedCcWrites_ += static_cast<uint64_t>(driven);
-                    if (midiInObserver_) midiInObserver_->on_midi_in(m, ev, 0);
-                    continue;
-                }
-            }
-
-            const int k = midiInRouter_.route(midiInParser_.message(), frame, ev,
-                                              MidiInputRouter::MAX_EVENTS);
-            total += k;
-            for (int j = 0; j < k; ++j) inject(ev[j]);
-            // ⚠️ Called even when `k == 0`. A message that routed nowhere still ARRIVED, and an
-            // observer told only about the routed ones cannot tell a dead cable from an unmapped
-            // channel — the same argument as the router's four counters.
-            // ⚠️ **AFTER the injection, not before** — an observer that prints is a debugging aid, and
-            // a debugging aid that runs between the record and the sound it makes would be the one
-            // thing changing the order of the two.
-            if (midiInObserver_) midiInObserver_->on_midi_in(midiInParser_.message(), ev, k);
-        }
-        return total;
+        midiIn_.request_reset();
+        if (!engine_) midiIn_.service_requests();
     }
 
     // ── ↓ data ───────────────────────────────────────────────────────────────────────────────────
@@ -393,8 +329,9 @@ class SongcoreHost {
         external_.panic();
         // …and the keys the INCOMING cable is holding. The voices below are about to be ramped down,
         // so a track the input router still believes is busy would make the next chord steal from a
-        // note that is already over.
-        midiInRouter_.release_all_keys();
+        // note that is already over. A request: the allocator is the drain's.
+        midiIn_.request_release_keys();
+        if (!engine_) midiIn_.service_requests();
         if (engine_) {
             engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
             // …and the voices already sounding. RAMPED, not cut: a sustained note ended where its
@@ -416,12 +353,14 @@ class SongcoreHost {
     // PlaybackController.updatePlaybackBuffer().
     void poll() {
         sync_clock();
-        // ⚠️ **BEFORE the lookahead pass, and with a LEAD-IN.** A live key has no lookahead at all — the
-        // byte is already late by the time it is drained — so it is stamped `now + 100` frames, which is
-        // `preview_note`'s lead-in and for the identical reason: a frame in the immediate past is a
-        // record the engine has already run past. Draining first also means a key pressed this frame is
-        // routed against the clock this frame read, not the one the pass has moved on to.
-        poll_midi_in(seq_.clock() + MIDI_IN_LEAD_FRAMES);
+        // The audio thread's drain needs two things only this thread can give it: the routing facts as
+        // a snapshot, and the engine holding every table and program a key could land on. Then, with
+        // no engine, this thread IS the drain — stamped at the clock, no lead-in, as the engine stamps
+        // at its block's first frame.
+        arm_midi_in();
+        if (!engine_) midiIn_.run(seq_.clock(), nullptr);
+        // What the drain handled since the last poll: the mapped knobs, thru, the counters, the observer.
+        drain_midi_in();
         // ⚠️ BETWEEN THE DRAIN AND THE PASS, and that is the whole point of deferring it: a mapped
         // knob's lookahead roll has to happen before the pass it is meant to affect, and once for
         // every message the drain just handed over rather than once each.
@@ -1613,58 +1552,115 @@ class SongcoreHost {
     }
 
     /**
-     * ⭐⭐ **PHASE E4 — ONE BUS RECORD FROM A LIVE KEY, HANDED TO THE CONSUMERS THAT OWN IT.**
+     * The audio thread's side of MIDI in: what the engine calls at the top of every live block.
      *
-     * ── WHY NOT `router_` ────────────────────────────────────────────────────────────────────────
+     * A record from a live key goes STRAIGHT INTO THE ENGINE'S QUEUES, stamped at the block's first
+     * frame, and the drain that follows picks it up — so the same block plays it. It does not ride
+     * `router_` (the bus): a live key is not part of the song, the trace goldens have never held one,
+     * and the bus's consumers read the project, which this thread may not.
      *
-     * The obvious move is `router_.note_on(...)` and let the bus fan out. It is wrong here, for three
-     * reasons, and B5 already answered the same question the same way for the preview:
-     *
-     *   1. ⚠️ **THE BUS'S ORDERING INVARIANT.** `TrackInstruments` (router.h) assumes events arrive per
-     *      track in NON-DECREASING frame order, which the sequencer guarantees because it schedules
-     *      forward. A live key is stamped `clock + 100` while the lookahead has already emitted records
-     *      up to two phrases into the future — so a key pressed mid-song would arrive *behind* records
-     *      already dispatched. The consumers each keep their own map and are handed the record
-     *      directly, which is the only arrangement in which that is harmless.
-     *   2. **THE TRACE.** `writer_` is a bus consumer and the 36 goldens have never contained a live
-     *      event. A key press is not part of the song, exactly as a preview is not.
-     *   3. There is nothing to gain: the two consumers below ARE the bus's audio subscribers.
-     *
-     * ── WHAT EACH CONSUMER IS ASKED ──────────────────────────────────────────────────────────────
-     *
-     * `consume` is the ONE DOOR on both (B5's `preview_note_off` says why): each answers the routing
-     * gate itself, resolves the record's owner through its own `TrackInstruments`, and honours the LEN
-     * gate — so a live key and a sequenced note cannot disagree about who owns a track.
-     *
-     *   • the ENGINE consumer, **unconditionally and whichever way the instrument routes**. Its gate
-     *     drops EXTERNAL records, and its internal→external arm is the one that ends a voice a flip
-     *     would otherwise leave sounding.
-     *   • the CABLE, only when THRU is on — see `set_midi_in_thru`. A suppressed record is COUNTED,
-     *     because "the key is silent" needs to name which of the reasons it was.
+     * ⚠️ **THE ENGINE RESOLVES THE NOTE FROM ITS OWN COPIES** — the program table, the tables, the
+     * mod/EQ/send state `push_instrument_params` writes — so nothing is derived here, and nothing
+     * here may be. `arm_midi_in` is what keeps those copies current for a note nobody scheduled ahead.
      */
-    void inject(const Event& ev) {
-        ++midiInInjected_;
+    struct LiveInput : AudioEngine::LiveInputSource, MidiInPipeline::Apply {
+        MidiInPipeline* pipeline = nullptr;
+        AudioEngine*    engine   = nullptr;
 
-        // ⚠️ **THE PAUSED-STREAM RESUME IS NOT MISSING HERE — IT IS ONE LAYER DOWN.** With the transport
-        // stopped the audio stream may be paused, and a note scheduled into a paused engine is a note
-        // nobody hears at a frame counter that is not moving. `plan_note_on` calls `requestResume()`
-        // immediately before both of its schedule calls (voice_derive.h), so every path that raises a
-        // voice already resumes; a second call here would be a second, unmeasured copy of that rule.
-        // (`preview_note` above does have its own — it predates the seam and is Kotlin's line for
-        // Kotlin's reason. This one does not need it.)
+        void drainLiveInput(int64_t blockStartFrame) override { pipeline->run(blockStartFrame, this); }
+        void discardLiveInput() override { pipeline->discard(); }
 
-        // ⚠️ Asked BEFORE either consume, and only to COUNT: `ExternalConsumer::consume` learns from a
-        // note-on, so a verdict taken afterwards would be answering about the state this record just
-        // created rather than the one it arrived into.
-        const bool external = record_is_external(ev);
+        void apply(const Event& ev, bool external) override {
+            switch (ev.type) {
+                case EV_NOTE_ON:
+                    // The routing gate the bus consumer applies, in its one live form: an EXTERNAL
+                    // instrument raises no voice, and a track that flips to one from a sounding
+                    // internal note ends that note, or nothing ever would.
+                    if (external) { engine->scheduleKill(ev.frame, ev.track); return; }
+                    engine->scheduleProgramNote(ev.frame, ev.track, ev.instrument, ev.noteOn, engine->tempo());
+                    return;
+                case EV_NOTE_OFF:
+                    switch (ev.noteOff.mode) {
+                        case NOTE_OFF_CUT: engine->scheduleKill(ev.frame, ev.track);       return;
+                        case NOTE_OFF_KEY: engine->scheduleKeyRelease(ev.frame, ev.track); return;
+                        default:           engine->scheduleNoteOff(ev.frame, ev.track);    return;
+                    }
+                case EV_CC:
+                    // A cable sends a literal controller number, never a CCA-CCD slot, so there is
+                    // no instrument to resolve it against — the bus consumer's table applies as is.
+                    EngineConsumer::apply_cc(*engine, ev.frame, ev.track, ev.cc.param, f32_from_bits(ev.cc.valueBits));
+                    return;
+                default:
+                    return;   // program change and pitch bend have no engine form (engine_consumer.h)
+            }
+        }
+    };
 
-        consumer_.consume(ev);
+    /**
+     * Give the audio thread's drain what it routes against and what it plays: the route snapshot, and
+     * every table the engine does not yet hold.
+     *
+     * The route is rebuilt each poll and published only when it differs — a cursor move, a channel
+     * cell, a note the sequencer played, a mapping added — so the drain sees an edit within one poll
+     * and pays nothing when nothing changed. ⚠️ The tables are pushed EAGERLY here because the note
+     * path's own lazy push (`plan_note_on`) never runs for a live key: a value pushed by its only
+     * reader is stale the moment a second reader appears.
+     */
+    void arm_midi_in() {
+        const MidiRoute route = build_midi_route(project_, external_.track_instruments(), midiInFallback_,
+                                                 controlChannel_, learnArmed_);
+        if (!midiRoutePublished_ || std::memcmp(&route, &midiRouteLast_, sizeof route) != 0) {
+            midiIn_.publish_route(route);
+            midiRouteLast_      = route;
+            midiRoutePublished_ = true;
+        }
+        if (engine_) consumer_.push_tables(project_);
+    }
 
-        if (midiInThru_) {
-            external_.consume(ev);
-            if (external) ++midiInThruSent_;
-        } else if (external) {
-            ++midiInThruSuppressed_;
+    /**
+     * What the drain handled since the last poll, on the thread that owns the song.
+     *
+     *   • a MAPPED knob is applied to the project here (`apply_mapped_cc`) — the drain only withheld
+     *     it from the router;
+     *   • a LEARN knob names its controller for the screen's learn gesture, and every CC says which
+     *     channel the cable is on (the answer to "which channel is my controller on?");
+     *   • ROUTED records reach the CABLE when thru is on (a suppressed one is COUNTED, because "the
+     *     key is silent" needs to name which of the reasons it was), and teach the bus consumers'
+     *     `TrackInstruments` which instrument the track is playing, exactly as the bus would have.
+     *
+     * The observer is told LAST, with the records — a debugging aid runs after the thing it describes.
+     */
+    void drain_midi_in() {
+        MidiInSeen seen;
+        while (midiIn_.pop_seen(seen)) {
+            if (seen.msg.status == EV_CC) {
+                lastCcChannel_ = static_cast<int>(seen.msg.channel);
+                // ⚠️⚠️ **A KNOB IS NOTICED ON EVERY CHANNEL, NOT ONLY THE CONTROL ONE**, and that is
+                // what makes the feature findable: "your knob is on channel 6" is the sentence a user
+                // needs while `CTL CH` does not cover it. The UI layer decides what to say.
+                if (learnArmed_) {
+                    learnController_ = seen.msg.data1;
+                    learnChannel_    = static_cast<int>(seen.msg.channel);
+                    ++learnEvents_;
+                }
+            }
+            if (seen.kind == MidiInSeen::MAPPED) {
+                mappedCcWrites_ += static_cast<uint64_t>(apply_mapped_cc(seen.msg.data1, seen.msg.data2));
+            }
+            for (int j = 0; j < seen.count; ++j) {
+                const Event& ev = seen.events[j];
+                // Asked BEFORE either consumer learns from it: a verdict taken afterwards would be
+                // answering about the state this record just created rather than the one it arrived into.
+                const bool external = record_is_external(ev);
+                consumer_.observe_live(ev);
+                if (midiInThru_) {
+                    external_.consume(ev);
+                    if (external) ++midiInThruSent_;
+                } else if (external) {
+                    ++midiInThruSuppressed_;
+                }
+            }
+            if (midiInObserver_) midiInObserver_->on_midi_in(seen.msg, seen.events, seen.count);
         }
     }
 
@@ -1734,17 +1730,17 @@ class SongcoreHost {
     ExternalConsumer external_;
     bool             midiPumpExternal_ = false;   // B3: a sender thread owns the release, not poll()
 
-    // MIDI in (E2). The queue is the only member here another thread ever touches, and it locks.
-    // Kotlin's `+100` preview lead-in, in frames — see the note in `poll()`.
-    static constexpr int64_t MIDI_IN_LEAD_FRAMES = 100;
-    MidiInQueue       midiInQueue_;
-    MidiParser        midiInParser_;
-    MidiInputRouter   midiInRouter_;
-    IMidiInObserver*  midiInObserver_ = nullptr;
-    uint64_t          midiInBytes_ = 0, midiInMessages_ = 0;
-    // E4: the injection. `midiInThru_` defaults to the FEATURE — see set_midi_in_thru.
+    // MIDI in. The pipeline is shared with the audio thread by construction (midi_in.h says how);
+    // everything else here is this thread's.
+    MidiInPipeline    midiIn_;
+    LiveInput         midiLive_;                  // what the engine calls; points back at midiIn_
+    MidiRoute         midiRouteLast_{};           // the route as last published, to publish only a change
+    bool              midiRoutePublished_ = false;
+    int               midiInFallback_     = -1;   // the instrument the UI is showing
+    IMidiInObserver*  midiInObserver_     = nullptr;
+    // `midiInThru_` defaults to the FEATURE — see set_midi_in_thru.
     bool              midiInThru_ = true;
-    uint64_t          midiInInjected_ = 0, midiInThruSent_ = 0, midiInThruSuppressed_ = 0;
+    uint64_t          midiInThruSent_ = 0, midiInThruSuppressed_ = 0;
 
     TraceWriter   writer_;
     std::string   traceBuf_;

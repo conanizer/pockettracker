@@ -58,6 +58,11 @@ void push_instrument_params(Engine& engine, const Instrument& ins, const Routing
                             int tempo, int sampleRate) {
     push_instrument_playback_params(engine, ins);
     push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate);
+    // The SoundFont ADSR override, keyed by instrument id. The note path pushes it again before every
+    // note it schedules; a live key is scheduled by the audio thread with no push in front of it, so
+    // the copy the engine holds has to be the edited one already.
+    const SFOverrides& ov = ins.sfOverrides;
+    engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
 
     const int   sid   = ins.sampleId;
     const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing.sampleRateRatio[sid] : 1.0f;

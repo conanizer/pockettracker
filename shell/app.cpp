@@ -61,8 +61,8 @@ namespace {
 // ⚠️ That last split is the one nothing else can make, and it is the difference between "the cable is
 // dead" and "no track is listening on that channel" — two problems whose fixes have nothing in common.
 //
-// It runs on the FRAME LOOP's thread (`SongcoreHost::poll` drains, this is called from there), so it
-// may print. The backend's own callback may not — see midi-in-base.h.
+// It runs on the FRAME LOOP's thread (`SongcoreHost::poll` takes back what the audio thread's drain
+// handled and calls this), so it may print. The backend's own callback may not — see midi-in-base.h.
 struct MidiInConsole : songcore::IMidiInObserver {
     bool     trace    = false;   // POCKETTRACKER_MIDI_IN_TRACE=1
     uint64_t messages = 0;
@@ -77,22 +77,22 @@ struct MidiInConsole : songcore::IMidiInObserver {
     // tool: only the app has a real port open.
     //
     // ⚠️ `perDrain` is the one that decides whether collapsing several CCs into one apply is worth
-    // anything: the drain runs every POLL_MS, so a busiest-drain of 1 means there is nothing to
-    // collapse at that rate. The 16 ms window is the same question asked at the DRAWING rate, where a
-    // collapse has more to gather, and the 1 s one is the peak RATE — the mean over a whole session
-    // is diluted by every moment nobody was turning anything.
+    // anything: the UI takes the handled messages back every POLL_MS, so a busiest-poll of 1 means
+    // there is nothing to collapse at that rate. The 16 ms window is the same question asked at the
+    // DRAWING rate, where a collapse has more to gather, and the 1 s one is the peak RATE — the mean
+    // over a whole session is diluted by every moment nobody was turning anything.
     //
     // ⚠️ The maxima count every CC, whatever its controller number, so two knobs turned at once read
     // as one busy stream. That over-states what a single mapping would see, never under-states it.
     //
-    // ⚠️ Every message a single drain hands over carries the SAME timestamp — the drain's, not the
-    // wire's — so a window can never split a drain, and the finest thing measurable here is a drain.
+    // ⚠️ Every message a single poll hands over carries the SAME timestamp — the poll's, not the
+    // wire's — so a window can never split a poll, and the finest thing measurable here is a poll.
     uint64_t ccTotal   = 0;
     uint64_t ccFirstMs = 0;      // wall clock of the first and last CC — the span the rate is over
     uint64_t ccLastMs  = 0;
     uint64_t ccDrains  = 0;      // drains that carried at least one CC
     uint64_t ccMaxPerDrain = 0;
-    uint64_t drain     = 0;      // bumped by the frame loop, immediately above host.poll()
+    uint64_t drain     = 0;      // the poll that took the messages back: bumped above host.poll()
 
     /** Most CCs seen inside one window of `width` ms. Windows are fixed, so a burst that straddles a
      *  boundary is counted as two — the number is a floor, never an over-statement. */
@@ -1147,6 +1147,7 @@ int run(const AppConfig& cfg) {
     Uint64 lastInputMs = 0;   // …and what tells the wait whether anyone is here
 
     Uint64 audioReopenMs = 0;  // when the next reopen attempt may run; 0 = at once
+    uint64_t midiSeen    = 0;  // messages the audio thread had handled at the last tick (see below the poll)
 
     // ⚠️⚠️ **THE ONLY PLACE THIS LOOP SLEEPS, AND WITHOUT IT IT BURNS A WHOLE CORE.** With vsync it
     // used to be `SDL_RenderPresent` that blocked and paced the entire app; a tick that draws nothing
@@ -1155,10 +1156,12 @@ int run(const AppConfig& cfg) {
     // next tick is followed by one immediately instead of adding its own wait on top of the block.
     //
     // ⚠️⚠️ **`busy` IS A LIST OF CHANNELS THAT DELIVER WITH NO SDL EVENT BEHIND THEM**, and that is
-    // the whole test — the transport's refill, a voice still sounding, an open MIDI port. Input needs
-    // no term of its own beyond the hold-off: the press that ends a quiet spell is the only one that
-    // pays the slow rate, and it re-arms the fast one for every press behind it. A first note also
-    // makes itself audible, so a jam on a stopped transport is fast from its second note on.
+    // the whole test — the transport's refill, a voice still sounding, a MIDI port the loop has to
+    // PUMP. Input needs no term of its own beyond the hold-off: the press that ends a quiet spell is
+    // the only one that pays the slow rate, and it re-arms the fast one for every press behind it. An
+    // incoming MIDI message re-arms it the same way (below `host.poll()`), and a port that pushes
+    // needs nothing more: its bytes reach the audio thread's drain without this loop, so an idle
+    // keyboard no longer keeps the loop at the fast rate — the battery cost the review named.
     //
     // ⚠️ Nothing here may sleep past a frame that is already due, or the idle rate beats against the
     // panel's and anything that animates without input — a falling meter, a status line clearing —
@@ -1166,7 +1169,7 @@ int run(const AppConfig& cfg) {
     const auto pace_tick = [&] {
         const Uint64 t    = SDL_GetTicks64();
         const bool   busy = state.isPlaying || audibleEdge ||
-                            (cfg.midiIn && cfg.midiIn->open_index() >= 0) ||
+                            (cfg.midiIn && cfg.midiIn->open_index() >= 0 && cfg.midiIn->polled()) ||
                             t - lastInputMs < QUIET_MS;
         Uint64 due = lastPollMs + (busy ? POLL_MS : POLL_IDLE_MS);
         if (nextFrameMs < due) due = nextFrameMs;
@@ -1667,9 +1670,10 @@ int run(const AppConfig& cfg) {
             running = false;
         }
 
-        // Which instrument a live MIDI key plays on a track the sequencer has not touched (E2). Pushed
-        // every frame rather than on change, because the user moves the cursor between frames and there
+        // Which instrument a live MIDI key plays on a track the sequencer has not touched. Pushed
+        // every tick rather than on change, because the user moves the cursor between frames and there
         // is no change notification to hook — the same reason SCALING is polled sixty lines below.
+        // The host publishes it to the audio thread's drain with the poll below, only when it changed.
         //
         // ⚠️ It is the instrument the UI is SHOWING, which is the one the A-button already auditions, and
         // it exists so a correctly configured keyboard is not silent on a stopped song. `TrackInstruments`
@@ -1686,25 +1690,33 @@ int run(const AppConfig& cfg) {
             std::fflush(stdout);
         }
 
-        // ⚠️ **IMMEDIATELY ABOVE THE DRAIN, and E5's Android backend is why there is a call here at
-        // all.** A POLLED input backend (`MidiManager`, which delivers to Kotlin on a binder thread)
-        // fetches its bytes here; the winmm and ALSA backends push from their own threads and this is a
-        // no-op for them. Move it below `host.poll()` and every Android MIDI byte waits an extra tick —
-        // invisible on the two platforms that ignore the call, which is exactly why the ordering is
-        // written down in midi-in-base.h as well.
+        // E5's Android backend is why there is a call here at all: a POLLED input backend
+        // (`MidiManager`, which delivers to Kotlin on a binder thread) fetches its bytes here into the
+        // ring the audio thread drains; the winmm and ALSA backends push from their own threads and
+        // this is a no-op for them. ⚠️ On Android this tick is therefore still in a key's path, which
+        // is why `pace_tick` keeps the fast rate for a polled port and for no other.
         if (cfg.midiIn) cfg.midiIn->pump();
 
-        // Which drain the CCs about to be handed over belong to. See the rate meter's note: it is the
-        // quantum an apply would be collapsed into, so it has to be counted where the drain is, not
-        // where the frame is.
+        // Which poll the CCs about to be handed back belong to. See the rate meter's note: it is the
+        // quantum an apply would be collapsed into, so it has to be counted where the hand-back is,
+        // not where the frame is.
         ++midiInConsole.drain;
 
         // The lookahead pump. ⚠️ Since B3 it no longer releases the MIDI queue when the sender thread
         // is running (host.h's set_midi_pump_external) — the scheduler's lookahead is still all its
-        // own. ⚠️ Since E2 it also DRAINS the MIDI-in queue, which is why a live key's latency is this
-        // loop's period and not something a backend chose. It is work-conserving: called four times as
-        // often it refills a quarter as much, and returns at once while the buffer is deep enough.
+        // own. It is work-conserving: called four times as often it refills a quarter as much, and
+        // returns at once while the buffer is deep enough. ⚠️ It does NOT drain MIDI in any more —
+        // the audio thread does, at the top of every block (host.h) — it publishes what that drain
+        // routes against and takes back what it handled: the mapped knobs, thru, the console below.
         host.poll();
+
+        // Somebody is playing — a message the audio thread handled since the last tick. It re-arms the
+        // fast poll exactly as a button press does, so a knob sweep or a thru note is taken back at
+        // POLL_MS while it lasts and the loop goes quiet when the keyboard does.
+        if (const uint64_t seen = host.midi_in_messages(); seen != midiSeen) {
+            midiSeen    = seen;
+            lastInputMs = now;
+        }
 
         // ── The tick ends here unless a frame is due ─────────────────────────────────────────────
         //
@@ -1933,6 +1945,7 @@ int run(const AppConfig& cfg) {
                     "         routed %llu, dropped: %llu non-channel, %llu unmapped, %llu no-instrument, "
                     "%llu unsupported\n"
                     "         queue overflow %llu bytes, parser orphans %llu, messages with no record %llu\n"
+                    "         dropped during an export %llu bytes, handled messages the UI never saw %llu\n"
                     // ⭐ THE E4 LINE, and it is the one that says whether anything was HEARD. `routed`
                     // above counts records the router made; these count records the ENGINE and the
                     // CABLE were actually handed — the two differ by exactly the thru suppression, so a
@@ -1952,6 +1965,8 @@ int run(const AppConfig& cfg) {
                     static_cast<unsigned long long>(host.midi_in_sink().dropped()),
                     static_cast<unsigned long long>(host.midi_in_parser().orphan_bytes()),
                     static_cast<unsigned long long>(midiInConsole.silent),
+                    static_cast<unsigned long long>(host.midi_in_pipeline().discarded()),
+                    static_cast<unsigned long long>(host.midi_in_pipeline().seen_dropped()),
                     static_cast<unsigned long long>(host.midi_in_injected()),
                     host.midi_in_thru() ? "on" : "OFF (loopback)",
                     static_cast<unsigned long long>(host.midi_in_thru_sent()),
@@ -2030,8 +2045,8 @@ int run(const AppConfig& cfg) {
 
     // ⚠️ BEFORE `audio.closeStream()`, which takes the negotiated frame count away with the device —
     // and with it the only chance of a MEASURED output latency rather than the buffer-sized floor.
-    // 100 frames is `MIDI_IN_LEAD_FRAMES` / `preview_note`'s lead-in — the same number on both paths.
-    latency::report(audio.sampleRate(), /*leadFrames=*/100, audio.outputLatency());
+    // Whether the poll is still in a key's path is the backend's to say (a polled port, Android).
+    latency::report(audio.sampleRate(), cfg.midiIn && cfg.midiIn->polled(), audio.outputLatency());
 
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();
