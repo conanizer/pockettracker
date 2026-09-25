@@ -24,19 +24,17 @@
 namespace ptshell {
 
 // Which ART SET a theme ships. A theme carries exactly one, and the choice decides three things at
-// once: which PNGs `Skin::load` looks for, how they are uploaded, and what the renderer draws over
-// them. `kFiles` in skin.cpp says which sets each file belongs to — a file may belong to more than
-// one, which is how the two shape-only sets share the same generic button art.
+// once: which PNGs `Skin::load` looks for, how the renderer lays them out, and what colour they are
+// drawn in. `kFiles` in skin.cpp says which sets each file belongs to — both share the generic button
+// shapes, each from its own folder.
 //
 //   Chrome       — the four background bands plus the generic button shapes, in the skin's own
 //                  colours; the button CHARACTERS are drawn over them in a font by the renderer.
 //                  `amiga` and `amiga-2`.
-//   Bitmap       — one image PER BUTTON, each already carrying its own character, so nothing is drawn
-//                  on top. No background art at all. `amiga-bitmap`.
 //   Transparent  — the generic button SHAPES alone, authored as white ink on transparent, and no
 //                  background art: the shapes are tinted to the live theme and the characters are
 //                  drawn over them in a font, in that same colour. `amiga-transparent`.
-enum class SkinArt : uint8_t { Chrome, Bitmap, Transparent };
+enum class SkinArt : uint8_t { Chrome, Transparent };
 
 // The pieces a theme ships, one enumerator per PNG file (the names mirror the filenames under
 // `assets/themes/<name>/`). `COUNT` sizes the table.
@@ -57,27 +55,6 @@ enum class SkinPiece {
     BtnSquarePressedDark,  // btn_square_pressed_dark.png
     BtnWideNormal,         // btn_wide_normal.png
     BtnWidePressed,        // btn_wide_pressed.png
-    // ── Bitmap set: one per button, character included ──
-    BmpUpNormal,           // btn_up_normal.png
-    BmpUpPressed,          // btn_up_pressed.png
-    BmpDownNormal,         // btn_down_normal.png
-    BmpDownPressed,        // btn_down_pressed.png
-    BmpLeftNormal,         // btn_left_normal.png
-    BmpLeftPressed,        // btn_left_pressed.png
-    BmpRightNormal,        // btn_right_normal.png
-    BmpRightPressed,       // btn_right_pressed.png
-    BmpANormal,            // btn_a_normal.png
-    BmpAPressed,           // btn_a_pressed.png
-    BmpBNormal,            // btn_b_normal.png
-    BmpBPressed,           // btn_b_pressed.png
-    BmpSelNormal,          // btn_sel_normal.png
-    BmpSelPressed,         // btn_sel_pressed.png
-    BmpStartNormal,        // btn_start_normal.png
-    BmpStartPressed,       // btn_start_pressed.png
-    BmpLShiftNormal,       // btn_lshift_normal.png
-    BmpLShiftPressed,      // btn_lshift_pressed.png
-    BmpRShiftNormal,       // btn_rshift_normal.png
-    BmpRShiftPressed,      // btn_rshift_pressed.png
     COUNT
 };
 
@@ -107,21 +84,13 @@ public:
      * on-device readout that tells a real decode from a silent no-op (there is no console assertion for
      * this on a phone; the log line IS the assertion).
      *
-     * `art` selects which pieces to attempt (see SkinArt) — a chrome theme is never asked for
-     * per-button art, nor the reverse, so the MISS lines stay real misses rather than twenty lines of
-     * "this theme was never going to have that".
+     * `art` selects which pieces to attempt (see SkinArt) — a transparent theme is never asked for the
+     * chrome bands, so the MISS lines stay real misses rather than lines of "this theme was never going
+     * to have that".
      *
-     * ⚠️ It also changes HOW the Bitmap set is uploaded. That art is two-colour and OPAQUE (black
-     * ground, white ink), but it is drawn TINTED to the live tracker theme — so the ink's brightness
-     * becomes ALPHA and the colour becomes flat white, leaving `SDL_SetTextureColorMod` free to pick
-     * the ink colour per frame and the black ground to fall away to whatever is behind it. Uploading it
-     * as-is would paint an opaque black box no colour mod could lighten. Scaling is NEAREST for the
-     * same art, not the others' LINEAR: it is pixel art, and smoothing it is the one thing that would
-     * stop it reading as pixel art.
-     *
-     * ⚠️ The Transparent set needs NEITHER — it is authored white-on-transparent already, so it goes up
-     * untouched and tints straight away, and its edges are anti-aliased curves that want the smoothing.
-     * The rule both branches follow is "match the handling to what the art IS", not to which set it is in.
+     * ⚠️ The Transparent set is uploaded untouched and tinted at blit time, which works only because it
+     * is authored flat white with a real alpha channel. Art authored opaque (ink on a solid ground)
+     * would come out as a solid box no colour mod could lighten.
      */
     int  load(SDL_Renderer* renderer, const std::string& theme, bool log, SkinArt art);
 
@@ -135,8 +104,8 @@ public:
      *  need not guard every draw against a theme that shipped an incomplete set. */
     void draw(SDL_Renderer* renderer, SkinPiece p, const SDL_Rect& dst) const;
 
-    /** As `draw`, but multiplying the piece by `rgb` (0xRRGGBB) — the ink colour of the two tinted art
-     *  sets, which is the live theme's and therefore cannot be baked into the texture at load. The mod
+    /** As `draw`, but multiplying the piece by `rgb` (0xRRGGBB) — the ink colour of the Transparent
+     *  set, which is the live theme's and therefore cannot be baked into the texture at load. The mod
      *  is set and put back to white around the blit, so it never leaks into the next piece drawn. */
     void draw_tinted(SDL_Renderer* renderer, SkinPiece p, const SDL_Rect& dst, uint32_t rgb) const;
 

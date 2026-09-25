@@ -19,16 +19,14 @@
 //   │  [buttons...]  │  band 4  button cluster    (SkinPiece::ButtonBacking) — the ten portrait2_rects
 //   └───────────────┘
 //
-// ── THREE SKINS IN ONE RENDERER ───────────────────────────────────────────────────────────────────
+// ── TWO KINDS OF SKIN IN ONE RENDERER ─────────────────────────────────────────────────────────────
 //
-// The above is the CHROME art (amiga / amiga-2). A skin whose `SkinArt` in device_skin.h is anything
-// else is drawn by this same class from a different starting point: `portrait2_skin_bare` instead of
-// `portrait2_skin`, so there are no bands at all — just the tracker across the FULL device width and
-// the button cluster below it. Both such skins tint their art at blit time to the live tracker theme,
-// so two colours reach the screen: the theme's background, which is the casing clear, and its TXT
-// VALUE, which is every key. They differ only in what the art is and therefore whether text goes over
-// it — BITMAP ships a character per button and needs none; TRANSPARENT ships the bare square and wide
-// shapes and gets the same labels the chrome skins draw, in that same TXT VALUE.
+// The above is the CHROME art (amiga / amiga-2). The TRANSPARENT skin is drawn by this same class from
+// a different starting point: `portrait2_skin_bare` instead of `portrait2_skin`, so there are no bands
+// at all — just the tracker across the FULL device width and the button cluster below it. Its art is
+// the bare square and wide shapes, tinted at blit time to the live tracker theme, so two colours reach
+// the screen: the theme's background, which is the casing clear, and its TXT VALUE, which is every key
+// and the same labels the chrome skins draw.
 //
 //   ┌───────────────┐  the tracker — full device width, no bezel, no border
 //   │    640×480    │
@@ -126,7 +124,7 @@ public:
 
     /**
      * The LIVE tracker theme's two colours, pushed every frame (unlike `set_skin`, which changes only
-     * when the user picks a different skin). The two CHROMELESS skins are drawn in these and nothing
+     * when the user picks a different skin). A CHROMELESS skin is drawn in these and nothing
      * else: the ground is `background` and the keys — art and labels alike — are `textValue`, so the
      * controls restyle themselves the moment a theme is edited or swapped, with no reload and nothing
      * to keep in step.
@@ -166,11 +164,8 @@ public:
      *  textures on first use. If `font` itself did not load, the whole cluster falls back to the 5×5
      *  label font, so a missing .otf shows blocky labels rather than none.
      *
-     *  ⚠️ The BITMAP skin takes NONE of that path: its art carries each button's character already, so
-     *  it blits one image per button tinted to the theme's TXT VALUE and draws no text at all. Neither
-     *  font is touched there, and a missing .otf cannot affect it. The TRANSPARENT skin does take it —
-     *  its art is only the shape — with the blit tinted and the label drawn in the theme's TXT VALUE
-     *  rather than the skin table's constant. */
+     *  The TRANSPARENT skin takes the same path, with the blit tinted and the label drawn in the
+     *  theme's TXT VALUE rather than the skin table's constant. */
     void draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, Font& arrowFont,
                       const SdlInput& input) const;
 
@@ -183,10 +178,8 @@ public:
     uint64_t signature(const SdlInput& input) const;
 
 private:
-    // ⚠️ CHROMELESS is derived from the art set, not stored beside it. Everything that is not the
-    // bands-and-casing skin shares one shape — the bare band layout, the theme background as its
-    // ground, and its art tinted to the theme's TXT VALUE — and only what sits ON a button differs.
-    // A second flag would let the two drift; this cannot.
+    // ⚠️ CHROMELESS is derived from the art set, not stored beside it: it decides the bare band layout,
+    // the theme background as ground and the tint together. A second flag would let them drift.
     bool chromeless() const { return art_ != SkinArt::Chrome; }
 
     /** The colour a button's art and its label are drawn in. A chromeless skin follows the live theme;

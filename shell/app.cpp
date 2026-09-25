@@ -1427,7 +1427,7 @@ int run(const AppConfig& cfg) {
                     loadedSkinIdx = state.settings.skinIndex;
                 }
 
-                // The chromeless skins draw in the LIVE theme's colours, so they are pushed every
+                // The chromeless skin draws in the LIVE theme's colours, so they are pushed every
                 // frame, not at load: a theme edit or swap must restyle the controls straight away, and
                 // the art they tint was uploaded colourless exactly so nothing has to be reloaded when
                 // it does. Inert for the chrome skins, which draw in their own table's scalars.

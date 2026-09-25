@@ -29,7 +29,7 @@ namespace ptshell {
 
 struct DeviceSkinDef {
     const char* id;               // persisted key + asset-folder leaf: "amiga" / "amiga-2"
-    const char* displayName;      // the SETTINGS skin column text: "NORM" / "DARK" / "BMAP" / "TRNS"
+    const char* displayName;      // the SETTINGS skin column text: "NORM" / "DARK" / "TRNS"
     uint32_t    casingFillArgb;   // casing clear behind/around the skin (DeviceSkin.casingFillColor)
     uint32_t    labelRgb;         // button-label colour, 0xRRGGBB (DeviceSkin.labelColor)
     float       bezelThicknessX;  // bezel border in skin X-units (DeviceTheme.screenBezelThicknessX)
@@ -39,20 +39,18 @@ struct DeviceSkinDef {
 // NORM = beige amiga skin, near-black labels; DARK = slate amiga-2 skin, white labels. DARK is index 1
 // and the fallback below, because it is the look the shell shipped hardcoded before selection existed.
 //
-// ⚠️ BMAP and TRNS are not more sets of chrome art. Anything but `SkinArt::Chrome` turns three things
-// over at once:
-//   * the ART — BMAP's is per-button, each image carrying its own character, so the renderer draws no
-//     text over it; TRNS's is the generic square/wide SHAPE alone, with the usual label drawn on top;
-//   * the LAYOUT is `portrait2_skin_bare` for both — no panels, no branding, no backing, no bezel, so
-//     the tracker gets the full device width;
+// ⚠️ TRNS is not another set of chrome art. Anything but `SkinArt::Chrome` turns three things over at
+// once:
+//   * the ART is the generic square/wide SHAPE alone, with the usual label drawn on top;
+//   * the LAYOUT is `portrait2_skin_bare` — no panels, no branding, no backing, no bezel, so the
+//     tracker gets the full device width;
 //   * the COLOURS are the LIVE tracker theme's (background behind, TXT VALUE for the keys and their
-//     labels), not the two constants below — which is why their `casingFillArgb`/`labelRgb` are left
+//     labels), not the two constants below — which is why its `casingFillArgb`/`labelRgb` are left
 //     at 0. Those are read only on the Chrome path; leaving them at 0 keeps a stray reader honest by
 //     making a mistaken use come out black rather than plausibly beige.
 inline constexpr DeviceSkinDef kDeviceSkins[] = {
     {"amiga",             "NORM", 0xFFE1D0BA, 0x0D0D0D, 3.0f, SkinArt::Chrome},
     {"amiga-2",           "DARK", 0xFF56606C, 0xFFFFFF, 3.0f, SkinArt::Chrome},
-    {"amiga-bitmap",      "BMAP", 0,          0,        0.0f, SkinArt::Bitmap},
     {"amiga-transparent", "TRNS", 0,          0,        0.0f, SkinArt::Transparent},
 };
 inline constexpr int kDeviceSkinCount = static_cast<int>(sizeof(kDeviceSkins) / sizeof(kDeviceSkins[0]));

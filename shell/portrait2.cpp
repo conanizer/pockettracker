@@ -41,27 +41,6 @@ SkinPiece piece_for(const Skin& skin, Button b, bool pressed) {
     }
 }
 
-// The Bitmap skin's art selection: one image per button, in its pressed or normal state. Unlike
-// `piece_for` above there is no sharing and no fallback — every button has its own file, and a missing
-// one is a `Skin::draw` no-op that leaves a gap exactly where the absent art is, which is the most
-// findable way for an incomplete set to fail.
-SkinPiece bitmap_piece_for(Button b, bool pressed) {
-    switch (b) {
-        case Button::L_SHIFT:    return pressed ? SkinPiece::BmpLShiftPressed : SkinPiece::BmpLShiftNormal;
-        case Button::R_SHIFT:    return pressed ? SkinPiece::BmpRShiftPressed : SkinPiece::BmpRShiftNormal;
-        case Button::A:          return pressed ? SkinPiece::BmpAPressed      : SkinPiece::BmpANormal;
-        case Button::B:          return pressed ? SkinPiece::BmpBPressed      : SkinPiece::BmpBNormal;
-        case Button::SELECT:     return pressed ? SkinPiece::BmpSelPressed    : SkinPiece::BmpSelNormal;
-        case Button::START:      return pressed ? SkinPiece::BmpStartPressed  : SkinPiece::BmpStartNormal;
-        case Button::DPAD_UP:    return pressed ? SkinPiece::BmpUpPressed     : SkinPiece::BmpUpNormal;
-        case Button::DPAD_DOWN:  return pressed ? SkinPiece::BmpDownPressed   : SkinPiece::BmpDownNormal;
-        case Button::DPAD_LEFT:  return pressed ? SkinPiece::BmpLeftPressed   : SkinPiece::BmpLeftNormal;
-        case Button::DPAD_RIGHT: return pressed ? SkinPiece::BmpRightPressed  : SkinPiece::BmpRightNormal;
-        // The cluster holds those ten and nothing else; this arm exists for the enum, not for a case.
-        default:                 return pressed ? SkinPiece::BmpRightPressed  : SkinPiece::BmpRightNormal;
-    }
-}
-
 // A PORTRAIT2 button's label, ported one-for-one from `VirtualControlsPortrait2`'s per-button call: the
 // text (or, for the D-pad, an `Arrow` the shell draws itself — Helvetica has no arrow glyphs), which
 // SIZE class it uses (large = A/B and the arrows; small = Sel/Start and the L/R shift), and which X
@@ -207,21 +186,6 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
 
     const int ox = geom_.buttons.x;
     const int oy = geom_.buttons.y;
-
-    // ── The BITMAP skin: one tinted image per button, and no text anywhere ───────────────────────
-    //
-    // The art already carries each button's character, so everything the path below this — the
-    // Helvetica metrics, the size classes, the X/Y offsets, the arrow font and its baseline anchoring —
-    // has nothing to do here. Drawing a label over art that has one is the only way to get this wrong,
-    // so the path does not have a font to draw one with.
-    if (art_ == SkinArt::Bitmap) {
-        for (int i = 0; i < buttons_.count; ++i) {
-            const tl::ButtonRect& br = buttons_.r[i];
-            const SDL_Rect        dst{br.x + ox, br.y + oy, br.w, br.h};
-            skin.draw_tinted(r, bitmap_piece_for(br.button, input.is_held(br.button)), dst, ink_rgb());
-        }
-        return;
-    }
 
     // The Helvetica label metrics, IN PIXELS. Density cancels for on-screen size exactly as it does for
     // positions (touch_layout.h): Kotlin draws `largeSp.sp` at `largeSp * density` px, and
