@@ -183,101 +183,6 @@ bool AudioEngine::loadSample(int id, const float* data, int length) {
     return true;
 }
 
-bool AudioEngine::loadSampleStereo(int id, const float* left, const float* right, int length) {
-    if (id < 0 || id >= 256 || !left || !right || length < 1) return false;
-
-    // Both channels up front, for loadSample's reason — and both or neither, so a half-allocated
-    // stereo pair can never be published.
-    float* newL = new (std::nothrow) float[length];
-    float* newR = new (std::nothrow) float[length];
-    if (!newL || !newR) {
-        delete[] newL;
-        delete[] newR;
-        LOGE("loadSampleStereo: OOM allocating 2 x %d frames", length);
-        return false;
-    }
-    std::memcpy(newL, left,  static_cast<size_t>(length) * sizeof(float));
-    std::memcpy(newR, right, static_cast<size_t>(length) * sizeof(float));
-
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
-
-    // Same as loadSample: a new file invalidates the old sample's undo backup.
-    delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
-    delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
-    sampleBackupLengths[id] = 0;
-    setSampleSourceFormat(id, 16, false);
-
-    setSampleBuffers(id, newL, newR, length);
-
-    LOGD("Sample %d: %d frames (stereo)", id, length);
-    return true;
-}
-
-bool AudioEngine::beginSampleLoad(int id, int channels, int estimatedFrames) {
-    if (id < 0 || id >= 256 || estimatedFrames < 1) return false;
-    int ch = (channels >= 2) ? 2 : 1;
-    // Allocate the destination up front so chunks fill it in place — no whole-file PCM on the Java heap
-    // and no second native copy at finalize. std::nothrow: a real OOM returns false instead of aborting
-    // (native new aborts under -fno-exceptions). Not zero-filled: sampleLengths stays 0 until finalize,
-    // and finalize publishes only the frames actually written, so the unfilled tail is never read.
-    float* newL = new (std::nothrow) float[estimatedFrames];
-    float* newR = (ch == 2) ? new (std::nothrow) float[estimatedFrames] : nullptr;
-    if (!newL || (ch == 2 && !newR)) { delete[] newL; delete[] newR; return false; }
-
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
-    // Free every stale per-slot buffer (mirror loadSampleFromWavFile).
-    delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
-    delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
-    sampleBackupLengths[id] = 0;
-    setSampleSourceFormat(id, 16, false);   // the chunks arrive as int16
-    setSampleBuffers(id, newL, newR, 0);    // not playable until finalize
-    streamLoadId       = id;
-    streamLoadChannels = ch;
-    streamLoadCapacity = estimatedFrames;
-    streamLoadFilled   = 0;
-    return true;
-}
-
-void AudioEngine::fillSampleChunk(int id, const int16_t* interleaved, int frameCount, int channels) {
-    // No lock: begin left sampleLengths[id]=0 so no voice reads this slot until finalize; we only write
-    // the already-allocated buffer in place. Clamp to capacity (a duration under-estimate drops the tail).
-    if (id != streamLoadId || !samples[id] || !interleaved || frameCount < 1) return;
-    int n = frameCount;
-    if (streamLoadFilled + n > streamLoadCapacity) n = streamLoadCapacity - streamLoadFilled;
-    if (n <= 0) return;
-    float* L = samples[id];
-    float* R = samplesRight[id];
-    const int base = streamLoadFilled;
-    if (channels >= 2) {
-        for (int i = 0; i < n; i++) {
-            L[base + i] = interleaved[(size_t)i * channels] / 32768.0f;
-            if (R) R[base + i] = interleaved[(size_t)i * channels + 1] / 32768.0f;
-        }
-    } else {
-        for (int i = 0; i < n; i++) L[base + i] = interleaved[i] / 32768.0f;
-    }
-    streamLoadFilled += n;
-}
-
-int AudioEngine::finalizeSampleLoad(int id) {
-    if (id != streamLoadId) return 0;
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
-    sampleLengths[id] = streamLoadFilled;   // publish actual frames; the unfilled tail is never reached
-    touchSample(id);                        // a voice started on the empty slot ends
-    int frames = streamLoadFilled;
-    streamLoadId = -1; streamLoadChannels = 0; streamLoadCapacity = 0; streamLoadFilled = 0;
-    LOGD("Streaming sample load: id=%d %d frames", id, frames);
-    return frames;
-}
-
-void AudioEngine::cancelSampleLoad(int id) {
-    // Decode failed/aborted — free the partially-filled buffer so it doesn't linger or play as garbage.
-    if (id != streamLoadId) return;
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
-    setSampleBuffers(id, nullptr, nullptr, 0);
-    streamLoadId = -1; streamLoadChannels = 0; streamLoadCapacity = 0; streamLoadFilled = 0;
-}
-
 // Decode one WAV sample at `p` to a normalized float in [-1, 1). Mirrors AudioEngine.kt
 // parseWavBuffer's `decode()` byte-for-byte (little-endian, identical divisors) so a native file
 // load is bit-identical to the old Java decode.
@@ -486,11 +391,6 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     return sampleRate;
 }
 
-// ACCEPTED 2x MEMORY PEAK: the decoder fills std::vector L/R, then loadSampleStereo
-// allocates the slot buffers and copies — both alive at once, so a multi-minute file
-// transiently needs ~2x its decoded PCM in native heap. The begin/fill/finalize streaming
-// path avoids this (MediaCodec loads use it) and dr_mp3/dr_flac/stb_vorbis all support
-// chunked reads; wire them up only if 1 GB devices actually hit this in practice.
 int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
     if (id < 0 || id >= 256 || !path) return 0;
 
@@ -503,40 +403,39 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
         ext[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
     }
 
-    std::vector<float> L, R;
+    ptdec::PcmSink pcm;
     int sr = 0;
     bool ok;
 
-    // ⚠️ THE ONLY `catch` IN native/, AND IT IS HERE BECAUSE THE ALLOCATIONS ARE NOT OURS. The
-    // decoders below grow std::vectors — five vendored libraries, each with its own idea of how much
-    // to reserve — so there is no allocation site here to hand a std::nothrow to. An uncaught
-    // bad_alloc is std::terminate, which takes the unsaved song with it; a caught one is a
-    // LOAD FAILED that costs the user only the file they picked.
+    // ⚠️ THE ONLY `catch` IN native/. The sample buffers are allocated nothrow, but the decoders' block
+    // buffers and the MP4 path's whole-file read are std::vectors, sized by the file — there is no
+    // allocation site there to hand a std::nothrow to. An uncaught bad_alloc is std::terminate, which
+    // takes the unsaved song with it; a caught one is a LOAD FAILED that costs the user only the file.
     //
     // ⚠️ It cannot help on 64-bit Android, where bionic grants any size and the kernel kills on the
     // write — see loadSample. It is Windows and 32-bit armhf that reach a real bad_alloc.
     try {
-        if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, L, R, sr);
-        else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, L, R, sr);
+        if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, pcm, sr);
+        else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, pcm, sr);
         else if (std::strcmp(ext, "ogg")  == 0) {
             // An .ogg holds either Vorbis or Opus. Try Vorbis (stb_vorbis); on a miss, retry as Opus.
             // ⚠️ A CANCEL IS NOT A MISS. Without that term the retry decodes the whole file a second
             // time with the box still up and the user's press already spent — the one place in the
             // app where "it failed, try the other decoder" and "stop" arrive as the same false.
-            ok = ptdec::decodeOggFile(path, L, R, sr);
+            ok = ptdec::decodeOggFile(path, pcm, sr);
             if (!ok && !pt::load_cancelled()) {
-                L.clear(); R.clear();
-                ok = ptdec::decodeOpusFile(path, L, R, sr);
+                pcm.clear();
+                ok = ptdec::decodeOpusFile(path, pcm, sr);
             }
         }
-        else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, L, R, sr);
+        else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, pcm, sr);
         // ISO-BMFF containers holding AAC (minimp4 demux + FAAD2). One decoder covers them all — .m4a and
         // the container extensions are the same box format. Raw .aac (ADTS) is deliberately NOT here: it is
         // a bare stream, not a container, and is not a sample format the app offers.
         else if (std::strcmp(ext, "m4a") == 0 || std::strcmp(ext, "mp4") == 0 ||
                  std::strcmp(ext, "m4b") == 0 || std::strcmp(ext, "mov") == 0 ||
                  std::strcmp(ext, "3gp") == 0)
-            ok = ptdec::decodeMp4File(path, L, R, sr);
+            ok = ptdec::decodeMp4File(path, pcm, sr);
         else { LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext); return 0; }
     } catch (const std::bad_alloc&) {
         LOGE("loadSampleFromCompressed: out of memory decoding %s", path);
@@ -544,7 +443,7 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
         return 0;
     }
 
-    if (!ok || L.empty() || sr <= 0) {
+    if (!ok || pcm.frames() == 0 || sr <= 0) {
         // ⚠️ A CANCEL comes back as the same false as everything else, and it is asked FIRST because
         // it is the one answer that is not a failure: nothing is wrong with the file and the user is
         // not to be told there is.
@@ -553,54 +452,46 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
             LOGD("loadSampleFromCompressed: cancelled (%s)", path);
             return 0;
         }
-        // ⚠️ A decoder that ran out of room returns false exactly as a corrupt file does, so the
-        // reason comes from whether memory is short RIGHT NOW rather than from the return value.
-        // The decoders abandon the decode and free as they unwind, so this reads the state that
-        // stopped them.
         LOGE("loadSampleFromCompressed: decode failed (%s)", path);
-        const int64_t budget = pt::load_budget_bytes();
-        const int64_t decoded = static_cast<int64_t>(L.capacity() + R.capacity()) * sizeof(float);
-        lastLoadFailure_ = (budget > 0 && decoded > 0 && decoded * 2 > budget)
-                               ? LoadFailure::OUT_OF_MEMORY
-                               : LoadFailure::PARSE;
+        lastLoadFailure_ = pcm.out_of_memory() ? LoadFailure::OUT_OF_MEMORY : LoadFailure::PARSE;
         return 0;
     }
-
-    // Publish via the existing, tested slot path (voice-stop + buffer free — incl. the stale undo
-    // backup — + mutex all handled there).
-    //
-    // ⚠️ The publish allocates a SECOND full copy and the decoded vectors are still live across it,
-    // so this path peaks at twice what it keeps. The WAV path does not — it allocates its destination
-    // up front and streams into it. Removing the asymmetry means decoding straight into the slot,
-    // which needs the frame count before the decode starts.
-    const bool published =
-        (!R.empty() && R.size() == L.size())
-            ? loadSampleStereo(id, L.data(), R.data(), (int)L.size())
-            : loadSample(id, L.data(), (int)L.size());
-    if (!published) {
-        LOGE("loadSampleFromCompressed: could not allocate slot %d for %zu frames", id, L.size());
-        lastLoadFailure_ = LoadFailure::OUT_OF_MEMORY;
-        return 0;
-    }
+    pcm.finish();
 
     // A FLAC keeps its source depth, and the float decode above holds all of it. The depth is the 5 bits
     // straddling bytes 20–21: "fLaC", a 4-byte block header, then STREAMINFO — whose place as the first
     // block the format requires — with bits-per-sample minus one after the rate and channel fields.
+    int bits = 16;
     if (std::strcmp(ext, "flac") == 0) {
         if (FILE* ff = pt_fopen(path, "rb")) {
             uint8_t head[22];
             if (fread(head, 1, sizeof(head), ff) == sizeof(head) && std::memcmp(head, "fLaC", 4) == 0 &&
                 (head[4] & 0x7F) == 0) {
-                const int bits = (((head[20] & 0x01) << 4) | (head[21] >> 4)) + 1;
-                if (bits > 16) setSampleSourceFormat(id, bits > 24 ? 32 : 24, false);
+                const int b = (((head[20] & 0x01) << 4) | (head[21] >> 4)) + 1;
+                if (b > 16) bits = b > 24 ? 32 : 24;
             }
             fclose(ff);
         }
     }
 
+    // The decoded buffers become the slot's as they are — no second copy. Same swap as the WAV path.
+    const int frames = static_cast<int>(pcm.frames());
+    const bool stereo = pcm.stereo();
+    float* newL = nullptr;
+    float* newR = nullptr;
+    pcm.release(newL, newR);
+    {
+        std::lock_guard<std::mutex> lock(sampleEditMutex);
+        delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
+        delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
+        sampleBackupLengths[id] = 0;
+        setSampleSourceFormat(id, bits, false);
+        setSampleBuffers(id, newL, newR, frames);
+    }
+
     lastLoadFailure_ = LoadFailure::NONE;
-    LOGD("loadSampleFromCompressed: id=%d %zu frames %s rate=%d (%s)",
-         id, L.size(), R.empty() ? "mono" : "stereo", sr, ext);
+    LOGD("loadSampleFromCompressed: id=%d %d frames %s rate=%d (%s)",
+         id, frames, stereo ? "stereo" : "mono", sr, ext);
     return sr;
 }
 

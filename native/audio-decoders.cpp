@@ -29,6 +29,8 @@ extern "C" {
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <new>
+#include <vector>
 
 // Descriptor duplication for the Opus path below, which is the only decoder that takes an fd.
 #if defined(_WIN32)
@@ -57,76 +59,26 @@ inline void ptClose(int fd)   { close(fd); }
  */
 constexpr int64_t DECODE_RESERVE_BYTES = 32ll * 1024 * 1024;
 
-/**
- * Is there room to append `frames` more? **False means the machine ran out**, and the caller must
- * stop decoding and fail the load — a decode that keeps going here is the one that gets the process
- * killed with nothing on screen.
- *
- * ⚠️ The container's own frame count is NOT the thing to guard on: an MP3 without a Xing header does
- * not state one at all (`reserveOutput` is skipped entirely there), and a corrupt FLAC can state a
- * count in the hundreds of GB. Guarding the actual growth needs neither to be honest.
- *
- * ⭐ **The check rides on the REALLOCATION, not on the block.** `/proc/meminfo` costs ~50 us and a
- * long file is thousands of blocks; but a vector only takes memory when it outgrows its capacity, so
- * testing exactly there is O(log n) reads placed on precisely the events that can exhaust a machine.
- * A file that fits its reservation is never checked at all.
- *
- * ⚠️ `available <= 0` is "the platform cannot say", and must never refuse.
- */
-inline bool decode_has_room(const std::vector<float>& L, const std::vector<float>& R, int frames) {
-    if (L.size() + static_cast<size_t>(frames) <= L.capacity()) return true;
-    const int64_t held      = static_cast<int64_t>(L.capacity() + R.capacity()) * sizeof(float);
-    const int64_t available = pt::available_memory_bytes();
-    // A regrow holds the old buffer and the new one at once and the new is about twice the old, so
-    // what is about to be TAKEN on top of what is already resident is roughly 2x `held`.
-    if (available <= 0) return true;
-    return held * 2 <= available - DECODE_RESERVE_BYTES;
-}
+// ⚠️ THE CAP IS NOT A LENGTH LIMIT ON SAMPLES — a longer file still decodes, growing past it. It bounds
+// what a *header* can make us allocate before a single byte of audio is decoded: FLAC's frame count is
+// a 36-bit field, so a corrupt-but-parseable header can ask for hundreds of GB. 30M frames is ~10
+// minutes of 48 kHz stereo — already past what a 512 MB handheld can hold resident.
+constexpr int64_t MAX_STATED_FRAMES = 30'000'000;
 
-// Deinterleave a freshly-decoded float block into L (always) and R (only when channels >= 2).
-// For >2 channels keep ch0/ch1 and drop the rest — same downmix the old Kotlin extractor used.
+// Append one decoded block and report it. **False means STOP**, for either of two reasons: the machine
+// ran out (`out.out_of_memory()`) or the user cancelled (`pt::load_cancelled()`). ⭐ One return value
+// for both because the unwind is identical — only the message at the end differs.
 //
-// **False means STOP**, for either of two reasons, and the caller asks `pt::load_cancelled()` which:
-// the machine ran out (decode_has_room), or the user cancelled the load (load_tick). ⭐ One return
-// value for both because the unwind is identical — the difference is only in the message at the end,
-// and choosing it where the message is written is one question instead of five.
-//
-// `totalFrames` is what the container said its length was, or 0 when it did not say (an mp3 with no
-// Xing header). Zero reports "unknown" rather than a made-up percentage.
-inline bool appendBlock(const float* interleaved, int frames, int channels,
-                        std::vector<float>& L, std::vector<float>& R, int64_t totalFrames) {
-    if (!decode_has_room(L, R, frames)) return false;
-    for (int i = 0; i < frames; i++) {
-        L.push_back(interleaved[(size_t)i * channels]);
-        if (channels >= 2) R.push_back(interleaved[(size_t)i * channels + 1]);
-    }
+// `totalFrames` is what the container said its length was, or 0 when it did not say. Zero reports
+// "unknown" rather than a made-up percentage.
+inline bool appendBlock(PcmSink& out, const float* interleaved, int frames, int channels, int64_t totalFrames) {
+    if (!out.append(interleaved, frames, channels)) return false;
     // Once per block, which is 4k-11k frames — often enough that a cancel lands within a frame or two
     // and rare enough that the report costs nothing against the decode it is reporting on.
     const float done = (totalFrames > 0)
-                           ? static_cast<float>(L.size()) / static_cast<float>(totalFrames)
+                           ? static_cast<float>(out.frames()) / static_cast<float>(totalFrames)
                            : -1.0f;
     return pt::load_tick(done > 1.0f ? 1.0f : done);
-}
-
-// Reserve the finished length before decoding, so a decode is ONE allocation per channel instead of a
-// geometric growth series. It matters more than it looks: at every regrow the old and new buffers are
-// both live, so the L channel alone peaks near 3x its final size — on top of the 2x the sample slot
-// already costs when loadSampleStereo copies these out (audio-engine.cpp documents that 2x and accepts
-// it; the growth churn is a third copy nobody costed).
-//
-// `frames <= 0` means the container did not say, and growth takes over exactly as before.
-//
-// ⚠️ THE CAP IS NOT A LENGTH LIMIT ON SAMPLES — nothing here refuses to decode a longer file, and the
-// vector grows past it normally. It bounds what a *header* can make us allocate before a single byte
-// of audio is decoded: FLAC's frame count is a 36-bit field, so a corrupt-but-parseable header can ask
-// for hundreds of GB and turn a file that loads today into an uncaught bad_alloc. 30M frames is ~10
-// minutes of 48 kHz stereo — already past what a 512 MB handheld can hold resident.
-inline void reserveOutput(int64_t frames, int channels, std::vector<float>& L, std::vector<float>& R) {
-    constexpr int64_t kMaxReserveFrames = 30'000'000;
-    if (frames <= 0) return;
-    const size_t n = static_cast<size_t>(frames < kMaxReserveFrames ? frames : kMaxReserveFrames);
-    L.reserve(n);
-    if (channels >= 2) R.reserve(n);
 }
 
 // ─── stdio over a FILE*, for the two decoders that have no FILE* entry point ─────────────────────
@@ -183,7 +135,80 @@ int mp4ReadCb(int64_t offset, void* buffer, size_t size, void* token) {
 }
 }  // namespace
 
-bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+void PcmSink::clear() {
+    delete[] left_;  left_  = nullptr;
+    delete[] right_; right_ = nullptr;
+    frames_ = capacity_ = 0;
+}
+
+bool PcmSink::reallocate(int64_t capacity) {
+    float* l = new (std::nothrow) float[static_cast<size_t>(capacity)];
+    float* r = stereo_ ? new (std::nothrow) float[static_cast<size_t>(capacity)] : nullptr;
+    if (!l || (stereo_ && !r)) { delete[] l; delete[] r; return false; }
+    if (frames_ > 0) {
+        std::memcpy(l, left_, static_cast<size_t>(frames_) * sizeof(float));
+        if (r) std::memcpy(r, right_, static_cast<size_t>(frames_) * sizeof(float));
+    }
+    delete[] left_;
+    delete[] right_;
+    left_ = l; right_ = r; capacity_ = capacity;
+    return true;
+}
+
+bool PcmSink::begin(int channels, int64_t stated) {
+    clear();
+    outOfMemory_ = false;
+    stereo_ = channels >= 2;
+    if (stated <= 0) return true;   // grown by append instead
+    const int64_t n = stated < MAX_STATED_FRAMES ? stated : MAX_STATED_FRAMES;
+    // ⚠️ Measured against the load BUDGET, not free memory — like the WAV path's size check, this is a
+    // prediction made before any work, and the budget carries the floor for Android's under-reporting.
+    // 0 = the platform cannot say, and then nothing is refused.
+    const int64_t budget = pt::load_budget_bytes();
+    if ((budget > 0 && n * (stereo_ ? 2 : 1) * static_cast<int64_t>(sizeof(float)) > budget) || !reallocate(n)) {
+        outOfMemory_ = true;
+        return false;
+    }
+    return true;
+}
+
+bool PcmSink::append(const float* interleaved, int n, int stride) {
+    if (frames_ + n > capacity_) {
+        // A growth holds the old buffers and the new ones at once. ⭐ The memory check rides on the
+        // growth, not on the block: free memory costs ~50 us to read and a long file is thousands of
+        // blocks, but only a growth can exhaust the machine. `available <= 0` never refuses.
+        int64_t want = capacity_ + capacity_ / 2;
+        if (want < frames_ + n) want = frames_ + n;
+        if (want < 65536) want = 65536;
+        const int64_t newBytes  = want * (stereo_ ? 2 : 1) * static_cast<int64_t>(sizeof(float));
+        const int64_t available = pt::available_memory_bytes();
+        if ((available > 0 && newBytes > available - DECODE_RESERVE_BYTES) || !reallocate(want)) {
+            outOfMemory_ = true;
+            return false;
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        left_[frames_ + i] = interleaved[static_cast<size_t>(i) * stride];
+        // A stride-1 block into a stereo sink (an AAC stream whose layout changes mid-file) doubles ch0.
+        if (stereo_) right_[frames_ + i] = interleaved[static_cast<size_t>(i) * stride + (stride >= 2 ? 1 : 0)];
+    }
+    frames_ += n;
+    return true;
+}
+
+// Trim when the buffer is more than an eighth larger than what was decoded — a growth's slack, or a
+// header that overstated. The copy briefly holds both; a smaller overshoot is cheaper left in place.
+void PcmSink::finish() {
+    if (frames_ > 0 && capacity_ - frames_ > frames_ / 8) reallocate(frames_);
+}
+
+void PcmSink::release(float*& left, float*& right) {
+    left = left_; right = right_;
+    left_ = right_ = nullptr;
+    frames_ = capacity_ = 0;
+}
+
+bool decodeMp3File(const char* path, PcmSink& out, int& sampleRate) {
     FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("decodeMp3File: cannot open %s", path); return false; }
 
@@ -197,28 +222,27 @@ bool decodeMp3File(const char* path, std::vector<float>& outL, std::vector<float
     sampleRate = (int)mp3.sampleRate;
     if (channels < 1) { drmp3_uninit(&mp3); std::fclose(f); return false; }
 
-    // DRMP3_UINT64_MAX means "no Xing/LAME header, length unknown" — reserveOutput ignores it, and
-    // so does the progress report: `total` stays 0 and the box shows a moving bar with no percentage.
-    const int64_t total = (mp3.totalPCMFrameCount != DRMP3_UINT64_MAX)
-                              ? (int64_t)mp3.totalPCMFrameCount : 0;
-    if (total > 0) reserveOutput(total, channels, outL, outR);
+    // From the Xing/LAME header when there is one; without it dr_mp3 walks every frame header (no
+    // decoding) and seeks back to the start. 0 only when that walk fails.
+    const int64_t total = (int64_t)drmp3_get_pcm_frame_count(&mp3);
+    if (!out.begin(channels, total)) { drmp3_uninit(&mp3); std::fclose(f); return false; }
 
     const drmp3_uint64 CHUNK = 8192;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
     drmp3_uint64 got;
     bool room = true;
     while ((got = drmp3_read_pcm_frames_f32(&mp3, CHUNK, block.data())) > 0)
-        if (!appendBlock(block.data(), (int)got, channels, outL, outR, total)) { room = false; break; }
+        if (!appendBlock(out, block.data(), (int)got, channels, total)) { room = false; break; }
     drmp3_uninit(&mp3);
     std::fclose(f);
     if (!room) { LOGE("decodeMp3File: %s at %zu frames: %s",
-                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                      pt::load_cancelled() ? "cancelled" : "out of memory", (size_t)out.frames(), path);
                  return false; }
-    LOGD("decodeMp3File: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
-    return !outL.empty();
+    LOGD("decodeMp3File: ch=%d rate=%d frames=%zu", channels, sampleRate, (size_t)out.frames());
+    return out.frames() > 0;
 }
 
-bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+bool decodeFlacFile(const char* path, PcmSink& out, int& sampleRate) {
     FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("decodeFlacFile: cannot open %s", path); return false; }
 
@@ -232,25 +256,26 @@ bool decodeFlacFile(const char* path, std::vector<float>& outL, std::vector<floa
     sampleRate = (int)flac->sampleRate;
     if (channels < 1) { drflac_close(flac); std::fclose(f); return false; }
 
+    // 0 = STREAMINFO left it unset, which the format allows.
     const int64_t total = (int64_t)flac->totalPCMFrameCount;
-    reserveOutput(total, channels, outL, outR);
+    if (!out.begin(channels, total)) { drflac_close(flac); std::fclose(f); return false; }
 
     const drflac_uint64 CHUNK = 8192;
     std::vector<float> block((size_t)CHUNK * channels);
     drflac_uint64 got;
     bool room = true;
     while ((got = drflac_read_pcm_frames_f32(flac, CHUNK, block.data())) > 0)
-        if (!appendBlock(block.data(), (int)got, channels, outL, outR, total)) { room = false; break; }
+        if (!appendBlock(out, block.data(), (int)got, channels, total)) { room = false; break; }
     drflac_close(flac);
     std::fclose(f);
     if (!room) { LOGE("decodeFlacFile: %s at %zu frames: %s",
-                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                      pt::load_cancelled() ? "cancelled" : "out of memory", (size_t)out.frames(), path);
                  return false; }
-    LOGD("decodeFlacFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
-    return !outL.empty();
+    LOGD("decodeFlacFile: ch=%d rate=%d frames=%zu", channels, sampleRate, (size_t)out.frames());
+    return out.frames() > 0;
 }
 
-bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+bool decodeOggFile(const char* path, PcmSink& out, int& sampleRate) {
     FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("decodeOggFile: cannot open %s", path); return false; }
 
@@ -274,7 +299,7 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
 
     // 0 when the stream length is not derivable (stb_vorbis returns 0 rather than an error).
     const int64_t total = (int64_t)stb_vorbis_stream_length_in_samples(v);
-    reserveOutput(total, channels, outL, outR);
+    if (!out.begin(channels, total)) { stb_vorbis_close(v); return false; }
 
     const int CHUNK = 4096;  // frames per read
     std::vector<float> block((size_t)CHUNK * channels);
@@ -282,16 +307,16 @@ bool decodeOggFile(const char* path, std::vector<float>& outL, std::vector<float
     // num_floats is the buffer capacity in floats; returns frames (samples per channel) written, 0 at EOF.
     bool room = true;
     while ((got = stb_vorbis_get_samples_float_interleaved(v, channels, block.data(), CHUNK * channels)) > 0)
-        if (!appendBlock(block.data(), got, channels, outL, outR, total)) { room = false; break; }
+        if (!appendBlock(out, block.data(), got, channels, total)) { room = false; break; }
     stb_vorbis_close(v);
     if (!room) { LOGE("decodeOggFile: %s at %zu frames: %s",
-                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                      pt::load_cancelled() ? "cancelled" : "out of memory", (size_t)out.frames(), path);
                  return false; }
-    LOGD("decodeOggFile: ch=%d rate=%d frames=%zu", channels, sampleRate, outL.size());
-    return !outL.empty();
+    LOGD("decodeOggFile: ch=%d rate=%d frames=%zu", channels, sampleRate, (size_t)out.frames());
+    return out.frames() > 0;
 }
 
-bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+bool decodeOpusFile(const char* path, PcmSink& out, int& sampleRate) {
     FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("decodeOpusFile: cannot open %s", path); return false; }
 
@@ -319,11 +344,10 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     sampleRate = 48000;  // Opus always decodes at 48 kHz regardless of the original rate
     if (channels < 1) { op_free(of); return false; }
 
-    // Negative on error, or for a link-index total the stream cannot give — reserveOutput ignores it,
-    // and so does the progress report (0 = "no percentage available").
+    // Negative on error, or for a link-index total the stream cannot give — then 0, "not stated".
     const int64_t pcmTotal = (int64_t)op_pcm_total(of, -1);
     const int64_t total    = pcmTotal > 0 ? pcmTotal : 0;
-    reserveOutput(pcmTotal, channels, outL, outR);
+    if (!out.begin(channels, total)) { op_free(of); return false; }
 
     // op_read_float wants room for >= 120 ms/channel (5760 frames at 48 kHz); use a generous chunk.
     const int CHUNK = 11520;  // frames
@@ -332,18 +356,18 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     int got;
     bool room = true;
     while ((got = op_read_float(of, block.data(), (int)block.size(), &li)) > 0)
-        if (!appendBlock(block.data(), got, channels, outL, outR, total)) { room = false; break; }
+        if (!appendBlock(out, block.data(), got, channels, total)) { room = false; break; }
     if (got < 0) LOGE("decodeOpusFile: op_read_float error %d (using %zu decoded frames): %s",
-                      got, outL.size(), path);  // keep whatever decoded before the error
+                      got, (size_t)out.frames(), path);  // keep whatever decoded before the error
     op_free(of);
     if (!room) { LOGE("decodeOpusFile: %s at %zu frames: %s",
-                      pt::load_cancelled() ? "cancelled" : "out of memory", outL.size(), path);
+                      pt::load_cancelled() ? "cancelled" : "out of memory", (size_t)out.frames(), path);
                  return false; }
-    LOGD("decodeOpusFile: ch=%d rate=48000 frames=%zu", channels, outL.size());
-    return !outL.empty();
+    LOGD("decodeOpusFile: ch=%d rate=48000 frames=%zu", channels, (size_t)out.frames());
+    return out.frames() > 0;
 }
 
-bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+bool decodeMp4File(const char* path, PcmSink& out, int& sampleRate) {
     // Read the whole file into RAM. minimp4 reads sequentially and the index may sit at the end of the
     // stream, so buffering the file up front is both simplest and what its read callback wants; a
     // container sample is a few MB. (The convergence plan's OOM guard is a UI-level length warning on
@@ -411,6 +435,7 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
     const unsigned containerCh = tr->SampleDescription.audio.channelcount;
 
     sampleRate = 0;
+    bool begun = false;
     for (unsigned s = 0; s < tr->sample_count; s++) {
         unsigned fbytes = 0, ts = 0, dur = 0;
         MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, (unsigned)atrack, s, &fbytes, &ts, &dur);
@@ -423,7 +448,7 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
             // does), so one bad packet late in a long sample does not throw the whole load away.
             LOGE("decodeMp4File: NeAACDecDecode error %d (%s) at sample %u/%u",
                  fi.error, NeAACDecGetErrorMessage(fi.error), s, tr->sample_count);
-            if (outL.empty()) { NeAACDecClose(dec); MP4D_close(&mp4); return false; }
+            if (out.frames() == 0) { NeAACDecClose(dec); MP4D_close(&mp4); return false; }
             break;
         }
         if (!pcm || fi.samples == 0 || fi.channels < 1) continue;
@@ -435,33 +460,31 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
         const int   frames     = (int)(fi.samples / (unsigned)stride);
         const float* p         = (const float*)pcm;
 
-        // Reserve on the FIRST decoded packet rather than up front, because the container gives a
+        // Sized on the FIRST decoded packet rather than up front, because the container gives a
         // packet count and not an output length: an AAC packet is 1024 frames, or 2048 once SBR
         // doubles it, and only a decoded frame says which this stream is. Every later packet is the
         // same size, so `sample_count x this one` is the whole file. Also the earliest point the L/R
         // decision (keepStereo) is known.
-        if (outL.empty())
-            reserveOutput((int64_t)tr->sample_count * frames, keepStereo ? 2 : 1, outL, outR);
-        // ⚠️ This path appends INLINE rather than through appendBlock — the interleave stride and the
-        // keepStereo rule are its own — so it needs the memory guard spelled out here. It is the one
-        // decoder where "every append goes through one helper" is not true.
-        if (!decode_has_room(outL, outR, frames)) {
+        if (!begun) {
+            begun = true;
+            if (!out.begin(keepStereo ? 2 : 1, (int64_t)tr->sample_count * frames)) {
+                NeAACDecClose(dec);
+                MP4D_close(&mp4);
+                return false;
+            }
+        }
+        if (!out.append(p, frames, stride)) {
             NeAACDecClose(dec);
             MP4D_close(&mp4);
-            LOGE("decodeMp4File: out of memory at %zu frames: %s", outL.size(), path);
+            LOGE("decodeMp4File: out of memory at %zu frames: %s", (size_t)out.frames(), path);
             return false;
         }
-        for (int i = 0; i < frames; i++) {
-            outL.push_back(p[(size_t)i * stride]);            // ch0 → L (a mono duplicate's ch0 == ch1)
-            if (keepStereo) outR.push_back(p[(size_t)i * stride + 1]);  // ch1 → R only for real stereo
-        }
-        // ⚠️ The report is spelled out here for the same reason the guard above is: this path does not
-        // go through appendBlock. Its fraction is the better one though — the container states a PACKET
-        // count up front, so this is exact from the first packet rather than from a decoded length.
+        // Not through appendBlock: this fraction is the better one — the container states a PACKET
+        // count up front, so it is exact from the first packet rather than from a decoded length.
         if (!pt::load_tick((float)(s + 1) / (float)tr->sample_count)) {
             NeAACDecClose(dec);
             MP4D_close(&mp4);
-            LOGE("decodeMp4File: cancelled at %zu frames: %s", outL.size(), path);
+            LOGE("decodeMp4File: cancelled at %zu frames: %s", (size_t)out.frames(), path);
             return false;
         }
     }
@@ -469,8 +492,8 @@ bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float
     NeAACDecClose(dec);
     MP4D_close(&mp4);
     LOGD("decodeMp4File: %s rate=%d frames=%zu (%s)",
-         outR.empty() ? "mono" : "stereo", sampleRate, outL.size(), path);
-    return !outL.empty() && sampleRate > 0;
+         out.stereo() ? "stereo" : "mono", sampleRate, (size_t)out.frames(), path);
+    return out.frames() > 0 && sampleRate > 0;
 }
 
 }  // namespace ptdec

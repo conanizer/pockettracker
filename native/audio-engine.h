@@ -62,7 +62,7 @@ extern SoundfontVoice sfVoices[SF_VOICE_COUNT];
  *
  * What bounds it instead is a check against the DEVICE's free memory, made where the memory actually
  * grows: a counting `TSF_MALLOC`/`TSF_REALLOC` for both font formats (`soundfont-voice.cpp`),
- * `decode_has_room()` for compressed samples (`audio-decoders.cpp`), and `load_budget_bytes()` up
+ * `PcmSink::append` for compressed samples (`audio-decoders.cpp`), and `load_budget_bytes()` up
  * front for WAV — the one source whose decoded size a header states. ⚠️ Deliberately NOT an estimate
  * made before opening the file: that would re-parse what the loaders already parse, and **no SF3
  * header carries the decoded size at all** — tsf only learns it by decoding. The limit is therefore
@@ -102,7 +102,6 @@ public:
     // buffers are taken before anything is freed — so a caller that reports LOAD FAILED is telling
     // the truth about a slot that still holds whatever it held before.
     bool loadSample(int id, const float* data, int length);
-    bool loadSampleStereo(int id, const float* left, const float* right, int length);
 
     /**
      * Why the last media load failed. Every loader reports failure the same way — 0 or -1 — and a
@@ -116,14 +115,6 @@ public:
     enum class LoadFailure { NONE = 0, PARSE, OUT_OF_MEMORY, CANCELLED };
     LoadFailure lastLoadFailure() const { return lastLoadFailure_; }
 
-    // Streaming sample load — decode a compressed file (e.g. MP3) chunk-by-chunk straight into native
-    // memory so the whole PCM never has to live on the Java heap. begin allocates the slot from an
-    // (over-)estimated frame count; fillSampleChunk writes interleaved 16-bit chunks in place; finalize
-    // publishes the real length; cancel frees a partial load on decode failure. One load at a time.
-    bool beginSampleLoad(int id, int channels, int estimatedFrames);
-    void fillSampleChunk(int id, const int16_t* interleaved, int frameCount, int channels);
-    int  finalizeSampleLoad(int id);
-    void cancelSampleLoad(int id);
     // Decode a WAV file straight into native sample memory (no Java-heap round trip). Handles the
     // same formats as the Kotlin parser it replaces for file loads — 16/24/32-bit PCM, 32-bit float,
     // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0) on success, 0 on failure.
@@ -131,8 +122,8 @@ public:
     int loadSampleFromWavFile(int id, const char* path);
     // Decode a compressed audio file (mp3/flac/ogg/opus, plus AAC in an ISO-BMFF container:
     // m4a/mp4/m4b/mov/3gp) natively into native sample memory — no Java heap, no MediaCodec. Dispatches
-    // by file extension to dr_mp3 / dr_flac / stb_vorbis / libopus / (minimp4+FAAD2), then publishes via
-    // the same slot path as loadSampleStereo. Returns the source sample rate (>0) on success, 0 on
+    // by file extension to dr_mp3 / dr_flac / stb_vorbis / libopus / (minimp4+FAAD2), decoding straight
+    // into the buffer the slot then owns. Returns the source sample rate (>0) on success, 0 on
     // failure (incl. unsupported extension). AAC containers are handled here now — nothing needs MediaCodec.
     int loadSampleFromCompressed(int id, const char* path);
     bool hasStereoData(int id);
@@ -1108,13 +1099,6 @@ private:
     float* sampleClipboard      = nullptr; // cross-operation copy/paste buffer (left)
     float* sampleClipboardRight = nullptr; // copy/paste buffer (right channel; null = mono clip)
     int    sampleClipboardLength = 0;
-
-    // Streaming-load cursor (see beginSampleLoad). Touched only on the decode thread; the audio thread
-    // never reads these — it sees the slot via sampleLengths[id], which stays 0 until finalize.
-    int streamLoadId       = -1;  // slot currently being streamed into, or -1
-    int streamLoadChannels = 0;   // 1 or 2
-    int streamLoadCapacity = 0;   // allocated frames in samples[streamLoadId]
-    int streamLoadFilled   = 0;   // frames written so far (becomes sampleLengths on finalize)
 
     // Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
     // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
