@@ -53,6 +53,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "event.h"
@@ -995,7 +996,8 @@ class MidiInPipeline {
     std::atomic<uint32_t> requests_{0};
     std::atomic<uint32_t> resetMark_{0};
 
-    MidiInSeen            seen_[SEEN_CAPACITY];
+    // ⚠️ On the heap: inline, the ring is ~83 KB and the host lives on the stack (Windows gives 1 MB).
+    std::unique_ptr<MidiInSeen[]> seen_{new MidiInSeen[SEEN_CAPACITY]};
     std::atomic<uint32_t> seenHead_{0};   // the UI's
     std::atomic<uint32_t> seenTail_{0};   // the drain's
 
