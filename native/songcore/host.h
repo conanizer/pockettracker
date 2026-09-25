@@ -1598,7 +1598,7 @@ class SongcoreHost {
 
     /**
      * Give the audio thread's drain what it routes against and what it plays: the route snapshot, and
-     * every table the engine does not yet hold.
+     * every table and program the engine does not yet hold.
      *
      * The route is rebuilt each poll and published only when it differs — a cursor move, a channel
      * cell, a note the sequencer played, a mapping added — so the drain sees an edit within one poll
@@ -1614,7 +1614,22 @@ class SongcoreHost {
             midiRouteLast_      = route;
             midiRoutePublished_ = true;
         }
-        if (engine_) consumer_.push_tables(project_);
+        if (!engine_) return;
+        consumer_.push_tables(project_);
+        // ⚠️ A program carries its SoundFont slot and sample-rate ratio, and those move — a PATCH
+        // change, a load, an eviction — without passing `push_instrument`. The note path re-sends the
+        // program before every note, a live key does not, so whatever moved is re-sent here.
+        const int count = std::min(static_cast<int>(project_.instruments.size()), POOL_INSTRUMENTS);
+        for (int id = 0; id < count; ++id) {
+            const Instrument& ins = project_.instruments[static_cast<size_t>(id)];
+            const int   sid   = ins.sampleId;
+            const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing_.sampleRateRatio[sid] : 1.0f;
+            if (routing_.sfSlot[id] == programRouting_.sfSlot[id] && ratio == programRouting_.sampleRateRatio[id])
+                continue;
+            push_instrument_params(*engine_, ins, routing_, project_.tempo, sampleRate_);
+            programRouting_.sfSlot[id]          = routing_.sfSlot[id];
+            programRouting_.sampleRateRatio[id] = ratio;
+        }
     }
 
     /**
@@ -1736,6 +1751,7 @@ class SongcoreHost {
     LiveInput         midiLive_;                  // what the engine calls; points back at midiIn_
     MidiRoute         midiRouteLast_{};           // the route as last published, to publish only a change
     bool              midiRoutePublished_ = false;
+    Routing           programRouting_;            // per INSTRUMENT id: the slot and ratio its program last carried
     int               midiInFallback_     = -1;   // the instrument the UI is showing
     IMidiInObserver*  midiInObserver_     = nullptr;
     // `midiInThru_` defaults to the FEATURE — see set_midi_in_thru.
