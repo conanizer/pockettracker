@@ -2173,6 +2173,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         continue;   // …and the voice keeps whatever it was already playing
                     }
                     soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
+                    // Per-track mono across voice types, this direction: an SF note replaces a sampler
+                    // note still sounding on this track with the fade a sampler note would give it.
+                    // The sampler path does the reverse below. Only after armNote said yes — a dropped
+                    // SF note leaves the track as it was.
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].trackId == t && voices[v].isActive && !voices[v].isFadingOut) {
+                            voices[v].startFadeOut();
+                        }
+                    }
                     sv.isReleasingOnly = false;
                     sv.resetPitchState();
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
