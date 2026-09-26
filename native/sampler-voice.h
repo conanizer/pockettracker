@@ -124,10 +124,6 @@ struct Voice : public IAudioVoice {
     float noteKeytrack = 0.0f;  // (midiNote − 60) / 12.0, bipolar
     float noteRandom   = 0.0f;  // random 0.0–1.0
 
-    // Send levels (copied from instrParams at trigger time)
-    float reverbSend = 0.0f;
-    float delaySend  = 0.0f;
-
     // Fade-out instead of a hard cut. Two lengths: DECLICK_SAMPLES for voice steals (tail is
     // masked by the new note), KILL_FADE_SAMPLES for deliberate kills (see audio-defs.h).
     int fadeOutRemaining;  // Counts down from fadeOutTotal to 0 during fade-out
@@ -392,9 +388,8 @@ struct Voice : public IAudioVoice {
 
     void noteOff() override { noteOffAt(0); }
 
-    // THE release decision for sampler voices — AudioEngine::triggerNoteOff delegates here (they
-    // used to be two drifted copies). Promote live ADSR/TRIG VOL mods (attack/decay/sustain, with a
-    // nonzero release configured) to the release stage; an already-releasing mod also counts. No
+    // THE release decision for sampler voices, what a KIL's note-off calls. Promote live ADSR/TRIG
+    // VOL mods (attack/decay/sustain, with a nonzero release configured) to the release stage; an already-releasing mod also counts. No
     // release envelope → declicked kill fade, starting at `atFrame` of the current block.
     // The envelope path takes no frame: the mod matrix runs once per block, so a release stage
     // begins on a block edge whatever frame asked for it.
@@ -403,7 +398,7 @@ struct Voice : public IAudioVoice {
     }
 
     /**
-     * A live KEY was let go of (MIDI plan §4.1, phase E4) — `AudioEngine::triggerKeyRelease`.
+     * A live KEY was let go of (MIDI plan §4.1, phase E4).
      *
      * ⚠️ **IDENTICAL TO `noteOff` EXCEPT IN ONE ARM, AND THAT ARM IS THE WHOLE POINT.** A KIL means
      * "end this note"; releasing a key does not. So:

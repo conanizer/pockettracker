@@ -146,7 +146,7 @@ struct SamplerNoteArgs {
     bool  valid = false;        // false = the note is dropped (empty slot)
 };
 
-// AudioEngine::scheduleSoundfontNote.
+// The SoundFont path's note, as resolveScheduledNote fills a ScheduledNote from it.
 struct SoundfontNoteArgs {
     int64_t frame = 0;
     int   trackId = 0;

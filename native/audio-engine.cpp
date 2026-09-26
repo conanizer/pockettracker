@@ -893,22 +893,12 @@ static inline void tableOffset(SoundfontVoice&, uint8_t) {}
 // ⚠️ **INERT ON A VOICE RUNNING NO FILTER** (`type == 0`, i.e. the instrument's FILTER TYPE is OFF).
 // These move the filter the instrument declares; they do not switch one on.
 //
-// ⚠️ **THE PARAM BUS IS WHERE THE LIVE VALUES LIVE, AND THE SF VOICE NEEDS A SECOND WRITE.** The
-// sampler's per-block mod recompute reads `params.get()`, but the SF's reads `instrParams +
-// modDestValues` — so an SF voice given only the bus would have the old value back a block later.
-// `filterStore` below is that difference and the only thing that differs per voice type.
-//
-// The override is per-note by construction: a note-on rebuilds the chain from the instrument, so
-// nothing has to be restored when the note ends.
-static inline void filterStore(Voice& v, int cut, int res) {
+// The live values are on the param bus, which every voice type's per-block recompute reads. The
+// override is per-note by construction: a note-on rebuilds the chain from the instrument, so nothing
+// has to be restored when the note ends.
+static inline void filterStore(IAudioVoice& v, int cut, int res) {
     v.params.setBase(PARAM_FILTER_CUT, (float)cut);
     v.params.setBase(PARAM_FILTER_RES, (float)res);
-}
-static inline void filterStore(SoundfontVoice& v, int cut, int res) {
-    v.params.setBase(PARAM_FILTER_CUT, (float)cut);
-    v.params.setBase(PARAM_FILTER_RES, (float)res);
-    v.instrParams.filterCut = cut;   // what THIS voice type's per-block recompute reads
-    v.instrParams.filterRes = res;
 }
 
 template <typename V>
@@ -948,16 +938,6 @@ template <typename V> static inline void voiceSetFilterMode(V& v, int type, int 
     v.chain.filter.setParams(type, modCut, modRes, v.chain.filter.drive, (int)sr);
 }
 
-// ─── DRV / CRU — two writes onto the per-block recompute's own inputs ────────────────────
-//
-// ⚠️ **THE SAMPLER RE-DERIVES BOTH FROM `params.base` EVERY BLOCK AND THE SF VOICE DOES NOT**,
-// and that is the whole difference between the overloads below — the same split `filterStore` makes,
-// for the same reason. A base write IS the command on a sampler voice; on an SF voice, whose chain is
-// set once at trigger, the module has to be written or the value would never be read at all.
-//
-// Per-note by construction: a note-on reseeds the bus and rebuilds the chain from the instrument, so
-// nothing is restored when the note ends.
-
 // LPO. ⚠️ **IT ADDS, WHERE EVERY OTHER SETTER ON THIS PAGE ASSIGNS** — the byte is a signed STEP in
 // sixteenths of the loop's own length, and the voice keeps the running total. Written on a table row
 // it therefore walks the window a step per tic, which is the shape the technique is actually used in.
@@ -967,35 +947,26 @@ static inline void voiceSlideLoop(Voice& v, int byteValue) {
 }
 static inline void voiceSlideLoop(SoundfontVoice&, int) {}
 
-static inline void voiceSetDrive(Voice& v, int drive) {
+// ─── DRV / CRU — writes onto the per-block recompute's own inputs ────────────────────────────────
+//
+// Every voice type re-derives drive and crush from `params.base` once per block, so the base write IS
+// the command. Per-note by construction: a note-on reseeds the bus from the instrument.
+static inline void voiceSetDrive(IAudioVoice& v, int drive) {
     v.params.setBase(PARAM_DRIVE, (float)drive);
-}
-static inline void voiceSetDrive(SoundfontVoice& v, int drive) {
-    v.instrParams.drive = drive;   // this voice's own copy: what a later reset would read back
-    v.chain.drive.setDrive(drive);
 }
 
 // ⚠️ The cell is TWO numbers. The sampler passes 0 for downsample at the chain and quantizes the read
 // address instead — a different effect from the module's, and the reason the base write must carry
 // both halves rather than being handed to `crush.setParams` here.
-static inline void voiceSetCrush(Voice& v, int packed) {
+static inline void voiceSetCrush(IAudioVoice& v, int packed) {
     v.params.setBase(PARAM_CRUSH,      (float)crushBitsOf(packed));
     v.params.setBase(PARAM_DOWNSAMPLE, (float)crushDownsampleOf(packed));
 }
-static inline void voiceSetCrush(SoundfontVoice& v, int packed) {
-    v.instrParams.crush      = crushBitsOf(packed);
-    v.instrParams.downsample = crushDownsampleOf(packed);
-    v.chain.crush.setParams(v.instrParams.crush, v.instrParams.downsample);
-}
 
-// ─── REV / DEL — the send levels, the same per-voice-type split ──────────────────────────────────
-static inline void voiceSetSends(Voice& v, float rev, float dly) {
+// ─── REV / DEL — the send levels ─────────────────────────────────────────────────────────────────
+static inline void voiceSetSends(IAudioVoice& v, float rev, float dly) {
     v.reverbSend = rev;
     v.delaySend  = dly;
-}
-static inline void voiceSetSends(SoundfontVoice& v, float rev, float dly) {
-    v.instrParams.reverbSend = rev;   // the SF send tap reads this copy, not the engine's
-    v.instrParams.delaySend  = dly;
 }
 
 // ─── A SOUNDING VOICE RE-READS ITS INSTRUMENT ────────────────────────────────────────────────────
@@ -1036,6 +1007,70 @@ template <typename V> static inline void voiceSetFineTune(V& v, int byteValue) {
 /** A 0-1 CC value back to the 00-FF byte the author typed. */
 static inline int filterByteOf(float value) {
     return std::max(0, std::min(255, (int)(value * 255.0f + 0.5f)));
+}
+
+// ─── ONE PER-VOICE CONTROLLER ONTO ONE VOICE ─────────────────────────────────────────────────────
+//
+// The whole meaning of a per-voice CC (songcore/event.h), for a phrase cell, an AUS/AUF ramp or a
+// mapped knob — every record the param queue carries for one. `value` is the 0-1 CC value. A new live
+// parameter is a CC id and a case here; a table row reaches the same `voiceSet…` helpers by its FX
+// code (processTableRow). PAN is not here: it reaches only the track's current note, through
+// IAudioVoice::setPan (processAudioBlock).
+template <typename V>
+static inline void applyVoiceCc(V& v, int cc, float value, float sampleRate) {
+    using namespace songcore;
+    const int byte = filterByteOf(value);
+    switch (cc) {
+        case CC_REVERB_SEND: v.reverbSend = value; break;
+        case CC_DELAY_SEND:  v.delaySend  = value; break;
+        // ⚠️ Inert on a voice whose FILTER TYPE is OFF: these move the filter the instrument declares.
+        case CC_FILTER_CUT:  voiceSetFilterCut(v, byte, sampleRate); break;
+        case CC_FILTER_RES:  voiceSetFilterRes(v, byte, sampleRate); break;
+        // The id IS the filter type and the value the cutoff, so one record switches the filter on
+        // and places it in the same frame — two records would be two blocks, and a click.
+        case CC_FILTER_LP:
+        case CC_FILTER_HP:
+        case CC_FILTER_BP:   voiceSetFilterMode(v, cc_filter_mode(cc), byte, sampleRate); break;
+        case CC_DRIVE:       voiceSetDrive(v, byte); break;
+        // ⚠️ The byte carries TWO nibbles, bits crushed high and downsample low — never interpolated.
+        case CC_CRUSH:       voiceSetCrush(v, byte); break;
+        // Retunes a sounding note: 0x80 is in tune, the ends a semitone either way.
+        case CC_FINE_TUNE:   voiceSetFineTune(v, byte); break;
+        // ⚠️ ACCUMULATES — two records slide the window twice.
+        case CC_LOOP_SLIDE:  voiceSlideLoop(v, byte); break;
+        default: break;
+    }
+}
+
+// BCK: sampler only — a SoundFont voice has no playback direction.
+static inline void voiceReverse(Voice& vo, bool rev, bool restart) {
+    vo.reverse = rev;
+    if (restart) {
+        // With-note BCK: (re)start at the boundary the new direction reads FROM, so a "play backwards"
+        // note begins at the sample's end instead of instantly hitting actualStart and fading out.
+        // Mid-note BCK (restart=false) keeps the live position so direction flips are continuous.
+        vo.position = rev ? (double)(vo.actualEnd > vo.actualStart ? vo.actualEnd - 1 : vo.actualStart)
+                          : (double)vo.actualStart;
+    }
+}
+static inline void voiceReverse(SoundfontVoice&, bool, bool) {}
+
+// What each way of ending a note does to one voice. A new voice type adds its overloads here — the
+// kill arms in processAudioBlock reach every pool through forEachVoiceOnTrack, so a missing one is a
+// compile error rather than a note that does not stop.
+static inline void voiceKeyRelease(Voice& v, int frame) { v.keyRelease(frame); }
+static inline void voiceKeyRelease(SoundfontVoice& v, int frame) {
+    v.noteOffAt(frame);   // TSF owns its release; a one-shot with no envelope is a sampler-only shape
+}
+static inline void voiceCut(Voice& v, int frame) { v.startFadeOut(KILL_FADE_SAMPLES, frame); }
+static inline void voiceCut(SoundfontVoice& v, int frame) {
+    v.startStopFade(KILL_FADE_SAMPLES, frame);   // ends in hardStop: no TSF or ADSR release outlives it
+}
+static inline void voiceKill(Voice& v, int frame) {
+    v.startFadeOut(KILL_FADE_SAMPLES, frame);   // a deliberate cut, not a steal
+}
+static inline void voiceKill(SoundfontVoice& v, int frame) {
+    v.noteOffAt(frame);   // soft, so TSF's own release envelope can play out
 }
 
 // The row a TIC00 retrigger continues from.
@@ -1465,6 +1500,373 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
     }
 }
 
+// PSL / PBN / vibrato that ride on the note itself, set on the voice the note starts — every voice
+// type, after its trigger has reset the pitch state. Both rates are already per FRAME: voice_derive.h
+// scales the authored ticks and steps before the note is queued.
+template <typename V>
+static inline void startNotePitchFx(V& v, const ScheduledNote& note) {
+    if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
+        v.pitchOffset      = note.pslInitialOffset;
+        v.pitchSlideTarget = 0.0f;
+        v.pitchSlideRate   = -note.pslInitialOffset / fmaxf(1.0f, note.pslDuration);
+        v.pitchSliding     = true;
+    }
+    if (fabsf(note.pbnRate) > 0.0001f) {
+        v.pitchSlideRate   = note.pbnRate;
+        v.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+        v.pitchSliding     = true;
+    }
+    if (note.vibratoDepth > 0.01f) {
+        v.vibratoSpeed  = note.vibratoSpeed;
+        v.vibratoDepth  = note.vibratoDepth;
+        v.vibratoActive = true;
+    }
+}
+
+// A SoundFont note onto its track's MIDI channel of the shared tsf* handle, at `frame` inside the
+// current block. Audio thread only; tsf_load_memory() never runs here.
+void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int64_t currentFrame,
+                                       float sampleRate) {
+    const int t = note.trackId;
+    if (t < 0 || t >= SF_VOICE_COUNT || note.sfSlot < 0 || note.sfSlot >= MAX_SOUNDFONTS) {
+        LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (out of range)", note.sfSlot, note.trackId);
+        return;
+    }
+    // ⚠️ The handle is NOT tested here. It is a non-atomic pointer the UI thread can null at any
+    // moment, and reading it without the slot mutex is a race whose answer may already be stale by
+    // the next line. `armNote` reads it under the lock and says whether the note is worth setting up.
+    SoundfontVoice& sv = sfVoices[t];
+    // ⚠️ READ BEFORE `armNote`, which sets isActive unconditionally. This is the
+    // question the chain setup below has to ask: is this channel's filter/EQ full of
+    // a note that is still sounding? See InstrumentChain::reset's keepToneState.
+    const bool wasSounding = sv.isActive;
+    // This instrument's ADSR override (applied atomically inside fireArmedNote, before
+    // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
+    int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
+    if (note.sampleId >= 0 && note.sampleId < 256) {
+        const SfEnvOverride& eo = sfEnvOverrides[note.sampleId];
+        eAtk = eo.atk; eDec = eo.dec; eSus = eo.sus; eRel = eo.rel;
+    }
+    if (!sv.armNote(note.sfSlot, note.midiNote, note.midiVelocity,
+                    note.volume, note.pan, note.sfBank, note.sfPreset, t,
+                    eAtk, eDec, eSus, eRel)) {
+        LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)",
+             note.sfSlot, note.trackId);
+        return;     // …and the voice keeps whatever it was already playing
+    }
+    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
+    // Per-track mono across voice types, this direction: an SF note replaces a sampler
+    // note still sounding on this track with the fade a sampler note would give it.
+    // The sampler trigger does the reverse. Only after armNote said yes — a dropped
+    // SF note leaves the track as it was.
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].trackId == t && voices[v].isActive && !voices[v].isFadingOut) {
+            voices[v].startFadeOut();
+        }
+    }
+    sv.isReleasingOnly = false;
+    sv.resetPitchState();
+    sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
+    sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
+    sv.instrId = note.sampleId;
+
+    // M8-style: a TIC in the table's last row overrides the instrument tic rate —
+    // one rate per FX column.
+    int effectiveTicRates[TABLE_LANES];
+    effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
+    const int sfStartRows[TABLE_LANES] = {note.tableStartRow, note.tableStartRow,
+                                          note.tableStartRow};
+    sv.resetTableState(note.tableId, effectiveTicRates,
+                       note.noteOctave, note.notePitch, sfStartRows);
+
+    // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
+    static const InstrumentParams kNoInstrument{};
+    const bool haveInstrument = note.sampleId >= 0 && note.sampleId < 256;
+    const InstrumentParams& ip = haveInstrument ? instrumentParams[note.sampleId] : kNoInstrument;
+    if (haveInstrument) {
+        initVoiceModSlots(sv, note.sampleId, currentFrame, sampleRate);
+    } else {
+        for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
+    }
+    sv.chain.reset(sampleRate, /*keepToneState=*/wasSounding);
+    sv.chain.filter.setParams(ip.filterType, ip.filterCut, ip.filterRes, ip.filterDrive,
+                              (int)sampleRate);
+    sv.chain.filter.snapshotCoeffs(); // seed prev = target so first block doesn't interpolate from reset defaults
+    sv.chain.drive.setDrive(ip.drive);
+    sv.chain.crush.setParams(ip.crush, ip.downsample);
+    if (ip.eqActive) {
+        sv.chain.eq.active = true;
+        for (int i = 0; i < 3; i++) {
+            sv.chain.eq.bands[i].setParams(ip.eqBands[i].type, ip.eqBands[i].freqHz,
+                                           ip.eqBands[i].gainDb, ip.eqBands[i].q);
+        }
+    }
+    sv.reverbSend = ip.reverbSend;
+    sv.delaySend  = ip.delaySend;
+
+    sv.params.setBase(PARAM_VOL,   note.volume);
+    sv.params.setBase(PARAM_PAN,   note.pan);
+    sv.params.setBase(PARAM_PITCH, 0.0f);
+    // What the setters and the per-block recompute read, seeded from the instrument as
+    // the sampler's trigger seeds them.
+    sv.params.setBase(PARAM_FILTER_CUT, (float)ip.filterCut);
+    sv.params.setBase(PARAM_FILTER_RES, (float)ip.filterRes);
+    sv.params.setBase(PARAM_DRIVE,      (float)ip.drive);
+    sv.params.setBase(PARAM_CRUSH,      (float)ip.crush);
+    sv.params.setBase(PARAM_DOWNSAMPLE, (float)ip.downsample);
+    sv.params.resetMods();
+    memset(sv.modSourceValues,  0, sizeof(sv.modSourceValues));
+    memset(sv.modDestValues,    0, sizeof(sv.modDestValues));
+    memset(sv.prevModDestValues,0, sizeof(sv.prevModDestValues));
+    sv.modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;
+    sv.modSourceValues[MOD_SRC_PHRASE_VOL] = note.phraseVolume;
+    float initVol = note.volume * note.phraseVolume;
+    sv.modDestValues[PARAM_VOL]     = initVol;
+    sv.prevModDestValues[PARAM_VOL] = initVol;
+    startNotePitchFx(sv, note);
+    LOGT("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
+         note.sfSlot, t, note.sfBank, note.sfPreset,
+         note.midiNote, note.midiVelocity, note.volume);
+}
+
+// A sampler note into the voice pool, at `frame` inside the current block. Audio thread only.
+void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64_t currentFrame,
+                                     float sampleRate) {
+    // TIC00 support: continue the table where this track's previous note left off — per
+    // COLUMN, since a table can be at TIC00 in FX2 and free-running in FX1. −1 = this column
+    // has nothing to carry and starts wherever the trigger says.
+    int savedTableRows[TABLE_LANES] = {-1, -1, -1};
+    bool wasTIC00Mode = false;
+    // ⚠️ …and it must be THIS table. A chain hands the note on, so the voice still sounding on
+    // this track can be running a different table entirely, and its row means nothing here.
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut
+            && voices[v].tableId >= 0 && voices[v].tableId == note.tableId) {
+            for (int l = 0; l < TABLE_LANES; ++l) {
+                if (voices[v].lanes[l].ticRate != 0x00) continue;
+                wasTIC00Mode = true;
+                savedTableRows[l] = tic00RowAfter(voices[v].lanes[l]);
+                LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from voice %d)",
+                     savedTableRows[l], note.trackId, l + 1, v);
+            }
+        }
+    }
+    // No voice left to read the row off — the previous note's sample ran out before this one
+    // arrived. The track's cursor still holds it. Without this the table restarted at row 0
+    // every time, so how far it got depended on the instrument's ROOT note (root → playback
+    // rate → how long a one-shot lasts): a low root never left the first row or two.
+    if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
+        note.tableId >= 0) {
+        if (const Tic00Cursor* c = tic00Slot(note.trackId, note.tableId, /*create=*/false)) {
+            for (int l = 0; l < TABLE_LANES; ++l) {
+                if (c->ticRate[l] != 0x00 || !c->active[l]) continue;
+                wasTIC00Mode = true;
+                savedTableRows[l] = tic00RowAfter(c->row[l], c->lastProcessed[l]);
+                LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from table cursor)",
+                     savedTableRows[l], note.trackId, l + 1);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // VOICE ALLOCATION — mono per track + 4-step slot choice
+    //
+    // Problem: "steal old + allocate new" temporarily consumes two
+    // slots per track.  When N tracks all trigger at the same frame
+    // (phrase boundaries) this exhausts the 8-slot pool even with
+    // only 5 active tracks.
+    //
+    // Step 1 — fade any playing same-track voice (mono per track).
+    // Step 2 — prefer a FREE slot, so the faded voice's declick tail
+    //           actually plays out. (Recycling the fading same-track
+    //           slot here instead cut its tail mid-fade — an audible
+    //           pop on rapid same-sample retriggers/previews.)
+    // Step 3 — no free slot: recycle a same-track fading voice
+    //           directly (0 extra slots used; trackId is preserved
+    //           through startFadeOut() precisely for this).
+    // Step 4 — last resort: preempt any fading voice (other track).
+    //           Produces at most a ~1ms click but prevents silence.
+    // ---------------------------------------------------------------
+
+    // A note with no sample behind it must not touch the track: fading the playing voice for
+    // a note that cannot sound would silence the track for nothing (a preview of an empty slot).
+    const bool haveSample = note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId];
+
+    // Step 1: mono per track — fade whatever is still playing on this track
+    for (int v = 0; haveSample && v < MAX_VOICES; v++) {
+        if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
+            voices[v].startFadeOut(DECLICK_SAMPLES, frame);   // …from the new note's own frame
+        }
+    }
+
+    // Step 2: free slot
+    int targetSlot = -1;
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (!voices[v].isActive) {
+            targetSlot = v;
+            break;
+        }
+    }
+
+    // Step 3: pool full — recycle a same-track fading voice (cuts its tail)
+    if (targetSlot == -1) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].trackId == note.trackId && voices[v].isFadingOut) {
+                targetSlot = v;
+                break;
+            }
+        }
+    }
+
+    // Step 4: preempt any fading voice (last resort)
+    if (targetSlot == -1) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isFadingOut) {
+                targetSlot = v;
+                LOGT("⚠️ Voice pool tight: preempting fading slot %d for track %d", v, note.trackId);
+                break;
+            }
+        }
+    }
+
+    if (targetSlot != -1) {
+        int v = targetSlot;
+        if (haveSample) {
+            // Per-track mono across voice types: a sampler note replaces an SF note
+            // still sounding on this track. noteOff (not hardStop) so the SF release
+            // plays out musically — findActiveVoiceForTrack skips releasing SF voices,
+            // so mid-note params already target the new sampler voice meanwhile.
+            if (note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
+                sfVoices[note.trackId].isActive && !sfVoices[note.trackId].isReleasingOnly) {
+                sfVoices[note.trackId].noteOffAt(frame);
+            }
+            float rate = note.frequency / note.baseFrequency;
+
+            // M8-style: a TIC in the table's last row overrides the instrument tic rate —
+            // one rate per FX column.
+            int effectiveTicRates[TABLE_LANES];
+            effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
+
+            // A THO-with-note start row places every column; otherwise only a column that is
+            // BOTH at TIC00 and had something to carry resumes, and the rest begin at row 0.
+            int startRows[TABLE_LANES] = {0, 0, 0};
+            for (int l = 0; l < TABLE_LANES; ++l) {
+                if (note.tableStartRow >= 0) startRows[l] = note.tableStartRow % 16;
+                else if (wasTIC00Mode && effectiveTicRates[l] == 0x00 && savedTableRows[l] >= 0)
+                    startRows[l] = savedTableRows[l];
+            }
+
+            // The generation BEFORE the buffers: the UI bumps it after storing them, so a
+            // mismatch here can only make the mix end the voice, never read a stale pointer.
+            const uint32_t gen = sampleGen[note.sampleId].load();
+            voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
+                              note.trackId, rate, note.baseFrequency,
+                              note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
+                              sampleRate, note.startPointOverride, note.endPointOverride,
+                              note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
+            voices[v].instrId = note.sampleId;
+            voices[v].sampleGen = gen;
+            voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
+
+            startNotePitchFx(voices[v], note);
+            initVoiceModSlots(voices[v], note.sampleId, currentFrame, sampleRate);
+
+            LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
+                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
+                 note.tableId, effectiveTicRates[0], note.noteOctave, note.notePitch, startRows[0]);
+        } else {
+            if (note.sampleId < 0 || note.sampleId >= 256) {
+                LOGT("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
+            } else {
+                LOGT("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
+            }
+        }
+    } else {
+        LOGT("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
+    }
+}
+
+// One track's rendered stereo buffer onto the bus, from after the note's own gain: the track fader,
+// the voice's chain, the mute gate and the transport-stop ramp, the send tap, the output, the meters
+// and scopes. The SoundFont path's tail — a voice type that renders a buffer per track calls it too,
+// rather than a copy that drifts. Returns the buffer's peak; `stopFadeDone` is set when the stop ramp
+// reached zero inside this block. (Audio thread only.)
+template <typename V>
+float AudioEngine::mixTrackBuffer(V& v, int t, float* buf, const TrackBufferMix& c, bool& stopFadeDone) {
+    // ⚠️ THE TRACK FADER IS APPLIED TO THE RENDERED SAMPLES, NOT TO THE TSF CHANNEL. A channel
+    // volume is one value per render call, so the fader could only step at a block edge — the
+    // staircase a knob turns into a tick per message. Here it is a ramp, like the note's own
+    // gain before it. It stays ABOVE the chain, where the channel volume had it, so an
+    // instrument's drive and filter hear the same signal they always did.
+    if (c.trackVolStart[t] != 1.0f || c.trackVolEnd[t] != 1.0f)
+        applyGainRamp(buf, c.numFrames, c.trackVolStart[t], c.trackVolEnd[t]);
+
+    // ⚠️ THE MUTE GATE IS APPLIED HERE, and it has to be ABOVE the send tap below: the fader
+    // is already in the buffer, which makes a SoundFont send post-fader where the sampler's is
+    // pre-fader, and a muted SF track has always taken its reverb and delay down with it.
+    // ⚠️ THE TRANSPORT-STOP RAMP RIDES HERE, on the gate and for the gate's own reason: it has
+    // to be per sample (a per-block value is the staircase both ramps exist to remove), it has
+    // to sit BELOW the filter so a stop cannot slam the chain under a note still ringing
+    // through it, and it has to be ABOVE the send tap so the reverb and delay are fed the
+    // faded signal rather than a waveform cut off mid-cycle.
+    for (int i = 0; i < c.numFrames; i++) {
+        float lerp_t = (c.numFrames > 1) ? (float)(i + 1) / (float)c.numFrames : 1.0f;
+        float L = buf[i * 2];
+        float R = buf[i * 2 + 1];
+        v.chain.filter.setInterpolatedCoeffs(lerp_t);
+        v.chain.processStereo(L, R);
+        float gate = c.gateStart[t] + (c.gateEnd[t] - c.gateStart[t]) * lerp_t;
+        if (v.stopFadeRemaining > 0) {
+            if (i >= v.stopFadeStartFrame) {   // a ramp dispatched mid-block waits for its frame
+                gate *= (float)v.stopFadeRemaining / (float)v.stopFadeTotal;
+                if (--v.stopFadeRemaining <= 0) stopFadeDone = true;
+            }
+        } else if (stopFadeDone) {
+            gate = 0.0f;   // the ramp ended inside this block; the rest of it is silence
+        }
+        buf[i * 2]     = L * gate;
+        buf[i * 2 + 1] = R * gate;
+    }
+
+    // SEND TAP: the post-chain buffer into the reverb/delay buses
+    if ((stemsMode == 0 || stemsMode >= 9) && (v.reverbSend > 0.0f || v.delaySend > 0.0f)) {
+        for (int i = 0; i < c.numFrames; i++) {
+            revSendBufL[i] += buf[i * 2]     * v.reverbSend;
+            revSendBufR[i] += buf[i * 2 + 1] * v.reverbSend;
+            dlySendBufL[i] += buf[i * 2]     * v.delaySend;
+            dlySendBufR[i] += buf[i * 2 + 1] * v.delaySend;
+        }
+    }
+
+    float trackPeakL = 0.0f, trackPeakR = 0.0f;
+    if (c.octaWanted) trackWasActive[t] = true;  // OCTA capture only
+    for (int i = 0; i < c.numFrames; i++) {
+        float outL = buf[i * 2];
+        float outR = buf[i * 2 + 1];
+        // Pre-master, like the sampler path's sampleL/sampleR — the master fader is applied to the
+        // summed bus in processAudioBlock, which also scales the meters and OCTA accumulators by it.
+        trackPeakL = peak_hold(trackPeakL, outL);
+        trackPeakR = peak_hold(trackPeakR, outR);
+        if (stemsMode == 0 || t == stemsMode - 1) {
+            c.output[i * 2]     += outL;
+            c.output[i * 2 + 1] += outR;
+        }
+        if (c.octaWanted) {
+            trackWaveAccumL[t][i] += outL;
+            trackWaveAccumR[t][i] += outR;
+        }
+        if (c.monitoredInstrId >= 0 && v.instrId == c.monitoredInstrId) {
+            instrSpectrumTempL[i] += 0.5f * (outL + outR);
+        }
+    }
+    const float trackPeak = fmaxf(trackPeakL, trackPeakR);
+    if (t < 8) {  // mixer meters cover song tracks only, not the preview lane
+        framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
+        framePeaksPerTrackR[t] = fmaxf(framePeaksPerTrackR[t], trackPeakR);
+    }
+    return trackPeak;
+}
+
 // ALL audio DSP lives here. processLiveBlock (live, via the platform backend's callback) and
 // renderOffline (WAV export) are thin wrappers.
 // Rule: NEVER add audio processing logic directly to processLiveBlock or renderOffline.
@@ -1716,134 +2118,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     break;
                 }
-                case PARAM_UPDATE_PAN: {                  // PAN — per-note pan override
-                    IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId);
-                    if (pv) pv->setPan(upd.value);
-                    break;
-                }
-                case PARAM_UPDATE_REVERB_SEND: {          // REV — per-note reverb send
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId)
-                            voices[v].reverbSend = upd.value;
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        sfVoices[upd.trackId].instrParams.reverbSend = upd.value;
-                    break;
-                }
-                case PARAM_UPDATE_DELAY_SEND: {           // DEL — per-note delay send
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId)
-                            voices[v].delaySend = upd.value;
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        sfVoices[upd.trackId].instrParams.delaySend = upd.value;
+                // A per-voice controller. ⚠️ PAN reaches only the note the track is playing; every
+                // other one also reaches a SoundFont note still releasing there (forEachTrackVoice).
+                case PARAM_UPDATE_VOICE_CC: {
+                    if (upd.sourceId == songcore::CC_PAN) {
+                        if (IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId)) pv->setPan(upd.value);
+                        break;
+                    }
+                    forEachTrackVoice(upd.trackId, [&](auto& v) { applyVoiceCc(v, upd.sourceId, upd.value, sampleRate); });
                     break;
                 }
                 case PARAM_UPDATE_REVERSE: {              // BCK — playback direction (sampler only)
-                    bool rev     = (upd.value  != 0.0f);
-                    bool restart = (upd.value2 != 0.0f);
-                    for (int v = 0; v < MAX_VOICES; v++) {
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            Voice& vo = voices[v];
-                            vo.reverse = rev;
-                            if (restart) {
-                                // With-note BCK: (re)start at the boundary the new direction reads FROM, so a
-                                // "play backwards" note begins at the sample's end instead of instantly hitting
-                                // actualStart and fading out. Mid-note BCK (restart=false) keeps the live position
-                                // so direction flips are continuous (scratching).
-                                vo.position = rev ? (double)(vo.actualEnd > vo.actualStart ? vo.actualEnd - 1 : vo.actualStart)
-                                                  : (double)vo.actualStart;
-                            }
-                            break;
-                        }
-                    }
-                    break;
-                }
-                // CUT / RES — the sounding voice's filter. Inert on an instrument whose FILTER TYPE
-                // is OFF, and gone with the note: the next note-on reloads the instrument's own.
-                case PARAM_UPDATE_FILTER_CUT: {           // CUT — filter cutoff
-                    int cut = filterByteOf(upd.value);
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            voiceSetFilterCut(voices[v], cut, sampleRate); break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        voiceSetFilterCut(sfVoices[upd.trackId], cut, sampleRate);
-                    break;
-                }
-                case PARAM_UPDATE_FILTER_RES: {           // RES — filter resonance
-                    int res = filterByteOf(upd.value);
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            voiceSetFilterRes(voices[v], res, sampleRate); break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        voiceSetFilterRes(sfVoices[upd.trackId], res, sampleRate);
-                    break;
-                }
-                // LPF / HPF / BPF — the type and the cutoff out of ONE record, so the filter opens at
-                // the cutoff it was told rather than a block before it. Unlike the two above this is
-                // NOT inert on a voice whose instrument declares no filter: it declares one.
-                case PARAM_UPDATE_FILTER_MODE: {
-                    int cut  = filterByteOf(upd.value);
-                    int type = (int)upd.value2;
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            voiceSetFilterMode(voices[v], type, cut, sampleRate); break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        voiceSetFilterMode(sfVoices[upd.trackId], type, cut, sampleRate);
-                    break;
-                }
-                // DRV / CRU. One write each onto the input the per-block recompute already
-                // reads, so the change is audible in the block it lands in.
-                case PARAM_UPDATE_DRIVE:
-                case PARAM_UPDATE_CRUSH: {
-                    int byteValue = filterByteOf(upd.value);
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            if (upd.action == PARAM_UPDATE_DRIVE) voiceSetDrive(voices[v], byteValue);
-                            else                                  voiceSetCrush(voices[v], byteValue);
-                            break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive) {
-                        if (upd.action == PARAM_UPDATE_DRIVE) voiceSetDrive(sfVoices[upd.trackId], byteValue);
-                        else                                  voiceSetCrush(sfVoices[upd.trackId], byteValue);
-                    }
-                    break;
-                }
-                // FIN. Its own arm rather than a fourth branch of the chain above: one setter serves
-                // both voice types here, which is exactly what the three above cannot do.
-                case PARAM_UPDATE_FINE_TUNE: {
-                    int byteValue = filterByteOf(upd.value);
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            voiceSetFineTune(voices[v], byteValue); break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        voiceSetFineTune(sfVoices[upd.trackId], byteValue);
-                    break;
-                }
-                // LPO. ⚠️ IT ADDS — every other arm in this switch assigns. The running total is in
-                // SIXTEENTHS of the loop's own length and the mix loop turns it into samples, which
-                // is what keeps sixteen small steps equal to one big one (sampler-voice.h).
-                //
-                // ⚠️ SAMPLER ONLY, and silently so: a SoundFont voice has no sample position to slide,
-                // the same silence OFF keeps.
-                case PARAM_UPDATE_LOOP_SLIDE: {
-                    int steps = loopSlideSixteenthsOf(filterByteOf(upd.value));
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            voices[v].loopSlideSixteenths += steps; break;
-                        }
+                    forEachTrackVoice(upd.trackId, [&](auto& v) { voiceReverse(v, upd.value != 0.0f, upd.value2 != 0.0f); });
                     break;
                 }
                 case PARAM_UPDATE_EQ_SLOT: {              // EQN — per-note EQ preset
-                    int slot = (int)upd.value;
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            applyEqPresetToModule(voices[v].chain.eq, slot); break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        applyEqPresetToModule(sfVoices[upd.trackId].chain.eq, slot);
+                    forEachTrackVoice(upd.trackId, [&](auto& v) { applyEqPresetToModule(v.chain.eq, (int)upd.value); });
                     break;
                 }
                 case PARAM_UPDATE_MASTER_EQ: {            // EQM — master/mixer EQ preset (global)
@@ -1855,12 +2145,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // per-voice limits an EQN is: it writes the SOUNDING voice and a note-on resets that
                 // voice's EQ from the instrument, so the next tick (≤ 1/12 of a step) re-asserts it.
                 case PARAM_UPDATE_EQ_BANDS: {             // EQN under AUS/AUF
-                    for (int v = 0; v < MAX_VOICES; v++)
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            applyEqBandsToModule(voices[v].chain.eq, upd.eqBands); break;
-                        }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
-                        applyEqBandsToModule(sfVoices[upd.trackId].chain.eq, upd.eqBands);
+                    forEachTrackVoice(upd.trackId, [&](auto& v) { applyEqBandsToModule(v.chain.eq, upd.eqBands); });
                     break;
                 }
                 case PARAM_UPDATE_MASTER_EQ_BANDS: {      // EQM under AUS/AUF (global)
@@ -1913,15 +2198,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     break;
                 }
                 default: {                                // PARAM_UPDATE_MOD_SOURCE — Vxx phraseVol
-                    for (int v = 0; v < MAX_VOICES; v++) {
-                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                            voices[v].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
-                            break;
-                        }
-                    }
-                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive) {
-                        sfVoices[upd.trackId].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
-                    }
+                    forEachTrackVoice(upd.trackId, [&](auto& v) {
+                        v.modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
+                    });
                     break;
                 }
             }
@@ -1932,47 +2211,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         while (killIdx < killBatch.size() && killBatch[killIdx].targetFrame <= currentFrame &&
                killBatch[killIdx].targetFrame <= dueNote()) {
             ScheduledKill kill = killBatch[killIdx++];
-            if (kill.mode == KILL_KEY_OFF) {
+            switch (kill.mode) {
                 // A live key let go of (MIDI plan §4.1). The three-way rule is inside
-                // SamplerVoice::keyRelease — and the ONLY difference from a KIL is the one-shot arm,
-                // which does nothing at all here and a declicked fade there.
-                triggerKeyRelease(kill.trackId, frame);
-                // SF: unchanged. TSF owns its own release envelope, a SoundFont preset always HAS one,
-                // and "a one-shot with no envelope" is a sampler-only shape — there is nothing for the
-                // §4.1 rule to decide on this side.
-                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].noteOffAt(frame);
-                }
-                LOGT("🎹 Key release: track %d at frame %lld", kill.trackId, (long long)currentFrame);
-            } else if (kill.mode == KILL_SOFT) {
-                triggerNoteOff(kill.trackId, frame);  // Sampler: trigger ADSR release
-                // SF: noteOff (TSF handles its own release envelope internally)
-                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].noteOffAt(frame);
-                }
-                LOGT("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
-            } else if (kill.mode == KILL_CUT) {
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].startFadeOut(KILL_FADE_SAMPLES, frame);
-                    }
-                }
-                // SF: the transport-stop ramp, not a note-off — it ends in hardStop, so no TSF release
-                // and no ADSR release outlive it.
-                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].startStopFade(KILL_FADE_SAMPLES, frame);
-                }
-            } else {
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].startFadeOut(KILL_FADE_SAMPLES, frame);  // soft deliberate cut, not a steal
-                        LOGT("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
-                    }
-                }
-                // SF: soft kill so TSF's internal release envelope can play out.
-                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
-                    sfVoices[kill.trackId].noteOffAt(frame);
-                }
+                // SamplerVoice::keyRelease; the ONLY difference from a KIL is the one-shot arm, which
+                // a key leaves to play out.
+                case KILL_KEY_OFF: forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceKeyRelease(v, frame); }); break;
+                // KIL's note-off: each voice type runs its own release, or fades where it has none.
+                case KILL_SOFT:    forEachVoiceOnTrack(kill.trackId, [&](auto& v) { v.noteOffAt(frame); });       break;
+                case KILL_CUT:     forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceCut(v, frame); });        break;
+                default:           forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceKill(v, frame); });       break;
             }
         }
 
@@ -1985,309 +2232,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // fully derived note and cannot tell the two paths apart.
             if (note.instrumentId >= 0 && !resolveScheduledNote(note)) continue;   // nothing to play
 
-            // ---- SOUNDFONT PATH ----
-            // Tracks use the master tsf* handle via MIDI channels (channel = trackId).
-            // No per-track clone creation — tsf_load_memory() never runs on the audio thread.
-            if (note.isSoundfont) {
-                int t = note.trackId;
-                // ⚠️ The handle is NOT tested here. It is a non-atomic pointer the JNI/UI thread can
-                // null at any moment, and reading it without the slot mutex is a race whose answer
-                // may already be stale by the next line. `armNote` reads it under the lock and says
-                // whether the note is worth setting up; that answer is the one worth having, and the
-                // whole block below belongs to a note that is going to play.
-                if (t >= 0 && t < SF_VOICE_COUNT &&
-                    note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS) {
-
-                    SoundfontVoice& sv = sfVoices[t];
-                    // ⚠️ READ BEFORE `armNote`, which sets isActive unconditionally. This is the
-                    // question the chain setup below has to ask: is this channel's filter/EQ full of
-                    // a note that is still sounding? See InstrumentChain::reset's keepToneState.
-                    const bool wasSounding = sv.isActive;
-                    // This instrument's ADSR override (applied atomically inside fireArmedNote, before
-                    // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
-                    int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
-                    if (note.sampleId >= 0 && note.sampleId < 256) {
-                        const SfEnvOverride& eo = sfEnvOverrides[note.sampleId];
-                        eAtk = eo.atk; eDec = eo.dec; eSus = eo.sus; eRel = eo.rel;
-                    }
-                    if (!sv.armNote(note.sfSlot, note.midiNote, note.midiVelocity,
-                                    note.volume, note.pan, note.sfBank, note.sfPreset, t,
-                                    eAtk, eDec, eSus, eRel)) {
-                        LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)",
-                             note.sfSlot, note.trackId);
-                        continue;   // …and the voice keeps whatever it was already playing
-                    }
-                    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
-                    // Per-track mono across voice types, this direction: an SF note replaces a sampler
-                    // note still sounding on this track with the fade a sampler note would give it.
-                    // The sampler path does the reverse below. Only after armNote said yes — a dropped
-                    // SF note leaves the track as it was.
-                    for (int v = 0; v < MAX_VOICES; v++) {
-                        if (voices[v].trackId == t && voices[v].isActive && !voices[v].isFadingOut) {
-                            voices[v].startFadeOut();
-                        }
-                    }
-                    sv.isReleasingOnly = false;
-                    sv.resetPitchState();
-                    sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
-                    sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
-                    sv.instrId = note.sampleId;
-
-                    // M8-style: a TIC in the table's last row overrides the instrument tic rate —
-                    // one rate per FX column.
-                    int effectiveTicRates[TABLE_LANES];
-                    effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
-                    const int sfStartRows[TABLE_LANES] = {note.tableStartRow, note.tableStartRow,
-                                                          note.tableStartRow};
-                    sv.resetTableState(note.tableId, effectiveTicRates,
-                                       note.noteOctave, note.notePitch, sfStartRows);
-
-                    // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
-                    if (note.sampleId >= 0 && note.sampleId < 256) {
-                        sv.instrParams = instrumentParams[note.sampleId];
-                        initVoiceModSlots(sv, note.sampleId, currentFrame, sampleRate);
-                    } else {
-                        sv.instrParams = InstrumentParams{};
-                        for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
-                    }
-                    sv.chain.reset(sampleRate, /*keepToneState=*/wasSounding);
-                    sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
-                                              sv.instrParams.filterRes, sv.instrParams.filterDrive,
-                                              (int)sampleRate);
-                    sv.chain.filter.snapshotCoeffs(); // seed prev = target so first block doesn't interpolate from reset defaults
-                    sv.chain.drive.setDrive(sv.instrParams.drive);
-                    sv.chain.crush.setParams(sv.instrParams.crush, sv.instrParams.downsample);
-                    if (sv.instrParams.eqActive) {
-                        sv.chain.eq.active = true;
-                        for (int i = 0; i < 3; i++) {
-                            sv.chain.eq.bands[i].setParams(sv.instrParams.eqBands[i].type,
-                                                           sv.instrParams.eqBands[i].freqHz,
-                                                           sv.instrParams.eqBands[i].gainDb,
-                                                           sv.instrParams.eqBands[i].q);
-                        }
-                    }
-
-                    sv.params.setBase(PARAM_VOL,   note.volume);
-                    sv.params.setBase(PARAM_PAN,   note.pan);
-                    sv.params.setBase(PARAM_PITCH, 0.0f);
-                    // The filter pair seeded from the instrument, as SamplerVoice::triggerNote does:
-                    // CUT/RES carry each other's current value through the bus, so an SF voice whose
-                    // bus still held the ParamBus default would jump to it on the first CUT.
-                    sv.params.setBase(PARAM_FILTER_CUT, (float)sv.instrParams.filterCut);
-                    sv.params.setBase(PARAM_FILTER_RES, (float)sv.instrParams.filterRes);
-                    sv.params.resetMods();
-                    memset(sv.modSourceValues,  0, sizeof(sv.modSourceValues));
-                    memset(sv.modDestValues,    0, sizeof(sv.modDestValues));
-                    memset(sv.prevModDestValues,0, sizeof(sv.prevModDestValues));
-                    sv.modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;
-                    sv.modSourceValues[MOD_SRC_PHRASE_VOL] = note.phraseVolume;
-                    float initVol = note.volume * note.phraseVolume;
-                    sv.modDestValues[PARAM_VOL]     = initVol;
-                    sv.prevModDestValues[PARAM_VOL] = initVol;
-                    if (note.pslInitialOffset != 0.0f && note.pslDuration > 0.0f) {
-                        sv.pitchOffset      = note.pslInitialOffset;
-                        sv.pitchSlideTarget = 0.0f;
-                        sv.pitchSlideRate   = -note.pslInitialOffset / note.pslDuration;
-                        sv.pitchSliding     = true;
-                    }
-                    if (fabsf(note.pbnRate) > 0.0001f) {
-                        sv.pitchSlideRate   = note.pbnRate;
-                        sv.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
-                        sv.pitchSliding     = true;
-                    }
-                    if (note.vibratoDepth > 0.01f) {
-                        sv.vibratoSpeed  = note.vibratoSpeed;
-                        sv.vibratoDepth  = note.vibratoDepth;
-                        sv.vibratoActive = true;
-                    }
-                    LOGT("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
-                         note.sfSlot, t, note.sfBank, note.sfPreset,
-                         note.midiNote, note.midiVelocity, note.volume);
-                } else {
-                    LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (out of range)", note.sfSlot, note.trackId);
-                }
-                continue;  // Skip voice pool processing
-            }
-            // ---- END SOUNDFONT PATH ----
-
-            // TIC00 support: continue the table where this track's previous note left off — per
-            // COLUMN, since a table can be at TIC00 in FX2 and free-running in FX1. −1 = this column
-            // has nothing to carry and starts wherever the trigger says.
-            int savedTableRows[TABLE_LANES] = {-1, -1, -1};
-            bool wasTIC00Mode = false;
-            // ⚠️ …and it must be THIS table. A chain hands the note on, so the voice still sounding on
-            // this track can be running a different table entirely, and its row means nothing here.
-            for (int v = 0; v < MAX_VOICES; v++) {
-                if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut
-                    && voices[v].tableId >= 0 && voices[v].tableId == note.tableId) {
-                    for (int l = 0; l < TABLE_LANES; ++l) {
-                        if (voices[v].lanes[l].ticRate != 0x00) continue;
-                        wasTIC00Mode = true;
-                        savedTableRows[l] = tic00RowAfter(voices[v].lanes[l]);
-                        LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from voice %d)",
-                             savedTableRows[l], note.trackId, l + 1, v);
-                    }
-                }
-            }
-            // No voice left to read the row off — the previous note's sample ran out before this one
-            // arrived. The track's cursor still holds it. Without this the table restarted at row 0
-            // every time, so how far it got depended on the instrument's ROOT note (root → playback
-            // rate → how long a one-shot lasts): a low root never left the first row or two.
-            if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
-                note.tableId >= 0) {
-                if (const Tic00Cursor* c = tic00Slot(note.trackId, note.tableId, /*create=*/false)) {
-                    for (int l = 0; l < TABLE_LANES; ++l) {
-                        if (c->ticRate[l] != 0x00 || !c->active[l]) continue;
-                        wasTIC00Mode = true;
-                        savedTableRows[l] = tic00RowAfter(c->row[l], c->lastProcessed[l]);
-                        LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from table cursor)",
-                             savedTableRows[l], note.trackId, l + 1);
-                    }
-                }
-            }
-
-            // ---------------------------------------------------------------
-            // VOICE ALLOCATION — mono per track + 4-step slot choice
-            //
-            // Problem: "steal old + allocate new" temporarily consumes two
-            // slots per track.  When N tracks all trigger at the same frame
-            // (phrase boundaries) this exhausts the 8-slot pool even with
-            // only 5 active tracks.
-            //
-            // Step 1 — fade any playing same-track voice (mono per track).
-            // Step 2 — prefer a FREE slot, so the faded voice's declick tail
-            //           actually plays out. (Recycling the fading same-track
-            //           slot here instead cut its tail mid-fade — an audible
-            //           pop on rapid same-sample retriggers/previews.)
-            // Step 3 — no free slot: recycle a same-track fading voice
-            //           directly (0 extra slots used; trackId is preserved
-            //           through startFadeOut() precisely for this).
-            // Step 4 — last resort: preempt any fading voice (other track).
-            //           Produces at most a ~1ms click but prevents silence.
-            // ---------------------------------------------------------------
-
-            // A note with no sample behind it must not touch the track: fading the playing voice for
-            // a note that cannot sound would silence the track for nothing (a preview of an empty slot).
-            const bool haveSample = note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId];
-
-            // Step 1: mono per track — fade whatever is still playing on this track
-            for (int v = 0; haveSample && v < MAX_VOICES; v++) {
-                if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
-                    voices[v].startFadeOut(DECLICK_SAMPLES, frame);   // …from the new note's own frame
-                }
-            }
-
-            // Step 2: free slot
-            int targetSlot = -1;
-            for (int v = 0; v < MAX_VOICES; v++) {
-                if (!voices[v].isActive) {
-                    targetSlot = v;
-                    break;
-                }
-            }
-
-            // Step 3: pool full — recycle a same-track fading voice (cuts its tail)
-            if (targetSlot == -1) {
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId && voices[v].isFadingOut) {
-                        targetSlot = v;
-                        break;
-                    }
-                }
-            }
-
-            // Step 4: preempt any fading voice (last resort)
-            if (targetSlot == -1) {
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].isFadingOut) {
-                        targetSlot = v;
-                        LOGT("⚠️ Voice pool tight: preempting fading slot %d for track %d", v, note.trackId);
-                        break;
-                    }
-                }
-            }
-
-            if (targetSlot != -1) {
-                int v = targetSlot;
-                if (haveSample) {
-                    // Per-track mono across voice types: a sampler note replaces an SF note
-                    // still sounding on this track. noteOff (not hardStop) so the SF release
-                    // plays out musically — findActiveVoiceForTrack skips releasing SF voices,
-                    // so mid-note params already target the new sampler voice meanwhile.
-                    if (note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
-                        sfVoices[note.trackId].isActive && !sfVoices[note.trackId].isReleasingOnly) {
-                        sfVoices[note.trackId].noteOffAt(frame);
-                    }
-                    float rate = note.frequency / note.baseFrequency;
-
-                    // M8-style: a TIC in the table's last row overrides the instrument tic rate —
-                    // one rate per FX column.
-                    int effectiveTicRates[TABLE_LANES];
-                    effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
-
-                    // A THO-with-note start row places every column; otherwise only a column that is
-                    // BOTH at TIC00 and had something to carry resumes, and the rest begin at row 0.
-                    int startRows[TABLE_LANES] = {0, 0, 0};
-                    for (int l = 0; l < TABLE_LANES; ++l) {
-                        if (note.tableStartRow >= 0) startRows[l] = note.tableStartRow % 16;
-                        else if (wasTIC00Mode && effectiveTicRates[l] == 0x00 && savedTableRows[l] >= 0)
-                            startRows[l] = savedTableRows[l];
-                    }
-
-                    // The generation BEFORE the buffers: the UI bumps it after storing them, so a
-                    // mismatch here can only make the mix end the voice, never read a stale pointer.
-                    const uint32_t gen = sampleGen[note.sampleId].load();
-                    voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
-                                      note.trackId, rate, note.baseFrequency,
-                                      note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
-                                      sampleRate, note.startPointOverride, note.endPointOverride,
-                                      note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
-                    voices[v].instrId = note.sampleId;
-                    voices[v].sampleGen = gen;
-                    voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
-
-                    // pslDuration is already in audio frames — songcore/voice_derive.h multiplies the
-                    // authored tick count by framesPerTic before the note reaches the queue.
-                    if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
-                        voices[v].pitchOffset = note.pslInitialOffset;
-                        float totalFrames = fmaxf(1.0f, note.pslDuration);
-                        voices[v].pitchSlideTarget = 0.0f;
-                        voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
-                        voices[v].pitchSliding = true;
-                        LOGT("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
-                             note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
-                    }
-                    // pbnRate is already in semitones/frame — songcore/voice_derive.h divides the
-                    // authored per-step rate by framesPerStep before the note reaches the queue.
-                    if (fabsf(note.pbnRate) > 0.0001f) {
-                        voices[v].pitchSlideRate = note.pbnRate;
-                        voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
-                        voices[v].pitchSliding = true;
-                        LOGT("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
-                    }
-                    if (note.vibratoDepth > 0.01f) {
-                        voices[v].vibratoSpeed = note.vibratoSpeed;
-                        voices[v].vibratoDepth = note.vibratoDepth;
-                        voices[v].vibratoActive = true;
-                        LOGT("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
-                             note.vibratoSpeed, note.vibratoDepth);
-                    }
-
-                    initVoiceModSlots(voices[v], note.sampleId, currentFrame, sampleRate);
-
-                    LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
-                         (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
-                         note.tableId, effectiveTicRates[0], note.noteOctave, note.notePitch, startRows[0]);
-                } else {
-                    if (note.sampleId < 0 || note.sampleId >= 256) {
-                        LOGT("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
-                    } else {
-                        LOGT("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
-                    }
-                }
-            } else {
-                LOGT("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
-            }
+            if (note.isSoundfont) triggerSoundfontNote(note, frame, currentFrame, sampleRate);
+            else                  triggerSamplerNote(note, frame, currentFrame, sampleRate);
         }
     }
 
@@ -2761,18 +2707,29 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // If filter mod is active, snapshot then recompute coefficients via InstrumentChain.
             sv.chain.filter.snapshotCoeffs();
             if (sv.chain.filter.enabled()) {
+                const int baseCut = (int)sv.params.base[PARAM_FILTER_CUT];
+                const int baseRes = (int)sv.params.base[PARAM_FILTER_RES];
                 int modCut = std::max(0, std::min(255,
-                    (int)(sv.instrParams.filterCut + sv.modDestValues[PARAM_FILTER_CUT])));
+                    (int)(sv.params.base[PARAM_FILTER_CUT] + sv.modDestValues[PARAM_FILTER_CUT])));
                 int modRes = std::max(0, std::min(255,
-                    (int)(sv.instrParams.filterRes + sv.modDestValues[PARAM_FILTER_RES])));
-                if (modCut != sv.instrParams.filterCut || modRes != sv.instrParams.filterRes) {
+                    (int)(sv.params.base[PARAM_FILTER_RES] + sv.modDestValues[PARAM_FILTER_RES])));
+                if (modCut != baseCut || modRes != baseRes) {
                     sv.chain.filter.setParams(sv.chain.filter.type, modCut, modRes, sv.chain.filter.drive, (int)sampleRate);
                 }
             }
+            // Drive and crush off the bus, as the sampler's mix does — except that the SF chain does
+            // its own downsampling: there is no read address here to quantize.
+            sv.chain.drive.setDrive(std::max(0, std::min(255,
+                (int)(sv.params.base[PARAM_DRIVE] + sv.modDestValues[PARAM_DRIVE]))));
+            sv.chain.crush.setParams(
+                std::max(0, std::min(15, (int)(sv.params.base[PARAM_CRUSH]      + sv.modDestValues[PARAM_CRUSH]))),
+                std::max(0, std::min(15, (int)(sv.params.base[PARAM_DOWNSAMPLE] + sv.modDestValues[PARAM_DOWNSAMPLE]))));
 
             sv.applyPitchMod((float)sampleRate, numFrames);
         }
 
+        const TrackBufferMix mix{ output, numFrames, trackVolStart, trackVolEnd, gateStart, gateEnd,
+                                  octaWanted, monitoredInstrId };
         for (int t = 0; t < SF_VOICE_COUNT; t++) {
             SoundfontVoice& sv = sfVoices[t];
             int slot = sv.sfSlot;
@@ -2858,78 +2815,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!rendered) continue;
             sv.volGain = sv.volGainTo;
 
-            // ⚠️ THE TRACK FADER IS APPLIED TO THE RENDERED SAMPLES, NOT TO THE TSF CHANNEL. A channel
-            // volume is one value per render call, so the fader could only step at a block edge — the
-            // staircase a knob turns into a tick per message. Here it is a ramp, like the note's own
-            // gain two lines up. It stays ABOVE the chain, where the channel volume had it, so an
-            // instrument's drive and filter hear the same signal they always did.
-            if (trackVolStart[t] != 1.0f || trackVolEnd[t] != 1.0f)
-                applyGainRamp(sfBuf, numFrames, trackVolStart[t], trackVolEnd[t]);
-
-            // ⚠️ THE MUTE GATE IS APPLIED HERE, and it has to be ABOVE the send tap below: the fader
-            // is already in the buffer, which makes a SoundFont send post-fader where the sampler's is
-            // pre-fader, and a muted SF track has always taken its reverb and delay down with it.
-            // ⚠️ THE TRANSPORT-STOP RAMP RIDES HERE, on the gate and for the gate's own reason: it has
-            // to be per sample (a per-block value is the staircase both ramps exist to remove), it has
-            // to sit BELOW the filter so a stop cannot slam the chain under a note still ringing
-            // through it, and it has to be ABOVE the send tap so the reverb and delay are fed the
-            // faded signal rather than a waveform cut off mid-cycle.
             bool stopFadeDone = false;
-            for (int i = 0; i < numFrames; i++) {
-                float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
-                float L = sfBuf[i * 2];
-                float R = sfBuf[i * 2 + 1];
-                sv.chain.filter.setInterpolatedCoeffs(lerp_t);
-                sv.chain.processStereo(L, R);
-                float gate = gateStart[t] + (gateEnd[t] - gateStart[t]) * lerp_t;
-                if (sv.stopFadeRemaining > 0) {
-                    if (i >= sv.stopFadeStartFrame) {   // a ramp dispatched mid-block waits for its frame
-                        gate *= (float)sv.stopFadeRemaining / (float)sv.stopFadeTotal;
-                        if (--sv.stopFadeRemaining <= 0) stopFadeDone = true;
-                    }
-                } else if (stopFadeDone) {
-                    gate = 0.0f;   // the ramp ended inside this block; the rest of it is silence
-                }
-                sfBuf[i * 2]     = L * gate;
-                sfBuf[i * 2 + 1] = R * gate;
-            }
-
-            // SEND TAP: stereo post-chain SF buffer into reverb/delay buses
-            if ((stemsMode == 0 || stemsMode >= 9) && (sv.instrParams.reverbSend > 0.0f || sv.instrParams.delaySend > 0.0f)) {
-                for (int i = 0; i < numFrames; i++) {
-                    revSendBufL[i] += sfBuf[i * 2]     * sv.instrParams.reverbSend;
-                    revSendBufR[i] += sfBuf[i * 2 + 1] * sv.instrParams.reverbSend;
-                    dlySendBufL[i] += sfBuf[i * 2]     * sv.instrParams.delaySend;
-                    dlySendBufR[i] += sfBuf[i * 2 + 1] * sv.instrParams.delaySend;
-                }
-            }
-
-            float trackPeakL = 0.0f, trackPeakR = 0.0f;
-            if (octaWanted) trackWasActive[t] = true;  // OCTA capture only
-            for (int i = 0; i < numFrames; i++) {
-                float outL = sfBuf[i * 2];
-                float outR = sfBuf[i * 2 + 1];
-                // Pre-master, like the sampler path's sampleL/sampleR — the master fader is applied to
-                // the summed bus below, and the meters and OCTA accumulators are scaled by it there.
-                trackPeakL = peak_hold(trackPeakL, outL);
-                trackPeakR = peak_hold(trackPeakR, outR);
-                if (stemsMode == 0 || t == stemsMode - 1) {
-                    output[i * 2]     += outL;
-                    output[i * 2 + 1] += outR;
-                }
-                if (octaWanted) {
-                    trackWaveAccumL[t][i] += outL;
-                    trackWaveAccumR[t][i] += outR;
-                }
-                if (monitoredInstrId >= 0 && sv.instrId == monitoredInstrId) {
-                    instrSpectrumTempL[i] += 0.5f * (outL + outR);
-                }
-            }
-            float trackPeak = fmaxf(trackPeakL, trackPeakR);
-            if (t < 8) {  // mixer meters cover song tracks only, not the preview lane
-                framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
-                framePeaksPerTrackR[t] = fmaxf(framePeaksPerTrackR[t], trackPeakR);
-            }
+            const float trackPeak = mixTrackBuffer(sv, t, sfBuf, mix, stopFadeDone);
 
             // Release tail: when noteOff() was called, keep rendering until TSF goes silent.
             // Suppressed while an ADSR/TRIG VOL release is active (stage 4) — TSF is still
@@ -3326,45 +3213,6 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
         note.tableStartRow      = a.tableStartRow;
     }
     return true;
-}
-
-void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
-                                        int midiNote, int midiVelocity, float vol, float pan,
-                                        int bank, int preset,
-                                        float pslInitialOffset, float pslDuration,
-                                        float pbnRate, float vibratoSpeed, float vibratoDepth,
-                                        float phraseVol, int sampleId,
-                                        int tableId, int tableTicRate,
-                                        int noteOctave, int notePitch, int tableStartRow,
-                                        float detuneSemitones) {
-    ScheduledNote note{};
-    note.targetFrame      = targetFrame;
-    note.trackId          = trackId;
-    note.isSoundfont      = true;
-    note.sfSlot           = sfSlot;
-    note.midiNote         = midiNote;
-    note.midiVelocity     = midiVelocity;
-    note.volume           = vol;
-    note.phraseVolume     = phraseVol;
-    note.pan              = pan;
-    note.sfBank           = bank;
-    note.sfPreset         = preset;
-    note.sampleId         = sampleId;
-    note.frequency        = 440.0f;
-    note.baseFrequency    = 440.0f;
-    note.startPointOverride = -1;
-    note.tableId          = tableId;
-    note.tableTicRate     = tableTicRate;
-    note.noteOctave       = noteOctave;
-    note.notePitch        = notePitch;
-    note.pslInitialOffset = pslInitialOffset;
-    note.pslDuration      = pslDuration;
-    note.pbnRate          = pbnRate;
-    note.vibratoSpeed     = vibratoSpeed;
-    note.vibratoDepth     = vibratoDepth;
-    note.tableStartRow    = tableStartRow;
-    note.detuneSemitones  = detuneSemitones;
-    noteQueue.schedule(note);
 }
 
 // Audio thread. The stored row's `sliceMarkers` is null — a self-pointer would not survive the
@@ -3989,50 +3837,13 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
 // so the voices[] / masterEq mutation happens on the audio thread at the exact step frame (no race),
 // and they replay identically during offline render (renderOffline drains the same queue). ──────────
 
-void AudioEngine::scheduleVoicePan(int64_t targetFrame, int trackId, float pan) {                 // PAN
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, pan, PARAM_UPDATE_PAN, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceReverbSend(int64_t targetFrame, int trackId, float send) {          // REV
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, send, PARAM_UPDATE_REVERB_SEND, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float send) {           // DEL
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, send, PARAM_UPDATE_DELAY_SEND, 0.0f });
+void AudioEngine::scheduleVoiceCc(int64_t targetFrame, int trackId, int cc, float value) {
+    paramUpdateQueue.schedule({ targetFrame, trackId, cc, value, PARAM_UPDATE_VOICE_CC, 0.0f });
 }
 
 void AudioEngine::scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart) {  // BCK
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, reverse ? 1.0f : 0.0f,
                                 PARAM_UPDATE_REVERSE, restart ? 1.0f : 0.0f });
-}
-
-void AudioEngine::scheduleVoiceFilterCut(int64_t targetFrame, int trackId, float cut) {            // CUT
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, cut, PARAM_UPDATE_FILTER_CUT, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res) {            // RES
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, res, PARAM_UPDATE_FILTER_RES, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceFilterMode(int64_t targetFrame, int trackId,                        // LPF/HPF/BPF
-                                          int type, float cut) {
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, cut, PARAM_UPDATE_FILTER_MODE, (float)type });
-}
-
-void AudioEngine::scheduleVoiceDrive(int64_t targetFrame, int trackId, float drive) {              // DRV
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, drive, PARAM_UPDATE_DRIVE, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceCrush(int64_t targetFrame, int trackId, float packed) {             // CRU
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, packed, PARAM_UPDATE_CRUSH, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceFineTune(int64_t targetFrame, int trackId, float fine) {            // FIN
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, fine, PARAM_UPDATE_FINE_TUNE, 0.0f });
-}
-
-void AudioEngine::scheduleVoiceLoopSlide(int64_t targetFrame, int trackId, float step) {           // LPO
-    paramUpdateQueue.schedule({ targetFrame, trackId, 0, step, PARAM_UPDATE_LOOP_SLIDE, 0.0f });
 }
 
 void AudioEngine::scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot) {                // EQN
@@ -4497,21 +4308,6 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
                                                    : lfoShape(dst.lfoPhase, src.oscShape);
             }
         }
-    }
-}
-
-void AudioEngine::triggerNoteOff(int trackId, int atFrame) {
-    // The release-vs-fade decision lives in Voice::noteOff — one implementation.
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].noteOffAt(atFrame);
-    }
-}
-
-void AudioEngine::triggerKeyRelease(int trackId, int atFrame) {
-    // …and the key-release decision lives in Voice::keyRelease, for the same reason: this loop is
-    // allocation, not policy. The two differ in exactly one arm (see sampler-voice.h).
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].keyRelease(atFrame);
     }
 }
 

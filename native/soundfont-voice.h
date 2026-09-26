@@ -42,7 +42,7 @@ struct SoundfontVoice : public IAudioVoice {
     bool  vibratoActive    = false;
     bool  needsPitchReset  = false;
 
-    // Table state — mirrors Voice table fields; populated from scheduleSoundfontNote.
+    // Table state — mirrors Voice table fields; set by the SoundFont trigger.
     int   tableId          = -1;
     TableLane lanes[TABLE_LANES];   // one cursor and one rate per FX column — see table-lanes.h
     float tableTranspose   = 0.0f;  // current semitones from table row (for debug)
@@ -157,10 +157,8 @@ struct SoundfontVoice : public IAudioVoice {
     // Rendering is done per-slot in processAudioBlock (one tsf_render_float per active slot).
     float render(float*, int) override { return 0.0f; }
 
-    // ── Effects — applied post-render to per-channel TSF buffer ─────────────
-    // Copied from instrumentParams[] at note trigger; independent per SF track.
-    InstrumentParams instrParams;
-    // Per-track stereo effect chain (filter + future modules).
+    // Per-track stereo effect chain, run on the rendered TSF buffer. Its live values are on the
+    // ParamBus, as the sampler's are; the engine writes them into the chain once per block.
     InstrumentChain chain;
 
     // ── Audio-thread-only methods (no lock needed) ──────────────────────────

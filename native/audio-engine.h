@@ -423,9 +423,8 @@ public:
     /**
      * Schedule a note by INSTRUMENT NUMBER, leaving what it sounds like undecided.
      *
-     * ⚠️ **This is the sequencer's path, and the difference from scheduleNote() is WHEN.** The two
-     * above are handed a sound — a sample id, a frequency, an SF slot — worked out about two phrases
-     * before anyone hears it. This one is handed a number, and the engine resolves it against its
+     * ⚠️ **This is the sequencer's path, and the difference from scheduleNote() is WHEN.** That one
+     * is handed a sound — a sample id and a frequency — worked out before anyone hears it. This one is handed a number, and the engine resolves it against its
      * program table at the trigger, which is the only moment a table row could have changed it.
      *
      * `tempo` is the tempo at SCHEDULE time: it sets the tick→frame scale for this note's PSL and
@@ -438,17 +437,6 @@ public:
     // Store a per-instrument SF2 ADSR override. Keyed by instrument id and
     // applied atomically at note trigger, so instruments sharing a de-duplicated handle don't clash.
     void setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel);
-
-    // Schedule a soundfont note (public method — called from JNI)
-    void scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
-                               int midiNote, int midiVelocity, float vol, float pan,
-                               int bank, int preset,
-                               float pslInitialOffset, float pslDuration,
-                               float pbnRate, float vibratoSpeed, float vibratoDepth,
-                               float phraseVol = 1.0f, int sampleId = -1,
-                               int tableId = -1, int tableTicRate = 6,
-                               int noteOctave = 4, int notePitch = 0,
-                               int tableStartRow = -1, float detuneSemitones = 0.0f);
 
     // Schedule a kill event (for Kill effect K00)
     void scheduleKill(int64_t targetFrame, int trackId);
@@ -516,25 +504,10 @@ public:
     void scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol);
 
     // ── Live per-note / mixer FX (all routed through the sample-accurate param queue) ──
-    void scheduleVoicePan(int64_t targetFrame, int trackId, float pan);                // PAN xx
-    void scheduleVoiceReverbSend(int64_t targetFrame, int trackId, float send);        // REV xx
-    void scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float send);         // DEL xx
+    // A per-voice controller — PAN, REV, DEL, CUT, RES, LPF/HPF/BPF, DRV, CRU, FIN, LPO — by its CC id
+    // (songcore/event.h), `value` the 0-1 CC value. What each one does is `applyVoiceCc`.
+    void scheduleVoiceCc(int64_t targetFrame, int trackId, int cc, float value);
     void scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart);  // BCK
-    void scheduleVoiceFilterCut(int64_t targetFrame, int trackId, float cut);          // CUT xx
-    void scheduleVoiceFilterRes(int64_t targetFrame, int trackId, float res);          // RES xx
-    // ⚠️ TYPE AND CUTOFF IN ONE CALL, and therefore in one queue record on one frame — see
-    // PARAM_UPDATE_FILTER_MODE. `type` is 1 lp | 2 hp | 3 bp.
-    void scheduleVoiceFilterMode(int64_t targetFrame, int trackId, int type, float cut);  // LPF/HPF/BPF
-    void scheduleVoiceDrive(int64_t targetFrame, int trackId, float drive);           // DRV xx
-    // ⚠️ `packed` is a BYTE-VALUED 0-1 float carrying TWO nibbles, not a quantity — bits crushed in
-    // the high half, downsample in the low. Nothing may interpolate it (songcore/effects.h).
-    void scheduleVoiceCrush(int64_t targetFrame, int trackId, float packed);          // CRU xy
-    // ⚠️ It RETUNES A SOUNDING NOTE, unlike everything else on this list, which shapes one. 0.5 (the
-    // 0x80 byte) is in tune and the ends are a semitone either way.
-    void scheduleVoiceFineTune(int64_t targetFrame, int trackId, float fine);         // FIN xx
-    // ⚠️ `step` is a RELATIVE move and this call ACCUMULATES — the only one on this list that does.
-    // The byte is signed sixteenths of the loop's own length; two calls slide the window twice.
-    void scheduleVoiceLoopSlide(int64_t targetFrame, int trackId, float step);        // LPO xx
     void scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot);              // EQN xx
     void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
     // An AUS/AUF EQ morph tick. Not a slot: the bands are carried verbatim, because the setting a
@@ -747,6 +720,45 @@ public:
     // Shared by the sampler and SF dispatch paths (audio thread only).
     void initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate);
 
+    // A resolved note onto its voice type's pool, at `frame` inside the current block. The dispatch
+    // loop picks one per note; a new voice type is a third, never an inline arm (audio thread only).
+    void triggerSoundfontNote(const ScheduledNote& note, int frame, int64_t currentFrame, float sampleRate);
+    void triggerSamplerNote(const ScheduledNote& note, int frame, int64_t currentFrame, float sampleRate);
+
+    // What mixTrackBuffer needs from the block it is called in — processAudioBlock's per-block values.
+    struct TrackBufferMix {
+        float*       output;          // interleaved stereo, the block being summed into
+        int          numFrames;
+        const float* trackVolStart;   // per track: the fader's ramp across this block
+        const float* trackVolEnd;
+        const float* gateStart;       // per track: the mute gate's ramp across this block
+        const float* gateEnd;
+        bool         octaWanted;      // the OCTA scopes are being drawn
+        int          monitoredInstrId;
+    };
+    template <typename V>
+    float mixTrackBuffer(V& v, int t, float* buf, const TrackBufferMix& c, bool& stopFadeDone);
+
+    // The voices of one track, for the code that changes or ends them. `fn` is called with each voice
+    // as its own type, so a per-type overload decides what it does. A new voice type adds its pool
+    // HERE, and every such site reaches it. (Audio thread only.)
+    //
+    // What a live command reaches: the track's sampler voice unless it is fading out under the next
+    // note, and its SoundFont voice while it is active — releasing included. A track plays one note at
+    // a time across the pools, so this is that note, plus at most a SoundFont tail.
+    template <typename F> void forEachTrackVoice(int track, F&& fn) {
+        for (int v = 0; v < MAX_VOICES; v++)
+            if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == track) fn(voices[v]);
+        if (track >= 0 && track < SF_VOICE_COUNT && sfVoices[track].isActive) fn(sfVoices[track]);
+    }
+    // What a kill reaches: every sampler voice still sounding on the track, fading ones included, and
+    // its SoundFont voice whatever its state.
+    template <typename F> void forEachVoiceOnTrack(int track, F&& fn) {
+        for (int v = 0; v < MAX_VOICES; v++)
+            if (voices[v].isActive && voices[v].trackId == track) fn(voices[v]);
+        if (track >= 0 && track < SF_VOICE_COUNT) fn(sfVoices[track]);
+    }
+
     // M8-style: a TIC FX in the table's LAST row overrides the instrument's tic rate at
     // note trigger — per COLUMN, one rate per playhead. Shared by the sampler and SF dispatch
     // paths (audio thread only).
@@ -778,12 +790,6 @@ public:
     template <typename V> void applyTableRamps(V& voice, const TableRow* rows,
                                                const double (&rowFraction)[TABLE_LANES],
                                                float sampleRate);
-
-    // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
-    void triggerNoteOff(int trackId, int atFrame = 0);   // atFrame: frame inside the current block (audio thread only)
-
-    // The same, for a live KEY that was let go of — a one-shot ignores it (MIDI plan §4.1).
-    void triggerKeyRelease(int trackId, int atFrame = 0);   // atFrame: frame inside the current block (audio thread only)
 
     // Clear all modulation slots for an instrument
     void clearInstrumentModulation(int sampleId);

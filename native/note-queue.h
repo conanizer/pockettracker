@@ -296,65 +296,40 @@ public:
     void clearFrom(int64_t fromFrame, int trackId = -1) { cancels.cancel(fromFrame, trackId); }
 };
 
-// Action discriminator for ScheduledParamUpdate. Live PBN/PVB/PVX/THO mutations are routed
-// through this queue so the voices[] write happens on the audio thread (no off-thread race) and
-// lands at the exact step frame instead of whenever the look-ahead scheduler reached the step.
+// Action discriminator for ScheduledParamUpdate. Every live change to a sounding voice or the mixer is
+// routed through this queue, so the write happens on the audio thread (no off-thread race) and lands
+// at the exact step frame instead of whenever the look-ahead scheduler reached the step. The numbers
+// live only in the queue — nothing stores them.
 enum ParamUpdateAction {
-    PARAM_UPDATE_MOD_SOURCE = 0,  // write modSourceValues[sourceId] = value (Vxx phraseVol)
-    PARAM_UPDATE_PITCH_BEND,      // active voice: setPitchBendRaw(value)        [PBN]
-    PARAM_UPDATE_VIBRATO,         // active voice: setVibratoRaw(value, value2)  [PVB/PVX]
-    PARAM_UPDATE_TABLE_ROW,       // active sampler voice: tableRow = (int)value [THO]
-    // Live per-note / mixer FX — all applied on the audio thread at the exact step frame.
-    PARAM_UPDATE_PAN,             // active voice: setPan(value)                 [PAN]
-    PARAM_UPDATE_REVERB_SEND,     // active voice: reverbSend = value            [REV]
-    PARAM_UPDATE_DELAY_SEND,      // active voice: delaySend = value             [DEL]
-    PARAM_UPDATE_REVERSE,         // active sampler voice: reverse=(value!=0); value2!=0 → snap pos to new-dir boundary [BCK]
-    // ⚠️ THESE TWO ARE INERT ON A VOICE WHOSE FILTER TYPE IS OFF, and deliberately so: they move the
-    // filter the instrument declares, they do not switch one on.
-    PARAM_UPDATE_FILTER_CUT,      // active voice: filter cutoff    = value*255      [CUT]
-    PARAM_UPDATE_FILTER_RES,      // active voice: filter resonance = value*255      [RES]
-    PARAM_UPDATE_EQ_SLOT,         // active voice: apply eqPresets[(int)value] to chain.eq ((int)value<0 = bypass) [EQN]
-    PARAM_UPDATE_MASTER_EQ,       // global: apply master EQ preset (int)value ((int)value<0 = bypass) [EQM]
-    // ⚠️ THE MIXER FADERS ARE THE ONLY TWO ACTIONS THAT TOUCH NO VOICE, and their apply arms carry a
-    // trap the others do not: processAudioBlock reads trackVolumes[]/masterVolume once, above the
-    // frame loop, and the hot loops read the snapshot. Writing only the member would apply a whole
-    // block late — audible as a ramp that lags, and invisible to anything that only reads back the
-    // member. Both arms write the member AND the in-scope snapshot.
+    PARAM_UPDATE_MOD_SOURCE = 0,  // modSourceValues[sourceId] = value                   [Vxx]
+    PARAM_UPDATE_PITCH_BEND,      // the track's note: setPitchBendRaw(value)            [PBN]
+    PARAM_UPDATE_VIBRATO,         // the track's note: setVibratoRaw(value, value2)      [PVB/PVX]
+    PARAM_UPDATE_TABLE_ROW,       // sampler voice: every table column to row (int)value [THO]
+    // A per-voice controller: `sourceId` is its CC id (songcore/event.h), `value` the 0-1 CC value.
+    // PAN, REV, DEL, CUT, RES, LPF/HPF/BPF, DRV, CRU, FIN, LPO — one action, one apply function
+    // (applyVoiceCc), shared with the table rows.
+    PARAM_UPDATE_VOICE_CC,
+    PARAM_UPDATE_REVERSE,         // sampler voice: reverse=(value!=0); value2!=0 → snap pos to new-dir boundary [BCK]
+    // A slot reads the preset bank; BANDS carry the values themselves, in `eqBands`, because an
+    // AUS/AUF morph sets the EQ to a setting no preset holds. (int)value < 0 = bypass.
+    PARAM_UPDATE_EQ_SLOT,         // the voice's EQ   [EQN]
+    PARAM_UPDATE_EQ_BANDS,        //                  [EQN + AUS/AUF]
+    PARAM_UPDATE_MASTER_EQ,       // the master EQ    [EQM]
+    PARAM_UPDATE_MASTER_EQ_BANDS, //                  [EQM + AUS/AUF]
+    // ⚠️ THE MIXER FADERS TOUCH NO VOICE, and their apply arms carry a trap the others do not:
+    // processAudioBlock reads trackVolumes[]/masterVolume once, above the frame loop, and the hot
+    // loops read the snapshot. Writing only the member would apply a whole block late — audible as a
+    // ramp that lags, and invisible to anything that only reads back the member. Both arms write the
+    // member AND the in-scope snapshot.
     PARAM_UPDATE_TRACK_VOL,       // mixer: trackVolumes[trackId] = value          [VTR]
     PARAM_UPDATE_MASTER_VOL,      // mixer: masterVolume = value (global)          [VMV]
-    // ⚠️ APPENDED, and these two must stay at the end. An action's NUMBER is its identity — every
-    // value above is a positional entry in a queue record the audio thread branches on.
-    //
-    // The two above carry a SLOT and read the preset bank; these carry the BAND VALUES themselves, in
-    // `eqBands`, because an AUS/AUF morph sets the EQ to a setting no preset holds.
-    PARAM_UPDATE_EQ_BANDS,        // active voice: apply eqBands to chain.eq        [EQN + AUS/AUF]
-    PARAM_UPDATE_MASTER_EQ_BANDS, // global: apply eqBands to the master EQ         [EQM + AUS/AUF]
-    // ⚠️ THE ONE ACTION THAT SWITCHES A FILTER ON, where the two above it deliberately cannot. It
-    // carries the TYPE in `value2` and the cutoff in `value` so both land in one record on one frame:
-    // two records is two blocks, and a filter that opens before it changes shape clicks. Appended,
-    // like everything else here — an action's number is its identity.
-    PARAM_UPDATE_FILTER_MODE,     // active voice: filter type = value2, cutoff = value*255 [LPF/HPF/BPF]
-    // The two dirt boxes. Each writes a value the per-block recompute already reads, so neither
-    // needs a second write to make the change audible — and each dies with its note, because a
-    // trigger reseeds both from the instrument. Appended, as ever.
-    PARAM_UPDATE_DRIVE,           // active voice: overdrive = value*255                   [DRV]
-    PARAM_UPDATE_CRUSH,           // active voice: bits = high nibble, downsample = low    [CRU]
-    // Fine tune, the same per-note lifetime and the same "write what the block already reads" shape.
-    // Both voice types fold it into their pitch every block, so it bends a note already sounding.
-    PARAM_UPDATE_FINE_TUNE,       // active voice: fine tune = value*255, 0x80 = in tune    [FIN]
-    // ⚠️ THE ONE ACTION HERE THAT ACCUMULATES. Every other arm above writes "the parameter is now
-    // this"; this one adds a signed STEP to a running count the voice keeps, so two records slide
-    // the window twice and a dropped record loses a movement rather than a value. Appended, as ever.
-    PARAM_UPDATE_LOOP_SLIDE,      // active sampler voice: loop window += value*255 sixteenths [LPO]
-    // ⚠️ THE THIRD ACTION THAT TOUCHES NO VOICE (the two mixer faders above are the others), and the
-    // only one that reaches a SEND BUS. It needs no snapshot write of its own: the delay module owns
-    // its head position and moves it per sample from inside its own `process`. Appended, as ever.
+    // The only action that reaches a SEND BUS. No snapshot write: the delay module owns its head
+    // position and moves it per sample from inside its own `process`.
     PARAM_UPDATE_DELAY_TIME,      // global: the delay's echo time = value*255, free scale      [TIM]
-    // ⚠️ THE ONE ACTION SCOPED TO AN INSTRUMENT RATHER THAN A TRACK, and the only one that carries no
-    // value: a voice copies its instrument's filter, drive, crush and sends when it is triggered, so
-    // an edit to any of them is inaudible until the next note unless the voices already sounding are
-    // told to read them again. It names the instrument in `instrId` and the engine re-reads the rest.
-    // Appended, like everything else here — an action's number is its identity.
+    // ⚠️ SCOPED TO AN INSTRUMENT RATHER THAN A TRACK, and carries no value: a voice copies its
+    // instrument's filter, drive, crush and sends when it is triggered, so an edit to any of them is
+    // inaudible until the next note unless the voices already sounding are told to read them again.
+    // It names the instrument in `instrId` and the engine re-reads the rest.
     PARAM_UPDATE_INSTRUMENT,      // every sounding voice of `instrId` re-reads that instrument
 };
 
@@ -373,7 +348,7 @@ struct EqBandsHex {
 struct ScheduledParamUpdate {
     int64_t targetFrame;     // Exact audio frame to apply the update
     int trackId;             // Which track's active voice to update
-    int sourceId;            // ModSourceId to write (PARAM_UPDATE_MOD_SOURCE)
+    int sourceId;            // ModSourceId (PARAM_UPDATE_MOD_SOURCE) or CC id (PARAM_UPDATE_VOICE_CC)
     float value;             // New value: mod-source value / bend rate / vibrato speed / table row
     int action = PARAM_UPDATE_MOD_SOURCE;  // discriminator (default keeps Vxx call sites unchanged)
     float value2 = 0.0f;     // second arg: vibrato depth (PARAM_UPDATE_VIBRATO)

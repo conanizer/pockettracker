@@ -177,33 +177,23 @@ class EngineConsumer : public IMidiConsumer {
     static void apply_cc(Engine& engine, int64_t frame, uint8_t track, int param, float v) {
         switch (param) {
             case CC_VOLUME:      engine.scheduleTrackPhraseVol(frame, track, v);  break;
-            case CC_PAN:         engine.scheduleVoicePan(frame, track, v);        break;
-            case CC_REVERB_SEND: engine.scheduleVoiceReverbSend(frame, track, v); break;
-            case CC_DELAY_SEND:  engine.scheduleVoiceDelaySend(frame, track, v);  break;
-            // CUT / RES. Both write the SOUNDING voice's own filter and are gone with it, so there
-            // is no restore on stop() — the instrument's values come back with the next note-on. An
-            // instrument with FILTER TYPE = OFF runs no filter and swallows them.
-            case CC_FILTER_CUT:  engine.scheduleVoiceFilterCut(frame, track, v);  break;
-            case CC_FILTER_RES:  engine.scheduleVoiceFilterRes(frame, track, v);  break;
-            // LPF / HPF / BPF — the id IS the filter type and `v` is the cutoff, so one record
-            // switches the filter on and places it in the same frame. Engine-only ids (event.h);
-            // `midi_out.h` drops them, there being no MIDI controller for a type.
+            // The per-voice controllers: they shape the SOUNDING note and are gone with it, so there
+            // is no restore on stop() — the instrument's values come back with the next note-on.
+            // What each one does is the engine's `applyVoiceCc`.
+            case CC_PAN:
+            case CC_REVERB_SEND:
+            case CC_DELAY_SEND:
+            case CC_FILTER_CUT:
+            case CC_FILTER_RES:
             case CC_FILTER_LP:
             case CC_FILTER_HP:
             case CC_FILTER_BP:
-                engine.scheduleVoiceFilterMode(frame, track, cc_filter_mode(param), v);
+            case CC_DRIVE:
+            case CC_CRUSH:
+            case CC_FINE_TUNE:
+            case CC_LOOP_SLIDE:
+                engine.scheduleVoiceCc(frame, track, param, v);
                 break;
-            // DRV / CRU — engine-only ids (event.h) for parameters MIDI has no controller for. Each
-            // writes the per-block recompute's own input, so the change is audible in the block it
-            // lands in and gone at the next note-on.
-            case CC_DRIVE:       engine.scheduleVoiceDrive(frame, track, v);     break;
-            case CC_CRUSH:       engine.scheduleVoiceCrush(frame, track, v);     break;
-            // FIN, the same shape — and engine-only for a different reason: MIDI's fine tune is an
-            // RPN that retunes a whole channel, not this note (event.h).
-            case CC_FINE_TUNE:   engine.scheduleVoiceFineTune(frame, track, v);  break;
-            // LPO. ⚠️ The one id here whose records ACCUMULATE rather than replace — the engine adds
-            // each one to the voice's running count (event.h).
-            case CC_LOOP_SLIDE:  engine.scheduleVoiceLoopSlide(frame, track, v);  break;
             // The mixer faders (VTR / VMV). Engine-only ids — `midi_out.h` drops both, which is the
             // one place the two consumers are meant to disagree (event.h).
             //
@@ -283,8 +273,8 @@ class EngineConsumer : public IMidiConsumer {
 
             // ⚠️ NO ENGINE PATH EXISTS FOR EITHER, AND SAYING SO IS THE POINT OF THE ARMS.
             //   • MPG: this engine has no notion of a program. The soundfont module does (a TSF
-            //     preset), but selecting one mid-take needs a per-track preset override that
-            //     scheduleSoundfontNote does not have.
+            //     preset), but selecting one mid-take needs a per-track preset override that the
+            //     SoundFont note path does not have.
             //   • MPB: `schedulePitchBend` is PBN — a RATE in semitones per step, applied over time.
             //     An absolute 14-bit bend is a different quantity and there is no param to hold it.
             // Both reach external gear correctly (midi_out.h); on a sampler they are silent. An empty

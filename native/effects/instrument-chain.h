@@ -16,8 +16,7 @@
 // Sampler voices: crush.setParams(effCrush, 0) — downsample=0 bypasses
 //   the chain downsample; pre-interpolation address quantization stays
 //   inline in the sampler mix loop (different lo-fi character, cannot move).
-// SF voices: crush.setParams(instrParams.crush, instrParams.downsample) —
-//   chain handles both; the old sfBuf index-based downsample is removed.
+// SF voices: crush.setParams(effCrush, effDownsample) — the chain handles both.
 //
 // Adding a new module:
 //   1. Add a member of the module type.

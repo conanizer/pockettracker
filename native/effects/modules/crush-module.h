@@ -17,7 +17,7 @@
 //   Maps to SetDownsampleFactor(downsample / 15.0f).
 //   For sampler voices always pass 0 — pre-interpolation address
 //   quantization stays inline in the sampler mix loop (different effect).
-//   For SF voices pass instrParams.downsample so the chain handles it.
+//   For SF voices pass the downsample so the chain handles it.
 //
 // Call setParams() once per block (or at trigger) when params change.
 // ===========================================================================
