@@ -234,6 +234,11 @@ struct SettingsValues {
     int         midiInVoices = 4;
     // OFF plays every live key at full strength, whatever the keyboard sends.
     bool        midiVelocity = true;
+    // AUDIO OUT. The NAME is the choice and what settings.json keeps; the index and count are the
+    // row's cycle over the list the platform supplies (0 = SYSTEM), filled in by the shell.
+    std::string audioOutput   = "SYSTEM";
+    int         audioOutIndex = 0;
+    int         audioOutCount = 1;
 
     // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
     // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already
@@ -259,6 +264,7 @@ struct SettingsState {
     std::string layoutText{};
     std::string skinText{};
     std::string overlayText = "OFF";
+    std::string audioOutText = "SYSTEM";
     std::string themeName   = "CLASSIC";
 
     PlatformCaps caps{};

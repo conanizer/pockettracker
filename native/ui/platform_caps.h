@@ -112,6 +112,9 @@ struct PlatformCaps {
      */
     bool loopWindow = false;
 
+    /** AUDIO OUT: the platform can switch its sound output while running (Windows: ASIO). */
+    bool audioOutputs = false;
+
     /** Kotlin's world: every device row, no exit. */
     static PlatformCaps android(bool debug_build) {
         PlatformCaps c;

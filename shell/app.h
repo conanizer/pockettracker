@@ -49,6 +49,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 class AudioBackend;
 class AudioEngine;
@@ -59,6 +60,22 @@ namespace ptshell {
 
 class ButtonFeedback;
 class MidiInBase;
+
+/**
+ * The outputs a platform can switch between while running — SETTINGS > AUDIO OUT. Index 0 is always
+ * the system output. Only Windows has one (its ASIO drivers); elsewhere `AppConfig::audioOutputs` is
+ * null and the row is hidden.
+ */
+class AudioOutputSelector {
+  public:
+    virtual ~AudioOutputSelector() = default;
+    virtual const std::vector<std::string>& names() const = 0;
+    /** The output that is playing now — not necessarily the one last asked for (see `select`). */
+    virtual int active() const = 0;
+    /** Switch to `index`, at the engine's current rate. On failure the previous output is back on and
+     *  `error` says why, in a few words. */
+    virtual bool select(int index, std::string& error) = 0;
+};
 
 /**
  * Everything the shared shell is GIVEN rather than decides. Every field is filled by the platform's
@@ -76,6 +93,8 @@ struct AppConfig {
      */
     AudioEngine*  engine = nullptr;
     AudioBackend* audio  = nullptr;
+    /** Null where the platform has only one output. When set, `audio` is the same object. */
+    AudioOutputSelector* audioOutputs = nullptr;
 
     /**
      * Where Projects/ Samples/ Soundfonts/ Instruments/ Renders/ Themes live, and the filesystem

@@ -124,12 +124,13 @@ int windows_endpoint_rate() {
 #endif
 
 /** Where the requested rate came from — printed on the boot line, so a reading stays attributable. */
-enum class RateSource { DEVICE, FALLBACK, ENV };
+enum class RateSource { DEVICE, FALLBACK, ENV, PINNED };
 
 const char* rate_source_text(RateSource s) {
     switch (s) {
         case RateSource::ENV:    return "env";
         case RateSource::DEVICE: return "the device";
+        case RateSource::PINNED: return "the engine's, kept";
         case RateSource::FALLBACK: break;
     }
     return "fallback";
@@ -333,7 +334,8 @@ bool SdlAudioEngine::openStream() {
     choose_linux_route(askedFrames);
 #endif
     RateSource rateSource  = RateSource::FALLBACK;
-    const int  askedRate   = requested_rate(rateSource);
+    const int  askedRate   = pinnedRate_ > 0 ? pinnedRate_ : requested_rate(rateSource);
+    if (pinnedRate_ > 0) rateSource = RateSource::PINNED;
 
     SDL_AudioSpec want{};
     want.freq     = askedRate;
@@ -352,7 +354,9 @@ bool SdlAudioEngine::openStream() {
     // insert a format shim (and possibly a resampler) underneath the DSP, and processAudioBlock's
     // contract is stereo float — a contract the engine guards rather than assumes. Failing loudly
     // here beats sounding subtly wrong on one CFW.
-    const int allow = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_SAMPLES_CHANGE;
+    //
+    // A pinned rate is not negotiable either: SDL converts rather than hand back another one.
+    const int allow = (pinnedRate_ > 0 ? 0 : SDL_AUDIO_ALLOW_FREQUENCY_CHANGE) | SDL_AUDIO_ALLOW_SAMPLES_CHANGE;
     device_ = SDL_OpenAudioDevice(nullptr, 0, &want, &got, allow);
 
 #ifndef _WIN32

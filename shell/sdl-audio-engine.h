@@ -69,6 +69,12 @@ class SdlAudioEngine : public AudioBackend {
      */
     OutputLatency outputLatency() const override { return {bufferFrames_, false}; }
 
+    /**
+     * Open at exactly `hz` from now on, converting if the device runs another rate; 0 negotiates.
+     * For a REOPEN mid-session: loaded samples are pitched for the rate in force.
+     */
+    void pin_rate(int hz) { pinnedRate_ = hz; }
+
   private:
     static void SDLCALL audioCallback(void* userdata, Uint8* out, int lenBytes);
 
@@ -77,6 +83,7 @@ class SdlAudioEngine : public AudioBackend {
     int               sampleRate_   = 0;
     int               channels_     = 0;
     int               bufferFrames_ = 0;  // what the device chose, not FRAMES_PER_CALLBACK
+    int               pinnedRate_   = 0;
 };
 
 #endif  // POCKETTRACKER_SDL_AUDIO_ENGINE_H

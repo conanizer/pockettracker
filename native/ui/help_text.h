@@ -391,6 +391,7 @@ enum class HelpTopic {
     GROOVE_SWG,
 
     MIDI_VELOCITY,
+    SET_AUDIO_OUT,
 
     COUNT
 };
@@ -2211,6 +2212,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "full strength, whatever the",
       "keyboard sends."},
      {"A+D-PAD turns it on or off"}},
+    /* SET_AUDIO_OUT */
+    {"AUDIO OUT: where sound goes", "SYSTEM, or an ASIO driver for", "less delay on an interface.",
+     {"SYSTEM plays through Windows.",
+      "An ASIO driver plays straight",
+      "to your audio interface, with",
+      "less delay. Its buffer size is",
+      "set in the driver panel."},
+     {"A+D-PAD picks the output"}},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -2609,6 +2618,7 @@ inline HelpTopic settings_cell_topic(int row, int column) {
         case SettingsRow::BTN_VIBRO:
             return second ? HelpTopic::SET_BTN_VIBRO_POW : HelpTopic::SET_BTN_VIBRO;
         case SettingsRow::ABXY:       return HelpTopic::SET_ABXY;
+        case SettingsRow::AUDIO_OUT:  return HelpTopic::SET_AUDIO_OUT;
         case SettingsRow::METRONOME:
             return second ? HelpTopic::SET_METRONOME_VOL : HelpTopic::SET_METRONOME;
         case SettingsRow::KB_INSERT:  return HelpTopic::SET_KB_INSERT;

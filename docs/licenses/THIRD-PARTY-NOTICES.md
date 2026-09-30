@@ -20,6 +20,7 @@ this file is the engine, i.e. what ships in *both* the APK and the Linux port. T
 |---|---|---|
 | Linux Biolinum (font asset) | The OFL requires its licence to accompany the font | wherever `assets/fonts/` travel |
 | Oboe, the AndroidX libraries | Apache-2.0 §4(a) requires supplying a *copy of the License* | the APK only |
+| Steinberg ASIO SDK | Compiled into the Windows shell only (SETTINGS > AUDIO OUT) | the Windows zip only |
 
 **Naming a licence is not supplying one.** `CREDITS.md` attributes everything the project builds on
 and is the right place for "what is this and who wrote it", but a licence whose terms demand that the
@@ -31,6 +32,42 @@ present in the artifact, but no automated check can know a component was *added*
 habit, not a guard.
 
 ---
+
+## Steinberg ASIO SDK — GPL-3.0 (its GPLv3 option) and BSD-3-Clause
+
+Used for: the ASIO audio output on Windows (`native/vendor/asio/`). `common/asio.cpp` and the
+`common/` headers are used under the SDK's **GPLv3** licence option (`native/vendor/asio/LICENSE.txt`);
+PocketTracker's own licence is GPL-3.0-or-later, so the combined Windows binary is distributed under
+GPL-3.0. `host/asiodrivers.*` and `host/pc/asiolist.*` carry the BSD-3-Clause notice below.
+
+ASIO is a trademark and software of Steinberg Media Technologies GmbH.
+
+```
+(c) 2025, Steinberg Media Technologies GmbH, All Rights Reserved
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+  * Neither the name of the Steinberg Media Technologies nor the names of its
+    contributors may be used to endorse or promote products derived from this
+    software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## KissFFT — BSD-3-Clause
 
