@@ -61,14 +61,17 @@ bool WindowsAudioOutputs::select(int index, std::string& error) {
     return false;
 }
 
-// The app's reopen after `deviceLost` — an ASIO driver asking to be reset. A driver that will not come
-// back (unplugged) leaves the system output playing rather than silence.
+// The app's reopen after `deviceLost`. A driver that asked to be reset is reopened; one that went
+// silent, or will not come back, leaves the system output playing rather than silence.
+//
+// ⚠️ A silent driver is NOT tried again: one whose interface is unplugged can still open and then
+// never call back, which would be a second of silence and a reopen, for ever.
 bool WindowsAudioOutputs::openStream() {
     const int rate = core_->getSampleRate();
-    if (open(active_, rate)) return true;
+    if (!(active_ != 0 && asio_.closed_silent()) && open(active_, rate)) return true;
     if (active_ == 0) return false;
-    std::fprintf(stderr, "audio:   %s did not come back - playing through the system output\n",
-                 names_[static_cast<size_t>(active_)].c_str());
+    std::printf("audio:   %s did not come back - playing through the system output\n",
+                names_[static_cast<size_t>(active_)].c_str());
     active_ = 0;
     return open(0, rate);
 }

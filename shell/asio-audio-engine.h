@@ -41,11 +41,20 @@ class AsioAudioEngine : public AudioBackend {
     int  sampleRate() const override { return rate_; }
     /** The driver's own output latency figure, which includes its buffer. */
     OutputLatency outputLatency() const override { return {latencyFrames_, latencyFrames_ > 0}; }
-    /** The driver asked to be reset (its buffer size or rate changed in its panel, or it failed). */
-    bool deviceLost() const override { return resetRequested_.load(); }
+    /**
+     * The driver asked to be reset (its buffer size or rate changed in its panel, or it failed), or it
+     * has stopped calling back while running.
+     *
+     * ⚠️ The second half is not optional: a driver whose interface is unplugged can simply go quiet
+     * without asking for anything, and then nothing else would ever notice.
+     */
+    bool deviceLost() const override;
+    /** The last close found the driver silent rather than asking to be reset — its hardware is gone. */
+    bool closed_silent() const { return closedSilent_; }
 
   private:
     bool fail(const std::string& why);
+    bool stalled() const;
     void render(long index);
 
     static void on_buffer_switch(long index, long directProcess);
@@ -65,11 +74,13 @@ class AsioAudioEngine : public AudioBackend {
     bool               loaded_        = false;   // driver loaded + ASIOInit succeeded
     bool               buffersMade_   = false;
     bool               running_       = false;
+    bool               closedSilent_  = false;
     void*              buffers_[2][2] = {};      // [channel][half]
     std::vector<float> scratch_;                 // interleaved stereo, frames_ × 2
     std::atomic<bool>  paused_{false};
     std::atomic<int>   inCallback_{0};
     std::atomic<bool>  resetRequested_{false};
+    std::atomic<unsigned long long> lastCallbackMs_{0};   // GetTickCount64 at the last buffer
 };
 
 #endif  // _WIN32

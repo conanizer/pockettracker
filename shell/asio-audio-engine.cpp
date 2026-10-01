@@ -90,6 +90,10 @@ const char* type_name(long type) {
     }
 }
 
+// How long a running driver may go without a buffer before it counts as gone. Far above any buffer
+// size, so only a driver that has really stopped trips it.
+constexpr ULONGLONG kSilentMs = 1000;
+
 inline double clamp1(float x) { return x > 1.0f ? 1.0 : (x < -1.0f ? -1.0 : double(x)); }
 
 /** Channel `ch` of the interleaved stereo `src` into one driver buffer, in the driver's format. */
@@ -182,6 +186,7 @@ bool AsioAudioEngine::fail(const std::string& why) {
 bool AsioAudioEngine::openStream() {
     error_.clear();
     resetRequested_ = false;
+    closedSilent_   = false;
     if (g_open != nullptr && g_open != this) return fail("ANOTHER ASIO DRIVER IS OPEN");
 
     char name[MAXDRVNAMELEN] = {};
@@ -258,6 +263,7 @@ bool AsioAudioEngine::openStream() {
     if (core_ && core_->getSampleRate() != rate_) core_->setDeviceSampleRate(rate_);
 
     paused_ = false;
+    lastCallbackMs_ = GetTickCount64();
     if (ASIOStart() != ASE_OK) return fail("START REFUSED");
     running_ = true;
 
@@ -269,7 +275,15 @@ bool AsioAudioEngine::openStream() {
     return true;
 }
 
+bool AsioAudioEngine::stalled() const {
+    return running_ && !paused_.load() && GetTickCount64() - lastCallbackMs_.load() > kSilentMs;
+}
+
+bool AsioAudioEngine::deviceLost() const { return resetRequested_.load() || stalled(); }
+
 void AsioAudioEngine::closeStream() {
+    closedSilent_ = stalled();
+    if (closedSilent_) std::printf("audio:   ASIO %s stopped calling back\n", driver_.c_str());
     if (running_) {
         ASIOStop();
         running_ = false;
@@ -297,12 +311,14 @@ void AsioAudioEngine::setPaused(bool paused) {
         wait_idle(inCallback_);
     } else {
         paused_ = false;
+        lastCallbackMs_ = GetTickCount64();
         if (buffersMade_ && !running_ && ASIOStart() == ASE_OK) running_ = true;
     }
 }
 
 void AsioAudioEngine::render(long index) {
     const InCallback guard(inCallback_);
+    lastCallbackMs_.store(GetTickCount64(), std::memory_order_relaxed);
     const int half = index != 0 ? 1 : 0;
     if (paused_.load() || !core_) {
         for (auto& ch : buffers_)
