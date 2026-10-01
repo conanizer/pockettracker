@@ -584,6 +584,7 @@ int main(int argc, char** argv) {
     int deviceRate = 0, deviceBurst = 0;
     query_device_audio_defaults(deviceRate, deviceBurst);
     audio.setPlatformDefaults(deviceRate, deviceBurst);
+    if (!privateRoot.empty()) audio.setSlowOpenMarker(privateRoot + "/audio-slow-open");
 
     if (!audio.openStream()) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "openStream failed - no audio device");

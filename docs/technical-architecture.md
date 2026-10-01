@@ -203,9 +203,12 @@ A sample-accurate queue system in C++.
 
 - **Stereo float, at the device's own rate.** A rate is asked for, never assumed: whatever the device
   negotiates is what the engine is told, and every pitch ratio and filter coefficient is derived from
-  it rather than from a constant. Android uses Oboe (OpenSL ES Exclusive → Shared → None/Shared →
-  AAudio Exclusive); every other platform uses SDL audio.
-- **The audio device is opened exactly once**, at startup, and never reopened.
+  it rather than from a constant. Android uses Oboe (AAudio Exclusive, which takes the direct MMAP
+  path where the device has one, then OpenSL ES Exclusive → Shared → None/Shared); every other
+  platform uses SDL audio. A device whose AAudio open ever took over 3 s stays on OpenSL ES — a
+  marker file in private storage, written before the attempt, so a hang counts too.
+- **The audio device is opened once, at startup.** It is reopened only by the frame loop — after
+  Android backgrounds the app, or when the backend reports the device lost.
 - `AudioEngine` **must be heap-allocated** — its DSP scratch buffers, spectrum rings and 256-slot
   table pool blow a 1 MB stack instantly.
 

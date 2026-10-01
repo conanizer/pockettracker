@@ -75,7 +75,9 @@ fetch "$TOOLCHAIN_URL" "$CACHE/dl/miyoomini-toolchain.tar.xz"
 fetch "$SDL2_URL"      "$CACHE/dl/sdl2-nogl.tar.gz"
 
 [ -d "$TOOLCHAIN" ]   || { mkdir -p "$CACHE/tc"  && tar -xf  "$CACHE/dl/miyoomini-toolchain.tar.xz" -C "$CACHE/tc" && mv "$CACHE/tc/miyoomini-toolchain" "$TOOLCHAIN"; }
-[ -d "$SDL2_LIBDIR" ] || { mkdir -p "$SDL2_LIBDIR" && tar -xzf "$CACHE/dl/sdl2-nogl.tar.gz" -C "$SDL2_LIBDIR" --strip-components=1; }
+# The fork's tarball has its files at the top level, no enclosing directory.
+[ -f "$SDL2_LIBDIR/libSDL2-2.0.so.0" ] || { mkdir -p "$SDL2_LIBDIR" && tar -xzf "$CACHE/dl/sdl2-nogl.tar.gz" -C "$SDL2_LIBDIR"; }
+[ -f "$SDL2_LIBDIR/libSDL2-2.0.so.0" ] || { echo "FAIL: libSDL2-2.0.so.0 not found after unpacking the fork's tarball."; exit 1; }
 
 CROSS="$TOOLCHAIN/bin/arm-linux-gnueabihf-"
 "${CROSS}gcc" --version | head -1

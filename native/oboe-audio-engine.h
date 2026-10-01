@@ -9,6 +9,7 @@
 #include <oboe/Oboe.h>
 #include <atomic>
 #include <memory>
+#include <string>
 
 #include "audio-backend.h"
 
@@ -35,15 +36,22 @@ public:
     /**
      * The device's OWN output rate and burst size, handed in before openStream().
      *
-     * ⚠️⚠️ **THE OpenSL ES PATH CANNOT ASK THE DEVICE ITSELF, AND IT IS THE PATH THAT SHIPS.**
-     * AAudio opens at the native rate when none is requested; OpenSL ES has no such query and falls
-     * back to Oboe's built-in guess for both numbers. So across the three attempts this backend makes
-     * first, these two values are the only thing standing between the stream and a resampler.
+     * ⚠️⚠️ **THE OpenSL ES PATH CANNOT ASK THE DEVICE ITSELF.** AAudio opens at the native rate when
+     * none is requested; OpenSL ES has no such query and falls back to Oboe's built-in guess for both
+     * numbers. So on the fallback path, and on Android 8.0 where it is the first path, these two
+     * values are the only thing standing between the stream and a resampler.
      *
      * Best effort, and the two are independent: a value <= 0 leaves Oboe's own default alone, so a
      * platform that answers for one and not the other still gets the half it knows.
      */
     void setPlatformDefaults(int sampleRate, int framesPerBurst);
+
+    /**
+     * A file in private storage that, while it exists, keeps this device on OpenSL ES. openStream
+     * writes it before trying the modern API and deletes it once that opened quickly — see there.
+     * Empty (the default) means no guard: the modern API is tried every time.
+     */
+    void setSlowOpenMarker(std::string path);
 
     bool openStream() override;
     void closeStream() override;
@@ -110,6 +118,8 @@ private:
     // defaults in setPlatformDefaults, not into the builder.
     int platformRate_  = 0;
     int platformBurst_ = 0;
+
+    std::string slowOpenMarker_;
 
     // Raised on Oboe's error thread, read by the frame loop, cleared when a reopen is ATTEMPTED (see
     // openStream) rather than when one succeeds.

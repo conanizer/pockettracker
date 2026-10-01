@@ -4,6 +4,11 @@
 #include "audio-engine.h"
 #include "audio-defs.h"  // LOGD/LOGE/LOG_TAG (platform log shim)
 
+#include <unistd.h>
+
+#include <chrono>
+#include <cstdio>
+
 OboeAudioEngine::OboeAudioEngine(AudioEngine* core) : core(core) {}
 
 OboeAudioEngine::~OboeAudioEngine() {
@@ -19,14 +24,14 @@ void OboeAudioEngine::setPlatformDefaults(int sampleRate, int framesPerBurst) {
     if (framesPerBurst > 0) oboe::DefaultStreamValues::FramesPerBurst = framesPerBurst;
 }
 
+void OboeAudioEngine::setSlowOpenMarker(std::string path) {
+    slowOpenMarker_ = std::move(path);
+}
+
 bool OboeAudioEngine::openStream() {
     // ⚠️ Cleared BEFORE the attempt, not after a successful one: a stream dying while this runs
     // raises it again, and clearing on the way out would erase that second death.
     deviceLost_.store(false, std::memory_order_relaxed);
-
-    // OpenSL ES does NOT trigger CCodec/C2 codec enumeration that spams 2000+ log lines
-    // and blocks for up to 35 seconds on some Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
-    // Try OpenSL ES first; fall back to AAudio only if OpenSL ES is unavailable.
 
     oboe::AudioStreamBuilder builder;
     builder.setDataCallback(this);
@@ -41,36 +46,49 @@ bool OboeAudioEngine::openStream() {
     // reads the result back: the callback passes the stream's own rate per block, and
     // `setDeviceSampleRate` below re-derives the send and master chains' coefficients from it.
 
-    // Attempt 1: OpenSL ES LowLatency Exclusive (best latency, no CCodec spam).
-    builder.setAudioApi(oboe::AudioApi::OpenSLES);
-    builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
-    builder.setSharingMode(oboe::SharingMode::Exclusive);
-    oboe::Result result = builder.openStream(stream);
+    // ⚠️⚠️ **THE MODERN API FIRST, BEHIND A MARKER FILE.** It is the only route to the direct
+    // (MMAP) path, which cuts the output latency to about a third where the device has it. But one
+    // ROM (GammaCoreOS on the Miyoo Flip) was seen to stall startup for up to 35 s opening it. So the
+    // marker is written BEFORE the attempt and removed only once the stream has opened AND started
+    // quickly: a slow open, a hang, or the app killed mid-stall all leave it behind, and from then on
+    // this device goes straight to OpenSL ES. A bad ROM pays the stall once.
+    const bool legacyOnly = !slowOpenMarker_.empty() && access(slowOpenMarker_.c_str(), F_OK) == 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    oboe::Result result = oboe::Result::ErrorInternal;
+    if (!legacyOnly) {
+        if (!slowOpenMarker_.empty()) {
+            if (FILE* f = std::fopen(slowOpenMarker_.c_str(), "w")) std::fclose(f);
+        }
+        // Unspecified, not AAudio: on Android 8.0 Oboe knows AAudio is unreliable and picks OpenSL ES.
+        // Exclusive is a request — a device without the direct path hands back a shared stream.
+        builder.setAudioApi(oboe::AudioApi::Unspecified);
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+        builder.setSharingMode(oboe::SharingMode::Exclusive);
+        result = builder.openStream(stream);
+    } else {
+        LOGD("openStream: a past open was slow (%s) - OpenSL ES only", slowOpenMarker_.c_str());
+    }
 
-    // Attempt 2: OpenSL ES LowLatency Shared.
+    // OpenSL ES, most capable first. It never takes the direct path, so it is the fallback now.
+    if (result != oboe::Result::OK) {
+        if (!legacyOnly) {
+            LOGD("openStream: modern API failed (%s), trying OpenSL ES", oboe::convertToText(result));
+        }
+        builder.setAudioApi(oboe::AudioApi::OpenSLES);
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+        builder.setSharingMode(oboe::SharingMode::Exclusive);
+        result = builder.openStream(stream);
+    }
     if (result != oboe::Result::OK) {
         LOGD("openStream: OpenSLES exclusive failed (%s), trying OpenSLES shared LowLatency",
              oboe::convertToText(result));
         builder.setSharingMode(oboe::SharingMode::Shared);
         result = builder.openStream(stream);
     }
-
-    // Attempt 3: OpenSL ES None/Shared (maximum OpenSL ES compatibility).
     if (result != oboe::Result::OK) {
         LOGD("openStream: OpenSLES LowLatency failed (%s), trying OpenSLES None/Shared",
              oboe::convertToText(result));
         builder.setPerformanceMode(oboe::PerformanceMode::None);
-        builder.setSharingMode(oboe::SharingMode::Shared);
-        result = builder.openStream(stream);
-    }
-
-    // Attempt 4: AAudio LowLatency Exclusive (fallback; may trigger CCodec on some ROMs).
-    if (result != oboe::Result::OK) {
-        LOGD("openStream: OpenSLES failed (%s), falling back to AAudio LowLatency Exclusive",
-             oboe::convertToText(result));
-        builder.setAudioApi(oboe::AudioApi::Unspecified);
-        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
-        builder.setSharingMode(oboe::SharingMode::Exclusive);
         result = builder.openStream(stream);
     }
 
@@ -113,6 +131,18 @@ bool OboeAudioEngine::openStream() {
     if (result != oboe::Result::OK) {
         LOGE("Failed to start: %s", oboe::convertToText(result));
         return false;
+    }
+
+    // Timed to here, not to the open: the stall was never pinned to one of the two calls.
+    constexpr long long kSlowOpenMs = 3000;
+    const long long openMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
+    if (!legacyOnly && !slowOpenMarker_.empty()) {
+        if (openMs < kSlowOpenMs) {
+            std::remove(slowOpenMarker_.c_str());
+        } else {
+            LOGE("openStream: took %lld ms - OpenSL ES only from the next launch", openMs);
+        }
     }
 
     // AFTER the start, because a stream that has presented no frames has no timestamp to compute a
