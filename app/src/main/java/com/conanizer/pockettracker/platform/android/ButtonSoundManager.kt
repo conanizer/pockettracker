@@ -30,7 +30,8 @@ import java.util.concurrent.Executors
  * (registering a track with AudioFlinger) on every tap is far heavier than SoundPool's
  * fire-and-forget and was audibly laggy. Instead we pre-build a small pool of streaming
  * float tracks once and reuse them (pause → flush → write → play); the buffer holds the
- * whole clip so the write never blocks. When every voice is busy the oldest is stolen.
+ * whole clip so the write never blocks. When every voice is busy the oldest is stolen
+ * (see `POOL_MAX` for why the pool is small).
  *
  * WAV files must be placed in app/src/main/res/raw/ with these names:
  *   ui_sq_press_1.wav, ui_sq_press_2.wav, ...       square button press variants
@@ -333,7 +334,10 @@ class ButtonSoundManager(context: Context) {
 
     private companion object {
         const val TAG = "ButtonSoundManager"
-        const val POOL_MAX = 8
+        // ⚠️ Each pooled track is a FAST track, and a fast mixer has only 7 for every app on the output.
+        // A bigger pool can take the last one, and the tracker stream reopened after a route change
+        // then falls to the normal mixer (~130 ms instead of ~30) until relaunch.
+        const val POOL_MAX = 3
     }
 }
 
