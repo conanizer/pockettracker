@@ -114,6 +114,8 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.midiInVoices = get_int(j, "midi_in_voices", values.midiInVoices);
     if (values.midiInVoices < 1 || values.midiInVoices > 8) values.midiInVoices = 4;
     values.midiVelocity = get_bool(j, "midi_velocity", values.midiVelocity);
+    // AUDIO OUT, by driver NAME — the shell resolves it against the drivers installed now.
+    values.audioOutput  = get_string(j, "audio_output", values.audioOutput);
 
     // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
     // flips the cap on is the session that must add the key, or the setting resets to ASK on every
@@ -233,6 +235,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["midi_control_channel"] = values.midiControlChannel;   // -1 = OFF, else 0-15 (shown 01-16)
     j["midi_in_voices"]       = values.midiInVoices;         // 1 = MONO, 2-8 = POLY
     j["midi_velocity"]        = values.midiVelocity;
+    j["audio_output"]         = values.audioOutput;
 
     // The Android device rows — see the matching block in load_settings for why these are written on
     // every platform a full phase before any of them is displayed. On the shell they are simply their

@@ -152,6 +152,8 @@ add_executable(pockettracker-sdl
         midi-in-alsa.cpp   # the LINUX   songcore::IMidiIn  (MIDI plan E5);  empty TU elsewhere
         midi-sender.cpp    # the just-in-time MIDI sender thread + its jitter instrument (MIDI plan B3)
         sdl-audio-engine.cpp
+        asio-audio-engine.cpp   # the ASIO output (SETTINGS > AUDIO OUT); empty TU elsewhere
+        audio-outputs-win.cpp   # the switch between the system output and ASIO; empty TU elsewhere
         sdl-input.cpp
         sdl-touch.cpp
         sdl-video.cpp
@@ -176,6 +178,23 @@ endif()
 # COM. Same terms as winmm: a system library, present everywhere, nothing to ship beside it.
 if(WIN32)
     target_link_libraries(pockettracker-sdl PRIVATE winmm ole32)
+
+    # The Steinberg ASIO SDK's host side (native/vendor/asio, GPLv3 option). Vendor code: its own
+    # target, so our warning flags never reach it.
+    set(PT_ASIO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/vendor/asio")
+    add_library(pt-asio STATIC
+            "${PT_ASIO_DIR}/common/asio.cpp"
+            "${PT_ASIO_DIR}/host/asiodrivers.cpp"
+            "${PT_ASIO_DIR}/host/pc/asiolist.cpp")
+    target_include_directories(pt-asio PUBLIC
+            "${PT_ASIO_DIR}/common" "${PT_ASIO_DIR}/host" "${PT_ASIO_DIR}/host/pc")
+    target_link_libraries(pt-asio PUBLIC ole32 advapi32)
+    if(MSVC)
+        target_compile_options(pt-asio PRIVATE /W0)
+    else()
+        target_compile_options(pt-asio PRIVATE -w)
+    endif()
+    target_link_libraries(pockettracker-sdl PRIVATE pt-asio)
 
     # ⚠️ NO CONSOLE WINDOW. A console-subsystem exe opens a black window beside the app for the whole
     # session, and on Windows that window IS the only place the program's output ever went. The

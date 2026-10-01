@@ -46,6 +46,7 @@
 #include "midi-in.h"          // picks the platform's IMidiIn  (winmm at E2, ALSA rawmidi at E5)
 #include "midi-out.h"         // picks the platform's IMidiOut; the block below has no #ifdef of its own
 #include "sdl-audio-engine.h"
+#include "audio-outputs-win.h"  // SETTINGS > AUDIO OUT; empty off Windows
 
 #include <csignal>
 #include <cstdio>
@@ -264,6 +265,15 @@ int main(int argc, char** argv) {
     cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/false);
 #else
     cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/true);
+#endif
+
+    // SETTINGS > AUDIO OUT: the system output or an ASIO driver. The app then talks to the switch,
+    // which delegates to whichever is playing.
+#ifdef _WIN32
+    ptshell::WindowsAudioOutputs audioOutputs(engine.get(), audio);
+    cfg.audio             = &audioOutputs;
+    cfg.audioOutputs      = &audioOutputs;
+    cfg.caps.audioOutputs = true;
 #endif
 
     // A desktop and a handheld both have somewhere for this to go — a terminal, an ssh session, a

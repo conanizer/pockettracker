@@ -91,9 +91,11 @@ enum class SettingsRow {
     // APPENDED like the rows above it. It DRAWS under VISUALIZER — the compact help stands in the
     // visualizer's box — and that is a position; SETTINGS_DISPLAY_ORDER says it.
     HELP       = 17,
+    // APPENDED like the rows above. Windows only; it DRAWS at the top of the device cluster.
+    AUDIO_OUT  = 18,
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 18;
+inline constexpr int SETTINGS_ROW_COUNT = 19;
 
 // ─── Display / navigation order ──────────────────────────────────────────────────────────────────
 //
@@ -106,6 +108,7 @@ inline constexpr int SETTINGS_ROW_COUNT = 18;
 // ⚠️ Every SettingsRow appears exactly once and the length is SETTINGS_ROW_COUNT — the walkers assume it.
 inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::LAYOUT,   SettingsRow::SCALING,   SettingsRow::OVERLAY,
+    SettingsRow::AUDIO_OUT,
     SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO, SettingsRow::ABXY,
     SettingsRow::METRONOME,
     SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
@@ -150,6 +153,7 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
         case SettingsRow::BTN_SOUND:
         case SettingsRow::BTN_VIBRO: return caps.buttonFeedback;
         case SettingsRow::ABXY:      return caps.padAttached;
+        case SettingsRow::AUDIO_OUT: return caps.audioOutputs;
         case SettingsRow::RESUME:    return caps.autosave;
         case SettingsRow::TRACE:     return caps.debug;
 

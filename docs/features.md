@@ -123,6 +123,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Reverb and delay each have their own 3-band EQ
 - Master bus: OTT 3-band compressor or DUST (lofi/vinyl texture) — switchable, with wet/dry depth control — followed by a soft peak limiter
 - Per-instrument EQ also accessible from the instrument screen
+- On Windows, play through an ASIO driver for low-latency sound from an audio interface (SETTINGS → AUDIO OUT)
 
 ## Export
 

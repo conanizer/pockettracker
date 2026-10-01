@@ -554,6 +554,7 @@ struct AppState {
     std::string layoutText{};
     std::string skinText{};
     std::string overlayText = "OFF";
+    std::string audioOutText = "SYSTEM";   // the output playing now (SETTINGS > AUDIO OUT)
 
     /** USED RAM: sample + SoundFont PCM the engine is holding. Drawn on PROJECT and INST.POOL. */
     int64_t sampleRamBytes = 0;

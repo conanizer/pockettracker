@@ -34,6 +34,7 @@
 #include "sdl-touch.h"
 #include "sdl-video.h"
 
+#include <algorithm>
 #include <cstdio>
 
 using namespace songcore;
@@ -694,15 +695,18 @@ int run(const AppConfig& cfg) {
     // heard — so the cable leads our own audio by the whole output latency. One fixed lead, the same
     // for every note, and exactly the kind of number a user should not have to find by ear.
     //
-    // ⚠️ It is the lead the APP CAN SEE: one buffer. Whatever the driver queues behind that is not in
-    // it and no platform here can report it, so this lands close rather than exact — which is why the
-    // row stays dialable and an explicit value still wins.
-    {
+    // ⚠️ Usually the lead the APP CAN SEE: one buffer, with the driver's queue behind it missing — so
+    // this lands close rather than exact, which is why the row stays dialable and an explicit value
+    // still wins. An ASIO driver reports its whole output latency, and that is used instead.
+    //
+    // Derived again whenever SETTINGS > AUDIO OUT changes the output.
+    const auto derive_midi_auto_offset = [&] {
         const int rate = audio.sampleRate();
         const AudioBackend::OutputLatency lat = audio.outputLatency();
         if (rate > 0 && lat.frames > 0)
             state.midiAutoOffsetMs = (lat.frames * 1000 + rate / 2) / rate;
-    }
+    };
+    derive_midi_auto_offset();
 
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
@@ -1049,6 +1053,16 @@ int run(const AppConfig& cfg) {
     // reloads only when the SETTINGS OVERLAY column moves `overlayIndex`. One PNG, a deliberate-action
     // cost, never per frame.
     int loadedOverlayIdx = -1;
+
+    // SETTINGS > AUDIO OUT: the row value last shown (-1 = boot, where the saved NAME is applied) and
+    // the output last seen playing (-1 = not yet read).
+    int shownAudioOut   = -1;
+    int playingAudioOut = -1;
+    // When Windows last reported a new output device, and how many retries of the saved driver that
+    // arrival has had. An unplugged interface's driver says nothing when it is plugged back in; Windows
+    // does, and an ASIO driver can need a few seconds after that before it will open.
+    Uint64 audioArrivalMs = 0;
+    int    audioRetries   = 0;
 
     // ── IS THERE A PHYSICAL PAD? (the touch vs FULL gate) ──────────────────────────────────────────
     //
@@ -1458,6 +1472,74 @@ int run(const AppConfig& cfg) {
                 }
             }
 
+            // ── SETTINGS > AUDIO OUT ─────────────────────────────────────────────────────────────
+            //
+            // The row edits an index; the output is switched here — at boot too, from the saved NAME.
+            // The name is rewritten only when a pick PLAYS, so a driver that fails at boot (an
+            // interface left unplugged) is tried again next launch. The row always shows what plays.
+            if (cfg.audioOutputs) {
+                ui::SettingsValues&             sv   = state.settings;
+                const std::vector<std::string>& outs = cfg.audioOutputs->names();
+                sv.audioOutCount = static_cast<int>(outs.size());
+
+                int pick = -1;
+                if (shownAudioOut < 0) {
+                    const auto it = std::find(outs.begin(), outs.end(), sv.audioOutput);
+                    if (it != outs.end()) pick = static_cast<int>(it - outs.begin());
+                } else if (sv.audioOutIndex != shownAudioOut) {
+                    pick = sv.audioOutIndex;
+                }
+                // The saved driver is not playing (unplugged, at boot or mid-play): try it again after
+                // a device arrives. Quietly — a failed try leaves the system output as it was.
+                static constexpr Uint64 kRetryAfterMs[] = {1500, 4000};
+                if (pick < 0 && audioArrivalMs != 0 && audioRetries < 2 &&
+                    now >= audioArrivalMs + kRetryAfterMs[audioRetries]) {
+                    ++audioRetries;
+                    const auto it = std::find(outs.begin(), outs.end(), sv.audioOutput);
+                    const int  saved = it != outs.end() ? static_cast<int>(it - outs.begin()) : -1;
+                    std::string err;
+                    if (saved > 0 && saved != cfg.audioOutputs->active()) {
+                        if (cfg.audioOutputs->select(saved, err)) {
+                            state.statusMessage = "AUDIO OUT: " + sv.audioOutput;
+                            state.statusSuccess = true;
+                        } else {
+                            std::printf("audio:   %s still will not open: %s\n", sv.audioOutput.c_str(),
+                                        err.c_str());
+                        }
+                    }
+                }
+
+                if (pick >= 0 && pick < sv.audioOutCount) {
+                    const std::string& want = outs[static_cast<size_t>(pick)];
+                    std::string        err;
+                    if (cfg.audioOutputs->select(pick, err)) {
+                        sv.audioOutput = want;
+                        if (shownAudioOut >= 0) {
+                            state.statusMessage = "AUDIO OUT: " + want;
+                            state.statusSuccess = true;
+                        }
+                    } else {
+                        state.statusMessage = "AUDIO OUT: " + err;
+                        state.statusSuccess = false;
+                        std::printf("audio:   %s could not open: %s\n", want.c_str(), err.c_str());
+                    }
+                }
+
+                // Also moves with no pick at all: a driver that did not come back after a reset.
+                const int active = cfg.audioOutputs->active();
+                if (active != playingAudioOut) {
+                    if (pick < 0 && playingAudioOut > 0) {
+                        state.statusMessage = "AUDIO OUT LOST: SYSTEM";
+                        state.statusSuccess = false;
+                    }
+                    playingAudioOut = active;
+                    derive_midi_auto_offset();
+                    host.set_midi_offset_ms(ui::midi_offset_in_force(sv, state.midiAutoOffsetMs));
+                }
+                shownAudioOut = sv.audioOutIndex = active;
+                state.audioOutText = outs[static_cast<size_t>(active)];
+            }
+
             // PORTRAIT2 first — its active() decides whether `touch` hit-tests the skinned cluster
             // (portrait) or the landscape letterbox bars. Both are a handful of int ops and a no-op with
             // no touchscreen. The cluster geometry is PortraitSkin's, handed straight to `touch` so the
@@ -1510,6 +1592,11 @@ int run(const AppConfig& cfg) {
             if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_CONTROLLERDEVICEREMOVED ||
                 e.type == SDL_JOYDEVICEADDED || e.type == SDL_JOYDEVICEREMOVED)
                 padDirty = true;
+
+            if (e.type == SDL_AUDIODEVICEADDED && !e.adevice.iscapture) {
+                audioArrivalMs = now;
+                audioRetries   = 0;
+            }
 
             // ⚠️ **THE BLACK-SCREEN-ON-RESUME FIX.** `sawInput` above makes this frame DRAW, but C7's
             // pixel gate in `present` still SKIPS the upload when the drawn frame is byte-identical to

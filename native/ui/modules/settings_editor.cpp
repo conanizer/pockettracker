@@ -104,6 +104,10 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     dual_row(SettingsRow::OVERLAY, "OVERLAY", s.overlayText, "STR", hex2(v.overlayStrength));
 
+    // A driver's name is the OS's and may not fit: 18 characters to the panel edge.
+    param_row(SettingsRow::AUDIO_OUT, "AUDIO OUT",
+              Canvas::clip_text(s.audioOutText, (WIDTH - VAL1_X - NAME_X) / CHAR_W));
+
     dual_row(SettingsRow::BTN_SOUND, "BTN SOUND", on_off(v.buttonSoundEnabled),
              "VOL", hex2(v.buttonSoundVolume));
     // POW is a LO/HI switch, not a 00-FF value: the target ROMs expose no Composition primitives, so
@@ -222,6 +226,7 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
             return cc::hex_byte(v.metronomeVolume, 0, 255);
 
         case SettingsRow::ABXY:       return cc::enum_cycle(v.abxyIndex, 3);
+        case SettingsRow::AUDIO_OUT:  return cc::enum_cycle(v.audioOutIndex, v.audioOutCount);
         case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
         case SettingsRow::NOTE_PREV:  return cc::toggle_binary(v.notePreviewEnabled);
@@ -318,6 +323,10 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         // Out of range falls back to AUTO - index 0, the same shape LAYOUT and OVERLAY use.
         case SettingsRow::ABXY:
             if (set) v.abxyIndex = (action.value >= 0 && action.value < 3) ? action.value : 0;
+            break;
+        // The shell opens the output and writes the NAME once it plays.
+        case SettingsRow::AUDIO_OUT:
+            if (set) v.audioOutIndex = (action.value >= 0 && action.value < v.audioOutCount) ? action.value : 0;
             break;
         case SettingsRow::KB_INSERT: if (set) v.insertBefore       = action.value > 0; break;
         case SettingsRow::CURSOR:    if (set) v.cursorRemember     = action.value > 0; break;

@@ -368,6 +368,7 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
                 ss.layoutText   = s.layoutText;
                 ss.skinText     = s.skinText;
                 ss.overlayText  = s.overlayText;
+                ss.audioOutText = s.audioOutText;
                 ss.themeName    = t.name;
                 ss.caps         = s.caps;
                 ss.theme        = t;
