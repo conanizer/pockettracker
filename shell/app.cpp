@@ -1058,6 +1058,11 @@ int run(const AppConfig& cfg) {
     // the output last seen playing (-1 = not yet read).
     int shownAudioOut   = -1;
     int playingAudioOut = -1;
+    // When Windows last reported a new output device, and how many retries of the saved driver that
+    // arrival has had. An unplugged interface's driver says nothing when it is plugged back in; Windows
+    // does, and an ASIO driver can need a few seconds after that before it will open.
+    Uint64 audioArrivalMs = 0;
+    int    audioRetries   = 0;
 
     // ── IS THERE A PHYSICAL PAD? (the touch vs FULL gate) ──────────────────────────────────────────
     //
@@ -1484,6 +1489,26 @@ int run(const AppConfig& cfg) {
                 } else if (sv.audioOutIndex != shownAudioOut) {
                     pick = sv.audioOutIndex;
                 }
+                // The saved driver is not playing (unplugged, at boot or mid-play): try it again after
+                // a device arrives. Quietly — a failed try leaves the system output as it was.
+                static constexpr Uint64 kRetryAfterMs[] = {1500, 4000};
+                if (pick < 0 && audioArrivalMs != 0 && audioRetries < 2 &&
+                    now >= audioArrivalMs + kRetryAfterMs[audioRetries]) {
+                    ++audioRetries;
+                    const auto it = std::find(outs.begin(), outs.end(), sv.audioOutput);
+                    const int  saved = it != outs.end() ? static_cast<int>(it - outs.begin()) : -1;
+                    std::string err;
+                    if (saved > 0 && saved != cfg.audioOutputs->active()) {
+                        if (cfg.audioOutputs->select(saved, err)) {
+                            state.statusMessage = "AUDIO OUT: " + sv.audioOutput;
+                            state.statusSuccess = true;
+                        } else {
+                            std::printf("audio:   %s still will not open: %s\n", sv.audioOutput.c_str(),
+                                        err.c_str());
+                        }
+                    }
+                }
+
                 if (pick >= 0 && pick < sv.audioOutCount) {
                     const std::string& want = outs[static_cast<size_t>(pick)];
                     std::string        err;
@@ -1567,6 +1592,11 @@ int run(const AppConfig& cfg) {
             if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_CONTROLLERDEVICEREMOVED ||
                 e.type == SDL_JOYDEVICEADDED || e.type == SDL_JOYDEVICEREMOVED)
                 padDirty = true;
+
+            if (e.type == SDL_AUDIODEVICEADDED && !e.adevice.iscapture) {
+                audioArrivalMs = now;
+                audioRetries   = 0;
+            }
 
             // ⚠️ **THE BLACK-SCREEN-ON-RESUME FIX.** `sawInput` above makes this frame DRAW, but C7's
             // pixel gate in `present` still SKIPS the upload when the drawn frame is byte-identical to
