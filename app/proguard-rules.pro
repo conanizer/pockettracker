@@ -80,7 +80,12 @@
     boolean safSetHomeRoot(java.lang.String);
     boolean safForgetRoot(java.lang.String);
     boolean safRequestRoot();
+    void stopPlaybackService();
 }
+# The background-playback JNI natives: their class and method names ARE the C symbol names
+# (shell/android-main.cpp), so neither may be renamed.
+-keepclasseswithmembernames class com.conanizer.pockettracker.MainActivity { native <methods>; }
+-keepclasseswithmembernames class com.conanizer.pockettracker.PlaybackService { native <methods>; }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────
 #

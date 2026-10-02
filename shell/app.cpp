@@ -158,10 +158,17 @@ struct BackgroundContext {
     ui::AppState*        state      = nullptr;
     AudioBackend*        audio      = nullptr;
     bool                 console    = false;
+    const AppConfig::BackgroundPlayback* background = nullptr;
 
     // Raised by the watcher, cleared by the frame loop when it has reopened the device. No lock: the
     // watcher runs ON the loop's own thread — see on_app_event.
     bool audioClosed = false;
+
+    // Off the screen: nothing may be drawn — the GL context is backed up — and the loop waits long
+    // unless a song is still playing. Raised by the watcher, cleared on SDL_APP_DIDENTERFOREGROUND.
+    bool backgrounded = false;
+    // …and a song was left playing there, under the playback service.
+    bool playingInBackground = false;
 };
 
 /**
@@ -174,16 +181,15 @@ struct BackgroundContext {
  *   1. `SDLActivity.onPause()` → `nativePause()` (SDL_android.c:1264) does exactly ONE thing:
  *      `SDL_SemPost(Android_PauseSem)`. It sends no event and calls nothing of ours.
  *   2. The NATIVE thread discovers that semaphore inside its own `SDL_PollEvent` →
- *      `Android_PumpEvents_Blocking` (SDL_androidevents.c:156), which is what sends
+ *      `Android_PumpEvents_NonBlocking` (SDL_androidevents.c), which is what sends
  *      `SDL_APP_WILLENTERBACKGROUND` — and `SDL_PushEvent` dispatches event watchers SYNCHRONOUSLY
  *      (SDL_events.c:1184) before the event is ever queued.
- *   3. Only on the NEXT pump does `isPaused` send the thread into `SDL_SemWait(Android_ResumeSem)`
- *      and freeze it.
+ *   3. The thread is NOT frozen: `SDL_HINT_ANDROID_BLOCK_ON_PAUSE` is off (android-main.cpp), so the
+ *      loop runs on in the background, drawing nothing, so that a playing song can go on being fed.
  *
- * So this runs **on the native thread, inside the frame loop's own `SDL_PollEvent` call**, one full
- * frame before anything freezes. There is no concurrency with the loop because it IS the loop — which
- * is why this touches `host`, `state` and the project directly with no lock, and why a lock would in
- * fact have been the bug (the loop is not running to release it).
+ * So this runs **on the native thread, inside the frame loop's own `SDL_PollEvent` call**. There is
+ * no concurrency with the loop because it IS the loop — which is why this touches `host`, `state`
+ * and the project directly with no lock.
  *
  * ⚠️ A poll-loop `case SDL_APP_WILLENTERBACKGROUND:` would ALSO work here, for a reason worth writing
  * down: `SDL_PollEvent` pumps only when no poll sentinel is pending (SDL_events.c:1092), so a
@@ -214,18 +220,26 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
     // installed.
     if (c->console) std::printf("lifecycle: entering background\n");
 
-    // ── 1. Playback stops. THE USER'S DECISION, and the alternative is not "it keeps playing" ──
+    c->backgrounded = true;
+
+    // ── 1. A playing song keeps playing — if Android let the playback service start ──
     //
-    // SDL freezes the native thread on the next pump, and `host.poll()` — the lookahead pump — rides
-    // this loop. Oboe's callback thread is NOT frozen (SDL pauses its OWN audio devices in
-    // Android_PumpEvents_Blocking, and it has never heard of Oboe), so the engine would keep pulling
-    // samples against a scheduler that has stopped filling the buffer: ~4 s of lookahead drains and
-    // the song dies mid-phrase. That is P4c's shape exactly — the bus keeps running, the notes stop
-    // arriving — and the only difference between the two options is whether the user hears a defined
-    // stop or a song rotting away in the background. Stopping is the honest one.
-    if (c->host->is_playing()) {
-        c->host->stop();
-        if (c->console) std::printf("lifecycle: backgrounded - playback stopped\n");
+    // The loop keeps running off the screen (SDL_HINT_ANDROID_BLOCK_ON_PAUSE is off), so the
+    // lookahead pump goes on refilling. ⚠️ **WITHOUT THE SERVICE, KEEPING THE SONG IS THE DEAD-STREAM
+    // BUG**: Android freezes a backgrounded process, the stream's pulls go unanswered and the audio
+    // server retires it silently. The service is what stops the freeze, so no service means the old
+    // answer — stop, and hand the sound back.
+    const AppConfig::BackgroundPlayback* bp = c->background;
+    const bool keep = c->host->is_playing() && bp && bp->serviceStarted && bp->serviceStarted();
+    if (keep) {
+        c->playingInBackground = true;
+        if (c->console) std::printf("lifecycle: backgrounded - still playing, under the service\n");
+    } else {
+        if (bp && bp->end) bp->end();   // a service onPause started for a song that has since stopped
+        if (c->host->is_playing()) {
+            c->host->stop();
+            if (c->console) std::printf("lifecycle: backgrounded - playback stopped\n");
+        }
     }
 
     // ── 2. The autosave. THE REASON THIS FUNCTION EXISTS ──
@@ -262,10 +276,13 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
     // the callback never fires again — the reported bug, with the playhead moving in silence.
     //
     // LAST because a close blocks on the callback in flight, and nothing here is worth delaying the
-    // autosave for. The frame loop reopens on its first tick after the thaw.
-    c->audio->closeStream();
-    c->audioClosed = true;
-    if (c->console) std::printf("lifecycle: backgrounded - audio device released\n");
+    // autosave for. The frame loop reopens on its first tick back on the screen. A song still playing
+    // keeps its stream — the service keeps the process from being frozen under it.
+    if (!keep) {
+        c->audio->closeStream();
+        c->audioClosed = true;
+        if (c->console) std::printf("lifecycle: backgrounded - audio device released\n");
+    }
 
     std::fflush(stdout);
 
@@ -962,7 +979,7 @@ int run(const AppConfig& cfg) {
     // autosave over the one still being decided about. Removed below the loop — `bg` is a stack
     // object and the watcher must not outlive it. See on_app_event for why this is not a thread
     // boundary despite what the plan assumed.
-    BackgroundContext bg{&host, &dispatch, &filesystem, &state, &audio, cfg.console};
+    BackgroundContext bg{&host, &dispatch, &filesystem, &state, &audio, cfg.console, &cfg.background};
     SDL_AddEventWatch(on_app_event, &bg);
 
     // The banner and the once-a-second status line below are the two HIGH-VOLUME things this file
@@ -1152,6 +1169,9 @@ int run(const AppConfig& cfg) {
     // before the split, so standing still costs a handheld exactly what it always did.
     constexpr Uint64 POLL_MS      = 4;
     constexpr Uint64 POLL_IDLE_MS = 16;
+    // Off the screen (Android): a song still playing needs only the lookahead pump, which works two
+    // phrases ahead, so the idle rate serves it; with nothing playing the loop just waits to come back.
+    constexpr Uint64 BACKGROUND_IDLE_MS = 250;
     constexpr Uint64 QUIET_MS     = 1000;   // input this recent still counts as something arriving
     constexpr Uint64 FRAME_MS     = 16;
     Uint64 nextFrameMs = 0;   // when the next drawn frame is due — 0 so the first tick draws
@@ -1184,7 +1204,11 @@ int run(const AppConfig& cfg) {
                             (cfg.midiIn && cfg.midiIn->open_index() >= 0 && cfg.midiIn->polled()) ||
                             t - lastInputMs < QUIET_MS;
         Uint64 due = lastPollMs + (busy ? POLL_MS : POLL_IDLE_MS);
-        if (nextFrameMs < due) due = nextFrameMs;
+        // ⚠️ Off the screen no frame is ever drawn, so `nextFrameMs` stays in the past — and a due time
+        // in the past is a loop that never sleeps. A playing song keeps the fast poll; anything else
+        // only waits to be brought back.
+        if (bg.backgrounded) due = lastPollMs + (state.isPlaying ? POLL_IDLE_MS : BACKGROUND_IDLE_MS);
+        else if (nextFrameMs < due) due = nextFrameMs;
         if (due > t) SDL_Delay(static_cast<Uint32>(due - t));
         lastPollMs = SDL_GetTicks64();
     };
@@ -1238,7 +1262,8 @@ int run(const AppConfig& cfg) {
         // Whether this tick also draws. Read ONCE, because the per-frame work is in two pieces — the
         // derivations above the event drain and the drawing below it — and they must agree about
         // which tick they are on.
-        const bool frameDue = now >= nextFrameMs;
+        // ⚠️ Never off the screen: the GL context is backed up there, so nothing may touch the renderer.
+        const bool frameDue = now >= nextFrameMs && !bg.backgrounded;
 
         // Lay the touch panels into the CURRENT letterbox bars before the drain below, so a finger
         // hits the geometry that is actually on screen. ⚠️ On a tick that draws nothing the layout is
@@ -1653,7 +1678,16 @@ int run(const AppConfig& cfg) {
             // changed by a file manager or a download — and on Android by this app's own ADD FOLDER…,
             // which grants through a picker activity and therefore ALWAYS lands while we are the
             // backgrounded one. Inert on desktop: SDL sends this event on Android and iOS only.
-            if (e.type == SDL_APP_DIDENTERFOREGROUND) dispatch.refresh_browser_on_foreground();
+            if (e.type == SDL_APP_DIDENTERFOREGROUND) {
+                dispatch.refresh_browser_on_foreground();
+                // Back on the screen: draw again, and a song that played on through the background
+                // no longer needs the service (Java's onResume stops it too; `end` is idempotent).
+                bg.backgrounded = false;
+                if (bg.playingInBackground) {
+                    bg.playingInBackground = false;
+                    if (cfg.background.end) cfg.background.end();
+                }
+            }
 
             if (e.type == SDL_QUIT) {
                 // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
@@ -1726,7 +1760,9 @@ int run(const AppConfig& cfg) {
         //
         // ⚠️ Retried on a DEADLINE rather than a count — the app is silent until this succeeds, so
         // there is no attempt at which giving up is the better answer. Inert on desktop.
-        if ((bg.audioClosed || audio.deviceLost()) && now >= audioReopenMs) {
+        // ⚠️ Not while backgrounded: the loop runs there now, and a stream closed on the way out would
+        // be reopened on the very next tick — the frozen-process bug the close exists to avoid.
+        if (((bg.audioClosed && !bg.backgrounded) || audio.deviceLost()) && now >= audioReopenMs) {
             audio.closeStream();
             if (audio.openStream()) {
                 bg.audioClosed = false;
@@ -1791,6 +1827,26 @@ int run(const AppConfig& cfg) {
         if (const uint64_t seen = host.midi_in_messages(); seen != midiSeen) {
             midiSeen    = seen;
             lastInputMs = now;
+        }
+
+        // ── PLAYING ON IN THE BACKGROUND (Android) ───────────────────────────────────────────────
+        //
+        // The notification's STOP arrives as a request; acted on here, on the loop's own thread. Once
+        // the song stops in the background — that STOP or any other way — the service goes and the
+        // sound is handed back exactly as leaving the screen with nothing playing does.
+        if (cfg.background.takeStopRequest && cfg.background.takeStopRequest() && host.is_playing())
+            host.stop();
+        if (cfg.background.publishPlaying) cfg.background.publishPlaying(host.is_playing());
+        if (bg.backgrounded) {
+            state.isPlaying = host.is_playing();   // the frame section that refreshes it is skipped
+            if (bg.playingInBackground && !state.isPlaying) {
+                bg.playingInBackground = false;
+                if (cfg.background.end) cfg.background.end();
+                audio.closeStream();
+                bg.audioClosed = true;
+                std::printf("lifecycle: stopped in the background - audio device released\n");
+                std::fflush(stdout);
+            }
         }
 
         // ── The tick ends here unless a frame is due ─────────────────────────────────────────────

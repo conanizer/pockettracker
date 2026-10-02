@@ -96,6 +96,10 @@ The folder currently in use is marked `(HOME)`. One whose directory has been del
 > [!IMPORTANT]
 > **FORGET is not DELETE.** It gives up a permission; every file in the folder stays exactly where it is, and you can grant the same folder again at any time. Nothing in this list can delete your files — `SELECT + B` means DELETE on ordinary files and folders, but on a granted folder it can only ever mean forget.
 
+### Playing in the background
+
+A song that is **playing** when you switch to another app or turn the screen off keeps playing, with a PocketTracker notification that has a **Stop** button. A stopped song stays stopped. On Android 13 and later the app asks once, on first launch, whether it may show notifications — without that permission the song still plays on, but the notification and its Stop are hidden.
+
 ### Sample files
 
 PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files into a folder you have granted, and load them from the **INSTRUMENT** screen using the file browser. SF2 and SF3 files are loaded the same way.

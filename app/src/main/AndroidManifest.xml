@@ -20,6 +20,15 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--
+        A song left playing when the app leaves the screen keeps playing, under a foreground service
+        (PlaybackService) — without one Android freezes the process and the audio stream dies under it.
+        POST_NOTIFICATIONS (Android 13+) only decides whether its notification, and STOP, is shown.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
         EXTERNAL MIDI out (MIDI plan phase B2b). No PERMISSION is needed: USB and virtual (app-to-app)
         MIDI through MidiManager are unguarded — only BLE MIDI would want BLUETOOTH_SCAN, and the plan
         defers BLE (§9). ⚠️ required="false" is load-bearing: `true` would hide the app on the Play
@@ -60,6 +69,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 
 </manifest>

@@ -43,6 +43,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>     // atoi — the AudioManager properties come back as decimal strings
 #include <memory>
@@ -321,6 +322,36 @@ void android_set_landscape_allowed(bool allowed) {
     env->DeleteLocalRef(activity);
 }
 
+// ─── PLAYING ON IN THE BACKGROUND ────────────────────────────────────────────────────────────────
+//
+// The three facts that cross between the frame loop and Java, as atomics: Java reads and writes them
+// on its UI thread, the loop on the native thread. The SERVICE is Java's — started in `onPause`, where
+// Android still allows it (MainActivity.kt) — and these only say what each side needs to know.
+std::atomic<bool> g_bgPlaying{false};          // the transport, published by the loop every tick
+std::atomic<bool> g_bgServiceStarted{false};   // onPause brought the playback service up
+std::atomic<bool> g_bgStopRequested{false};    // the notification's STOP, waiting for the loop
+
+// The song stopped in the background (or never kept playing): Java takes the service down. Same
+// by-name, exception-safe shape as the hooks above.
+void android_stop_playback_service() {
+    g_bgServiceStarted.store(false);
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (!env) return;
+    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (!activity) return;
+    jclass    cls = env->GetObjectClass(activity);
+    jmethodID mid = env->GetMethodID(cls, "stopPlaybackService", "()V");
+    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
+    if (mid) {
+        env->CallVoidMethod(activity, mid);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    } else {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag, "stopPlaybackService()V not found");
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+}
+
 // ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
 //
 // ⚠️ **THE ONE THING A LAYOUT BUG REPORT NEEDS, AND THE ONE THING NOTHING RECORDED.** `useTouch` is
@@ -511,6 +542,22 @@ void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
 
 }  // namespace
 
+// ─── called by Java, so OUTSIDE the anonymous namespace — a name in there is not exported ────────
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_conanizer_pockettracker_MainActivity_nativeIsPlaying(JNIEnv*, jobject) {
+    return g_bgPlaying.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_MainActivity_nativeSetServiceStarted(JNIEnv*, jobject, jboolean started) {
+    g_bgServiceStarted.store(started == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_PlaybackService_nativeRequestStop(JNIEnv*, jclass) {
+    g_bgStopRequested.store(true);
+}
+
 int main(int argc, char** argv) {
     // ⚠️ THE ROOTS ARE RESOLVED FIRST, and the redirect follows them — not the other way round. The pump
     // tees the console into a file, so it has to know where before the first line is written or the
@@ -560,6 +607,12 @@ int main(int argc, char** argv) {
     // one Android uses. A future targetSdk bump that opts into predictive back silently un-traps this
     // — the symptom being the app closing on back again, with nothing here having changed.
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+
+    // ⚠️ **THE NATIVE THREAD IS NOT FROZEN OFF THE SCREEN**, so a song left playing goes on being fed
+    // by the lookahead pump (app.cpp, on_app_event). Read ONCE, when the video device is created, so
+    // BEFORE `SDL_Init` — it cannot be switched per pause. The price is the loop's: it must draw nothing
+    // while backgrounded (SDL has backed up the GL context) and must wait long when nothing plays.
+    SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
 
     // ⚠️ NO `SDL_INIT_AUDIO`, and on this platform it is load-bearing rather than tidy: Oboe owns the
     // device here. Asking SDL for the audio subsystem as well would put two libraries on one output
@@ -753,11 +806,16 @@ int main(int argc, char** argv) {
     // developed: `POCKETTRACKER_TOUCH=1` on a desktop with the window dragged wide (main.cpp).
     cfg.allowLandscape = [](bool allowed) { android_set_landscape_allowed(allowed); };
 
+    cfg.background.publishPlaying  = [](bool playing) { g_bgPlaying.store(playing); };
+    cfg.background.serviceStarted  = [] { return g_bgServiceStarted.load(); };
+    cfg.background.takeStopRequest = [] { return g_bgStopRequested.exchange(false); };
+    cfg.background.end             = [] { android_stop_playback_service(); };
+
     // ⚠️ **NULL, AND C4 IS WHERE THIS GETS ITS ANSWER — NOT HERE.** The desktop polls a SIGTERM flag
-    // through this hook once a frame. Android must not: SDL freezes the native thread when the
-    // activity pauses (`SDL_HINT_ANDROID_BLOCK_ON_PAUSE`, on by default), which is precisely when the
-    // process is most likely to be killed, so a flag consumed by this loop is P4d's never-armed write
-    // in a new body — it would read correct and never run. C4's autosave flushes in an
+    // through this hook once a frame. Android must not: off the screen the process is frozen or killed
+    // without notice (unless the playback service holds it), which is precisely when a kill arrives,
+    // so a flag consumed by this loop is P4d's never-armed write in a new body — it would read correct
+    // and never run. C4's autosave flushes in an
     // `SDL_AddEventWatch` watcher, which fires synchronously on the Java activity thread and does not
     // touch this loop at all. Leaving it null is the honest state: nothing asks this app to
     // terminate yet.

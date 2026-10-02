@@ -1,7 +1,9 @@
 package com.conanizer.pockettracker
 
+import android.Manifest
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +15,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import androidx.annotation.Keep
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import com.conanizer.pockettracker.input.PadClassifier
@@ -241,7 +244,64 @@ class MainActivity : SDLActivity() {
 
         super.onCreate(savedInstanceState)
         hideSystemBars()
+        askForNotificationsOnce()
     }
+
+    /**
+     * Android 13+: the playback notification — and its STOP — is hidden without this permission, while
+     * the song itself still plays on. Asked once, on the first launch that can ask; Android stops
+     * offering the dialog after two refusals anyway.
+     */
+    private fun askForNotificationsOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val prefs = getSharedPreferences(SHELL_PREFS, MODE_PRIVATE)
+        if (prefs.getBoolean(NOTIFICATIONS_ASKED_KEY, false)) return
+        prefs.edit().putBoolean(NOTIFICATIONS_ASKED_KEY, true).apply()
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+    }
+
+    // ── A song left playing keeps playing ────────────────────────────────────────────────────────
+    //
+    // ⚠️ **STARTED HERE, BEFORE `super.onPause()`, AND THE ORDER IS THE FEATURE.** Android refuses a
+    // foreground service started from the background, and this is the last moment the activity still
+    // counts as in front. `super.onPause()` is what tells the native loop it is leaving, and the loop
+    // asks then whether the service came up — so the answer has to be stored first. If the start is
+    // refused, the loop stops the song and hands the sound back, as it always did.
+    override fun onPause() {
+        var started = false
+        try {
+            if (nativeIsPlaying()) {
+                ContextCompat.startForegroundService(this, Intent(this, PlaybackService::class.java))
+                started = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "playback service refused: $e")
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "native library not loaded - no background playback")
+        }
+        try { nativeSetServiceStarted(started) } catch (_: UnsatisfiedLinkError) {}
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        stopPlaybackService()
+    }
+
+    /**
+     * Takes the playback service down; harmless when it is not running. Also **called from native**
+     * (`shell/android-main.cpp`) once a song stops in the background — so `@Keep` and a
+     * `proguard-rules.pro` `-keep`, like every method resolved by name over JNI.
+     */
+    @Keep
+    fun stopPlaybackService() {
+        try { nativeSetServiceStarted(false) } catch (_: UnsatisfiedLinkError) {}
+        stopService(Intent(this, PlaybackService::class.java))
+    }
+
+    private external fun nativeIsPlaying(): Boolean
+    private external fun nativeSetServiceStarted(started: Boolean)
 
     override fun onDestroy() {
         buttonSound?.release()
@@ -824,5 +884,10 @@ class MainActivity : SDLActivity() {
 
         /** [safRequestRoot]'s `startActivityForResult` code, matched in [onActivityResult]. */
         const val REQ_ADD_ROOT = 1001
+
+        /** [askForNotificationsOnce] — the request code, and where "already asked" is remembered. */
+        const val REQ_NOTIFICATIONS = 1002
+        const val SHELL_PREFS = "pockettracker_shell"
+        const val NOTIFICATIONS_ASKED_KEY = "notifications_asked"
     }
 }

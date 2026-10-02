@@ -164,3 +164,4 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Virtual button clicks: choose a sound and volume
 - Haptic feedback on button press (toggle on/off)
 - Auto-detects physical vs touchscreen device on launch
+- Android: a playing song keeps playing when you switch apps or turn the screen off, with Stop in the notification

@@ -208,7 +208,11 @@ A sample-accurate queue system in C++.
   platform uses SDL audio. A device whose AAudio open ever took over 3 s stays on OpenSL ES — a
   marker file in private storage, written before the attempt, so a hang counts too.
 - **The audio device is opened once, at startup.** It is reopened only by the frame loop — after
-  Android backgrounds the app, or when the backend reports the device lost.
+  Android backgrounds the app with nothing playing, or when the backend reports the device lost.
+- **On Android the frame loop keeps running off the screen** (`SDL_HINT_ANDROID_BLOCK_ON_PAUSE` off),
+  drawing nothing, so a song left playing is still fed by the lookahead pump. It may keep its stream
+  only while the playback foreground service holds the process — a frozen process loses its stream
+  silently — and that service is started by Java in `onPause`, the last moment Android allows it.
 - `AudioEngine` **must be heap-allocated** — its DSP scratch buffers, spectrum rings and 256-slot
   table pool blow a 1 MB stack instantly.
 

@@ -279,6 +279,21 @@ struct AppConfig {
      * see the header note above on why its lifecycle cannot ride this loop.
      */
     std::function<bool()> terminate_requested;
+
+    /**
+     * Android: a song that is PLAYING when the app leaves the screen keeps playing, under a
+     * notification with STOP. Null everywhere else, and then leaving the screen stops it as before.
+     *
+     * ⚠️ The service is started by JAVA, in `onPause`, while the activity still counts as in front —
+     * Android refuses a foreground service started from the background. So the shell does not ask
+     * for it; it publishes whether it is playing, and asks afterwards whether the service came up.
+     */
+    struct BackgroundPlayback {
+        std::function<void(bool)> publishPlaying;   // every tick: is the transport running
+        std::function<bool()>     serviceStarted;   // did onPause bring the playback service up
+        std::function<bool()>     takeStopRequest;  // the notification's STOP, once per press
+        std::function<void()>     end;              // the song has stopped: take the service down
+    } background;
 };
 
 /**
