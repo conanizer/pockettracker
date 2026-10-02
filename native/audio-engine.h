@@ -800,6 +800,14 @@ public:
     template <typename V> bool processTableRow(V& voice, const TableRow& row, int lane,
                                                bool shouldAdvance, int atFrame, float sampleRate);
 
+    // One table FX that WRITES something — a filter, the drive, the sample offset, an EQ — the arms
+    // a row and a hit's carry (TableCarry) share. Steering, KIL and VOL are the caller's.
+    template <typename V> void applyTableWrite(V& voice, int fxType, int fxValue, float sampleRate);
+
+    // Start a voice on what its hit picked up passing through INS rows. Call after the voice is set
+    // up from its instrument and before its table's first row, which may overwrite any of it.
+    template <typename V> void applyTableCarry(V& voice, const TableCarry& carry, float sampleRate);
+
     // The AUS/AUF ramps a table declares, applied to one voice at the position it is standing on.
     // ⚠️ AFTER the row's own effects, never before: on the AUS row the ramp is at t=0, so it writes
     // the same value the cell to its left just wrote, and on every later row the fade is the thing
@@ -1070,16 +1078,18 @@ private:
      * table, which may hand it on again. Every table it passes through keeps its place, so the next
      * hit reads the next row down — that is what makes a sixteen-row rotation work.
      *
-     * ⚠️ **The tables passed through are ROUTERS: they shape nothing and do not tick on the note.**
-     * The voice runs the LAST table only. An INS met later, while the note holds, is not read.
+     * ⚠️ **The tables passed through do not tick on the note** — the voice runs the LAST table only,
+     * and an INS met later, while the note holds, is not read. What a switching row holds to the LEFT
+     * of its INS is in the hit's path, so it goes into `carry` for the voice to start with.
      *
      * Returns the instrument that sounds, or -1 for silence — an empty slot, or external gear, which
-     * has no way to answer yet. `note.tableId` is left holding the table the voice should run.
+     * has no way to answer yet. `outTableId` is left holding the table the voice should run.
      *
      * ⚠️ Runs on the AUDIO THREAD, at the trigger. Bounded by CHAIN_MAX_LINKS and allocation-free.
      */
     static constexpr int CHAIN_MAX_LINKS = 4;
-    int resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId);
+    int resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId,
+                     TableCarry* carry);
 
     // Chain rolls (a CHA gating a switch, an RNL picking the instrument) happen on the audio thread,
     // so they use the engine's lock-free PRNG rather than the sequencer's.

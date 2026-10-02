@@ -1751,6 +1751,9 @@ to `XY` added to its value. `00` adds nothing; the value never goes past `FF`.
     04    C-4 00  RND 10               ← VOL 80 to VOL 90
 ```
 
+It works on a **table row** too, re-playing the nearest effect above it in its column — with `TIC 00`,
+a new roll on every note.
+
 ---
 
 ### RNL `XY` — Randomize Left

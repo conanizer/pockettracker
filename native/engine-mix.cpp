@@ -149,6 +149,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     sv.modDestValues[PARAM_VOL]     = initVol;
     sv.prevModDestValues[PARAM_VOL] = initVol;
     startNotePitchFx(sv, note);
+    applyTableCarry(sv, note.carry, sampleRate);
     LOGT("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
          note.sfSlot, t, note.sfBank, note.sfPreset,
          note.midiNote, note.midiVelocity, note.volume);
@@ -295,6 +296,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
 
             startNotePitchFx(voices[v], note);
             initVoiceModSlots(voices[v], note.sampleId, currentFrame, sampleRate);
+            applyTableCarry(voices[v], note.carry, sampleRate);
 
             LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                  (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,

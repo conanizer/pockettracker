@@ -53,6 +53,14 @@ static_assert(::FX_CRU    == FX_CRU,    "audio-defs.h FX_CRU has drifted from ef
 static_assert(::FX_FIN    == FX_FIN,    "audio-defs.h FX_FIN has drifted from effects.h");
 static_assert(::FX_LPO    == FX_LPO,    "audio-defs.h FX_LPO has drifted from effects.h");
 static_assert(::FX_TIM    == FX_TIM,    "audio-defs.h FX_TIM has drifted from effects.h");
+static_assert(::FX_RND    == FX_RND,    "audio-defs.h FX_RND has drifted from effects.h");
+static_assert(::FX_RNL    == FX_RNL,    "audio-defs.h FX_RNL has drifted from effects.h");
+static_assert(::FX_CHA    == FX_CHA,    "audio-defs.h FX_CHA has drifted from effects.h");
+static_assert(::FX_INS    == FX_INS,    "audio-defs.h FX_INS has drifted from effects.h");
+static_assert(::tableFxCeiling(FX_INS) == effect_value_max(FX_INS) &&
+              ::tableFxCeiling(FX_EQN) == effect_value_max(FX_EQN) &&
+              ::tableFxCeiling(FX_CUT) == effect_value_max(FX_CUT),
+              "audio-defs.h tableFxCeiling has drifted from effect_value_max");
 
 // …and CRU's nibble split, which is spelled on both sides of the seam for the same reason the codes
 // are. Checked over the whole byte rather than at a sample point: the two are three characters each

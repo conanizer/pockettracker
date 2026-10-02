@@ -89,6 +89,7 @@ const int MUTE_GATE_SAMPLES = 256;
 // ===================================
 const int FX_CHA    = 0x04;  // CHA xy - chance gate; on a failed roll y=0 skips, y=1-3 clears that slot
 const int FX_RNL    = 0x11;  // RNL xx - add a random 0..xx to the value in the slot to its LEFT
+const int FX_RND    = 0x10;  // RND xx - re-fire the last command in this column with 0..xx added
 const int FX_HOP    = 0x08;  // Hxx - Table hop (repeat-count jump, FF = stop table)
 const int FX_TIC    = 0x09;  // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
 const int FX_KILL   = 0x0B;  // K00 - Kill voice
@@ -108,6 +109,12 @@ const int FX_CRU    = 0x38;  // CRU xy - x = bits crushed, y = downsample; two 4
 const int FX_FIN    = 0x39;  // FIN xx - fine tune; 80 = in tune, one semitone either way
 const int FX_INS    = 0x3C;  // INS xx - play this hit on instrument xx; on a table row it is a SWITCH
 const int FX_TIM    = 0x3D;  // TIM xx - the delay's echo time, free scale (00-FF = 0-2 s); GLOBAL
+
+// The highest value a random roll may push a table command to — songcore's effect_value_max for the
+// codes a table row acts on, and pinned to it in engine_consumer.h.
+inline constexpr int tableFxCeiling(int fxType) {
+    return (fxType == FX_EQN || fxType == FX_EQM || fxType == FX_INS) ? 127 : 255;
+}
 // ─── The loop modes, as the engine numbers them ─────────────────────────────────────────────────
 //
 // ⚠️ **OSCILLATOR IS A FORWARD LOOP WITH ITS SCAN RATE RETUNED**, not a fourth kind of traversal:

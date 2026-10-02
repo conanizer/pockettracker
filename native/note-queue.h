@@ -8,6 +8,7 @@
 #include <cstring>
 #include "audio-defs.h"
 #include "songcore/program.h"   // NoteOnPayload — a queued note carries it until the trigger
+#include "table-lanes.h"
 
 // ===================================
 // SOUNDFONT INFRASTRUCTURE (TinySoundFont)
@@ -100,6 +101,7 @@ struct ScheduledNote {
     // -1 means the note arrived already derived (previews, retrigger, MIDI in, the file browser).
     int instrumentId = -1;
     songcore::NoteOnPayload noteOn{};   // the note-level half: pitch, velocity, pan, PSL/PBN/vibrato
+    TableCarry carry{};                 // filled at the trigger by the INS walk; empty otherwise
     int  tempo        = 120;            // the tempo the note was SCHEDULED at — its tick→frame scale
     bool rootAudition = false;          // INSTRUMENT-screen root preview; the sequencer never sets it
     uint32_t gen = 0;                   // stamped by the queue, never by a caller — see CancelLedger

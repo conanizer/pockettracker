@@ -45,7 +45,26 @@ static inline void rowFx(const TableRow& r, int type[3], int value[3]) {
     type[2] = r.fx3Type; value[2] = r.fx3Value;
 }
 
-int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId) {
+// RND re-fires the nearest real command ABOVE it in its own column with 0..xx added — the phrase's
+// rule, one row up instead of one step back. ⚠️ The base is always the TYPED cell, never an earlier
+// roll, so repeated rolls spread around it instead of wandering off. False when there is nothing above.
+static bool tableRandomize(const TableRow rows[16], int row, int slot, int range, uint32_t& rng,
+                           int& type, int& value) {
+    for (int up = 1; up < 16; ++up) {
+        int t3[3], v3[3];
+        rowFx(rows[(row - up + 16) % 16], t3, v3);
+        const int t = t3[slot];
+        if (t == 0 || t == FX_RND || t == FX_RNL || t == FX_CHA) continue;
+        const int added = range > 0 ? static_cast<int>(xorshift32(rng) % (uint32_t)(range + 1)) : 0;
+        type  = t;
+        value = std::min(v3[slot] + added, tableFxCeiling(t));
+        return true;
+    }
+    return false;
+}
+
+int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId,
+                              TableCarry* carry) {
     int tableId = (tableIdOverride >= 0) ? tableIdOverride : instrumentId;
     int visited[CHAIN_MAX_LINKS];
     int visitedCount = 0;
@@ -141,6 +160,14 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
             if (target >= 1 && target <= 3) type[target - 1] = 0;
         }
 
+        // RND re-fires the command above it in its column — so an RND below an INS picks a nearby
+        // instrument on every hit, and one below a CUT moves the cutoff the hit carries.
+        for (int s = 0; s < 3; ++s) {
+            if (type[s] != FX_RND) continue;
+            if (!tableRandomize(rows, slotRow[s], s, value[s], chainRngState, type[s], value[s]))
+                type[s] = 0;
+        }
+
         // RNL adds a random 0..xx to the slot on its LEFT, so an RNL beside an INS IS the instrument
         // number — the pool-picker. Read wherever it sits: it configures the switch, it is not in
         // the path through the row.
@@ -156,13 +183,35 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         // table on that row, and every later hit would read it again and never reach the rows past it.
         // ⚠️ **LEFTMOST WINS** — the signal leaves at the first switch it meets, so anything past it
         // on the row is not part of the path.
-        int next = -1;
+        int next = -1, switchSlot = -1;
         for (int s = 0; s < 3; ++s) {
-            if (type[s] == FX_INS) { next = value[s] & 0x7F; break; }
+            if (type[s] == FX_INS) { next = value[s] & 0x7F; switchSlot = s; break; }
         }
         // No switch here, so this instrument sounds and its voice runs this table from `laneRow` —
         // which is where the voice would have started anyway, so nothing has to be handed down.
         if (next < 0) return instrumentId;
+
+        // ⚠️ **WHAT IS LEFT OF THE SWITCH IS IN THE PATH, SO IT TRAVELS WITH THE HIT.** No voice will
+        // play this row, so its transpose, volume and FX have to be handed to the one that sounds.
+        // The VOL column and a VOL cell are one write, the cell winning, as on a played row.
+        if (carry) {
+            const TableRow& r0 = rows[laneRow[0]];
+            float vol = (r0.volume == 0xFF) ? 1.0f : r0.volume / 255.0f;
+            for (int s = 0; s < switchSlot; ++s) {
+                const int t = type[s];
+                if (t == FX_VOLUME) { vol = value[s] / 255.0f; continue; }
+                if (t == 0 || t == FX_HOP || t == FX_THO || t == FX_TIC || t == FX_KILL ||
+                    t == FX_RNL || t == FX_CHA)
+                    continue;
+                if (carry->fxCount < TABLE_CARRY_FX_MAX) {
+                    carry->fxType[carry->fxCount]  = static_cast<uint8_t>(t);
+                    carry->fxValue[carry->fxCount] = static_cast<uint8_t>(value[s]);
+                    carry->fxCount++;
+                }
+            }
+            carry->semitones += static_cast<float>(transposeToSemitones(r0.transpose));
+            carry->volume    *= vol;
+        }
 
         // ⚠️ **THE HIT LEAVES, SO NOTHING ELSE WILL MOVE THIS TABLE ON.** No voice runs it, so the
         // step the voice would have made has to be made here or the next trigger reads the same row
@@ -265,8 +314,21 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
         // here, in this same tic. Bounded at one table's worth of rows so a HOP onto itself, or a
         // ring of them, cannot spin the audio thread; a ring with no playable row simply sounds
         // nothing, which is what a table of pure jumps deserves.
-        for (int steered = 0; shouldProcessRow && steered <= 16; ++steered)
-            if (!processTableRow(voice, rows[L.row], lane, shouldAdvance, from, sampleRate)) break;
+        for (int steered = 0; shouldProcessRow && steered <= 16; ++steered) {
+            TableRow played = rows[L.row];
+            uint8_t& fxT = (lane == 0) ? played.fx1Type  : (lane == 1) ? played.fx2Type  : played.fx3Type;
+            uint8_t& fxV = (lane == 0) ? played.fx1Value : (lane == 1) ? played.fx2Value : played.fx3Value;
+            if (fxT == FX_RND) {
+                int t = 0, v = 0;
+                if (tableRandomize(rows, L.row, lane, fxV, chainRngState, t, v)) {
+                    fxT = static_cast<uint8_t>(t);
+                    fxV = static_cast<uint8_t>(v);
+                } else {
+                    fxT = 0;
+                }
+            }
+            if (!processTableRow(voice, played, lane, shouldAdvance, from, sampleRate)) break;
+        }
         // ⚠️ A HOP FF in an EARLIER lane can have cleared tableId. Stop reading the table copy the
         // moment it does — the remaining lanes are already down.
         if (voice.tableId < 0) return maxFrames;
@@ -333,7 +395,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
         // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
         int semitones = transposeToSemitones(row.transpose);
         voice.tableTranspose = (float)semitones;  // kept for debug log
-        voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
+        voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones + voice.carrySemitones;
 
         // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
         if (row.volume == 0xFF) {
@@ -341,7 +403,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
         } else {
             voice.tableVolume = row.volume / 255.0f;
         }
-        voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
+        voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume * voice.carryVolume;
     }
 
     bool hopExecuted = false;
@@ -405,81 +467,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
 
             case FX_VOLUME:
                 voice.tableVolume = fxValue / 255.0f;
-                voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
-                break;
-
-            case FX_OFFSET:
-                tableOffset(voice, fxValue);
-                break;
-
-            // CUT / RES on a table row: the same per-voice write the FX column makes, once per tic —
-            // a sweep that follows every note the instrument plays without being written per phrase.
-            case FX_CUT:
-                voiceSetFilterCut(voice, fxValue, sampleRate);
-                break;
-
-            case FX_RES:
-                voiceSetFilterRes(voice, fxValue, sampleRate);
-                break;
-
-            // LPF / HPF / BPF on a table row. The reason they belong here as much as in a phrase: a
-            // table follows the INSTRUMENT, so one row gives every note that instrument ever plays a
-            // filter — including the CUT and RES rows above it, which without one are inert.
-            case FX_LPF: voiceSetFilterMode(voice, 1, fxValue, sampleRate); break;
-            case FX_HPF: voiceSetFilterMode(voice, 2, fxValue, sampleRate); break;
-            case FX_BPF: voiceSetFilterMode(voice, 3, fxValue, sampleRate); break;
-
-            // DRV / CRU on a table row — the same per-voice writes the FX column makes, once per
-            // tic. A table is where a dirt that rises while the note holds is actually written,
-            // because it wants a value per tic rather than one per step.
-            case FX_DRV: voiceSetDrive(voice, fxValue);     break;
-            case FX_CRU: voiceSetCrush(voice, fxValue);     break;
-
-            // FIN on a table row — a tuning per tic, which is where a chorus or a drifting detune is
-            // actually written. ⚠️ It shares no state with the table's TRANSPOSE column: that column
-            // drives the MOD half of the same bus slot and this writes the BASE, so the two add.
-            case FX_FIN: voiceSetFineTune(voice, fxValue);  break;
-
-            // LPO on a table row, which is where the slide is most of the point: a row under a HOP
-            // walks the loop window a step per tic for as long as the note holds, and that walk is
-            // the drone, the timestretch and the wavetable scan. ⚠️ It ACCUMULATES — a row that fires
-            // 100 tics has moved the window 100 steps, unlike every other arm here.
-            case FX_LPO: voiceSlideLoop(voice, fxValue);    break;
-
-            // EQN / EQM on a table row: the same two writes the FX column's EQN and EQM make, once
-            // per tic, reached directly rather than through the param queue because the voice is
-            // already in hand — the queue's only job on that path is finding it.
-            //
-            // ⚠️ THE TWO HAVE DIFFERENT LIFETIMES, and only one of them cleans up after itself. EQN
-            // writes THIS voice's chain and dies with the note, because a note-on rebuilds the chain
-            // from the instrument. EQM writes the MASTER BUS, which outlives every voice and the
-            // table with them — so it is armed for the restore on stop() the phrase-level EQM gets
-            // from the scheduler's own flag (songcore/scheduler.h eqm_active, host.h stop). Without
-            // the arming the bus keeps the table's preset after the transport stops, and the FX
-            // helper's "resets to mixer EQ on stop" would be false for exactly this one way in.
-            case FX_EQN:
-                applyEqPresetToModule(voice.chain.eq, fxValue);
-                break;
-
-            case FX_EQM:
-                applyEqPresetToModule(masterChain.masterEq, fxValue);   // not setMasterEqSlot: a table's
-                tableMasterEqTouched.store(true, std::memory_order_relaxed);   // override is not the song's
-                break;
-
-            // TIM on a table row — the delay's echo time, once per tic, which is where the command is
-            // most of the fun: a row under a HOP walks the time a step per tic, and the head glides to
-            // each one, so the repeats bend continuously.
-            //
-            // ⚠️ IT IS GLOBAL AND THE VOICES ARE NOT. Two voices standing on different rows of the same
-            // table write it in turn and the last one in the block wins — exactly what EQM above does,
-            // and for the same reason: a shared bus reached from a per-voice walk. A TIM belongs in a
-            // table one instrument drives, not in one eight tracks share.
-            //
-            // ⚠️ Latched like EQM, and for the identical reason: the send outlives every voice, so
-            // stop() has to put the DELAY screen's own time back (host.h).
-            case FX_TIM:
-                delaySend.setTimeFree(fxValue);
-                tableDelayTimeTouched.store(true, std::memory_order_relaxed);
+                voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume * voice.carryVolume;
                 break;
 
             case FX_TIC:
@@ -499,6 +487,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
                 break;
 
             default:
+                applyTableWrite(voice, fxType, fxValue, sampleRate);
                 break;
         }
     };
@@ -531,6 +520,102 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
              voice.tableId, voice.getTrackId(), voice.tableTranspose, voice.tableVolume);
     }
     return false;
+}
+
+// ─── The table commands that WRITE something ─────────────────────────────────────────────────────
+//
+// Shared by a played row and by the carry a hit brings through INS rows (applyTableCarry), so a cutoff
+// handed on by a switch is the same write a row makes. Unknown codes do nothing.
+template <typename V>
+void AudioEngine::applyTableWrite(V& voice, int fxType, int fxValue, float sampleRate) {
+    switch (fxType) {
+        case FX_OFFSET:
+            tableOffset(voice, fxValue);
+            break;
+
+        // CUT / RES on a table row: the same per-voice write the FX column makes, once per tic —
+        // a sweep that follows every note the instrument plays without being written per phrase.
+        case FX_CUT:
+            voiceSetFilterCut(voice, fxValue, sampleRate);
+            break;
+
+        case FX_RES:
+            voiceSetFilterRes(voice, fxValue, sampleRate);
+            break;
+
+        // LPF / HPF / BPF on a table row. The reason they belong here as much as in a phrase: a
+        // table follows the INSTRUMENT, so one row gives every note that instrument ever plays a
+        // filter — including the CUT and RES rows above it, which without one are inert.
+        case FX_LPF: voiceSetFilterMode(voice, 1, fxValue, sampleRate); break;
+        case FX_HPF: voiceSetFilterMode(voice, 2, fxValue, sampleRate); break;
+        case FX_BPF: voiceSetFilterMode(voice, 3, fxValue, sampleRate); break;
+
+        // DRV / CRU on a table row — the same per-voice writes the FX column makes, once per
+        // tic. A table is where a dirt that rises while the note holds is actually written,
+        // because it wants a value per tic rather than one per step.
+        case FX_DRV: voiceSetDrive(voice, fxValue);     break;
+        case FX_CRU: voiceSetCrush(voice, fxValue);     break;
+
+        // FIN on a table row — a tuning per tic, which is where a chorus or a drifting detune is
+        // actually written. ⚠️ It shares no state with the table's TRANSPOSE column: that column
+        // drives the MOD half of the same bus slot and this writes the BASE, so the two add.
+        case FX_FIN: voiceSetFineTune(voice, fxValue);  break;
+
+        // LPO on a table row, which is where the slide is most of the point: a row under a HOP
+        // walks the loop window a step per tic for as long as the note holds, and that walk is
+        // the drone, the timestretch and the wavetable scan. ⚠️ It ACCUMULATES — a row that fires
+        // 100 tics has moved the window 100 steps, unlike every other arm here.
+        case FX_LPO: voiceSlideLoop(voice, fxValue);    break;
+
+        // EQN / EQM on a table row: the same two writes the FX column's EQN and EQM make, once
+        // per tic, reached directly rather than through the param queue because the voice is
+        // already in hand — the queue's only job on that path is finding it.
+        //
+        // ⚠️ THE TWO HAVE DIFFERENT LIFETIMES, and only one of them cleans up after itself. EQN
+        // writes THIS voice's chain and dies with the note, because a note-on rebuilds the chain
+        // from the instrument. EQM writes the MASTER BUS, which outlives every voice and the
+        // table with them — so it is armed for the restore on stop() the phrase-level EQM gets
+        // from the scheduler's own flag (songcore/scheduler.h eqm_active, host.h stop). Without
+        // the arming the bus keeps the table's preset after the transport stops, and the FX
+        // helper's "resets to mixer EQ on stop" would be false for exactly this one way in.
+        case FX_EQN:
+            applyEqPresetToModule(voice.chain.eq, fxValue);
+            break;
+
+        case FX_EQM:
+            applyEqPresetToModule(masterChain.masterEq, fxValue);   // not setMasterEqSlot: a table's
+            tableMasterEqTouched.store(true, std::memory_order_relaxed);   // override is not the song's
+            break;
+
+        // TIM on a table row — the delay's echo time, once per tic, which is where the command is
+        // most of the fun: a row under a HOP walks the time a step per tic, and the head glides to
+        // each one, so the repeats bend continuously.
+        //
+        // ⚠️ IT IS GLOBAL AND THE VOICES ARE NOT. Two voices standing on different rows of the same
+        // table write it in turn and the last one in the block wins — exactly what EQM above does,
+        // and for the same reason: a shared bus reached from a per-voice walk. A TIM belongs in a
+        // table one instrument drives, not in one eight tracks share.
+        //
+        // ⚠️ Latched like EQM, and for the identical reason: the send outlives every voice, so
+        // stop() has to put the DELAY screen's own time back (host.h).
+        case FX_TIM:
+            delaySend.setTimeFree(fxValue);
+            tableDelayTimeTouched.store(true, std::memory_order_relaxed);
+            break;
+
+        default:
+            break;
+    }
+}
+
+template <typename V>
+void AudioEngine::applyTableCarry(V& voice, const TableCarry& carry, float sampleRate) {
+    voice.carrySemitones = carry.semitones;
+    voice.carryVolume    = carry.volume;
+    voice.modSourceValues[MOD_SRC_TABLE_PITCH] = carry.semitones;
+    voice.modSourceValues[MOD_SRC_TABLE_VOL]   = carry.volume;
+    for (int i = 0; i < carry.fxCount; ++i)
+        applyTableWrite(voice, carry.fxType[i], carry.fxValue[i], sampleRate);
 }
 
 // ─── AUS / AUF on a table row ────────────────────────────────────────────────────────────────────
@@ -598,7 +683,7 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
         switch (r.fxCode) {
             case FX_VOLUME:
                 voice.tableVolume = value / 255.0f;
-                voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
+                voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume * voice.carryVolume;
                 break;
             case FX_CUT: voiceSetFilterCut(voice, value, sampleRate); break;
             case FX_RES: voiceSetFilterRes(voice, value, sampleRate); break;
@@ -793,3 +878,5 @@ int AudioEngine::getVoiceTableId(int trackId) {
 // processAudioBlock (engine-mix.cpp) ticks both voice pools.
 template int AudioEngine::processTableTick<Voice>(Voice&, int, int, float);
 template int AudioEngine::processTableTick<SoundfontVoice>(SoundfontVoice&, int, int, float);
+template void AudioEngine::applyTableCarry<Voice>(Voice&, const TableCarry&, float);
+template void AudioEngine::applyTableCarry<SoundfontVoice>(SoundfontVoice&, const TableCarry&, float);

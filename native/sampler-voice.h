@@ -97,6 +97,9 @@ struct Voice : public IAudioVoice {
     TableLane lanes[TABLE_LANES];
     float tableTranspose;    // Current transpose from table (semitones)
     float tableVolume;       // Current volume multiplier from table (0.0-1.0)
+    // Picked up passing through INS rows (table-lanes.h); every table pitch/volume write adds/multiplies it.
+    float carrySemitones = 0.0f;
+    float carryVolume    = 1.0f;
 
     // Note identity (used by note monitor to show playing note even across empty phrases)
     int noteOctave;          // Octave of the triggered note (0-9), -1 = none
@@ -250,6 +253,8 @@ struct Voice : public IAudioVoice {
         tableId = tblId;
         tableTranspose = 0.0f;
         tableVolume = 1.0f;
+        carrySemitones = 0.0f;
+        carryVolume    = 1.0f;
         // The lanes themselves are placed below, once the note they may be mapped from is known.
 
         // New notes clear all pitch effects (PSL, PBN, PVB, PVX)

@@ -267,7 +267,7 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
     // it was given and the table it would have used, so the ordinary note path is unchanged.
     int chainTableId = -1;
     const int sounding = resolveChain(note.trackId, note.instrumentId, note.noteOn.tableId,
-                                      &chainTableId);
+                                      &chainTableId, &note.carry);
     if (sounding < 0) return false;                 // an empty slot, or external gear: silence
     note.instrumentId  = sounding;
     note.noteOn.tableId = chainTableId;             // the voice runs the LAST link's table

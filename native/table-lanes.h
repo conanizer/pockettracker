@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 // ─── THE THREE PLAYHEADS OF ONE TABLE ────────────────────────────────────────────────────────────
 //
 // A table's columns do not advance together. Lane 0 carries `transpose`, `volume` and FX1; lane 1 is
@@ -27,6 +29,21 @@ struct TableLane {
 };
 
 inline constexpr int TABLE_LANES = 3;
+
+/**
+ * What a hit picked up on its way through the INS rows of the tables before the one it sounds with —
+ * the transpose, volume and FX to the LEFT of each switch. Each composes the way it already does:
+ * semitones add, volume multiplies, and an FX is a write that the sounding table's own rows can
+ * overwrite. Steering (HOP, THO, TIC), KIL and the switch's own cells (INS, RNL, CHA) are not carried.
+ */
+inline constexpr int TABLE_CARRY_FX_MAX = 8;   // two slots left of an INS, on up to four routers
+struct TableCarry {
+    float   semitones = 0.0f;
+    float   volume    = 1.0f;
+    int     fxCount   = 0;
+    uint8_t fxType[TABLE_CARRY_FX_MAX]  = {};
+    uint8_t fxValue[TABLE_CARRY_FX_MAX] = {};
+};
 
 // The "no table involved" arguments, so a trigger that passes no table still has trailing defaults.
 inline constexpr int TABLE_TICS_DEFAULT[TABLE_LANES] = {6, 6, 6};

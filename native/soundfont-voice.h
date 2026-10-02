@@ -47,6 +47,9 @@ struct SoundfontVoice : public IAudioVoice {
     TableLane lanes[TABLE_LANES];   // one cursor and one rate per FX column — see table-lanes.h
     float tableTranspose   = 0.0f;  // current semitones from table row (for debug)
     float tableVolume      = 1.0f;  // current vol multiplier from table row (for debug)
+    // Picked up passing through INS rows (table-lanes.h); every table pitch/volume write adds/multiplies it.
+    float carrySemitones   = 0.0f;
+    float carryVolume      = 1.0f;
     int   noteOctave       = 4;     // note octave (for TICFC/TICFE special modes)
     int   notePitch        = 0;     // note pitch  (for TICFE mode)
 
@@ -208,6 +211,8 @@ struct SoundfontVoice : public IAudioVoice {
         tableId          = tblId;
         tableTranspose   = 0.0f;
         tableVolume      = 1.0f;
+        carrySemitones   = 0.0f;
+        carryVolume      = 1.0f;
         noteOctave       = octave;
         notePitch        = pitch;
         reset_table_lanes(lanes, ticRates, startRows, octave, pitch);
