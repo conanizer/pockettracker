@@ -589,7 +589,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     {"MIDI: ports and sync", "Which device the app talks", "to, going in and going out.",
      {"Which MIDI devices the app sends",
       "to and listens to, the clock it",
-      "sends, and the timing."},
+      "sends, the timing, and how a",
+      "keyboard plays."},
      {"A+D-PAD changes a value",
       "A on PANIC or TEST sends it",
       "START plays the song from 00",
@@ -606,7 +607,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "hold R on a value and turn."},
      {"A+D-PAD changes a value",
       "A on the last line adds one",
-      "A+B on the name removes a line",
+      "A+B removes a line",
+      "A+B on MIN or MAX resets it",
       "START plays the song from 00",
       "B goes back"}},
 
@@ -749,12 +751,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
 
     // ── INSTRUMENT, on every type ────────────────────────────────────────────────────────────────
     /* INST_TYPE */
-    {"TYPE: what kind of sound", "SAMPLER plays a file, SF2 a", "SoundFont, EXT a MIDI device.",
+    {"TYPE: what kind of sound", "SAMPLER plays a file, SOUNDFONT", "a bank, EXTERNAL a MIDI device.",
      {"SAMPLER plays an audio file.",
       "SOUNDFONT plays one voice from",
-      "a SoundFont bank. On a slot",
-      "that is already loaded, it asks",
-      "before changing."},
+      "a SoundFont bank. EXTERNAL",
+      "sends the notes to a MIDI",
+      "device. On a loaded slot it",
+      "asks before changing."},
      {"A+D-PAD changes the type",
       "START plays the instrument"}},
     /* INST_SOURCE_LOAD */
@@ -1356,12 +1359,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "it. The MIXER sets its depth."},
      {"A+D-PAD picks OTT or DUST"}},
     /* FX_REVERB_SIZE */
-    {"SIZE: how big the room is", "Bigger spreads the echoes out", "and slows the drift of MOD.",
+    {"SIZE: how big the room is", "Bigger spreads the echoes out.", "PLATE and FOIL ignore it.",
      {"How far apart the walls are.",
       "Bigger spreads the echoes out",
-      "and slows the drift of MOD. It",
-      "does not change how long it",
-      "rings."},
+      "without making it ring longer.",
+      "On OLD it also slows the drift",
+      "of MOD. PLATE and FOIL have no",
+      "room and ignore it."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to 60"}},
     /* FX_REVERB_DAMP */
@@ -1383,7 +1387,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"The gap between echoes. Free, it",
       "runs 00 to FF. In note sync it",
       "is a note length from 1/1 to",
-      "1/16 and follows the TEMPO."},
+      "1/32, plain, triplet or dotted,",
+      "and follows the TEMPO."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "B switches free and note sync",
       "A+B sets free time back to 40"}},
@@ -1551,26 +1556,33 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
 
     // ── MIDI ─────────────────────────────────────────────────────────────────────────────────────
     /* MIDI_OUTPUT */
-    {"OUTPUT: the cable out", "The device notes are sent", "to. OFF sends nothing.",
-     {"The device that EXT instruments",
-      "and the clock are sent to. OFF",
-      "sends nothing."},
+    {"OUTPUT: the cable out", "The device notes are sent to.", "AUTO finds one by itself.",
+     {"The device EXTERNAL instruments",
+      "and the clock are sent to. AUTO",
+      "takes the first one it finds,",
+      "and again when it is plugged",
+      "back in. OFF sends nothing."},
      {"A+D-PAD picks a device"}},
     /* MIDI_INPUT */
-    {"INPUT: the cable in", "The device you play from.", "OFF listens to nothing.",
+    {"INPUT: the cable in", "The device you play from.", "AUTO finds one by itself.",
      {"The keyboard or controller you",
-      "play the app from. OFF listens",
-      "to nothing."},
+      "play the app from. AUTO takes",
+      "the first one it finds, and",
+      "again when it is plugged back",
+      "in. OFF listens to nothing."},
      {"A+D-PAD picks a device"}},
     /* MIDI_OFFSET */
     {"OFFSET: nudge the timing", "Minus sends earlier, plus", "later. In milliseconds.",
      {"Moves everything sent out",
       "earlier or later, -99 to 99 ms,",
       "so an outside synth lines up",
-      "with the app. Set it by ear",
-      "while the song plays."},
+      "with the app. AUTO works it out",
+      "from the sound delay of this",
+      "device. Turn it to set it by",
+      "ear while the song plays."},
      {"A+←/→ steps 1 ms",
       "A+↑/↓ steps 10 ms",
+      "A+B goes back to AUTO",
       "START plays the song"}},
     /* MIDI_SYNC */
     {"SYNC: send a clock out", "24 pulses a beat, plus start", "and stop.",
@@ -2150,9 +2162,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* FX_REVERB_WIDE */
     {"WIDE: how far it spreads", "00 is mono, 80 is normal,", "FF pushes it to the sides."},
     /* FX_REVERB_MOD */
-    {"MOD: movement in the tail", "The tail drifts in pitch. 00", "holds it still and metallic."},
+    {"MOD: movement in the tail", "The tail drifts in pitch. 00 is", "still. PLATE and FOIL ignore it."},
     /* FX_REVERB_DECAY */
-    {"DCAY: how long it rings", "Higher rings longer. FF never", "stops, whatever the room."},
+    {"DCAY: how long it rings", "Higher rings longer. On OLD,", "FF never stops."},
     /* SE_BIT */
     {"BIT: bits per sample", "The file depth, or lower for", "grit. SAVE writes at this depth."},
     /* FX_REVERB_ALGO */
@@ -2194,7 +2206,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "pair still adds up and the bar",
       "line does not shift."},
      {"A+D-PAD picks OFF or a fraction",
-      "B+up/down sets it from any cell",
+      "B+↑/↓ sets it from any cell",
       "A+D-PAD on a tick moves the pair"}},
     /* GROOVE_SWG */
     {"SWG: how far the swing is", "A readout. 50 is even, 66.7", "is a triplet feel.",
