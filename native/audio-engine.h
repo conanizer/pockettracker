@@ -802,7 +802,7 @@ public:
 
     // One table FX that WRITES something — a filter, the drive, the sample offset, an EQ — the arms
     // a row and a hit's carry (TableCarry) share. Steering, KIL and VOL are the caller's.
-    template <typename V> void applyTableWrite(V& voice, int fxType, int fxValue, float sampleRate);
+    template <typename V> void applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, float sampleRate);
 
     // Start a voice on what its hit picked up passing through INS rows. Call after the voice is set
     // up from its instrument and before its table's first row, which may overwrite any of it.

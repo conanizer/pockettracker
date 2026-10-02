@@ -199,7 +199,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
             float vol = (r0.volume == 0xFF) ? 1.0f : r0.volume / 255.0f;
             for (int s = 0; s < switchSlot; ++s) {
                 const int t = type[s];
-                if (t == FX_VOLUME) { vol = value[s] / 255.0f; continue; }
+                if (t == FX_VOLUME) { vol = static_cast<float>(value[s]) / 255.0f; continue; }
                 if (t == 0 || t == FX_HOP || t == FX_THO || t == FX_TIC || t == FX_KILL ||
                     t == FX_RNL || t == FX_CHA)
                     continue;
@@ -527,7 +527,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
 // Shared by a played row and by the carry a hit brings through INS rows (applyTableCarry), so a cutoff
 // handed on by a switch is the same write a row makes. Unknown codes do nothing.
 template <typename V>
-void AudioEngine::applyTableWrite(V& voice, int fxType, int fxValue, float sampleRate) {
+void AudioEngine::applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, float sampleRate) {
     switch (fxType) {
         case FX_OFFSET:
             tableOffset(voice, fxValue);
