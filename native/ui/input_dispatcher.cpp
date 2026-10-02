@@ -28,10 +28,18 @@ void InputDispatcher::set_now(long long now_ms) {
     run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
     run_selection_recency();            // which rung L+R takes first
     run_mapped_cc_dirty();              // a knob on the cable moved something in the song
-    // What a live MIDI key plays: the instrument the UI is on, on the SONG cursor's track — the
-    // remembered one while another screen is up — over KEYS' voices. Every frame, because a cursor
-    // has no change notification; the host republishes only when it changed.
-    host_.set_midi_in_play(s_.currentInstrument, pointer_track(s_), s_.settings.midiInVoices,
+    // What a live MIDI key plays: on PHRASE the instrument of the note under the cursor, anywhere
+    // else the one last typed or picked; on the SONG cursor's track — the remembered one while
+    // another screen is up — over KEYS' voices. Every frame, because a cursor has no change
+    // notification; the host republishes only when it changed.
+    int keysInstrument = s_.lastEditedInstrument;
+    if (s_.currentScreen == ScreenType::PHRASE) {
+        const songcore::PhraseStep& step =
+            s_.project->phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+        if (step.note != Note::EMPTY() && step.instrument >= 0) keysInstrument = step.instrument;
+    }
+    keysInstrument = std::min(static_cast<int>(s_.project->instruments.size()) - 1, std::max(0, keysInstrument));
+    host_.set_midi_in_play(keysInstrument, pointer_track(s_), s_.settings.midiInVoices,
                            s_.settings.midiVelocity);
     run_midi_learn();                   // …or, with R held, was pointed at the cell under the cursor
     // The cable reporting which channel its knobs are on — one copy a frame, for a screen that is
