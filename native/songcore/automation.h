@@ -236,6 +236,18 @@ struct RampSpec {
     int     stepOffset = 0;
 };
 
+/** Does a note-on put this parameter back to the instrument's value? Every note inside such a fade —
+ *  a new one or an ARP/RPT retrigger — has to be handed the fade's value; the two faders, the delay
+ *  time and the master EQ hold through any note. */
+inline bool ramp_moves_voice(const RampSpec& r) {
+    return !r.global && r.ccId != CC_TRACK_VOL;
+}
+
+/** …and of those, the two a note-on carries in its own fields rather than as a controller. */
+inline bool ramp_rides_note_on(const RampSpec& r) {
+    return r.ccId == CC_VOLUME || r.ccId == CC_PAN;
+}
+
 /**
  * Every ramp `phrase` declares, in the order they open, walking from `startRow`.
  *

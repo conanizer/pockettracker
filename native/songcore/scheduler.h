@@ -154,20 +154,72 @@ struct LiveSlot {
     bool armed() const { return pending() && firesAt < 0; }
 };
 
+// ─── What the sounding note is playing with (NoteCarry) ─────────────────────────────────────────
+//
+// ⚠️⚠️ **AN ARP OR RPT RETRIGGER IS A NEW VOICE, AND A NEW VOICE STARTS FROM THE INSTRUMENT.** So a
+// VOL, PAN, CUT … written on an empty step, or a fade moving one, reaches the voice that is sounding
+// and is then undone by the next retrigger — unless the retrigger is handed it again. This is that
+// state: set from the note's own step, moved by every later command and fade tick, and reset by the
+// next real note.
+//
+// The controllers are one slot each, in the order they are re-applied. LPF/HPF/BPF share a slot:
+// each sets the filter type AND the cutoff, so only the latest of them means anything.
+constexpr int CARRY_CC_SLOTS = 8;
+inline constexpr int carry_cc_slot(int ccId) {
+    switch (ccId) {
+        case CC_REVERB_SEND: return 0;
+        case CC_DELAY_SEND:  return 1;
+        case CC_FILTER_LP: case CC_FILTER_HP: case CC_FILTER_BP: return 2;
+        case CC_FILTER_CUT:  return 3;
+        case CC_FILTER_RES:  return 4;
+        case CC_DRIVE:       return 5;
+        case CC_CRUSH:       return 6;
+        case CC_FINE_TUNE:   return 7;
+        default:             return -1;
+    }
+}
+
+struct NoteCarry {
+    float velGain   = 1.0f;   // the note's velocity curve, without the VOL channel
+    float phraseVol = 1.0f;   // the VOL channel: instrument VOL, a VOL command, or a fade
+    float pan       = 0.5f;
+    int   pit       = 0;
+    int   slice     = -1;
+    float vibSpeed  = 0.0f;   // PVB / PVX; depth 0 = none
+    float vibDepth  = 0.0f;
+    uint8_t ccId[CARRY_CC_SLOTS]    = {};   // 0 = not moved since the note
+    float   ccValue[CARRY_CC_SLOTS] = {};
+    int     eqnSlot  = -1;                  // EQN, or -1
+    bool    eqMorphed = false;              // …or where an EQN fade left the voice
+    ExtEqMorphPayload eqMorph{};
+    int     reverse  = -1;                  // BCK: -1 untouched, else the `reverse` flag it sent
+
+    void set_cc(int id, float v) {
+        const int s = carry_cc_slot(id);
+        if (s < 0) return;
+        ccId[s] = static_cast<uint8_t>(id);
+        ccValue[s] = v;
+        // A filter switched on carries its own cutoff, so an earlier CUT no longer describes it.
+        if (s == carry_cc_slot(CC_FILTER_LP)) ccId[carry_cc_slot(CC_FILTER_CUT)] = 0;
+    }
+};
+
 // ─── Per-track persistent effect state (TrackState) ─────────────────────────────────────────────
 struct TrackState {
     Note  lastNote = Note::EMPTY();
     int   lastInstrument = 0;
-    float lastVolume = 1.0f;
-    float lastPan = 0.5f;
     int   lastStartPoint = -1;
+    NoteCarry carry;
 
     int   repeatActiveColumn = 0;
     int   repeatTicInterval = 0;
     int   repeatVolRamp = 0;
     int64_t repeatStartFrame = 0;
     int   repeatRetrigCount = 0;
+    // The ramp runs on the product of velocity and the VOL channel; `repeatBasePhraseVol` is the
+    // channel that product was taken at, so a later VOL scales the hits rather than being ignored.
     float repeatBaseVolume = 1.0f;
+    float repeatBasePhraseVol = 1.0f;
 
     int   arpeggioActiveColumn = 0;
     int   arpeggioValue = 0;
@@ -215,7 +267,7 @@ struct TrackState {
     bool hasActiveRepeat() const { return repeatActiveColumn > 0 && repeatTicInterval > 0; }
     void clearRepeat() {
         repeatActiveColumn = 0; repeatTicInterval = 0; repeatVolRamp = 0;
-        repeatStartFrame = 0; repeatRetrigCount = 0; repeatBaseVolume = 1.0f;
+        repeatStartFrame = 0; repeatRetrigCount = 0; repeatBaseVolume = 1.0f; repeatBasePhraseVol = 1.0f;
     }
     bool hasActiveArpeggio() const { return arpeggioActiveColumn > 0 && arpeggioValue > 0; }
     void clearArpeggio() { arpeggioActiveColumn = 0; arpeggioValue = 0; arpeggioStartFrame = 0; }
@@ -1564,8 +1616,11 @@ class Sequencer {
 
             int64_t targetFrame = startFrame + frameOffset;
 
+            stepRamps_ = ramps.empty() ? nullptr : &ramps;
+            stepIndex_ = stepIndex;
             ScheduleStepResult stepResult = scheduleStepWithEffects(step, targetFrame, stepDuration, trackId,
                                                                     transposeSemitones, trackState, stepIndex);
+            stepRamps_ = nullptr;
 
             // ⚠️⚠️ A HOP ROW COSTS NOTHING — NO TIME, NO MARKER, NO RAMP TIC. It is not a row that
             // plays and then jumps; it is the jump. So the walk leaves before `frameOffset` moves,
@@ -1594,7 +1649,7 @@ class Sequencer {
             // parameter after the phrase had ended.
             if (!ramps.empty())
                 emit_ramp_ticks(ramps, rampLast, stepResult.effectiveStep, stepIndex, targetFrame,
-                                stepDuration, trackId, stepResult.noteFrame, stepResult.fxFrame);
+                                stepDuration, trackId, trackState, stepResult.noteFrame, stepResult.fxFrame);
             rowsScheduled++;
             frameOffset += stepDuration;
             if (currentGrooveActive) localGrooveStep++;
@@ -1630,7 +1685,8 @@ class Sequencer {
 
     void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<RampLastValue>& lastValue,
                          const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
-                         int64_t stepDuration, int trackId, int64_t noteFrame, int64_t fxFrame) {
+                         int64_t stepDuration, int trackId, TrackState& trackState,
+                         int64_t noteFrame, int64_t fxFrame) {
         const int64_t framesPerTic = stepDuration / TICS_PER_STEP;
 
         // A parameter scheduled on a note's own frame reaches the voice that note is REPLACING — the
@@ -1682,6 +1738,32 @@ class Sequencer {
             // eaten by CHA hands the ramp a tic whose value is the start byte it is already holding —
             // so the de-dup drops it, and the eaten case emits exactly what it did before.
             const bool ownsStep = step_has_fx(effectiveStep, r.fxCode);
+            const bool perVoice = ramp_moves_voice(r);
+
+            // ⚠️ **A NEW NOTE INSIDE THE FADE STARTS FROM THE INSTRUMENT**, and the tic after it need
+            // not move — an ease curve sits on one byte for many tics — so a de-dup against the last
+            // byte would leave the note there. So the fade is put back one frame behind it, whatever
+            // it holds. VOL and PAN need none of this: the note-on carries the fade's value itself
+            // (`voice_at`), as does every ARP/RPT retrigger for all of them.
+            int64_t reassertAt = (noteFrame >= 0 && perVoice && !ramp_rides_note_on(r) && !ownsStep)
+                               ? noteFrame + 1 : -1;
+            auto emit_byte = [&](int64_t frame, int b, bool force) {
+                if (!force && b == lastValue[i].byte) return;
+                router_.cc(frame, lane, r.ccId, b / 255.0f);
+                lastValue[i].byte = b;
+                if (perVoice) carry_fade(trackState.carry, r, b);
+            };
+            auto emit_eq = [&](int64_t frame, const ExtEqMorphPayload& m, bool force) {
+                if (!force && eq_morph_equal(m, lastValue[i].eq)) return;
+                emit_eq_morph(frame, r, trackId, m);
+                lastValue[i].eq = m;
+                if (perVoice) { trackState.carry.eqMorph = m; trackState.carry.eqMorphed = true; }
+            };
+            auto reassert_held = [&]() {
+                if (r.kind == RampKind::EQ_PRESET) emit_eq(reassertAt, lastValue[i].eq, true);
+                else                               emit_byte(reassertAt, lastValue[i].byte, true);
+                reassertAt = -1;
+            };
 
             // The arrival carries the destination byte the author typed, not an interpolation that
             // happens to round to it. It stays on its own step — that is what makes a fade written
@@ -1695,17 +1777,12 @@ class Sequencer {
             // avoid. Landing on the real preset is one visible cell: `EQM 12` on the next step.
             if (stepIndex == r.aufStep) {
                 const int64_t arriveFrame = place(ownsStep ? fxFrame + 1 : targetFrame);
-                if (r.kind == RampKind::EQ_PRESET) {
-                    const ExtEqMorphPayload m =
-                        eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, 1.0);
-                    if (!eq_morph_equal(m, lastValue[i].eq)) {
-                        emit_eq_morph(arriveFrame, r, trackId, m);
-                        lastValue[i].eq = m;
-                    }
-                } else if (r.destByte != lastValue[i].byte) {
-                    router_.cc(arriveFrame, lane, r.ccId, r.destByte / 255.0f);
-                    lastValue[i].byte = r.destByte;
-                }
+                const bool force = arriveFrame == reassertAt;
+                if (r.kind == RampKind::EQ_PRESET)
+                    emit_eq(arriveFrame, eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, 1.0), force);
+                else
+                    emit_byte(arriveFrame, r.destByte, force);
+                if (reassertAt > arriveFrame) reassert_held();
                 continue;
             }
 
@@ -1721,19 +1798,17 @@ class Sequencer {
                 const double t = (static_cast<double>(r.stepOffset + stepIndex) +
                                   tic / static_cast<double>(TICS_PER_STEP)) / static_cast<double>(r.span);
                 const int64_t frame = place(targetFrame + tic * framesPerTic);
-                if (r.kind == RampKind::EQ_PRESET) {
-                    const ExtEqMorphPayload m =
-                        eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, t);
-                    if (eq_morph_equal(m, lastValue[i].eq)) continue;
-                    emit_eq_morph(frame, r, trackId, m);
-                    lastValue[i].eq = m;
-                    continue;
+                bool force = false;
+                if (reassertAt >= 0 && frame >= reassertAt) {
+                    if (frame == reassertAt) { force = true; reassertAt = -1; }
+                    else reassert_held();
                 }
-                const int b = automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
-                if (b == lastValue[i].byte) continue;
-                router_.cc(frame, lane, r.ccId, b / 255.0f);
-                lastValue[i].byte = b;
+                if (r.kind == RampKind::EQ_PRESET)
+                    emit_eq(frame, eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, t), force);
+                else
+                    emit_byte(frame, automation_value_byte(r.startByte, r.destByte, r.curveByte, t), force);
             }
+            if (reassertAt >= 0) reassert_held();
         }
     }
 
@@ -1829,6 +1904,7 @@ class Sequencer {
         if (hasNote) { trackState.clearRepeat(); trackState.clearArpeggio(); }
 
         float savedRampVolume;
+        const float savedRampPhraseVol = trackState.repeatBasePhraseVol;
         if (trackState.hasActiveRepeat() && trackState.repeatRetrigCount > 0) {
             float oldDelta = REPEAT_RAMP_DELTAS[clampi(trackState.repeatVolRamp, 0, 15)];
             savedRampVolume = clampf(trackState.repeatBaseVolume + trackState.repeatRetrigCount * oldDelta, 0.0f, 1.0f);
@@ -1945,6 +2021,15 @@ class Sequencer {
             trackState.scaleKey  = scale_cmd_key(*params.scaleTrackByte);
         }
 
+        // What `voice_at` needs to know about this step — set before the first note-on it emits.
+        stepEffective_  = &effectiveStep;
+        stepTarget_     = targetFrame;
+        stepDuration_   = stepDuration;
+        stepNoteFrame_  = (hasNote && !skipNote) ? effectiveTargetFrame : -1;
+        stepFxFrame_    = (hasNote && !skipNote) ? effectiveTargetFrame + 1 : effectiveTargetFrame;
+        stepCarryBefore_ = trackState.carry;
+        stepCarryFrom_   = effectiveTargetFrame;
+
         bool noteScheduled = false;
         if (hasNote && !skipNote) {
             Note note;
@@ -1989,10 +2074,26 @@ class Sequencer {
                 trackState.vibratoActive = true;
             }
 
+            NoteCarry& carry = trackState.carry;
+            carry = NoteCarry{};
+            carry.velGain = velocityGain;
+            carry.phraseVol = instrVolWithVxx;
+            carry.pan = notePan;
+            carry.vibSpeed = vibratoSpeed;
+            carry.vibDepth = vibratoDepth;
+            record_voice_commands(carry, params);
+            // A note inside a VOL or PAN fade starts where the fade has got to, not at the instrument's
+            // value — the fade's next tic need not move, so it may never correct it.
+            {
+                const NoteCarry v = voice_at(trackState, effectiveTargetFrame);
+                carry.phraseVol = v.phraseVol;
+                carry.pan = v.pan;
+            }
+
             NoteArgs a;
             a.frame = effectiveTargetFrame; a.track = trackId; a.instrument = effectiveStep.instrument;
             a.notePitch = note.pitch; a.noteOctave = note.octave;
-            a.velocity = velocityByte; a.velGain = velocityGain; a.volGain = instrVolWithVxx; a.pan = notePan;
+            a.velocity = velocityByte; a.velGain = velocityGain; a.volGain = carry.phraseVol; a.pan = carry.pan;
             a.start = params.startPoint; a.slice = params.sliIndex.value_or(-1);
             a.transpose = transposeSemitones; a.pit = params.pitSemitones.value_or(0); a.arp = 0;
             a.tableId = tableIdOverride; a.tableRow = tableStartRow;
@@ -2003,9 +2104,7 @@ class Sequencer {
 
             trackState.lastNote = note;
             trackState.lastInstrument = effectiveStep.instrument;
-            trackState.lastVolume = velocityGain * instrVolWithVxx;
             trackState.lastStartPoint = params.startPoint;
-            trackState.lastPan = notePan;
             trackState.lastNoteMidi = note_to_midi(note);
 
             if (trackState.hasPitchMod() && pbnRate == 0.0f && vibratoDepth == 0.0f) trackState.clearPitchMod();
@@ -2026,8 +2125,12 @@ class Sequencer {
         // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / CUT / RES / EQN / EQM)
         {
             bool triggeredNote = hasNote && !skipNote;
-            if (!triggeredNote && params.panValue.has_value())
+            if (!triggeredNote && params.panValue.has_value()) {
                 router_.cc(effectiveTargetFrame, trackId, CC_PAN, *params.panValue / 255.0f);
+                trackState.carry.pan = *params.panValue / 255.0f;
+            }
+            // The note step recorded its own above, on a carry it had just reset.
+            if (!triggeredNote) record_voice_commands(trackState.carry, params);
             if (params.reverbSendValue.has_value())
                 router_.cc(voiceFxFrame, trackId, CC_REVERB_SEND, *params.reverbSendValue / 255.0f);
             if (params.delaySendValue.has_value())
@@ -2134,8 +2237,10 @@ class Sequencer {
             // carries tempo 120 (the fallback), while live playback carries the real tempo. This is
             // an intentional quirk of the Kotlin scheduler; the goldens enshrine it (g4 render vs live).
             int tempo = currentProject_ ? currentProject_->tempo : 120;
-            if (params.volumeFromVxx)
+            if (params.volumeFromVxx) {
                 router_.cc(effectiveTargetFrame, trackId, CC_VOLUME, instrVolWithVxx);
+                trackState.carry.phraseVol = instrVolWithVxx;
+            }
             if (params.pbnValue.has_value()) {
                 int v = *params.pbnValue;
                 if (v == 0) {
@@ -2152,6 +2257,7 @@ class Sequencer {
                 if (v == 0) {
                     router_.ext_vibrato(effectiveTargetFrame, trackId, 0.0f, 0.0f);
                     trackState.vibratoActive = false;
+                    trackState.carry.vibSpeed = trackState.carry.vibDepth = 0.0f;
                 } else {
                     int speedNibble = (v >> 4) & 0x0F;
                     int depthNibble = v & 0x0F;
@@ -2159,6 +2265,8 @@ class Sequencer {
                     float depth = depthNibble * 0.125f;
                     router_.ext_vibrato(effectiveTargetFrame, trackId, speed, depth);
                     trackState.vibratoActive = true;
+                    trackState.carry.vibSpeed = speed;
+                    trackState.carry.vibDepth = depth;
                 }
             }
             if (params.pvxValue.has_value()) {
@@ -2166,6 +2274,7 @@ class Sequencer {
                 if (v == 0) {
                     router_.ext_vibrato(effectiveTargetFrame, trackId, 0.0f, 0.0f);
                     trackState.vibratoActive = false;
+                    trackState.carry.vibSpeed = trackState.carry.vibDepth = 0.0f;
                 } else {
                     int speedNibble = (v >> 4) & 0x0F;
                     int depthNibble = v & 0x0F;
@@ -2173,6 +2282,8 @@ class Sequencer {
                     float depth = depthNibble * 0.125f * 4.0f;
                     router_.ext_vibrato(effectiveTargetFrame, trackId, speed, depth);
                     trackState.vibratoActive = true;
+                    trackState.carry.vibSpeed = speed;
+                    trackState.carry.vibDepth = depth;
                 }
             }
         }
@@ -2194,8 +2305,13 @@ class Sequencer {
             trackState.repeatVolRamp = newRepeatVolRamp;
             trackState.repeatStartFrame = targetFrame;
             trackState.repeatRetrigCount = 0;
-            trackState.repeatBaseVolume = hasNote ? (velocityGain * instrVolWithVxx)
-                                        : (savedRampVolume >= 0.0f ? savedRampVolume : trackState.lastVolume);
+            if (!hasNote && savedRampVolume >= 0.0f) {
+                trackState.repeatBaseVolume    = savedRampVolume;
+                trackState.repeatBasePhraseVol = savedRampPhraseVol;
+            } else {
+                trackState.repeatBaseVolume    = trackState.carry.velGain * trackState.carry.phraseVol;
+                trackState.repeatBasePhraseVol = trackState.carry.phraseVol;
+            }
         }
 
         int activeRepeatInterval = newRepeatTicInterval > 0 ? newRepeatTicInterval
@@ -2217,7 +2333,6 @@ class Sequencer {
                 retrigNote = trackState.lastNote;
             }
             int retrigInstrument = hasNote ? effectiveStep.instrument : trackState.lastInstrument;
-            float retrigPan = hasNote ? notePan : trackState.lastPan;
             int retrigStartPoint = hasNote ? params.startPoint : trackState.lastStartPoint;
             float rampDelta = REPEAT_RAMP_DELTAS[clampi(activeVolRamp, 0, 15)];
 
@@ -2235,14 +2350,19 @@ class Sequencer {
                         trackState.repeatRetrigCount++;
                         float retrigVolume = clampf(trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta,
                                                     0.0f, 1.0f);
+                        // The ramp's product, with the VOL channel it was taken at divided back out:
+                        // `emit_retrigger` multiplies the channel as it stands NOW back in. A base taken
+                        // at VOL 00 has nothing to divide, and ramps the velocity alone.
+                        const float retrigVelGain = trackState.repeatBasePhraseVol > 0.0f
+                            ? retrigVolume / trackState.repeatBasePhraseVol
+                            : clampf(trackState.carry.velGain + trackState.repeatRetrigCount * rampDelta, 0.0f, 1.0f);
                         NoteArgs a;
                         a.frame = triggerFrame; a.track = trackId; a.instrument = retrigInstrument;
                         a.notePitch = retrigNote.pitch; a.noteOctave = retrigNote.octave;
-                        a.velocity = -1; a.velGain = retrigVolume; a.volGain = 1.0f; a.pan = retrigPan;
-                        a.start = retrigStartPoint; a.slice = params.sliIndex.value_or(-1);
-                        a.transpose = transposeSemitones; a.pit = params.pitSemitones.value_or(0); a.arp = 0;
+                        a.velocity = -1; a.start = retrigStartPoint;
+                        a.transpose = transposeSemitones; a.arp = 0;
                         a.tableId = trackState.lastTableOverride; a.tableRow = -1;
-                        emit_note(a, retrigNote);
+                        emit_retrigger(a, retrigNote, trackId, trackState, retrigVelGain);
                     }
                     k++;
                 }
@@ -2277,8 +2397,7 @@ class Sequencer {
 
         if (activeArpValue > 0 && trackState.lastNote != Note::EMPTY()) {
             scheduleArpeggioNotes(targetFrame, stepDuration, trackId, trackState, hasNote, effectiveStep, params,
-                                  transposeSemitones, /*instrVol=*/velocityGain, /*phraseVol=*/instrVolWithVxx,
-                                  notePan, scheduledNoteFrame);
+                                  transposeSemitones, scheduledNoteFrame);
         }
 
         // Per-column FX memory for RND — real effects only, from the ORIGINAL step.
@@ -2297,8 +2416,7 @@ class Sequencer {
 
     void scheduleArpeggioNotes(int64_t targetFrame, int64_t stepDuration, int trackId, TrackState& trackState,
                                bool hasNote, const PhraseStep& step, const ResolvedStepParams& params,
-                               int transposeSemitones, float instrVol, float phraseVol, float finalPan,
-                               int64_t scheduledNoteFrame) {
+                               int transposeSemitones, int64_t scheduledNoteFrame) {
         int semi1 = (trackState.arpeggioValue >> 4) & 0x0F;
         int semi2 = trackState.arpeggioValue & 0x0F;
 
@@ -2326,9 +2444,6 @@ class Sequencer {
         int patternLength = trackState.arpeggioMode == 2 ? 4 : 3;
 
         int instrumentId = hasNote ? step.instrument : trackState.lastInstrument;
-        float arpInstrVol = hasNote ? instrVol : trackState.lastVolume;
-        float arpPhraseVol = hasNote ? phraseVol : 1.0f;
-        float arpPan = hasNote ? finalPan : trackState.lastPan;
         int startPoint = hasNote ? params.startPoint : trackState.lastStartPoint;
 
         int64_t stepEndFrame = targetFrame + stepDuration;
@@ -2345,12 +2460,11 @@ class Sequencer {
                     NoteArgs a;
                     a.frame = triggerFrame; a.track = trackId; a.instrument = instrumentId;
                     a.notePitch = baseNote.pitch; a.noteOctave = baseNote.octave;
-                    a.velocity = -1; a.velGain = arpInstrVol; a.volGain = arpPhraseVol; a.pan = arpPan;
-                    a.start = startPoint; a.slice = params.sliIndex.value_or(-1);
-                    a.transpose = transposeSemitones; a.pit = params.pitSemitones.value_or(0);
+                    a.velocity = -1; a.start = startPoint;
+                    a.transpose = transposeSemitones;
                     a.arp = arpMidi - baseMidi;
                     a.tableId = trackState.lastTableOverride; a.tableRow = -1;
-                    emit_note(a, baseNote);
+                    emit_retrigger(a, baseNote, trackId, trackState);
                 }
                 triggerIndex++;
                 triggerFrame += framesPerArpNote;
@@ -2375,6 +2489,146 @@ class Sequencer {
 
     // Empty-note guard mirrors AudioEngine.scheduleNote (the tap is BELOW it): an EMPTY note is
     // never an event. Real call sites never pass EMPTY, but the guard keeps the seam faithful.
+    // ─── Retriggers and the note they repeat (NoteCarry) ────────────────────────────────────────
+
+    // `reapply_voice` mask bits beyond the controller slots.
+    static constexpr unsigned CARRY_EQ      = 1u << CARRY_CC_SLOTS;
+    static constexpr unsigned CARRY_REVERSE = 1u << (CARRY_CC_SLOTS + 1);
+    static constexpr unsigned CARRY_ALL     = ~0u;
+
+    /** The per-voice commands of one step, into the carry — everything except VOL, PAN and the
+     *  vibrato, which each have a value only their own emit site knows. */
+    static void record_voice_commands(NoteCarry& c, const ResolvedStepParams& p) {
+        if (p.pitSemitones.has_value())    c.pit = *p.pitSemitones;
+        if (p.sliIndex.has_value())        c.slice = *p.sliIndex;
+        if (p.reverbSendValue.has_value()) c.set_cc(CC_REVERB_SEND, *p.reverbSendValue / 255.0f);
+        if (p.delaySendValue.has_value())  c.set_cc(CC_DELAY_SEND, *p.delaySendValue / 255.0f);
+        // The filter switched on before CUT: it clears CUT, which on the same step comes after it.
+        if (p.filterModeValue.has_value())
+            c.set_cc(p.filterModeType == 1 ? CC_FILTER_LP : p.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
+                     *p.filterModeValue / 255.0f);
+        if (p.filterCutValue.has_value())  c.set_cc(CC_FILTER_CUT, *p.filterCutValue / 255.0f);
+        if (p.filterResValue.has_value())  c.set_cc(CC_FILTER_RES, *p.filterResValue / 255.0f);
+        if (p.driveValue.has_value())      c.set_cc(CC_DRIVE, *p.driveValue / 255.0f);
+        if (p.crushValue.has_value())      c.set_cc(CC_CRUSH, *p.crushValue / 255.0f);
+        if (p.fineTuneValue.has_value())   c.set_cc(CC_FINE_TUNE, *p.fineTuneValue / 255.0f);
+        if (p.eqnSlot.has_value())         { c.eqnSlot = *p.eqnSlot; c.eqMorphed = false; }
+        if (p.bckValue.has_value())        c.reverse = (*p.bckValue == 0) ? 1 : 0;
+    }
+
+    /** Where emit_ramp_ticks puts tic `k` of the step being scheduled. */
+    int64_t fade_tic_frame(int k) const {
+        const int64_t raw = stepTarget_ + k * (stepDuration_ / TICS_PER_STEP);
+        return raw == stepNoteFrame_ ? raw + 1 : raw;
+    }
+
+    /**
+     * How far fade `r` has moved the voice by frame `f` of the step being scheduled — its curve
+     * position, 1.0 once it has arrived — or −1 where it is not moving the voice there: outside its
+     * span, or while the step's own write of the same parameter still holds.
+     *
+     * ⚠️ It must follow emit_ramp_ticks tic for tic. A retrigger re-applies this value on a frame a
+     * tic may also land on, and the queue orders two updates on one frame arbitrarily — so the two
+     * may only ever meet carrying the same number.
+     */
+    double fade_t_at(const RampSpec& r, int64_t f) const {
+        if (!ramp_moves_voice(r)) return -1.0;
+        if (r.ausStep >= 0 && stepIndex_ < r.ausStep) return -1.0;
+        if (r.aufStep >= 0 && stepIndex_ > r.aufStep) return -1.0;
+        const bool owns = stepEffective_ != nullptr && step_has_fx(*stepEffective_, r.fxCode);
+        if (stepIndex_ == r.aufStep) {
+            const int64_t raw = owns ? stepFxFrame_ + 1 : stepTarget_;
+            return f >= (raw == stepNoteFrame_ ? raw + 1 : raw) ? 1.0 : -1.0;
+        }
+        const int64_t framesPerTic = stepDuration_ / TICS_PER_STEP;
+        int firstTic = 0;
+        if (owns)
+            while (firstTic < TICS_PER_STEP && stepTarget_ + firstTic * framesPerTic <= stepFxFrame_) ++firstTic;
+        int tic = -1;
+        for (int k = firstTic; k < TICS_PER_STEP && fade_tic_frame(k) <= f; ++k) tic = k;
+        if (tic < 0) return -1.0;
+        return (static_cast<double>(r.stepOffset + stepIndex_) + tic / static_cast<double>(TICS_PER_STEP)) /
+               static_cast<double>(r.span);
+    }
+
+    /**
+     * What a note-on at `frame` starts from: the carry — as it stood before this step's own commands
+     * when the note lands ahead of them (LAT) — with every fade moving the voice laid over it.
+     * `faded` gets a `reapply_voice` mask of what the fades set.
+     */
+    NoteCarry voice_at(const TrackState& ts, int64_t frame, unsigned* faded = nullptr) const {
+        NoteCarry v = frame < stepCarryFrom_ ? stepCarryBefore_ : ts.carry;
+        unsigned mask = 0;
+        if (stepRamps_ != nullptr) {
+            for (const RampSpec& r : *stepRamps_) {
+                // `frame + 1`: the value is applied one frame behind the note (reapply_voice).
+                const double t = fade_t_at(r, frame + 1);
+                if (t < 0.0) continue;
+                if (r.kind == RampKind::EQ_PRESET) {
+                    v.eqMorph = eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, t < 1.0 ? t : 1.0);
+                    v.eqMorphed = true;
+                    mask |= CARRY_EQ;
+                    continue;
+                }
+                const int b = t >= 1.0 ? r.destByte
+                                       : automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
+                if (r.ccId == CC_VOLUME)   v.phraseVol = b / 255.0f;
+                else if (r.ccId == CC_PAN) v.pan = b / 255.0f;
+                else { v.set_cc(r.ccId, b / 255.0f); mask |= 1u << carry_cc_slot(r.ccId); }
+            }
+        }
+        if (faded != nullptr) *faded = mask;
+        return v;
+    }
+
+    /** What a note-on cannot carry itself, one frame behind the note at `frame` — on its own frame
+     *  it would reach the voice the note replaces. `only` picks the parts. */
+    void reapply_voice(int64_t frame, int trackId, const NoteCarry& v, unsigned only = CARRY_ALL) {
+        const int64_t at = frame + 1;
+        const int lp = carry_cc_slot(CC_FILTER_LP), cut = carry_cc_slot(CC_FILTER_CUT);
+        for (int slot = 0; slot < CARRY_CC_SLOTS; ++slot) {
+            if (v.ccId[slot] == 0 || !(only & (1u << slot))) continue;
+            // A filter switched on and a CUT after it go as ONE write — the type from the one, the
+            // cutoff from the other. Two on one frame would land in either order.
+            if (slot == cut && v.ccId[lp] != 0 && (only & (1u << lp))) continue;
+            const float value = (slot == lp && v.ccId[cut] != 0) ? v.ccValue[cut] : v.ccValue[slot];
+            router_.cc(at, trackId, v.ccId[slot], value);
+        }
+        if (only & CARRY_EQ) {
+            if (v.eqMorphed)         router_.ext_eq_morph(at, trackId, v.eqMorph);
+            else if (v.eqnSlot >= 0) router_.ext_eq_slot(at, trackId, v.eqnSlot);
+        }
+        if ((only & CARRY_REVERSE) && v.reverse >= 0) router_.ext_reverse(at, trackId, v.reverse != 0, true);
+    }
+
+    /**
+     * An ARP or RPT retrigger. It is a new voice, so it is handed what the note it repeats is playing
+     * with at its own frame: the VOL channel, pan, PIT, slice and vibrato in the note-on, everything
+     * else straight behind it. `velGain` < 0 takes the note's own velocity.
+     *
+     * ⚠️ PBN, PSL and LPO are NOT handed on: each is a movement from where the voice started, and a
+     * new voice starts from nowhere — carrying them needs the engine to start a voice mid-movement.
+     */
+    void emit_retrigger(NoteArgs a, const Note& note, int trackId, const TrackState& ts, float velGain = -1.0f) {
+        const NoteCarry v = voice_at(ts, a.frame);
+        a.velGain = velGain >= 0.0f ? velGain : v.velGain;
+        a.volGain = v.phraseVol;
+        a.pan     = v.pan;
+        a.pit     = v.pit;
+        a.slice   = v.slice;
+        a.vibSpd  = v.vibSpeed;
+        a.vibDep  = v.vibDepth;
+        emit_note(a, note);
+        reapply_voice(a.frame, trackId, v);
+    }
+
+    /** A fade tick, into the carry, so a retrigger after the fade has passed still starts there. */
+    static void carry_fade(NoteCarry& c, const RampSpec& r, int byte) {
+        if (r.ccId == CC_VOLUME)   c.phraseVol = byte / 255.0f;
+        else if (r.ccId == CC_PAN) c.pan = byte / 255.0f;
+        else                       c.set_cc(r.ccId, byte / 255.0f);
+    }
+
     void emit_note(NoteArgs a, const Note& note) {
         if (note == Note::EMPTY()) return;
         apply_track_scale(a);
@@ -2454,6 +2708,18 @@ class Sequencer {
     // track 0, whose stream is unchanged.
     Rng rngs_[8];
     int schedulingTrack_ = 0;
+    // The step being scheduled, as `voice_at` needs it. `stepRamps_` is set by schedulePhrase for
+    // the length of one step and is null otherwise — then no fade is moving anything.
+    const std::vector<RampSpec>* stepRamps_ = nullptr;
+    int     stepIndex_     = 0;
+    int64_t stepTarget_    = 0;
+    int64_t stepDuration_  = 0;
+    int64_t stepFxFrame_   = 0;
+    int64_t stepNoteFrame_ = -1;
+    const PhraseStep* stepEffective_ = nullptr;
+    // The carry before this step's own commands, for a retrigger landing ahead of a LAT-delayed one.
+    NoteCarry stepCarryBefore_;
+    int64_t   stepCarryFrom_ = 0;
     MidiRouter& router_;
     const Project* project_ = nullptr;
     // Mirrors PlaybackController.currentProject: set only by the live transport starts, left null on
