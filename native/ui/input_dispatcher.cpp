@@ -105,8 +105,10 @@ void InputDispatcher::run_instrument_entry_push() {
         // does on every entry (TrackerController.kt:46–48 → updateInstrumentPlaybackParams). Belt and
         // braces by design: edits push for themselves (mark_modified), loads push wholesale — this
         // covers an instrument changed anywhere the cursor was not, one frame after arrival.
+        // ⚠️ No refresh of the notes sounding now: arriving edits nothing, and the refresh would strip
+        // a table's or a phrase's filter off them mid-note — heard as a new note on every pass.
         if (s_.currentScreen == ScreenType::INSTRUMENT)
-            host_.push_instrument(std::min(127, std::max(0, s_.currentInstrument)));
+            host_.push_instrument(std::min(127, std::max(0, s_.currentInstrument)), /*refreshSounding=*/false);
         lastScreenSeen_ = s_.currentScreen;
     }
 }
