@@ -50,6 +50,14 @@ struct SoundfontVoice : public IAudioVoice {
     // Picked up passing through INS rows (table-lanes.h); every table pitch/volume write adds/multiplies it.
     float carrySemitones   = 0.0f;
     float carryVolume      = 1.0f;
+    // A table PAN glides to its value over PAN_GLIDE_FRAMES rather than jumping (engine-voice-ops.h).
+    float panNow           = 0.5f;
+    float panGoal          = 0.5f;
+    int   panGlideLeft     = 0;
+    // …and a table VOL steps the note's gain toward its new value over VOL_GLIDE_FRAMES.
+    float volRouteLast     = 0.0f;   // unused here — the gain ramp starts from `volGain` already
+    float volGlideFrom     = 0.0f;
+    int   volGlideLeft     = 0;
     int   noteOctave       = 4;     // note octave (for TICFC/TICFE special modes)
     int   notePitch        = 0;     // note pitch  (for TICFE mode)
 
@@ -213,6 +221,7 @@ struct SoundfontVoice : public IAudioVoice {
         tableVolume      = 1.0f;
         carrySemitones   = 0.0f;
         carryVolume      = 1.0f;
+        volGlideLeft     = 0;
         noteOctave       = octave;
         notePitch        = pitch;
         reset_table_lanes(lanes, ticRates, startRows, octave, pitch);

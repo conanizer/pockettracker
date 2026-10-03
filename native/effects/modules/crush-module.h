@@ -22,43 +22,80 @@
 // Call setParams() once per block (or at trigger) when params change.
 // ===========================================================================
 struct BitcrushModule {
+    // A change on a sounding note crossfades from the old setting over CHANGE_FRAMES samples. Two
+    // decimators per channel take turns: the new setting starts in the idle pair while the old pair
+    // plays out the fade (a Decimator holds a counter and a held sample, and cannot be copied).
+    // Anything set before the note's first sample is instant.
+    static constexpr int CHANGE_FRAMES = 128;
+
     int crush      = 0;
     int downsample = 0;
-    daisysp::Decimator decL;
-    daisysp::Decimator decR;
+    daisysp::Decimator decL[2];
+    daisysp::Decimator decR[2];
+    int  cur         = 0;       // the pair in force; the other is the one fading out
+    bool prevEnabled = false;
+    int  fadeLeft    = 0;
+    bool fresh       = true;
+
+    static void bypass(daisysp::Decimator& d) {
+        d.Init();
+        // Decimator::Init() defaults downsample_factor=1 (active) — force bypass.
+        d.SetDownsampleFactor(0.0f);
+        d.SetBitsToCrush(0);
+    }
 
     void reset() {
         crush = 0;
         downsample = 0;
-        decL.Init();
-        decR.Init();
-        // Decimator::Init() defaults downsample_factor=1 (active) — force bypass.
-        decL.SetDownsampleFactor(0.0f);
-        decR.SetDownsampleFactor(0.0f);
-        decL.SetBitsToCrush(0);
-        decR.SetBitsToCrush(0);
+        for (auto& d : decL) bypass(d);
+        for (auto& d : decR) bypass(d);
+        cur = 0;
+        fadeLeft = 0;
+        fresh = true;
     }
 
     bool enabled() const { return crush > 0 || downsample > 0; }
 
     // Call once per block (or at trigger) when params change.
     void setParams(int crushParam, int downsampleParam) {
+        if (!fresh && (crushParam != crush || downsampleParam != downsample)) {
+            prevEnabled = enabled();
+            cur ^= 1;
+            bypass(decL[cur]);
+            bypass(decR[cur]);
+            fadeLeft = CHANGE_FRAMES;
+        }
         crush      = crushParam;
         downsample = downsampleParam;
-        decL.SetBitsToCrush(static_cast<uint8_t>(crush));
-        decR.SetBitsToCrush(static_cast<uint8_t>(crush));
-        decL.SetDownsampleFactor(downsample / 15.0f);
-        decR.SetDownsampleFactor(downsample / 15.0f);
+        decL[cur].SetBitsToCrush(static_cast<uint8_t>(crush));
+        decR[cur].SetBitsToCrush(static_cast<uint8_t>(crush));
+        decL[cur].SetDownsampleFactor(static_cast<float>(downsample) / 15.0f);
+        decR[cur].SetDownsampleFactor(static_cast<float>(downsample) / 15.0f);
     }
 
     inline float processMono(float in) {
-        if (!enabled()) return in;
-        return decL.Process(in);
+        fresh = false;
+        if (!enabled() && fadeLeft == 0) return in;
+        float out = enabled() ? decL[cur].Process(in) : in;
+        if (fadeLeft > 0) {
+            const float k = static_cast<float>(fadeLeft) / CHANGE_FRAMES;
+            out = (prevEnabled ? decL[cur ^ 1].Process(in) : in) * k + out * (1.0f - k);
+            --fadeLeft;
+        }
+        return out;
     }
 
     inline void processStereo(float& L, float& R) {
-        if (!enabled()) return;
-        L = decL.Process(L);
-        R = decR.Process(R);
+        fresh = false;
+        if (!enabled() && fadeLeft == 0) return;
+        float outL = enabled() ? decL[cur].Process(L) : L, outR = enabled() ? decR[cur].Process(R) : R;
+        if (fadeLeft > 0) {
+            const float k = static_cast<float>(fadeLeft) / CHANGE_FRAMES;
+            outL = (prevEnabled ? decL[cur ^ 1].Process(L) : L) * k + outL * (1.0f - k);
+            outR = (prevEnabled ? decR[cur ^ 1].Process(R) : R) * k + outR * (1.0f - k);
+            --fadeLeft;
+        }
+        L = outL;
+        R = outR;
     }
 };

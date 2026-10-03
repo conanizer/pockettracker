@@ -21,6 +21,7 @@ struct TableLane {
     int   ticRate       =  6;   // 01-FB musical tics per row; 00 trigger, FC octave, FE note, FF 200 Hz
     double frameAccum   =  0.0;    // frames into the row in force; negative until the note's onset
     int   hopRepeat     =  0;   // jumps left on an active `HOP XY` (X > 0)
+    uint16_t ausEaten   =  0;   // rows whose AUS in this column a CHA ate on their last pass — their ramp is off
     int   hopTarget     = -1;   // its target row; -1 = no HOP counting
 
     // ⚠️ `HOP FF` freezes THIS LANE, not the table. The voice's `tableId` only goes to -1 once all

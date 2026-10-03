@@ -798,7 +798,8 @@ public:
     // Returns true when the row only STEERED the lane (HOP / THO) and the lane has been moved to
     // the row that must play in this same tic — see the steering note at the definition.
     template <typename V> bool processTableRow(V& voice, const TableRow& row, int lane,
-                                               bool shouldAdvance, int atFrame, float sampleRate);
+                                               bool shouldAdvance, int atFrame, float sampleRate,
+                                               bool applyNV = true);
 
     // One table FX that WRITES something — a filter, the drive, the sample offset, an EQ — the arms
     // a row and a hit's carry (TableCarry) share. Steering, KIL and VOL are the caller's.

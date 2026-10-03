@@ -87,9 +87,10 @@ const int MUTE_GATE_SAMPLES = 256;
 // defined and where the UI, the file format and the scheduler all read it from. Only effects the C++
 // TABLE engine processes are listed here; the phrase-level ones (ARP/ARC/REP/…) are songcore's.
 // ===================================
-const int FX_CHA    = 0x04;  // CHA xy - chance gate; on a failed roll y=0 skips, y=1-3 clears that slot
+const int FX_CHA    = 0x04;  // CHA xy - chance: x for its nearest filled neighbour on the LEFT, y on the RIGHT
 const int FX_RNL    = 0x11;  // RNL xx - add a random 0..xx to the value in the slot to its LEFT
 const int FX_RND    = 0x10;  // RND xx - re-fire the last command in this column with 0..xx added
+const int FX_PAN    = 0x1F;  // PAN xx - the voice's pan: 00 left, 80 centre, FF right
 const int FX_HOP    = 0x08;  // Hxx - Table hop (repeat-count jump, FF = stop table)
 const int FX_TIC    = 0x09;  // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
 const int FX_KILL   = 0x0B;  // K00 - Kill voice

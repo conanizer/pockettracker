@@ -100,6 +100,19 @@ struct Voice : public IAudioVoice {
     // Picked up passing through INS rows (table-lanes.h); every table pitch/volume write adds/multiplies it.
     float carrySemitones = 0.0f;
     float carryVolume    = 1.0f;
+    // A table PAN glides to its value over PAN_GLIDE_FRAMES rather than jumping (engine-voice-ops.h).
+    float panNow       = 0.5f;
+    float panGoal      = 0.5f;
+    int   panGlideLeft = 0;
+    // …and a table VOL blends from the gain the last sample used (`volRouteLast`) over VOL_GLIDE_FRAMES.
+    float volRouteLast = 0.0f;
+    float volGlideFrom = 0.0f;
+    int   volGlideLeft = 0;
+    // The sampler's downsample is a quantized READ, not a chain module, so a change to it on a sounding
+    // note blends the old read into the new one over DOWNSAMPLE_FADE_FRAMES (engine-mix.cpp).
+    int   dsLast = 0;
+    int   dsPrev = 0;
+    int   dsFadeLeft = 0;
 
     // Note identity (used by note monitor to show playing note even across empty phrases)
     int noteOctave;          // Octave of the triggered note (0-9), -1 = none
@@ -184,6 +197,10 @@ struct Voice : public IAudioVoice {
         float panAngle = pan * (float)M_PI * 0.5f;  // 0 to π/2
         panLeft = prevPanLeft = cosf(panAngle);
         panRight = prevPanRight = sinf(panAngle);
+        panNow = pan;
+        panGlideLeft = 0;
+        volGlideLeft = 0;
+        dsFadeLeft = 0;
 
         // Convert normalized 0-255 values to actual sample positions
         // Use startPointOverride if provided (Offset effect / slice start), otherwise use instrument default
@@ -428,6 +445,8 @@ struct Voice : public IAudioVoice {
 
     void setPan(float pan) override {
         params.setBase(PARAM_PAN, pan);
+        panNow = pan;
+        panGlideLeft = 0;
         float angle = pan * (float)M_PI * 0.5f;
         panLeft = prevPanLeft = cosf(angle);
         panRight = prevPanRight = sinf(angle);

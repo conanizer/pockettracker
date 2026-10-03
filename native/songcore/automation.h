@@ -234,6 +234,12 @@ struct RampSpec {
     // phrase the AUS sits in (exactly −ausStep, so the sum is the familiar `stepIndex − ausStep`) and
     // positive once the ramp has crossed a boundary — one signed number instead of two cases.
     int     stepOffset = 0;
+
+    // Where the AUS cell itself is, whichever phrase is asking: its step counted from the start of the
+    // chain's walk (or of the phrase, with no chain) and its slot. A CHA can eat the AUS on that step,
+    // and a later phrase the span crosses has to know — the scheduler keys that memory on these two.
+    int     originAbs  = -1;
+    int     originSlot = 0;
 };
 
 /** Does a note-on put this parameter back to the instrument's value? Every note inside such a fade —
@@ -341,6 +347,8 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
                 open.destByte   = step_fx_value(step, slot);
                 open.span       = open.aufStep - open.ausStep;
                 open.stepOffset = -open.ausStep;   // see RampSpec: elapsed = stepOffset + stepIndex
+                open.originAbs  = open.ausStep;
+                open.originSlot = open.ausSlot;
                 out.push_back(open);
                 isOpen = false;
             }
@@ -469,6 +477,8 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
                     r.ausStep    = (openRow == chainRow) ? openAbs - hereAbs : -1;
                     r.aufStep    = (row == chainRow)     ? aufAbs  - hereAbs : -1;
                     r.aufSlot    = (row == chainRow)     ? slot              : 0;
+                    r.originAbs  = openAbs;
+                    r.originSlot = open.ausSlot;
                     if (r.ausStep < 0) r.ausSlot = 0;    // the AUS cell is not in this phrase
                     out.push_back(r);
                     break;

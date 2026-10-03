@@ -943,8 +943,8 @@ threes under a volume moving in fours.
 0A   00   --   ---  00  AUF F0   ---  00   ← arrive at F0 eight rows later
 ```
 
-A table `AUS` can move **VOL**, **CUT**, **RES**, **LPF**, **HPF**, **BPF**, **END**, **DRV**, **FIN**,
-**EQN** and **EQM**; anything else to its left is
+A table `AUS` can move **VOL**, **PAN**, **CUT**, **RES**, **LPF**, **HPF**, **BPF**, **DRV**, **FIN**,
+**TIM**, **EQN** and **EQM**; anything else to its left is
 passed over. The fade follows the playhead of the column holding the value it is moving — `CUT` in
 FX1 above, so that fade runs at FX1's speed whichever column the `AUS` sits in. **HOP steers it** —
 back to the `AUS` row restarts it, into the middle picks it up there, past the `AUF` ends it. A `TIC`
@@ -1624,15 +1624,27 @@ Persists across steps. Configure with **ARC**.
 
 ### CHA `XY` — Chance
 
-Probability gate. Rolls a random number each time the step plays.
+Rolls the dice each time the step plays — once for each side of the `CHA` cell:
 
-- `X` (high nibble) = probability (`0`=never, `F`=always)
-- `Y` (low nibble) = target: `0`=note, `1`=FX1, `2`=FX2, `3`=FX3
+- `X` = the chance of its nearest neighbour on the **left**: the nearest filled FX column, or the
+  note when every column to its left is empty
+- `Y` = the chance of its nearest neighbour on the **right**: the nearest filled FX column after it
 
-CHA can appear in any FX column and gates any specific target independently of its own position.
+Empty columns are skipped, and only that one neighbour is gated on each side. `0` = never, `F` =
+always, `8` ≈ half. Write `F` for a side you do not want gated.
 
-> [!TIP]
-> `CHA 82` anywhere on the step = ~53% chance FX2 fires. `CHA 40` = ~25% chance the note plays at all. Mix multiple CHA slots to gate different targets with different probabilities.
+```
+    00    C-4 00  CHA 4F  PIT 05             ← the note about 1 time in 4; PIT whenever it plays
+    04    C-4 00  LPF 40  CHA 8F             ← the note always; its LPF about half the time
+    08    C-4 00  LPF 40  CHA F8  AUS 80     ← note and LPF always; the filter sweep about half the time
+    0C    C-4 00  ---     CHA 8F             ← FX1 empty: the note itself about half the time
+```
+
+`AUS` looks past a `CHA` for the effect it fades, so a `CHA` between them decides whether the fade
+happens at all — on that step and for the whole of the fade.
+
+It works on a **table row** too, rolled each time the row plays; there, with nothing filled to its
+left, `X` gates the row's N and V columns.
 
 ---
 
@@ -1768,6 +1780,9 @@ In the first FX column there is no effect to its left, so it randomizes the note
 instead: the note goes up by `0` to `X` semitones, and the instrument number goes up by `0` to `Y`.
 `C-4 04 RNL 53` plays anything from C-4 to F-4, on instrument 04 to 07.
 
+It works on a **table row** too, rolled each time the row plays — in FX2 or FX3; in a table's FX1 it does
+nothing.
+
 ---
 
 ### SLI `XX` — Slice Index
@@ -1824,7 +1839,8 @@ Sets the step volume to `XX` at the exact tick this command fires. Useful in tab
 
 Overrides the stereo pan for **this note only**. `00` = hard left, `80` = center, `FF` = hard right. The
 next note on the track (without a PAN) reverts to the pan set on the INSTRUMENT screen. On an empty step it
-moves the currently-playing voice.
+moves the currently-playing voice. On a **table row** it moves the note each time the row plays, so a
+column of PAN values is an auto-pan.
 
 ---
 
@@ -2844,7 +2860,7 @@ Open with **A** on an EQ cell.
 |---|---|---|---|
 | ARP | Arpeggio | `XY` = intervals | Persists — cancel with `ARP 00` |
 | ARC | Arpeggio Config | `XY` | High nibble=mode (0=UP 1=DN 2=PP 3=RND), low=speed |
-| CHA | Chance | `XY` | X=probability (0=never F=always), Y=target (0=note 1=FX1 2=FX2 3=FX3) |
+| CHA | Chance | `XY` | X = chance of the nearest filled FX to its left (or the note), Y = to its right (0=never F=always) |
 | LAT | Latency | `XX` ticks | Delays row trigger |
 | GRV | Groove | `XX` | Assigns groove to this track |
 | HOP | Hop/Jump | `XY` | Phrase: next phrase starts at row Y (FF=stop track). Table: jump to row Y, X times (0=forever) |

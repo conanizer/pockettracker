@@ -54,6 +54,7 @@ static_assert(::FX_FIN    == FX_FIN,    "audio-defs.h FX_FIN has drifted from ef
 static_assert(::FX_LPO    == FX_LPO,    "audio-defs.h FX_LPO has drifted from effects.h");
 static_assert(::FX_TIM    == FX_TIM,    "audio-defs.h FX_TIM has drifted from effects.h");
 static_assert(::FX_RND    == FX_RND,    "audio-defs.h FX_RND has drifted from effects.h");
+static_assert(::FX_PAN    == FX_PAN,    "audio-defs.h FX_PAN has drifted from effects.h");
 static_assert(::FX_RNL    == FX_RNL,    "audio-defs.h FX_RNL has drifted from effects.h");
 static_assert(::FX_CHA    == FX_CHA,    "audio-defs.h FX_CHA has drifted from effects.h");
 static_assert(::FX_INS    == FX_INS,    "audio-defs.h FX_INS has drifted from effects.h");
@@ -97,7 +98,7 @@ constexpr bool table_arms_match_the_engine() {
             c != ::FX_CUT && c != ::FX_RES &&
             c != ::FX_LPF && c != ::FX_HPF && c != ::FX_BPF &&
             c != ::FX_DRV && c != ::FX_CRU && c != ::FX_FIN &&
-            c != ::FX_LPO && c != ::FX_TIM) return false;
+            c != ::FX_LPO && c != ::FX_TIM && c != ::FX_PAN) return false;
     }
     return table_automation::has_arm(::FX_HOP)    && table_automation::has_arm(::FX_TIC)  &&
            table_automation::has_arm(::FX_KILL)   && table_automation::has_arm(::FX_OFFSET) &&
@@ -108,7 +109,7 @@ constexpr bool table_arms_match_the_engine() {
            table_automation::has_arm(::FX_BPF)    &&
            table_automation::has_arm(::FX_DRV)    && table_automation::has_arm(::FX_CRU)  &&
            table_automation::has_arm(::FX_FIN)    && table_automation::has_arm(::FX_LPO) &&
-           table_automation::has_arm(::FX_TIM);
+           table_automation::has_arm(::FX_TIM)    && table_automation::has_arm(::FX_PAN);
 }
 static_assert(table_arms_match_the_engine(),
               "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "

@@ -792,6 +792,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // PAN modulation: snapshot before update so the mix loop can interpolate per-sample
         voice.prevPanLeft  = voice.panLeft;
         voice.prevPanRight = voice.panRight;
+        if (voiceStepPanGlide(voice, frames)) {
+            const float a = voice.panNow * (float)M_PI * 0.5f;
+            voice.panLeft  = cosf(a);
+            voice.panRight = sinf(a);
+        }
         if (fabsf(voice.params.mod[PARAM_PAN]) > 0.001f) {
             float modPan = fmaxf(0.0f, fminf(1.0f, voice.params.get(PARAM_PAN)));
             float panAngle = modPan * (float)M_PI * 0.5f;
@@ -839,6 +844,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
         voice.chain.drive.setDrive(effDrive);
         voice.chain.crush.setParams(effCrush, 0);   // sampler: downsample=0, pre-interp handles it
+        if (effDownsample != voice.dsLast) {
+            if (voice.chain.started) {   // a change on the sounding note — before it, just where it starts
+                voice.dsPrev     = voice.dsLast;
+                voice.dsFadeLeft = DOWNSAMPLE_FADE_FRAMES;
+            }
+            voice.dsLast = effDownsample;
+        }
         {
             int sl = voice.sampleLength;
             // START/END are re-derived every block so a mod route can move them WHILE the note rings.
@@ -972,6 +984,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             float volRoute = voice.prevModDestValues[PARAM_VOL]
                            + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
+            if (voice.volGlideLeft > 0) {   // a table VOL on the sounding note: blend in, never step
+                const float k = static_cast<float>(voice.volGlideLeft) / VOL_GLIDE_FRAMES;
+                volRoute = voice.volGlideFrom * k + volRoute * (1.0f - k);
+                --voice.volGlideLeft;
+            }
+            voice.volRouteLast = volRoute;
             // ⚠️ SF_VOICE_COUNT, not 8: the preview lane is index 8 and now carries a real fader.
             // Bounded at 8 the sampler path would hold unity while the SoundFont path (which indexes
             // the same array by trackId with no such clamp) followed it — two readings of one array.
@@ -1005,6 +1023,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
                 procL = s1L + (s2L - s1L) * frac;
                 procR = s1R + (s2R - s1R) * frac;
+                if (voice.dsFadeLeft > 0) {
+                    float oldL, oldR;
+                    fetchDownsampled(voice, idx, frac, voice.dsPrev, oldL, oldR);
+                    const float k = static_cast<float>(voice.dsFadeLeft--) / DOWNSAMPLE_FADE_FRAMES;
+                    procL = oldL * k + procL * (1.0f - k);
+                    procR = oldR * k + procR * (1.0f - k);
+                }
                 voice.chain.filter.setInterpolatedCoeffs(t);
                 voice.chain.processStereo(procL, procR);
             } else {
@@ -1018,6 +1043,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sample2 = voice.sampleData[quantizedIdx];
                 }
                 float processedSample = sample1 + (sample2 - sample1) * frac;
+                if (voice.dsFadeLeft > 0) {
+                    float oldL, oldR;
+                    fetchDownsampled(voice, idx, frac, voice.dsPrev, oldL, oldR);
+                    const float k = static_cast<float>(voice.dsFadeLeft--) / DOWNSAMPLE_FADE_FRAMES;
+                    processedSample = oldL * k + processedSample * (1.0f - k);
+                }
                 voice.chain.filter.setInterpolatedCoeffs(t);
                 procL = procR = voice.chain.processMono(processedSample);
             }
@@ -1224,6 +1255,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
         sv.volGainFrom = sv.hasArmedNote ? onsetVol : sv.volGain;
         sv.volGainTo   = noteVol;
+        // A table VOL on the sounding note: this piece moves only its share of the way there. The
+        // table tick keeps the pieces short meanwhile, so the steps are small ramps.
+        if (sv.volGlideLeft > 0 && !sv.hasArmedNote) {
+            const float share = frames >= sv.volGlideLeft ? 1.0f
+                              : static_cast<float>(frames) / static_cast<float>(sv.volGlideLeft);
+            sv.volGainTo    = sv.volGain + (noteVol - sv.volGain) * share;
+            sv.volGlideLeft = frames >= sv.volGlideLeft ? 0 : sv.volGlideLeft - frames;
+        }
         // PAN modulation. A SoundFont voice has no panLeft/panRight gains in the mix loop — TSF
         // pans on its own channel — so the modulated value goes back through
         // tsf_channel_set_pan instead, guarded by the same |mod| > 0.001 test the sampler path
@@ -1232,9 +1271,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         const float modPan = panModded ? fmaxf(0.0f, fminf(1.0f, sv.params.get(PARAM_PAN))) : 0.0f;
 
         int volSlot = sv.sfSlot;
-        if (panModded && volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
+        const bool panGliding = voiceStepPanGlide(sv, frames);
+        if ((panModded || panGliding) && volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
             tsf* h = soundfonts[volSlot].handle.load();
-            if (h) tsf_channel_set_pan(h, t, modPan);
+            if (h) tsf_channel_set_pan(h, t, panModded ? modPan : sv.panNow);
         }
 
         // Every VOL envelope has finished: the note is over, or — with AMT below FF — held at a

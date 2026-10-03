@@ -410,6 +410,8 @@ void SoundfontVoice::setPan(float pan) {
     // modulation in processAudioBlock recomputes the channel pan as base + mod, so a PAN effect that
     // moved only TSF's channel would be undone by the next modulated block.
     params.setBase(PARAM_PAN, pan);
+    panNow = pan;
+    panGlideLeft = 0;
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         tsf* h = soundfonts[slot].handle.load();
@@ -486,6 +488,8 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
         }
     }
     tsf_channel_set_pan(h, _trackId, a.pan);
+    panNow = a.pan;
+    panGlideLeft = 0;
     // ⚠️ THE CHANNEL VOLUME IS LEFT ALONE, at TSF's own unity. Both gains that would go through it —
     // the note's (volGain) and the track fader — are ramps applied to the rendered samples instead,
     // because a channel volume can only change at a render boundary.

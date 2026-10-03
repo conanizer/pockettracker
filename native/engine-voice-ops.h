@@ -132,6 +132,56 @@ static inline void voiceReloadInstrument(V& v, const InstrumentParams& ip, float
 // ⚠️ Both voice types have to READ it, and they read it in different places: the sampler folds it
 // into the playback rate (`getModulatedPlaybackRate`), the SoundFont voice into the pitch wheel
 // (`soundfont-voice.cpp`), which also has to count it as active pitch or it re-centres the wheel.
+// ─── PAN from a table row: a glide, not a jump ──────────────────────────────────────────────────
+//
+// A pan that jumps is a step in both channels' gain, and on a low note that is a click — loud on a
+// row-by-row auto-pan. So a table row only sets the GOAL; the voice's per-piece pan update walks to it
+// over PAN_GLIDE_FRAMES, and the table tick cuts the pieces to PAN_GLIDE_STEP while it does, so the
+// sampler's per-sample interpolation turns each step into a ramp (TSF pans per piece, so a SoundFont
+// moves in PAN_GLIDE_STEP stairs instead — small ones).
+inline constexpr int PAN_GLIDE_FRAMES = 256;
+inline constexpr int PAN_GLIDE_STEP   = 64;
+
+template <typename V> static inline void voiceGlidePan(V& v, float pan) {
+    if (!v.chain.started) { v.setPan(pan); return; }   // the note's own set-up: no glide from anywhere
+    v.params.setBase(PARAM_PAN, pan);
+    v.panGoal      = pan;
+    v.panGlideLeft = PAN_GLIDE_FRAMES;
+}
+
+/** Advance a pan glide by `frames`; true when it moved, with the voice's new pan in `panNow`. */
+template <typename V> static inline bool voiceStepPanGlide(V& v, int frames) {
+    if (v.panGlideLeft <= 0) return false;
+    const float step = frames >= v.panGlideLeft ? 1.0f : static_cast<float>(frames) / static_cast<float>(v.panGlideLeft);
+    v.panNow += (v.panGoal - v.panNow) * step;
+    v.panGlideLeft = frames >= v.panGlideLeft ? 0 : v.panGlideLeft - frames;
+    return true;
+}
+
+// A table VOL on a SOUNDING note: the table volume itself is written as before; this arms the blend
+// that hides the step. Before the first sample the new volume is simply where the note starts.
+inline constexpr int VOL_GLIDE_FRAMES = 128;
+template <typename V> static inline void voiceGlideVol(V& v) {
+    if (!v.chain.started) return;
+    v.volGlideFrom = v.volRouteLast;
+    v.volGlideLeft = VOL_GLIDE_FRAMES;
+}
+
+// The sampler's read at downsample `ds` — the mix loop's own fetch, for the read being faded OUT when
+// the downsample changes on a sounding note. `r` repeats `l` for a mono sample.
+inline constexpr int DOWNSAMPLE_FADE_FRAMES = 128;
+static inline void fetchDownsampled(const Voice& v, int idx, float frac, int ds, float& l, float& r) {
+    if (ds > 0) {
+        const int f  = 1 << ds;
+        const int qi = (idx / f) * f;
+        l = v.sampleData[qi];
+        r = v.sampleDataRight ? v.sampleDataRight[qi] : l;
+        return;
+    }
+    l = v.sampleData[idx] + (v.sampleData[idx + 1] - v.sampleData[idx]) * frac;
+    r = v.sampleDataRight ? v.sampleDataRight[idx] + (v.sampleDataRight[idx + 1] - v.sampleDataRight[idx]) * frac : l;
+}
+
 template <typename V> static inline void voiceSetFineTune(V& v, int byteValue) {
     v.params.setBase(PARAM_PITCH, fineTuneSemitonesOf(byteValue));
 }

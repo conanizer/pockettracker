@@ -43,8 +43,8 @@ namespace table_automation {
 //
 // So the set a table AUS may ramp is the INTERSECTION of two lists that already exist — the arms
 // `AudioEngine::processEffect` has, and the automation registry — and it is derived rather than
-// written down. It is eleven today (`VOL CUT RES LPF HPF BPF DRV FIN TIM EQN EQM`); give `OFF` a registry
-// row, or give the table a `PAN` arm, and that effect joins on its own with no edit here beyond its flag.
+// written down. It is twelve today (`VOL PAN CUT RES LPF HPF BPF DRV FIN TIM EQN EQM`); give `OFF` a
+// registry row and it joins on its own with no edit here beyond its flag.
 struct Arm {
     int  code;
     bool rampable;   // the registry admits it → a table AUS to its right can ramp it
@@ -58,6 +58,7 @@ inline constexpr Arm ARMS[] = {
     { 0x0F, false, false },  // OFF — no CC id and no absolute path, so not in the registry
     { 0x15, false, false },  // THO
     { 0x16, true,  false },  // VOL
+    { 0x1F, true,  false },  // PAN
     { 0x23, true,  true  },  // EQN
     { 0x24, true,  true  },  // EQM
     { 0x2F, true,  false },  // CUT

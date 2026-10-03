@@ -38,13 +38,20 @@ struct InstrumentChain {
     // for the rest of that block. Zeroing the crush's held sample or a resonant SVF steps the output
     // to zero in one sample, and nothing downstream can smooth that. (Drive has no memory.)
     // A sampler voice comes out of the pool silent, so it clears.
+    // False until the note's first sample has gone through — what tells a set-up write (instant) from a
+    // change to a sounding note (glided). See the modules' `fresh`.
+    bool started = false;
+
     void reset(float sampleRate = 44100.0f, bool keepToneState = false) {
+        started = false;
         drive.reset();
         if (keepToneState) {
             // Filter and EQ are re-armed below by the caller — only the memory of the signal still passing
             // through survives. Held at the same defaults reset() would have left them at, so a
             // caller that then declines to set a filter type or an EQ band gets silence from them.
             filter.type = 0;
+            filter.fresh = true;   // the new note's own filter lands at once, not as a glide
+            crush.fresh = true;
             eq.active   = false;
         } else {
             crush.reset();
@@ -55,6 +62,7 @@ struct InstrumentChain {
 
     // Signal order: Crush → Drive → Filter → EQ
     inline float processMono(float in) {
+        started = true;
         in = crush.processMono(in);
         in = drive.processMono(in);
         in = filter.processMono(in);
@@ -62,6 +70,7 @@ struct InstrumentChain {
     }
 
     inline void processStereo(float& L, float& R) {
+        started = true;
         crush.processStereo(L, R);
         drive.processStereo(L, R);
         filter.processStereo(L, R);

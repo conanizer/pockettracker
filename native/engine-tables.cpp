@@ -63,6 +63,53 @@ static bool tableRandomize(const TableRow rows[16], int row, int slot, int range
     return false;
 }
 
+// The row as ONE column plays it, after the dice — the phrase's order (CHA, then RND, then RNL), each
+// read on this row. CHA XY: X is the chance of its nearest FILLED neighbour on the LEFT — with none,
+// the row's N and V columns — and Y of its nearest filled neighbour on the RIGHT; 0 never, F always.
+// Its two rolls are made once per row per tick and shared by the lanes that play the row (`rolls`), and
+// a CHA an earlier one has cleared gates nothing. `nvPlays` comes back false when a CHA with nothing
+// filled to its left lost its left roll — lane 0 then leaves the row's N and V alone. RND re-fires the cell above (tableRandomize); an RNL in
+// the NEXT column adds 0..xx to this one, and one in FX1 has no FX to its left and does nothing.
+static TableRow rollTableRow(const TableRow rows[16], int row, int lane, uint32_t& rng,
+                             int (&rolls)[3][2], bool& nvPlays) {
+    TableRow played = rows[row];
+    uint8_t& fxT = (lane == 0) ? played.fx1Type  : (lane == 1) ? played.fx2Type  : played.fx3Type;
+    uint8_t& fxV = (lane == 0) ? played.fx1Value : (lane == 1) ? played.fx2Value : played.fx3Value;
+    int t3[3], v3[3];
+    rowFx(played, t3, v3);
+
+    bool alive[3] = {t3[0] != 0, t3[1] != 0, t3[2] != 0};
+    nvPlays = true;
+    for (int s = 0; s < 3; ++s) {
+        if (t3[s] != FX_CHA || !alive[s]) continue;
+        for (int& r : rolls[s]) if (r < 0) r = static_cast<int>(xorshift32(rng) % 15u);
+        int left = s - 1, right = s + 1;
+        while (left >= 0 && !alive[left]) --left;
+        while (right <= 2 && !alive[right]) ++right;
+        if (rolls[s][0] >= ((v3[s] >> 4) & 0x0F)) {
+            if (left >= 0) alive[left] = false;
+            else           nvPlays = false;
+        }
+        if (right <= 2 && rolls[s][1] >= (v3[s] & 0x0F)) alive[right] = false;
+    }
+    if (!alive[lane]) fxT = 0;
+
+    if (fxT == FX_RND) {
+        int t = 0, v = 0;
+        if (tableRandomize(rows, row, lane, fxV, rng, t, v)) {
+            fxT = static_cast<uint8_t>(t);
+            fxV = static_cast<uint8_t>(v);
+        } else {
+            fxT = 0;
+        }
+    }
+    if (lane < 2 && fxT != 0 && alive[lane + 1] && t3[lane + 1] == FX_RNL && v3[lane + 1] > 0) {
+        const int added = static_cast<int>(xorshift32(rng) % static_cast<uint32_t>(v3[lane + 1] + 1));
+        fxV = static_cast<uint8_t>(std::min(fxV + added, tableFxCeiling(fxT)));
+    }
+    return played;
+}
+
 int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride, int* outTableId,
                               TableCarry* carry) {
     int tableId = (tableIdOverride >= 0) ? tableIdOverride : instrumentId;
@@ -150,14 +197,21 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
             type[s] = t3[s]; value[s] = v3[s]; slotRow[s] = laneRow[s];
         }
 
-        // CHA decides whether the switch fires at all: on a failed roll its low nibble clears that
-        // slot, and a cleared INS is simply a row with no switch on it.
+        // CHA XY, the rule a played row follows (rollTableRow): X the chance of its nearest filled
+        // neighbour on the LEFT — with none, the row's N and V — and Y of the one on the RIGHT. A
+        // cleared INS is simply a row with no switch on it; a lost N/V stays out of what the hit carries.
+        bool nvPlays = true;
         for (int s = 0; s < 3; ++s) {
             if (type[s] != FX_CHA) continue;
-            const int odds  = (value[s] >> 4) & 0x0F;
-            const int target = value[s] & 0x0F;
-            if (static_cast<int>(xorshift32(chainRngState) % 15u) < odds) continue;   // passed
-            if (target >= 1 && target <= 3) type[target - 1] = 0;
+            const int v = value[s];
+            int left = s - 1, right = s + 1;
+            while (left >= 0 && type[left] == 0) --left;
+            while (right <= 2 && type[right] == 0) ++right;
+            if (static_cast<int>(xorshift32(chainRngState) % 15u) >= ((v >> 4) & 0x0F)) {
+                if (left >= 0) type[left] = 0;
+                else           nvPlays = false;
+            }
+            if (right <= 2 && static_cast<int>(xorshift32(chainRngState) % 15u) >= (v & 0x0F)) type[right] = 0;
         }
 
         // RND re-fires the command above it in its column — so an RND below an INS picks a nearby
@@ -196,7 +250,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         // The VOL column and a VOL cell are one write, the cell winning, as on a played row.
         if (carry) {
             const TableRow& r0 = rows[laneRow[0]];
-            float vol = (r0.volume == 0xFF) ? 1.0f : r0.volume / 255.0f;
+            float vol = (!nvPlays || r0.volume == 0xFF) ? 1.0f : r0.volume / 255.0f;
             for (int s = 0; s < switchSlot; ++s) {
                 const int t = type[s];
                 if (t == FX_VOLUME) { vol = static_cast<float>(value[s]) / 255.0f; continue; }
@@ -209,7 +263,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
                     carry->fxCount++;
                 }
             }
-            carry->semitones += static_cast<float>(transposeToSemitones(r0.transpose));
+            if (nvPlays) carry->semitones += static_cast<float>(transposeToSemitones(r0.transpose));
             carry->volume    *= vol;
         }
 
@@ -283,6 +337,11 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
     for (const TableRow& r : rows)
         blank = blank && r.transpose == 0 && r.volume == 0xFF && !r.fx1Type && !r.fx2Type && !r.fx3Type;
 
+    // Each CHA's two rolls, per row, shared by the lanes that play that row in this call — see
+    // rollTableRow.
+    int rolls[16][3][2];
+    for (auto& row : rolls) for (auto& slot : row) slot[0] = slot[1] = -1;
+
     // ⚠️ **THE RATE MACHINE RUNS ONCE PER LANE, AND NOTHING IN IT IS SHARED.** A lane at TICFF next
     // to a lane at TIC 06 is the point of the feature; a single accumulator would make the faster
     // one drag the slower.
@@ -315,19 +374,16 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
         // ring of them, cannot spin the audio thread; a ring with no playable row simply sounds
         // nothing, which is what a table of pure jumps deserves.
         for (int steered = 0; shouldProcessRow && steered <= 16; ++steered) {
-            TableRow played = rows[L.row];
-            uint8_t& fxT = (lane == 0) ? played.fx1Type  : (lane == 1) ? played.fx2Type  : played.fx3Type;
-            uint8_t& fxV = (lane == 0) ? played.fx1Value : (lane == 1) ? played.fx2Value : played.fx3Value;
-            if (fxT == FX_RND) {
-                int t = 0, v = 0;
-                if (tableRandomize(rows, L.row, lane, fxV, chainRngState, t, v)) {
-                    fxT = static_cast<uint8_t>(t);
-                    fxV = static_cast<uint8_t>(v);
-                } else {
-                    fxT = 0;
-                }
-            }
-            if (!processTableRow(voice, played, lane, shouldAdvance, from, sampleRate)) break;
+            bool nvPlays = true;
+            const TableRow played = rollTableRow(rows, L.row, lane, chainRngState, rolls[L.row], nvPlays);
+            // A CHA that ate this column's AUS turns its ramp off until the row plays again.
+            int a3[3], av3[3], p3[3], pv3[3];
+            rowFx(rows[L.row], a3, av3);
+            rowFx(played, p3, pv3);
+            const uint16_t bit = static_cast<uint16_t>(1u << L.row);
+            if (a3[lane] == table_automation::FX_AUS_CODE && p3[lane] != table_automation::FX_AUS_CODE) L.ausEaten = static_cast<uint16_t>(L.ausEaten | bit);
+            else                                          L.ausEaten = static_cast<uint16_t>(L.ausEaten & ~bit);
+            if (!processTableRow(voice, played, lane, shouldAdvance, from, sampleRate, nvPlays)) break;
         }
         // ⚠️ A HOP FF in an EARLIER lane can have cleared tableId. Stop reading the table copy the
         // moment it does — the remaining lanes are already down.
@@ -347,6 +403,9 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
             frames = std::min(frames, left < 1.0 ? 1 : (left < (double)maxFrames ? (int)left : maxFrames));
         }
     }
+
+    // A pan or volume glide in progress keeps the pieces short, so each one moves a small step of it.
+    if ((voice.panGlideLeft > 0 || voice.volGlideLeft > 0) && frames > PAN_GLIDE_STEP) frames = PAN_GLIDE_STEP;
 
     // How far each lane is through the row in force, at the END of this segment — the ramp's target,
     // which the mix interpolates towards across it. 0 in the three modes that hold the row still.
@@ -384,13 +443,13 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
 // filter. The caller re-enters on `true` until a row actually plays.
 template <typename V>
 bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool shouldAdvance,
-                                  int atFrame, float sampleRate) {
+                                  int atFrame, float sampleRate, bool applyNV) {
     TableLane& L = voice.lanes[lane];
 
     const uint8_t laneFxType = (lane == 0) ? row.fx1Type : (lane == 1) ? row.fx2Type : row.fx3Type;
     const bool steers = (laneFxType == FX_HOP || laneFxType == FX_THO);
 
-    if (lane == 0 && !steers) {
+    if (lane == 0 && !steers && applyNV) {
         // playbackRate does not include transpose; getModulatedPlaybackRate reads
         // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
         int semitones = transposeToSemitones(row.transpose);
@@ -398,11 +457,13 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
         voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones + voice.carrySemitones;
 
         // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
+        const float wasVolume = voice.tableVolume;
         if (row.volume == 0xFF) {
             voice.tableVolume = 1.0f;  // kept for debug log
         } else {
             voice.tableVolume = row.volume / 255.0f;
         }
+        if (voice.tableVolume != wasVolume) voiceGlideVol(voice);
         voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume * voice.carryVolume;
     }
 
@@ -466,6 +527,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
                 break;
 
             case FX_VOLUME:
+                if (voice.tableVolume != fxValue / 255.0f) voiceGlideVol(voice);
                 voice.tableVolume = fxValue / 255.0f;
                 voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume * voice.carryVolume;
                 break;
@@ -531,6 +593,11 @@ void AudioEngine::applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, flo
     switch (fxType) {
         case FX_OFFSET:
             tableOffset(voice, fxValue);
+            break;
+
+        // PAN on a table row — the phrase's per-note pan, once per tic: 00 left, 80 centre, FF right.
+        case FX_PAN:
+            voiceGlidePan(voice, fxValue / 255.0f);
             break;
 
         // CUT / RES on a table row: the same per-voice write the FX column makes, once per tic —
@@ -646,6 +713,7 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
         // FX1, so a fade written before per-column playback existed keeps running on lane 0.)
         const TableLane& L = voice.lanes[r.paramSlot - 1];
         if (!L.active || L.lastProcessed < 0) continue;
+        if (voice.lanes[r.ausSlot - 1].ausEaten & (1u << r.ausRow)) continue;   // a CHA ate its AUS
         const double t = table_automation::table_ramp_position(r, L.lastProcessed,
                                                                rowFraction[r.paramSlot - 1]);
         if (t < 0.0) continue;   // this ramp does not cover the row that column is standing on
@@ -682,11 +750,13 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
         const int value = songcore::automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
         switch (r.fxCode) {
             case FX_VOLUME:
+                if (voice.tableVolume != static_cast<float>(value) / 255.0f) voiceGlideVol(voice);
                 voice.tableVolume = value / 255.0f;
                 voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume * voice.carryVolume;
                 break;
             case FX_CUT: voiceSetFilterCut(voice, value, sampleRate); break;
             case FX_RES: voiceSetFilterRes(voice, value, sampleRate); break;
+            case FX_PAN: voiceGlidePan(voice, static_cast<float>(value) / 255.0f); break;
             // A ramp over one of these moves the CUTOFF and re-asserts the same type every block, so
             // a sweep cannot lose the filter it opened with half way through.
             case FX_LPF: voiceSetFilterMode(voice, 1, value, sampleRate); break;

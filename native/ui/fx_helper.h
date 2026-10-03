@@ -375,7 +375,8 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
     static const std::vector<std::vector<std::string>> d = {
         /* 00 --- */ {"---: No effect", "Empty FX slot"},
         /* 1 ARC */ {"ARC: Arpeggio config", "x=mode(0=UP 1=DN 2=PP 3=RND)", "y=speed in ticks"},
-        /* 2 CHA */ {"CHA: Probability gate", "x=prob(0=never F=always 8=50%)", "y=target(0=note 1-3=FX slot)"},
+        /* 2 CHA */ {"CHA: Chance for its neighbours", "x=nearest FX left, or the note", "y=nearest FX right",
+                     "0=never F=always 8=about half"},
         /* 3 LAT */ {"LAT: Latency (delay trigger)", "xx=ticks before note fires"},
         /* 4 GRV */ {"GRV: Groove assign", "xx=groove ID (00=disable)"},
         // ⚠️ "y=target row" alone reads as a row in THIS phrase, which is the one thing it is not:

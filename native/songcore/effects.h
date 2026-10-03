@@ -25,7 +25,7 @@ namespace songcore {
 // ─── Effect codes (EffectProcessor companion — single source of truth) ────────────────────────────
 constexpr int FX_NONE     = 0x00;
 constexpr int FX_ARC      = 0x03;  // Cxx  arpeggio config (mode/speed)
-constexpr int FX_CHA      = 0x04;  // CHA  chance gate
+constexpr int FX_CHA      = 0x04;  // CHA  chance: x = nearest filled neighbour left (or the note), y = right
 constexpr int FX_LAT      = 0x05;  // LAT  latency (delay row trigger by xx ticks)
 constexpr int FX_GRV      = 0x07;  // GRV  assign groove table
 constexpr int FX_HOP      = 0x08;  // Hxx  hop (FF = stop track)

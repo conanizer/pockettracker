@@ -264,6 +264,29 @@ struct TrackState {
     int   lastColFxType[4] = {0, 0, 0, 0};   // 1-indexed: [1]=FX1 …
     int   lastColFxValue[4] = {0, 0, 0, 0};
 
+    // AUS cells a CHA ate on their last pass, so the phrases their span crosses stay silent too. Keyed
+    // on where the AUS sits (`RampSpec::originAbs/originSlot`, plus the chain); written afresh every
+    // time the AUS step plays, so a later pass that keeps the AUS clears it.
+    struct EatenAus { int chain = -1; int abs = -1; int slot = 0; };
+    static constexpr int EATEN_AUS_SLOTS = 4;
+    EatenAus eatenAus[EATEN_AUS_SLOTS];
+    int      eatenAusNext = 0;
+    bool aus_eaten(int chain, int abs, int slot) const {
+        for (const EatenAus& e : eatenAus)
+            if (e.chain == chain && e.abs == abs && e.slot == slot) return true;
+        return false;
+    }
+    void set_aus_eaten(int chain, int abs, int slot, bool eaten) {
+        for (EatenAus& e : eatenAus)
+            if (e.chain == chain && e.abs == abs && e.slot == slot) {
+                if (!eaten) e = EatenAus{};
+                return;
+            }
+        if (!eaten) return;
+        eatenAus[eatenAusNext] = EatenAus{chain, abs, slot};
+        eatenAusNext = (eatenAusNext + 1) % EATEN_AUS_SLOTS;
+    }
+
     bool hasActiveRepeat() const { return repeatActiveColumn > 0 && repeatTicInterval > 0; }
     void clearRepeat() {
         repeatActiveColumn = 0; repeatTicInterval = 0; repeatVolRamp = 0;
@@ -1648,7 +1671,7 @@ class Sequencer {
             // fade baked into frames the transport then jumps away from would go on moving the
             // parameter after the phrase had ended.
             if (!ramps.empty())
-                emit_ramp_ticks(ramps, rampLast, stepResult.effectiveStep, stepIndex, targetFrame,
+                emit_ramp_ticks(ramps, rampLast, chain ? chain->id : -1, stepResult.effectiveStep, stepIndex, targetFrame,
                                 stepDuration, trackId, trackState, stepResult.noteFrame, stepResult.fxFrame);
             rowsScheduled++;
             frameOffset += stepDuration;
@@ -1684,7 +1707,7 @@ class Sequencer {
     };
 
     void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<RampLastValue>& lastValue,
-                         const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
+                         int chainId, const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
                          int64_t stepDuration, int trackId, TrackState& trackState,
                          int64_t noteFrame, int64_t fxFrame) {
         const int64_t framesPerTic = stepDuration / TICS_PER_STEP;
@@ -1702,6 +1725,15 @@ class Sequencer {
             // AUF is here. A phrase the span merely crosses matches neither and emits all sixteen steps.
             if (r.ausStep >= 0 && stepIndex < r.ausStep) continue;
             if (r.aufStep >= 0 && stepIndex > r.aufStep) continue;
+
+            // ⭐ A CHA THAT ATE THE AUS EATS THE RAMP — on its own step and on every step of the span,
+            // in this phrase and the ones it crosses. Pairing reads the AUTHORED step, so it is here,
+            // where the effective step is in hand, that the roll is consulted.
+            if (r.ausStep >= 0 && stepIndex == r.ausStep)
+                trackState.set_aus_eaten(chainId, r.originAbs, r.originSlot,
+                                         step_fx_type(effectiveStep, r.ausSlot) != FX_AUS);
+            if (trackState.aus_eaten(chainId, r.originAbs, r.originSlot)) continue;
+
             const int lane = r.global ? TRACK_GLOBAL : trackId;
 
             // ⚠️ VTR/VMV REPLACE the mixer fader and hold, so the host puts the authored value back on
@@ -1827,19 +1859,21 @@ class Sequencer {
         bool hasNote = !step_empty(step);
         skipNote = false;
         PhraseStep effectiveStep = step;
+        // CHA XY — X is the chance of its nearest neighbour on the LEFT, Y of the one on the RIGHT;
+        // 0 never, F always (a roll is 0-14). A neighbour is the nearest FILLED FX column — empty ones
+        // are skipped — and on the left, with none, it is the note. With none on the right, Y does
+        // nothing. A CHA an earlier one has already cleared gates nothing.
         for (int slot = 1; slot <= 3; ++slot) {
-            int fxType = step_fx_type(step, slot);
-            int fxValue = step_fx_value(step, slot);
-            if (fxType == FX_CHA) {
-                int probability = (fxValue >> 4) & 0x0F;
-                int target = fxValue & 0x0F;
-                int roll = rng_int(15);  // 0-14, so probability F always passes and 0 never does
-                bool passed = roll < probability;
-                if (!passed) {
-                    if (target == 0) skipNote = true;
-                    else if (target >= 1 && target <= 3) step_set_fx(effectiveStep, target, 0x00, 0x00);
-                }
+            if (step_fx_type(effectiveStep, slot) != FX_CHA) continue;
+            const int value = step_fx_value(effectiveStep, slot);
+            int left = slot - 1, right = slot + 1;
+            while (left >= 1 && step_fx_type(effectiveStep, left) == FX_NONE) --left;
+            while (right <= 3 && step_fx_type(effectiveStep, right) == FX_NONE) ++right;
+            if (rng_int(15) >= ((value >> 4) & 0x0F)) {
+                if (left >= 1) step_set_fx(effectiveStep, left, 0x00, 0x00);
+                else           skipNote = true;
             }
+            if (right <= 3 && rng_int(15) >= (value & 0x0F)) step_set_fx(effectiveStep, right, 0x00, 0x00);
         }
         // The M8 rule: RND/RNL ADD a random 0..XY to the value already there, and stop at the effect's
         // ceiling. 00 adds nothing and draws nothing. In FX1, RNL adds 0..X to the note and 0..Y to
