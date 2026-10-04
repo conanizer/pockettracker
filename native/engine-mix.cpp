@@ -80,6 +80,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
         return;     // …and the voice keeps whatever it was already playing
     }
     soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
+    trackOnsetFrame[t] = note.targetFrame;   // the authored frame: a late note still pairs with its VTR
     // Per-track mono across voice types, this direction: an SF note replaces a sampler
     // note still sounding on this track with the fade a sampler note would give it.
     // The sampler trigger does the reverse. Only after armNote said yes — a dropped
@@ -292,6 +293,8 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
                               note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
             voices[v].instrId = note.sampleId;
             voices[v].sampleGen = gen;
+            voices[v].faderHeld = false;
+            if (note.trackId >= 0 && note.trackId < SF_VOICE_COUNT) trackOnsetFrame[note.trackId] = note.targetFrame;
             voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
 
             startNotePitchFx(voices[v], note);
@@ -324,10 +327,13 @@ void AudioEngine::chainTrackPiece(V& v, int t, float* buf, const TrackBufferMix&
     // staircase a knob turns into a tick per message. Here it is a ramp, like the note's own
     // gain before it. It stays ABOVE the chain, so an instrument's drive and filter hear the
     // faded signal.
-    if (c.trackVolStart[t] != 1.0f || c.trackVolEnd[t] != 1.0f) {
+    const float fStart = v.faderHeld ? v.faderHeldStart : c.trackVolStart[t];
+    const float fEnd   = v.faderHeld ? v.faderHeldEnd   : c.trackVolEnd[t];
+    if (v.faderInBuf) {
+        v.faderInBuf = false;   // the steal pass has put it on already, old note and new apart
+    } else if (fStart != 1.0f || fEnd != 1.0f) {
         for (int i = from; i < to; i++) {
-            const float g = c.trackVolStart[t] + (c.trackVolEnd[t] - c.trackVolStart[t])
-                                                 * (float)(i + 1) / (float)c.numFrames;
+            const float g = fStart + (fEnd - fStart) * (float)(i + 1) / (float)c.numFrames;
             buf[i * 2]     *= g;
             buf[i * 2 + 1] *= g;
         }
@@ -474,6 +480,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float revGateStart, revGateEnd, dlyGateStart, dlyGateEnd, dryGateStart, dryGateEnd;
     float masterVolStart, masterVolSnapshot;   // …and the master fader, same pair, same reason
     int previewTrack;
+    // How far a fader may move in this block — per full swing, so the glide is the same wall-clock
+    // length whatever the block size. Also read by the VTR/VMV arms below.
+    const float faderStep = (float)numFrames / (float)FADER_GLIDE_SAMPLES;
+    const auto fader_toward = [faderStep](float from, float target) {
+        return from < target ? fminf(target, from + faderStep) : fmaxf(target, from - faderStep);
+    };
     {
         // Per full swing, so the ramp is the same wall-clock length whatever the block size.
         const float gateStep = (float)numFrames / (float)MUTE_GATE_SAMPLES;
@@ -487,22 +499,26 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             else if (gate > target) gate = fmaxf(target, gate - gateStep);
             end = gate;
         };
-        // The fader's walk, and it reaches its target within the block rather than chasing it over
-        // several: one block is already long enough to carry a full swing without a step (that is
-        // what MUTE_GATE_SAMPLES is), so anything longer would only be lag.
-        const auto walk_fader = [&](float& ramp, float target, float& start, float& end) {
-            if (offlineRender) ramp = target;
+        // The fader's walk: toward its target at FADER_GLIDE_SAMPLES per full swing, over as many
+        // blocks as that takes.
+        const auto walk_fader = [&](float& ramp, float target, bool& songMove, float& start, float& end) {
+            if (offlineRender && !songMove) ramp = target;
             start = ramp;
-            end = ramp = target;
+            end = ramp = fader_toward(ramp, target);
+            if (ramp == target) songMove = false;
         };
         for (int t = 0; t < 8; t++) {
-            walk_fader(trackVolRamp[t], trackVolumes[t].load(std::memory_order_relaxed), trackVolStart[t], trackVolEnd[t]);
+            walk_fader(trackVolRamp[t], trackVolumes[t].load(std::memory_order_relaxed), trackVolSongMove[t],
+                       trackVolStart[t], trackVolEnd[t]);
             walk_gate(trackGate[t], trackMuted[t].load(std::memory_order_relaxed), gateStart[t], gateEnd[t]);
         }
         walk_gate(revReturnGate,   revReturnMuted.load(std::memory_order_relaxed),   revGateStart, revGateEnd);
         walk_gate(delayReturnGate, delayReturnMuted.load(std::memory_order_relaxed), dlyGateStart, dlyGateEnd);
         walk_gate(dryGate,         dryMuted.load(std::memory_order_relaxed),         dryGateStart, dryGateEnd);
-        walk_fader(masterVolRamp, masterVolume.load(std::memory_order_relaxed), masterVolStart, masterVolSnapshot);
+        walk_fader(masterVolRamp, masterVolume.load(std::memory_order_relaxed), masterVolSongMove,
+                   masterVolStart, masterVolSnapshot);
+        for (Voice& v : voices)          if (v.faderHeld)  v.faderHeldStart  = v.faderHeldEnd;
+        for (SoundfontVoice& v : sfVoices) if (v.faderHeld) v.faderHeldStart = v.faderHeldEnd;
         previewTrack      = previewLaneTrack.load(std::memory_order_relaxed);
     }
     // The preview lane borrows the fader of the channel the audition came from — the lane is a ninth
@@ -665,7 +681,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // other one also reaches a SoundFont note still releasing there (forEachTrackVoice).
                 case PARAM_UPDATE_VOICE_CC: {
                     if (upd.sourceId == songcore::CC_PAN) {
-                        if (IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId)) pv->setPan(upd.value);
+                        // Glided, as a table PAN is — a pan that jumps on a sounding note clicks.
+                        if (IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId)) {
+                            if (pv >= static_cast<IAudioVoice*>(&voices[0]) &&
+                                pv <= static_cast<IAudioVoice*>(&voices[MAX_VOICES - 1]))
+                                voiceGlidePan(*static_cast<Voice*>(pv), upd.value);
+                            else
+                                voiceGlidePan(*static_cast<SoundfontVoice*>(pv), upd.value);
+                        }
                         break;
                     }
                     forEachTrackVoice(upd.trackId, [&](auto& v) { applyVoiceCc(v, upd.sourceId, upd.value, sampleRate); });
@@ -695,30 +718,49 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     applyEqBandsToModule(masterChain.masterEq, upd.eqBands);
                     break;
                 }
-                // ⚠️ BOTH FADER ARMS WRITE THE SNAPSHOT AS WELL AS THE MEMBER. The snapshot above is
-                // what the mix loops below actually read; the member is what survives to the next
-                // block. Write one and the fader moves a block late, write the other and it moves for
-                // one block and springs back.
-                //
-                // ⚠️ AND BOTH ENDS OF THE PAIR, WHICH KEEPS A SONG'S OWN RAMP EXACTLY AS IT WAS. A
-                // `VTR` already moves in per-block steps of its own choosing and a render must
-                // reproduce them to the sample; the smoothing above is for a fader a HAND moved
-                // between blocks, which is the one that arrives as an unannounced step.
+                // ⚠️ BOTH FADER ARMS REDO THIS BLOCK'S WALK, from the block's start toward the new
+                // value: the end is what the mix loops below ramp to, the member is where the next
+                // block carries on from. Write only the target and the glide starts a block late.
                 case PARAM_UPDATE_TRACK_VOL: {            // VTR — this track's mixer fader
                     if (upd.trackId >= 0 && upd.trackId < 8) {
-                        // Both take the authored value: the mute is no longer folded in here, it is a
-                        // separate gate multiplied at the two read sites. The fader therefore keeps
-                        // moving under a muted track exactly as before, so unmuting lands on wherever
-                        // the ramp has got to rather than on where it started.
-                        trackVolumes[upd.trackId].store(upd.value, std::memory_order_relaxed);
-                        trackVolStart[upd.trackId] = trackVolEnd[upd.trackId] = upd.value;
-                        trackVolRamp[upd.trackId]  = upd.value;
+                        // The mute is a separate gate multiplied at the two read sites, so the fader
+                        // keeps moving under a muted track and unmuting lands wherever it has got to.
+                        const int t = upd.trackId;
+                        trackVolumes[t].store(upd.value, std::memory_order_relaxed);
+                        // ⚠️ ON A NOTE'S OWN STEP (it rides one frame behind the note) IT DOES NOT
+                        // GLIDE: the new note starts at its level, or its attack is heard sliding
+                        // from the last one's. What the note cut keeps the old fader while it fades.
+                        const int64_t sinceOnset = upd.targetFrame - trackOnsetFrame[t];
+                        if (sinceOnset >= 0 && sinceOnset <= 1) {
+                            for (Voice& v : voices)
+                                if (v.trackId == t && v.isActive && v.isFadingOut && !v.faderHeld) {
+                                    v.faderHeld = true;
+                                    v.faderHeldStart = trackVolStart[t];
+                                    v.faderHeldEnd   = trackVolEnd[t];
+                                }
+                            SoundfontVoice& sv = sfVoices[t];
+                            if (sv.isActive && (sv.isReleasingOnly || sv.hasArmedNote) && !sv.faderHeld) {
+                                sv.faderHeld = true;
+                                sv.faderHeldStart = trackVolStart[t];
+                                sv.faderHeldEnd   = trackVolEnd[t];
+                            }
+                            trackVolStart[t] = trackVolEnd[t] = trackVolRamp[t] = upd.value;
+                            trackVolSongMove[t] = false;
+                        } else {
+                            trackVolEnd[t] = trackVolRamp[t] = fader_toward(trackVolStart[t], upd.value);
+                            trackVolSongMove[t] = true;
+                        }
+                        if (previewBorrows && previewTrack == t) {
+                            trackVolStart[PREVIEW_LANE] = trackVolStart[t];
+                            trackVolEnd[PREVIEW_LANE]   = trackVolEnd[t];
+                        }
                     }
                     break;
                 }
                 case PARAM_UPDATE_MASTER_VOL: {           // VMV — the master fader (global)
                     masterVolume.store(upd.value, std::memory_order_relaxed);
-                    masterVolStart = masterVolSnapshot = masterVolRamp = upd.value;
+                    masterVolSnapshot = masterVolRamp = fader_toward(masterVolStart, upd.value);
+                    masterVolSongMove = true;
                     break;
                 }
                 case PARAM_UPDATE_DELAY_TIME: {           // TIM — the delay's echo time (global)
@@ -996,9 +1038,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // ⚠️ THE FADER AND THE MUTE GATE BOTH RIDE HERE, interpolated across the whole block on
             // `tBlock`, never the piece's `t`: together they are everything between a mixer move
             // and a step in the output.
-            float trackVol = (voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT)
-                           ? (trackVolStart[voice.trackId]
-                              + (trackVolEnd[voice.trackId] - trackVolStart[voice.trackId]) * tBlock)
+            const bool onTrack = voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT;
+            const float fStart = voice.faderHeld ? voice.faderHeldStart : onTrack ? trackVolStart[voice.trackId] : 1.0f;
+            const float fEnd   = voice.faderHeld ? voice.faderHeldEnd   : onTrack ? trackVolEnd[voice.trackId]   : 1.0f;
+            float trackVol = onTrack
+                           ? (fStart + (fEnd - fStart) * tBlock)
                              * (gateStart[voice.trackId]
                                 + (gateEnd[voice.trackId] - gateStart[voice.trackId]) * tBlock)
                            : 1.0f;
@@ -1372,14 +1416,33 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             // Now the old voices can be cut: the samples they contributed are already at zero.
             sv.fireArmedNote(h);
+            // A VTR on this note's step: the old note keeps the fader it had, the new one starts on
+            // the new value — so the fader goes on each half here, not on the sum in chainTrackPiece.
+            const bool faderApart = sv.faderHeld && t < SF_VOICE_COUNT;
+            const auto fader_at = [&](float s0, float s1, int i) {
+                return s0 + (s1 - s0) * (float)(i + 1) / (float)numFrames;
+            };
+            if (faderApart) {
+                for (int i = from; i < fadeEnd; i++) {
+                    const float g = fader_at(sv.faderHeldStart, sv.faderHeldEnd, i);
+                    sfBuf[i * 2] *= g; sfBuf[i * 2 + 1] *= g;
+                }
+            }
             // Rendered apart and ADDED — [sfStart, fadeEnd) still holds the tail of the fade,
             // and the two notes carry different gains across it.
             const int noteFrames = to - sfStart;
             if (noteFrames > 0) {
                 tsf_render_float_channel(h, t, sfNoteBuf, noteFrames, 0 /* overwrite */);
                 applyGainRamp(sfNoteBuf, noteFrames, sv.volGainFrom, sv.volGainTo);
+                if (faderApart) {
+                    for (int i = 0; i < noteFrames; i++) {
+                        const float g = fader_at(trackVolStart[t], trackVolEnd[t], sfStart + i);
+                        sfNoteBuf[i * 2] *= g; sfNoteBuf[i * 2 + 1] *= g;
+                    }
+                }
                 for (int i = 0; i < noteFrames * 2; i++) sfBuf[sfStart * 2 + i] += sfNoteBuf[i];
             }
+            if (faderApart) { sv.faderHeld = false; sv.faderInBuf = true; }
         }
         sv.volGain = sv.volGainTo;
     };

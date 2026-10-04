@@ -123,6 +123,13 @@ struct SoundfontVoice : public IAudioVoice {
     };
     bool      hasArmedNote = false;
     ArmedNote armed;
+    // A note on its way out keeps the track fader it had when a VTR on the next note's step changed
+    // it: the new note starts at the new level, the old one fades at its own. Advanced per block; the
+    // steal pass spends it on the old note.
+    bool  faderHeld      = false;
+    float faderHeldStart = 1.0f, faderHeldEnd = 1.0f;
+    // Set by a steal pass that has already put the fader on its piece, so chainTrackPiece skips it.
+    bool  faderInBuf     = false;
 
     // ── IAudioVoice ─────────────────────────────────────────────────────────
     bool active()     const override { return isActive; }

@@ -108,6 +108,10 @@ struct Voice : public IAudioVoice {
     float volRouteLast = 0.0f;
     float volGlideFrom = 0.0f;
     int   volGlideLeft = 0;
+    // A note on its way out keeps the track fader it had when a VTR on the next note's step changed
+    // it: the new note starts at the new level, the old one fades at its own. Advanced per block.
+    bool  faderHeld      = false;
+    float faderHeldStart = 1.0f, faderHeldEnd = 1.0f;
     // The sampler's downsample is a quantized READ, not a chain module, so a change to it on a sounding
     // note blends the old read into the new one over DOWNSAMPLE_FADE_FRAMES (engine-mix.cpp).
     int   dsLast = 0;

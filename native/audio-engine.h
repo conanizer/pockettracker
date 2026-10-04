@@ -1384,11 +1384,20 @@ private:
     float trackGate[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     // ⚠️ WHERE EACH FADER HAS GOT TO — a fader moves across a block, it does not jump at its edge.
     // A knob sending 0-127 steps a gain by ~0.8% per message, and a step in a gain is a step in the
-    // waveform: audible as a tick per message. Both mix paths read the pair (this value, the current
-    // target) and interpolate per sample, exactly as the mute gate above does.
+    // waveform: audible as a tick per message. It walks toward the target at FADER_GLIDE_SAMPLES per
+    // full swing, and both mix paths interpolate each block's piece of that walk per sample.
     // ⚠️ AUDIO THREAD ONLY, like the gates: advanced once per block inside processAudioBlock.
     float trackVolRamp[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     float masterVolRamp   = 1.0f;
+    // Set while a VTR / VMV glide is under way: an export snaps a fader to its target, but not one
+    // the song itself is moving — that would turn the glide back into a step.
+    bool trackVolSongMove[8] = {};
+    bool masterVolSongMove   = false;
+    // The global frame of the last note that started on each track — a VTR one frame behind it is
+    // that note's own level. ⚠️ AUDIO THREAD ONLY.
+    int64_t trackOnsetFrame[SF_VOICE_COUNT] = {INT64_MIN / 2, INT64_MIN / 2, INT64_MIN / 2, INT64_MIN / 2,
+                                               INT64_MIN / 2, INT64_MIN / 2, INT64_MIN / 2, INT64_MIN / 2,
+                                               INT64_MIN / 2};
     // Which of those eight the preview lane borrows, or -1 for unity. An INDEX, not a gain: the
     // snapshot below re-reads the live fader every block, so a VTR or a mixer move is heard in the
     // audition it is aimed at. Written by the UI thread, read once per block.

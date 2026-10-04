@@ -81,6 +81,9 @@ const int KILL_FADE_SAMPLES = 256;
 // high-amplitude point is a click whatever cut it. ⚠️ It is a GATE, not a fade — it runs in both
 // directions, so unmuting rides back up to the fader over the same 5.8 ms rather than snapping.
 const int MUTE_GATE_SAMPLES = 256;
+// A mixer fader (a hand, VTR, VMV) glides at most one full swing per this many samples, across as many
+// blocks as it takes. A VTR on a note's own step does not glide at all (engine-mix.cpp).
+const int FADER_GLIDE_SAMPLES = 256;
 
 // ===================================
 // EFFECT TYPE CONSTANTS — ⚠️ must match native/songcore/effects.h, which is where an effect's code is
