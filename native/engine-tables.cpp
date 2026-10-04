@@ -2,7 +2,7 @@
 // tick and AUS/AUF ramps, and the playing-row readout the TABLE screen draws.
 #include "audio-engine.h"
 #include "engine-voice-ops.h"
-#include "table_automation.h"  // AUS/AUF pairing over a table's rows — shared with the table editor
+#include "songcore/table_automation.h"  // AUS/AUF pairing over a table's rows — shared with the table editor
 #include <cstdint>
 
 // A TIC in the table's LAST ROW overrides the instrument's rate — per COLUMN, because each column

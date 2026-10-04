@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"  // pt_fopen
+#include "../common/byte_source.h"  // pt_fopen
 
 namespace songcore {
 

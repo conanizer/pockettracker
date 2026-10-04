@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"     // pt_fopen
-#include "../load_progress.h"   // LoadSpan
+#include "../common/byte_source.h"     // pt_fopen
+#include "../common/load_progress.h"   // LoadSpan
 #include "media_path.h"
 #include "midi_map.h"     // MapDestId
 #include "model.h"

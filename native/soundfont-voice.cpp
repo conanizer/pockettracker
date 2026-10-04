@@ -34,8 +34,8 @@ extern "C" {
 // only the sample buffers are large enough to matter.
 //
 // ⚠️ `available_memory_bytes()` returning 0 means UNKNOWN and must never refuse.
-#include "platform_memory.h"
-#include "load_progress.h"
+#include "common/platform_memory.h"
+#include "common/load_progress.h"
 #include "note-queue.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
 
 #include <cstdlib>

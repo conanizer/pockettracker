@@ -1,6 +1,6 @@
 #include "saf-filesystem.h"
 
-#include "byte_source.h"
+#include "common/byte_source.h"
 
 #include <SDL.h>
 

@@ -1,8 +1,8 @@
 #include "audio-decoders.h"
 #include "audio-defs.h"     // LOGD/LOGE (portable shim)
-#include "byte_source.h"    // pt_fopen — every open below goes through it
-#include "platform_memory.h"  // available_memory_bytes — the decode's memory guard
-#include "load_progress.h"    // load_tick — a long decode reports itself, and can be cancelled
+#include "common/byte_source.h"    // pt_fopen — every open below goes through it
+#include "common/platform_memory.h"  // available_memory_bytes — the decode's memory guard
+#include "common/load_progress.h"    // load_tick — a long decode reports itself, and can be cancelled
 
 #if defined(_MSC_VER)
 #pragma warning(push, 0)   // vendored, not ours to fix

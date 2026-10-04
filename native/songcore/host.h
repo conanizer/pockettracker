@@ -19,7 +19,7 @@
 #include <functional>
 
 #include "../audio-engine.h"
-#include "../byte_source.h"   // pt_read_file
+#include "../common/byte_source.h"   // pt_read_file
 #include "engine_consumer.h"
 #include "engine_setup.h"
 #include "midi_in.h"

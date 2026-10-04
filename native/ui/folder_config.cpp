@@ -1,6 +1,6 @@
 #include "ui/folder_config.h"
 
-#include "byte_source.h"        // pt_path_is_uri — one rule for what a URI is
+#include "common/byte_source.h"        // pt_path_is_uri — one rule for what a URI is
 #include "songcore/media_path.h"  // app_root_relative_tail — the same re-rooting as a sample path
 #include "vendor/nlohmann/json.hpp"
 

@@ -2,9 +2,9 @@
 // with its de-dup and LRU, the per-file preset index, and the per-instrument ADSR override.
 #include "audio-engine.h"
 #include "vendor/tsf/tsf.h"    // TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
-#include "byte_source.h"       // pt_fopen — the soundfont loader opens through it
-#include "platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
-#include "load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
+#include "common/byte_source.h"       // pt_fopen — the soundfont loader opens through it
+#include "common/platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
+#include "common/load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
 #include <cstdio>
 #include <cstdint>
 #include <climits>   // INT_MAX — tsf_load_memory takes an int size

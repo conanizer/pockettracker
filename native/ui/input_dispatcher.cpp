@@ -8,7 +8,7 @@
 #include "ui/helpers.h"        // dec2 — a MIDI channel is the one number shown in decimal
 #include "ui/lifecycle.h"        // the crash-recovery autosave — write / clear / load
 #include "ui/song_pointer.h"     // NAV = SONG — the pointer, the entry gate and the load-time clamp
-#include "load_progress.h"       // begin_load / end_load — where the engine reports a slow load
+#include "common/load_progress.h"       // begin_load / end_load — where the engine reports a slow load
 
 #include <algorithm>
 #include <string>

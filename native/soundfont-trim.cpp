@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include "byte_source.h"
+#include "common/byte_source.h"
 
 namespace pt {
 namespace {

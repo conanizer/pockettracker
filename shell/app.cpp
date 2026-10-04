@@ -7,7 +7,7 @@
 
 #include "audio-backend.h"
 #include "audio-engine.h"
-#include "load_progress.h"   // set_load_tick
+#include "common/load_progress.h"   // set_load_tick
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/button_mapper.h"

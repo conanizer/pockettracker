@@ -26,7 +26,7 @@
 //
 // So this header includes NOTHING but the curve, which is dependency-free for the same reason.
 
-#include "songcore/automation_curve.h"
+#include "automation_curve.h"
 
 namespace table_automation {
 

@@ -10,7 +10,7 @@
 #include <cstdint>
 
 #include "../audio-engine.h"
-#include "../table_automation.h"  // only for the cross-checks below
+#include "table_automation.h"  // only for the cross-checks below
 #include "automation.h"           // only for the cross-checks below
 #include "effects.h"              // only for the cross-checks below; no effect is resolved here
 #include "event.h"
@@ -63,7 +63,7 @@ static_assert(crush_split_matches_the_engine(),
 
 // ─── …and the third list: what a TABLE row's AUS may ramp ────────────────────────────────────────
 //
-// `native/table_automation.h` serves both the engine and the table editor, so it spells its codes as
+// `table_automation.h` serves both the engine and the table editor, so it spells its codes as
 // literals. Checked here, in both directions, so neither list can grow an entry the other lacks.
 static_assert(table_automation::FX_AUS_CODE == FX_AUS,
               "table_automation.h AUS has drifted from effects.h");

@@ -21,7 +21,7 @@
 #include <SDL.h>
 
 #include "audio-engine.h"
-#include "byte_source.h"       // pt_fopen — the log file's tee follows the app into a granted tree
+#include "common/byte_source.h"       // pt_fopen — the log file's tee follows the app into a granted tree
 #include "oboe-audio-engine.h"
 #include "ui/platform_caps.h"
 

@@ -16,7 +16,7 @@
 
 #include "songcore/model.h"
 #include "table-lanes.h"
-#include "table_automation.h"
+#include "songcore/table_automation.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
 #include "ui/theme.h"

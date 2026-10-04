@@ -3,9 +3,9 @@
 #include "audio-engine.h"
 #include "vendor/tsf/tsf.h"    // tsf_get_fontsamplecount — the memory count includes the loaded fonts
 #include "audio-decoders.h"
-#include "byte_source.h"       // pt_fopen — the WAV reader opens through it
-#include "platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
-#include "load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
+#include "common/byte_source.h"       // pt_fopen — the WAV reader opens through it
+#include "common/platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
+#include "common/load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
 #include <cstdio>
 #include <cstdint>
 #include <cstring>

@@ -87,6 +87,9 @@ native/                            The portable program
 │   ├── primitives/                  biquad, filter, vendored DaisySP
 │   └── modules/                     FilterModule, DriveModule, BitcrushModule, DustChain
 │
+├── common/                        Below every layer: pt_fopen and the URI hooks, the memory
+│                                  probe a load asks first, a slow load's progress and cancel
+│
 ├── songcore/                      Header-only, platform-free. No SDL, no JNI, no POSIX.
 │   ├── model.h                      Project, Chain, Phrase, Table, Groove, Instrument, Note
 │   ├── project_io.h                 .ptp / .pti parse + emit (minified), and JsonWriter
@@ -94,6 +97,7 @@ native/                            The portable program
 │   ├── timing.h                     frames_per_step / _tic, groove timing, transpose
 │   ├── effects.h                    Effect codes, names, EFFECT_TYPES, resolve_step_params
 │   ├── automation.h                 AUS/AUF: the automatable registry, the curve, the pairing
+│   ├── table_automation.h           AUS/AUF over a table's rows — shared by the engine and the editor
 │   ├── traversal.h                  Song walks, collect_used_instruments
 │   ├── rng.h                        PCG32, seeded and bounded like kotlin.random
 │   ├── event.h                      The event schema (versioned, frozen)
@@ -604,7 +608,7 @@ resolves that to a document URI internally. The id is derived rather than stored
 the grant list on any boot in any order.
 
 **A second seam sits below the UI**, because samples, SoundFonts, projects and the WAV writer open
-paths directly rather than through the interface. `byte_source.h` provides `pt_fopen`, `pt_remove` and
+paths directly rather than through the interface. `common/byte_source.h` provides `pt_fopen`, `pt_remove` and
 `pt_rename`: a plain path takes libc's branch, a URI is handed to a host-installed hook. The decision is
 derived from the string, once, below every call site — not repeated at each of them. On every platform
 but Android no hook is installed and all three are a rename of the libc call.

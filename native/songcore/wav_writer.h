@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"   // pt_fopen / pt_remove / pt_rename
+#include "../common/byte_source.h"   // pt_fopen / pt_remove / pt_rename
 
 namespace songcore {
 

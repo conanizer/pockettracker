@@ -1,6 +1,6 @@
 #include "ui/modules/table_editor.h"
 
-#include "table_automation.h"
+#include "songcore/table_automation.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {

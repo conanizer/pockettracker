@@ -6,7 +6,7 @@
 #include "ui/scale_io.h"
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 #include "ui/theme_io.h"
-#include "load_progress.h"       // load_cancelled
+#include "common/load_progress.h"       // load_cancelled
 
 #include <algorithm>
 #include <string>

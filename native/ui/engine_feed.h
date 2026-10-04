@@ -12,7 +12,7 @@
 #include <cmath>
 
 #include "audio-engine.h"
-#include "platform_memory.h"
+#include "common/platform_memory.h"
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/modules/oscilloscope.h"

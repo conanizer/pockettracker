@@ -196,13 +196,13 @@ set(ENGINE_CORE_SOURCES
         songcore/schema-check.cpp
         # The single definition of the file-open hook every layer above resolves against. It is a
         # .cpp and not a header inline for a linkage reason byte_source.h states in full.
-        byte_source.cpp
+        common/byte_source.cpp
         # How much RAM the machine will actually give us. A .cpp for byte_source's linkage reason and
         # to keep <windows.h> out of every TU that asks; see the header.
-        platform_memory.cpp
+        common/platform_memory.cpp
         # Where a slow load reports itself and where a cancel is read. A .cpp for platform_memory's
         # linkage reason — one symbol, not one copy per shared library. See the header.
-        load_progress.cpp
+        common/load_progress.cpp
         soundfont-voice.cpp
         # Reading a SoundFont's preset index without its samples, and writing a one-preset copy of
         # it. Pure file-format handling over a FILE* — no tsf, no engine. See the header.
