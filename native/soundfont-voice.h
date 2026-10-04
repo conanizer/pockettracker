@@ -185,19 +185,12 @@ struct SoundfontVoice : public IAudioVoice {
     // noteVol = instrument × phrase volume. ⚠️ Neither it nor the track fader reaches the TSF
     // channel: both ride the rendered buffer as per-sample ramps (see volGain above).
     //
-    // ⚠️⚠️ **IT ARMS; IT DOES NOT SOUND.** The note_on happens in `fireArmedNote`, which the SF render
-    // pass calls at this note's exact intra-block frame — AFTER it has rendered the frames before it.
-    // Sounding the note here instead is what used to make an SF note change CRACK: the render pass
-    // starts a trigger block at `startDelayFrames` and leaves the head silent, so a note that had
-    // already replaced the previous one at dispatch time cut it dead at the block boundary, at
-    // whatever amplitude its waveform happened to be at. Nothing on the note's own timing changes —
-    // `startDelayFrames` decided when it sounds before this split and decides it still.
+    // ⚠️⚠️ IT ARMS; IT DOES NOT SOUND. The note_on happens in `fireArmedNote`, which the render pass
+    // calls at this note's exact intra-block frame after rendering the frames before it — sounding
+    // it here would cut the previous note dead at the block boundary (a crack).
     //
-    // ⚠️ **RETURNS FALSE WHEN THE SLOT'S HANDLE IS GONE, AND THE CALLER MUST HONOUR IT.** Only a
-    // function holding the slot mutex can answer that; anything the caller checked beforehand is a
-    // hint that may already be stale. On false NOTHING has been written — the voice is left exactly
-    // as it was, still sounding whatever it was sounding, which is the point: the eighty lines of
-    // chain/envelope/mod setup that follow a trigger belong to a note that is actually going to play.
+    // ⚠️ RETURNS FALSE WHEN THE SLOT'S HANDLE IS GONE, AND THE CALLER MUST HONOUR IT: only this, under
+    // the slot mutex, can answer. On false nothing has been written and the voice keeps sounding.
     bool armNote(int slot, int midiNote, int midiVelocity,
                  float noteVol, float pan,
                  int bank, int preset, int trackId,

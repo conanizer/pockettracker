@@ -2,25 +2,18 @@
 
 // ─── THE SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/SampleEditorModule.kt — the biggest single module in the app, and the
-// last screen that is neither the arrangement nor the filesystem. It is where a sample stops being a
-// file and becomes an instrument: trim it, slice it, normalise it, pitch it to the grid, chop it into
-// a folder of one-shots.
+// Where a sample becomes an instrument: trim it, slice it, normalise it, pitch it to the grid, chop
+// it into a folder of one-shots.
 //
-// ── IT PORTS NO DSP, AND THAT IS THE POINT ──────────────────────────────────────────────────────
+// ── NO DSP HERE ──────────────────────────────────────────────────────────────────────────────────
 //
-// Every one of the twelve operations already exists, in C++, in the engine (`native/sample-editor.cpp`
-// + `native/transient-detector.cpp`), because Android's JNI layer is a thin forward and always was.
-// crop, copy, cut, dupl, paste, del / norm, fade+, fade−, silence, reverse, undo — plus the FX row,
-// the pitch shift, the time stretch and the transient detector. **Not one line of signal processing is
-// written this session.** What was missing was never the DSP: it was the module that draws the
-// waveform, the cursor that walks it, and the dispatcher arm that turns a button into one of those
-// calls. That is what lands here.
+// Every operation (crop … undo, the FX row, pitch, stretch, transient detection) lives in the
+// engine: `native/sample-editor.cpp` and `native/transient-detector.cpp`. This module draws the
+// waveform and walks the cursor; the dispatcher turns a button into one of those calls.
 //
 // ── FULL-SCREEN, like the file browser ──────────────────────────────────────────────────────────
 //
-// 640×480 with no oscilloscope strip and no right bar (`SampleEditorModule.height = 480`). A waveform
-// needs the width, and the note monitor has nothing to say about a sample that is not playing.
+// 640×480 with no oscilloscope strip and no right bar: a waveform needs the width.
 //
 // ── THE ROW MAP IS SPARSE, and the gaps are the layout ──────────────────────────────────────────
 //
@@ -47,34 +40,22 @@
 namespace pt::ui {
 
 /**
- * The editor's own session state — and unlike every other module's state struct, this one is
- * PERSISTENT (it lives in `AppState`, not on the draw stack).
- *
- * That is not a port artifact: it is what a sample editor IS. Nothing here can be derived from the
- * project, because none of it is *in* the project — the zoom level, the selection, the detected
- * transients and the pending pitch shift are all facts about an editing session, and they are gone the
- * moment it closes. The audio itself is in the ENGINE (which is why there is no PCM here, only the 620
- * min/max pairs the waveform draws from), and the only things that reach the document are the ones the
- * user explicitly saves: the name, the file path, and the slice markers.
- */
-/**
  * A slice boundary the user has moved or made: where it is, and where its METHOD had put it.
  *
- * ⚠️ **`originFrame` is the boundary's IDENTITY, and it is what makes A+B mean anything now that a
- * boundary may be dragged past its neighbours.** The list is sorted by `frame`, so a boundary's INDEX
- * is its place on the SCREEN and changes under it as it is dragged — the index is not the boundary.
- * Reading the reset target off the index is how "put slice 01 back" became "put whatever is now at 01
- * back", which lands on a position another boundary already holds.
- *
- * ⭐ It carries the FRAME rather than which computed cut it was, so a reset needs no arithmetic and no
- * arm per method: put it back where it says. −1 means MADE BY HAND — there is no computed position to
- * return to, and A+B removes it instead.
+ * ⚠️ `originFrame` is the boundary's IDENTITY: the list is sorted by `frame`, so an index is a
+ * place on screen that changes as a boundary is dragged past its neighbours. A+B puts it back where
+ * this says; −1 means MADE BY HAND — no computed position, so A+B removes it.
  */
 struct SliceMarker {
     int frame       = 0;
     int originFrame = -1;
 };
 
+/**
+ * The editor's session state, kept in `AppState`: zoom, selection, transients and pending pitch are
+ * facts about an editing session, not the project. The audio is in the ENGINE (only the 620 min/max
+ * pairs are here); the name, path and slice markers reach the document only when saved.
+ */
 struct SampleEditorState {
     int sampleId     = 0;
     int instrumentId = 0;
@@ -129,27 +110,19 @@ struct SampleEditorState {
     int sliceIndex       = 0;
 
     /**
-     * ⚠️ Kept for its ONE use: `undo` clamps it, and the two SYNC ops rescale it, so a length-changing
-     * operation does not leave it pointing past the end. It is NOT what the slice rows read — they call
-     * `effective_slice_position()`, which derives the position from the method and the index. Kotlin
-     * carries the same otherwise-dead field, and dropping it would silently change what UNDO restores.
+     * ⚠️ Kept for UNDO and the two SYNC ops, which clamp or rescale it; the slice rows read
+     * `effective_slice_position()` instead. Dropping it would change what UNDO restores.
      */
     int64_t slicePosition = 0;
 
     /**
-     * The markers the FILE carries: the WAV's `cue ` chunk, as the project loaded it. Snapshotted at
-     * open, and CLEARED by an op that changes the sample's length — a frame index into audio that has
-     * been replaced describes nothing (`refresh_sample_view`).
+     * The markers the FILE carries (its `cue ` chunk), snapshotted at open and CLEARED by a
+     * length-changing op (`refresh_sample_view`).
      *
-     * ⚠️ This is what SLICE = OFF *means* — the sample as it already is on disk — and it is what a save
-     * under OFF writes back. Keeping it apart from the detector's output is what stops a detour through
-     * TRANSIENT adding slices to a file the user turned slicing off for.
+     * ⚠️ This is what SLICE = OFF means, and what a save under OFF writes back — kept apart from
+     * the detector's output. ⭐ It is also where MANUAL starts.
      *
-     * ⭐ It is also where MANUAL STARTS, which is what makes MANUAL an edit of the slicing a sample
-     * already has rather than a fresh start over the top of it.
-     *
-     * ⚠️ SORTED, UNIQUE and strictly inside the sample — a `cue ` chunk promises none of the three, so
-     * `init_sample_editor_state` makes it so on the way in. Every marker reader rests on all three.
+     * ⚠️ SORTED, UNIQUE and strictly inside the sample — `init_sample_editor_state` makes it so.
      */
     std::vector<int> fileMarkers;
 
@@ -164,24 +137,17 @@ struct SampleEditorState {
     std::vector<int> transientMarkers;
 
     /**
-     * The boundaries the USER has placed or moved, sorted by frame and strictly increasing.
+     * The boundaries the USER has placed or moved, sorted and strictly increasing. Starts as a copy
+     * of what the method shows (detected, arithmetic, or the file's own under MANUAL) and overrides
+     * it. ⚠️ A MANUAL entry's origin is −1, so A+B DELETES it rather than restoring.
      *
-     * It starts as a copy of whatever the method already shows — the detected cuts under TRANSIENT, the
-     * arithmetic ones under DIVIDE, the FILE's own cue points under MANUAL — and OVERRIDES that source
-     * from then on. Each entry remembers which computed cut it is, because the order can change
-     * afterwards; ⚠️ a MANUAL entry remembers −1 instead, so A+B on it DELETES rather than restores, and
-     * that is the whole of "drop a slice the sample came with".
-     *
-     * ⚠️ Only live while the stamp below still matches — see `manual_markers_live()`. ⚠️ And EMPTY is a
-     * meaningful live value: MANUAL with every boundary deleted, which must not fall back to the file's.
+     * ⚠️ Live only while the stamp below matches (`manual_markers_live()`); EMPTY is a live value.
      */
     std::vector<SliceMarker> manualMarkers;
 
     /**
-     * The (method, parameter) pair `manualMarkers` was made under. ⚠️ Not bookkeeping: it is what
-     * makes "changing the method or its setting resets the hand-placed markers" DERIVED rather than
-     * something every future write to `sliceMethod`, `sliceSensitivity` and `sliceDivisions` has to
-     * remember to do. The feed clears a stale list once per frame, above every reader.
+     * The (method, parameter) `manualMarkers` was made under, so a method or setting change resets
+     * them by derivation; the feed clears a stale list once per frame, above every reader.
      */
     int manualKeyMethod = -1;
     int manualKeyParam  = -1;
@@ -199,7 +165,7 @@ struct SampleEditorState {
     /** 0..1 while the sample is sounding, −1 when it is not. The playhead line over the waveform. */
     float playbackPosition = -1.0f;
 
-    // ── Derived (Kotlin's computed properties, and the same arithmetic) ──────────────────────────
+    // ── Derived ──────────────────────────────────────────────────────────────────────────────────
 
     /** The parameter `manualMarkers` is keyed to: SENS under TRANSIENT, BY under DIVIDE, none else. */
     int manual_key_param() const;
@@ -211,14 +177,9 @@ struct SampleEditorState {
     bool manual_markers_live() const;
 
     /**
-     * What the METHOD alone says, with no hand-placed boundaries on top: the file's own under OFF **and
-     * under MANUAL**, the detector's under TRANSIENT, and nothing under DIVIDE (its boundaries are
-     * arithmetic, so there is no list to hand back and its callers compute instead).
-     *
-     * ⚠️ Almost nothing wants this. Read `marker_count()` / `marker_position()` instead — they are the
-     * seam every reader goes through, and they are where a live hand-placed set overrides this one.
-     * One vector answering several questions is what made a save under OFF write the detector's
-     * markers into the file.
+     * What the METHOD alone says: the file's markers under OFF and MANUAL, the detector's under
+     * TRANSIENT, nothing under DIVIDE (arithmetic). ⚠️ Read `marker_count()` / `marker_position()`
+     * instead — they are where a live hand-placed set overrides this.
      */
     const std::vector<int>& method_markers() const;
 
@@ -243,10 +204,8 @@ struct SampleEditorState {
     int slice_marker_index() const;
 
     /**
-     * Row 11's top index. N markers make N + 1 slices, so it is N — except under MANUAL, which reaches
-     * one further: that slot is the next boundary, and moving it off the boundary to its left is what
-     * makes it exist. ⭐ There is no separate "how many are unlocked" to keep in step, and none of the
-     * duplicate-position checks the request asked for — the list's own length is the whole rule.
+     * Row 11's top index: N markers make N + 1 slices, so N — except MANUAL reaches one further,
+     * the next boundary, which exists once moved off its left neighbour.
      */
     int slice_index_ceiling() const;
 
@@ -272,19 +231,9 @@ struct SampleEditorState {
     std::string duration_display() const;
 
     /**
-     * "NNNBPM" — the tempo this sample IS, if it holds exactly the DURATION row's bar count. The
-     * inverse of what SYNC does: SYNC stretches the audio to fit `duration_beats` at the project's
-     * tempo, this reads the tempo off the audio it already has. With no pending pitch, this number
-     * reaching the project's tempo is SYNC's "already on the grid" test — both sides reduce to
-     * `beats * 60 / seconds`.
-     *
-     * ⚠️ Scaled by the pending PITCH, which SYNC is NOT. The clock beside this one previews the same
-     * shift (`duration_display`), and one length shown in two units cannot be allowed to disagree with
-     * itself. So a pending shift moves this away from the tempo SYNC would still fit — which is the
-     * honest reading, because SYNC's RPITCH discards that shift rather than baking it.
-     *
-     * "---BPM" when there is no sample, or when the answer is outside 1..999: a five-digit tempo is
-     * the DURATION row being wrong about the sample, and printing it would dress that up as a reading.
+     * "NNNBPM" — the tempo this sample IS if it holds exactly the DURATION row's bar count (the
+     * inverse of SYNC). ⚠️ Scaled by the pending PITCH, as `duration_display` is, so the two agree;
+     * SYNC's RPITCH discards that shift. "---BPM" with no sample or outside 1..999.
      */
     std::string bpm_display() const;
 };
@@ -293,10 +242,8 @@ struct SampleEditorState {
 struct SampleEditorInputResult {
     bool modified = false;
     /**
-     * RATE is the one row whose edit is DESTRUCTIVE: it re-decimates the audio in the engine, which
-     * changes the sample's length and its rate ratio. The dispatcher owns those calls, so the module
-     * reports the transition rather than making them (a module that reached for the engine could not
-     * be drawn by ptshot — see ui/engine_feed.h).
+     * RATE is DESTRUCTIVE: it re-decimates the audio, changing length and rate ratio. The engine
+     * calls are the dispatcher's, so the module reports the change.
      */
     bool rateModeChanged = false;
     /** BIT is RATE's twin: the same rebuild, from the same cached original. */
@@ -328,12 +275,8 @@ public:
     static const std::vector<std::string>& duration_values();  // 4 BAR … 1/32
 
     /**
-     * How many beats one DURATION index is worth — "1 BAR" is 4. The list halves at every step, so
-     * this is `16 >> index` rather than a second table beside `duration_values()`: two tables that
-     * must agree row for row is how a new duration gets the beat count of its neighbour.
-     *
-     * SYNC fits the sample to this many beats at the project's tempo; `bpm_display` runs it backwards
-     * to say what tempo the sample is already at.
+     * Beats per DURATION index — "1 BAR" is 4, halving each step, so `16 >> index` rather than a
+     * second table. SYNC fits the sample to it; `bpm_display` runs it backwards.
      */
     static double duration_beats(int duration_index);
     static const std::vector<std::string>& fx_types();         // OTT / DUST / DRIVE / EQ / SYNC
@@ -352,9 +295,8 @@ public:
     static constexpr int SLICE_TRANSIENT = 0;
     static constexpr int SLICE_DIVIDE    = 1;
     static constexpr int SLICE_OFF       = 2;
-    // ⚠️ APPENDED after OFF, never inserted. `sliceMethod` is an index into `slice_methods()` that
-    // survives a session, and `SLICE_OFF` is compared by name in a dozen places across the module, the
-    // dispatcher and the feed — every one of which keeps meaning what it means only because 2 is still 2.
+    // ⚠️ APPENDED after OFF, never inserted: `sliceMethod` survives a session and SLICE_OFF (2) is
+    // compared in a dozen places.
     static constexpr int SLICE_MANUAL    = 3;
 
     /** Row 10's second cell: TRANSIENT has SENS and DIVIDE has BY. OFF and MANUAL have neither. */
@@ -380,12 +322,7 @@ public:
 
     CursorContext cursor_context(const SampleEditorState& s) const;
 
-    /**
-     * Apply a resolved action to the editor state. Mutates `s` in place — the same shape every other
-     * C++ module takes, and what lets `tools/ptinput` byte-compare the RESULTING CELL rather than only
-     * the context and the action (S3's finding: a tool that compares context + action alone is
-     * completely blind to a module that writes the right value into the wrong field).
-     */
+    /** Apply a resolved action to the editor state, in place. */
     SampleEditorInputResult handle_input(SampleEditorState& s, const InputAction& action) const;
 
 private:

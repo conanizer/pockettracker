@@ -40,8 +40,7 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     std::string blob;
     if (!fs.read_file(fs.settings_path(), blob)) return false;   // first launch
 
-    // Tolerant by design: a settings file the user has hand-edited into nonsense costs them their
-    // settings, not their session.
+    // Tolerant: a hand-mangled settings file costs the user their settings, not their session.
     const json j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
 
@@ -50,113 +49,67 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.cursorRemember     = get_bool(j, "cursorRemember",     values.cursorRemember);
     values.notePreviewEnabled = get_bool(j, "notePreview",        values.notePreviewEnabled);
 
-    // FOLDER = REMEMBER / REFRESH (D2a). Only the TOGGLE persists; `lastSampleFolder` is deliberately
-    // SESSION-ONLY — it resets to the default folder on every launch, exactly like CURSOR remembering.
-    // So the choice survives a restart but the remembered path does not (the user's call).
+    // FOLDER: only the TOGGLE persists; `lastSampleFolder` is session-only and resets every launch.
     values.rememberFolder     = get_bool(j, "rememberFolder", values.rememberFolder);
 
-    // NAV = POOL / SONG. ⚠️ A ROW THIS PLATFORM HAS MUST BE PERSISTED, or the setting silently resets
-    // on every launch and nothing anywhere says so — the S10 RESUME bug's exact shape, one row later.
-    // ⚠️ Absent from an older settings.json → the struct default, which is SONG. A file written before
-    // this row existed carries no opinion about NAV, so an upgrading user gets the new default exactly
-    // as a fresh install does; once the row is touched the choice is written and sticks.
+    // NAV. ⚠️ A row this platform HAS must be persisted, or it silently resets every launch.
+    // Absent (an older file) → the struct default, SONG, as on a fresh install.
     values.navSongRelative    = get_bool(j, "navSongRelative", values.navSongRelative);
     values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
 
-    // ABXY = AUTO / XBOX / NINTENDO, and the on-screen buttons kept under a pad. Both are absent from
-    // every settings.json written before their rows existed, and both struct defaults are what the app
-    // already did - AUTO is a no-op and a pad already turned the buttons off - so an upgrade changes
-    // nothing until the row is touched.
+    // ABXY and the on-screen buttons under a pad. Absent → defaults that change nothing (AUTO; a pad
+    // already hides the buttons).
     values.abxyIndex          = clamp(get_int(j, "abxy", values.abxyIndex), 0, 2);
     values.touchButtonsWithPad = get_bool(j, "touchButtonsWithPad", values.touchButtonsWithPad);
 
-    // METRONOME — a row EVERY platform has, so it is persisted here under the same rule NAV is.
-    // ⚠️ Both defaults are what the app already did (no click at all), so a settings.json written
-    // before this row existed leaves an upgrading user exactly where they were.
+    // METRONOME — persisted like NAV. Absent → no click, as before the row existed.
     values.metronomeEnabled   = get_bool(j, "metronome", values.metronomeEnabled);
     values.metronomeVolume    = clamp(get_int(j, "metronomeVolume", values.metronomeVolume), 0, 255);
 
-    // HELP — OFF / SHORT / FULL. Absent → SHORT, which is what SELECT already did.
+    // HELP — OFF / SHORT / FULL. Absent → SHORT.
     values.helpMode           = clamp(get_int(j, "help", values.helpMode), 0, 2);
 
-    // ── MIDI (B4.3) — the CABLE's half. The song's half is in the .ptp. ──────────────────────────
+    // ── MIDI — the CABLE's half (the song's half is in the .ptp) ─────────────────────────────────
     //
-    // ⚠️ THE DEVICE IS A NAME AND NOT AN INDEX, and MIDI is the case that rule exists for: a port list
-    // is re-enumerated from the OS and reorders on every replug, so an index saved yesterday opens a
-    // different synth today. The shell resolves the name against the live list at boot; a name that is
-    // not there resolves to OFF, which is the truth rather than a wrong guess (settings_editor.h).
-    //
-    // Absent from an older settings.json → OFF / 0 ms, which is what every existing file has.
+    // ⚠️ The device is a NAME, not an index: port lists reorder on every replug. The shell resolves the
+    // name against the live list at boot; a missing name resolves to OFF — the truth, not a wrong guess.
+    // Absent → OFF / 0 ms.
     values.midiOutDevice      = get_string(j, "midi_out_device", values.midiOutDevice);
-    // E2 — the INPUT port. Absent from every settings.json written before phase E → "OFF", which is
-    // also the right default: an app that opened whatever keyboard it found would hold a port another
-    // program wanted, and would do it on the say-so of nobody.
+    // The INPUT port. Absent → "OFF": opening whatever keyboard was found would take a port another
+    // program may want.
     values.midiInDevice       = get_string(j, "midi_in_device", values.midiInDevice);
     values.midiOffsetMs       = clamp(get_int(j, "midi_offset_ms", values.midiOffsetMs), -99, 99);
-    // ⚠️ **MUST FOLLOW THE LINE ABOVE — ITS FALLBACK IS READ OFF THAT VALUE.** Absent from every
-    // settings.json written before AUTO existed, and a blanket `true` would be the upgrade undoing
-    // the user's own measurement: a file carrying a number had it dialled in BY EAR against this
-    // desk's real cable. A file at 0 never had one dialled at all, so AUTO is a straight improvement.
+    // ⚠️ MUST FOLLOW THE LINE ABOVE — its fallback reads that value. Absent → AUTO only if the offset was
+    // 0: a non-zero offset was dialled in by ear against this desk's cable, and an upgrade must not undo it.
     values.midiOffsetAuto     = get_bool(j, "midi_offset_auto", values.midiOffsetMs == 0);
-    // Phase C. Absent → false, which is both the default and what every settings.json written before
-    // phase C says: a file from yesterday must not silently start driving a drum machine today.
+    // Absent → false: an old file must not suddenly start driving a drum machine.
     values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
-    // The knob channel: 0-15 for one, `MIDI_CTL_CH_ALL` for any. Absent → ALL, which is safe as an
-    // upgrade because a CC is CLAIMED rather than reserved (songcore/midi_map.h) — an install with no
-    // mappings has nothing to claim, so not one byte of its cable behaves differently.
-    //
-    // ⚠️ Out of range → ALL, and that also carries the ONE file this ever wrote a `-1` into: the row
-    // offered an OFF it could not leave, because its write-back ignored the very action the cell
-    // advertised. A value no user could have chosen is not a value worth preserving.
+    // The knob channel: 0-15, or `MIDI_CTL_CH_ALL`. Absent → ALL, safe because a CC is CLAIMED, not
+    // reserved (songcore/midi_map.h): with no mappings, no byte behaves differently.
+    // ⚠️ Out of range (including a `-1` an older build could write) → ALL.
     values.midiControlChannel = get_int(j, "midi_control_channel", values.midiControlChannel);
     if (values.midiControlChannel < 0 || values.midiControlChannel > songcore::MIDI_CTL_CH_ALL)
         values.midiControlChannel = songcore::MIDI_CTL_CH_ALL;
     values.midiInVoices = get_int(j, "midi_in_voices", values.midiInVoices);
     if (values.midiInVoices < 1 || values.midiInVoices > 8) values.midiInVoices = 4;
     values.midiVelocity = get_bool(j, "midi_velocity", values.midiVelocity);
-    // AUDIO OUT, by driver NAME — the shell resolves it against the drivers installed now.
+    // AUDIO OUT, by driver NAME — resolved by the shell against the drivers installed now.
     values.audioOutput  = get_string(j, "audio_output", values.audioOutput);
 
-    // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
-    // flips the cap on is the session that must add the key, or the setting resets to ASK on every
-    // launch and nothing anywhere says so. See the header: this is S9's theme-by-name bug's shape, and
-    // the only check that can catch it is a save → load round trip (ptdispatch §28).
-    //
-    // Absent from an older settings.json → the default (ASK) stays, which is the right answer for an
-    // upgrading user: a prompt they can say no to, not a silent restore they never asked for.
+    // ⚠️ RESUME. A row this platform HAS, so it must be persisted; only a save → load round trip catches
+    // the omission (tested). Absent → ASK: a prompt the user can refuse, not a silent restore.
     values.autosaveResumeAuto = get_bool(j, "autosaveResumeAuto", values.autosaveResumeAuto);
 
-    // ── The Android device rows (C6) ─────────────────────────────────────────────────────────────
+    // ── The device rows ──────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️⚠️ **THESE ARE READ AND WRITTEN ON EVERY PLATFORM WHILE NO PLATFORM DISPLAYS THEM, AND THAT IS
-    // DELIBERATE.** This file's header states the rule they appear to break — "only the rows the shell
-    // actually HAS are persisted", because writing a value for a question the platform never asked is
-    // inventing an answer. C6 is the case that rule anticipated in its own next sentence: *"if Android
-    // ever converges onto this UI it brings its own answers with it — and its own keys."* This is that,
-    // arriving one phase before the rows do.
-    //
-    // The ordering is forced, and it is the whole reason these land now rather than in Phase D. The
-    // one-shot prefs import (`SdlActivity.importLegacySettings`) runs BEFORE native boot and writes
-    // these keys into settings.json. If `serialize_settings` did not know them, the very first quit
-    // would rewrite the file without them and the user's BTN SOUND / VIBRO / overlay strength would be
-    // gone — silently, between the import that rescued them and the phase that finally shows them.
-    // A key that is written by one component and dropped by another is worse than a key nobody writes.
-    //
-    // ⚠️ SKIN is now persisted, as a STABLE STRING — this is the "Phase D second pass" the deferral
-    // below anticipated. `portrait_skin` (matching Android's SharedPreferences key) survives the shell's
-    // skin list being reordered; the shell resolves the name to an index at boot (device_skin.h). An
-    // absent key keeps the default, which is what an upgrading user's file has until they touch it.
-    //
-    // ⚠️ OVERLAY is now persisted too, as a STABLE STRING — the "Phase D second pass" the note below
-    // anticipated, landing with D6's CRT overlay. `overlay_name` (matching Android's SharedPreferences
-    // key) survives the shell's overlay list being reordered; the shell resolves the name to an index at
-    // boot (shell/overlay.h), and "OFF" is the no-overlay choice. An absent key keeps the default (OFF),
-    // which is what an upgrading user's file has until they touch it.
-    //
-    // ⚠️ LAYOUT (the row's *mode selection*) is STILL deliberately not here. There is no shell-side layout
-    // MODE override to resolve a name against — the shell auto-selects portrait/landscape by orientation
-    // and fullscreen by controller presence — so Android keeps `layout_mode` in SharedPreferences with no
-    // consumer on this UI. `SETTINGS_IMPORT_VERSION` keeps that versioned and safe.
+    // ⚠️⚠️ Read and written on EVERY platform, even where not displayed. Android's one-shot prefs import
+    // (`SdlActivity.importLegacySettings`) writes these keys before native boot; if the serializer did not
+    // know them, the first quit would drop them. A key one component writes and another drops is worse
+    // than a key nobody writes.
+    // SKIN and OVERLAY are persisted as STABLE STRINGS (`portrait_skin`, `overlay_name`) that survive the
+    // shell's lists being reordered; the shell resolves them at boot (device_skin.h, shell/overlay.h).
+    // LAYOUT's mode is NOT here: the shell auto-selects it (orientation, controller presence), so there
+    // is nothing to resolve a name against.
     values.portraitSkin       = get_string(j, "portrait_skin", values.portraitSkin);
     values.overlayName        = get_string(j, "overlay_name",  values.overlayName);
     values.buttonSoundEnabled = get_bool(j, "buttonSound",  values.buttonSoundEnabled);
@@ -165,33 +118,19 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.vibroPower         = clamp(get_int(j, "vibroPower",        values.vibroPower),        0, 255);
     values.overlayStrength    = clamp(get_int(j, "overlayStrength",   values.overlayStrength),   0, 255);
 
-    // The visualizer is the theme's field but the USER's choice, so it survives the theme load below —
-    // which is why it is read first and handed in rather than left to be overwritten.
+    // The visualizer is the theme's field but the USER's choice: read first, so a theme load below
+    // cannot overwrite it.
     const int viz = clamp(get_int(j, "visualizer", static_cast<int>(theme.visualizerType)),
                           0, VISUALIZER_COUNT - 1);
 
-    // ⚠️⚠️ THE WHOLE PALETTE, NOT ITS NAME — AND UNTIL S9 THIS WAS A NAME.
-    //
-    // S7 wrote `theme = theme_by_name(j["theme"], viz)` and was RIGHT TO, on the state of the world it
-    // was written in: the four built-ins were the entire palette set, so a name WAS a palette and
-    // re-deriving one from the other was lossless. The THEME EDITOR ends that. A theme is now an
-    // arbitrary eighteen-colour palette that exists nowhere but in this file, and storing its NAME threw
-    // away every colour the user had dialled — silently, on every quit, with the app cheerfully coming
-    // back up in CLASSIC. Android never had the bug: it serializes the entire AppTheme into
-    // SharedPreferences (`prefs["app_theme"]`, MainActivity), which is exactly what this now mirrors.
-    //
-    // ⚠️ NO TOOL IN THE LADDER COULD HAVE SEEN IT. ptinput compares the cell an edit lands in; ptdispatch
-    // drives the dispatcher. Neither one QUITS AND RELAUNCHES THE APP — and that is the only place this
-    // bug lives. It is the recurring shape, one more time: an assumption that was true when it was made,
-    // invalidated by the layer built on top of it, in a channel nothing was pointed at. `ptdispatch` §27
-    // is pointed at it now (save → load → the colours are still there).
-    //
-    // The nested object is a `.ptt` in all but name: it goes through the SAME serializer, so a palette in
-    // settings.json and a palette on the SD card cannot drift apart in format.
+    // ⚠️⚠️ The WHOLE PALETTE, not its name: a theme can be an invented palette that exists nowhere but
+    // here, and a name would lose every dialled colour on quit. Only a save → load round trip can see
+    // that (tested). The nested object goes through the `.ptt` serializer, so the two formats
+    // cannot drift.
     if (const auto it = j.find("appTheme"); it != j.end() && it->is_object())
         parse_theme(it->dump(), theme);
     else
-        theme = theme_by_name(get_string(j, "theme", theme.name), theme.visualizerType);  // pre-S9 file
+        theme = theme_by_name(get_string(j, "theme", theme.name), theme.visualizerType);  // an older file
 
     theme.visualizerType = static_cast<VisualizerType>(viz);
     return true;
@@ -200,12 +139,9 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
 namespace {
 
 /**
- * The exact bytes `settings.json` should hold for this state.
- *
- * ⚠️ ONE writer, deliberately: `save_settings_if_changed` COMPARES against this and `save_settings`
- * WRITES it, so the two can never disagree about format. A second copy of the layout would make the
- * comparison drift from the write, and the file would then be rewritten on every quit (harmless) or
- * never (silent loss) depending on which way it drifted.
+ * The exact bytes `settings.json` should hold. ⚠️ ONE writer: `save_settings_if_changed` compares
+ * against this and `save_settings` writes it, so format cannot drift between the comparison and the
+ * write.
  */
 std::string serialize_settings(const SettingsValues& values, const Theme& theme) {
     json j;
@@ -213,8 +149,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["insertBefore"]       = values.insertBefore;
     j["cursorRemember"]     = values.cursorRemember;
     j["notePreview"]        = values.notePreviewEnabled;
-    j["rememberFolder"]     = values.rememberFolder;      // D2a — FOLDER row (the toggle only; the
-                                                          // remembered PATH is session-only, not saved)
+    j["rememberFolder"]     = values.rememberFolder;      // the FOLDER toggle (its path is session-only)
     j["navSongRelative"]    = values.navSongRelative;   // the NAV row — POOL / SONG
     j["abxy"]               = values.abxyIndex;            // the ABXY row - 0 AUTO, 1 XBOX, 2 NINTENDO
     j["touchButtonsWithPad"] = values.touchButtonsWithPad; // LAYOUT s FULL / PORTRAIT under a pad
@@ -222,36 +157,31 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["metronomeVolume"]    = values.metronomeVolume;
     j["help"]               = values.helpMode;             // the HELP row - 0 OFF, 1 SHORT, 2 FULL
     j["trace"]              = values.traceEnabled;
-    j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
+    j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);
 
-    // B4.3 — the MIDI screen's two cable settings. `midi_out_device` is a stable NAME string, for the
-    // same reason `portrait_skin` and `overlay_name` below are (see load_settings).
+    // The MIDI cable settings. `midi_out_device` is a stable NAME, like `portrait_skin` (load_settings).
     j["midi_out_device"]    = values.midiOutDevice;
-    j["midi_in_device"]     = values.midiInDevice;   // E2 — the INPUT port, a NAME for the same reason
+    j["midi_in_device"]     = values.midiInDevice;   // a NAME, for the same reason
     j["midi_offset_ms"]     = values.midiOffsetMs;
     j["midi_offset_auto"]   = values.midiOffsetAuto;
-    j["midi_sync_out"]      = values.midiSyncOut;   // phase C — the clock + transport switch
-    j["midi_control_channel"] = values.midiControlChannel;   // -1 = OFF, else 0-15 (shown 01-16)
+    j["midi_sync_out"]      = values.midiSyncOut;   // the clock + transport switch
+    j["midi_control_channel"] = values.midiControlChannel;   // 0-15 (shown 01-16), or MIDI_CTL_CH_ALL
     j["midi_in_voices"]       = values.midiInVoices;         // 1 = MONO, 2-8 = POLY
     j["midi_velocity"]        = values.midiVelocity;
     j["audio_output"]         = values.audioOutput;
 
-    // The Android device rows — see the matching block in load_settings for why these are written on
-    // every platform a full phase before any of them is displayed. On the shell they are simply their
-    // defaults; on Android they are what the C6 import rescued out of SharedPreferences. `portrait_skin`
-    // is the one selection now LIVE on the shell (Phase D), written as a stable id string.
+    // The device rows — written on every platform (see load_settings).
     j["portrait_skin"]      = values.portraitSkin;
-    j["overlay_name"]       = values.overlayName;   // D6 — the overlay SELECTION, a stable id string
+    j["overlay_name"]       = values.overlayName;   // the overlay SELECTION, a stable id string
     j["buttonSound"]        = values.buttonSoundEnabled;
     j["buttonSoundVolume"]  = values.buttonSoundVolume;
     j["buttonVibro"]        = values.buttonVibroEnabled;
     j["vibroPower"]         = values.vibroPower;
     j["overlayStrength"]    = values.overlayStrength;
 
-    // The palette itself, through the `.ptt` serializer (see load_settings). `theme` is still written
-    // beside it, and NOT as a leftover: it is what an OLDER build reads, and what a human scanning the
-    // file sees. The reader prefers `appTheme` and falls back to it.
+    // The palette itself, through the `.ptt` serializer. `theme` is written too: older builds read it,
+    // and a human scanning the file sees it.
     j["theme"]    = theme.name;
     j["appTheme"] = json::parse(serialize_theme(theme), nullptr, /*allow_exceptions=*/false);
 
@@ -268,9 +198,8 @@ SettingsWrite save_settings_if_changed(FileSystem& fs, const SettingsValues& val
                                        const Theme& theme) {
     const std::string wanted = serialize_settings(values, theme);
 
-    // ⚠️ A file that cannot be READ is a file that must be WRITTEN — first launch (no file at all), and
-    // an unreadable or hand-mangled one, both land here and both want the current state put down. The
-    // `!=` is what makes an untouched session a no-op without anyone having to have remembered to say so.
+    // ⚠️ A file that cannot be READ must be WRITTEN (first launch, or a mangled file). The `!=` makes an
+    // untouched session a no-op.
     std::string current;
     if (fs.read_file(fs.settings_path(), current) && current == wanted) return SettingsWrite::UNCHANGED;
 

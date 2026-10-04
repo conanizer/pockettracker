@@ -2,18 +2,11 @@
 
 // ─── .ptg — a groove, as a file ──────────────────────────────────────────────────────────────────
 //
-// `ui/scale_io.h` for one of the project's grooves, and deliberately the same file in every respect
-// it can be: a small human-readable document a user can save, rename, hand to someone else, or drop
-// onto an SD card. Where the two differ it is noted below; where they do not, the reasoning is over
-// there and is not repeated.
-//
-// ⚠️ IT ALWAYS WRITES `steps`, where a `.ptp` writes a field only when it differs from the default.
-// A `.ptg` has exactly one subject, and a STRAIGHT groove written under the project's rule would be
-// an empty object — a file that says nothing about the only thing it is for.
-//
-// ⚠️ A LOAD NEVER TOUCHES THE SLOT'S `id`. The id is *which of the grooves this is*, and `GRV` in a
-// phrase names it; copying an id out of a file would let a groove saved from slot 3 renumber slot 9
-// on the way in, and silently move every phrase that pointed at either.
+// The twin of `ui/scale_io.h` (the reasoning is there): a small human-readable file to save, share
+// or drop onto an SD card.
+// ⚠️ ALWAYS writes `steps` — under the .ptp's omit-defaults rule a STRAIGHT groove would be `{}`.
+// ⚠️ A load never touches the slot's `id`: `GRV` names slots, and an id copied from a file would
+// renumber them.
 
 #include <cctype>
 #include <string>
@@ -27,15 +20,11 @@
 
 namespace pt::ui {
 
-/** The extension, in one place — the browser's filter, the save path and the seed all read it. */
+/** The extension — the browser's filter, the save path and the seed all read it. */
 inline constexpr const char* GROOVE_FILE_EXT = "ptg";
 
-/**
- * A groove → `.ptg` bytes. Pretty-printed: this is a file a person may open.
- *
- * ⚠️ The array writer and the readers below are `project_io`'s own (`songcore::detail`), reached
- * into deliberately rather than reimplemented — the same bargain `scale_io.h` states at length.
- */
+/** A groove → `.ptg` bytes, pretty-printed. Uses `project_io`'s own writer and readers
+ *  (`songcore::detail`), as scale_io.h does. */
 inline std::string serialize_groove(const songcore::Groove& g) {
     songcore::JsonWriter w{songcore::JsonLayout::Pretty};
     w.begin_object();
@@ -45,12 +34,8 @@ inline std::string serialize_groove(const songcore::Groove& g) {
     return std::move(w.out);
 }
 
-/**
- * `.ptg` bytes → the shape half of a groove. `out` keeps its `id`; everything else the file names is
- * replaced, and everything it does not name keeps what `out` already held.
- *
- * Returns false only when the text is not a JSON object.
- */
+/** `.ptg` bytes → the groove's shape. `out` keeps its `id` and any field the file does not name.
+ *  False only when the text is not a JSON object. */
 inline bool parse_groove_text(const std::string& text, songcore::Groove& out) {
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
@@ -59,11 +44,10 @@ inline bool parse_groove_text(const std::string& text, songcore::Groove& out) {
     g.name  = songcore::detail::get_str(j, "name", g.name);
     g.steps = songcore::detail::parse_int_array(j, "steps", g.steps);
 
-    // The GROOVE screen indexes all sixteen directly with a cursor row, and a hand-edited or
-    // truncated file could hand it fewer — the repair `parse_groove` makes inside a project.
+    // The GROOVE screen indexes all sixteen by cursor row; a hand-edited file may hold fewer.
     g.steps.resize(16, -1);
     for (int& v : g.steps)
-        if (v < -1 || v > 255) v = -1;           // outside the legal range, the row is simply absent
+        if (v < -1 || v > 255) v = -1;           // out of range: the row is absent
 
     out = g;
     return true;
@@ -82,12 +66,9 @@ inline bool load_groove_file(FileSystem& fs, const std::string& path, songcore::
 }
 
 /**
- * A groove name, as a FILENAME: anything outside `[A-Za-z0-9_]` becomes `_`, so a name survives a
- * FAT32 card. The SPACE in "TRIPLET 16" is what makes it matter for the factory bank, which is the
- * one caller that hits it every time.
- *
- * ⚠️ It does not supply the empty fallback — the callers do, because `<Grooves>/.ptg` is a dotfile
- * the browser does not list, and a save that produces an invisible file reports success by silence.
+ * A groove name as a FILENAME: anything outside `[A-Za-z0-9_]` becomes `_` (FAT32-safe; the factory
+ * bank's "TRIPLET 16" needs it).
+ * ⚠️ No empty fallback here — callers supply it, since `<Grooves>/.ptg` is a dotfile the browser hides.
  */
 inline std::string sanitize_groove_filename(const std::string& name) {
     std::string out;
@@ -101,19 +82,14 @@ inline std::string sanitize_groove_filename(const std::string& name) {
 }
 
 /**
- * Write the compiled-in factory bank to the Grooves folder, so the shapes exist as files that can be
- * edited, renamed and shared. `seed_scale_bank`'s twin, on the same two terms:
- *
- * ⚠️ THE TEST IS "DOES THIS FOLDER HOLD ANY `.ptg` AT ALL", not "is each file missing" — a user who
- * deletes the ones they never use has made a decision, and a per-file seed would undo it on every
- * launch. ⚠️ AND IT NEVER OVERWRITES, so an edited file of the same name is safe.
- *
- * Returns how many files it wrote — 0 when the folder already had grooves in it.
+ * Write the compiled-in factory bank to the Grooves folder as editable, shareable files.
+ * ⚠️ Only when the folder holds NO `.ptg` at all — a user who deleted some made a decision. Never
+ * overwrites. Returns how many were written.
  */
 inline int seed_groove_bank(FileSystem& fs) {
     const std::string dir = fs.grooves_directory();
 
-    // ⚠️ Lower-cased before it is compared: `FileInfo::extension` is the case that is ON DISK.
+    // ⚠️ Lower-cased first: `FileInfo::extension` is the on-disk case.
     for (const FileInfo& f : fs.list_files(dir)) {
         if (f.isDirectory) continue;
         std::string ext = f.extension;

@@ -8,11 +8,8 @@ namespace pt::ui {
 namespace {
 
 /**
- * The 5×5 template: what each COLUMN holds, top to bottom. `nullopt` (here: the NONE sentinel) is an
- * empty cell. Rows 3 and 4 are MIXER/EFFECTS in every column because they are shared; row 2 is the
- * main row and is filled in separately, since it is drawn whatever column you are in.
- *
- *   COLUMN_LAYOUTS in the Kotlin, verbatim — only the phrase and instrument columns have five screens.
+ * The 5×5 template: what each COLUMN holds, top to bottom; EMPTY_CELL is empty. Rows 3 and 4 are the
+ * shared MIXER/EFFECTS; row 2, the main row, is filled in separately.
  */
 constexpr int EMPTY_CELL = -1;
 
@@ -26,7 +23,7 @@ int column_layout(int col, int row) {
         {(int)ScreenType::INST_POOL, (int)ScreenType::MODS,   (int)ScreenType::INSTRUMENT, (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
         {EMPTY_CELL,        (int)ScreenType::PROJECT,   (int)ScreenType::TABLE,      (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
     };
-    if (col < 0 || col > 4) col = 2;  // the phrase column is the fallback, as in Kotlin
+    if (col < 0 || col > 4) col = 2;  // the phrase column is the fallback
     return L[col][row];
 }
 
@@ -55,10 +52,8 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
     const int col = (currentCol < 0 || currentCol > 4) ? 2 : currentCol;
     for (int row = 0; row < 5; ++row) grid[row][col] = column_layout(col, row);
 
-    // The pool's fast-jump INSTRUMENT cell, at row 0 / col 4 — to the RIGHT of the pool (row 0 / col
-    // 3), which is where R+RIGHT goes from there. It shows both while ON the pool and while on an
-    // INSTRUMENT reached from it; in the latter case THAT cell is the current position, not the normal
-    // row-2 instrument (they share a ScreenType, so position — not identity — is what disambiguates).
+    // The pool's fast-jump INSTRUMENT cell at row 0 / col 4, right of the pool. On an INSTRUMENT reached
+    // from the pool, THAT cell is the current position (same ScreenType, so position disambiguates).
     const bool onPoolInstrument = (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool);
     if (s.currentScreen == ScreenType::INST_POOL || onPoolInstrument)
         grid[0][4] = static_cast<int>(ScreenType::INSTRUMENT);

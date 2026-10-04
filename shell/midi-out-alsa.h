@@ -1,7 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_OUT_ALSA_H
 #define POCKETTRACKER_SHELL_MIDI_OUT_ALSA_H
 
-// The LINUX songcore::IMidiOut — ALSA rawmidi, reached through dlopen. MIDI plan phase B2b.
+// The LINUX songcore::IMidiOut — ALSA rawmidi, reached through dlopen.
 // See midi-out-alsa.cpp for why rawmidi and not seq, and why dlopen and not -lasound.
 // Compiles to nothing off desktop/handheld Linux, so main.cpp can name the header unconditionally.
 
@@ -16,10 +16,6 @@
 
 namespace ptshell {
 
-// ⚠️ **`AlsaApi`, THE LOADER AND THE DEVICE WALK MOVED TO alsa-rawmidi.h AT E5**, when the INPUT
-// backend turned out to need every one of them and to differ by a single integer (`STREAM_INPUT`
-// instead of `STREAM_OUTPUT`). Everything this file used to say about hand-copied prototypes and about
-// `tools/ptalsa` still holds and now lives there.
 
 class AlsaMidiOut : public MidiOutBase {
   public:

@@ -2,22 +2,11 @@
 
 // ─── The EFFECTS screen's row geometry ───────────────────────────────────────────────────────────
 //
-// The ONE table the cursor walks and the module draws, in the shape SETTINGS and PROJECT already have
-// (ui/settings_row_layout.h) and for the reason those two grew it: a row's PLACE on screen and its
-// NUMBER are two different things, and the delay section has now been added to from both ends.
-//
-// ⚠️ A ROW'S NUMBER IS ITS IDENTITY. `tools/testdata/units/p3-input.txt` records 321 EFFECTS cases by
-// row NUMBER, so a row may be APPENDED but never INSERTED — which is why the delay-character rows are
-// 8..11 and the reverb-character rows 12..15 while both draw among the rows numbered 1..7.
-// EFFECTS_DISPLAY_LINES below is where the position is said, and it is the only place.
-//
-// ⚠️ Both sections draw in TWO COLUMNS, so a drawn LINE is not a row: six of the lines carry a cell on
-// each side. That is why everything below is addressed by line, and why the cursor needs a sideways
-// step as well as an up-and-down one.
-//
-// ⚠️ Unlike SETTINGS and PROJECT, no row here is conditional. The delay's character used to hide TONE
-// and WOBL under the types that read them; the cells are all independent now, so they are all always
-// there — which is the whole point of them.
+// The ONE table the cursor walks and the module draws: a row's PLACE on screen and its NUMBER differ.
+// ⚠️ A row's NUMBER is its identity — the recorded EFFECTS input cases address rows by number — so rows
+// are APPENDED, never inserted. EFFECTS_DISPLAY_LINES is the only place position is stated.
+// ⚠️ Both sections draw in TWO COLUMNS, so a drawn LINE is not a row; everything is addressed by line,
+// and the cursor needs a sideways step. No row is conditional.
 
 namespace pt::ui {
 
@@ -88,10 +77,8 @@ constexpr EffectsSection effects_row_section(EffectsRow row) {
 
 /**
  * One DRAWN line: a single cell, or two side by side.
- *
- * ⚠️ An UNPAIRED line answers with the SAME cell in either column, which is what makes both walkers
- * below branchless and total: stepping sideways on a single cell stays put, and coming DOWN the right
- * column onto a single cell lands on it rather than nowhere.
+ * An UNPAIRED line answers the SAME cell in either column, which keeps both walkers branchless: a
+ * sideways step stays put, and coming down the right column onto a single cell lands on it.
  */
 struct EffectsDisplayLine {
     EffectsRow cell[2];
@@ -105,27 +92,14 @@ struct EffectsDisplayLine {
 inline constexpr int EFFECTS_LINE_COUNT = 11;
 
 /**
- * The order the rows are DRAWN and the D-pad walks — decoupled from the enum VALUE above, which stays
- * each row's identity.
- *
- * Both sends read as a pair of columns under a TYPE, and mostly the same way round: the cells that
- * shape the effect's own character on the LEFT, the cells that size and colour it on the RIGHT. TYPE
- * leads each because it is the one that writes the others.
- *
- * ⚠️ The reverb's last line is the deliberate exception — INP EQ on the LEFT and MOD on the right —
- * so that both sends' EQ cells sit in the same column, at the foot of the screen. An EQ cell is the
- * only one here that opens another screen rather than holding a value, and it is easier to find when
- * the two of them line up than when each obeys its own section's grouping.
- *
- * ⚠️ SIZE sits beside the reverb's TYPE rather than on a line of its own, so the right column reads
- * SIZE, DCAY, DAMP — the room, how long it rings, how dark it goes.
- *
- * ⚠️ ALGO has a line of its own above TYPE — every cell in the reverb section already has a partner.
- *
- * ⚠️⚠️ **TEN DRAWN LINES IS EXACTLY WHAT THE PANEL HOLDS, AND THIS IS ELEVEN, SO THE SCREEN SCROLLS BY
- * ONE LINE** to reach the delay's last. Every cell is still reachable — the title stays pinned and the
- * clip keeps the rows off it. A row added to either section costs a LINE only if it has no partner,
- * so the cheap place to add one is beside a cell that is alone: ALGO and the DELAY's TYPE.
+ * The order rows are DRAWN and the D-pad walks, independent of the enum VALUE (the identity).
+ * Each send is a pair of columns under its TYPE (which writes the others): character on the LEFT, size
+ * and colour on the RIGHT. SIZE sits beside the reverb's TYPE so the right column reads SIZE, DCAY,
+ * DAMP; ALGO has a line of its own above TYPE.
+ * ⚠️ Exception: the reverb's last line puts INP EQ on the LEFT so both sends' EQ cells — which open a
+ * screen rather than hold a value — line up at the foot.
+ * ⚠️ The panel holds ten lines and this is eleven, so the screen scrolls by one (title pinned). A new
+ * row is cheapest beside a cell that is alone (ALGO, the delay's TYPE).
  */
 inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = {
     {EffectsRow::MASTER_TYPE},
@@ -146,10 +120,8 @@ inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = 
 namespace detail {
 
 /**
- * The two things every walker here assumes, checked off the table itself rather than trusted: every
- * row is drawn exactly once, and a paired line's two cells belong to the same section (the header
- * walk reads the section off the LEFT cell alone, so a split pair would draw one of them under the
- * wrong heading).
+ * Checked off the table itself: every row drawn exactly once, and a paired line's cells in the same
+ * section (headers read the section off the LEFT cell).
  */
 constexpr bool effects_lines_are_well_formed() {
     int seen[EFFECTS_ROW_COUNT] = {};
@@ -187,10 +159,8 @@ inline EffectsCellPos effects_cell_pos(int row) {
 }
 
 /**
- * Where every row and every header lands, counted in LINES from the screen's title.
- *
- * The screen draws a title, then for each section a blank line, a header, and the section's lines.
- * A paired line's two rows share one line number, because they share one line.
+ * Where every row and header lands, in LINES from the title: per section a blank line, a header, then
+ * its lines. A paired line's two rows share one line number.
  */
 struct EffectsLayout {
     int rowLine[EFFECTS_ROW_COUNT];
@@ -218,11 +188,8 @@ inline EffectsLayout effects_layout() {
     return out;
 }
 
-/**
- * The next row's VALUE one line up or down (+1 = down, −1 = up), keeping the column it is in. ⚠️ It
- * CLAMPS rather than wrapping, which is what this screen has always done and what the recorded
- * EFFECTS cases expect — unlike SETTINGS and PROJECT, whose rows wrap.
- */
+/** The row one line up or down (+1 down, −1 up), keeping its column. ⚠️ CLAMPS — the recorded
+ *  EFFECTS cases expect it, unlike SETTINGS and PROJECT, which wrap. */
 inline int effects_next_row(int from, int delta) {
     const EffectsCellPos at   = effects_cell_pos(from);
     const int            line = at.line + delta;
@@ -230,10 +197,7 @@ inline int effects_next_row(int from, int delta) {
     return static_cast<int>(EFFECTS_DISPLAY_LINES[line].cell[at.column]);
 }
 
-/**
- * The row's VALUE one column left or right. It SNAPS, the way SETTINGS' two columns do: there are
- * only ever two, so a step and a snap are the same move. On a single-cell line it stays put.
- */
+/** The row one column left or right. SNAPS (only two columns); stays put on a single-cell line. */
 inline int effects_step_column(int from, int delta) {
     const EffectsCellPos at = effects_cell_pos(from);
     return static_cast<int>(EFFECTS_DISPLAY_LINES[at.line].cell[delta < 0 ? 0 : 1]);

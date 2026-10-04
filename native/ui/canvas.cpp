@@ -6,9 +6,8 @@ namespace pt::ui {
 
 namespace {
 
-// src-over, 8-bit, integer. Compose composites a translucent colour onto the canvas exactly this
-// way; the only place the UI needs it is the dialog/overlay backdrop (0xCC000000), but a canvas that
-// silently ignored alpha would make that backdrop opaque black and hide the screen behind it.
+// src-over, 8-bit, integer. The dialog/overlay backdrop (0xCC000000) is the one translucent fill; a
+// canvas ignoring alpha would draw it opaque and hide the screen behind.
 inline uint32_t blend(uint32_t dst, uint32_t src) {
     const uint32_t sa = (src >> 24) & 0xFF;
     if (sa == 0xFF) return src;
@@ -16,9 +15,8 @@ inline uint32_t blend(uint32_t dst, uint32_t src) {
     const uint32_t ia = 255 - sa;
     const uint32_t sr = (src >> 16) & 0xFF, sg = (src >> 8) & 0xFF, sb = src & 0xFF;
     const uint32_t dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF, db = dst & 0xFF;
-    // +127 rounds to nearest rather than truncating — the difference is a single LSB, but the
-    // backdrop is drawn over the whole screen and a truncating blend darkens it visibly over time
-    // if it is ever composited twice.
+    // +127 rounds to nearest: a truncating blend darkens the full-screen backdrop visibly if it is
+    // ever composited twice.
     const uint32_t r = (sr * sa + dr * ia + 127) / 255;
     const uint32_t g = (sg * sa + dg * ia + 127) / 255;
     const uint32_t b = (sb * sa + db * ia + 127) / 255;
@@ -26,14 +24,9 @@ inline uint32_t blend(uint32_t dst, uint32_t src) {
 }
 
 /**
- * Decode one UTF-8 code point at `i`, advancing `i` past it. Malformed input consumes one byte and
- * yields U+FFFD, which draws blank — a text renderer must never loop forever or run off the end on a
- * byte it does not understand.
- *
- * Why the UI needs UTF-8 at all: the MODS screen draws its mod-to-mod destinations as "→M2 AMT", and
- * that arrow is a real glyph in the Kotlin font (BitmapFont5x5 keys it by the literal '→'). It is the
- * only non-ASCII character the whole UI draws — but a byte-wise loop would render it as THREE blanks
- * and shift the label two cells right, which is a visible parity break, not a rounding error.
+ * Decode one UTF-8 code point at `i`, advancing past it. Malformed input consumes one byte and yields
+ * U+FFFD (drawn blank) — never loop or run off the end. Needed for MODS' "→M2 AMT": byte-wise, the
+ * arrow would draw as three blanks and shift the label.
  */
 inline uint32_t next_codepoint(const std::string& s, size_t& i) {
     const auto b0 = static_cast<unsigned char>(s[i]);
@@ -90,8 +83,7 @@ void Canvas::blend_px(int x, int y, Argb color) {
 void Canvas::fill_rect(int x, int y, int w, int h, Argb color) {
     if (w <= 0 || h <= 0) return;
 
-    // Clamp to the clip once, then run the rows — a per-pixel clip test across a full-screen
-    // backdrop is 300k branches the rasteriser does not need.
+    // Clamp to the clip once, then run the rows — no per-pixel clip test.
     const int x0 = std::max(x, clipX_);
     const int y0 = std::max(y, clipY_);
     const int x1 = std::min(x + w, clipX_ + clipW_);
@@ -118,19 +110,11 @@ void Canvas::stroke_rect(int x, int y, int w, int h, Argb color, int thickness) 
     fill_rect(x + w - t, y + t, t, h - 2 * t, color);  // right
 }
 
-// One source pixel becomes a font_scale × font_scale block — nearest-neighbour by construction, which
-// is what keeps the glyphs hard-edged (Compose has to ask for FilterQuality.None to get the same thing
-// out of its atlas blit).
-//
-// ⚠️ THE BLOCKS ARE EMITTED AS RECTANGLES, NOT ONE PER LIT PIXEL, AND THE PIXELS MUST NOT CHANGE.
-// Text is 67–77 % of a frame (measured: with draw_glyph stubbed out, PHRASE goes 381 → 89 µs), and it
-// is spent in `fill_rect`'s per-call clip clamp rather than in the writes, which are nine bytes. So
-// identical adjacent ROWS merge into one band, and each band's horizontal RUNS become one rect —
-// 7.0–12.7 calls per glyph become 2.1–5.1, a 58–70 % cut depending on which characters a screen draws.
-//
-// The rects tile the same union with no overlap, exactly as the one-per-pixel version did, so a
-// translucent colour composites identically too — every covered pixel is still blended exactly once.
-// That is the safety argument; `ptshot` is what holds it, since every golden pixel comes through here.
+// One source pixel becomes a font_scale × font_scale block (nearest-neighbour, hard-edged).
+// ⚠️ Emitted as RECTANGLES, not one per lit pixel: text is most of a frame's cost, and it goes into
+// `fill_rect`'s clip clamp, so identical adjacent rows merge into bands and each band's runs into one
+// rect. The rects tile the same union with no overlap, so a translucent colour blends each pixel once,
+// exactly as before — the screenshot goldens hold this, since every pixel comes through here.
 void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale) {
     if (font_scale <= 0) return;
     for (int row = 0; row < 5;) {
@@ -189,9 +173,8 @@ std::string Canvas::clip_text(const std::string& text, int max_glyphs) {
     while (i < text.size()) {
         if (n == max_glyphs - 1) cut = i;
         next_codepoint(text, i);
-        // Only a glyph BEYOND the budget proves anything was lost. At exactly `max_glyphs` the
-        // string fits and must come back whole — spending a column on a marker for nothing is how
-        // a name that fits loses its last character.
+        // Only a glyph BEYOND the budget means something was cut; at exactly `max_glyphs` the string
+        // fits and comes back whole.
         if (++n > max_glyphs) return text.substr(0, cut) + "\xE2\x80\xA6";
     }
     return text;
@@ -202,8 +185,7 @@ std::string Canvas::clip_text_head(const std::string& text, int max_glyphs) {
     const int total = glyph_count(text);
     if (total <= max_glyphs) return text;
 
-    // Skip whatever does not fit, marker included, and keep the rest — walking from the front is the
-    // only way to land on a code-point boundary, since UTF-8 cannot be read backwards from an offset.
+    // Walk from the front: only that lands on a code-point boundary.
     size_t i = 0;
     for (int skip = total - (max_glyphs - 1); skip > 0; --skip) next_codepoint(text, i);
     return "\xE2\x80\xA6" + text.substr(i);

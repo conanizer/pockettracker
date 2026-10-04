@@ -24,10 +24,9 @@ import android.view.View
  *   4. API <29: View.performHapticFeedback (VIRTUAL_KEY / VIRTUAL_KEY_RELEASE)
  *      — system-default feel, ignores [power]
  *
- * ⚠️ POW-as-vibration was the first cut of this (createOneShot ahead of predefined): it made POW work
- * but turned every press into a buzz. On an actuator without Composition primitives, crisp-haptic and
- * continuous-POW cannot both be had — the predefined family is the crisp-haptic answer, and POW steps
- * through it. Only virtual-button (touch) layouts reach this; physical-pad devices never call it.
+ * ⚠️ Without Composition primitives, crisp feel and continuous POW cannot both be had: the predefined
+ * family keeps the crisp haptic and POW steps through it (an amplitude one-shot honours POW but
+ * buzzes). Only touch layouts reach this.
  *
  * VIBRATE permission must be declared in AndroidManifest.xml.
  */
@@ -110,11 +109,9 @@ class ButtonHapticManager(context: Context) {
     }
 
     /**
-     * Map POW (1..255) onto a predefined "click": light below the midpoint, strong above it. Two steps,
-     * not three — on the actuators tested (Xiaomi 12T Pro / LineageOS), only EFFECT_TICK (light) and
-     * EFFECT_CLICK (strong) are distinct; EFFECT_HEAVY_CLICK collapses onto TICK, so it is not used.
-     * This keeps the crisp HAPTIC feel (a tuned click) instead of a buzzy amplitude one-shot, while POW
-     * still changes the pulse. No Composition primitives on these ROMs, so continuous POW isn't crisp.
+     * Map POW (1..255) onto a predefined "click": light below the midpoint, strong above it. Two
+     * steps: on the actuators tested only EFFECT_TICK and EFFECT_CLICK are distinct
+     * (EFFECT_HEAVY_CLICK collapses onto TICK). No Composition primitives there, so POW isn't continuous.
      */
     private fun predefinedForPower(p: Int): Int =
         if (p < 128) VibrationEffect.EFFECT_TICK else VibrationEffect.EFFECT_CLICK

@@ -3,26 +3,15 @@
 
 // midi_map.h — a controller's knob moves a parameter in the song.
 //
-// ⭐⭐ **THE CATALOGUE BELOW IS THE FEATURE; THE SCREEN IS THE CHEAP PART.** Everywhere else in this
-// app the cursor sitting on a cell is enough to say what is being edited — a module answers
-// `cursor_context()` with "a hex byte, 0..255" and one generic handler does the rest. That makes a
-// cursor position a SEAT, not a name, and a seat cannot be stored: `instrument_row_layout.h` is 16
-// rows for a sampler and 15 for a SoundFont, so the same seat is a different knob after a type
-// change. A mapping has to name a PARAMETER, so this file is where parameters get names.
+// A mapping must name a PARAMETER, not a cursor position: the same row index is a different knob on a
+// sampler and a SoundFont instrument. This catalogue is where parameters get names.
 //
-// ⚠️⚠️ **AN ENTRY'S ID IS ITS IDENTITY AND IT IS WRITTEN INTO THE .ptp. APPEND, NEVER INSERT, NEVER
-// REUSE, NEVER RENUMBER** — the rule `EFFECT_TYPES`, `SettingsRow` and `InstrumentType` already live
-// under, for the same reason. Removing a parameter means leaving its id dead, not closing the gap.
-// Lookup is BY ID rather than by array index so the table's order is free to change.
-//
-// ⚠️ A `scope` is what the id alone cannot say: which track's fader, which instrument's cutoff. It is
-// resolved when the mapping is LEARNED and stored — "instrument 3's cutoff", never "the cutoff of
-// whatever instrument is selected", which is the only reading that survives the cursor moving.
-//
-// ⚠️ **RANGES ARE IN THE DESTINATION'S OWN UNITS, never 0..127.** A volume is 0..255, a crush is
-// 0..15. A user who sets a cutoff range has to type the numbers the cutoff row shows them, so the
-// range a mapping carries is bounded by the catalogue entry's own min/max, and `scale_cc` below is
-// the ONE place a 0..127 controller value becomes one of them.
+// ⚠️ An entry's id is written into the .ptp: APPEND, never insert, reuse or renumber. A removed
+// parameter leaves its id dead. Lookup is by id, so the array's order is free.
+// ⚠️ `scope` (which track, which instrument) is resolved when the mapping is LEARNED and stored —
+// "instrument 3's cutoff", never "the selected instrument's".
+// ⚠️ Ranges are in the destination's own units (volume 0..255, crush 0..15); `scale_cc` is the one
+// place a 0..127 controller value becomes one of them.
 
 #include <algorithm>
 #include <cstdint>
@@ -40,13 +29,8 @@ enum class MapScope : uint8_t {
 };
 
 /**
- * Which cluster a destination belongs to — how a person picks one out of twenty-eight.
- *
- * ⚠️ **NOT DERIVABLE FROM `MapScope`**: MASTER, REVERB and DELAY all have no scope index, so the
- * scope cannot tell them apart. It is a second axis and it is stored as one.
- *
- * ⚠️ A group is a READING aid and never an identity — nothing outside the screen stores it, so
- * regrouping a destination is free where renumbering its id is not.
+ * Which cluster a destination belongs to, for picking one. Not derivable from `MapScope` (MASTER,
+ * REVERB and DELAY all have none). A reading aid, never stored, so regrouping is free.
  */
 enum class MapGroup : uint8_t {
     TRACK,
@@ -58,7 +42,7 @@ enum class MapGroup : uint8_t {
 
 inline constexpr int MAP_GROUP_COUNT = 5;
 
-/** Three characters, because the list row spends its width on the parameter name beside it. */
+/** Three characters: the list row spends its width on the parameter name. */
 inline const char* map_group_name(MapGroup g) {
     switch (g) {
         case MapGroup::TRACK:      return "TRK";
@@ -71,10 +55,8 @@ inline const char* map_group_name(MapGroup g) {
 }
 
 /**
- * ⚠️⚠️ **APPEND ONLY. A NUMBER HERE IS A NUMBER IN SOMEONE'S SAVED SONG.**
- *
- * Which parameters are in the list at all is a decision, not a sweep of everything editable: a
- * parameter earns a place by being worth turning while the song plays.
+ * ⚠️ APPEND ONLY — a number here is a number in someone's saved song. A parameter is listed only if
+ * it is worth turning while the song plays.
  */
 enum class MapDestId : uint8_t {
     NONE = 0,
@@ -82,7 +64,7 @@ enum class MapDestId : uint8_t {
     TRACK_VOL  = 1,
     MASTER_VOL = 2,
 
-    REV_DCAY = 3,   // the tail's length — `reverbFeedback`, the DCAY cell's own field name
+    REV_DCAY = 3,   // the tail's length — `reverbFeedback`
     REV_DAMP = 4,
     REV_WET  = 5,
     REV_SIZE = 6,
@@ -115,36 +97,26 @@ enum class MapDestId : uint8_t {
 
 struct MapDest {
     MapDestId   id;
-    /**
-     * The name the PICKER prints, read under its section heading — so the instrument's ten drop the
-     * group's word, while `REV WET` and `DLY WET` keep theirs: those two share a heading and would
-     * otherwise be two cells called `WET`.
-     */
+    /** The PICKER's name, read under its section heading — so the instrument's drop the group word,
+     *  while `REV WET` / `DLY WET` keep it (they share a heading). */
     const char* name;
     MapScope    scope;
     int         min;    // the destination's own range, and the bound on a mapping's own
     int         max;
     MapGroup    group;
     /**
-     * The name the list row's own cell prints, with the group's word dropped — the group is in the
-     * cell beside it, so `REV REV DCAY` would say it twice.
-     *
-     * ⚠️ **FIVE CHARACTERS IS A HARD CEILING**, set by the list row's column budget
-     * (`midi_map_editor.cpp`): the row is CC, VAL, MIN, MAX, group, scope and this, and the panel
-     * affords 28. A sixth character is drawn off the panel's right edge, where the clip eats it.
+     * The list row's name, group word dropped (the group is in the next cell).
+     * ⚠️ Five characters at most: the row's columns fill the panel's 28, and a sixth is clipped.
      */
     const char* cell;
 };
 
-// ⚠️ `map_dest()` searches by id, so this array's order carries no IDENTITY — but since the screen
-// cycles a group's parameters in array order, it does carry the ORDER THEY ARE DIALLED IN. Reordering
-// is a cosmetic change; renumbering an id is not, and never becomes one.
+// The array order carries no identity, but it is the order a group's parameters are dialled in.
 inline constexpr MapDest MAP_DESTS[] = {
     {MapDestId::TRACK_VOL,  "TRACK VOL",  MapScope::TRACK,      0, 255, MapGroup::TRACK,      "VOL"},
 
-    // ⚠️ The master fader sits after the two colour effects so the PICKER's rows come out as the two
-    // a reader wants (`ui/map_picker.h`): the array's order is the reading order there, and it is
-    // free to change — only an id is identity.
+    // The array order is the PICKER's reading order (`ui/map_picker.h`), so the master fader follows
+    // the two colour effects.
     {MapDestId::OTT_DEPTH,  "OTT",        MapScope::NONE,       0, 255, MapGroup::MASTER,     "OTT"},
     {MapDestId::DUST_DEPTH, "DUST",       MapScope::NONE,       0, 255, MapGroup::MASTER,     "DUST"},
     {MapDestId::MASTER_VOL, "MIX VOL",    MapScope::NONE,       0, 255, MapGroup::MASTER,     "VOL"},
@@ -171,8 +143,7 @@ inline constexpr MapDest MAP_DESTS[] = {
     {MapDestId::INS_RES,    "RES",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "RES"},
     {MapDestId::INS_DRIVE,  "DRIVE",      MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "DRIVE"},
     {MapDestId::INS_CRUSH,  "CRUSH",      MapScope::INSTRUMENT, 0,  15, MapGroup::INSTRUMENT, "CRUSH"},
-    // ⚠️ The names are the INSTRUMENT screen's own words, so a mapping and the row it moves are read
-    // the same way. The five-character cell is the one place that cannot follow — `DWNSMPL` is seven.
+    // Names match the INSTRUMENT screen's rows; only the five-character cell must abbreviate.
     {MapDestId::INS_DWN,    "DWNSMPL",    MapScope::INSTRUMENT, 0,  15, MapGroup::INSTRUMENT, "DWNSM"},
     {MapDestId::INS_REV,    "REV",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "REV"},
     {MapDestId::INS_DLY,    "DEL",        MapScope::INSTRUMENT, 0, 255, MapGroup::INSTRUMENT, "DEL"},
@@ -181,7 +152,7 @@ inline constexpr MapDest MAP_DESTS[] = {
 
 inline constexpr int MAP_DEST_COUNT = static_cast<int>(sizeof(MAP_DESTS) / sizeof(MAP_DESTS[0]));
 
-/** The catalogue entry for an id, or null — which is what an id from a NEWER version reads as. */
+/** The catalogue entry for an id, or null — as an id from a newer version reads. */
 inline const MapDest* map_dest(MapDestId id) {
     for (const MapDest& d : MAP_DESTS)
         if (d.id == id) return &d;
@@ -192,12 +163,8 @@ inline const MapDest* map_dest(uint8_t id) { return map_dest(static_cast<MapDest
 
 // ─── Picking one out of twenty-eight ─────────────────────────────────────────────────────────────
 //
-// ⭐ The list screen never shows the catalogue: a mapping's destination is TWO cells, a group and a
-// parameter within it, each cycled like any other cell in the app. Five groups, at most ten deep, so
-// the longest reach is ten steps and nothing new has to be drawn.
-//
-// ⚠️ The three below walk MAP_DESTS in ARRAY order, which is therefore the order a group's
-// parameters are dialled in.
+// A destination is TWO cells — a group and a parameter within it — each cycled like any other cell.
+// These walk MAP_DESTS in array order, the order the parameters are dialled in.
 
 /** How many destinations `g` holds. */
 inline int map_group_size(MapGroup g) {
@@ -229,65 +196,43 @@ inline int map_index_in_group(MapDestId id) {
 }
 
 /**
- * ⚠️ **A COUNT PLUS THAT MANY ENTRIES, NEVER A FIXED 128-SLOT ARRAY** (`Project::midiMappings`). The
- * list GROWS: a song with no mappings carries none, and the screen shows its headers and nothing
- * else. A fixed array would put 128 blank rows in every .ptp and leave the screen hiding them.
- *
- * ⚠️ **ONE DESTINATION TAKES ONE MAPPING; ONE CONTROLLER MAY DRIVE MANY** — M8's asymmetry, and the
- * interesting half: a knob fanning out to several destinations is a macro control, and it comes free
- * from the list being flat.
+ * `Project::midiMappings` is a growing list (count plus entries), never a fixed 128 slots — a song
+ * with no mappings carries none.
+ * One destination takes one mapping; one controller may drive many (a macro knob).
  */
 inline constexpr int MIDI_MAP_MAX = 128;
 
 /**
- * The control channel's "any channel" value — M8's `ALL`, and the DEFAULT here for the reason M8
- * picks it: a controller's knob channel is a number most people do not know, and a setting that has
- * to be right before anything works at all is a setting nobody gets past.
- *
- * ⚠️⚠️ **IT IS SAFE AS A DEFAULT ONLY BECAUSE A CC IS CLAIMED, NOT RESERVED.** An incoming CC is
- * offered to the mappings first; one that DRIVES something is consumed, and one that drives nothing
- * routes to its track exactly as it always did. So `ALL` costs an install with no mappings nothing —
- * and the moment a knob is mapped, that knob stops doing its old job, which is what the user asked
- * for by mapping it. A channel number narrows the offer; it does not change the rule.
+ * The control channel's "any channel" value, and the default: most people do not know their knob's
+ * channel. ⚠️ Safe only because a CC is CLAIMED, not reserved: a CC that drives a mapping is consumed,
+ * any other routes to its track as before.
  */
 inline constexpr int MIDI_CTL_CH_ALL = 16;
 
 /**
- * Does the control-channel setting let a knob arriving on `channel` drive a mapping?
- *
- * ⚠️ **THE ONE READING OF THAT SETTING.** The MIDI drain asks it to decide whether to offer a CC to
- * the mappings, and the learn gesture asks it to decide whether to refuse and say where the knob
- * really is. Written twice, the two would disagree about `ALL` the first time either changed — which
- * is precisely how it was written the first time, and the check caught it.
+ * Does the control-channel setting let a knob on `channel` drive a mapping? The ONE reading of the
+ * setting, shared by the MIDI drain and the learn gesture.
  */
 inline bool ctl_ch_covers(int setting, int channel) {
     return setting == MIDI_CTL_CH_ALL || (setting >= 0 && setting == channel);
 }
 
 /**
- * A 0-127 controller value into the destination's own units. ⭐ **THE ONE PLACE THAT CONVERSION
- * HAPPENS** — the MIDI plan's §11 rule, which exists because a second copy drifts from the first.
- *
- * ⚠️ `lo > hi` is deliberate and works: a range typed backwards is an INVERTED mapping, which the
- * range rows get for free rather than needing a flag of their own.
+ * A 0-127 controller value into the destination's units — the one place this conversion happens.
+ * `lo > hi` is an inverted mapping, and works.
  */
 inline int scale_cc(int cc, int lo, int hi) {
     const int c = cc < 0 ? 0 : (cc > 127 ? 127 : cc);
     const int span = hi - lo;
-    // Rounded to nearest rather than truncated, in both directions: integer division truncates
-    // TOWARDS ZERO, so the half has to carry the span's sign or an inverted range lands a step high.
+    // Round to nearest both ways: division truncates toward zero, so the half carries the span's sign.
     const int half = span >= 0 ? 63 : -63;
     return lo + static_cast<int>((static_cast<long long>(span) * c + half) / 127);
 }
 
 /**
- * Does this mapping still point at something? ⚠️ **A "NO" MUST NOT DELETE THE ROW** — the screen
- * greys it and says why, because a mapping silently dropped when a slot was cleared for a minute is
- * one the user has to notice is missing before they can make it again.
- *
- * ⚠️ The slot question is `instrument_is_free` (model.h) and not a path test written out here. An
- * EXTERNAL instrument owns no file at all, so a path test calls its slot empty — and its VOL and PAN
- * are real, reaching the cable as note velocity and CC 10.
+ * Does this mapping still point at something? ⚠️ A "no" must not delete the row — the screen greys it.
+ * The slot test is `instrument_is_free`, not a path test: an EXTERNAL instrument has no file, yet its
+ * VOL and PAN are real.
  */
 inline bool map_dest_present(const Project& p, const MidiMapping& m) {
     const MapDest* d = map_dest(m.dest);
@@ -303,12 +248,9 @@ inline bool map_dest_present(const Project& p, const MidiMapping& m) {
 }
 
 /**
- * Write `value` (already in the destination's units) into the song. Returns false and writes nothing
- * if the destination is not there any more.
- *
- * ⚠️ **IT ONLY WRITES.** Making the engine hear it is `push_mapped_dest` (engine_setup.h), and
- * marking the song modified is the dispatcher's — the three are split because they have different
- * costs and, since a knob moves ~30 times a second, the cost is the whole design.
+ * Write `value` (in the destination's units) into the song; false if the destination is gone.
+ * ⚠️ It only writes. Hearing it is `push_mapped_dest` (engine_setup.h); marking the song modified is
+ * the dispatcher's. Kept apart because a knob moves ~30 times a second.
  */
 inline bool write_mapped(Project& p, const MidiMapping& m, int value) {
     const MapDest* d = map_dest(m.dest);
@@ -356,8 +298,8 @@ inline bool write_mapped(Project& p, const MidiMapping& m, int value) {
     return false;
 }
 
-/** What the song currently reads on a mapping's destination — the list's live value, and what the
- *  learn gesture needs to seed a range with. Returns -1 when the destination is gone. */
+/** What the song reads on a mapping's destination (the list's live value, the learn seed), or -1
+ *  when it is gone. */
 inline int read_mapped(const Project& p, const MidiMapping& m) {
     const MapDest* d = map_dest(m.dest);
     if (!d || !map_dest_present(p, m)) return -1;
@@ -405,13 +347,8 @@ inline int read_mapped(const Project& p, const MidiMapping& m) {
 // ─── Learning one ────────────────────────────────────────────────────────────────────────────────
 
 /**
- * What the cell under the cursor names — the SECOND question a screen answers, beside
- * `cursor_context()`. That one says *what kind of value this is*; this one says *what it is called*,
- * and a screen that cannot name a cell declines with `NONE`.
- *
- * ⚠️ **THE SCOPE IS RESOLVED HERE, AT LEARN TIME, AND STORED.** "Instrument 3's cutoff", never "the
- * cutoff of whatever instrument is selected" — the second reading changes meaning the moment the
- * cursor moves, which is not something a saved mapping may do.
+ * What the cell under the cursor names — beside `cursor_context()` (what KIND of value), this says
+ * what it is CALLED. `NONE` when the screen cannot name it. The scope is resolved here and stored.
  */
 struct MapTarget {
     MapDestId id    = MapDestId::NONE;
@@ -421,15 +358,9 @@ struct MapTarget {
 };
 
 /**
- * Point an existing mapping at `d`. Returns false when it already pointed there.
- *
- * ⚠️ **A NEW DESTINATION BRINGS ITS OWN RANGE WITH IT.** The range is in the destination's units, so
- * carrying 00..FF onto a crush (0..F) would leave a mapping whose ends the crush cannot reach and
- * whose numbers the CRUSH cell has never shown. ⚠️ And the scope goes with it: "instrument 3's
- * cutoff" does not survive becoming a track's fader.
- *
- * One function, because THREE things point a mapping somewhere — the group cell, the parameter cell
- * and the picker overlay — and a fourth would otherwise be one more site to remember.
+ * Point an existing mapping at `d`; false when it already pointed there.
+ * ⚠️ The range and scope reset with the destination: 00..FF carried onto a crush (0..F) is unreachable.
+ * Shared by the group cell, the parameter cell and the picker.
  */
 inline bool take_dest(MidiMapping& m, const MapDest& d) {
     if (m.dest == static_cast<uint8_t>(d.id)) return false;
@@ -441,14 +372,9 @@ inline bool take_dest(MidiMapping& m, const MapDest& d) {
 }
 
 /**
- * Point `controller` at `target`. Returns the row it landed on, or −1 when the list is full.
- *
- * ⚠️ **ONE DESTINATION TAKES ONE MAPPING; ONE CONTROLLER MAY DRIVE MANY** (M8's asymmetry). So
- * learning a destination that already has a row RE-POINTS that row rather than adding a second one —
- * otherwise the parameter would be driven by two knobs at once and follow whichever moved last.
- *
- * ⭐ A re-pointed row KEEPS ITS RANGE. The range is the user's own work and the destination has not
- * changed, so only the knob does; a new row takes the destination's full range, as the ADD row does.
+ * Point `controller` at `target`. Returns the row, or −1 when the list is full.
+ * One destination takes one mapping, so learning an already-mapped destination RE-POINTS its row and
+ * keeps its range (the user's work); a new row gets the destination's full range.
  */
 inline int learn_mapping(Project& p, const MapTarget& target, int controller) {
     const MapDest* d = map_dest(target.id);

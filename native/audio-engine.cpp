@@ -40,15 +40,9 @@ AudioEngine::AudioEngine() {
     globalFrameCounter.store(0, std::memory_order_relaxed);
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;  // vary RND/DRNK per app session
 
-    // Pre-size the per-block drain buffers. A single ~23 ms block only ever holds a handful of
-    // events (a few tracks × retrigs), and 64 covers a dense AUS/AUF ramp across all eight.
-    //
-    // ⚠️ It is a typical bound, not a hard one, and `drainUntil` uses push_back — so this is "the
-    // audio thread almost never allocates", not "never". The bound is not a property of the block:
-    // `drainUntil` takes everything scheduled at or before the block end, INCLUDING anything already
-    // overdue, so a stall or a resume after a long pause can cross it. The cost is one `operator new`
-    // inside the callback, once, after which the capacity persists. Said out loud rather than left to
-    // read as a guarantee.
+    // Pre-size the per-block drain buffers: a block holds a handful of events, and 64 covers a dense
+    // AUS/AUF ramp across all eight tracks. ⚠️ A typical bound, not a hard one — `drainUntil` also
+    // takes anything overdue, so a stall can cross it and cost one `operator new` in the callback, once.
     noteBatch.reserve(64);
     killBatch.reserve(64);
     paramBatch.reserve(64);
@@ -90,8 +84,7 @@ AudioEngine::~AudioEngine() {
     // while it is still running. It is at most one preset's decode.
     discardSoundfontLoad();
 
-    // The platform backend (OboeAudioEngine on Android, SdlAudioEngine on desktop) owns and closes the
-    // output stream; the core just frees its buffers. The owner (android-main's / the shell's `main`)
+    // The platform backend owns and closes the output stream; the core frees its buffers. The owner
     // destroys the backend first, so no callback can run during this teardown.
     for (int i = 0; i < 256; i++) {
         if (samples[i])              delete[] samples[i];
@@ -106,8 +99,6 @@ AudioEngine::~AudioEngine() {
     delete[] fxPreviewBackupRight;
 }
 
-// Stream lifecycle (openStream/closeStream/resumeStream) and the audio callback now live in the
-// platform backend, oboe-audio-engine.cpp. The core is backend-agnostic.
 
 void AudioEngine::stopAll() {
     stopRampRequested.store(false, std::memory_order_relaxed);   // superseded: nothing is left to ramp
@@ -165,14 +156,8 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
         int t = view.sampler[v].trackId;
         if (t >= 0 && t < trackCount && out[t] == -1) out[t] = view.sampler[v].note;
     }
-    // ⚠️ THE SOUNDFONT POOL IS A SECOND VOICE POOL AND THE MONITOR HAS TO READ BOTH. `voices[]` holds
-    // samplers only, so a track playing an SF2 instrument reported no note at all — the note column
-    // beside the navigation map stayed blank for exactly the instruments TSF renders.
-    //
-    // Same encoding and the same fields as the sampler above: `resetTableState` copies the scheduled
-    // note's octave and pitch onto the SF voice at every trigger. Sampler first — a sampler note on a
-    // track supersedes an SF note still releasing on it (that is what the note-off at the sampler
-    // trigger site means), so whichever pool answered first is the one still being played.
+    // ⚠️ THE SOUNDFONT POOL IS A SECOND VOICE POOL, AND THE MONITOR READS BOTH (`voices[]` holds
+    // samplers only). Sampler first: a sampler note supersedes an SF note still releasing on the track.
     for (int t = 0; t < SF_VOICE_COUNT && t < trackCount; t++) {
         if (out[t] == -1 && view.sf[t].active) {
             out[t] = view.sf[t].note;
@@ -181,10 +166,8 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
 }
 
 int AudioEngine::getSampleRate() {
-    // Cached from the platform backend at stream-open (setDeviceSampleRate). Defaults to 44100 until
-    // then — matching every other fallback in the engine (schedulePitchBend, updateVoiceModulation,
-    // the Kotlin layer); 48000 here once made rate/pitch math ~8.8% off if Kotlin cached this
-    // before the stream opened.
+    // Cached from the backend at stream-open (setDeviceSampleRate); 44100 until then, matching
+    // every other fallback in the engine.
     return deviceSampleRate.load(std::memory_order_relaxed);
 }
 
@@ -206,9 +189,7 @@ void AudioEngine::setFlushToZeroForCurrentThread() {
     fpscr |= (1U << 24);  // FZ bit
     asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
 #elif defined(PT_HAS_SSE_DENORMAL_CTRL)
-    // x86/x86_64 — the emulator ABIs today, desktop Linux/Windows hosts now (ptrender), desktop
-    // Linux later. FTZ (outputs) + DAZ (inputs) via MXCSR; both Android x86 ABIs and any x86_64
-    // desktop have SSE3+.
+    // x86/x86_64 (emulators, desktop hosts): FTZ (outputs) + DAZ (inputs) via MXCSR; SSE3+ is given.
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
     _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 #endif
@@ -406,9 +387,8 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
     paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
-// ── Live per-note / mixer FX — all enqueue onto the same sample-accurate paramUpdateQueue,
-// so the voices[] / masterEq mutation happens on the audio thread at the exact step frame (no race),
-// and they replay identically during offline render (renderOffline drains the same queue). ──────────
+// ── Live per-note / mixer FX — all onto the sample-accurate paramUpdateQueue, so the mutation happens
+// on the audio thread at the exact step frame and replays identically in an offline render. ──────
 
 void AudioEngine::scheduleVoiceCc(int64_t targetFrame, int trackId, int cc, float value) {
     paramUpdateQueue.schedule({ targetFrame, trackId, cc, value, PARAM_UPDATE_VOICE_CC, 0.0f });
@@ -436,10 +416,8 @@ void AudioEngine::scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& b
 }
 
 // Convert one band from authored hex to the Hz/dB/Q the filters run on.
-// ⚠️ The three curves are setEqBand's, and there must not be a second copy of them: a morph that
-// converted its frequency even slightly differently would land somewhere the preset it names does
-// not, and only at the ends of a fade — the hardest place to hear it and the easiest to blame on the
-// curve. Anything that changes there changes here, in the same commit.
+// ⚠️ The three curves are setEqBand's and must have no second copy: a morph converting even slightly
+// differently would miss the preset it names at the ends of a fade. Change both together.
 static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
     EqBandData b;
     b.type   = type;
@@ -484,14 +462,9 @@ static const int SPECTRUM_FFT_SIZE = 2048;
 
 // Shared FFT helper — takes FFT_SIZE samples already copied from the circular buffer by the caller
 // (under mutex), applies Hann window + FFT, maps to numBins log-spaced magnitude values [0,1].
-// ⚠️ The two tables below are FUNCTION-LOCAL STATICS WITH NO LOCK, on the same terms as the FFT
-// config: every caller is the single UI poll thread. A second calling thread would need more than a
-// mutex here — it would need a slot of its own, because the bin map is chosen per call.
-//
-// Neither table depends on the audio, and recomputing them per call cost more than the transform:
-// measured at 2048 points / 620 bins, 14 us of window and 25 us of bin mapping against 17 us of FFT.
-// Caching both halves the cost of a poll, which is what lets the EQ panel run at frame rate for less
-// than it used to cost at 20 Hz.
+// ⚠️ The two tables below are FUNCTION-LOCAL STATICS WITH NO LOCK, like the FFT config: every caller
+// is the single UI poll thread (a second thread would need its own slot — the bin map is per call).
+// Cached because recomputing them cost more than the transform itself.
 
 static const float* spectrum_hann_window() {
     static float w[SPECTRUM_FFT_SIZE];
@@ -572,7 +545,7 @@ static void readCircularBuffer(const float* buf, int writeIdx, int bufSize, kiss
 }
 
 void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
-    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for 1.10 capture gate
+    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for the capture gate
     kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
     {
         std::lock_guard<std::mutex> lock(spectrumMutex);
@@ -582,7 +555,7 @@ void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
 }
 
 void AudioEngine::getSpectrumMagnitudesForSource(int source, int instrId, int numBins, float* out) {
-    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for 1.10 capture gate
+    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for the capture gate
     if (source == 3) instrSpectrumInstrId.store(instrId, std::memory_order_relaxed);
 
     kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
@@ -667,7 +640,7 @@ void AudioEngine::decayWaveform() {
 }
 
 void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
-    lastTrackWaveformReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for 1.2 OCTA gate
+    lastTrackWaveformReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for the OCTA gate
     std::lock_guard<std::mutex> lock(waveformMutex);
     for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
         activeFlags[t] = trackHasVoice[t];
@@ -678,14 +651,9 @@ void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
     }
 }
 
-// ⚠️ THE TWO apply* HELPERS EXIST BECAUSE VTR/VMV REACH THE SAME FADERS FROM THE AUDIO THREAD, and
-// the difference that forces the split is the LOGD below them: `processAudioBlock` contains no log
-// call at all (audio-defs.h states it as an invariant), and a ramp emitting one CC per tick would put
-// an fprintf on the audio thread a hundred times a second whenever POCKETTRACKER_LOG is set. So the
-// setters are the helpers plus a log line, and the queue arms call the helpers directly.
-//
-// ⚠️ SETTING THE VALUE IS ALL THERE IS TO DO — both mix paths re-read it every block and ramp to it,
-// so nothing has to be poked into a voice or a TSF channel from here.
+// ⚠️ THE apply* HELPERS EXIST BECAUSE VTR/VMV REACH THE SAME FADERS FROM THE AUDIO THREAD, where no
+// log call may run (audio-defs.h). The setters are the helpers plus a LOGD; the queue arms call the
+// helpers. Setting the value is all there is to do — both mix paths ramp to it every block.
 void AudioEngine::applyTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
     trackVolumes[trackId].store(volume, std::memory_order_relaxed);
@@ -783,11 +751,9 @@ void AudioEngine::setLimiterPreGain(int depth) {
 }
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
-    // Returns the track's CURRENT note, for mid-note param updates (PBN/PVB/PAN). A releasing
-    // SF voice or a fading (stolen) sampler voice is the previous note's tail, never the
-    // target: without the isReleasingOnly skip, one SF note left the track's SF voice
-    // permanently preferred here (nothing note-offs a naturally-decayed SF note, so it stays
-    // isActive) and PBN/PVB on every later sampler note went nowhere.
+    // The track's CURRENT note, for mid-note param updates (PBN/PVB/PAN). A releasing SF voice or a
+    // fading (stolen) sampler voice is the previous note's tail, never the target — a naturally
+    // decayed SF note stays isActive, and would otherwise capture every later update.
     if (trackId >= 0 && trackId < SF_VOICE_COUNT &&
         sfVoices[trackId].isActive && !sfVoices[trackId].isReleasingOnly) {
         return &sfVoices[trackId];
@@ -860,9 +826,8 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
         dst.envValue = 0.0f;
         dst.stageCounter = 0;
 
-        // Per-slot RNG for the stateful RND/DRNK LFO shapes: RND holds a random level from
-        // note-on, DRNK walks from it. Seed varies per note (frame), per slot, and per
-        // session/render (noteSeedEntropy — frame-only seeds made renders bit-identical).
+        // Per-slot RNG for the RND/DRNK LFO shapes, seeded per note (frame), per slot, and per
+        // session/render (noteSeedEntropy), so two renders differ.
         dst.lfoRngState  = (((uint32_t)(uint64_t)currentFrame) * 747796405u
                             ^ (uint32_t)(m + 1) * 2891336453u
                             ^ noteSeedEntropy) | 1u;
@@ -912,20 +877,12 @@ float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
 
     // ── OSCILLATOR loop mode: one trip round the loop is one cycle of the played note ───────────
     //
-    // ⭐⭐ **THE WHOLE MODE IS THIS ONE FACTOR, AND IT INHERITS EVERY PITCH SOURCE FOR FREE.**
-    // `rate × baseFrequency` is what the voice is sounding at right now — whatever moved it: the
-    // table transpose, FIN, a slide, vibrato, an arpeggio. Traversals per second is
-    // `rate × sampleRate / loopLength`, and the mode wants that to EQUAL the sounding frequency, so
-    // the rate is scaled by `loopLength × baseFrequency / sampleRate` and nothing else has to know.
-    //
-    // ⭐ The factor is 1.0 exactly when the loop is one cycle long at the sample's own base pitch —
-    // i.e. oscillator mode and forward mode agree precisely where you would expect them to, which is
-    // the arithmetic's own self-check.
-    //
-    // ⚠️ So in this mode the loop LENGTH is a TIMBRE control, not a pitch one: a longer window packs
-    // more of the file into each cycle. That is the opposite of a plain forward loop, where a short
-    // loop is what makes the pitch, and it is why LPO — which never changes the length — is the
-    // command this mode is built to be played with.
+    // ⭐⭐ THE WHOLE MODE IS THIS ONE FACTOR, AND IT INHERITS EVERY PITCH SOURCE: `rate × baseFrequency`
+    // is what the voice sounds at now (transpose, FIN, slides, vibrato, arps); traversals per second
+    // are `rate × sampleRate / loopLength`, so scaling by `loopLength × baseFrequency / sampleRate`
+    // makes them equal. The factor is 1.0 when the loop is one cycle at the base pitch — the check.
+    // ⚠️ So here the loop LENGTH is TIMBRE, not pitch — which is why LPO (never changing the length)
+    // is the command this mode is played with.
     if (voice.loopMode == LOOP_MODE_OSCILLATOR && voice.baseFrequency > 0.0f) {
         const int loopLength = voice.actualLoopEnd - voice.actualLoopStart;
         const float sr = (float)getSampleRate();
@@ -959,10 +916,8 @@ void AudioEngine::resetEffectState() {
     reverbSend.reset(sr);   // zeroes the delay lines AND reseeds ReverbSc's random-lineseg LCG
     delaySend.reset(sr);    // zeroes both delay lines
     masterChain.reset(sr);  // OTT bands, DUST, limiter envelope, master EQ
-    // Everything above is now at FACTORY DEFAULTS, not at the project's values. A render pushes the
-    // project next; a device reopen replays `busSettings` (setDeviceSampleRate). Not replayed HERE:
-    // a render must be a function of the project alone, so nothing may depend on what was pushed
-    // before the reset — the two renders ptrender compares would otherwise take different paths.
+    // Everything above is at FACTORY DEFAULTS now. A render pushes the project next; a device reopen
+    // replays `busSettings`. Not replayed here: a render must be a function of the project alone.
     LOGD("🎬 Effect chains reset to clean state");
 }
 

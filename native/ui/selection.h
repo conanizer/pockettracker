@@ -2,23 +2,12 @@
 
 // ─── The selection machinery ─────────────────────────────────────────────────────────────────────
 //
-// The half of core/logic/InputController.kt that S1 left behind. `ui/cursor.h` ported the part a
-// SINGLE cell needs — what is under the cursor, and what the five buttons do to it. This is the part
-// a RANGE of cells needs: the L+B multi-tap that grows a selection from one cell to a row to the
-// whole screen, the D-pad that drags its edge, and the question every grid editor already asks while
-// drawing ("is this cell selected?").
-//
-// Two things are worth stating, because both are load-bearing.
-//
-// ⚠️ **It never reads the clock.** Kotlin's `handleSelectB` calls `System.currentTimeMillis()` inside
-// itself, which is fine when a human is pressing the button and fatal when a test is. `now_ms` is a
-// PARAMETER here, exactly as `SdlInput::handle_event` takes one (S1 changed it for the same reason):
-// a function whose behaviour is a function of time cannot be tested if it reaches for the time
-// itself. `ptinput` drives the multi-tap window with a fake clock and asserts the exact 500 ms edge.
-//
-// **Columns are 1-based and start at 1, not 0.** Every bound below (`ROW` spanning `1..maxColumn`,
-// `expand`'s LEFT clamp) says 1, because column 0 is the read-only step-number gutter — the cursor
-// cannot reach it (ui/cursor_move.h) and a selection must not cover it.
+// What a RANGE of cells needs (ui/cursor.h is the single cell): the L+B multi-tap that grows a
+// selection CELL → ROW → SCREEN, the D-pad that drags its edge, and "is this cell selected?".
+// ⚠️ It never reads the clock: `now_ms` is a parameter, so a test can drive the 500 ms window with a
+// fake clock.
+// Columns are 1-based from 1: column 0 is the read-only step-number gutter, which neither the cursor
+// nor a selection may cover.
 
 #include <algorithm>
 #include <string>
@@ -56,24 +45,18 @@ struct SelectionBounds {
 /** The tap window, in ms. Two L+B presses closer than this cycle the scope; further apart, exit. */
 inline constexpr long long MULTI_TAP_WINDOW = 500;
 
-/**
- * InputController's selection state. Kotlin keeps `selectionStart`/`selectionEnd` as nullable
- * CursorPositions and gates every read on `selectionMode`; `active` is that same gate, so the two
- * positions can stay plain values rather than optionals.
- */
+/** The selection state. `active` gates every read, so the two positions are plain values. */
 struct Selection {
     SelectionScope scope  = SelectionScope::NONE;
-    bool           active = false;   // Kotlin's `selectionMode`
+    bool           active = false;
     CursorPosition start{};
     CursorPosition end{};
 
     /**
-     * L+B. First tap selects the CELL; each further tap inside the 500 ms window widens the scope
-     * (CELL → ROW → SCREEN → CELL); a tap after the window has closed exits selection entirely.
-     *
-     * ⚠️ `lastTapMs` is updated on EVERY path, the exit path included — that is Kotlin's behaviour and
-     * it matters: it means the tap that closed a selection also starts the clock for the next one, so
-     * a slow double-tap re-opens on CELL rather than skipping straight to ROW.
+     * L+B. The first tap selects the CELL; each tap inside the 500 ms window widens it (CELL → ROW →
+     * SCREEN → CELL); a tap after the window exits.
+     * ⚠️ `lastTapMs` is updated on EVERY path, exit included, so a slow double-tap re-opens on CELL
+     * rather than jumping to ROW.
      */
     void handle_select_b(long long now_ms, int cursorRow, int cursorColumn, int maxColumn,
                          int maxRow = 15) {
@@ -147,8 +130,7 @@ struct Selection {
                 end   = CursorPosition{cursorRow, maxColumn};
                 break;
             case SelectionScope::SCREEN:
-                // The WHOLE screen, which on SONG means all 256 rows and not merely the 16 on
-                // display — hence `maxRow` being a parameter rather than a constant 15.
+                // The WHOLE screen — on SONG all 256 rows, hence `maxRow` as a parameter.
                 start = CursorPosition{0, 1};
                 end   = CursorPosition{maxRow, maxColumn};
                 break;

@@ -3,8 +3,8 @@
 
 // ===========================================================================
 // LRCrossover — stereo 3-band Linkwitz-Riley crossover.
-// Filter 1 splits at freq1 (120 Hz): low band + remainder.
-// Filter 2 splits remainder at freq2 (2500 Hz): mid + high.
+// Filter 1 splits at freq1 (default 120 Hz): low band + remainder.
+// Filter 2 splits remainder at freq2 (default 2500 Hz): mid + high.
 // Low + Mid + High reconstructs the original signal (flat amplitude + phase).
 // ===========================================================================
 struct LRCrossover {

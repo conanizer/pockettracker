@@ -2,11 +2,8 @@
 
 // ─── The layout ──────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of `TrackerLayout.drawLayout` in ui/PixelPerfectRenderer.kt: the one function that
-// paints a frame. It fills the background, draws the oscilloscope strip, picks the module for the
-// current screen, and paints the furniture down the right — BPM, the note monitor, the navigation map.
-//
-// The geometry is the whole reason this exists as its own file, and it is exact:
+// The one function that paints a frame: background, oscilloscope strip, the current screen's module,
+// and the furniture down the right (BPM, note monitor, navigation map).
 //
 //     y =  0..  5   6px top spacer
 //     y =  6.. 75   oscilloscope        (620 × 70, at x = 10)
@@ -14,14 +11,8 @@
 //     y = 82..473   the editor module   (510 × 392, at x = 10)      ← 6 + 70 + 6 + 392 = 474
 //     x = 515..     the right bar       (115 wide: BPM, note monitor, navigation map)
 //
-// Editors are clipped to the left of the right bar so a full-width row highlight cannot bleed into
-// the BPM readout — Compose spells that `clipRect(right = …)`, and the number is derived below rather
-// than written down, exactly as the Kotlin does.
-//
-// ⚠️ The clip is NOT cosmetic and the module widths do not make it redundant: an editor is 510px wide
-// at x=10, so its row backgrounds run to x=520 — 11px INTO the right bar's column. The clip at 509 is
-// what cuts them. (S1 had the nav map at 80px wide instead of 115, which put the clip at 544 and so
-// clipped nothing at all; the row highlights ran under the BPM row. The width below is the Kotlin's.)
+// ⚠️ Editors are CLIPPED at x = 509: an editor is 510 px wide at x = 10, so its row backgrounds run
+// 11 px into the right bar's column. The clip is derived below, never typed.
 
 #include "ui/app_state.h"
 #include "ui/canvas.h"
@@ -64,10 +55,9 @@ inline constexpr int RIGHT_BAR_X = DESIGN_W - NavigationMapModule::WIDTH - SIDE_
 /** Right edge of the editor clip: 640 − 115 − 10 − 6 = 509. */
 inline constexpr int EDITOR_CLIP_RIGHT = RIGHT_BAR_X - SCREEN_SPACER;
 
-// PROJECT's NAME row holds more characters than it can show, and the number it CAN show is a fact
-// about this clip — the module knows neither the clip nor the x it is drawn at. Pinned here, from
-// both sides, because a window one column too WIDE draws into the right bar (which is the bug that
-// put it here: 20 cells were drawn and 17 arrived) and one column too NARROW throws a column away.
+// PROJECT's NAME row shows only as many characters as fit this clip — a fact neither the module nor
+// its x knows, so it is pinned here from both sides (too wide draws into the right bar, too narrow
+// wastes a column).
 inline constexpr int PROJECT_NAME_CELLS_X = SIDE_SPACER + ProjectModule::VALUE_X;
 static_assert(PROJECT_NAME_CELLS_X + ProjectModule::NAME_VISIBLE_CHARS * CHAR_W <= EDITOR_CLIP_RIGHT,
               "PROJECT's NAME window spills past the editor clip");
@@ -75,10 +65,8 @@ static_assert(PROJECT_NAME_CELLS_X + (ProjectModule::NAME_VISIBLE_CHARS + 1) * C
                   > EDITOR_CLIP_RIGHT,
               "PROJECT's NAME window is narrower than the row affords — another cell fits");
 
-// INST.POOL's USED RAM readout sits in the title row, and the same clip applies to it. Pinned here
-// for the same reason: the module knows neither the clip nor the x it is drawn at, so nothing inside
-// it could catch a total that runs off the edge — and a RAM figure is exactly the string that grows
-// when things are going wrong.
+// INST.POOL's USED RAM readout is in the title row under the same clip; pinned here for the same reason
+// — a RAM figure is exactly the string that grows when things go wrong.
 inline constexpr int POOL_RAM_VALUE_X = SIDE_SPACER + InstrumentPoolModule::RAM_VALUE_X;
 static_assert(POOL_RAM_VALUE_X + InstrumentPoolModule::RAM_MAX_CHARS * CHAR_W - CHAR_SPACING
                   <= EDITOR_CLIP_RIGHT,
@@ -86,9 +74,8 @@ static_assert(POOL_RAM_VALUE_X + InstrumentPoolModule::RAM_MAX_CHARS * CHAR_W - 
 static_assert(SIDE_SPACER + InstrumentPoolModule::RAM_LABEL_X + 3 * CHAR_W <= POOL_RAM_VALUE_X,
               "INST.POOL's RAM label overlaps its value");
 
-// ⚠️ THE SAMPLE EDITOR'S WAVEFORM IS THE HELP PANEL'S SECOND HOME, and only because it happens to be
-// the same width at the same left edge. Neither module knows about the other, so the agreement is
-// pinned here — widen the waveform and the panel would sit off-centre in it with no other symptom.
+// ⚠️ The sample editor's waveform hosts the help panel only because they share width and left edge;
+// neither knows the other, so the agreement is pinned here.
 static_assert(SampleEditorModule::WAVEFORM_W == HelpPanelModule::WIDTH,
               "the waveform panel is no longer the width the help panel draws");
 static_assert(SampleEditorModule::WAVEFORM_H >= HelpPanelModule::HEIGHT,
@@ -97,55 +84,30 @@ static_assert(SampleEditorModule::WAVEFORM_H >= HelpPanelModule::HEIGHT,
 class TrackerLayout {
 public:
     /**
-     * Paint one frame of `state` onto `c`. The only entry point the shell (or ptshot) calls.
-     *
-     * NOT const, and that is the oscilloscope's doing — and, since S5, the MIXER's: both carry
-     * peak-hold state across draws, because a falling peak marker is a function of the PREVIOUS frame
-     * and there is nowhere else for that to live. Since S8 the EQ EDITOR joins them, for a different
-     * reason: it caches its response curve, which is a function of the project alone but far too
-     * expensive to recompute 60 times a second (eq_editor.h).
-     *
-     * It is `draw_frame` plus the loading strip, and the split is load-bearing — see `draw_frame`.
+     * Paint one frame of `state` onto `c` — the shell's (and the screenshot tests') only entry point. Not const: the
+     * oscilloscope and MIXER carry peak-hold state across draws, and the EQ editor caches its response
+     * curve. It is `draw_frame` plus the loading strip — see `draw_frame`.
      */
     void draw(Canvas& c, const AppState& state);
 
     /**
-     * Is something on screen still falling that no input will bring back?
-     *
-     * The shell's idle gate (C7) knows about two animation sources — the transport and the master
-     * waveform — and both are AUDIO. These are the ones that are not: the MIXER's peak markers step down
-     * once per peak poll (mixer.h) and the SPECTRUM strip's bars and dots step down once per frame
-     * (oscilloscope.h), and both do it inside `draw`, so both need frames for a few seconds after the
-     * audio has gone silent or they freeze part-way. The gate is allowed to be conservative, never
-     * clever, so it asks the modules that own the state rather than modelling the fall itself.
-     *
-     * ⚠️ **Each half is gated on its module being DRAWN, and that is load-bearing rather than tidy.**
-     * Off the MIXER the feed stops polling peaks (ui/engine_feed.h), so `peaksVersion` never moves and
-     * the markers never age; off the strip — a full-screen module has the frame — the bars never age
-     * either, and neither does a visualizer mode that draws no bars at all. Answering "still falling"
-     * in any of those would pin the redraw loop at 60 Hz for as long as the user stayed there, with
-     * nothing moving on screen to show for it: the exact battery cost the idle gate exists to avoid.
+     * Is something on screen still falling that no input will bring back? The shell's idle gate knows
+     * the audio sources; this covers the MIXER's peak markers and the SPECTRUM strip's bars, which fall
+     * inside `draw` and freeze part-way without frames. The modules that own the state are asked.
+     * ⚠️ Each half is gated on its module being DRAWN: off the MIXER the peaks are not polled and never
+     * age, and a full-screen module has no strip — answering "falling" there would pin the loop at
+     * 60 Hz with nothing moving.
      */
     bool has_falling_meters(const AppState& state) const;
 
 private:
     /**
-     * Everything below the loading strip: the background, the module, the furniture, the overlays.
-     *
-     * ⚠️⚠️ **IT RETURNS FROM THE MIDDLE, THREE TIMES** — no document, and each of the two full-screen
-     * modules — so anything that has to appear on EVERY screen cannot be written at the bottom of it.
-     * That is not a wart to tidy away: the browser and the sample editor genuinely draw nothing else,
-     * and they are also the two screens a load is started from. `draw` is where the exceptions go.
+     * Everything below the loading strip. ⚠️ It RETURNS FROM THE MIDDLE three times (no document, and
+     * each full-screen module), so anything that must appear on EVERY screen goes in `draw`.
      */
     void draw_frame(Canvas& c, const AppState& state);
 
-    /**
-     * A screen with no module yet: its title, and "COMING SOON" in the middle. This is not port
-     * scaffolding — it is `drawPlaceholderScreen` from the Kotlin renderer, which the Android app
-     * used for exactly the same reason while its own screens were being written. Porting it first
-     * means navigation works across the whole app from S1, and each screen simply stops being a
-     * placeholder as it lands.
-     */
+    /** A screen with no module: its title and "COMING SOON". */
     void draw_placeholder(Canvas& c, int x, int y, ScreenType screen, const Theme& t) const;
 
     /** BPM · the 8-track note monitor · the navigation map. Hidden on the full-screen screens. */
@@ -180,7 +142,7 @@ private:
     SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width
     QwertyKeyboardOverlay qwerty_;        // modal: drawn LAST, over everything, including the browser
     EqModule              eq_;            // stateful (curve cache); drawn INSTEAD of the screen module
-    ThemeEditorModule     themeEditor_;   // drawn INSTEAD of the screen module, on the EQ's terms (S9)
+    ThemeEditorModule     themeEditor_;   // drawn INSTEAD of the screen module, like the EQ
 };
 
 }  // namespace pt::ui

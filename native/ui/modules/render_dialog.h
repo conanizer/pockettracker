@@ -10,17 +10,12 @@
 //   REPEAT      how many times the range is played into the file, or OFF (once)
 //   RENDER      A fires it; the row carries the percentage while it runs
 //
-// ⚠️ IT EXISTS BECAUSE A BLOCK LOOPS FOR EVER. A track now plays its block of song rows round and
-// round rather than running on into what is below (scheduler.h `song_cell_plays`), so a project can
-// hold several unrelated sketches that never meet. Rendering "the song" would glue them together with
-// silence, and there was no way to ask for less — so the range is not a convenience here, it is what
-// makes an isolated sketch exportable at all.
+// ⚠️ It exists because a block of song rows LOOPS FOR EVER (scheduler.h `song_cell_plays`): a project
+// can hold several unrelated sketches, and the range is what makes one of them exportable at all.
 //
-// The OUTPUT is not a row: which of the two EXPORT buttons opened the dialog is what picks stereo WAV
-// or stems, exactly as it picked before. One panel, two outputs.
+// The output is not a row: which EXPORT button opened the dialog picks stereo WAV or stems.
 //
-// A modal, with the same full-canvas dim as the confirm dialog — a render takes the machine over
-// while it runs, and the panel is the only thing on screen that is live.
+// A modal with the confirm dialog's full-canvas dim; a render takes the machine over while it runs.
 
 #include <string>
 
@@ -57,8 +52,8 @@ struct RenderDialogState {
      * The last song row, or **−1 = AUTO**: resolve to the end of the section `startRow` is in, every
      * time the render fires.
      *
-     * ⚠️ AUTO IS A RULE, NOT A REMEMBERED NUMBER. Left as a number it would go stale the moment a row
-     * is added to the part, and the export would quietly stop one bar short of what is on screen.
+     * ⚠️ AUTO IS A RULE, NOT A REMEMBERED NUMBER — a stored number would go stale when a row is added
+     * to the part, and the export would stop short of what is on screen.
      */
     int endRow = -1;
 

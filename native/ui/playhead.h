@@ -2,19 +2,12 @@
 
 // ─── WHERE ONE TRACK IS ──────────────────────────────────────────────────────────────────────────
 //
-// The UI's copy of one track's playhead, refilled from songcore every frame. Eight of them: with
-// independent song cursors "the song is on row 5" is not a fact anybody can state, so there is no
-// single playhead field anywhere above this line.
-//
-// ⚠️ **−1 IS A REAL ANSWER AND IT IS NOT ROW 0.** A phrase played on its own is in no chain and in
-// no song; a track whose song column has run out has stopped. Both cases must draw NOTHING, and a
-// zero would draw a marker on the first row of a screen that is not playing at all — which is
-// exactly the bug the row highlight had, because a highlight always lands on some row.
-//
-// ⚠️ **THE IDS ARE LOAD-BEARING, because a row number is not a place.** The CHAIN screen shows ONE
-// chain and two tracks can be inside it at two different rows, while a third is inside a chain the
-// screen is not showing. The marker is drawn where the id the screen is looking at matches the id
-// the track is in — never on a row number alone.
+// The UI's copy of one track's playhead, refilled from songcore every frame — eight of them; there is
+// no single song position.
+// ⚠️ −1 is a real answer and NOT row 0: a phrase played alone is in no chain or song, and a track
+// whose column ran out has stopped. Both draw NOTHING.
+// ⚠️ The ids are load-bearing: a marker is drawn where the screen's id matches the track's, never on a
+// row number alone (two tracks can be in one chain at different rows).
 
 namespace pt::ui {
 
@@ -28,24 +21,16 @@ struct TrackPlayhead {
 
 // ─── …AND WHAT ONE TRACK IS WAITING TO DO ────────────────────────────────────────────────────────
 //
-// LIVE mode's queue, mirrored for the drawing layer exactly as `TrackPlayhead` mirrors a playback
-// position — pt-ui reads back what the sequencer decided and never includes it.
-//
-// ⚠️ **`row < 0` WITHOUT `stop` IS AN EMPTY SLOT, AND IT IS NOT ROW 0** — the same rule as above, for
-// the same reason: a stop queue carries no row at all, so "nothing queued" cannot be said by the row
-// on its own, and a marker drawn on a zero would blink on the first row of a channel with nothing
-// waiting.
+// LIVE mode's queue, mirrored for drawing — pt-ui never includes the sequencer.
+// ⚠️ `row < 0` without `stop` is an EMPTY slot, not row 0 (a stop queue carries no row).
 struct LiveQueue {
     int  row       = -1;      // the song row queued to launch on this channel
     bool stop      = false;   // …or this channel is queued to fall silent
-    bool immediate = false;   // at the next phrase boundary, not the next chain end — a FAST blink
+    bool immediate = false;   // the next phrase boundary, not the next chain end — a FAST blink
     /**
-     * The sequencer has not committed this to a frame yet.
-     *
-     * ⚠️ **THE MARKER AND THE SECOND PRESS ASK DIFFERENT QUESTIONS OF THE SAME SLOT.** A launch the
-     * walk has scheduled but the transport has not reached is still WAITING to the eye — the marker
-     * must keep blinking — while to a press it is already committed, and pulling it earlier would cut
-     * short a chain the player is still hearing. `pending()` draws; `armed` promotes.
+     * The sequencer has not committed this to a frame yet. ⚠️ The marker and a second press ask
+     * different questions: a scheduled-but-unheard launch still BLINKS (`pending()`), but to a press it
+     * is committed — pulling it earlier would cut a chain the player still hears (`armed` promotes).
      */
     bool armed     = false;
 

@@ -10,7 +10,7 @@ namespace pt::ui {
 
 namespace {
 
-/** The title line's height plus the 14px of air Kotlin puts under it, from the panel's top. */
+/** The title line's height plus 14px of air under it, from the panel's top. */
 constexpr int ROW_AREA_TOP = TEXT_PADDING + ROW_HEIGHT + 14;   // 3 + 21 + 14 = 38
 
 /** THEME and RANDOMIZE on top; the rest are colours. */
@@ -37,15 +37,9 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
 
     c.draw_text("THEME EDIT", x + NAME_COL_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // ⚠️ THE MESSAGE TAKES THE ACCENT, NEVER RED. A red bar in this app means something is about to
-    // be destroyed; a palette that is merely hard to read is not that, and spending the alarm colour
-    // here is how it stops meaning anything where it matters.
-    // A failed roll is an event and outranks the cursor's own reading until something else happens.
-    //
-    // ⚠️ SEVENTEEN CHARACTERS, and the phrasing is chosen to fit the LONGEST row label rather than
-    // the one in front of whoever is reading: "BLENDS " + `MTR BORDER` is exactly the budget. A
-    // fuller sentence clipped to "CLASHES WITH TXT…" names no colour at all, which is the one thing
-    // the line exists to do.
+    // ⚠️ The message takes the accent, never red: red here means something is about to be destroyed.
+    // A failed roll outranks the cursor's own reading until something else happens.
+    // ⚠️ Seventeen characters: "BLENDS " + `MTR BORDER` (the longest label) is exactly the budget.
     constexpr int MSG_X    = NAME_COL_X + 11 * CHAR_W;   // past "THEME EDIT" and a space
     constexpr int MSG_COLS = (WIDTH - 10 - MSG_X) / CHAR_W;
 
@@ -71,10 +65,8 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         return y + ROW_AREA_TOP + (logical - scroll) * ROW_HEIGHT;
     };
 
-    // One rule for every value on a row, and it is worth naming once rather than writing eleven times:
-    // the other channels of the cursor's ROW are `textValue` (so you can read the colour you are
-    // dialling) and every row you are not on is `textParam`. ⚠️ The cursor's OWN channel is not a case
-    // here — it is a cell, and a cell's ink comes from the painter, which inverts it against the bar.
+    // The cursor row's other channels are `textValue` (readable while dialling), other rows
+    // `textParam`. ⚠️ The cursor's own channel is a cell, inked by the painter.
     const auto value_color = [&](bool on_row, int /*channel*/) {
         return on_row ? t.textValue : t.textParam;
     };
@@ -91,10 +83,8 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         c.draw_text("THEME", x + NAME_COL_X, ty,
                     on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-        // ⚠️ CLIPPED, and the budget is the gap to the SAVE column. A name is user-typed and
-        // unbounded; unclipped it does not merely spill off the panel, it paints over the cells this
-        // screen is exited through. Derived from the two X constants, so moving a column cannot leave
-        // the budget behind.
+        // ⚠️ Clipped to the gap before SAVE (derived from the two X constants): a user-typed name
+        // would otherwise paint over the cells this screen is exited through.
         constexpr int NAME_COLS = (SAVE_LABEL_X - THEME_NAME_X) / CHAR_W;
         draw_cursor_cell(c, Canvas::clip_text(t.name, NAME_COLS), x + THEME_NAME_X, ty,
                          on_cell(on_row, 0), value_color(on_row, 0), t);
@@ -124,14 +114,10 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
     // ── The colour rows ──────────────────────────────────────────────────────────────────────────
     const auto& rows = theme_color_rows();
 
-    // ⚠️ ONE validator pass for the whole panel. Asking per row would run the same rules over the
-    // same palette nineteen times, every frame the editor is up.
-    //
-    // ⚠️⚠️ **A CONTRAST MISS MARKS THE INK, NEVER THE GROUND.** Marking both ends is the obvious
-    // reading and it makes the panel useless: one placeholder too dim to read lights up BACKGROUND,
-    // ROW 4TH, VIZ BG and MTR BG as well, because a text role lands on all four — and none of those
-    // four is the colour anyone would change. The ink is the culprit; the ground is named in the
-    // message instead. A separation or distinctness miss IS symmetric and marks both.
+    // ⚠️ One validator pass for the whole panel, not one per row every frame.
+    // ⚠️⚠️ A CONTRAST MISS MARKS THE INK, NEVER THE GROUND: one dim text role lands on BACKGROUND,
+    // ROW 4TH, VIZ BG and MTR BG alike, and none of those is what anyone would change. The ground is
+    // named in the message instead. A separation or distinctness miss is symmetric and marks both.
     std::vector<bool> clash(rows.size(), false);
     for (const ThemeViolation& v : theme_violations(t, /*generator=*/false)) {
         const bool symmetric = (v.rule->kind != RuleKind::Contrast);
@@ -154,9 +140,8 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         c.draw_text(row.label, x + NAME_COL_X, ty,
                     on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-        // ⚠️ ONE CHARACTER, TWO FACTS, AND THE LOCK WINS. A locked row cannot be re-rolled, so
-        // whatever it clashes with is a thing the user is choosing to keep — saying so every frame
-        // would be nagging about a decision already made.
+        // ⚠️ One character, two facts, and the lock wins: a locked row is a colour the user chose to
+        // keep, so its clash is not flagged.
         if (es.locks.locked(static_cast<int>(i))) {
             c.draw_text("*", x + WARN_COL_X, ty, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
         } else if (clash[i]) {
@@ -171,9 +156,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         draw_cursor_cell(c, hex2(g), x + G_COL_X, ty, on_cell(on_row, 1), value_color(on_row, 1), t);
         draw_cursor_cell(c, hex2(b), x + B_COL_X, ty, on_cell(on_row, 2), value_color(on_row, 2), t);
 
-        // The swatch — the only reason the R/G/B columns are usable at all. It is drawn with the
-        // colour ITSELF, which makes this the one module in the app whose output is not a function of
-        // the theme's text roles.
+        // The swatch, drawn in the colour itself — the R/G/B columns are unusable without it.
         c.fill_rect(x + SWATCH_X, ry, SWATCH_W, ROW_HEIGHT, color);
     }
 }

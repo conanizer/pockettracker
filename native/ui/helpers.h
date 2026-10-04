@@ -2,22 +2,16 @@
 
 // ─── Shared editor helpers ───────────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of ui/EditorHelpers.kt: the layout constants every screen is built on, the row
-// background priority, and the two cell painters (a grid cell, an EQ cell) that the editors share so
-// they cannot drift apart from each other.
-//
-// The hex formatters and the effect names are NOT re-implemented here — songcore already carries
-// them (`songcore::hex2`, `effect_name`, `effect_value_max`, `note_name`), because they are the
-// data model's own vocabulary and the sequencer speaks it too. Kotlin has the same arrangement:
-// `EditorHelpers.getEffectTypeName()` is a one-line alias for `EffectProcessor.effectName()`, "so the
-// code↔name map lives in core and can't drift from the effect codes".
+// The layout constants every screen is built on, the row background, and the cell painters the
+// editors share so they cannot drift apart. Hex formatters and effect names live in songcore
+// (`hex2`, `effect_name`, `note_name`) — they are the data model's own vocabulary.
 
 #include <cstdint>
 #include <string>
 
 #include "canvas.h"
 #include "theme.h"
-#include "theme_rules.h"   // theme_polarity — the mascot's inversion reads the same one the roller does
+#include "theme_rules.h"   // theme_polarity — the mascot reads the same one the roller does
 #include "songcore/effects.h"
 #include "songcore/model.h"
 
@@ -34,8 +28,7 @@ inline constexpr int TEXT_PADDING = 3;
 /** Width of one character slot as the editors advance it: 5*3 + 2 = 17 px. */
 inline constexpr int CHAR_W = 5 * FONT_SCALE + CHAR_SPACING;
 
-// Layout spacers (PixelPerfectRenderer): the 620px content column is centred in 640, modules are
-// separated by 6px.
+// The 620 px content column is centred in 640; modules are separated by 6 px.
 inline constexpr int SCREEN_SPACER = 6;
 inline constexpr int SIDE_SPACER   = 10;
 
@@ -43,13 +36,8 @@ using songcore::effect_name;
 using songcore::effect_value_max;
 using songcore::hex2;
 
-/**
- * Kotlin's `Long.toHex8()` — uppercase, zero-padded to eight digits. The SAMPLE EDITOR's frame
- * positions, which are the only values in the app too big for a hex byte.
- *
- * It PADS but never truncates, exactly as `padStart(8, '0')` does: a sample longer than 0xFFFFFFFF
- * frames (27 hours at 44.1 kHz) would print nine digits rather than the wrong eight.
- */
+/** Uppercase, zero-padded to eight digits — the SAMPLE EDITOR's frame positions. Pads but never
+ *  truncates, so a longer value prints nine digits rather than the wrong eight. */
 inline std::string hex8(int64_t v) {
     static const char* H = "0123456789ABCDEF";
     if (v == 0) return "00000000";
@@ -60,18 +48,14 @@ inline std::string hex8(int64_t v) {
 }
 using songcore::note_name;
 
-/** 1-digit uppercase hex — Kotlin's Int.toHex1(). Masks to the low nibble. */
+/** 1-digit uppercase hex of the low nibble. */
 inline std::string hex1(int v) {
     static const char* H = "0123456789ABCDEF";
     return std::string(1, H[v & 0x0F]);
 }
 
-/**
- * 4-digit uppercase hex — the EXTERNAL instrument's BANK, and nothing else.
- *
- * A bank select is 14 bits (CC0 MSB + CC32 LSB), so 0..16383, and `hex2` would have MASKED it: a bank
- * of 1024 drew as `00` in the first render of that screen. Pads but never truncates, as hex8 does.
- */
+/** 4-digit uppercase hex — the EXTERNAL instrument's 14-bit BANK (0..16383), which `hex2` would mask.
+ *  Pads but never truncates. */
 inline std::string hex4(int v) {
     static const char* H = "0123456789ABCDEF";
     if (v == 0) return "0000";
@@ -81,79 +65,55 @@ inline std::string hex4(int v) {
     return s;
 }
 
-/**
- * 2-digit zero-padded DECIMAL — the MIDI channel on the EXTERNAL instrument, and nothing else.
- *
- * Every other number on these screens is hex, and that is deliberate: they are bytes. A MIDI channel
- * is not a byte the user thinks in — every device, cable and manual in the world calls it 1 to 16 —
- * so it is the one cell shown in the base its own world uses. Pads but never truncates.
- */
+/** 2-digit zero-padded DECIMAL — the MIDI channel, shown 1..16 as every device and manual numbers it.
+ *  The one non-hex number on these screens. */
 inline std::string dec2(int v) {
     std::string s = std::to_string(v);
     return s.size() >= 2 ? s : "0" + s;
 }
 
-// `darken` lives in theme.h — a theme's own fallback colours are derived with it, and theme.h cannot
-// include this file. It is reachable from here, as it always was, because this file includes that one.
+// `darken` is in theme.h (a theme derives its fallbacks with it), included above.
 
-/**
- * REPLACE the alpha channel, keeping the RGB — Compose's `Color(x).copy(alpha = a)`, which the sample
- * editor's slice highlight uses to lay 10% of the cursor colour over the waveform without hiding it.
- * `Canvas::fill_rect` blends src-over, so a translucent fill is a real blend rather than a flat wash.
- */
+/** Replace the alpha channel, keeping RGB — e.g. the sample editor's 10% slice highlight over the
+ *  waveform (`fill_rect` blends src-over). */
 inline Argb with_alpha(Argb c, float alpha) {
     const float a = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
-    const Argb  v = static_cast<Argb>(a * 255.0f + 0.5f);   // round, as Compose does
+    const Argb  v = static_cast<Argb>(a * 255.0f + 0.5f);   // round
     return (v << 24) | (c & 0x00FFFFFFu);
 }
 
 // ─── Modal chrome ────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The border every modal box wears: a solid line, `MODAL_BORDER` px thick, in the title colour.
- *
- * ⚠️ IT GROWS OUTWARD from the box it is given — its innermost pixel is the box's own edge and the
- * rest sit outside, so nothing inside a modal moves or shrinks to make room for it. The one thing a
- * box has to have is `MODAL_BORDER - 1` px of screen beyond its own rect on all four sides.
+ * The border every modal box wears: `MODAL_BORDER` px in the title colour.
+ * ⚠️ It GROWS OUTWARD from the box — nothing inside moves — so a box needs `MODAL_BORDER - 1` px of
+ * screen beyond its rect on every side.
  */
 inline constexpr int MODAL_BORDER = 3;
 
 /**
- * A modal box: the fill and the border.
- *
- * ⚠️ It is one function because there is one look. Every overlay open-coded the same fill and stroke,
- * and the next one would have open-coded them again; a border added at three call sites is a border
- * that is two sites out of date the first time it changes.
- *
- * ⚠️ THE SCREEN-WIDE DIM IS NOT IN HERE, and that is not an oversight. Whether a modal dims what is
- * behind it is a decision per modal — `modal_backdrop_active` (ui/app_state.h) is the list, and the
- * shell reads it to carry the same dim into the letterbox bars. The sample editor's confirm does not
- * dim: it COVERS the editor outright. So the box's own chrome is here and the screen's is not.
+ * A modal box: the fill and the border — one look, one function.
+ * ⚠️ The screen-wide dim is NOT here: whether a modal dims is per modal (`modal_backdrop_active`,
+ * ui/app_state.h, which the shell also reads); the sample editor's confirm covers instead.
  */
 inline void draw_modal_box(Canvas& c, int x, int y, int boxW, int boxH, const Theme& t) {
     c.fill_rect(x, y, boxW, boxH, t.background);
-    // Ring 0 is the line the box has always had, on its own rect; the rest step outward one at a time.
+    // Ring 0 is on the box's own rect; the rest step outward.
     for (int r = 0; r < MODAL_BORDER; ++r)
         c.stroke_rect(x - r, y - r, boxW + 2 * r, boxH + 2 * r, t.textTitle);
 }
 
-/** The full-canvas dim under a modal that has one. ⚠️ Add the modal to `modal_backdrop_active` too,
- *  or the shell leaves the letterbox bars bright and the scrim stops at the 4:3 edge (B4). */
+/** The full-canvas dim under a modal that has one. ⚠️ Add the modal to `modal_backdrop_active` too, or
+ *  the letterbox bars stay bright and the scrim stops at the 4:3 edge. */
 inline void draw_modal_backdrop(Canvas& c) { c.fill_rect(0, 0, DESIGN_W, DESIGN_H, MODAL_BACKDROP); }
 
 // ─── Row background ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * The standard row background for every grid editor (phrase, chain, song, table).
- * Priority: every-4th-row accent > default.
- *
- * ⚠️ NOTHING THAT PICKS CELLS IS A ROW HERE — not the cursor, not playback, and not the selection —
- * all for the same reason: a grid row holds up to ten cells and a row-wide colour cannot say which
- * of them is meant. A selection is a RECTANGLE, and it starts at column 1: painting its rows edge to
- * edge claims both the columns outside it and the row-number gutter, which no selection can reach.
- * So the cursor and the selection are backgrounds under the cells themselves (`RowCells`), and what
- * plays is a marker per track (`draw_playhead`), which can be absent, and can be in eight places at
- * once.
+ * The standard row background for the grid editors: every-4th-row accent, else default.
+ * ⚠️ Nothing that picks CELLS is a row colour here — not the cursor, playback or the selection: a row
+ * holds up to ten cells, and a selection is a rectangle starting at column 1. Cursor and selection are
+ * per-cell backgrounds (`RowCells`); what plays is a marker per track (`draw_playhead`).
  */
 inline Argb row_bg_color(int index, const Theme& t) {
     return (index % 4 == 0) ? t.rowEvery4th : t.background;
@@ -161,20 +121,13 @@ inline Argb row_bg_color(int index, const Theme& t) {
 
 // ─── The two cursor inks ─────────────────────────────────────────────────────────────────────────
 //
-// ⚠️⚠️ "THE CURSOR COLOUR" IS TWO DIFFERENT ROLES AND THEY TAKE OPPOSITE COLOURS. Both are named here
-// so a new screen picks one deliberately instead of reaching for whichever it remembers:
-//
-//   * `cursor_cell_ink` — text that sits INSIDE the cursor's bar. The bar is `rowCursor`, so the ink
-//     is `background`: the cell inverts, which is what makes a cursor readable at a glance on a grid
-//     of identical cells.
-//   * `cursor_mark_ink` — text that says WHICH row or column the cursor is in, with no bar behind it.
-//     A row number, a column heading, the label of the row the cursor is on. `rowCursor` itself, on
-//     the plain ground — the same colour as the bar, so one accent says "you are here" everywhere.
-//
-// ⚠️ NEITHER IS A ROW OF THE THEME EDITOR, and that is the point. They used to be one row (TXT CURSOR)
-// which could be set to anything, including a colour invisible on its own bar. Reading them off the
-// ground beside them means the pair cannot disagree — and it leaves `rowCursor` as the single accent a
-// palette dials to move every cursor in the app at once.
+// ⚠️⚠️ "The cursor colour" is TWO roles taking OPPOSITE colours:
+//   * `cursor_cell_ink` — text INSIDE the cursor's bar (`rowCursor`), so it is `background`: the cell
+//     inverts.
+//   * `cursor_mark_ink` — text saying which row or column the cursor is in, with no bar: `rowCursor`
+//     itself, so one accent says "you are here" everywhere.
+// Neither is a theme-editor row: derived from the ground beside them, the pair cannot be set to
+// something invisible, and `rowCursor` moves every cursor at once.
 
 /** Text inside the cursor's bar. See above. */
 inline Argb cursor_cell_ink(const Theme& t) { return t.background; }
@@ -186,14 +139,9 @@ inline Argb cursor_mark_ink(const Theme& t) { return t.rowCursor; }
 inline Argb selection_cell_ink(const Theme& t) { return t.rowEvery4th; }
 
 /**
- * The mascot's two colours, given the panel it stands on.
- *
- * ⚠️ **THE ART IS A LIGHT FIGURE**, one bit deep and tinted at the draw. Drawn the same way on a
- * light palette it becomes a dark silhouette, which reads as a NEGATIVE of the character rather than
- * as the character — so there the pair swaps and the figure is punched out of a patch of TXT TITLE.
- *
- * ⚠️ The polarity is `background`'s, never the panel's: the two mascots stand on different panels
- * (the strip's and a modal's), and deriving it per panel would invert one and not the other.
+ * The mascot's two colours. ⚠️ The art is a LIGHT figure; on a light palette it would read as a
+ * negative, so the pair swaps and the figure is punched out of a patch of TXT TITLE.
+ * ⚠️ Polarity is `background`'s, never the panel's — the two mascots stand on different panels.
  */
 struct MascotInk {
     Argb figure;     ///< the colour the lit pixels take
@@ -205,11 +153,8 @@ inline MascotInk mascot_ink(const Theme& t, Argb panel) {
                                    : MascotInk{t.textTitle, panel, false};
 }
 
-/**
- * A grid's column header, which is how the cursor says WHICH COLUMN now that it no longer paints a
- * whole row. `lo`..`hi` is a range because an FX header stands over two cursor columns: a name and
- * its value are one column to the reader and two to the cursor.
- */
+/** A grid column header — how the cursor shows WHICH COLUMN. `lo`..`hi` because an FX header spans
+ *  two cursor columns (name and value). */
 inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
     return (cursor_column >= lo && cursor_column <= hi) ? cursor_mark_ink(t) : t.textParam;
 }
@@ -217,24 +162,18 @@ inline Argb header_color(int cursor_column, int lo, int hi, const Theme& t) {
 // ─── The playback marker ─────────────────────────────────────────────────────────────────────────
 
 /**
- * LGPT's and M8's playhead: a `>` in the gap ahead of the cell, one per track. It is one glyph wide
- * (CHAR_W), so `x` is the marker's own column and never the cell's.
- *
- * ⚠️ THE COLOUR IS `textPlayhead` AS TYPED. The lift that makes an old theme's ROW PLAY readable as
- * ink is a DEFAULT (`derive_borrowed_colors`), not a step in the drawing — so TXT PLAY set to the
- * selection colour really does hide the marker inside a selection.
+ * The playhead: a `>` in the gap ahead of the cell, one per track; `x` is the marker's own column.
+ * ⚠️ Drawn in `textPlayhead` AS TYPED — the legibility lift is a default (`derive_borrowed_colors`), so
+ * TXT PLAY set to the selection colour really does hide the marker inside a selection.
  */
 inline void draw_playhead(Canvas& c, int x, int text_y, const Theme& t) {
     c.draw_text(">", x, text_y, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
 }
 
 /**
- * Is a LIVE queue marker lit on this frame's phase? SLOW is a queue waiting for its chain to end,
- * FAST one that lands on the next phrase boundary — so the two launch quantizations are told apart
- * by the RATE of the same marker rather than by a second glyph.
- *
- * ⚠️ `phase_ms` is handed in (ui/app_state.h): a drawing layer with no clock is what makes a blinking
- * marker reproducible in a screenshot.
+ * Is a LIVE queue marker lit this frame? SLOW = waiting for its chain to end, FAST = the next phrase
+ * boundary — the two quantizations told apart by blink rate. `phase_ms` is handed in, so screenshots
+ * are reproducible.
  */
 inline bool blink_on(int phase_ms, bool fast) {
     const int period = fast ? 200 : 600;
@@ -243,46 +182,22 @@ inline bool blink_on(int phase_ms, bool fast) {
 
 // ─── Cells ───────────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ A CURSOR IS `rowCursor` BEHIND AND `background` IN FRONT, EVERYWHERE — `cursor_cell_ink` above,
-// and a cell that wants to stand out uses the pair rather than mixing a shade of its own. A shade
-// mixed out of the accent looks like a reasonable highlight and reads as one, but it answers to no row
-// of the theme editor: a user who sets ROW CURSOR sees every grid in the app change and that one cell
-// not. It is the same trap `eqFill` was in (theme.h) — a colour with no key of its own.
+// ⚠️ A cursor is `rowCursor` behind and `background` in front, everywhere. A shade mixed from the
+// accent answers to no theme row, so setting ROW CURSOR would change every grid but that cell.
 
 /**
- * A grid row's cells, painted left to right, with the standard colour priority per cell:
- * cursor > selection > empty > `value_color` (which varies per column: values, params, FX names).
+ * A grid row's cells, painted left to right: cursor > selection > empty > `value_color`.
  *
- * ⚠️ BOTH THE CURSOR'S BACKGROUND AND THE SELECTION'S ARE PAINTED HERE, per cell — `row_bg_color`
- * has neither.
- *
- * ⚠️ AND THE SELECTION OUTRANKS THE CURSOR IN THE BACKGROUND WHILE LOSING TO IT IN THE TEXT. That is
- * not a contradiction: the cursor is always inside the selection it is dragging, so a cursor
- * background would punch a hole in the one region the screen is trying to show as a block. The
- * region stays one unbroken colour and the cursor says where its edge is with its INK alone. ⚠️ WHICH
- * IS WHY THE TWO INKS ARE A SHADE APART RATHER THAN OPPOSITES: inside a selection the cursor's cell is
- * the one cell reading `background` where its neighbours read `rowEvery4th`, and that difference has
- * to be visible without breaking the block up.
- *
- * ⚠️ AND A SELECTION IS ONE BLOCK, WHICH IS WHY THIS IS AN OBJECT AND NOT A FREE FUNCTION. The
- * gutter between two columns belongs to neither cell, and its width is not something a call site
- * could pass: it is the DISTANCE between two cells, and only something that has already drawn the
- * left one knows it. So a row hands its cells over in COLUMN ORDER and each selected cell whose
- * left neighbour was also selected begins its fill at that neighbour's right edge — a selected
- * range reads as a rectangle rather than as a line of separate chips, and it still stops at the
- * columns the selection actually covers. ⚠️ HANDED OVER OUT OF ORDER, the fill either runs backwards
- * over a cell already drawn or leaves the gap it was meant to close; every grid draws left to right.
- *
- * The width is DERIVED from the text rather than passed in, and that is exact rather than
- * approximate: every column of every grid is fixed-width in GLYPHS, because an empty cell prints a
- * placeholder the same length as a full one (`--`, `---`). So the derived width is uniform down a
- * column without a tenth argument at two dozen call sites, and it is the width of the string
- * actually drawn. ⚠️ A column whose text could change length would highlight raggedly — that is the
- * constraint this buys the brevity with, and it is the one thing to check before adding one.
- *
- * The horizontal margin is CHAR_SPACING, the font's own inter-glyph gap: the cell edge lands exactly
- * where the next character would have begun, which reads as one character cell and clears the
- * playhead marker sitting one CHAR_W to the left of the cell.
+ * ⚠️ The SELECTION outranks the cursor in the BACKGROUND but loses to it in the TEXT: the cursor is
+ * always inside the selection it drags, so a cursor background would punch a hole in the block. Hence
+ * the two inks are a shade apart, not opposites.
+ * ⚠️ An object because a selection is ONE block: the gutter between two selected cells is filled by
+ * starting a cell's fill at its left neighbour's right edge, which only something that drew the left
+ * one knows. ⚠️ Cells must come in COLUMN ORDER.
+ * The width is derived from the text: every grid column is fixed-width in glyphs (empty cells print
+ * `--` / `---`). ⚠️ A column whose text could change length would highlight raggedly.
+ * The margin is CHAR_SPACING, so the edge lands where the next glyph would begin and clears the
+ * playhead one CHAR_W to the left.
  */
 class RowCells {
   public:
@@ -294,14 +209,13 @@ class RowCells {
         const int right = x + Canvas::text_width(text, CHAR_SPACING, FONT_SCALE) + CHAR_SPACING;
 
         if (is_cursor || is_selected) {
-            // The gutter on the left is claimed only when the cells on BOTH sides of it are selected.
+            // The gutter is claimed only when the cells on BOTH sides are selected.
             const int from = (is_selected && selectedRight_ >= 0) ? selectedRight_ : left;
             c_.fill_rect(from, textY_ - TEXT_PADDING, right - from, ROW_HEIGHT,
                          is_selected ? t_.rowSelection : t_.rowCursor);
         }
 
-        // −1 is "nothing selected on my left", and an unselected cell restores it: the next selected
-        // cell then opens a fresh block at its own edge instead of reaching back across it.
+        // −1 = nothing selected on my left; an unselected cell resets it so the next block starts fresh.
         selectedRight_ = is_selected ? right : -1;
 
         const Argb color = is_cursor     ? cursor_cell_ink(t_)
@@ -318,39 +232,30 @@ class RowCells {
     int          selectedRight_ = -1;
 };
 
-/** One cell with no neighbours — a grid with no selection to join up (GROOVE), or a row's gutter. */
+/** One cell with no neighbours — a grid with no selection (GROOVE), or a row's gutter. */
 inline void draw_cell(Canvas& c, const std::string& text, int x, int text_y, bool is_cursor,
                       bool is_selected, bool is_empty, Argb value_color, const Theme& t) {
     RowCells{c, text_y, t}.cell(text, x, is_cursor, is_selected, is_empty, value_color);
 }
 
 /**
- * One cell on a screen that has no selection at all — every parameter screen, and every button on
- * one. The same cursor the grids draw, so the whole app says "you are here" one way; `color` is the
- * cell's RESTING colour (a value, a button, a name), which the cursor's own ink replaces.
- *
- * ⚠️ These screens carry "which row" on the row's LABEL rather than on a row number: the label takes
- * `cursor_mark_ink` while the cursor is anywhere on its row, and it is not a cell — no fill — unless
- * the cursor can actually land on it.
+ * One cell on a screen with no selection — parameter screens and buttons — with the grids' cursor.
+ * `color` is the resting colour the cursor's ink replaces. These screens mark the cursor's row on its
+ * LABEL (`cursor_mark_ink`), which is not a cell unless the cursor can land on it.
  */
 inline void draw_cursor_cell(Canvas& c, const std::string& text, int x, int text_y, bool is_cursor,
                              Argb color, const Theme& t) {
     draw_cell(c, text, x, text_y, is_cursor, /*is_selected=*/false, /*is_empty=*/false, color, t);
 }
 
-/**
- * An EQ slot value ("--" when unassigned, hex when set) plus the trailing ">" that signals the cell
- * opens the EQ editor. Shared by every EQ cell so they all look identical. The ">" never dims with
- * the value; `show_arrow=false` hides it (the instrument pool hides it on non-selected rows).
- */
+/** An EQ slot ("--" or hex) plus the ">" that says the cell opens the EQ editor. The ">" never dims;
+ *  `show_arrow=false` hides it (the pool, on unselected rows). */
 inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool is_cursor,
                          const Theme& t, bool show_arrow = true) {
     const std::string eq_str = (eq_slot < 0) ? "--" : hex2(eq_slot);
 
-    // ⚠️ The cursor's background spans the value AND the arrow, but the two keep separate colours —
-    // which is why this is a fill of its own rather than a `draw_cursor_cell` of one string. The
-    // width is measured off the glyphs that will actually be drawn, on the same edges `RowCells`
-    // uses, so an EQ cell and a grid cell cannot end up different sizes.
+    // ⚠️ The cursor background spans value AND arrow while they keep separate colours — a fill of its
+    // own, measured on the same edges as `RowCells`, so EQ and grid cells match.
     if (is_cursor) {
         const std::string span = show_arrow ? eq_str + ">" : eq_str;
         const int         w = Canvas::text_width(span, CHAR_SPACING, FONT_SCALE) + 2 * CHAR_SPACING;
@@ -367,13 +272,8 @@ inline void draw_eq_cell(Canvas& c, int value_x, int text_y, int eq_slot, bool i
     }
 }
 
-/**
- * A byte count as "12.4 MB" — the USED RAM readout, drawn on PROJECT and on INST.POOL.
- *
- * Integer math in tenths, never a float format: `%.1f` would print a comma under a locale that uses
- * one, and this font has no comma-as-decimal-point convention to fall back on. Written once because
- * two screens show the same quantity and a reader comparing them must not find two roundings.
- */
+/** A byte count as "12.4 MB" (USED RAM on PROJECT and INST.POOL). Integer tenths, never `%.1f`, which
+ *  prints a comma under some locales. */
 inline std::string megabytes_str(int64_t bytes) {
     const int64_t tenths = (bytes * 10 + 524288) / 1048576;   // round to nearest tenth of a MiB
     return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10) + " MB";
@@ -381,7 +281,7 @@ inline std::string megabytes_str(int64_t bytes) {
 
 // ─── Clears ──────────────────────────────────────────────────────────────────────────────────────
 
-/** Clear one FX slot (1..3) of a step — EditorHelpers.clearEffect(). */
+/** Clear one FX slot (1..3) of a step. */
 inline void clear_effect(songcore::PhraseStep& step, int fx_slot) {
     switch (fx_slot) {
         case 1: step.fx1Type = 0x00; step.fx1Value = 0x00; break;

@@ -6,7 +6,7 @@
 // ===========================================================================
 // EqModule — 3-band parametric EQ.
 //
-// Band types (match Kotlin EqBand.type / EQ_BAND_TYPE_NAMES):
+// Band types (the number is stored in the project file — append, never insert):
 //   0 = off      (bypass)
 //   1 = loShelf  (sp_pareq mode 1)
 //   2 = lowcut   (highpass biquad — sp_pareq cannot do HP/LP)

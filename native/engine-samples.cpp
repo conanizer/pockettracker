@@ -22,11 +22,8 @@ bool AudioEngine::loadSample(int id, const float* data, int length) {
     // std::nothrow because a bare `new` throws and nothing in native/ catches — an uncaught
     // bad_alloc is std::terminate, which loses the song and not just the file.
     //
-    // ⚠️ This buys a clean failure only where the allocator HAS one to give. Windows (real commit
-    // accounting) and 32-bit armhf (3 GB of address space) reach it. 64-bit Android does not: bionic
-    // grants any size — 256 GB was granted on a 7 GB device — and the process is killed on the write
-    // instead. Nothing written at an allocation site can turn that into a LOAD FAILED; only refusing
-    // the load before it starts can.
+    // ⚠️ This buys a clean failure only where the allocator has one to give (Windows, 32-bit armhf).
+    // 64-bit Android's bionic grants any size and kills on the write; only refusing the load first helps.
     float* newL = new (std::nothrow) float[length];
     if (!newL) {
         LOGE("loadSample: OOM allocating %d frames", length);
@@ -54,9 +51,7 @@ bool AudioEngine::loadSample(int id, const float* data, int length) {
     return true;
 }
 
-// Decode one WAV sample at `p` to a normalized float in [-1, 1). Mirrors AudioEngine.kt
-// parseWavBuffer's `decode()` byte-for-byte (little-endian, identical divisors) so a native file
-// load is bit-identical to the old Java decode.
+// Decode one WAV sample at `p` to a normalized float in [-1, 1): little-endian, standard divisors.
 static inline float decodeWavSample(const uint8_t* p, int audioFormat, int bitsPerSample) {
     if (audioFormat == 3 && bitsPerSample == 32) {           // IEEE float
         uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -66,7 +61,7 @@ static inline float decodeWavSample(const uint8_t* p, int audioFormat, int bitsP
         return out;
     }
     if (bitsPerSample == 8) {                                // PCM 8-bit, UNSIGNED (center 128)
-        return (p[0] - 128) / 128.0f;                        // native-only: the dead Java decode had no 8-bit case
+        return (p[0] - 128) / 128.0f;
     }
     if (bitsPerSample == 16) {                               // PCM 16-bit
         int16_t v = (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -104,7 +99,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     }
 
     // Scan chunks for fmt + data (fmt always precedes data in a valid WAV). Don't assume fixed
-    // offsets — a JUNK/bext/RF64 chunk before fmt shifts everything (matches parseWavBuffer).
+    // offsets — a JUNK/bext/RF64 chunk before fmt shifts everything.
     int audioFormat = 0, channels = 0, sampleRate = 0, bitsPerSample = 0;
     bool haveFmt = false;
     long dataOffset = -1;
@@ -167,15 +162,10 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     int totalFrames = (int)(dataSize / (uint32_t)bytesPerFrame);
     if (totalFrames < 1) { fclose(f); return 0; }
 
-    // ⭐ The one source whose cost is known EXACTLY before a byte is decoded: `dataSize` is in the
-    // header, so the destination is `totalFrames x channels x 4` and nothing has to be guessed. The
-    // soundfont and compressed paths cannot do this — they learn their size only by decoding — and
-    // are guarded where they grow instead.
-    //
-    // ⚠️ Checked against `load_budget_bytes()` rather than raw free memory, because this is a
-    // PREDICTION made before the work starts, and the budget is the number that carries the floor for
-    // Android's under-reporting. The guards that measure live use free memory directly. A budget of 0
-    // means the platform could not answer, and then nothing is refused.
+    // ⭐ The one source whose cost is known EXACTLY up front: `dataSize` is in the header. The
+    // soundfont and compressed paths learn their size by decoding and are guarded where they grow.
+    // ⚠️ Checked against `load_budget_bytes()`, not raw free memory: this is a PREDICTION, and the
+    // budget carries the floor for Android's under-reporting. 0 = unknown, nothing refused.
     {
         const int64_t needed = static_cast<int64_t>(totalFrames) * channels * 4;
         const int64_t budget = pt::load_budget_bytes();
@@ -188,8 +178,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
         }
     }
 
-    // Allocate the destination buffers in NATIVE memory (not the capped Java heap). std::nothrow so
-    // a genuine OOM returns cleanly instead of terminating (native new aborts under -fno-exceptions).
+    // std::nothrow, so a genuine OOM returns cleanly instead of terminating.
     float* newL = new (std::nothrow) float[totalFrames];
     float* newR = (channels == 2) ? new (std::nothrow) float[totalFrames] : nullptr;
     if (!newL || (channels == 2 && !newR)) {
@@ -278,21 +267,15 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
     int sr = 0;
     bool ok;
 
-    // ⚠️ THE ONLY `catch` IN native/. The sample buffers are allocated nothrow, but the decoders' block
-    // buffers and the MP4 path's whole-file read are std::vectors, sized by the file — there is no
-    // allocation site there to hand a std::nothrow to. An uncaught bad_alloc is std::terminate, which
-    // takes the unsaved song with it; a caught one is a LOAD FAILED that costs the user only the file.
-    //
-    // ⚠️ It cannot help on 64-bit Android, where bionic grants any size and the kernel kills on the
-    // write — see loadSample. It is Windows and 32-bit armhf that reach a real bad_alloc.
+    // ⚠️ THE ONLY `catch` IN native/: the decoders' block buffers and the MP4 whole-file read are
+    // std::vectors sized by the file, with no nothrow site. An uncaught bad_alloc takes the unsaved
+    // song with it; a caught one is a LOAD FAILED. (64-bit Android kills on the write instead.)
     try {
         if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, pcm, sr);
         else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, pcm, sr);
         else if (std::strcmp(ext, "ogg")  == 0) {
-            // An .ogg holds either Vorbis or Opus. Try Vorbis (stb_vorbis); on a miss, retry as Opus.
-            // ⚠️ A CANCEL IS NOT A MISS. Without that term the retry decodes the whole file a second
-            // time with the box still up and the user's press already spent — the one place in the
-            // app where "it failed, try the other decoder" and "stop" arrive as the same false.
+            // An .ogg holds Vorbis or Opus: try Vorbis, then Opus on a miss. ⚠️ A CANCEL IS NOT A
+            // MISS — without that check the retry decodes the whole file again after a stop.
             ok = ptdec::decodeOggFile(path, pcm, sr);
             if (!ok && !pt::load_cancelled()) {
                 pcm.clear();

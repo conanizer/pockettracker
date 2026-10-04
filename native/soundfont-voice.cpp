@@ -1,21 +1,13 @@
 // TinySoundFont — single-header SF2/SF3 renderer (MIT license)
 // NOTE: TSF_IMPLEMENTATION must be defined in exactly one .cpp file
 
-// ⚠️ **THIS INCLUDE IS WHAT DECODES COMPRESSED SAMPLE DATA, AND IT MUST COME FIRST.** A compressed
-// soundfont's `smpl` chunk holds Ogg Vorbis frames, and both of tsf's paths for them —
-// `tsf_decode_sf3_samples` and `tsf_decode_ogg` — sit behind `#ifdef STB_VORBIS_INCLUDE_STB_VORBIS_H`,
-// which is stb_vorbis's own include guard. Without it those two functions are never compiled, and
-// tsf's `#else` arm has NO FORMAT CHECK: it converts the chunk in place as raw 16-bit PCM, so the file
-// loads and then renders noise.
+// ⚠️ THIS INCLUDE IS WHAT DECODES COMPRESSED SAMPLE DATA, AND IT MUST COME FIRST. tsf's Ogg paths
+// (`tsf_decode_sf3_samples`, `tsf_decode_ogg`) sit behind stb_vorbis's include guard; without it
+// tsf's `#else` arm converts the chunk as raw 16-bit PCM — the file loads and renders noise. tsf
+// picks the decoder per shdr flag, not by extension, so a `.sf2` can need it too.
 //
-// ⚠️ It is needed for more than the `.sf3` the browser offers: tsf picks the decoder off each shdr's
-// compression flag, not off the extension, so a file NAMED `.sf2` can carry Vorbis samples. Removing
-// this include to follow whatever the extension list currently says would make such a file load and
-// render noise, silently.
-//
-// Declarations only. stb_vorbis is compiled as its own C translation unit (see CMakeLists.txt), so
-// STB_VORBIS_HEADER_ONLY avoids a second copy of the implementation, and extern "C" makes these C++
-// references resolve against the C-compiled symbols. Same shape as audio-decoders.cpp.
+// Declarations only: stb_vorbis is its own C translation unit (CMakeLists.txt); extern "C"
+// resolves against it, as in audio-decoders.cpp.
 extern "C" {
 #define STB_VORBIS_HEADER_ONLY
 #include "vendor/stb_vorbis/stb_vorbis.c"
@@ -23,40 +15,25 @@ extern "C" {
 
 // ─── The memory guard on a soundfont load ────────────────────────────────────────────────────────
 //
-// ⚠️⚠️ **WITHOUT THIS, A FONT TOO BIG FOR THE MACHINE KILLS THE APP AND NOTHING SAYS WHY.** tsf
-// null-checks its allocations and unwinds to a null return, but the null never arrives: measured on
-// a shipping device, bionic GRANTED a 256 GB request on a 7.36 GB machine. `malloc` never refuses,
-// the request succeeds against untouched address space, and the kernel kills the process the moment
-// the pages are written.
+// ⚠️⚠️ WITHOUT THIS, A FONT TOO BIG FOR THE MACHINE KILLS THE APP AND NOTHING SAYS WHY: bionic's
+// malloc never refuses (platform_memory.h), so tsf's null checks never fire and the kernel kills
+// the process when the pages are written.
 //
-// ⭐ **So this does not ESTIMATE anything — it MEASURES.** There is nothing in an SF3 header that
-// states its decoded size (tsf only learns it by decoding), so a prediction was never available for
-// the format that needs one most. Asking the machine how much is actually free, at the moment a
-// large block is about to be taken, needs no header and is exact for both formats at once.
+// ⭐ It MEASURES rather than estimates: an SF3 header does not state its decoded size, but asking
+// the machine what is free when a large block is taken works for both formats. tsf documents
+// TSF_MALLOC / TSF_REALLOC / TSF_FREE as override points, so a refusal lands on tsf's own null checks.
 //
-// ⭐ tsf documents `TSF_MALLOC`/`TSF_REALLOC`/`TSF_FREE` as override points (tsf.h:13), so the guard
-// itself needs no edit to the vendored file, and the refusal lands on tsf's own null checks.
+// ⚠️⚠️ Making the allocator say no makes tsf's never-taken error paths reachable — `tsf_decode_ogg`'s
+// double free on a failed realloc is fixed in `tsf.h`, one of the THREE local changes to vendored
+// tsf that must be re-applied on any update.
 //
-// ⚠️⚠️ **BUT ONE OF THOSE UNWIND PATHS WAS WRONG, AND MAKING THE ALLOCATOR SAY NO IS WHAT EXPOSED
-// IT.** `tsf_decode_ogg` freed the CALLER's buffer and returned 0; the caller freed it again — a
-// double free, reachable only when a realloc fails, which under overcommit it never did. It is fixed
-// in `tsf.h` and is the **THIRD** local change to vendored tsf, all three of which must be re-applied
-// on any update. ⭐ The lesson to keep: **a dormant error path is not a working one, and a guard that
-// makes a never-taken branch reachable inherits every bug in it.**
+// ⚠️⚠️ THE QUANTITY MEASURED IS `old + new`, NOT `new` — a realloc holds both (see the block table).
+// tsf's growth factor (1.5×, in tsf.h) is the other half of that number.
 //
-// ⚠️⚠️ **AND THE QUANTITY IT MEASURES IS `old + new`, NOT `new`** — see the block table below. A
-// guard that measured only the requested size approved the step that killed the process, because a
-// `realloc` holds both blocks at once. That, and tsf's growth factor (1.5x rather than 2x, in
-// tsf.h), are what a font the machine can very nearly hold turns on.
+// ⚠️ Only allocations ≥ SF_GUARD_MIN_BYTES are checked: reading free memory costs a syscall, and
+// only the sample buffers are large enough to matter.
 //
-// ⚠️ Only allocations at or above `SF_GUARD_MIN_BYTES` are checked. `/proc/meminfo` costs ~50 us to
-// read and tsf makes thousands of small allocations for its preset and region tables; the ones that
-// can exhaust a machine are the sample buffers, and those are enormous. A small allocation cannot be
-// the one that kills us, so measuring before it is cost with no answer attached.
-//
-// ⚠️ **`available_memory_bytes()` returning 0 means UNKNOWN and must never refuse.** A platform that
-// cannot answer has to keep loading exactly as it does today, or the guard turns into a total outage
-// on whatever port reads it wrong.
+// ⚠️ `available_memory_bytes()` returning 0 means UNKNOWN and must never refuse.
 #include "platform_memory.h"
 #include "load_progress.h"
 #include "note-queue.h"   // MAX_SOUNDFONTS — how many big blocks can be resident at once
@@ -79,28 +56,20 @@ thread_local bool g_sfMemoryGuardTripped = false;
 constexpr size_t SF_GUARD_MIN_BYTES = 4u * 1024 * 1024;
 
 /**
- * Headroom left unclaimed so that refusing a font leaves a machine that still works. This is NOT the
- * "reserve fraction" the budget policy rejects — that one shrinks a *predicted* budget and costs the
- * user files. This is an absolute floor under a *measured* one, and it exists so the app that just
- * said LOAD FAILED can still draw the message.
+ * Headroom left unclaimed so the app that just said LOAD FAILED can still draw it. An absolute
+ * floor under a MEASURED figure — not a margin shaved off a predicted budget, which costs files.
  */
 constexpr int64_t SF_GUARD_RESERVE_BYTES = 32ll * 1024 * 1024;
 
 /**
  * The large blocks this guard has handed out.
  *
- * ⚠️⚠️ **IT EXISTS BECAUSE A `realloc` COSTS `old + new`, NOT `new`, AND A GUARD THAT MEASURES THE
- * WRONG QUANTITY READS GREEN RIGHT UP TO THE CRASH.** Measured on a 43 MB `.sf3`: the sample buffer
- * climbs 160 → 240 → 360 → 540 → 810 MB, and while the last step is being served the 540 MB block is
- * still alive and still owned, because that is exactly what `realloc` promises. The machine is asked
- * for 1.35 GB at that instant. Comparing only the 810 MB against what is free approves the step on
- * any machine with about 850 MB — and the kill arrives during the copy, with the guard having said
- * yes. The growth factor in `tsf.h` is the other half of the same number.
+ * ⚠️⚠️ IT EXISTS BECAUSE A `realloc` COSTS `old + new`: while the buffer grows (e.g. 540 → 810 MB)
+ * the old block is still alive, so a guard comparing only the new size approves the step that
+ * kills the process during the copy.
  *
- * ⚠️ Sized for every font that can be RESIDENT plus the two a load in flight holds — a loaded font
- * keeps its trimmed sample buffer for its whole life, so those entries stay occupied. An overflowing
- * table simply leaves a block unrecorded, and a later realloc of it is measured the old, optimistic
- * way: the table degrades toward today's behaviour rather than toward a spurious refusal.
+ * ⚠️ Sized for every RESIDENT font plus the two a load in flight holds. An overflow leaves a block
+ * unrecorded and measured optimistically later — degrading toward no guard, never a false refusal.
  */
 struct SfBigBlock {
     void*  ptr  = nullptr;
@@ -109,12 +78,9 @@ struct SfBigBlock {
 SfBigBlock g_sfBig[MAX_SOUNDFONTS + 2];
 
 /**
- * ⚠️⚠️ **THE TABLE IS SHARED AND IS NOT PER-THREAD, so every touch of it takes this.** It must be
- * global: a block allocated by the worker loading a preset is FREED by the main thread when that slot
- * is evicted, so a per-thread table would lose the entry and charge a later realloc the wrong size.
- * Uncontended it costs nothing, it is taken only during a load or a free, and the alternative — one
- * thread walking the array while another writes it — is a torn read of a pointer the guard then
- * treats as a live block.
+ * ⚠️⚠️ THE TABLE IS SHARED, NOT PER-THREAD, so every touch takes this: a block allocated by the
+ * worker loading a preset is FREED by the main thread when that slot is evicted. Taken only during
+ * a load or a free.
  */
 std::mutex g_sfBigMutex;
 
@@ -176,12 +142,9 @@ void sf_guarded_free(void* ptr) {
 void* sf_guarded_realloc(void* ptr, size_t size) {
     const size_t held = sf_big_block_size(ptr);
 
-    // ⚠️⚠️ **A SHRINK IS NEVER REFUSED, AND THAT IS NOT LENIENCY.** The one shrink tsf performs is the
-    // trim at the end of `tsf_decode_sf3_samples`, whose failure arm quietly keeps the oversized
-    // buffer and reports SUCCESS — so a refusal there would trip `g_sfMemoryGuardTripped` on a font
-    // that had in fact loaded, and the app would say FILE TOO BIG about a soundfont sitting in a
-    // playable slot. The guard is about GROWTH; a request no larger than what is already held cannot
-    // be the allocation that exhausts the machine.
+    // ⚠️⚠️ A SHRINK IS NEVER REFUSED: tsf's one shrink (the trim ending `tsf_decode_sf3_samples`)
+    // keeps the oversized buffer on failure and reports success, so a refusal there would report
+    // FILE TOO BIG for a font that loaded. Only growth can exhaust the machine.
     if (size > held && sf_alloc_would_exhaust(size, held)) return nullptr;
 
     // The book-keeping moves BEFORE the realloc: after it `ptr` may already be freed, and a freed
@@ -195,18 +158,9 @@ void* sf_guarded_realloc(void* ptr, size_t size) {
 
 // ─── Progress out of, and a stop into, the SF3 decode ────────────────────────────────────────────
 //
-// ⚠️ **THE ALLOCATOR ABOVE IS NOT A USABLE HOOK FOR THIS, AND THAT IS WHY tsf.h IS PATCHED.** Through
-// the decode of a 43 MB `.sf3`, `TSF_MALLOC`/`TSF_REALLOC` fire about a DOZEN times — the sample
-// buffer only allocates when it grows — and the last of those steps covers half the run. A
-// percentage built on that is a staircase, and a cancel read there lands seconds after the press.
-// One report per sample header is the granularity both actually need.
-//
-// ⭐ **AN .sf2 REPORTS TOO, WHICH IS NOT OBVIOUS FROM THE FUNCTION'S NAME.** `tsf_decode_sf3_samples`
-// runs for BOTH formats — tsf calls it whenever `tsf_load_samples` left the float buffer unbuilt,
-// which is every plain `smpl` chunk — and its raw-PCM `else` arm is what converts an uncompressed
-// font. So the report is one per SAMPLE HEADER for either format, and the bar and the cancel work on
-// an `.sf2` as well. It rarely matters: measured, a 106 MB `.sf2` loads in 0.26 s and is over long
-// before the box's delay. It matters on a slow card, and it costs nothing.
+// ⚠️ The allocator above is too coarse for this (a dozen calls over a whole decode), so tsf.h is
+// patched to report once per sample header. ⭐ `tsf_decode_sf3_samples` also converts plain `.sf2`
+// PCM, so the bar and the cancel work for both formats.
 int sf_load_progress(int index, int count) {
     return pt::load_tick(count > 0 ? static_cast<float>(index) / static_cast<float>(count) : -1.0f)
                ? 1 : 0;
@@ -252,8 +206,8 @@ bool sf_memory_guard_tripped() { return g_sfMemoryGuardTripped; }
 SoundfontEntry soundfonts[MAX_SOUNDFONTS];
 
 /**
- * Above this release time, TSF's own envelope is smooth enough to hear as a fade rather than a
- * staircase — below it, the note ends on OUR ramp instead. See the measurement in `noteOff`.
+ * Above this release time TSF's own envelope is smooth enough to hear as a fade; below it the note
+ * ends on OUR ramp instead (see `noteOff`).
  */
 static constexpr float SF_RELEASE_RAMP_MAX_SECS = 0.1f;
 
@@ -285,23 +239,10 @@ void SoundfontVoice::hardStop() {
         tsf* h = soundfonts[slot].handle.load();
         if (h) {
             if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
-            // ⚠️⚠️ AND THEN KILL WHAT THAT LEFT ALIVE, OR THE NEXT TAKE PLAYS IT.
-            //
-            // `tsf_channel_note_off` starts a RELEASE; it does not end a voice. `isActive` goes false
-            // on the line below, so the render loop never reaches this channel again and that release
-            // is never rendered to its end — TSF's voices sit FROZEN at whatever level they had
-            // reached, indefinitely.
-            //
-            // They come back at the next trigger, because the steal path renders the channel BEFORE
-            // it kills: pass one asks TSF for "the note being replaced", and on a restart that is a
-            // note last heard before the stop, arriving as a step out of silence. Measured on
-            // `test.sf2`: the first block of a restarted take stepped **0.28 — 74 % of the take's own
-            // peak** — where the same note on a COLD start steps 0.03.
-            //
-            // Killing here is free at every call site: each one either has the channel already at
-            // zero (the stop ramp's end, an ADSR that has finished, the render loop's silence
-            // detection) or wants it gone this instant (the render path's stopAll, a second preview
-            // stop).
+            // ⚠️⚠️ AND THEN KILL WHAT THAT LEFT ALIVE, OR THE NEXT TAKE PLAYS IT. A note-off only
+            // starts a release, and with `isActive` false below it is never rendered to its end —
+            // TSF's voices sit frozen, and the steal path renders them again at the next trigger as
+            // a step out of silence. Every call site has the channel at zero already or wants it gone.
             struct tsf_voice* v    = h->voices;
             struct tsf_voice* vEnd = v + h->voiceNum;
             for (; v != vEnd; v++) {
@@ -369,19 +310,11 @@ void SoundfontVoice::noteOffAt(int atFrame) {
         if (slot >= 0 && slot < MAX_SOUNDFONTS) {
             tsf* h = soundfonts[slot].handle.load();
             if (h && activeNote >= 0) {
-                // ⚠️⚠️ **A SHORT RELEASE IS RUN AS OUR OWN RAMP, BECAUSE TSF CANNOT FADE ONE.** Its
-                // amplitude envelope is computed once per 64-sample render chunk and held flat across
-                // it — the same granularity the steal path fades around by hand. A release of a few
-                // milliseconds therefore lands as ONE step: measured on a preset carrying the SF2's
-                // own near-instant release, the first chunk after a key-up stepped **48 % of the
-                // note's peak**, and the same measurement reads 22 % at a 32 ms release and reaches
-                // the waveform's own floor only around 100 ms. That is a crack on every key release
-                // and on every KIL, and it is the one thing a keyboard does that a phrase does not.
-                //
-                // So below the threshold TSF is NOT told the note is over: it holds the note at
-                // sustain while the ramp takes the rendered samples down per sample over the time
-                // the release would have taken, never faster than the declick fade. Above it, TSF's
-                // own release is smooth enough and is left exactly as it was — a pad keeps its tail.
+                // ⚠️⚠️ A SHORT RELEASE IS RUN AS OUR OWN RAMP, BECAUSE TSF CANNOT FADE ONE: its
+                // envelope is held flat per 64-sample chunk, so a release of a few ms lands as one
+                // step — a crack on every key release and KIL. Below the threshold TSF holds sustain
+                // while our ramp takes the samples down over the release time (never faster than the
+                // declick fade). Above it, TSF's own release is left alone — a pad keeps its tail.
                 const float rel = longest_release(h, _trackId);
                 if (rel < SF_RELEASE_RAMP_MAX_SECS) {
                     const int want = static_cast<int>(rel * h->outSampleRate);
@@ -449,8 +382,8 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
     // TSF's note_off for. Writing the new note now would aim those at a key nothing is holding.
     armed = ArmedNote{slot, midiNote, midiVelocity, bank, preset,
                       noteVol, pan, envAtk, envDec, envSus, envRel};
-    // ⚠️ A second arm in the same sub-block REPLACES the first, which is what the audible result was
-    // when both fired: two notes 5.8 ms apart on one track, the second stealing the first.
+    // ⚠️ A second arm in the same sub-block REPLACES the first — two notes 5.8 ms apart on one
+    // track, the second stealing the first.
     hasArmedNote = true;
     isActive     = true;   // the render pass skips an inactive voice, and it is the one that fires this
     // Clear any stale transport-stop ramp, exactly as Voice::trigger() clears a stale fade-out: a new
@@ -466,20 +399,11 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
     if (!h) return;
     const ArmedNote a = armed;
 
-    // Hard-kill every TSF voice on this channel — no release-tail overlap. New note on the same track
-    // = voice-steal, matching sampler behaviour; noteOff() / the KIL effect preserve the instrument's
-    // SF REL envelope, this path does not.
-    //
-    // ⚠️ AND THE CUT IS DELIBERATELY UNFADED, BECAUSE TSF CANNOT FADE. Its amplitude envelope is
-    // computed once per 64-sample render block and held flat across it, so `tsf_voice_endquick` — the
-    // fastest release it has — steps the level down 74% at the first of those boundaries rather than
-    // sliding it. Measured, it left a step a third of the peak: a quieter crack is still a crack.
-    // The steal is faded in the RENDER instead, over DECLICK_SAMPLES of the already-rendered samples,
-    // which is where the sampler pool has always faded its own (processAudioBlock's SF render loop).
-    // ⚠️ That fade must ALREADY have been applied when this runs — the caller's ordering is the
-    // contract, and cutting first would be the old bug back.
-    //
-    // tsf_voice_kill() is accessible here because TSF_IMPLEMENTATION is defined in this file.
+    // Hard-kill every TSF voice on this channel: a new note on the track is a steal, as on the
+    // sampler; noteOff() and KIL keep the SF REL envelope, this does not.
+    // ⚠️ The cut is UNFADED because TSF cannot fade (its envelope is flat per 64-sample block). The
+    // steal is faded in the RENDER instead, over DECLICK_SAMPLES of the rendered samples — and that
+    // fade must ALREADY have been applied when this runs; the caller's ordering is the contract.
     {
         struct tsf_voice* v = h->voices;
         struct tsf_voice* vEnd = v + h->voiceNum;
@@ -494,9 +418,8 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
     // the note's (volGain) and the track fader — are ramps applied to the rendered samples instead,
     // because a channel volume can only change at a render boundary.
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
-    // Apply THIS instrument's ADSR override right before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own
-    // override even when instruments share a de-duplicated handle — the next trigger re-patches and
-    // re-captures, and playing voices are immune. -1 fields keep the SF2 value.
+    // This instrument's ADSR override, right before note_on: TSF captures the envelope into the
+    // voice there, so each note keeps its own even on a shared handle. -1 fields keep the SF2 value.
     tsf_preset_apply_overrides(h, a.bank, a.preset, a.envAtk, a.envDec, a.envSus, a.envRel);
     tsf_channel_note_on(h, _trackId, a.midiNote, a.midiVelocity / 127.0f);
     activeNote = a.midiNote;
@@ -516,18 +439,10 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
         needsPitchReset = false;
     }
 
-    // If no pitch mod is active, reset pitch wheel to center and return.
-    // Must NOT skip this when pitch was non-zero last block (e.g. table row returned to
-    // 0 semitones after a +2 row): the wheel is persistent in TSF and must be explicitly
-    // re-centered, or the previous pitch offset sticks (unlike the sampler which
-    // recalculates playbackRate from modDestValues every sample).
-    // detuneSemitones counts as active pitch: a static instrument detune has no slide/vibrato/mod,
-    // so without this it would be wiped to center here and never reach the pitch wheel below.
-    // pitchOffset likewise: a finished slide (advancePitchSlide clears pitchSliding at the
-    // target) must keep applying its held offset — a stopped PBN stays bent, like the sampler.
-    // ⚠️ params.base[PARAM_PITCH] — FIN's fine tune — counts as active pitch for the same reason
-    // detuneSemitones does: it has no slide, vibrato or mod behind it, so an early return here would
-    // re-centre the wheel and the command would be silent on every SoundFont note.
+    // Re-centre the wheel only when NO pitch source is active: the wheel persists in TSF, so a table
+    // row back at 0 semitones must re-centre it explicitly. A static detune, a held slide offset and
+    // FIN's fine tune (params.base[PARAM_PITCH]) all count as active — none has a slide or mod behind
+    // it, so an early return would wipe it.
     if (!pitchSliding && !vibratoActive && pitchOffset == 0.0f &&
         modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f &&
         params.base[PARAM_PITCH] == 0.0f) {
@@ -559,8 +474,7 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
 }
 
 // ── TSF internal-access helper ──────────────────────────────────────────────
-// TSF_IMPLEMENTATION is defined above, so the full tsf struct is visible here.
-// jni-bridge.cpp uses the forward-declared opaque tsf*, so it can't access members directly.
+// TSF_IMPLEMENTATION is defined above, so the full tsf struct is visible here; elsewhere tsf* is opaque.
 
 bool tsf_get_preset_at(tsf* f, int index, int* bank, int* preset_number) {
     if (!f || index < 0 || index >= f->presetNum) return false;

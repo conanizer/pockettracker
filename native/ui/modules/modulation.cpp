@@ -19,7 +19,7 @@ constexpr int VAL_X2  = 390;
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-/** A list entry, or "???" if the stored index is out of range — Kotlin's `getOrElse { "???" }`. */
+/** A list entry, or "???" if the stored index is out of range. */
 std::string at_or_unknown(const std::vector<std::string>& list, int index) {
     if (index < 0 || index >= static_cast<int>(list.size())) return "???";
     return list[static_cast<size_t>(index)];
@@ -181,9 +181,8 @@ CursorContext ModulationModule::cursor_context(const ModulationState& s) const {
             if (slot.type == ModType::NONE) return cc::read_only();
             return cc::hex_byte(slot.amount, 0, 255, -1, false, false, false, /*def=*/0xFF);
 
-        // Rows 3..6 exist only if the type is deep enough. `rows` is the guard, and it is the same
-        // number the cursor uses to decide how far down it may walk — so a read_only() here is a cell
-        // the cursor cannot reach anyway. It is the belt to that braces.
+        // Rows 3..6 exist only if the type is deep enough; `rows` also bounds the cursor, so this
+        // read_only() is a backstop for a cell it cannot reach.
         case 3:
             if (rows < 4) return cc::read_only();
             if (slot.type == ModType::LFO)
@@ -225,18 +224,9 @@ ModulationInputResult ModulationModule::handle_input(Instrument& ins, int slot_i
     ModSlot& slot = ins.modSlots[static_cast<size_t>(slot_index)];
 
     if (action.type == ActionType::DELETE) {
-        // "A+B resets the WHOLE slot" — which is what this screen's code says, in both languages, and
-        // ⚠️ **it never happens.** No cursor context on MODS ever sets `canDelete`: the TYPE and DEST
-        // rows are bare cycles (no delete, no default), and every parameter row is a `hex_byte` with a
-        // DEFAULT — and `on_a_b` prefers a default over a delete. So A+B on a MODS row either does
-        // nothing (TYPE / DEST) or resets that ONE field to its default (AMT / ATK / …), and this arm
-        // is unreachable.
-        //
-        // Carried anyway, and not quietly deleted, for two reasons: it is what the Kotlin has (and
-        // bug-for-bug parity is the rule the goldens enforce — `tools/ptinput` pins all five buttons on
-        // all seven rows of all eight mod types), and it is the behaviour the screen would get back the
-        // moment a context here declares canDelete. Found by the S4 harness, which asserted the
-        // documented behaviour and was right to be surprised.
+        // ⚠️ UNREACHABLE TODAY: no MODS context sets `canDelete` (TYPE/DEST are bare cycles, every
+        // parameter row has a default, and `on_a_b` prefers a default), so A+B resets one field or
+        // does nothing. Kept so a context that declares canDelete gets the whole-slot reset.
         slot = ModSlot{};
         r.modified = true;
         return r;

@@ -1,17 +1,12 @@
-// ─── shell/image.h — PNG decode, SHELL-SIDE ONLY (convergence plan D2) ───────────────────────────
+// ─── shell/image.h — PNG decode, SHELL-SIDE ONLY ─────────────────────────────────────────────────
 //
 // The touch skin, the CRT overlays and the theme PNGs are decoded here and composited as SDL
-// textures around the 640×480 frame in sdl-video's present() (D1). The canvas never sees a pixel of
-// this: pt-ui keeps its four primitives, and image decoding is a SHELL facility, not a UI one.
+// textures around the 640×480 frame in sdl-video's present(). The canvas never sees a pixel: pt-ui
+// keeps its four primitives, and image decoding is a SHELL facility.
 //
-// This header is deliberately SDL-free and engine-free — it depends on the standard library and
-// (in the .cpp) the vendored stb_image, nothing else. That is what lets tools/ptdecode prove the
-// decoder correct with no window and no pt-ui, exactly as ptshot proves the UI with no window.
-//
-// The two entry points mirror the two worlds the shell lives in (D7, the asset seam):
-//   * decode_png(bytes) — Android APK assets are invisible to std::filesystem; the caller reads them
-//     with SDL_RWFromFile and hands the bytes here.
-//   * decode_png_file(path) — desktop skins sit beside the exe on a std::filesystem-reachable path.
+// SDL-free and engine-free (stb_image in the .cpp), so the decoder is testable without a window.
+// Two entry points for the asset seam (assets.h): decode_png(bytes) for APK assets read through
+// SDL_RWFromFile, decode_png_file(path) for desktop files beside the exe.
 
 #pragma once
 
@@ -23,9 +18,8 @@
 namespace ptshell {
 
 // A decoded image in the shell's pixel convention: 0xAARRGGBB per pixel, row-major, top-left origin
-// — the SAME ARGB packing the canvas and ptshot's PNG writer already use, so a decoded skin hands
-// straight to an SDL_Texture (SDL_PIXELFORMAT_ARGB8888) with no channel shuffle. Always four
-// channels: a source with no alpha decodes fully opaque (A = 0xFF).
+// — the canvas's packing, so it uploads straight to an SDL_PIXELFORMAT_ARGB8888 texture. Always four
+// channels: a source with no alpha decodes fully opaque.
 struct Image {
     int                   width  = 0;
     int                   height = 0;

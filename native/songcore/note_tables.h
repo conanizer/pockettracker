@@ -1,19 +1,12 @@
 #ifndef POCKETTRACKER_SONGCORE_NOTE_TABLES_H
 #define POCKETTRACKER_SONGCORE_NOTE_TABLES_H
 
-// ─── GENERATED FILE — do not edit ───────────────────────────────────────────────────────────────
+// ─── Frozen pitch tables — do not edit ──────────────────────────────────────────────────────────
 //
-// Written by app/src/test/.../trace/S5NoteTableTest.kt, which also guards it: the test fails if
-// these values ever stop matching Kotlin's Note.toFrequency() / Instrument.detuneMultiplier().
-// Regenerate deliberately by deleting this file and re-running :app:testDebugUnitTest.
-//
-// WHY A TABLE. Both Kotlin functions route through a Double pow(), and the JVM's pow and the
-// device's libm are not guaranteed to agree to the last bit — nor are bionic and glibc, which
-// would break golden reuse between the device and CI. A 1-ULP frequency error changes the
-// resampling rate and therefore every rendered byte. The input domains are small and closed
-// (132 reachable MIDI numbers, 256 detune bytes), so the transcendental is evaluated ONCE, by
-// Kotlin, and baked here as raw binary32 bits. This is event-schema §5's "one vendored
-// implementation on every platform" rule, in its strongest form: no runtime pow at all.
+// Note → Hz and detune → multiplier, precomputed as raw binary32 bits. Both are a pow(), and libm
+// implementations (glibc, bionic, MSVC) need not agree to the last bit; a 1-ULP frequency error
+// changes the resampling rate and every rendered byte. The domains are small (132 notes, 256 detune
+// bytes), so there is no runtime pow at all. ⚠️ Every golden render depends on these exact bits.
 
 #include <cstdint>
 #include <cstring>
@@ -26,8 +19,8 @@ inline float f32_from_bits(uint32_t b) {
     return f;
 }
 
-// Note.toFrequency() for MIDI 0..131 — (octave+1)*12+pitch, so index 131 = B-9 (the tracker's
-// top authored note, deliberately past the 0..127 MIDI range: the trace records it verbatim).
+// Hz for MIDI 0..131 — (octave+1)*12+pitch, so 131 = B-9, the top authored note (past MIDI's 127 on
+// purpose: traces record it verbatim).
 constexpr uint32_t NOTE_HZ_BITS[132] = {
     0x4102D012, 0x410A9761, 0x4112D517, 0x411B9041, 0x4124D054, 0x412E9D37, 0x4138FF49, 0x4143FF6A,
     0x414FA700, 0x415C0000, 0x416914F7, 0x4176F110, 0x4182D012, 0x418A9761, 0x4192D517, 0x419B9041,
@@ -48,8 +41,8 @@ constexpr uint32_t NOTE_HZ_BITS[132] = {
     0x464FA700, 0x465C0000, 0x466914F7, 0x4676F110,
 };
 
-// Instrument.detuneMultiplier() for every detune byte 0x00..0xFF — 2^(detuneSemitones/12),
-// where detuneSemitones = (d>>4) + (d&0xF)/16 - 8. Index 0x80 is unity (1.0f).
+// The detune multiplier for every byte 0x00..0xFF: 2^(detuneSemitones/12), where
+// detuneSemitones = (d>>4) + (d&0xF)/16 - 8. Index 0x80 is unity (1.0f).
 constexpr uint32_t DETUNE_MUL_BITS[256] = {
     0x3F214518, 0x3F21DA68, 0x3F227043, 0x3F2306A8, 0x3F239D99, 0x3F243516, 0x3F24CD1E, 0x3F2565B4,
     0x3F25FED7, 0x3F269887, 0x3F2732C6, 0x3F27CD94, 0x3F2868F1, 0x3F2904DE, 0x3F29A15B, 0x3F2A3E69,
@@ -85,7 +78,7 @@ constexpr uint32_t DETUNE_MUL_BITS[256] = {
     0x3FC5672A, 0x3FC61DEF, 0x3FC6D55D, 0x3FC78D75, 0x3FC84637, 0x3FC8FFA4, 0x3FC9B9BE, 0x3FCA7483,
 };
 
-// 0 Hz for anything outside the authored range — mirrors Note.toFrequency()'s empty-note return.
+// 0 Hz outside the authored range — an empty note.
 inline float note_hz(int midi) {
     if (midi < 0 || midi >= 132) return 0.0f;
     return f32_from_bits(NOTE_HZ_BITS[midi]);

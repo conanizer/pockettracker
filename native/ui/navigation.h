@@ -2,13 +2,8 @@
 
 // ─── Screen navigation ───────────────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of the screen-grid half of core/logic/TrackerController.kt: `getScreenColumn`,
-// `getMainScreenForColumn`, and the four `navigate*` functions R+DPAD drives.
-//
-// It is the SAME 5×5 grid that `modules/navigation_map.h` draws, and that is the whole reason these
-// two land in the same session. The map is the picture; this is the movement. A drift between them —
-// a cell you can see but cannot reach, or a screen you land on that the map draws nowhere — is the
-// only interesting bug in either, and keeping them side by side is what makes it obvious.
+// The 5×5 screen grid R+DPAD moves around — the same grid `modules/navigation_map.h` draws. A cell you
+// can see but not reach, or a landing the map does not show, is the bug to watch for.
 //
 //        col 0     col 1     col 2     col 3       col 4
 //  row 0                     SCALE     INST.POOL              ← column-specific
@@ -17,15 +12,10 @@
 //  row 3  MIXER    MIXER     MIXER     MIXER       MIXER      ← shared
 //  row 4  EFFECTS  EFFECTS   EFFECTS   EFFECTS     EFFECTS    ← shared
 //
-// PROJECT / MIXER / EFFECTS are shared: they sit in every column and therefore have no column of
-// their own. `previousColumn` is what remembers which one you entered from, so that leaving one of
-// them — UP onto the main row, or SIDEWAYS onto the column beside it — is answered relative to where
-// you dropped in rather than from a fixed default. That is why every function here takes it, and why
-// they return the new column alongside the new screen — the pair travels together or it desyncs.
-//
-// The four `navigate_*` functions are PURE: a `NavState` in, a `NavResult` out, no canvas and no
-// engine. `go_to_screen` at the bottom is the one that APPLIES the answer, and it carries the whole
-// rest of the transaction — which is not optional bookkeeping, see its comment.
+// PROJECT / MIXER / EFFECTS have no column of their own; `previousColumn` remembers the one you came
+// from, so leaving them is relative to it. The new column travels with the new screen, or they desync.
+// The four `navigate_*` functions are PURE; `go_to_screen` applies the answer and the bookkeeping that
+// goes with it.
 
 #include "app_state.h"
 #include "cursor_move.h"
@@ -39,11 +29,8 @@ namespace pt::ui {
 struct NavResult {
     ScreenType screen = ScreenType::PHRASE;
     int        column = 2;
-    /**
-     * `TrackerController.instrumentFromPool` — set by R+RIGHT out of the pool, so a later R+LEFT
-     * returns to the pool instead of falling through to PHRASE. The Kotlin `currentScreen` setter
-     * clears it on any move OFF the instrument screen; `apply_navigation` below does the same.
-     */
+    /** Set by R+RIGHT out of the pool, so R+LEFT returns there instead of to PHRASE. Cleared by any
+     *  move off INSTRUMENT (`apply_navigation`). */
     bool instrumentFromPool = false;
 };
 
@@ -96,15 +83,9 @@ inline int context_column(const NavState& s) {
 }
 
 /**
- * Does R+LEFT/R+RIGHT step SIDEWAYS off this screen, onto the MAIN row one column over?
- *
- * True for every screen off the main row that sits in a column: row 1 (PROJECT / GROOVE / MODS) and
- * the two shared rows below it (MIXER, EFFECTS). You do not walk ALONG those rows — row 4 is EFFECTS
- * in all five columns, so a step sideways within it would change nothing you can see — you drop back
- * to the tracker and then move.
- *
- * The three that are absent are absent for three reasons: INST.POOL owns the fast-jump pair, SCALE
- * drops straight to its own column's main screen, and the popups have no cell in the grid to move from.
+ * Does R+LEFT/RIGHT step SIDEWAYS off this screen onto the MAIN row one column over? True for row 1
+ * and the shared rows — walking along row 4 would change nothing you can see. Not INST.POOL (it owns
+ * the fast-jump pair), SCALE (drops to its own column's main screen) or the popups.
  */
 inline bool exits_sideways_to_main_row(ScreenType s) {
     return s == ScreenType::PROJECT || s == ScreenType::GROOVE || s == ScreenType::MODS ||
@@ -112,19 +93,10 @@ inline bool exits_sideways_to_main_row(ScreenType s) {
 }
 
 /**
- * A POPUP — a screen with no cell in the navigation grid at all: no column of its own, and not one of
- * the shared rows that borrow the column they were entered from.
- *
- * ⚠️⚠️ **R+DPAD MUST NOT MOVE OFF ONE, AND `B` IS THE ONLY WAY OUT** (docs/input-system.md says so).
- * `navigate_up` and `navigate_down` already do, in their `default` arm — which names the popups. LEFT
- * and RIGHT did not: they reached the "not on the main row" arm instead, where `screen_column`
- * answers −1 and `main_screen_for_column(-1)` falls through to PHRASE. **So SETTINGS, MIDI and MIDI
- * MAPPING closed themselves on R+LEFT and landed the user on a screen they had not asked for**, which
- * is how it was reported.
- *
- * ⭐ DERIVED from the two facts above rather than listing screen names, so a popup added later is
- * covered without this file being touched — and it cannot drift from `screen_column`, which is what
- * the navigation MAP is painted from.
+ * A POPUP: no cell in the grid — no column of its own, and not a shared row.
+ * ⚠️⚠️ R+DPAD must not move off one; B is the only way out. Without this, R+LEFT from SETTINGS, MIDI or
+ * MIDI MAPPING fell through to `main_screen_for_column(-1)` = PHRASE. Derived from `screen_column`
+ * (what the map paints from), so a new popup is covered automatically.
  */
 inline bool is_popup(ScreenType s) {
     return screen_column(s) == -1 && !exits_sideways_to_main_row(s);
@@ -188,20 +160,15 @@ inline NavResult navigate_left(const NavState& s) {
     // A popup has no cell to move from — B is its way out. See `is_popup`.
     if (detail::is_popup(s.currentScreen)) return {s.currentScreen, s.previousColumn};
 
-    // The instrument-pool fast-jump pair, R+LEFT half: out of the pool exits left to PHRASE, and out
-    // of an INSTRUMENT that was ENTERED from the pool returns to it. (A normally-entered INSTRUMENT
-    // still goes to PHRASE — which is exactly what instrumentFromPool is for.)
+    // The pool fast-jump pair, R+LEFT half: the pool exits to PHRASE; an INSTRUMENT entered from the
+    // pool returns to it (a normally entered one goes to PHRASE).
     if (s.currentScreen == ScreenType::INST_POOL) return {ScreenType::PHRASE, 2};
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::INST_POOL, 3, true};
 
-    // Rows 1, 3 and 4 exit sideways onto the MAIN row, one column over.
-    //
-    // ⭐ THE COLUMN IS DERIVED, not spelled out per screen: `context_column` is the SAME reading the
-    // navigation MAP paints (`modules/navigation_map.cpp:42`), so the picture and the movement cannot
-    // disagree about which column a shared screen is standing in — which is the one bug either can
-    // have. For MIXER and EFFECTS that column is the one they were ENTERED from, so a sideways exit
-    // lands beside the screen you dropped in from and never on a fixed pair.
+    // Rows 1, 3 and 4 exit sideways onto the MAIN row, one column over. The column is DERIVED by
+    // `context_column`, the same reading the navigation MAP paints, so picture and movement agree — and
+    // MIXER/EFFECTS exit beside the screen they were entered from.
     if (detail::exits_sideways_to_main_row(s.currentScreen)) {
         const int contextCol = detail::context_column(s);
         const int target = contextCol - 1 < 0 ? 0 : contextCol - 1;
@@ -234,7 +201,7 @@ inline NavResult navigate_right(const NavState& s) {
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::INSTRUMENT, 3, true};
 
-    // The mirror of navigate_left's — see the comment there for why the column is derived.
+    // The mirror of navigate_left's.
     if (detail::exits_sideways_to_main_row(s.currentScreen)) {
         const int contextCol = detail::context_column(s);
         const int target = contextCol + 1 > 4 ? 4 : contextCol + 1;
@@ -264,18 +231,11 @@ inline NavState nav_state_of(const AppState& s) {
 }
 
 /**
- * Land on a screen. Everything Kotlin's `TrackerController.currentScreen` SETTER does, plus the
- * cursor save/restore its callers do around it — and none of it is bookkeeping you can skip:
- *
- *   • THE CURSOR MUST BE SAVED AND RESTORED. SONG, CHAIN and PHRASE share one `cursorColumn` but have
- *     8, 2 and 9 columns. Leave PHRASE on column 9, arrive on CHAIN, and the cursor is outside every
- *     cell — it does not clamp, it DISAPPEARS (no cell matches, so nothing draws highlighted). The
- *     per-screen slots are what make the shared cursor safe.
- *   • TABLE FOLLOWS THE INSTRUMENT. Arriving on TABLE syncs `currentTable` to `currentInstrument`,
- *     because a table is an instrument's automation and showing table 3 while instrument 7 is selected
- *     would be showing you someone else's.
- *   • THE POOL FLAG IS STICKY ONLY ON INSTRUMENT. Any move to a screen that is not INSTRUMENT clears
- *     it, so a stale flag cannot silently reroute a later R+LEFT back to the pool.
+ * Land on a screen, with the bookkeeping that goes with it — none of it optional:
+ *   • THE CURSOR IS SAVED AND RESTORED: SONG, CHAIN and PHRASE share `cursorColumn` but have 8, 2 and
+ *     9 columns, and a carried column outside the new screen makes the cursor DISAPPEAR.
+ *   • TABLE FOLLOWS THE INSTRUMENT: arriving on TABLE syncs `currentTable` to `currentInstrument`.
+ *   • The pool flag survives only on INSTRUMENT, so a stale one cannot reroute a later R+LEFT.
  */
 inline void go_to_screen(AppState& s, const NavResult& r) {
     // Save where we were leaving from (REMEMBER mode reads these back).
@@ -295,21 +255,17 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
     s.instrumentFromPool = (r.screen == ScreenType::INSTRUMENT) ? r.instrumentFromPool : false;
 
     if (r.screen == ScreenType::TABLE) {
-        // Kotlin runs this line through the currentTable SETTER (TrackerController.kt:124–129),
-        // which clamps to the pool and mirrors lastEditedTable. Plain fields here, so both are
-        // said out loud — assign the field bare and lastEditedTable trails one navigation behind.
+        // Clamp to the pool AND mirror lastEditedTable — assigned bare, lastEditedTable would trail one
+        // navigation behind.
         const int last    = static_cast<int>(s.project->tables.size()) - 1;
         s.currentTable    = std::min(last, std::max(0, s.currentInstrument));
         s.lastEditedTable = s.currentTable;
     }
 
-    // Restore — or refresh, which is the Android default.
-    //
-    // ⚠️ UNDER NAV = SONG, SONG AND CHAIN ALWAYS RESTORE, whatever the CURSOR row says. Their cursors
-    // are not a convenience there — they ARE the pointer (ui/song_pointer.h), so a REFRESH to row 0
-    // would not lose your place, it would silently re-aim the whole thing at song row 0 / track 1.
-    // PHRASE is untouched: its row is a step, not a pointer component, so REFRESH still means what it
-    // has always meant.
+    // Restore, or refresh (the default).
+    // ⚠️ Under NAV = SONG, SONG and CHAIN always RESTORE: their cursors ARE the pointer
+    // (ui/song_pointer.h), and a refresh would re-aim it at row 0 / track 1. PHRASE's row is a step,
+    // so it refreshes normally.
     const bool pointerScreen = s.settings.navSongRelative &&
                                (r.screen == ScreenType::SONG || r.screen == ScreenType::CHAIN);
     if (s.settings.cursorRemember || pointerScreen) {
@@ -324,24 +280,16 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
             default: break;
         }
     } else {
-        // REFRESH — every screen that owns a cursor resets it to its top-left editable cell on entry
-        // (bar the two the pointer owns under NAV = SONG, which took the branch above).
-        //
-        // ⚠️ INSTRUMENT, MODS and INST.POOL were MISSING here until S5 (their cursors persisted across
-        // an entry, where Android's refresh them). Harmless-looking, but INSTRUMENT is the one screen
-        // whose ROW MAP changes shape under it — a SoundFont has a different row list from a sampler —
-        // so a stale row survives onto a map that may not have one, and the cursor silently draws
-        // nowhere. `instrument_row_kind` is bounds-safe (out of range reads as SINGLE, as Kotlin's
-        // getOrElse does), so it was never a crash; it was a cursor you could lose.
-        //
-        // EFFECTS is deliberately absent: Kotlin does not reset it either, so its row persists in BOTH
-        // modes.
+        // REFRESH — every screen that owns a cursor resets it to its top-left editable cell (except the
+        // two the pointer owns under NAV = SONG). ⚠️ INSTRUMENT included: its row map changes shape with
+        // the instrument type, and a stale row can land nowhere. EFFECTS, PROJECT and SETTINGS
+        // deliberately persist in both modes.
         switch (r.screen) {
             case ScreenType::SONG:
             case ScreenType::CHAIN:
             case ScreenType::PHRASE:
                 s.cursorRow    = 0;
-                s.cursorColumn = min_cursor_column(r.screen);  // 1 — never the read-only gutter
+                s.cursorColumn = min_cursor_column(r.screen);  // 1 — never the gutter
                 break;
             case ScreenType::TABLE:
                 s.tableCursorRow = 0; s.tableCursorColumn = 1;
@@ -359,7 +307,7 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
                 s.modCursorRow = 0; s.modCursorPair = 0; s.modCursorSide = 0;
                 break;
             case ScreenType::INST_POOL:
-                s.poolCursorColumn = 0;   // …but NOT currentInstrument: that IS the pool's row
+                s.poolCursorColumn = 0;   // but NOT currentInstrument: that IS the pool's row
                 break;
             case ScreenType::MIXER:
                 s.mixerCursorColumn = 0; s.mixerMasterRow = 0;
@@ -368,25 +316,17 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
         }
     }
 
-    // ⚠️ A GUARD KOTLIN CANNOT NEED — and note that PROJECT and SETTINGS are absent from BOTH arms
-    // above, deliberately: Kotlin never resets their cursors either, so they persist in both modes
-    // (as EFFECTS' does). This is not a refresh. It is a BOUNDS check, and it exists only because the
-    // SETTINGS row map is caps-FILTERED here and is not on Android.
-    //
-    // The cursor's default row is 0 = LAYOUT, a row the SHELL does not draw. Without this, the very
-    // first entry into SETTINGS would leave the cursor on an invisible row: nothing highlighted
-    // anywhere, and A+DPAD quietly editing a touch-layout setting on a device that has no touch
-    // screen. Android's row 0 is always present, so its `restoreCursorForScreen` has nothing to clamp.
+    // ⚠️ Not a refresh — a BOUNDS check: the SETTINGS row map is caps-FILTERED, and the default row 0
+    // (LAYOUT) is not drawn on the shell. Without it the first entry would leave the cursor on an
+    // invisible row, with A+DPAD editing a touch setting on a device with no touch screen.
     if (r.screen == ScreenType::SETTINGS &&
         !settings_row_visible(static_cast<SettingsRow>(s.settingsCursorRow), s.caps)) {
         s.settingsCursorRow    = settings_first_visible_row(s.caps);
         s.settingsCursorColumn = 1;
     }
 
-    // ⚠️ THE SAME BOUNDS CHECK FOR THE MIXER, and for the same reason: its two ints describe a grid
-    // that is not rectangular, so a pair carried in under REMEMBER can name a cell the screen does not
-    // draw — no cursor anywhere, and A+DPAD editing nothing. Row 0 is the one row that exists in every
-    // column, so a lost cursor comes back on the fader above where it was rather than at the far left.
+    // ⚠️ The same for the MIXER: a pair carried in under REMEMBER can name an undrawn cell. Row 0 exists
+    // in every column, so the cursor comes back on the fader above where it was.
     if (r.screen == ScreenType::MIXER && !mixer_cell_exists(s.mixerMasterRow, s.mixerCursorColumn)) {
         s.mixerMasterRow    = 0;
         s.mixerCursorColumn = (s.mixerCursorColumn >= 0 && s.mixerCursorColumn <= 8)
@@ -397,9 +337,8 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
     // SONG's viewport must contain its cursor, whichever branch above set it.
     if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.cursorRow);
 
-    // ⭐ And under NAV = SONG the two current* refs are a READING of the cursors just saved and
-    // restored above — so this is where they are taken, once, below every site that lands a screen
-    // change, rather than at each of the thirty that consume them. A no-op under NAV = POOL.
+    // ⭐ Under NAV = SONG the current* refs are READ from the cursors just restored — taken here, once,
+    // below every screen change. A no-op under NAV = POOL.
     refresh_song_relative_refs(s);
 }
 

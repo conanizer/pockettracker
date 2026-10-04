@@ -10,14 +10,12 @@ namespace tl = pt::ui::touch_layout;
 
 namespace {
 
-// The panels only appear where the letterbox bar is at least this wide — narrower than a finger-sized
-// box and there is nothing usable to draw. The value is DeviceAdapter.MIN_BUTTON_PANEL_PX.
+// The panels only appear where the letterbox bar is at least this wide — narrower is not finger-sized.
 constexpr int MIN_PANEL_PX = 150;
 
-// The three fixed panel colours, lifted from VirtualControls.kt: the button in its two states, and the
-// 0xFF1a1a1a the Column fills its box with. RGB only — the panels are always opaque.
-constexpr uint32_t BTN_NORMAL  = 0x3D5A80;  // VirtualControls.kt BTN_NORMAL
-constexpr uint32_t BTN_PRESSED = 0x98C1D9;  // VirtualControls.kt BTN_PRESSED
+// The three fixed panel colours: the button in its two states, and the panel ground. Always opaque.
+constexpr uint32_t BTN_NORMAL  = 0x3D5A80;
+constexpr uint32_t BTN_PRESSED = 0x98C1D9;
 constexpr uint32_t PANEL_BG    = 0x1A1A1A;  // the Column background
 
 void fill(SDL_Renderer* r, const SDL_Rect& rc, uint32_t rgb) {
@@ -109,9 +107,8 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
             finger_.erase(it);
         }
     } else if (e.type == SDL_FINGERMOTION) {
-        // Sliding off the button a finger went down on RELEASES it, matching Kotlin's per-button
-        // pointer scope (tryAwaitRelease ends when the pointer leaves). Sliding back in does not
-        // re-press — the gesture is over, as in Compose.
+        // Sliding off the button a finger went down on RELEASES it; sliding back in does not
+        // re-press — the gesture is over.
         auto it = finger_.find(t.fingerId);
         if (it != finger_.end()) {
             Button b{};

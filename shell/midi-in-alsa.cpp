@@ -1,57 +1,25 @@
-// midi-in-alsa.{h,cpp} — the LINUX implementation of songcore::IMidiIn (MIDI plan phase E5).
-//
-// The second of the three input backends, and the first that ships to a real target: a USB-OTG MIDI
-// keyboard on a PortMaster handheld appears through the in-tree `snd-usb-audio` driver as
-// /dev/snd/midiC*D*, which is what `alsa_detail::scan_rawmidi` enumerates. Everything above
-// `IMidiIn` — the byte ring, the MIDI 1.0 parser, the channel→track→instrument router, the injection —
-// is native/songcore/midi_in.h and is shared with Windows; the device list, the sink and the counters
-// are midi-in-base.{h,cpp}. This file is a port, a thread and a read loop.
-//
-// rawmidi rather than ALSA *seq*, and dlopen rather than `-lasound`, for the reasons midi-out-alsa.cpp
-// sets out at length — the CFW kernels do not guarantee `snd-seq`, and the ubuntu:20.04 PortMaster
-// container has no libasound-dev to link against. Nothing about the input direction changes either
-// argument.
+// midi-in-alsa.{h,cpp} — the LINUX implementation of songcore::IMidiIn: a USB MIDI keyboard appears
+// via `snd-usb-audio` as /dev/snd/midiC*D*, which `alsa_detail::scan_rawmidi` enumerates. Everything
+// above `IMidiIn` is songcore/midi_in.h; the device list, sink and counters are midi-in-base. This
+// file is a port, a thread and a read loop. rawmidi and dlopen for the reasons in midi-out-alsa.cpp.
 //
 // ── ⚠️⚠️ WHY THERE IS A THREAD HERE AND NONE IN THE OUTPUT BACKEND ───────────────────────────────
 //
-// The output backend is CALLED; an input backend must WAIT. ALSA rawmidi offers no callback: the only
-// way to learn that a byte arrived is to read for it. So this owns one thread whose whole life is
-// `snd_rawmidi_read` → `MidiInBase::deliver`, which is the same shape winmm gets from the system (a
-// callback on a thread nobody chose) reached by the only route ALSA has.
+// ALSA rawmidi offers no callback: the only way to learn a byte arrived is to read for it. So one
+// thread runs `snd_rawmidi_read` → `MidiInBase::deliver`. A plain `std::thread`, not SDL's: there is
+// no JVM to attach on Linux, and it keeps this backend usable without SDL.
 //
-// ⚠️ **`std::thread`, NOT `SDL_CreateThread`, AND THE DIFFERENCE IS ANDROID.** midi-sender.cpp is an
-// SDL thread precisely because it makes JNI calls and SDL's thread entry attaches the JVM. This file
-// cannot run on Android at all (the `#if` below), so there is no JVM to attach to — and a plain
-// `std::thread` keeps this backend linkable into `tools/ptalsain`, which has no SDL and is the only
-// thing that can drive it with bytes on a machine with no MIDI hardware.
+// ── ⚠️ NONBLOCK — THE OPPOSITE OF THE OUTPUT PORT ────────────────────────────────────────────────
 //
-// ── ⚠️ NONBLOCK, AND IT IS THE OPPOSITE DECISION FROM THE OUTPUT PORT'S ──────────────────────────
-//
-// `AlsaMidiOut` opens BLOCKING because a non-blocking WRITE that returns -EAGAIN has **dropped the
-// bytes**, and the byte most worth losing is never the one you lose (a dropped note-off is a note that
-// sounds until the gear is power-cycled). A non-blocking READ that returns -EAGAIN has dropped
-// nothing: it means "no byte has arrived yet", and the data is still in the driver's buffer if it ever
-// comes. The asymmetry is real, so the choice is opposite:
-//
-//   • BLOCKING would be tidier to write and is what most examples show — and `close()` would then have
-//     to unblock a thread parked inside libasound with no documented way to do it. `snd_rawmidi_close`
-//     from another thread while a read is in flight is not a promise ALSA makes; a signal is worse.
-//     A join that never returns is an app that hangs on quit, on a handheld, in the shutdown path.
-//   • NONBLOCK + a 1 ms poll costs one wakeup per millisecond **only while a port is open**, which is
-//     only when the user has picked a MIDI keyboard, and it is the same cadence the B3 sender thread
-//     already runs at. The latency it can add (1 ms) is a fortieth of the frame the record will wait
-//     for anyway (the drain is in `SongcoreHost::poll`, on the 60 Hz loop).
-//
-// ⭐ The read is drained to exhaustion before any sleep, so a burst — a chord, or a controller dumping
-// its state — is delivered in one pass rather than one message per millisecond.
+// A non-blocking WRITE that returns -EAGAIN has dropped bytes; a non-blocking READ has dropped
+// nothing. BLOCKING would leave `close()` unable to unblock a thread parked inside libasound (a quit
+// that hangs); NONBLOCK + a 1 ms poll costs a wakeup per ms only while a port is open. ⭐ Each read
+// drains to exhaustion before sleeping, so a burst arrives in one pass.
 //
 // ── ⚠️ WHAT MAY RUN ON THIS THREAD ───────────────────────────────────────────────────────────────
 //
-// More than on winmm's callback (this is an ordinary thread, not an interrupt-like context), but the
-// rule stays the same on purpose: `deliver` is an atomic add and a memcpy under `MidiInQueue`'s lock,
-// and every print about MIDI in happens on the frame loop where a MESSAGE rather than a byte is the
-// useful unit. The one exception is the fatal-error line below, which prints once per session at most
-// and is the only place that can say why the keyboard stopped answering.
+// The callback rule, kept on purpose: `deliver` is an atomic add and a memcpy; MIDI-in printing
+// happens on the frame loop. The one exception is the fatal-error line below (once per session).
 
 #include "midi-in-alsa.h"
 
@@ -125,11 +93,8 @@ bool AlsaMidiIn::open(int index) {
 void AlsaMidiIn::close() {
     if (!in_) return;
 
-    // ⚠️⚠️ **THE ORDER IS THE WHOLE OF THIS FUNCTION, and it is one operation split across three
-    // lines.** The thread is inside `snd_rawmidi_read(in_, ...)` most of the time; closing the handle
-    // first would hand it a freed `snd_rawmidi_t*` — a use-after-free during teardown, which is the
-    // least debuggable moment available. So: ask it to stop, WAIT for it to have stopped, and only then
-    // take the handle away. NONBLOCK is what bounds that wait at one poll interval (see the header).
+    // ⚠️⚠️ THE ORDER IS THE WHOLE FUNCTION: the thread is usually inside `snd_rawmidi_read(in_, ...)`,
+    // so ask it to stop, WAIT for it, and only then close the handle. NONBLOCK bounds the wait.
     quit_.store(true, std::memory_order_relaxed);
     if (thread_.joinable()) thread_.join();
 
@@ -156,10 +121,8 @@ void AlsaMidiIn::reader() {
             continue;
         }
 
-        // Anything else is the wire or the driver. -ENODEV is a cable pulled out, and it will repeat
-        // forever, so this thread stops rather than spinning on it — but it says so first, because a
-        // reader thread that has quietly died is indistinguishable from a keyboard nobody is playing,
-        // which is the exact ambiguity every counter in this backend exists to remove.
+        // Anything else is the wire or the driver (-ENODEV: a cable pulled), and it repeats forever,
+        // so the thread stops — saying so first, or a dead reader looks like a keyboard nobody plays.
         readErrors_.fetch_add(1, std::memory_order_relaxed);
         note_port_error();
         dead_.store(true, std::memory_order_relaxed);

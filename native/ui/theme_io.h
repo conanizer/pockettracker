@@ -2,43 +2,21 @@
 
 // ─── .ptt — a theme, as a file ───────────────────────────────────────────────────────────────────
 //
-// The reader and writer for the theme files the four built-in palettes stand in for. It is the same
-// job `songcore/project_io.h` does for `.ptp`, at a twentieth of the size, and it is done the same way:
-// nlohmann parses (tolerant, like kotlinx's `ignoreUnknownKeys` + `coerceInputValues`), and a
-// hand-rolled emitter writes bytes that are IDENTICAL to what `kotlinx.serialization` produces.
+// nlohmann parses (tolerantly); a hand-rolled emitter writes pretty-printed bytes that must match the
+// recorded THEMEPTT goldens exactly — byte-exactness is the only claim a golden can check,
+// and `.ptt` files move between devices with no conversion. (`JsonLayout::Pretty` is asked for
+// explicitly: that enum has no default.)
 //
-// ⚠️ THE `.ptp` GAVE ITS BYTE-EXACTNESS UP AND THE `.ptt` DID NOT. A project is rewritten by autosave
-// every few seconds and is 78 KB nobody reads, so it is minified; a theme is ~400 bytes a person may
-// open, edit or hand to someone else, and byte-exactness here still costs nothing. `serialize_theme`
-// therefore asks `JsonWriter` for `JsonLayout::Pretty` explicitly — that enum has no default, so this
-// is a stated choice rather than whatever the other caller happened to want.
-//
-// ⚠️ WHY BYTE-EXACT, when a theme is only twenty-two colours and any JSON would "work"?
-//
-// Because byte-exactness is the only claim a golden can actually CHECK. "Semantically equivalent" is
-// a promise a test cannot hold you to; "these 400 bytes match the 400 bytes Kotlin wrote" is a promise
-// a `memcmp` holds you to, and ptinput's THEMEPTT cases hold it. The user-facing half: a
-// `PocketTracker/` folder copied off a phone onto an SD card must simply work, in both directions,
-// with no conversion step.
-//
-// ⚠️ kotlinx's contract, reproduced exactly (this is the part that is easy to get almost right):
-//
-//   * `Json { prettyPrint = true }` — and `encodeDefaults` therefore defaults to **FALSE**. Every
-//     field equal to its DECLARED DEFAULT is OMITTED. Since the field defaults ARE the CLASSIC
-//     palette, saving an unmodified CLASSIC theme called "CLASSIC" writes `{}` — which is correct,
-//     and reads back as CLASSIC.
+// The format, reproduced exactly:
+//   * Every field equal to its DECLARED default (`Theme{}` = CLASSIC) is OMITTED, so an unmodified
+//     CLASSIC named "CLASSIC" is `{}` and reads back as CLASSIC.
 //   * 4-space indent; `"key": value`; members separated by ",\n"; no trailing newline.
-//   * Keys in @Serializable DECLARATION order, not alphabetical.
-//   * A `Long` colour is a plain decimal number: 0xFF0A0A0A is written `4278518794`, not `"#0A0A0A"`.
-//   * `visualizerType` is an enum → its DECLARED NAME, as a string.
-//
-// ⚠️ AND THE ENUM NAME IS **NOT** THE NAME THE SETTINGS SCREEN DRAWS. `SettingsModule::visualizer_names()`
-// is a list of six LABELS sized to fit a settings cell — "OCTA.F", "SPECT", "SPCT.P" — while kotlinx
-// writes the Kotlin identifier: OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS. Three of the six differ. Writing
-// the display label into a `.ptt` would produce a file Android parses without complaint and reads as
-// SCOPE, because `coerceInputValues` turns an unknown enum into the field default rather than an
-// error. A silent wrong answer, in a file that looks right. They are two vocabularies for one enum and
-// they must never be confused — which is why the serial names live here and nowhere else.
+//   * Keys in DECLARATION order, not alphabetical.
+//   * A colour is a plain decimal: 0xFF0A0A0A is `4278518794`, not `"#0A0A0A"`.
+//   * `visualizerType` is its SERIAL NAME, a string.
+// ⚠️ The serial name is NOT the settings screen's label ("OCTA.F", "SPECT", "SPCT.P" vs OCTA_FULL,
+// SPECTRUM, SPECTRUM_PEAKS): a label in a file reads back silently as SCOPE. The serial names live
+// here and nowhere else.
 
 #include <cstdint>
 #include <string>
@@ -50,7 +28,7 @@
 
 namespace pt::ui {
 
-/** The enum's DECLARED name — what kotlinx writes. NOT the settings screen's label. See above. */
+/** The enum's SERIAL name — what a `.ptt` holds. NOT the settings screen's label. */
 inline const char* visualizer_serial_name(VisualizerType v) {
     switch (v) {
         case VisualizerType::SCOPE:          return "SCOPE";
@@ -63,37 +41,27 @@ inline const char* visualizer_serial_name(VisualizerType v) {
     return "SCOPE";
 }
 
-/** The inverse. An unknown name reads as the field default — kotlinx's `coerceInputValues`. */
+/** The inverse. An unknown name reads as the field default. */
 inline VisualizerType visualizer_from_serial_name(const std::string& s) {
     if (s == "FLAT")           return VisualizerType::FLAT;
     if (s == "OCTA")           return VisualizerType::OCTA;
     if (s == "OCTA_FULL")      return VisualizerType::OCTA_FULL;
     if (s == "SPECTRUM")       return VisualizerType::SPECTRUM;
     if (s == "SPECTRUM_PEAKS") return VisualizerType::SPECTRUM_PEAKS;
-    return VisualizerType::SCOPE;   // incl. "SCOPE", and every value an older/newer build might write
+    return VisualizerType::SCOPE;   // incl. "SCOPE", and any value another build might write
 }
 
-/**
- * A theme → kotlinx-exact `.ptt` bytes.
- *
- * Every field is compared against `Theme{}` — the DECLARED default, which is the CLASSIC palette — and
- * omitted when equal. That is `encodeDefaults = false`, and it is why this takes a default-constructed
- * theme as its yardstick rather than the theme it is writing.
- */
+/** A theme → `.ptt` bytes. Each field is compared against `Theme{}` — the DECLARED default — and
+ *  omitted when equal; the yardstick is never the theme being written. */
 inline std::string serialize_theme(const Theme& t) {
-    const Theme d{};   // the field defaults — kotlinx's yardstick, not ours
+    const Theme d{};   // the field defaults — the omission yardstick
     songcore::JsonWriter w{songcore::JsonLayout::Pretty};
     w.begin_object();
 
     if (t.name != d.name) w.field_string("name", t.name);
 
-    // ⚠️ Spelled out, and deliberately NOT driven off `theme_color_rows()`, though it is nearly that
-    // table in that order — `meterBorder` sits in the middle of it here and has no row at all. Two
-    // reasons, and the second is the real one: the table is not the field list; and
-    // more importantly THIS ORDER IS THE FILE FORMAT. The row table is a UI concern and someone may one
-    // day reorder it to group the colours differently — which must not silently rewrite every `.ptt`
-    // key order and break the byte-golden. The two lists look alike today and answer different
-    // questions; the golden pins this one.
+    // ⚠️ Spelled out, NOT driven off `theme_color_rows()`: this ORDER IS THE FILE FORMAT (pinned by the
+    // golden), while the row table is a UI list someone may regroup — and it lacks `meterBorder`.
     auto color = [&](const char* key, Argb v, Argb dv) {
         if (v != dv) w.field_int(key, static_cast<long long>(v));
     };
@@ -117,12 +85,9 @@ inline std::string serialize_theme(const Theme& t) {
     color("meterHigh",       t.meterHigh,       d.meterHigh);
     color("meterBorder",     t.meterBorder,     d.meterBorder);   // no editor row; still a field
 
-    // ⚠️ THE SIX BORROWED KEYS ARE MEASURED AGAINST A DIFFERENT YARDSTICK — `derive_borrowed_colors`
-    // run on THIS theme, not `Theme{}`. Their absence from a file does not mean "CLASSIC's value", it
-    // means "the fields those screens used to borrow", which is a function of the palette in hand.
-    // `parse_theme` fills them in that way, and omitting them on the same terms is what makes the pair
-    // a round trip. It also keeps a theme nobody has dialled these rows on byte-identical to what a
-    // build without them wrote — the keys appear in a `.ptt` the first time they are actually used.
+    // ⚠️ The six borrowed keys use a different yardstick — `derive_borrowed_colors` on THIS theme — so
+    // omission and `parse_theme`'s fill-in are a round trip, and a theme nobody dialled these on keeps
+    // its bytes.
     Theme e = t;
     derive_borrowed_colors(e);
     color("eqBg",     t.eqBg,     e.eqBg);
@@ -130,8 +95,7 @@ inline std::string serialize_theme(const Theme& t) {
     color("eqBorder", t.eqBorder, e.eqBorder);
     color("eqTxt",    t.eqTxt,    e.eqTxt);
 
-    // ⚠️ LAST, AND AFTER THE EQ FOUR — this order IS the file format, and appending here is what keeps
-    // every byte a previous build wrote in the same place it was.
+    // ⚠️ LAST, after the EQ four: appending keeps every existing byte in place.
     color("textSelection", t.textSelection, e.textSelection);
     color("textPlayhead",  t.textPlayhead,  e.textPlayhead);
 
@@ -143,21 +107,15 @@ inline std::string serialize_theme(const Theme& t) {
 }
 
 /**
- * `.ptt` bytes → a theme. Tolerant, exactly as Kotlin's reader is
- * (`Json { ignoreUnknownKeys = true; coerceInputValues = true }`):
- *
- *   * an unknown key is ignored (a theme from a newer build still loads),
- *   * a missing key keeps the FIELD DEFAULT (which is why `out` starts as a fresh CLASSIC),
- *   * a key of the wrong type, or an unknown enum name, keeps the field default too.
- *
- * Returns false only when the text is not a JSON object at all — the one case Kotlin throws on, and
- * the one the caller reports as "LOAD FAILED" rather than silently accepting a blank palette.
+ * `.ptt` bytes → a theme, tolerantly: unknown keys ignored (a newer build's theme loads); a missing,
+ * wrong-typed or unknown-enum key keeps the field default (`out` starts as a fresh CLASSIC). False only
+ * when the text is not a JSON object — reported as "LOAD FAILED".
  */
 inline bool parse_theme(const std::string& text, Theme& out) {
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
 
-    Theme t{};   // the field defaults fill in every key the file does not carry
+    Theme t{};   // the field defaults fill every key the file lacks
 
     if (const auto it = j.find("name"); it != j.end() && it->is_string())
         t.name = it->get<std::string>();
@@ -165,8 +123,7 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     auto color = [&](const char* key, Argb& field) {
         const auto it = j.find(key);
         if (it == j.end() || !it->is_number_integer()) return;
-        // Kotlin stores a colour as a Long. Read it as one and keep the low 32 bits, which is what
-        // Compose's `Color(Long)` does with a hand-edited file carrying an out-of-range value.
+        // A colour is read as int64 and keeps the low 32 bits (a hand-edited out-of-range value).
         field = static_cast<Argb>(static_cast<uint64_t>(it->get<int64_t>()) & 0xFFFFFFFFu);
     };
 
@@ -189,11 +146,8 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     color("meterHigh",       t.meterHigh);
     color("meterBorder",     t.meterBorder);
 
-    // ⚠️ The six borrowed keys are DERIVED FIRST and then overwritten by whatever the file names, so a
-    // theme written before they existed keeps the exact EQ screen and the exact selection colour it has
-    // always had. Derived here rather than in the struct's field defaults because the source fields are
-    // the ones just read: a constant default would repaint every existing `.ptt`'s spectrum in CLASSIC's
-    // greys and its selected cells in CLASSIC's green.
+    // ⚠️ The six borrowed keys are DERIVED from the fields just read, then overwritten by whatever the
+    // file names — so an older theme keeps its EQ screen and selection colour exactly.
     derive_borrowed_colors(t);
     color("eqBg",     t.eqBg);
     color("eqFill",   t.eqFill);
@@ -209,22 +163,16 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     return true;
 }
 
-/** Write `theme` to `path`. The bytes are kotlinx's — see serialize_theme. */
+/** Write `theme` to `path` (see serialize_theme). */
 inline bool save_theme_file(FileSystem& fs, const std::string& path, const Theme& theme) {
     return fs.write_file(path, serialize_theme(theme));
 }
 
 /**
  * Read a theme from `path`.
- *
- * ⚠️ THE VISUALIZER IS *NOT* TAKEN FROM THE FILE, and that is the caller's call rather than the
- * parser's — `parse_theme` faithfully reads whatever the file says. Kotlin discards it at the call
- * site (`appTheme = loaded.copy(visualizerType = appTheme.visualizerType)`), because the palette
- * belongs to the theme but the visualizer belongs to the USER: loading a friend's palette should not
- * also switch your scope to their spectrum analyser. The field is still WRITTEN (kotlinx serializes
- * the whole object), so a `.ptt` carries a visualizer that nothing ever reads back. That asymmetry is
- * Kotlin's, it is harmless, and it is reproduced rather than tidied — a "fix" here would be a silent
- * behaviour divergence in a file format shared with the phone.
+ * ⚠️ The VISUALIZER is not taken from the file: the palette belongs to the theme, the visualizer to the
+ * user (loading a friend's palette must not switch your scope). It is still WRITTEN, so a `.ptt`
+ * carries a visualizer nothing reads back — harmless, and part of the shared format.
  */
 inline bool load_theme_file(FileSystem& fs, const std::string& path, Theme& out) {
     std::string text;

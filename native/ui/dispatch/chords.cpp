@@ -4,7 +4,7 @@
 
 #include "songcore/traversal.h"
 #include "ui/navigation.h"
-#include "ui/song_pointer.h"     // NAV = SONG — the pointer, the entry gate and the load-time clamp
+#include "ui/song_pointer.h"
 
 #include <algorithm>
 #include <map>
@@ -31,11 +31,8 @@ bool chain_is_blank(const Chain& c) {
 }
 
 /**
- * Kotlin's `((start..255) + (0 until start)).firstOrNull { pred }` — search forward from `start`,
- * wrapping once. Returns −1 when the pool is full.
- *
- * The wrap is the point: inserting the next unused phrase should hand you one NEAR the one you were
- * just editing, not slot 0 every time. Starting at `lastEdited + 1` and wrapping is what does that.
+ * Search forward from `start`, wrapping once; −1 when the pool is full. Starting after the last edited
+ * item hands you a free one near it, not slot 0 every time.
  */
 template <typename Pred>
 int first_from_wrapping(int start, int count, Pred pred) {
@@ -68,26 +65,15 @@ std::set<int> used_chain_ids(const Project& p) {
 
 // ─── A + D-pad ───────────────────────────────────────────────────────────────────────────────────
 
-// ⚠️ `on_a_b` below shares a NAME with the free cursor.h handler it calls, and inside a member
-// function unqualified lookup finds the MEMBER first — `generic_input(on_a_b)` would try to pass the
-// method to itself. The `pt::ui::` qualification forces namespace-scope lookup and is load-bearing,
-// not decoration. The other four free handlers are named for the STEP (`increment` / `decrement` /
-// `increment_fast` / `decrement_fast`), so nothing shadows them — but they are qualified alongside
-// `on_a_b` so the four arms of one gesture read the same way.
+// ⚠️ `pt::ui::on_a_b` must stay qualified: inside a member, unqualified lookup finds the member of the
+// same name first. The other handlers are qualified to match.
 //
-// ⚠️ WHICH CHORD FIRES WHICH STEP IS THE SPECIFICATION, and it follows LGPT: the D-pad's HORIZONTAL
-// axis is the small step and the VERTICAL axis the large one. A+RIGHT/A+LEFT is ±1, A+UP/A+DOWN is
-// ±`largeStep`. Everything a screen overrides below keeps that split — the sample editor's fine and
-// coarse nudges, the theme editor's ±0x01 and ±0x10, the INSTRUMENT TYPE cycle (a ±1, so horizontal).
-// The one gesture that is not a step at all, the FX picker, stays on the vertical axis.
+// ⚠️ Which chord fires which step follows LGPT: the HORIZONTAL axis is the small step (±1), the
+// VERTICAL the large one (±`largeStep`). Every screen override below keeps that split.
 
 /**
- * A+DPAD on the INSTRUMENT screen's TYPE cell. Switching a slot's type FREES whatever source it
- * holds — a sampler has no use for an .sf2 and vice versa — so a loaded slot is asked about through
- * the confirm dialog first, and only an EMPTY slot switches outright.
- *
- * ⚠️ Silently dropping a loaded sample because the user nudged A+RIGHT one cell too far is the failure
- * this shape exists to prevent. The dialog is the guard; do not add a path around it.
+ * A+DPAD on the INSTRUMENT screen's TYPE cell. Switching type frees the slot's source, so a loaded slot
+ * goes through the confirm dialog; only an empty one switches outright. ⚠️ Do not add a path around it.
  */
 void InputDispatcher::request_instrument_type_toggle(int delta) {
     const Instrument& ins =
@@ -101,16 +87,8 @@ void InputDispatcher::request_instrument_type_toggle(int delta) {
 }
 
 /**
- * Step the TYPE cell by `delta`, wrapping through the types this build offers.
- *
- * A+RIGHT and A+LEFT have to disagree about direction or a cell with three stops can only ever be walked
- * forwards. The cycle runs on a COUNT rather than a chain of ternaries, so a fourth type joins it by
- * existing.
- *
- * ⚠️ EXTERNAL is the LAST type, and a build with the MIDI surfaces hidden simply stops one short.
- * That works for the same reason the FX list can be shortened (songcore/effects.h): the hidden entry
- * is a tail, so every reachable value keeps its meaning. The cycle is the only way to REACH the type
- * — an instrument already set to it, from a .ptp or a .pti, keeps it and keeps drawing as EXTERNAL.
+ * Step the TYPE cell by `delta`, wrapping through the types this build offers. ⚠️ EXTERNAL is the
+ * last type, so a build that hides MIDI simply stops one short; an instrument already EXTERNAL keeps it.
  */
 void InputDispatcher::toggle_instrument_type(int delta) {
     Project&    p   = host_.edit_project();
@@ -120,36 +98,23 @@ void InputDispatcher::toggle_instrument_type(int delta) {
                                    : songcore::INSTRUMENT_TYPE_COUNT - 1;
     const int cur   = static_cast<int>(ins.instrumentType);
     const int step  = delta < 0 ? -1 : +1;
-    // An instrument that is ALREADY external in a build that hides the type is outside the cycle:
-    // `cur` is `count`, and the modulo would land it back on itself. Step from the last reachable
-    // type instead, so the gesture still has somewhere to go.
+    // An EXTERNAL instrument in a build that hides the type is outside the cycle; step from the last
+    // reachable type.
     const int from  = (cur >= count) ? count - 1 : cur;
     const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
 
-    // The name the slot would have adopted from the source it is ABOUT to lose — read before the
-    // change, exactly as a source load reads it. See the adopt rule at the end of browser activation:
-    // this is the same question asked at the other end of the same slot's life.
+    // The name the slot adopted from the source it is about to lose (see the adopt rule in browser.cpp).
     const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
 
     host_.set_instrument_type(s_.currentInstrument, next);
 
-    // ⚠️⚠️ **A TYPE CHANGE DROPS THE SOURCE, SO A NAME TAKEN FROM THAT SOURCE HAS TO GO WITH IT — AND
-    // THE SECOND HALF IS THE ONE THAT BIT.** An orphaned adopted name does not merely mislead: it no
-    // longer matches what the slot's new type would auto-name, so the adopt rule on the NEXT load
-    // reads it as a name the user TYPED and keeps it. The slot then wears the first file's name
-    // through every later load, and the only way out was to blank the name by hand.
-    //
-    // ⚠️ A name the user really did type still survives, here as there — `previousAutoName` is what
-    // tells the two apart, and it is empty for a slot that never had a source. (`ins` is still the
-    // same slot: the type change rewrites it in place and never resizes the pool.)
+    // ⚠️ A type change drops the source, so a name ADOPTED from it must go too — otherwise the next
+    // load reads it as a typed name and keeps it forever. A name the user typed survives.
     if (!previousAutoName.empty() && ins.name == previousAutoName)
         ins.name = songcore::default_instrument_name(ins.id);
 
-    // The row map just changed under the cursor — the three layouts have 16, 15 and 11 rows — and the
-    // cursor is sitting on row 0, which exists in all three. Its COLUMN may not: row 0 caps at 3 on a
-    // sampler, 2 on a SoundFont and 1 on EXTERNAL, and the cursor is on column 1 (the TYPE cell) to
-    // have reached this code at all. Nothing to clamp, then; but the SF preset readback must be
-    // re-taken, and the feed does that from the path+type on the next frame.
+    // Row 0 exists in all three layouts and the cursor is on its TYPE cell, so nothing to clamp; the
+    // feed re-reads the SF preset next frame.
     s_.statusMessage = std::string("TYPE: ") + songcore::instrument_type_name(next);
     s_.statusSuccess = true;
 }
@@ -160,17 +125,11 @@ bool InputDispatcher::on_instrument_type_cell() const {
            s_.instrumentCursorColumn == 1;
 }
 
-// A+DPAD has no meaning in either modal — the keyboard's D-pad moves its key cursor (a bare press,
-// handled above) and the browser's moves its file cursor. Swallowed, not passed through: an A held
-// down over a browser must not reach the editor screen underneath it.
+// A+DPAD is swallowed under the keyboard and the browser, so an A held over one never reaches the
+// screen underneath.
 
-// ⚠️ On the SAMPLE EDITOR, A+DPAD on rows 3..8 does not step a cell — it DRAGS the selection's active
-// edge (START on col 0, END on col 1). LEFT/RIGHT are the fine step and UP/DOWN the coarse one, both
-// scaled by the ZOOM, so a nudge is always about a pixel's worth of the waveform you can actually see:
-// zoomed out, UP moves a sixteenth of the sample; zoomed to 16×, it moves a sixteenth of the WINDOW.
-//
-// This is checked ahead of the FX helper's column test and the instrument TYPE cell, exactly where
-// Kotlin checks it, because neither of those exists on this screen.
+// On the SAMPLE EDITOR, A+DPAD on rows 3..8 drags the selection's active edge (START on col 0, END on
+// col 1), scaled by the zoom so a nudge is about one visible pixel.
 static int64_t sample_fine_step(const SampleEditorState& se) {
     return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (256LL << se.zoomLevel));
 }
@@ -178,22 +137,12 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
     return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (16LL << se.zoomLevel));
 }
 
-// ⚠️ THE EQ ARM COMES FIRST in all five A-combo handlers, ahead of the FX helper, the sample editor's
-// selection rows, the FX-type column and INSTRUMENT's type cell — which is Kotlin's order, and it is not
-// merely defensive. Every one of those four questions is asked of `currentScreen`, and `currentScreen`
-// is the screen UNDERNEATH the overlay. They all happen to answer "no" today (you cannot open the EQ
-// from an FX column, and the editor's own cell is row 16, not the sample editor's 3..8) — which is
-// exactly the kind of accident that stops being true the day someone adds an EQ cell somewhere new.
-// `generic_input()` carries the real arm; these five make sure nothing gets in front of it.
-
-// ⚠️ THE THEME ARM COMES FIRST IN ALL FOUR, and it is where the editor's whole edit lives — the module
-// has no `handle_input` and no CursorContext (see generic_input). The four gestures are not symmetric:
+// ⚠️ The EQ arm comes first in all five A-combo handlers: the other arms ask about `currentScreen`,
+// which is the screen UNDERNEATH the overlay.
 //
-//   A+LEFT / A+RIGHT → on the THEME row, step the BUILT-IN palette (prev / next).
-//                      on a colour row, nudge the cursor's channel by ∓0x01.
-//   A+UP   / A+DOWN  → on the THEME row, step the palette too: a list of presets has no coarse step,
-//                      and a cell that can be changed at all should answer both axes.
-//                      on a colour row, nudge the cursor's channel by ±0x10.
+// The THEME arm comes first in all four, and holds the editor's whole edit:
+//   A+LEFT / A+RIGHT → THEME row: previous / next built-in palette; colour row: channel ∓0x01.
+//   A+UP   / A+DOWN  → THEME row: the palette too; colour row: channel ±0x10.
 
 void InputDispatcher::on_a_up() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
@@ -218,8 +167,7 @@ void InputDispatcher::on_a_up() {
             s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
         return;
     }
-    // The TYPE cell is a three-stop cycle with no coarse step, so both axes walk it — and both go
-    // through the same request, which means both still meet the confirm dialog on a loaded slot.
+    // The TYPE cell has no coarse step, so both axes walk it — through the confirm dialog on a loaded slot.
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment_fast);
 }
@@ -286,15 +234,14 @@ void InputDispatcher::on_a_right() {
 }
 
 void InputDispatcher::on_a_released() {
-    // Ahead of the overlay test: it is not an overlay's gesture, and nothing can start a second
-    // preview while A is down (START is refused under A), so this can only silence the one A began.
+    // Ahead of the overlay test: nothing else can start a preview while A is down, so this silences
+    // the one A began.
     if (heldNotePreview_) {
         heldNotePreview_ = false;
         host_.stop_preview(/*cut=*/true);
     }
 
-    // Both pickers commit on RELEASE, not on a press — which is what lets you hold A, read your way
-    // through the list, and let go on the one you want.
+    // Both pickers commit on RELEASE, so you can hold A, read the list, and let go on your choice.
     if (top_overlay() == Overlay::MAP_PICK) { apply_map_picker_choice(); return; }
     if (top_overlay() != Overlay::FX_HELPER) return;
     apply_fx_type_change(s_.fxHelper.selected_effect_code());
@@ -302,9 +249,7 @@ void InputDispatcher::on_a_released() {
 }
 
 void InputDispatcher::on_a_deferred() {
-    // The mapper is holding this press. Nothing acts here — the one thing recorded is the number that
-    // will have MOVED by the time A comes back up. Every other deferred cell opens something that reads
-    // no clock, so they write the "nothing was sounding" value and never look at it again.
+    // The mapper is holding this press; record the playhead now, since it will have moved by release.
     sliceTapPlayhead_ = on_slice_tap_cell() ? s_.sampleEditor.playbackPosition : -1.0f;
 }
 
@@ -313,9 +258,8 @@ void InputDispatcher::on_a_deferred() {
 void InputDispatcher::on_a_b() {
     if (overlay_swallows(Overlay::EQ)) return;
 
-    // A+B in the EQ editor RESETS the band param under the cursor to its default — FREQ to 0x80
-    // (≈450 Hz, the middle of the log sweep), GAIN to 120 (0 dB) and Q to 0x80. TYPE has no default and
-    // no delete, so A+B there is inert, exactly as Kotlin's inline context leaves it.
+    // A+B in the EQ editor resets the param under the cursor: FREQ 0x80 (≈450 Hz), GAIN 120 (0 dB),
+    // Q 0x80. TYPE has no default.
     if (eq_open()) { generic_input(pt::ui::on_a_b); return; }
 
     if (s_.selection.active) {
@@ -347,10 +291,8 @@ void InputDispatcher::on_a_b() {
         return;
     }
 
-    // ⚠️ The SAMPLE EDITOR's SELECTION row (8): A+B RESETS the edge under the cursor to the sample's own
-    // bound — START to 0, END to the last frame. It is the fast way back out of a selection you have
-    // nudged into a corner, and the only meaning "delete" can have on a cell that cannot be empty.
-    // (Rows 3..7 are the waveform, and Kotlin's arm is row 8 alone.)
+    // The SAMPLE EDITOR's SELECTION row (8): A+B resets the edge under the cursor to the sample's own
+    // bound — START to 0, END to the last frame.
     if (on_sample_editor() && s_.sampleEditor.cursorRow == 8) {
         SampleEditorState& se = s_.sampleEditor;
         if (se.cursorCol == 0)      se.selectionStart = 0;
@@ -358,17 +300,12 @@ void InputDispatcher::on_a_b() {
         return;
     }
 
-    // ⚠️ The SLICE DETAIL row (11): A+B puts the boundary under the cursor back where its own method
-    // would have put it — the detected position under TRANSIENT and the arithmetic cut under DIVIDE.
-    // Under MANUAL there is no such position and it DELETES instead, the slices after it renumbering.
-    // ONE boundary, matching row 8 above; changing the method or its parameter is what resets them all
-    // (engine_feed.h).
+    // The SLICE DETAIL row (11): A+B puts the boundary back where its method would — the detected
+    // position under TRANSIENT, the arithmetic cut under DIVIDE. Under MANUAL it deletes the boundary.
     if (on_sample_editor() && s_.sampleEditor.cursorRow == 11) { reset_slice_marker(); return; }
 
-    // The pool's NAME column: A+B CLEARS the slot (M8's EDIT+OPTION). It frees the sample's PCM and,
-    // if this was the SoundFont's last user, that .sf2's engine slot too — which is the whole reason it
-    // is a host verb and not a field assignment. The instrument TYPE survives, so a SoundFont slot
-    // stays a (now empty) SoundFont slot rather than silently becoming a sampler under the cursor.
+    // The pool's NAME column: A+B CLEARS the slot, freeing its sample (and the .sf2, if this was its
+    // last user) — a host verb, not a field write. The TYPE survives.
     if (s_.currentScreen == ScreenType::INST_POOL && s_.poolCursorColumn == 0) {
         host_.clear_instrument(s_.currentInstrument);
         mark_modified();
@@ -380,43 +317,26 @@ void InputDispatcher::on_a_b() {
 
 // ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
 
-// ⚠️ A STATED SUPERSET OF KOTLIN, and the one place S8 deliberately adds a guard Kotlin does not have.
-//
-// Kotlin does NOT check the EQ editor in `handleAA`, `handleLA`, `handleLB`, `handleLBA` or `handleLR`.
-// It gets away with it by accident: all five are gated on the screen, to SONG / CHAIN / PHRASE / TABLE /
-// FILE_BROWSER — and the EQ editor can only be raised from INSTRUMENT, INST.POOL, MIXER, EFFECTS and the
-// SAMPLE EDITOR. The two sets do not intersect, so every one of them is already inert under the overlay.
-//
-// That is a proof about today's screens, not about the gesture, and it is worth exactly nothing the day
-// an EQ cell appears on a screen that has a clipboard. The guard costs a token; the accident costs a
-// silent paste into a phrase you cannot see. It changes no observable behaviour on either platform
-// (ptdispatch asserts the whole button set is inert under the overlay, which is the claim that actually
-// matters and which holds with or without these lines).
+// The EQ editor cannot be raised on any screen these handlers act on, so the overlay guards in
+// on_a_a / on_l_* are defensive — kept so an EQ cell added to a clipboard screen cannot paste into a
+// phrase the user cannot see.
 
 void InputDispatcher::on_a_a() {
     if (overlay_swallows(Overlay::NONE)) return;
 
-    // ⚠️ THE SAMPLE EDITOR'S ROW 11 NEEDS NO ARM HERE, though the fast pass it would be for is real —
-    // it taps a boundary per hit, and a 16th note at 120 BPM is 125 ms, well inside the 300 ms window.
-    // Its A is DEFERRED (`defer_a_to_release`) and the mapper clears `lastAPress` on every defer, so no
-    // tap can reach this handler to be dropped by the insert-position gate below.
+    // The sample editor's row 11 needs no arm: its A is deferred, and the mapper clears `lastAPress`
+    // on every defer, so no tap reaches this handler.
 
-    // ⚠️ RESAMPLE is checked BEFORE the double-tap-position gate below, and it must be — Kotlin's
-    // handleAA opens with the identical arm ahead of its InsertPosition logic. Under a SONG selection
-    // the FIRST A press COPIED the selection rather than inserting an item, so `hasInsertPos_` was
-    // never armed; the position gate would `return` and this arm would never run. Opening the RESAMPLE
-    // keyboard here is the double-tap's whole meaning on a SONG selection.
+    // ⚠️ RESAMPLE goes before the double-tap gate: under a SONG selection the first A copied rather
+    // than inserting, so the gate would return and this arm would never run.
     if (s_.currentScreen == ScreenType::SONG && s_.selection.active) {
         open_qwerty(QwertyContext::RESAMPLE, resample_base_name(fs_), "SAMPLE NAME:", "",
                     /*max_length=*/20, /*clear_on_first_b=*/true);
         return;
     }
 
-    // ⚠️ TAP TEMPO COUNTS EVERY PRESS, AND ITS FAST HALF ARRIVES HERE RATHER THAN AT `on_button_a`.
-    // The mapper routes a second A inside 300 ms to the double-tap handler, and 300 ms IS 200 BPM —
-    // squarely inside the row's 20..999 range. Without this arm every other tap above 200 BPM would
-    // be swallowed by the insert-position gate below and the tempo would settle at half what was
-    // tapped. Ahead of that gate for the same reason RESAMPLE is: PROJECT never arms an insert.
+    // ⚠️ Tap tempo: a second A inside 300 ms (= 200 BPM) arrives here, not at `on_button_a`. Without
+    // this arm every other fast tap would be swallowed by the gate below and the tempo would halve.
     if (s_.currentScreen == ScreenType::PROJECT &&
         s_.projectCursorRow == static_cast<int>(ProjectRow::TEMPO) &&
         s_.projectCursorColumn == 2) {
@@ -424,12 +344,8 @@ void InputDispatcher::on_a_a() {
         return;
     }
 
-    // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
-    // else is two separate A presses, and each of those already did something (they inserted the
-    // LAST-EDITED item — see on_button_a).
-    //
-    // ⚠️ The PHRASE audition is owed on BOTH exits. A second A inside 300 ms lands here and never
-    // reaches `on_button_a`, so a quick re-press on a note would otherwise be held in silence.
+    // A double-tap only counts if the cursor has not moved between the presses. ⚠️ The PHRASE
+    // audition is owed on both exits — a quick second A never reaches `on_button_a`.
     if (!hasInsertPos_ || insertScreen_ != s_.currentScreen || insertRow_ != s_.cursorRow ||
         insertCol_ != s_.cursorColumn) {
         preview_held_note();
@@ -467,9 +383,8 @@ void InputDispatcher::on_a_a() {
         mark_modified();
 
     } else if (s_.currentScreen == ScreenType::PHRASE) {
-        // D1: advance the NOTE cell's instrument to the next FREE slot, keeping the note the first A
-        // laid down. `instrument_is_free` (not a bare sampleFilePath==null) is the resample-safe
-        // predicate — it skips configured SoundFonts, which also have a null sampleFilePath.
+        // Advance the NOTE cell's instrument to the next FREE slot. `instrument_is_free` also skips
+        // configured SoundFonts, which have a null sampleFilePath too.
         if (s_.cursorColumn != 1) return;   // the NOTE column only
         Phrase&               ph   = p.phrases[static_cast<size_t>(s_.currentPhrase)];
         songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
@@ -490,18 +405,12 @@ void InputDispatcher::on_a_a() {
 // ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
 
 void InputDispatcher::cycle_current_item(int delta) {
-    // ⚠️ The THEME editor SWALLOWS B+LEFT/RIGHT rather than doing anything with it (Kotlin's
-    // `cycleCurrentItem` opens with the same line). It is not that there is nothing sensible to cycle —
-    // B+LEFT/RIGHT could plausibly walk the built-in palettes — it is that A+LEFT/A+RIGHT already does, and
-    // a second gesture for one job is a second thing to keep in step. Without this arm the press would
-    // fall through to `currentScreen`, which is SETTINGS, whose `default:` arm does nothing — so the bug
-    // would be invisible today and would arrive the day an EQ cell or a pool lands on SETTINGS.
+    // ⚠️ The THEME editor swallows B+LEFT/RIGHT: A+LEFT/RIGHT already walks the palettes, and the
+    // press would otherwise reach SETTINGS underneath.
     if (theme_open()) return;
 
-    // ⚠️ In the EQ editor B+LEFT/RIGHT changes the SLOT — and it CLAMPS at 0 and 127 where every other
-    // B+LEFT/RIGHT in the app wraps. A phrase pool is a ring you scroll through; the EQ bank is an index
-    // you are pointing a mixer channel at, and wrapping from slot 127 back to 0 would silently re-point
-    // it at a completely different curve.
+    // ⚠️ In the EQ editor B+LEFT/RIGHT changes the SLOT and CLAMPS at 0 and 127 where everything else
+    // wraps: wrapping would silently re-point the mixer channel at an unrelated curve.
     if (eq_open()) {
         const int newSlot = std::min(127, std::max(0, s_.eq.slotIndex + delta));
         s_.eq.slotIndex   = newSlot;
@@ -509,28 +418,17 @@ void InputDispatcher::cycle_current_item(int delta) {
         return;
     }
 
-    // ⭐ ON SONG, B+LEFT/RIGHT TOGGLES THE TRANSPORT MODE — LGPT's own gesture, ported literally
-    // because it was free here: the NAV=SONG arm below is gated on CHAIN and PHRASE, and the pool
-    // switch under it has no SONG case, so this press has always reached `default: break;` and done
-    // nothing. LEFT and RIGHT both toggle rather than one each: there are two modes, so a direction
-    // that could only ever confirm the mode you are already in would be a button that does nothing.
-    //
-    // ⚠️ GATED ON SONG ALONE. The handler is shared: an ungated arm would swallow the pool cycle on
-    // six screens and the song-relative walk on two.
+    // ⭐ On SONG, B+LEFT/RIGHT toggles the transport mode (LGPT's gesture); both directions toggle,
+    // since there are only two modes. ⚠️ Gated on SONG alone — the handler is shared.
     if (s_.currentScreen == ScreenType::SONG) {
         host_.set_live_mode(!host_.live_mode());
         return;
     }
 
-    // ⭐ UNDER NAV = SONG, THIS WALKS THE SONG ROW instead of the pool — the whole gesture changes
-    // meaning, so it takes the press before the pool arms below ever see it. CHAIN steps to the nearest
-    // FILLED cell either side; PHRASE steps to the nearest one whose chain ALSO holds a phrase at the
-    // chain row you are on, which is one predicate covering both reasons a track is skipped
-    // (songcore/traversal.h). Both CLAMP: nothing to that side is a press that does nothing.
-    //
-    // ⚠️ `chainRow` is deliberately NOT reset by the move. It may then point at an empty row of the
-    // chain you land on — which the CHAIN→PHRASE entry gate already refuses, so a second guard here
-    // would only be a second place to get it wrong.
+    // ⭐ Under NAV = SONG this walks the SONG row instead of the pool. CHAIN steps to the nearest filled
+    // cell either side; PHRASE to the nearest whose chain also holds a phrase at this chain row
+    // (songcore/traversal.h). Both clamp. `chainRow` is not reset — the CHAIN→PHRASE gate already
+    // refuses an empty row.
     if (s_.settings.navSongRelative &&
         (s_.currentScreen == ScreenType::CHAIN || s_.currentScreen == ScreenType::PHRASE)) {
         const int requireRow = (s_.currentScreen == ScreenType::PHRASE) ? pointer_chain_row(s_) : -1;
@@ -542,8 +440,7 @@ void InputDispatcher::cycle_current_item(int delta) {
         return;
     }
 
-    // Kotlin's `(value + delta).mod(max + 1)` — a FLOORING modulo, so −1 wraps to the top rather than
-    // staying at −1 the way C's % would.
+    // A flooring modulo, so −1 wraps to the top.
     auto wrap = [delta](int value, int max) {
         const int n = max + 1;
         return ((value + delta) % n + n) % n;
@@ -568,9 +465,8 @@ void InputDispatcher::cycle_current_item(int delta) {
         case ScreenType::SCALE:
             s_.currentScale = wrap(s_.currentScale, songcore::POOL_SCALES - 1);
             break;
-        // INSTRUMENT and MODS cycle the same thing — the instrument — because MODS *is* a view of one.
-        // (INST_POOL is absent on purpose: there, the D-PAD already selects the instrument, so B+LEFT
-        // would be a second, redundant way to do it. Kotlin has the same gap for the same reason.)
+        // INSTRUMENT and MODS cycle the instrument (MODS is a view of one). Not INST_POOL: there the
+        // D-pad already selects it.
         case ScreenType::INSTRUMENT:
         case ScreenType::MODS:
             s_.currentInstrument    = wrap(s_.currentInstrument, 127);
@@ -581,9 +477,8 @@ void InputDispatcher::cycle_current_item(int delta) {
     }
 }
 
-// ⚠️ THE THEME AND EQ EDITORS ARE ARMED HERE, and their arms live inside `cycle_current_item` above
-// rather than in the two lines below — one of them swallows B+LEFT/RIGHT and the other re-points the
-// EQ slot with it.
+// The THEME and EQ arms live inside cycle_current_item: one swallows B+LEFT/RIGHT, the other re-points
+// the EQ slot with it.
 void InputDispatcher::on_b_left() {
     if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
     cycle_current_item(-1);
@@ -594,31 +489,11 @@ void InputDispatcher::on_b_right() {
     cycle_current_item(+1);
 }
 
-// ⚠️ AN ANDROID BUG, FOUND BY PORTING — and it is the modal rule's own warning coming true.
-//
-// `handleBUp`/`handleBDown` are the ONLY two handlers in the Kotlin dispatcher that never got an
-// `eqEditorState.isOpen` guard. Every other one has it. It survived because the guard is only MISSING
-// where it is also needed: of the two screens these two handlers act on, SONG cannot raise the EQ
-// editor at all — but INST.POOL can, from its column 4.
-//
-// So on Android: open the EQ from the pool's EQ column, hold B (which does NOT close the editor — the
-// deferred-B latch is holding it), press UP. The B+DPAD arm fires, cancels the latch, and pages
-// `currentInstrument` sixteen slots. The editor stays open on the instrument you opened it FROM (the
-// caller is captured, so the bands are still right), and the pool cursor is now somewhere else
-// entirely. Close it and you are looking at a different instrument than the one you were editing.
-//
-// Not corrupting, and that is exactly why nobody ever reported it: it reads as a mis-press. Zone B, so
-// fixed on Android too (`AppInputDispatcher.handleBUp`/`handleBDown`), per §4's rule.
-
 /**
- * B+UP/DOWN under NAV = SONG — the two directions the pool ruleset leaves FREE on both screens.
+ * B+UP/DOWN under NAV = SONG. On CHAIN it walks the track column to the nearest filled song row,
+ * skipping gaps. On PHRASE it walks the chain's own filled rows and never leaves the chain.
  *
- * On CHAIN it walks the track COLUMN: the nearest song row above or below whose cell in this track is
- * filled, GAPS SKIPPED. On PHRASE it walks the CHAIN's own filled rows and NEVER LEAVES THE CHAIN —
- * crossing chains vertically from there is deliberately not a gesture.
- *
- * ⚠️ Returns true even when the walk CLAMPS. The press was owned and its answer was "nothing to that
- * side"; falling through to the pool arms would page the song out from under the pointer instead.
+ * ⚠️ Returns true even when the walk clamps — falling through would page the song from under the pointer.
  */
 bool InputDispatcher::song_relative_b_vertical(int delta) {
     if (!s_.settings.navSongRelative) return false;
@@ -644,23 +519,20 @@ void InputDispatcher::on_b_up() {
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(-1)) return;
 
-    // B+UP/DOWN sets the GROOVE screen's quantize pointer from ANY cell on it — the gesture is free
-    // here (it is a page jump on SONG and the pool alone) and it means the editing aid can be armed
-    // without leaving the step you are editing.
+    // B+UP/DOWN steps the GROOVE screen's quantize from any cell on it.
     if (s_.currentScreen == ScreenType::GROOVE) {
         s_.grooveQuantize = (s_.grooveQuantize + 1) % GROOVE_QUANTIZE_COUNT;
         return;
     }
 
-    // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
-    // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
+    // The pool pages by 16 but CLAMPS at the ends, where a single D-pad step wraps 00↔7F.
     if (s_.currentScreen == ScreenType::INST_POOL) {
         s_.currentInstrument    = std::max(0, s_.currentInstrument - 16);
         s_.lastEditedInstrument = s_.currentInstrument;
         return;
     }
     if (s_.currentScreen != ScreenType::SONG) return;
-    s_.cursorRow = std::max(0, s_.cursorRow - 16);   // TrackerController.moveSongBigUp
+    s_.cursorRow = std::max(0, s_.cursorRow - 16);
     scroll_song_to_row(s_, s_.cursorRow);
 }
 
@@ -681,35 +553,25 @@ void InputDispatcher::on_b_down() {
         return;
     }
     if (s_.currentScreen != ScreenType::SONG) return;
-    s_.cursorRow = std::min(255, s_.cursorRow + 16);  // moveSongBigDown
+    s_.cursorRow = std::min(255, s_.cursorRow + 16);
     scroll_song_to_row(s_, s_.cursorRow);
 }
 
-// ─── R + D-pad: move between screens — except where it does not ──────────────────────────────────
+// ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
 //
-// ⚠️ On the modals R+DPAD is NOT navigation, and this is the one place the modal rule pays for itself
-// several times over. In the KEYBOARD, R+UP/DOWN switches layout (letters ↔ numbers) and R+LEFT/RIGHT
-// moves the TEXT cursor — four bindings that have nowhere else to live on an eight-button device. In
-// the BROWSER, R+UP/DOWN cycles the SORT MODE and R+LEFT goes UP A DIRECTORY, which is what its own
-// bottom bar advertises ("R+<=UP R+^v=SORT"). In the SAMPLE EDITOR R+UP/DOWN is the waveform ZOOM and
-// R+LEFT/RIGHT is swallowed. In the EQ EDITOR all four are simply SWALLOWED: the overlay has no cell in
-// the 5×5 grid, so there is nowhere for R+DPAD to go FROM — and letting it navigate would leave the
-// editor drawn over a screen it was never opened from, still writing into the caller that raised it.
-//
-// None of them may fall through to `navigate_*`: a browser is a popup, not a cell in the screen grid,
-// and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
+// ⚠️ On the modals R+DPAD is not navigation. KEYBOARD: R+UP/DOWN switches layout, R+LEFT/RIGHT moves
+// the text cursor. BROWSER: R+UP/DOWN cycles the sort, R+LEFT goes up a directory. SAMPLE EDITOR:
+// R+UP/DOWN zooms, R+LEFT/RIGHT swallowed. EQ EDITOR: all four swallowed. None may fall through to
+// `navigate_*` — a popup is not a cell in the screen grid, and the user would land on a screen with the
+// popup's state still live.
 
 void InputDispatcher::on_r_up() {
     if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER | Overlay::RENDER)) return;
-    // R+UP/DOWN steps the RENDER dialog's range to the previous or next part of the song — the one
-    // gesture on that panel that moves two values at once, because a part is a start and an end.
+    // R+UP/DOWN steps the RENDER dialog's range to the previous or next part of the song.
     if (render_dialog_open()) { render_dialog_step_section(-1); return; }
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(+1); return; }
-    // Sample-editor ZOOM IN (v0.9.4 C3): R+UP/R+DOWN drive `zoomLevel` (0=1×…4=16×) without hopping to
-    // the ZOOM row. The per-frame feed re-bins the waveform off `view_start`/`view_end`, so mutating the
-    // level is the whole job. (SAMPLE_EDITOR is a popup, and `navigate_up`/`navigate_down` sit still on
-    // it via their default arm — unlike the horizontal pair, which do NOT: see on_r_right.)
+    // Sample-editor ZOOM: R+UP/DOWN step `zoomLevel` (0=1×…4=16×); the feed re-bins the waveform.
     if (on_sample_editor()) {
         if (s_.sampleEditor.showConfirmClose) return;   // the ARE YOU SURE? dialog owns the buttons
         s_.sampleEditor.zoomLevel = std::min(s_.sampleEditor.zoomLevel + 1, 4);
@@ -738,43 +600,32 @@ void InputDispatcher::on_r_down() {
 void InputDispatcher::browser_cycle_sort(int delta) {
     FileBrowserState& b = s_.fileBrowser;
 
-    // Step through the six modes BY INDEX, which is why the enum's declaration order is behaviour
-    // rather than documentation (ui/filesystem.h).
+    // Steps the modes by index, so the enum's order is behaviour (ui/filesystem.h).
     const int next = (static_cast<int>(b.sortMode) + delta + FILE_SORT_MODE_COUNT) % FILE_SORT_MODE_COUNT;
     b.sortMode = static_cast<FileSortMode>(next);
 
-    // ⚠️ REBUILD, not `sort_items` on what is already there — see rebuild_items. Sorting the on-screen
-    // list in place would make the tie-break depend on the sort mode you happened to arrive from.
+    // ⚠️ Rebuild rather than re-sort in place, or the tie-break depends on the previous sort mode.
     rebuild_items(b, fs_);
 
-    // The cursor stays where it is (Android's does — `handleRUp` copies only `sortMode`), so the row
-    // under it now holds a different file. That is the point: you are re-ordering the list you are
-    // looking at, not jumping somewhere.
+    // The cursor stays put, so the row under it now holds a different file — the list is re-ordered.
     b.statusMessage = file_sort_label(b.sortMode);
     b.statusSuccess = true;
 }
 
-// ─── The R+LEFT/R+RIGHT deep-link (AppInputDispatcher.syncLastEditedOnScreenSwitch) ──────────────
+// ─── R+LEFT/R+RIGHT: carry the edited item across screens ────────────────────────────────────────
 //
-// What makes SONG-over-chain-04 → R+RIGHT land ON chain 04 rather than on chain 00. TWO halves,
-// transcribed from :2760–2787:
+// What makes SONG-over-chain-04 → R+RIGHT land ON chain 04. CAPTURE: the ref under the departing
+// screen's cursor becomes the lastEdited memory (PHRASE asks whether the CELL is empty; CHAIN and SONG
+// guard on `ref >= 0`). APPLY: the arriving screen jumps to the matching lastEdited item.
 //
-//   • CAPTURE — the ref under the DEPARTING screen's cursor becomes the lastEdited memory. PHRASE
-//     asks the module's own cursor_context whether the cell is empty (the CELL, column and all: an
-//     empty FX cell of a noted step captures nothing); CHAIN and SONG guard on `ref >= 0`.
-//   • APPLY — the ARRIVING screen deep-links its current* to the matching lastEdited*.
-//
-// ⚠️ HORIZONTAL MOVES ONLY, and only when the screen actually changes. Kotlin's handleRUp/handleRDown
-// do plain cursor save/restore + selection exit (:2695/:2716) — sync them too and the port diverges
-// the other way. ptdispatch §31 pins both directions of that trap.
+// ⚠️ Horizontal moves only, and only when the screen actually changes — R+UP/DOWN must not sync.
 void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenType to) {
     const Project& p = *s_.project;
 
     switch (from) {
         case ScreenType::PHRASE:
-            // `currentScreen` is still the departing PHRASE here, so cursor_context() is the same
-            // question Kotlin puts to phraseEditorModule.getCursorContext. No `>= 0` guard on the
-            // instrument, exactly as Kotlin has none (:2772) — the CLAMP below is what makes -1 safe.
+            // `currentScreen` is still the departing PHRASE, so cursor_context() describes its cell.
+            // No `>= 0` guard on the instrument — the clamp on arrival makes -1 safe.
             if (!cursor_context().capabilities.isEmpty) {
                 s_.lastEditedInstrument = p.phrases[static_cast<size_t>(s_.currentPhrase)]
                                               .steps[static_cast<size_t>(s_.cursorRow)]
@@ -790,9 +641,7 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
         }
 
         case ScreenType::SONG: {
-            // On SONG the cursor column IS the track, 1-based — and the size guard is load-bearing,
-            // not defensive: a track's chainRefs vector may be SHORTER than the 256-row screen
-            // (the model's default is empty, as Kotlin's mutableListOf() is).
+            // The column is the track, 1-based; a track's chainRefs may be shorter than 256 rows.
             const auto& refs = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)].chainRefs;
             if (s_.cursorRow < static_cast<int>(refs.size()) &&
                 refs[static_cast<size_t>(s_.cursorRow)] >= 0) {
@@ -809,9 +658,7 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
         case ScreenType::PHRASE: s_.currentPhrase = s_.lastEditedPhrase; break;
         case ScreenType::CHAIN:  s_.currentChain  = s_.lastEditedChain;  break;
         case ScreenType::INSTRUMENT: {
-            // Kotlin assigns through the currentInstrument SETTER (TrackerController.kt:167–172),
-            // which coerces into the pool and mirrors the CLAMPED value back into the memory — a
-            // captured -1 must land on 00, not on "slot -1". Plain fields here, so both are said.
+            // Clamp into the pool and mirror the clamped value back, so a captured -1 lands on 00.
             const int last          = static_cast<int>(p.instruments.size()) - 1;
             s_.currentInstrument    = std::min(last, std::max(0, s_.lastEditedInstrument));
             s_.lastEditedInstrument = s_.currentInstrument;
@@ -843,19 +690,14 @@ void InputDispatcher::on_r_right() {
         move_text_cursor_right(s_.qwerty);
         return;
     }
-    // ⚠️ SWALLOWED on the sample editor, for the reason the EQ overlay is: it has no cell in the 5×5
-    // grid, so `navigate_left`/`navigate_right` fall through their `!is_main_row` arm to
-    // `main_screen_for_column(screen_column(SAMPLE_EDITOR))` = `main_screen_for_column(-1)` = PHRASE.
-    // That is a way OUT of the editor that bypasses ARE YOU SURE? and discards an unsaved edit
-    // silently — B is the only door, and it asks.
+    // ⚠️ Swallowed on the sample editor: it has no cell in the screen grid, so navigating would fall
+    // through to PHRASE and bypass ARE YOU SURE?, silently discarding an unsaved edit.
     if (on_sample_editor()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_right(ns);
-    // ⚠️ THE ENTRY GATE, and it sits ABOVE the sync rather than beside `go_to_screen`: under NAV = SONG
-    // a refused press must leave NOTHING behind, and `sync_last_edited_on_screen_switch` writes the
-    // lastEdited memory before the screen moves. See ui/song_pointer.h — R+RIGHT is the only gated
-    // direction, because it is the only one that goes DEEPER into the arrangement.
+    // ⚠️ The NAV = SONG entry gate sits above the sync: a refused press must leave nothing behind, and
+    // the sync writes the lastEdited memory. R+RIGHT is the only gated direction (ui/song_pointer.h).
     if (!song_relative_entry_allowed(s_, r.screen)) return;
     if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
     go_to_screen(s_, r);
@@ -867,10 +709,8 @@ void InputDispatcher::on_r_right() {
 void InputDispatcher::on_l_b() {
     if (overlay_swallows(Overlay::BROWSER)) return;
 
-    // ⚠️ The browser's selection is a DIFFERENT machine from the grid editors'. Theirs is the multi-tap
-    // CELL→ROW→SCREEN widener (ui/selection.h); the browser's is a plain anchor..cursor RANGE over a
-    // list, and its second tap inside the window means SELECT ALL rather than "widen the scope". They
-    // share a button and a 500 ms window and nothing else, which is why they are two pieces of code.
+    // ⚠️ The browser's selection is a plain anchor..cursor range over a list (a second tap inside the
+    // window selects all) — a different machine from the grid editors' CELL→ROW→SCREEN widener.
     if (on_browser()) {
         FileBrowserState& b = s_.fileBrowser;
         if (b.mode != BrowserMode::NORMAL) return;
@@ -908,22 +748,18 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
-    // ⚠️⚠️ THE THEME EDITOR HAS TO BE NAMED HERE. The guard answers for the layers this handler
-    // serves, and leaving the editor out of the set meant the gesture was thrown away one line above
-    // the arm that implements it — the lock did nothing on a device, with nothing on screen to say
-    // why. Any arm below that tests for a layer must appear in this set.
+    // ⚠️ Every layer an arm below tests for must be in this set, or the gesture is thrown away here.
     if (overlay_swallows(Overlay::THEME | Overlay::BROWSER)) return;
 
-    // ⚠️ MUST RETURN, like every other theme-editor arm: `currentScreen` is still SETTINGS underneath,
-    // and falling through would run the grid selection's cut/paste on a screen the user cannot see.
+    // ⚠️ Must return: `currentScreen` is still SETTINGS underneath, and falling through would edit
+    // a screen the user cannot see.
     if (theme_open()) {
         const int color = theme_color_index(s_.themeEditor.cursorRow);
         if (color >= 0) s_.themeEditor.locks.toggle(color);
         return;
     }
 
-    // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
-    // outside one it pastes" shape as the grid editors below, over files instead of cells.
+    // On the browser L+A cuts/pastes FILES — the same shape as the grid editors below.
     if (on_browser()) {
         FileBrowserState& b = s_.fileBrowser;
         if (b.mode != BrowserMode::NORMAL) return;
@@ -945,9 +781,7 @@ void InputDispatcher::on_l_a() {
         return;
     }
 
-    // Inside a selection L+A CUTS; outside one it PASTES. One button, two verbs, and which one you
-    // get is a function of the selection — Kotlin's `handleSelectA()`, inlined because the C++
-    // selection has no InputAction to return.
+    // Inside a selection L+A CUTS; outside one it PASTES.
     Project& p = host_.edit_project();
 
     if (s_.selection.active) {
@@ -997,8 +831,7 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
     count = 0;
     switch (s_.currentScreen) {
         case ScreenType::SONG: {
-            // A selection makes the chord act on every channel it covers — the reason the gesture is
-            // worth having on a tracker at all: L+B+B selects the row, R+B drops the whole mix out.
+            // A selection makes the chord act on every channel it covers.
             if (s_.selection.active) {
                 const SelectionBounds b = s_.selection.bounds();
                 for (int col = b.topLeftColumn; col <= b.bottomRightColumn; ++col)
@@ -1009,13 +842,8 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
             return;
         }
         case ScreenType::MIXER:
-            // ⚠️ THE ROW IS PART OF THE ADDRESS. Row 0's columns 0..7 are the eight track faders, but
-            // row 1 puts the REV and DEL send returns under those same two columns — read the column
-            // alone and a chord aimed at a return lands on the track fader above it.
-            //
-            // ⚠️ Column 8 is the MASTER strip and has no mute of its own — the chord is a no-op there
-            // rather than muting track 8, which does not exist. The selection is not consulted: it
-            // belongs to the grid editors, and a stale one from SONG must not reach across.
+            // ⚠️ The row is part of the address: row 1 puts the REV and DEL returns under the columns
+            // of tracks 1-2. Column 8 is MASTER and has no mute — a no-op. The selection is not consulted.
             if (s_.mixerMasterRow == 0 && s_.mixerCursorColumn >= 0 && s_.mixerCursorColumn <= 7)
                 out[count++] = s_.mixerCursorColumn;
             else if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 0)
@@ -1029,8 +857,7 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
 }
 
 void InputDispatcher::toggle_mute_solo(bool solo) {
-    // Ordering, not bookkeeping: a selection made earlier in THIS batch of events has to be seen as
-    // older than the toggle about to happen. See `run_selection_recency()`.
+    // A selection made earlier in this batch of events must count as older than this toggle.
     run_selection_recency();
 
     int targets[8];
@@ -1040,9 +867,8 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 
     Project& p = host_.edit_project();
 
-    // ⚠️ ALL TEN PAIRS, and only on the FIRST toggle of a chord. A revert has to undo everything the
-    // chord did — a selection touches several channels, and a solo changes what every other channel is
-    // heard doing — and re-snapshotting per press would leave it able to undo only the last one.
+    // ⚠️ Snapshot all ten pairs, on the FIRST toggle of a chord only, so a revert undoes everything the
+    // chord did, not just the last press.
     if (!mixSnapshot_.live) {
         for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
             const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
@@ -1062,11 +888,9 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 
     s_.lastClearable = AppState::Clearable::MUTE;
 
-    // ⚠️ NO mark_dirty_and_arm_autosave(). Muting a channel is a PERFORMANCE action, not an edit to
-    // the document: it is saved when the project is saved for some other reason, but on its own it
-    // must not arm the 3 s autosave, must not make the song read as dirty, and must not put a
-    // "RECOVER WORK?" in front of the next launch. `push_globals()` is what makes it audible, and it
-    // sweeps all eight tracks because a solo changes the answer for the seven it was not aimed at.
+    // ⚠️ No mark_dirty_and_arm_autosave(): muting is a performance action, not an edit. It must not
+    // arm the autosave or make the song dirty. push_globals() sweeps all eight tracks because a solo
+    // changes the other seven too.
     host_.push_globals();
 }
 
@@ -1084,8 +908,7 @@ void InputDispatcher::on_r_b() {
 }
 
 void InputDispatcher::on_r_a() {
-    // ⚠️ BEFORE the mute/solo guard, which would return on any screen but SONG and MIXER and take the
-    // gesture with it. The editor is an overlay standing on SETTINGS, so it never reaches that test.
+    // ⚠️ Before the mute/solo guard: the editor stands on SETTINGS, which that guard would refuse.
     if (theme_open()) {
         if (theme_color_index(s_.themeEditor.cursorRow) >= 0) theme_roll_palette(/*rowOnly=*/true);
         return;
@@ -1094,19 +917,14 @@ void InputDispatcher::on_r_a() {
     toggle_mute_solo(/*solo=*/true);
 }
 
-// The one question both the chord and the deferred B ask: is R+A/R+B a MUTE/SOLO here, right now?
-// Derived rather than restated at the three sites, so a screen that grows the chord tomorrow starts
-// deferring its B on the same day.
+// Is R+A/R+B a MUTE/SOLO here? Asked by the chord and by the deferred B alike.
 bool InputDispatcher::mute_solo_chord_live() const {
     if (overlay_swallows(Overlay::NONE)) return false;   // a modal owns the buttons while it is up
     return s_.currentScreen == ScreenType::SONG || s_.currentScreen == ScreenType::MIXER;
 }
 
 void InputDispatcher::on_r_combo_commit() {
-    // R came up first, so what the chord did stands. Dropping the snapshot is the whole of it — the
-    // next chord takes a fresh one. (A real handler rather than an absent one: the mapper's release
-    // ordering is the specification, and a closer that never ran must be distinguishable from one
-    // that ran and had nothing to do.)
+    // R came up first, so what the chord did stands; the next chord takes a fresh snapshot.
     mixSnapshot_.live = false;
 }
 
@@ -1154,24 +972,10 @@ void InputDispatcher::on_l_r() {
         return;
     }
 
-    // ── ONE PRESS UNDOES ONE THING, MOST RECENT FIRST ────────────────────────────────────────────
-    //
-    // Two rungs: the mix (any mixer channel muted or soloed) and the selection with its buffer.
-    // `s_.lastClearable` says which the user touched last, and that one is tried first — clearing
-    // both at once would throw away a selection someone built press by press just because they also
-    // dropped a channel out of the mix.
-    //
-    // ⚠️ A rung with nothing to clear FALLS THROUGH to the other. Without that, L+R reads as a dead
-    // button whenever the most recent thing is already empty — and the recency flag survives the
-    // clear that emptied it, so that is not a rare state.
-    //
-    // ⚠️ The SAMPLE_EDITOR exclusion covers this rung too, for the reason it covers the clipboard's:
-    // L+R is reserved there for the editor's own selection, and one screen with two exclusion lists
-    // is a special case someone has to remember.
-    //
-    // ⚠️ Asked over all MIX_CHANNELS through `mix_channel_flags` — the resolver the chord toggles with —
-    // so the REV and DEL strips count. A walk over `p.tracks` alone leaves a return muted on its own
-    // with no L+R to bring it back.
+    // One press undoes one thing, most recent first (`s_.lastClearable`): the mix (any channel muted
+    // or soloed) or the selection with its buffer. ⚠️ A rung with nothing to clear falls through to
+    // the other, or L+R reads as a dead button. The mix check covers all MIX_CHANNELS, so the REV and
+    // DEL returns count.
     const bool mix_touched = [&] {
         if (s_.currentScreen == ScreenType::SAMPLE_EDITOR) return false;
         Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
@@ -1187,25 +991,15 @@ void InputDispatcher::on_l_r() {
         return;
     }
 
-    // Two-state rule (v0.9.4 C4), and the gate is `selection.active`, nothing else:
-    //   • SELECTING → leave selection mode, but the copy buffer MUST SURVIVE — you might re-enter a
-    //     selection by accident and must not lose what you copied. `selection.exit()` does not touch
-    //     `clip_`, so the buffer is untouched.
-    //   • NOT selecting → CLEAR the buffer. It is the only way to dismiss the top-strip clipboard
-    //     readout (`Clipboard::info()`) short of a restart.
+    // Inside a selection: leave it, but keep the copy buffer. Outside one: clear the buffer — the only
+    // way to dismiss the clipboard readout on the top strip.
     if (s_.selection.active) {
         s_.selection.exit();   // buffer untouched
         return;
     }
 
-    // ⚠️ A DENY-list, not an allow-list, and that is the point: the readout is drawn on the top strip
-    // of EVERY screen, so scoping the clear to the four screens that can fill the buffer left it
-    // undismissable from the other ten. The two exclusions above this line stand (the overlays own
-    // every button; the browser's L+R cancels its own selection, which its hint bar advertises).
-    //
-    // ⚠️ SAMPLE_EDITOR is excluded: L+R is reserved there for the editor's own selection, and a
-    // generic clear would shadow it. GROOVE and the other one-column screens are NOT excluded — a
-    // clear there is a no-op that costs nothing, which beats a special case someone has to remember.
+    // ⚠️ A deny-list: the readout is drawn on every screen, so the clear must work everywhere except
+    // SAMPLE_EDITOR, where L+R is the editor's own selection.
     const bool had_buffer = !clip_.info().empty();
     if (s_.currentScreen != ScreenType::SAMPLE_EDITOR) clip_.clear();
 

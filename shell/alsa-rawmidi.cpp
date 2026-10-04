@@ -13,10 +13,8 @@ void* load_alsa(AlsaApi& api, const char* who) {
     // SONAME is what is present at runtime everywhere.
     void* lib = ::dlopen("libasound.so.2", RTLD_NOW | RTLD_LOCAL);
     if (!lib) {
-        // ⚠️ ONE call to dlerror(), into a variable. It CONSUMES the error — a second call returns
-        // null — so the obvious `dlerror() ? dlerror() : "..."` prints "(null)" every single time and
-        // throws away the only sentence that says why. Found by the control that unloads the library
-        // on purpose, which is the only run in which this line is ever reached.
+        // ⚠️ ONE call to dlerror(), into a variable: it CONSUMES the error, so a second call returns
+        // null.
         const char* why = ::dlerror();
         std::printf("midi:    libasound.so.2 not available (%s) - MIDI %s disabled\n",
                     why ? why : "no error reported", who);
@@ -30,7 +28,7 @@ void* load_alsa(AlsaApi& api, const char* who) {
         return p;
     };
 
-    // ⚠️ The casts are the unchecked part. See the header, and tools/ptalsa.
+    // ⚠️ The casts are the unchecked part — see the header.
     api.card_next   = reinterpret_cast<int (*)(int*)>(sym("snd_card_next"));
     api.ctl_open    = reinterpret_cast<int (*)(void**, const char*, int)>(sym("snd_ctl_open"));
     api.ctl_close   = reinterpret_cast<int (*)(void*)>(sym("snd_ctl_close"));
@@ -98,10 +96,8 @@ void scan_rawmidi(const AlsaApi& api, int stream, std::vector<RawmidiDevice>& ou
                 RawmidiDevice d;
                 d.name = (n && *n) ? n : ctlName;
 
-                // Two identical USB interfaces produce two identical names, and the settings store a
-                // NAME — so an un-suffixed duplicate would make the second one unselectable forever.
-                // (Which of two identical devices you get after a replug is still undecidable; the
-                // plan calls that acceptable for v1, §11.)
+                // Identical USB interfaces get a numeric suffix: the settings store a NAME, so an
+                // un-suffixed duplicate would be unselectable. (Which one a replug gives is undecidable.)
                 int               dup  = 1;
                 const std::string base = d.name;
                 for (const RawmidiDevice& e : out)

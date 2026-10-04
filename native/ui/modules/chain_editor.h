@@ -2,14 +2,10 @@
 
 // ─── CHAIN EDITOR ────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/ChainEditorModule.kt. 16 phrase slots, each with a transpose.
+// 16 phrase slots, each with a transpose. The cell shows the raw byte: 00 = no change, 80 = −128,
+// FF = +127 (two's complement, `byte_to_signed_semitones` in songcore/timing.h).
 //
-// Transpose encoding: 00 = no change, 80 = −128 semitones, FF = +127 — a byte read as two's
-// complement (`byte_to_signed_semitones` in songcore/timing.h). The cell shows the raw byte; the
-// sequencer is what interprets it, and the editor deliberately does not second-guess that.
-//
-// The TSP column is empty *because the phrase slot is empty*, not because the transpose is 0 — an
-// empty slot has nothing to transpose. That is why both cells below read `isEmpty` off `phraseRefs`.
+// The TSP cell is empty because the PHRASE slot is empty, not because the transpose is 0.
 
 #include "songcore/model.h"
 #include "ui/canvas.h"
@@ -26,16 +22,13 @@ struct ChainEditorState {
     int  cursorRow     = 0;
     int  cursorColumn  = 1;
 
-    // The song cell this chain is being looked at THROUGH, drawn beside the title as `S01 T3`.
-    // −1 = "no cell", which is what NAV = POOL always answers and what NAV = SONG answers for a chain
-    // reached before the pointer had anywhere to be. ⭐ Not decoration: under NAV = SONG the cell is
-    // what decides where the next B+D-pad press goes, and a B+UP that lands on the SAME chain has
-    // still moved — the header is the only thing on screen that says so.
+    // The song cell this chain is seen THROUGH, drawn as `S01 T3`; −1 = none (always under NAV = POOL).
+    // ⭐ Under NAV = SONG it decides where the next B+D-pad goes, and the header is the only thing on
+    // screen that shows a move between two cells of the same chain.
     int  songRow = -1;
     int  songTrack = -1;
-    // ONE screen, EIGHT possible playheads: two tracks can be inside this same chain at two
-    // different rows, and a third inside a chain this screen is not showing. A marker is drawn only
-    // where `chainId` matches the chain on display, never on a row number alone (ui/playhead.h).
+    // Eight possible playheads: two tracks can be in this chain at different rows. A marker is drawn
+    // only where `chainId` matches the chain on display (ui/playhead.h).
     TrackPlayhead playheads[8] = {};
     bool selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };

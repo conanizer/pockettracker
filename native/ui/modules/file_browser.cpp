@@ -11,7 +11,7 @@ namespace pt::ui {
 
 namespace {
 
-/** "12B" / "48KB" / "3MB" — `formatFileSize`, verbatim (integer division, no decimals). */
+/** "12B" / "48KB" / "3MB" — integer division, no decimals. */
 std::string format_file_size(int64_t bytes) {
     char buf[32];
     if (bytes < 1024) {
@@ -24,7 +24,7 @@ std::string format_file_size(int64_t bytes) {
     return buf;
 }
 
-/** `SimpleDateFormat("dd-MM-yy", Locale.US)` over the file's mtime, in the machine's local zone. */
+/** "dd-MM-yy" over the file's mtime, in the machine's local zone. */
 std::string format_file_date(int64_t millis) {
     const std::time_t secs = static_cast<std::time_t>(millis / 1000);
     std::tm           tm{};
@@ -33,10 +33,7 @@ std::string format_file_date(int64_t millis) {
 #else
     if (localtime_r(&secs, &tm) == nullptr) return "--------";
 #endif
-    // The `% 100` on all three is what tells the compiler these are two-digit numbers. Without it gcc
-    // has to assume `tm_mday` and `tm_mon` could be any int (they are plain `int` fields) and warns
-    // that the output might not fit — -Wformat-truncation. Behaviour-free: a valid `tm` has mday in
-    // 1..31 and mon in 0..11, so the modulo cannot change what is printed.
+    // `% 100` tells gcc these are two-digit numbers (-Wformat-truncation); a valid `tm` is unchanged.
     const int day   = tm.tm_mday % 100;
     const int month = (tm.tm_mon + 1) % 100;
     const int year  = (tm.tm_year + 1900) % 100;
@@ -155,7 +152,7 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
             continue;
         }
 
-        if (!e.name.empty() && e.name[0] == '.') continue;   // hidden — `showHidden` is never true
+        if (!e.name.empty() && e.name[0] == '.') continue;   // hidden
 
         BrowserItem it;
         it.path         = e.path;
@@ -179,10 +176,8 @@ std::vector<BrowserItem> build_item_list(FileSystem& fs, const std::string& dire
         }
     }
 
-    // Both groups by name. This is the base order every other sort mode is STABLE against — see
-    // sort_items — so it is not merely the default view, it is the tiebreak for all five others.
-    // ⚠️ Which is why it is `natural_name_less` and not a plain compare: leave this one lexicographic
-    // and DATE and SIZE would resolve their (very common) ties in a different order from NAME.
+    // Both groups by name — the base order every other sort is STABLE against, so it is the tiebreak
+    // for all of them. ⚠️ `natural_name_less`, or DATE and SIZE would break ties unlike NAME.
     auto by_name = [](const BrowserItem& a, const BrowserItem& b) {
         return natural_name_less(a.sortName, b.sortName);
     };
@@ -210,9 +205,8 @@ void sort_items(std::vector<BrowserItem>& items, FileSortMode mode) {
         }
     }
 
-    // ⚠️ stable_sort, not sort. Kotlin's `sortedBy` is stable, and build_item_list left each group in
-    // name order — so equal keys (two files written in the same second, which is most of them) keep
-    // that name order. std::sort would scramble them, differently per toolchain.
+    // ⚠️ stable_sort: equal keys (files written in the same second) keep build_item_list's name
+    // order; std::sort would scramble them, differently per toolchain.
     auto apply = [mode](std::vector<BrowserItem>& v) {
         switch (mode) {
             case FileSortMode::NAME_ASC:
@@ -255,21 +249,9 @@ void sort_items(std::vector<BrowserItem>& items, FileSortMode mode) {
 }
 
 void rebuild_items(FileBrowserState& s, FileSystem& fs) {
-    // ⚠️ **REBUILD, then sort — never re-sort the list already on screen**, and the difference is
-    // visible the moment two files share an mtime (which is every file a `git clone` wrote, and every
-    // WAV a chop just produced).
-    //
-    // `sort_items` is a STABLE sort, so ties keep the order they came in with. Rebuilding means they
-    // come in NAME-ordered every time (build_item_list guarantees it), and the tie-break is therefore
-    // the same no matter which sort mode you arrived from. Re-sorting the existing list instead would
-    // make it depend on the PREVIOUS mode — NAME_ASC → SIZE_DESC → DATE_DESC would tie-break
-    // differently from NAME_ASC → DATE_DESC, for no reason a user could ever discover.
-    //
-    // Android gets this for free, and by construction rather than by care: its listing is a
-    // `LaunchedEffect(currentDirectory, sortMode, listRefreshTick)` whose whole body is
-    // `sortItems(buildItemList(dir, ext, exts), sort)` — a rebuild on every sort change, because a
-    // Compose effect keyed on the sort mode has nothing to re-sort in place. There is no LaunchedEffect
-    // here, so the invariant has to be stated, and this function is where it lives.
+    // ⚠️ REBUILD, then sort — never re-sort the list on screen. The sort is stable, so ties keep
+    // their incoming order; rebuilding makes that name order every time, while re-sorting would make
+    // the tiebreak depend on the PREVIOUS mode.
     s.items = build_item_list(fs, s.currentDirectory, s.fileExtensions);
     sort_items(s.items, s.sortMode);
 }
@@ -282,18 +264,12 @@ void navigate_to_folder(FileBrowserState& s, FileSystem& fs, const std::string& 
     s.statusMessage.clear();
     s.statusSuccess   = true;
 
-    // ⚠️ **A selection does not survive a directory change**, and on Android it DOES — which is a bug.
-    // `navigateToFolder` copies the state without clearing `selectionMode` / `selectionAnchor`, so
-    // entering a folder with a selection live leaves the anchor pointing at an index in the directory
-    // you just LEFT. The rows between it and the (now reset) cursor render highlighted in the NEW
-    // listing, and B there copies files the user never picked — which an L+A paste then duplicates.
-    // Fixed on Android too (zone B, per order-of-work §4).
+    // ⚠️ A selection does not survive a directory change: its anchor indexes the directory you LEFT,
+    // and B would copy files the user never picked.
     s.selectionMode   = false;
     s.selectionAnchor = -1;
 
-    // Kotlin's `permissionError` (an Android runtime-permission state) has no counterpart here. A
-    // directory we cannot read simply lists empty, which is the same thing the user sees and one fewer
-    // state to keep true. Its four-line "grant All Files Access" overlay goes with it.
+    // A directory we cannot read lists empty.
 }
 
 void navigate_to_parent(FileBrowserState& s, FileSystem& fs) {
@@ -327,9 +303,8 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         hintColor = t.textTitle;
     } else if (s.mode == BrowserMode::FORGET_ROOT) {
         const BrowserItem* item = s.current();
-        // ⚠️ **The word is FORGET and it must never read as DELETE** — this hands back a permission and
-        // removes a row; every file in the folder stays. Not red for exactly that reason: the red bar
-        // in this app means "something is about to be destroyed".
+        // ⚠️ The word is FORGET, never DELETE: it hands back a permission and removes a row; every
+        // file stays. Not red — red means something is about to be destroyed.
         hint = "FORGET " + Canvas::clip_text(item ? item->displayName : "", 15) + "? A=YES B=NO";
         hintColor = t.textTitle;
     } else if (s.selectionMode) {
@@ -339,10 +314,8 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         hint      = "L+A=PASTE  " + s.clipboard_info();
         hintColor = t.textTitle;
     } else if (const BrowserItem* item = s.current(); item && item->isRoot) {
-        // ⭐ **On a granted tree all three of those chords are refused**, so advertising them there
-        // would name three things that do nothing and hide the one thing that works. The row's own
-        // kind decides what the bar says, which is also how a user discovers the gesture at all —
-        // there is no settings row for it, and no other screen mentions a home folder.
+        // ⭐ On a granted tree the three file chords are refused, so the bar names what works there —
+        // the only place the home-folder gesture is discoverable.
         hint      = "SEL+A=SET HOME  SEL+B=FORGET";
         hintColor = t.textParam;
     } else {
@@ -357,7 +330,7 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     c.draw_text(path, x + 10, barY2 + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
 
     // ── The list ────────────────────────────────────────────────────────────────────────────────
-    int rowY = barY2 + ROW_HEIGHT + 5;   // the 5px spacer where the header used to be
+    int rowY = barY2 + ROW_HEIGHT + 5;   // a 5px spacer
 
     const int total = static_cast<int>(s.items.size());
     for (int i = 0; i < BROWSER_VISIBLE_ROWS; ++i) {
@@ -368,13 +341,9 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         const bool         isCursor = (index == s.cursor);
         const bool         isSel    = s.is_selected(index);
 
-        // ⚠️ The stripe alternates on the ITEM index, not on the on-screen row. Keyed on `i` it
-        // re-phases whenever the list scrolls by an odd number of rows, so a row changes colour
-        // without its content changing.
-        // ⚠️ THE CURSOR IS A WHOLE ROW HERE, and it is the one screen in the app where it still is.
-        // A row carries three columns the cursor cannot land on — the name, the size and the date —
-        // and they are read TOGETHER: highlighting the name alone leaves the size and date of the
-        // file you are on looking like every other row's. The row IS the unit of this screen.
+        // ⚠️ The stripe alternates on the ITEM index, not the screen row, or it re-phases on scroll.
+        // ⚠️ THE CURSOR IS A WHOLE ROW HERE (the only screen where it is): name, size and date are
+        // read together, and none is a cell the cursor lands on.
         Argb bg;
         if (isCursor)            bg = t.rowCursor;
         else if (isSel)          bg = t.rowSelection;
@@ -382,14 +351,9 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         else                     bg = t.rowEvery4th;
         c.fill_rect(x, rowY, WIDTH, ROW_HEIGHT, bg);
 
-        // Initialized, not merely assigned in every arm below: the `switch` covers all three
-        // enumerators, but a scoped enum can legally hold a value outside them, so gcc is right that
-        // this could be read uninitialized (-Wmaybe-uninitialized). `textValue` is the same colour the
-        // FILE arm falls back to, so no reachable case changes.
-        // ⚠️ A SELECTED ROW INVERTS, exactly as a selected cell does everywhere else in the app.
-        // `rowSelection` is a bright ground, so a name left in its own bright ink sits on it unread —
-        // grey on grey once a palette is monochrome. The row's KIND stops colouring it while it is
-        // selected, which is the same trade the cursor arm above already makes.
+        // Initialized: a scoped enum can hold a value outside the switch (-Wmaybe-uninitialized).
+        // ⚠️ A SELECTED ROW INVERTS, as a selected cell does elsewhere: `rowSelection` is a bright
+        // ground, so the row's kind stops colouring it while selected.
         Argb textColor = t.textValue;
         if (isCursor) {
             textColor = cursor_cell_ink(t);
@@ -409,10 +373,8 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
 
         if (isCursor) c.draw_text(">", x + 10, rowY + TEXT_PADDING, cursor_cell_ink(t), CHAR_SPACING, FONT_SCALE);
 
-        // ⚠️ **20 is the FILE limit and it exists because of the size column at x+370** — a granted
-        // tree has no size and no date, so nothing is under it to run into, and clipping one at 20 cut
-        // off the `(HOME)` / `(MISSING)` marker that is the whole reason those rows say anything.
-        // Derived from the row's own kind rather than from a second constant nobody would keep in step.
+        // ⚠️ 20 is the FILE limit, set by the size column at x+370. A granted tree has no size or
+        // date, so it gets more — 20 would cut off its `(HOME)` / `(MISSING)` marker.
         c.draw_text(Canvas::clip_text(item.displayName, item.isRoot ? ROOT_COLS : NAME_COLS),
                     x + 30, rowY + TEXT_PADDING, textColor, CHAR_SPACING, FONT_SCALE);
 
@@ -434,25 +396,17 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         c.draw_text(Canvas::clip_text(s.statusMessage, STATUS_COLS), x + 10, bottomY + TEXT_PADDING,
                     s.statusSuccess ? t.textTitle : 0xFFFF4444, CHAR_SPACING, FONT_SCALE);
     } else {
-        // ⚠️ REAL ARROWS (U+2190/2191/2193), as Kotlin draws them — not "<" and "^v". The 5×5 font has
-        // had the four arrow glyphs since S1 and `draw_text` has advanced per CODE POINT since S4, so
-        // they render; a '^' does NOT (there is no caret in the font, and it comes out as a BLANK,
-        // which is how the first version of this line shipped a bottom bar reading "R+ V=SORT").
-        // ⚠️ Do not "shorten" this line by touching the arrows — the verbs are the slack. 28 code
-        // points from x+10 ends at x+484, which is what leaves the counter below room to grow.
+        // ⚠️ REAL ARROWS (U+2190/2191/2193): the font has them, and no caret ('^' draws blank).
+        // Shorten the verbs, not the arrows: 28 code points from x+10 end at x+484, leaving the
+        // counter room to grow.
         c.draw_text("A=OPN B=BCK R+\xE2\x86\x90=UP R+\xE2\x86\x91\xE2\x86\x93=SRT", x + 10,
                     bottomY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
     if (total > 0) {
-        // RIGHT-ALIGNED against the same 10px spacer the hint line and the path use on the left, so
-        // the bar is symmetric and the count grows leftward from a fixed edge however long it gets. A
-        // fixed left anchor put "100/256" 29px past the panel (7 chars × 17 = 119 from x+550, and
-        // WIDTH is 640).
-        //
-        // `text_width` and not `size() * CHAR_W`: the trailing gap after the last glyph is not ink, and
-        // counting it would leave the digits 2px shy of the mirror. It may reach 8 characters —
-        // `999/9999`, 134px — before it touches the hint line, which ends at x+484.
+        // RIGHT-ALIGNED against the same 10px spacer as the left side, so the count grows leftward.
+        // `text_width`, not `size() * CHAR_W`: the trailing gap is not ink. Up to 8 characters
+        // (`999/9999`) fit before the hint line, which ends at x+484.
         const std::string count  = std::to_string(s.cursor + 1) + "/" + std::to_string(total);
         const int         countW = Canvas::text_width(count, CHAR_SPACING, FONT_SCALE);
         c.draw_text(count, x + WIDTH - 10 - countW, bottomY + TEXT_PADDING, t.textParam,

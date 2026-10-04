@@ -2,25 +2,14 @@
 
 // ─── The clipboard ───────────────────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of core/logic/ClipboardManager.kt. Copy / cut / paste / delete over a rectangular
-// selection, on each of the four screens that have one (PHRASE, CHAIN, SONG, TABLE).
+// Copy / cut / paste / delete over a rectangular selection on PHRASE, CHAIN, SONG and TABLE.
 //
-// The design is Kotlin's and it is worth spelling out, because it is not the obvious one: the
-// clipboard does NOT hold a rectangle of cells. It holds a FLAT LIST of items, each carrying its own
-// (row, column) and exactly ONE populated field. A copy of PHRASE columns 4..5 therefore produces
-// items that remember they were an FX *type* and an FX *value* — and a paste re-anchors them by
-// column OFFSET from the leftmost column copied, so pasting that pair onto column 6 lands the type on
-// 6 and the value on 7, not two types side by side. A rectangle of raw ints could not do that.
-//
-// The consequence, and it is the reason `std::optional` appears at all: an item whose field is absent
-// is SKIPPED on paste rather than written as zero (`item.note?.let { … }` in Kotlin). Pasting a
-// note-column selection over a phrase leaves every velocity, instrument and FX byte in it untouched.
-//
-// ⚠️ Cut is copy-then-delete, and delegates to `delete_*` for the clearing rather than clearing
-// inline. That is deliberate in the Kotlin ("Delete owns the clearing logic so cut and delete can
-// never diverge") and the empty-value conventions are exactly what would diverge: clearing a phrase
-// velocity means 0x7F, clearing a table volume means −1, clearing a chain ref means −1, and clearing
-// a transpose means 0x00. Four different "empty"s, one place that knows them.
+// It holds a FLAT LIST of items, not a rectangle: each carries its (row, column) and exactly ONE field.
+// Paste re-anchors by column OFFSET from the leftmost copied, so an FX type+value pair pasted on
+// column 6 lands type on 6 and value on 7. An absent field is SKIPPED on paste, not written as zero —
+// pasting note-column cells leaves velocity, instrument and FX untouched.
+// ⚠️ Cut is copy-then-delete, delegating to `delete_*`, because the "empty" values differ per field
+// and must live in one place.
 
 #include <optional>
 #include <string>
@@ -73,18 +62,13 @@ struct PasteResult {
     enum class Kind {
         NO_CLIPBOARD,  // nothing has been copied yet
         SUCCESS,
-        WRONG_SCREEN   // PHRASE data cannot be pasted onto CHAIN — the only error Kotlin can return
+        WRONG_SCREEN   // e.g. PHRASE data onto CHAIN
     };
     Kind kind        = Kind::NO_CLIPBOARD;
     int  itemsPasted = 0;
 };
 
-/**
- * `ClipboardManager`. One instance lives in the dispatcher, exactly as one lives in MainActivity.
- *
- * Kotlin holds `data: Any` and casts on the way out; the four typed vectors here say the same thing
- * without the cast, and only the one named by `type_` is ever non-empty.
- */
+/** One instance lives in the dispatcher. Only the vector named by `type_` is ever non-empty. */
 class Clipboard {
   public:
     // ── Copy ─────────────────────────────────────────────────────────────────────────────────────
@@ -99,10 +83,8 @@ class Clipboard {
 
     /**
      * Paste at the cursor. `target_id` is the phrase/chain/table being edited (ignored for SONG).
-     *
-     * The type must match the screen — phrase data onto the CHAIN screen is WRONG_SCREEN, not a
-     * best-effort conversion. There is no meaningful mapping between a phrase step and a chain row,
-     * and inventing one would silently destroy data.
+     * The type must match the screen — there is no meaningful conversion, and inventing one would
+     * destroy data (WRONG_SCREEN).
      */
     PasteResult paste(songcore::Project& p, ScreenType target, int targetId, int cursorRow,
                       int cursorColumn);

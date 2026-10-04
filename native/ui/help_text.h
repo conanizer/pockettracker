@@ -2,34 +2,20 @@
 
 // ─── HELP ON SELECT — the text, and what the cursor is standing on ───────────────────────────────
 //
-// Tap SELECT and the visualizer strip becomes three lines explaining the cell under the cursor. This
-// header is the whole of the WRITING half: a topic for every explainable place in the app, the three
-// lines each one shows, and the lookup that turns a cursor position into a topic.
+// Tap SELECT and the visualizer strip explains the cell under the cursor. This is the WRITING half: a
+// topic for every explainable place, its lines, and the cursor → topic lookup. PURE (no drawing), so
+// the text can be checked without a renderer.
 //
-// It is PURE — no canvas, no theme, no drawing. That split is `fx_helper.h`'s, and for the same
-// reason: the text can be checked, and the lookup driven, without linking a renderer.
-//
-// ── THE FOUR RULES THE TEXT OBEYS, AND WHY TWO OF THEM ARE COMPILER-CHECKED ──────────────────────
-//
-//  1. **Three lines, and the first one NAMES the thing** — "VOL: how loud this step is". The name is
-//     what the reader is hunting for; the two lines under it are what it does.
-//  2. ⚠️ **HELP_MAX_CHARS per line.** The strip is 620px wide, the mascot takes 64 of them plus its
-//     margins, and a glyph advances CHAR_W. A longer line runs off the right edge, silently.
-//  3. ⚠️ **NO APOSTROPHE AND NO SEMICOLON.** `font5x5.h` has neither glyph and draws a BLANK, so
-//     "the sample's pitch" comes out as "THE SAMPLE S PITCH". The string is right, the width is
-//     right, only the pixels are wrong. Stick to letters, digits, and `: = - ( ) . / , +` — plus
-//     the four arrows ← ↑ → ↓, the one thing above ASCII the font maps, each costing ONE column.
+// The rules the text obeys:
+//  1. The first line NAMES the thing — "VOL: how loud this step is"; the rest say what it does.
+//  2. ⚠️ At most HELP_MAX_CHARS per line, or it runs off the right edge silently.
+//  3. ⚠️ No apostrophe or semicolon: `font5x5.h` draws them BLANK ("SAMPLE S PITCH"). Use letters,
+//     digits, `: = - ( ) . / , +` and the four arrows ← ↑ → ↓ (one column each).
 //  4. Say what the cell DOES, not why it is shaped that way.
+// Rules 2 and 3 are a `static_assert` over the table (`help_table_ok`); 1 and 4 need a reader.
 //
-// Rules 2 and 3 are a `static_assert` over the whole table below (`help_table_ok`), so a line that
-// breaks either one fails the BUILD rather than reaching a device. Rules 1 and 4 need a reader.
-//
-// ⚠️ **A CELL WITH NO ENTRY FALLS BACK TO ITS SCREEN.** `help_topic` returns a SCREEN_* topic for
-// anything not written up yet, so a half-finished table still says something useful everywhere — and
-// a new screen is never silent by omission.
-//
-// ⚠️ Nothing here is persisted, so the enum's order is free — but it is APPENDED to anyway, because
-// HELP_ENTRIES is indexed by the enum value and an insert would silently re-point every entry below.
+// A cell with no entry falls back to its SCREEN_* topic, so no screen is ever silent.
+// ⚠️ Nothing is persisted, but the enum is APPENDED to: HELP_ENTRIES is indexed by its value.
 
 #include <cstddef>
 
@@ -47,11 +33,8 @@
 namespace pt::ui {
 
 /**
- * Characters that fit on one line beside the mascot.
- *
- * 620 (strip) − 3 (left margin) − 64 (mascot) − 7 (gutter) = 546px of text, and a glyph advances
- * CHAR_W = 17, so 32 fit with 2px to spare. ⚠️ Derived from the same numbers `modules/help_panel.cpp`
- * lays the panel out with — move the mascot or resize it there and this moves with it.
+ * Characters that fit on one line beside the mascot: 620 (strip) − 3 (margin) − 64 (mascot) − 7
+ * (gutter) = 546 px at CHAR_W = 17. ⚠️ The same numbers `modules/help_panel.cpp` lays out with.
  */
 inline constexpr int HELP_MAX_CHARS = 32;
 
@@ -68,22 +51,12 @@ inline constexpr int HELP_BODY_LINES = 8;
 inline constexpr int HELP_KEY_LINES = 9;
 
 /**
- * Three lines, top to bottom, then an optional body and an optional list of controls. An unused
- * summary line is "" and is not drawn.
- *
- * The full overlay reads, top to bottom: the TITLE, what the thing IS (the body, or `line2`/`line3`
- * when there is no body), then the CONTROLS in the closing hint's colour. The compact panel reads only
- * the three summary lines.
- *
- * ⚠️ **THE BODY REPLACES `line2`/`line3` IN THE FULL OVERLAY, IT DOES NOT FOLLOW THEM.** A summary is
- * often a gesture squeezed into two lines ("A+←/→ steps a semitone"), and the same gesture is then in
- * the controls — shown twice, it reads as a mistake.
- *
- * ⚠️ **Both lists are optional, and a null line ends nothing — it is a blank row.** A topic with neither
- * shows its summary alone, which is what lets them be written a topic at a time.
- *
- * Both obey the summary's two compiler-checked rules, at the same HELP_MAX_CHARS — the overlay has room
- * for 35, and one budget for every line is worth more than three characters.
+ * Three summary lines, then an optional body and an optional list of controls ("" = not drawn). The
+ * compact panel shows only the summary; the full overlay shows the TITLE, the body (or `line2`/`line3`
+ * when there is none), then the controls.
+ * ⚠️ The body REPLACES `line2`/`line3` in the overlay — a summary is often the same gesture as a
+ * control, and shown twice it reads as a mistake.
+ * A null line in either list is a blank row. Both obey the summary's rules and HELP_MAX_CHARS.
  */
 struct HelpEntry {
     const char* line1 = "";
@@ -367,8 +340,6 @@ enum class HelpTopic {
     SE_CHOP,
 
     // ── Appended, because the value indexes HELP_ENTRIES ──────────────────────────────────────────
-    // These belong with the SETTINGS and PROJECT blocks above and are written here for that reason
-    // alone.
     SET_METRONOME,
     SET_METRONOME_VOL,
     PROJECT_TAP,
@@ -2236,10 +2207,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
 //
-// ⚠️ Rules 2 and 3 above are silent at runtime — an over-long line simply vanishes off the right edge
-// and an apostrophe simply draws as a space. Neither shows up as a crash, a log line or a wrong
-// number, and neither is visible unless you happen to open the one screen it is on. So they are
-// asserted HERE, where the failure is a compile error naming the file.
+// ⚠️ Rules 2 and 3 fail silently at runtime (text off the edge, a blank glyph), so they are compile
+// errors here.
 
 namespace detail {
 

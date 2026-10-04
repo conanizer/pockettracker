@@ -1,19 +1,13 @@
-// ─── shell/overlay.{h,cpp} — the SCREEN-OVERLAY texture (convergence plan D6) ─────────────────────
+// ─── shell/overlay.{h,cpp} — the SCREEN-OVERLAY texture ──────────────────────────────────────────
 //
-// The CRT-scanline filter Android draws OVER the tracker screen: a full-frame PNG composited on top of
-// the 640×480 display at an adjustable strength, exactly as `ScreenLayouts.kt`'s `TrackerScreen` does
-// with `drawImage(..., alpha = overlayStrength / 255f)` over `PixelPerfectTracker`. Like the touch
-// skin (skin.h) it is CHROME the shell draws around/over the frame — never in the canvas, which keeps
-// its four primitives (image.h) — so it lives shell-side and holds its own SDL texture.
+// The CRT-scanline filter drawn OVER the tracker screen: a full-frame PNG composited on top of the
+// 640×480 display at an adjustable strength. Chrome, like the touch skin (skin.h) — never in the
+// canvas.
 //
-// It is ONE texture, not a set: the pieces are named by a fixed table below (`kScreenOverlays`), the
-// shell-side twin of Kotlin's `assets/overlays/` listing. Android enumerated that folder at run time;
-// the shell converges on a fixed shipped set exactly as `device_skin.h` did for the skins — an index
-// is meaningless without the list it indexes, so the SETTINGS row edits an index and the PERSISTED
-// value is the stable `id` string (settings_store.h's rule), resolved to an index at boot.
+// One texture, picked from a fixed shipped table (`kScreenOverlays`). The SETTINGS row edits an
+// index and the PERSISTED value is the stable `id` string (settings_store.h's rule), resolved at boot.
 //
-// Lifetime is the RENDERER's, like `Skin`: the texture is created from an `SDL_Renderer*` and must be
-// destroyed before it is (`unload()` before `SdlVideo::close()`).
+// Lifetime is the RENDERER's, like `Skin`: `unload()` before `SdlVideo::close()`.
 
 #ifndef POCKETTRACKER_OVERLAY_H
 #define POCKETTRACKER_OVERLAY_H
@@ -25,12 +19,9 @@
 
 namespace ptshell {
 
-// One entry per overlay PNG shipped under `assets/overlays/`. `id` is the persisted key + asset leaf
-// (matching Android's `overlay_name` SharedPreferences value); `displayName` is what SETTINGS paints
-// in the OVERLAY column — Kotlin shows `overlayName.uppercase().take(8)`, so the table carries that
-// pre-computed (e.g. "crt_scanlines" → "CRT_SCAN"). The INDEX space the SETTINGS row cycles is
-// `["OFF"] + kScreenOverlays`, matching Kotlin's `listOf("OFF") + overlayFiles`: index 0 is OFF, and
-// index 1.. is `kScreenOverlays[index-1]`.
+// One entry per overlay PNG under `assets/overlays/`. `id` is the persisted key and asset leaf;
+// `displayName` is the OVERLAY column text (the id uppercased, eight characters). The SETTINGS cycle
+// is `["OFF"] + kScreenOverlays`: index 0 is OFF, index i is `kScreenOverlays[i-1]`.
 struct ScreenOverlayDef {
     const char* id;           // persisted overlay_name + asset-folder leaf: "crt_scanlines"
     const char* displayName;  // SETTINGS column text = uppercase(id).take(8): "CRT_SCAN"
@@ -48,8 +39,7 @@ inline constexpr int kScreenOverlayCount =
 // The number of choices the OVERLAY row cycles: "OFF" + every shipped overlay.
 inline constexpr int screen_overlay_choice_count() { return 1 + kScreenOverlayCount; }
 
-/** Resolve a persisted overlay id to its cycle index; "OFF", an unknown, or a mangled id → 0 (OFF),
- *  matching Kotlin's `options.indexOf(name)` falling back to OFF for anything not in the list. */
+/** Resolve a persisted overlay id to its cycle index; "OFF", an unknown or a mangled id → 0 (OFF). */
 inline int screen_overlay_index(const std::string& id) {
     for (int i = 0; i < kScreenOverlayCount; ++i)
         if (id == kScreenOverlays[i].id) return i + 1;
@@ -78,13 +68,10 @@ public:
     ScreenOverlay& operator=(const ScreenOverlay&) = delete;
 
     /**
-     * Decode `kScreenOverlays[index-1]`'s PNG (via the D7 asset seam → D2 decoder) and upload it to a
-     * blended texture on `renderer`. `index` 0 (OFF) or out of range unloads and loads nothing — the
-     * "OFF" choice draws no overlay. A missing/corrupt PNG is NOT fatal (a filter is decoration, not
-     * correctness): it unloads and `loaded()` stays false, so `draw` becomes a no-op. When `log`,
-     * prints one `overlay:` line — the on-device account of whether a real PNG came out of the APK,
-     * there being no console test on a phone, exactly as `Skin::load` does.
-     *
+     * Decode `kScreenOverlays[index-1]`'s PNG and upload it to a blended texture. `index` 0 (OFF) or
+     * out of range unloads and loads nothing. A missing/corrupt PNG is not fatal (decoration): it
+     * unloads and `draw` becomes a no-op. When `log`, prints one `overlay:` line — the on-device
+     * account of whether a real PNG came out of the APK.
      * Returns true when a texture is now loaded.
      */
     bool load(SDL_Renderer* renderer, int index, bool log);
@@ -92,9 +79,8 @@ public:
     /** Destroy the texture. Idempotent; call before the renderer is destroyed. */
     void unload();
 
-    /** Blit the overlay across `dst` (the tracker frame rect), scaled and alpha-blended at
-     *  `strength` (0–255 → the texture's alpha mod, the shell twin of Kotlin's `alpha = STR/255f`).
-     *  No-op when nothing loaded or `strength <= 0`, so callers need not guard. */
+    /** Blit the overlay across `dst` (the tracker frame rect), alpha-blended at `strength` (0–255).
+     *  No-op when nothing is loaded or `strength <= 0`. */
     void draw(SDL_Renderer* renderer, const SDL_Rect& dst, int strength) const;
 
     bool loaded() const { return tex_ != nullptr; }

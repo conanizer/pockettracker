@@ -2,17 +2,10 @@
 
 // ─── The cursor-context system ───────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of input/CursorContext.kt and the value-stepping half of core/logic/InputController.kt.
-//
-// This is the idea the whole input layer rests on, and it is worth restating: the app does NOT ask
-// "which screen am I on?" to decide what a button does. Each module answers `cursor_context(state)`
-// — "the cursor is on a NOTE, it is empty, it can be inserted, its range is 12..127, a small step is
-// 1 and a large step is 12" — and one generic handler turns button presses into InputActions from
-// that answer alone. Every screen therefore gets increment/decrement/fast-step/delete/insert for
-// free, and a new column is a new `case` in one function rather than a new branch in the dispatcher.
-//
-// The selection machinery (CELL/ROW/SCREEN multi-tap, expand, clipboard) is the other half of
-// InputController and lands with the dispatcher; only the parts a single editable cell needs are here.
+// The input layer never asks "which screen am I on?". Each module answers `cursor_context(state)` —
+// "a NOTE, empty, insertable, range 12..127, small step 1, large step 12" — and one generic handler
+// turns presses into InputActions from that alone. Every screen gets increment / decrement / fast
+// step / delete / insert for free; a new column is a new `case` in one function.
 
 #include <algorithm>
 #include <limits>
@@ -26,10 +19,8 @@ namespace pt::ui {
 /** Sentinel for `default_value`: this cell has no A+B "reset to default" target. */
 inline constexpr int NO_DEFAULT = std::numeric_limits<int>::min();
 
-/**
- * What kind of value is the cursor on? Each type steps differently — see `step_value`, where the
- * wrapping set and the clamping set part ways.
- */
+/** What kind of value the cursor is on. Each steps differently — see `step_value`, where the wrapping
+ *  and clamping sets part ways. */
 enum class CursorValueType {
     // Numeric values that can be increased/decreased
     HEX_BYTE,         // 00-FF (most common: phrases, chains, instruments)
@@ -92,16 +83,11 @@ struct CursorContext {
     int                defaultValue = NO_DEFAULT;  // A+B resets a non-deletable value to this
 
     /**
-     * NOTE cells only: which of the twelve pitch classes may be typed, as a 12-bit mask with bit 0 =
-     * pitch class `scaleKey`. `0x0FFF` is the chromatic default and means "no constraint" — every
-     * other context leaves it at that, and so does every project that has not authored a scale.
-     *
-     * ⚠️ It lives on the CONTEXT rather than being applied afterwards because stepping is where the
-     * scale is felt: A+RIGHT must move a whole scale degree, and a step that lands out of scale and is
-     * corrected back afterwards would land on the note it started from — a cell that cannot be edited.
-     *
-     * ⚠️ `ptinput`'s recorded contexts do not print these two, deliberately: a chromatic project (which
-     * every fixture is) produces the identical actions it always did, so the golden is untouched.
+     * NOTE cells only: which pitch classes may be typed — a 12-bit mask, bit 0 = pitch class
+     * `scaleKey`. `0x0FFF` (chromatic) means no constraint, the default everywhere.
+     * ⚠️ On the CONTEXT because stepping is where the scale is felt: A+RIGHT must move a whole degree;
+     * correcting an out-of-scale step afterwards would land back where it started.
+     * The input tests do not print these two, so their golden is unaffected.
      */
     unsigned           scaleMask = 0x0FFFu;
     int                scaleKey  = 0;
@@ -112,7 +98,7 @@ struct CursorContext {
 };
 
 // ─── Factory ─────────────────────────────────────────────────────────────────────────────────────
-// CursorContextFactory — the named constructors the modules build their contexts from.
+// The named constructors the modules build their contexts from.
 
 namespace cc {
 
@@ -183,18 +169,15 @@ inline CursorContext transpose(int current, bool is_empty = false, int def = NO_
     c.maxValue     = 255;
     c.smallStep    = 1;
     c.largeStep    = 12;
-    c.emptyValue   = 0x80;  // vestigial display value; 0x00 is no-transpose (two's-complement)
+    c.emptyValue   = 0x80;  // display value only; 0x00 is no-transpose (two's-complement)
     c.defaultValue = is_empty ? NO_DEFAULT : def;
     return c;
 }
 
 /**
- * A musical note. Range C-0 (midi 12) to G-9 (midi 127), keeping C-4 = middle C = midi 60.
- * A on an empty note inserts C-4; A+B deletes it.
- *
- * `scale_mask` / `scale_key` constrain which notes can be typed (roadmap 1.A). The default is the
- * chromatic mask, so a caller that has no scale to offer — the INSTRUMENT screen's ROOT cell, which is
- * a tuning reference rather than a note in the song — gets exactly the behaviour it always had.
+ * A musical note, C-0 (midi 12) to G-9 (midi 127), C-4 = midi 60. A on an empty note inserts C-4;
+ * A+B deletes it. `scale_mask` / `scale_key` limit what can be typed; the default is chromatic, which
+ * ROOT (a tuning reference, not a song note) relies on.
  */
 inline CursorContext note(int current, bool is_empty = false, unsigned scale_mask = 0x0FFFu,
                           int scale_key = 0) {
@@ -234,11 +217,9 @@ inline CursorContext instrument(int current) {
 }
 
 /**
- * A single hex digit, 0..F — CRUSH and DWNSMPL on the INSTRUMENT screen.
- *
- * ⚠️ It CLAMPS, where a hex byte wraps: HEX_NIBBLE is not in `step_value`'s wrapping set, on either
- * side of the port. Holding A+RIGHT on CRUSH stops at F rather than snapping back to 0 and quietly
- * undoing the destruction you were dialling in. Large step is 4 — a quarter of the range.
+ * A single hex digit, 0..F — CRUSH and DWNSMPL.
+ * ⚠️ CLAMPS where a hex byte wraps: holding A+RIGHT on CRUSH stops at F instead of snapping to 0 and
+ * undoing the destruction being dialled in. Large step 4.
  */
 inline CursorContext hex_nibble(int current, int def = NO_DEFAULT) {
     CursorContext c;
@@ -259,12 +240,9 @@ inline CursorContext hex_nibble(int current, int def = NO_DEFAULT) {
 }
 
 /**
- * An EQ band's GAIN — stored 0..240, read as −12.0..+12.0 dB. One small step is 0.1 dB; the fast step
- * is 1.0 dB, which is why `largeStep` is 10 rather than the usual 16.
- *
- * ⚠️ It CLAMPS. GAIN and FREQ are the two CONTINUOUS PHYSICAL-UNIT types in the whole app, and they are
- * the reason `step_value` splits wrap from clamp at all: wrapping +12 dB round to −12 dB would be a
- * trap rather than a convenience — you would be reaching for one more dB of boost and get a full cut.
+ * An EQ band's GAIN — stored 0..240, read as −12.0..+12.0 dB; small step 0.1 dB, fast step 1.0 dB
+ * (`largeStep` 10).
+ * ⚠️ CLAMPS: wrapping +12 dB to −12 dB would turn one more dB of boost into a full cut.
  */
 inline CursorContext gain_db(int current, int def = 120) {
     CursorContext c;
@@ -284,12 +262,9 @@ inline CursorContext gain_db(int current, int def = 120) {
 }
 
 /**
- * An EQ band's FREQUENCY — stored 0..255, mapped logarithmically over 20 Hz..20 kHz. Clamps, like GAIN.
- *
- * ⚠️ The CONTEXT is an ordinary ±1 / ±16 stepper, but the module does NOT simply store what the action
- * resolves to: a single step is display-aware and keeps going until the READOUT changes. That lives in
- * `EqModule::step_freq_display_aware`, not here, because it is a property of the field rather than of
- * the button — and because the golden has to be able to measure the two separately.
+ * An EQ band's FREQUENCY — stored 0..255, log over 20 Hz..20 kHz; clamps like GAIN.
+ * The context is a plain ±1 / ±16 stepper; the module steps display-aware (until the READOUT changes)
+ * in `EqModule::step_freq_display_aware` — a property of the field, measured separately.
  */
 inline CursorContext freq(int current, int def = NO_DEFAULT) {
     CursorContext c;
@@ -324,12 +299,9 @@ inline CursorContext toggle_binary(bool current) {
 }
 
 /**
- * An N-state cycle stored as a STRING in the model — SLICE (OFF/CUT/TRU), FILTER (off/lp/hp/bp),
- * LOOP (off/fwd/png). The context carries the INDEX; the module maps it back to the string when it
- * writes. An unrecognised value reads as index 0, which is Kotlin's `indexOf(...).coerceAtLeast(0)`
- * and the reason a project with a junk filterType shows "off" rather than a blank cell.
- *
- * (Named "ternary" after its first user; it takes any number of options — `filterType` has four.)
+ * An N-state cycle stored as a STRING in the model — SLICE (OFF/CUT/TRU), FILTER (off/lp/hp/bp), LOOP.
+ * The context carries the INDEX; the module maps it back on write. An unknown string reads as index 0
+ * (a junk filterType shows "off", not a blank). Any number of options, despite the name.
  */
 inline CursorContext toggle_ternary(const std::string& current,
                                     const std::vector<std::string>& options) {
@@ -351,10 +323,8 @@ inline CursorContext toggle_ternary(const std::string& current,
 }
 
 /**
- * A cycle through a list the model stores as an INDEX already — the MODS screen's TYPE, DEST, OSC and
- * TRIG rows. Kotlin builds these four inline as raw `CursorContext(valueType = EFFECT_TYPE, …)`
- * literals rather than through a factory; the EFFECT_TYPE type is reused purely because it is the one
- * that wraps with a large step of 1. Named here so the intent survives the port.
+ * A cycle through a list stored as an INDEX — the MODS screen's TYPE, DEST, OSC and TRIG rows. Uses
+ * EFFECT_TYPE because it wraps with a large step of 1.
  */
 inline CursorContext index_cycle(int current, int count) {
     CursorContext c;
@@ -370,18 +340,10 @@ inline CursorContext index_cycle(int current, int count) {
 }
 
 /**
- * A cycle through an option LIST — SETTINGS' LAYOUT, OVERLAY and VISUALIZER rows. Kotlin's
- * `CursorContextFactory.enumCycle`.
- *
- * ⚠️ NOT the same context as `index_cycle` above, however interchangeable the two look. Kotlin's
- * enumCycle is a **HEX_BYTE with emptyValue = −1**; the MODS rows index_cycle serves are inline
- * EFFECT_TYPE literals that keep the struct's own emptyValue. The BEHAVIOUR is identical — both value
- * types wrap, neither carries a delete, and neither is ever empty — but the CONTEXT is not, and
- * ptinput byte-compares the context. Folding these two into one factory is a one-line "cleanup" that
- * turns the settings golden red.
- *
- * `optionCount` is clamped the way Kotlin clamps it (`coerceAtLeast(0)`), so an empty option list
- * yields a 0..0 cycle rather than a 0..−1 one.
+ * A cycle through an option LIST — SETTINGS' LAYOUT, OVERLAY and VISUALIZER rows.
+ * ⚠️ Not `index_cycle`, though they behave identically: this is a HEX_BYTE with emptyValue −1, and
+ * The input tests byte-compare the context — merging them turns the settings golden red.
+ * `option_count` clamps at 0, so an empty list is a 0..0 cycle.
  */
 inline CursorContext enum_cycle(int current, int option_count) {
     CursorContext c;
@@ -398,14 +360,8 @@ inline CursorContext enum_cycle(int current, int option_count) {
 }
 
 /**
- * One character of an in-place name editor — PROJECT's NAME row, where each of the 20 characters is
- * its own cursor column and A+LEFT/RIGHT walks the allowed set (`allowed_chars()`).
- *
- * The first user of CursorValueType::CHARACTER in the port: the stepping has been here since S1 (it
- * came with the value type), but no ported screen had an in-place text cell until PROJECT — the
- * INSTRUMENT NAME row opens the QWERTY keyboard instead. A+B DELETES, which for a character means
- * writing a space; there is no "empty" character, so `isEmpty` stays false and the delete arm is
- * always live.
+ * One character of an in-place name editor (PROJECT's NAME row, one column per character); A+LEFT/RIGHT
+ * walks `allowed_chars()`. A+B writes a space — a character is never empty, so delete is always live.
  */
 inline CursorContext character(char current) {
     CursorContext c;
@@ -423,16 +379,11 @@ inline CursorContext character(char current) {
 }
 
 /**
- * Effect type. The stored value is an INDEX into songcore::EFFECT_TYPES, not an effect code —
- * A+RIGHT walks the list, and the module converts back to a code when it writes the step.
- * A+B clears the effect, but only when it is not already NONE (FX_NONE is a valid stop on the cycle,
- * not an "empty" cell).
- *
- * `type_count` is how many of the list this build lets you reach — fewer where the MIDI commands at
- * the end of it are hidden (ui/platform_caps.h `midi`). It bounds the coarse A+UP/A+DOWN step; the
- * picker that A+UP/A+DOWN opens is bounded by its own group lists (ui/fx_helper.h). ⚠️ It clamps
- * the CURSOR, never the CELL: a step that already holds a hidden effect keeps it and keeps drawing
- * it, because the value came off disk and this build is not the one that authored it.
+ * Effect type: the value is an INDEX into songcore::EFFECT_TYPES, not a code; the module converts on
+ * write. A+B clears it unless already NONE (a valid stop on the cycle, not "empty").
+ * `type_count` is how much of the list this build reaches (the MIDI tail may be hidden,
+ * ui/platform_caps.h). ⚠️ It clamps the CURSOR, never the CELL: a step holding a hidden effect keeps and
+ * draws it — the value came off disk.
  */
 inline CursorContext effect_type(int current_type, int fx_slot,
                                  int type_count = songcore::EFFECT_TYPE_COUNT) {
@@ -470,8 +421,7 @@ inline CursorContext effect_value(int current, int fx_slot, int max = 255) {
 }  // namespace cc
 
 // ─── Actions ─────────────────────────────────────────────────────────────────────────────────────
-// Kotlin's `sealed class InputAction`. Only SET_VALUE carries a payload, so a tagged struct is the
-// honest C++ shape — a variant would buy nothing and cost every call site a `std::get`.
+// Only SET_VALUE carries a payload, so a tagged struct rather than a variant.
 
 enum class ActionType {
     NONE,
@@ -505,15 +455,6 @@ inline const std::string& allowed_chars() {
     return s;
 }
 
-/**
- * Apply a signed step to the cursor value, honouring the value type's wrap/clamp rules.
- *
- * The split matters and is not arbitrary: the discrete, enumerable types WRAP (stepping past FF on a
- * hex byte lands back on 00, which is what makes A+RIGHT a usable way to dial a value in on a
- * four-button device), while the continuous physical-unit types — GAIN in dB, FREQ in Hz — CLAMP,
- * because wrapping +12 dB round to −12 dB would be a trap rather than a convenience. NOTE clamps too
- * (its range is the MIDI ceiling), and so does anything not named here.
- */
 /** Is this MIDI note one the context's scale allows? Bit 0 of the mask is pitch class `scaleKey`. */
 inline bool note_in_scale_mask(const CursorContext& ctx, int midi) {
     if (midi < 0) return false;
@@ -533,6 +474,11 @@ inline int snap_note_to_scale(const CursorContext& ctx, int midi) {
     return midi;
 }
 
+/**
+ * Apply a signed step, honouring the type's rule: discrete, enumerable types WRAP (past FF lands on
+ * 00 — dialling on a four-button device); continuous physical units (GAIN, FREQ) CLAMP; NOTE clamps at
+ * the MIDI ceiling, and so does anything not listed.
+ */
 inline int step_value(int current, int signed_step, const CursorContext& ctx) {
     switch (ctx.valueType) {
         case CursorValueType::CHARACTER: {
@@ -556,13 +502,8 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
         case CursorValueType::INSTRUMENT_REF:
         case CursorValueType::TOGGLE_BINARY:
         case CursorValueType::TOGGLE_TERNARY: {
-            // ⚠️ `std::max(1, …)`, or an inverted range makes both loops spin forever with no
-            // output — in the one function EVERY editable cell in the application runs through.
-            // `maxValue < minValue` comes from a factory handed a count of zero
-            // (`toggle_ternary` with an empty list, `index_cycle(…, 0)`, `effect_type(…, 0)`); no
-            // live caller does that today, so this is a trap rather than a bug. It is derived here
-            // rather than guarded at the factories because `enum_cycle` already guards itself and
-            // three siblings do not — the hazard was seen once and answered at one call site.
+            // ⚠️ `std::max(1, …)`: an inverted range (a factory handed a zero count) would make both loops
+            // spin forever, in the function every editable cell runs through.
             const int range = std::max(1, ctx.maxValue - ctx.minValue + 1);
             int       v     = current + signed_step;
             while (v > ctx.maxValue) v -= range;
@@ -571,12 +512,9 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
         }
 
         case CursorValueType::NOTE: {
-            // A+LEFT/RIGHT walks ONE NOTE OF THE SCALE, so a press is a scale degree rather than a
-            // semitone — on the chromatic default the two are the same thing, which is why nothing
-            // about note entry changes for a song that has never authored a scale.
-            //
-            // ⚠️ A+UP/DOWN (largeStep 12) is deliberately NOT walked: an octave is in every scale by
-            // construction, and walking twelve degrees of a pentatonic would jump two octaves.
+            // A+LEFT/RIGHT walks ONE SCALE DEGREE (a semitone on chromatic).
+            // ⚠️ A+UP/DOWN (12) is not walked: an octave is in every scale, while twelve degrees of a
+            // pentatonic would be two octaves.
             const bool byDegree = (signed_step == ctx.smallStep || signed_step == -ctx.smallStep);
             if (!byDegree || ctx.scaleMask == 0x0FFFu)
                 return std::min(ctx.maxValue, std::max(ctx.minValue, current + signed_step));
@@ -584,7 +522,7 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
             const int dir = signed_step > 0 ? 1 : -1;
             for (int v = current + dir; v >= ctx.minValue && v <= ctx.maxValue; v += dir)
                 if (note_in_scale_mask(ctx, v)) return v;
-            return current;  // no further note in the scale: stay put rather than leave it
+            return current;  // no further note in the scale: stay put
         }
 
         default: {
@@ -595,27 +533,20 @@ inline int step_value(int current, int signed_step, const CursorContext& ctx) {
 }
 
 // ─── Step → action ───────────────────────────────────────────────────────────────────────────────
-// The generic half of InputController: these five functions are the ENTIRE editing vocabulary, and
-// they never mention a screen.
-//
-// ⚠️ They are named for the STEP, not for the chord that fires them, because the two are not the same
-// thing on every screen and the binding has moved once already. Today, in the dispatcher:
+// The generic editing vocabulary; it never mentions a screen. Named for the STEP, not the chord: today
 // A+RIGHT → `increment`, A+LEFT → `decrement`, A+UP → `increment_fast`, A+DOWN → `decrement_fast`.
 
 /**
- * What A on an empty NOTE cell inserts, as a MIDI number. ⚠️ Its twin is `Note::C4()` in
- * phrase_editor.cpp, which is what actually runs on the INSERT_DEFAULT below — this constant exists
- * only so the scale can ask whether that note is typeable, and the two must name the same note.
+ * What A on an empty NOTE cell inserts, as MIDI. ⚠️ Must name the same note as `Note::C4()` in
+ * phrase_editor.cpp, which is what the INSERT_DEFAULT actually writes.
  */
 inline constexpr int NOTE_INSERT_DEFAULT_MIDI = 60;  // C-4
 
 inline InputAction increment(const CursorContext& c) {
     if (!c.is_editable()) return InputAction::none();
     if (c.capabilities.isEmpty && c.capabilities.canInsert) {
-        // ⚠️ A scale that does not contain C-4 must not be handed one: the inserted note would be a
-        // note no press could have produced, and A+LEFT/RIGHT would then step away from it and never
-        // be able to come back. Spelled as a VALUE only when the scale actually moves it, so the
-        // chromatic default emits the INSERT_DEFAULT it always did — golden and all.
+        // ⚠️ A scale without C-4 must not be handed one — no press could produce it or step back to
+        // it. Spelled as a VALUE only when the scale moves it, so chromatic still emits INSERT_DEFAULT.
         if (c.valueType == CursorValueType::NOTE && c.scaleMask != 0x0FFFu) {
             const int snapped = snap_note_to_scale(c, NOTE_INSERT_DEFAULT_MIDI);
             if (snapped != NOTE_INSERT_DEFAULT_MIDI) return InputAction::set_value(snapped);
@@ -635,12 +566,8 @@ inline InputAction decrement(const CursorContext& c) {
 }
 
 /**
- * The fast pair FALLS BACK to the small step on a cell that declares no fast one — a short cycle
- * (a preset list, a scale, SLICE, SOURCE, an on/off flag, a name character) then answers A+UP/DOWN
- * exactly as it answers A+RIGHT/LEFT, instead of answering nothing.
- *
- * ⚠️ Derived here rather than by setting `largeStep = 1` in each cycle factory, so a factory added
- * later inherits it. It also keeps the CONTEXT each factory builds byte-for-byte what it was.
+ * The fast pair falls back to the small step on a cell with none, so a short cycle (presets, SLICE,
+ * a flag…) answers A+UP/DOWN like A+RIGHT/LEFT. Derived here so a new factory inherits it.
  */
 inline InputAction increment_fast(const CursorContext& c) {
     if (!c.is_editable() || c.capabilities.isEmpty) return InputAction::none();
@@ -660,10 +587,7 @@ inline InputAction decrement_fast(const CursorContext& c) {
     return InputAction::none();
 }
 
-/**
- * A+B. Deletable cells clear to empty; non-deletable cells that declare a default (PAN, DRIVE, VOL,
- * the sends…) reset to it, which is why `defaultValue` exists at all.
- */
+/** A+B: deletable cells clear to empty; others reset to `defaultValue` if they declare one. */
 inline InputAction on_a_b(const CursorContext& c) {
     if (c.capabilities.canDelete) return InputAction::of(ActionType::DELETE);
     if (c.defaultValue != NO_DEFAULT && c.is_editable())

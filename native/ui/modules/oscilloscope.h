@@ -2,18 +2,13 @@
 
 // ─── OSCILLOSCOPE / VISUALIZER ───────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/OscilloscopeModule.kt: the 620×70 strip across the top, in six modes
-// (SCOPE / FLAT / OCTA / OCTA_FULL / SPECTRUM / SPECTRUM_PEAKS) chosen by the theme.
+// The 620×70 strip across the top, in six modes (SCOPE / FLAT / OCTA / OCTA_FULL / SPECTRUM /
+// SPECTRUM_PEAKS) chosen by the theme.
 //
-// THE ONLY STATEFUL MODULE IN THE UI, and the reason `TrackerLayout::draw` is not const. The peak-hold
-// dots and the spectrum bars' decay are functions of the PREVIOUS frame, not of the audio — so the
-// module instance lives in the layout and persists across frames, exactly as Kotlin's does (it holds
-// three FloatArrays for the same reason). A module recreated per frame would show bars that never fall.
+// STATEFUL, which is why `TrackerLayout::draw` is not const: the peak-hold dots and the bars' decay
+// depend on the previous frame, so the instance lives in the layout across frames.
 //
-// It reads no engine. The samples arrive as plain pointers that the caller has already captured
-// (ui/engine_feed.h does that on the SDL side; Kotlin's PixelPerfectRenderer does it in its 60 Hz
-// loop). A null pointer is silence, not a crash — which is precisely how `tools/ptshot` draws a screen
-// with no audio device in the process.
+// It reads no engine: the caller hands in captured samples (engine_feed.h). A null pointer is silence.
 
 #include "ui/canvas.h"
 #include "ui/theme.h"
@@ -32,9 +27,8 @@ struct OscilloscopeState {
     const float* waveform = nullptr;
 
     /**
-     * TRACK_WAVEFORM_COUNT × WAVEFORM_SIZE, flat — lane N starts at `trackWaveforms[N * 620]`. Flat
-     * because that is the shape `AudioEngine::getTrackWaveforms` fills; splitting it into 9 arrays
-     * would be a copy that buys nothing.
+     * TRACK_WAVEFORM_COUNT × WAVEFORM_SIZE, flat, as `AudioEngine::getTrackWaveforms` fills it — lane
+     * N starts at `trackWaveforms[N * 620]`.
      */
     const float* trackWaveforms = nullptr;
 
@@ -79,12 +73,10 @@ public:
 
     static constexpr int OCTA_TRACK_GAP = 10;
 
-    // SCOPE / OCTA / OCTA_FULL "chunky" look (v0.9.4 A1). Two independent knobs in draw_wave_dots:
-    //   N — pixel-block size: draw one N×N block per N horizontal pixels, snapped to an N-px grid
-    //       (coarser than the old one fill per column), so the trace reads as blocks not a hairline.
-    //   Z — time zoom: render only the centred WAVEFORM_SIZE/Z samples, stretched to fill the strip,
-    //       so the waveform reads as motion rather than a thin wiggle.
-    // SPECTRUM / SPECTRUM_PEAKS are a different draw path (draw_bar_amps) and are deliberately untouched.
+    // SCOPE / OCTA / OCTA_FULL "chunky" look, two knobs in draw_wave_dots:
+    //   N — one N×N block per N horizontal pixels, snapped to an N-px grid.
+    //   Z — time zoom: only the centred WAVEFORM_SIZE/Z samples, stretched across the strip.
+    // The SPECTRUM modes use draw_bar_amps and ignore both.
     static constexpr int SCOPE_PIXEL_BLOCK = 2;  // N
     static constexpr int SCOPE_TIME_ZOOM   = 2;  // Z
 
@@ -94,21 +86,12 @@ public:
     /**
      * Are the SPECTRUM bars and their peak dots all the way down?
      *
-     * ⚠️ **The shell's idle gate has to ask this, because the bars fall INSIDE `draw`.** Nothing in the
-     * audio the gate listens to knows about them: the master waveform crosses the silence floor about a
-     * second after a stop, the gate stops drawing, and the bars — a third of full scale at that moment,
-     * with the SPECT P dots still holding above them — freeze there until some input buys a single
-     * frame. That is "the spectrum only falls when I press a button", and any input does it, mapped or
-     * not. (Kotlin held the frames open with a fixed 75-frame release tail instead; asking the module is
-     * the same answer without a number to keep true.)
+     * ⚠️ The shell's idle gate must ask this, because the bars fall INSIDE `draw`: once the gate
+     * stops drawing (about a second after a stop) they freeze until an input buys one frame. A bar
+     * under one LED cell snaps to zero, so the frame that brings the last one down also shows it gone.
      *
-     * At rest is the resting state, not a transient: a bar under one LED cell is snapped to zero rather
-     * than left to an exponential that never arrives, so the frame that brings the last one down is also
-     * the frame that shows it gone.
-     *
-     * ⚠️ Answers only for the two SPECTRUM modes. The other four never call `draw_bar_amps`, so this
-     * state is whatever the last spectrum theme left in it — the caller gates on the visualizer type
-     * (layout.cpp), the way it gates the mixer's markers on the MIXER being up.
+     * ⚠️ Answers only for the two SPECTRUM modes; the caller gates on the visualizer type
+     * (layout.cpp), as it gates the mixer's markers on MIXER being up.
      */
     bool bars_at_rest() const;
 

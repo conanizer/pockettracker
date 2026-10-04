@@ -114,15 +114,12 @@ struct ScheduledNote {
 
 // Scheduled kill event (for Kill effect K00, soft note-off for ADSR release, and a live key let go of)
 //
-// ⚠️ **ONE `mode`, NOT A SECOND BOOL BESIDE `softKill`.** Two bools can encode a state that means
-// nothing (hard AND key-release), and the dispatch would have to pick a winner somewhere; an enum
-// cannot be put into that state at all. Same rule the repo applies to every "derive it from the data"
-// case — the numbers below are internal to the engine and unrelated to event.h's NOTE_OFF_* wire
-// values, which is why the consumer translates rather than casts.
+// ⚠️ ONE `mode`, NOT TWO BOOLS: two bools could encode a meaningless state (hard AND key-release).
+// These numbers are the engine's own, unrelated to event.h's NOTE_OFF_* — the consumer translates.
 enum KillMode : uint8_t {
     KILL_HARD    = 0,   // K00 / killTrack — declick fade, whatever the instrument is
     KILL_SOFT    = 1,   // KIL's soft note-off — ADSR release, else a declick fade
-    KILL_KEY_OFF = 2,   // a KEY released (MIDI in, plan §4.1) — a one-shot IGNORES it and plays out
+    KILL_KEY_OFF = 2,   // a KEY released (MIDI in) — a one-shot IGNORES it and plays out
     KILL_CUT     = 3,   // a held audition let go of — KILL_FADE_SAMPLES and gone, no release tail at all
 };
 
@@ -444,21 +441,12 @@ struct InstrumentParams {
     float reverbSend = 0.0f;
     float delaySend  = 0.0f;
 
-    // ⚠️ THE EXACT-FRAME WINDOW: −1 = unset, and then startPoint/endPoint above decide. When set it
-    // REPLACES them, in frames, because 0-255 cannot express a frame.
-    //
-    // startPoint/endPoint are eighths of a percent of the buffer: on a 2-second 44.1 kHz sample one
-    // step is 346 frames, ~8 ms. That is the right grain for a playback parameter you dial by ear, and
-    // the wrong one for the sample editor's audition, which exists to let you hear the exact boundary
-    // CROP is about to cut at — dozens of single-frame nudges land inside one step and the audition
-    // does not change, then the crop applies the frame you actually chose.
-    //
-    // Set only by setInstrumentFrameWindow, and CLEARED by every setInstrumentParams push — so an
-    // ordinary push of the instrument is what ends a preview's window, and no caller has to remember.
-    //
-    // ⚠️ Read at TRIGGER, and then carried on the voice (`Voice::windowStartFrame`), because the mix
-    // loop re-derives the endpoints from startPoint/endPoint every block. Clearing this mid-note ends
-    // the window for the NEXT note, never for one already ringing.
+    // ⚠️ THE EXACT-FRAME WINDOW: −1 = unset, and startPoint/endPoint decide. When set it REPLACES
+    // them, in frames — a 0-255 step is ~8 ms on a 2 s sample, too coarse for the sample editor's
+    // audition of exactly where CROP will cut. Set only by setInstrumentFrameWindow, and CLEARED by
+    // every setInstrumentParams push, so an ordinary push ends a preview's window.
+    // ⚠️ Read at TRIGGER and carried on the voice (`Voice::windowStartFrame`); clearing it mid-note
+    // affects the next note only.
     int startFrame = -1;
     int endFrame   = -1;
 
@@ -469,8 +457,7 @@ struct InstrumentParams {
                          startFrame(-1), endFrame(-1) {}
 };
 
-// Per-slot modulation configuration set from Kotlin.
-// Copied to VoiceModSlot when a note triggers on that instrument.
+// Per-slot modulation configuration, copied to VoiceModSlot when a note triggers on the instrument.
 struct InstrumentModSlot {
     int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
     int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH

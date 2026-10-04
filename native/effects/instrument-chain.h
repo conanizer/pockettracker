@@ -10,7 +10,7 @@
 // Sampler voices: processMono() called per sample in the mix loop.
 // SF voices: processStereo() called per sample after tsf_render_float_channel().
 //
-// Signal order: Crush → Drive → Filter
+// Signal order: Crush → Drive → Filter → EQ
 // Within Crush: Decimator applies Downsample → Bitcrush in one pass.
 //
 // Sampler voices: crush.setParams(effCrush, 0) — downsample=0 bypasses
@@ -30,18 +30,15 @@ struct InstrumentChain {
     FilterModule   filter;
     EqModule       eq;    // 3-band parametric EQ (loShelf / bell / hiShelf)
 
-    // sampleRate required for EqModule init; other modules don't need it here.
-    //
-    // ⚠️ `keepToneState` leaves the memory of the CRUSH, the FILTER and the EQ alone — the caller's
-    // setParams calls restore the parameters either way. A SoundFont chain belongs to the TRACK, not
-    // to the note: the note being stolen is still flowing through it when the next note is set up,
-    // for the rest of that block. Zeroing the crush's held sample or a resonant SVF steps the output
-    // to zero in one sample, and nothing downstream can smooth that. (Drive has no memory.)
-    // A sampler voice comes out of the pool silent, so it clears.
     // False until the note's first sample has gone through — what tells a set-up write (instant) from a
     // change to a sounding note (glided). See the modules' `fresh`.
     bool started = false;
 
+    // sampleRate is for EqModule's init.
+    // ⚠️ `keepToneState` leaves the CRUSH, FILTER and EQ memory alone (the caller re-sets the
+    // parameters either way): a SoundFont chain belongs to the TRACK, and the stolen note is still
+    // flowing through it for the rest of the block — zeroing a held sample or a resonant SVF steps
+    // the output to zero. A sampler voice comes out of the pool silent, so it clears.
     void reset(float sampleRate = 44100.0f, bool keepToneState = false) {
         started = false;
         drive.reset();

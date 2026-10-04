@@ -17,13 +17,9 @@ constexpr int NAME_X = 10;
 
 // ─── The columns ─────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ **TWENTY-EIGHT CHARACTERS IS THE WHOLE ROW**, and that is what sizes the catalogue's `cell`
-// names. The panel is 510px at x = 10 and the editor clip is at 509, so the text has 489px — 28
-// glyphs of CHAR_W. The last cell starts at column 23, which leaves it five.
-//
-// ⭐ The columns are FIXED whether or not a row uses them all: a destination with no scope number
-// (the master bus, the two send buses) leaves that gap empty rather than sliding its name left, so
-// the names stay in one column down the list and the eye can run down it.
+// ⚠️ TWENTY-EIGHT CHARACTERS IS THE WHOLE ROW (489px of text before the clip at 509), which sizes
+// the catalogue's `cell` names: the last cell starts at column 23 and has five.
+// The columns are fixed: a destination with no scope number leaves that gap rather than sliding left.
 constexpr int COL_CC    = 0;
 constexpr int COL_VAL   = 4;
 constexpr int COL_MIN   = 8;
@@ -91,10 +87,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
 
     // ── Scroll ───────────────────────────────────────────────────────────────────────────────────
     //
-    // SETTINGS' arrangement exactly: DERIVED from the cursor row every frame, so there is no stored
-    // scroll position that could disagree with where the cursor is. A list shorter than the viewport
-    // clamps `maxScroll` to 0 and nothing moves — which is every list until someone makes fifteen
-    // mappings.
+    // Derived from the cursor row every frame, as SETTINGS does, so no stored scroll can disagree.
     const int firstRowY = headerY + ROW_HEIGHT;
     const int footerY   = y + HEIGHT - ROW_HEIGHT;
     const int viewportH = footerY - firstRowY;
@@ -151,9 +144,7 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
 
     // ── The footer ───────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ IT IS WHERE A DIMMED ROW SAYS WHY IT IS DIMMED. Dimming alone is a row that looks switched
-    // off with nothing on screen to say what would switch it back on — and the theme editor's
-    // unblendable colour is marked exactly this way.
+    // ⚠️ It is where a dimmed row says WHY it is dimmed; dimming alone gives no way back.
     std::string footer;
     if (const MidiMapping* m = mapping_at(p, s.cursorRow)) {
         if (!songcore::map_dest(m->dest))              footer = "PARAMETER UNKNOWN TO THIS VERSION";
@@ -161,9 +152,8 @@ void MidiMapModule::draw(Canvas& c, int x, int y, const MidiMapState& s) const {
     } else if (p.midiMappings.empty()) {
         footer = "NO MAPPINGS YET";
     }
-    // ⚠️ It follows the LAST ROW while the list is short, and only settles on the panel's bottom edge
-    // once the rows reach it — a one-row list with its note pinned four inches below reads as two
-    // unrelated screens.
+    // It follows the last row while the list is short, and settles on the panel's bottom once the
+    // rows reach it.
     if (!footer.empty()) {
         const int noteY = std::min(footerY, firstRowY + rows * ROW_HEIGHT - scrollY);
         c.draw_text(footer, colX(COL_CC), noteY + TEXT_PADDING, t.textEmpty, CHAR_SPACING,
@@ -233,9 +223,8 @@ MidiMapInputResult MidiMapModule::handle_input(songcore::Project& project, int c
     MidiMapping&   m = project.midiMappings[static_cast<size_t>(cursor_row)];
     const MapDest* d = songcore::map_dest(m.dest);
 
-    // ⚠️ `songcore::take_dest` and not a lambda here: the picker overlay points a mapping at a
-    // destination too, and a new destination brings its own RANGE and clears its SCOPE. Three callers
-    // of one function rather than three copies of four lines.
+    // `songcore::take_dest`, shared with the picker overlay: a new destination brings its own RANGE
+    // and clears its SCOPE.
     const auto take_dest = [&](const MapDest& nd) { return songcore::take_dest(m, nd); };
 
     const auto col = static_cast<MapCol>(cursor_column);

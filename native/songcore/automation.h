@@ -3,23 +3,16 @@
 
 // ─── AUS / AUF — what can be automated, and how a pair is found ──────────────────────────────────
 //
-// Automating a parameter means moving it continuously across a span of steps instead of writing it
-// once per step. The author puts the parameter at its starting value, puts AUS beside it to say
-// "ramp from here, with this curve", and AUF on a later step to say "arrive at this value".
+// AUS beside a parameter starts a ramp from that value with a curve; an AUF on a later step sets
+// the value it arrives at:
 //
 //     step 00   VOL 00  AUS 80        ← start at 0, linear
 //     step 08   AUF FF                ← arrive at 255 eight steps later
 //
-// This header is the PURE half: the registry of parameters a ramp can move, the curve, and the
-// pairing rule. It emits nothing and knows nothing about frames, ticks, grooves or the transport —
-// `find_ramps` answers "which spans does this phrase declare", in STEP indices, and the scheduler
-// turns a span into events.
-//
-// ⚠️ **THAT SPLIT IS LOAD-BEARING, NOT TIDINESS.** Pairing in step space needs no frame table, so the
-// groove trap the design doc warned about — a pre-scan that walks the phrase to find span frames and
-// double-advances `TrackState::grooveStep` on the way — cannot exist here. The emitter already holds
-// each step's real duration as it walks, so a groove-warped span costs it nothing, and a HOP out of
-// the phrase truncates the ramp for free by ending the walk.
+// This header is the pure half: which parameters can ramp, and how AUS/AUF pair up, in STEP indices.
+// The scheduler turns a span into events.
+// ⚠️ Keep pairing in step space. A pre-scan for frame positions would double-advance the groove
+// step; the emitter already knows each step's real duration as it walks.
 
 #include <cstdint>
 #include <vector>
@@ -33,30 +26,14 @@ namespace songcore {
 
 // ─── The registry — which parameters a ramp can move ─────────────────────────────────────────────
 //
-// A ramp is nothing but the parameter's own CC, emitted more often. So the entry price is exactly
-// "this parameter has an absolute, sample-accurate set-to-X-at-frame-F path" — a CC id inside the
-// existing EV_CC, an arm in `EngineConsumer::consume`, and a queued apply on the audio thread. Those
-// three are what live control costs whether or not anything ramps it; automation adds no fourth.
+// A ramp is the parameter's own CC, emitted more often. To add one: give it a CC id, an arm in
+// `EngineConsumer::consume`, a queued apply on the audio thread, and a row here.
 //
-// ⚠️ **THE SET IS THIS TABLE, NOT A PROPERTY OF THE FEATURE.** It is short today because only six
-// effects have paid that price, not because a ramp is limited to six things. Adding a seventh is:
-// give it a CC id, an arm, an apply, and a row here.
-//
-// ⚠️ There is deliberately no range column and no density column. Every entry's ceiling is already
-// `effect_value_max(fxCode)` (asserted below) and the emission grid is one constant for all of them —
-// a column holding the same value in every row is a claim that it varies, and the day it stops being
-// true the table and the truth part company silently.
-// ⚠️ **WHAT THE TWO ENDPOINTS MEAN — the one thing that is not the same for every row.**
-//
-//  • `BYTE` — the endpoints are VALUES, and the ramp interpolates the authored byte itself. This is
-//    the sentence the paragraph above is written in: the ramp is the parameter's own CC, emitted
-//    more often.
-//  • `EQ_PRESET` — the endpoints are INDICES into `Project::eqPresets`, and interpolating them would
-//    walk presets 05, 06, 07 … which is a slideshow, not a fade. What moves is the twelve numbers the
-//    two referenced presets HOLD, and the tick carries them as band values (`ExtEqMorphPayload`).
-//
-// A third kind is a third answer to "what does the AUF's byte mean?", and nothing else — every rule
-// below (looking left, last-AUS-wins, the chain boundary, the curve) is indifferent to it.
+// What the endpoints mean is the one thing that differs per row:
+//  • `BYTE` — they are values, and the ramp interpolates the byte.
+//  • `EQ_PRESET` — they are indices into `Project::eqPresets`; interpolating the index would step
+//    through unrelated presets, so the twelve band numbers the two presets hold are what moves
+//    (`ExtEqMorphPayload`).
 enum class RampKind { BYTE, EQ_PRESET };
 
 struct AutomatableParam {
@@ -72,47 +49,31 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     { FX_RSEND,  CC_REVERB_SEND, false, RampKind::BYTE },
     { FX_DSEND,  CC_DELAY_SEND,  false, RampKind::BYTE },
     { FX_VTR,    CC_TRACK_VOL,   false, RampKind::BYTE },
-    // The instrument filter. A ramp on either is a per-note sweep and dies with the note that carries
-    // it — nothing to restore on stop(), unlike the two faders below.
+    // Per-note sweeps: they die with the note, so nothing to restore on stop().
     { FX_CUT,    CC_FILTER_CUT,  false, RampKind::BYTE },
     { FX_RES,    CC_FILTER_RES,  false, RampKind::BYTE },
-    // LPF / HPF / BPF ramp their CUTOFF and re-assert the same type on every tick, so a sweep that
-    // opens the filter on its first tick cannot lose it half way through. Nothing else about them is
-    // special here: a BYTE row over the full 00-FF range, like the two above.
+    // LPF / HPF / BPF ramp the cutoff and re-assert the type on every tick.
     { FX_LPF,    CC_FILTER_LP,   false, RampKind::BYTE },
     { FX_HPF,    CC_FILTER_HP,   false, RampKind::BYTE },
     { FX_BPF,    CC_FILTER_BP,   false, RampKind::BYTE },
-    // DRV. A per-note sweep like the filter rows above it — the note dirtying as it holds.
-    //
-    // ⚠️ **CRU IS DELIBERATELY ABSENT AND WOULD PASS THE ASSERT BELOW.** Its byte spans 00-FF, so
-    // the full-range check has nothing to object to — but the two halves are independent 4-bit
-    // numbers, and interpolating the byte wraps the right one sixteen times while sweeping the left.
-    // The omission is a judgement, so it is written down here rather than left to be re-litigated.
+    // ⚠️ CRU is deliberately absent and would pass the assert below: its two nibbles are separate
+    // numbers, and interpolating the byte wraps the right one sixteen times.
     { FX_DRV,    CC_DRIVE,       false, RampKind::BYTE },
-    // FIN. The one ramp here that is a PITCH BEND — a sweep from one end of the byte to the other is
-    // a two-semitone glide, and it works because the command retunes the note that is already
-    // sounding rather than arming the next one (effects.h). Per-note like the rows above it.
+    // FIN ramps as a pitch bend: it retunes the sounding note (effects.h).
     { FX_FIN,    CC_FINE_TUNE,   false, RampKind::BYTE },
-    // ⚠️ The master fader belongs to no track. Track-scoped, EngineConsumer's external-routing gate
-    // would swallow it whenever the carrying track plays an EXTERNAL instrument (event.h) — so the
-    // ramp must ride the same TRACK_GLOBAL lane the per-step VMV does, or it dies on exactly the
-    // tracks a master fade is most often written on.
+    // ⚠️ Global: on a track's own lane, the EXTERNAL-routing gate would swallow the master fade on
+    // any track playing a MIDI instrument (event.h).
     { FX_VMV,    CC_MASTER_VOL,  true,  RampKind::BYTE },
-    // TIM — the delay's echo time. ⭐ **THE RAMP IS THE POINT OF THE COMMAND, not a bonus**: the head
-    // glides to each new time and a moving head shifts pitch, so a span of these is the tape swoop.
-    // Global, and with the same restore debt, for the reason VMV above it is: the send belongs to no
-    // track (event.h).
+    // TIM: the delay head glides and shifts pitch — the ramp is the point of the command. Global,
+    // with the same restore-on-stop debt as VMV.
     { FX_TIM,    CC_DELAY_TIME,  true,  RampKind::BYTE },
-    // ── The EQ presets. No CC id: what these emit is a band set, not a controller value ───────────
+    // ── The EQ presets: these emit a band set, not a controller value ─────────────────────────────
     //
-    // ⚠️ EQN IS A PER-VOICE SWEEP, not a per-track one. `applyEqPresetToModule` writes the sounding
-    // voice's own chain, and a note-on resets that chain from the instrument's preset — so a morph
-    // re-asserts itself one tic after every retrigger and does nothing at all over a silent track.
-    // Same shape as CUT/RES above. EQM is the one that gives a long global sweep.
+    // ⚠️ EQN is per VOICE: a note-on resets the voice's EQ from its instrument, so the morph re-asserts
+    // one tic after each retrigger and does nothing over a silent track. EQM is the global sweep.
     { FX_EQN,    0,              false, RampKind::EQ_PRESET },
-    // ⚠️ Global for the same reason VMV is, and with the same debt: EQM REPLACES the mixer's master
-    // EQ and holds, so the host must put the project's value back on stop(). The scheduler sets
-    // `eqmActive_` off the ramp as well as off the per-step effect — see emit_ramp_ticks.
+    // ⚠️ EQM replaces the master EQ and holds, so the host restores it on stop(). The scheduler sets
+    // `eqmActive_` from the ramp as well as from the per-step effect.
     { FX_EQM,    0,              true,  RampKind::EQ_PRESET },
 };
 
@@ -126,9 +87,8 @@ inline constexpr const AutomatableParam* automatable_param(int fxCode) {
     return nullptr;
 }
 
-// A BYTE ramp interpolates in the authored 0-255 domain and emits `byte / 255`, so every value it
-// produces is a member of the same 256-value set the per-step effects already emit. A parameter whose
-// cell caps below 0xFF would break that: its ramp could type values the cell cannot.
+// A BYTE ramp interpolates 0-255, so a parameter whose cell caps below 0xFF could be ramped to a
+// value its own cell cannot hold.
 inline constexpr bool automatable_params_are_full_range() {
     for (int i = 0; i < AUTOMATABLE_PARAM_COUNT; ++i)
         if (AUTOMATABLE_PARAMS[i].kind == RampKind::BYTE &&
@@ -139,10 +99,7 @@ static_assert(automatable_params_are_full_range(),
               "an automatable BYTE parameter must accept the full 00-FF byte — the ramp interpolates "
               "in that domain and would emit values its own cell cannot hold");
 
-// ⭐ The twin, and it is the reason an out-of-range endpoint needs no runtime range check anywhere:
-// an EQ_PRESET endpoint is a SLOT, the pool is 128 slots, and a cell that caps at 127 cannot hold a
-// number that is not one. Widen either half and this fails at compile time rather than indexing off
-// the end of `Project::eqPresets` at the first tick.
+// An EQ_PRESET endpoint is a slot index; this is why pairing needs no runtime range check.
 inline constexpr bool automatable_preset_params_are_slot_range() {
     for (int i = 0; i < AUTOMATABLE_PARAM_COUNT; ++i)
         if (AUTOMATABLE_PARAMS[i].kind == RampKind::EQ_PRESET &&
@@ -155,13 +112,8 @@ static_assert(automatable_preset_params_are_slot_range(),
 
 // ─── The EQ morph — what an EQ_PRESET ramp holds at position `t` ──────────────────────────────────
 //
-// The per-band RULE — which of the two ends' type wins, and what interpolates — is
-// `automation_eq_band_at` in automation_curve.h, because the table path applies the same rule from
-// below the seam. What is here is only the lookup: two `Project` slots to two bands.
-//
-// ⚠️ The slots are clamped rather than trusted. Pairing refuses an endpoint above the last slot, so
-// the authored path cannot produce one — but a hand-edited project file is not the authored path, and
-// an unclamped index here reads off the end of the pool on the first tick.
+// The per-band rule is `automation_eq_band_at` (shared with the table path); this is only the lookup.
+// Slots are clamped because a hand-edited project file can hold an out-of-range one.
 inline ExtEqMorphPayload eq_morph_at(const Project& project, int startSlot, int destSlot,
                                      int curveByte, double t) {
     ExtEqMorphPayload m{};
@@ -172,8 +124,7 @@ inline ExtEqMorphPayload eq_morph_at(const Project& project, int startSlot, int 
     const EqPreset& to   = project.eqPresets[slot(destSlot)];
 
     for (int i = 0; i < 3; ++i) {
-        // A preset carries three bands by construction; a file that says otherwise leaves the missing
-        // ones at the zeroed payload, which reads as OFF.
+        // A file with fewer than three bands leaves the rest zeroed, which reads as OFF.
         if (i >= static_cast<int>(from.bands.size()) || i >= static_cast<int>(to.bands.size())) break;
         const EqBand& a = from.bands[static_cast<size_t>(i)];
         const EqBand& b = to.bands[static_cast<size_t>(i)];
@@ -204,19 +155,16 @@ inline constexpr bool is_eq_preset_slot(int value) {
 // ─── The pairing ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One declared ramp, as seen from ONE phrase of the walk.
+ * One ramp, as seen from ONE phrase of the walk.
  *
- * A span may cross phrase boundaries (`find_ramps_in_chain`), so the fields divide into two kinds:
- * `span`/`stepsBefore` describe the WHOLE ramp and are what the curve is evaluated against, while
- * `ausStep`/`aufStep` and the slots are about THIS phrase and go to −1 when the corresponding end is
- * in a different one. A ramp confined to a single phrase has `stepsBefore == 0` and
- * `span == aufStep − ausStep`, which is what `find_ramps` produces on its own.
+ * `span` and `stepOffset` describe the whole ramp (what the curve is evaluated against);
+ * `ausStep`/`aufStep` and the slots are about this phrase and are −1/0 when that end is elsewhere.
  */
 struct RampSpec {
     int      fxCode   = FX_NONE;
     uint8_t  ccId     = 0;
     bool     global   = false;
-    // What `startByte`/`destByte` MEAN: values for BYTE, `Project::eqPresets` indices for EQ_PRESET.
+    // BYTE: values. EQ_PRESET: `Project::eqPresets` indices.
     RampKind kind     = RampKind::BYTE;
     int     ausStep   = -1;   // the step carrying AUS, or −1: the ramp opened in an earlier phrase
     int     aufStep   = -1;   // the step carrying the AUF, or −1: it arrives in a later phrase
@@ -227,24 +175,19 @@ struct RampSpec {
     int     destByte  = 0;
     int     curveByte = AUS_CURVE_LINEAR;
 
-    // The span, in steps, over the whole ramp — the denominator `t` is measured against, and never
-    // zero for a ramp that paired.
-    int     span       = 0;
-    // Add this phrase's step index to it for the steps elapsed since the AUS. It is NEGATIVE for the
-    // phrase the AUS sits in (exactly −ausStep, so the sum is the familiar `stepIndex − ausStep`) and
-    // positive once the ramp has crossed a boundary — one signed number instead of two cases.
+    int     span       = 0;   // steps over the whole ramp; never zero for a paired ramp
+    // Steps elapsed since the AUS = stepOffset + stepIndex. Negative (−ausStep) in the AUS's own
+    // phrase, positive once the ramp has crossed into a later one.
     int     stepOffset = 0;
 
-    // Where the AUS cell itself is, whichever phrase is asking: its step counted from the start of the
-    // chain's walk (or of the phrase, with no chain) and its slot. A CHA can eat the AUS on that step,
-    // and a later phrase the span crosses has to know — the scheduler keys that memory on these two.
+    // The AUS cell's position in the chain walk (or the phrase, with no chain) and its slot. A CHA
+    // can eat the AUS, and every later phrase of the span needs to know; the scheduler keys on these.
     int     originAbs  = -1;
     int     originSlot = 0;
 };
 
-/** Does a note-on put this parameter back to the instrument's value? Every note inside such a fade —
- *  a new one or an ARP/RPT retrigger — has to be handed the fade's value; the two faders, the delay
- *  time and the master EQ hold through any note. */
+/** Does a note-on reset this parameter to the instrument's value? Then every note inside the fade,
+ *  ARP/RPT retriggers included, must be handed the fade's value. */
 inline bool ramp_moves_voice(const RampSpec& r) {
     return !r.global && r.ccId != CC_TRACK_VOL;
 }
@@ -254,45 +197,7 @@ inline bool ramp_rides_note_on(const RampSpec& r) {
     return r.ccId == CC_VOLUME || r.ccId == CC_PAN;
 }
 
-/**
- * Every ramp `phrase` declares, in the order they open, walking from `startRow`.
- *
- * The rules, and what each one is defending against:
- *
- *  • **AUS looks LEFT on its own step** for the nearest automatable effect, skipping ones that are
- *    not (`VOL 20  PSL 40  AUS 00` ramps the VOL). That effect's type is the parameter and its value
- *    is the start byte, so the number the ramp begins at is a number visible in the grid, typed as an
- *    ordinary effect — and it still emits its own per-step event, so the authored start and the
- *    ramp's first sample agree by construction rather than by arithmetic.
- *  • **An AUS with nothing automatable to its left is INERT** — it does not open, and it does not
- *    close or replace a ramp already open. A curve on its own names no parameter, and guessing one
- *    would move something the author never pointed at.
- *  • **AUF must be on a LATER step**, and the FIRST one closes. An AUF sharing a step with its AUS is
- *    inert and leaves the ramp open: slot order inside a step is not a time order, and the span it
- *    would describe has no duration to interpolate across.
- *  • **An EQ_PRESET endpoint that is not a slot is INERT, at either end.** The AUF cell accepts
- *    00-FF and a preset index is 00-7F, so `AUF C0` over an EQM names nothing; it does not close the
- *    ramp, and — like every other unused AUS/AUF cell — it draws DIM, so the author sees it in the
- *    grid the moment they type it. ⚠️ **The open AUS stays open**, so a later, legal AUF still closes
- *    the span. The same rule at the start end leaves the AUS itself inert rather than letting it walk
- *    further left onto a parameter the author was not pointing at.
- *  • **The last AUS wins**, matching the last-wins convention the FX slots already follow: a second
- *    AUS before any AUF replaces the open ramp rather than nesting.
- *  • **An unclosed AUS at the end of the phrase produces nothing.** Pairing is per-phrase — the AUF
- *    of a future phrase has not been scheduled yet, and inventing an end would mean guessing it.
- *
- * ⚠️ Reads the AUTHORED step, before CHA/RND/RNL touch anything. A ramp therefore never joins the
- * non-reproducible set (`tools/ptnondet`): randomising the curve or the destination would make the
- * same project render differently twice, and a fade is not a thing anyone wants dice on. RND on an
- * AUS, AUF or start-value slot is ignored for pairing purposes.
- */
-/**
- * Does this phrase carry an AUS or an AUF cell at all?
- *
- * A ramp is a property of the walk, not of one phrase — this answers only whether the phrase owns an
- * END of one, which is the cheap question the pairing walks cannot be asked. Used to skip work whose
- * answer is already known; it is never a substitute for pairing.
- */
+/** Does this phrase carry an AUS or AUF cell at all? A cheap skip — never a substitute for pairing. */
 inline bool phrase_has_ramp_cell(const Phrase& phrase) {
     for (const PhraseStep& step : phrase.steps) {
         for (int slot = 1; slot <= 3; ++slot) {
@@ -303,6 +208,20 @@ inline bool phrase_has_ramp_cell(const Phrase& phrase) {
     return false;
 }
 
+/**
+ * Every ramp `phrase` declares, in the order they open, walking from `startRow`.
+ *
+ *  • AUS looks LEFT on its own step for the nearest automatable effect; its value is the start.
+ *    With nothing automatable to its left the AUS is inert and leaves any open ramp alone.
+ *  • The first AUF on a LATER step closes. One on the AUS's own step is inert — slot order is not
+ *    time order.
+ *  • An EQ_PRESET endpoint that is not a slot is inert at either end; the AUS stays open, so a later
+ *    legal AUF still closes it. Unused AUS/AUF cells draw dim.
+ *  • The last AUS wins; ramps do not nest.
+ *  • An AUS still open at the end of the phrase produces nothing.
+ *
+ * Reads the AUTHORED step, before CHA/RND/RNL, so a ramp is always reproducible.
+ */
 inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) {
     std::vector<RampSpec> out;
     RampSpec              open;
@@ -321,8 +240,7 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
                     const AutomatableParam* p = automatable_param(step_fx_type(step, left));
                     if (p == nullptr) continue;
                     const int startValue = step_fx_value(step, left);
-                    // The nearest automatable effect IS the parameter, so an endpoint it cannot
-                    // express ends the search rather than continuing it.
+                    // The nearest automatable effect is the parameter, so a bad endpoint ends the search.
                     if (p->kind == RampKind::EQ_PRESET && !is_eq_preset_slot(startValue)) break;
                     open           = RampSpec{};
                     open.fxCode    = p->fxCode;
@@ -338,8 +256,8 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
                     break;
                 }
             } else if (type == FX_AUF && isOpen && stepIndex > open.ausStep) {
-                // ⚠️ Before anything that closes the ramp: an endpoint that is not a slot leaves the
-                // AUS open for a later AUF, and this cell unused (so `RampCells` dims it).
+                // ⚠️ Before the close: an endpoint that is not a slot leaves the AUS open and this
+                // cell unused (so `RampCells` dims it).
                 if (open.kind == RampKind::EQ_PRESET && !is_eq_preset_slot(step_fx_value(step, slot)))
                     continue;
                 open.aufStep    = stepIndex;
@@ -359,54 +277,28 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
 
 // ─── Pairing across a chain ──────────────────────────────────────────────────────────────────────
 //
-// A phrase is 16 steps, which at any useful tempo is a bar or less — so a fade written the way
-// `find_ramps` pairs it can never be longer than a bar, and "fade this in over the four bars of the
-// intro" is not expressible at all. The AUF is allowed to sit in a LATER PHRASE OF THE SAME CHAIN,
-// which is what the walk below works out.
-//
-// ⚠️ **THE CHAIN IS THE BOUNDARY, AND IT IS A REAL ONE.** Pairing stops at the end of the chain: a
-// chain is the unit a track repeats and re-enters, and a span that ran past it would have to survive
-// the song moving to a different chain, a chain played from two song rows at once, and CHAIN mode's
-// wrap back to row 0. Sixteen rows of sixteen steps is 256 steps of ramp, which is the length of the
-// thing anyone has asked for.
-//
-// ⭐⭐ **IT IS RE-DERIVED ON EVERY CALL, NOT CARRIED IN `TrackState`.** The obvious implementation
-// leaves the open AUS in the track's state and lets successive `schedulePhrase` calls advance it, and
-// it is wrong in three ways at once, all of them invisible until they are not: `notify_data_changed`
-// rolls the lookahead back to an earlier chain row WITHOUT rewinding `TrackState` (see the checkpoint
-// ring), so a live edit would jump the fade forward by a phrase; a chain re-entered from a later song
-// row would inherit the previous one's open ramp; and the same phrase scheduled twice would advance it
-// twice. Deriving the whole picture from (chain, chainRow) each time makes every one of those
-// questions unaskable — the same reason the emitter measures `t` in steps rather than accumulating
-// frames.
+// The AUF may sit in a later phrase of the SAME chain, so a fade can span up to 256 steps.
+// ⚠️ The chain is the boundary: a span past it would have to survive song moves, a chain played from
+// two rows, and CHAIN-mode wraps.
+// ⚠️ Re-derived from (chain, chainRow) on every call — never carried in `TrackState`. A live edit
+// rolls the lookahead back without rewinding `TrackState`, a chain can be re-entered, and a phrase
+// can be scheduled twice; carried state would be wrong in all three.
 
 /**
- * Every ramp playing over the phrase at `chainRow`, whether it opened there or in an earlier row.
+ * Every ramp playing over the phrase at `chainRow`, whether it opened there or earlier.
  *
- * Spans are returned as this phrase sees them: `ausStep` is −1 when the AUS is behind us, `aufStep`
- * is −1 when the AUF is ahead, and `stepsBefore` says how far along the ramp already was when this
- * phrase began. `startRow` is the HOP entry point and applies only to ramps opening in THIS phrase —
- * a phrase entered below its own AUS runs no ramp, exactly as `find_ramps` has it, while one entered
- * below a step a ramp from an earlier row is merely passing through is unaffected.
- *
- * ⚠️ Empty chain rows contribute NO steps, matching the traversal: the scheduler skips them without
- * scheduling anything, so counting them would drift the fade against the notes.
- *
- * ⚠️ **THE WALK IS THE AUTHORED ONE, AND A HOP CAN MAKE THE REAL ONE SHORTER.** A HOP inside the span
- * ends its phrase early, so fewer steps play than this counted and the fade is a little further along
- * than the step count says when the next phrase picks it up. It still starts at the start byte and
- * still arrives at the destination on the AUF's own step — the error is in the middle and bounded by
- * the steps the HOP skipped. Reading the real traversal instead is not available: the HOP itself can
- * be CHA-gated, so how far the phrase gets is not knowable until it has been walked, which is the
- * same reason nothing is ever emitted ahead of the walk.
+ * `startRow` (the HOP entry) applies only to ramps opening in THIS phrase. Empty chain rows add no
+ * steps, matching the traversal.
+ * ⚠️ The walk counts authored steps. A HOP inside the span plays fewer, so the middle of the fade
+ * runs slightly ahead; both endpoints stay exact. The real walk is unknowable in advance (the HOP can
+ * be CHA-gated).
  */
 inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const Chain& chain,
                                                  int chainRow, int startRow = 0) {
     std::vector<RampSpec> out;
     if (chainRow < 0 || chainRow >= 16) return out;
 
-    // Absolute step of each row's step 0, in the chain's own walk. −1 marks a row that is never
-    // played and therefore has no position at all.
+    // Absolute step of each row's step 0; −1 for a row that never plays.
     int rowAbs[CHAIN_ROWS];
     int walked = 0;
     for (int row = 0; row < CHAIN_ROWS; ++row) {
@@ -419,9 +311,7 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
     const int hereAbs = rowAbs[chainRow];
     const int hereEnd = hereAbs + 15;
 
-    // One pass over the whole chain, in playing order, pairing exactly as `find_ramps` does within a
-    // phrase — the rules do not change, only how far the walk can see. Absolute step indices keep the
-    // two ends comparable across rows.
+    // Same rules as `find_ramps`, over the whole chain in absolute steps.
     RampSpec open;
     bool     isOpen    = false;
     int      openAbs   = 0;   // absolute step the open AUS sits on
@@ -438,8 +328,7 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
                 const int type = step_fx_type(step, slot);
 
                 if (type == FX_AUS) {
-                    // A HOP into this phrase below the AUS means the step never plays, so the ramp is
-                    // never declared. Only applies to the phrase actually being entered.
+                    // A HOP into this phrase below the AUS skips it.
                     if (row == chainRow && stepIndex < startRow) continue;
                     for (int left = slot - 1; left >= 1; --left) {
                         const AutomatableParam* p = automatable_param(step_fx_type(step, left));
@@ -461,14 +350,13 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
                         break;
                     }
                 } else if (type == FX_AUF && isOpen && absStep > openAbs) {
-                    // ⚠️ ABOVE `isOpen = false` DELIBERATELY. This walk clears the flag before its
-                    // visibility check, so the same guard written below would close the ramp and emit
-                    // nothing — which looks identical from the grid and is not the same thing.
+                    // ⚠️ Must stay above `isOpen = false`: written below it, a bad endpoint would
+                    // close the ramp and emit nothing.
                     if (open.kind == RampKind::EQ_PRESET &&
                         !is_eq_preset_slot(step_fx_value(step, slot))) continue;
                     const int aufAbs = absStep;
                     isOpen = false;
-                    // Only the part of the chain this phrase can see is any of its business.
+                    // Only spans overlapping this phrase are returned.
                     if (aufAbs < hereAbs || openAbs > hereEnd) break;
                     RampSpec r   = open;
                     r.destByte   = step_fx_value(step, slot);
@@ -491,24 +379,11 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
 
 // ─── Which cells of ONE phrase a ramp uses — the question the editor asks ────────────────────────
 //
-// The editor draws a phrase, and a phrase has no single playing context: the same sixteen steps may
-// sit at several rows of a chain, in several chains, in neither. A ramp, meanwhile, is a property of
-// a CHAIN WALK. So the cell question — *is this AUS doing anything?* — is answered over EVERY context
-// the project plays the phrase in, and the cell is live if any one of them uses it.
-//
-// ⚠️ **THE UNION IS THE HONEST ANSWER, AND ASKING ONE CONTEXT IS NOT.** Dimming means "you wrote
-// something inert"; a cell live in one of its contexts is not inert, and saying so would send the
-// author hunting a bug in a fade that plays. The imprecision runs the other way instead — a cell live
-// in one chain draws live everywhere, which is the most an editor with one cell and many contexts can
-// say without lying.
+// A phrase can play in many chain contexts, and a ramp belongs to a chain walk. A cell draws live if
+// ANY context uses it — dimming means "inert", and a cell live somewhere is not.
 
-/**
- * The AUS/AUF cells of one phrase that a ramp really uses, indexed `[step][slot]` with slots 1-3.
- *
- * Filled from `RampSpec`s, whose `ausStep`/`aufStep` are already −1 for an end living in ANOTHER
- * phrase — so marking is safe to do with the specs of any row, and folding several rows together is
- * exactly the union above.
- */
+/** The AUS/AUF cells of one phrase that a ramp uses, `[step][slot]` with slots 1-3. Ends in another
+ *  phrase are −1 in the spec and skipped, so marking from several rows is a union. */
 struct RampCells {
     bool used[16][4] = {};
 
@@ -521,15 +396,7 @@ struct RampCells {
         }
     }
 
-    /**
-     * Does this FX cell take part in a ramp?
-     *
-     * Only AUS and AUF can answer no — every other effect stands on its own, so a cell carrying one
-     * is active by definition and the caller may ask about any slot. The three ways to write an AUS
-     * that does nothing (nothing automatable to its left, no AUF after it, an AUF sharing its step)
-     * and the two ways to write an inert AUF (no ramp open, or a second AUF after one already closed)
-     * all reduce to the same thing: the pairing did not use this cell.
-     */
+    /** Does this FX cell take part in a ramp? Anything but AUS/AUF is always active. */
     bool active(int fxType, int stepIndex, int slot) const {
         if (fxType != FX_AUS && fxType != FX_AUF) return true;
         if (stepIndex < 0 || stepIndex >= 16 || slot < 1 || slot > 3) return false;
@@ -538,27 +405,16 @@ struct RampCells {
 };
 
 /**
- * Every AUS/AUF cell of phrase `phraseId` that a ramp uses, over every chain row that plays it.
- *
- * A phrase no chain references has no walk to be read in, and falls back to pairing within itself —
- * which is what an author writing a phrase before placing it should see.
- *
- * ⚠️ Asks `find_ramps_in_chain` rather than re-deriving the rules, so an editor drawing this cannot
- * claim a fade the emitter will not play — they are reading one answer, not two implementations of
- * it. That is also why the whole phrase is answered in ONE pass and handed to the caller as a mask:
- * per-cell scanning would put a chain walk under every glyph.
+ * Every AUS/AUF cell of phrase `phraseId` that a ramp uses, over every chain row that plays it. A
+ * phrase no chain references pairs within itself.
+ * Asks `find_ramps_in_chain`, so the editor cannot show a fade the emitter will not play.
  */
 inline RampCells find_ramp_cells(const Project& project, int phraseId) {
     RampCells cells;
     if (phraseId < 0 || phraseId >= static_cast<int>(project.phrases.size())) return cells;
 
-    // ⚠️ EVERY CELL THIS CAN MARK BELONGS TO THIS PHRASE. `RampSpec::ausStep`/`aufStep` are −1 for an
-    // end living in another phrase and `mark` skips those, so a phrase carrying no AUS and no AUF cell
-    // of its own has an all-false mask however the chains around it are written — and `active()`
-    // answers true for every other effect without consulting the mask at all. Asking that first is
-    // EXACT rather than an approximation, and it is what keeps the editor off the walk below on an
-    // ordinary phrase: the walk pairs 16×16×3 cells once per chain row that plays this phrase, and
-    // the PHRASE screen redraws at 60 Hz for as long as the transport is audible.
+    // A phrase with no AUS/AUF cell of its own can have no marked cell — exact, and it keeps the
+    // chain walk off the 60 Hz redraw of an ordinary phrase.
     const Phrase& self = project.phrases[static_cast<size_t>(phraseId)];
     if (!phrase_has_ramp_cell(self)) return cells;
 

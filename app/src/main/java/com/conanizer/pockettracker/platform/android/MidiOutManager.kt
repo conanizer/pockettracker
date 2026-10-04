@@ -12,22 +12,15 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * The Android MIDI **output** port — the Java half of `songcore::IMidiOut` (MIDI plan phase B2b).
+ * The Android MIDI **output** port — the Java half of `songcore::IMidiOut`.
  *
- * ## ⚠️ Why this file exists at all, when Phase E deleted the Kotlin UI
+ * ## ⚠️ Why Kotlin at all
  *
- * Convergence left `app/src/main/java` a four-file shim; this is the fifth, and the MIDI plan named
- * the cost when it was ratified rather than discovering it here. `android.media.midi.MidiManager` is
- * the **only** sanctioned route to USB, virtual and BLE MIDI devices on Android, and it is a Java
- * API. The NDK's AMidi does not save us: it is API 29+ (this app's floor is 26) and it *still*
- * requires Java-side `MidiManager` to enumerate and open a device — it only makes the byte I/O
- * native, which was never the part that needed help. Raw `UsbManager` bulk transfers would mean
- * hand-writing the USB-MIDI class driver and would lose virtual (app-to-app) devices entirely.
- *
- * So this is the same shape [ButtonSoundManager] and [ButtonHapticManager] already have: an Android
- * system service with no C++ twin, reached through one narrow outward hook. Everything above it —
- * the serializer, the note lifecycle, the gate lengths, the panic, the OFFSET — is C++ and is shared
- * with the Windows and Linux builds. Nothing musical is decided here.
+ * `android.media.midi.MidiManager` is the ONLY sanctioned route to USB, virtual and BLE MIDI, and it
+ * is a Java API. The NDK's AMidi is API 29+ (the floor is 26) and still needs Java to enumerate and
+ * open; raw `UsbManager` would mean hand-writing the USB-MIDI class driver and losing virtual devices.
+ * Same shape as [ButtonSoundManager] and [ButtonHapticManager]: a system service reached through one
+ * narrow hook. Everything musical is decided in C++.
  *
  * ## ⚠️⚠️ THE DIRECTION GOTCHA — the easiest thing in this file to get backwards
  *
@@ -61,9 +54,8 @@ class MidiOutManager(context: Context) {
      * One reusable buffer, because [send] runs per MIDI message and a 3-byte allocation per note is
      * pure garbage-collector pressure on the one path that must not stutter.
      *
-     * ⚠️ It used to say "safe only because every call arrives on the single thread that pumps the
-     * queue". Since MIDI plan B3 there are TWO threads that can (a sender thread releases the queue,
-     * the frame loop still panics), so [send] is `@Synchronized` — see the note there.
+     * Two threads can reach [send] (the sender thread and a panic on the frame loop), so it is
+     * `@Synchronized` — see the note there.
      */
     private val scratch = ByteArray(3)
 
@@ -111,24 +103,18 @@ class MidiOutManager(context: Context) {
     /**
      * Open device [index] for sending. Returns whether a port is actually live.
      *
-     * ⚠️ **THIS BLOCKS THE CALLING THREAD**, for up to [OPEN_TIMEOUT_MS]. `MidiManager.openDevice` is
-     * asynchronous and there is no synchronous form, so something has to wait — and the alternative
-     * was considered and rejected: returning an optimistic `true` and letting the port arrive later
-     * would make the MIDI screen's OUTPUT row claim a device that may never open, and that row's one
-     * design rule (plan §0.1) is that it shows what is OPEN, not what was WANTED. A row that lies
-     * about a cable is worse than a frame-loop stall the user caused by pressing a button, which is
-     * what this is: [open] is only ever reached from picking a port or from boot. Real opens take
-     * tens of milliseconds; the timeout exists for the device that is unplugged mid-handshake.
+     * ⚠️ THIS BLOCKS THE CALLING THREAD for up to [OPEN_TIMEOUT_MS]: `openDevice` is asynchronous with
+     * no synchronous form. An optimistic `true` would make the OUTPUT row claim a device that may never
+     * open, and that row shows what is OPEN, not what was WANTED. Only a port pick or boot reaches
+     * this; real opens take tens of ms, and the timeout is for a device unplugged mid-handshake.
      */
     fun open(index: Int): Boolean {
         close()
         val m = manager ?: return false
         val info = devices.getOrNull(index) ?: return false
 
-        // ⚠️ A GUARD AGAINST A FUTURE CALLER, not against today's. The callback below is delivered on
-        // the MAIN looper, so waiting for it FROM the main thread would deadlock this app solid. The
-        // native side calls from the SDL thread and always will; this makes the assumption fail loudly
-        // in a log rather than silently as a five-second ANR if that ever changes.
+        // ⚠️ A guard against a FUTURE caller: the callback below arrives on the MAIN looper, so
+        // waiting from the main thread would deadlock. The native side calls from the SDL thread.
         if (Looper.myLooper() == Looper.getMainLooper()) {
             Log.e(TAG, "open() called on the main thread - refused (it would deadlock on openDevice)")
             return false
@@ -190,16 +176,9 @@ class MidiOutManager(context: Context) {
     /**
      * One MIDI message, 1–3 bytes, already serialized by songcore. False = it did not go out.
      *
-     * ⚠️⚠️ **`@Synchronized`, AND MIDI PLAN B3 IS WHY.** `scratch` is one reusable 3-byte buffer, and
-     * its original comment said that was safe "because every call arrives on the one thread that pumps
-     * the queue". That was TRUE WHEN IT WAS WRITTEN and B3 invalidated it: the queue is now released by
-     * a dedicated sender thread while `panic()` still runs on the frame loop, so two threads reach this
-     * method. Two callers filling one buffer would interleave into a message that is neither of theirs.
-     *
-     * `ExternalConsumer`'s own mutex already serialises every `send`, so this lock is redundant TODAY —
-     * and it stays anyway, because the alternative is a Kotlin file whose correctness depends on a
-     * C++ lock two layers away that nothing here can see. (The guardrails' rule: derive safety from the
-     * data, or write it once below the sites — not from a convention every future caller must know.)
+     * ⚠️⚠️ `@Synchronized`: `scratch` is one reusable buffer, and two threads reach this (the sender
+     * thread releases the queue, `panic()` runs on the frame loop). `ExternalConsumer`'s mutex already
+     * serialises every `send`, but this file's correctness must not rest on a C++ lock it cannot see.
      */
     @Synchronized
     fun send(b0: Int, b1: Int, b2: Int, len: Int): Boolean {

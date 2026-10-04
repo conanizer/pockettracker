@@ -4,9 +4,8 @@
 //
 // ⭐⭐ THE POINTER IS THE CELL, NOT THE ITEM.
 //
-// Under NAV = POOL — what the app has always done — `currentChain` and `currentPhrase` ARE the state:
-// B+LEFT/RIGHT scrolls them over the whole 256-slot pool and nothing relates them to the arrangement.
-// Under NAV = SONG they stop being state and become a READING of one:
+// Under NAV = POOL, `currentChain` and `currentPhrase` ARE the state (B+LEFT/RIGHT scroll the pool).
+// Under NAV = SONG they are a READING of the cursors:
 //
 //     songRow, track := the SONG cursor    (songCursorRow, songCursorColumn − 1)
 //     chainRow       := the CHAIN cursor   (chainCursorRow)
@@ -14,22 +13,14 @@
 //     currentChain   = tracks[track].chainRefs[songRow]
 //     currentPhrase  = chains[currentChain].phraseRefs[chainRow]
 //
-// ⭐ NO NEW AppState FIELD, and that is the design rather than a saving. `go_to_screen` already saves
-// and restores those three on every screen change, so the pointer is maintained by code that exists.
-// It is also the only shape that gives the behaviour asked for: a B+UP that lands on the SAME chain
-// has still MOVED, because what moved is the cell — so a later B+RIGHT goes somewhere else. Anything
-// that stored "which chain am I looking at" would have to carry the cell beside it as a second,
-// desyncable copy, which is the shape `CLAUDE.md` names.
-//
-// ⚠️ THE TWO current* FIELDS ARE STILL WRITTEN — they are not deleted, they are DERIVED. Thirty-odd
-// sites index `project.chains[currentChain]` directly, and re-deriving at each of them is the bug this
-// file exists to avoid. `refresh_song_relative_refs` runs at the places the pointer CAN move —
-// `go_to_screen`, the B+D-pad walks, the PHRASE spill — each of which is itself the funnel for its
-// kind of move rather than one site among many.
-//
-// ⚠️ AN EMPTY CELL LEAVES THE OLD VALUE ALONE. `currentChain` indexes `project.chains` unguarded
-// wherever it is read, so writing −1 here would be an out-of-bounds read on the next frame. The entry
-// gate is what keeps the user off an empty cell; this is the belt to its braces.
+// No new AppState field: `go_to_screen` already saves and restores those cursors. And it is the only
+// shape that behaves right — a B+UP onto the SAME chain has still MOVED (the cell moved), so the next
+// B+RIGHT goes somewhere else.
+// ⚠️ The two current* fields are still WRITTEN, derived by `refresh_song_relative_refs` wherever the
+// pointer can move (`go_to_screen`, the B+D-pad walks, the PHRASE spill), because many sites index
+// `project.chains[currentChain]` directly.
+// ⚠️ An EMPTY cell leaves the old value alone: `currentChain` is read unguarded, so −1 would be an
+// out-of-bounds read. The entry gate keeps the user off empty cells; this is the backup.
 
 #include <algorithm>
 
@@ -40,13 +31,9 @@
 namespace pt::ui {
 
 /**
- * The three pointer components, LIVE-CURSOR AWARE.
- *
- * ⚠️ The saved copy is one screen change behind while you are standing ON the screen that owns it —
- * `go_to_screen` writes `songCursorRow` on the way OUT of SONG, not on every cursor step. So the
- * answer is the live cursor there and the saved field everywhere else, and the setter below mirrors
- * the same test: a reader and a writer that disagree about which copy is authoritative is the whole
- * class of bug this file is here to avoid.
+ * The three pointer components, LIVE-CURSOR AWARE: `go_to_screen` writes the saved copy on the way OUT,
+ * so on the screen that owns it the live cursor is the answer. The setter below applies the same test —
+ * reader and writer must agree on which copy is authoritative.
  */
 inline int pointer_song_row(const AppState& s) {
     return (s.currentScreen == ScreenType::SONG) ? s.cursorRow : s.songCursorRow;
@@ -67,8 +54,7 @@ inline void set_pointer_song_cell(AppState& s, int songRow, int track) {
         s.songCursorRow    = songRow;
         s.songCursorColumn = track + 1;
     }
-    // Whichever copy moved, the SONG viewport must be able to show the cell when the user arrives on
-    // it — `go_to_screen` scrolls to `cursorRow`, and that is restored from `songCursorRow`.
+    // The SONG viewport must be able to show the cell on arrival (`go_to_screen` scrolls to the cursor).
     scroll_song_to_row(s, songRow);
 }
 
@@ -78,10 +64,7 @@ inline void set_pointer_chain_row(AppState& s, int chainRow) {
     else                                      s.chainCursorRow = chainRow;
 }
 
-/**
- * Re-read `currentChain` / `currentPhrase` off the pointer. A no-op under NAV = POOL, which is what
- * makes every existing caller and every existing golden indifferent to this file.
- */
+/** Re-read `currentChain` / `currentPhrase` off the pointer. A no-op under NAV = POOL. */
 inline void refresh_song_relative_refs(AppState& s) {
     if (!s.settings.navSongRelative || s.project == nullptr) return;
     const songcore::Project& p = *s.project;
@@ -99,12 +82,9 @@ inline void refresh_song_relative_refs(AppState& s) {
 }
 
 /**
- * May R+RIGHT enter `to`? The "you cannot get there until you put it in the song" half of the
- * ruleset: CHAIN needs a filled song cell under the cursor, PHRASE needs a phrase at the chain row.
- *
- * ⚠️ R+RIGHT ONLY. R+LEFT and R+UP/DOWN are never gated — they move OUT of a screen or between rows
- * of the grid, and refusing them could strand the user on a screen with no way back. A refused press
- * does nothing at all (LGPT's own answer): the SONG cell you are standing on is the explanation.
+ * May R+RIGHT enter `to`? CHAIN needs a filled song cell under the cursor, PHRASE a phrase at the chain
+ * row. ⚠️ R+RIGHT only — gating R+LEFT or R+UP/DOWN could strand the user. A refused press does nothing;
+ * the SONG cell is the explanation.
  */
 inline bool song_relative_entry_allowed(const AppState& s, ScreenType to) {
     if (!s.settings.navSongRelative || s.project == nullptr) return true;
@@ -120,15 +100,10 @@ inline bool song_relative_entry_allowed(const AppState& s, ScreenType to) {
 }
 
 /**
- * Put the pointer on a cell that exists, and re-read the refs from it.
- *
- * ⚠️ A `.ptp` loaded under NAV = SONG can leave the remembered song cell on an empty one. The entry
- * gate then refuses CHAIN — correctly — and the user is stuck on SONG until they find a filled cell
- * themselves, with nothing on screen saying why. So the pointer is DERIVED at load: the first filled
- * cell in reading order (song row outer, track inner), and the chain row likewise.
- *
- * An arrangement with nothing in it at all leaves the pointer alone: there is no better cell to name,
- * and the gate is then doing exactly what it should.
+ * Put the pointer on a cell that exists, and re-read the refs. A `.ptp` loaded under NAV = SONG can
+ * leave the remembered cell empty, and the gate would then refuse CHAIN with nothing on screen to say
+ * why — so the pointer moves to the first filled cell (song row outer, track inner), and the chain row
+ * likewise. An empty arrangement leaves it alone.
  */
 inline void clamp_song_pointer(AppState& s) {
     if (!s.settings.navSongRelative || s.project == nullptr) return;
@@ -148,8 +123,7 @@ inline void clamp_song_pointer(AppState& s) {
                 }
     }
 
-    // …and the chain row, for the same reason one level down: a pointer whose chain is real but whose
-    // row is empty refuses PHRASE just as flatly.
+    // …and the chain row: a real chain with an empty row refuses PHRASE just as flatly.
     const int chainId = songcore::chain_at(p, pointer_track(s), pointer_song_row(s));
     if (chainId >= 0 && songcore::phrase_at(p, chainId, pointer_chain_row(s)) < 0) {
         for (int row = 0; row < songcore::CHAIN_ROWS; ++row)

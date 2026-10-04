@@ -94,12 +94,9 @@ int Skin::load(SDL_Renderer* renderer, const std::string& theme, bool log, SkinA
         // than overwrite — the bezel and branding art have transparent regions by design, and the
         // transparent art is all alpha.
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        // LINEAR (bilinear) filtering, not SDL's default NEAREST: the skin is device CHROME authored at
-        // one resolution and scaled to fit the band on screen, so its diagonals, curves and the cursive
-        // branding must smooth under scaling — exactly what Compose's BitmapPainter (FilterQuality.Low =
-        // bilinear) gave it on Android. NEAREST is right for the 640×480 pixel-art FRAMEBUFFER (that
-        // texture lives in sdl-video.cpp and keeps its own scale mode); it is wrong for the chrome, whose
-        // stair-stepped edges were the user-visible "ladder pixelisation" this fixes.
+        // LINEAR filtering, not SDL's default NEAREST: the skin is chrome scaled to fit its band, so
+        // its diagonals, curves and branding must smooth. NEAREST is right only for the pixel-art
+        // framebuffer (sdl-video.cpp); on the chrome it is visible stair-stepping.
         SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
 
         pieces_[i] = SkinTexture{tex, img.width, img.height};

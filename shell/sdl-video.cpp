@@ -6,13 +6,10 @@
 
 #include "ui/canvas.h"
 
-// ── The window icon, EMBEDDED — the Linux mirror of the Windows .rc (see below) ────────────────────
-// Only the platforms that have a window manager but do NOT take the icon from the executable need
-// this. Windows reads the icon straight out of the .exe's resources (shell/windows/pockettracker.rc,
-// which is why "there is no SDL_SetWindowIcon call" is stated there as intentional), and Android has
-// no window chrome and its own launcher icon — so both are compiled out, and with them the ~27 KB of
-// embedded PNG. What is left is desktop Linux (and PortMaster, where it is a harmless fullscreen
-// no-op): a bare ELF with no companion asset file, so the bytes have to ride inside the binary.
+// ── The window icon, EMBEDDED ────────────────────────────────────────────────────────────────────
+// Windows reads its icon from the .exe's resources (shell/windows/pockettracker.rc) and Android has
+// its own launcher icon, so both compile this out; desktop Linux (and PortMaster, a fullscreen no-op)
+// is a bare ELF with no asset file, so the bytes ride inside the binary.
 #if !defined(_WIN32) && !defined(__ANDROID__)
 #include "image.h"
 #include "window_icon.h"
@@ -26,26 +23,13 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
     Uint32 flags = SDL_WINDOW_SHOWN;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
-    // ── The WINDOWED host: resizable, and opened at a sensible size for THIS display ──────────────
+    // ── The WINDOWED host: resizable, opened at a sensible size for THIS display ──────────────────
     //
-    // Until now every platform opened at exactly 640×480 and could not be resized at all, which had
-    // two consequences that only ever showed up away from a handheld. On a desktop the tracker was a
-    // postage stamp on a 1440p monitor with no way to grow it — and, less obviously, it is why
-    // SETTINGS > SCALING was invisible there even after C4 finally wired it up: FIT and INTEGER
-    // compute the SAME rect when the output is exactly the design size, so the setting genuinely had
-    // nothing to do. Making the window resizable is what gives that setting somewhere to show.
-    //
-    // ⚠️ The size is DERIVED from the display rather than hardcoded to 2×, and that is what makes one
-    // code path correct on three very different targets with no build-time discriminator to test —
-    // and there is none: desktop Linux and PortMaster are the same Linux build of the same main.cpp.
-    // A 640×480 handheld panel computes 1× and is therefore byte-for-byte what shipped; a 1280×720
-    // TrimUI computes 1× (2× does not fit); a 1920×1080 desktop computes 2×; 4K computes 3×.
-    // Hardcoding 2× would have overflowed every handheld panel in the zoo, which is exactly the
-    // "frame is LARGER than the display" case describe() warns about.
-    //
-    // The 90% margin is for the things a desktop puts around a window and a handheld does not: a
-    // title bar, a taskbar, a dock. Without it a 1280×960 desktop would compute a 2× window whose
-    // chrome does not fit on the screen it has to sit on.
+    // Resizable, so SETTINGS > SCALING has somewhere to show (FIT and INTEGER compute the same rect
+    // at exactly the design size). ⚠️ The size is DERIVED from the display — the largest integer
+    // multiple that fits — because desktop Linux and PortMaster are the same build: a 640×480 panel
+    // gets 1×, a 1280×720 TrimUI 1×, a 1080p desktop 2×, 4K 3×. A hardcoded 2× would overflow every
+    // handheld. The 90% margin leaves room for a title bar and taskbar.
     if (resizable) {
         flags |= SDL_WINDOW_RESIZABLE;
 
@@ -53,10 +37,7 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
         if (SDL_GetDesktopDisplayMode(0, &desktop) == 0 && desktop.w > 0 && desktop.h > 0) {
             const int scale = std::max(1, std::min(desktop.w * 9 / 10 / windowW,
                                                    desktop.h * 9 / 10 / windowH));
-            // ASCII, and this line got it WRONG first time round: a U+00D7 multiplication sign came
-            // back on a 1251 console as `1Г—`. This file's own describe() comment and app.cpp's
-            // banner both state the rule — the console's encoding is not ours to choose — and the
-            // mojibake was in the very first run's output.
+            // ASCII only: the console's encoding is not ours to choose (a × came back as mojibake).
             std::printf("video:   desktop=%dx%d  opening at %dx (%dx%d), resizable\n", desktop.w,
                         desktop.h, scale, windowW * scale, windowH * scale);
             windowW *= scale;
@@ -73,14 +54,9 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
 
 #if !defined(_WIN32) && !defined(__ANDROID__)
     // ── The window / taskbar icon (desktop Linux) ─────────────────────────────────────────────────
-    // Decode the embedded PNG (window_icon.h, generated from docs/images/logo-app.png) and hand it to
-    // SDL. SDL_SetWindowIcon COPIES the surface, so the decoded pixels and the surface can both go out
-    // of scope the moment the call returns — nothing here has to outlive this block.
-    //
-    // ⚠️ image.h decodes into 0xAARRGGBB, which is exactly SDL_PIXELFORMAT_ARGB8888 on the
-    // little-endian targets here — the same packing the streaming texture uses (create_texture) — so
-    // the surface wraps the decoded buffer with no channel shuffle. A failure to decode is non-fatal:
-    // the window simply keeps SDL's default icon, which is the pre-icon behaviour, not a crash.
+    // SDL_SetWindowIcon COPIES the surface, so nothing here has to outlive this block. image.h decodes
+    // to 0xAARRGGBB = SDL_PIXELFORMAT_ARGB8888 on these little-endian targets, so the surface wraps the
+    // buffer with no shuffle. A failure keeps SDL's default icon.
     if (ptshell::Image icon = ptshell::decode_png(kWindowIconPng, kWindowIconPngLen); icon.ok()) {
         SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(
             icon.pixels.data(), icon.width, icon.height, 32, icon.width * 4, SDL_PIXELFORMAT_ARGB8888);
@@ -99,19 +75,12 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
     }
 #endif
 
-    // ⚠️ SDL_RENDERER_ACCELERATED does NOT mean "prefer accelerated" — it means "REQUIRE accelerated",
-    // and SDL_CreateRenderer FAILS outright if no driver offers it. That is the opposite of what a
-    // handheld port wants, and it fails on exactly the device the port plan names: TrimUI's GE8300,
-    // whose 32-bit GL blobs are missing, and any CFW booted without a GPU driver. The app would not
-    // start, and the error ("Couldn't find matching render driver") names nothing useful.
-    //
-    // So the flags are tried in descending order of what we'd LIKE, and the first that works wins:
+    // ⚠️ SDL_RENDERER_ACCELERATED means "REQUIRE accelerated": SDL_CreateRenderer fails outright with
+    // no GPU driver (a GE8300 with missing 32-bit GL blobs, a CFW without one), with a useless error.
+    // So the flags are tried in order and the first that works wins:
     //   1. accelerated + vsync   — a normal device
     //   2. accelerated           — a GPU whose driver won't vsync
-    //   3. anything at all       — SDL picks the software renderer, which is all a 640×480 blit needs
-    //
-    // The software fallback is not a degraded mode here. Blitting one 640×480 texture is trivial on a
-    // CPU; that is *why* this design draws into a framebuffer instead of using shaders.
+    //   3. anything at all       — the software renderer, which is all a 640×480 blit needs
     struct Attempt {
         Uint32      flags;
         const char* what;
@@ -147,14 +116,9 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
 /**
  * Report what the display actually IS, not what was asked for — one line, always on.
  *
- * ⚠️ This is the §10 bring-up row ("KMSDRM/rotation: no letterbox surprise") made answerable, and it
- * exists because the shell asks for a 640x480 WINDOW and never asks for fullscreen. On the Miyoo Flip
- * that is invisible: the panel IS 640x480, and KMSDRM has no window manager to put it in a box. On any
- * device whose panel is not 640x480 the request is a guess, and nothing in the log would say what
- * became of it.
- *
- * So: print the driver, the panel, what the renderer really gave us, and the rect the frame lands in.
- * A dest rect smaller than the output IS the letterbox, in numbers, before anyone squints at a photo.
+ * ⚠️ The shell asks for a 640×480 WINDOW and never for fullscreen; on a panel that is not 640×480
+ * that is a guess, and nothing else in the log says what became of it. So: the driver, the panel,
+ * what the renderer gave, and the frame rect — a rect smaller than the output IS the letterbox.
  */
 void SdlVideo::describe() const {
     int outW = 0, outH = 0;
@@ -208,15 +172,9 @@ void SdlVideo::set_scaling(ScalingMode m) {
     scaling_              = m;
     create_texture();
 
-    // Once per CHANGE, never per frame — the early return above is what makes this cheap enough to
-    // call from the frame loop, which is where SETTINGS > SCALING is polled from (app.cpp).
-    //
-    // ⚠️ The RECT is printed beside the mode, and it is the whole point of the line. "SCALING =
-    // BILINEAR" only says what was asked for; `frame=1280x960` versus `frame=640x480` says what the
-    // user will actually see — and this setting's entire history is of being asked for and not
-    // applied. On a handheld with no console you read this back out of the log; on a phone it is the
-    // difference between "the setting does nothing" and "the setting works, the WINDOW is wrong",
-    // which are the two bugs C4 had to tell apart.
+    // Once per CHANGE (the early return makes it cheap from the frame loop). ⚠️ The RECT is printed
+    // beside the mode: "BILINEAR" says what was asked for, `frame=1280x960` what the user sees — on a
+    // handheld the log is how to tell "the setting does nothing" from "the window is wrong".
     const SDL_Rect d = dest_rect();
     std::printf("video:   scaling %s -> %s   frame=%dx%d at %d,%d\n",
                 was == ScalingMode::FIT ? "FIT" : "INTEGER",
@@ -238,26 +196,12 @@ SDL_Rect SdlVideo::dest_rect() const {
     SDL_GetRendererOutputSize(renderer_, &outW, &outH);
 
     if (scaling_ == ScalingMode::FIT) {
-        // ⚠️⚠️ **FIT PRESERVES THE ASPECT RATIO. IT IS NOT A STRETCH TO THE WINDOW EDGES**, and it
-        // used to be — `return {0, 0, outW, outH}`, which squashes the 4:3 design into whatever shape
-        // the window happens to be. Reported by the user against the resizable desktop window, which
-        // is what made the setting visible on a non-4:3 output for the first time.
-        //
-        // ⭐ **The Kotlin this is a port OF has never stretched.** All three BILINEAR paths in
-        // `ScreenLayouts.kt` (FullScreen :189, Portrait :228, the bezel layout :472) compute ONE
-        // factor as a `minOf` of the two axis ratios and apply it to BOTH — `scaleX = scaleY =
-        // fillFactor` — and the bezel path even computes explicit `transX`/`transY` centring offsets,
-        // i.e. it expects a letterbox gap. So square pixels are not what INTEGER buys over FIT; the
-        // difference is only that FIT allows a FRACTIONAL scale and filters the result.
-        //
-        // ⭐ The row is called "BILINEAR", which says the same thing: it names a FILTERING choice, not
-        // a geometry one. The geometry divergence arrived with the wording "fit-stretch" in the port
-        // plan's §4.5 and was never checked against the app being converged onto.
-        // ⚠️ INTEGER arithmetic, not `float scale = min(outW/640.0f, outH/480.0f)`. A float scale
-        // truncates: at 1280×960 it computes 960/480 = 2.0f, and `480 * 2.0f` can land at 959.99997,
-        // giving a 1px bar on an output that is an EXACT multiple of the design and should have none.
-        // Cross-multiplying answers "which axis binds?" exactly, and the bound axis then keeps the
-        // window's own size rather than a value round-tripped through a ratio.
+        // ⚠️⚠️ FIT PRESERVES THE ASPECT RATIO; IT IS NOT A STRETCH TO THE WINDOW EDGES. The row is
+        // "BILINEAR" — a filtering choice: FIT differs from INTEGER only in allowing a fractional
+        // scale and filtering it. One factor, the `min` of the two axis ratios, applied to both.
+        // ⚠️ INTEGER arithmetic, not `min(outW/640.0f, outH/480.0f)`: a float scale can land
+        // 480 × 2.0f at 959.99997 and leave a 1px bar on an exact multiple. Cross-multiplying picks
+        // the binding axis exactly, and that axis keeps the window's own size.
         int w, h;
         if (outW * DESIGN_H >= outH * DESIGN_W) {  // window wider than 4:3 → height binds
             h = outH;
@@ -305,24 +249,13 @@ void SdlVideo::invalidate_backbuffer(bool texture_lost) {
 bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
                        const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
                        uint32_t modalScrimArgb) {
-    // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
-    // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be
-    // WRONG. `SdlActivity.hideSystemBars()` has to POST itself (API 30+ wants an attached DecorView),
-    // so the surface is still 1280x904 when the window is created and becomes 1280x960 a few frames
-    // later. The boot line therefore reported a 1x letterboxed window for a session that was actually
-    // running 2x full-screen, and on a handheld with no console that line is the ONLY account of what
-    // the user is looking at. An instrument aimed at the wrong instant is worse than none.
-    //
-    // ⚠️ ABOVE the C7 skip (in present_impl), deliberately. INTEGER scaling can absorb a small output
-    // change without moving the dest rect at all (1284→1285 wide still lands 1280 at x=2), so a check
-    // placed after the skip would miss exactly the resize this instrument exists to report.
-    //
-    // ⚠️ This is the LANDSCAPE/centred path's describe. The PORTRAIT2 skin (present_skinned) reports its
-    // own geometry from app.cpp, because `describe()` reports the CENTRED `dest_rect()` — which is not
-    // where a skinned frame lands, so calling it there would be a lying instrument (the very failure
-    // this comment block exists to prevent, one mode over).
-    //
-    // Fires on change only: a window resize, a rotation, or the system bars coming and going.
+    // ⚠️ RE-DESCRIBE WHEN THE OUTPUT CHANGES: on Android the surface is still 1280x904 when the window
+    // is created and becomes 1280x960 a few frames later (the system bars hide asynchronously), so a
+    // boot-only line would describe the wrong session.
+    // ⚠️ ABOVE the pixel-gate skip: INTEGER scaling can absorb a small output change without moving
+    // the rect, and the skip would hide exactly that resize.
+    // ⚠️ The landscape/centred path only: the PORTRAIT2 skin reports its own geometry from app.cpp,
+    // since `describe()` reports the centred `dest_rect()`.
     int outW = 0, outH = 0;
     SDL_GetRendererOutputSize(renderer_, &outW, &outH);
     if (outW != lastOutW_ || outH != lastOutH_) {
@@ -331,8 +264,7 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
         lastOutH_ = outH;
     }
 
-    // The centred frame, no underlay — the pre-D present, now expressed through the shared body. The
-    // modal scrim (when any) dims the whole output around the frame: the landscape letterbox bars.
+    // The centred frame, no underlay. The modal scrim (if any) dims the whole output around it.
     return present_impl(canvas, letterboxArgb, dest_rect(), {}, overlay, overlaySig, modalScrimArgb,
                         SDL_Rect{0, 0, outW, outH});
 }
@@ -341,10 +273,8 @@ bool SdlVideo::present_skinned(const Canvas& canvas, uint32_t clearArgb, const S
                                const std::function<void(SDL_Renderer*)>& underlay,
                                const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
                                uint32_t modalScrimArgb, const SDL_Rect& scrimBounds) {
-    // No re-describe here: the PORTRAIT2 mode's geometry is logged by app.cpp (see the note in
-    // `present` above). Otherwise identical to the centred path — same upload, same gate, same pacing.
-    // The modal scrim (when any) is bounded to `scrimBounds` — the bezel's inner glass, NOT the whole
-    // output — so it dims the gap around the frame without touching the casing or the button cluster (B4).
+    // No re-describe: the PORTRAIT2 geometry is logged by app.cpp. The modal scrim (if any) is
+    // bounded to `scrimBounds` — the bezel's inner glass — so it never dims the casing or the cluster.
     return present_impl(canvas, clearArgb, frameDest, underlay, overlay, overlaySig, modalScrimArgb,
                         scrimBounds);
 }
@@ -353,24 +283,13 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
                             const std::function<void(SDL_Renderer*)>& underlay,
                             const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
                             uint32_t modalScrimArgb, const SDL_Rect& scrimBounds) {
-    // ── C7: DON'T PRESENT A FRAME THAT IS ALREADY ON SCREEN ──────────────────────────────────────
+    // ── DON'T PRESENT A FRAME THAT IS ALREADY ON SCREEN ──────────────────────────────────────────
     //
-    // The pixel-level half of the idle-redraw discipline. `app.cpp` decides when not to DRAW; this
-    // decides when a drawn frame is not worth sending — and it is the safety net under that decision,
-    // because it cannot be fooled by a state field somebody forgot to include in a predicate. If the
-    // pixels, the letterbox colour and the destination rect are all identical, the display is already
-    // showing this exact image and uploading it again changes nothing a user could see.
-    //
-    // ⚠️ ALL THREE, not just the canvas: a theme change repaints the BARS without moving one canvas
-    // pixel, and a resize moves the frame without changing it. Comparing the canvas alone would leave
-    // both stale on screen — the C4 SCALING bug's shape (a value read but never applied), one layer
-    // over.
-    // ⚠️ `overlaySig` is part of this compare, and the touch skin is why (Phase D). A virtual-button
-    // press repaints only the PANEL — a highlight OUTSIDE the 640×480 canvas — so the canvas memcmp
-    // alone would find the frame identical and skip it, leaving the button looking un-pressed. That is
-    // the C7 blind-channel shape exactly (a change the comparison cannot see), one panel over from the
-    // sleep-resume case; folding the overlay's fingerprint into the gate closes it. Zero when there is
-    // no overlay, so this is a no-op wherever there are no on-screen controls.
+    // The pixel-level half of the idle-redraw discipline: `app.cpp` decides when not to DRAW, this
+    // when a drawn frame is not worth sending — a net no forgotten state field can fool.
+    // ⚠️ The pixels, the letterbox colour, the destination rect AND `overlaySig`: a theme change
+    // repaints the bars, a resize moves the frame, and a virtual-button press repaints only the panel
+    // — each invisible to a canvas compare. `overlaySig` is zero where there are no on-screen controls.
     const size_t n = static_cast<size_t>(DESIGN_W) * DESIGN_H;
     if (haveLast_ && clearArgb == lastLetterbox_ && overlaySig == lastOverlaySig_ &&
         modalScrimArgb == lastModalScrim_ &&
@@ -401,42 +320,24 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
     }
     SDL_UnlockTexture(texture_);
 
-    // ── The letterbox bars, in the THEME's background colour rather than black ────────────────────
-    //
-    // The design is 4:3 and almost nothing else is, so on a 16:9 desktop window or a phone the frame
-    // sits in a box with bars either side. Painting those black drew a hard edge around the tracker
-    // and made the app look like a small picture on a large black wall; painting them the same colour
-    // the UI already fills its own background with makes the whole window read as one surface, which
-    // is the "fullscreen experience" this is for.
-    //
-    // ⚠️ It is the LIVE theme, so it tracks the theme editor and any loaded .ptt with no wiring of its
-    // own — the colour arrives as an argument on every present (see the header for why not a setter).
-    //
-    // ⚠️ Phase D composites the touch skin into exactly this space on a phone. That is not a conflict:
-    // the skin's textures are drawn OVER a cleared background, so this stays the correct thing
-    // underneath them, and remains the whole answer on every layout that has no virtual buttons.
+    // ── The letterbox bars, in the LIVE theme's background colour rather than black ───────────────
+    // Black bars draw a hard edge and make the app a small picture on a black wall; the UI's own
+    // background makes the window one surface. On a phone the touch skin is drawn over this clear.
     SDL_SetRenderDrawColor(renderer_, static_cast<Uint8>((clearArgb >> 16) & 0xFF),
                            static_cast<Uint8>((clearArgb >> 8) & 0xFF),
                            static_cast<Uint8>(clearArgb & 0xFF), 255);
     SDL_RenderClear(renderer_);  // paints the letterbox bars (landscape) or the casing (PORTRAIT2)
 
-    // ⚠️ The UNDERLAY goes here — after the clear, BEFORE the frame — for the one thing drawn BEHIND the
-    // tracker: PORTRAIT2's chrome bands and the black inner bezel the frame sits on. Empty (and so a
-    // no-op) on the centred landscape/desktop path, where nothing is behind the frame but the clear.
+    // ⚠️ The UNDERLAY — after the clear, BEFORE the frame: PORTRAIT2's chrome bands and inner bezel.
+    // A no-op on the centred path.
     if (underlay) underlay(renderer_);
 
-    // ── B4: the modal scrim, so the dim reaches AROUND the frame ──────────────────────────────────
-    // When a full-canvas modal (qwerty / confirm) is up, the tracker inside the 640×480 frame is already
-    // dimmed by the module's own MODAL_BACKDROP — but whatever the shell paints AROUND it stays bright, so
-    // the scrim used to stop at the 4:3 edge. Fill ONLY the four regions around `dest`, bounded to
-    // `scrimBounds`, with the SAME colour — never the frame itself. The bounds are what keep this correct
-    // on both present paths: LANDSCAPE passes the whole output, so the scrim reaches the letterbox bars;
-    // PORTRAIT2 passes the bezel's inner GLASS (present_skinned), so with INTEGER scaling — where the frame
-    // is a whole multiple SMALLER than the glass — the bright gap around it dims too, while the device
-    // casing and the button cluster OUTSIDE the glass stay bright (dimming those reads as a bug, not a
-    // modal). An earlier draft filled the whole output and let the frame copy reclaim the 4:3 area, but the
-    // copy did not overpaint the blended scrim as assumed and the tracker went black; painting only the
-    // regions around `dest` cannot touch the frame at all.
+    // ── The modal scrim, so the dim reaches AROUND the frame ──────────────────────────────────────
+    // A full-canvas modal dims the tracker inside the frame; the shell fills the four regions AROUND
+    // `dest`, bounded to `scrimBounds`, with the same colour — never the frame itself. Landscape
+    // passes the whole output (the letterbox bars); PORTRAIT2 passes the bezel's inner glass, so the
+    // gap around an integer-scaled frame dims while the casing and button cluster stay bright.
+    // (Filling the whole output and re-copying the frame over it left the tracker black.)
     if (modalScrimArgb != 0) {
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer_, static_cast<Uint8>((modalScrimArgb >> 16) & 0xFF),
@@ -462,9 +363,8 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
 
     SDL_RenderCopy(renderer_, texture_, nullptr, &dest);
 
-    // ⚠️ The overlay goes HERE — after the frame, before the flip — drawn OVER it: the landscape touch
-    // panels in the bars beside the frame, or PORTRAIT2's button cluster on its backing. Never onto the
-    // 640×480 tracker itself. Empty on any layout with no on-screen controls, and then this does nothing.
+    // ⚠️ The OVERLAY — after the frame, before the flip: the landscape touch panels or PORTRAIT2's
+    // button cluster. Never onto the tracker itself.
     if (overlay) overlay(renderer_);
 
     SDL_RenderPresent(renderer_);
@@ -480,10 +380,7 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
     lastModalScrim_ = modalScrimArgb;
     haveLast_       = true;
 
-    // ⚠️ **NOTHING HERE PACES ANYTHING, AND THAT IS DELIBERATE — THE APP LOOP OWNS BOTH RATES.**
-    // With vsync `SDL_RenderPresent` still blocks until the display is ready, but that is no longer
-    // what keeps the app from spinning: the loop polls input far faster than it draws, so a wait
-    // inside a call it only sometimes reaches could not pace it. See THE TWO RATES in app.cpp — the
-    // frame deadline is what holds the draw to 60 Hz on a renderer that gave us no vsync.
+    // ⚠️ NOTHING HERE PACES ANYTHING: the app loop owns both rates (THE TWO RATES in app.cpp). With
+    // vsync SDL_RenderPresent still blocks, but the frame deadline is what holds the draw to 60 Hz.
     return true;
 }

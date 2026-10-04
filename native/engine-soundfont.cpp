@@ -36,10 +36,6 @@ void AudioEngine::setSoundfontEnvelopeOverride(int instrumentId, int atk, int de
 // ===================================
 // SOUNDFONT BANK
 // ===================================
-// Moved here from jni-bridge.cpp in S6b. Nothing about parsing an SF2 and caching its handle is
-// platform-specific, and leaving it behind the JNI wall meant no host build could load one — which
-// blocked tools/ptrender and would have forced the SDL shell to write a second slot cache. See the
-// header for the de-dup / LRU contract.
 
 void AudioEngine::freeSoundfontSlot(int slot) {
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
@@ -57,11 +53,6 @@ void AudioEngine::freeSoundfontSlot(int slot) {
     soundfonts[slot].preset = -1;
 }
 
-/**
- * Turn a file plus a bank/preset into a parsed tsf handle. No slot is touched and no member is
- * written except `lastLoadFailure_`'s answer, which comes back through `failure` instead — this runs
- * on the background worker as often as on the calling thread.
- */
 // ⚠️ Everything tsf would otherwise allocate on the AUDIO thread, done here: it grows its voice array
 // on a note that finds none free, and its channel array on the first call naming a new channel. So
 // both are sized now — a voice pool no preset here comes near, and a channel per SoundFont voice.
@@ -72,17 +63,17 @@ static void readyForAudio(tsf* h, int sampleRate) {
     tsf_channel_set_pan(h, SF_VOICE_COUNT - 1, 0.5f);   // creates channels 0..8, each at its default
 }
 
+/**
+ * Turn a file plus a bank/preset into a parsed tsf handle. No slot is touched and no member is
+ * written; the failure comes back through `failure` — this runs on the background worker as often
+ * as on the calling thread.
+ */
 tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFailure* failure) {
     *failure = LoadFailure::NONE;
 
-    // ⭐ **THE PREFERRED PATH: cut the one preset out of the file and parse only that.** The trimmed
-    // font is a complete, ordinary SoundFont holding this preset, the instruments it reaches and their
-    // sample bytes — typically under 1 % of the bank — so tsf runs unmodified over a small buffer and
-    // never sees, allocates or decodes the rest. Reading the index costs a few kilobytes.
-    //
-    // A false answer means "this file cannot be cut apart" (a layout with no per-sample byte ranges,
-    // or a preset that is not in it), never "this file is broken" — so it falls through to the whole-
-    // bank parse below, which is what the app did before and still does correctly.
+    // ⭐ THE PREFERRED PATH: cut the one preset out of the file and parse only that — a complete,
+    // ordinary SoundFont, typically under 1 % of the bank, so tsf never sees the rest. False means
+    // "cannot be cut apart", never "broken", and falls through to the whole-bank parse.
     {
         std::vector<uint8_t> trimmed;
         sf_memory_guard_reset();
@@ -107,13 +98,9 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
         }
     }
 
-    // Parse the SF2 into a single master TSF handle. All tracks share it via MIDI channels — no
-    // per-track clones, which would cost 8× the file size in RAM and stall the audio callback.
-    //
-    // `tsf_load` over a `FILE*` rather than `tsf_load_filename`, so the open goes through pt_fopen
-    // like every other one. It is the same stream tsf builds for itself in `tsf_load_filename` —
-    // sequential reads and forward skips only, so the SF2 still streams and peak RAM is the parsed
-    // soundfont, not the file on top of it.
+    // Parse into a single master handle; all tracks share it via MIDI channels (per-track clones
+    // would cost 8× the file in RAM). `tsf_load` over pt_fopen's `FILE*` — sequential reads and
+    // forward skips, so the file streams and peak RAM is the parsed soundfont alone.
     FILE* sf = pt_fopen(path, "rb");
     if (!sf) {
         LOGE("❌ Cannot open soundfont: %s", path);
@@ -121,10 +108,8 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
         return nullptr;
     }
     tsf_stream sfStream = { sf, &sfStreamRead, &sfStreamSkip };
-    // ⭐ The guard that makes a too-large font a MESSAGE instead of a kill. There is no size to check
-    // up front — nothing in an SF3 header states its decoded size — so the allocator itself refuses
-    // when a block would exhaust the machine, and tsf's own null checks unwind to the failure below.
-    // Reset first: the flag is what separates "too big for this device" from "not a soundfont".
+    // ⭐ The guard that makes a too-large font a MESSAGE instead of a kill (soundfont-voice.cpp).
+    // Reset first: the flag separates "too big for this device" from "not a soundfont".
     sf_memory_guard_reset();
     tsf* loaded = tsf_load(&sfStream);
     std::fclose(sf);
@@ -294,11 +279,9 @@ void AudioEngine::waitForSoundfontLoad() {
     if (!sfLoadBusy.load(std::memory_order_acquire)) return;
     if (sfLoadThread.joinable()) sfLoadThread.join();
 
-    // ⚠️⚠️ **THE RESULT IS KEPT, NOT THROWN AWAY, AND THAT IS THE WHOLE POINT OF WAITING RATHER THAN
-    // CANCELLING.** Only the PARSE has to be alone; the answer is still the answer. Discarding it here
-    // would lose a load the caller was already told had been accepted, and nothing asks twice — the
-    // PATCH row clears its pending flag the moment a request is taken, so the instrument would sit on
-    // its old sound for good. `sfLoadBusy` stays set and the next poll collects it as usual.
+    // ⚠️⚠️ THE RESULT IS KEPT, NOT THROWN AWAY: only the PARSE must be alone. The caller was told
+    // the load was accepted and the PATCH row will not ask twice, so discarding it would leave the
+    // instrument on its old sound for good. `sfLoadBusy` stays set and the next poll collects it.
 }
 
 void AudioEngine::discardSoundfontLoad() {
@@ -343,9 +326,8 @@ void AudioEngine::clearAllSoundfonts() {
     // or it would land in a slot the new project has to clear all over again.
     discardSoundfontLoad();
 
-    // Free EVERY slot — called when the project changes (NEW / load). The cache otherwise only
-    // reclaims a slot on LRU eviction (one more distinct SF2 than there are slots), so a loaded SF2's
-    // samples (its 16-bit file bytes, resident) would stay across NEW/load.
+    // Free EVERY slot on a project change (NEW / load); otherwise a slot is reclaimed only by LRU
+    // eviction, and a loaded font's samples would stay resident.
     for (int s = 0; s < MAX_SOUNDFONTS; s++) freeSoundfontSlot(s);
     LOGD("🎹 Cleared all soundfont slots");
 }

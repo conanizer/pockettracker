@@ -42,13 +42,9 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
 
-    // ── Scroll (v0.9.4 D2a) ───────────────────────────────────────────────────────────────────────
-    // The rows below the title form a scrollable viewport. When the rows OVERFLOW it — the dense debug
-    // caps put 15 rows in a 392px panel — it scrolls to keep the cursor row visible, so the bottom rows
-    // (RESUME/TRACE) stay reachable exactly like the file browser / SONG list. When they fit (every
-    // release build, where the debug rows are hidden) `maxScroll` is 0 and this is a no-op. The scroll is
-    // DERIVED from the cursor row each frame — no stored scroll state — centring the cursor in the
-    // viewport, pinned at the top and bottom by the clamp.
+    // ── Scroll ───────────────────────────────────────────────────────────────────────────────────
+    // The rows scroll to keep the cursor visible when they overflow (debug builds); in release they
+    // fit and `maxScroll` is 0. Derived from the cursor row each frame — no stored scroll.
     const int viewportH = HEIGHT - (firstRowY - y);
     const int contentH  = settings_content_height(s.caps, ROW_HEIGHT);
     const int maxScroll = std::max(0, contentH - viewportH);
@@ -81,8 +77,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         c.draw_text(name, labelX, ry + TEXT_PADDING,
                     on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value1, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
-        // The sublabel is textParam whether or not the cursor is on the row — Kotlin's ternary picks
-        // textParam on both arms, which is a tell that it was written and then thought better of.
+        // The sublabel is textParam whether or not the cursor is on the row.
         c.draw_text(sublabel, subX, ry + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value2, val2X, ry + TEXT_PADDING, on_cell(row, 2), t.textValue, t);
     };
@@ -110,9 +105,8 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     dual_row(SettingsRow::BTN_SOUND, "BTN SOUND", on_off(v.buttonSoundEnabled),
              "VOL", hex2(v.buttonSoundVolume));
-    // POW is a LO/HI switch, not a 00-FF value: the target ROMs expose no Composition primitives, so
-    // haptic strength has only two crisp steps (EFFECT_TICK vs EFFECT_CLICK) — a hex knob would imply a
-    // continuous scale the hardware can't deliver. LO stores <128 (→TICK), HI stores ≥128 (→CLICK).
+    // POW is LO/HI, not 00-FF: the target ROMs have no Composition primitives, only EFFECT_TICK and
+    // EFFECT_CLICK. LO stores <128 (TICK), HI ≥128 (CLICK).
     dual_row(SettingsRow::BTN_VIBRO, "BTN VIBRO", on_off(v.buttonVibroEnabled),
              "POW", std::string(v.vibroPower >= 128 ? "HI" : "LO"));
 
@@ -141,14 +135,9 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::HELP, "HELP", HELP_NAMES[clamp(v.helpMode, 0, 2)]);
     }
 
-    // THEME shows the name and a ">" — the arrow is the promise that A opens something, and it does:
-    // the theme editor is its own module (theme_editor.cpp), opened by InputDispatcher and drawn over
-    // this one.
-    //
-    // ⚠️ The NAME is clipped, and the arrow is what the budget protects. It is the one value on this
-    // screen a user types, so it is the one that can outrun its column; the row's clip would hide the
-    // overflow but the ">" goes out with it, and the arrow is the only thing saying this row opens a
-    // screen. Two glyphs are held back for it, out of the value column's own width.
+    // THEME shows the name and a ">": A opens the theme editor (theme_editor.cpp).
+    // ⚠️ The name is clipped two glyphs short of the column so the ">" — the only sign this row
+    // opens a screen — cannot be pushed out by a long user-typed name.
     {
         constexpr int VALUE_COLS = (WIDTH - 10 - VAL1_X) / CHAR_W;
         param_row(SettingsRow::THEME, "THEME",
@@ -171,10 +160,8 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     param_row(SettingsRow::RESUME, "RESUME", v.autosaveResumeAuto ? "AUTO" : "ASK");
 
     // ── TRACE (+ ENG) ────────────────────────────────────────────────────────────────────────────
-    // ⚠️ The only row whose COLUMN COUNT is caps-dependent. ENG picks which sequencer walks the song
-    // — and in this process there is no other one to pick. Both live on one row because the twelve
-    // above them already consume 395 of the panel's 392 pixels, so a fourteenth row would draw
-    // underneath it and be invisible.
+    // ⚠️ The only row whose column count is caps-dependent. ENG shares TRACE's row because a further
+    // row would not fit the panel.
     if (s.caps.engineToggle) {
         dual_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled),
                  "ENG", v.engineCpp ? "C++" : "KT");
@@ -182,8 +169,8 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled));
     }
 
-    // FOLDER = REMEMBER / REFRESH (D2a). Same REMEMBER/REFRESH shape as CURSOR; it positions itself by
-    // its own offset_y, so drawing it last here is only source order, not screen order.
+    // FOLDER = REMEMBER / REFRESH. It positions itself by its own offset_y, so drawing it last is
+    // source order only.
     param_row(SettingsRow::FOLDER, "FOLDER", v.rememberFolder ? "REMEMBER" : "REFRESH");
 }
 
@@ -273,8 +260,7 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
                 if (cursor_column == 2) {
                     if (v.skinCount > 0) v.skinIndex = clamp(action.value, 0, v.skinCount - 1);
                 } else {
-                    // Kotlin: `modes.getOrElse(action.value) { modes.first() }` — an index the cycle
-                    // could not have produced falls back to the FIRST mode, not to the nearest one.
+                    // An index the cycle could not produce falls back to the FIRST mode.
                     v.layoutIndex = (action.value >= 0 && action.value < v.layoutCount)
                                         ? action.value : 0;
                 }
@@ -288,8 +274,7 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         case SettingsRow::OVERLAY:
             if (set) {
                 if (cursor_column == 1) {
-                    // Kotlin: `options.getOrElse(action.value) { "OFF" }` — out of range means OFF,
-                    // which IS index 0, so the fallback is the same shape as LAYOUT's.
+                    // Out of range means OFF, which is index 0.
                     v.overlayIndex = (action.value >= 0 && action.value < v.overlayCount)
                                          ? action.value : 0;
                 } else if (cursor_column == 2) {
@@ -337,7 +322,6 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         case SettingsRow::VISUALIZER:
             if (set) {
                 const int count = static_cast<int>(visualizer_names().size());
-                // Kotlin: `types.getOrNull(action.value) ?: types[0]`.
                 const int index = (action.value >= 0 && action.value < count) ? action.value : 0;
                 theme.visualizerType = static_cast<VisualizerType>(index);
             }

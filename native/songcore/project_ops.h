@@ -1,15 +1,10 @@
 #pragma once
 /**
- * native/songcore/project_ops.h — NEW, and the two COMPACT operations.
+ * native/songcore/project_ops.h — NEW, and the two COMPACT operations (the PROJECT screen).
  *
- * The surgery behind the PROJECT screen's NEW button and its SEQ / INST buttons, ported 1:1 from
- * TrackerController.collectUsedRefs / cleanUnusedSeq / cleanUnusedInst.
- *
- * PURE: each verb takes a `Project&` and nothing else. Everything the ENGINE must be told afterwards
- * — reload its sample pool, drop its table cache, re-push the live params — is the HOST's job (see
- * SongcoreHost::new_project / clean_inst), not this file's. That split is not tidiness: it is what
- * lets `ptinput` and `ptdispatch` drive a COMPACT with no audio device in the process at all, which
- * is how the C++ side of these gets measured against Kotlin's.
+ * PURE: each takes a `Project&` and nothing else. Telling the engine afterwards (reload samples, drop
+ * the table cache, re-push params) is the host's job (SongcoreHost::new_project / clean_inst), which
+ * lets the tests drive a COMPACT with no audio device.
  */
 
 #include <cstddef>
@@ -42,10 +37,8 @@ inline UsedRefs collect_used_refs(const Project& project) {
             if (ref >= 0) used.phrases.insert(ref);
     }
 
-    // ⚠️ Only steps WITH A NOTE count their instrument. A note-less step's instrument number never
-    // triggers or configures anything at playback (scheduleStepWithEffects reads it only when
-    // hasNote), so an instrument referenced solely by note-less steps is genuinely unused and gets
-    // compacted away. Kotlin's rule, and its reasoning.
+    // ⚠️ Only steps WITH A NOTE count their instrument: a note-less step's instrument column never
+    // triggers or configures anything, so an instrument referenced only there is unused.
     bool sawIns = false, sawRandom = false;
     for (int phraseId : used.phrases) {
         if (phraseId >= static_cast<int>(project.phrases.size())) continue;
@@ -79,12 +72,9 @@ inline void clean_unused_seq(Project& project) {
 
 /**
  * COMPACT → INST. Every instrument, table and groove the song does not reach goes back to factory.
- *
- * Tables are the subtle half. A table is reachable four ways — a phrase's TBL effect, the IMPLICIT
- * instrument→table mapping (instrument i uses table i), an instrument's explicit `tableId` override,
- * and ⚠️ from INSIDE ANOTHER TABLE, because the editor allows every effect in a table's own FX
- * columns. So the walk is TRANSITIVE: a groove used only from within a table, or a table chained
- * from another via a TBL row, must not be wiped out from under a still-referenced table.
+ * A table is reachable four ways: a phrase's TBL, the implicit instrument i → table i, an explicit
+ * `tableId`, and ⚠️ from INSIDE another table (any effect is allowed in a table's FX columns). So the
+ * walk is TRANSITIVE.
  */
 inline void clean_unused_inst(Project& project) {
     const UsedRefs used = collect_used_refs(project);
@@ -135,12 +125,9 @@ inline void clean_unused_inst(Project& project) {
         }
     }
 
-    // ⚠️ `Instrument(i)` is the FIELD default, which leaves `sampleId = -1` — where the same slot in a
-    // FRESH project has `sampleId = i`, because the Project factory's Array(128) initializer sets it
-    // (model.h). The two are therefore NOT the same object, and with `encodeDefaults = false` they do
-    // not even serialize alike: -1 IS the field default and is omitted, i is not and is written. This
-    // is Kotlin's `Instrument(id = i)` exactly, quirk included — a compacted project and a new project
-    // differ on disk, and ptroundtrip would catch a "tidy-up" here as a byte divergence.
+    // ⚠️ `Instrument(i)` leaves the FIELD default `sampleId = -1`, while a fresh project has
+    // `sampleId = i` (model.h) — so a compacted slot and a new slot differ on disk. Kept deliberately;
+    // ptroundtrip would flag a "tidy-up" here.
     for (int i = 0; i < static_cast<int>(project.instruments.size()); ++i)
         if (used.instruments.count(i) == 0) project.instruments[static_cast<size_t>(i)] = Instrument(i);
 
@@ -152,12 +139,9 @@ inline void clean_unused_inst(Project& project) {
 }
 
 /**
- * NEW. A fresh document, at the CURRENT file-format version.
- *
- * ⚠️ `version = 1`, not the struct's 0. Kotlin writes `Project(version = 1)` and 0 means
- * "pre-versioning" — a file written by a build that had no version field. A new project is not that,
- * and the emitter only writes `version` when it is non-zero, so getting this wrong would silently
- * stamp every newly created song as a legacy file and send it back through `migrate` on next load.
+ * NEW. A fresh document at the CURRENT file-format version.
+ * ⚠️ `version = 1`, not the struct's 0: 0 means "pre-versioning", and since `version` is only written
+ * when non-zero, a new song would load as a legacy file and be migrated.
  */
 inline void new_project(Project& project) {
     project         = make_default_project();

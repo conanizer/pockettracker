@@ -55,11 +55,9 @@ inline float dist_to_seg(float px, float py, float ax, float ay, float bx, float
 }
 
 // Fill an N×N coverage cell with an anti-aliased THIN-LINE arrow for one D-pad direction — a stroked
-// shaft plus an open two-stroke arrowhead, NOT a solid triangle. This is the glyph Android actually
-// drew: Helvetica ships no U+2190–2193, so Compose's `Text` fell back to the system font, whose arrows
-// are line-drawn (shaft + chevron head). We reproduce that shape here rather than bundle a whole
-// fallback font for four glyphs. Coverage is a 1px anti-aliased ramp around the nearest of the three
-// strokes; at N=128 downscaled with linear filtering the strokes stay smooth at any button size.
+// shaft plus an open two-stroke head, not a solid triangle, matching the line-drawn system arrows.
+// Coverage is a 1px AA ramp around the nearest of the three strokes; at N=128 with linear filtering
+// it stays smooth at any button size.
 void make_arrow_coverage(Arrow dir, int N, std::vector<std::uint8_t>& out) {
     out.assign(static_cast<std::size_t>(N) * N, 0);
     const float m    = N * 0.14f;              // margin so the arrow does not touch the cell edge

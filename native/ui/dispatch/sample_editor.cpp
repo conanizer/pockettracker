@@ -43,8 +43,7 @@ void InputDispatcher::init_sample_editor_state() {
     SampleEditorState& se  = s_.sampleEditor;
     const Instrument&  ins = s_.project->instruments[static_cast<size_t>(se.instrumentId)];
 
-    // The NAME is the FILE's, not the instrument's — you are editing a sample, and its file is what you
-    // will save it back over.
+    // The NAME is the FILE's — it is what you will save back over.
     se.sampleFilePath = ins.sampleFilePath.value_or("");
     se.sampleName     = se.sampleFilePath.empty() ? "" : path_stem(se.sampleFilePath);
 
@@ -55,30 +54,21 @@ void InputDispatcher::init_sample_editor_state() {
     se.sourceBitDepth = host_.sample_bit_depth(se.instrumentId);
     se.bitDepth       = se.sourceBitDepth;
 
-    // ⚠️ SOURCE OPENS ON STEREO FOR A STEREO SAMPLE, and this is a SAVE decision rather than a display
-    // one. The mode is what `resolve_save_channels` reads: every value but STEREO writes a ONE-CHANNEL
-    // file, so a session that never visited the row would silently throw away the right channel of a
-    // stereo sample the user only meant to trim. The mode a save cannot lose is the one to open on.
-    // (Mono has nothing to choose — the row draws "MONO" and is read-only there whatever this says.)
+    // ⚠️ SOURCE opens on STEREO for a stereo sample: every other mode SAVES one channel, so a trim
+    // would silently drop the right channel. Mono shows "MONO", read-only.
     se.sourceMode = se.hasStereoData ? 2 /*STEREO*/ : 0;
 
     se.waveformData  = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
                                              waveform_channel(se.sourceMode));
 
-    // The selection opens on the instrument's OWN sample window. The instrument stores it as 0..255 (it
-    // is a playback parameter, not a frame count) and the editor works in frames, so it is scaled in
-    // here and scaled back out on the way to a preview.
+    // The selection opens on the instrument's own window, stored as 0..255 and scaled to frames here.
     if (se.totalFrames > 0) {
         se.selectionStart = (static_cast<int64_t>(ins.sampleStart) * se.totalFrames) / 255;
         se.selectionEnd   = (static_cast<int64_t>(ins.sampleEnd) * se.totalFrames) / 255;
-        // ⚠️ START and END are two independent free 0-255 cells, so an INVERTED window is typeable
-        // and arrives here as `start > end`. It runs to the END OF THE SAMPLE, which is not a repair
-        // chosen here — it is what `derive_sample_window` does with the same pair, so the editor
-        // shows the region the engine plays. Drawn as-is it would show no selection at all (the
-        // waveform lights `>= start && < end`), which reads as "nothing selected".
+        // ⚠️ An INVERTED window (start > end) runs to the end of the sample, as `derive_sample_window`
+        // plays it — so the editor shows what the engine plays.
         if (se.selectionStart >= se.selectionEnd) {
-            // A START of 0xFF scales to the very last frame, so the tail it opens on has to be at
-            // least one frame wide or the repair draws as "nothing selected" all over again.
+            // A START of 0xFF scales to the last frame; the tail must be at least one frame wide.
             se.selectionStart = std::min<int64_t>(se.selectionStart, se.totalFrames - 1);
             se.selectionEnd   = se.totalFrames;
         }
@@ -87,18 +77,11 @@ void InputDispatcher::init_sample_editor_state() {
         se.selectionEnd   = 0;
     }
 
-    // The FILE's markers come from the PROJECT, which got them from the file's `cue ` chunk when the
-    // sample was loaded (engine_setup.h / wav_writer.h). No file I/O here, and no race: the editor and
-    // the loader are looking at the same list. (`sliceMarkers` is int64 — Kotlin's `List<Long>` — and a
-    // frame index is an int everywhere else, so the narrowing is said out loud rather than left to the
-    // compiler.)
+    // The file's markers come from the PROJECT (read from its `cue ` chunk at load) — no file I/O here.
     //
-    // ⚠️ **SORTED, UNIQUE and strictly INSIDE the sample**, because a `cue ` chunk is written by whatever
-    // made the file and nothing upstream promises any of the three. Every marker reader rests on all
-    // three — `slice_bounds` reads marker `k − 1` and marker `k` as one slice's two edges, so an
-    // out-of-order pair is a negative-length slice and a duplicate a zero-length one, which is what CHOP
-    // would hand to the file writer. MANUAL seeds itself from this list and `place_slice_marker` then
-    // maintains the invariant, so this is the only door it can come in through.
+    // ⚠️ Made SORTED, UNIQUE and strictly INSIDE the sample: nothing upstream promises it, and
+    // `slice_bounds` reads neighbours as one slice's edges, so a bad pair is a negative or zero-length
+    // slice. This is the only door markers come in through.
     se.fileMarkers.clear();
     se.fileMarkers.reserve(ins.sliceMarkers.size());
     for (const int64_t m : ins.sliceMarkers)
@@ -106,20 +89,14 @@ void InputDispatcher::init_sample_editor_state() {
     std::sort(se.fileMarkers.begin(), se.fileMarkers.end());
     se.fileMarkers.erase(std::unique(se.fileMarkers.begin(), se.fileMarkers.end()), se.fileMarkers.end());
 
-    // ⚠️ The DETECTOR's list opens EMPTY, and that is behaviour rather than tidiness: `sliceMethod`
-    // survives a re-entry, so an editor re-opened while TRANSIENT is still selected must re-detect on
-    // the new audio. Empty is the only thing the feed reads as "detect".
+    // ⚠️ The detector's list opens EMPTY — that is what makes the feed re-detect on the new audio.
     se.transientMarkers.clear();
-    // ⚠️ And so do the HAND-PLACED ones. The METHOD survives a re-entry; the markers cannot — they are
-    // frame indices into audio that has just been replaced, and a position that meant a drum hit in one
-    // sample means the middle of a chord in the next.
+    // ⚠️ And the hand-placed ones: they are frame indices into audio just replaced.
     se.manualMarkers.clear();
     se.manualKeyMethod = -1;
     se.manualKeyParam  = -1;
     se.sliceIndex = 0;
-    // ⚠️ sliceMethod is deliberately NOT reset — it opens at OFF on a fresh session (the struct's
-    // default) and SURVIVES a re-entry, so loading a second sample to compare does not silently drop you
-    // back out of TRANSIENT mode.
+    // ⚠️ sliceMethod is NOT reset: it survives a re-entry, so loading a second sample keeps TRANSIENT.
 
     se.isModified       = false;
     se.showConfirmClose = false;
@@ -127,8 +104,7 @@ void InputDispatcher::init_sample_editor_state() {
 }
 
 void InputDispatcher::close_sample_editor() {
-    // Anything the audition still owes the instrument, it pays now — leaving with a restore pending would
-    // put the preview's sample window back onto a slot that is no longer on screen.
+    // Pay any pending audition restore now, or it lands on a slot no longer on screen.
     run_due_sample_preview_restore(/*force=*/true);
 
     host_.restore_fx_preview_backup();          // drop an un-applied FX preview
@@ -143,27 +119,16 @@ void InputDispatcher::close_sample_editor() {
 void InputDispatcher::nudge_selection_edge(int64_t delta) {
     SampleEditorState& se = s_.sampleEditor;
 
-    // ⚠️ **AN ANDROID CRASH, FOUND BY PORTING.** With NO sample loaded, `totalFrames` and `selectionEnd`
-    // are both 0 — and Kotlin's arms are `coerceIn(0, selectionEnd - 1)` and `coerceIn(selectionStart + 1,
-    // maxFrame)`, i.e. `coerceIn(0, -1)` and `coerceIn(1, 0)`. Both have min > max, and `coerceIn` REQUIRES
-    // min <= max: it throws IllegalArgumentException, and the app dies. It is reachable in four presses —
-    // EDIT on a fresh sampler slot, DOWN, DOWN, A+RIGHT — because nothing on the way in checks that the
-    // slot has any audio in it. (In C++ it would be worse than a crash: `std::clamp` with lo > hi is UB.)
-    //
-    // A selection inside a sample with no frames is meaningless, so there is nothing to nudge. Zone B, so
-    // it is fixed on Android too (AppInputDispatcher.nudgeSelectionEdge), per §4's rule.
+    // With no sample `totalFrames` is 0 and the clamps below would have lo > hi (UB). Reachable: EDIT on
+    // an empty slot, DOWN, DOWN, A+RIGHT.
     if (se.totalFrames <= 0) return;
 
     const int64_t maxFrame = se.totalFrames;
     const int     dir      = (delta >= 0) ? 1 : -1;
 
-    // SNAP moves the edge on to the nearest zero crossing IN THE DIRECTION OF TRAVEL, which is what keeps
-    // a trimmed sample from clicking at its own boundary. Searching in the direction of the nudge (rather
-    // than the nearest in either) is what stops the edge sticking: a crossing you have just left is
-    // always the nearest one.
-    // ⚠️ THROUGH THE SOURCE MODE, so the crossing is looked for in the signal the SAVE will write. On a
-    // stereo sample the left channel alone is one of two: an edge that sits exactly on a left crossing
-    // leaves the right one wherever it happened to be, and the seam clicks in one ear.
+    // SNAP moves the edge to the nearest zero crossing in the DIRECTION OF TRAVEL (the one just left is
+    // always nearest). ⚠️ Through the source mode, so it is a crossing in the signal SAVE writes — on
+    // stereo, both channels.
     auto snap = [&](int64_t f) -> int64_t {
         if (!se.snapEnabled) return f;
         return host_.find_zero_crossing(se.instrumentId, static_cast<int>(f), dir, se.sourceMode);
@@ -184,22 +149,12 @@ void InputDispatcher::nudge_selection_edge(int64_t delta) {
 namespace {
 
 /**
- * Put boundary `k` at `want` — or MAKE one there when `k` is not in the list — and answer with the
- * index it ended up at, which is not necessarily the one it started from. −1 when there is nowhere for
- * it to go.
+ * Put boundary `k` at `want` (or MAKE one there when `k` is not in the list) and return its new index;
+ * −1 when there is nowhere for it to go.
  *
- * ⭐ **A boundary MAY be dragged past its neighbours; its NUMBER follows its POSITION.** The list stays
- * sorted because it is re-sorted here, in the one place a boundary can move, rather than because a
- * clamp forbids the crossing — and that is what lets a boundary made at the end be walked back to
- * anywhere in the sample instead of having to be deleted and remade.
- *
- * ⚠️ **Two boundaries may never share a frame.** `slice_bounds` reads marker `k − 1` as the left edge
- * of slice `k` and marker `k` as its right, so a duplicate is a zero-length slice — one CHOP would hand
- * to the file writer. A landing that is taken is stepped PAST in the direction of travel rather than
- * refused, so a drag through a crowd keeps moving.
- *
- * ⚠️ Frame 0 and the last frame are the sample's own bounds and not boundaries within it — the same
- * rule `compute_slice_cue_points` applies when it writes the `cue ` chunk.
+ * ⭐ A boundary may be dragged past its neighbours; its NUMBER follows its POSITION, re-sorted here.
+ * ⚠️ Two boundaries never share a frame (a zero-length slice) — a taken landing is stepped past in the
+ * direction of travel. Frame 0 and the last frame are the sample's bounds, never boundaries.
  */
 int place_slice_marker(std::vector<SliceMarker>& m, int k, int64_t want, int dir, int totalFrames) {
     const int64_t last = static_cast<int64_t>(totalFrames) - 1;
@@ -216,9 +171,7 @@ int place_slice_marker(std::vector<SliceMarker>& m, int k, int64_t want, int dir
     while (at >= 1 && at <= last && taken(at)) at += dir;
     if (at < 1 || at > last) return -1;   // walked off the end through a wall of boundaries
 
-    // ⚠️ MOVE the boundary, never rebuild it: `originFrame` is its identity and has to travel with it
-    // through every crossing, or A+B loses the position it is meant to put the boundary back on. A
-    // boundary that is MADE here rather than moved has no computed home, which is what −1 says.
+    // ⚠️ MOVE, never rebuild: `originFrame` is the boundary's identity. A boundary MADE here has none (−1).
     if (k >= 0 && k < static_cast<int>(m.size())) m[static_cast<size_t>(k)].frame = static_cast<int>(at);
     else                                          m.push_back(SliceMarker{static_cast<int>(at), -1});
     std::sort(m.begin(), m.end(),
@@ -232,22 +185,15 @@ int place_slice_marker(std::vector<SliceMarker>& m, int k, int64_t want, int dir
 }  // namespace
 
 /**
- * Take a copy of whatever the method currently answers with, so the user's nudges have something to
- * write into, and stamp it with the (method, parameter) it describes.
- *
- * Every method starts from the set it already shows, so a drag adjusts what is on screen rather than
- * throwing it away: the detected cuts under TRANSIENT, the arithmetic ones under DIVIDE, and under
- * MANUAL the boundaries the SAMPLE ITSELF came with — its `cue ` chunk, as the project loaded it. A
- * sample carrying no cue points starts MANUAL empty, and its first boundary is born on frame 0, which
- * is the sample's own start and not a boundary until something is dragged off it.
+ * Copy whatever the method currently shows, so nudges have something to write into, stamped with its
+ * (method, parameter). MANUAL starts from the sample's `cue ` chunk; with none it starts empty.
  */
 void InputDispatcher::materialise_manual_markers() {
     SampleEditorState& se = s_.sampleEditor;
     if (se.manual_markers_live()) return;
 
-    // ⚠️ Each copy remembers the frame it was made at, and that is the whole of "put slice 01 back where
-    // DIVIDE had it" — the boundary can be dragged past its neighbours afterwards, so by the time A+B
-    // arrives its index says nothing about which cut it is.
+    // ⚠️ Each copy remembers its origin frame: after a drag past its neighbours the index no longer
+    // says which cut it was, and A+B needs to know.
     se.manualMarkers.clear();
     if (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT) {
         for (const int f : se.transientMarkers) se.manualMarkers.push_back(SliceMarker{f, f});
@@ -258,10 +204,8 @@ void InputDispatcher::materialise_manual_markers() {
             se.manualMarkers.push_back(SliceMarker{f, f});
         }
     } else if (se.sliceMethod == SampleEditorModule::SLICE_MANUAL) {
-        // ⚠️ ORIGIN −1, unlike the two above: the file's cue points are not a position any method can
-        // RECOMPUTE, so A+B on one REMOVES it. That is deliberate and it is the point of the seed — the
-        // gesture that deletes a boundary the sample came with is the same A+B that deletes one placed by
-        // hand, and there is no second meaning of A+B on this row to learn.
+        // ⚠️ Origin −1: a file cue point has no computed home, so A+B REMOVES it — the same A+B that
+        // removes a hand-placed one.
         for (const int f : se.fileMarkers) se.manualMarkers.push_back(SliceMarker{f, -1});
     }
     se.manualKeyMethod = se.sliceMethod;
@@ -270,8 +214,7 @@ void InputDispatcher::materialise_manual_markers() {
 
 /**
  * The selection follows the slice the row-11 cursor is on. ⚠️ Every gesture that moves a boundary or
- * changes which one is under the cursor ends here — a slice whose edge has just moved is one START must
- * play the new shape of, and the reset leaving the old shape behind is the defect this closes.
+ * the cursor ends here, so START plays the slice's current shape.
  */
 void InputDispatcher::select_current_slice() {
     SampleEditorState& se = s_.sampleEditor;
@@ -284,25 +227,20 @@ void InputDispatcher::select_current_slice() {
 void InputDispatcher::nudge_slice_marker(int64_t delta) {
     SampleEditorState& se = s_.sampleEditor;
 
-    // The same guard `nudge_selection_edge` carries, for the same reason: this screen is reachable on an
-    // empty slot in four presses, and `std::clamp` with lo > hi is UB rather than a wrong answer.
+    // An empty slot reaches this screen; `std::clamp` with lo > hi is UB.
     if (se.totalFrames <= 0 || delta == 0) return;
 
     const bool manual = se.sliceMethod == SampleEditorModule::SLICE_MANUAL;
     const int  k      = se.slice_marker_index();
 
-    // Slice 00's left edge is the sample's own start: under TRANSIENT and DIVIDE there is no boundary
-    // there and nothing to drag. ⭐ Under MANUAL a rightward drag MAKES one instead of moving that edge
-    // — the sample does not start later, it gains a cut — and the cursor follows the new boundary onto
-    // whichever slice it opens. Leftward there is nowhere to go: frame 0 is the sample's own start.
+    // Slice 00's left edge is the sample's start: nothing to drag. ⭐ Under MANUAL a rightward drag MAKES
+    // a boundary there, and the cursor follows it.
     if (k < 0 && (!manual || delta < 0)) return;
 
     materialise_manual_markers();
     std::vector<SliceMarker>& m = se.manualMarkers;
 
-    // A boundary past the end of the list is MANUAL's free slot — the next one, not yet made. It is
-    // born on the boundary to its left, which is where the cell already reads, and this drag is what
-    // carries it off there.
+    // A boundary past the end of the list is MANUAL's next free slot, born on the boundary to its left.
     if (k >= static_cast<int>(m.size()) && !manual) return;
     const int64_t from = (k >= 0 && k < static_cast<int>(m.size()))
                              ? static_cast<int64_t>(m[static_cast<size_t>(k)].frame)
@@ -310,8 +248,7 @@ void InputDispatcher::nudge_slice_marker(int64_t delta) {
 
     const int dir  = (delta > 0) ? 1 : -1;
     int64_t   want = from + delta;
-    // SNAP is row 2's toggle and it already works on the selection edges; a boundary is the same kind of
-    // cut through the same audio, so it reads the same switch and searches in the direction of travel.
+    // SNAP (row 2) applies to boundaries as to selection edges, searching in the direction of travel.
     if (se.snapEnabled)
         want = host_.find_zero_crossing(
             se.instrumentId,
@@ -331,33 +268,24 @@ void InputDispatcher::reset_slice_marker() {
     const int k = se.slice_marker_index();
     if (k < 0) return;   // slice 00's left edge is the sample's own start: no boundary, nothing to undo
 
-    // ⚠️ **MATERIALISE FIRST, like the drag and the tap do** — all three gestures on this row go through
-    // the same door. The boundary under the cursor may be one the METHOD is still answering with and
-    // nothing has copied yet, and under MANUAL that is a cue point the sample arrived with: A+B is how it
-    // is deleted, so a "nothing has been placed yet" bail made the FIRST A+B of a session do nothing.
+    // ⚠️ Materialise first, like the drag and the tap: under MANUAL the boundary may be a cue point
+    // nothing has copied yet, and A+B is how it is deleted.
     materialise_manual_markers();
     std::vector<SliceMarker>& m = se.manualMarkers;
     if (k >= static_cast<int>(m.size())) return;      // MANUAL's free slot holds no boundary yet
 
-    // ⭐ THE BOUNDARY ITSELF SAYS WHERE IT GOES, so there is no arm per method here and — more to the
-    // point — nothing reads the boundary's INDEX to decide. The index is where it currently sits on
-    // screen, which after a crossing is somebody else's cut.
+    // ⭐ The boundary itself says where it goes — never its index, which after a crossing is another cut's.
     const int origin = m[static_cast<size_t>(k)].originFrame;
 
     if (origin < 0) {
-        // Placed by hand, or seeded from the file's own cue points: there is no computed position to go
-        // back to, so A+B REMOVES it. The boundaries after it renumber, and the cursor keeps its number
-        // and therefore names the slice that has just grown into the gap.
+        // Placed by hand or from the file's cue points: nothing to go back to, so A+B REMOVES it and the
+        // cursor names the slice that grew into the gap.
         //
-        // ⚠️ Emptying the list does NOT retire the stamp. An empty live list is "this sample has no
-        // boundaries", and it is the answer every reader must get; drop the stamp and the read falls back
-        // to `method_markers()`, which under MANUAL is the file's own cue points — every delete undone at
-        // once by the one that finished the job.
+        // ⚠️ Emptying the list does NOT retire the stamp: without it the read falls back to the file's
+        // cue points, undoing every delete at once.
         m.erase(m.begin() + k);
     } else {
-        // ⚠️ Through `place_slice_marker` like every other move, because a NEIGHBOUR may have been
-        // dragged across that position since — the boundary then takes the number its own place gives
-        // it, rather than breaking the sort order.
+        // ⚠️ Through `place_slice_marker`: a neighbour may have been dragged across that position since.
         const int landed = place_slice_marker(m, k, origin, +1, se.totalFrames);
         if (landed < 0) return;
         se.sliceIndex = landed + 1;
@@ -367,27 +295,18 @@ void InputDispatcher::reset_slice_marker() {
 }
 
 /**
- * Cut a boundary at the playhead — the "slice it by ear" gesture. MANUAL only, and only while the
- * sample is actually sounding: with nothing playing there is no playhead to cut at.
+ * Cut a boundary at the playhead — "slice it by ear". MANUAL only, and only while the sample sounds.
  *
- * ⭐ **The frame comes from `playbackPosition`, the same field the waveform draws its playhead line
- * from, and that is the point rather than a shortcut.** A fresher number straight off the voice would
- * land the boundary somewhere the user never saw — they are tapping to a line on the screen and to
- * audio that left the device a buffer ago, so the line they were looking at IS the frame they meant.
+ * ⭐ The frame is `playbackPosition` — the line the waveform draws — as it stood when A went DOWN: the
+ * user taps to the line they see, and by the release the playhead has run on.
  *
- * ⚠️ **And it is the line as it stood when A went DOWN** (`on_a_deferred`), not when it came up. The
- * press is the tap; the release is only where the mapper can tell a tap from an A+DPAD, and by then the
- * playhead has run on for as long as the user held the button.
- *
- * SNAP searches BACKWARD, unlike a drag's "in the direction of travel". A tap has no direction, and it
- * is always LATE — reaction time plus the audio buffer — so the zero crossing that matters is the one
- * before the hit rather than the one inside it.
+ * SNAP searches BACKWARD: a tap has no direction and is always late, so the crossing that matters is
+ * before the hit.
  */
 void InputDispatcher::tap_slice_marker() {
     SampleEditorState& se = s_.sampleEditor;
 
-    // Consumed, not merely read: a press that ended in an A+DPAD leaves its snapshot behind, and the
-    // next tap must not be able to cut at a playhead position from a gesture that was not a tap.
+    // Consumed: a press that ended in an A+DPAD must not leave a snapshot for the next tap.
     const float at    = sliceTapPlayhead_;
     sliceTapPlayhead_ = -1.0f;
 
@@ -403,9 +322,7 @@ void InputDispatcher::tap_slice_marker() {
     materialise_manual_markers();
     std::vector<SliceMarker>& m = se.manualMarkers;
 
-    // ⚠️ Past the end of the list on purpose: a tap always MAKES a boundary, wherever the cursor
-    // happens to be sitting. `place_slice_marker` stamps a made one with origin −1 — "by hand, with
-    // nowhere to go back to" — which is what makes A+B remove it rather than move it.
+    // ⚠️ Past the end of the list on purpose: a tap always MAKES a boundary (origin −1, so A+B removes it).
     const int landed = place_slice_marker(m, static_cast<int>(m.size()), want, +1, se.totalFrames);
     if (landed < 0) return;
 
@@ -422,9 +339,8 @@ void InputDispatcher::apply_sample_rate_and_bits() {
 
     host_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth);
 
-    // ⚠️ The 2-phrase lookahead has ALREADY scheduled notes against the OLD base frequency — they would
-    // play the re-decimated buffer at double or half pitch. Rolling the schedule back is what makes the
-    // upcoming phrases re-derive it. (A no-op when stopped.)
+    // ⚠️ The lookahead already scheduled notes against the OLD base frequency; roll it back so they
+    // re-derive.
     if (host_.is_playing()) host_.notify_data_changed();
 
     const int newLen = host_.sample_length(se.instrumentId);
@@ -450,25 +366,15 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
     const int          newLen = host_.sample_length(se.instrumentId);
     se.totalFrames = newLen;
 
-    // ⚠️ RESET, not clamp. An op that SHORTENS the sample (crop, cut, a SYNC that compressed it) leaves a
-    // selection that describes frames which no longer exist; clamping it would leave you with a partial
-    // selection of the new audio that you never made. Selecting the whole result is the one answer that
-    // is always true. Kotlin's `afterResize()` does the same.
+    // ⚠️ RESET, not clamp: after an op that shortens the sample, a clamped selection would be one the
+    // user never made. The whole result is always true.
     if (reset_selection) {
         se.selectionStart = 0;
         se.selectionEnd   = newLen;
 
-        // ⚠️ AND SO DOES THE INSTRUMENT'S OWN WINDOW, for the same reason and a sharper one: those two
-        // 0-255 cells are a FRACTION of the buffer, so a buffer that changed length silently re-aims
-        // them at audio the user never pointed at. CROP to a loop with START/END at 40/C0 and the note
-        // plays the middle 50 % of the crop — the file on disk holds the whole thing, so it sounds
-        // wrong in the tracker and right everywhere else.
-        //
-        // `cropSample`, `deleteSampleRegion` and `pasteRegion` already reset the ENGINE's copy of the
-        // pair; this is the PROJECT's, and without it the next ordinary push — the audition's own
-        // restore, 100 ms later — puts the stale fraction straight back. The LOOP pair is the same two
-        // cells one row down and gets the same treatment: after a resize it points into audio that is
-        // not there any more, and a loop is the thing this editor is most used to cut.
+        // ⚠️ And the instrument's own START/END and LOOP cells: they are 0-255 FRACTIONS of the buffer,
+        // so a length change re-aims them at audio the user never chose. The ops reset the engine's
+        // copy; this is the PROJECT's, or the next push puts the stale fraction back.
         Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)];
         if (ins.sampleStart != 0x00 || ins.sampleEnd != 0xFF ||
             ins.loopStart   != 0x00 || ins.loopEnd   != 0xFF) {
@@ -480,19 +386,10 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
             mark_modified();
         }
 
-        // ⚠️⚠️ **AND EVERY MARKER LIST, for the third time the same reason: a boundary is a FRAME INDEX,
-        // and the frames have just been replaced.** A cut that meant a drum hit before a CROP means the
-        // middle of the next hit after it, and nothing on screen says the number is stale — it is a line
-        // over a waveform, and a wrong line looks exactly like a right one.
-        //
-        // ⭐ ALL THREE, not the file's alone. `manualMarkers` OVERRIDES the other two while its stamp is
-        // live, so clearing only the source underneath a live override changes nothing the user can see;
-        // and `transientMarkers` empty is what makes the feed re-detect, so the detector comes back with
-        // the cuts in the NEW audio instead of holding the old ones for good.
-        //
-        // ⚠️ This is what makes a save after a resize honest. `compute_slice_cue_points` drops a marker
-        // past the end, so a cropped sample used to write back the SURVIVING half of its old cue points —
-        // fewer slices than before, in the wrong places, with no gesture that said so.
+        // ⚠️⚠️ And every marker list: a boundary is a frame index into audio just replaced, and a stale
+        // line over a waveform looks exactly like a right one. All three — `manualMarkers` overrides the
+        // others while live, and an empty `transientMarkers` makes the feed re-detect. This also keeps a
+        // save after a resize from writing back the surviving half of the old cue points.
         se.fileMarkers.clear();
         se.transientMarkers.clear();
         se.manualMarkers.clear();
@@ -515,8 +412,8 @@ void InputDispatcher::sample_editor_confirm() {
     const int          startF = static_cast<int>(se.selectionStart);
     const int          endF   = static_cast<int>(se.selectionEnd);
 
-    // Every destructive op opens the same way: drop any un-applied FX preview (so the op acts on the
-    // CLEAN audio, not on the effect you were auditioning) and take an undo backup.
+    // Every destructive op drops any un-applied FX preview (so it acts on the clean audio) and takes
+    // an undo backup.
     auto begin_destructive = [&] {
         host_.restore_fx_preview_backup();
         host_.backup_sample(instId);
@@ -537,16 +434,9 @@ void InputDispatcher::sample_editor_confirm() {
     switch (se.cursorRow) {
         // ── Row 11: cut a boundary at the playhead, mid-audition ─────────────────────────────────
         //
-        // The whole row, both columns, exactly as A+B on it is: which column the cursor sits in says
-        // which NUMBER you are reading, and neither of them is what a tap is aimed at.
-        //
-        // ⚠️ It arrives on A's RELEASE, not its press (`defer_a_to_release`), and cuts at the playhead
-        // as it stood on the PRESS (`on_a_deferred`). The row's other gestures all start with the same
-        // A held down, so a tap that fired immediately would precede every one of them.
-        //
-        // ⚠️ This is the one A on this screen that does nothing destructive and takes no undo backup —
-        // a boundary is editor state, not audio. It must sit ABOVE the `begin_destructive` rows for
-        // that to stay obvious, not because the order matters to the switch.
+        // Both columns. It arrives on A's RELEASE (`defer_a_to_release`) and cuts at the playhead as it
+        // stood on the PRESS — the row's other gestures start with the same A held. Not destructive:
+        // a boundary is editor state, so no undo backup.
         case 11:
             tap_slice_marker();
             break;
@@ -597,9 +487,7 @@ void InputDispatcher::sample_editor_confirm() {
                     host_.restore_fx_preview_backup();
                     host_.undo_sample(instId);
                     refresh_sample_view(/*reset_selection=*/true);
-                    // ⚠️ `isModified` is deliberately NOT cleared: one undo does not mean the sample is
-                    // back to what the FILE holds — it means it is back one step. Kotlin leaves it too, and
-                    // the flag's only job is to put the "ARE YOU SURE?" in front of an unsaved exit.
+                    // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
                     se.slicePosition = std::clamp<int64_t>(se.slicePosition, 0, se.totalFrames);
                     break;
                 }
@@ -612,8 +500,7 @@ void InputDispatcher::sample_editor_confirm() {
             if (se.cursorCol != 2) break;
 
             if (se.fxType <= SampleEditorModule::FX_EQ) {
-                // OTT / DUST / DRIVE need an AMOUNT to do anything; EQ has none (its value is a slot),
-                // so it always applies.
+                // OTT / DUST / DRIVE need an AMOUNT; EQ's value is a slot, so it always applies.
                 const bool worth_doing =
                     (se.fxValue > 0) || (se.fxType == SampleEditorModule::FX_EQ);
                 if (!worth_doing) break;
@@ -627,9 +514,7 @@ void InputDispatcher::sample_editor_confirm() {
 
             // ── SYNC: fit the sample to the project's grid ───────────────────────────────────────
             //
-            // Two ways to make a sample last a bar, and they are not the same tool. RPITCH RESAMPLES it —
-            // faster is higher, which is what you want for a breakbeat. TSTRETCH holds the pitch and moves
-            // the time (SOLA), which is what you want for anything with a tune in it.
+            // RPITCH resamples (faster is higher — for breakbeats); TSTRETCH holds the pitch (SOLA).
             const int    bpm     = s_.project->tempo;
             const double rawSecs = (se.sampleRate > 0)
                                        ? static_cast<double>(se.totalFrames) / se.sampleRate
@@ -647,35 +532,27 @@ void InputDispatcher::sample_editor_confirm() {
                 };
                 se.slicePosition = scale(se.slicePosition);
                 if (clear_pitch) se.pitchSemitones = 0;
-                // ⚠️ Both resamplers drop the engine's RATE/BIT original — the result IS the new
-                // original. Left at NORM or LOFI, RATE would describe a cache that no longer exists,
-                // and its next touch would decimate the audio a second time. BIT is KEPT: it is also
-                // the depth SAVE writes, and rounding a second time to the same grid changes nothing.
+                // ⚠️ Both resamplers drop RATE: the result is the new original, and a stale RATE would
+                // decimate it twice. BIT is kept — it is also the depth SAVE writes.
                 se.rateMode     = 0;
                 refresh_sample_view(/*reset_selection=*/true);
                 se.isModified = true;
             };
 
-            // ⚠️ "Already on the grid" is a question about FRAMES, and both branches must ask it the
-            // same way. A ratio window instead — a thousandth either side of 1.0 — is 8 ms on a 4-bar
-            // loop at 120 BPM, which is most of a tick, so a loop inside the window was declared
-            // finished while still audibly off the beat.
+    // ⚠️ "Already on the grid" is asked in FRAMES by both branches; a ratio window of ±0.1 % is most of
+    // a tick on a 4-bar loop.
             const double  ratio      = targetSecs / rawSecs;
             const int64_t wantFrames = std::llround(static_cast<double>(se.totalFrames) * ratio);
             if (ratio <= 0.001 || wantFrames == se.totalFrames) break;
 
             if (se.syncType == 0) {   // RPITCH
-                // ⚠️ FRACTIONAL, and that is the point. This is a fit-to-grid, not the musical
-                // transpose row 2 dials in: one semitone is a 5.9 % step in length, so rounding to the
-                // nearest one misses the target by up to half of that — 230 ms on a 4-bar loop, twenty
-                // ticks. Nothing below here is integer: `pitch_shift_sample` takes a float and the
-                // engine resamples by pow(2, semitones/12).
+                // ⚠️ Fractional: rounding to whole semitones (a 5.9 % length step) can miss a 4-bar
+                // loop by ~230 ms.
                 const double exact     = 12.0 * std::log(rawSecs / targetSecs) / std::log(2.0);
                 const float  semitones = static_cast<float>(std::clamp(exact, -24.0, 24.0));
                 begin_destructive();
                 host_.pitch_shift_sample(instId, semitones);
-                // The shift is BAKED, so the pending one on row 2 is spent — leaving it would apply it
-                // twice at the next save.
+                // The shift is baked, so the pending one on row 2 is spent.
                 rescale_after(/*clear_pitch=*/true);
             } else {                  // TSTRETCH
                 begin_destructive();
@@ -695,9 +572,8 @@ void InputDispatcher::sample_editor_confirm() {
         case 19:
             switch (se.cursorCol) {
                 case 0: {   // LOAD — a different sample, into the slot the editor is already open on
-                    // ⚠️ `previousScreen` is the EDITOR's return target (INSTRUMENT), and the browser must
-                    // not take it: it would leave B on the editor going back to the browser. Kotlin never
-                    // assigns it here for the same reason.
+                    // ⚠️ Keep `previousScreen` as the EDITOR's return target, or B on the editor would go
+                    // back to the browser.
                     const ScreenType keep = s_.previousScreen;
                     open_file_browser(AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR,
                                       browser_dir(BrowserDir::SAMPLES), {"wav"});
@@ -715,11 +591,10 @@ void InputDispatcher::sample_editor_confirm() {
                         save_sample_to(target, /*adopt_name=*/true);
                         break;
                     }
-                    // Taken. Suggest the next free `<base>_0001` and let the user confirm or change it —
-                    // SAVE is not OVERWRITE, and the button next to it is.
+                    // Taken: suggest the next free `<base>_0001` — SAVE is not OVERWRITE.
                     std::string suggested = base;
                     for (int n = 1; fs_.file_exists(dir + "/" + suggested + ".wav"); ++n) {
-                        char suffix[16];   // 16, not 8: "_%04d" of an unbounded int is up to 12 bytes, and gcc says so (-Wformat-truncation). The counter never gets near it; the buffer now cannot be the reason.
+                        char suffix[16];   // "_%04d" of an int can be 12 bytes (-Wformat-truncation)
                         std::snprintf(suffix, sizeof(suffix), "_%04d", n);
                         suggested = base + suffix;
                     }
@@ -763,9 +638,8 @@ void InputDispatcher::bake_pending_pitch() {
         return std::clamp<int64_t>((f * newLen) / oldLen, 0, newLen);
     };
 
-    // Every frame-measured thing moves with the audio. The SELECTION is scaled rather than reset here
-    // (unlike an op) because the user has not asked for anything to change — they asked to SAVE, and the
-    // shift is a thing they dialled in earlier that is only now being made real.
+    // Every frame-measured thing moves with the audio. The selection is scaled, not reset: the user
+    // asked to SAVE, not to change anything.
     se.selectionStart = scale(se.selectionStart);
     se.selectionEnd   = scale(se.selectionEnd);
     se.slicePosition  = scale(se.slicePosition);
@@ -787,8 +661,7 @@ void InputDispatcher::bake_pending_pitch() {
 std::vector<int> InputDispatcher::compute_slice_cue_points() const {
     const SampleEditorState& se = s_.sampleEditor;
 
-    // DIVIDE only while it is still arithmetic — a boundary the user has dragged makes it a list like
-    // any other, and the cue points must be the ones on the screen.
+    // DIVIDE only while it is still arithmetic — once a boundary is dragged, it is a list like any other.
     if (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE && se.marker_count() == 0) {
         const int div = std::max(se.sliceDivisions, 1);
         std::vector<int> cues;
@@ -798,16 +671,12 @@ std::vector<int> InputDispatcher::compute_slice_cue_points() const {
         return cues;
     }
 
-    // Whichever list the method is answering with — the detector's under TRANSIENT, the hand-placed one
-    // under MANUAL (which starts as the file's, so ⭐ **a MANUAL save keeps the boundaries the sample
-    // came with unless the user moved or deleted them**), and under OFF the file's own, so ⚠️ **a save
-    // with slicing OFF can neither add a slice nor drop one.** A detour
-    // through TRANSIENT leaves markers behind on purpose (they are what a return to it re-uses); writing
-    // those into the `cue ` chunk would put slices into a file the user turned slicing off for, and
-    // nothing on screen would say so.
+    // Whichever list the method answers with: the detector's under TRANSIENT, the hand-placed one under
+    // MANUAL (seeded from the file's, so a MANUAL save keeps the original boundaries unless moved), and
+    // under OFF the file's own — ⚠️ a save with slicing OFF can neither add nor drop a slice, even after
+    // a detour through TRANSIENT left markers behind.
     //
-    // Frame 0 and the end frame are dropped: they are the sample's own bounds, not boundaries WITHIN
-    // it, and a cue point at 0 gives every reader a zero-length first slice.
+    // Frame 0 and the end frame are dropped: a cue point at 0 gives every reader a zero-length slice.
     std::vector<int> cues;
     for (int i = 0; i < se.marker_count(); ++i) {
         const int m = static_cast<int>(se.marker_position(i));
@@ -819,9 +688,8 @@ std::vector<int> InputDispatcher::compute_slice_cue_points() const {
 std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const {
     const SampleEditorState& se = s_.sampleEditor;
 
-    // N markers → N+1 slices, whichever method the list came from — which is also what DIVIDE's div−1
-    // computed cuts mean, so a dragged DIVIDE keeps its own count. OFF has nothing to chop; TRANSIENT
-    // before the detector has run, and MANUAL with no boundaries at all, are one slice — the whole sample.
+    // N markers → N+1 slices. OFF, TRANSIENT before detection, and MANUAL with no boundaries are one
+    // slice — the whole sample.
     const int markers = se.marker_count();
     const int count   = (se.sliceMethod == SampleEditorModule::SLICE_OFF)
                             ? 0
@@ -855,18 +723,14 @@ void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
     }
     host_.adopt_saved_sample(se.instrumentId, se.bitDepth);
 
-    // ⚠️ A MONO save is re-loaded from the file it just wrote, and that is not belt-and-braces. The
-    // editor's buffer may still be STEREO (SOURCE=LEFT writes one channel of a two-channel sample), and
-    // the slot would otherwise go on holding audio that no longer matches the file its instrument points
-    // at. A true stereo save (SOURCE=STEREO) already matches, so it is left alone — re-decoding a
-    // multi-megabyte file for nothing is exactly the cost the native load path exists to avoid.
+    // ⚠️ A MONO save is reloaded from the file just written: the editor's buffer may still be stereo
+    // (SOURCE=LEFT), and the slot must match the file. A stereo save already matches.
     const bool wrote_mono = !(se.hasStereoData && se.sourceMode == 2);
     if (wrote_mono) host_.load_sample(se.instrumentId, path);
 
     Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)];
     ins.sampleFilePath = path;
-    // The markers go into the PROJECT as well as into the file — the .ptp is what a reload reads first,
-    // and the two must agree.
+    // The markers go into the PROJECT too — the .ptp is what a reload reads first.
     ins.sliceMarkers.clear();
     ins.sliceMarkers.reserve(cues.size());
     for (const int c : cues) ins.sliceMarkers.push_back(static_cast<int64_t>(c));
@@ -897,8 +761,7 @@ void InputDispatcher::sample_editor_chop() {
         if (!safe) c = '_';
     }
 
-    // Samples/Chops/<base>/ — its own folder, because a 32-slice break would otherwise bury the sample
-    // directory it came from.
+    // Samples/Chops/<base>/ — its own folder, so a 32-slice break does not bury the sample directory.
     const std::string samples = fs_.samples_directory();
     fs_.create_folder(samples, "Chops");                     // "" if it already exists — either is fine
     const std::string chops = samples + "/Chops";

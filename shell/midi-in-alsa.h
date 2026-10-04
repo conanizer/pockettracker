@@ -1,7 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_IN_ALSA_H
 #define POCKETTRACKER_SHELL_MIDI_IN_ALSA_H
 
-// The LINUX songcore::IMidiIn — ALSA rawmidi, reached through dlopen. MIDI plan phase E5.
+// The LINUX songcore::IMidiIn — ALSA rawmidi, reached through dlopen.
 // See midi-in-alsa.cpp for the reader thread, and alsa-rawmidi.h for the loader and the device walk
 // it shares with the OUTPUT backend. Compiles to nothing off desktop/handheld Linux, so midi-in.h can
 // name the header unconditionally.

@@ -1,17 +1,14 @@
-// ─── shell/skin.h — the touch-skin textures, decoded once and owned by the renderer (D1/D2/D7) ───
+// ─── shell/skin.h — the touch-skin textures, decoded once and owned by the renderer ──────────────
 //
-// Phase D's touch skin is chrome drawn AROUND the 640×480 frame, in device-resolution space, in the
-// shell's `present()` — never in the canvas (pt-ui keeps its four primitives; see image.h). This holds
-// the SDL textures for one theme's skin: the PNGs are read through the D7 asset seam (assets.h),
-// decoded through the D2 decoder (image.h), and uploaded to `SDL_Texture`s here, once, at load.
+// The touch skin is chrome drawn AROUND the 640×480 frame, in device-resolution space, in the
+// shell's `present()` — never in the canvas. The PNGs come through the asset seam (assets.h) and the
+// decoder (image.h) and are uploaded to `SDL_Texture`s here, once, at load.
 //
 // It is the SHELL's, and its lifetime is the RENDERER's: the textures are created from an
 // `SDL_Renderer*` and must be destroyed before it is (`unload()` before `SdlVideo::close()`).
 //
-// ⚠️ This holder is deliberately SEMANTIC-FREE: a `SkinPiece` names the FILE it came from, not the band
-// it lands in. Which piece goes where — the top panel, the bezel the frame sits inside, the button
-// cluster — is the RENDERER's knowledge (ScreenLayouts.kt / VirtualControlsPortrait2), and belongs in
-// the code that computes the destination rects, not in the thing that merely owns the pixels.
+// ⚠️ SEMANTIC-FREE: a `SkinPiece` names the FILE, not the band it lands in. Where a piece goes is
+// the renderer's knowledge (portrait2), in the code that computes the destination rects.
 
 #ifndef POCKETTRACKER_SKIN_H
 #define POCKETTRACKER_SKIN_H
@@ -78,11 +75,9 @@ public:
     /**
      * Decode the PNGs under `assets/themes/<theme>/` and upload each to a texture on `renderer`.
      *
-     * A missing or corrupt piece is SKIPPED, not fatal: a skin is decoration, and a theme that ships
-     * without (say) the dark button variants should draw the rest rather than nothing. Returns how many
-     * pieces loaded. When `log`, prints one `skin:` line per piece with its dimensions or MISS — the
-     * on-device readout that tells a real decode from a silent no-op (there is no console assertion for
-     * this on a phone; the log line IS the assertion).
+     * A missing or corrupt piece is SKIPPED, not fatal: a skin is decoration. Returns how many pieces
+     * loaded. When `log`, prints one `skin:` line per piece with its dimensions or MISS — the
+     * on-device readout that tells a real decode from a silent no-op.
      *
      * `art` selects which pieces to attempt (see SkinArt) — a transparent theme is never asked for the
      * chrome bands, so the MISS lines stay real misses rather than lines of "this theme was never going

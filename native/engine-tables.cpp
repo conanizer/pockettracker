@@ -63,13 +63,12 @@ static bool tableRandomize(const TableRow rows[16], int row, int slot, int range
     return false;
 }
 
-// The row as ONE column plays it, after the dice — the phrase's order (CHA, then RND, then RNL), each
-// read on this row. CHA XY: X is the chance of its nearest FILLED neighbour on the LEFT — with none,
-// the row's N and V columns — and Y of its nearest filled neighbour on the RIGHT; 0 never, F always.
-// Its two rolls are made once per row per tick and shared by the lanes that play the row (`rolls`), and
-// a CHA an earlier one has cleared gates nothing. `nvPlays` comes back false when a CHA with nothing
-// filled to its left lost its left roll — lane 0 then leaves the row's N and V alone. RND re-fires the cell above (tableRandomize); an RNL in
-// the NEXT column adds 0..xx to this one, and one in FX1 has no FX to its left and does nothing.
+// The row as ONE column plays it, after the dice — the phrase's order (CHA, then RND, then RNL).
+// CHA XY: X is the chance of its nearest FILLED neighbour on the LEFT (with none, the row's N and
+// V), Y of its nearest filled neighbour on the RIGHT; 0 never, F always. Its two rolls are made once
+// per row per tick and shared by the lanes that play the row (`rolls`); a CHA an earlier one cleared
+// gates nothing. `nvPlays` is false when a CHA with nothing to its left lost its left roll. RND
+// re-fires the cell above (tableRandomize); an RNL in the NEXT column adds 0..xx to this one.
 static TableRow rollTableRow(const TableRow rows[16], int row, int lane, uint32_t& rng,
                              int (&rolls)[3][2], bool& nvPlays) {
     TableRow played = rows[row];
@@ -120,8 +119,7 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         if (outTableId) *outTableId = tableId;
 
         // Silence beats a fallback: an empty slot and external gear both mean "this instrument
-        // cannot answer", and a hit that quietly played something else is the bug that started this.
-        // Link 0 is exempt from the empty test — the scheduler already made it, before any pushes.
+        // cannot answer". Link 0 is exempt from the empty test — the scheduler already made it.
         if (instrumentId < 0 || instrumentId >= songcore::PROGRAM_SLOTS) return -1;
         const songcore::Program& p = programs[instrumentId].program;
         if (p.type == songcore::PROGRAM_EXTERNAL) return -1;   // until the cable is a program too
@@ -144,14 +142,10 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
         }
         if (!routes) return instrumentId;
 
-        // ⚠️ **THE ROW IS THE ONE THE TABLE IS STANDING ON FOR THIS TRIGGER — THE SAME ROW THE VOICE
-        // WOULD START AT, BY THE SAME RULE.** There is ONE place per table, not a separate one for
-        // routing: at TIC00 it steps on a row per trigger (which is the rotation) and at every other
-        // rate it starts at row 0 each note, exactly as a table with no INS in it does. So when no
-        // switch is found, the voice below picks up this same row and that row's transpose, volume
-        // and FX apply to the note — they are in the path, not part of the switch.
-        // Row 15's TIC overrides the instrument's rate per column — `effectiveTicRatesFor`'s rule,
-        // read off the copy already in hand rather than taking the table lock a second time.
+        // ⚠️ THE ROW IS THE ONE THE TABLE STANDS ON FOR THIS TRIGGER — the row the voice would start
+        // at, by the same rule: at TIC00 it steps a row per trigger (the rotation), at any other rate
+        // row 0. With no switch found, the voice picks up this row and its transpose, volume and FX.
+        // Row 15's TIC overrides the rate per column (`effectiveTicRatesFor`'s rule), read off this copy.
         int rates[TABLE_LANES] = {p.tableTicRate, p.tableTicRate, p.tableTicRate};
         if (rows[15].fx1Type == FX_TIC) rates[0] = rows[15].fx1Value;
         if (rows[15].fx2Type == FX_TIC) rates[1] = rows[15].fx2Value;
@@ -436,11 +430,9 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
 // ⚠️ And a lane reads **exactly one** FX slot: its own. `KIL VOL OFFSET CUT RES EQN EQM` are global
 // effects any column may carry, but `HOP`, `TIC` and `THO` steer the lane they are written in.
 //
-// ⚠️⚠️ **A ROW THAT STEERS THE LANE IS NEVER HEARD.** `HOP` and `THO` have no tic of their own: the
-// lane resolves them and the row they land on is the row that plays. Letting one play would put a
-// tic of the table's DEFAULTS in front of every loop — no transpose, no filter, full volume — which
-// is an untransposed grace note before the transposed one, and a burst of raw sample under a closed
-// filter. The caller re-enters on `true` until a row actually plays.
+// ⚠️⚠️ A ROW THAT STEERS THE LANE IS NEVER HEARD: HOP and THO have no tic of their own; the row they
+// land on plays. Playing one would put a tic of table DEFAULTS before every loop. The caller
+// re-enters on `true` until a row actually plays.
 template <typename V>
 bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool shouldAdvance,
                                   int atFrame, float sampleRate, bool applyNV) {
@@ -634,17 +626,10 @@ void AudioEngine::applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, flo
         // 100 tics has moved the window 100 steps, unlike every other arm here.
         case FX_LPO: voiceSlideLoop(voice, fxValue);    break;
 
-        // EQN / EQM on a table row: the same two writes the FX column's EQN and EQM make, once
-        // per tic, reached directly rather than through the param queue because the voice is
-        // already in hand — the queue's only job on that path is finding it.
-        //
-        // ⚠️ THE TWO HAVE DIFFERENT LIFETIMES, and only one of them cleans up after itself. EQN
-        // writes THIS voice's chain and dies with the note, because a note-on rebuilds the chain
-        // from the instrument. EQM writes the MASTER BUS, which outlives every voice and the
-        // table with them — so it is armed for the restore on stop() the phrase-level EQM gets
-        // from the scheduler's own flag (songcore/scheduler.h eqm_active, host.h stop). Without
-        // the arming the bus keeps the table's preset after the transport stops, and the FX
-        // helper's "resets to mixer EQ on stop" would be false for exactly this one way in.
+        // EQN / EQM on a table row: the FX column's two writes, made directly (the voice is in hand).
+        // ⚠️ DIFFERENT LIFETIMES: EQN writes THIS voice's chain and dies with the note; EQM writes the
+        // MASTER BUS, which outlives every voice, so it arms the restore on stop() (host.h) as the
+        // phrase-level EQM does — or the bus keeps the table's preset after the transport stops.
         case FX_EQN:
             applyEqPresetToModule(voice.chain.eq, fxValue);
             break;
@@ -654,17 +639,10 @@ void AudioEngine::applyTableWrite(V& voice, uint8_t fxType, uint8_t fxValue, flo
             tableMasterEqTouched.store(true, std::memory_order_relaxed);   // override is not the song's
             break;
 
-        // TIM on a table row — the delay's echo time, once per tic, which is where the command is
-        // most of the fun: a row under a HOP walks the time a step per tic, and the head glides to
-        // each one, so the repeats bend continuously.
-        //
-        // ⚠️ IT IS GLOBAL AND THE VOICES ARE NOT. Two voices standing on different rows of the same
-        // table write it in turn and the last one in the block wins — exactly what EQM above does,
-        // and for the same reason: a shared bus reached from a per-voice walk. A TIM belongs in a
-        // table one instrument drives, not in one eight tracks share.
-        //
-        // ⚠️ Latched like EQM, and for the identical reason: the send outlives every voice, so
-        // stop() has to put the DELAY screen's own time back (host.h).
+        // TIM on a table row — the delay's echo time per tic; under a HOP the head glides through
+        // each step and the repeats bend.
+        // ⚠️ GLOBAL, while the voices are not: two voices on different rows write it in turn and the
+        // last in the block wins (as EQM). Latched like EQM, so stop() restores the DELAY screen's time.
         case FX_TIM:
             delaySend.setTimeFree(fxValue);
             tableDelayTimeTouched.store(true, std::memory_order_relaxed);
@@ -692,11 +670,9 @@ void AudioEngine::applyTableCarry(V& voice, const TableCarry& carry, float sampl
 // through, so a table morph and a phrase morph over the same two presets land on the same bytes.
 // What is here is only the apply: the five effects a table row can both carry and ramp.
 //
-// ⚠️ **EVERY CALL, NOT EVERY ROW** — that is the whole reason processTableTick was split. A ramp
-// re-evaluated only on a row change would be sixteen values, the sub-row interpolation would be dead
-// code, and a slow morph would step audibly. The cost is one 48-slot walk plus, for an EQ ramp, six
-// `powf` per voice per call (a block, or less where a row begins inside it); at eight voices that is
-// a fraction of a percent of a core, and it buys a fade instead of a staircase.
+// ⚠️ EVERY CALL, NOT EVERY ROW: re-evaluated only on a row change a ramp would be sixteen steps and
+// a slow morph would stair audibly. The cost (a 48-slot walk, six `powf` for an EQ ramp, per voice
+// per call) is a fraction of a percent of a core.
 template <typename V>
 void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
                                   const double (&rowFraction)[TABLE_LANES], float sampleRate) {
@@ -704,13 +680,9 @@ void AudioEngine::applyTableRamps(V& voice, const TableRow* rows,
 
     for (int i = 0; i < ramps.count; ++i) {
         const table_automation::TableRamp& r = ramps.items[i];
-        // ⚠️⚠️ **A RAMP RUNS ON THE COLUMN ITS PARAMETER IS IN, NOT THE ONE ITS AUS IS IN.** AUS pairs
-        // by looking LEFT along its own row, so the value being faded always sits in a lower slot
-        // than the curve — every ramp spans at least two columns, and with three playheads there are
-        // two candidate clocks. The parameter's is the only one that cannot fight itself: that same
-        // cell is re-applied on its own column's tic, and driving the fade from the AUS's column
-        // would have the two writing one destination at two rates. (In practice the parameter is in
-        // FX1, so a fade written before per-column playback existed keeps running on lane 0.)
+        // ⚠️⚠️ A RAMP RUNS ON THE COLUMN ITS PARAMETER IS IN, NOT ITS AUS's: that cell is re-applied
+        // on its own column's tic, and driving the fade from another column would write one
+        // destination at two rates.
         const TableLane& L = voice.lanes[r.paramSlot - 1];
         if (!L.active || L.lastProcessed < 0) continue;
         if (voice.lanes[r.ausSlot - 1].ausEaten & (1u << r.ausRow)) continue;   // a CHA ate its AUS
@@ -801,29 +773,19 @@ void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
 
 // The TABLE screen's playing-row indicator (ui/engine_feed.h) reads these two, at 60 Hz.
 //
-// ⚠️ They answer "where is this track's table", NOT "is a voice sounding" — the two diverge, and the
-// indicator is the thing that shows it. A retrigger leaves the OLD voice fading beside the new one for
-// the length of its declick, so a plain first-active-slot scan can report the previous note's row; and
-// a one-shot that ends before the next note leaves no voice at all, which read as "no table running"
-// and blanked the indicator for the rest of the note. Both are set by the instrument's ROOT note —
-// root sets playback rate, rate sets how long the sample lasts — so the same table on the same phrase
-// stepped smoothly at one root and skipped and stalled at another.
-//
-// Order: the live voice, then the SF voice, then the track cursor (the TIC00 table outlives its
-// voices), and a fading voice only as a last resort — it goes on ticking its own table after the note
-// that replaced it has moved on, so it is the stalest source here, not the freshest.
+// ⚠️ They answer "where is this track's table", NOT "is a voice sounding": a retrigger leaves the OLD
+// voice fading beside the new one, and a one-shot that ends before the next note leaves no voice at
+// all. Order: the live voice, the SF voice, the track's bookmark (a TIC00 table outlives its voices),
+// and a fading voice last — it keeps ticking its own table after the note that replaced it moved on.
 static int findTrackVoice(Voice* voices, int trackId, bool fading) {
     for (int v = 0; v < MAX_VOICES; v++)
         if (voices[v].isActive && voices[v].isFadingOut == fading && voices[v].trackId == trackId) return v;
     return -1;
 }
 
-// ⚠️⚠️ **THE ROW IN FORCE IS `lastProcessed`, NOT `row`.** The lane's cursor has already been moved
-// on — advanced, or HOPped — to the row that comes NEXT, so drawing it puts the marker a row ahead of
-// what is being heard, and parks it on rows that never sound: a `HOP` row is resolved without ever
-// playing, so `row` rests on it while the row it jumped to is the one making the sound. `row` is the
-// honest answer only before the lane has consumed anything, where it is where the lane will start.
-// Same pairing the AUS/AUF ramp reads, and for the same reason.
+// ⚠️⚠️ THE ROW IN FORCE IS `lastProcessed`, NOT `row`: the cursor has already moved to the NEXT row
+// (or rests on a HOP row that never plays). `row` is right only before the lane consumed anything.
+// Same pairing the AUS/AUF ramp reads.
 static inline int laneMarker(int row, int lastProcessed) {
     return lastProcessed >= 0 ? lastProcessed : row;
 }

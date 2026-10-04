@@ -2,25 +2,16 @@
 
 // ─── MIXER ───────────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/MixerModule.kt. Eight stereo track meters, a master meter, the two send
-// returns (REV / DEL), and the master strip: MIX volume, EQ slot, OTT/DUST depth, LIM pre-gain.
+// Eight stereo track meters, a master meter, the two send returns (REV / DEL), and the master strip:
+// MIX volume, EQ slot, OTT/DUST depth, LIM pre-gain.
 //
-// ⚠️ THE SECOND STATEFUL MODULE IN THE UI, after the oscilloscope — and for the same reason: the
-// peak-hold markers are a function of the PREVIOUS frame, not of the project. Its `draw` is therefore
-// non-const, and `TrackerLayout` holds it by value like the scope.
+// ⚠️ STATEFUL: the peak-hold markers depend on the previous frame, so `draw` is non-const and
+// `TrackerLayout` holds the module by value, like the scope.
 //
-// ⚠️ **The peak-hold advances on NEW DATA, not on a frame.** `PEAK_HOLD_FRAMES = 45` counts *draws*
-// in Kotlin — where a draw is a Compose recomposition, and the only thing that triggers one on this
-// screen is the peak poll's `stateVersion++` every 60 ms. So 45 "frames" is ~2.7 seconds of hang. The
-// SDL shell redraws at 60 Hz, so counting its draws would expire the hold in 0.75 s and make the
-// meters fall visibly faster than Android's. `peaksVersion` is what closes that gap: the feed bumps it
-// once per 60 ms poll (ui/engine_feed.h), and the hold only steps when it moves. Same constants, same
-// wall-clock behaviour, on both platforms — see the note on `steps` in the .cpp.
-//
-// ⚠️ It steps as far as the version MOVED, not once per draw that finds it moved. The feed bumps it by
-// every 60 ms slot that went by, including slots spent on another screen where neither this draw nor
-// that poll was running, so a marker caught mid-fall resumes at the clock's position rather than the
-// one it was parked at.
+// ⚠️ THE PEAK-HOLD ADVANCES ON NEW DATA, NOT ON A FRAME. `PEAK_HOLD_FRAMES` counts peak polls
+// (60 ms each; ~2.7 s of hang), not 60 Hz draws. The feed bumps `peaksVersion` by every 60 ms slot
+// that passed (engine_feed.h) — including ones spent on another screen — and the hold steps by as
+// much as it moved, so a marker resumes where the clock is, not where it was parked.
 //
 // The CURSOR here is (mixerMasterRow, cursorColumn) and it is not a grid — see ui/cursor_move.h:
 //   row 0: cols 0..7 = track volumes, col 8 = master MIX
@@ -44,8 +35,7 @@ struct MixerState {
     int cursorColumn   = 0;  // 0..7 = tracks, 8 = master
     int mixerMasterRow = 0;  // 0 = volumes, 1 = sends / EQ, 2 = OTT|DUST, 3 = LIM
 
-    // The engine's meters, as ui/engine_feed.h last read them. Null-safe by construction: a zeroed
-    // array is silence, which is exactly what `ptshot` draws with (it has no engine at all).
+    // The engine's meters as engine_feed.h last read them. Null means silence.
     const float* trackPeaks  = nullptr;  // 16 — L/R per track
     const float* masterPeaks = nullptr;  // 2
     const float* reverbPeaks = nullptr;  // 2
@@ -72,16 +62,9 @@ public:
     /**
      * Is every peak marker down to zero?
      *
-     * ⚠️ **The shell's idle gate has to ask this, because the markers fall INSIDE `draw`.** A screen the
-     * gate has stopped drawing is a screen whose markers never age: the transport stops, the master
-     * waveform decays past the silence floor about a second later, the gate closes — and the markers
-     * hang wherever they were until some input forces a single frame, which steps them by exactly one
-     * segment. That is "the peaks only fall when I press a button", and any input does it because any
-     * SDL event opens the gate for one frame, mapped or not.
-     *
-     * At rest is the resting state, not a transient: `draw` ages a marker and then draws it in the same
-     * call, so the frame that brings the last one to zero is also the frame that shows it gone. The gate
-     * needs no final edge bump the way the waveform does.
+     * ⚠️ The shell's idle gate must ask this, because the markers fall INSIDE `draw`: once the gate
+     * stops drawing they hang until an input buys one frame ("the peaks only fall when I press a
+     * button"). The frame that brings the last marker to zero also shows it gone.
      */
     bool peaks_at_rest() const;
 
@@ -100,15 +83,14 @@ public:
 
 private:
     // Peak-hold, in unscaled pixels. 0..15 = track L/R (i*2, i*2+1), 16..17 = master, 18..19 = reverb,
-    // 20..21 = delay — the same index space Kotlin uses, because the meters are drawn in that order.
+    // 20..21 = delay — the order the meters are drawn in.
     static constexpr int PEAK_SLOTS = 22;
     float peakHoldPx_[PEAK_SLOTS]   = {};
     int   peakCounters_[PEAK_SLOTS] = {};
 
     /**
-     * The peaksVersion the last draw saw. Starts at a value no version can be, so the FIRST draw always
-     * advances the hold once — without which a single-shot renderer (ptshot) would show bars with no
-     * peak markers above them.
+     * The peaksVersion the last draw saw. Starts at an impossible value, so the first draw advances
+     * the hold once — a single-frame render would otherwise show no peak markers.
      */
     unsigned lastPeaksVersion_ = static_cast<unsigned>(-1);
 

@@ -14,8 +14,7 @@ constexpr int CONTENT_PAD = 8;
 
 // The title, a gap, then the four rows.
 constexpr int TITLE_GAP = 8;
-// ⚠️ THE WIDTH IS SET BY THE PERCENTAGE, not by the longest label. "RENDER" ends well inside a
-// narrower box, and the readout beside it is what runs off the edge — see the static_assert below.
+// ⚠️ The width is set by the percentage readout, not the longest label — see the static_assert below.
 constexpr int BOX_W     = 420;
 constexpr int BOX_H     = 2 * CONTENT_PAD + ROW_HEIGHT + TITLE_GAP + ROWS * ROW_HEIGHT;
 constexpr int BOX_X     = (DESIGN_W - BOX_W) / 2;
@@ -23,8 +22,7 @@ constexpr int BOX_Y     = (DESIGN_H - BOX_H) / 2;
 
 constexpr int PAD_X   = 14;
 constexpr int LABEL_X = BOX_X + PAD_X;
-// "SONG START" is the longest label, and one space after it. Derived so a longer label added later
-// moves the values instead of drawing over them.
+// "SONG START" is the longest label, plus one space; derived so a longer label moves the values.
 constexpr int VALUE_X = LABEL_X + 11 * CHAR_W;
 
 // The percentage sits one space past the widest value on the panel ("RENDER" itself, 6 characters).
@@ -32,8 +30,7 @@ constexpr int PROGRESS_X = VALUE_X + 7 * CHAR_W;
 
 static_assert(BOX_H + 2 * (MODAL_BORDER - 1) <= DESIGN_H, "the render dialog is taller than the screen");
 
-// ⚠️ The readout is the rightmost ink on the panel, and it only appears while a render RUNS — so
-// nothing on screen says it has overflowed until someone watches an export. "100%" is its widest.
+// ⚠️ The readout appears only while a render runs, so an overflow would go unseen. "100%" is widest.
 static_assert(PROGRESS_X - BOX_X + 4 * CHAR_W + PAD_X <= BOX_W,
               "the render percentage draws past the panel's right edge");
 
@@ -76,8 +73,7 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     label(RenderRow::SONG_END, "SONG END");
     value(RenderRow::SONG_END, s.endRow >= 0 ? hex2(s.endRow) : "AUTO");
 
-    // ⚠️ AUTO SHOWS THE ROW IT LANDS ON, beside itself and dimmed. "AUTO" alone is the one value on
-    // this panel that does not say what will be exported, and the answer is one glyph pair away.
+    // ⚠️ AUTO shows the row it resolves to, beside itself and dimmed.
     if (s.endRow < 0) {
         c.draw_text(hex2(render_dialog_end_row(s, project)), VALUE_X + 5 * CHAR_W,
                     row_y(static_cast<int>(RenderRow::SONG_END)) + TEXT_PADDING, t.textEmpty,
@@ -87,9 +83,8 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     label(RenderRow::REPEAT, "REPEAT");
     value(RenderRow::REPEAT, s.repeat > 1 ? ("x" + std::to_string(s.repeat)) : std::string("OFF"));
 
-    // The RENDER row is a button: the word itself is the cell, and it carries the percentage while
-    // the render runs — the panel is over the PROJECT screen's own readout, so this is the only place
-    // the progress can be seen.
+    // The RENDER row is a button, and carries the percentage while rendering — the only place the
+    // progress is visible, since the panel covers PROJECT's readout.
     value(RenderRow::RENDER, "RENDER");
     if (isRendering) {
         const int pct = static_cast<int>(progress * 100.0f + 0.5f);

@@ -122,16 +122,6 @@ static inline void voiceReloadInstrument(V& v, const InstrumentParams& ip, float
     voiceSetSends(v, ip.reverbSend, ip.delaySend);
 }
 
-// ─── FIN — the one command that lands in a bus slot the voices ALREADY reset ─────────────────────
-//
-// ⭐ It needs no field of its own: `PARAM_PITCH`'s BASE has been written to zero by both voice types'
-// trigger paths since the bus existed and read by neither, while the MOD half carries the table
-// transpose, the slides and the vibrato. Putting the fine tune in the base is therefore per-note by
-// construction — a trigger clears it — and it cannot collide with any of those.
-//
-// ⚠️ Both voice types have to READ it, and they read it in different places: the sampler folds it
-// into the playback rate (`getModulatedPlaybackRate`), the SoundFont voice into the pitch wheel
-// (`soundfont-voice.cpp`), which also has to count it as active pitch or it re-centres the wheel.
 // ─── PAN from a table row: a glide, not a jump ──────────────────────────────────────────────────
 //
 // A pan that jumps is a step in both channels' gain, and on a low note that is a click — loud on a
@@ -182,6 +172,10 @@ static inline void fetchDownsampled(const Voice& v, int idx, float frac, int ds,
     r = v.sampleDataRight ? v.sampleDataRight[idx] + (v.sampleDataRight[idx + 1] - v.sampleDataRight[idx]) * frac : l;
 }
 
+// FIN needs no field of its own: both voice types zero `PARAM_PITCH`'s BASE at trigger, while the MOD
+// half carries table transpose, slides and vibrato — so the base is per-note and collides with none.
+// ⚠️ Both voice types must READ it: the sampler in `getModulatedPlaybackRate`, the SoundFont voice in
+// its pitch wheel (soundfont-voice.cpp), which must also count it as active pitch.
 template <typename V> static inline void voiceSetFineTune(V& v, int byteValue) {
     v.params.setBase(PARAM_PITCH, fineTuneSemitonesOf(byteValue));
 }

@@ -1,21 +1,15 @@
 #ifndef POCKETTRACKER_SONGCORE_TRACE_WRITER_H
 #define POCKETTRACKER_SONGCORE_TRACE_WRITER_H
 
-// ─── Conformance-trace writer (encoding 2) ──────────────────────────────────────────────────────
+// ─── Conformance-trace writer ───────────────────────────────────────────────────────────────────
 //
-// The C++ twin of core/trace/EventTrace.kt: an IMidiConsumer that serializes the router's bus
-// records into the frozen schema-v1 trace text (event.h / event-schema.md §6). This is the C++ side
-// of the "measuring stick" — the text it produces must equal the Kotlin golden byte-for-byte (after
-// the §4 canonical sort, applied by the comparator, not here).
-//
-// Freezes reproduced verbatim (see EventTrace.kt):
-//   * frames are session-relative — the base latches at T PLAY (render = 0; live subtracts the
-//     transport-start frame) so traces are position-independent and device↔host comparable;
-//   * every payload field always renders, in struct order (fixed line shape);
-//   * ints decimal, floats "0x" + exactly 8 uppercase hex digits of the binary32 bits, bools 0/1,
-//     instrument 2-hex or -1; '\n' endings; no date/wall-clock anywhere;
-//   * events outside a PLAY..STOP session are dropped; T STOP is a no-op with no session open
-//     (mirrors stop() running before every play()).
+// A bus consumer that serializes the router's records into the frozen trace text (event.h). Its
+// output must equal the goldens byte for byte, after the comparator's canonical sort:
+//   * frames session-relative — the base latches at T PLAY;
+//   * every payload field, always, in struct order;
+//   * ints decimal, floats "0x" + 8 uppercase hex digits of the binary32 bits, bools 0/1, instrument
+//     2-hex or -1; '\n' endings; no wall clock anywhere;
+//   * events outside a PLAY..STOP session are dropped; T STOP with no session is a no-op.
 
 #include <cstdint>
 #include <cstdio>
@@ -142,13 +136,13 @@ class TraceWriter : public IMidiConsumer {
                     s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.q[i]));
                 }
                 break;
-            default: break;  // schema-complete: no other emitters exist (event-schema §3)
+            default: break;  // schema-complete: no other emitters exist
         }
         s += '\n';
     }
 
   private:
-    // lower 8 bits as 2-digit UPPERCASE hex — mirrors EventTrace.hex2 / model.h hex2.
+    // Lower 8 bits as 2-digit UPPERCASE hex.
     static std::string hex2(int v) {
         static const char* H = "0123456789ABCDEF";
         unsigned b = static_cast<unsigned>(v) & 0xFFu;
@@ -157,7 +151,7 @@ class TraceWriter : public IMidiConsumer {
         s[1] = H[b & 0xF];
         return s;
     }
-    // raw binary32 bits as "0x" + exactly 8 uppercase hex digits — mirrors EventTrace.fbits.
+    // Raw binary32 bits as "0x" + exactly 8 uppercase hex digits.
     static std::string fbits(uint32_t bits) {
         char buf[16];
         std::snprintf(buf, sizeof buf, "0x%08X", bits);

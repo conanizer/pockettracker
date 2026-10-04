@@ -1,15 +1,13 @@
-// ─── shell/font_raster.h — glyph rasterization, SDL-free (convergence D — the button font) ────────
+// ─── shell/font_raster.h — glyph rasterization, SDL-free ─────────────────────────────────────────
 //
 // The PURE half of the shell's text renderer: it parses a TrueType/OpenType font (stb_truetype) and
 // rasterizes a Unicode codepoint to an 8-bit alpha-coverage bitmap plus the metrics to place it. No
-// SDL, no textures, no window — exactly the split image.cpp (pure `decode_png`) makes against skin.cpp
-// (the SDL textures). `shell/font.{h,cpp}` builds `SDL_Texture`s on top of this; `tools/ptfont` drives
-// THIS directly, linking nothing, so the rasterizer is proven on a real compiler independent of SDL.
+// SDL, no textures, no window — the split image.cpp makes against skin.cpp; `shell/font.{h,cpp}`
+// builds `SDL_Texture`s on top of this.
 //
-// ⚠️ The button font is `helvetica_regular.otf`, which is CFF/PostScript-outline OpenType (`OTTO`), not
-// the commoner TrueType (`glyf`) flavour. stb_truetype supports CFF, but that path is the one at risk
-// of silently regressing on a version bump — which is precisely why ptfont asserts a CFF font still
-// produces ink, and does it against the exact file the shell ships.
+// ⚠️ The button font `helvetica_regular.otf` is CFF/PostScript-outline OpenType (`OTTO`), not
+// TrueType (`glyf`) — stb_truetype supports it, but that path is the one most likely to regress on a
+// version bump. Check that it still produces ink after updating.
 
 #ifndef POCKETTRACKER_FONT_RASTER_H
 #define POCKETTRACKER_FONT_RASTER_H

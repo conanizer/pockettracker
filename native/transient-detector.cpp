@@ -1,6 +1,6 @@
 /* transient-detector.cpp
- * AudioEngine::detectTransients — spectral flux onset detection via KissFFT.
- * Called from JNI for the TRANSIENT slice mode in the sample editor.
+ * AudioEngine::detectTransients — spectral flux onset detection via KissFFT, for the sample
+ * editor's TRANSIENT slice mode.
  */
 #include "audio-engine.h"
 #include "kissfft/kiss_fftr.h"

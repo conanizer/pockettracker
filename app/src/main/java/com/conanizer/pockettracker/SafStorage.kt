@@ -74,8 +74,7 @@ class SafStorage(private val context: Context) {
      * The id of a granted tree: 12 hex characters of SHA-256 over the persisted tree URI.
      *
      * ⭐ Derived, never stored — so the id→tree mapping is re-derivable from the grant list on any
-     * boot, in any order, and there is no table to migrate or to fall out of sync. See
-     * `saf-migration-plan.md` §5b for the three candidates this beat.
+     * boot, in any order, with no table to migrate or fall out of sync.
      */
     private fun rootId(tree: Uri): String =
         MessageDigest.getInstance("SHA-256")
@@ -112,25 +111,15 @@ class SafStorage(private val context: Context) {
     /**
      * The id of the tree the app's seven folders live in — the HOME root — or "" if nothing is granted.
      *
-     * ⚠️⚠️ **This is the one piece of SAF state that is STORED rather than derived, and it has to be.**
-     * Everything else about a root comes back out of `getPersistedUriPermissions()` on demand, which is
-     * what makes ids re-derivable in any order on any boot. The home CHOICE cannot work that way: any
-     * rule computed from the grant set — lowest id, first returned, newest — moves the app's Projects,
-     * Samples and Renders folders the day the user grants a second, unrelated folder. The user would
-     * see their songs vanish, and nothing would have gone wrong.
+     * ⚠️⚠️ The one piece of SAF state that is STORED rather than derived, and it has to be: any rule
+     * computed from the grant set would move the app's folders the day the user grants a second,
+     * unrelated folder.
      *
-     * ⭐ **The TREE URI is stored, not the id**, because the id is a function of the tree URI and not
-     * the other way round: a stored id could not survive a change in how ids are derived, and could
-     * not be matched back to a grant except by re-deriving every id anyway.
+     * ⭐ The TREE URI is stored, not the id — the id is a function of the tree URI, not the reverse.
      *
-     * **First grant wins, and it keeps winning until it stops being usable.** A home that is no longer
-     * in the list, or whose folder has been DELETED underneath the grant, falls back to the lowest LIVE
-     * id and re-stamps — the only moment this value changes without [setHomeRoot] being called.
-     *
-     * ⚠️⚠️ **The liveness test is the whole point of the second condition, and "is its id still in the
-     * grant list?" is NOT that test.** A grant survives its folder; a dead home therefore matched, kept
-     * winning, and made every accessor answer "" — a browser with no entries and no way out, on every
-     * launch. Being in the list is necessary and not sufficient.
+     * First grant wins until it stops being usable: a home no longer in the list, or whose folder was
+     * DELETED under the grant, falls back to the lowest LIVE id and re-stamps. ⚠️ "Still in the grant
+     * list" is NOT liveness — a grant survives its folder.
      */
     fun homeRootId(): String {
         val live = roots().filter { it.live }
@@ -175,9 +164,8 @@ class SafStorage(private val context: Context) {
      * one is reached from the SDL thread, so [MainActivity.safRequestRoot] posts it and waits only for
      * the launch. See `ui::FileSystem::activate` for why it must not wait for the answer.
      *
-     * ⚠️ Android forbids granting a volume root or `Download` itself, and the picker is a TOUCH flow in
-     * an app that is otherwise 100 % D-pad. Both are owned regressions of the SAF migration, not
-     * surprises — `saf-migration-plan.md` §7.
+     * ⚠️ Android forbids granting a volume root or `Download` itself, and the picker is a TOUCH flow
+     * in an otherwise D-pad app — both accepted costs of SAF.
      */
     fun requestRoot(activity: Activity, requestCode: Int): Boolean {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
@@ -257,10 +245,8 @@ class SafStorage(private val context: Context) {
     /**
      * Every child of a directory document, in ONE query.
      *
-     * One record per line: `docUri \t name \t isDir(0|1) \t size \t lastModified`. The whole listing
-     * crosses JNI as a single string because the alternative — a call per child, or a call per field
-     * — is what makes a 200-entry sample folder feel slow, and `filesystem.h` is explicit that the
-     * sort keys are read once at build time rather than re-`stat`ed inside the comparator.
+     * One record per line: `docUri \t name \t isDir(0|1) \t size \t lastModified` — one JNI string,
+     * because a call per child or per field makes a 200-entry folder feel slow.
      */
     fun listChildren(dirDocUri: String): String {
         val dir = Uri.parse(dirDocUri)
@@ -434,12 +420,11 @@ class SafStorage(private val context: Context) {
     }.getOrNull()
 
     private companion object {
-        // The same tag the rest of the Kotlin half logs under; `MainActivity`'s own is private to it.
-        // ⚠️ `PocketTrackerSDL` is the KOTLIN tag — the native side logs under `PocketTracker`, and a
-        // logcat filter on the wrong one reports a working migration as never having run.
+        // The Kotlin half's log tag. ⚠️ The native side logs under `PocketTracker` — a logcat filter
+        // on the wrong one shows nothing.
         const val TAG = "PocketTrackerSDL"
 
-        /** `MainActivity`'s prefs file, shared so the migration counters and this sit in one place. */
+        /** `MainActivity`'s prefs file, shared. */
         const val PREFS = "pockettracker_ui"
 
         /** The persisted TREE uri of the home root. See [homeRootId] for why it is the uri, not the id. */

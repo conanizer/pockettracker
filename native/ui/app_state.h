@@ -2,19 +2,10 @@
 
 // ─── The UI state ────────────────────────────────────────────────────────────────────────────────
 //
-// Everything the screens draw from that is NOT the project itself: where the cursor is, which screen
-// is up, which phrase/chain/instrument is being looked at, and the playhead the 60 Hz loop last read
-// out of songcore.
-//
-// On Android this state is scattered across `TrackerController` and ~60 `mutableStateOf` refs in
-// MainActivity, and it has to be: Compose needs observable holders to know what to recompose. There
-// is no recomposition here — the frame is redrawn from this struct — so the observers collapse into
-// plain fields and the two halves become one struct. The FIELD NAMES are kept, because the Kotlin
-// files are the executable spec for the port and a reviewer must be able to read them side by side.
-//
-// ⚠️ EVERYTHING A FRAME READS IS IN HERE, and that is the design rather than an accident of size: the
-// draw path takes this struct and nothing else, so a field that is not here cannot reach the screen.
-// A new screen adds its fields here; it does not get state of its own.
+// Everything the screens draw from that is NOT the project: cursors, the screen that is up, which
+// phrase/chain/instrument is being looked at, the playheads read from songcore each frame.
+// ⚠️ The draw path takes this struct and nothing else, so a field that is not here cannot reach the
+// screen. A new screen adds its fields here; it gets no state of its own.
 
 #include "screen.h"
 #include "table-lanes.h"
@@ -36,8 +27,8 @@
 #include "ui/playhead.h"
 #include "ui/selection.h"
 
-#include "songcore/midi_in.h"    // IMidiIn  — the input port (E2); its row is E3's
-#include "songcore/midi_out.h"   // IMidiOut — the port the MIDI screen picks (B4.3)
+#include "songcore/midi_in.h"    // IMidiIn
+#include "songcore/midi_out.h"   // IMidiOut
 
 #include <cstdint>
 #include <string>
@@ -45,124 +36,101 @@
 
 namespace pt::ui {
 
-// The clipboard lives in the InputDispatcher (ui/clipboard.h), one instance as in MainActivity. AppState
-// needs only a POINTER to it — for the top-strip "PHR:2x3" readout — so a forward declaration keeps
-// clipboard.h out of every translation unit that includes this header.
+// Only a POINTER to the dispatcher's clipboard is needed (for the "PHR:2x3" readout), so a forward
+// declaration keeps clipboard.h out of every TU that includes this.
 class Clipboard;
 
 struct AppState {
     // ── The document ─────────────────────────────────────────────────────────────────────────────
     //
-    // A POINTER, and there is exactly one Project behind it: the one SongcoreHost owns and the
-    // Sequencer reads. The UI edits it in place through `host.edit_project()`.
-    //
-    // Not a copy, and this is the single most important line in the struct. Android can afford a
-    // second Project (Compose needs its own observable object graph, and it pushes a JSON blob down to
-    // songcore whenever it changes) — but two mutable copies of a document is a desync waiting to
-    // happen, and there is no reason to take that risk on a platform where the UI and the sequencer
-    // are the same program in the same address space. `ptshot` points this at a Project it owns
-    // itself; the SDL shell points it at the host's.
+    // ⚠️ A POINTER to the one Project the host owns and the Sequencer reads; the UI edits it in place
+    // (`host.edit_project()`). Never a copy — two mutable copies of a document is a desync. A headless screenshot
+    // points it at a Project of its own.
     songcore::Project* project = nullptr;
 
     // ── Navigation ───────────────────────────────────────────────────────────────────────────────
-    // SONG, as Android boots (TrackerController.kt:41) — not PHRASE, which was an S1 relic from when
-    // PHRASE was the only screen that existed. The shell adds no boot assignment of its own: a boot
-    // line that merely restates a default is a second place for the default to rot.
+    // The app boots on SONG.
     ScreenType currentScreen = ScreenType::SONG;
 
-    /**
-     * Which column of the 5×5 screen grid a SHARED screen was entered from (PROJECT / MIXER /
-     * EFFECTS sit in every column and own none). It is what lets R+UP out of MIXER return you to the
-     * main-row screen you came from rather than to a fixed default — see ui/navigation.h.
-     */
+    /** Which column of the 5×5 screen grid a SHARED screen (PROJECT / MIXER / EFFECTS) was entered
+     *  from, so R+UP out of MIXER returns there (ui/navigation.h). */
     int previousColumn = 2;
 
     /** On INSTRUMENT, reached via the pool's R+RIGHT: R+LEFT goes back to the pool, not to PHRASE. */
     bool instrumentFromPool = false;
 
-    // The live cursor of the grid editors. SONG / CHAIN / PHRASE share it — and on SONG,
-    // `cursorColumn` IS the track, 1-based (1..8). TABLE, GROOVE, INSTRUMENT and the rest carry their
-    // own, exactly as TrackerController does.
+    // The live cursor of the grid editors. SONG / CHAIN / PHRASE share it; on SONG `cursorColumn` IS
+    // the track, 1-based (1..8). The other screens keep their own.
     int cursorRow    = 0;
     int cursorColumn = 1;
 
     int tableCursorRow    = 0;
     int tableCursorColumn = 1;  // starts on transpose
     int grooveCursorRow   = 0;
-    // GROOVE. The tick grid and the panel beside it each keep their own row, both live at once: the
-    // swing percentage reports on the group the TICK cursor is in, so walking into the panel to set
-    // QNT must not move the number QNT governs. `grooveCursorColumn` says which of the two has the
-    // cursor (ui/modules/groove_editor.h).
+    // GROOVE. The tick grid and the side panel keep separate rows: the swing readout follows the TICK
+    // cursor, so moving into the panel to set QNT must not move it. `grooveCursorColumn` says which
+    // has the cursor (ui/modules/groove_editor.h).
     int grooveCursorColumn = 1;
     int groovePanelRow     = 0;
     int groovePanelColumn  = 0;  // the SAVE/LOAD row only
-    /**
-     * The quantize pointer: how A+DPAD edits a groove step. ⚠️ NOT A SETTING — it is never written to
-     * the song or to settings.json, and it resets to OFF here on app start and on loading a project.
-     */
+    /** The quantize pointer — how A+DPAD edits a groove step. Not a setting: never saved, and reset
+     *  to OFF at app start and on project load. */
     int grooveQuantize     = 0;
     int scaleCursorRow    = 0;
-    // ⚠️ Read on the SCALE screen's NAME row and nowhere else — that is the only row there with more
-    // than one cell. It is NOT what `InputDispatcher::cursor_column()` answers for SCALE: that one
-    // feeds the selection and the clipboard, which see this screen as a single column of degrees.
+    // Read on the SCALE screen's NAME row only. Not what `cursor_column()` answers for SCALE — the
+    // selection and clipboard see that screen as one column of degrees.
     int scaleCursorColumn = 0;
 
-    // INSTRUMENT. Its rows are not a uniform grid — they are the row-kind table in
-    // ui/instrument_row_layout.h, and the cursor walks that rather than a range.
+    // INSTRUMENT walks the row-kind table in ui/instrument_row_layout.h, not a range.
     int instrumentCursorRow    = 0;
     int instrumentCursorColumn = 1;
 
-    /** INST.POOL. The pool's ROW is `currentInstrument` itself, so only the column lives here (0..4). */
+    /** INST.POOL. The pool's ROW is `currentInstrument` itself; only the column lives here (0..4). */
     int poolCursorColumn = 0;
 
-    // MODS. Four slots drawn as two pairs of two, so the cursor is a (pair, side, row) triple rather
-    // than a (row, column) pair: `activeSlot = modSlots[pair * 2 + side]`.
+    // MODS: four slots drawn as two pairs, so the cursor is (pair, side, row):
+    // `activeSlot = modSlots[pair * 2 + side]`.
     int modCursorRow  = 0;
     int modCursorPair = 0;  // 0 = MOD1+MOD2, 1 = MOD3+MOD4
     int modCursorSide = 0;  // 0 = left, 1 = right
 
-    // MIXER. Two ints, but NOT a grid: rows 2 and 3 exist only in column 8 (the master strip), and the
-    // cursor reaches them by walking DOWN it. Every other (row, column) pair is unreachable, and the
-    // module answers `none()` there rather than guessing — see ui/modules/mixer.h.
+    // MIXER: two ints but not a grid — rows 2 and 3 exist only in column 8 (master), reached by walking
+    // down it. Other pairs are unreachable; the module answers `none()` there (mixer_cell_exists).
     int mixerCursorColumn = 0;  // 0..7 = tracks, 8 = master
     int mixerMasterRow    = 0;  // 0 = volumes, 1 = sends / EQ, 2 = OTT|DUST, 3 = LIM
 
-    /** EFFECTS. Eight editable rows; the screen draws fifteen (headers and spacers between them). */
+    /** EFFECTS. Eight editable rows among fifteen drawn. */
     int effectsCursorRow = 0;
 
     /**
-     * Where the shared cursor was when you last left each of the three screens that share it.
-     *
-     * Not an optimisation — a CORRECTNESS requirement, and the reason `go_to_screen` exists. The three
-     * screens have different column counts (SONG 8, CHAIN 2, PHRASE 9), so carrying a live column
-     * across a screen change can land the cursor outside the new screen's range: leave PHRASE on
-     * column 9, arrive on CHAIN, and no cell matches the cursor — it vanishes. Kotlin saves and
-     * restores per screen for exactly this reason (`saveCursorForScreen` / `restoreCursorForScreen`).
+     * Where the shared cursor was on leaving each of the three screens that share it. Required, not an
+     * optimisation: SONG has 8 columns, CHAIN 2, PHRASE 9, so a carried column could land outside the
+     * new screen and the cursor would vanish.
      */
     int songCursorRow = 0,   songCursorColumn = 1;
     int chainCursorRow = 0,  chainCursorColumn = 1;
     int phraseCursorRow = 0, phraseCursorColumn = 1;
 
-    // PROJECT. Rows 0..7 (0..8 on the shell, which has an EXIT row); column 0 is the label and is
-    // unreachable, so the cursor starts on 1 — see ui/settings_row_layout.h.
+    // PROJECT. Rows 0..7 (0..8 with an EXIT row); column 0 is the label, so the cursor starts on 1
+    // (ui/settings_row_layout.h).
     int projectCursorRow    = 0;
     int projectCursorColumn = 1;
 
-    // MIDI (B4.3). One column — ui/modules/midi_settings.h.
+    // MIDI. One column — ui/modules/midi_settings.h.
     int midiCursorRow    = 0;
     int midiCursorColumn = 1;
 
-    // MIDI MAPPING. ⚠️ THE ROW COUNT IS THE SONG'S, not a constant: one per mapping plus the ADD
-    // row. A cursor left past the end by a delete is clamped on the way in and after every edit.
+    // MIDI MAPPING. ⚠️ The row count is the SONG's (one per mapping, plus ADD); a cursor past the end
+    // after a delete is clamped on the way in and after every edit.
     int midiMapCursorRow    = 0;
     int midiMapCursorColumn = 1;
 
-    // SETTINGS. `settingsCursorRow` is a SettingsRow — the row's NUMBER, which is its identity on
-    // BOTH platforms, not its position in this platform's filtered list.
+    // SETTINGS. `settingsCursorRow` is a SettingsRow — the row's NUMBER (its identity), not its
+    // position in this platform's filtered list.
     int settingsCursorRow    = 0;
     int settingsCursorColumn = 1;
 
-    /** SONG shows 16 of its 256 rows: the first visible row. TrackerController clamps it to 0..240. */
+    /** SONG shows 16 of its 256 rows: the first visible row, 0..240. */
     int songScrollPosition = 0;
 
     // Which slot of each pool is being edited.
@@ -173,64 +141,48 @@ struct AppState {
     int currentGroove     = 0;
     int currentScale      = 0;   // which of the 16 slots the SCALE screen is showing, 0-15
 
-    // ── Playback (read back from songcore's playheads at 60 Hz) ──────────────────────────────────
+    // ── Playback (read back from songcore's playheads each frame) ────────────────────────────────
     //
-    // ⚠️ EIGHT, one per track, and −1 where a track has no position at all (ui/playhead.h). There is
-    // no "the playback row": the eight song cursors run independently, so any single number would be
-    // one track's answer wearing the whole song's name.
+    // ⚠️ Eight, one per track, −1 where a track has no position (ui/playhead.h). The eight run
+    // independently, so there is no single "playback row".
     bool          isPlaying    = false;
     TrackPlayhead playheads[8] = {};
 
     // ── LIVE mode (SONG's launcher) ──────────────────────────────────────────────────────────────
     //
-    // ⚠️ A PER-SESSION PERFORMANCE CHOICE — deliberately not in `settings.json` and not in the `.ptp`.
-    // Reopening a project puts you back on the arrangement, which is where editing happens.
-    //
-    // ⚠️ AND THESE ARE A READBACK, NOT THE MODE ITSELF. The sequencer owns it — it is the thing that
-    // has to schedule differently — and both fields are refilled from the host each frame beside the
-    // playheads. The input side asks the host, never this, so there is one answer to "are we live"
-    // and no way for the screen and the transport to disagree about it.
+    // A per-session choice — saved nowhere. ⚠️ A READBACK of the sequencer's mode, refilled each frame;
+    // input asks the host, never this, so screen and transport cannot disagree.
     bool     liveMode     = false;
     LiveQueue liveQueue[8] = {};
 
     /**
-     * The blink phase the queue markers are drawn on, 0..999 ms, written once a frame beside the
-     * playheads.
-     *
-     * ⚠️ IT IS HANDED IN RATHER THAN READ, and that is what keeps a blinking marker drawable by a
-     * tool: `ptshot` has no clock and no engine, so it sets the phase it wants and gets the same
-     * pixels every time. It is the same contract the input dispatcher and the meters are built on.
+     * The blink phase for queue markers, 0..999 ms, set once a frame. Handed in rather than read, so
+     * a headless screenshot (no clock) can set it and get the same pixels every time.
      */
     int blinkPhaseMs = 0;
 
     /**
-     * The TABLE row an engine voice is on, ONE PER FX COLUMN — −1 for a column that is not running.
-     * Unlike the eight above, these are not sequencer playheads: they are read off the VOICE,
-     * because a table advances on its own tic clock under a note that may outlive the step that
-     * started it (ui/engine_feed.h), and each of its columns advances on a clock of its own.
+     * The TABLE row an engine voice is on, one per FX column (−1 = not running). Read off the VOICE,
+     * not the sequencer: a table runs on its own tic clock under a note that may outlive its step, and
+     * each column advances on its own (ui/engine_feed.h).
      */
     int tablePlaybackRows[TABLE_LANES] = {-1, -1, -1};
 
     // ── The note monitor (right bar) ─────────────────────────────────────────────────────────────
-    // What each of the 8 tracks is SOUNDING, read from the engine's voice pool rather than from the
-    // sequencer — so a long sample still shows while it rings out past the end of its chain.
+    // What each track is SOUNDING, from the engine's voices — so a long sample still shows while it
+    // rings out past its chain.
     songcore::Note trackNotes[8] = {};
 
     // ── The SoundFont preset list (INSTRUMENT screen, PRESET row) ────────────────────────────────
     //
-    // Read back from the engine for `currentInstrument`, because only the engine has opened the .sf2
-    // and knows what is in it — the Project stores a bank and a preset NUMBER, not the list they index
-    // into. Refreshed once a frame beside the note monitor (ui/engine_feed.h).
-    //
-    // With no SoundFont loaded these are 0 / 0 / "---", and that is what makes the screen drawable with
-    // no engine at all: `ptshot` renders the PRESET row from exactly these three fields.
+    // Read back from the engine for `currentInstrument` — only the engine has opened the .sf2. Refreshed
+    // once a frame (ui/engine_feed.h). With none loaded: 0 / 0 / "---", which a headless screenshot draws.
     std::string sfPresetName  = "---";
     int         sfPresetCount = 0;
     int         sfPresetIndex = 0;
 
     // ── The visualizer (right/top strip) ─────────────────────────────────────────────────────────
-    // Filled by ui/engine_feed.h once a frame; null means silence, which is what `ptshot` draws with
-    // (it has no engine at all — and that is the proof the UI does not need one).
+    // Filled by ui/engine_feed.h once a frame; null means silence (what a headless screenshot draws).
     const float* waveform       = nullptr;  // WAVEFORM_SIZE master samples
     const float* trackWaveforms = nullptr;  // TRACK_WAVEFORM_COUNT × WAVEFORM_SIZE, flat (OCTA)
     const float* spectrum       = nullptr;  // NUM_BARS magnitudes (SPECTRUM modes)
@@ -242,21 +194,16 @@ struct AppState {
 
     // ── The MIXER's meters ───────────────────────────────────────────────────────────────────────
     //
-    // Read out of the engine ONLY while the MIXER is up, and only every 60 ms — both of which are
-    // Kotlin's (its whole peak loop is a `LaunchedEffect(currentScreen)` gated on MIXER, ticking at
-    // `delay(60)`). Neither is an optimisation for its own sake: `getTrackPeaks` takes the engine's
-    // peak mutex, which the AUDIO CALLBACK also takes, so polling it at 60 Hz on every screen would be
-    // contention with the audio thread bought for nothing.
-    //
-    // ⚠️ `peaksVersion` is what the peak-HOLD counts, not frames. See ui/modules/mixer.h.
+    // Read only while the MIXER is up, every 60 ms: `getTrackPeaks` takes a mutex the AUDIO callback
+    // also takes, so polling it on every screen at 60 Hz would contend with the audio thread.
+    // ⚠️ The peak-HOLD counts `peaksVersion`, not frames (ui/modules/mixer.h).
     float    trackPeaks[16] = {};   // L/R per track
     float    masterPeaks[2] = {};
     float    sendPeaks[4]   = {};   // revL, revR, delL, delR
     unsigned peaksVersion   = 0;
 
     // ── Selection ────────────────────────────────────────────────────────────────────────────────
-    // The L+B multi-tap CELL/ROW/SCREEN machine (ui/selection.h). The grid editors have asked these
-    // two questions since S1; until S3 they were stubbed to "no selection".
+    // The L+B multi-tap CELL/ROW/SCREEN machine (ui/selection.h).
     Selection selection{};
 
     bool selection_mode() const { return selection.active; }
@@ -265,121 +212,80 @@ struct AppState {
     }
 
     /**
-     * Which of L+R's two rungs to try FIRST — the transient state the user touched most recently.
-     *
-     * L+R undoes one thing per press: the mute/solo state, or the selection and its buffer. Doing
-     * both at once would throw away a selection someone spent four presses building just because
-     * they also dropped a channel out of the mix. So the most recent goes first, and a rung with
-     * nothing to clear falls through to the other rather than reading as a dead button.
+     * Which of L+R's two rungs to try FIRST — whichever the user touched last. L+R undoes one thing per
+     * press (mute/solo, or the selection), so dropping a channel out cannot also discard a selection;
+     * a rung with nothing to clear falls through to the other.
      */
     enum class Clearable { NONE, SELECTION, MUTE };
     Clearable lastClearable = Clearable::NONE;
 
     // ── The clipboard's readout ──────────────────────────────────────────────────────────────────
-    // A POINTER to the dispatcher's clipboard, set once by its constructor — exactly as `project` above
-    // points at the host's one document. The layout draws its "PHR:2x3" contents beside the selection
-    // label. NULL when there is no input layer (ptshot renders screens with no dispatcher): the readout
-    // is then simply absent, which is correct — there is no clipboard to report.
+    // Points at the dispatcher's clipboard, set by its constructor. Null with no input layer (headless screenshots),
+    // and the readout is then absent.
     const Clipboard* clipboard = nullptr;
 
     // ── The FX-helper overlay ────────────────────────────────────────────────────────────────────
-    // A+UP/DOWN on an FX-TYPE column opens it; releasing A commits the highlighted effect
-    // (ui/fx_helper.h). While it is open it OWNS the D-pad — the cursor underneath must not move.
+    // A+UP/DOWN on an FX-TYPE column opens it; releasing A commits (ui/fx_helper.h). While open it OWNS
+    // the D-pad.
     FxHelperState fxHelper{};
 
     // ── The mapping DESTINATION picker ───────────────────────────────────────────────────────────
-    // The same gesture over a mapping row's GROUP or PARAMETER cell, and the same bargain: A+UP/DOWN
-    // opens it, releasing A commits the highlighted destination (ui/map_picker.h).
+    // The same gesture over a mapping's GROUP or PARAMETER cell (ui/map_picker.h).
     MapPickerState mapPicker{};
 
-    // ── The file browser, and why it was opened (S6a) ────────────────────────────────────────────
+    // ── The file browser, and why it was opened ──────────────────────────────────────────────────
     FileBrowserState fileBrowser{};
 
-    /**
-     * What the A button will DO with the file the user picks. The browser itself has no idea — it
-     * lists, it sorts, it hands back a path.
-     *
-     * ⚠️ Android answers this question with TWO fields and no type at all: `previousScreen` (a
-     * ScreenType) plus `instrumentFileBrowserAction`, a **String** compared against the literals
-     * `"LOAD_PRESET"`, `"LOAD_SOURCE"`, `"LOAD_SAMPLE_EDITOR"` and `"LOAD_THEME"` — with a silent
-     * `else` arm for every typo. An enum is the same information with the failure mode removed.
-     */
+    /** What A will DO with the picked file — the browser only lists, sorts and hands back a path. */
     enum class BrowserPurpose {
-        LOAD_SOURCE,        // a sample (or an .sf2 — the instrument's TYPE decides which, at open time)
+        LOAD_SOURCE,        // a sample (or an .sf2 — the instrument's TYPE decides, at open time)
         LOAD_PRESET,        // a .pti into the current instrument slot
-        LOAD_SAMPLE_EDITOR, // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
-        LOAD_PROJECT,       // a .ptp — the whole document, from PROJECT's LOAD button (S7)
-        LOAD_THEME,         // a .ptt — and back into the THEME EDITOR, which raised the browser (S9)
+        LOAD_SAMPLE_EDITOR, // a .wav into the slot the SAMPLE EDITOR is open on — and back to it
+        LOAD_PROJECT,       // a .ptp — the whole document (PROJECT's LOAD)
+        LOAD_THEME,         // a .ptt — and back into the THEME EDITOR that raised the browser
         LOAD_SCALE,         // a .pts into the slot the SCALE screen is showing
         LOAD_GROOVE         // a .ptg into the slot the GROOVE screen is showing
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 
-    /**
-     * The screen the browser (or a full-screen overlay) will return to when it closes.
-     * PROJECT, as Android defaults it (MainActivity.kt:777) — likely unreachable, since every
-     * overlay open writes it first, but "likely" is not a spec (parity audit, finding 8).
-     */
+    /** The screen the browser (or a full-screen overlay) returns to. Every overlay open writes it. */
     ScreenType previousScreen = ScreenType::PROJECT;
 
     /**
-     * Where B goes from SETTINGS — and ⚠️ it is deliberately NOT `previousScreen`.
-     *
-     * Android keeps a second, dedicated field for exactly this (`AppInputDispatcher.settingsReturnScreen`),
-     * and the duplication is the point: `previousScreen` is the FILE BROWSER's and the SAMPLE EDITOR's
-     * return target, so anything that raises one of those MOVES it. Ride on it and B out of SETTINGS
-     * lands wherever the last overlay happened to be opened from — a screen the user never came from.
-     * Two questions, two answers.
-     *
-     * PROJECT is the default because PROJECT → SYSTEM is the only thing that writes it, on Android and
-     * here (Kotlin: the `6 ->` arm of handleConfirmAProject, and `settingsReturnScreen = PROJECT` at its
-     * declaration). ⚠️ So the nav grid can also land on SETTINGS WITHOUT setting it, and B then returns
-     * to PROJECT rather than to wherever R+DPAD came from. That is Android's own behaviour, quirk and
-     * all, and the port matches it rather than improving on it — R+DPAD's way back out is R+DPAD.
+     * Where B goes from SETTINGS — ⚠️ deliberately NOT `previousScreen`, which every browser and sample
+     * editor open moves; riding on it would land B wherever the last overlay came from.
+     * Only PROJECT → SYSTEM writes it, so reaching SETTINGS by the nav grid leaves it at PROJECT — and
+     * the way back from there is R+DPAD.
      */
     ScreenType settingsReturnScreen = ScreenType::PROJECT;
 
-    /** Where B goes from MIDI. Same two-questions-two-answers argument as the field above. */
+    /** Where B goes from MIDI, for the same reason. */
     ScreenType midiReturnScreen = ScreenType::PROJECT;
 
     /** …and from the mapping list, which is only ever reached from MIDI. */
     ScreenType midiMapReturnScreen = ScreenType::MIDI;
 
-    // ── MIDI (plan §8.1, phase B4.3) ────────────────────────────────────────────────────────────
+    // ── MIDI ─────────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ THE PORT ITSELF, AND IT IS THE ONLY PLATFORM OBJECT IN THIS STRUCT — but not the only one in
-    // pt-ui (`FileSystem` is the other, and is a reference the dispatcher is constructed with). It is a
-    // POINTER and it is allowed to be null: a build with no MIDI backend (Linux and Android until B2b)
-    // leaves it so, and every use below is guarded. The interface is songcore's, not the shell's, which
-    // is what keeps this header free of SDL — `songcore/midi_out.h` is five virtual methods and no OS.
-    //
-    // Why the UI layer holds it at all: OUTPUT is the one row in the app whose OPTION LIST comes from
-    // the operating system and changes while the app is running. Every other list here is a fact about
-    // the project or a compile-time constant.
+    // The output port: the one platform object in this struct (the dispatcher's `FileSystem` is the
+    // other in pt-ui). A pointer to songcore's five-method interface, so no SDL here; null with no
+    // backend, and every use is guarded. Held by the UI because OUTPUT's option list comes from the OS
+    // and changes while the app runs.
     songcore::IMidiOut* midiOut = nullptr;
 
     /**
-     * The enumerated port list with "OFF" and "AUTO" prepended, and the index of the current choice.
-     *
-     * ⚠️ REBUILT ON EVERY ENTRY TO THE SCREEN, not once at boot — `refresh_midi_devices()`. MIDI is
-     * hot-pluggable and a device list is stale the moment a cable moves; the screen that exists to pick
-     * one is the exact place where a stale list is a bug the user cannot explain.
+     * The port list with "OFF" and "AUTO" prepended. ⚠️ Rebuilt on every entry to the screen
+     * (`refresh_midi_devices()`) — MIDI is hot-pluggable.
      */
     std::vector<std::string> midiDeviceNames{"OFF", "AUTO"};
     int                      midiDeviceIndex = 0;
-    /** The device actually open, "" for none. Under AUTO it is not the setting, so it is kept here. */
+    /** The device actually open, "" for none — under AUTO it differs from the setting. */
     std::string              midiOutOpenName;
 
     /**
-     * The INPUT port and its own list (phase E2) — the mirror of the two above, and separate from them
-     * because they are separate device lists on every platform: winmm enumerates outputs and inputs
-     * with different calls, and a loopback port appears in BOTH under the same name.
-     *
-     * ⚠️ Null on any build with no input backend — since E5 that is no shipping platform (winmm, ALSA
-     * rawmidi and `MidiManager` are all here), but every use stays guarded: null is also what a build
-     * with a MISSING libasound gets, and that is a state a user can be in. The INPUT row that displays
-     * this list is E3's; the pointer is here because the thing that OPENS the port at boot is the
-     * dispatcher, and it reads this struct.
+     * The INPUT port and its list — separate from the output's, as on every platform (a loopback port
+     * appears in both under one name). ⚠️ May be null (e.g. libasound missing); every use is guarded.
+     * Here because the dispatcher opens it at boot and reads this struct.
      */
     songcore::IMidiIn*       midiIn = nullptr;
     std::vector<std::string> midiInDeviceNames{"OFF", "AUTO"};
@@ -390,67 +296,43 @@ struct AppState {
     std::string midiStatusText;
 
     /**
-     * What the OFFSET row's AUTO uses: the output latency the audio device reported, in ms.
-     *
-     * ⚠️ **A PLATFORM FACT AND NOT A SETTING** — the shell writes it once, after the device has
-     * negotiated, and it is never saved. pt-ui has no backend to ask, which is why it arrives here
-     * rather than being read where it is used. 0 until something fills it in, and 0 is the behaviour
-     * this row had before AUTO existed.
+     * The output latency the audio device reported, in ms — what the OFFSET row's AUTO uses. A platform
+     * fact, written once by the shell and never saved; 0 until set.
      */
     int midiAutoOffsetMs = 0;
 
     /**
-     * The channel the cable last carried a CC on, or −1 for none since launch. Another platform fact,
-     * arriving the same way: the dispatcher copies it off the host once a frame, because the MIDI
-     * screen is drawn from HERE and has no host to ask.
-     *
-     * ⚠️ Copied in `set_now`, not by whichever reader happens to need it — the MIDI screen is built in
-     * two separate places (the layout's draw and the dispatcher's cursor context), and a value pushed
-     * lazily by one of them is stale the moment the other one reads it.
+     * The channel the cable last carried a CC on, or −1. Copied off the host in `set_now`, because the
+     * MIDI screen is built in two places (draw and cursor context) and must not be fed lazily by one.
      */
     int midiInCcChannel = -1;
 
-    /** The audio callback's cost, copied off the host in `set_now` like the channel above. */
+    /** The audio callback's cost, copied off the host in `set_now`. */
     AudioLoad audioLoad{};
 
     // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
-    // The app's first true modal: while it is open it owns every button, and `isOpen` is checked
-    // before any other arm in every handler that can reach it.
+    // A true modal: while open it owns every button; `isOpen` is checked first in every handler.
     QwertyKeyboardState qwerty{};
 
-    // ── The SAMPLE EDITOR (S6b) ─────────────────────────────────────────────────────────────────
+    // ── The SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────
     //
-    // The one screen whose state is a SESSION rather than a view. Everything else in this struct is a
-    // cursor position — throw it away and you lose your place. Throw this away and you lose the
-    // selection you spent a minute dialling in, the transients you just detected, and the pending
-    // pitch shift you have not baked yet. It is created fresh when INSTRUMENT's EDIT opens the editor,
-    // and it lives until the editor closes.
-    //
-    // The AUDIO is not in here — it is in the engine, where the twelve operations already were. What
-    // this holds is the 620 min/max pairs the waveform draws from, and the state of the knobs.
+    // A SESSION, not a view: the selection, detected transients and pending pitch shift live here from
+    // the editor opening to it closing. The audio is in the engine; this holds the waveform's min/max
+    // pairs and the knobs.
     SampleEditorState sampleEditor{};
 
-    // ── The confirm dialog (S7) ──────────────────────────────────────────────────────────────────
+    // ── The confirm dialog ───────────────────────────────────────────────────────────────────────
     //
-    // The port's second true modal, and — unlike Android's four separate `show*Dialog` booleans — ONE
-    // state, so the "is a modal up?" question every handler must ask has exactly one answer to check.
-    // See ui/modules/confirm_dialog.h for why that is worth a file.
+    // ONE state for every confirm, so "is a modal up?" has one answer (ui/modules/confirm_dialog.h).
     ConfirmDialogState confirm{};
 
     // ── LOADING ──────────────────────────────────────────────────────────────────────────────────
     //
-    // Opening a file is the one thing the app does that can outlast a frame, and while it does the
-    // frame loop is inside it rather than running. A one-line strip across the top of the screen is
-    // what says so — never a modal: it dims nothing and covers nothing (ui/modules/loading_strip.h).
-    //
-    // ⚠️⚠️ **`shown` IS NOT `running`, AND THE GAP BETWEEN THEM IS THE WHOLE FEATURE.** Almost every
-    // load is over in well under a tenth of a second — a 106 MB `.sf2` takes 0.26 s, every `.wav` is
-    // a read — and a strip that flashes up and away on each of those is worse than none at all. So a
-    // load RUNS from its first moment and is only SHOWN once it has already outstayed
-    // `LOADING_DELAY_MS`. Nothing predicts a file's size or guesses a threshold: the app finds
-    // out the way the user does, by waiting. ⭐ Which also makes it right on a slow device without a
-    // second number — the same file that is instant on a desktop crosses the delay on a handheld,
-    // and the strip appears there and only there.
+    // A file load can outlast a frame. A strip across the top says so — never a modal; it dims nothing
+    // (ui/modules/loading_strip.h).
+    // ⚠️ `shown` is not `running`: almost every load is over in a tenth of a second, and a strip that
+    // flashes is worse than none. A load RUNS from its first moment and is SHOWN only after
+    // `LOADING_DELAY_MS` — no size prediction, so a slow device shows it exactly when it is slow.
     struct LoadingState {
         /** A load is in flight. Owns every button (Overlay::LOADING) from the first moment. */
         bool running = false;
@@ -460,97 +342,60 @@ struct AppState {
         float progress = -1.0f;
         /** What is being loaded: the file's name, or the project's. Empty draws the title alone. */
         std::string detail{};
-        /**
-         * Milliseconds since the load opened. It is what raises `shown`, and it is also the ONLY
-         * clock the strip has: with no percentage to draw there has to be something on screen that
-         * moves, or a working load and a hung one look identical.
-         */
+        /** Milliseconds since the load opened. It raises `shown`, and is the strip's only moving part
+         *  when there is no percentage — a working load and a hung one must look different. */
         int elapsedMs = 0;
         /** B has been pressed. The engine reads it through the tick's return and unwinds. */
         bool cancelRequested = false;
     };
     LoadingState loading{};
 
-    // ── The EQ EDITOR (S8) ───────────────────────────────────────────────────────────────────────
+    // ── The EQ EDITOR ────────────────────────────────────────────────────────────────────────────
     //
-    // The port's third modal, and the first PARTIAL one: it owns the D-pad, A, B and SELECT, but START
-    // deliberately passes THROUGH to the screen underneath. That is not an oversight in Kotlin — it is
-    // what lets you hold an instrument audition ringing and sweep a band across it, which is the only
-    // way to hear what an EQ is doing. Every other modal in the app swallows everything.
-    //
-    // ⚠️ `eq.caller` is captured when the editor OPENS and is never re-read: five different cells raise
-    // it, and B+LEFT/RIGHT inside it has to write the new slot back into whichever field asked.
+    // A PARTIAL modal: it owns the D-pad, A, B and SELECT, but START passes through, so an instrument
+    // audition can ring while a band is swept across it.
+    // ⚠️ `eq.caller` is captured on OPEN: five cells raise the editor, and B+LEFT/RIGHT writes the new
+    // slot back into whichever asked.
     EqEditorState eq{};
 
     /**
-     * The spectrum of the signal the OPEN EQ sits on — the master bus, a send's input, or one
-     * instrument's voices; `eq.caller` picks which, and ui/engine_feed.h polls it at 20 Hz (Kotlin's
-     * own cadence) only while the editor is up.
-     *
-     * Separate from `spectrum` above, which is the VISUALIZER's and is always the master bus. Same
-     * engine, two different questions — and pointing the EQ at the master bus would draw a curve over a
-     * signal the band is not even in.
+     * The spectrum of the signal the open EQ sits on — master bus, a send's input, or one instrument
+     * (`eq.caller` picks; ui/engine_feed.h polls at 20 Hz while open). Not the visualizer's `spectrum`,
+     * which is always the master bus.
      */
     const float* eqSpectrum      = nullptr;
     int          eqSpectrumCount = 0;
 
-    // The engine's device rate, for the EQ editor's response curve — it must plot at the rate the
-    // bands were built at. Fed alongside the spectrum by engine_feed.h, since both are the engine
-    // telling the UI something the document does not carry.
+    // The engine's device rate, so the EQ curve plots at the rate the bands were built at.
     int          eqSampleRate    = 44100;
 
-    // ── The THEME EDITOR (S9) ────────────────────────────────────────────────────────────────────
+    // ── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────
     //
-    // The port's fourth modal, and the SECOND partial one: it lets START through to the transport, as the
-    // EQ editor does. That is what makes VIZ BG / VIZ LINE / VIZ WAVE dialable — they are the oscilloscope
-    // strip, which keeps drawing above the panel, and an oscilloscope with the transport stopped is a
-    // flat line. A handful more the editor previews simply by DRAWING ITSELF in them — `background`,
-    // `rowCursor` and the title/param/value inks, which is also the pair that inverts on a cursor cell
-    // right there on the row being dialled. The rest it can only show as a swatch, because the pixels
-    // they describe live on screens this overlay has replaced.
-    //
-    // ⚠️ Unlike the EQ's pass-through, there is NO evidence in the Kotlin that this one is deliberate —
-    // `handleStart` simply has no theme guard where every other handler has one. The effect is right, so
-    // it is ported as-is; if it was an accident, it was a lucky one. (Stated rather than dressed up: the
-    // difference between "Kotlin means this" and "Kotlin does this" is the difference between a spec and
-    // an observation, and only one of them is evidence.)
-    //
-    // It is raised from exactly one place (SETTINGS row 9), so unlike `eq.caller` there is nothing to
-    // capture — the thing being edited is the app's single live Theme, below.
+    // A partial modal like the EQ editor: START reaches the transport, so VIZ BG / LINE / WAVE can be
+    // dialled against a moving oscilloscope. Some colours preview by the editor drawing itself in them;
+    // the rest only as swatches, since their pixels are on screens the overlay replaced. Raised only
+    // from SETTINGS, and edits the app's single live Theme.
     ThemeEditorState themeEditor{};
 
-    // ── SETTINGS (S7) ────────────────────────────────────────────────────────────────────────────
+    // ── SETTINGS ─────────────────────────────────────────────────────────────────────────────────
     //
-    // Every value the SETTINGS screen edits, in one struct — which is also the unit the shell writes
-    // to settings.json. On Android these are ~16 separate `mutableStateOf` refs plus SharedPreferences
-    // (Compose leaves no choice); here the screen, the persistence and the code that READS a setting
-    // all name the same field.
-    //
-    // ⚠️ `settings.insertBefore` is read by the QWERTY keyboard when it OPENS, not while it is open,
-    // so flipping the setting mid-word cannot change what the buttons mean under the user's thumb.
-    // ⚠️ `settings.cursorRemember` is what go_to_screen consults: REMEMBER restores each screen's last
-    // cursor, REFRESH (the default, as on Android) resets it to the top-left editable cell on entry.
+    // Every value the SETTINGS screen edits — also the unit written to settings.json.
+    // ⚠️ `settings.insertBefore` is read when the QWERTY keyboard OPENS, so flipping it mid-word cannot
+    // change what the buttons mean.
+    // `settings.cursorRemember` is consulted by go_to_screen: REMEMBER restores each screen's last
+    // cursor, REFRESH (the default) resets it to the top-left editable cell.
     SettingsValues settings{};
 
-    // ⚠️ THERE IS DELIBERATELY NO `settingsDirty` HERE, AND ITS ABSENCE IS LOAD-BEARING.
-    //
-    // There was one, and it was wrong. The shell wrote settings.json on exit `if (settingsDirty)`, and
-    // the only thing that ever set it was the SETTINGS screen's own edit arm — so the THEME EDITOR,
-    // which has no CursorContext and mutates `theme` directly, armed nothing: a session whose only
-    // change was the palette threw all eighteen colours away on quit, intermittently (any SETTINGS row
-    // touched in the same sitting armed the write, and it carried the theme with it).
-    //
-    // The exit now asks `save_settings_if_changed()` — which compares the bytes on disk with what memory
-    // holds — so the question is answered from the DATA and there is nothing here for a future screen to
-    // forget to set. Re-adding a flag re-adds the bug. See ui/settings_store.h.
+    // ⚠️ There is deliberately NO `settingsDirty` flag. Not every edit path goes through the SETTINGS
+    // screen (the THEME EDITOR mutates `theme` directly), so a flag loses changes. The exit calls
+    // `save_settings_if_changed()`, which compares the bytes on disk with memory. Re-adding a flag
+    // re-adds the bug (ui/settings_store.h).
 
     /** What this platform can do — and therefore which SETTINGS rows and PROJECT actions exist. */
     PlatformCaps caps{};
 
-    // What the DEVICE rows' indices NAME on this platform — text the settings module paints but does
-    // not own, because only the platform knows that layout index 2 is "PORTRAIT". All empty on the
-    // shell, which does not draw those rows at all. (This is the seam that keeps `DeviceAdapter` out
-    // of the port: see ui/modules/settings_editor.h.)
+    // What the DEVICE rows' indices are called on this platform (only the platform knows index 2 is
+    // "PORTRAIT"). Empty on the shell, which does not draw those rows (ui/modules/settings_editor.h).
     std::string layoutText{};
     std::string skinText{};
     std::string overlayText = "OFF";
@@ -562,12 +407,10 @@ struct AppState {
     /** FREE RAM: physical memory the machine still has. 0 = the platform could not answer. */
     int64_t freeRamBytes = 0;
 
-    // ── "Last edited" — the memory that makes A,A and the insert defaults useful ─────────────────
+    // ── "Last edited" — what A,A and the insert defaults remember ────────────────────────────────
     //
-    // TrackerController's `lastEdited*`. Not cosmetic: A,A on SONG inserts the next unused chain
-    // *after the one you last touched*, and a chain row inserted on CHAIN carries the transpose you
-    // last dialled in. Without them, every insert would start its search at 0 and hand you a slot
-    // nowhere near the one you were working on.
+    // A,A on SONG inserts the next unused chain after the one last touched; an inserted chain row
+    // carries the transpose last dialled in. Without these every search starts at 0.
     int           lastEditedPhrase     = 0;
     int           lastEditedChain      = 0;
     int           lastEditedTable      = 0;
@@ -578,59 +421,38 @@ struct AppState {
 
     // ── The status line ──────────────────────────────────────────────────────────────────────────
     //
-    // "SAVED" / "CHAIN CLONED" / "NO FREE PHRASES" — what an action reports back. Drawn as a GLOBAL
-    // overlay on the visualizer header (TrackerLayout::draw), so that every screen can report without
-    // spending an editor row on it. Kotlin does the same, at PixelPerfectRenderer:444.
-    //
-    // ⚠️ S3 ADDED THESE TWO FIELDS AND NOTHING EVER DREW THEM. The dispatcher has been setting them
-    // at 22 sites since the clipboard landed, so every "CHAIN CLONED" and every "NO FREE PHRASES"
-    // this port has ever produced went straight into the void — a bug found the only way it could be,
-    // by porting the screen whose actions have NO other feedback at all: SAVE, EXPORT and COMPACT say
-    // nothing else, and a save that reports nothing is a save you cannot trust.
+    // "SAVED" / "CHAIN CLONED" / "NO FREE PHRASES" — drawn over the visualizer header on every screen
+    // (TrackerLayout::draw). SAVE, EXPORT and COMPACT have no other feedback.
     std::string statusMessage{};
     bool        statusSuccess = true;
 
     // ── HELP ON SELECT ───────────────────────────────────────────────────────────────────────────
     //
-    // Is the help panel standing in for the visualizer? Under SETTINGS > HELP = SHORT a tap of SELECT
-    // raises it, a second one or a press of anything else puts it away — see ui/button_mapper.h.
-    //
-    // ⚠️ **NOT AN OVERLAY, and deliberately not in the `Overlay` set.** It covers only the 620×70
-    // strip, never the editor, so it swallows no button and blocks no gesture: every screen underneath
-    // stays live and usable while it is up, which is what lets the cursor be walked from cell to cell
-    // with the text following it. Adding it to the overlay stack would take that away and would gate
-    // handlers that have nothing to do with it.
-    //
-    // ⚠️ Not persisted. The app opens with the visualizer, whatever the last session was reading.
+    // The compact help panel replacing the visualizer (SETTINGS > HELP = SHORT; ui/button_mapper.h).
+    // ⚠️ NOT an overlay: it covers only the 620×70 strip, swallows no button and leaves the screen
+    // usable, so the text follows the cursor. Not persisted.
     bool helpOpen = false;
 
-    // Is the FULL help overlay up? A tap of SELECT raises it under SETTINGS > HELP = FULL.
-    //
-    // ⚠️⚠️ **THIS ONE IS AN OVERLAY, and every fact above about `helpOpen` is inverted for it.** It
-    // covers the editor, so it is in the `Overlay` stack and in `modal_backdrop_active`, and the press
-    // that closes it is consumed (ui/button_mapper.h). Never both flags at once.
+    // The FULL help overlay (HELP = FULL). ⚠️ This one IS an overlay — every fact above is inverted: it
+    // is in the `Overlay` stack and `modal_backdrop_active`, and its closing press is consumed. Never
+    // both flags at once.
     bool helpFull = false;
 
     // ── The render (PROJECT → EXPORT) ────────────────────────────────────────────────────────────
     //
-    // The shell renders SYNCHRONOUSLY, on this thread, with the audio device paused — see the shell's
-    // export action. Android needs a coroutine because Compose would ANR; a single-threaded frame loop
-    // simply stops, and repaints itself from the progress callback. So these are written from inside
-    // the render, and read by the frame it forces.
+    // Synchronous, on this thread, with the audio device paused; the frame is repainted from the
+    // progress callback.
     bool  isRendering    = false;
     float renderProgress = 0.0f;
 
-    // …and WHICH ROWS of the song go into the file. PROJECT → EXPORT → MIX / STEMS raises this panel
-    // rather than rendering the whole project, which is what makes a single sketch inside a project
-    // exportable now that a block loops rather than running on (ui/modules/render_dialog.h).
+    // …and WHICH ROWS go into the file: EXPORT raises this panel, so one sketch in a project can be
+    // exported (ui/modules/render_dialog.h).
     RenderDialogState renderDialog{};
 
     // ── Is there unsaved work? ───────────────────────────────────────────────────────────────────
     //
-    // TrackerController's `projectVersion` / `savedProjectVersion`. The counter is bumped in exactly
-    // one place — `InputDispatcher::mark_modified`, which every edit in the app already funnels
-    // through — and the SAVE / LOAD / NEW actions align the two. It is what gates the NEW PROJECT?
-    // and EXIT? confirms: a clean project needs no question asked.
+    // Bumped only by `InputDispatcher::mark_modified`, which every edit goes through; SAVE / LOAD / NEW
+    // align the two. A clean project skips the NEW PROJECT? and EXIT? confirms.
     int projectVersion      = 0;
     int savedProjectVersion = 0;
 
@@ -645,40 +467,29 @@ struct AppState {
     // ── Theme ────────────────────────────────────────────────────────────────────────────────────
     Theme theme = theme_default();
 
-    // ── config.json — hand-edited default browse folders (D2b) ─────────────────────────────────────
-    // Read ONCE at boot, and only on a debug build (the read is gated on caps.debug in the shell). Empty
-    // on release and on any box without a config.json, so every category falls back to its built-in dir.
+    // ── config.json — hand-edited default browse folders ────────────────────────────────────────────
+    // Read once at boot, debug builds only. Empty otherwise: every category uses its built-in dir.
     FolderConfig folderConfig{};
 };
 
 /**
- * Is a modal that paints the full-canvas MODAL_BACKDROP up? (B4) — the shell asks this to extend the
- * dim into the letterbox bars so the scrim does not stop at the 4:3 edge.
- *
- * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog,
- * the full help overlay, the render dialog, the FX-helper overlay (the phrase screen's FX picker) and
- * the mapping destination picker. The EQ and theme editors are NOT here: they REPLACE the module in
- * place and leave the rest of the frame bright, so scrimming the bars for them would invert the seam
- * (dim bars, bright tracker). Derived from the state, never from each call site remembering — the
- * modal-predicate rule.
+ * Is a modal up that paints the full-canvas MODAL_BACKDROP? The shell extends the dim into the
+ * letterbox bars when it is.
+ * ⚠️ Exactly those modals: qwerty, confirm, full help, render dialog, FX helper, map picker. The EQ and
+ * theme editors REPLACE the module and leave the frame bright, so they are not here.
  */
 inline bool modal_backdrop_active(const AppState& s) {
-    // ⚠️ A LOAD IS NOT HERE. It draws a status strip across the top and dims nothing — opening a file
-    // asks the user no question, and a screen that goes dark for one reads as far more than it is.
+    // A load is not here: its strip dims nothing.
     return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.mapPicker.isOpen ||
            s.helpFull || s.renderDialog.isOpen;
 }
 
 /**
- * Does a FULL-SCREEN module have the frame — i.e. is none of the furniture drawn this frame?
- *
- * ⚠️ Written once because two questions read it: `draw`'s early return and `has_falling_meters`
- * (layout.cpp). Two copies would be one full-screen module away from disagreeing, and that shows up
- * silently — a redraw loop pinned at 60 Hz over a static frame. (SELECT's compact help panel does NOT
- * use it: the sample editor has no strip but shows the panel over its waveform — see `on_select`.)
- *
- * ⚠️ `!s.eq.isOpen` — the EQ editor opened from the sample editor REPLACES it and brings the normal
- * furniture back, strip included.
+ * Does a FULL-SCREEN module own the frame (no furniture drawn)? One answer for `draw`'s early return
+ * and `has_falling_meters` (layout.cpp) — if they disagree, the redraw loop pins at 60 Hz over a
+ * static frame.
+ * ⚠️ `!s.eq.isOpen`: the EQ editor opened from the sample editor replaces it and brings the furniture
+ * back.
  */
 inline bool full_screen_module(const AppState& s) {
     return s.currentScreen == ScreenType::FILE_BROWSER ||
@@ -686,14 +497,9 @@ inline bool full_screen_module(const AppState& s) {
 }
 
 /**
- * Is (row, column) a cell the MIXER actually draws?
- *
- * ⚠️ The mixer cursor is two INDEPENDENT ints over a grid that is not rectangular — rows 2 and 3 exist
- * only in the master strip, and row 1 only under REV, DEL and the master. Every other pair draws
- * nothing at all: no cell is highlighted, the module answers `cc::none()`, and the cursor is simply
- * GONE until the user walks it back. The D-pad table (ui/cursor_move.h) can only ever step from one
- * real cell to another — but anything that writes ONE of the two ints on its own can land between
- * them, which is why the question is asked here rather than trusted to each such site.
+ * Is (row, column) a cell the MIXER draws? The grid is not rectangular — rows 2 and 3 only on the
+ * master strip, row 1 only under REV, DEL and master. Anything that writes one of the two ints alone
+ * can land between cells, where the cursor vanishes; ask here.
  */
 inline bool mixer_cell_exists(int row, int column) {
     if (column < 0 || column > 8) return false;
@@ -702,13 +508,8 @@ inline bool mixer_cell_exists(int row, int column) {
     return (row == 2 || row == 3) && column == 8;                     // OTT|DUST and LIM
 }
 
-/**
- * SONG shows 16 of its 256 rows; keep `cursorRow` inside that window. `scrollSongToRow` in Kotlin.
- *
- * Lives here rather than beside the cursor table because three unrelated things move the song row —
- * the D-pad, `go_to_screen` on arrival, and the song-relative pointer — and it is the state's own
- * invariant rather than any one of their business.
- */
+/** Keep `cursorRow` inside SONG's 16-row window. The state's own invariant — the D-pad, `go_to_screen`
+ *  and the song pointer all move the song row. */
 inline void scroll_song_to_row(AppState& s, int row) {
     if (row < s.songScrollPosition)            s.songScrollPosition = row;
     else if (row >= s.songScrollPosition + 16) s.songScrollPosition = row - 15;

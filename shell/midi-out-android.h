@@ -1,7 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_OUT_ANDROID_H
 #define POCKETTRACKER_SHELL_MIDI_OUT_ANDROID_H
 
-// The ANDROID songcore::IMidiOut — five JNI up-calls into MainActivity. MIDI plan phase B2b.
+// The ANDROID songcore::IMidiOut — five JNI up-calls into MainActivity.
 // See midi-out-android.cpp for why the port lives in Kotlin at all, and for the direction gotcha
 // (to SEND you open the device's INPUT port) that is the single easiest thing to get backwards here.
 // Compiles to nothing off Android.

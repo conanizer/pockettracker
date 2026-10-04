@@ -3,64 +3,46 @@
 
 // ─── The project → engine push ───────────────────────────────────────────────────────────────────
 //
-// Everything the app does to get a Project *into* the engine: the per-instrument playback params, the
-// modulation slots, the EQ/send routing, the mixer, and the global FX state. Ported from
-// RenderController.setupInstrumentParams + applyMasterBusForRender and AppInputDispatcher's
-// syncVolumesToAudioBackend / pushGlobalEffectsToBackend.
+// Everything that gets a Project into the engine: per-instrument params, modulation, EQ/sends, the
+// mixer and the global FX. The engine keeps all of that across project swaps, so playing a project
+// means pushing it first. Two halves, split by lifetime:
 //
-// WHY IT HAS TO EXIST (S6b). The engine keeps mixer / master-bus / EQ-bank / send state across project
-// swaps — none of it is per-voice — so "play this project" is not just scheduling notes: someone must
-// push all of that down first. On Android that someone was Kotlin, which meant a host renderer
-// (tools/ptrender) or the SDL shell could not make a sound at all, no matter how correct the
-// scheduler was. S7 (deleting the Kotlin path) and Linux Phase 2 need exactly this file.
+//   push_project_params  — pure param pushes, no I/O, idempotent. A render prepares with it; the app
+//                          calls it after every load and edit.
+//   load_project_media   — opens FILES (samples, SF2s) and produces the Routing.
 //
-// Two halves, split by lifetime:
-//
-//   push_project_params  — pure param pushes, no I/O. Cheap, idempotent, safe to repeat. A render
-//                          prepares with it; the SDL shell calls it after every load and edit.
-//   load_project_media   — opens FILES (samples, SF2s) and *produces* the Routing. Used by ptrender
-//                          and the SDL shell. Android still loads media in Kotlin, whose loader also
-//                          drives MediaCodec for m4a and reads WAV cue points — see the note there.
-//
-// Float exactness: every derived value goes through voice_derive.h, whose derivations are byte-
-// goldened against the real Kotlin code by tools/ptvoice (77 cases). Nothing is re-derived here.
-//
-// Template over the engine, like voice_derive.h — AudioEngine satisfies it as-is, and a recorder can
-// be substituted in a host test without an interface or a virtual call.
+// Every derived value comes from voice_derive.h; nothing is re-derived here. Templated over the
+// engine so a recorder can stand in for it in a host test.
 
 #include <cstdio>
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"     // pt_fopen — every media open below goes through it
-#include "../load_progress.h"   // LoadSpan — one bar over a whole project's worth of files
-#include "media_path.h"      // resolve_media_path and the path helpers a media load resolves through
-#include "midi_map.h"     // MapDestId — what a mapped knob's push switches on
+#include "../byte_source.h"     // pt_fopen
+#include "../load_progress.h"   // LoadSpan
+#include "media_path.h"
+#include "midi_map.h"     // MapDestId
 #include "model.h"
-#include "scheduler.h"    // hex_to_float (VolumeUtils.hexToFloat)
+#include "scheduler.h"    // hex_to_float
 #include "traversal.h"    // collect_used_instruments
 #include "voice_derive.h" // Routing, push_instrument_mod_eq_sends, push_instrument_playback_params
-#include "wav_writer.h"   // read_cue_points — a WAV's slice boundaries live in its `cue ` chunk
+#include "wav_writer.h"   // read_cue_points
 
 namespace songcore {
 
 // ─── params: no I/O, idempotent ──────────────────────────────────────────────────────────────────
 
-// RenderController.setupInstrumentParams, for one instrument. Kotlin's SF branch and sampler branch
-// push the *same* three things — applySoundfontFilterOverrides is just updateInstrumentPlaybackParams
-// under another name — so there is deliberately one path here, not two.
-// ⚠️ **THIS IS THE ONE SEAM THAT MEANS "INSTRUMENT N CHANGED, TELL THE ENGINE"**, and the program
-// snapshot rides on it for that reason: the engine resolves a note from its own copy of the
-// instrument, so a copy refreshed anywhere else would be one more thing every future caller has to
-// remember. Every media load, preset load and INSTRUMENT-screen edit already comes through here.
+// One instrument's params. SoundFont and sampler instruments push the same things.
+// ⚠️ This is THE "instrument N changed, tell the engine" seam, so the program snapshot rides on it:
+// the engine plays notes from its own copy of the instrument, and every load and edit comes through
+// here.
 template <typename Engine>
 void push_instrument_params(Engine& engine, const Instrument& ins, const Routing& routing,
                             int tempo, int sampleRate) {
     push_instrument_playback_params(engine, ins);
     push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate);
-    // The SoundFont ADSR override, keyed by instrument id. The note path pushes it again before every
-    // note it schedules; a live key is scheduled by the audio thread with no push in front of it, so
-    // the copy the engine holds has to be the edited one already.
+    // The SF ADSR override. The note path re-pushes it before each note, but a live key is scheduled by
+    // the audio thread with no push, so the engine's copy must already be current.
     const SFOverrides& ov = ins.sfOverrides;
     engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
 
@@ -71,13 +53,9 @@ void push_instrument_params(Engine& engine, const Instrument& ins, const Routing
     engine.setProgram(ins.id, p, p.sliceMarkers, p.sliceCount);
 }
 
-// The pre-render sweep: every instrument any step on an AUDIBLE track in rows [startRow, endRow] plays.
-//
-// ⚠️ **AND EVERY INSTRUMENT AN `INS` ON A TABLE ROW CAN HAND THE HIT TO.** A step names one
-// instrument; the tables it passes through can route it to others that no step mentions, and the
-// engine treats an instrument it holds no program for as EMPTY — which is SILENCE, not a wrong sound.
-// So the set the RENDER must hold is wider than the set the song "uses", and widening it here rather
-// than in `collect_used_instruments` keeps that function what its name and its golden say it is.
+// The pre-render sweep: every instrument any step on an AUDIBLE track in rows [startRow, endRow] plays
+// — plus every instrument a table's `INS` can hand a hit to. The engine treats an instrument with no
+// program as empty, i.e. silent. Widened here so `collect_used_instruments` keeps meaning "used".
 template <typename Engine>
 void push_used_instrument_params(Engine& engine, const Project& project, const Routing& routing,
                                  int startRow, int endRow) {
@@ -93,8 +71,8 @@ void push_used_instrument_params(Engine& engine, const Project& project, const R
         pending.push_back(id);
     }
 
-    // A table id defaults to its instrument's id, so following the INS cells is the same walk the
-    // engine makes at the trigger. Each instrument is visited once, so the chain's depth cannot run away.
+    // A table id defaults to its instrument's id, so following INS cells is the engine's own walk.
+    // Each instrument is visited once.
     while (!pending.empty()) {
         const int id = pending.back();
         pending.pop_back();
@@ -118,11 +96,7 @@ void push_used_instrument_params(Engine& engine, const Project& project, const R
     }
 }
 
-// The LIVE sweep: every instrument in the pool, played or not.
-//
-// A render only needs the instruments the rows it is exporting actually use. An interactive app cannot
-// make that assumption for a second: you can sit on the INSTRUMENT screen and audition slot 7F while no
-// step in the song refers to it, and its filter and drive must already be in the engine when you do.
+// The LIVE sweep: every instrument in the pool, since the user can audition one no step refers to.
 template <typename Engine>
 void push_all_instrument_params(Engine& engine, const Project& project, const Routing& routing) {
     const int sampleRate = engine.getSampleRate();
@@ -131,20 +105,12 @@ void push_all_instrument_params(Engine& engine, const Project& project, const Ro
     }
 }
 
-// What the RUNNING SONG has already taken over, and whose authored value must therefore NOT be
-// pushed back on top of it.
+// What the running song has taken over, so its authored value must NOT be pushed on top.
 //
-// ⚠️ VTR/VMV and EQM *replace* engine state and nothing puts it back until the transport stops — see
-// effects.h's VTR note, and `SongcoreHost::stop()`'s restore, which answers this same question from
-// the other end with the same two flags. So a mid-take push of the authored mixer is not a refresh,
-// it is a WIPE: the song's fade springs back to the fader on screen, and its master-EQ sweep is gone.
-//
-// ⚠️ PER FADER, NOT A BLANKET SKIP, and the granularity is what keeps the fix from costing something
-// else: `mark_modified` on the MIXER screen pushes through here too, so a whole-mixer skip would mean
-// that once ANY VTR had run, no fader the user typed could be heard until the transport stopped.
-// Only the faders the song is actually driving are its own.
-//
-// Empty is the LOAD-time answer, and the default: nothing is running, so everything is pushed.
+// ⚠️ VTR/VMV, EQM and TIM REPLACE engine state until STOP (`SongcoreHost::stop()` restores it), so a
+// mid-take push of the authored mixer is a WIPE: the fade springs back, the EQ sweep is gone.
+// ⚠️ Per fader, not a blanket skip: MIXER edits push through here too, and a blanket skip would mute
+// every fader edit once any VTR had run. Empty (the default, and the load-time answer) pushes everything.
 struct MixerHeld {
     int  faderTracks = 0;       // bit N: a VTR has moved track N's fader this take
     bool masterFader = false;   // a VMV has moved the master fader
@@ -152,13 +118,9 @@ struct MixerHeld {
     bool delayTime   = false;   // a TIM has taken the delay's echo time off the DELAY screen's
 };
 
-// AppInputDispatcher.pushGlobalEffectsToBackend — the state that lives ONLY in the engine and so
-// survives a project swap: the 128-slot EQ preset bank, the reverb and delay buses (+ their input EQ
-// and the delay→reverb send), and the master EQ. Without it a loaded project's reverb/delay keep
-// sounding like the previous project's until the user nudges each control.
-//
-// Every slot and band is pushed, including cleared (type = 0) ones, so a previous project's presets
-// are fully overwritten rather than partially.
+// The state that lives only in the engine and so survives a project swap: the 128-slot EQ bank, the
+// reverb and delay buses (with their input EQ and the delay→reverb send), and the master EQ. Every
+// slot is pushed, cleared ones included, so a previous project's presets are fully overwritten.
 template <typename Engine>
 void push_global_effects(Engine& engine, const Project& project, MixerHeld held = {}) {
     const int presets = static_cast<int>(project.eqPresets.size());
@@ -175,10 +137,7 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
     engine.setReverbAlgo(project.reverbAlgo);
     engine.setReverbCharacter(project.reverbPreDelay, project.reverbWidth, project.reverbMod);
     engine.setReverbInputEq(project.reverbInputEq);
-    // ⚠️ THE TIME IS SKIPPED WHILE A TIM OWNS IT, AND THE REST OF THE DELAY IS NOT. Same granularity,
-    // and for the same reason, as the per-fader skip above: every EFFECTS edit pushes through here, so
-    // a blanket skip would mean that once any TIM had run, no FDBK or WET the user typed could be heard
-    // until the transport stopped.
+    // ⚠️ Only the TIME is skipped while a TIM owns it — FDBK and WET edits must still be heard.
     if (held.delayTime) {
         engine.setDelayFeedbackWet(project.delayFeedback, project.delayWet);
     } else {
@@ -188,28 +147,22 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
     engine.setDelayCharacter(project.delayPong, project.delayTone, project.delayWobble);
     engine.setDelayInputEq(project.delayInputEq);
     engine.setDelayReverbSend(project.delayReverbSend);
-    // The bank above is safe to re-push at any moment — `setEqBand` writes only the 128-slot store,
-    // and nothing that is USING a slot reads it back. THIS line is the one that reaches the bus.
+    // The bank above is safe to re-push any time (nothing reads a slot back); this line reaches the bus.
     if (!held.masterEq) engine.setMasterEqSlot(project.masterEqSlot);   // -1 = bypass
 }
 
-// AppInputDispatcher.syncVolumesToAudioBackend — the mixer and master bus, then the globals above.
+// The mixer and master bus, then the globals above.
 template <typename Engine>
 void push_mixer(Engine& engine, const Project& project, MixerHeld held = {}) {
     const int tracks = static_cast<int>(project.tracks.size());
     for (int i = 0; i < 8 && i < tracks; ++i) {
         if (!(held.faderTracks & (1 << i)))
             engine.setTrackVolume(i, hex_to_float(project.tracks[i].volume));
-        // ⚠️ SEPARATE FROM THE FADER, and pushed from the same place, because SOLO makes a track's
-        // audibility depend on the other seven: soloing track 3 has to reach the engine for 0,1,2,
-        // 4..7 as well, and only a sweep of all eight can do that.
-        //
-        // ⚠️ AND NEVER GATED BY `held`: on a mute/solo press this line IS the press. The fader beside
-        // it is what the SONG may have moved; the mute is what the user just typed.
+        // ⚠️ Separate from the fader, and swept across all eight: SOLO makes one track's audibility
+        // depend on the other seven. Never gated by `held` — on a mute/solo press this line IS the press.
         engine.setTrackMuted(i, !track_audible(project, i));
     }
-    // The other three channels the mute/solo chord can name, and never gated by `held` for the same
-    // reason the line above is not: on a press of the chord, this line IS the press.
+    // The other channels mute/solo can name; ungated for the same reason.
     engine.setBusMutes(!reverb_return_audible(project), !delay_return_audible(project),
                        !dry_audible(project));
     if (!held.masterFader) engine.setMasterVolume(hex_to_float(project.masterVolume));
@@ -220,22 +173,13 @@ void push_mixer(Engine& engine, const Project& project, MixerHeld held = {}) {
     push_global_effects(engine, project, held);
 }
 
-// ── A MAPPED KNOB'S PUSH: the ONE thing that moved ───────────────────────────────────────────────
+// ── A mapped knob's push: only the thing that moved ──────────────────────────────────────────────
 //
-// ⭐⭐ **THE RIGHT-SIZED VERB, AND HERE IT IS THE WHOLE DESIGN RATHER THAN AN OPTIMISATION.** A knob
-// arrives ~30 times a second (measured), and `push_mixer` above is ~140 engine calls including all
-// 128 EQ slots. Routing a mapped CC through it would spend a screenful of work per byte for one
-// number — so each destination pushes the call that carries it, and nothing else.
-//
-// ⚠️⚠️ **AND IT IS NEVER GATED BY `MixerHeld`**, which is the opposite of what `push_mixer` does two
-// functions up. A mapped knob is a PRESS: the same argument written beside the mute/solo lines there
-// — "on a press this line IS the press". Gate it and a knob mapped to a fader a running `VTR` owns
-// writes the value, moves the number on screen, and is heard by nobody until the transport stops:
-// the "saved and not heard" failure this project has already paid for once. The hand wins, which is
-// also where Ableton and Bitwig land.
-//
-// ⚠️ Returns false for a destination this function does not push — an instrument parameter, whose
-// verb is `push_instrument(id)` (it needs the routing and the sample rate, which are the host's).
+// A knob sends ~30 values a second and `push_mixer` is ~140 engine calls, so each destination pushes
+// just its own setter.
+// ⚠️ Never gated by `MixerHeld`: a mapped knob is a press. Gated, a knob on a fader a VTR owns would
+// change the number on screen and nobody would hear it until STOP. The hand wins.
+// Returns false for an instrument parameter — its push is `push_instrument(id)`, which needs the host.
 template <typename Engine>
 bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scopeIndex) {
     switch (dest) {
@@ -247,9 +191,8 @@ bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scop
             engine.setMasterVolume(hex_to_float(p.masterVolume));
             return true;
 
-        // The four that share one setter, and the three that share the other. A setter taking the
-        // whole group is not a reason to push the group's neighbours too — they are simply the
-        // arguments it asks for, and they are the values already in the project.
+        // Setters that take a group: the neighbours are just its other arguments, at their project
+        // values.
         case MapDestId::REV_DCAY:
         case MapDestId::REV_DAMP:
         case MapDestId::REV_WET:
@@ -284,10 +227,9 @@ bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scop
     }
 }
 
-// RenderController.applyMasterBusForRender. The *ForRender variants reset the module rather than
-// fading it in, so the export matches playback from frame 0 — and the master EQ is put back to the
-// project's slot so an EQM effect in the song animates from the right baseline (and a previous
-// render's EQM override cannot bleed into this one).
+// The master bus for an export: the *ForRender variants reset the module instead of fading it in, so
+// the file matches playback from frame 0. The master EQ goes back to the project's slot so a previous
+// render's EQM cannot bleed in.
 template <typename Engine>
 void apply_master_bus_for_render(Engine& engine, const Project& project) {
     engine.setMasterFx(project.masterBusFx);
@@ -297,9 +239,9 @@ void apply_master_bus_for_render(Engine& engine, const Project& project) {
     engine.setMasterEqSlot(project.masterEqSlot);
 }
 
-// The whole param half in one call: the mixer + globals, then every instrument the given song range
-// uses. This is what makes a render a pure function of the project — see songcore::prepare_render,
-// which calls it right after AudioEngine::resetEffectState() has wiped the chains back to defaults.
+// The whole param half: mixer + globals, then the instruments the song range uses. Called by
+// `prepare_render` right after `resetEffectState()`, which is what makes a render a pure function of
+// the project.
 template <typename Engine>
 void push_project_params(Engine& engine, const Project& project, const Routing& routing,
                          int startRow, int endRow) {
@@ -309,26 +251,12 @@ void push_project_params(Engine& engine, const Project& project, const Routing& 
 }
 
 /**
- * The same thing, for an app that is going to PLAY the project rather than export it — every
- * instrument rather than the used ones, and no `resetEffectState()` first (that would cut off whatever
- * is currently ringing).
+ * The same for PLAYING the project: every instrument, and no `resetEffectState()` (it would cut off
+ * whatever is ringing).
  *
- * ⚠️ **This closes a real hole, and it is worth being precise about what the hole was.** Until Phase 3
- * S4 the ONLY caller of push_project_params in the whole tree was `prepare_render`. So a rendered WAV
- * carried the project's mixer, master bus, reverb, delay, EQ bank and every sampler's drive / filter /
- * crush / loop / sample window — and the SDL shell PLAYING that same project carried none of it. Live
- * playback ran on whatever the engine happened to hold: its own defaults at startup, or the previous
- * project's settings after a load. It was not audible on the default project (whose values happen to be
- * the engine's own), which is exactly why it survived Phase 2 and three Phase-3 sessions.
- *
- * The reason it could survive at all is that it is invisible to the conformance ladder: ptplay compares
- * EVENTS, and none of this is an event; ptvoice compares the calls a NOTE makes, and none of this is
- * made by a note; ptrender compares audio, and ptrender renders — so it goes through the one path that
- * was correct. Nothing in seven tools looks at what the engine holds while the app is merely running.
- *
- * Call it after a project is loaded, and again whenever a screen edits something in it that the engine
- * keeps on its own (the mixer, the master bus, an instrument's params — SongcoreHost::push_params /
- * push_instrument).
+ * ⚠️ Call it after a load and after any edit to state the engine keeps on its own (mixer, master bus,
+ * instrument params). Nothing in the event/voice/render tools observes what the engine holds while
+ * the app is merely running, so a missing call here is heard and not caught.
  */
 template <typename Engine>
 void push_live_params(Engine& engine, const Project& project, const Routing& routing) {
@@ -352,62 +280,45 @@ inline std::string path_extension_lower(const std::string& path) {
     return ext;
 }
 
-// AudioFormats.NATIVE_EXTENSIONS — the formats the bundled decoders handle (dr_mp3 / dr_flac /
-// stb_vorbis / libopus, plus minimp4+FAAD2 for the ISO-BMFF/AAC containers). The container formats
-// (m4a/mp4/m4b/mov/3gp) are all the same box format decoded by decodeMp4File; this is the native,
-// in-place replacement for Android's MediaCodec path — no format is MediaCodec-only any more.
+// The compressed formats the bundled decoders handle (dr_mp3 / dr_flac / stb_vorbis / libopus, and
+// minimp4 + FAAD2 for the m4a/mp4/m4b/mov/3gp box format).
 inline bool is_native_compressed(const std::string& ext) {
     return ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "opus" ||
            ext == "m4a" || ext == "mp4"  || ext == "m4b" || ext == "mov"  || ext == "3gp";
 }
 
-// A WAV's cue points as the model wants them: `Instrument::sliceMarkers` is int64 (Kotlin's
-// `List<Long>`, and Kotlin maps `readCuePoints(path).map { it.toLong() }` at every call site).
+// A WAV's cue points as `Instrument::sliceMarkers` wants them (int64).
 inline std::vector<int64_t> read_cue_markers(const std::string& path) {
     const std::vector<int> cues = read_cue_points(path);
     return std::vector<int64_t>(cues.begin(), cues.end());
 }
 
-// Load one instrument's sample into its engine slot. Returns the FILE's sample rate (> 0) on success,
-// which is what the rate-compensation ratio is derived from, or 0 on failure / unsupported format.
+// Load one instrument's sample. Returns the FILE's sample rate (> 0), from which the rate ratio is
+// derived, or 0 on failure / unsupported format.
 template <typename Engine>
 int load_sample_file(Engine& engine, int instrumentId, const std::string& path) {
     const std::string ext = path_extension_lower(path);
     if (ext == "wav") return engine.loadSampleFromWavFile(instrumentId, path.c_str());
     if (is_native_compressed(ext)) return engine.loadSampleFromCompressed(instrumentId, path.c_str());
-    return 0;   // an unknown / unsupported extension (raw .aac ADTS, video-only container, etc.)
+    return 0;   // unknown or unsupported (raw .aac ADTS, video-only container, …)
 }
 
-// AppInputDispatcher.reloadProjectSamples, without Android: load every instrument's media into the
-// engine and record what the note path cannot derive for itself.
+// Load every instrument's media into the engine and learn what the note path cannot derive: a
+// sample's rate ratio (deviceRate / fileRate) and the SF2 slot a path resolved to. The Routing is an
+// OUTPUT here — songcore opens no file anywhere else.
 //
-// The Routing is an OUTPUT here, not an input. songcore never opens a file, so the two facts it can't
-// know — a sample's rate ratio (deviceRate / fileRate) and the SF2 slot a soundfontPath resolved to —
-// are learned exactly here, where the files are opened. On Android the Kotlin loader learns the same
-// two and pushes them in via SongcoreHost::push_routing: one struct, one producer per platform.
+// ⚠️ The loaders key the rate ratio by `instrument.id` while the note path reads it by `sampleId`.
+// They coincide for every factory-built project (sampleId = slot); the tests pin the current
+// behaviour.
 //
-// Indexing note, preserved from Kotlin bug-for-bug: the loaders key the rate ratio by `instrument.id`
-// while the note path reads it by `instrument.sampleId`. The two coincide for every project the
-// factory builds (sampleId = slot index), and "fixing" it here would silently diverge from the Kotlin
-// engine that tools/ptvoice goldens.
-//
-// NOT ported from the Kotlin loader, deliberately:
-//   • m4a/aac — needs MediaCodec; no native decoder exists (AudioFormats.kt).
-//
-// ⚠️ **WAV cue points → `instrument.sliceMarkers` IS ported now (S6b), and the FILE WINS.** S6a could
-// not port it — there was no cue-point reader — and said so. There is one now (`wav_writer.h`), so this
-// reads them, exactly where Kotlin reads them (`reloadProjectSamples`), and with Kotlin's precedence:
-// for a WAV the file's cue chunk REPLACES whatever markers the .ptp carried, because the audio and its
-// slice boundaries are one artifact and the file is the newer of the two (the editor's CHOP/SAVE writes
-// both, but only the file survives being loaded into a different slot or project). A COMPRESSED source
-// keeps the .ptp's markers untouched — it has no cue chunk to read, and clearing them would delete
-// markers nothing else can restore. Hence the non-const `project`.
+// ⚠️ For a WAV, the file's `cue ` chunk REPLACES the .ptp's slice markers — the audio and its
+// boundaries are one artifact, and the file is the one that travels between slots and projects. A
+// compressed source keeps the .ptp's markers: it has none to read. Hence the non-const `project`.
 template <typename Engine>
 MediaLoadResult load_project_media(Engine& engine, Project& project,
                                    const std::string& base_dir, const std::string& app_root,
                                    Routing& routing) {
-    // Start from a clean native slate so a previous project's PCM and SoundFonts don't accumulate —
-    // the same reason reloadProjectSamples opens with clearAllSamples + clearAllSoundfonts.
+    // A clean slate, so a previous project's PCM and SoundFonts do not accumulate.
     engine.clearAllSamples();
     engine.clearAllSoundfonts();
     routing.reset();
@@ -415,16 +326,10 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
     MediaLoadResult result;
     const float deviceRate = static_cast<float>(engine.getSampleRate());
 
-    // ── One bar over the whole project ───────────────────────────────────────────────────────────
+    // ── One progress bar over the whole project ──────────────────────────────────────────────────
     //
-    // A project's load cost is the SUM over its instruments, and a bar that restarts at every file
-    // says nothing about how long there is left. So each source gets a SLICE of 0..1 and reports
-    // inside it (`pt::LoadSpan`); a slice whose file cannot say how far through itself it is still
-    // places the job, because the slice's own start is a true position.
-    //
-    // ⚠️ Counted over the instruments that HAVE a source rather than over the 128 the pool holds — a
-    // bar that reaches 6% on a full project of eight samples is measuring the wrong thing. Two passes
-    // because the denominator has to exist before the first slice does.
+    // Each source gets a slice of 0..1 (`pt::LoadSpan`), counted over the instruments that HAVE a
+    // source, not the 128-slot pool. Two passes, because the denominator must exist first.
     int sources = 0;
     for (const Instrument& ins : project.instruments) {
         if (ins.id < 0 || ins.id >= POOL_INSTRUMENTS) continue;
@@ -456,8 +361,7 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
             }
             if (pt::load_cancelled()) break;
         } else if (ins.sampleFilePath.has_value()) {
-            // sampleFilePath == null is the single "empty slot" signal — an instrument with no path
-            // loads nothing and its note is dropped at the seam, exactly as on Android.
+            // sampleFilePath == null is the one "empty slot" signal; such a note is dropped at the seam.
             const std::string path = resolve_media_path(*ins.sampleFilePath, base_dir, app_root);
             const auto span = slice();
             const int fileRate = load_sample_file(engine, ins.id, path);
@@ -471,42 +375,28 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
             } else {
                 result.failed++;
             }
-            // ⚠️ A cancelled PROJECT load leaves the document pointing at sources the engine does not
-            // have. It is stopped here rather than carried on with, and the CALLER is what puts the
-            // app back on a coherent document — see the dispatcher's project-load path.
+            // ⚠️ A cancelled load leaves the document naming sources the engine lacks; the CALLER puts
+            // the app back on a coherent document (the dispatcher's project-load path).
             if (pt::load_cancelled()) break;
         }
     }
     return result;
 }
 
-// ─── the instrument operations (core/logic/InstrumentController.kt) ──────────────────────────────
+// ─── The instrument operations ───────────────────────────────────────────────────────────────────
 //
-// The three verbs the INSTRUMENT screen and the pool need that are NOT a plain parameter edit, because
-// they own a SOURCE and freeing it is the engine's business. Kotlin's InstrumentController holds them,
-// together with its ~25 `updateXxx(instrument, value)` setters — and those setters are deliberately NOT
-// ported: they are `instrument.field = v.coerceIn(...)` plus an engine push, and in C++ the module's
-// own `handle_input` does the assignment (as every other screen module already does) and the dispatcher
-// makes ONE push afterwards. A controller class whose entire content is "assign, then push" is a layer
-// that exists only to be a layer, and porting it would put the model mutation somewhere no golden could
-// see it — the pool and MODS modules would then be untestable by ptinput.
+// The verbs that own a SOURCE, whose freeing is the engine's business. Plain parameter edits are not
+// here: the screen module assigns the field and the dispatcher makes one push.
+// The SoundFont path→slot map lives in the ENGINE (de-duped by path, LRU-evicted); do not keep a
+// second copy here.
 //
-// ⚠️ The SoundFont path→slot map is NOT ported either, and must not be: it lives in the ENGINE now
-// (S6b moved the whole SF bank out of jni-bridge.cpp), which already de-dups by path and evicts LRU.
-// Kotlin's `sfSlotMap` is the Kotlin-side shadow of that map. A second copy here would be a second
-// truth about which slot a file is in.
-
-// ⚠️ **THESE ASK THE FILE, NOT THE LOADED SLOT, AND THEY HAVE TO.** A slot holds ONE preset cut out
-// of the file, so it cannot say what else is in there — and the answer is wanted before anything is
-// loaded, and for banks far too large to load at all. Reading the file's index is a few kilobytes and
-// touches no sample data; the engine caches it by path.
+// The preset queries below read the FILE's index, not a loaded slot: a slot holds one preset, and the
+// answer is wanted before anything loads, even for banks too large to load. The engine caches it.
 
 /**
- * The instrument's SoundFont spelled so it opens on THIS install — empty when it has none.
- *
- * ⚠️ **Every engine call below goes through this; none may use `ins.soundfontPath` directly.** The
- * document keeps the path as written, which off another install names nothing here — and the resolved
- * spelling is also what the loader put in the engine's slots, so it is what a slot compare needs.
+ * The instrument's SoundFont path as it opens on THIS install — empty when it has none.
+ * ⚠️ Every engine call below goes through this, never `ins.soundfontPath` directly: the document
+ * keeps the path as written, and the resolved spelling is also what slot compares need.
  */
 inline std::string instrument_soundfont_path(const Instrument& ins, const MediaRoots& roots) {
     if (!ins.soundfontPath.has_value()) return std::string();
@@ -543,13 +433,8 @@ std::string soundfont_preset_name(Engine& engine, const Instrument& ins, const M
     return engine.getSoundfontFilePresetName(path.c_str(), ins.sfBank, ins.sfPreset);
 }
 
-/**
- * Move to the preset at `index` in the file's list — the INSTRUMENT screen's PRESET row.
- *
- * It writes the instrument's bank+preset and nothing else, so scrolling the row stays free. Bringing
- * the SOUND into line is `sync_instrument_soundfont` below, which the UI calls once the row has stopped
- * moving — see its note on why the two are separate.
- */
+/** Move to the preset at `index` in the file's list (the PATCH row). Writes bank+preset only, so
+ *  scrolling stays free; `sync_instrument_soundfont` brings the sound in line once the row settles. */
 template <typename Engine>
 bool set_soundfont_preset_by_index(Engine& engine, Instrument& ins, int index,
                                    const MediaRoots& roots) {
@@ -564,29 +449,15 @@ bool set_soundfont_preset_by_index(Engine& engine, Instrument& ins, int index,
 }
 
 /**
- * Free every SoundFont slot no instrument is pointing at.
+ * Free every SoundFont slot no instrument is routed to.
  *
- * ⚠️⚠️ **A SLOT HOLDS ONE PRESET, SO MOVING THE PATCH ROW ORPHANS THE SLOT THE OLD PRESET IS IN.**
- * `routing.sfSlot[id]` is a single index and the load overwrites it; the preset that was there stays
- * resident with nothing pointing at it, and only LRU eviction — thirteen distinct sounds later — ever
- * reclaims it. Walking a big bank's presets piles up a slotful each, and a slot then emptied by a
- * type change hands back a USED RAM figure that never returns to zero.
- *
- * ⚠️⚠️ **REFERENCE IS THE ROUTING INDEX, AND DELIBERATELY NOT THE PATH THE INSTRUMENT NAMES.** The
- * obvious version — free a slot no instrument's `soundfontPath` matches — compares path SPELLINGS,
- * and the two loaders spell them differently: `load_project_media` opens through
- * `resolve_media_path`, so a project authored elsewhere leaves its slots holding a re-rooted absolute
- * path while the document still holds what the user wrote. Every slot in such a project reads as
- * unreferenced, and the sweep silences the whole song. `routing.sfSlot` is the app's own record of
- * which slot an instrument is using, is written by all three loaders, and carries no spelling.
- *
- * ⚠️ It is one-directional on purpose. A stale index — one left pointing at a slot LRU eviction has
- * since given to somebody else — protects that slot from this sweep, which is the harmless way to be
- * wrong: the cost is a slot not reclaimed, never a slot pulled out from under a sounding voice.
- *
- * It is what `set_instrument_type` and `clear_instrument` used to ask about one slot with a
- * hand-rolled loop over the pool; those callers clear their own index first and the sweep then finds
- * everything the instrument was the last owner of, rather than only the one the index named.
+ * ⚠️ A slot holds one preset, so moving the PATCH row orphans the old one; without this sweep it stays
+ * resident until LRU eviction.
+ * ⚠️ "Referenced" means `routing.sfSlot`, NOT the instrument's path: the loaders spell paths
+ * differently (a project from another install holds re-rooted paths in its slots), and a path
+ * compare would free — and silence — every slot of such a project.
+ * A stale index merely protects a slot from the sweep — a missed reclaim, never a slot pulled from
+ * under a voice.
  */
 template <typename Engine>
 void release_unreferenced_soundfonts(Engine& engine, const Routing& routing) {
@@ -595,25 +466,16 @@ void release_unreferenced_soundfonts(Engine& engine, const Routing& routing) {
         bool inUse = false;
         for (int i = 0; i < POOL_INSTRUMENTS; ++i)
             if (routing.sfSlot[i] == s) { inUse = true; break; }
-        // Empty slots cost nothing here — unloadSoundfont is a no-op on one with no handle.
+        // unloadSoundfont is a no-op on an empty slot.
         if (!inUse) engine.unloadSoundfont(s);
     }
 }
 
 /**
- * Make the engine slot behind instrument `id` hold the sound the instrument now names, loading it if
- * it does not.
- *
- * ⚠️ **A slot holds ONE preset, so changing the PATCH row changes which file has to be resident** —
- * and that is a load, where before it was a number. It is kept OUT of `set_soundfont_preset_by_index`
- * deliberately: a load per scroll step would put a pause between the button and the row on a big bank.
- * The caller lets the row settle first.
- *
- * Cheap and idempotent — it returns immediately when the slot already holds this exact sound, which is
- * every call but the one that follows a real change.
- *
- * ⚠️ The sweep runs only on the branch that actually loaded, which is also the only branch that can
- * have orphaned the preset this instrument was on a moment ago.
+ * Make instrument `id`'s slot hold the sound it now names, loading it if needed. Returns at once
+ * when the slot already holds it.
+ * ⚠️ Kept out of `set_soundfont_preset_by_index`: a load per scroll step would stall the PATCH row.
+ * The sweep runs only after a real load, the only branch that can orphan a preset.
  */
 template <typename Engine>
 bool sync_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& routing,
@@ -632,20 +494,10 @@ bool sync_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& r
 }
 
 /**
- * The same thing the PATCH row wants, without stopping the screen to get it.
- *
- * ⚠️ **A PRESET IS A DECODE.** `sync_instrument_soundfont` above is right for a load the user is
- * already watching a progress bar for — opening a project, applying a preset. It is wrong for the
- * PATCH row, where it costs a frozen frame per step: measured on a 43 MB compressed bank, 37 ms for an
- * average preset and 288 ms for the largest, on a desktop.
- *
- * These two are that load split in time. `request` asks for it and returns immediately; `collect`
- * installs whatever has finished. Between the two the instrument goes on playing the sound it had,
- * which is both correct and what a user expects — the row shows the new name, and the new sound
- * arrives a moment later.
- *
- * Returns false when the engine is busy with another load. **The caller must ask again** — nothing is
- * queued, deliberately: by the time a queue was consulted the row would have moved on again.
+ * The same, without stalling the screen: a preset is a decode (up to ~300 ms on a big bank).
+ * `request` asks and returns at once; `collect` installs what has finished. The instrument keeps
+ * playing its old sound in between.
+ * Returns false when the engine is busy with another load — nothing is queued, so the caller asks again.
  */
 template <typename Engine>
 bool request_instrument_soundfont(Engine& engine, const Instrument& ins, Routing& routing,
@@ -667,12 +519,9 @@ bool request_instrument_soundfont(Engine& engine, const Instrument& ins, Routing
 }
 
 /**
- * Install a finished background load. Call it once a frame; it is free when nothing has finished.
- *
- * Returns the instrument whose slot MOVED, or -1. ⚠️ The caller needs that answer: which slot an
- * instrument plays out of is read when a note is SCHEDULED, two phrases before it is heard, so a sound
- * installed mid-take is inaudible until every note bound to the old slot has played. Only the caller
- * holds the transport, so only the caller can shorten that.
+ * Install a finished background load; call once a frame, free when nothing has finished.
+ * Returns the instrument whose slot MOVED, or -1. ⚠️ The caller needs it: a note's slot is read when it
+ * is SCHEDULED, two phrases ahead, so a mid-take install is unheard until the caller reschedules.
  */
 template <typename Engine>
 int collect_instrument_soundfont(Engine& engine, const Project& project, Routing& routing,
@@ -681,10 +530,8 @@ int collect_instrument_soundfont(Engine& engine, const Project& project, Routing
     if (!engine.collectSoundfontLoad(&id, &slot)) return -1;
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return -1;
 
-    // ⚠️ **THE ROW MAY HAVE MOVED ON WHILE THIS DECODED**, so what was asked for is not necessarily
-    // what is wanted. Checked against the instrument as it is NOW: a slot the document no longer names
-    // is left unrouted, and the sweep below reclaims it. Routing a stale answer would put the
-    // instrument back on a preset the user has already scrolled past.
+    // ⚠️ The row may have moved on while this decoded: check against the instrument as it is NOW. A
+    // slot the document no longer names stays unrouted and the sweep reclaims it.
     const Instrument& ins = project.instruments[static_cast<size_t>(id)];
     const std::string resolved = instrument_soundfont_path(ins, roots);
     bool moved = false;
@@ -698,21 +545,12 @@ int collect_instrument_soundfont(Engine& engine, const Project& project, Routing
 }
 
 /**
- * Change an instrument's TYPE, freeing the source the old type owned.
+ * Change an instrument's TYPE, freeing the source the old type owned (otherwise its PCM or SF data
+ * stays resident with nothing able to play it).
  *
- * The free is the point. Without it a slot toggled SAMPLER→SOUNDFONT keeps its PCM resident (and a
- * SoundFont toggled the other way keeps ~2× its file size in RAM) for a source the UI no longer shows
- * and nothing can ever play again.
- *
- * ⚠️ The SoundFont unload is guarded on SHARING: engine slots are keyed by PATH, so two instruments
- * pointing at one .sf2 hold ONE slot between them. Unloading it because one of them changed type would
- * silence the other.
- *
- * ⚠️ **`engine` is a POINTER and may be null, and that is not defensive padding — it is the contract.**
- * These are MODEL edits that happen to also free engine resources, and gating the model edit on an
- * engine being present would make the whole editing path require an audio device. It does not: the S4
- * harness drives every one of these verbs against a null engine, and `tools/ptshot` renders the screens
- * that show them with no engine in the process at all. Guard the ENGINE CALLS, never the document.
+ * ⚠️ `engine` may be null — that is the contract. These are model edits that also free engine
+ * resources; the editing path must not need an audio device (the headless tests run with
+ * none). Guard the engine calls, never the document.
  */
 template <typename Engine>
 void set_instrument_type(Engine* engine, Project& project, int id, InstrumentType newType,
@@ -721,10 +559,7 @@ void set_instrument_type(Engine* engine, Project& project, int id, InstrumentTyp
     Instrument& ins = project.instruments[id];
     ins.instrumentType = newType;
 
-    // ⚠️ Two INDEPENDENT tests, not an if/else on "is it a SoundFont" — that shape was correct only
-    // while there were exactly two types, and EXTERNAL (MIDI plan §7) owns NEITHER source, so it must
-    // free BOTH. Written this way the two original types take byte-for-byte the same branches they
-    // always did, and a fourth type gets the right answer by construction.
+    // ⚠️ Two independent tests, not an if/else: EXTERNAL owns neither source and must free both.
     if (newType != InstrumentType::SAMPLER) {
         ins.sampleFilePath.reset();
         if (engine) engine->clearSample(id);
@@ -733,10 +568,8 @@ void set_instrument_type(Engine* engine, Project& project, int id, InstrumentTyp
     if (newType != InstrumentType::SOUNDFONT) {
         ins.soundfontPath.reset();
         routing.sfSlot[id] = -1;
-        // ⚠️ The sweep, not this slot: an instrument that has been walked along the PATCH row owns the
-        // sound in `routing.sfSlot[id]` and every preset it passed through on the way, and freeing the
-        // one the index names would leave the rest resident. It also subsumes the sharing guard that
-        // used to live here — a sound another instrument still names is not unreferenced.
+        // ⚠️ The sweep, not just this slot: walking the PATCH row leaves every passed preset resident.
+        // A sound another instrument still names is not unreferenced, so sharing is safe.
         if (engine) release_unreferenced_soundfonts(*engine, routing);
     }
 }
@@ -760,19 +593,17 @@ void clear_instrument(Engine* engine, Project& project, int id, Routing& routing
     if (engine) engine->clearSample(id);
     routing.sampleRateRatio[id] = 1.0f;
 
-    // …and every SoundFont slot the emptied instrument was the last owner of. Same sweep as
-    // set_instrument_type, for the same reason: the PATCH row leaves more than one behind.
+    // …and every SoundFont slot it was the last owner of (see set_instrument_type).
     routing.sfSlot[id] = -1;
     if (engine) release_unreferenced_soundfonts(*engine, routing);
 }
 
-// ─── the preview slots (AudioEngine.clearPreviewSlots) ──────────────────────────────────────────
+// ─── The preview slots ───────────────────────────────────────────────────────────────────────────
 //
-// Two sample slots above the 128-instrument pool are scratch, and neither belongs to a project:
-//   255 — the FILE BROWSER's audition. The file under the cursor, decoded so it can be heard BEFORE
-//         it is committed to a slot, which is the entire reason to browse samples rather than guess.
-//   254 — the SAMPLE EDITOR's source preview (S6b).
-// A real load frees them, because the audition is stale the moment the file it auditioned is loaded.
+// Two sample slots above the 128-instrument pool, owned by no project:
+//   255 — the FILE BROWSER's audition of the file under the cursor.
+//   254 — the SAMPLE EDITOR's source preview.
+// A real load frees them: the audition is stale once the file is loaded.
 
 inline constexpr int PREVIEW_SAMPLE_SLOT = 255;
 inline constexpr int SOURCE_PREVIEW_SLOT = 254;
@@ -784,16 +615,11 @@ void clear_preview_slots(Engine& engine) {
 }
 
 /**
- * Audition the file at `path` — the browser's START. It decodes into slot 255 and plays it at C-4 on
- * the preview lane, so it steals nothing from a song playing underneath.
- *
- * ⚠️ This is the ONE note in the port that does NOT go through `plan_note_on`, and the exception is
- * principled rather than convenient: `plan_note_on` derives a note from an INSTRUMENT, and a file
- * being auditioned in a browser has no instrument behind it — no root, no detune, no filter, no mod
- * slots, not even a pool slot. There is nothing to derive from. What it plays is the file, flat, at
- * C-4, with the sample-rate ratio applied so a 22 kHz file is not auditioned an octave low.
- *
- * Returns the file's sample rate (> 0) on success, 0 if it could not be decoded.
+ * Audition the file at `path` (the browser's START): decoded into slot 255, played at C-4 on the
+ * preview lane so it steals nothing from a playing song.
+ * ⚠️ The one note that skips `plan_note_on` — there is no instrument to derive from. The file plays
+ * flat at C-4, with the rate ratio applied so a 22 kHz file is not an octave low.
+ * Returns the file's sample rate (> 0), or 0 if it could not be decoded.
  */
 template <typename Engine>
 int preview_sample_file(Engine& engine, const std::string& path) {
@@ -812,36 +638,25 @@ int preview_sample_file(Engine& engine, const std::string& path) {
     return fileRate;
 }
 
-// ─── loading a SOURCE into one instrument (Phase 3 S6a — the file browser's whole point) ─────────
+// ─── Loading a source into one instrument ────────────────────────────────────────────────────────
 //
-// `load_project_media` above loads every instrument's source at once, which is what a project LOAD
-// does. These two are the single-slot verbs the file browser needs: the user picked one file, and it
-// goes into one slot. Same engine calls, same Routing writes, same "sampleFilePath is the empty
-// signal" convention — differing only in that they also update the DOCUMENT, because a project load
-// has already read the paths from the file whereas a browser pick is what CREATES them.
+// The file browser's single-slot verbs. Same engine calls and Routing writes as `load_project_media`,
+// but these also write the DOCUMENT — a browser pick is what creates the path.
 
 /**
- * Load a sample (wav / mp3 / flac / ogg / opus) into instrument `id`. True on success.
+ * Load a sample (wav / mp3 / flac / ogg / opus / m4a…) into instrument `id`. True on success.
  *
- * ⚠️ The instrument keeps the ORIGINAL path even for a compressed source — no WAV is written, and the
- * decode is repeated on the next project load. That is Kotlin's contract (`loadSampleFromCompressed`:
- * "the instrument keeps its original path"), and `load_project_media` is the code that honours it.
- *
- * ⚠️ The new source's SLICE MARKERS come from the file, and only a WAV has any — its `cue ` chunk,
- * which is where the sample editor's CHOP and SAVE put them (S6b). A compressed source has no cue
- * chunk, so its markers are CLEARED rather than left behind: the slot now points at different audio,
- * and boundaries measured against the previous sample are worse than none. Kotlin does exactly this
- * (`InstrumentController`: `if (isCompressed) emptyList() else readCuePoints(path)`).
+ * The instrument keeps the ORIGINAL path even for a compressed source; no WAV is written, and the
+ * decode repeats on the next project load.
+ * Slice markers come from a WAV's `cue ` chunk (where CHOP/SAVE put them). A compressed source has
+ * none, so the old markers are CLEARED — they measured different audio.
  */
 template <typename Engine>
 bool load_instrument_sample(Engine* engine, Project& project, int id, const std::string& path,
                             Routing& routing) {
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return false;
 
-    // No engine → no decode, and therefore nothing true to write into the document. Unlike
-    // set_instrument_type (which edits the document and merely also frees engine resources), a LOAD
-    // *is* the engine call: claiming a path we never opened would leave a slot that points at audio
-    // the engine does not have.
+    // No engine, no decode — and a path the engine never opened must not enter the document.
     if (!engine) return false;
 
     const int fileRate = load_sample_file(*engine, id, path);
@@ -857,16 +672,14 @@ bool load_instrument_sample(Engine* engine, Project& project, int id, const std:
     const float deviceRate = static_cast<float>(engine->getSampleRate());
     routing.sampleRateRatio[id] = deviceRate / static_cast<float>(fileRate);
 
-    // The audition the browser was playing while the user scrolled is now stale — a real load has
-    // committed. Kotlin drops it here too (`audioEngine.clearPreviewSlots()`).
+    // The browser's audition is stale now that a real load has committed.
     clear_preview_slots(*engine);
     return true;
 }
 
 /**
- * Load a soundfont into instrument `id`, make the slot a SOUNDFONT, and select the first preset that
- * actually EXISTS in the file — a bank/preset pair the .sf2 does not contain plays silence, and 0/0 is
- * not present in every soundfont.
+ * Load a soundfont into instrument `id`, make it a SOUNDFONT, and select the file's FIRST listed
+ * preset — 0/0 is not in every SF2, and a missing bank/preset plays silence.
  */
 template <typename Engine>
 bool load_instrument_soundfont(Engine* engine, Project& project, int id, const std::string& path,
@@ -874,10 +687,7 @@ bool load_instrument_soundfont(Engine* engine, Project& project, int id, const s
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return false;
     if (!engine) return false;
 
-    // ⚠️ **THE PRESET IS CHOSEN BEFORE THE LOAD, NOT AFTER IT** — a slot holds one sound, so which one
-    // to load has to be known first. The FIRST preset in the file's list, read out of the file's index
-    // rather than out of a handle. Not 0/0: plenty of SF2s do not contain bank 0 preset 0, and a
-    // bank/preset pair the file lacks plays silence.
+    // ⚠️ Chosen BEFORE the load: a slot holds one sound, so which one must be known first.
     int bank = -1, preset = -1;
     if (!engine->getSoundfontFilePresetAt(path.c_str(), 0, &bank, &preset) || bank < 0) return false;
 
@@ -892,9 +702,8 @@ bool load_instrument_soundfont(Engine* engine, Project& project, int id, const s
     ins.sfBank   = bank;
     ins.sfPreset = preset;
 
-    // The sound this slot was on before — a different file, or a preset of this one — is now named by
-    // nobody. Pointing an instrument at a new SoundFont has to release the old one, or every file the
-    // user auditions into the slot stays resident until eviction reaches it.
+    // The sound this slot held before is now named by nobody; free it, or every file auditioned into
+    // the slot stays resident.
     release_unreferenced_soundfonts(*engine, routing);
 
     clear_preview_slots(*engine);
@@ -902,17 +711,12 @@ bool load_instrument_soundfont(Engine* engine, Project& project, int id, const s
 }
 
 /**
- * Apply a loaded .pti to instrument `id` — every parameter, the embedded table if there is one, and
- * the source file the preset names.
+ * Apply a loaded .pti to instrument `id`: every parameter, the embedded table, and the source file.
  *
- * `id` is preserved (a preset saved from slot 3 loads into whichever slot you are standing on), and so
- * is the TABLE it lands in: the embedded rows always go into the DESTINATION instrument's own table,
- * because instrument index == table index is the app's rule (INST01 owns TABLE01) and honouring the
- * preset's stored tableId would have it stomp a table belonging to a different instrument.
- *
- * Returns false only if the SOURCE could not be loaded — the parameters are applied either way, which
- * is Kotlin's behaviour and the useful one: a preset whose sample has been moved should still give you
- * back its filter, its envelope and its mod slots.
+ * `id` is kept, and the embedded rows go into the DESTINATION's own table (instrument N owns table N)
+ * — honouring the stored tableId would stomp another instrument's table.
+ * Returns false only if the SOURCE failed to load; the parameters apply regardless, so a preset whose
+ * sample moved still restores its filter, envelope and mod slots.
  */
 template <typename Engine>
 bool apply_instrument_preset(Engine* engine, Project& project, int id, const InstrumentPreset& preset,
@@ -942,16 +746,14 @@ bool apply_instrument_preset(Engine* engine, Project& project, int id, const Ins
         const std::string sfPath = resolve_media_path(*src.soundfontPath, roots);
         if (!load_instrument_soundfont(engine, project, id, sfPath, routing)) return false;
 
-        // load_instrument_soundfont selected the file's FIRST preset. The one the .pti saved wins —
-        // but only if this file still has it: a preset validated against a different .sf2 (or an .sf2
-        // that has been edited since) would play silence, and falling back to the first is Kotlin's
-        // behaviour and the recoverable one.
+        // The .pti's own preset wins if this file still has it; otherwise the first stays (a missing
+        // one would play silence).
         Instrument& ins = project.instruments[static_cast<size_t>(id)];
         if (engine && ins.soundfontPath.has_value() &&
             engine->getSoundfontFilePresetName(sfPath.c_str(), src.sfBank, src.sfPreset) != "---") {
             ins.sfBank   = src.sfBank;
             ins.sfPreset = src.sfPreset;
-            // the first preset is loaded; this is not it, and the sweep inside drops the one that was
+            // the first preset is loaded and this is not it; the sweep inside drops the first
             sync_instrument_soundfont(*engine, ins, routing, roots);
         }
         return true;
@@ -965,10 +767,7 @@ bool apply_instrument_preset(Engine* engine, Project& project, int id, const Ins
     return true;
 }
 
-/**
- * Build the .pti for instrument `id`. The table travels WITH the preset — but only if it has content,
- * because embedding 16 empty rows in every preset is bloat that says nothing.
- */
+/** Build the .pti for instrument `id`. The table travels with it only if it has content. */
 inline InstrumentPreset make_instrument_preset(const Project& project, int id) {
     InstrumentPreset ip;
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return ip;

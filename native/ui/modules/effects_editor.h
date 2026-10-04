@@ -2,20 +2,14 @@
 
 // ─── EFFECTS ─────────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/EffectModule.kt: the master-bus FX selector, the reverb's own controls,
-// the delay's, and the two input EQ slots. Together with MIXER (which owns the *send levels* into
-// these buses) it is the whole of the project's global audio state.
+// The master-bus FX selector, the reverb's and the delay's controls, and the two input EQ slots.
+// With MIXER (which owns the send levels into these buses) it is the project's global audio state.
 //
-// A FORM, like INSTRUMENT: rows with section headers between them, one column through the master
-// section and two through the reverb's and the delay's, where each send's eight cells read as a pair
-// of columns under a TYPE. The cursor walks EDITABLE cells while the screen draws those plus the
-// headers and the blank lines between them, and `ui/effects_row_layout.h` turns one into the other —
-// which is what lets a header be inserted without renumbering every cursor row, and why both the
-// highlight and the column a cell is drawn in come from the table rather than from the cursor.
+// A FORM, like INSTRUMENT: the cursor walks EDITABLE cells, the screen draws those plus headers and
+// blank lines, and `effects_row_layout.h` maps one onto the other — so a header can be inserted
+// without renumbering cursor rows, and the highlight and a cell's column both come from that table.
 //
-// The one place it is stateful-looking but is not: TIME reads as either a hex byte or a note division
-// ("1/8T"), depending on `delaySync` — the same cell, two vocabularies. B toggles which; see
-// InputDispatcher::on_button_b.
+// TIME reads as a hex byte or a note division ("1/8T") depending on `delaySync`; B toggles which.
 
 #include <string>
 #include <vector>
@@ -44,8 +38,7 @@ public:
     static constexpr int WIDTH  = 620;
     static constexpr int HEIGHT = 392;
 
-    // The editable rows, named. ⚠️ The VALUES live in ui/effects_row_layout.h and are appended-to
-    // there, never renumbered: the recorded EFFECTS cases speak in these numbers.
+    // The editable rows, named. ⚠️ The values live in effects_row_layout.h: append, never renumber.
     static constexpr int ROW_MASTER_TYPE = static_cast<int>(EffectsRow::MASTER_TYPE);  // OTT / DUST
     static constexpr int ROW_REV_DECAY   = static_cast<int>(EffectsRow::REV_DECAY);    // the tail's length
     static constexpr int ROW_REV_DAMP    = static_cast<int>(EffectsRow::REV_DAMP);

@@ -14,10 +14,8 @@
 // and only lifts what is genuinely below it after compression.
 //
 // ⚠️ Keying both halves off the band input instead makes the upward half swing
-// its full range between notes and dump the accumulated boost, times the
-// makeup below, onto the front of the next note: measured +5 dB of peak on a
-// render whose RMS went DOWN, because the limiter then spends a second
-// recovering from each spike.
+// its full range between notes and dump its boost, times the makeup, onto the
+// next note's front — spikes the limiter then spends a second recovering from.
 //
 // makeup runs after both halves, before the band is summed back.
 //
@@ -97,11 +95,9 @@ struct BandCompressor {
 //   mid    -30 dB   66.7:1     4:1      +5.7 dB    1.4 ms / 28 ms
 //   high   -30 dB   limiter    4:1     +10.3 dB    0.7 ms / 15 ms
 //
-// ⚠️ The preset also drives +5.2 dB into every band ahead of its detectors,
-// which is NOT carried here. That drive exists to push a quiet mix over the
-// threshold, and this master bus already sits ~27 dB above it, so all it would
-// add is 5 dB of naked gain through the attack window on top of the makeup —
-// measured as 5 dB of extra peak into the limiter for 0.1 dB of steady state.
+// ⚠️ The preset's +5.2 dB drive into every band is NOT carried: this bus
+// already sits far above the threshold, so it would only add naked gain
+// through the attack window, straight into the limiter.
 //
 // ⚠️ The outer bands are
 // made up ~4.6 dB harder than the middle one, and that asymmetry is what gives
@@ -191,10 +187,9 @@ struct OttModule {
         warmupRemaining = WARMUP_SAMPLES;
     }
 
-    // Called by RenderController before offline render. Resets all DSP state and
-    // enables warmup — the LR4 filters start from zero state so their output is
-    // near-zero for the first ~500 samples; warmup hides this as a dry→wet fade
-    // over 11.6ms rather than a pop at the start of the export.
+    // Called before an offline render. Resets all DSP state and enables warmup — the LR4 filters
+    // start from zero, so their output is near-zero for ~500 samples; warmup hides that as an
+    // 11.6 ms dry→wet fade rather than a pop at the start of the export.
     void resetForRender(float d) {
         depth   = d;
         enabled = (d > 0.f);

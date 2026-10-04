@@ -9,19 +9,10 @@
 
 // Max delay line: 88200 samples per channel — 2 seconds at 44100 Hz, 1.84 at 48000, 0.92 at 96000.
 //
-// ⚠️ **IT IS A SAMPLE COUNT AND EVERY TIME BELOW IS IN SECONDS OR BEATS, so the ceiling is a TIME
-// that moves with the device rate — and both setters CLAMP SILENTLY when they cross it.** The
-// consequences, worth knowing before changing either:
-//   * free mode's documented "00-FF -> 0-2 seconds" is 0-2 s only at 44.1 kHz;
-//   * sync mode's longest subdivisions are unreachable at slow tempos even at 44.1 kHz — 1/1 is four
-//     beats, i.e. exactly 2 s at 120 BPM and longer below it, so at 100 BPM a `00` delay runs 17%
-//     early while the cell still reads `00`. 1/2 breaks the same way below 60 BPM, dotted-1/4 below 45.
-//
-// Growing it is not free: two `DelayLine<float, DELAY_MAX_SAMPLES>` are 706 KB, which is 48% of
-// `sizeof(AudioEngine)`, so doubling the ceiling doubles that. The alternative — offering only the
-// subdivisions the current tempo can actually produce — makes an FX cell's range depend on the
-// project tempo, which collides with "a member's number is its identity". Left as it is deliberately;
-// the constraint belongs in the manual.
+// ⚠️ IT IS A SAMPLE COUNT, so the ceiling is a TIME that moves with the device rate, and both setters
+// CLAMP SILENTLY past it: free mode's "00-FF → 0-2 s" holds only at 44.1 kHz, and sync mode's longest
+// subdivisions are unreachable at slow tempos (1/1 is exactly 2 s at 120 BPM). Growing it costs
+// 706 KB per doubling; limiting subdivisions by tempo would make a cell's range depend on the tempo.
 static constexpr size_t DELAY_MAX_SAMPLES = 88200;
 
 // Subdivision beat fractions (in quarter-note beats) for sync mode.
@@ -41,21 +32,15 @@ static constexpr int kDelaySyncCount = 12;
 static constexpr float kDelayWowHz     = 0.71f;
 static constexpr float kDelayFlutterHz = 5.3f;
 
-// How far the head drifts, as a fraction of the delay TIME, at WOBL FF. Tape speed error is a
-// percentage, so a slapback wobbles proportionally less than a two-second echo — which is what a
-// listener expects, and why this is not an absolute number of samples.
-//
-// ⚠️ **WHAT IS AUDIBLE IS THE PITCH DEVIATION, NOT THE EXCURSION, and the two differ by the LFO
-// RATE**: a modulated read head shifts pitch by `depth × 2πf / rate`, so the fast flutter term does
-// far more of the audible work than the slow wow term at the same depth. At 0.004 this whole control
-// was worth about 15 cents at FF on a 1/8 delay — real, measurable, and reported as "cannot feel it".
+// How far the head drifts, as a fraction of the delay TIME, at WOBL FF — tape speed error is a
+// percentage, so a slapback wobbles less than a long echo.
+// ⚠️ What is audible is the PITCH deviation (`depth × 2πf / rate`), so the fast flutter term does
+// most of the audible work.
 static constexpr float kDelayWobbleFraction = 0.025f;
 
-// ⚠️ **AND A CEILING ON IT, IN TIME**, because the fraction alone runs away: the pitch swing grows
-// with the delay TIME, so the same WOBL FF that is a pleasant warble on a 1/8 echo is most of an
-// octave on a two-second one. Capping the excursion holds the strongest setting at roughly a
-// semitone whatever TIME is set to, while leaving short delays proportional — a slapback still
-// wobbles less than a long echo, which is the part of the tape model worth keeping.
+// ⚠️ AND A CEILING ON IT, IN TIME: the pitch swing grows with TIME, so WOBL FF would be most of an
+// octave on a two-second echo. The cap holds the strongest setting near a semitone while short
+// delays stay proportional.
 static constexpr float kDelayWobbleMaxSeconds = 0.007f;
 
 static constexpr float kDelayTwoPi = 6.28318530717958647692f;
@@ -66,30 +51,18 @@ static constexpr float kDelayToneHighHz = 20000.0f;
 
 // ─── Where the echo starts to sing ───────────────────────────────────────────────────────────────
 //
-// Past `kDelayOscOnset` the loop stops being a plain repeat and becomes a tape machine pushed too
-// far. Three things arrive together and each one is useless without the other two:
+// Past `kDelayOscOnset` the loop becomes a tape machine pushed too far. Three things arrive together:
 //
-//   * ⭐⭐⭐ **A BAND, NOT A ROLL-OFF.** TONE is a low-pass and nothing holds the bottom, so every
-//     pass leaves the bottom of the spectrum untouched while the top is trimmed, and the steady
-//     sound silts up down there: **40% of its energy below 100 Hz, measured, against 10% with the
-//     bottom bounded** — a note with a rumble under it, which is what "self-oscillation" sounded
-//     like the first time it was tried here and why it was thrown out. ⚠️ It does NOT collapse all
-//     the way to DC, and a check written expecting that does not fire (ptdelay C4).
-//   * **Gain past unity, and the band eats most of it.** 25% a repeat nominal at the very top; a
-//     one-pole either side of the note takes most of that straight back, so the howl blooms over
-//     about four seconds. ⚠️ **THE NOMINAL FIGURE IS NOT THE LOOP GAIN and this constant cannot be
-//     judged by it** — at half this value the bloom takes ten seconds and the first three of them
-//     are a DECAY, at nearly double it the ceiling arrives within a second and hears as "loud".
-//   * **A curve that bounds it.** `SoftLimit` is what turns growth into a steady note instead of an
-//     explosion; the steady level is where its gain falls back to 1, which is about −2 dBFS.
+//   * ⭐⭐⭐ A BAND, NOT A ROLL-OFF. TONE is a low-pass, so without a bottom bound the steady sound
+//     silts up below 100 Hz into a rumble. ⚠️ It does not collapse all the way to DC.
+//   * Gain past unity, most of which the band eats back, so the howl blooms over seconds.
+//     ⚠️ The nominal figure is NOT the loop gain; judge this constant by ear, not by its value.
+//   * A curve that bounds it: `SoftLimit` turns growth into a steady note at about −2 dBFS.
 //
-// WOBL is the fourth ingredient and already exists — a howl with the head drifting under it is most
-// of what a listener recognises. It is left as the user's choice rather than forced on here.
+// WOBL is the fourth ingredient, left to the user.
 //
-// ⚠️⚠️ **THIS CHANGES WHAT A HIGH FDBK DOES TO PROJECTS ALREADY ON DISK**, and it is the only cell
-// in this module whose meaning was ever widened rather than added beside. The onset is placed at
-// `E0` so the region is the top eighth of the cell and everything below it — the `60` default very
-// much included — is arithmetic for arithmetic what it always was.
+// ⚠️⚠️ The onset is at `E0`, so only the top eighth of FDBK is affected; below it — the `60`
+// default included — the arithmetic is unchanged.
 static constexpr float kDelayOscOnset       = 224.0f / 255.0f;   // FDBK E0
 static constexpr float kDelayOscHighpassHz  = 180.0f;
 static constexpr float kDelayOscLowpassHz   = 5000.0f;
@@ -97,25 +70,14 @@ static constexpr float kDelayOscHeadroom    = 0.25f;
 
 // ─── How the read head reaches a new TIME ────────────────────────────────────────────────────────
 //
-// It GLIDES there instead of jumping, and the pitch shift everyone knows from a tape echo is not an
-// effect added on top — it is what a read head moving through the buffer at a rate other than 1
-// unavoidably does. Output frame `n` is `buffer[n - D(n)]`, so the playback ratio is `1 - D'(n)`: a
-// shortening delay reads forward faster and pitches UP, a lengthening one pitches DOWN.
+// It GLIDES instead of jumping, and the tape pitch shift is simply what a moving read head does:
+// output frame `n` is `buffer[n - D(n)]`, so the playback ratio is `1 - D'(n)` — a shortening delay
+// pitches UP, a lengthening one DOWN. ⚠️ A jump is a discontinuity: a click per knob step.
 //
-// ⚠️ **A JUMP IS A DISCONTINUITY IN THE OUTPUT**, which is the click a turned TIME knob used to make,
-// and a knob held down is a click per step — the "robotic" stutter, not a resampling artefact.
-//
-// One-pole toward the target, so a small step settles quickly and a big one starts fast and eases in.
-// The pitch deviation therefore decays exponentially — which is the shape of a tape machine settling
-// to a new speed, and the reason the head is left free to move as fast as the jump demands.
-//
-// ⚠️ **A CAP ON THE RATE WOULD FLATTEN THE START OF EVERY BIG MOVE INTO A PLATEAU AT EXACTLY THE
-// CAP'S PITCH** — a held, constant detune before the swoop begins, which is the one part of a tape
-// swoop that does not sound like tape. What is bounded instead is the playback ratio `1 − D'(n)`, and
-// only where it stops being a pitch at all: at ratio 0 the head is pinned to one sample and the line
-// plays DC, below it the buffer plays backwards, and far above it Hermite interpolation is reading
-// faster than the stored audio can describe and returns aliasing rather than a note. Four octaves
-// either way puts that wall outside anything a knob, a cell or a subdivision change can ask for.
+// One-pole toward the target, so the pitch deviation decays exponentially, like a tape settling.
+// ⚠️ A CAP ON THE RATE would flatten every big move into a constant detune before the swoop. Only
+// the playback ratio is bounded, where it stops being a pitch (0 = DC, below = backwards, far
+// above = Hermite aliasing) — four octaves either way.
 static constexpr float kDelayGlideSeconds  = 0.08f;
 static constexpr float kDelayGlideMinRatio = 1.0f / 16.0f;
 static constexpr float kDelayGlideMaxRatio = 16.0f;
@@ -135,16 +97,11 @@ struct DelayModule {
     float    feedback   = 0.375f;
     float    sampleRate = 44100.0f;
 
-    // ⚠️⚠️ **THREE INDEPENDENT SWITCHES, EACH OFF AT ITS DEFAULT, AND THE DEFAULTS ARE THE DELAY THAT
-    // SHIPPED.** They are not a mode between them: any combination is legal, because the TYPE cell on
-    // screen only writes them and never comes back to ask. Each is gated so that at its default the
-    // arithmetic in `process` is the arithmetic that was there before the cell existed — not merely
-    // close to it. That is what lets every project written until now play unchanged.
-    //
-    // ⚠️ **THE REGENERATION GAIN IS FDBK ALONE UNTIL `kDelayOscOnset`, AND BELOW THAT FDBK TOPS OUT
-    // AT EXACTLY 1.0** — the repeats hold but never grow. Above it the gain is deliberately past
-    // unity and the bound is no longer the gain but `SoftLimit`, which is the limiting curve that
-    // clause has always demanded of anything lifting this loop.
+    // ⚠️⚠️ THREE INDEPENDENT SWITCHES, EACH OFF AT ITS DEFAULT — and at its default the arithmetic in
+    // `process` is exactly the plain delay's, so an older project plays unchanged. Any combination
+    // is legal: the TYPE cell only writes them.
+    // ⚠️ Below `kDelayOscOnset` the regeneration gain is FDBK alone, topping out at exactly 1.0 (the
+    // repeats hold, never grow); above it the gain passes unity and `SoftLimit` is the bound.
     bool  pong      = false;   // a side's repeat feeds the OTHER line
     int   toneHex   = 0xFF;    // kept as the CELL, because the coefficient below depends on the rate
     float toneCoeff = 1.0f;    // the one-pole on the line's input; 1 lets everything through
@@ -187,28 +144,19 @@ struct DelayModule {
         float defaultSamples = 1.0f * (60.0f / 120.0f) * sr;
         snapNextTime = true;
         setDelaySamples(defaultSamples);
-        // ⚠️ RE-ARMED AFTER THE DEFAULT IS PLACED, because `resetEffectState` leaves the module at
-        // FACTORY defaults and the project's own time is pushed straight after (a render's push, or
-        // the engine's own replay on a device reopen). That push is still part of the load, so it must
-        // land rather than glide.
+        // ⚠️ RE-ARMED AFTER THE DEFAULT IS PLACED: the project's own time is pushed straight after a
+        // reset, and that push is part of the load, so it must land rather than glide.
         snapNextTime = true;
         toneStateL = toneStateR = 0.0f;
         oscHpL = oscHpR = oscLpL = oscLpR = 0.0f;
         wowPhase = flutterPhase = 0.0f;
-        // ⚠️ Re-derived here, not left to the next push: the cutoff is a fraction of the RATE, and
-        // `reset` is where the rate changes. A caller that forgot would leave the repeats filtered
-        // for a 44.1 kHz device on a machine running at 48.
+        // ⚠️ Re-derived here: the cutoff is a fraction of the RATE, and `reset` is where it changes.
         updateToneCoeff();
         updateOscCoeffs();
     }
 
-    // How far into the singing region FDBK sits, 0 below the onset and 1 at FF.
-    //
-    // ⚠️ **DERIVED FROM `feedback`, NOT PUSHED IN BESIDE IT.** Three call sites write the cell (the
-    // two `setParams*` and the engine's own FDBK setter) and a fourth would be added by the next
-    // screen that touches a delay; a value every one of them had to remember to keep in step is the
-    // shape this project has been bitten by before. `feedback` is exactly `hex / 255`, so nothing is
-    // lost by reading the region back out of it.
+    // How far into the singing region FDBK sits, 0 below the onset and 1 at FF. ⚠️ DERIVED from
+    // `feedback` (exactly hex / 255), so no setter has to keep a second value in step.
     float oscAmount() const {
         return fminf(1.0f, fmaxf(0.0f, (feedback - kDelayOscOnset) / (1.0f - kDelayOscOnset)));
     }
@@ -240,10 +188,8 @@ struct DelayModule {
         setDelaySamples(kDelaySyncBeats[subdivIdx] * (60.0f / bpm) * sampleRate);
     }
 
-    // How far the read head swings, in frames, at the current TIME and WOBL. ⚠️ Public and stated
-    // ONCE because it is the quantity a listener actually hears — the pitch swing is this times the
-    // LFO rate — so anything measuring the wobble must read the same number `process` uses rather
-    // than recomputing it from the constants and drifting away from the code.
+    // How far the read head swings, in frames, at the current TIME and WOBL. ⚠️ Stated once and
+    // public: anything measuring the wobble must read the number `process` uses.
     float wobbleDepthSamples() const {
         const float proportional = wobble * headSamples * kDelayWobbleFraction;
         const float ceiling      = wobble * kDelayWobbleMaxSeconds * sampleRate;
@@ -253,11 +199,8 @@ struct DelayModule {
     // The position the drifting head swings AROUND — the delay time, pulled down just far enough
     // that a full swing still fits inside the line.
     //
-    // ⚠️ **AT THE LONGEST DELAY TIME THERE IS NO ROOM ABOVE TO DRIFT INTO**: TIME is already clamped
-    // to the last sample of the buffer, so a head that only ever swung upward from there had nowhere
-    // to go and the wobble silently vanished at exactly the setting where it is most audible. Moving
-    // the CENTRE down costs a couple of milliseconds off a two-second echo — inaudible, and only
-    // when WOBL is up — where flattening the swing against the clamp would have been heard.
+    // ⚠️ At the longest TIME there is no room above to drift into, so the CENTRE moves down rather
+    // than the swing flattening against the clamp — a couple of ms off a two-second echo.
     float wobbleCentreSamples() const {
         const float ceiling = static_cast<float>(DELAY_MAX_SAMPLES) - 3.0f - wobbleDepthSamples();
         return fminf(headSamples, fmaxf(2.0f, ceiling));
@@ -265,11 +208,9 @@ struct DelayModule {
 
     // The three character cells, together, because they arrive together from the project.
     //
-    // TONE is the brightness of the repeats, 356 Hz–20 kHz on an exponential curve; lower than that
-    // and a few passes leave only mud. ⚠️ **FF IS NOT THE TOP OF THAT CURVE, IT IS THE FILTER
-    // SWITCHED OUT**: a one-pole at 20 kHz still takes a little off every pass, and a delay whose
-    // brightest setting is not the delay that shipped would have no way back to it. FE is 19.7 kHz
-    // and inaudibly below FF — the step is a discontinuity in the code and not in what anyone hears.
+    // TONE is the brightness of the repeats, 356 Hz–20 kHz exponential. ⚠️ FF IS THE FILTER
+    // SWITCHED OUT, not the top of the curve: a one-pole at 20 kHz still takes a little off every
+    // pass. FE is 19.7 kHz — inaudibly below FF.
     void setCharacter(bool pongOn, int toneHexIn, int wobbleHex) {
         pong    = pongOn;
         toneHex = toneHexIn;
@@ -280,12 +221,9 @@ struct DelayModule {
     // Process stereo send bus into stereo wet output. Always 100% wet. Writes to outL/outR.
     // Each channel has its own delay line — panned instruments echo on the correct side.
     //
-    // ⚠️⚠️ **AT THE DEFAULT CELLS THIS LOOP MUST COLLAPSE TO EXACTLY `Read()`, `l + read * feedback`,
-    // `out = read`** — the arithmetic the delay had before it had a character, in that order and with
-    // no term added. The three gates below are what keeps that true, and each one is drawn where the
-    // cell is genuinely OFF rather than merely gentle: TONE FF removes the filter (a one-pole at
-    // 20 kHz is not transparent), WOBL 00 goes back to `Read()` (`ReadHermite` is a different
-    // interpolator even at a standing position), and PONG off leaves each side to itself.
+    // ⚠️⚠️ AT THE DEFAULT CELLS THIS LOOP MUST COLLAPSE TO EXACTLY `Read()`, `l + read * feedback`,
+    // `out = read`. Each gate below sits where its cell is genuinely OFF: TONE FF removes the filter,
+    // WOBL 00 goes back to `Read()` (ReadHermite differs even standing still), PONG off keeps sides apart.
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         if (sleep.skip(inL, inR, numFrames)) {
             // The line is quiet, so a TIME change made meanwhile can land now instead of gliding
@@ -297,27 +235,20 @@ struct DelayModule {
         }
         const bool  drifting = wobble > 0.0f;
         const bool  filtered = toneHex < 0xFF;
-        // ⚠️ Every term below is scaled by this, so at the onset step itself the band, the extra gain
-        // and the curve are all worth ZERO and the loop is still bit for bit the one above the onset
-        // — the same way TONE `FF` and WOBL `00` are drawn where their cell is genuinely off. Without
-        // the fade, `DF` → `E0` would be a one-step jump in tone AND level.
+        // ⚠️ Every term below is scaled by this, so at the onset step the band, gain and curve are
+        // worth ZERO — otherwise `DF` → `E0` would jump in tone and level.
         const float osc     = oscAmount();
         const bool  singing = osc > 0.0f;
         const float oscGain = feedback + kDelayOscHeadroom * osc;
-        // ⚠️ A GLIDE IS THE THIRD WAY THE HEAD CAN BE SOMEWHERE OTHER THAN `Read()`'s position, and it
-        // borrows the wobble's interpolated read rather than adding one of its own. It ends by landing
-        // EXACTLY on the target (below the loop), so a delay whose TIME nobody touches is back to
-        // `Read()` on the very next block and the default arithmetic is untouched.
+        // ⚠️ A GLIDE borrows the wobble's interpolated read. It lands EXACTLY on the target (below),
+        // so an untouched delay is back on `Read()` next block.
         const bool gliding = fabsf(delaySamples - headSamples) > kDelayGlideEpsilon;
         const bool moving  = drifting || gliding;
         const float glideCoeff  = 1.0f / (kDelayGlideSeconds * sampleRate);
         const float headAtStart = headSamples;
 
-        // The drift is evaluated at the block's two ends and interpolated across it, the way the
-        // track mute gate is, and it costs two sines per block rather than two per frame. ⚠️ The
-        // term that bounds this is the FLUTTER, not the wow: at 5.3 Hz a 256-frame block is 3% of a
-        // cycle, where a straight line between the ends is the curve. Raising kDelayFlutterHz much
-        // further is what would make this an approximation worth worrying about.
+        // The drift is evaluated at the block's two ends and interpolated across it (two sines per
+        // block). ⚠️ The FLUTTER bounds that: at 5.3 Hz a 256-frame block is 3% of a cycle.
         const float wobbleCentre = wobbleCentreSamples();
         float drift = 0.0f, driftStep = 0.0f;
         if (drifting && numFrames > 0) {
@@ -386,15 +317,9 @@ struct DelayModule {
                 regenR += osc * (daisysp::SoftLimit(regenR) - regenR);
             }
 
-            // ⚠️⚠️ **WHERE THE INPUT ENTERS IS WHAT MAKES A PING-PONG A PING-PONG — the cross-feed
-            // above is not enough on its own.** The send bus is STEREO but a CENTRED instrument
-            // arrives with L == R, so PONG on symmetric input would be arithmetic that cancels — the
-            // two lines holding identical audio for ever, and the bounce never happening. Summing to
-            // mono and injecting into ONE line is what makes the bounce a property of the EFFECT
-            // rather than of how the source happened to be panned.
-            //
-            // ⚠️ So PONG deliberately DISCARDS the source's pan. That is what the name promises, and
-            // PONG off is where a panned echo still lives.
+            // ⚠️⚠️ WHERE THE INPUT ENTERS MAKES A PING-PONG: a centred instrument arrives with L == R,
+            // so cross-feed alone would bounce nothing. PONG sums to mono into ONE line — deliberately
+            // discarding the source's pan; PONG off is where a panned echo lives.
             float writeL = (pong ? (l + r) * 0.5f : l) + regenL;
             float writeR = (pong ? 0.0f : r) + regenR;
 

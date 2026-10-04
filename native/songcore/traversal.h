@@ -3,14 +3,9 @@
 
 // ─── Static song traversal ────────────────────────────────────────────────────────────────────────
 //
-// 1:1 port of core/logic/SongTraversal.kt: the shared song → chain → phrase → step walk used for
-// STATIC analysis of the song (e.g. "which instruments does this row range use?"), applying the same
-// bounds guards every time so the copies can't drift. This is deliberately NOT the live scheduler's
-// walk (that goes by playback position / HOP / checkpoints — songcore S4) and NOT CLEAN's whole-song
-// collector (which counts muted tracks as used and gathers more ref kinds).
-//
-// SongTraversal.kt is the executable spec. tools/ptresolve proves collect_used_instruments against a
-// JVM golden over the real /tools/testdata projects.
+// The shared song → chain → phrase → step walk for STATIC analysis ("which instruments does this row
+// range use?"), with the bounds guards in one place. Not the live scheduler's walk (playback position,
+// HOP, checkpoints), and not COMPACT's collector (which counts muted tracks and more ref kinds).
 
 #include <algorithm>
 #include <functional>
@@ -20,14 +15,13 @@
 
 namespace songcore {
 
-// True when a step carries no note. Mirrors PhraseStep.isEmpty().
+// True when a step carries no note.
 inline bool step_is_empty(const PhraseStep& step) { return step.note == Note::EMPTY(); }
 
-// Visit every phrase step in song rows [start_row, end_row] (inclusive) across all 8 tracks, applying
-// the same guards each time: a track row past the end, or one pointing at an empty chain/phrase slot,
-// is skipped; inaudible tracks (muted, or unsoloed while another is soloed) are skipped unless
-// include_inaudible. ⚠️ RENDER-SIDE ONLY — the live path pushes every instrument, and its scheduler
-// does not consult audibility at all (mute is a mixer gate there). Mirrors forEachStepInSongRange().
+// Visit every phrase step in song rows [start_row, end_row] across all 8 tracks. Rows past a track's
+// end and empty chain/phrase slots are skipped; inaudible tracks too, unless include_inaudible.
+// ⚠️ RENDER-SIDE ONLY — live playback pushes every instrument and never consults audibility (mute is a
+// mixer gate there).
 template <typename Action>
 inline void for_each_step_in_song_range(const Project& project, int start_row, int end_row,
                                         bool include_inaudible, Action action) {
@@ -48,9 +42,7 @@ inline void for_each_step_in_song_range(const Project& project, int start_row, i
 }
 
 // Instrument IDs (0..127) used by any non-empty step in song rows [start_row, end_row]. Muted tracks
-// are skipped (matching the render paths); out-of-pool instrument bytes from older files are ignored.
-// Mirrors Project.collectUsedInstruments(). std::set keeps the ids sorted+unique, like the Kotlin Set
-// once sorted for the golden.
+// are skipped, as in the render; out-of-pool instrument bytes are ignored. Sorted and unique.
 inline std::set<int> collect_used_instruments(const Project& project, int start_row, int end_row) {
     std::set<int> used;
     int n = static_cast<int>(project.instruments.size());
@@ -73,14 +65,9 @@ inline std::set<int> collect_used_instruments(const Project& project, int start_
 
 // ─── Which mixer track a chain or a phrase belongs to ────────────────────────────────────────────
 //
-// The arrangement is the answer, not a remembered cursor: a chain reached by scrolling the 00..FF
-// pool was never entered from a song cell, so there is nothing to remember and a memory-only answer
-// would leave it on track 0. `preferred` is a TIE-BREAK only — it is honoured just when it is one of
-// the tracks that actually hold the chain, so a stale one can never route a chain somewhere it does
-// not live.
-//
-// A chain in no track at all answers 0: the pre-existing behaviour, and the arm a project that has
-// never been arranged still takes.
+// The arrangement answers, not a remembered cursor — a chain reached from the pool was never entered
+// from a song cell. `preferred` only breaks a tie among tracks that really hold the chain. A chain in
+// no track answers 0.
 
 /** The track holding `chainId`; `preferred` wins if it is one of them, else the lowest, else 0. */
 inline int track_of_chain(const Project& project, int chainId, int preferred = -1) {
@@ -97,12 +84,9 @@ inline int track_of_chain(const Project& project, int chainId, int preferred = -
 }
 
 /**
- * The track holding `phraseId`, asked through the chain the user is looking at.
- *
- * The chain on screen is consulted FIRST and its answer is that chain's — the same phrase may sit in
- * five chains, and the one you are inside is the only one with a gesture behind it. Only when the
- * phrase is not in that chain does this fall back to the first place in the arrangement that reaches
- * it, in (track, song row, chain row) order.
+ * The track holding `phraseId`, asked through the chain on screen first — the same phrase may sit in
+ * several chains, and only the one you are inside reflects a gesture. Otherwise the first place in
+ * the arrangement that reaches it, in (track, song row, chain row) order.
  */
 inline int track_of_phrase(const Project& project, int phraseId, int currentChainId,
                            int preferred = -1) {
@@ -128,14 +112,9 @@ inline int track_of_phrase(const Project& project, int phraseId, int currentChai
 
 // ─── Walking the song grid ───────────────────────────────────────────────────────────────────────
 //
-// The pure half of song-relative navigation (SETTINGS → NAV = SONG), where B+DPAD walks the
-// ARRANGEMENT instead of the 00..FF pool — so the chain in front of you is always one the song
-// actually plays. Project in, index out: no AppState, no cursor, no screen.
-//
-// ⭐ THEY ALL CLAMP. Nothing to that side means the index comes back unchanged, which the caller
-// spends as "the press did nothing". A song row is eight cells wide, and wrapping across it would
-// read as a mis-press rather than as a shortcut. The one exception is spelled out loud: the `wrap`
-// argument on `next_chain_row`, used only by the plain UP/DOWN spill.
+// The pure half of song-relative navigation (SETTINGS → NAV = SONG): B+DPAD walks the ARRANGEMENT,
+// not the 00..FF pool. They all CLAMP — nothing that way returns the index unchanged ("the press did
+// nothing"). The one exception is `wrap` on `next_chain_row`, for the plain UP/DOWN spill.
 
 /** The chain in song cell (track, row), or −1. ⚠️ A track's chainRefs may be SHORTER than the song. */
 inline int chain_at(const Project& project, int track, int songRow) {
@@ -153,12 +132,9 @@ inline int phrase_at(const Project& project, int chainId, int chainRow) {
 }
 
 /**
- * The nearest track to the side of `track` whose cell in song row `songRow` holds a chain — and,
- * when `requirePhraseAtRow >= 0`, whose chain also holds a phrase at that chain row.
- *
- * ⭐ ONE PREDICATE, TWO REASONS. Stepping sideways on the PHRASE screen skips a track both because
- * its song cell is empty and because the chain sitting there has no phrase at the row you are on.
- * Written as two tests they drift; written as one they cannot.
+ * The nearest track to the side of `track` whose song cell in `songRow` holds a chain — and, when
+ * `requirePhraseAtRow >= 0`, whose chain holds a phrase at that row. One predicate for both reasons
+ * the PHRASE screen skips a track.
  */
 inline int next_song_cell_h(const Project& project, int songRow, int track, int delta,
                             int requirePhraseAtRow = -1) {
@@ -173,11 +149,8 @@ inline int next_song_cell_h(const Project& project, int songRow, int track, int 
 }
 
 /**
- * The nearest song row above/below `songRow` whose cell in track `track` holds a chain. GAPS ARE
- * SKIPPED — an empty bar in the middle of a column is walked straight over rather than stopped at.
- *
- * The bound is the track's OWN chainRefs length rather than the screen's 256 rows: a cell past the
- * end of that vector is empty by construction, so there is nothing out there to find.
+ * The nearest song row above/below `songRow` whose cell in `track` holds a chain; gaps are skipped.
+ * Bounded by the track's own chainRefs length — past it every cell is empty.
  */
 inline int next_song_cell_v(const Project& project, int songRow, int track, int delta) {
     if (track < 0 || track >= static_cast<int>(project.tracks.size())) return songRow;
@@ -189,12 +162,8 @@ inline int next_song_cell_v(const Project& project, int songRow, int track, int 
 }
 
 /**
- * The nearest row of `chainId` above/below `fromRow` that holds a phrase.
- *
- * `wrap` is the whole difference between the two gestures that call this. B+UP/DOWN on the PHRASE
- * screen CLAMPS — vertical movement never leaves the chain — while plain UP/DOWN spilling off step
- * 00 or 0F wraps to the chain's last/first filled row, so "rows wrap" stays true one level up.
- * Returns `fromRow` when the chain holds no other filled row, which both callers spend as "stay".
+ * The nearest row of `chainId` above/below `fromRow` holding a phrase. B+UP/DOWN CLAMPS; the plain
+ * UP/DOWN spill off step 00 or 0F WRAPS (`wrap`). Returns `fromRow` when nothing else is filled.
  */
 inline int next_chain_row(const Project& project, int chainId, int fromRow, int delta,
                           bool wrap = false) {

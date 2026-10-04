@@ -1,26 +1,19 @@
-// PocketTracker — the ANDROID entry point. Everything in this file is platform residue.
-//
-// Convergence C3, and the file `app.h`'s diagram has had a placeholder for since C0.2. It is the
-// sibling of `main.cpp`: the shared shell (`app.cpp`) boots, runs and tears down identically on both,
-// and what differs is exactly the list C0.2 named. Set the two side by side and the difference IS the
-// port:
+// PocketTracker — the ANDROID entry point. Everything in this file is platform residue; `app.cpp`
+// boots, runs and tears down identically on both platforms. Side by side with `main.cpp`:
 //
 //   main.cpp (desktop/handheld)              android-main.cpp (this file)
 //   ─────────────────────────────────────    ──────────────────────────────────────────────────────
 //   argv: project, media dir, app root       argv: app root, then filesDir — both from SDLActivity
-//   SIGTERM/SIGINT → a flag the loop polls   nothing (⚠️ C4 — see the terminate_requested note below)
+//   SIGTERM/SIGINT → a flag the loop polls   nothing (see the terminate_requested note below)
 //   SDL_Init / SDL_Quit, here                SDL_Init here too; SDLActivity owns the surface, not this
-//   SdlAudioEngine                           OboeAudioEngine  ← the whole of C3's audio work
+//   SdlAudioEngine                           OboeAudioEngine
 //   StdFileSystem over the app root          SafFileSystem — the app holds no storage permission
 //   default_app_root(), one root twice       two roots from Java: media tree + app-private files
 //   PlatformCaps::sdl(debug), console on     PlatformCaps::converged(...) — see where it is set below
 //
-// ⚠️ **NO `SDL_MAIN_HANDLED` HERE, AND THAT IS THE OPPOSITE OF `main.cpp`.** SDL_main.h defines
-// `SDL_MAIN_NEEDED` on `__ANDROID__` and with it `#define main SDL_main`, so the `main` below is
-// compiled as `SDL_main` — which is the symbol `SDLActivity` looks up by name (`getMainFunction()`)
-// with `dlsym` in the last library `getLibraries()` names. Define SDL_MAIN_HANDLED as the desktop
-// does and the rename does not happen, the symbol is not there, and the app dies at start-up with a
-// message about a missing entry point rather than anything about this file.
+// ⚠️ NO `SDL_MAIN_HANDLED` HERE, THE OPPOSITE OF `main.cpp`: on `__ANDROID__` SDL_main.h does
+// `#define main SDL_main`, the symbol `SDLActivity` looks up with `dlsym`. Define SDL_MAIN_HANDLED
+// and the app dies at start-up with a missing-entry-point message.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -35,8 +28,8 @@
 #include "app.h"
 #include "button_feedback.h"
 #include "saf-filesystem.h"    // the ONLY ui::FileSystem here; Android-only by construction
-#include "midi-in-android.h"    // the MIDI INPUT port  (MIDI plan E5);  compiles to nothing elsewhere
-#include "midi-out-android.h"   // the EXTERNAL MIDI port (MIDI plan B2b); compiles to nothing elsewhere
+#include "midi-in-android.h"    // the MIDI INPUT port;    compiles to nothing elsewhere
+#include "midi-out-android.h"   // the EXTERNAL MIDI port; compiles to nothing elsewhere
 
 #include <android/log.h>
 #include <jni.h>
@@ -56,52 +49,25 @@ namespace {
 
 constexpr const char* kLogTag = "PocketTrackerSDL";
 
-// ⚠️ **THE APP ROOT COMES FROM JAVA, AND IT IS NOT A STYLE CHOICE.** `ui::default_app_root()` walks
-// `POCKETTRACKER_HOME` → `XDG_DATA_HOME` → `HOME`, and on Android all three miss — so it would fall
-// through to the RELATIVE path "PocketTracker", i.e. beside whatever the process's cwd happens to be.
-// That is character-for-character the A1 bug, which was found on Windows for the same reason: the
-// platform nobody resolved a root for is already broken. Only Java knows where
-// `Environment.getExternalStoragePublicDirectory(DIRECTORY_DOCUMENTS)` actually is on this device and
-// this OS version, so the activity resolves it and passes it down through `getArguments()`.
-//
-// The fallback below exists so a bring-up cannot be blocked by a missing argument, and it SAYS SO in
-// the log rather than quietly guessing — a silently wrong root would present as "all my projects are
-// gone", which is the worst possible way to discover an argv change.
+// ⚠️ THE APP ROOT COMES FROM JAVA: `ui::default_app_root()` walks POCKETTRACKER_HOME → XDG_DATA_HOME
+// → HOME, all of which miss on Android, falling through to a RELATIVE path beside the cwd. Only Java
+// knows where DIRECTORY_DOCUMENTS is, so the activity passes it through `getArguments()`. The fallback
+// keeps a bring-up going and SAYS SO in the log — a silently wrong root reads as "my projects are gone".
 constexpr const char* kFallbackAppRoot = "/storage/emulated/0/Documents/PocketTracker";
 
 // ─── stdout/stderr → logcat ───────────────────────────────────────────────────────────────────────
 //
-// The shared shell's boot banner and its once-a-second status line are THE bring-up instrument — the
-// half of this app that answers "did my samples load?", "where did it put its folders?", "did it find
-// my crash file?". On Android they go to a stdout that is `/dev/null` unless somebody has set
-// `log.redirect-stdio`, which needs root on most devices. So the two lessons this project has already
-// paid for both apply here and neither is satisfied by default: `main.cpp`'s `setvbuf` note (a
-// buffered stdout loses everything when the process is killed, which is how a bring-up ends), and that
-// an instrument not pointed at the thing tells you nothing about it.
+// The boot banner and status line are the bring-up instrument, and on Android stdout is /dev/null
+// unless `log.redirect-stdio` is set (root). A pipe-and-pump sends them to logcat, unbuffered.
 //
-// Twenty lines of pipe-and-pump fixes both, and it is platform residue in the strictest sense —
-// nothing above this file knows it happened.
+// ⚠️ AND TO A FILE, because logcat needs a PC and developer mode; a user reporting a boot problem can
+// reach `pockettracker-log.txt` with any file manager. TRUNCATED at start and capped.
 //
-// ⚠️ **AND THE SAME LINES GO TO A FILE, because logcat is unreachable to the person who has the bug.**
-// Reading logcat needs a PC, developer mode and USB debugging; a user reporting "it opened without the
-// on-screen buttons" has none of those, and that report is about the boot itself — the one moment
-// nobody can be talked through capturing live. So the pump tees into `pockettracker-log.txt`, which the
-// user reaches with any file manager and attaches to a mail. It is TRUNCATED at start (a session log,
-// not a history) and capped, so it cannot grow into the user's storage.
-//
-// ⚠️⚠️ **IT IS WRITTEN TWICE OVER, TO TWO DIFFERENT PLACES, AND BOTH ARE REQUIRED.** The app holds no
-// storage permission, so at the moment the first line is written the only directory it can certainly
-// write to is `filesDir` — which the user cannot reach. The granted tree, which they CAN reach, does not
-// exist yet on a fresh install and is not known until the filesystem has asked Java for it, several
-// screens of boot later. So the log opens in `filesDir` at once and RELOCATES into the granted tree as
-// soon as there is one, replaying everything written so far (`relocate_log_file`). Neither half alone
-// satisfies the requirement this file has to meet — that a user with no PC can find it and attach it
-// to a mail — and the app is unusable until a folder is granted anyway, so the reachable copy always
-// covers the sessions that can have a bug worth reporting.
-//
-// ⚠️ `getExternalFilesDir()` is not the answer to this and never was: Android 11+ hides `Android/data`
-// from the system picker and from most file managers, so it is PC-reachable and device-unreachable —
-// the wrong half of the problem.
+// ⚠️⚠️ WRITTEN TO TWO PLACES, BOTH REQUIRED: at the first line the only certainly writable directory
+// is `filesDir` (unreachable to the user); the granted tree (reachable) is known only later in boot.
+// So the log opens in `filesDir` and RELOCATES into the granted tree once there is one, replaying
+// what was written (`relocate_log_file`). `getExternalFilesDir()` is no answer: Android 11+ hides
+// `Android/data`.
 std::mutex  g_logMutex;           // g_logFile is swapped on the SDL thread and written on the pump's
 FILE*       g_logFile     = nullptr;   // null = logcat alone
 size_t      g_logFileSize = 0;
@@ -109,14 +75,10 @@ std::string g_logPath;            // what g_logFile is open on; "" = nothing ope
 constexpr size_t      kLogFileCap  = 512 * 1024;
 constexpr const char* kLogFileName = "pockettracker-log.txt";
 
-// Everything written so far, held so the relocation can carry it across.
-//
-// ⚠️ **IN MEMORY AND NOT RE-READ OFF THE FIRST FILE, because of the pump.** The lines the relocation
-// most needs to carry are the ones printed microseconds before it (`saf: N granted folder(s)`), and
-// those are still in the pipe: the pump thread turns them into writes whenever it is scheduled. Reading
-// the file back would race that and drop exactly the lines that say why the boot went the way it did.
-// Appended under the same lock as the write, so a line is either in here (and carried) or arrives after
-// the swap (and goes straight to the new file) — never neither, never both.
+// Everything written so far, held so the relocation can carry it across. ⚠️ In memory, not re-read
+// off the first file: the lines printed just before the relocation are still in the pipe, and a
+// re-read would race the pump. Appended under the write's lock, so each line is carried or goes to
+// the new file — never neither, never both.
 std::string      g_logCarry;
 bool             g_logCarrying = true;
 constexpr size_t kLogCarryCap  = 64 * 1024;   // the boot is a few KB; this is slack, not a budget
@@ -198,18 +160,11 @@ void* log_pump(void* arg) {
     return nullptr;
 }
 
-// ─── button feedback → the surviving thin Kotlin managers (convergence D) ───────────────────────────
+// ─── button feedback → the thin Kotlin managers ──────────────────────────────────────────────────
 //
-// The ONE outward JNI hook the Phase-E plan names: the shared touch layer decides WHEN a virtual
-// button clicks (sdl-touch.cpp), and this shim carries that decision across to Java, where the
-// SoundPool and the Vibrator live. It calls a single method on the running `SdlActivity` — `pt-ui` and
-// the shared shell never learn the word `jni`; only this file, which is already the platform residue.
-//
-// ⚠️ Runs on the SDL thread (the frame loop), NOT the Java UI thread. `SDL_AndroidGetJNIEnv` attaches
-// this thread to the JVM and hands back its env; the Kotlin side is what marshals the haptic to the UI
-// thread where it needs to be (SoundPool is thread-safe and stays put for lowest latency). The method
-// is looked up by NAME, so it does not exist at C++ compile time and a mismatch degrades to silence
-// with one log line rather than a crash — hence the null-and-exception handling on every JNI call.
+// The shared touch layer decides WHEN a virtual button clicks (sdl-touch.cpp); this shim carries it
+// to Java, where SoundPool and the Vibrator live. Runs on the SDL thread; `SDL_AndroidGetJNIEnv`
+// attaches it. The method is looked up by NAME, so a mismatch degrades to silence with one log line.
 class AndroidButtonFeedback : public ptshell::ButtonFeedback {
 public:
     void play(pt::ui::Button button, bool down, const ptshell::ButtonFeedbackSettings& s) override {
@@ -256,15 +211,12 @@ private:
     jmethodID mid_       = nullptr;
 };
 
-// ─── does a physical game controller exist? → SdlActivity (convergence D) ────────────────────────────
+// ─── does a physical game controller exist? → SdlActivity ────────────────────────────────────────
 //
-// The shared layout gate (app.cpp `useTouch`) must answer "is there a real pad?" the way the Compose app
-// did — and on Android SDL cannot, because `isDeviceSDLJoystick` counts the emulator's keyboard as a
-// controller (see app.h `physicalGamepadPresent`). Only `InputDevice.getSources()` tells them apart, and
-// it is Java-only, so this JNIs into `SdlActivity.hasPhysicalGameButtons()`, which runs Kotlin's exact
-// SOURCE_GAMEPAD/SOURCE_JOYSTICK test. Resolved by name each call — null/exception-safe, degrading to
-// "no pad" (the touch UI) rather than a crash, exactly like AndroidButtonFeedback above. Cheap: the frame
-// loop only asks at boot and when SDL reports a controller add/remove.
+// On Android SDL counts the emulator's keyboard as a controller (app.h `physicalGamepadPresent`);
+// only `InputDevice.getSources()` tells them apart, so this asks `SdlActivity.hasPhysicalGameButtons()`
+// (SOURCE_GAMEPAD/SOURCE_JOYSTICK). By name, null/exception-safe, degrading to "no pad" (the touch
+// UI). Asked only at boot and on a controller add/remove.
 bool android_has_physical_gamepad() {
     JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
     if (!env) return false;
@@ -289,16 +241,10 @@ bool android_has_physical_gamepad() {
 
 // ─── may the screen rotate into landscape? → SdlActivity ─────────────────────────────────────────
 //
-// The live half of the orientation lock. `SDL_HINT_ORIENTATIONS` (set below, at window creation) is read
-// ONCE, so it can only ever describe the pad situation at launch — and unplugging a pad mid-session is
-// exactly the case that needs answering: the app returns to the portrait skin while the activity, still
-// holding the launch-time permission, stays in landscape and draws the letterbox touch panels.
-//
-// So the shell's layout gate calls this on every change, and Java sets `requestedOrientation`. Android
-// re-orients the activity itself when the current one stops being allowed, which is what turns a
-// physically-horizontal phone back upright the moment the pad goes away.
-//
-// Same by-name/exception-safe shape as the hook above: a missing method logs and changes nothing.
+// The live half of the orientation lock: `SDL_HINT_ORIENTATIONS` is read once, so a pad unplugged
+// mid-session would leave the activity in landscape over the portrait skin. The layout gate calls
+// this on every change and Java sets `requestedOrientation`; Android re-orients when the current
+// one stops being allowed. A missing method logs and changes nothing.
 void android_set_landscape_allowed(bool allowed) {
     JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
     if (!env) return;
@@ -354,14 +300,9 @@ void android_stop_playback_service() {
 
 // ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
 //
-// ⚠️ **THE ONE THING A LAYOUT BUG REPORT NEEDS, AND THE ONE THING NOTHING RECORDED.** `useTouch` is
-// `touchCapable && !physicalPad`, and when a phone lands on FULL there is no way to tell which half
-// was wrong — `hasPhysicalGameButtons()` logs only when it FINDS a pad, so the failing case is the
-// silent one. This prints the whole enumeration Java saw, through `printf` so the pipe tees it into
-// `pockettracker-log.txt` (a `Log.i` from Kotlin reaches logcat only, and logcat needs a PC).
-//
-// Once, at boot, on the same by-name/exception-safe pattern as the hook above: a missing method
-// degrades to one line saying so, never a crash.
+// ⚠️ THE ONE THING A LAYOUT BUG REPORT NEEDS: `useTouch` is `touchCapable && !physicalPad`, and
+// `hasPhysicalGameButtons()` logs only when it FINDS a pad. This prints the whole enumeration
+// through `printf`, so it reaches the log file (Kotlin's `Log.i` reaches logcat only).
 void android_log_input_devices() {
     JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
     if (!env) { std::printf("input:   no JNI env - cannot enumerate\n"); return; }
@@ -411,11 +352,8 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
     int pfd[2];
     if (pipe(pfd) != 0) return;  // No console is a degraded bring-up, not a failure to launch.
 
-    // ⚠️ **KEEP THE ORIGINALS, because the redirect has to be UNDOABLE.** If the pump does not start,
-    // stdout is a pipe with nobody reading it: the banner plus the once-a-second status line fills
-    // the 64 KB buffer in minutes and the next `printf` blocks the SDL thread **forever** — an app
-    // that hangs with no log, no crash and nothing to attribute it to. The `pipe()` failure above
-    // already decided what the acceptable degradation is, and this is how that path reaches it too.
+    // ⚠️ KEEP THE ORIGINALS, so the redirect is UNDOABLE: with no pump, stdout is a pipe nobody
+    // reads, which fills its 64 KB in minutes and blocks the SDL thread's next `printf` forever.
     const int savedOut = dup(STDOUT_FILENO);
     const int savedErr = dup(STDERR_FILENO);
 
@@ -479,14 +417,9 @@ int audio_manager_property(JNIEnv* env, jobject audioManager, jclass amClass,
 /**
  * The device's own output rate and burst size, for Oboe to open at instead of guessing.
  *
- * ⚠️ **ONLY JAVA KNOWS THESE**, which is why the query lives in this file rather than in the audio
- * backend: `AudioManager` is the only thing on Android that will name the rate the HAL mixes at and
- * the block size it hands out. Asking for anything else costs a resampler, and a resampled stream
- * commonly loses the fast path — the largest single cost on this platform.
- *
- * Both come back 0 when the platform declines, on an old device, or if anything in the chain is
- * missing; the backend then leaves Oboe's own defaults alone. Failure is quiet on purpose — this is
- * a hint that makes audio faster, never a thing the app needs to start.
+ * ⚠️ ONLY JAVA KNOWS THESE: `AudioManager` names the rate the HAL mixes at and the block size it
+ * hands out; asking for anything else costs a resampler, which commonly loses the fast path. Both
+ * 0 when the platform declines; the backend then leaves Oboe's defaults alone.
  */
 void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
     sampleRate = framesPerBurst = 0;
@@ -495,10 +428,8 @@ void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
     jobject activity = (jobject)SDL_AndroidGetActivity();   // ⚠️ a LOCAL ref SDL leaves us to release
     if (env == nullptr || activity == nullptr) return;
 
-    // ⚠️ **EVERY LOOKUP IS CLEARED THE MOMENT IT MISSES.** A failed FindClass or GetStaticFieldID
-    // leaves an exception PENDING, and the next JNI call made under one is a programming error that
-    // CheckJNI aborts the process for. These are framework names so a miss should be impossible —
-    // which is exactly why getting it wrong would only ever be found on somebody else's device.
+    // ⚠️ EVERY LOOKUP IS CLEARED THE MOMENT IT MISSES: a pending exception makes the next JNI call
+    // a programming error that CheckJNI aborts for.
     jclass  actClass = env->GetObjectClass(activity);
     if (env->ExceptionCheck()) env->ExceptionClear();
     jclass  ctxClass = env->FindClass("android/content/Context");
@@ -559,10 +490,8 @@ Java_com_conanizer_pockettracker_PlaybackService_nativeRequestStop(JNIEnv*, jcla
 }
 
 int main(int argc, char** argv) {
-    // ⚠️ THE ROOTS ARE RESOLVED FIRST, and the redirect follows them — not the other way round. The pump
-    // tees the console into a file, so it has to know where before the first line is written or the
-    // banner lands in logcat alone. The lines below use `__android_log_print` directly and so do not
-    // need the redirect to be up.
+    // ⚠️ THE ROOTS FIRST, then the redirect: the pump tees into a file and must know where before
+    // the first line. The lines below use `__android_log_print` directly.
     // argv[0] is the application name SDLActivity supplies; the root is the first real argument.
     std::string appRoot = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : std::string();
     if (appRoot.empty()) {
@@ -573,39 +502,24 @@ int main(int argc, char** argv) {
         appRoot = kFallbackAppRoot;
     }
 
-    // ⚠️ **argv[2] IS `context.filesDir`, AND IT IS NOT A SECOND COPY OF THE ROOT.** `settings.json`,
-    // `template.ptp` and `autosave.ptp` are read during the boot below — before the user has been
-    // asked for anything — while the media tree above is storage the app may not be allowed to read at
-    // all. Settings that cannot be read at boot are settings the quit-time save writes defaults over,
-    // so those three live in app-private storage, which needs no permission and cannot be revoked.
-    // `config.json` deliberately stays in the media tree; see `StdFileSystem`'s two-root constructor.
-    //
-    // Missing, this falls back to the media root and the app behaves exactly as it did before the
-    // split — which is also what every desktop and PortMaster build does, one argument shorter.
+    // ⚠️ argv[2] IS `context.filesDir`, NOT A SECOND COPY OF THE ROOT: settings.json, template.ptp
+    // and autosave.ptp are read during boot, before any grant, so they live in app-private storage —
+    // or the quit-time save would write defaults over unreadable settings. `config.json` stays in the
+    // media tree. Missing, this falls back to the media root, as on desktop.
     const std::string privateRoot =
         (argc > 2 && argv[2] && argv[2][0]) ? std::string(argv[2]) : appRoot;
 
-    // ⚠️ **THE PRIVATE ROOT, NOT THE MEDIA ROOT** — the media tree is unreadable and unwritable to this
-    // process until a folder is granted, so a tee aimed at it opens nothing and says nothing. That is
-    // measured, not supposed: the device says so as `MediaProvider: Permission to access file … is
-    // denied` — under MediaProvider's own logcat tag, and NOTHING under ours. See
-    // `relocate_log_file` for the other half — this destination is the one the user cannot reach.
+    // ⚠️ THE PRIVATE ROOT, NOT THE MEDIA ROOT: the media tree is unwritable until a folder is
+    // granted, and the refusal shows only under MediaProvider's own logcat tag. `relocate_log_file`
+    // moves it later.
     redirect_stdio_to_logcat(privateRoot);
 
-    // ⚠️ **THE BACK BUTTON, TRAPPED BEFORE SDL_Init (C4).** Untrapped, Android's back runs
-    // `SDLActivity.onBackPressed()` → `finish()`, which closes the activity out from under the frame
-    // loop mid-edit — and it is the easiest button on a phone to hit by accident. Set, the activity
-    // ignores it (SDLActivity.java:623 returns early) and the key still reaches native as
-    // `SDLK_AC_BACK`, which sdl-input.cpp maps to B, the app's own cancel.
-    //
-    // ⚠️ This is read by JAVA, through `nativeGetHintBoolean`, at the moment back is pressed — so it
-    // is a hint about the activity's behaviour rather than about any subsystem, and setting it before
-    // `SDL_Init` is belt-and-braces rather than a requirement.
-    //
-    // ⚠️ It works because `android:enableOnBackInvokedCallback` is NOT set in the manifest: at
-    // targetSdk 34 that defaults to false, so the legacy `onBackPressed` path SDL hooks is still the
-    // one Android uses. A future targetSdk bump that opts into predictive back silently un-traps this
-    // — the symptom being the app closing on back again, with nothing here having changed.
+    // ⚠️ THE BACK BUTTON, TRAPPED. Untrapped, back runs `SDLActivity.onBackPressed()` → `finish()`,
+    // closing the activity mid-edit. Trapped, the key reaches native as `SDLK_AC_BACK`, mapped to B
+    // (sdl-input.cpp). Java reads the hint when back is pressed; setting it before `SDL_Init` is
+    // belt-and-braces.
+    // ⚠️ It works only while `android:enableOnBackInvokedCallback` is unset (the targetSdk 34
+    // default): a targetSdk bump that opts into predictive back silently un-traps it.
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 
     // ⚠️ **THE NATIVE THREAD IS NOT FROZEN OFF THE SCREEN**, so a song left playing goes on being fed
@@ -614,20 +528,15 @@ int main(int argc, char** argv) {
     // while backgrounded (SDL has backed up the GL context) and must wait long when nothing plays.
     SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
 
-    // ⚠️ NO `SDL_INIT_AUDIO`, and on this platform it is load-bearing rather than tidy: Oboe owns the
-    // device here. Asking SDL for the audio subsystem as well would put two libraries on one output
-    // stream — convergence-plan §1's "SDL and Oboe are not a choice". `SdlAudioEngine::openStream`
-    // initialises the subsystem itself on the platforms that use it, which is what lets this line be
-    // identical to the desktop's; see native/audio-backend.h.
+    // ⚠️ NO `SDL_INIT_AUDIO`: Oboe owns the device here, and two libraries must not share an output
+    // stream. `SdlAudioEngine::openStream` initialises the subsystem itself where it is used.
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
 
-    // ⚠️ HEAP, not a local — the same 0xC00000FD the desktop would hit, and worse here: Android's
-    // default thread stack is smaller than a desktop's, and this runs on SDLActivity's thread rather
-    // than a process main. AudioEngine's per-block DSP scratch, spectrum rings and 256-slot table pool
-    // are members.
+    // ⚠️ HEAP, not a local: AudioEngine's members blow a stack — and this runs on SDLActivity's
+    // thread, whose stack is smaller than a desktop main's.
     auto engine = std::make_unique<AudioEngine>();
 
     OboeAudioEngine audio(engine.get());
@@ -645,41 +554,24 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ⚠️ **THE STORAGE ACCESS FRAMEWORK IS THE ONLY WAY TO USER FILES ON THIS PLATFORM**, because the
-    // app declares no storage permission at all: `/storage/emulated/0` is unreadable to this process,
-    // so a `StdFileSystem` over the media tree would list nothing whatever `std::filesystem` can do.
-    // The seam has been abstract since S6a precisely so the answer to that is a second implementation
-    // rather than a redesign, and this is it. It still OWNS a `StdFileSystem` over `privateRoot` for
-    // `settings.json`, `template.ptp` and `autosave.ptp` — read during the boot below, long before a
-    // picker can have run.
-    //
-    // ⚠️ Constructed HERE so it outlives `run()`, like the feedback sink and both MIDI ports.
-    //
-    // ⚠️ **The hooks go in before anything can open a file.** They are what lets `pt_fopen`,
-    // `pt_remove` and `pt_rename` — the direct file calls below the UI, in the decoders and the WAV
-    // writer — act on a `pt://` path. Un-installed, a render writes every byte correctly and produces
-    // no file.
+    // ⚠️ THE STORAGE ACCESS FRAMEWORK IS THE ONLY WAY TO USER FILES: the app declares no storage
+    // permission, so a `StdFileSystem` over the media tree would list nothing. It still OWNS a
+    // `StdFileSystem` over `privateRoot` for the boot-time files. Constructed here to outlive `run()`.
+    // ⚠️ The hooks go in before anything can open a file: un-installed, a render writes every byte
+    // and produces no file.
     ptshell::SafFileSystem filesystem(privateRoot);
     filesystem.install_file_hooks();
 
-    // The COUNT, not a yes/no, and unconditional: an empty browser under a granted folder and an
-    // empty browser under no grant at all are different failures with the same appearance, and this
-    // is the line that tells them apart. Zero is the fresh-install state — the browser opens on the
-    // roots directory, whose one row is ADD FOLDER….
+    // The COUNT, unconditionally: an empty browser under a grant and under none look alike. Zero is
+    // the fresh install — the browser opens on the roots directory's ADD FOLDER… row.
     std::printf("saf:     %d granted folder(s)\n", filesystem.root_count());
 
-    // ⚠️ **THE MEDIA ROOT IS THE GRANTED TREE, AND `appRoot` IS NOT IT.** argv[1] is still
-    // `Documents/PocketTracker` — a directory this process cannot read a byte of. Everything below that
-    // used to take it is asking "where does this install keep Samples/, Soundfonts/, Renders/?", and on
-    // this platform the answer is the home tree. `pt://roots` when nothing is granted, which is honest:
-    // there is no media root yet, and every path built on it fails to open rather than resolving to
-    // somewhere wrong.
+    // ⚠️ THE MEDIA ROOT IS THE GRANTED TREE, NOT `appRoot` (argv[1], unreadable to this process).
+    // `pt://roots` when nothing is granted, so paths built on it fail to open rather than resolve wrong.
     const std::string mediaRoot = filesystem.home_root_path();
 
-    // ⚠️ **The log moves NOW, and not one line earlier**: it goes through `pt_fopen`, which cannot
-    // resolve a `pt://` path until `install_file_hooks` has run. Unconditional either way — a log with
-    // no reachable destination and a log that is working look identical from inside the app, which is
-    // exactly how `pockettracker-log.txt` came to be dead for a whole phase with nothing saying so.
+    // ⚠️ The log moves NOW, not earlier: it goes through `pt_fopen`, which needs the hooks.
+    // Unconditional either way — a log with no reachable destination looks fine from inside the app.
     {
         const std::string moved = filesystem.has_grant() ? relocate_log_file(mediaRoot) : std::string();
         if (moved.empty()) log_carry_done();   // it stays where it is; give the carry buffer back
@@ -699,22 +591,14 @@ int main(int argc, char** argv) {
     cfg.appRoot    = mediaRoot;
     cfg.filesystem = &filesystem;
 
-    // No command line, so no project and no media dir of its own: the app opens the blank document
-    // NEW PROJECT makes and the file browser is how the user reaches their songs — exactly as the
-    // shipping handheld target already behaves (PortMaster invokes the binary with no arguments).
-    // ⚠️ mediaBaseDir is what a project's RELATIVE sample paths resolve against, so it has to be the
-    // tree the samples are actually in. Pointed at the plain media root it named a directory the app
-    // cannot open, and a portable project would have come back looking correct and playing silence.
+    // No command line: the app opens the blank NEW PROJECT document, and the browser reaches the
+    // songs. ⚠️ mediaBaseDir must be the tree the samples are actually in, or a portable project
+    // loads looking correct and plays silence.
     cfg.mediaBaseDir = mediaRoot;
 
-    // ⚠️ **`converged()`, NOT `sdl()` OR `android()` — the profile the converged Android app RUNS.**
-    // Its three device rows (touch layouts, BTN SOUND/VIBRO, the CRT overlay) are all on because
-    // their FEATURES now exist in the shell (Phases D–D6); it keeps `sdl()`'s `appExit` and RESUME
-    // row and leaves `engineToggle` off (no Kotlin sequencer left to switch to). See
-    // `platform_caps.h::converged` for why it is neither of the other two profiles. This replaces the
-    // three hand-flipped `cfg.caps.X = true` overrides those phases added one at a time — the value
-    // is byte-identical, now named. ⚠️ ptinput's goldens are unaffected: they compare against
-    // `PlatformCaps::android()`, Kotlin's row map, not this runtime choice.
+    // ⚠️ `converged()`, not `sdl()` or `android()` — the profile this app runs: the touch layouts,
+    // BTN SOUND/VIBRO and CRT overlay rows on, `sdl()`'s `appExit` and RESUME row kept,
+    // `engineToggle` off (platform_caps.h::converged).
 #ifdef NDEBUG
     cfg.caps = ui::PlatformCaps::converged(/*debug_build=*/false);
 #else
@@ -725,66 +609,31 @@ int main(int argc, char** argv) {
     // which is the only console this platform has.
     cfg.console = true;
 
-    // ⚠️ **PHASE D: this is a phone, so draw the on-screen gamepad** — when no physical controller is
-    // plugged and the letterbox bars have room (the shell decides both). This is NOT the same as
-    // flipping `PlatformCaps::touchLayouts`: that is the SETTINGS row that lets the user PICK a layout,
-    // and it stays off until PORTRAIT and the skinned grid exist to be picked, so the picker never
-    // offers a mode that does nothing (platform_caps.h's own rule). Desktop and the handhelds leave
-    // this false — main.cpp says nothing, so the default (false) is the safe answer there.
+    // This is a phone: draw the on-screen gamepad when no physical controller is plugged and there
+    // is room (the shell decides both). Not `PlatformCaps::touchLayouts`, the row that picks one.
     cfg.touchCapable = true;
 
-    // ⚠️ **HOW "IS THERE A REAL PAD?" IS ANSWERED ON ANDROID — NOT by SDL's joystick count.** SDL opens
-    // the emulator's keyboard (`qwerty2`, a DPAD source with a BUTTON_A keylayout) as a game controller, so
-    // `SdlInput::controller_count()` reads 1 with no pad attached and the shell would drop the touch UI to
-    // a bare fullscreen frame with an empty LAYOUT row. Only Android's InputDevice source flags tell the
-    // keyboard from a pad, so the gate asks Java. Desktop/handheld leave this null and fall back to the SDL
-    // count, which IS the truth there. See app.h physicalGamepadPresent and android_has_physical_gamepad.
+    // ⚠️ "Is there a real pad?" is answered by Java, NOT SDL's joystick count, which counts the
+    // emulator's keyboard as a pad (app.h physicalGamepadPresent).
     cfg.physicalGamepadPresent = android_has_physical_gamepad;
 
     // The evidence behind the line above, written down once. See android_log_input_devices: the
     // layout gate's inputs are otherwise unrecoverable from a user's report.
     android_log_input_devices();
 
-    // ⚠️ **`cfg.windowed = true` UNLOCKS PORTRAIT, AND THAT IS AN ORIENTATION DECISION, NOT A COSMETIC
-    // ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to
-    // `SDLActivity.setOrientationBis` (SDL_androidwindow.c:52): a NON-resizable window takes its
-    // orientation from `w > h` and locks to SENSOR_LANDSCAPE for the 640x480 design, while a RESIZABLE
-    // one becomes SCREEN_ORIENTATION_FULL_USER, free to follow the sensor into PORTRAIT. Through C4 this
-    // was deliberately FALSE, because a rotation into portrait had no layout to land on and would have
-    // shown a broken letterboxed screen. Phase D's PORTRAIT2 device skin is that layout, so it flips to
-    // true here: held LANDSCAPE the phone still gets C4's pixel-exact 2x window (FULL_USER stays
-    // landscape while the device is), and held PORTRAIT it now gets the skin — app.cpp switches on the
-    // output aspect, with nothing to keep in sync. Read out of the vendored SDL source, not remembered.
-    //
-    // ⚠️ **THIS ALSO MAKES A LANDSCAPE-NATIVE HANDHELD (the AYANEO) ROTATABLE**, where C4 proved its
-    // geometry with the flag false. Landscape is preserved — the 2x integer scale is a function of the
-    // OUTPUT SIZE, not this flag — but a deliberate rotate would now show PORTRAIT2 there too. That is
-    // the one behaviour change this slice makes to a C4-proven config, and it is worth a re-check on
-    // that device.
+    // ⚠️ `cfg.windowed = true` IS AN ORIENTATION DECISION: it becomes `SDL_WINDOW_RESIZABLE`, which
+    // makes the activity FULL_USER (free to rotate) instead of SENSOR_LANDSCAPE. Held landscape the
+    // phone keeps its 2x window; held portrait it gets the PORTRAIT2 skin (app.cpp picks by aspect).
+    // ⚠️ It also makes a landscape-native handheld (the AYANEO) rotatable — landscape stays 2x (a
+    // function of the output size), but a deliberate rotate shows PORTRAIT2 there too.
     cfg.windowed = true;
 
-    // ⚠️ **AND A RELEASE BUILD ON A PHONE IS PINNED TO PORTRAIT, WHICH IS WHAT MAKES THE LINE ABOVE
-    // SAFE TO SHIP.** `FULL_USER` follows the sensor into LANDSCAPE, where the app presents the centred
-    // frame with a touch panel in each letterbox bar — a layout SETTINGS cannot offer (its LAYOUT row
-    // has exactly one entry, "PORTRAIT", because the shell picks by aspect: app.cpp) and therefore one
-    // the user cannot get back OUT of except by rotating the phone. A mode reachable only by accident,
-    // with no control naming it, is the same lie `platform_caps.h` refuses for a row that configures
-    // nothing. So release allows portrait only; DEBUG leaves the hint empty and keeps `FULL_USER`, so
-    // the landscape panels stay drivable for development.
-    //
-    // ⚠️ THE PAD IS THE OTHER HALF OF THE GATE, and it is not cosmetic: a landscape-native handheld
-    // running this build (the AYANEO) has physical buttons, takes the FULL layout, and pinning it to
-    // portrait would stand its screen on end. Same fact `useTouch` is built from.
-    //
-    // ⚠️ **THIS IS THE LAUNCH-TIME ANSWER ONLY.** A hint is read at window creation and never again, so
-    // it can neither unlock rotation for a pad plugged in later nor take the permission BACK when one
-    // is unplugged — and the second of those leaves the phone sitting in a landscape layout release
-    // does not ship. `cfg.allowLandscape` below is the live half; this stays so the FIRST frame is
-    // already right rather than snapping after it.
-    //
-    // "Portrait PortraitUpsideDown" → SCREEN_ORIENTATION_SENSOR_PORTRAIT with a resizable window
-    // (SDLActivity.setOrientationBis) — both ways up, no landscape. Read out of the vendored SDL's own
-    // Java, not remembered. An empty hint is SDL's "nothing explicitly allowed" and changes nothing.
+    // ⚠️ A RELEASE BUILD ON A PHONE IS PINNED TO PORTRAIT, which makes the line above safe: FULL_USER
+    // would let the sensor reach the landscape touch panels, a layout SETTINGS cannot name or leave.
+    // DEBUG leaves the hint empty so those panels stay drivable. A device with a PHYSICAL pad (the
+    // AYANEO) takes the FULL layout and is not pinned.
+    // ⚠️ LAUNCH-TIME ONLY: the hint is read at window creation; `cfg.allowLandscape` below is the live
+    // half. "Portrait PortraitUpsideDown" → SENSOR_PORTRAIT with a resizable window.
 #ifdef NDEBUG
     if (!android_has_physical_gamepad()) {
         SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait PortraitUpsideDown");
@@ -796,14 +645,9 @@ int main(int argc, char** argv) {
     std::printf("orient:  free (debug build)\n");
 #endif
 
-    // The live half of the same rule, called on change by the layout gate (app.h `allowLandscape`).
-    //
-    // ⚠️ **UNCONDITIONAL, unlike the boot hint above, and the difference is deliberate.** The hint
-    // decides where the app STARTS, and a debug build starting free is a dev convenience that costs
-    // nothing. This decides where it may END UP, and the state it forbids — the landscape touch panels
-    // arrived at by unplugging a pad — is confusing in a debug build for exactly the same reason it is
-    // unshippable in a release one. The landscape panels stay drivable where they are actually
-    // developed: `POCKETTRACKER_TOUCH=1` on a desktop with the window dragged wide (main.cpp).
+    // The live half of the same rule (app.h `allowLandscape`). ⚠️ UNCONDITIONAL, unlike the boot
+    // hint: the landscape panels reached by unplugging a pad are as confusing in debug as in release.
+    // They stay drivable on a desktop with POCKETTRACKER_TOUCH=1 and a wide window.
     cfg.allowLandscape = [](bool allowed) { android_set_landscape_allowed(allowed); };
 
     cfg.background.publishPlaying  = [](bool playing) { g_bgPlaying.store(playing); };
@@ -811,49 +655,28 @@ int main(int argc, char** argv) {
     cfg.background.takeStopRequest = [] { return g_bgStopRequested.exchange(false); };
     cfg.background.end             = [] { android_stop_playback_service(); };
 
-    // ⚠️ **NULL, AND C4 IS WHERE THIS GETS ITS ANSWER — NOT HERE.** The desktop polls a SIGTERM flag
-    // through this hook once a frame. Android must not: off the screen the process is frozen or killed
-    // without notice (unless the playback service holds it), which is precisely when a kill arrives,
-    // so a flag consumed by this loop is P4d's never-armed write in a new body — it would read correct
-    // and never run. C4's autosave flushes in an
-    // `SDL_AddEventWatch` watcher, which fires synchronously on the Java activity thread and does not
-    // touch this loop at all. Leaving it null is the honest state: nothing asks this app to
-    // terminate yet.
+    // ⚠️ NULL: off the screen the process is frozen or killed without notice (unless the playback
+    // service holds it), so a flag polled by this loop would never run. The autosave flushes in an
+    // `SDL_AddEventWatch` watcher on the Java activity thread instead.
     cfg.terminate_requested = nullptr;
 
-    // The button-feedback sink (convergence D). Constructed HERE so it outlives `run()`, and only on
-    // Android — desktop's `main.cpp` leaves `cfg.buttonFeedback` null and the shared touch path treats
-    // that as "no feedback". See button_feedback.h and AndroidButtonFeedback above.
+    // The button-feedback sink, constructed here so it outlives `run()` (desktop leaves it null).
     AndroidButtonFeedback buttonFeedback;
     cfg.buttonFeedback = &buttonFeedback;
 
-    // ── EXTERNAL MIDI out (MIDI plan phase B2b) ──────────────────────────────────────────────────
+    // ── EXTERNAL MIDI out ────────────────────────────────────────────────────────────────────────
     //
-    // Attached UNCONDITIONALLY, and — read app.h — null is NOT "MIDI off". `SongcoreHost` attaches its
-    // `ExternalConsumer` either way; what this pointer decides is whether the bytes have anywhere to
-    // go. The MIDI screen needs the ENUMERATOR even on a phone with nothing plugged in, or its OUTPUT
-    // row cannot tell "no devices" from "no backend" — which is the state the whole row exists to make
-    // visible. Constructed HERE so it outlives `run()`, like the feedback sink above.
-    //
-    // ⚠️ NO ENV-VAR BLOCK, unlike shell/main.cpp. `POCKETTRACKER_MIDI_OUT` and friends are a desktop
-    // bring-up console; on Android there is no shell to set them from, and the device pick comes from
-    // settings.json through `InputDispatcher::boot_midi_port()` — which `ptshell::run` calls below,
-    // and which is the same path the OUTPUT row uses. One owner of "which port is open".
+    // Attached UNCONDITIONALLY — the MIDI screen needs the ENUMERATOR to tell "no devices" from "no
+    // backend". Constructed here so it outlives `run()`. No env-var block: the device pick comes from
+    // settings.json via `InputDispatcher::boot_midi_port()`, as for the OUTPUT row.
     ptshell::AndroidMidiOut midiOut;
     cfg.midiOut = &midiOut;
 
-    // ── MIDI IN (MIDI plan phase E5) ─────────────────────────────────────────────────────────────
+    // ── MIDI IN ──────────────────────────────────────────────────────────────────────────────────
     //
-    // The same terms as the output port above, and the same three rules: attached UNCONDITIONALLY (the
-    // MIDI screen's INPUT row needs the enumerator even on a phone with nothing plugged in), constructed
-    // HERE so it outlives `run()` — ⚠️ which is not a style point but the E2 lifetime rule: the queue
-    // this port delivers into lives inside the `SongcoreHost` that `run()` owns, so the port must be the
-    // longer-lived of the two and `run()` closes it before returning — and NO env-var block, because the
-    // device pick comes from settings.json through `InputDispatcher::boot_midi_in_port()`.
-    //
-    // ⚠️ Unlike the other two backends this one is POLLED, once a frame, from inside `run()`. See
-    // midi-in-android.cpp: `MidiManager` delivers on a binder thread to the Kotlin side and the frame
-    // loop fetches, which costs nothing because the drain is on that loop either way.
+    // Same terms: attached unconditionally, constructed here — ⚠️ it must outlive the `SongcoreHost`
+    // whose queue it delivers into, and `run()` closes it before returning — and opened from
+    // settings.json via `InputDispatcher::boot_midi_in_port()`. POLLED once a frame (midi-in-android.cpp).
     ptshell::AndroidMidiIn midiIn;
     cfg.midiIn = &midiIn;
 

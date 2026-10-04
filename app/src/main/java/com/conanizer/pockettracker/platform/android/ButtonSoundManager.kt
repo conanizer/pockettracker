@@ -15,23 +15,14 @@ import java.util.concurrent.Executors
  * A completely separate audio path from the Oboe tracker engine, so button
  * sounds never steal tracker voices.
  *
- * ⚠️ **Why this uses AudioTrack with software gain instead of SoundPool (B1).**
- * The click must be captured on a screen recording *at the level the user hears*.
- * SoundPool applied BTN VOL as a per-stream track gain (`play(sound, vol, vol, …)`),
- * and that gain is applied by AudioFlinger **downstream of the MediaProjection
- * playback-capture tap** — so the speaker honoured BTN VOL but the recording always
- * got unity gain. Confirmed on-device: at BTN VOL = 00 the speaker is silent yet the
- * recording still captures the click at full. `AudioTrack.setVolume` is the *same*
- * downstream track gain, so it would be captured wrong too. The only fix that every
- * capture path reflects is to bake the gain into the PCM the app submits — we scale
- * the decoded samples by BTN VOL in software here, before writing them to the track.
+ * ⚠️ AudioTrack with SOFTWARE gain, not SoundPool: a per-stream gain (SoundPool's, or
+ * `AudioTrack.setVolume`) is applied downstream of the MediaProjection capture tap, so a screen
+ * recording gets the click at unity whatever BTN VOL says. Baking the gain into the submitted PCM is
+ * the only fix every capture path reflects.
  *
- * ⚠️ **Latency: a POOL of reused tracks, not one per press.** Building an `AudioTrack`
- * (registering a track with AudioFlinger) on every tap is far heavier than SoundPool's
- * fire-and-forget and was audibly laggy. Instead we pre-build a small pool of streaming
- * float tracks once and reuse them (pause → flush → write → play); the buffer holds the
- * whole clip so the write never blocks. When every voice is busy the oldest is stolen
- * (see `POOL_MAX` for why the pool is small).
+ * ⚠️ A POOL of reused tracks, not one per press: building an `AudioTrack` per tap is audibly laggy.
+ * The pool's streaming float tracks are reused (pause → flush → write → play); each buffer holds a
+ * whole clip so the write never blocks. When every voice is busy the oldest is stolen (`POOL_MAX`).
  *
  * WAV files must be placed in app/src/main/res/raw/ with these names:
  *   ui_sq_press_1.wav, ui_sq_press_2.wav, ...       square button press variants
@@ -41,10 +32,9 @@ import java.util.concurrent.Executors
  *
  * Adding more variants (just drop more files) is automatically picked up.
  * Up to 10 variants per event type are scanned. 16-, 24- and 32-bit-float PCM WAVs
- * (mono or stereo) are supported; the shipped clicks are 48 kHz / stereo / 16-bit. ⚠️ Bit depth here
- * is a PACKAGING choice and nothing else: every arm decodes to the same FloatArray, so a deeper
- * format costs APK bytes (24-bit was +50 % on 2.8 MB of clips) and saves no resident heap at all.
- * What DOES move the 3.5 MB these occupy in RAM is the channel count and the frame count.
+ * (mono or stereo) are supported; the shipped clicks are 48 kHz / stereo / 16-bit. ⚠️ Bit depth is a
+ * PACKAGING choice only — every format decodes to the same FloatArray, so a deeper one costs APK
+ * bytes and saves no heap; channel and frame counts are what move the RAM.
  *
  * Button release cuts the in-progress press sound for that specific button,
  * while other simultaneously-held buttons are unaffected.

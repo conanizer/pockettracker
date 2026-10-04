@@ -3,27 +3,12 @@
 
 // ─── The songcore runtime ────────────────────────────────────────────────────────────────────────
 //
-// The object an application owns to make songcore play: it holds the Project, the bus (MidiRouter),
-// the Sequencer, and the trace sink, and it exposes exactly the verb set the event-schema §7 JNI
-// vocabulary names — push the song, play/stop, poll, read back playheads. Phase 1 S5.
+// The object an application owns to make songcore play: the Project, the bus (MidiRouter), the
+// Sequencer and the trace sink, with the verbs — load, play/stop, poll, render, read playheads.
+// Platform-free: the only outside dependency is the portable AudioEngine core.
 //
-// PLATFORM-FREE ON PURPOSE. The only thing outside songcore it knows is AudioEngine (audio-engine.h),
-// which is the *portable* engine core — no <jni.h>, no <oboe/*>, no <android/*> anywhere in this
-// header. That is the whole point: the Android JNI shell (songcore-jni.cpp) is a thin marshalling
-// layer over this class, and the SDL shell will construct the same class the same way. Nothing that
-// decides how the song sounds lives above this line on either platform.
-//
-// Threading: single-threaded by contract. Every verb is called from the app's UI/transport thread
-// (on Android: the Compose poll loop + input handlers), never from the audio callback. The engine
-// calls it makes (scheduleNote…, clearScheduledNotesFrom) are the same ones the Kotlin sequencer made
-// from that same thread — they land in the engine's lock-free queues, which is the existing contract.
-//
-// S6b closed the last gap: project→engine setup (engine_setup.h) and the offline render (render.h)
-// are C++ too, so this class can now take a project from JSON all the way to a WAV with no app code
-// at all — which is what tools/ptrender does, and what the SDL shell will do. The one thing still
-// outside it is Android's *media* loading (samples/SF2 from disk): the Kotlin loader also drives
-// MediaCodec for m4a and reads WAV cue points, so it stays for now and pushes its results down via
-// push_routing(). load_media() is the C++ equivalent, used by every non-Android caller.
+// Single-threaded by contract: every verb is called from the app's UI/transport thread, never from
+// the audio callback. The engine calls it makes land in the engine's lock-free queues.
 
 #include <algorithm>
 #include <cstdint>
@@ -34,7 +19,7 @@
 #include <functional>
 
 #include "../audio-engine.h"
-#include "../byte_source.h"   // pt_read_file — the .ptp and .pti reads
+#include "../byte_source.h"   // pt_read_file
 #include "engine_consumer.h"
 #include "engine_setup.h"
 #include "midi_in.h"
@@ -53,34 +38,29 @@ namespace songcore {
 
 class SongcoreHost {
   public:
-    // `engine` may be null (a trace-only host — useful for testing the scheduler with no audio). The
-    // sample rate is re-read from the engine on every verb, mirroring PlaybackController, which calls
-    // audioEngine.getDeviceSampleRate() on each poll — a headphone swap can change it mid-session.
+    // `engine` may be null — a trace-only host, for testing the scheduler without audio. The sample
+    // rate is re-read from the engine on every verb: a device change can alter it mid-session.
     SongcoreHost(AudioEngine* engine, int sampleRate)
         : engine_(engine),
           sampleRate_(sampleRate),
           seq_(router_, project_, sampleRate),
           consumer_(engine, &project_, &routing_),
           external_(&project_) {
-        // The engine consumer is the bus's permanent subscriber: events become audio. The trace
-        // writer joins it only while tracing (set_trace), and sees the identical records.
+        // The engine consumer is the bus's permanent subscriber; the trace writer joins only while
+        // tracing (set_trace) and sees the identical records.
         if (engine_) router_.add_consumer(&consumer_);
-        // ⚠️ The EXTERNAL consumer is attached UNCONDITIONALLY, with or without a port — it is not an
-        // optional feature bolted on when a cable appears. Half of its job is bookkeeping (which track
-        // owns which note, what a channel was last told), and a consumer that only starts listening
-        // when a device is picked would attach mid-song with no idea what is already sounding.
+        // ⚠️ The EXTERNAL consumer is attached always, port or not: half its job is bookkeeping (which
+        // track owns which note), and attaching mid-song would leave it blind to what is sounding.
         router_.add_consumer(&external_);
 
-        // MIDI in. The drain runs on the ENGINE's thread — see the block below — and the engine is
-        // told where it is here, once. Nothing here opens or touches a port.
+        // MIDI in: the drain runs on the ENGINE's thread (see below). Nothing here touches a port.
         midiLive_.pipeline = &midiIn_;
         midiLive_.engine   = engine_;
         if (engine_) engine_->setLiveInput(&midiLive_);
     }
 
-    // ⚠️ The engine's live-input pointer names a member of THIS object, so it is withdrawn here. The
-    // caller's job is the ordering: the audio stream must be closed before the host is destroyed,
-    // which the shell does (app.cpp closes the stream, then returns from run()).
+    // ⚠️ The engine's live-input pointer names a member of this object, so it is withdrawn here. The
+    // caller must close the audio stream before destroying the host.
     ~SongcoreHost() {
         if (engine_) engine_->setLiveInput(nullptr);
         set_trace(false, "");
@@ -90,52 +70,35 @@ class SongcoreHost {
     Sequencer&  sequencer() { return seq_; }
     const Project& project() const { return project_; }
 
-    // ── ↕ EXTERNAL MIDI out (MIDI plan §4.3) ─────────────────────────────────────────────────────
-    // The port itself is the platform's (ALSA rawmidi / winmm / MidiManager); everything above it is
-    // in midi_out.h and shared. The shell picks a device and hands the open port in here.
+    // ── ↕ EXTERNAL MIDI out ──────────────────────────────────────────────────────────────────────
+    // The port is the platform's; everything above it is midi_out.h. The shell hands the open port in.
     ExternalConsumer& midi_out() { return external_; }
     void set_midi_out(IMidiOut* out) { external_.set_out(out); }
     void set_midi_offset_ms(int ms) { external_.set_offset_ms(ms); }
-    /** Phase C: the 24 PPQN clock + transport out. Takes effect at the next transport start. */
+    /** The 24 PPQN clock + transport out. Takes effect at the next transport start. */
     void set_midi_sync_out(bool on) { external_.set_sync_out(on); }
     bool midi_sync_out() const { return external_.sync_out(); }
 
     /**
-     * Hand the queue's release over to somebody else — B3's sender thread (`shell/midi-sender.h`).
-     *
-     * ⚠️ **ONE OWNER OF "WHO RELEASES THE QUEUE", and it is the same rule B4.3 wrote for "who opens
-     * the port".** Leaving `poll()`'s pump in place alongside a sender thread would not misbehave
-     * visibly — `poll` reads the block-quantised counter, which is never AHEAD of the estimator, so it
-     * could only ever release messages the thread was about to release anyway — and that is exactly
-     * what makes it dangerous: the 60 Hz path would still be live, still be the thing timing some
-     * fraction of the messages, and a broken sender thread would look like a working one with worse
-     * jitter. A measurement can only tell the two cadences apart if only one of them is running.
-     *
-     * Nobody calls this in the tools or on the Android JNI path, so `poll()` keeps pumping there.
+     * Hand the queue's release to a sender thread (`shell/midi-sender.h`).
+     * ⚠️ One owner only: with `poll()` still pumping beside the thread, a broken sender would look
+     * like a working one with worse jitter. Hosts that never call this keep pumping in `poll()`.
      */
     void set_midi_pump_external(bool external) { midiPumpExternal_ = external; }
     bool midi_pump_external() const { return midiPumpExternal_; }
 
     // ── ↕ MIDI in ────────────────────────────────────────────────────────────────────────────────
     //
-    // The mirror of the block above, and the same division of labour: the PORT is the platform's
-    // (`IMidiIn`, opened by the shell), and everything from the first byte onwards is songcore's — the
-    // ring that crosses the backend's thread, the parser, the router, and the one place that drains
-    // them (`MidiInPipeline`, midi_in.h).
-    //
-    // ⚠️⚠️ **THE DRAIN RUNS ON THE AUDIO THREAD, NOT HERE.** The engine calls `midiLive_` at the top
-    // of every live block; a key is routed and scheduled at that block's first frame and sounds in it.
-    // No frame-loop poll and no lead-in sit between the cable and the voice any more. What this
-    // thread does, from `poll()`, is the two halves the audio thread cannot: it PUBLISHES the routing
-    // facts the drain routes against (`arm_midi_in`), and it takes back what the drain handled
-    // (`drain_midi_in`) to apply the mapped knobs, send MIDI thru, keep the bookkeeping and tell the
-    // observer. A host with no engine runs the drain from `poll()` itself: same code, same order.
+    // The PORT is the platform's (`IMidiIn`); from the first byte on it is songcore's —
+    // `MidiInPipeline` (midi_in.h).
+    // ⚠️ The drain runs on the AUDIO thread, at the top of each live block, so a key sounds in the
+    // block it arrives in. This thread, from `poll()`, publishes the routing facts the drain routes
+    // against (`arm_midi_in`) and takes back what it handled (`drain_midi_in`): mapped knobs, thru,
+    // bookkeeping, observer. With no engine, `poll()` runs the drain itself — same code, same order.
 
     /**
      * Where a backend delivers its bytes — `IMidiIn::set_sink(&host.midi_in_sink())`.
-     *
-     * ⚠️ Called from a thread this class knows nothing about, which is exactly what `MidiInQueue` is
-     * for: a lock-free ring and NOTHING else. Everything with an opinion runs in the drain.
+     * Called from an unknown thread, so it is a lock-free ring and nothing else.
      */
     MidiInQueue& midi_in_sink() { return midiIn_.sink(); }
 
@@ -145,22 +108,15 @@ class SongcoreHost {
     const MidiInPipeline&  midi_in_pipeline() const { return midiIn_; }
 
     /**
-     * Told about every message the drain handled, with the records it produced, one poll later. The
-     * shell's is its console. Nullable — with none, the drain still runs and still counts, because
-     * the counters are how "no cable" is told from "no track listening".
+     * Told about every message the drain handled, with its records, one poll later. Nullable; the
+     * drain counts regardless — the counters tell "no cable" from "no track listening".
      */
     void set_midi_in_observer(IMidiInObserver* obs) { midiInObserver_ = obs; }
 
-    /**
-     * The instrument a live key plays on a track the sequencer has not touched yet — the one the UI is
-     * showing (midi_in.h says why this exists at all: without it a correctly configured keyboard is
-     * SILENT on a stopped song, which is the "not configured looks like broken" failure verbatim).
-     * Pushed every frame by the shell, because the user moves the cursor between frames; it reaches
-     * the drain with the next route the poll publishes.
-     */
     /** What a live key plays: `instrument` on `track` (the SONG cursor's), over `voices` tracks
-     *  (1 = MONO), and whether the key's velocity counts. Published to the drain by the next poll,
-     *  and only when it changed. */
+     *  (1 = MONO), and whether velocity counts. Pushed every frame by the shell; published to the
+     *  drain by the next poll, only when it changed. Without it a configured keyboard is silent on a
+     *  stopped song. */
     void set_midi_in_play(int instrument, int track, int voices, bool velocity = true) {
         midiInInstrument_ = instrument;
         midiInTrack_      = track;
@@ -169,21 +125,10 @@ class SongcoreHost {
     }
 
     /**
-     * MIDI THRU — whether a live key on a track whose instrument is EXTERNAL reaches the CABLE.
-     *
-     * ⭐ **ON is the feature; OFF exists for exactly one configuration, and it is not a preference.**
-     * Playing external gear from a keyboard through the tracker is the obvious use of an input port,
-     * and a key on an EXTERNAL track that did nothing at all would be §B2's failure verbatim ("not
-     * configured" indistinguishable from "broken").
-     *
-     * ⚠️ **BUT WHEN THE INPUT PORT AND THE OUTPUT PORT ARE THE SAME DEVICE, THRU IS A FEEDBACK LOOP** —
-     * key → track → cable out → the same port → key again, amplifying, for ever. That is not a corner
-     * case here: a loopback port is the only MIDI-in test rig this project has (§0.8's desk loopback,
-     * now a manual regression test). So the SHELL compares the two open port names and turns thru off
-     * when they match, saying so on the console; this flag is where that verdict lands.
-     *
-     * The default is ON, deliberately: a host nobody told (the tools, the JNI path) behaves like the
-     * feature rather than like the exception, and the suppression has to be an explicit act.
+     * MIDI THRU — whether a live key on an EXTERNAL track reaches the cable. ON by default: playing
+     * gear through the tracker is the point of an input port.
+     * ⚠️ When input and output are the SAME device, thru is a feedback loop. The shell compares the
+     * port names and turns it off when they match.
      */
     void set_midi_in_thru(bool on) { midiInThru_ = on; }
     bool midi_in_thru() const { return midiInThru_; }
@@ -198,15 +143,11 @@ class SongcoreHost {
     uint64_t midi_in_thru_suppressed() const { return midiInThruSuppressed_; }
 
     /**
-     * Forget everything mid-flight — the ring's parked bytes and the parser's half-assembled message.
-     *
-     * ⚠️ Called when a port CLOSES, and it is not housekeeping: a cable pulled between a status byte
-     * and its data leaves running status in force, so the next port's first data byte would complete a
-     * note nobody played, on the previous device's channel.
-     *
-     * ⚠️ A REQUEST, honoured by the drain at the top of its next block — the parser is the audio
-     * thread's, and this thread may not touch it. With no engine this thread is the drain, and the
-     * request is honoured at once.
+     * Forget everything mid-flight — parked bytes and a half-assembled message.
+     * ⚠️ Called when a port closes: running status from a pulled cable would complete a phantom note
+     * from the next port's first data byte.
+     * ⚠️ A REQUEST, honoured at the drain's next block (the parser belongs to the audio thread);
+     * at once when there is no engine.
      */
     void reset_midi_in() {
         midiIn_.request_reset();
@@ -214,35 +155,24 @@ class SongcoreHost {
     }
 
     // ── ↓ data ───────────────────────────────────────────────────────────────────────────────────
-    // The blob is the .ptp JSON verbatim — the bytes FileController.serializeProject() produces, which
-    // S2 proved this parser reads byte-exactly. Pushing REPLACES the project in place: `project_` never
-    // changes address, so the Sequencer's pointer into it stays valid even mid-playback (the Kotlin
-    // sequencer likewise reads the one live Project object, seeing edits as they land).
-    //
-    // Whole-project push, not per-item diffs: the parser already exists and is proven, and a wrong
-    // diff is a silent desync. ⚠️ The cost — ~440 KB of JSON for a full pool, measured at 2.2 MB peak
-    // and 7 ms to parse — is paid only by a caller that pushes a serialized blob. The SDL shell does
-    // not: it edits the live document in place (see edit_project below), so this is the JNI path's
-    // price alone.
+    // The blob is the .ptp JSON. Pushing REPLACES the project in place: `project_` never moves, so the
+    // Sequencer's pointer stays valid mid-playback. Costs a full parse; the app edits the live
+    // document in place instead (edit_project below).
     bool push_project(const std::string& blob) {
-        // allow_exceptions=false: a malformed blob must leave the previous project intact, not throw
-        // across the JNI boundary (and it keeps songcore compilable with exceptions off).
+        // allow_exceptions=false: a malformed blob leaves the previous project intact.
         json j = json::parse(blob, /*cb=*/nullptr, /*allow_exceptions=*/false);
         if (j.is_discarded() || !j.is_object()) return false;
 
         Project parsed = parse_project(j);
-        normalize_and_migrate(parsed);   // pool repair + v0→1 table-volume migration, as FileController does
+        normalize_and_migrate(parsed);   // pool repair + v0→1 table-volume migration
         project_ = std::move(parsed);
         projectSha_ = sha1_hex(blob);
-        // Table data may have changed with the push, so the consumer's "already sent to the engine"
-        // cache must not survive it.
+        // Table data may have changed, so the consumer's "already sent" cache must go.
         consumer_.invalidate_tables();
         return true;
     }
 
-    // The two per-instrument facts songcore cannot derive, because it never opens a file: the sample's
-    // rate ratio (deviceRate / fileRate) and the SF2 slot the instrument's soundfontPath resolved to.
-    // The app pushes them alongside the project — same call site, so they can never drift apart.
+    // Set the two per-instrument facts songcore cannot derive (rate ratio, SF2 slot) from outside.
     void push_routing(const float* sampleRateRatios, const int* sfSlots, int count) {
         const int n = std::min(count, POOL_INSTRUMENTS);
         for (int i = 0; i < n; ++i) {
@@ -252,12 +182,9 @@ class SongcoreHost {
     }
 
     // ── ↓ transport ──────────────────────────────────────────────────────────────────────────────
-    // Each returns the frame the transport latched (the trace's session base), so a caller that also
-    // keeps a Kotlin-side trace stamps the SAME base instead of re-reading a clock that has moved on.
-    //
-    // ⚠️ CHAIN and PHRASE take the MIXER TRACK they belong to, defaulted to 0. It is what gives them
-    // the arrangement's fader, mute, voice slot and per-track FX instead of channel 1's; the default
-    // is what keeps every tool caller — and its goldens — asking for track 0 unchanged.
+    // Each returns the frame the transport latched (the trace's session base).
+    // CHAIN and PHRASE take the MIXER TRACK they play on — its fader, mute, voice slot and FX —
+    // defaulting to 0.
     int64_t play_song(int startRow)   { before_play(); seq_.playSong(startRow);     return after_play(); }
     /** LIVE mode from a standing start: `mask` bit N launches track N at `songRow`, the rest begin silent. */
     int64_t play_song_live(int songRow, int mask) {
@@ -273,58 +200,31 @@ class SongcoreHost {
     /**
      * Stop the transport — the scheduler AND the engine.
      *
-     * ⚠️ THIS USED TO STOP ONLY THE SCHEDULER, and it is the whole Phase-4 "START won't stop playback"
-     * bug. `seq_.stop()` halts the thing that DECIDES what to play; the notes it has already handed to
-     * the engine live in `noteQueue` with target frames in the future, and `processAudioBlock` goes on
-     * draining them. The scheduler runs `BUFFER_PHRASES` (2) phrases ahead — ≈4 s at the default tempo
-     * — so the button did nothing audible for four seconds, and the next START (correctly seeing
-     * `isPlaying_ == false`) scheduled a SECOND stream on top of the stale one. That is what "layered"
-     * playback was: two live schedules in one queue, not the voice allocator.
-     *
-     * ⚠️ THE ASSUMPTION WAS TRUE WHEN IT WAS MADE. On Android this host is only ever reached through
-     * `PlaybackController.stop()`, which does the engine-side cleanup itself immediately afterwards —
-     * and says so: *"songcore resets its own transport, per-track state and master EQ; the engine-side
-     * cleanup below (queues, voices) is shared and runs for both engines"* (PlaybackController.kt:415).
-     * It was shared right up until the SDL shell called `host_.stop()` with no PlaybackController under
-     * it. The layer built on top invalidated the assumption, in a channel nothing was pointed at.
-     * Android's calls are now redundant rather than wrong — both verbs are idempotent.
-     *
-     * ORDER IS LOAD-BEARING, and it is Kotlin's: the master EQ is restored BEFORE the queues are
-     * cleared, because the EQM override lives in the param queue — drop those entries first and the bus
-     * stays stuck on the last EQM preset forever. Guarded on a live project: the render path leaves
-     * `currentProject_` null and restores its own master EQ in RenderController.
-     *
-     * `play_song`/`play_chain`/`play_phrase` deliberately do NOT call this. Kotlin's play* verbs each
-     * open with `stop()`, but on both platforms the caller has already done it — the dispatcher's
-     * `on_start` stops before it starts, and the JNI's caller is that same
-     * `PlaybackController.play*`. A second stop here would buy nothing and would put an extra `t_stop`
-     * into the event trace the 36 goldens byte-compare.
+     * ⚠️ Stopping only the scheduler is not enough: notes already handed to the engine sit in its
+     * queue up to two phrases ahead, and would keep playing — and a START would then layer a second
+     * stream on top.
+     * ⚠️ Order matters: the master EQ is restored BEFORE the queues are cleared, because an EQM
+     * override may be waiting in the param queue.
+     * The play_* verbs do not call this; the dispatcher stops before it starts, and an extra stop
+     * would add a `t_stop` to the goldened traces.
      */
     void stop() {
-        // ⚠️ TWO SOURCES ARM THIS RESTORE, ONE ON EACH SIDE OF THE SEAM. A phrase step's EQM is
-        // emitted by the scheduler, which knows it happened; a TABLE row's EQM is applied by the
-        // audio engine itself, per voice, and the scheduler never sees it. Read the engine's latch
-        // UNCONDITIONALLY — short-circuiting past it would leave it set for the next take, which
-        // would then restore the mixer EQ over a bus nothing had overridden.
+        // ⚠️ Two sources arm this restore: a phrase EQM (the scheduler knows) and a TABLE row's EQM
+        // (applied inside the engine). Read the engine's latch UNCONDITIONALLY, or it leaks into the
+        // next take.
         const bool table_eqm = engine_ && engine_->takeTableMasterEqTouched();
         if (engine_ && (seq_.eqm_active() || table_eqm) && seq_.has_live_project()) {
             engine_->setMasterEqSlot(project_.masterEqSlot);
         }
-        // The mixer faders VTR/VMV moved, for the identical reason and in the identical window: they
-        // REPLACE the authored value and nothing later puts it back, so without this the engine keeps
-        // whatever the song faded to while the MIXER screen still draws what the user typed — and the
-        // next PLAY starts from the wrong level. Also BEFORE the queues are cleared, so a queued fader
-        // move due after the stop cannot land on top of the restore.
+        // VTR/VMV replaced the faders; put the authored values back, also before the queues clear so
+        // a queued fader move cannot land after the restore.
         if (engine_ && seq_.mixer_vol_active() && seq_.has_live_project()) {
             const int tracks = static_cast<int>(project_.tracks.size());
             for (int i = 0; i < 8 && i < tracks; ++i)
                 engine_->setTrackVolume(i, hex_to_float(project_.tracks[static_cast<size_t>(i)].volume));
             engine_->setMasterVolume(hex_to_float(project_.masterVolume));
         }
-        // The delay's echo time a TIM took over, for the identical reason and in the identical
-        // window. ⚠️ TWO SOURCES ARM IT, one per side of the seam, exactly as the master EQ above has:
-        // a phrase cell goes through the scheduler and a TABLE row is applied by the engine itself.
-        // Read the engine's latch UNCONDITIONALLY, or it survives into the next take.
+        // The delay time a TIM took over — two sources again; read the engine's latch unconditionally.
         const bool table_tim = engine_ && engine_->takeTableDelayTimeTouched();
         if (engine_ && (seq_.delay_time_active() || table_tim) && seq_.has_live_project()) {
             engine_->setDelayTime(project_.delayTime, project_.delaySync,
@@ -332,59 +232,48 @@ class SongcoreHost {
         }
         sync_clock();
         seq_.stop();
-        // The transport ends: every note the cable is holding, ended NOW (not queued — the queue is
-        // dropped). `seq_.stop()` does not reach the router, so this cannot ride an event.
+        // Every note the cable holds, ended now; `seq_.stop()` does not reach the router.
         external_.panic();
-        // …and the keys the INCOMING cable is holding. The voices below are about to be ramped down,
-        // so a track the input router still believes is busy would make the next chord steal from a
-        // note that is already over. A request: the allocator is the drain's.
+        // …and the incoming keys, so the next chord does not steal from a note that is over. A
+        // request: the allocator is the drain's.
         midiIn_.request_release_keys();
         if (!engine_) midiIn_.service_requests();
         if (engine_) {
-            engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
-            // …and the voices already sounding. RAMPED, not cut: a sustained note ended where its
-            // waveform happens to be is a full-scale step, and it is handed to the instrument's
-            // filter, the reverb and delay sends and the master bus on its way out. The audio thread
-            // finishes the ramp — the voices are still sounding when this returns.
+            engine_->clearScheduledNotes();   // the lookahead: notes, kills and param updates
+            // The sounding voices, RAMPED rather than cut (a cut is a full-scale step). The audio
+            // thread finishes the ramp after this returns.
             engine_->stopAllRamped();
-            engine_->stopMetronome();         // …and the click, which is not queued and not a voice
+            engine_->stopMetronome();         // the click is neither queued nor a voice
         }
-        consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes/stopAll
+        consumer_.clear_track_mask();
         flush_trace();
     }
 
-    // AudioEngine.phraseTrackMask — bit N set once track N has had a note scheduled this session.
-    // The OCTA visualizer lights one scope lane per bit.
+    // Bit N set once track N has had a note scheduled this session (the OCTA visualizer's lanes).
     int track_mask() const { return consumer_.track_mask(); }
 
-    // The lookahead poll — PixelPerfectRenderer's 60 Hz loop drives this, exactly as it drove
-    // PlaybackController.updatePlaybackBuffer().
+    // The lookahead poll, once per UI frame.
     void poll() {
         sync_clock();
-        // The audio thread's drain needs two things only this thread can give it: the routing facts as
-        // a snapshot, and the engine holding every table and program a key could land on. Then, with
-        // no engine, this thread IS the drain — stamped at the clock, no lead-in, as the engine stamps
-        // at its block's first frame.
+        // The audio thread's drain needs the routing facts and every table a key could land on; with
+        // no engine, this thread IS the drain.
         arm_midi_in();
         if (!engine_) midiIn_.run(seq_.clock(), nullptr);
-        // What the drain handled since the last poll: the mapped knobs, thru, the counters, the observer.
+        // What the drain handled since the last poll: mapped knobs, thru, counters, observer.
         drain_midi_in();
-        // ⚠️ BETWEEN THE DRAIN AND THE PASS, and that is the whole point of deferring it: a mapped
-        // knob's lookahead roll has to happen before the pass it is meant to affect, and once for
-        // every message the drain just handed over rather than once each.
+        // ⚠️ Between the drain and the pass: a mapped knob's lookahead roll must precede the pass it
+        // affects, and happen once per batch rather than once per message.
         flush_mapped_edits();
         seq_.updatePlaybackBuffer();
-        // ⚠️ The MIDI queue is released HERE — unless a sender thread has taken the job (B3) — and it
-        // must be released even when nothing is playing, because a LEN gate and a panic's note-offs are
-        // things we OWE after the last note was scheduled. `pump` is idempotent on an empty queue.
+        // ⚠️ The MIDI queue is released here (unless a sender thread owns it), even when stopped: a
+        // LEN gate and a panic's note-offs are owed after the last note.
         if (!midiPumpExternal_) external_.pump(seq_.clock());
-        // TEMPO is editable while playing, so the beat length is pushed rather than remembered —
-        // exactly as it is handed to `MidiClock::pump` on every call, and for the same reason.
+        // TEMPO is editable while playing, so the beat length is pushed every time.
         if (engine_) engine_->setMetronomeBeat(frames_per_quarter());
         flush_trace();
     }
 
-    // ── ↓ the render path (RenderController.scheduleSongForRender / scheduleSelectionForRender) ───
+    // ── ↓ the render path ────────────────────────────────────────────────────────────────────────
     // Returns the total frame span scheduled. trackFilter == nullptr renders every track.
     int64_t schedule_song_range(int startRow, int endRow, const std::set<int>* trackFilter,
                                 int repeat = 1) {
@@ -395,23 +284,15 @@ class SongcoreHost {
     }
 
     // ── ↓ the render itself (render.h) ───────────────────────────────────────────────────────────
-    // Three verbs rather than one, because the caller may schedule with a DIFFERENT sequencer:
-    // Android's RenderController must still be able to put the KOTLIN one between prepare and render
-    // — that is exactly what the ENG=KT vs ENG=C++ byte-identical WAV check compares, and it stays
-    // meaningful only while the sequencer is the sole difference between the two runs.
-    // A caller with no other sequencer (tools/ptrender, the SDL shell) uses render_song_range_to_wav.
+    // prepare → schedule → render → finish; render_song_range_to_wav does all four.
     void prepare_render(int startRow, int endRow) {
         if (!engine_) return;
-        // ⚠️ **A RENDER IS NOT A PERFORMANCE — the cable is detached for its duration.** A render
-        // schedules the entire song into the bus in one go and never polls, so an attached
-        // ExternalConsumer would (a) accumulate the whole song's messages with nothing releasing them
-        // and (b) fire them at the wall clock afterwards, playing the song at the hardware once the
-        // render was over. §9 already says an EXTERNAL instrument cannot be rendered to a WAV; this is
-        // what makes it render as silence rather than as chaos.
+        // ⚠️ The cable is detached for a render: the whole song is scheduled at once and never
+        // polled, so an attached ExternalConsumer would fire it all at the hardware afterwards.
         external_.panic();
         router_.remove_consumer(&external_);
         songcore::prepare_render(*engine_, project_, routing_, startRow, endRow);
-        consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes()
+        consumer_.clear_track_mask();
         sync_clock();                   // the frame counter is back at 0 — re-read it
     }
 
@@ -432,10 +313,9 @@ class SongcoreHost {
         router_.add_consumer(&external_);   // the cable is live again (add_consumer is idempotent)
     }
 
-    // prepare → schedule → render → finish, with songcore's own sequencer in the middle.
-    //
-    // `repeat` plays the range that many times in ONE scheduling pass — see scheduleSongRowRange: a
-    // file rendered once and concatenated would cut the reverb and the delay at every join.
+    // prepare → schedule → render → finish, with songcore's own sequencer.
+    // `repeat` plays the range that many times in ONE pass — files concatenated afterwards would cut
+    // the reverb and delay at every join.
     RenderStats render_song_range_to_wav(int startRow, int endRow, const std::string& path,
                                          const RenderOptions& opts = RenderOptions(),
                                          const std::function<void(float)>& progress = nullptr,
@@ -448,7 +328,7 @@ class SongcoreHost {
         return stats;
     }
 
-    // The whole song, bounds and all — what a host renderer actually wants to call.
+    // The whole song, bounds and all.
     RenderStats render_song_to_wav(const std::string& path,
                                    const RenderOptions& opts = RenderOptions(),
                                    const std::function<void(float)>& progress = nullptr) {
@@ -457,12 +337,8 @@ class SongcoreHost {
         return render_song_range_to_wav(b.startRow, b.endRow, path, opts, progress);
     }
 
-    // Load the project's samples and SoundFonts into the engine, and learn the Routing from them
-    // (engine_setup.h). Android does this in Kotlin — its loader also drives MediaCodec for m4a — and
-    // pushes the result in via push_routing() instead.
-    //
-    // ⚠️ It also WRITES to the project: a WAV's `cue ` chunk is where its slice boundaries live, and
-    // loading the audio is what learns them (S6b). See load_project_media.
+    // Load the project's samples and SoundFonts and learn the Routing (engine_setup.h).
+    // ⚠️ It also WRITES to the project: a WAV's cue points become its slice markers.
     MediaLoadResult load_media(const std::string& baseDir) {
         lastMediaLoad_ = MediaLoadResult();
         if (!engine_) return lastMediaLoad_;
@@ -473,74 +349,46 @@ class SongcoreHost {
     }
 
     /**
-     * What the most recent `load_media` found. Recorded HERE rather than returned by every path that
-     * loads media, because two of them — `load_project_file` and `clean_inst` — do the load as one
-     * step of a fixed sequence and have their own return values; a caller that had to remember to ask
-     * for the count is a caller that will not.
-     *
-     * ⚠️ It matters because a failed sample load is otherwise INVISIBLE on the two platforms with no
-     * console. The instrument simply plays silence. This is also where an out-of-memory sample lands
-     * on a 512 MB device, and it is a handled, non-crashing path — the care is wasted if nobody says
-     * so.
+     * What the most recent `load_media` found — recorded here so every loading path reports it.
+     * ⚠️ Without it a failed sample load (including out-of-memory on a small device) is invisible
+     * where there is no console: the instrument just plays silence.
      */
     const MediaLoadResult& last_media_load() const { return lastMediaLoad_; }
 
     /**
-     * THIS install's app root — the folder Samples/, Soundfonts/… live directly under. The SDL shell
-     * hands in `$POCKETTRACKER_HOME` once at boot; a project copied off ANOTHER install (a phone, another
-     * handheld) then has its absolute-but-dead media paths re-rooted onto it at load (resolve_media_path).
-     *
-     * ⚠️ Leave it UNSET and every load behaves exactly as before — which is precisely what the host tools
-     * do, so their goldens do not move. Only a caller that sets it gets the relocation.
+     * THIS install's app root (Samples/, Soundfonts/… live under it), set once at boot. A project from
+     * another install has its dead absolute media paths re-rooted onto it at load
+     * (resolve_media_path). Unset — as in the host tools — leaves paths as they are.
      */
     void set_app_root(std::string root) { mediaRoots_.appRoot = std::move(root); }
 
     // ── ↓ the LIVE param push (engine_setup.h) ───────────────────────────────────────────────────
     //
-    // Everything the engine holds ON ITS OWN BEHALF and therefore survives a project swap: the mixer,
-    // the master bus, reverb, delay, the 128-slot EQ bank, and every instrument's playback params.
-    // None of it is a note, so nothing on the event path pushes it.
-    //
-    // ⚠️ **Call push_params() after load_media(), or the project you loaded is not the project you
-    // hear.** Until Phase 3 S4 nothing did: `push_project_params` had exactly one caller in the tree,
-    // `prepare_render`. A project rendered to a WAV therefore had its reverb, its master EQ, its track
-    // volumes and its samplers' filters — and the same project PLAYED had the engine's defaults, or
-    // whatever the last project left behind. See push_live_params for why seven conformance tools
-    // could not see it.
+    // What the engine holds on its own and keeps across project swaps: mixer, master bus, sends, EQ
+    // bank, instrument params. No event pushes it.
+    // ⚠️ Call push_params() after load_media(), or what you hear is the previous project's settings.
     void push_params() {
         if (!engine_) return;
         push_live_params(*engine_, project_, routing_);
     }
 
     /**
-     * One instrument's params — what an INSTRUMENT / MODS / pool edit pushes. Cheap and idempotent.
-     *
-     * ⚠️ **AND THE NOTES ALREADY SOUNDING ON IT ARE TOLD**, which the push above does not do on its
-     * own: a voice COPIES its instrument's filter, drive, crush and sends when it is triggered, so
-     * without the second call an edit — a mapped knob, a screen cell, a preset — is inaudible until
-     * the next note. Here rather than at the call sites because every edit path already comes
-     * through this one function.
+     * One instrument's params — what an INSTRUMENT / MODS / pool edit pushes.
+     * ⚠️ Also refreshes the notes already sounding on it: a voice COPIES filter, drive, crush and sends
+     * at trigger, so without this an edit is unheard until the next note.
      */
     void push_instrument(int id, bool refreshSounding = true) {
         if (!engine_) return;
         if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
         push_instrument_params(*engine_, project_.instruments[id], routing_, project_.tempo, sampleRate_);
-        // ⚠️ `sampleId`, because that is the index the params were just written at — the engine keys
-        // its per-instrument playback params by it, and a voice remembers the same number.
-        // ⚠️ Only for an EDIT: the refresh re-applies the instrument's filter, drive, crush and sends
-        // to the notes sounding now, wiping whatever a table row or a phrase command set on them.
+        // `sampleId` is the index the params were written at and the one a voice remembers.
+        // ⚠️ Only for an EDIT: the refresh wipes what a table row or phrase command set on the voice.
         if (refreshSounding) engine_->refreshSoundingInstrument(project_.instruments[id].sampleId);
     }
 
     /**
-     * The GLOBALS — the mixer, the master bus, both send buses, the EQ bank, the master EQ. What a
-     * MIXER or EFFECTS edit pushes, and the exact counterpart of push_instrument(id) above: the
-     * right-sized verb for what those two screens can actually change.
-     *
-     * ⚠️ Deliberately not push_params(). That one additionally sweeps all 128 instruments — ~2,500
-     * engine calls — and neither screen can touch an instrument. On a handheld, holding A+UP on a track
-     * volume fires an edit every 100 ms (the key-repeat interval), and re-pushing the whole pool on each
-     * one is work paid for nothing. push_params() stays what it is: the LOAD-time call.
+     * The GLOBALS — mixer, master bus, sends, EQ bank, master EQ. What MIXER and EFFECTS edits push.
+     * ⚠️ Not push_params(): that also sweeps 128 instruments (~2,500 engine calls) on every key-repeat.
      */
     void push_globals() {
         if (!engine_) return;
@@ -550,13 +398,8 @@ class SongcoreHost {
     // ── ↕ a mapped knob (midi_map.h) ─────────────────────────────────────────────────────────────
 
     /**
-     * Which incoming channel may carry MAPPING knobs: 0-15 for one, `MIDI_CTL_CH_ALL` for any, −1 for
-     * none. It is a setting, not the song's — see the CTL CH row — so it is pushed here the way the
-     * MIDI offset is.
-     *
-     * ⚠️ −1 is this object's start state and has no row behind it: the screen offers `ALL` and the
-     * sixteen channels, and pushes one of them at boot. A tool that builds a bare host gets "no knobs
-     * yet", which is the honest answer before anything has been configured.
+     * Which incoming channel may carry MAPPING knobs: 0-15, `MIDI_CTL_CH_ALL`, or −1 for none (the
+     * start state; the shell pushes the setting at boot).
      */
     void set_midi_control_channel(int ch) {
         controlChannel_ = (ch < 0 || ch > MIDI_CTL_CH_ALL) ? -1 : ch;
@@ -564,40 +407,26 @@ class SongcoreHost {
     int  midi_control_channel() const { return controlChannel_; }
 
     /**
-     * How many mapped destinations have been moved by the cable, ever.
-     *
-     * ⭐ **A COUNTER RATHER THAN A CALLBACK, and that is what keeps the dirty flag off the hot path.**
-     * The UI layer owns "the document changed" and the autosave debounce; it reads this once a frame
-     * and marks the song dirty if it moved, so a sweep of ~30 messages a second costs one bump per
-     * frame instead of one per message — and nothing has to be plumbed back down through the drain.
+     * How many mapped destinations the cable has moved, ever. A counter, not a callback: the UI reads
+     * it once a frame and marks the song dirty, so a knob sweep costs one bump per frame.
      */
     uint64_t mapped_cc_writes() const { return mappedCcWrites_; }
 
     /**
-     * MIDI LEARN is armed — the user is holding `R` — so the next knob on the control channel names a
-     * destination instead of driving one.
-     *
-     * ⚠️⚠️ **THE ARM IS PUSHED DOWN, THE RESULT IS WATCHED BACK UP, AND NEITHER CROSSES AS A CALL.**
-     * The drain runs below the UI layer and cannot ask which cell the cursor is on; the UI layer
-     * cannot be called from the drain without putting itself on a path a knob sweeps ~30 times a
-     * second. So this half is a bool the UI sets when `R` goes down, and the other half is the same
-     * watched-counter shape `mapped_cc_writes()` already uses.
+     * MIDI LEARN is armed (`R` held), so the next knob on the control channel names a destination.
+     * The arm is a bool pushed down; the result is a counter watched from above — the drain can never
+     * call into the UI.
      */
     void set_midi_learn_armed(bool on) { learnArmed_ = on; }
     bool midi_learn_armed() const { return learnArmed_; }
 
-    /** Moves once per knob seen while learn was armed; the controller and CHANNEL are the ones it saw. */
+    /** Moves once per knob seen while learn was armed, with the controller and channel it saw. */
     uint64_t midi_learn_events() const { return learnEvents_; }
     int      midi_learn_controller() const { return learnController_; }
     int      midi_learn_channel() const { return learnChannel_; }
 
-    /**
-     * The channel the last incoming CC arrived on, whatever channel that was, or −1 for none yet.
-     *
-     * ⚠️ **THE ANSWER TO "WHICH CHANNEL IS MY CONTROLLER ON?", which the `CTL CH` row otherwise asks
-     * the user to already know.** It defaults to OFF, so a fresh install cannot map anything until
-     * that number is found — and this is where the cable itself says it.
-     */
+    /** The channel the last incoming CC arrived on, or −1 — how the user finds their controller's
+     *  channel for the `CTL CH` row. */
     int last_cc_channel() const { return lastCcChannel_; }
 
     /** What the live audio callback costs over the last second; all zero without an engine. */
@@ -606,25 +435,18 @@ class SongcoreHost {
     }
 
     /**
-     * A knob the song has a mapping for moved. Writes the value into the project and makes it heard.
-     * Returns how many mappings that controller drove — 0 means nothing is mapped to it.
-     *
-     * ⭐ **THE VALUE IS WRITTEN THE INSTANT THE KNOB MOVES.** Nothing waits for the end of a
-     * "gesture": a knob has no button-up, so there is nothing to wait for. What is deferred is the
-     * AUTOSAVE, on the debounce every other edit already uses — the dispatcher's job, not this one.
-     *
-     * ⚠️ **ONE CONTROLLER MAY DRIVE SEVERAL DESTINATIONS** (a macro knob), so this is a sweep of the
-     * list rather than a lookup, and every match is applied.
-     *
-     * ⚠️ **A MAPPING WHOSE DESTINATION HAS GONE IS SKIPPED, NOT DELETED** — the instrument slot was
-     * cleared, the track index is out of range. It stays in the song and the list screen greys it.
+     * A mapped knob moved: write the value into the project and make it heard. Returns how many
+     * mappings that controller drove (0 = none). The value is written at once — a knob has no
+     * button-up; only the autosave is debounced (the dispatcher's job).
+     * One controller may drive several destinations; a mapping whose destination is gone is skipped,
+     * not deleted (the list screen greys it).
      */
     int apply_mapped_cc(int controller, int value) {
         int applied = 0;
         for (const MidiMapping& m : project_.midiMappings) {
             if (m.controller != controller) continue;
             const MapDest* d = map_dest(m.dest);
-            if (!d) continue;   // an id from a newer version — the row greys, the knob does nothing
+            if (!d) continue;   // an id from a newer version
 
             if (!write_mapped(project_, m, scale_cc(value, m.rangeMin, m.rangeMax))) continue;
             ++applied;
@@ -632,12 +454,9 @@ class SongcoreHost {
 
             if (d->scope == MapScope::INSTRUMENT) {
                 push_instrument(m.scopeIndex);
-                // ⚠️⚠️ **VOL AND PAN ARE BAKED INTO A NOTE WHEN IT IS EMITTED, and nothing else in the
-                // catalogue is.** `Sequencer::emit_note` reads the instrument's volume and pan and
-                // puts them in the record; every other mapped parameter is engine state a running
-                // voice reads, so pushing it IS delivering it. Those two therefore have to reach
-                // notes the lookahead has already scheduled — the "a value read two phrases before
-                // it is heard" shape — and that is what the roll below is for.
+                // ⚠️ VOL and PAN are baked into a note when it is EMITTED, so they must reach notes the
+                // lookahead already scheduled — hence the roll. Every other mapped parameter is engine
+                // state a voice reads live.
                 if (d->id == MapDestId::INS_VOL || d->id == MapDestId::INS_PAN)
                     mappedNotifyDue_ = true;
             } else {
@@ -649,13 +468,9 @@ class SongcoreHost {
     }
 
     /**
-     * The one expensive thing a mapped knob can owe, paid AT MOST ONCE PER POLL rather than per
-     * message.
-     *
-     * ⚠️ `notify_data_changed()` rolls the lookahead back to the next phrase boundary. At a knob's
-     * ~30 messages a second that is the scheduler never getting to schedule ahead, which is audible
-     * as stutter and gets blamed on the audio buffer. One poll is the cap, and it is free: the
-     * messages of a poll were drained together anyway.
+     * The lookahead roll a mapped knob may owe, at most once per poll.
+     * ⚠️ `notify_data_changed()` rolls back to the next phrase boundary; once per message (~30/s) the
+     * scheduler would never get ahead — heard as stutter.
      */
     void flush_mapped_edits() {
         if (!mappedNotifyDue_) return;
@@ -664,15 +479,9 @@ class SongcoreHost {
     }
 
     /**
-     * What the RUNNING TAKE owns right now, so `push_globals()` can push the authored mixer WITHOUT
-     * wiping it. Same two questions `stop()`'s restore asks, from the other end of the take.
-     *
-     * ⚠️ It is not only the mute/solo chords that need this. Every `mark_modified` on a globals screen
-     * pushes too, so nudging a MIXER fader or an EFFECTS dial mid-song used to kill a running EQM the
-     * same way a mute did.
-     *
-     * ⚠️ PEEK, NEVER TAKE, on the table latch: it is a one-way arm for the restore in `stop()`, and
-     * consuming it here would leave a bus a TABLE row's EQM had overridden restored by nobody.
+     * What the running take owns now, so `push_globals()` can push the authored mixer without wiping
+     * it (any MIXER/EFFECTS edit mid-song pushes). The same questions `stop()`'s restore asks.
+     * ⚠️ PEEK, never take, the table latches: they arm the restore in `stop()`.
      */
     MixerHeld held_by_song() const {
         MixerHeld held;
@@ -684,21 +493,12 @@ class SongcoreHost {
         return held;
     }
 
-    // ── ↕ the EQ editor (Phase 3 S8) ─────────────────────────────────────────────────────────────
+    // ── ↕ the EQ editor ──────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ THE TWO CALLS ARE BOTH REQUIRED, and this is the "a push that is SKIPPED is the same bug
-    // wearing a different hat" rule in its sharpest form. `setEqBand` writes ONLY into the engine's
-    // 128-slot BANK. Nothing that USES a slot reads the bank while it runs: the master bus compiles its
-    // own biquad coefficients (`masterChain.masterEq.bands[b].setParams(…)`), and each instrument keeps
-    // its own copy (`instrumentParams[id].eqBands[i]`) — see sample-editor.cpp. So a band edit that only
-    // calls `set_eq_band` updates the bank and CHANGES NOTHING YOU CAN HEAR: the EQ goes on filtering
-    // with the coefficients it was last handed.
-    //
-    // Re-assigning the SAME slot to the same consumer is what forces the recompute, which is why Kotlin
-    // re-calls the caller's own setter after every single band nudge — and why the editor has to
-    // remember WHICH cell opened it. This is also why these are the right-sized verbs rather than
-    // `push_globals()`: holding A+UP on a GAIN cell fires an edit every 100 ms, and re-pushing the whole
-    // mixer, both send buses and all 128 EQ slots for one band's frequency is work paid for nothing.
+    // ⚠️ A band edit needs BOTH calls. `setEqBand` writes only the 128-slot bank; the master bus and
+    // each instrument compile their own coefficients when a slot is ASSIGNED. So the editor re-assigns
+    // the same slot to the consumer that opened it after every band nudge — and must remember which
+    // one that was. Cheaper than `push_globals()` on every key-repeat.
 
     void set_eq_band(int slot, int band, int type, int freqHex, int gainHex, int qHex) {
         if (!engine_) return;
@@ -726,13 +526,9 @@ class SongcoreHost {
     }
 
     /**
-     * The spectrum of ONE signal path, for the EQ editor's visualization — the master bus (0), the
-     * delay's input (1), the reverb's input (2), or one instrument's own voices (3).
-     *
-     * Not the same question as the visualizer's `getSpectrumMagnitudes`, which is always the master bus.
-     * An EQ sitting on the reverb send drawn over the master spectrum would be a curve over a signal the
-     * band is not even in. Returns false with no engine, and the editor then draws its grid over nothing
-     * — which is exactly what `ptshot` renders.
+     * The spectrum of ONE signal path for the EQ editor: master bus (0), delay input (1), reverb input
+     * (2), or one instrument's voices (3) — an EQ on a send is drawn over that send's signal. False
+     * with no engine; the editor then draws an empty grid.
      */
     bool spectrum_for_source(int source, int instrId, int numBins, float* out) const {
         if (!engine_ || numBins <= 0 || !out) return false;
@@ -740,18 +536,14 @@ class SongcoreHost {
         return true;
     }
 
-    // ── ↕ the instrument operations (InstrumentController) ────────────────────────────────────────
-    // The verbs that own a SOURCE — the ones a plain field edit cannot express because freeing the old
-    // sample or SoundFont is the engine's business. See engine_setup.h for the sharing guards.
-    //
-    // ⚠️ NOT guarded on `engine_`, and that distinction cost a harness failure to find: these EDIT THE
-    // DOCUMENT and merely also free engine resources. An early `if (!engine_) return;` here would mean
-    // the whole editing path silently did nothing without an audio device — so the null-check lives
-    // around the engine CALLS, inside engine_setup.h, and the document is always written.
+    // ── ↕ the instrument operations ──────────────────────────────────────────────────────────────
+    // The verbs that own a SOURCE (engine_setup.h).
+    // ⚠️ Not guarded on `engine_`: they edit the DOCUMENT and only also free engine resources. The
+    // null checks live around the engine calls, inside engine_setup.h.
 
     void set_instrument_type(int id, InstrumentType type) {
         songcore::set_instrument_type(engine_, project_, id, type, routing_);
-        push_instrument(id);   // itself a no-op without an engine
+        push_instrument(id);   // a no-op without an engine
     }
 
     void clear_instrument(int id) {
@@ -759,9 +551,8 @@ class SongcoreHost {
         push_instrument(id);
     }
 
-    // The SoundFont preset list, for the INSTRUMENT screen's PRESET row. All three answer for an
-    // instrument with no SoundFont (0 / 0 / "---"), which is what lets the screen draw before anything
-    // is loaded — and they read the FILE's index, so they also answer for a bank too large to load.
+    // The PRESET row's list. All three answer for an instrument with no SoundFont (0 / 0 / "---"), and
+    // read the FILE's index, so they work for banks too large to load.
     int sf_preset_count(int id) const {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
         return soundfont_preset_count(*engine_, project_.instruments[static_cast<size_t>(id)],
@@ -783,11 +574,8 @@ class SongcoreHost {
                                                 index, mediaRoots_);
     }
 
-    /**
-     * Bring instrument `id`'s loaded sound into line with the preset it names — a load when the PATCH
-     * row has moved, and nothing at all otherwise. Safe to call every frame; see
-     * `sync_instrument_soundfont`.
-     */
+    /** Bring instrument `id`'s loaded sound in line with the preset it names; free when nothing moved,
+     *  so safe every frame. */
     void sync_sf_preset(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
         const int was = routing_.sfSlot[id];
@@ -796,17 +584,13 @@ class SongcoreHost {
         if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
     }
 
-    /**
-     * The PATCH row's load, started rather than done. False means the engine was busy and the caller
-     * must ask again — see `request_instrument_soundfont`.
-     */
+    /** The PATCH row's load, started rather than done. False = engine busy, ask again. */
     bool request_sf_preset(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return true;
         const int was = routing_.sfSlot[id];
         const bool taken = songcore::request_instrument_soundfont(
             *engine_, project_.instruments[static_cast<size_t>(id)], routing_, mediaRoots_);
-        // An already-resident preset is answered on the spot rather than by the worker, and that
-        // answer moves the slot here instead of in poll_sf_load.
+        // An already-resident preset is answered on the spot, moving the slot here.
         if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
         return taken;
     }
@@ -818,92 +602,50 @@ class SongcoreHost {
             notify_sf_slot_moved();
     }
 
-    // ── ↕ the FILE verbs (Phase 3 S6a — what the browser's A button reaches) ─────────────────────
+    // ── ↕ the FILE verbs ─────────────────────────────────────────────────────────────────────────
     //
-    // Until now the host could only be handed a project blob by its caller. These five are what let the
-    // app OPEN and SAVE things itself, and they are the reason `set_instrument_type` / `clear_instrument`
-    // (S4) finally have company: those two could empty a slot, and nothing could fill one.
-    //
-    // All of them take a path and none of them take a FileSystem: songcore reads and writes files
-    // directly (project_io.h parses a blob; the engine opens a .wav), and the `ui::FileSystem`
-    // abstraction exists for the BROWSER — for listing, sorting, renaming — which is a UI concern.
-    // Two layers, each doing its own job.
-    //
-    // The *opening* still funnels: `pt_read_file` and `pt_fopen` (native/byte_source.h) are the one
-    // place a path string becomes a handle, for songcore and the engine alike. That is a different
-    // seam from `ui::FileSystem` and deliberately narrower — it knows nothing about names, parents
-    // or listings, which is what lets songcore keep depending on it and not on the UI.
+    // They take paths, not a `ui::FileSystem` — that abstraction is for the browser (listing,
+    // renaming). Opening funnels through `pt_read_file` / `pt_fopen` (byte_source.h), the one place a
+    // path becomes a handle.
 
     /** Replace the project from a .ptp on disk: stop → parse → push → load its media → push its params. */
     bool load_project_file(const std::string& path, const std::string& baseDir) {
         std::string blob;
         if (!pt_read_file(path.c_str(), blob)) return false;
 
-        // ⚠️ **THE TRANSPORT STOPS BEFORE THE DOCUMENT UNDER IT IS REPLACED**, exactly as new_project
-        // does — a load is a document swap and every one of them invalidates the scheduler's position.
-        // Without this the sequencer keeps `isPlaying_`, its PlaybackMode and its `nextSongRowToSchedule_`
-        // from the OLD song and walks them through the NEW project's data: the rows there are empty, so
-        // scheduler.h's `maxChainLength == 0` arm advances the row WITHOUT advancing
-        // `nextFrameToSchedule_`, burning through the rest of the stale range for free. By the time the
-        // walk wraps to row 0 and finds real content, the schedule frame is behind the clock and the
-        // song's first row lands in the PAST. What the user sees is a lit PLAY, silence, a playhead
-        // drifting through the previous song's position, and then a late start missing its first row.
-        //
-        // A parse failure below therefore leaves the transport stopped while the previous project stays
-        // intact (push_project's contract). That is deliberate: the only alternative is playing on over a
-        // LOAD FAILED, and there is nothing to resume to — the position that made sense belonged to the
-        // document the user was trying to leave.
+        // ⚠️ The transport stops BEFORE the document is replaced. Left running, the scheduler walks
+        // the old song's position through the new data, falls behind the clock, and the new song
+        // starts late and without its first row. A parse failure therefore leaves the transport
+        // stopped with the previous project intact — there is no position to resume to.
         const bool wasPlaying = seq_.is_playing();
         stop();
 
         if (!push_project(blob)) return false;
 
-        // ⚠️ The two calls that must follow a push, in this order, or the project you loaded is not
-        // the project you hear. load_media opens the files and learns the Routing; push_params pushes
-        // everything the ENGINE holds that no note carries. Phase 3 S4 is the session that found out
-        // what happens when the second one is missing (84.4% of the render's bytes differed).
+        // ⚠️ Both, in this order, or the project you hear is not the one you loaded.
         load_media(baseDir);
         push_params();
 
-        // Loading a project while the transport runs SWITCHES SONGS: the new one takes over from its
-        // top rather than making the user press START again. It cannot be gapless — load_media opens
-        // and decodes every sample on the calling thread — so this is a hard cut, and `play_song`
-        // re-reads the engine's frame counter (sync_clock) so the schedule starts from where the clock
-        // actually is after that wait, not from where it was before the disk work.
-        //
-        // Always the SONG from row 0, whatever mode was running: a CHAIN or PHRASE id from the old
-        // document names unrelated material in the new one, and row 0 is the only position a project
-        // the user has not seen yet is known to have. Nothing starts here that was not already playing,
-        // which is what keeps the launch and autosave-recovery callers silent.
+        // Loading while playing SWITCHES SONGS: a hard cut (the media decode blocks), then the new song
+        // from row 0 — an old CHAIN or PHRASE id means nothing in the new document. `play_song`
+        // re-reads the clock after the disk work. Nothing starts that was not already playing.
         if (wasPlaying) play_song(0);
         return true;
     }
 
-    // ⚠️ **songcore WRITES NO USER FILE, and that is deliberate rather than an omission.** Every
-    // path that saves something a user would miss — the `.ptp`, the autosave, the template, a
-    // `.pti` — goes through `ui::FileSystem::write_file`, which writes a temp and renames it over
-    // the target and checks the close. songcore cannot depend on `ui::FileSystem` (it has to keep
-    // compiling for the NDK, where *where files live* is the host's problem), so the write belongs
-    // one layer up, in `ui/project_actions.cpp` and `ui/lifecycle.cpp`. A truncating `ofstream`
-    // writer sitting here is a trap for the next caller: it destroys the previous file at open time
-    // and cannot report a failure that only surfaces at the flush.
+    // ⚠️ songcore writes no user file. Every save goes through `ui::FileSystem::write_file` (temp +
+    // rename + checked close), one layer up; songcore cannot depend on it. A truncating `ofstream`
+    // here would destroy the old file at open and miss a failure that surfaces at flush.
 
     // ── PROJECT screen: NEW, and the two COMPACTs ────────────────────────────────────────────────
     //
-    // The document surgery itself is pure and lives in project_ops.h. What lands HERE is the half
-    // that has to tell the ENGINE, and it is the whole reason these are host verbs rather than three
-    // free functions the dispatcher could call: the engine holds state that the document does not,
-    // and every one of these invalidates some of it.
+    // The document surgery is pure (project_ops.h). These are host verbs because each also
+    // invalidates state the engine holds.
 
     /** PROJECT → NEW. A blank document, and an engine that has forgotten the last one. */
     void new_project() {
-        // ⚠️ This comment used to read "before the samples go: no voice may be reading PCM we are about
-        // to free" — which was BOTH a false description of stop() (it stopped no voices until the Phase-4
-        // fix above) and the wrong reason. The PCM is not safe because of this line: `clearAllSamples()`
-        // stops every voice and clears all three queues INSIDE `sampleEditMutex`, which is the only way
-        // to do it correctly, since the audio thread can be mid-read and takes that lock with try_to_lock.
-        // A stop() out here races it by construction. This is the TRANSPORT stopping because NEW ends the
-        // session — a user-facing fact, not a memory-safety mechanism. Do not lean on it for the latter.
+        // This stops the transport because NEW ends the session. It does NOT make freeing PCM safe:
+        // `clearAllSamples()` does that itself, stopping voices under `sampleEditMutex`.
         stop();
         songcore::new_project(project_);
 
@@ -911,33 +653,24 @@ class SongcoreHost {
             engine_->clearAllSamples();
             engine_->clearAllSoundfonts();
         }
-        routing_.reset();     // the ratios and SF slots described the OLD project's media
+        routing_.reset();     // the ratios and SF slots described the old project's media
 
-        invalidate_tables();  // Kotlin's audioEngine.clearLoadedTables()
-        push_params();        // Kotlin's syncVolumesToAudioBackend()
+        invalidate_tables();
+        push_params();
     }
 
-    /**
-     * PROJECT → COMPACT → SEQ. Unused chains and phrases back to factory.
-     *
-     * No engine call, and that is not an omission: a chain and a phrase are pure arrangement. They
-     * hold no PCM, no table, no param — nothing the engine has ever been told about.
-     */
+    /** PROJECT → COMPACT → SEQ. Unused chains and phrases back to factory. Pure arrangement, so no
+     *  engine call. */
     void clean_seq() { songcore::clean_unused_seq(project_); }
 
     /**
      * PROJECT → COMPACT → INST. Unused instruments, tables and grooves back to factory.
-     *
-     * ⚠️ Every part of the engine sync below is load-bearing. Compacting replaced unused instruments
-     * with empty ones in the DOCUMENT, but their sample and SoundFont buffers are still loaded — so
-     * the RAM would only drop after a save and a reload (Kotlin hits `reloadProjectSamples` here for
-     * exactly this). The tables it reset are worse than stale: the consumer caches which tables it
-     * has already handed the engine, so without `invalidate_tables` a compacted table 5 would go on
-     * playing the OLD table 5's rows.
+     * ⚠️ All three engine steps matter: the old buffers stay loaded until media is reloaded, and
+     * without `invalidate_tables` a compacted table would go on playing its old rows.
      */
     void clean_inst(const std::string& baseDir) {
         songcore::clean_unused_inst(project_);
-        load_media(baseDir);   // clearAllSamples + clearAllSoundfonts + routing.reset + reload
+        load_media(baseDir);   // clears samples, SoundFonts and routing, then reloads
         invalidate_tables();
         push_params();
     }
@@ -945,7 +678,7 @@ class SongcoreHost {
     /** A sample (wav/mp3/flac/ogg/opus) → instrument `id`. The browser's A on a sampler slot. */
     bool load_sample(int id, const std::string& path) {
         if (!load_instrument_sample(engine_, project_, id, path, routing_)) return false;
-        push_instrument(id);   // the fresh source needs its slot's filter/window/loop pushed at it
+        push_instrument(id);   // the fresh source needs its slot's filter/window/loop
         return true;
     }
 
@@ -957,33 +690,21 @@ class SongcoreHost {
     }
 
     /**
-     * True when the last media load failed because the device could not hold it, rather than because
-     * the file would not parse. The two want opposite messages, and every loader reports failure the
-     * same way without this.
-     *
-     * ⚠️ It forwards ONE bool rather than exposing the engine. The UI has no business reaching the
-     * engine directly — that seam is why `pt-ui` is portable — and the question it actually needs
-     * answered is this narrow.
+     * True when the last media load failed for lack of memory rather than a bad file — the two want
+     * different messages. One bool, so the UI never reaches the engine.
      */
     bool last_load_ran_out_of_memory() const {
         return engine_ && engine_->lastLoadFailure() == AudioEngine::LoadFailure::OUT_OF_MEMORY;
     }
 
-    /**
-     * True when the last media load stopped because the USER stopped it.
-     *
-     * ⚠️ It is a third answer and not a shade of the second: a cancel is not a failure, and the file
-     * is not at fault. The UI's job on this one is to say nothing — the user pressed B and already
-     * knows why nothing arrived. Same one-bool seam as the query above, for the same reason.
-     */
+    /** True when the user cancelled the last media load: not a failure, and the UI says nothing. */
     bool last_load_cancelled() const {
         return engine_ && engine_->lastLoadFailure() == AudioEngine::LoadFailure::CANCELLED;
     }
 
     /**
-     * Read a .pti into instrument `id`. False if the file will not parse, OR if its source file is
-     * gone — but the PARAMETERS land either way in the second case, which is deliberate (a preset
-     * whose sample has moved should still give you back its filter and its mod slots).
+     * Read a .pti into instrument `id`. False if it will not parse or its source file is gone — in the
+     * latter case the parameters still land.
      */
     bool load_instrument_preset(int id, const std::string& path) {
         std::string blob;
@@ -1011,16 +732,10 @@ class SongcoreHost {
         clear_preview_slots(*engine_);
     }
 
-    // ── ↕ THE SAMPLE EDITOR (Phase 3 S6b) ────────────────────────────────────────────────────────
+    // ── ↕ THE SAMPLE EDITOR ──────────────────────────────────────────────────────────────────────
     //
-    // Almost every verb below is ONE LINE, and that is the whole story of this session: the sample
-    // editor's DSP has been in the engine since long before songcore existed (`native/sample-editor.cpp`
-    // + `native/transient-detector.cpp`), because Android's JNI layer was always a thin forward. So the
-    // port writes no DSP — it writes the SEAM, and the seam is this list.
-    //
-    // The `if (!engine_)` guard on each is not defensive noise: it is what lets `tools/ptdispatch` drive
-    // the whole editor — its cursor, its row map, its slice arithmetic, its save paths — with **no audio
-    // device at all**. An op that cannot run simply does not run, and the document is unharmed.
+    // Thin forwards to the engine's DSP (sample-editor.cpp, transient-detector.cpp). Each is guarded on
+    // `engine_`, so the tests can drive the whole editor with no audio device.
 
     // ── Reading the sample (the feed) ────────────────────────────────────────────────────────────
     int  sample_length(int id) const { return engine_ ? engine_->getSampleLength(id) : 0; }
@@ -1037,13 +752,9 @@ class SongcoreHost {
     }
 
     /**
-     * `bins` (min, max) PAIRS — so the returned vector is 2 × bins long. `channel` is 0 = left,
-     * 1 = right, 2 = averaged, and is only consulted for a stereo sample.
-     *
-     * A frame range that COVERS the sample — (0, 0), or (0, length) — means "the whole thing", and takes
-     * the engine's whole-sample entry point. Both spellings must land on the same call, because both
-     * callers exist: the editor opens on (0, 0) and the zoom-0 view computes (0, length), and a waveform
-     * that changed subtly depending on which of those asked for it would be a bug nobody could see.
+     * `bins` (min, max) pairs, so 2 × bins floats. `channel`: 0 left, 1 right, 2 averaged (stereo only).
+     * A range covering the whole sample — (0, 0) or (0, length) — takes the whole-sample entry point;
+     * both spellings must draw identically.
      */
     std::vector<float> sample_waveform(int id, int bins, int startFrame = 0, int endFrame = 0,
                                        int channel = 2) const {
@@ -1054,8 +765,8 @@ class SongcoreHost {
         const bool whole = (startFrame <= 0) && (endFrame <= 0 || endFrame >= len);
 
         if (engine_->hasStereoData(id)) {
-            // A stereo sample ALWAYS goes through the channel-aware entry point, even un-zoomed: the
-            // plain one averages, and SOURCE=LEFT must draw the left channel, not a downmix.
+            // Stereo always uses the channel-aware entry point: the plain one averages, and
+            // SOURCE=LEFT must draw the left channel.
             engine_->getSampleWaveformRangeSource(id, whole ? 0 : startFrame, whole ? len : endFrame,
                                                   out.data(), bins, channel);
         } else if (whole) {
@@ -1066,7 +777,7 @@ class SongcoreHost {
         return out;
     }
 
-    /** The slice boundaries the detector finds at `sensitivity`. Capped at 128, as Kotlin's JNI is. */
+    /** The slice boundaries the detector finds at `sensitivity`, capped at 128. */
     std::vector<int> detect_transients(int id, int sensitivity) const {
         if (!engine_) return {};
         int       markers[128];
@@ -1074,20 +785,18 @@ class SongcoreHost {
         return std::vector<int>(markers, markers + std::max(n, 0));
     }
 
-    /**
-     * The nearest zero crossing to `frame` in direction `dir` (−1 back, +1 forward, 0 either), in the
-     * signal the editor's SOURCE mode says the cut will be made in — both channels under STEREO.
-     */
+    /** The nearest zero crossing to `frame` in direction `dir` (−1 back, +1 forward, 0 either), in the
+     *  signal the SOURCE mode will cut — both channels under STEREO. */
     int find_zero_crossing(int id, int frame, int dir, int sourceMode = 0) const {
         return engine_ ? engine_->findZeroCrossing(id, frame, dir, 512, sourceMode) : frame;
     }
 
     int clipboard_length() const { return engine_ ? engine_->getClipboardLength() : 0; }
 
-    // ── The twelve operations. Every one of them is already written; these only name them. ───────
+    // ── The destructive operations ───────────────────────────────────────────────────────────────
     void backup_sample(int id) { if (engine_) engine_->backupSample(id); }
     void undo_sample(int id) { if (engine_) engine_->undoSample(id); }
-    /** The editor is closing: its single-level undo is unreachable now, so it is just held memory. */
+    /** The editor is closing: its single-level undo is now just held memory. */
     void free_sample_undo(int id) { if (engine_) engine_->freeSampleUndo(id); }
 
     void crop_sample(int id, int start, int end) { if (engine_) engine_->cropSample(id, start, end); }
@@ -1101,12 +810,10 @@ class SongcoreHost {
     void silence_region(int id, int start, int end) { if (engine_) engine_->silenceRegion(id, start, end); }
     void reverse_sample(int id, int start, int end) { if (engine_) engine_->reverseSample(id, start, end); }
 
-    // ── The FX row: a NON-destructive preview, and a destructive apply ───────────────────────────
+    // ── The FX row: a non-destructive preview, and a destructive apply ───────────────────────────
     //
-    // The backup is what makes the FX row auditionable at all: START applies the effect for real, plays
-    // it, and the next gesture puts the clean audio back. Only APPLY keeps it. Two separate backups
-    // (this one and the undo slot) because they answer different questions — "what did it sound like
-    // before I *previewed*" and "what did it sound like before I *committed*".
+    // START applies the effect for real and plays it; the next gesture restores this backup. Only
+    // APPLY keeps it. Separate from the undo slot: "before I previewed" vs "before I committed".
     void save_fx_preview_backup(int id) { if (engine_) engine_->saveFxPreviewBackup(id); }
     void restore_fx_preview_backup() { if (engine_) engine_->restoreFxPreviewBackup(); }
 
@@ -1116,7 +823,7 @@ class SongcoreHost {
                                static_cast<float>(sample_rate_of(id)), project_.limiterPreGain);
     }
 
-    // ── The three that move the ratio, and therefore live in songcore (sample_edit.h) ────────────
+    // ── The three that change the rate ratio, so live in songcore (sample_edit.h) ────────────────
     void apply_rate_and_bits(int id, int factor, int bits) {
         songcore::apply_rate_and_bits(engine_, routing_, rateCache_, id, factor, bits);
     }
@@ -1130,17 +837,12 @@ class SongcoreHost {
     // ── The audition ─────────────────────────────────────────────────────────────────────────────
 
     /**
-     * Play the sample DRY at its root, through the SOURCE mode's channel, with the SELECTION as its
-     * window — the editor's START.
-     *
-     * ⚠️ THE WINDOW GOES IN AS FRAMES (`setInstrumentFrameWindow`), NOT through the instrument's own
-     * 0-255 `sampleStart` / `sampleEnd`. Those are a 1/255 grid — 8 ms on a 2-second sample — so an
-     * audition driven through them cannot hear a one-frame nudge of the selection at all, and CROP
-     * then cuts somewhere the user never heard. The frame window is exactly what CROP will keep.
-     *
-     * ⚠️ It still temporarily mutates `sampleId` when a scratch slot is in play, and the frame window
-     * outlives this call: the engine reads both when the note FIRES, 100 frames later, not when it is
-     * scheduled. `finish_sample_preview()` is what ends them, on the dispatcher's deadline.
+     * The editor's START: the sample DRY at its root, through the SOURCE mode's channel, windowed to
+     * the SELECTION.
+     * ⚠️ The window goes in as FRAMES (`setInstrumentFrameWindow`), not the 0-255 sampleStart/End grid
+     * (8 ms steps on a 2 s sample) — the audition must be exactly what CROP will keep.
+     * ⚠️ The frame window (and a swapped `sampleId`) is read when the note FIRES, 100 frames later, so
+     * it outlives this call; `finish_sample_preview()` ends it on the dispatcher's deadline.
      */
     void preview_sample_editor(int id, int sourceMode, int64_t selStart, int64_t selEnd,
                                int totalFrames, int pitchSemitones) {
@@ -1148,42 +850,36 @@ class SongcoreHost {
         Instrument& ins = project_.instruments[static_cast<size_t>(id)];
 
         const Note savedRoot = ins.root;
-        // The PENDING pitch shift is auditioned by transposing the ROOT — nothing is resampled until
-        // SAVE bakes it, so this is the only way to hear what it will do.
+        // A pending pitch shift is heard by transposing the ROOT; nothing is resampled until SAVE.
         if (pitchSemitones != 0)
             ins.root = note_from_midi(std::clamp(note_to_midi(ins.root) + pitchSemitones, 0, 127));
 
         const int slot = prepare_source_preview(*engine_, id, sourceMode);
 
-        // The engine keys a voice's window on the SLOT it plays from, so the params must be pushed at
-        // the scratch slot when there is one — pushing them at the instrument left slot 254 at its
-        // 0/255 default, playing the whole sample and ignoring the markers entirely.
+        // A voice's window is keyed on the SLOT it plays from, so the params go to the scratch slot
+        // when there is one.
         const int savedSampleId = ins.sampleId;
         if (slot != id) ins.sampleId = slot;
         push_instrument_playback_params(*engine_, ins);
-        // AFTER the push, which clears any window left over from the previous audition. The scratch
-        // slot holds a frame-for-frame copy of the instrument's audio, so the selection indexes both.
+        // After the push, which clears any previous window. The scratch slot is a frame-for-frame
+        // copy, so the selection indexes both.
         if (totalFrames > 0 && selEnd > selStart)
             engine_->setInstrumentFrameWindow(slot, static_cast<int>(selStart), static_cast<int>(selEnd));
         preview_instrument_dry(*engine_, ins, slot, routing_.sampleRateRatio[id]);
         if (slot != id) ins.sampleId = savedSampleId;
 
-        ins.root = savedRoot;   // the root is read at SCHEDULE time, so it can go back at once
+        ins.root = savedRoot;   // read at SCHEDULE time, so it can go back at once
     }
 
     /**
-     * Put the instrument back: its real sample window, its EQ, its sends, its modulation. Runs on the
-     * dispatcher's 100 ms deadline, and IMMEDIATELY if a second START arrives inside that window.
-     *
-     * The window needs no saved copy to restore FROM — the preview never wrote to the project, and the
-     * push below is itself what disarms the engine's frame window (`setInstrumentParams`).
+     * Put the instrument back — window, EQ, sends, modulation. Runs on the dispatcher's 100 ms
+     * deadline, or at once if a second START arrives first. The push itself disarms the frame window.
      */
     void finish_sample_preview(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
         Instrument& ins = project_.instruments[static_cast<size_t>(id)];
         push_instrument_playback_params(*engine_, ins);
-        // The push above only reaches the slot the INSTRUMENT points at; a channel-selected audition
-        // played from the scratch, so that one is disarmed by name.
+        // The push only reaches the instrument's own slot; a channel audition used the scratch slot.
         engine_->setInstrumentFrameWindow(SOURCE_PREVIEW_SLOT, -1, -1);
         // The three the DRY preview switched off.
         push_instrument_mod_eq_sends(*engine_, ins, project_.tempo, engine_->getSampleRate());
@@ -1191,8 +887,7 @@ class SongcoreHost {
 
     // ── SAVE and CHOP ────────────────────────────────────────────────────────────────────────────
 
-    /** The edited PCM → a WAV at `path`, with its slice boundaries in the `cue ` chunk. */
-    /** `bits` 0 = the depth the sample was loaded at. */
+    /** The edited PCM → a WAV at `path`, slices in the `cue ` chunk. `bits` 0 = the loaded depth. */
     bool save_sample_wav(int id, const std::string& path, const std::vector<int>& cuePoints,
                          int sourceMode, bool hasStereo, int bits = 0) {
         if (!engine_) return false;
@@ -1201,10 +896,9 @@ class SongcoreHost {
     }
 
     /**
-     * After a SAVE that left the slot's buffer in place: that buffer is now what the file holds, so its
-     * depth becomes the saved one and the RATE/BIT original — and the ratio it would restore — are
-     * dropped. Left behind, the next session's first touch of RATE or BIT would bring back the audio
-     * from before the save.
+     * After a SAVE that kept the slot's buffer: that buffer is now the file, so its depth becomes the
+     * saved one and the RATE/BIT original is dropped — else the next RATE/BIT touch would restore
+     * pre-save audio.
      */
     void adopt_saved_sample(int id, int bits) {
         if (!engine_) return;
@@ -1220,30 +914,19 @@ class SongcoreHost {
         return songcore::chop_sample(*engine_, routing_, id, dir, baseName, slices, bits);
     }
 
-    // ── ↕ live editing — the SDL shell's UI *is* the editing model ────────────────────────────────
+    // ── ↕ live editing ───────────────────────────────────────────────────────────────────────────
     //
-    // On Android the Kotlin UI owns a SECOND copy of the project (Compose needs an observable object
-    // graph to recompose against) and pushes it down as a whole JSON blob whenever it changes. There
-    // is no Kotlin on Linux: the C++ UI edits THIS project, in place.
-    //
-    // That is not a shortcut — it is what push_project's own contract already describes. The project
-    // never changes address, and the Sequencer reads "the one live Project object, seeing edits as
-    // they land", which is exactly how the Kotlin sequencer sees Kotlin's edits. Editing here simply
-    // removes the serialize → parse round trip from the path, so a cursor keystroke on a handheld does
-    // not re-encode ~440 KB of JSON to move one byte.
-    //
-    // Two obligations come with the reference, both of them the same ones the Android path has:
-    //   • after an edit WHILE PLAYING → notify_data_changed(), or the change is not heard until the
-    //     lookahead happens to pass it;
-    //   • after editing a TABLE → invalidate_tables(), because the consumer caches which tables it has
-    //     already pushed to the engine (push_project does this for you; an in-place edit cannot).
+    // The UI edits THIS project in place; the Sequencer reads the same object and sees edits as they
+    // land. Two obligations:
+    //   • an edit WHILE PLAYING → notify_data_changed(), or it is not heard until the lookahead passes;
+    //   • a TABLE edit → invalidate_tables(): the consumer caches what it already pushed.
     Project& edit_project() { return project_; }
     void     invalidate_tables() { consumer_.invalidate_tables(); }
 
     // ── ↑ live-edit reaction ─────────────────────────────────────────────────────────────────────
-    // Roll the lookahead back to the earliest unplayed phrase boundary and drop the notes already
-    // queued past it, so an edit is heard on the next phrase loop. The Sequencer computes the
-    // boundary; clearing the queue is the host's job because only the host holds the engine.
+    // Roll the lookahead back to the earliest unplayed phrase boundary and drop the queued notes past
+    // it, so an edit is heard on the next loop. The Sequencer picks the boundary; the host clears the
+    // queue because only it holds the engine.
     void notify_data_changed() {
         sync_clock();
         apply_rollback(seq_.notify_data_changed(seq_.clock()));
@@ -1251,11 +934,9 @@ class SongcoreHost {
 
     // ── ↕ LIVE mode ──────────────────────────────────────────────────────────────────────────────
     //
-    // Queue-and-launch. Each verb arms a slot and rewinds the track it belongs to so the launch can
-    // still land on the boundary it was aimed at — the scheduler runs two phrases ahead, so without
-    // the rewind a launch aimed at a boundary already inside the buffer would arrive a lap late.
-    // ⚠️ Dropping the notes past that frame is the HOST's half, exactly as it is for a live edit:
-    // only the host holds the engine.
+    // Queue-and-launch. Each verb arms a slot and rewinds its track so the launch lands on the
+    // boundary it was aimed at (the scheduler runs two phrases ahead). Dropping the queued notes past
+    // that frame is the host's half.
 
     bool               live_mode() const              { return seq_.live_mode(); }
     songcore::LiveSlot live_queue(int track) const    { return seq_.live_queue(track); }
@@ -1266,48 +947,28 @@ class SongcoreHost {
     void queue_live_stop(int track, bool now)         { sync_clock(); apply_rollback(seq_.queue_live_stop(track, now, seq_.clock())); }
     void queue_live_row(int songRow, bool now)        { sync_clock(); apply_rollback(seq_.queue_live_row(songRow, now, seq_.clock())); }
 
-    // ── ↕ the note preview — "hear the note you just dialled in" ──────────────────────────────────
+    // ── ↕ the note preview ───────────────────────────────────────────────────────────────────────
     //
-    // The C++ twin of AudioEngine.previewNoteWithTimeout. It plays on the DEDICATED PREVIEW LANE
-    // (AudioEngine::PREVIEW_LANE == track 8, the ninth voice), which is why auditioning a note while
-    // a song is playing steals nothing: the eight song tracks are untouched.
+    // Plays on the dedicated PREVIEW LANE (track 8, a ninth voice), so it steals nothing from a song.
+    // ⚠️ Through `plan_note_on`, the sequencer's own derivation — a hand-rolled copy would drift. The
+    // payload is a note with no phrase: no FX, no transpose, velocity −1, the instrument's volume and
+    // pan, `tableId = -1` (its own table).
+    // ⚠️ It also goes to the CABLE, handed to `external_` directly rather than via `router_`: the
+    // router feeds the trace writer (no preview belongs in a trace) and the engine consumer (which
+    // cannot carry `rootAudition`). The routing verdict is the shared model predicate either way.
     //
-    // ⚠️ It goes through `plan_note_on` — the same derivation the sequencer's own notes take, the one
-    // `tools/ptvoice` goldens against the real Kotlin `AudioEngine.scheduleNote`. Hand-rolling the
-    // engine calls here (Kotlin does, and its sampler branch has quietly drifted from its own
-    // scheduleNote as a result) would mean a second, unmeasured copy of the note path — the exact
-    // thing S5 ported the consumer to avoid. The payload below is a note with NO phrase behind it:
-    // no FX, no transpose, velocity −1, the instrument's own volume and pan, and `tableId = -1`,
-    // which derive_sampler_note resolves to the instrument's own table — exactly what Kotlin passes.
-    //
-    // ⚠️ **AND IT GOES TO THE CABLE (MIDI plan B5), which `plan_note_on` alone cannot do.** An
-    // EXTERNAL instrument has no voice to raise, so an audition that only ever called the engine was
-    // silent by construction — the one screen where you pick the instrument type was the one place
-    // you could not hear the choice. The event is handed to `external_` DIRECTLY rather than through
-    // `router_`, and that is deliberate: the router also feeds the trace writer, whose 36 goldens have
-    // never contained a preview, and the engine consumer, which cannot carry this event's
-    // `rootAudition` flag or its fresh table cache (voice_derive.h says so — a preview is not a bus
-    // event and the ratified schema has no field for either). The routing VERDICT is still the one
-    // model predicate both consumers ask, so the three cannot disagree about who owns a note.
-    //
-    // `durationFrames <= 0` means NO TIMED KILL — the voice rings out on its own (endlessly, for a
-    // sustaining SoundFont preset) until stop_preview(). That is the instrument audition's contract,
-    // not an edge case: an audition of a pad that dies after a 16th note tells you nothing about it.
-    //
-    // `tableIdOverride < 0` means "the instrument's own table" (which is what derive_sampler_note
-    // resolves −1 to). The TABLE screen passes the table it is SHOWING instead, so that auditioning
-    // from there plays the automation you are looking at.
+    // `durationFrames <= 0` = no timed kill: the voice rings until stop_preview() — an instrument
+    // audition. `tableIdOverride` lets the TABLE screen audition the table it is showing.
     void preview_note(int instrumentId, const Note& note, int64_t durationFrames,
                       bool rootAudition = false, int tableIdOverride = -1) {
         if (!engine_) return;
-        if (note == Note::EMPTY()) return;   // Kotlin's first line, and it matters: A on an empty
-                                             // cell that inserts nothing must not thump the lane
+        if (note == Note::EMPTY()) return;   // A on an empty cell must not thump the lane
         if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
         const Instrument& ins = project_.instruments[instrumentId];
         const bool external = instrument_routes_external(ins);
 
         engine_->requestResume();
-        const int64_t frame = engine_->getCurrentFrame() + 100;  // Kotlin's +100-frame lead-in
+        const int64_t frame = engine_->getCurrentFrame() + 100;  // a short lead-in
 
         Event ev{};
         ev.type       = EV_NOTE_ON;
@@ -1317,15 +978,10 @@ class SongcoreHost {
 
         NoteOnPayload& n = ev.noteOn;
         n.note        = static_cast<uint8_t>(note_to_midi(note));
-        // ⚠️ **The three velocity fields are wired DIFFERENTLY per destination, and the difference is
-        // a fix rather than a shortcut.** The engine's wiring is Kotlin's historically-crossed one
-        // (scheduler.h says so): the instrument's own VOL arrives as the velocity-curve gain
-        // `velGain`, with `phraseVol` at 1.0. `midi_velocity` (midi_out.h) is written against the
-        // SCHEDULER's meaning of the same fields — it reads `velocity == -1` as "derive from velGain,
-        // which the scheduler built as (V/127)²" and takes the square root. Handed a raw VOL that
-        // comes out sqrt-BOOSTED: VOL 0x80 previewed at velocity 90, where the very same instrument
-        // SEQUENCED at V=7F sends 64. So the wire's copy states what it means — a preview has no V
-        // column, hence full velocity, scaled by VOL in the field that scales by VOL.
+        // ⚠️ The velocity fields are wired differently per destination. The engine takes VOL as
+        // `velGain` (the crossed wiring, see event.h). `midi_velocity` (midi_out.h) reads velocity −1
+        // as "derive from velGain = (V/127)²" and takes a square root, which would boost a raw VOL. So
+        // the cable gets full velocity, with VOL in the field that scales by VOL.
         n.velocity    = external ? 127 : -1;
         n.velGainBits = f32_bits(external ? 1.0f : hex_to_float(ins.volume));   // seam arg `volume`
         n.volGainBits = f32_bits(external ? hex_to_float(ins.volume) : 1.0f);   // seam arg `phraseVol`
@@ -1334,26 +990,19 @@ class SongcoreHost {
         n.transpose = 0; n.pit = 0; n.arp = 0;
         n.pslOffBits = n.pslDurBits = n.pbnRateBits = n.vibSpdBits = n.vibDepBits = f32_bits(0.0f);
 
-        // ⚠️ UNCONDITIONALLY, whichever way this instrument routes — and that is the whole of the
-        // preview lane's note lifecycle. `ExternalConsumer::consume` answers the gate itself, and its
-        // INTERNAL arm is the one that matters here: a note-on for a non-external instrument on a lane
-        // that was last EXTERNAL ends the note the cable is still holding. Without it, auditioning an
-        // external instrument and then a sampler one — two STARTs, and START is exempt from
-        // `on_stop_preview` (button_mapper.h) — leaves a note sounding on the gear with nothing left
-        // in the app that resolves to it. On a lane that was never external this costs one lookup.
+        // ⚠️ Unconditionally, whichever way this instrument routes: a note-on for an internal
+        // instrument on a lane last used by an EXTERNAL one ends the note the cable still holds.
+        // START is exempt from `on_stop_preview`, so nothing else would.
         external_.consume(ev);
 
         if (external) {
-            // A timed audition owes the cable its own note-off; the engine's half of the same thing is
-            // the `scheduleKill` below. `end_note` takes the MIN of this frame and the instrument's
-            // LEN gate, so a LEN shorter than the preview still wins. `durationFrames <= 0` is the
-            // ring-out contract — an instrument audition — and `stop_preview()` is what ends that.
+            // A timed audition owes the cable a note-off (the engine's half is `scheduleKill` below).
+            // `end_note` takes the earlier of this and the LEN gate.
             if (durationFrames > 0) preview_note_off(frame + durationFrames);
-            return;   // …and NO voice, cable or no cable: EXTERNAL means "not this engine"
+            return;   // no voice, cable or not: EXTERNAL means "not this engine"
         }
 
-        // A fresh cache every preview, so an edit to the instrument's table is heard immediately —
-        // Kotlin calls forceReloadTable here for the same reason.
+        // A fresh cache every preview, so a table edit is heard at once.
         bool tableLoaded[POOL_TABLES] = {false};
         plan_note_on(*engine_, ev, project_, routing_, tableLoaded, rootAudition);
 
@@ -1361,15 +1010,9 @@ class SongcoreHost {
     }
 
     /**
-     * Audition an instrument at its own ROOT — what START does on INSTRUMENT / INST_POOL / MODS, and
-     * (with a table override) on TABLE.
-     *
-     * Two things separate it from the phrase preview above, and both are Kotlin's
-     * `AudioEngine.previewInstrument`:
-     *   • it RINGS OUT (no timed kill) until the next plain button press stops it — you are listening
-     *     to an instrument, not to a step;
-     *   • it is a ROOT AUDITION, which the SoundFont path must be told about or ROOT does nothing (the
-     *     note IS the root, so the usual 60 − root transpose would cancel it to a flat C-4 every time).
+     * Audition an instrument at its own ROOT — START on INSTRUMENT / INST_POOL / MODS, and on TABLE
+     * with a table override. It rings out until the next plain button press, and it is a ROOT
+     * AUDITION: the SoundFont path must know, or its 60 − root transpose would play a flat C-4.
      */
     void preview_instrument(int instrumentId, int tableIdOverride = -1) {
         if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
@@ -1378,28 +1021,18 @@ class SongcoreHost {
     }
 
     /**
-     * Point the preview lane at a mixer channel — `trackId` in 0..7, or −1 for the unity gain it has
-     * always had.
-     *
-     * ⭐ THE TRACK, NOT THE VOLUME. A stored gain goes stale the moment the fader moves or a VTR
-     * lands; a stored index re-reads the live fader every block, for nothing. The lane keeps its own
-     * ninth voice either way — an audition over a running song must go on stealing nothing.
+     * Point the preview lane at mixer channel `trackId` (0..7), or −1 for unity gain. An index, not a
+     * gain, so the live fader is re-read every block. The lane keeps its own voice either way.
      */
     void set_preview_track(int trackId) {
         if (engine_) engine_->setPreviewTrack(trackId);
     }
 
     /**
-     * Silence the audition lane. Backs the "press any button to stop the preview" gesture.
-     *
-     * ⚠️ Both halves, and the second one is not symmetry for its own sake: an EXTERNAL audition with
-     * `midiLen == 0` is gate-to-next and there is no next note, so THIS is the only thing that ends
-     * it. An external synth has no voice allocator to save us — a note-on we fail to answer sounds
-     * until the gear is power-cycled. On a lane holding no external note the consumer's `active_` flag
-     * says so and it costs a branch.
-     *
-     * `cut` ends the lane in ~6 ms with no release tail — letting go of the A that holds a phrase
-     * note's audition. Without it the instrument's own release plays out, as any other stop does.
+     * Silence the audition lane ("press any button to stop the preview").
+     * ⚠️ Both halves: an EXTERNAL audition with `midiLen == 0` has no next note to end it, and gear
+     * holds an unanswered note-on until power-cycled.
+     * `cut` ends the lane in ~6 ms with no release tail (letting go of a phrase note's A).
      */
     void stop_preview(bool cut = false) {
         if (!engine_) return;
@@ -1407,23 +1040,16 @@ class SongcoreHost {
         if (cut) engine_->scheduleCut(now, AudioEngine::PREVIEW_LANE);
         else     engine_->scheduleKill(now, AudioEngine::PREVIEW_LANE);
         preview_note_off(now);
-        // ⚠️ AN AUDITIONED TABLE CAN CARRY AN EQM, and the master bus outlives the lane that moved it.
-        // The TABLE screen's START runs the table on the screen through the preview lane, so this is
-        // the only end that audition has — without the restore here, auditioning a table with an EQM
-        // on it leaves the master EQ on that preset with no transport stop to put it back.
-        //
-        // ⚠️ ONLY WHILE THE TRANSPORT IS IDLE. Playing, the latch belongs to stop(): consuming it here
-        // would disarm the restore the SONG's own table rows are counting on, and the bus would keep
-        // the last EQM for good.
+        // ⚠️ An auditioned TABLE can carry an EQM, and no transport stop follows an audition — so the
+        // master EQ is restored here. Only while IDLE: playing, the latch belongs to stop() and the
+        // song's own table rows.
         if (!seq_.is_playing() && seq_.has_live_project() && engine_->takeTableMasterEqTouched())
             engine_->setMasterEqSlot(project_.masterEqSlot);
     }
 
     // ── ↑ feedback ───────────────────────────────────────────────────────────────────────────────
 
-    // Where ONE track's playhead is — the only form there is. In SONG mode the eight run
-    // independently, so a single whole-song answer would be one track's number wearing the song's
-    // name; the UI asks eight times, once per marker it might draw (ui/playhead.h).
+    // One track's playhead. In SONG mode the eight run independently, so the UI asks per track.
     PlaybackPosition playheads(int trackId) {
         sync_clock();
         return seq_.getPlaybackPosition(trackId);
@@ -1431,12 +1057,10 @@ class SongcoreHost {
 
     bool is_playing() const { return seq_.is_playing(); }
 
-    /** The device rate the sequencer is running at — the note preview needs it for framesPerStep. */
+    /** The device rate the sequencer runs at. */
     int sample_rate() const { return sampleRate_; }
 
-    // ── ↑ debug: the conformance trace (event-schema §6) ─────────────────────────────────────────
-    // Same output contract as the Kotlin EventTrace tap — same path, same bytes — so the S1 device
-    // cross-check procedure compares a C++-engine trace against the goldens without changing a step.
+    // ── ↑ debug: the conformance trace ───────────────────────────────────────────────────────────
     // Enable AFTER the project is pushed: the header's project= is the sha of the pushed blob.
     void set_trace(bool enabled, const std::string& path) {
         if (enabled == traceEnabled_) return;
@@ -1460,12 +1084,9 @@ class SongcoreHost {
 
   private:
     /**
-     * A mapped knob IS the press, so whatever the running take had claimed on that destination is
-     * the hand's now — `MixerHeld` would otherwise make the next ordinary edit's push skip exactly
-     * the fader the knob is moving, and the knob would be saved and not heard.
-     *
-     * ⚠️ A TABLE's own TIM latch is deliberately left alone: it is a one-way arm for the restore in
-     * `stop()`, not a gate, and consuming it here would leave the delay restored by nobody.
+     * A mapped knob IS the press: whatever the take held on that destination is the hand's now, or
+     * `MixerHeld` would skip the very fader the knob is moving.
+     * ⚠️ A TABLE's TIM latch is left alone — it arms the restore in `stop()`.
      */
     void release_song_hold(MapDestId id, int scopeIndex) {
         switch (id) {
@@ -1486,34 +1107,24 @@ class SongcoreHost {
     int      lastCcChannel_   = -1;      // whatever channel the cable last carried a CC on
 
     /**
-     * A SoundFont slot moved under a playing take, so the lookahead has to be re-derived.
-     *
-     * ⚠️ **THE PATCH ROW'S EDIT AND THE SOUND IT NAMES DO NOT ARRIVE TOGETHER.** The edit rolls the
-     * lookahead back where it is typed (mark_modified), but a preset is a decode: the slot it lands in
-     * is not known for another settle plus a parse, and by then the walk has refilled the buffer with
-     * notes carrying the OLD slot — which the residency sweep then frees from under them. So the
-     * slot's ARRIVAL is a second edit, and says so here.
-     *
-     * Written once below the three loaders rather than at their call sites: every way to move a slot
-     * goes through one of them.
+     * A SoundFont slot moved under a playing take, so the lookahead is re-derived.
+     * ⚠️ The PATCH edit and its sound arrive apart: by the time the decode lands, the buffer holds notes
+     * on the OLD slot, which the residency sweep then frees. The arrival is a second edit. Called
+     * from the loaders, below every call site.
      */
     void notify_sf_slot_moved() {
         if (seq_.is_playing()) notify_data_changed();
     }
 
-    // Drop what the rolled-back tracks had already queued. ⚠️ ONE FRAME PER TRACK, not one for the
-    // engine: the eight song cursors have their own boundaries, so clearing every track from the
-    // earliest of them would drop notes a track ahead of it had queued and is not going to schedule
-    // again. Written once below its four callers — the live edit and the three LIVE verbs, which are
-    // the same motion for different reasons.
+    // Drop what the rolled-back tracks had queued. ⚠️ One frame PER TRACK: clearing every track from
+    // the earliest boundary would drop notes a track further ahead will not schedule again.
     void apply_rollback(const songcore::RollbackPlan& plan) {
         if (!engine_) return;
         for (int t = 0; t < 8; ++t)
             if (plan.frames[t] >= 0) engine_->clearScheduledNotesFrom(plan.frames[t], t);
     }
 
-    // songcore owns no clock: the engine's frame counter IS the transport clock (getCurrentFrame() is
-    // what the Kotlin scheduler polled). With no engine the clock stays where a test put it.
+    // The engine's frame counter IS the transport clock. With no engine it stays where a test put it.
     void sync_clock() {
         if (!engine_) return;
         seq_.set_clock(engine_->getCurrentFrame());
@@ -1530,40 +1141,24 @@ class SongcoreHost {
     int64_t after_play() {
         resync_soundfont_slots();
         flush_trace();
-        // Every play verb goes through here, which is what makes this the one place the metronome's
-        // grid can be pinned — the take's own start frame, so beat 0 is the downbeat by construction.
+        // Every play verb passes here, so the metronome grid is pinned to the take's start frame.
         if (engine_) engine_->startMetronome(seq_.playback_start_frame(), frames_per_quarter());
         return seq_.playback_start_frame();
     }
 
-    /**
-     * Frames in one quarter note at the LIVE tempo — four phrase steps (16ths).
-     *
-     * ⚠️ The same expression `ExternalConsumer::frames_per_quarter` uses, and for the same reason:
-     * multiplying the already-truncated `frames_per_step` keeps the beat on the rounded grid the
-     * scheduler puts notes on, rather than on a more accurate one they would drift away from.
-     */
+    /** Frames per quarter note at the live tempo. ⚠️ Same expression as
+     *  `ExternalConsumer::frames_per_quarter`: built from the truncated `frames_per_step`, so the
+     *  beat stays on the scheduler's grid. */
     int64_t frames_per_quarter() const {
         return frames_per_step(project_.tempo, sampleRate_) * 4;
     }
 
     /**
-     * Every SoundFont instrument made to hold the sound it names, once, as the transport starts.
-     *
-     * ⚠️ **A SLOT HOLDS ONE PRESET, SO BROWSING THE PATCH ROW NOW COMPETES WITH THE SONG FOR SLOTS.**
-     * Scrolling loads a preset per step; enough steps and the least-recently-used eviction reclaims a
-     * slot a song instrument was pointing at, and `routing.sfSlot` has no way to know — the symptom is
-     * a track playing the wrong instrument with nothing logged. A note trigger bumps its slot's use
-     * tick, so a song that is PLAYING defends its own slots; this is what covers the case where the
-     * browsing happened while stopped.
-     *
-     * It is here rather than at the four `play_*` entry points because correctness must not rest on
-     * each of them remembering. Nearly always free: a non-SoundFont instrument returns on its type, and
-     * a slot that already holds the right sound returns on a comparison.
-     *
-     * ⚠️ A project naming more distinct SoundFont sounds than there are slots cannot have them all
-     * resident in any arrangement, and this cannot fix that — it will reload the stale ones on every
-     * start. `MAX_SOUNDFONTS` is sized so that eight tracks plus the preview lane fit.
+     * Every SoundFont instrument made to hold the sound it names, as the transport starts.
+     * ⚠️ Browsing the PATCH row while stopped can make LRU eviction reclaim a slot a song instrument
+     * points at — `routing.sfSlot` cannot tell, and the track plays the wrong sound. (While playing,
+     * note triggers keep their own slots fresh.) Here rather than at each `play_*`; nearly free.
+     * A project needing more distinct sounds than `MAX_SOUNDFONTS` reloads on every start.
      */
     void resync_soundfont_slots() {
         if (!engine_) return;
@@ -1572,16 +1167,12 @@ class SongcoreHost {
     }
 
     /**
-     * The audio thread's side of MIDI in: what the engine calls at the top of every live block.
-     *
-     * A record from a live key goes STRAIGHT INTO THE ENGINE'S QUEUES, stamped at the block's first
-     * frame, and the drain that follows picks it up — so the same block plays it. It does not ride
-     * `router_` (the bus): a live key is not part of the song, the trace goldens have never held one,
-     * and the bus's consumers read the project, which this thread may not.
-     *
-     * ⚠️ **THE ENGINE RESOLVES THE NOTE FROM ITS OWN COPIES** — the program table, the tables, the
-     * mod/EQ/send state `push_instrument_params` writes — so nothing is derived here, and nothing
-     * here may be. `arm_midi_in` is what keeps those copies current for a note nobody scheduled ahead.
+     * The audio thread's side of MIDI in, called at the top of every live block. A live key's record
+     * goes STRAIGHT into the engine's queues at the block's first frame, so the same block plays it.
+     * Not via `router_`: a live key is not part of the song, and the bus consumers read the project,
+     * which this thread may not.
+     * ⚠️ The engine resolves the note from its own copies, so nothing may be derived here;
+     * `arm_midi_in` keeps those copies current.
      */
     struct LiveInput : AudioEngine::LiveInputSource, MidiInPipeline::Apply {
         MidiInPipeline* pipeline = nullptr;
@@ -1593,9 +1184,8 @@ class SongcoreHost {
         void apply(const Event& ev, bool external) override {
             switch (ev.type) {
                 case EV_NOTE_ON:
-                    // The routing gate the bus consumer applies, in its one live form: an EXTERNAL
-                    // instrument raises no voice, and a track that flips to one from a sounding
-                    // internal note ends that note, or nothing ever would.
+                    // The routing gate's live form: EXTERNAL raises no voice, and a flip to one ends
+                    // the sounding internal note.
                     if (external) { engine->scheduleKill(ev.frame, ev.track); return; }
                     engine->scheduleProgramNote(ev.frame, ev.track, ev.instrument, ev.noteOn, engine->tempo());
                     return;
@@ -1606,8 +1196,7 @@ class SongcoreHost {
                         default:           engine->scheduleNoteOff(ev.frame, ev.track);    return;
                     }
                 case EV_CC:
-                    // A cable sends a literal controller number, never a CCA-CCD slot, so there is
-                    // no instrument to resolve it against — the bus consumer's table applies as is.
+                    // A cable sends literal controller numbers, never a CCA-CCD slot.
                     EngineConsumer::apply_cc(*engine, ev.frame, ev.track, ev.cc.param, f32_from_bits(ev.cc.valueBits));
                     return;
                 default:
@@ -1617,14 +1206,9 @@ class SongcoreHost {
     };
 
     /**
-     * Give the audio thread's drain what it routes against and what it plays: the route snapshot, and
-     * every table and program the engine does not yet hold.
-     *
-     * The route is rebuilt each poll and published only when it differs — a cursor move, another
-     * instrument, a mapping added — so the drain sees an edit within one poll
-     * and pays nothing when nothing changed. ⚠️ The tables are pushed EAGERLY here because the note
-     * path's own lazy push (`plan_note_on`) never runs for a live key: a value pushed by its only
-     * reader is stale the moment a second reader appears.
+     * Give the audio thread's drain its route and everything it can play. The route is rebuilt each
+     * poll and published only when it changed.
+     * ⚠️ Tables are pushed EAGERLY: the note path's lazy push never runs for a live key.
      */
     void arm_midi_in() {
         const MidiRoute route = build_midi_route(project_, midiInInstrument_, midiInTrack_, midiInVoices_,
@@ -1636,9 +1220,8 @@ class SongcoreHost {
         }
         if (!engine_) return;
         consumer_.push_tables(project_);
-        // ⚠️ A program carries its SoundFont slot and sample-rate ratio, and those move — a PATCH
-        // change, a load, an eviction — without passing `push_instrument`. The note path re-sends the
-        // program before every note, a live key does not, so whatever moved is re-sent here.
+        // ⚠️ A program carries its SF slot and rate ratio, which move (PATCH, load, eviction) without
+        // passing `push_instrument`. A live key gets no per-note re-send, so re-send what moved.
         const int count = std::min(static_cast<int>(project_.instruments.size()), POOL_INSTRUMENTS);
         for (int id = 0; id < count; ++id) {
             const Instrument& ins = project_.instruments[static_cast<size_t>(id)];
@@ -1653,26 +1236,20 @@ class SongcoreHost {
     }
 
     /**
-     * What the drain handled since the last poll, on the thread that owns the song.
-     *
-     *   • a MAPPED knob is applied to the project here (`apply_mapped_cc`) — the drain only withheld
-     *     it from the router;
-     *   • a LEARN knob names its controller for the screen's learn gesture, and every CC says which
-     *     channel the cable is on (the answer to "which channel is my controller on?");
-     *   • ROUTED records reach the CABLE when thru is on (a suppressed one is COUNTED, because "the
-     *     key is silent" needs to name which of the reasons it was), and teach the bus consumers'
-     *     `TrackInstruments` which instrument the track is playing, exactly as the bus would have.
-     *
-     * The observer is told LAST, with the records — a debugging aid runs after the thing it describes.
+     * What the drain handled since the last poll, on the song's thread:
+     *   • MAPPED knobs are applied to the project (`apply_mapped_cc`);
+     *   • LEARN records the controller, and every CC records its channel;
+     *   • ROUTED records reach the cable when thru is on (suppressions are counted) and teach
+     *     `TrackInstruments` which instrument each track plays.
+     * The observer is told last.
      */
     void drain_midi_in() {
         MidiInSeen seen;
         while (midiIn_.pop_seen(seen)) {
             if (seen.msg.status == EV_CC) {
                 lastCcChannel_ = static_cast<int>(seen.msg.channel);
-                // ⚠️⚠️ **A KNOB IS NOTICED ON EVERY CHANNEL, NOT ONLY THE CONTROL ONE**, and that is
-                // what makes the feature findable: "your knob is on channel 6" is the sentence a user
-                // needs while `CTL CH` does not cover it. The UI layer decides what to say.
+                // Noticed on EVERY channel, not just the control one — "your knob is on channel 6"
+                // is how the user finds the right `CTL CH`.
                 if (learnArmed_) {
                     learnController_ = seen.msg.data1;
                     learnChannel_    = static_cast<int>(seen.msg.channel);
@@ -1684,8 +1261,7 @@ class SongcoreHost {
             }
             for (int j = 0; j < seen.count; ++j) {
                 const Event& ev = seen.events[j];
-                // Asked BEFORE either consumer learns from it: a verdict taken afterwards would be
-                // answering about the state this record just created rather than the one it arrived into.
+                // Asked BEFORE either consumer learns from the record.
                 const bool external = record_is_external(ev);
                 consumer_.observe_live(ev);
                 if (midiInThru_) {
@@ -1700,12 +1276,8 @@ class SongcoreHost {
     }
 
     /**
-     * Would this record have gone out on the cable? Asked ONLY to count a suppression — the consumers
-     * never ask it, they answer it themselves.
-     *
-     * ⚠️ A note-on carries its instrument; every other record on the bus is track-scoped and rides
-     * `INSTRUMENT_NONE`, so the owner comes from the same `TrackInstruments` the cable's own consumer
-     * keeps. A second opinion about track ownership is the one thing this file must not invent.
+     * Would this record have gone to the cable? Only to count a suppression. Track-scoped records
+     * take their owner from the cable consumer's own `TrackInstruments` — never a second opinion.
      */
     bool record_is_external(const Event& ev) const {
         int16_t instrument = ev.instrument;
@@ -1715,13 +1287,8 @@ class SongcoreHost {
     }
 
     /**
-     * The preview lane's note-off on the CABLE (MIDI plan B5) — the timed audition's end, and what
-     * `stop_preview` sends.
-     *
-     * It is a bus record rather than a call into the consumer's internals on purpose: `consume` is the
-     * one door, so the note-off answers the SAME routing gate the note-on did, resolves the lane's
-     * instrument through the SAME `TrackInstruments`, and honours the LEN gate through the same `min`.
-     * A private back door would be a second opinion about who owns the note.
+     * The preview lane's note-off on the CABLE. A bus record through `consume`, so it passes the same
+     * routing gate, `TrackInstruments` and LEN `min` as the note-on did.
      */
     void preview_note_off(int64_t frame) {
         Event off{};
@@ -1733,8 +1300,7 @@ class SongcoreHost {
         external_.consume(off);
     }
 
-    // Drain the writer's buffer to disk after each verb: a long session can't grow unbounded in RAM,
-    // and a crash mid-take still leaves the trace up to the last poll on disk.
+    // Flushed after each verb: a long session stays bounded in RAM and a crash keeps the trace so far.
     void flush_trace() {
         if (!traceEnabled_ || traceBuf_.empty()) return;
         traceFile_.write(traceBuf_.data(), static_cast<std::streamsize>(traceBuf_.size()));
@@ -1748,25 +1314,21 @@ class SongcoreHost {
 
     Project project_ = make_default_project();
     std::string projectSha_ = "-";
-    // set_app_root() plus the last load_media(); both empty ⇒ no resolving at all (the tools' default)
+    // set_app_root() plus the last load_media(); both empty ⇒ no resolving (the tools' default)
     MediaRoots mediaRoots_;
     Routing routing_;
 
-    /**
-     * The RATE row's ratio cache (sample_edit.h). Editor-session state, not project state — it exists
-     * only so LOFI → HIGH restores the ratio the FILE was loaded with instead of compounding factors,
-     * and it is meaningless the moment the sample is resampled.
-     */
+    /** The RATE row's ratio cache (sample_edit.h). Editor-session state: lets LOFI → HIGH restore the
+     *  file's ratio instead of compounding factors. */
     RateCache rateCache_;
 
     MidiRouter       router_;
     Sequencer        seq_;
     EngineConsumer   consumer_;
     ExternalConsumer external_;
-    bool             midiPumpExternal_ = false;   // B3: a sender thread owns the release, not poll()
+    bool             midiPumpExternal_ = false;   // a sender thread owns the release, not poll()
 
-    // MIDI in. The pipeline is shared with the audio thread by construction (midi_in.h says how);
-    // everything else here is this thread's.
+    // MIDI in. The pipeline is shared with the audio thread (midi_in.h); the rest is this thread's.
     MidiInPipeline    midiIn_;
     LiveInput         midiLive_;                  // what the engine calls; points back at midiIn_
     MidiRoute         midiRouteLast_{};           // the route as last published, to publish only a change
@@ -1777,7 +1339,6 @@ class SongcoreHost {
     int               midiInVoices_       = 1;    // 1 = MONO
     bool              midiInVelocity_     = true;
     IMidiInObserver*  midiInObserver_     = nullptr;
-    // `midiInThru_` defaults to the FEATURE — see set_midi_in_thru.
     bool              midiInThru_ = true;
     uint64_t          midiInThruSent_ = 0, midiInThruSuppressed_ = 0;
 

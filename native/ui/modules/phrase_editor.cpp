@@ -13,8 +13,7 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // Column x positions. The `30 + 10` spellings are kept from the Kotlin verbatim — they read as
-    // "a 2-char cell, then a 10px gutter", and collapsing them to 40 would lose that.
+    // Column x positions, spelled `30 + 10` = a 2-char cell, then a 10px gutter.
     int       colX      = x + 10;
     const int stepX     = colX; colX += 30 + 10;
     const int noteX     = colX; colX += 45 + 20;
@@ -37,8 +36,8 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
         c.draw_text(via, x + 190, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
-    // The header lights for the column the cursor is in — it is half of what the row highlight used
-    // to say, the row number being the other half. An FX header covers its name AND its value cell.
+    // The header lights for the cursor's column (an FX header covers its name and value cell); the
+    // row number lights for its row.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const int cc = s.cursorColumn;
     c.draw_text("N",   noteX,    rowY, header_color(cc, 1, 1, t), CHAR_SPACING, FONT_SCALE);
@@ -48,11 +47,9 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
     c.draw_text("FX2", fx2NameX, rowY, header_color(cc, 6, 7, t), CHAR_SPACING, FONT_SCALE);
     c.draw_text("FX3", fx3NameX, rowY, header_color(cc, 8, 9, t), CHAR_SPACING, FONT_SCALE);
 
-    // Asked once and read three times a row: an AUS/AUF cell no ramp uses draws dimmed (draw_row).
-    // It is the pairing the emitter itself runs, over every chain row that plays this phrase, so the
-    // grid can neither show a fade the scheduler will not play nor deny one it will — an AUS whose
-    // AUF is three phrases further down the chain is doing its job, and dimming it would be a lie in
-    // the other direction.
+    // Asked once per draw: an AUS/AUF cell no ramp uses draws dimmed. It is the same pairing the
+    // emitter runs over every chain row that plays this phrase, so the grid agrees with playback —
+    // including an AUS whose AUF is phrases further down the chain.
     songcore::RampCells rampCells;
     if (s.project) rampCells = songcore::find_ramp_cells(*s.project, s.phrase.id);
     else           rampCells.mark(songcore::find_ramps(s.phrase));
@@ -80,22 +77,19 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     // gutters, and it can only do that if the cells arrive in the order they are laid out.
     RowCells cells(c, textY, t);
 
-    // Every value cell shares the painter.s colour priority (cursor > selection > empty > per-column
+    // Every value cell shares the painter's colour priority (cursor > selection > empty > per-column
     // colour); note-emptiness dims NOTE/VOL/INST, fx-emptiness dims its own name/value pair.
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
-    // Quarter-note rows (every 4th) are drawn brighter as a beat-accent cue — and the whole cursor
-    // ROW's number lights, whatever column the cursor is in, because that is what now says which row
-    // is being edited. Column 0 is a real cursor position, so the number goes through the painter and
-    // gets the cell background when the cursor is actually on it.
+    // Every 4th row number is brighter (a beat); the cursor row's number lights whatever the column.
+    // Column 0 is a real cursor position, so the number goes through the painter like any cell.
     const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
                            : (index % 4 == 0)     ? t.textParam
                                                   : t.textEmpty;
     cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
 
-    // Beside the one-character row number, in the gutter that was already there - 40px of which a
-    // glyph uses 15. No column moves.
+    // The playhead marker sits beside the one-character row number, in the existing gutter.
     for (const TrackPlayhead& ph : s.playheads)
         if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
@@ -104,10 +98,8 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noteEmpty, t.textParam);
     cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noteEmpty, t.textParam);
 
-    // An FX pair dims when the slot is unset — and an AUS/AUF cell dims when no ramp uses it, which
-    // is the only place the editor says that a fade the author thought they wrote is not one. Both
-    // reach the painter through the one flag, because an inert cell does exactly what an unset cell
-    // does: nothing.
+    // An FX pair dims when unset, and an AUS/AUF cell when no ramp uses it — an inert cell does what
+    // an unset one does.
     const auto fxDim = [&](int type, int slot) {
         return type == 0x00 || !rampCells.active(type, index, slot);
     };
@@ -129,18 +121,12 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
         case 0: return cc::read_only();
         case 1: {
             const bool isEmpty = (step.note == Note::EMPTY());
-            // ⚠️ THIS QUANTIZES TYPING, NOT THE SONG. Nothing here rewrites `step.note` — opening an
-            // old song under a new scale leaves every note exactly where its author put it, and what
-            // moves it is the playback quantizer (scheduler.h), which the cell on screen never shows.
-            //
-            // The scale is the one the phrase's own `SCA`/`SCG` puts this row in, so typing under a
-            // command offers that command's notes. ⚠️ It is a walk of the AUTHORED cells above the
-            // cursor, never the sequencer's live scale — see `phrase_scale_at_row` for why that
-            // distinction is the whole safety argument.
-            //
-            // ⚠️ The same two exemptions the playback quantizer makes (`apply_track_scale`): a note
-            // that selects a slice is not a pitch, and a TSP-off instrument ignores the scale — so
-            // typing must offer every note, or slices between scale degrees cannot be reached.
+            // ⚠️ THIS QUANTIZES TYPING, NOT THE SONG. `step.note` is never rewritten; the playback
+            // quantizer (scheduler.h) moves notes, and the cell never shows that.
+            // The scale is the one the phrase's own SCA/SCG puts this row in — a walk of the AUTHORED
+            // cells above the cursor, never the sequencer's live scale (see `phrase_scale_at_row`).
+            // ⚠️ The same two exemptions as `apply_track_scale`: a slice-selecting note is not a pitch,
+            // and a TSP-off instrument ignores the scale — typing must offer every note there.
             unsigned mask = 0x0FFFu;
             int      key  = 0;
             const int  instId = isEmpty ? s.insertInstrument : step.instrument;
@@ -216,7 +202,7 @@ PhraseInputResult PhraseEditorModule::handle_input(songcore::Phrase& phrase, int
 
         case ActionType::INSERT_DEFAULT:
             if (cursor_column == 1) {
-                step.note        = Note::C4();  // Note.fromString("C-4")
+                step.note        = Note::C4();
                 r.hasNote        = true;
                 r.lastEditedNote = step.note;
             }

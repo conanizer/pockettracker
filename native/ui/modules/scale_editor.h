@@ -2,10 +2,8 @@
 
 // ─── SCALE EDITOR ────────────────────────────────────────────────────────────────────────────────
 //
-// Which of the twelve chromatic intervals belong to one of the project's 16 scales, the KEY the whole
-// song sits in, and the factory shape the slot was taken from. The first screen with no Kotlin twin —
-// the Kotlin UI was deleted before scales existed — so it is written to the tree's own grain rather
-// than ported.
+// Which of the twelve chromatic intervals belong to one of the project's 16 scales, the KEY the
+// whole song sits in, and the factory shape the slot was taken from.
 //
 // Its 14 rows are ONE cursor column, as GROOVE's are, except the top one:
 //

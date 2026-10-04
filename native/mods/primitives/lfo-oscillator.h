@@ -5,8 +5,7 @@
 //   phase : 0.0 to 2π
 //   shape : 0=TRI  1=SIN  2=RMP+  3=RMP-  4=EXP+  5=EXP-  6=SQU+  7=SQU-
 // Returns −1.0 to +1.0 (all shapes are bipolar).
-// TRI ranges −1..+1 across the full cycle matching the switch block in
-// updateVoiceModulation before extraction into this header.
+// TRI ranges −1..+1 across the full cycle.
 // Shapes 8 (RND, sample & hold) and 9 (DRNK, random walk) are stateful and live in
 // tickLFO (lfo-module.h) — they never reach this function.
 inline float lfoShape(float phase, int shape) {

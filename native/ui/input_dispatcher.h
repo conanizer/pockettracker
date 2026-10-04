@@ -2,71 +2,31 @@
 
 // ─── THE INPUT DISPATCHER ────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of input/AppInputDispatcher.kt — every button, every combo, one place. It replaces
-// the `handle_button` stand-in the Phase-3 S1/S2 shell carried, and keeps everything that was under
-// it: `cursor_context()` still answers what the cursor is on, and the generic `on_a` / `on_b` /
-// `on_a_left` / `on_a_right` / `on_a_b` handlers still turn a button into an `InputAction` without
-// ever asking which screen is up (ui/cursor.h). What lands here is what those five could not do —
-// selection, the clipboard, item cycling, cloning, the FX helper, the note preview.
-//
-// ── SCOPE: every screen the app has ──────────────────────────────────────────────────────────────
-//
-// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS, MIXER, EFFECTS, the FILE BROWSER
-// with the QWERTY KEYBOARD overlay behind it, the SAMPLE EDITOR, PROJECT and SETTINGS with the confirm
-// dialog, the EQ EDITOR overlay behind all five EQ cells, the MIDI screen, and the THEME editor.
-// Every screen the app has is dispatched from here; there is no second input path.
+// Every button, every combo, one place — the only input path for every screen. `cursor_context()`
+// answers what the cursor is on, and the generic `on_a` / `on_b` / `on_a_left` / `on_a_right` /
+// `on_a_b` turn a button into an `InputAction` without asking which screen is up (ui/cursor.h); what
+// lives here is everything else — selection, clipboard, item cycling, cloning, the FX helper, previews.
 //
 // ── ⚠️ THE MODAL RULE ────────────────────────────────────────────────────────────────────────────
 //
-// The CONFIRM DIALOG is the topmost layer, the QWERTY keyboard is a true modal, the THEME and EQ
-// editors are PARTIAL ones, the FX HELPER is a picker held up by A, and the FILE BROWSER is a
-// full-screen popup. Each OWNS THE BUTTONS while it is up, and the order in which a press is offered
-// to them is the specification, not an implementation detail: the keyboard can be open ON TOP of the
-// browser (SELECT+A to rename a file) or ON TOP of the theme editor (its SAVE), and a D-pad press
-// there must move the KEY cursor, not the one underneath.
+// The confirm dialog, the QWERTY keyboard, the THEME and EQ editors (partial), the FX helper and the
+// FILE BROWSER each OWN THE BUTTONS while up, and the order a press is offered to them is the
+// specification: the keyboard can sit on top of the browser (rename) or the theme editor (its SAVE),
+// and a D-pad press there must move the KEY cursor.
+// ⭐ That order is written once, in `top_overlay()`; every handler asks `overlay_swallows()` with the
+// layers it answers for. A modal one handler forgets is a button that silently does the wrong thing.
+// ⚠️ The EQ editor is PARTIAL: it swallows the D-pad, A, B and SELECT but lets START through, so a band
+// can be swept across a held INSTRUMENT audition. Every other modal swallows everything.
 //
-// ⭐ **That order is written exactly once, in `top_overlay()`**, and every handler below asks
-// `overlay_swallows()` with the set of layers it answers for rather than re-deriving the stack. See
-// the block comment on those two, which is where the rule's whole mechanism now lives.
+// ── Input layers ─────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ **The EQ editor is PARTIAL, and that is a design decision rather than an oversight.** It swallows
-// the D-pad, A, B and SELECT, but it lets START through to the screen underneath — because START on
-// INSTRUMENT is an AUDITION, and sweeping a band across a note you can hear is the entire reason the
-// screen exists. Kotlin is explicit about it (`stopActivePreview` counts the EQ editor as a preview
-// screen when it was opened over an instrument, so its band edits "sweep a held preview live").
-// Every other modal in the app swallows everything.
-//
-// ⚠️ **A modal that one handler forgets is a button that does the wrong thing exactly once** — and
-// that is a bug nobody reports, because it looks like a mis-press. Android carries a live one, found
-// by porting: `handleBUp`/`handleBDown` never got the EQ guard, so B+UP with the editor open over
-// INST.POOL pages the pool cursor 16 slots underneath it. See on_b_up(). That is the failure a
-// per-handler subset invites and the reason the stack is derived here rather than remembered.
-//
-// ── THE MAPPER IS SPLIT IN TWO, AND ONLY ONE HALF IS THE SHELL'S ─────────────────────────────────
-//
-// Android's chain is InputMapper → ButtonHandlers → AppInputDispatcher: the mapper owns the physical
-// keys, the held-modifier state and the key repeat, and calls a NAMED handler. The split is kept —
-// the methods below are the ButtonHandlers — but Kotlin's one `InputMapper` class answers to TWO
-// files here, and the boundary between them is the only platform seam in the input chain:
-//
-//   • `shell/sdl-input.h`  — a keycode, a game-controller button, an axis, the key repeat. SDL's.
+//   • `shell/sdl-input.h`  — keycodes, controller buttons, axes, key repeat. SDL's.
 //   • `ui/button_mapper.h` — the COMBO MATRIX: which named handler a press means. Portable.
+//   • here                 — what each named handler DOES.
+// No `handle(ButtonEvent)` here: the matrix is a free function so a tool can drive it with a stub,
+// and named handlers let the tests drive them one at a time.
 //
-// ⚠️ **This header used to say there is no `handle(ButtonEvent)` here because "pt-ui must not know
-// SDL exists (a `ButtonEvent` is an SDL-side type)". The rule is right and the parenthesis was
-// wrong** — `ButtonEvent` never named an SDL type, it was merely DECLARED in a header that included
-// `<SDL.h>`, and convergence C0.1 moved it to `ui/buttons.h` where that accident cannot be mistaken
-// for a design again. The cost of the mistake was real: it kept the combo matrix in `shell/main.cpp`,
-// in one copy, where no tool could reach it (`tools/ptmapper` covers it now).
-//
-// There is still no `handle(ButtonEvent)` on this class, and that part stands on its own feet: the
-// matrix is a free function so a headless tool can drive it with a recording stub, and keeping the
-// dispatcher's surface at NAMED handlers is what lets ptdispatch drive them one at a time.
-//
-// ⚠️ **The clock is injected.** `set_now()` once a frame, and `on_l_b()` reads it. The multi-tap
-// window is a function of time, and a class that reaches for the clock itself cannot be tested —
-// the same reason `SdlInput::handle_event` takes `now_ms` (S1) and `Selection::handle_select_b`
-// does (ui/selection.h).
+// ⚠️ The clock is injected (`set_now()` once a frame), so time-dependent behaviour can be tested.
 
 #include "songcore/host.h"
 #include "songcore/midi_map.h"
@@ -107,132 +67,81 @@ namespace pt::ui {
 class InputDispatcher {
   public:
     /**
-     * `fs` is a REFERENCE, and there is no null-FileSystem path — unlike the engine, which
-     * `SongcoreHost` null-checks everywhere so the whole editing layer can be driven with no audio
-     * device. A file browser with no filesystem is not a degraded browser, it is an empty box; a tool
-     * that wants one without touching the user's disk points it at a temp directory instead, which is
-     * what `tools/ptdispatch` does.
+     * `fs` is a REFERENCE with no null path (unlike the engine): a browser with no filesystem is an
+     * empty box. A test points it at a temp directory.
      */
     InputDispatcher(AppState& state, songcore::SongcoreHost& host, FileSystem& fs)
         : s_(state), host_(host), fs_(fs) {
-        // The layout draws the clipboard's "PHR:2x3" readout beside the selection label and reaches it
-        // through AppState — so point AppState at our clipboard here, once, the same way the shell points
-        // it at the host's document. `clip_` is a member and outlives every frame this dispatcher drives.
+        // The layout's clipboard readout reaches the clipboard through AppState.
         s_.clipboard = &clip_;
 
-        // …and the same thing for the song-relative pointer, for the launch-time project the shell
-        // pushed before this object existed: it is the LOAD path `reset_editing_context` covers, minus
-        // the reset. A no-op under NAV = POOL and with no project pointed at yet (ui/song_pointer.h).
+        // …and clamp the song-relative pointer for the project the shell pushed before this existed.
+        // A no-op under NAV = POOL or with no project (ui/song_pointer.h).
         clamp_song_pointer(s_);
     }
 
     /**
-     * The frame's clock reading — call it once per frame, before the events.
-     *
-     * It feeds the L+B multi-tap window, and (since S6b) it RUNS ANY DEFERRED WORK THAT IS NOW DUE.
-     * There are TWO such jobs now, and both are deadlines because Kotlin arranges them with coroutines
-     * and there are none here:
-     *
-     *   • the sample editor's audition restore (S6b) — the preview writes the SELECTION into the
-     *     instrument's sample window, and has to put the real one back once the voice has actually
-     *     triggered, which is 100 frames after the note is scheduled rather than when it is scheduled;
-     *   • the crash-recovery AUTOSAVE's 3 s debounce (S10) — see `mark_modified`.
-     *
-     * ⚠️ Which means the clock is INJECTED rather than read, and that is the point: work that fires on
-     * a deadline cannot be tested by a tool that cannot move time. `tools/ptdispatch` drives both of
-     * these with a fake clock — the same reason `SdlInput::handle_event` takes `now_ms` (S1) and
-     * `Selection::handle_select_b` does.
+     * The frame's clock — call once per frame, before the events. It feeds the L+B multi-tap window and
+     * runs deferred work that is now due:
+     *   • the sample editor's audition restore — the preview's selection window must be put back once
+     *     the voice has triggered, 100 frames after scheduling;
+     *   • the crash-recovery AUTOSAVE's 3 s debounce (`mark_modified`);
+     *   • the status lines' auto-dismiss.
+     * Injected so a test can move time.
      */
     void set_now(long long now_ms);
 
     /**
-     * Is there time-triggered work outstanding that will change what is on SCREEN by itself?
-     *
-     * ⚠️ **C7 NEEDS THIS AND THE PIXEL COMPARISON CANNOT ANSWER IT.** The shell skips drawing on an
-     * idle frame, and the safety net under that decision is a byte-compare of the drawn frame — but a
-     * frame that is never drawn is never compared. So anything that changes the SCREEN on a TIMER,
-     * with no input at all, is invisible to that net: BOTH status lines auto-dismiss after
-     * `STATUS_DISMISS_MS` (`run_due_status_dismiss`), and without this query a "PROJECT SAVED" — or a
-     * "FILE TOO BIG" on the browser's own bar — would sit on a quiescent screen forever, cleared in
-     * the state and stale in the pixels.
-     *
-     * ⚠️⚠️ **IT GOES FALSE ON THE FRAME THE WORK COMPLETES, AND THAT FRAME IS THE ONE THAT HAS TO BE
-     * DRAWN.** `set_now()` clears the message and its deadline together, so a gate that asks this
-     * question afterwards closes on exactly the frame that would have erased the message — which is
-     * how "PROJECT SAVED" came to sit on a still screen until the next button press, on both
-     * platforms. The caller owes this an active→idle EDGE, the way it already owes one to audio; the
-     * shell's `timedWorkEdge` is that, and the comment at the gate is where the reasoning lives.
-     *
-     * Derived from the DEADLINES themselves rather than from a flag any caller has to set — the same
-     * rule that made the dismissal watch the message field instead of trusting its 22 assignment
-     * sites. ⚠️ A future timer that alters the screen belongs in this expression, and that is one
-     * place, colocated with the deadlines it reads.
-     *
-     * `autosavePending_` is included though it draws nothing itself: it ends in a status message.
+     * Is there timed work outstanding that will change the SCREEN on its own? The shell skips drawing
+     * idle frames, and nothing else would redraw when a status message auto-dismisses
+     * (`run_due_status_dismiss`).
+     * ⚠️⚠️ It goes false ON the frame the work completes — the frame that must be drawn. The caller
+     * owes it an active→idle EDGE (the shell's `timedWorkEdge`), or "PROJECT SAVED" stays on a still
+     * screen.
+     * Derived from the deadlines themselves; a new screen-changing timer belongs in this expression.
+     * `autosavePending_` is included: it ends in a status message.
      */
     bool has_pending_timed_work() const {
         return statusDismissAtMs_ != 0 || browserStatusDismissAtMs_ != 0 || autosavePending_;
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // THE LIFECYCLE (Phase 3 S10) — the three things the SHELL has to say
+    // THE LIFECYCLE — the three things the SHELL has to say
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //
-    // Everything else about the autosave is internal: `mark_modified` arms it, `set_now` fires it, and
-    // SAVE / LOAD / NEW / EXIT clear it. These three are the boundary, because only the shell knows
-    // where the media is, when the app started, and when it is being taken away.
+    // The rest of the autosave is internal: `mark_modified` arms it, `set_now` fires it, SAVE / LOAD /
+    // NEW / EXIT clear it. Only the shell knows where the media is, when the app started, and when it
+    // is being taken away.
 
     /**
-     * Where a project's RELATIVE sample paths resolve. Call once, at start-up.
-     *
-     * ⚠️ It is the SESSION's media dir, and the autosave is why it has to be remembered rather than
-     * guessed. `resolve_media_path` leaves an ABSOLUTE path alone and joins a RELATIVE one onto this —
-     * and every sample loaded through the browser is absolute, so in normal use this changes nothing.
-     * But a *portable* project stores its media relative (every golden does, and so will anything the
-     * Linux build ships), and recovering one of those against the wrong folder loads no samples at all:
-     * the song comes back looking perfectly correct and playing silence, which is the worst way for a
-     * recovery to fail. The shell hands in what it handed `load_media` at boot.
+     * Where a project's RELATIVE sample paths resolve; call once at start-up with what the shell gave
+     * `load_media`. A portable project stores relative paths, and recovering one against the wrong
+     * folder plays silence while looking correct.
      */
     void set_media_base_dir(std::string dir) { mediaBaseDir_ = std::move(dir); }
 
     /** What `boot_recovery()` actually did. Four outcomes, and each one means exactly one thing. */
     enum class BootRecovery {
-        NONE,      // no autosave — the last session ended cleanly. The overwhelmingly common case.
+        NONE,      // no autosave — the last session ended cleanly
         ASKED,     // RESUME=ASK: the RECOVER WORK? dialog is up, and nothing is decided yet.
         RESTORED,  // RESUME=AUTO: the document is back, and DIRTY.
         DROPPED,   // it would not parse. The file is gone, so it cannot be offered again.
     };
 
     /**
-     * START-UP: an autosave that survived to launch means the last session did not end cleanly.
-     *
-     * SETTINGS → RESUME decides what happens next — ASK raises the RECOVER WORK? dialog, AUTO restores
-     * it in silence — so the shell must call this AFTER loading settings.json, and after its own
-     * `push_params()`, because a recovery re-pushes everything anyway and doing it twice is only slow.
-     *
-     * ⚠️ The return value is an ENUM and not a bool, and S10 changed it to one after watching the shell
-     * print a lie. `bool found` collapsed RESTORED and DROPPED into the same answer, so a CORRUPT
-     * autosave under RESUME=AUTO — dropped, correctly, with nothing recovered — reported itself on the
-     * console as *"restored silently"*. A boot diagnostic that misreports the outcome is worse than no
-     * diagnostic at all: it is the thing you will trust at 2 a.m. on a handheld with no screen.
+     * START-UP: an autosave that survived to launch means an unclean exit. SETTINGS → RESUME decides:
+     * ASK raises RECOVER WORK?, AUTO restores silently. Call AFTER loading settings.json and the
+     * shell's own `push_params()`.
+     * An enum, not a bool: a bool reported a DROPPED corrupt autosave as restored.
      */
     BootRecovery boot_recovery();
 
     /**
-     * THE KILL. Flush the autosave NOW, synchronously, if there is unsaved work — and then return,
-     * because the caller is on its way out of the process.
-     *
-     * ⚠️ **CALL THIS FROM THE FRAME LOOP'S EXIT PATH, NEVER FROM A SIGNAL HANDLER.** It serializes
-     * ~440 KB of JSON and writes a file: `malloc`, `<filesystem>`, `ofstream` — not one of them is
-     * async-signal-safe, and a SIGTERM arriving while the main thread happens to be inside `malloc`
-     * would deadlock the handler on the heap lock. The app would then hang instead of saving, and the
-     * launcher's SIGKILL would arrive a second later: the autosave would fail in precisely the case it
-     * exists for. The port plan's "handle SIGTERM → autosave" (§5) is therefore a line to read twice.
-     *
-     * The shell's handler writes a `volatile sig_atomic_t` and returns; its frame loop reads that flag,
-     * leaves, and calls this. `pt-ui` never sees a signal — which is also why this is an ordinary public
-     * method and not a callback: `tools/ptdispatch` drives it directly, with no signals and no SDL, and
-     * proves the thing that actually loses data if it is wrong.
+     * THE KILL: flush the autosave NOW, synchronously, if there is unsaved work — the caller is leaving.
+     * ⚠️ From the frame loop's exit path, NEVER a signal handler: it allocates and writes a file, none of
+     * it async-signal-safe — a SIGTERM inside `malloc` would deadlock and lose the save it exists for.
+     * The shell's handler sets a `volatile sig_atomic_t`; the loop leaves and calls this. An ordinary
+     * method, so a test drives it directly.
      */
     void flush_autosave();
 
@@ -243,8 +152,8 @@ class InputDispatcher {
     void on_dpad_right();
 
     // ── A + D-pad: edit the cell under the cursor ────────────────────────────────────────────────
-    // A+LEFT/RIGHT step by one, A+UP/DOWN by the large step (16 for a hex byte, an octave for a
-    // note). On an FX-TYPE column, A+UP/DOWN instead open the FX helper.
+    // A+LEFT/RIGHT step by one, A+UP/DOWN by the large step; on an FX-TYPE column A+UP/DOWN open the
+    // FX helper.
     void on_a_up();
     void on_a_down();
     void on_a_left();
@@ -260,18 +169,14 @@ class InputDispatcher {
     void on_a_released();
 
     /**
-     * A went down on a cell the mapper is DEFERRING (`defer_a_to_release`), so nothing has fired yet
-     * and nothing fires here. It exists for the one thing a release cannot recover: the instant.
-     *
-     * ⚠️ The lazy-chop tap on the sample editor's row 11 is aimed by EAR at the playhead line, and the
-     * release comes a reaction time — and possibly an A+DPAD — later. The frame is snapshotted here and
-     * the boundary is cut from the snapshot.
+     * A went down on a cell the mapper DEFERS; nothing fires here but the instant is recorded: the
+     * sample editor's row-11 chop tap is aimed by ear at the playhead, and the release comes a
+     * reaction time later.
      */
     void on_a_deferred();
 
     // ── B + D-pad: which item am I looking at? ───────────────────────────────────────────────────
-    // B+LEFT/RIGHT cycle the current phrase / chain / table / groove — without this the shell can
-    // only ever edit slot 0 of each. B+UP/DOWN page the SONG screen.
+    // B+LEFT/RIGHT cycle the current phrase / chain / table / groove; B+UP/DOWN page SONG.
     void on_b_left();
     void on_b_right();
     void on_b_up();
@@ -284,20 +189,14 @@ class InputDispatcher {
     void on_r_right();
 
     // ── R + A/B: MUTE and SOLO (SONG and MIXER) ──────────────────────────────────────────────────
-    // The chord acts the instant it is pressed and is undone if its own button comes up before R —
-    // the mapper owns that half (`MapperState::rComboArmed`) and calls exactly one of the two
-    // closers below. The snapshot the revert restores is taken here, on the first toggle of a chord.
+    // Acts on the press; undone if its own button comes up before R (the mapper's `rComboArmed`
+    // calls one of the two closers below). The revert snapshot is taken on a chord's first toggle.
     /** R+B: toggle MUTE on the cursor's channel, or on every channel in the selection. */
     void on_r_b();
     /** R+A: toggle SOLO, same targeting. */
     void on_r_a();
-    /**
-     * R went down or came up — the arming half of MIDI learn (`hold R, turn a knob`).
-     *
-     * ⚠️ **THE ONLY HANDLER HERE THAT IS TOLD ABOUT A BUTTON'S STATE RATHER THAN ABOUT A GESTURE**,
-     * and it has to be: the other half of this gesture is a CC on a cable, which never becomes a
-     * button event. It only forwards to the host, which is the layer the drain can reach.
-     */
+    /** R went down or up — the arming half of MIDI learn ("hold R, turn a knob"). The only handler
+     *  told about a button's state: the other half is a CC, never a button event. */
     void on_r_held(bool down);
 
     /** R came up first: the chord's changes stand. Drops the snapshot. */
@@ -315,9 +214,8 @@ class InputDispatcher {
     /** L+B+A: deep-clone the chain/phrase under the cursor into free slots. */
     void on_l_b_a();
 
-    // ── SELECT + … : the file browser's verbs (S6a) ──────────────────────────────────────────────
-    // Three chords that exist only on the browser, and each opens something: the keyboard (twice) or
-    // a confirm. They are its whole file-management vocabulary — Android has no others.
+    // ── SELECT + … : the file browser's verbs ────────────────────────────────────────────────────
+    // Browser-only chords, each opening the keyboard or a confirm.
     /** SELECT+A: rename the file/folder under the cursor (opens the keyboard). */
     void on_select_a();
     /** SELECT+B: delete it — arms the "A=YES B=NO" confirm, never deletes on the press itself. */
@@ -330,22 +228,15 @@ class InputDispatcher {
     void on_button_b();
     void on_button_a();
     /**
-     * Bare SELECT raises help — the compact panel or the full overlay, as SETTINGS > HELP says — and
-     * aborts the keyboard. Nothing else is bound to it, on any screen.
-     *
-     * ⚠️ **Called on the RELEASE**, and only when SELECT went down and came back up with no other
-     * button touched in between (ui/button_mapper.h). SELECT+A/B/R on the browser is a separate
-     * gesture and cancels this one.
+     * Bare SELECT raises help (the compact panel or full overlay, per SETTINGS > HELP) and aborts the
+     * keyboard. ⚠️ Called on the RELEASE, only when nothing else was pressed meanwhile
+     * (ui/button_mapper.h).
      */
     void on_select();
 
     /**
-     * A button has gone down: put the help away — the compact panel on any press but SELECT, the full
-     * overlay on any press at all.
-     *
-     * ⚠️ Called by the MAPPER, like `on_stop_preview` beside it, because the mapper is the one layer
-     * every press passes through. Whether the press is then CONSUMED is the mapper's decision, and it
-     * asks `help_full_open()` first: the full overlay consumes it, the compact panel does not.
+     * A button went down: put help away — the compact panel on any press but SELECT, the full overlay
+     * on any press. Called by the mapper, which decides whether the press is also consumed.
      */
     void on_help_dismiss();
 
@@ -355,18 +246,16 @@ class InputDispatcher {
     void on_start();
 
     /**
-     * LIVE mode's two chords, both of them SONG's alone: L+START queues the whole cursor ROW as one
-     * scene, R+START queues the channel under the cursor to fall silent. Off SONG, or out of LIVE
-     * mode, they stay what they have always been — reserved, and doing nothing.
+     * LIVE mode's chords, SONG only: L+START queues the cursor ROW as one scene, R+START queues the
+     * cursor's channel to fall silent. Elsewhere they are reserved and do nothing.
      */
     void on_l_start();
     void on_r_start();
 
   private:
     /**
-     * The one gate every LIVE gesture asks, written once below its four sites: LIVE mode, on SONG,
-     * with nothing on top of it. ⚠️ The SONG half is not a nicety — the mapper's L+START and R+START
-     * arms are global, so an ungated handler would queue a song row from inside the sample editor.
+     * The one gate every LIVE gesture asks: LIVE mode, on SONG, nothing on top. ⚠️ The mapper's
+     * L+START / R+START arms are global — ungated, they would queue from inside the sample editor.
      */
     bool live_song_gesture() const {
         return host_.live_mode() && s_.currentScreen == ScreenType::SONG &&
@@ -376,120 +265,75 @@ class InputDispatcher {
     /** Bit N set where track N has a chain on `songRow` — the channels a row launch starts sounding. */
     int  live_row_mask(int songRow) const;
 
-    /**
-     * Has this row already been queued? It is what promotes a second L+START to the next phrase
-     * boundary, and it is read back off the slots rather than remembered: a row queue writes all
-     * eight, so any one of them still pointing here says the press before this one aimed at it.
-     */
+    /** Has this row already been queued? A second L+START then promotes it to the next phrase
+     *  boundary. Read back off the slots, not remembered. */
     bool live_row_armed(int songRow) const;
 
   public:
 
-    /**
-     * "Press any button to silence the audition." The mapper calls this on every plain press; the
-     * dispatcher decides whether the current screen even HAS a preview to stop. Previews live on
-     * their own voice, so this never touches song playback.
-     */
+    /** "Press any button to silence the audition." Called by the mapper on every plain press; whether
+     *  this screen has a preview is decided here. Previews have their own voice — song playback is
+     *  untouched. */
     void on_stop_preview();
 
     /**
-     * ⚠️ **Asked by the MAPPER on every plain A press**: is the cursor on a cell whose A OPENS
-     * something, and whose A+DPAD/A+B means something ELSE? If so the mapper holds the press until A is
-     * RELEASED, and cancels it outright if any A-combo fires in between.
-     *
-     * Without it, holding A on such a cell to reset it with A+B would open the sub-screen first and the
-     * combo would land on top of it. Kotlin's `InputMapper` asks the same question (`deferAToRelease()`
-     * → `openSubScreenAtCursor(peek = true)`) and keeps the same `aPressedAlone` latch.
+     * ⚠️ Asked by the MAPPER on every plain A: is the cursor on a cell whose A OPENS something while its
+     * A+DPAD / A+B means something else? Then the press waits for A's release and any A-combo cancels
+     * it — otherwise A+B to reset such a cell would open the sub-screen first.
      */
     bool defer_a_to_release() const;
 
     /**
-     * ⚠️ **Asked by the MAPPER on every plain B press** (S8), and the exact mirror of the above: is B a
-     * CLOSE rather than a modifier? True while the EQ editor is open, and only then.
-     *
-     * The editor's slot is changed with B+LEFT/RIGHT, and B is also what closes it. Fire the close on the
-     * PRESS and the cycle is unreachable — you would be back on the mixer before LEFT ever arrived. So the
-     * close is held until B comes back UP, and cancelled outright if a B-combo fires in between. Kotlin
-     * carries the same latch (`deferBToRelease` → `bPressedAlone`) for the same one screen.
+     * ⚠️ Asked by the MAPPER on every plain B: should B wait for its release? True in the EQ editor (B
+     * both closes it and modifies the slot cycle) and wherever R+B is a mute (a B landing a frame ahead
+     * of its R must still be claimable as the chord, not copy the selection).
      */
     bool defer_b_to_release() const;
 
     /** The clipboard, for the top-strip readout ("PHR:2x3"). */
     const Clipboard& clipboard() const { return clip_; }
 
-    // ── Opening the sub-screens (the shell needs these too, for its start-up state) ──────────────
+    // ── Opening the sub-screens (the shell uses these at start-up too) ───────────────────────────
 
-    /**
-     * Show the browser, filtered, in `directory`, and remember what A will do with the pick.
-     * `previousScreen` is captured here — it is where B returns to.
-     */
+    /** Show the browser, filtered, in `directory`, remembering what A will do with the pick.
+     *  `previousScreen` (where B returns) is captured here. */
     void open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
                            const std::vector<std::string>& extensions);
 
-    /** The load-browse categories a config.json override can redirect (D2b). */
+    /** The load-browse categories a config.json override can redirect. */
     enum class BrowserDir { SAMPLES, SOUNDFONTS, INSTRUMENTS, PROJECTS, THEMES };
 
     /**
-     * The directory a LOAD browser should START in for `cat` (D2b): the user's config.json override when
-     * that category is set and the override RESOLVES to a real directory — otherwise the built-in
-     * FileSystem default. Public so `ptdispatch` can drive it directly.
-     *
-     * ⚠️ An override is root-relative unless it is absolute (`ui/folder_config.h`
-     * `resolve_folder_override`), so what this returns is not necessarily what config.json says.
-     *
-     * ⚠️ The single resolution point, so D2a (remember-last-folder) and D2b compose: open_file_browser
-     * compares the requested dir against `browser_dir(SAMPLES)`, so a D2b override still reads as "a
-     * sample load" for the remember-folder seed.
+     * The directory a LOAD browser STARTS in for `cat`: the config.json override if it resolves to a
+     * real directory, else the built-in default (root-relative unless absolute — not necessarily the
+     * file's text). ⚠️ The single resolution point: `open_file_browser` compares against
+     * `browser_dir(SAMPLES)`, so an override still counts as a sample load for remember-last-folder.
      */
     std::string browser_dir(BrowserDir cat);
 
     /**
-     * How many of songcore::EFFECT_TYPES this build lets an FX cell be stepped to — the whole list,
-     * or the list minus its trailing MIDI commands (ui/platform_caps.h `midi`).
-     *
-     * ⚠️ WRITTEN ONCE HERE BECAUSE BOTH WAYS INTO THE FX TYPE COLUMN HAVE TO AGREE: the bound on the
-     * cell's CursorContext (cc::effect_type) and the size of the picker A+UP opens (ui/fx_helper.h).
-     * Two sites deriving it separately is one of them being wrong, and the disagreement would show up
-     * as an effect the picker cannot name. Public so `ptdispatch` can assert both against it.
+     * How many of songcore::EFFECT_TYPES an FX cell can reach in this build (the MIDI tail may be
+     * hidden, ui/platform_caps.h). ⚠️ Written once because the cell's CursorContext bound and the
+     * picker's size must agree, or the picker meets an effect it cannot name.
      */
     int visible_effect_type_count() const;
 
     /**
-     * The two things a render needs that only the SHELL can do (S7).
-     *
-     * ⚠️ THE RENDER IS SYNCHRONOUS. Android hands it to a coroutine because Compose would ANR; a
-     * single-threaded frame loop has nothing to hand it to, so it simply stops and renders — which is
-     * both simpler and SAFER, because the audio callback is the one thing that must not be reading
-     * engine state while an offline render is writing it.
-     *
-     *   `suspend_audio(true/false)` — the shell pauses its SDL audio device for the duration. Kotlin
-     *   only stops PLAYBACK (its Oboe stream stays open and idle); the shell can do better, and a
-     *   paused device is a guarantee rather than a hope.
-     *
-     *   `repaint()` — called as progress moves. It is what draws the "43%" on the EXPORT row, and it
-     *   is why the percentage is a real readout rather than a decoration.
-     *
-     * Both may be empty. `tools/ptdispatch` renders a real WAV with neither an audio device nor a
-     * window, which is exactly the proof that neither is load-bearing.
+     * What a render needs that only the SHELL can do. ⚠️ The render is SYNCHRONOUS — the frame loop
+     * stops and renders, which also guarantees the audio callback is not reading engine state:
+     *   `suspend_audio(true/false)` — pause the audio device for the duration;
+     *   `repaint()` — draw the progress (the "43%" on EXPORT).
+     * Both may be empty: the tests render a real WAV with neither.
      */
     struct RenderHooks {
         std::function<void(bool)> suspend_audio;
         std::function<void()>     repaint;
 
         /**
-         * ⭐ **THE THIRD ONE, AND IT IS A LOAD'S, NOT A RENDER'S** (see `begin_load` below).
-         *
-         * "Drain whatever the platform has queued, and tell me whether the user asked to stop." It is
-         * what makes a load cancellable, and what keeps the app's lifecycle alive while one runs.
-         *
-         * ⚠️⚠️ **IT DOES NOT DISPATCH THE PRESSES IT DRAINS, AND THAT IS THE POINT.** Every button
-         * except a cancel is CONSUMED. Without it a load's queued input is not lost, it is REPLAYED:
-         * SDL keeps the presses, and they all arrive at once when the load ends, onto whatever screen
-         * it returned to. That is still true of EXPORT today.
-         *
-         * ⚠️ It is also the only reason `SDL_APP_WILLENTERBACKGROUND` is seen during a load at all —
-         * the watcher that flushes the crash-recovery autosave fires from inside the platform's own
-         * pump, so a frame loop that has stopped polling has silently switched that machinery off.
+         * A LOAD's hook (`begin_load`): "drain what the platform has queued; did the user cancel?"
+         * ⚠️⚠️ It does NOT dispatch what it drains: every press but a cancel is CONSUMED — otherwise SDL
+         * would replay them all onto whatever screen the load returns to. (EXPORT still replays.)
+         * ⚠️ It is also how `SDL_APP_WILLENTERBACKGROUND` (the autosave flush) is seen during a load.
          */
         std::function<bool()> load_pump;
     };
@@ -499,59 +343,34 @@ class InputDispatcher {
     // A SLOW LOAD
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //
-    // Opening a file is the one thing the app does that can outlast a frame. Most loads do not — a
-    // 106 MB `.sf2` takes a quarter of a second, every `.wav` is a read — but a compressed `.sf3` is
-    // unpacked one sample at a time and a long mp3 in proportion to its length, and there the loop is
-    // inside the load rather than running.
-    //
-    // ⚠️ **THE APP NEVER PREDICTS WHETHER A FILE IS BIG.** `begin_load` starts a clock; the strip goes
-    // up only if the load is still running after `LOADING_DELAY_MS`. ⭐ Which is also what makes
-    // it right on a slow device with no second number in it: a file that is instant on a desktop
-    // crosses the delay on a handheld and gets a strip there and only there.
+    // Most loads finish within a frame or two; a compressed `.sf3` or a long mp3 may not, and then the
+    // loop is inside the load.
+    // ⚠️ The app never predicts a file's size: `begin_load` starts a clock and the strip shows only once
+    // the load outlasts `LOADING_DELAY_MS` — so a slow device shows it exactly when it is slow.
 
     /** The wait before a running load is drawn. Below it a strip would flash and be worse than none. */
     static constexpr int LOADING_DELAY_MS = 400;
 
-    /**
-     * How long a status message stays up before it clears itself (`run_due_status_dismiss`).
-     *
-     * ⚠️ **3 s, and it is a DEPARTURE from Kotlin's 5 s (MainActivity's two status LaunchedEffects) —
-     * asked for from the device.** Five seconds is long enough that the message is still sitting there
-     * two or three actions later, reporting on something the user has already moved on from, and it
-     * reads as stuck rather than as slow. Nothing measures this window; it is a judgement about
-     * reading speed, and it is the user's.
-     *
-     * Public so a check can be written against the WINDOW rather than against a number typed twice.
-     */
+    /** How long a status message stays up before clearing itself (`run_due_status_dismiss`). Long
+     *  enough to read, short enough not to look stuck two actions later. Public for the checks. */
     static constexpr long long STATUS_DISMISS_MS = 3000;
 
     /**
-     * How often the strip is redrawn and the buttons are read while a load runs.
-     *
-     * ⚠️⚠️ **NOT "on every report", and the difference is measured rather than tidy.** A soundfont
-     * reports once per sample header — 1628 times for a 43 MB `.sf3` — and each repaint is a full
-     * canvas draw and a present. Doing that per report made the load visibly slower than it was with
-     * no strip at all: the reporting cost more than the decoding. Thirty frames a second is more than a
-     * bar can use.
+     * How often the strip repaints and the buttons are read during a load. ⚠️ Not per report: a
+     * soundfont reports per sample header (1628 times for a 43 MB `.sf3`), and a full redraw each time
+     * made the load slower than the decoding.
      */
     static constexpr int LOADING_REPAINT_MS = 33;
 
-    /**
-     * Open a load. `detail` is what the strip names — a file's display name, or a project's.
-     *
-     * ⚠️ Every `begin_load` needs its `end_load`, and every load path in the app is wrapped by
-     * `LoadScope` (ui/dispatch/dispatch_common.h) rather than calling these by hand.
-     */
+    /** Open a load; `detail` is what the strip names. ⚠️ Every load path is wrapped in `LoadScope`
+     *  (ui/dispatch/dispatch_common.h), never these calls by hand. */
     void begin_load(long long now_ms, std::string detail);
 
     /**
-     * The report from inside the load, called by the sink the shell installs into `pt::set_load_tick`.
-     * **Returns false when the user has cancelled**, which is what the engine unwinds on.
-     *
-     * ⚠️ THE TIME IS PASSED IN rather than taken from `set_now()`, and that is deliberate rather than
-     * tidy: `set_now` also RUNS DUE WORK, and the 3 s autosave firing from inside a project load
-     * would write the crash-recovery file from a document that is half-loaded. A tick moves the
-     * clock the strip reads and nothing else.
+     * The report from inside the load (via the sink the shell installs into `pt::set_load_tick`).
+     * Returns false when the user cancelled — the engine unwinds on it.
+     * ⚠️ Time is passed in, NOT via `set_now()`, which RUNS DUE WORK: the autosave firing mid-load would
+     * write a half-loaded document.
      */
     bool load_tick(long long now_ms, float fraction);
 
@@ -562,50 +381,26 @@ class InputDispatcher {
     bool load_running() const { return s_.loading.running; }
 
     /**
-     * Open the MIDI port the settings name, once, at boot — call it after `AppState::midiOut` is set
-     * and `settings.json` has been read.
-     *
-     * ⚠️ IT IS THE SAME TWO CALLS THE MIDI SCREEN MAKES, ON PURPOSE. The shell could resolve a name to
-     * an index and call `open()` itself in six lines, and then there would be two answers to "which
-     * port is open and why" — a boot one and a UI one — free to drift the moment either grows a case.
-     * This is the guardrail's derive-it-from-the-data rule applied to a seam with exactly two callers,
-     * which is when it is cheapest to obey.
-     *
-     * A port that is ALREADY open is left alone: that is the `POCKETTRACKER_MIDI_OUT` dev override,
-     * which the shell has already resolved into `settings.midiOutDevice` before calling this — so the
-     * device the screen names and the device that is open are the same one by construction.
+     * Open the MIDI port the settings name, once at boot (after `AppState::midiOut` and settings.json).
+     * ⚠️ The same two calls the MIDI screen makes, so there is one answer to "which port is open and
+     * why". A port already open is left alone — the `POCKETTRACKER_MIDI_OUT` dev override, which the
+     * shell has already written into `settings.midiOutDevice`.
      */
     void boot_midi_port();
 
     /**
-     * The same, for the INPUT port (phase E2) — resolve `settings.midiInDevice` against the live list,
-     * wire the host's queue as the sink, open it.
-     *
-     * ⚠️ **A SEPARATE CALL AND NOT A SECOND HALF OF `boot_midi_port`**, because the two are separately
-     * absent: a build can have an output backend and no input one (Linux between B2b and E5, and any
-     * platform where only one of the two libraries is present), and folding them would make "there is
-     * no MIDI in on this build" print as though the cable had failed.
-     *
-     * ⚠️ **THE SINK IS WIRED HERE, WITH THE OPEN, AND THAT PAIRING IS THE POINT.** An input port that is
-     * open with no sink drops every byte silently, and one whose sink outlives its `set_sink(nullptr)`
-     * is a backend thread writing into a dead object. Both are invisible until they are not, so the two
-     * calls live in the one function that can never do one without the other.
+     * The same for the INPUT port: resolve `settings.midiInDevice`, wire the host's queue as the sink,
+     * open it. Separate from `boot_midi_port` because a build can have one backend and not the other.
+     * ⚠️ Sink and open are paired here: an open port with no sink drops every byte, and a sink outliving
+     * `set_sink(nullptr)` is a backend thread writing into a dead object.
      */
     void boot_midi_in_port();
 
     /**
-     * The app has come back to the front — re-list the file browser if that is what is on screen.
-     * A no-op on every other screen, and on a listing nothing has changed under.
-     *
-     * ⚠️ **It exists because the app is not the only writer.** The directory on screen belongs to the
-     * user, and while PocketTracker was in the background a file manager, a download or a sync client
-     * may have changed it — but the case it was written for is the app's own: Android's folder picker
-     * is another activity, so `ADD FOLDER…` necessarily grants while this one is backgrounded, and the
-     * roots directory the user granted from is stale the moment they return to it.
-     *
-     * ⚠️ Inert on desktop by construction rather than by `#ifdef`, the same way the background-flush
-     * watcher is: SDL sends `SDL_APP_DIDENTERFOREGROUND` on Android and iOS only, so nothing calls this
-     * anywhere else. The cursor is kept and clamped — a refresh is not a navigation.
+     * The app is back in front: re-list the file browser if it is on screen (keeping and clamping the
+     * cursor). Other apps — and Android's folder picker, an activity of its own — change directories
+     * while we are in the background. SDL sends `SDL_APP_DIDENTERFOREGROUND` only on Android and iOS,
+     * so this is inert on desktop with no `#ifdef`.
      */
     void refresh_browser_on_foreground();
 
@@ -617,14 +412,13 @@ class InputDispatcher {
     // ── TAP TEMPO (PROJECT > TEMPO, plain A) ─────────────────────────────────────────────────────
     /** How many gaps between taps are averaged. Four taps in, the number has settled. */
     static constexpr int       TAP_TEMPO_KEEP       = 4;
-    /** A longer silence than this is a new count, not a gap. 3 s is one beat at 20 BPM — the slowest
-     *  tempo the row accepts, so nothing inside the legal range can be mistaken for a pause. */
+    /** A longer silence starts a new count. 3 s is one beat at 20 BPM, the slowest tempo allowed. */
     static constexpr long long TAP_TEMPO_TIMEOUT_MS = 3000;
-    /** Under this and it is a bouncing button, not a tap: 60 ms is 1000 BPM, past the row's ceiling. */
+    /** Shorter is a bouncing button, not a tap: 60 ms is 1000 BPM, past the ceiling. */
     static constexpr long long TAP_TEMPO_MIN_MS     = 60;
     long long tapTempoLastMs_ = 0;                    // 0 = no tap yet this count
-    long long tapTempoGaps_[TAP_TEMPO_KEEP] = {0};    // a ring of the most recent gaps, in ms
-    int       tapTempoCount_ = 0;                     // how many of them are filled (capped at KEEP)
+    long long tapTempoGaps_[TAP_TEMPO_KEEP] = {0};    // ring of the most recent gaps, ms
+    int       tapTempoCount_ = 0;                     // how many are filled (capped at KEEP)
 
     /** When the load in flight opened — what `LOADING_DELAY_MS` is measured from. */
     long long               loadStartMs_ = 0;
@@ -635,122 +429,79 @@ class InputDispatcher {
     /** See set_media_base_dir. Empty means "relative paths stay relative" (resolve_media_path). */
     std::string mediaBaseDir_{};
 
-    // ── HOLD ACCELERATION lives in the SHELL ─────────────────────────────────────────────────────
+    // ── Hold acceleration lives in the SHELL ─────────────────────────────────────────────────────
     //
-    // ⚠️ A press handler here is one step, always — a row, a character, a screenful. Holding a
-    // direction arrives as more presses, closer together (`shell/sdl-input.h`); it never arrives as a
-    // bigger step. Scaling one here would put a 2- or 4-row jump back into a cursor the eye is
-    // tracking, which is the stutter the ramp exists to remove.
+    // ⚠️ A handler here is one step, always. Holding a direction arrives as more presses, closer together
+    // (`shell/sdl-input.h`), never a bigger step — a 2- or 4-row jump is the stutter the ramp avoids.
 
-    // ── The autosave's DEBOUNCE (S10) ────────────────────────────────────────────────────────────
+    // ── The autosave's debounce ──────────────────────────────────────────────────────────────────
     //
-    // Kotlin's is a `LaunchedEffect(projectVersion)` that DELAYS 3 s and is re-keyed — and therefore
-    // CANCELLED and restarted — by the next edit, so a burst of typing coalesces into one write. That
-    // is a deadline wearing a coroutine's clothes, and without coroutines it is just a deadline.
-    //
-    // ⚠️ RE-ARMED on every edit, never merely armed once: the write must land 3 s after the LAST
-    // keystroke, not 3 s after the first. Arm-if-not-armed would fire mid-burst, on a device where a
-    // held A+UP produces an edit every 100 ms — ten writes of ~440 KB a second onto an SD card.
+    // ⚠️ RE-ARMED on every edit, so the write lands 3 s after the LAST change: a held A+UP edits every
+    // 100 ms, and arm-once would write ~440 KB to an SD card several times a second.
     bool      autosavePending_ = false;
     long long autosaveDueAtMs_ = 0;
 
-    /** 3 s, and it is Kotlin's own constant (MainActivity.AUTOSAVE_DEBOUNCE_MS). */
+    /** 3 s after the last edit. */
     static constexpr long long AUTOSAVE_DEBOUNCE_MS = 3000;
 
     /** The deadline, checked once a frame by set_now(). */
     void run_due_autosave();
 
-    // ── The status line's auto-dismiss (parity audit, finding 5) ─────────────────────────────────
+    // ── The status line's auto-dismiss ───────────────────────────────────────────────────────────
     //
-    // MainActivity.kt:734–747 clears the status 5 s after it is SET — a LaunchedEffect keyed on the
-    // VALUE, so re-setting an identical message does not restart the delay. The port's "setter" is
-    // 22 plain assignments, so the dismissal is derived from the DATA instead: set_now watches the
-    // field for CHANGES (the settingsDirty lesson — a stamp 22 call sites must remember is one they
-    // will forget once, and the 23rd site gets this for free). Detection therefore lands on the
-    // frame AFTER the set — one ~16 ms tick late on the shell, invisible on a 5 s timer, and
-    // ptdispatch §34 encodes the tick explicitly.
+    // A message clears STATUS_DISMISS_MS after it is SET; re-setting an identical one does not restart
+    // it. There are many plain assignments to the field, so set_now WATCHES it for changes rather than
+    // trusting a stamp at each site. Detection lands one frame after the set (the tests encode it).
     std::string statusLastSeen_{};
     long long   statusDismissAtMs_ = 0;
 
-    // The FILE BROWSER's line, on the same window. ⚠️ A SEPARATE PAIR, and not for tidiness:
-    // feeding both message fields through ONE pair stops the dismissal working at all — `lastSeen`
-    // then thrashes between two different strings and re-arms the deadline on every frame, so
-    // neither line ever expires. (Measured; §34's own checks are what go red.)
+    // The FILE BROWSER's line, on the same window. ⚠️ A SEPARATE pair: one pair watching two fields
+    // thrashes between them, re-arms every frame, and neither ever expires.
     std::string browserStatusLastSeen_{};
     long long   browserStatusDismissAtMs_ = 0;
 
     /** The watchers and the deadlines, all run once a frame by set_now(). */
     void run_due_status_dismiss();
 
-    // ── The INSTRUMENT-entry param push (parity audit, finding 8) ────────────────────────────────
+    // ── The INSTRUMENT-entry param push ──────────────────────────────────────────────────────────
     //
-    // Android's currentScreen SETTER calls `instrumentController.syncToLastEdited(project)` on every
-    // entry into INSTRUMENT (TrackerController.kt:46–48), which ends in
-    // `audioEngine.updateInstrumentPlaybackParams` — a belt-and-braces push of engine state the
-    // event path never carries (the S4 family). The port's screen changes have no single setter
-    // (go_to_screen from R+DPAD, bare assignments on overlay close), so the push is derived from the
-    // DATA: set_now watches `currentScreen` and pushes on the frame after INSTRUMENT is entered, by
-    // any route — including routes not written yet.
+    // Entering INSTRUMENT pushes its playback params. Screens change by many routes, so set_now watches
+    // `currentScreen` and pushes the frame after INSTRUMENT is entered, by any route.
     ScreenType lastScreenSeen_ = ScreenType::SONG;   // the boot screen — see app_state.h
 
     /** The watcher, run once a frame by set_now(). */
     void run_instrument_entry_push();
 
     /**
-     * The same shape, for a mapped knob: the host writes the value and pushes it from the MIDI drain,
-     * and this notices — once a frame — that it did, so the song is marked modified and the crash
-     * autosave re-arms.
-     *
-     * ⚠️ **A COUNT WATCHED, NOT A CALL RECEIVED.** The drain runs below this layer and cannot reach
-     * the dirty flag; a callback plumbed down to it would put a UI concern on the path a knob sweeps
-     * at ~30 messages a second. Watching the number is also what collapses a whole sweep into one
-     * bump per frame.
+     * A mapped knob wrote the song (from the MIDI drain); notice it once a frame, mark the song modified
+     * and re-arm the autosave. A COUNT WATCHED, not a callback — the drain cannot reach the dirty flag,
+     * and a whole sweep collapses into one bump per frame.
      */
     void     run_mapped_cc_dirty();
     uint64_t mappedCcSeen_ = 0;
 
-    /**
-     * The other half of the same shape: a knob turned while `R` was held, so the cell under the
-     * cursor is pointed at it.
-     *
-     * ⚠️ **A SWEEP IS ONE LEARN, NOT THIRTY.** The count is watched once a frame and the mapping is
-     * written for whichever controller was seen last — and `learn_mapping` re-points an existing row
-     * rather than appending, so even a learn spread over several frames cannot fill the list.
-     */
+    /** A knob turned while `R` was held: point the cell under the cursor at it. A sweep is ONE learn —
+     *  the last controller seen wins, and `learn_mapping` re-points rather than appends. */
     void     run_midi_learn();
     uint64_t learnSeen_ = 0;
 
-    /**
-     * What the cell under the cursor is CALLED — the module's second answer, beside
-     * `cursor_context()`. `NONE` on every screen that has no destination to name, which is most of
-     * them: a phrase step, a chain row and a file name are not parameters a knob can sweep.
-     */
+    /** What the cell under the cursor is CALLED (beside `cursor_context()`). `NONE` on screens with
+     *  nothing a knob can sweep. */
     songcore::MapTarget map_target() const;
 
     /**
-     * Load the autosave into the live document — and LEAVE IT DIRTY.
-     *
-     * ⚠️ **The dirty flag is the whole difference between this and a LOAD, and it is deliberate on both
-     * platforms** (`TrackerController.recoverFromAutosave`: "leaving it DIRTY … so the user is nudged to
-     * Save it under a real name"). Recovered work is not *stored* work — it exists in one file the user
-     * cannot see, has never named, and did not ask for. Aligning the versions here would tell them the
-     * song is safe when the only copy of it is the crash file.
-     *
-     * ⚠️ And for the same reason it does NOT clear the autosave. The recovered document is still the
-     * only copy; deleting the file that holds it, at the exact moment the user has proved they are
-     * capable of losing the session, would be the one deletion in the app that can destroy real work.
+     * Load the autosave into the live document — and LEAVE IT DIRTY. Recovered work is not saved work:
+     * the only copy is a crash file the user never named, and a clean flag would say it is safe.
+     * ⚠️ And the autosave is NOT cleared: it is still the only copy.
      */
     bool recover_from_autosave();
 
     Clipboard clip_{};
 
     // ── The MUTE/SOLO chord's undo ───────────────────────────────────────────────────────────────
-    // What the mix looked like when the chord started, so `on_r_combo_revert()` can put it back. All
-    // TEN channels — the eight tracks and the two send returns — not the one under the cursor: a chord
-    // over a selection touches several, and a SOLO changes what every other channel is heard doing.
-    //
-    // ⚠️ Taken on the FIRST toggle of a chord and not on every press, or holding R and muting three
-    // channels in turn would leave the revert able to undo only the last of them.
+    // All TEN channels (8 tracks + 2 returns) as the chord found them — a chord over a selection
+    // touches several, and SOLO changes every other channel. ⚠️ Taken on a chord's FIRST toggle, or
+    // muting three channels in turn could only undo the last.
     static constexpr int MIX_CHANNELS = 10;
     struct MixSnapshot {
         bool live = false;
@@ -769,15 +520,10 @@ class InputDispatcher {
     /** Whether R+A/R+B mean MUTE/SOLO on the screen as it stands — and so whether B must be held. */
     bool mute_solo_chord_live() const;
     /**
-     * L+R's recency flag, DERIVED rather than stamped by each of the paths that could move it.
-     *
-     * ⚠️ There is no one place a selection changes: L+B opens it, the D-pad drags its edge, B copies
-     * and exits, L+A cuts, a paste fills the buffer, and the next screen to grow a selection will add
-     * another. A flag every one of those had to remember to set is the failure this codebase has hit
-     * seven times — so the watcher folds the observable state into one number instead and notices
-     * when it moves. `run_selection_recency()` runs once a frame from `set_now()`, AND at the top of
-     * `toggle_mute_solo()`, which is what keeps the ordering right to the PRESS rather than to the
-     * frame when both happen inside one 16 ms batch of events.
+     * L+R's recency flag, DERIVED: a selection changes by many paths (L+B, D-pad drag, copy, cut,
+     * paste…), so the watcher folds the observable state into one number and notices it move. Run
+     * once a frame from `set_now()` AND at the top of `toggle_mute_solo()`, so the order follows the
+     * PRESS even when both land in one frame.
      */
     unsigned selection_signature() const;
     void     run_selection_recency();
@@ -798,19 +544,15 @@ class InputDispatcher {
     SettingsModule         settings_{};
     MidiModule             midi_{};
     MidiMapModule          midiMap_{};
-    EqModule               eq_{};   // stateful: it caches its response curve — see eq_editor.h
+    EqModule               eq_{};   // stateful: caches its response curve (eq_editor.h)
 
-    /**
-     * A,A is a DOUBLE-TAP, and a double-tap is only a double-tap if the cursor has not moved between
-     * the presses. Kotlin records where the first A landed and compares; anything else — a press on
-     * one cell and a press on the next — is two separate presses.
-     */
+    /** A,A only counts if the cursor did not move between the presses: where the first A landed. */
     bool         hasInsertPos_ = false;
     ScreenType   insertScreen_ = ScreenType::PHRASE;
     int          insertRow_    = 0;
     int          insertCol_    = 0;
 
-    // ── The spine (AppInputDispatcher's own private shape, kept) ─────────────────────────────────
+    // ── The spine ────────────────────────────────────────────────────────────────────────────────
 
     /** "What is under the cursor?" — the ONE place that asks which screen is up. */
     CursorContext cursor_context() const;
@@ -821,82 +563,52 @@ class InputDispatcher {
     /** Apply a resolved action to the live document. True if anything changed. */
     bool apply_edit(const InputAction& action);
 
-    /**
-     * `handleGenericInput`: context → action → mutate → echo to the engine. `fn` is one of the five
-     * generic handlers, and this function never learns which.
-     */
+    /** Context → action → mutate → echo to the engine. `fn` is one of the five generic handlers. */
     void generic_input(InputAction (*fn)(const CursorContext&));
 
-    /**
-     * `handleSelectionOrSingleIncrement`: the same, but applied to EVERY ROW of a selection when one
-     * is up. A+RIGHT over a 4-row selection increments four cells.
-     */
+    /** The same over EVERY ROW of a selection when one is up (A+RIGHT over 4 rows → 4 cells). */
     void selection_or_single(InputAction (*fn)(const CursorContext&));
 
-    /** `handleDPadNavigation`: move the cursor, or drag the selection's active edge. */
+    /** Move the cursor, or drag the selection's active edge. */
     void dpad_nav(NavDir direction);
 
     /**
-     * `AppInputDispatcher.syncLastEditedOnScreenSwitch` (:2760) — the R+LEFT/R+RIGHT deep-link.
-     * CAPTURE the ref under the departing screen's cursor into lastEdited*, then APPLY lastEdited*
-     * to the arriving screen's current*. ⚠️ The two HORIZONTAL moves only, and only when the screen
-     * actually changes: Kotlin's handleRUp/handleRDown do plain save/restore + selection exit, and
-     * syncing them too would diverge the other way (parity audit, finding 2's scope trap).
+     * The R+LEFT/R+RIGHT deep-link: CAPTURE the ref under the departing cursor into lastEdited*, then
+     * APPLY lastEdited* to the arriving screen's current*. ⚠️ Horizontal moves only, and only when the
+     * screen actually changes; R+UP/DOWN just save/restore the cursor.
      */
     void sync_last_edited_on_screen_switch(ScreenType from, ScreenType to);
 
     /** An edit happened: tell the sequencer, so a note already scheduled past the cursor is redone. */
     void mark_modified(bool table_touched = false);
 
-    /**
-     * The first HALF of mark_modified — dirty the document and (re-)arm the crash autosave — split
-     * out for the one caller that must not take the second half: the EQ editor's band path, whose
-     * right-sized engine push is two calls, not mark_modified's wholesale push_globals. On Android
-     * the two halves cannot come apart (EVERY projectVersion++ re-keys the autosave LaunchedEffect,
-     * MainActivity.kt:754); here a bare `projectVersion++` is a dirty flag with no crash protection
-     * behind it — P4d's shape, third body (parity audit, finding 7).
-     */
+    /** The first HALF of mark_modified — dirty the document, (re-)arm the autosave — for the EQ editor's
+     *  band path, whose engine push is two calls, not push_globals. Never bump `projectVersion` bare:
+     *  that is a dirty flag with no crash protection. */
     void mark_dirty_and_arm_autosave();
 
     /**
-     * Sound the PHRASE note under the cursor for as long as A stays down (SETTINGS "NOTE PREV") —
-     * the insert, the A+DPAD edit and a bare A on a note that is already there all call it, and
-     * `on_a_released` is its only end. It gates itself: the NOTE column, a filled step, no selection.
-     *
-     * ⚠️ It rings with NO timed kill, so the release is the whole lifecycle. Every caller is an A
-     * handler, which is what makes that safe — the mapper always delivers A's release, focus loss
-     * included (SdlInput::reset). A caller that edits a note WITHOUT A held would leave it sounding
-     * until the next plain press.
+     * Sound the PHRASE note under the cursor while A is down (SETTINGS NOTE PREV); `on_a_released` is
+     * its only end. It gates itself (NOTE column, filled step, no selection).
+     * ⚠️ No timed kill: only call from an A handler — the mapper always delivers A's release, focus loss
+     * included. A caller without A held would leave it sounding.
      */
     void preview_held_note();
     /** A phrase preview is sounding that the release of A must end. */
     bool heldNotePreview_ = false;
 
-    /**
-     * The song cell the cursor last left SONG on, as a 0-based track — the TIE-BREAK a chain or
-     * phrase played from its own screen offers `songcore::track_of_*`, never the answer on its own.
-     *
-     * ⭐ It needs no new field: `go_to_screen` saves songCursorRow/Column every time you leave SONG,
-     * and on SONG the column IS the track, 1-based. Because it only ever breaks a tie between tracks
-     * that already hold the chain, a stale one cannot route a chain somewhere it does not live.
-     */
+    /** The song cell the cursor last left SONG on, as a 0-based track — only ever a TIE-BREAK for
+     *  `songcore::track_of_*` (from the saved songCursorColumn), so a stale one cannot misroute. */
     int remembered_song_track() const;
 
-    /**
-     * B+UP/DOWN under NAV = SONG: the CHAIN screen walks the track column of the song grid, the PHRASE
-     * screen walks the current chain's filled rows. Returns true when it owned the press — including
-     * when the walk clamped and nothing moved (ui/song_pointer.h).
-     */
+    /** B+UP/DOWN under NAV = SONG: CHAIN walks the song column, PHRASE the chain's filled rows. True when
+     *  it owned the press, even if the walk clamped (ui/song_pointer.h). */
     bool song_relative_b_vertical(int delta);
 
     /**
-     * The mixer channel an audition on the preview lane borrows, or -1 for the neutral unity gain the
-     * lane has always had.
-     *
-     * ⚠️ An INSTRUMENT IS NOT IN THE SONG — only its uses are. So this is the song cell you came
-     * through, and only while that cell still holds a chain; "the first track that plays it" is
-     * available and tempting, but an instrument used on five tracks would audition through whichever
-     * sorts first, which is a lie with no gesture behind it.
+     * The mixer channel an audition on the preview lane borrows, or -1 (unity gain). ⚠️ An instrument is
+     * not IN the song, only its uses: this is the song cell you came through, while it still holds a
+     * chain — never "the first track that plays it".
      */
     int audition_track() const;
 
@@ -907,12 +619,8 @@ class InputDispatcher {
     bool on_globals_screen() const;
 
     /**
-     * INSTRUMENT row 0, A+LEFT/RIGHT on the TYPE cell: switch outright if the slot is EMPTY, else put the
-     * CONFIRM DIALOG in front of it — the toggle drops the loaded source, since a sampler has no use
-     * for an .sf2 and vice versa.
-     *
-     * `delta` is the direction — +1 for A+RIGHT, −1 for A+LEFT — and it rides through the dialog in
-     * `ConfirmDialogState::arg`, because with three types the two buttons no longer mean the same.
+     * INSTRUMENT row 0, A+LEFT/RIGHT on TYPE: switch at once on an EMPTY slot, else ask first (the
+     * source is dropped). `delta` (+1 / −1) rides through the dialog in `ConfirmDialogState::arg`.
      */
     void request_instrument_type_toggle(int delta);
     void toggle_instrument_type(int delta);
@@ -939,10 +647,7 @@ class InputDispatcher {
     void apply_fx_type_change(int effect_code);
 
     // ── The mapping destination picker ──────────────────────────────────────────────────────────
-    /**
-     * True when the cursor is on a mapping row's GROUP or PARAMETER cell — the two the picker stands
-     * in for. ⚠️ Not the ADD row: there is no mapping there yet to point anywhere.
-     */
+    /** On a mapping row's GROUP or PARAMETER cell — what the picker stands in for. Not the ADD row. */
     bool on_map_dest_cell() const;
     /** Point the mapping under the cursor at the picked destination, and close. */
     void apply_map_picker_choice();
@@ -950,33 +655,23 @@ class InputDispatcher {
     // ── A,A / L+B+A helpers ─────────────────────────────────────────────────────────────────────
     void cycle_current_item(int delta);
 
-    // ── The modal guards (see the ⚠️ THE MODAL RULE note at the top of this file) ────────────────
+    // ── The modal guards (see THE MODAL RULE at the top) ─────────────────────────────────────────
     bool qwerty_open() const { return s_.qwerty.isOpen; }
     bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // THE OVERLAY STACK — `top_overlay()` below is the ONE place its order is written
+    // THE OVERLAY STACK — `top_overlay()` is the ONE place its order is written
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //
-    // The order is the specification (see THE MODAL RULE at the top of this file). Every handler has
-    // to know it, and none of them may state it: a stack re-typed at two dozen call sites is a stack
-    // that drifts, and each site's subset is correct only about TODAY's overlays.
-    //
-    // A handler names the layers it answers for ITSELF and `overlay_swallows()` answers for the rest.
-    // ⭐ **The default for a layer a handler does not name is SWALLOW**, and that is what makes a new
-    // overlay ONE registration: add the enumerator, add its line to `top_overlay()`, and every handler
-    // that has not been taught about it is INERT under it. The failure mode of forgetting one is a
-    // button that does nothing — not a button that edits the screen hidden behind the new overlay.
-    //
-    // ⚠️ FX_HELPER and BROWSER are not modals. The helper is a picker held up by A, and the browser is
-    // a SCREEN — but every handler has to ask about them in the same breath and in the same place as
-    // the three real modals, so they are layers here. `modal_backdrop_active` (ui/app_state.h) asks
-    // the narrower question of which layers paint a full-canvas scrim, and stays separate.
+    // A handler names the layers it answers for; `overlay_swallows()` answers for the rest.
+    // ⭐ The default for an unnamed layer is SWALLOW, so a new overlay is ONE registration (enumerator +
+    // its line in `top_overlay()`): a handler not taught about it does nothing under it, rather than
+    // editing the screen behind.
+    // FX_HELPER and BROWSER are not modals, but every handler asks about them in the same breath, so
+    // they are layers here. `modal_backdrop_active` (ui/app_state.h) is the separate scrim question.
 
-    /**
-     * ⚠️ The enumerators are BITS, so that a handler's `arms` set is a plain OR of them and reads as
-     * one line. `top_overlay()` returns exactly one of them; `overlay_swallows()` takes any number.
-     */
+    /** BITS, so a handler's `arms` set is an OR. `top_overlay()` returns one; `overlay_swallows()` takes
+     *  any number. */
     enum class Overlay : unsigned {
         NONE      = 0,
         CONFIRM   = 1u << 0,
@@ -996,51 +691,35 @@ class InputDispatcher {
     }
 
     /**
-     * The topmost open layer — the one whose vocabulary a press belongs to.
-     *
-     * ⚠️ QWERTY sits ABOVE THEME because it genuinely stacks on it: the editor's SAVE raises the
-     * keyboard without closing the editor, and a D-pad press there must move the KEY cursor. That is
-     * the only pair in the app that can be open at once; every other ordering below is disjoint by
-     * construction, which is exactly why it was free to drift before it lived in one function.
+     * The topmost open layer. ⚠️ QWERTY sits above THEME because it stacks on it (the editor's SAVE
+     * raises the keyboard without closing). Every other pair below is disjoint by construction.
      */
     Overlay top_overlay() const {
-        // ⚠️ FIRST, above even the confirm dialog. A load is the one layer that can open while another
-        // modal is already up — the sample editor's LOAD is reached from behind its own confirm — and
-        // it is not dismissible by anything except finishing or being cancelled.
-        //
-        // ⚠️ `running`, not `shown`: a load owns the buttons from its first moment, whether or not it
-        // has been up long enough to have drawn anything. A press in the first 400 ms is not a press
-        // on the screen underneath.
+        // ⚠️ FIRST, above even the confirm: a load can open behind another modal (the sample editor's
+        // LOAD from its confirm) and only finishing or cancelling ends it. `running`, not `shown` — a
+        // load owns the buttons from its first moment.
         if (s_.loading.running) return Overlay::LOADING;
         if (confirm_open())     return Overlay::CONFIRM;
-        // The render dialog opens from PROJECT alone and can share the screen with nothing — but it
-        // IS up while a render runs, and a load inside one would rank above it, so it sits here.
+        // The render dialog is up while a render runs; a load inside it ranks above.
         if (s_.renderDialog.isOpen) return Overlay::RENDER;
-        // The full help can be raised over the browser and over the two in-place editors, so it ranks
-        // above them. It can never share the screen with a confirm or the keyboard — SELECT is refused
-        // under the first and aborts the second — nor with the FX picker, which SELECT does not reach.
+        // The full help can open over the browser and the two in-place editors, never over a confirm,
+        // the keyboard or the FX picker.
         if (s_.helpFull)        return Overlay::HELP;
         if (qwerty_open())      return Overlay::QWERTY;
         if (theme_open())       return Overlay::THEME;
         if (eq_open())          return Overlay::EQ;
         if (s_.fxHelper.isOpen) return Overlay::FX_HELPER;
-        // The destination picker is the FX picker one screen over, and is disjoint from it by
-        // construction: one opens only on a PHRASE/TABLE FX column, the other only on a mapping row.
+        // Disjoint from the FX picker: one opens on a PHRASE/TABLE FX column, the other on a mapping row.
         if (s_.mapPicker.isOpen) return Overlay::MAP_PICK;
         if (on_browser())       return Overlay::BROWSER;
         return Overlay::NONE;
     }
 
     /**
-     * THE MODAL RULE, DERIVED: true when a layer this handler does not answer for is up, and the
-     * caller must return without touching the screen behind it.
-     *
-     * `arms` is the set of layers the handler takes responsibility for — either by SERVING them with
-     * the arms that follow this call (the D-pad moves the key cursor, the theme cursor, the EQ cursor
-     * or the file cursor) or by deliberately LETTING THEM THROUGH to the screen underneath, which is
-     * what START does for the two partial overlays: they name it, and it reaches the transport.
-     *
-     * `Overlay::NONE` is the common `arms` value and reads as "any layer at all owns this button".
+     * THE MODAL RULE: true when a layer this handler does not answer for is up — return without
+     * touching the screen. `arms` are the layers the handler takes responsibility for, by serving them
+     * or deliberately letting them through (START under the two partial overlays). `Overlay::NONE` =
+     * "any layer owns this button".
      */
     bool overlay_swallows(Overlay arms) const {
         const Overlay top = top_overlay();
@@ -1049,20 +728,10 @@ class InputDispatcher {
     }
 
     /**
-     * The confirm dialog owns EVERY button but A and B. It is the topmost modal — drawn last, over
-     * even the keyboard — so it is checked FIRST, ahead of the keyboard and the browser both, and it
-     * is the one guard that simply RETURNS rather than redirecting.
-     *
-     * ⚠️ The check appears at the top of every handler but three, and the exceptions are exactly
-     * `on_button_a` and `on_button_b`, which ARE the answer, and `on_stop_preview`, which silences a
-     * ringing audition (a dialog raised over an INSTRUMENT audition must not leave the note hanging —
-     * and silencing a note is not an edit). ptdispatch asserts the rest: with a confirm up, every
-     * other button is inert. **That assertion is the real guarantee here, not the code shape** —
-     * Kotlin's own comment on this predicate warns that "every new show*Dialog-style modal state MUST
-     * be added" to it, and a rule that has to be remembered at every new handler is a rule that will
-     * eventually be forgotten once. (No count in prose: a number maintained by hand goes stale
-     * silently — this one had said 28 for a while when it was 30 — and the check already holds the
-     * claim that matters.)
+     * The confirm dialog owns every button but A and B; topmost, so checked FIRST, and it simply
+     * RETURNS. Every handler checks it except `on_button_a` / `on_button_b` (the answers) and
+     * `on_stop_preview` (silencing a note is not an edit). The tests assert every other button is
+     * inert with a confirm up — that check, not the code shape, is the guarantee.
      */
     bool confirm_open() const { return s_.confirm.is_open(); }
 
@@ -1070,30 +739,19 @@ class InputDispatcher {
     void confirm_accept();
 
     /**
-     * B on the dialog: don't.
-     *
-     * ⚠️ **NOT A PURE CLOSE ANY MORE — S10 is where that stopped being true.** For five of the six
-     * questions NO means "the world is exactly as it was", and closing the box is the whole of it. For
-     * RECOVER it means *discard my unsaved work*, and that has to DELETE the autosave: leave the file
-     * on disk and the same prompt comes back on the next launch, and the next, asking about work the
-     * user has already refused once — which is how a safety prompt teaches people to dismiss it.
-     *
-     * ptdispatch pins both halves: the other five leave the filesystem untouched, and this one does not.
+     * B on the dialog: don't. ⚠️ Not always a pure close — for RECOVER it means "discard my unsaved
+     * work" and DELETES the autosave, or the prompt would return on every launch. The tests pin
+     * both: the other questions leave the filesystem untouched.
      */
     void confirm_cancel();
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // THE EQ EDITOR (Phase 3 S8)
+    // THE EQ EDITOR
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //
-    // The port's third modal, and the first PARTIAL one: it owns the D-pad, A, A+DPAD, A+B, B, B+DPAD and
-    // SELECT, and lets START through on purpose (the screen underneath keeps its audition, which is the
-    // only way to HEAR what a band is doing while you dial it).
-    //
-    // ⚠️ It is an OVERLAY, so `currentScreen` still names the screen underneath — which means every
-    // handler that reaches for the cursor MUST ask `eq_open()` first, or it will edit a mixer fader while
-    // the user is dialling a bell curve. That is why `generic_input()` opens with the EQ arm rather than
-    // each caller carrying one.
+    // A PARTIAL modal: owns the D-pad, A, A+DPAD, A+B, B, B+DPAD and SELECT; START passes through.
+    // ⚠️ An OVERLAY, so `currentScreen` still names the screen underneath — any handler reaching for the
+    // cursor must ask `eq_open()` first, which is why `generic_input()` opens with the EQ arm.
 
     bool eq_open() const { return s_.eq.isOpen; }
 
@@ -1104,33 +762,20 @@ class InputDispatcher {
     /** The D-pad: LEFT/RIGHT change band, UP/DOWN change param. Both CLAMP; neither wraps. */
     void eq_move_cursor(int d_band, int d_param);
 
-    /**
-     * B+LEFT/RIGHT: step the slot 0..127 (CLAMPED — it is a bank index, not a ring) and re-point the
-     * cell that opened the editor at the new slot. Five different project fields, one gesture; the
-     * caller tag is the only thing that knows which.
-     */
+    /** B+LEFT/RIGHT: step the slot 0..127 (CLAMPED — a bank index) and re-point the cell that opened
+     *  the editor; the caller tag says which of five fields. */
     void apply_caller_eq_slot_change(int new_slot);
 
-    /**
-     * ⚠️ After EVERY band nudge, and it is two engine calls, not one. See SongcoreHost::set_eq_band:
-     * writing the bank changes nothing anyone is listening to until the consumer is re-handed the slot.
-     */
+    /** ⚠️ After EVERY band nudge — two engine calls: writing the bank changes nothing until the
+     *  consumer is re-handed the slot (SongcoreHost::set_eq_band). */
     void push_eq_band_to_engine();
 
     /**
-     * Kotlin's `openSubScreenAtCursor(peek)` — the ONE list of cells whose plain A opens something, and
-     * the single source of truth for both halves of that claim: what A DOES (peek = false) and what the
-     * mapper must DEFER (peek = true).
-     *
-     * ⚠️ It is not the WHOLE of what is deferred: `defer_a_to_release` has one arm above this one, for
-     * a cell whose A opens nothing (the sample editor's lazy-chop tap). The rule below applies to that
-     * arm as much as to this list — nothing joins it without an A the RELEASE can still perform.
-     *
-     * ⚠️ One function rather than two lists, deliberately. Split them and a cell can drift into being
-     * openable-but-not-deferred (its A+DPAD gets pre-empted by the open) or deferred-but-not-openable
-     * (its A does nothing at all, and the deferral silently eats the press). Both are bugs that look
-     * like a mis-press, and neither would show up in any golden — which is precisely the class of bug
-     * S7's one-state confirm dialog was about.
+     * The ONE list of cells whose plain A opens something — both what A DOES (peek = false) and what
+     * the mapper must DEFER (peek = true). One function, or a cell drifts into openable-not-deferred
+     * (its A+DPAD pre-empted) or deferred-not-openable (the press eaten).
+     * ⚠️ `defer_a_to_release` has one more arm (the sample editor's chop tap, which opens nothing); the
+     * same rule applies: only an A the RELEASE can still perform may be deferred.
      */
     bool open_sub_screen_at_cursor(bool peek);
 
@@ -1139,24 +784,16 @@ class InputDispatcher {
         return confirm_open() || qwerty_open() || eq_open() || theme_open();
     }
 
-    // ── The THEME EDITOR (Phase 3 S9) ───────────────────────────────────────────────────────────
+    // ── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────
     //
-    // The port's fourth modal and its second PARTIAL one — it owns the D-pad, A, A+DPAD, B, B+DPAD and
-    // SELECT, and lets START through to the transport (ui/app_state.h says why: half the colours it
-    // edits only exist while the song plays).
-    //
-    // ⚠️ IT IS RAISED FROM SETTINGS AND `currentScreen` STAYS `SETTINGS` — the same overlay hazard the
-    // EQ editor has, and the same rule: ask `theme_open()` before reaching for the screen's cursor, or
-    // A+UP will cycle the VISUALIZER row underneath while the user is dialling a colour.
-    //
-    // ⚠️ AND THE KEYBOARD OPENS ON TOP OF IT. SAVE raises the QWERTY overlay WITHOUT closing the editor
-    // (LOAD, by contrast, closes it and re-opens it when the file lands), so `qwerty_open()` must be
-    // tested BEFORE `theme_open()` in every handler — THE MODAL RULE from S6a, and this is the second
-    // place in the app where two modals are genuinely stacked.
+    // A PARTIAL modal: owns the D-pad, A, A+DPAD, B, B+DPAD and SELECT; START reaches the transport.
+    // ⚠️ Raised from SETTINGS and `currentScreen` STAYS `SETTINGS`: ask `theme_open()` before the
+    // screen's cursor, or A+UP cycles the row underneath.
+    // ⚠️ SAVE raises the keyboard ON TOP of it, so `qwerty_open()` is tested BEFORE `theme_open()`.
 
     bool theme_open() const { return s_.themeEditor.isOpen; }
 
-    // The roll's seed starts from the frame clock, so each opening walks a different sequence of palettes.
+    // The roll's seed starts from the frame clock, so each opening walks a different sequence.
     void open_theme_editor() {
         s_.themeEditor = ThemeEditorState{};
         s_.themeEditor.isOpen = true;
@@ -1164,15 +801,8 @@ class InputDispatcher {
     }
     void close_theme_editor() { s_.themeEditor = ThemeEditorState{}; }
 
-    /**
-     * Is there an OPEN port right now — the question PANIC and TEST both have to ask before claiming
-     * to have done anything.
-     *
-     * ⚠️ TWO conditions, and the second is the one that matters: a backend can exist and hold no port
-     * (nothing picked, or an open that failed). Answering on `midiOut != nullptr` alone would make the
-     * screen report "TEST SENT" into a closed handle — a vacuous pass on the one control whose entire
-     * purpose is telling the user whether the cable is real.
-     */
+    /** Is a port actually OPEN? A backend can exist with no port, and "TEST SENT" into a closed handle
+     *  would lie about the one thing the button is for. */
     bool port_open() const { return s_.midiOut != nullptr && s_.midiOut->is_open(); }
 
     /** The D-pad: UP/DOWN walk the rows (WRAPPING), LEFT/RIGHT the row's own channels (WRAPPING). */
@@ -1191,15 +821,9 @@ class InputDispatcher {
     void theme_refresh_message();
 
     /**
-     * Apply the typed name and write `<dir>/<name>.ptt`. The QWERTY's THEME_SAVE arm.
-     *
-     * ⚠️ `dir` is a PARAMETER and not read from `s_.qwerty.contextExtra`, which would be the obvious
-     * thing and is wrong: `qwerty_apply()` copies the keyboard state by value and CLEARS `s_.qwerty`
-     * before it dispatches, so by the time any arm runs, the live keyboard is already gone. Reading it
-     * here wrote the theme to the filesystem ROOT instead of the Themes folder — silently, because
-     * `write_file` creates its parent directories and cheerfully succeeded. Every other arm takes
-     * `k.contextExtra`; this one does too now. (Caught by ptdispatch §27 on its first run, which is
-     * precisely the join a golden cannot see.)
+     * Apply the typed name and write `<dir>/<name>.ptt` (the QWERTY's THEME_SAVE arm).
+     * ⚠️ `dir` is a PARAMETER: `qwerty_apply()` clears `s_.qwerty` before dispatching, so the live
+     * keyboard's `contextExtra` is already gone (reading it wrote to the filesystem ROOT).
      */
     void save_theme_as(const std::string& dir, const std::string& typed_text);
 
@@ -1215,70 +839,52 @@ class InputDispatcher {
     /** Apply the typed name and write `<dir>/<name>.ptg`. The QWERTY's GROOVE_SAVE arm. */
     void save_groove_as(const std::string& dir, const std::string& typed_text);
 
-    // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
+    // ── PROJECT + SETTINGS: the buttons ──────────────────────────────────────────────────────────
     /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
     void project_action();
 
     /**
-     * TAP TEMPO — one press of A on the TEMPO row, in time with what you want to hear.
-     *
-     * The tempo is the average of the last `TAP_TEMPO_KEEP` gaps rather than the last one alone: a
-     * single gap makes the number jump on every uneven tap, and a human tapping by feel is uneven.
-     * The FIRST tap sets no tempo — there is no gap yet to measure — and a gap longer than
-     * `TAP_TEMPO_TIMEOUT_MS` starts a fresh count rather than averaging in a pause.
+     * TAP TEMPO — A on the TEMPO row, in time. The tempo averages the last `TAP_TEMPO_KEEP` gaps (one
+     * gap jumps on every uneven tap). The first tap sets nothing; a gap past `TAP_TEMPO_TIMEOUT_MS`
+     * starts a new count.
      */
     void tap_tempo();
     /** A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) do anything — the rest are A+DPAD. */
     void settings_action();
 
-    // ── MIDI: the screen, the port and the two buttons (phase B4.3) ─────────────────────────────
+    // ── MIDI: the screen, the port and the two buttons ───────────────────────────────────────────
     /** A on MIDI: only PANIC and TEST do anything — OUTPUT / OFFSET / PROG CHG are A+DPAD. */
     void midi_action();
 
     /** A on the mapping list — the ADD row, and nothing else on that screen answers a bare press. */
     void midi_map_action();
 
-    /**
-     * Put the mapping cursor back inside a list whose length just changed. ⚠️ Owed on the way IN as
-     * well as after a delete: the list is the SONG's, so loading a different project underneath a
-     * remembered cursor is the same situation arriving by another door.
-     */
+    /** Put the mapping cursor back inside a list whose length changed — owed on the way IN too (a
+     *  different project's list under a remembered cursor). */
     void clamp_midi_map_cursor();
 
     /**
-     * Re-enumerate the ports and re-resolve the saved device NAME against the fresh list.
-     *
-     * Called on every entry to the screen and once a second by `run_midi_hotplug`: a list built at
-     * launch is a list of the cables that were in at launch.
-     *
-     * A saved name that is not in the list resolves to index 0 = OFF, and that is the honest answer:
-     * the row shows what is OPEN, never what was once wanted (see midi_settings.h).
+     * Re-enumerate the ports and re-resolve the saved device NAME — on every screen entry and once a
+     * second (`run_midi_hotplug`). A saved name not in the list resolves to 0 = OFF: the row shows
+     * what is OPEN, never what was once wanted (midi_settings.h).
      */
     void refresh_midi_devices();
 
     /**
-     * Make the port match `settings.midiOutDevice` — close whatever is open, open the named one.
-     *
-     * ⚠️ PANICS FIRST, AND ITS OWN PANIC IS NOT REDUNDANT. `ExternalConsumer::set_out` panics when the
-     * POINTER changes, and here it never does: the shell hands over one `IMidiOut` object for the whole
-     * session and this swaps the DEVICE underneath it. So the consumer cannot see the change, and every
-     * note sounding on the old device would be held by hardware that is about to stop being listened
-     * to — the note-offs we owe delivered to a port that is already closed.
+     * Make the port match `settings.midiOutDevice`.
+     * ⚠️ PANICS FIRST: the shell hands over one `IMidiOut` for the session and this swaps the DEVICE
+     * under it, so `ExternalConsumer::set_out` never sees a change — the owed note-offs must go out
+     * before the old port closes.
      */
     void apply_midi_device();
 
-    /** `refresh_midi_devices`' twin for the INPUT list (E2). Same rules, a different enumeration. */
+    /** `refresh_midi_devices`' twin for the INPUT list. */
     void refresh_midi_in_devices();
 
     /**
-     * Make the input port match `settings.midiInDevice` — unwire the sink, close, open the named one,
-     * wire the sink back.
-     *
-     * ⚠️ THE ORDER IS THE WHOLE FUNCTION. `set_sink(nullptr)` before `close()`, so no byte from the old
-     * device can arrive during the swap; `host_.reset_midi_in()` between them, because a cable pulled
-     * mid-message leaves running status in force and the next port's first data byte would otherwise
-     * complete a note nobody played on the previous device's channel; `set_sink` before `open`, because
-     * a port that is open is a port already delivering.
+     * Make the input port match `settings.midiInDevice`. ⚠️ The ORDER is the function: `set_sink(nullptr)`
+     * before `close()` (no byte from the old device mid-swap); `host_.reset_midi_in()` between (stale
+     * running status would complete a phantom note); `set_sink` before `open` (an open port delivers).
      */
     void apply_midi_in_device();
 
@@ -1299,16 +905,9 @@ class InputDispatcher {
     std::vector<std::string>   midiInRefused_;
 
     /**
-     * ⭐ **THE THRU VERDICT (E4): is the port we listen on the same one we send on?**
-     *
-     * MIDI thru — a live key on an EXTERNAL instrument reaching the cable — is the feature. On a
-     * LOOPBACK port it is instead an amplifying feedback loop (key → cable → the same port → key), and
-     * a loopback is not exotic here: it is the only MIDI-in test rig this project has (§0.8).
-     *
-     * ⚠️ **ONE FUNCTION, CALLED FROM BOTH SIDES, BECAUSE THE VERDICT DEPENDS ON BOTH PORTS.** Either
-     * device row can change it, so a rule spelled out at each site is a rule one of them will forget —
-     * the repo has paid for that five times (the modal-guard predicate, `settingsDirty`, …). It is
-     * derived from the two names the SCREEN is showing, which is the same data the user is reading.
+     * Is the port we listen on the one we send on? MIDI thru on a LOOPBACK port is an amplifying
+     * feedback loop. One function called from both device rows, derived from the two names the
+     * screen shows.
      */
     void update_midi_thru();
 
@@ -1327,23 +926,16 @@ class InputDispatcher {
     // ── The RENDER dialog (ui/modules/render_dialog.h) ──────────────────────────────────────────
 
     /**
-     * PROJECT → EXPORT → MIX / STEMS. The range starts on the section the SONG cursor is parked in
-     * and SONG END starts on AUTO, so the common ask — "export the part I am looking at" — needs no
-     * dialling. ⚠️ REPEAT is deliberately KEPT between openings: it is a preference about the file,
-     * not a place in the song, and re-typing it for the stems pass after the mix pass is the one
-     * thing this panel would otherwise cost.
+     * PROJECT → EXPORT → MIX / STEMS. The range starts on the section the SONG cursor is in and SONG END
+     * on AUTO — "export the part I am looking at" with no dialling. REPEAT is kept between openings (a
+     * preference about the file, not a place in the song).
      */
     void open_render_dialog(RenderDialogState::Output output);
 
     bool render_dialog_open() const { return s_.renderDialog.isOpen; }
 
-    /**
-     * A+UP/DOWN's step on the panel: a page of song rows, or ONE repetition.
-     *
-     * ⚠️ REPEAT HAS NO COARSE STEP WORTH THE NAME — it runs OFF..×16, so a page would be the whole
-     * range in one press. Both axes walking it by one is the same answer the TYPE cell and the theme
-     * presets give for the same reason, and it keeps the row from having an edge that does nothing.
-     */
+    /** A+UP/DOWN's step on the panel: a page of song rows, or ONE repetition — REPEAT runs OFF..×16, so
+     *  a page would cross the whole range. */
     int render_dialog_coarse_step() const {
         return s_.renderDialog.is_on(RenderRow::REPEAT) ? 1 : 16;
     }
@@ -1361,11 +953,9 @@ class InputDispatcher {
     void render_dialog_fire();
 
     /**
-     * SONG-selection RESAMPLE — the APPLY of the RESAMPLE keyboard. Renders the live selection to a WAV
-     * in Resampled/ and loads it into a fresh instrument. SYNCHRONOUS, exactly like export_song: it
-     * stops the transport, suspends the audio device, repaints from the render's progress, and restores
-     * the device after. `customBaseName` empty ⇒ auto `Resample_NNNN`. A no-op if a render is already
-     * running or the selection has gone.
+     * SONG-selection RESAMPLE (the RESAMPLE keyboard's APPLY): render the selection to a WAV in
+     * Resampled/ and load it into a fresh instrument. SYNCHRONOUS like export_song. `customBaseName`
+     * empty ⇒ `Resample_NNNN`. A no-op while rendering or with no selection.
      */
     void resample_selection(const std::string& customBaseName);
 
@@ -1402,12 +992,8 @@ class InputDispatcher {
     bool instrument_open_at_cursor();
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // THE SAMPLE EDITOR (Phase 3 S6b)
+    // THE SAMPLE EDITOR
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    //
-    // Kotlin scatters this across ten regions of `AppInputDispatcher` — a `SAMPLE_EDITOR ->` arm inside
-    // handleButtonA, handleButtonB, handleSelect, handleStart, all four D-pad handlers, all four A+D-pad
-    // handlers, handleAB, and the qwerty commit. Gathered here, because they are one screen.
 
     bool on_sample_editor() const { return s_.currentScreen == ScreenType::SAMPLE_EDITOR; }
 
@@ -1422,23 +1008,18 @@ class InputDispatcher {
     void close_sample_editor();
 
     /**
-     * Build the editor's session from the sample the engine is holding: its length, its rate, its
-     * waveform, the selection its instrument's start/end points describe, and the slice markers its file
-     * brought with it. Separate from `open_sample_editor` because the editor's own LOAD button re-enters
-     * on DIFFERENT audio — everything the previous session knew is then false, and rebuilding is safer
-     * than patching. (It must not touch `previousScreen`: that is the editor's return target, and the
-     * browser it just came back from is not it.)
+     * Build the editor's session from the sample the engine holds: length, rate, waveform, the selection
+     * the instrument's start/end describe, the file's slice markers. Separate from `open_sample_editor`
+     * because the editor's LOAD re-enters on DIFFERENT audio. ⚠️ Must not touch `previousScreen` (the
+     * editor's return target).
      */
     void init_sample_editor_state();
 
     /** A+DPAD on rows 3..8, and the whole reason those rows have no CursorContext. */
     void nudge_selection_edge(int64_t delta);
 
-    /**
-     * Row 11's POSITION cell: A+DPAD drags the slice boundary under the cursor, as it drags a
-     * selection edge one section up. Col 0 is the index and keeps its own cell — dragging there would
-     * fight the step that chooses which marker you are looking at.
-     */
+    /** Row 11's POSITION cell: A+DPAD drags the boundary under the cursor. Col 0 (the index) keeps its
+     *  own cell — dragging there would fight choosing the marker. */
     bool on_sample_slice_marker_row() const {
         return on_sample_editor() && s_.sampleEditor.cursorRow == 11 &&
                s_.sampleEditor.cursorCol == 1 &&
@@ -1449,13 +1030,9 @@ class InputDispatcher {
     void nudge_slice_marker(int64_t delta);
 
     /**
-     * Row 11 under MANUAL, BOTH columns: a plain A is the lazy-chop tap, and the mapper therefore holds
-     * it until A is released.
-     *
-     * ⚠️ Every other gesture on this row starts with the same A held down — A+DPAD steps the slice
-     * number on col 0 and drags the boundary on col 1, A+B deletes one. Fire the tap on the PRESS and
-     * each of those is preceded by a boundary nobody asked for. It is why the EQ slot cell defers its
-     * A too — a cell with an A+DPAD of its own cannot also act on the press.
+     * Row 11 under MANUAL, both columns: a plain A is the lazy-chop tap, so the mapper holds it until
+     * release. ⚠️ Every other gesture here starts with A held (A+DPAD steps or drags, A+B deletes); a
+     * tap on the PRESS would precede each with an unasked boundary.
      */
     bool on_slice_tap_cell() const {
         return on_sample_editor() && !s_.sampleEditor.showConfirmClose &&
@@ -1473,11 +1050,8 @@ class InputDispatcher {
     void reset_slice_marker();
 
     /**
-     * A on row 11 under MANUAL: cut a boundary at the PLAYHEAD, while the sample is sounding.
-     *
-     * Slicing by ear rather than by number — press START, listen, and tap A on each hit. It makes the
-     * same kind of boundary a rightward drag does, so everything already built for one applies to it:
-     * A+DPAD walks it, A+B removes it, and the list stays sorted however out of order the taps arrive.
+     * A on row 11 under MANUAL: cut a boundary at the PLAYHEAD — START, listen, tap on each hit. It is
+     * the same kind of boundary a drag makes: A+DPAD walks it, A+B removes it, the list stays sorted.
      */
     void tap_slice_marker();
 
@@ -1487,21 +1061,17 @@ class InputDispatcher {
     /** A on rows 13/14/16/18/19 — the twelve ops, the FX apply, the name, and the save buttons. */
     void sample_editor_confirm();
 
-    /**
-     * Bake the PENDING pitch shift destructively into the buffer and rescale everything measured in
-     * frames. Shared by all three save paths — a sample must be saved as it SOUNDS, and until this runs
-     * the shift is only a number on the screen.
-     */
+    /** Bake the PENDING pitch shift into the buffer and rescale everything in frames — all three saves
+     *  call it, since a sample is saved as it SOUNDS. */
     void bake_pending_pitch();
 
     /** The slice boundaries as WAV cue points: the markers, or DIVIDE's N−1 computed cuts. */
     std::vector<int> compute_slice_cue_points() const;
 
     /**
-     * Re-read the length and the waveform after an op. `reset_selection` says the op CHANGED THE LENGTH,
-     * and it does more than re-select: everything measured in frames — the selection, the instrument's
-     * own sample and loop windows, and ⚠️ **every slice marker** — describes audio that no longer exists,
-     * so all of it is reset rather than clamped.
+     * Re-read length and waveform after an op. `reset_selection` = the op CHANGED THE LENGTH: the
+     * selection, the instrument's sample and loop windows and ⚠️ every slice marker describe audio
+     * that no longer exists, so they are reset, not clamped.
      */
     void refresh_sample_view(bool reset_selection);
 
@@ -1515,13 +1085,9 @@ class InputDispatcher {
     std::vector<std::pair<int64_t, int64_t>> current_slices() const;
 
     /**
-     * ⚠️ The deferred half of the audition (see set_now). The preview arms an exact-frame window and
-     * strips the instrument's EQ, sends and modulation — and the voice reads all four when it TRIGGERS,
-     * 100 frames later, not when it is scheduled. So none of them can be put back until then, and these
-     * three fields are what remembers to do it.
-     *
-     * A second START inside the window runs it IMMEDIATELY, before arming anything: otherwise the first
-     * preview's restore would land in the middle of the second audition and undo it.
+     * ⚠️ The deferred half of the audition (set_now): the preview's frame window and stripped EQ, sends
+     * and modulation are read when the voice TRIGGERS, 100 frames later, so they are restored then. A
+     * second START inside the window runs it IMMEDIATELY, or the first restore would undo the second.
      */
     void run_due_sample_preview_restore(bool force = false);
 
@@ -1529,13 +1095,8 @@ class InputDispatcher {
     long long previewRestoreAtMs_    = 0;
     int       previewRestoreInst_    = 0;
 
-    /**
-     * The playhead as it stood when A went down on the tap cell — 0..1, or −1 for "nothing was
-     * sounding", which is the same value `playbackPosition` itself carries when there is no audition.
-     *
-     * ⚠️ Written by `on_a_deferred` and CONSUMED by `tap_slice_marker`, so a tap can never read a
-     * position from a press that ended in a combo instead.
-     */
+    /** The playhead when A went down on the tap cell (0..1, or −1 = nothing sounding). Written by
+     *  `on_a_deferred`, CONSUMED by `tap_slice_marker`, so a press that became a combo leaves nothing. */
     float sliceTapPlayhead_ = -1.0f;
 
     SampleEditorModule sample_{};

@@ -1,19 +1,11 @@
 #ifndef POCKETTRACKER_SONGCORE_AUTOMATION_CURVE_H
 #define POCKETTRACKER_SONGCORE_AUTOMATION_CURVE_H
 
-// ─── The shape of a ramp, and nothing else ───────────────────────────────────────────────────────
+// ─── The shape of a ramp ─────────────────────────────────────────────────────────────────────────
 //
-// AUS/AUF's curve, the byte it produces at a position, and the one rule an EQ-preset morph adds on
-// top. `automation.h` holds everything ELSE about automation — the registry, the pairing, the phrase
-// walk — and includes this.
-//
-// ⚠️ **IT IS SPLIT OUT BECAUSE IT HAS TWO CALLERS ON OPPOSITE SIDES OF THE SONGCORE SEAM.** The
-// phrase path reaches it through `automation.h`; the TABLE path reaches it from inside `AudioEngine`,
-// which sits below the seam and must not see `model.h`. A second implementation over there would be a
-// second thing to keep bit-identical, and a table morph that felt different from a phrase morph over
-// the same two presets is exactly the inconsistency the feature exists to remove.
-//
-// So: `<cstdint>` and nothing else, ever.
+// AUS/AUF's curve and the EQ-morph band rule. Split from `automation.h` because the table path in
+// `AudioEngine`, below the songcore seam, uses it too and must not see `model.h`.
+// ⚠️ `<cstdint>` only, ever — one implementation keeps phrase and table morphs identical.
 
 #include <cstdint>
 
@@ -21,19 +13,15 @@ namespace songcore {
 
 // ─── The curve ───────────────────────────────────────────────────────────────────────────────────
 //
-// AUS's value byte picks the shape, as a continuous family between three anchors. It is a POLYNOMIAL
-// on purpose — `+ − ×` only, never `pow` or `exp`: the scheduling TUs compile with no fast-math and
-// `-ffp-contract=off`, and the emitted values have to be bit-identical on every platform, which is
-// the same reason note→Hz is vendored rather than called (event-schema.md).
+// AUS's byte picks a shape between three anchors.
+// ⚠️ Polynomial only (`+ − ×`, never `pow`/`exp`): the emitted values must be bit-identical on every
+// platform.
 constexpr int AUS_CURVE_EASE_IN  = 0x00;  // slow to leave, fast to arrive — cubic up
 constexpr int AUS_CURVE_LINEAR   = 0x80;
 constexpr int AUS_CURVE_EASE_OUT = 0xFF;  // fast to leave, slow to arrive
 
-/**
- * The eased position, `t` and the result both in [0,1]. 0x80 is exactly `t`; either side blends
- * linearly towards the cubic anchor, so the family is continuous through the middle and the two
- * halves meet at the same value.
- */
+/** The eased position, `t` and result in [0,1]. 0x80 is exactly `t`; each side blends linearly
+ *  towards its cubic anchor, so the family is continuous through the middle. */
 inline double automation_shape(int curveByte, double t) {
     if (t <= 0.0) return 0.0;
     if (t >= 1.0) return 1.0;
@@ -46,10 +34,7 @@ inline double automation_shape(int curveByte, double t) {
     return (1.0 - w) * t + w * (1.0 - u * u * u);
 }
 
-/**
- * The byte a ramp holds at position `t`. Rounded half-up — both ends are 0-255 and the shape never
- * leaves [0,1], so the value is never negative and the rounding needs no sign case.
- */
+/** The byte a ramp holds at position `t`, rounded half-up (never negative, so no sign case). */
 inline int automation_value_byte(int startByte, int destByte, int curveByte, double t) {
     const double v = startByte + (destByte - startByte) * automation_shape(curveByte, t);
     const int    b = static_cast<int>(v + 0.5);
@@ -58,10 +43,7 @@ inline int automation_value_byte(int startByte, int destByte, int curveByte, dou
 
 // ─── One EQ band, morphed ────────────────────────────────────────────────────────────────────────
 //
-// The band as AUTHORED HEX, which is the domain both morph paths interpolate in: hex is what makes a
-// frequency sweep linear in log-frequency, and it is what the project file and the FX cells hold. The
-// engine's own `EqBandsHex` and the model's `EqBand` both convert to and from this shape a band at a
-// time, so neither type has to be visible here.
+// The band in authored hex — the domain both paths interpolate in (log-frequency is linear in hex).
 struct AutomationEqBand {
     int type = 0;     // 0 OFF | 1 LOSHELF | 2 LOWCUT | 3 BELL | 4 HISHELF | 5 HICUT
     int freq = 128;   // 00-FF → 20-20000 Hz, log
@@ -72,21 +54,11 @@ struct AutomationEqBand {
 /**
  * One band of an EQ-preset morph at position `t`.
  *
- * ⚠️ **THE START PRESET'S BAND TYPE SURVIVES THE WHOLE SPAN, ARRIVAL INCLUDED.** A type is not an
- * interpolable quantity — there is no continuous path from BELL to HISHELF, and LOWCUT/HICUT run
- * through the SVF and have no gain at all — so one of the two ends has to win, for every tick. The
- * start wins, and the morph never snaps:
- *
- *   • Types that AGREE (the normal case, and the one to write) make the arrival exactly the
- *     destination preset, by construction rather than by rounding.
- *   • Types that DIFFER still sweep that band's frequency and gain under the start's type, and the
- *     ramp rests on a setting no preset holds. To land on the real destination, write it — `EQM 12`
- *     on the step after the AUF is one cell, visible in the grid, and then the discontinuity is the
- *     author's rather than the ramp's.
- *
- * ⭐ A band OFF in the start preset stays off for the whole ramp, whatever the destination says — so
- * `chain.eq.active` (derived from "some type ≠ 0") cannot change mid-sweep and no band can pop in or
- * out. Fade a band out by ramping its GAIN to 0 dB (0x78) instead.
+ * ⚠️ The START preset's band type holds for the whole span, arrival included — types cannot be
+ * interpolated. When both ends agree the arrival is exactly the destination; when they differ, the
+ * ramp rests on a setting no preset holds (write `EQM xx` after the AUF to land on it).
+ * A band OFF at the start stays off, so `chain.eq.active` cannot change mid-sweep. Fade a band by
+ * ramping its gain to 0 dB (0x78).
  */
 inline AutomationEqBand automation_eq_band_at(const AutomationEqBand& from, const AutomationEqBand& to,
                                               int curveByte, double t) {

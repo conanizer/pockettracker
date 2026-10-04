@@ -1,4 +1,4 @@
-// ─── shell/font_raster.cpp — the ONE stb_truetype implementation TU (convergence D — button font) ──
+// ─── shell/font_raster.cpp — the ONE stb_truetype implementation TU ──────────────────────────────
 //
 // ⚠️ This is the only translation unit in the whole tree that pulls in the stb_truetype implementation,
 // exactly as shell/image.cpp is the only one that pulls in stb_image. Nothing in native/ (the engine)

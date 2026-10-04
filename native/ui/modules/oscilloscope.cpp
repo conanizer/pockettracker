@@ -118,9 +118,7 @@ void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amp
 
     for (int i = 0; i < NUM_BARS; ++i) {
         const int barX = x + BAR_START_OFFSET + i * (BAR_W + BAR_GAP);
-        // A magnitude under one LED cell is silence to this strip — it cannot light a segment and it
-        // cannot raise a dot. Reading it as zero draws the identical picture and keeps `bars_at_rest`
-        // from being held open forever by a noise floor nothing can see.
+        // Under one LED cell reads as silence: it draws the same and lets `bars_at_rest` settle.
         const float rawIn = amps ? amps[i] : 0.0f;
         const float raw   = (rawIn * maxAmp >= static_cast<float>(SEGMENT_H)) ? rawIn : 0.0f;
 
@@ -129,11 +127,8 @@ void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amp
             barSmoothed_[i] = raw;
         } else {
             barSmoothed_[i] *= BAR_DECAY;
-            // ⚠️ SNAPPED TO ZERO ONCE IT IS UNDER ONE LED CELL, and that is what makes `bars_at_rest`
-            // REACHABLE. A bar this low draws nothing already (the segment loop needs SEGMENT_H px), so
-            // the pixels do not change — but ×0.90 from full scale takes about a thousand frames to
-            // reach a float zero, and the idle gate would hold the screen at 60 Hz for sixteen seconds
-            // after a stop with nothing moving on it, which is worse than the freeze it exists to fix.
+            // ⚠️ Snapped to zero under one LED cell (it draws nothing already), or the ×0.90 decay takes
+            // ~1000 frames to reach 0 and `bars_at_rest` holds the screen at 60 Hz long after a stop.
             if (barSmoothed_[i] * maxAmp < static_cast<float>(SEGMENT_H)) barSmoothed_[i] = 0.0f;
         }
 

@@ -2,26 +2,17 @@
 
 // ─── TABLE EDITOR ────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/TableModule.kt. 16 rows of per-tic automation an instrument runs under
-// its own notes: Step | Transpose | Vol | FX1 | FX2 | FX3.
+// 16 rows of per-tic automation an instrument runs under its own notes:
+// Step | Transpose | Vol | FX1 | FX2 | FX3.
 //
-// It LOOKS like the phrase editor and it is not, in three ways that a "shared drawCell" refactor
-// would quietly erase. Each is inherited verbatim:
+// It looks like the phrase editor and is not, in three ways a shared-drawing refactor would erase:
+//   • Both FX cells (name and value) are `textValue`; the phrase editor uses `textTitle`/`textParam`.
+//   • The step column has no beat accent — a table row is a tic, not a beat.
+//   • The transpose is never "--": `0x00` is drawn dim. Only the volume has an empty (−1, "--").
 //
-//   • ITS FX CELLS ARE `textValue`, BOTH OF THEM. The phrase editor paints an FX *name* in `textTitle`
-//     and its *value* in `textParam`; the table paints both in `textValue`.
-//   • ITS STEP COLUMN HAS NO BEAT ACCENT. Phrase and chain brighten every 4th row number; a table row
-//     is a tic, not a beat, so there is nothing to accent and the column is flat `textEmpty`.
-//   • ITS TRANSPOSE IS NEVER "--". `0x00` means no transpose and is drawn dim, but it is still drawn —
-//     unlike the volume, where −1 is a genuine "leave it alone" and shows "--".
-//
-// The playback rows are the rows the ENGINE is standing on, not ones the sequencer reports: the
-// layout resolves them per frame from `getTableRowsFor` (see ui/engine_feed.h).
-// Hence the −1 sentinel below where the Kotlin has `Int?`.
-//
-// ⚠️ **THERE ARE THREE OF THEM, one per FX column**, because each column has its own playhead and its
-// own tic rate. The gutters they draw in are what set the horizontal gaps between the FX columns —
-// see the layout in the .cpp.
+// ⚠️ THREE PLAYBACK ROWS, one per FX column, each with its own playhead and tic rate. They are the
+// rows the ENGINE is standing on, resolved per frame (engine_feed.h); their gutters set the gaps
+// between the FX columns.
 
 #include "songcore/model.h"
 #include "table-lanes.h"

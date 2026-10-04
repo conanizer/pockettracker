@@ -9,12 +9,9 @@
 
 // The pre-delay line, per channel: 0.15 s at 48 kHz.
 //
-// ⚠️ **IT IS A SAMPLE COUNT AND PRE IS A TIME, so the ceiling moves with the device rate** — the same
-// shape as the echo's DELAY_MAX_SAMPLES, and it CLAMPS SILENTLY at the top. At 44.1 kHz the cell's
-// full range fits with room to spare; at 96 kHz the top of the cell is 75 ms rather than 150 and the
-// cell still reads FF. The two lines are 58 KB together, which is why the ceiling is a twelfth of the
-// echo's rather than matched to it: a reverb pre-delay past about 150 ms stops reading as one space
-// and starts reading as a slap, which the echo already does better.
+// ⚠️ A SAMPLE COUNT while PRE is a TIME, so the ceiling moves with the device rate and CLAMPS
+// SILENTLY (at 96 kHz the cell's top is 75 ms and still reads FF). A twelfth of the echo's ceiling:
+// past ~150 ms a pre-delay reads as a slap.
 static constexpr size_t REVERB_PREDELAY_MAX_SAMPLES = 7200;
 static constexpr float  kReverbPreDelayMaxSeconds   = 0.15f;
 
@@ -33,34 +30,20 @@ struct ReverbModule {
     EqModule          inputEq;
     float             sampleRate = 44100.0f; // the rate the delay lines were actually built at
 
-    // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array, sized for exactly this rate,
-    // and refuses any rate whose lines will not fit. Its refusal leaves three buffer pointers
-    // indeterminate, so the return value is not optional: `Process` would dereference them.
-    //
-    // A device above the ceiling gets a reverb built at the ceiling instead: shorter and brighter
-    // than intended, which is the same compromise the whole engine ran on before the buses learned
-    // the device rate at all, and much better than no reverb. `sampleRate` records what was really
-    // used, so nobody reads it as the device rate.
+    // ⚠️ ReverbSc carves all eight delay lines out of ONE fixed array sized for this rate, and
+    // refuses a rate that will not fit — leaving three buffer pointers indeterminate, so the return
+    // value is not optional. A device above the ceiling gets a reverb built AT the ceiling (shorter,
+    // brighter); `sampleRate` records what was really used.
     static constexpr float MAX_SUPPORTED_RATE = DSY_REVERBSC_MAX_RATE;
 
-    // ⚠️⚠️ **THREE INDEPENDENT CELLS, AND PRE AND WIDE ARE NEUTRAL AT THEIR DEFAULTS.** They are not
-    // a mode between them: any combination is legal, because the TYPE cell on screen only writes them
-    // and never comes back to ask. Those two are gated so that at their defaults the arithmetic below
-    // is skipped rather than performed as an identity — that is what keeps an old project's
-    // pre-delay and stereo image exactly as they were.
-    //
-    // ⚠️ **MOD IS NOT ONE OF THEM.** Its default is a real setting the algorithm is driven to, not a
-    // no-op: it is set on every `reset` and every push, and lowering it below what `Init` leaves
-    // behind is the whole point of the value chosen. There is nothing to gate — the call is made
-    // unconditionally and there is no cheaper path to fall back to.
-    //
-    // ⚠️ WIDE's neutral is 0x80 and not 00, because a width cell has to reach BOTH sides of "as it
-    // is". The mid/side pair that reconstructs L and R exactly is not bit-identical to leaving them
-    // alone, so 0x80 skips the arithmetic rather than performing the identity.
-    // ⚠️ PRE is kept as the CELL as well as in frames, the way the echo keeps `toneHex`, because the
-    // frame count depends on the RATE: `reset` is where the rate changes, and a module that only held
-    // the frames would keep a 44.1 kHz pre-delay on a device running at 48.
-    int preHex          = 0x00;     // 00 = the send goes straight in, as it always did
+    // ⚠️⚠️ THREE INDEPENDENT CELLS; PRE AND WIDE ARE NEUTRAL AT THEIR DEFAULTS and gated so their
+    // arithmetic is SKIPPED there rather than performed as an identity — an old project's pre-delay
+    // and stereo image stay exact. Any combination is legal: the TYPE cell only writes them.
+    // ⚠️ MOD IS NOT GATED: its default is a real setting, driven on every reset and push.
+    // ⚠️ WIDE's neutral is 0x80 (a width cell reaches both sides of "as it is"); the mid/side pair is
+    // not bit-identical to leaving L/R alone, so 0x80 skips it.
+    // ⚠️ PRE is kept as the CELL too: its frame count depends on the RATE, which `reset` changes.
+    int preHex          = 0x00;     // 00 = the send goes straight in
     int preDelaySamples = 0;        // derived from preHex and the rate — never written directly
     int widthHex        = 0x80;     // 0x80 = untouched; 00 = mono, FF = twice the sides
     int modHex          = 0x10;     // 00 = none; 0x40 is the wander the algorithm is built around
@@ -104,10 +87,8 @@ struct ReverbModule {
         // defaults by construction, so the ramp starts where a default project would already have it.
         setParams(0x60, 0x80, 0x60);
         wetGain = wetGainTarget;
-        // ⚠️ Both re-derived here rather than left to the next push, the way the echo's tone
-        // coefficient is. `Init` puts the wander back to 1 whatever the cell said, and the pre-delay
-        // is a count of FRAMES for a rate that has just changed — a caller that forgot would leave a
-        // 44.1 kHz pre-delay running on a device at 48, and drop a MOD the user had set.
+        // ⚠️ Both re-derived here: `Init` puts the wander back to 1 whatever MOD says, and the
+        // pre-delay is a FRAME count for a rate that has just changed.
         reverb.SetPitchMod(reverb_mod_scale(modHex));
         updatePreDelaySamples();
         inputEq.reset(sr);
@@ -135,19 +116,14 @@ struct ReverbModule {
 
     // The three character cells, together, because they arrive together from the project.
     //
-    // ⚠️ **PRE IS NOT RAMPED, so moving it while the send is loud puts a step into the reverb's
-    // INPUT** — the same trade the echo's TIME cell makes, and it lands in the same place: the wet
-    // return only, softened by everything downstream of it. It is a voicing control, set once and
-    // left, and smoothing it would cost a second read head for a click nobody has complained about.
+    // ⚠️ PRE IS NOT RAMPED: moving it while the send is loud puts a step into the reverb's INPUT
+    // (wet return only, softened downstream). A voicing control, set once — the echo's TIME trade.
     void setCharacter(int preHexIn, int widthHexIn, int modHexIn) {
         const bool wasOff = (preDelaySamples == 0);
         preHex            = preHexIn;
         updatePreDelaySamples();
-        // ⚠️ **THE RING IS ONLY WRITTEN WHILE PRE IS UP, so switching it on again would otherwise
-        // replay whatever was in it when it went off** — a burst of audio from minutes ago, straight
-        // into a tail that rings for seconds. Cleared on that one transition and no other, because
-        // clearing it on every push would punch a hole in a pre-delay that was already running: the
-        // global effects are pushed again on any project edit.
+        // ⚠️ The ring is written only while PRE is up, so switching it back on would replay old
+        // audio into the tail. Cleared on that one transition only — every project edit re-pushes this.
         if (wasOff && preDelaySamples > 0) clearPreDelay();
         widthHex = widthHexIn;
         modHex   = modHexIn;
@@ -172,11 +148,8 @@ struct ReverbModule {
 
     // inputEq applied stereo (independent L/R biquads) before the reverb algorithm.
     //
-    // ⚠️ **AT THE DEFAULT PRE AND WIDE CELLS THE TWO GATES BELOW ADD NOTHING TO EITHER SIDE OF
-    // `Process`** — that is what keeps an old project's pre-delay and stereo image untouched. MOD is
-    // not here at all; it lives inside the algorithm. The wet gain is NOT one of the gates either:
-    // it is derived at every setting including the default, because the level it divides out is
-    // there at every setting too.
+    // ⚠️ AT THE DEFAULT PRE AND WIDE CELLS THE TWO GATES ADD NOTHING to either side of `Process`.
+    // MOD lives inside the algorithm; the wet gain is derived at every setting, default included.
     void run(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         const int  want     = algo;
         const bool switched = want != soundingAlgo;

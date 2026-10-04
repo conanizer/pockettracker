@@ -7,7 +7,7 @@
 
 #include "audio-backend.h"
 #include "audio-engine.h"
-#include "load_progress.h"   // set_load_tick — where a slow load reports itself
+#include "load_progress.h"   // set_load_tick
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/button_mapper.h"
@@ -16,9 +16,9 @@
 #include "ui/engine_feed.h"
 #include "ui/input_dispatcher.h"
 #include "ui/layout.h"
-#include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE — the C7 audible test
-#include "ui/scale_io.h"              // seed_scale_bank — the factory scales, as .pts files
-#include "ui/groove_io.h"             // seed_groove_bank — the factory grooves, as .ptg files
+#include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE
+#include "ui/scale_io.h"              // seed_scale_bank
+#include "ui/groove_io.h"             // seed_groove_bank
 #include "ui/settings_store.h"
 
 #include "device_skin.h"
@@ -27,8 +27,8 @@
 #include "font.h"
 #include "portrait2.h"
 
-#include "latency_probe.h"   // POCKETTRACKER_LATENCY=1 — the loop period and the callback gap
-#include "midi-in.h"      // the platform's IMidiIn, or nothing (E2: Windows only)
+#include "latency_probe.h"   // POCKETTRACKER_LATENCY=1
+#include "midi-in.h"      // the platform's IMidiIn, or nothing
 #include "midi-sender.h"
 #include "sdl-input.h"
 #include "sdl-touch.h"
@@ -44,50 +44,23 @@ namespace ptshell {
 
 namespace {
 
-// ─── THE BACKGROUND WATCHER (C4) ─────────────────────────────────────────────────────────────────
+// ─── The MIDI-in console ─────────────────────────────────────────────────────────────────────────
 //
-// Everything the "the platform is taking the app away" handler needs, borrowed from `run`'s frame.
-// ⚠️ It lives on `run`'s STACK, so the watcher MUST be removed before `run` returns — see the
-// SDL_DelEventWatch below the loop. A watcher outliving its userdata is a use-after-free that fires
-// during teardown, which is the least debuggable moment available.
-// ─── THE MIDI-IN CONSOLE (phase E2) ──────────────────────────────────────────────────────────────
+// Counts what MIDI input delivered, printed at exit. A working input and one that never received a
+// byte look identical inside the app, so these counts are how the two are told apart. `silent`
+// separates "the cable is dead" from "no track is listening on that channel".
 //
-// ⭐⭐ **THE INSTRUMENT FOR A COMPONENT WHOSE CORRECT BEHAVIOUR IS SILENCE.** A MIDI input that is
-// working and one that never received a byte look identical from every seat in the app: no sound, no
-// screen, no log. So every stage of the path counts, and the counts are printed beside the verdict at
-// exit — bytes at the PORT (`MidiInBase`), bytes and messages at the QUEUE and PARSER
-// (`SongcoreHost`), records at the ROUTER, and here the split between messages that produced a record
-// and messages that produced none.
-//
-// ⚠️ That last split is the one nothing else can make, and it is the difference between "the cable is
-// dead" and "no track is listening on that channel" — two problems whose fixes have nothing in common.
-//
-// It runs on the FRAME LOOP's thread (`SongcoreHost::poll` takes back what the audio thread's drain
-// handled and calls this), so it may print. The backend's own callback may not — see midi-in-base.h.
+// Runs on the frame loop's thread (SongcoreHost::poll calls it), so it may print.
 struct MidiInConsole : songcore::IMidiInObserver {
     bool     trace    = false;   // POCKETTRACKER_MIDI_IN_TRACE=1
     uint64_t messages = 0;
     uint64_t records  = 0;
     uint64_t silent   = 0;       // messages that produced no bus record at all
 
-    // ── What a turning knob costs, as a number ───────────────────────────────────────────────────
-    //
-    // A controller sweeping a knob is a stream of CCs, and every design that answers one with work —
-    // writing a value, pushing it to the engine — has to be priced against how fast they really
-    // arrive. Nothing in this tree had ever observed that, so the counters are here rather than in a
-    // tool: only the app has a real port open.
-    //
-    // ⚠️ `perDrain` is the one that decides whether collapsing several CCs into one apply is worth
-    // anything: the UI takes the handled messages back every POLL_MS, so a busiest-poll of 1 means
-    // there is nothing to collapse at that rate. The 16 ms window is the same question asked at the
-    // DRAWING rate, where a collapse has more to gather, and the 1 s one is the peak RATE — the mean
-    // over a whole session is diluted by every moment nobody was turning anything.
-    //
-    // ⚠️ The maxima count every CC, whatever its controller number, so two knobs turned at once read
-    // as one busy stream. That over-states what a single mapping would see, never under-states it.
-    //
-    // ⚠️ Every message a single poll hands over carries the SAME timestamp — the poll's, not the
-    // wire's — so a window can never split a poll, and the finest thing measurable here is a poll.
+    // How fast CCs arrive while a knob turns: per poll (`ccMaxPerDrain` says whether batching CCs
+    // into one apply could gain anything), per 16 ms frame, and the peak per second.
+    // ⚠️ The maxima count every controller number, so two knobs at once read as one stream.
+    // ⚠️ Messages from one poll share the poll's timestamp, so a window never splits a poll.
     uint64_t ccTotal   = 0;
     uint64_t ccFirstMs = 0;      // wall clock of the first and last CC — the span the rate is over
     uint64_t ccLastMs  = 0;
@@ -95,8 +68,8 @@ struct MidiInConsole : songcore::IMidiInObserver {
     uint64_t ccMaxPerDrain = 0;
     uint64_t drain     = 0;      // the poll that took the messages back: bumped above host.poll()
 
-    /** Most CCs seen inside one window of `width` ms. Windows are fixed, so a burst that straddles a
-     *  boundary is counted as two — the number is a floor, never an over-statement. */
+    /** Most CCs inside one fixed window of `width` ms. A burst across a boundary counts as two, so
+     *  this is a floor. */
     struct Window {
         uint64_t width;
         uint64_t id  = ~0ull;    // a value no window index can have, so the first CC opens one
@@ -131,9 +104,8 @@ struct MidiInConsole : songcore::IMidiInObserver {
         if (m.status == songcore::EV_CC) count_cc(static_cast<uint64_t>(SDL_GetTicks64()));
         if (!trace) return;
 
-        // ⚠️ The bytes are RECONSTRUCTED from the message rather than remembered from the wire, so a
-        // trace line that disagrees with the cable is a parser bug this can actually show. A channel
-        // message's status byte is the nibble plus the channel; a system one is the whole byte.
+        // The bytes are rebuilt from the parsed message, not copied from the wire, so a trace line
+        // that disagrees with the cable shows a parser bug.
         const unsigned status = m.is_channel() ? (m.status | m.channel) : m.status;
         std::printf("midi ->  %02X", status);
         if (m.len > 1) std::printf(" %02X", m.data1);
@@ -146,11 +118,14 @@ struct MidiInConsole : songcore::IMidiInObserver {
     }
 
   private:
-    // ⚠️ Starts at a value no drain index can have, so the very first CC opens a run of its own
-    // instead of joining drain 0.
+    // Starts at a value no drain index can have, so the first CC opens a run of its own.
     uint64_t ccDrain_ = ~0ull, ccInDrain_ = 0;
 };
 
+// ─── The background watcher ──────────────────────────────────────────────────────────────────────
+//
+// What on_app_event needs, borrowed from run()'s stack.
+// ⚠️ The watcher must be removed before run() returns — see SDL_DelEventWatch below the loop.
 struct BackgroundContext {
     SongcoreHost*        host       = nullptr;
     ui::InputDispatcher* dispatch   = nullptr;
@@ -160,75 +135,42 @@ struct BackgroundContext {
     bool                 console    = false;
     const AppConfig::BackgroundPlayback* background = nullptr;
 
-    // Raised by the watcher, cleared by the frame loop when it has reopened the device. No lock: the
-    // watcher runs ON the loop's own thread — see on_app_event.
+    // Set by the watcher, cleared by the loop once it has reopened the device. No lock: the watcher
+    // runs on the loop's own thread (see on_app_event).
     bool audioClosed = false;
 
-    // Off the screen: nothing may be drawn — the GL context is backed up — and the loop waits long
-    // unless a song is still playing. Raised by the watcher, cleared on SDL_APP_DIDENTERFOREGROUND.
+    // Off the screen: nothing may be drawn (the GL context is backed up). Cleared on
+    // SDL_APP_DIDENTERFOREGROUND.
     bool backgrounded = false;
     // …and a song was left playing there, under the playback service.
     bool playingInBackground = false;
 };
 
 /**
- * `SDL_APP_WILLENTERBACKGROUND` — the Android Home press, and the last moment this process is
- * guaranteed to run.
+ * SDL_APP_WILLENTERBACKGROUND — the Android Home press, and the last moment this process is sure to
+ * run. Saves what would otherwise be lost and hands the audio device back.
  *
- * ⚠️⚠️ **THE PLAN SAID THIS FIRES ON THE JAVA ACTIVITY THREAD. IT DOES NOT, AND THE DIFFERENCE IS
- * THE WHOLE DESIGN OF THIS FUNCTION.** Read out of the vendored SDL 2.30.9 rather than remembered:
+ * ⚠️ Runs on the NATIVE thread, inside the loop's own SDL_PollEvent: SDL's onPause only posts a
+ * semaphore, the native pump then sends this event, and SDL calls watchers synchronously. So it may
+ * touch `host`, `state` and the project with no lock. A watcher rather than a case in the poll loop
+ * because SDL flushes the event queue after a quit.
  *
- *   1. `SDLActivity.onPause()` → `nativePause()` (SDL_android.c:1264) does exactly ONE thing:
- *      `SDL_SemPost(Android_PauseSem)`. It sends no event and calls nothing of ours.
- *   2. The NATIVE thread discovers that semaphore inside its own `SDL_PollEvent` →
- *      `Android_PumpEvents_NonBlocking` (SDL_androidevents.c), which is what sends
- *      `SDL_APP_WILLENTERBACKGROUND` — and `SDL_PushEvent` dispatches event watchers SYNCHRONOUSLY
- *      (SDL_events.c:1184) before the event is ever queued.
- *   3. The thread is NOT frozen: `SDL_HINT_ANDROID_BLOCK_ON_PAUSE` is off (android-main.cpp), so the
- *      loop runs on in the background, drawing nothing, so that a playing song can go on being fed.
- *
- * So this runs **on the native thread, inside the frame loop's own `SDL_PollEvent` call**. There is
- * no concurrency with the loop because it IS the loop — which is why this touches `host`, `state`
- * and the project directly with no lock.
- *
- * ⚠️ A poll-loop `case SDL_APP_WILLENTERBACKGROUND:` would ALSO work here, for a reason worth writing
- * down: `SDL_PollEvent` pumps only when no poll sentinel is pending (SDL_events.c:1092), so a
- * `while (SDL_PollEvent(...))` drain pumps exactly once and cannot block partway through. The watcher
- * is still the right mechanism — it does not depend on that property surviving a future refactor of
- * the loop, and SDL's own `nativeSendQuit` says in as many words that "the user should have handled
- * state storage in SDL_APP_WILLENTERBACKGROUND", because after a quit it FLUSHES the event queue.
- *
- * ⚠️ Inert everywhere else, by construction rather than by `#ifdef`: SDL sends this event on Android
- * and iOS only, so on desktop this function is installed and never called.
- *
- * ⚠️ Every step is IDEMPOTENT, because background→foreground→background fires it again: `stop()` on a
- * stopped transport does nothing, `flush_autosave` is a no-op on a clean document, and
- * `save_settings_if_changed` compares against the bytes on disk.
+ * Never called on desktop (SDL sends it on Android and iOS only). Every step is idempotent, since
+ * background → foreground → background fires it again.
  */
 int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
     if (e->type != SDL_APP_WILLENTERBACKGROUND) return 0;
 
     auto* c = static_cast<BackgroundContext*>(userdata);
 
-    // ⚠️ **UNCONDITIONAL, AND IT IS THE ONLY LINE HERE THAT ALWAYS PRINTS — ON PURPOSE.** Every step
-    // below is a no-op in the common case (nothing playing, document clean, settings unmoved), so a
-    // watcher that ran perfectly and a watcher that never fired at all produce EXACTLY the same empty
-    // log. That ambiguity is not hypothetical: it is what the first device test of this function ran
-    // into — the autosave was on disk afterwards and there was no way to tell whether this code had
-    // written it or the 3 s debounce had beaten it there. A lifecycle handler whose correct behaviour
-    // is silence needs one line saying it woke up, or it cannot be told from a handler that is never
-    // installed.
+    // Always printed: every step below is usually a no-op, so without this line a watcher that ran
+    // and one that never fired leave the same log.
     if (c->console) std::printf("lifecycle: entering background\n");
 
     c->backgrounded = true;
 
-    // ── 1. A playing song keeps playing — if Android let the playback service start ──
-    //
-    // The loop keeps running off the screen (SDL_HINT_ANDROID_BLOCK_ON_PAUSE is off), so the
-    // lookahead pump goes on refilling. ⚠️ **WITHOUT THE SERVICE, KEEPING THE SONG IS THE DEAD-STREAM
-    // BUG**: Android freezes a backgrounded process, the stream's pulls go unanswered and the audio
-    // server retires it silently. The service is what stops the freeze, so no service means the old
-    // answer — stop, and hand the sound back.
+    // 1. A playing song keeps playing, if Android let the playback service start. ⚠️ Without the
+    // service Android freezes the process and the audio server silently retires the stream — so stop.
     const AppConfig::BackgroundPlayback* bp = c->background;
     const bool keep = c->host->is_playing() && bp && bp->serviceStarted && bp->serviceStarted();
     if (keep) {
@@ -242,19 +184,11 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
         }
     }
 
-    // ── 2. The autosave. THE REASON THIS FUNCTION EXISTS ──
-    //
-    // A backgrounded Android app is killed without further notice, and the 3 s autosave debounce may
-    // not have fired. `MainActivity.kt:1054` has flushed on ON_STOP since long before this port for
-    // exactly this reason; until C4 the SDL build had NOTHING here, so every Home press risked the
-    // last few edits and no crash recovery existed at all on this platform.
+    // 2. The autosave: a backgrounded app can be killed without notice, before the 3 s debounce fires.
     c->dispatch->flush_autosave();
 
-    // ── 3. Settings. THE BUG THE USER REPORTED ──
-    //
-    // `save_settings_if_changed` is called once, below the frame loop — and on Android the loop is
-    // only left on a clean destroy (`nativeSendQuit` → SDL_QUIT). A Home press never reaches it, so
-    // settings.json was never written and every setting was back to factory on the next launch.
+    // 3. Settings: on Android the loop is left only on a real destroy, so the save below the loop
+    // never runs after a Home press.
     switch (ui::save_settings_if_changed(*c->filesystem, c->state->settings, c->state->theme)) {
         using SW = ui::SettingsWrite;
         case SW::UNCHANGED: break;
@@ -267,17 +201,9 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
             break;
     }
 
-    // ── 4. The audio device goes back to the system ──
-    //
-    // ⚠️ **A STREAM LEFT OPEN ACROSS A BACKGROUNDING COMES BACK DEAD.** The callback thread is not
-    // frozen with this one, so it keeps pulling from an engine nobody is pumping; once the platform
-    // freezes the whole process those pulls go unanswered, and a track that underruns long enough is
-    // retired by the audio server without telling the client. The stream still reads as started and
-    // the callback never fires again — the reported bug, with the playhead moving in silence.
-    //
-    // LAST because a close blocks on the callback in flight, and nothing here is worth delaying the
-    // autosave for. The frame loop reopens on its first tick back on the screen. A song still playing
-    // keeps its stream — the service keeps the process from being frozen under it.
+    // 4. Hand the audio device back. ⚠️ A stream left open across backgrounding comes back dead: the
+    // frozen process stops answering its pulls and the audio server retires it without telling us.
+    // Last, because the close waits for the callback in flight. The loop reopens it on return.
     if (!keep) {
         c->audio->closeStream();
         c->audioClosed = true;
@@ -289,37 +215,19 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
     return 0;  // watchers do not consume; the event still reaches the queue
 }
 
-// ─── C7: IS ANYTHING ON SCREEN ACTUALLY MOVING? ──────────────────────────────────────────────────
+// ─── Is anything on screen moving? ───────────────────────────────────────────────────────────────
 //
-// A DIRECT PORT OF `PixelPerfectRenderer.kt:151-191`, which solved this on Android long before the
-// port existed and whose own comment names unconditional repainting "the dominant battery drain on
-// the handheld". Kotlin gets two redraw sources: Compose recomposes on a real state change (a cursor
-// move, an edit, a new playback row), and an `oscilloscopeTicker` drives ANIMATION — and the loop
-// bumps that ticker only while audio is audible, polling cheaply at 20 Hz when it is not.
-//
-// ⚠️ **THE ONE THING THAT COULD NOT BE COPIED, AND COPYING IT WOULD HAVE ADDED INPUT LAG.** Kotlin's
-// visualizer loop is a separate coroutine, so its idle `delay(50L)` slows nothing but itself. Here
-// input polling, `host.poll()` and drawing are ALL ONE LOOP: dropping it to 20 Hz would put 50 ms of
-// latency on every keypress, on a tracker whose whole point is that a note sounds when you press it.
-// So the LOOP stays at 60 Hz and only the DRAW is skipped — the frame still polls input, still pumps
-// the scheduler, still runs the watcher. That is the shape of the port, not an approximation of it.
-//
-// What counts as audible is Kotlin's test exactly: the transport playing, OR any master-waveform
-// sample above the silence floor (a one-shot preview still ringing after STOP), OR the preview lane
-// active. The threshold is its constant, not a new one.
-//
-// ⚠️ AUDIBLE IS NOT ANIMATING, and this test answers only the first. Everything that keeps moving
-// after the sound has gone — the mixer's markers, the spectrum's bars — is the `metersFalling` term
-// below. Kotlin held the same frames open with a 75-frame release tail it re-armed while audible;
-// asking the modules whether they are at rest is that, without a number that has to stay true.
-constexpr float SCOPE_SILENCE_THRESHOLD = 0.002f;   // PixelPerfectRenderer.kt:101
+// The loop always runs at full rate; only the DRAW is skipped when nothing changes, to save battery.
+// Audible = the transport playing, the preview lane active, or the master waveform above the silence
+// floor (a preview still ringing after STOP). Meters still falling after the sound stops are a
+// separate term in the loop.
+constexpr float SCOPE_SILENCE_THRESHOLD = 0.002f;
 
 bool audio_is_audible(const ui::AppState& s) {
     if (s.isPlaying || s.previewLaneActive) return true;
 
-    // ⚠️ Null is SILENCE, not "unknown" — `engine_feed` leaves these null when there is nothing to
-    // show, and `ptshot` draws whole screens with no engine at all. Treating null as audible would
-    // make the idle path unreachable in exactly the configuration that is idle.
+    // ⚠️ Null means SILENCE, not "unknown": engine_feed leaves it null when there is nothing to show,
+    // and the headless screenshot tool draws with no engine at all.
     if (s.waveform) {
         for (int i = 0; i < ui::WAVEFORM_SIZE; ++i) {
             if (std::fabs(s.waveform[i]) > SCOPE_SILENCE_THRESHOLD) return true;
@@ -331,43 +239,27 @@ bool audio_is_audible(const ui::AppState& s) {
 }  // namespace
 
 int run(const AppConfig& cfg) {
-    // The version, in the log, on every platform — a bug report arrives as a log file and a sentence,
-    // and nothing else in this program says which build produced it. It sits in the SHARED shell
-    // rather than in each platform's entry point, which costs it the first line (the audio and MIDI
-    // backends are already open by the time run() is called) and buys it being impossible to have on
-    // one platform and not another.
-    //
-    // PT_VERSION_STRING comes from native/cmake/pt_version.cmake, which reads app/build.gradle.kts.
-    // No fallback here on purpose: a tree that forgets the define must fail to COMPILE rather than
-    // print a version that is quietly a lie.
+    // The version in the log on every platform — a bug report usually arrives as a log file.
+    // PT_VERSION_STRING comes from native/cmake/pt_version.cmake; no fallback, so a tree that forgets
+    // the define fails to compile rather than print a wrong version.
     std::printf("PocketTracker %s\n", PT_VERSION_STRING);
 
-    // ⚠️ WHICH BUILD THIS IS, said out loud beside the version. The developer rows exist only on a
-    // debug build (ui/platform_caps.h), so a user hunting for a row that is simply not in their
-    // binary has nothing else to tell them apart — the version string is the same on both.
+    // Debug and release share a version string but not the developer rows (ui/platform_caps.h).
     std::printf("build:   %s\n", cfg.caps.debug ? "debug" : "release");
 
     AudioEngine&  engineRef  = *cfg.engine;
     AudioBackend& audio      = *cfg.audio;
     ui::FileSystem& filesystem = *cfg.filesystem;
 
-    // The engine asks for its stream back without knowing what a stream is. Unwired at teardown
-    // below, before the backend is closed — a callback firing into a dead lambda is the one ordering
-    // mistake this pair can make.
+    // Unwired at teardown, before the backend is closed.
     engineRef.onResumeRequested = [&audio] { audio.resumeStream(); };
 
-    // ⚠️ **DECLARED BEFORE THE HOST, AND THE ORDER IS A LIFETIME FIX, NOT A STYLE CHOICE.** The
-    // ExternalConsumer inside `host` calls this observer, and its DESTRUCTOR panics — which emits
-    // messages. Declared after the host it would be destroyed first, and that final panic would call
-    // into a dead object. It is also what makes the early `return 1` below (a boot project that does not
-    // parse) safe: there is no teardown path on which the observer outlives its caller.
-    // See the sender-thread block after the port is attached for what fills it.
+    // ⚠️ Declared BEFORE the host: the host's MIDI consumer calls this observer from its destructor
+    // (the final panic), so it must outlive the host.
     MidiJitterRecorder midiJitter;
 
-    // ⚠️ **ALSO BEFORE THE HOST, AND FOR THE SAME KIND OF REASON**: the host calls this observer from
-    // `poll()`, and `~SongcoreHost` runs before any object declared after it. Attached unconditionally
-    // below — the counters are what make a silent input path readable, so they must exist on the runs
-    // where nobody asked for a trace.
+    // ⚠️ Also before the host, which calls it from poll(). Always attached: the counters are what make
+    // a silent MIDI input readable.
     MidiInConsole midiInConsole;
 
     SongcoreHost host(&engineRef, audio.sampleRate());
@@ -375,26 +267,22 @@ int run(const AppConfig& cfg) {
     if (const char* t = SDL_getenv("POCKETTRACKER_MIDI_IN_TRACE"); t && t[0] == '1')
         midiInConsole.trace = true;
 
-    // THIS install's app root — where Projects/ Samples/ Soundfonts/… live (also the FileSystem's root).
-    // Handed to the host BEFORE the first load: a project opened at boot may have been authored on
-    // another install (a phone's Documents/PocketTracker) whose absolute media paths are dead here until
-    // re-rooted onto ours. See set_app_root.
+    // This install's app root. Set before the first load, so a project made on another install has its
+    // absolute media paths re-rooted onto ours (see set_app_root).
     host.set_app_root(cfg.appRoot);
 
-    // The EXTERNAL MIDI port, if the platform opened one (MIDI plan phase B). Set BEFORE the project
-    // loads, so an EXTERNAL instrument in a boot project is routed from its very first note.
+    // The MIDI OUT port, if the platform opened one. Set before the project loads, so an EXTERNAL
+    // instrument is routed from its first note.
     host.set_midi_out(cfg.midiOut);
     host.set_midi_offset_ms(cfg.midiOffsetMs);
 
-    // ── The MIDI sender thread (phase B3) ────────────────────────────────────────────────────────
+    // ── The MIDI sender thread ───────────────────────────────────────────────────────────────────
     //
-    // Started on EVERY platform and whether or not a port is open: the queue must be released either
-    // way (a LEN gate and a panic's note-offs are owed after the last note was scheduled), and starting
-    // it only when a cable is attached would mean the timing path a user exercises is not the one that
-    // was measured. `poll()` stops pumping while it runs — see set_midi_pump_external.
+    // Started on every platform, port or not: a LEN gate and a panic's note-offs must be released
+    // either way. While it runs, poll() stops releasing the queue (set_midi_pump_external).
     //
-    // ⚠️ DEV OVERRIDES, both of them, and the first is B3's own negative control:
-    //   POCKETTRACKER_MIDI_SENDER=0   don't start it; the 60 Hz frame loop keeps the job (pre-B3)
+    // Dev overrides:
+    //   POCKETTRACKER_MIDI_SENDER=0   don't start it; the frame loop releases the queue instead
     //   POCKETTRACKER_MIDI_JITTER=1   measure every released message and print the numbers on exit
     const bool jitterOn = [] {
         const char* j = SDL_getenv("POCKETTRACKER_MIDI_JITTER");
@@ -402,9 +290,7 @@ int run(const AppConfig& cfg) {
     }();
     if (jitterOn) host.midi_out().set_send_observer(&midiJitter);
 
-    // ⚠️ …and the SENDER is declared AFTER the host, for the mirror-image reason: it pumps `host`, so it
-    // must be destroyed (and its thread joined — see the destructor) while the host is still alive. That
-    // is also what makes the early `return 1` safe on this side.
+    // ⚠️ Declared AFTER the host: it pumps `host`, so its thread must be joined while the host lives.
     MidiSender  midiSender(engineRef, host, audio.sampleRate());
     const char* senderEnv = SDL_getenv("POCKETTRACKER_MIDI_SENDER");
     bool        senderOn  = false;
@@ -415,8 +301,7 @@ int run(const AppConfig& cfg) {
         senderOn = midiSender.start();
     }
 
-    // A REQUESTED project is one with a path; its bytes are already in `projectBlob`, read by the
-    // platform before any window existed to hide a bad path behind.
+    // A requested project's bytes were read by the platform before any window existed.
     const bool hasProject = !cfg.projectPath.empty();
 
     if (hasProject) {
@@ -429,43 +314,27 @@ int run(const AppConfig& cfg) {
         std::printf("project: %s\nmedia:   %d loaded, %d failed (base dir: %s)\n",
                     cfg.projectPath.c_str(), media.loaded, media.failed, cfg.mediaBaseDir.c_str());
         if (media.failed > 0) {
-            // ASCII, like every other line this program prints — see the banner below. (This one was NOT:
-            // it carried an em-dash, on the one path you most want legible when something has already gone
-            // wrong on a device with no screen. Found by grepping the file against its own stated rule.)
             std::fprintf(stderr,
                          "warning: %d sample(s)/SoundFont(s) failed to load - those instruments will be "
                          "silent\n",
                          media.failed);
         }
     } else {
-        // The same document NEW PROJECT builds. There is no media to load: a blank project references
-        // no samples, so load_media would walk an empty instrument pool and report 0/0.
+        // The same blank document NEW PROJECT builds; it references no media.
         host.new_project();
         std::printf("project: (none given) - starting on a blank document\n");
     }
 
-    // ⚠️ **Load the media, then push the PARAMS.** The engine holds a great deal of state on its own
-    // behalf that no note ever carries — the mixer, the master bus, reverb, delay, the 128-slot EQ bank,
-    // and every instrument's drive / crush / filter / sample window / loop — and until Phase 3 S4 the
-    // only thing in the whole tree that pushed any of it was the offline renderer. So this shell would
-    // RENDER a project correctly and PLAY the same project on the engine's factory defaults. See
-    // songcore::push_live_params: it survived Phase 2 and three Phase-3 sessions because it is invisible
-    // to every conformance tool (none of it is an event, none of it is made by a note, and the one tool
-    // that compares audio renders — through the path that was already right).
+    // ⚠️ Load the media, THEN push the params. The engine holds state no note carries — mixer, master
+    // bus, reverb, delay, the EQ bank, every instrument's drive/crush/filter/loop — and without this
+    // push the project would play on the engine's factory defaults.
     host.push_params();
 
-    // ── The file system (S6a) ────────────────────────────────────────────────────────────────────
+    // ── The file system ──────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ Create the app directories NOW, at boot, rather than lazily on the first browse. `ensure_dir`
-    // runs inside each getter, so the folders would otherwise not exist until the user opened the
-    // browser once — and on a handheld that is exactly backwards. The first thing anyone does with a new
-    // port is plug the SD card into a PC and copy their samples in, and they cannot do that if the app
-    // has not yet said where. (Android gets this for free: it calls the getters all through start-up.)
-    //
-    // WHICH filesystem is the platform's business — the root is the only per-platform fact about files,
-    // and `pt::ui::FileSystem` has been the seam for it since S6a. The SUB-directory names are identical
-    // on every platform on purpose: a user who copies their `PocketTracker/` folder off a phone onto an
-    // SD card must find their projects where the app looks.
+    // Create the app folders at boot, not on the first browse: on a handheld the user's first move is
+    // copying samples onto the SD card, and the folders must already be there. The names are the same
+    // on every platform, so a PocketTracker/ folder copied off a phone is found where the app looks.
     filesystem.projects_directory();
     filesystem.samples_directory();
     filesystem.renders_directory();
@@ -476,18 +345,12 @@ int run(const AppConfig& cfg) {
     filesystem.grooves_directory();
     std::printf("files:   %s\n", cfg.appRoot.c_str());
 
-    // ⚠️ The app's OWN files need not live in the tree just named — on Android they do not, because
-    // settings/template/autosave are read at boot and the media tree may not be readable then. Say so,
-    // and say it by comparing the path the filesystem actually returns against the one the old
-    // single-root layout would have produced: a platform that later changes its mind cannot leave this
-    // line asserting something stale, and there is no flag to keep in step.
+    // The app's own files (settings, template, autosave) may live elsewhere — on Android they do.
+    // Derived by comparing paths, so there is no flag to keep in step.
     if (filesystem.settings_path() != cfg.appRoot + "/settings.json")
         std::printf("files:   app files: %s\n", filesystem.settings_path().c_str());
 
-    // ⚠️ **THE COUNT, not just the path.** Every other line of this banner is satisfied by a storage
-    // backend that resolves a directory and then lists nothing — the browser comes up empty and looks
-    // exactly like an empty folder. One number tells the two apart, and it is the same reason
-    // `media: N loaded, M failed` prints a number rather than "media ok".
+    // The count, not just the path: a storage backend that lists nothing looks like an empty folder.
     {
         const std::string projects = filesystem.projects_directory();
         std::printf("files:   projects: %s (%zu entries)\n", projects.c_str(),
@@ -502,13 +365,9 @@ int run(const AppConfig& cfg) {
 
     SdlInput input;
 
-    // ⚠️ POCKETTRACKER_INPUT_TRACE=1 — the bring-up instrument for a NEW device or CFW, and the only
-    // eye the port has on the layer between the hardware and `ButtonEvent`. ptinput, ptdispatch and
-    // ptmapper all start one layer BELOW this: none can see SDL, the CFW's controller mapping, or the
-    // launch script — which is precisely the layer P4b's bug lived in.
-    //
-    // An env var rather than a flag because PortMaster invokes the binary with NO arguments, so a
-    // flag would be unreachable on the device this exists for. Off unless asked: it prints per event.
+    // POCKETTRACKER_INPUT_TRACE=1 prints every input event and what it mapped to — the only view of
+    // the layer between the hardware and ButtonEvent. An env var because PortMaster runs the binary
+    // with no arguments.
     const char* inputTrace = SDL_getenv("POCKETTRACKER_INPUT_TRACE");
     if (inputTrace && inputTrace[0] == '1') {
         input.set_trace(true);
@@ -517,94 +376,51 @@ int run(const AppConfig& cfg) {
 
     input.open_controllers();
 
-    // ── The on-screen gamepad (Phase D) ────────────────────────────────────────────────────────────
+    // ── The on-screen gamepad ────────────────────────────────────────────────────────────────────
     //
-    // Drawn only where the hardware is a touchscreen AND no physical controller is attached — the SDL
-    // reading of DeviceAdapter's "does this device have game buttons?". A phone with no pad gets the
-    // panels; a handheld (a pad, built-in or plugged) gets FULL and full-bleed, exactly as the Kotlin
-    // app decides. `touch.layout()` in the loop below then draws them only if the letterbox bars are
-    // actually wide enough (`active()`), so a narrow window shows none regardless. The trace shares the
-    // input trace's env var — it is the same P4b blind channel, one input source over.
-    //
-    // ⚠️ `set_enabled` is NOT called here: the gate is recomputed EACH FRAME in the loop (see `useTouch`)
-    // so a controller plugged or unplugged mid-session moves the app between the on-screen gamepad and a
-    // bare fullscreen frame. Setting it once at boot is what let a controller connected AFTER launch (or
-    // the portrait skin, which used to read `cfg.touchCapable` alone) disagree with this gate.
+    // Drawn on a touchscreen with no physical controller. ⚠️ Enabled per frame in the loop
+    // (`useTouch`), not here, so plugging or unplugging a controller mid-session switches layouts.
     SdlTouch touch;
     if (inputTrace && inputTrace[0] == '1') touch.set_trace(true);
 
-    // The click/haptic sink (convergence D). Null on desktop/handheld (no feedback); Android hands in
-    // a JNI shim. Installed once — the per-frame `set_feedback_settings` below is what tracks the live
-    // BTN SOUND / BTN VIBRO rows. See button_feedback.h.
+    // Click/haptic sink: null on desktop and handhelds, a JNI shim on Android (button_feedback.h).
     touch.set_feedback(cfg.buttonFeedback);
 
-    // ── The touch skin's textures (D7 asset seam → D2 decode → texture), consumed by PORTRAIT2 ─────
-    //
-    // Decoded only where there is a touchscreen to skin — the same gate as the panels — so desktop and
-    // the handhelds decode nothing. The `skin:` lines it prints are the on-device account of whether a
-    // real PNG came out of the APK — the log line IS the assertion there, there being no console test on
-    // a phone. The D7 walking skeleton blitted one piece in a corner to prove the pipeline reached the
-    // screen; the PORTRAIT2 renderer (below, `portrait`) composites the whole set into the band geometry.
-    // ⚠️ `unload()` is called before video.close() below, because these textures belong to that renderer
-    // and outliving it is a use-after-free.
-    //
-    // ⚠️ The theme is no longer hardcoded: `SETTINGS > LAYOUT`'s skin column (NORM/DARK) picks it, the
-    // choice persists as `portrait_skin` and resolves through `device_skin.h`. The actual `skin.load` /
-    // `portrait.set_skin` happens in the loop below (the `loadedSkinIdx` sync), so a live switch reloads
-    // the PNGs once, on the deliberate user action, rather than every frame.
+    // The portrait device skin's textures, decoded only on a touchscreen. Loaded in the loop when the
+    // SETTINGS > LAYOUT skin column changes (`loadedSkinIdx`), never every frame.
+    // ⚠️ unload() before video.close(): the textures belong to that renderer.
     Skin skin;
 
-    // The button-label font (convergence D): Helvetica, decoded once, owned by the renderer like the
-    // skin, loaded on the same touchscreen gate — so desktop and the handhelds parse nothing. A load
-    // failure is NOT fatal: PortraitSkin::draw_buttons falls back to the shared 5×5 font, so a missing
-    // asset degrades to blocky labels, not none. ⚠️ `unload()` before video.close() below, with skin's.
+    // Button-label font. A failed load falls back to the 5×5 font. ⚠️ unload() before video.close().
     Font helvFont;
     if (cfg.touchCapable) helvFont.load(video.renderer(), "fonts/helvetica_regular.otf", cfg.console);
 
-    // The D-pad ARROW font (convergence D-theme): Linux Biolinum (SIL OFL), bundled for the four arrow
-    // glyphs (↑↓←→) Helvetica lacks — on Android those came from the system-font fallback, which one
-    // .otf has no equivalent of. `PortraitSkin::draw_buttons` blits its real glyphs; a load failure is
-    // NOT fatal — it falls back to the shell-drawn line arrow — so a missing asset degrades, not breaks.
-    // Same touchscreen gate and renderer-owned lifetime as helvFont; `unload()` before video.close().
+    // The D-pad arrow glyphs Helvetica lacks (Linux Biolinum, SIL OFL). A failed load falls back to
+    // drawn line arrows. ⚠️ unload() before video.close().
     Font arrowFont;
     if (cfg.touchCapable) arrowFont.load(video.renderer(), "fonts/LinBiolinum_Rah.ttf", cfg.console);
 
-    // ── The screen overlay (convergence D6): the CRT filter drawn OVER the frame ─────────────────
-    //
-    // One texture, decoded through the same D7 asset seam / D2 decoder as the skin, owned by the
-    // renderer (unload() before video.close()). It is NOT gated on a touchscreen like the skin — it is
-    // a screen filter, so it applies wherever the OVERLAY row exists (caps.skinOverlay, Android/debug).
-    // The actual `screenOverlay.load` happens in the loop below (the `loadedOverlayIdx` sync), so a live
-    // selection change decodes the PNG once, on the deliberate user action, not every frame.
+    // The CRT overlay drawn over the frame, wherever the OVERLAY row exists (caps.skinOverlay). Loaded
+    // in the loop when the choice changes (`loadedOverlayIdx`). ⚠️ unload() before video.close().
     ScreenOverlay screenOverlay;
 
-    // ── The PORTRAIT2 device-skin renderer (convergence D) ───────────────────────────────────────
-    //
-    // Owns no resources — it composites `skin`'s textures into the band geometry each frame — so it
-    // just needs to exist. `portrait.layout()` in the loop decides per frame whether the output is
-    // portrait and this should present the skin instead of the centred landscape frame; `active()` is
-    // that decision, derived from the output aspect, so a live rotation switches modes with nothing to
-    // keep in sync. Inert where there is no skin to draw (desktop/handheld, and any landscape frame).
+    // Composites `skin` around the frame when the output is portrait; owns no resources. Whether it is
+    // active is derived from the output aspect each frame.
     PortraitSkin portrait;
 
-    // The UI state points at the host's live project — one document, edited in place. The boot
-    // screen is AppState's own default (SONG, as Android): restating it here would be a second
-    // place for it to rot, which is exactly how it sat on PHRASE for four phases.
+    // The UI edits the host's live project in place. The boot screen is AppState's own default.
     ui::AppState state;
     state.project = &host.edit_project();
 
-    // Which SETTINGS rows exist, and whether PROJECT has an EXIT. A VALUE, not an #ifdef — see
-    // ui/platform_caps.h. The platform chose it; this file only installs it.
+    // Which SETTINGS rows exist, and whether PROJECT has an EXIT — a value, not an #ifdef
+    // (ui/platform_caps.h).
     state.caps = cfg.caps;
 
     // ── settings.json ────────────────────────────────────────────────────────────────────────────
-    // SharedPreferences, as a file. No file = first launch = the factory settings, which is not an
-    // error and gets no complaint.
     //
-    // ⚠️ But `load_settings` returns the same `false` for "no file" and "the file is there and would
-    // not read or would not parse", and the second one silently DISCARDS the user's settings — the
-    // quit-time save then writes the defaults over what was there. Asking the filesystem separately
-    // is what tells the two apart, so the one case worth a complaint gets one.
+    // No file means a first launch and the factory settings. ⚠️ load_settings also returns false for
+    // a file that will not read or parse, and the save at quit would then overwrite it — so that case
+    // is reported.
     if (ui::load_settings(filesystem, state.settings, state.theme)) {
         std::printf("settings: %s\n", filesystem.settings_path().c_str());
     } else if (filesystem.file_exists(filesystem.settings_path())) {
@@ -614,48 +430,31 @@ int run(const AppConfig& cfg) {
                      filesystem.settings_path().c_str());
     }
 
-    // ── config.json — the hand-edited configuration file ──────────────────────────────────────────
+    // ── config.json, the hand-edited configuration ───────────────────────────────────────────────
     //
-    // Read once at boot, on EVERY platform and in every build. It was debug-gated while the shape was
-    // being tested in 0.9.4; from this release the gate is gone from the read, the seed and the
-    // dispatcher alike, so a file that works on Windows works identically on Android and on a handheld.
-    //
-    // Seed a starter template FIRST (only when the file is absent — it never clobbers the user's), so the
-    // feature is discoverable: the app used to never create the file, so there was nothing to find or
-    // edit. The template states every section at its current value, so the file as seeded changes
-    // nothing; the loads right after pick it up.
-    //
-    // ⚠️ The keyboard defaults are handed to the seeder BY the input layer rather than restated in it —
-    // pt-ui cannot name an SDL key, and a template that lies about your current bindings is worse than
-    // no template. This is the whole reason `default_keyboard_bindings()` exists.
+    // Read at boot on every platform. A starter template is seeded only when the file is absent; it
+    // states every current value, so seeding changes nothing.
+    // ⚠️ The keyboard defaults come from the input layer: pt-ui cannot name an SDL key.
     if (ui::seed_config_template(filesystem, SdlInput::default_keyboard_bindings()))
         std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
 
-    // ── The factory scales, as files ──────────────────────────────────────────────────────────────
-    //
-    // The bank the SCALE screen cycles is compiled in and works with or without these; what the files
-    // add is that a shape can be edited, renamed and carried to another device. Written only when the
-    // folder holds no `.pts` at all, so a user who has pruned the list keeps their pruning.
-    //
-    // ⚠️ The count is PRINTED, because this is the one thing here with no signal inside the app: a seed
-    // that silently wrote nothing looks exactly like a seed that had nothing to do.
+    // The factory scales as editable files, written only when the folder has no .pts at all, so a
+    // user's pruning is kept. The count is printed: a seed that wrote nothing is otherwise invisible.
     if (const int seeded = ui::seed_scale_bank(filesystem); seeded > 0)
         std::printf("files:   seeded %d factory scales in %s\n", seeded,
                     filesystem.scales_directory().c_str());
 
-    // The factory grooves, on exactly the terms above.
+    // The factory grooves, on the same terms.
     if (const int seeded = ui::seed_groove_bank(filesystem); seeded > 0)
         std::printf("files:   seeded %d factory grooves in %s\n", seeded,
                     filesystem.grooves_directory().c_str());
 
-    // `folders` → the dispatcher's browse start dirs. An override is root-relative unless absolute,
-    // is re-rooted when it was authored under another install's root, and falls back to the built-in
-    // folder when it cannot be read here — the whole rule is `ui::resolve_browse_dir`.
+    // `folders` → the browser's start folders. The whole rule is ui::resolve_browse_dir.
     if (ui::load_folder_config(filesystem, state.folderConfig))
         std::printf("config:   %s\n", filesystem.config_path().c_str());
 
-    // `controller` + `keyboard` → this shell's own input layer. Every rejection is printed: a
-    // hand-edited file that looks applied and is not is the most expensive way for this to fail.
+    // `controller` + `keyboard` → this shell's input layer. Every rejected entry is printed: a
+    // hand-edited file that looks applied and is not is the worst way for this to fail.
     {
         ui::InputConfig                     inputCfg;
         std::vector<ui::InputConfigWarning> warnings;
@@ -663,60 +462,39 @@ int run(const AppConfig& cfg) {
         for (const ui::InputConfigWarning& w : warnings) std::printf("config:   %s\n", w.text.c_str());
         input.apply_input_config(inputCfg);
 
-        // config.json SEEDS the ABXY row rather than competing with it. A user who wrote a value
-        // into the file before the row existed keeps it; once the row says anything but AUTO, the
-        // row wins and the file is ignored. Two controls for one value is how one of them becomes a
-        // lie, and this is the cheapest way to have only one.
+        // config.json only SEEDS the ABXY row: once the row says anything but AUTO, the row wins.
         if (state.settings.abxyIndex == 0 && inputCfg.abxy != ui::AbxyLayout::AUTO)
             state.settings.abxyIndex = static_cast<int>(inputCfg.abxy);
     }
 
-    // Resolve the PERSISTED skin id (a stable string, `portrait_skin`) to the runtime index the SETTINGS
-    // skin column edits. device_skin.h falls back to DARK for an unknown id, so a missing/mangled key
-    // keeps the shell's shipped look. The loop's `loadedSkinIdx` sync turns this index into the loaded
-    // textures + PortraitSkin's scalars on the first frame, and again whenever the user changes it.
+    // The saved skin id (a stable string) → the index the SETTINGS skin column edits. An unknown id
+    // falls back to DARK.
     state.settings.skinIndex = device_skin_index(state.settings.portraitSkin);
 
-    // And the persisted OVERLAY selection (`overlay_name`, "OFF" or a stable id) to its cycle index —
-    // 0 = OFF, 1.. = a shipped overlay. Same "stable string, not an index" contract as the skin above
-    // (shell/overlay.h). The loop's `loadedOverlayIdx` sync turns this into the decoded texture on the
-    // first frame the OVERLAY row is live, and again whenever the user cycles it.
+    // The saved overlay name → its index (0 = OFF), on the same stable-string terms (shell/overlay.h).
     state.settings.overlayIndex = screen_overlay_index(state.settings.overlayName);
 
-    // ── The MIDI port (plan §8.1, B4.3) ──────────────────────────────────────────────────────────
+    // ── MIDI ports ───────────────────────────────────────────────────────────────────────────────
     //
-    // The backend goes into AppState so the MIDI screen can ENUMERATE — the one option list in the app
-    // that comes from the operating system and changes while the app is running. It stays a borrowed,
-    // nullable pointer: a build with no backend (Linux and Android until B2b) simply has none, and
-    // every use of it is guarded.
-    //
-    // The two env-var overrides land here, over whatever settings.json said, BEFORE anything opens —
-    // see app.h for why they become settings rather than a second, invisible source of truth.
+    // The backends go into AppState so the MIDI screen can list devices. Either may be null, and every
+    // use is guarded. The env-var overrides land as settings before anything opens (see app.h).
     state.midiOut = cfg.midiOut;
-    // The INPUT backend (E2) rides in the same way and on the same terms — the list is the OS's, the
-    // choice is a NAME, and the override becomes a setting rather than a second source of truth.
     state.midiIn  = cfg.midiIn;
     if (!cfg.midiInDevice.empty())  state.settings.midiInDevice  = cfg.midiInDevice;
     if (!cfg.midiOutDevice.empty()) state.settings.midiOutDevice = cfg.midiOutDevice;
     if (cfg.midiOffsetMs != 0) {
         state.settings.midiOffsetMs   = cfg.midiOffsetMs;
-        // ⚠️ …and AUTO off with it, or the override would land in settings.json and change nothing
-        // audible: the derived value would still be the one in force.
+        // ⚠️ …and AUTO off, or the override would be saved and change nothing audible.
         state.settings.midiOffsetAuto = false;
     }
     if (cfg.midiSyncOut >= 0)       state.settings.midiSyncOut   = cfg.midiSyncOut != 0;
 
-    // ── The OFFSET row's AUTO: how far ahead of the speakers the cable runs ──────────────────────
+    // ── The OFFSET row's AUTO ────────────────────────────────────────────────────────────────────
     //
-    // A message is released the moment its block of sound is handed to the DEVICE, not when it is
-    // heard — so the cable leads our own audio by the whole output latency. One fixed lead, the same
-    // for every note, and exactly the kind of number a user should not have to find by ear.
-    //
-    // ⚠️ Usually the lead the APP CAN SEE: one buffer, with the driver's queue behind it missing — so
-    // this lands close rather than exact, which is why the row stays dialable and an explicit value
-    // still wins. An ASIO driver reports its whole output latency, and that is used instead.
-    //
-    // Derived again whenever SETTINGS > AUDIO OUT changes the output.
+    // MIDI is released when its block of sound is handed to the device, so the cable leads the
+    // speakers by the output latency. The app usually sees only one buffer of it, so this lands close
+    // rather than exact; an ASIO driver reports the whole latency. Derived again when SETTINGS >
+    // AUDIO OUT changes the output.
     const auto derive_midi_auto_offset = [&] {
         const int rate = audio.sampleRate();
         const AudioBackend::OutputLatency lat = audio.outputLatency();
@@ -729,20 +507,15 @@ int run(const AppConfig& cfg) {
     ui::TrackerLayout layout;
     ui::EngineFeed    feed;
 
-    // The whole input layer, in one object. It edits `host.edit_project()` — the SAME Project the
-    // Sequencer is reading — so an edit is live the instant it is made.
+    // The whole input layer. It edits the same Project the sequencer reads, so an edit is live at once.
     ui::InputDispatcher dispatch(state, host, filesystem);
     ui::MapperState     mapper;
 
-    // Open the port the settings name — and push the OFFSET, which the consumer needs whether or not a
-    // port ever opens. Deliberately the DISPATCHER's call and not six lines of resolve-and-open here:
-    // the MIDI screen's OUTPUT row runs the same two functions, so boot and UI cannot drift apart about
-    // which device is open. See InputDispatcher::boot_midi_port.
+    // Opens the port the settings name and pushes the OFFSET. The MIDI screen's OUTPUT row runs the
+    // same code, so boot and UI cannot disagree about which device is open.
     dispatch.boot_midi_port();
     if (cfg.midiOut) {
-        // ⚠️ The offset printed is the one IN FORCE, never the stored number — under AUTO those are
-        // different values, and a boot line stating the one nobody is sending with would be the
-        // lying instrument in its cheapest form.
+        // ⚠️ Prints the offset in force, which under AUTO is not the stored one.
         std::printf("midi:    OUT %s (offset %+d ms%s, sync %s)\n",
                     cfg.midiOut->is_open() ? state.midiOutOpenName.c_str() : "OFF",
                     ui::midi_offset_in_force(state.settings, state.midiAutoOffsetMs),
@@ -750,86 +523,49 @@ int run(const AppConfig& cfg) {
                     state.settings.midiSyncOut ? "ON 24 PPQN" : "off");
     }
 
-    // The INPUT port, opened the same way and by the same rule: the dispatcher owns the open BECAUSE it
-    // owns the sink wiring, and the two may never come apart (input_dispatcher.h).
-    //
-    // ⭐ **THE LINE IS UNCONDITIONAL ON A BUILD THAT HAS A BACKEND, and that is the guardrail's own
-    // "give it one 'I woke up' line".** An input path is the purest case of a component whose correct
-    // behaviour is silence: with no line here, "MIDI in is not compiled into this build" and "your
-    // keyboard is not plugged in" and "the port refused to open" are one indistinguishable nothing.
+    // The input port, by the same rule. One line whenever a backend exists, so "not plugged in" and
+    // "refused to open" can be told apart from "not compiled in".
     dispatch.boot_midi_in_port();
-    // Latched at BOOT, and read by the exit report. Not asked again at teardown for `senderOn`'s reason
-    // (the B3 block above): by then the port has been closed, so the object would answer "no" on every
-    // run and the report would print on none of them.
+    // Latched now: by the exit report the port is closed.
     const bool midiInPortWasOpen = cfg.midiIn && cfg.midiIn->is_open();
     if (cfg.midiIn) {
         std::printf("midi:    IN  %s (%d port(s) enumerated)\n",
                     cfg.midiIn->is_open() ? state.midiInOpenName.c_str() : "OFF",
                     static_cast<int>(state.midiInDeviceNames.size()) - ui::MIDI_FIRST_PORT);
     } else {
-        // ⚠️ Since E5 every shipping platform HAS a backend (winmm, ALSA rawmidi, `MidiManager`), so
-        // this arm now means "this build is none of the three" and nothing else. A Linux box whose
-        // libasound is missing does NOT come here — it has a backend object that answers 0 devices, and
-        // said why on its own line — and keeping the two states distinguishable is the whole point.
+        // Every shipping platform has a backend; a Linux box without libasound still has one, with no
+        // devices.
         std::printf("midi:    IN  no input backend compiled into this build\n");
     }
 
-    // ⭐ **THE THRU VERDICT (E4), PRINTED WHETHER OR NOT IT IS THE INTERESTING ONE.** A live key on an
-    // EXTERNAL instrument goes out on the cable; on a LOOPBACK port that would be an amplifying feedback
-    // loop, so the dispatcher turns it off when both ports name the same device. Both outcomes print,
-    // because the suppression is invisible from anywhere else — a silent thru and an EXTERNAL instrument
-    // that simply is not responding look exactly alike from the keyboard.
+    // THRU: a live key on an EXTERNAL instrument goes out on the cable — except when IN and OUT are the
+    // same device, where it would feed back. Both outcomes print; the suppression is invisible otherwise.
     bool midiThru = host.midi_in_thru();
     std::printf("midi:    THRU %s%s\n", midiThru ? "on" : "OFF",
                 midiThru ? " (a live key on an EXTERNAL instrument reaches the cable)"
                          : " - IN and OUT are the SAME port, and thru on a loopback is a feedback loop");
 
-    // ── What a RENDER needs from the shell (S7) ──────────────────────────────────────────────────
+    // ── Presenting a frame ───────────────────────────────────────────────────────────────────────
     //
-    // The render is SYNCHRONOUS — the frame loop stops and renders. Android hands it to a coroutine
-    // because Compose would ANR; there is nothing here to hand it to, and stopping is the safer
-    // answer anyway, because the ONE thing that must not touch the engine while an offline render is
-    // driving it is the audio callback.
-    //
-    // ⚠️ So the device is PAUSED, not merely stopped. Kotlin stops PLAYBACK and leaves its Oboe stream
-    // open and idle, which is a race it happens to win (an idle callback reads a silent engine). A
-    // paused device is a guarantee instead of a coincidence, and it costs one call.
-    // ── The present branch, shared by the frame loop and the synchronous repaint hook ─────────────
-    //
-    // Composites whatever THIS orientation's skin is around the just-drawn 640x480 `canvas`: the
-    // PORTRAIT2 device skin (present_skinned — chrome behind the frame, button cluster in front) or the
-    // landscape LEFT/RIGHT touch panels (present), plus the CRT screen overlay (D6) over the frame in
-    // either. Returns whether a frame actually reached the screen — the C7 pixel gate skips one identical
-    // to the last, and the loop counts the rest.
-    //
-    // ⚠️ It lives in ONE place for a reason. When this was inline in the loop only, the dispatcher's
-    // `repaint` hook — the path a BLOCKING render uses to push its "RESAMPLING... 43%" readout on screen
-    // while the loop runs no frames — did a bare fullscreen `video.present`, flashing the PORTRAIT2 skin
-    // away for the whole length of a resample/export and snapping it back when the loop resumed. Both
-    // callers now go through here, so that divergence cannot reopen. Assumes layout.draw() already
-    // refreshed `canvas`.
+    // Puts the drawn 640×480 `canvas` on screen with this orientation's surround — the portrait device
+    // skin or the landscape touch panels — plus the CRT overlay. Returns whether a frame reached the
+    // screen (one identical to the last is skipped). Shared by the loop and the render repaint hook,
+    // so a blocking render keeps the skin. Expects layout.draw() to have filled `canvas`.
     const auto present_current = [&]() -> bool {
-        // The CRT overlay: a translucent PNG over the tracker's on-screen box at STR/255 alpha, on the
-        // FRAME rect (portrait.frame_rect() in the bezel, video.frame_rect() centred in landscape),
-        // drawn AFTER the frame and BEFORE the buttons so it filters the screen but not the gamepad.
-        // Off (index 0 / STR 0 / nothing decoded — every non-Android build) draws nothing.
+        // The CRT overlay: over the frame and under the on-screen buttons, at STR/255 alpha.
         const int  ovStr = state.settings.overlayStrength;
         const bool ovOn  = state.settings.overlayIndex > 0 && ovStr > 0 && screenOverlay.loaded();
 
-        // A CRT change (selection OR strength) must force one repaint even on an otherwise-still screen —
-        // the canvas need not change when only the overlay does. Bits 48-60 are disjoint from the
-        // touch/portrait signatures (buttons low, geometry 16-47, active markers 62/63), so an XOR into
-        // either cannot collide. Zero when off, leaving those signatures untouched.
+        // Folded into the skip signature, so changing only the overlay still repaints. Bits 48-60 are
+        // clear of the touch/portrait signature bits; zero when off.
         const uint64_t crtSig = ovOn
             ? ((1ull << 60) | (static_cast<uint64_t>(state.settings.overlayIndex & 0xF) << 56) |
                (static_cast<uint64_t>(ovStr & 0xFF) << 48))
             : 0;
 
         if (portrait.active()) {
-            // PORTRAIT2 (convergence D): the retro-device skin. The 640x480 frame lands in the bezel
-            // (portrait.frame_rect), NOT window-centred; the casing is the clear, the chrome bands the
-            // underlay behind the frame, the button cluster the overlay in front. The buttons are
-            // pressable: touch.layout_portrait2 (in the loop) hit-tests this same cluster.
+            // The portrait skin: the frame sits in the bezel, chrome behind it, buttons in front.
+            // touch.layout_portrait2 (in the loop) hit-tests the same button cluster.
             const uint32_t bg = state.theme.background;   // the tracker's own bg fills the bezel gap
             const auto chrome = [&portrait, &skin, bg](SDL_Renderer* r) {
                 portrait.draw_chrome(r, skin, bg);
@@ -839,19 +575,15 @@ int run(const AppConfig& cfg) {
                 if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
                 portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
             };
-            // ⚠️ B4 scrims ONLY the bezel's inner GLASS on PORTRAIT2, never the casing or the button
-            // cluster: dimming those would make the whole skin go dark around a bright cluster, which
-            // reads as a bug, not a modal. The modal's own MODAL_BACKDROP dims the tracker inside the
-            // frame; this extends the SAME dim to the bright gap AROUND the frame when INTEGER scaling
-            // leaves the frame smaller than the glass (screen_rect()). FIT fills the glass, so the gap —
-            // and therefore this scrim — is empty there. Off entirely when no full-canvas modal is up.
+            // ⚠️ A modal dims only the bezel glass around the frame, never the casing or the buttons —
+            // a dark skin around a bright cluster reads as a bug. Empty under FIT, which fills the glass.
             const uint32_t scrim = ui::modal_backdrop_active(state) ? ui::MODAL_BACKDROP : 0;
             return video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
                                          chrome, buttons, portrait.signature(input) ^ crtSig, scrim,
                                          portrait.screen_rect());
         }
-        // Landscape / desktop: the centred frame, the LEFT/RIGHT touch panels in the bars beside it —
-        // inert (drawing nothing, signature 0) when there is no touchscreen.
+        // Landscape / desktop: the centred frame, the touch panels in the bars beside it (inert
+        // without a touchscreen).
         const auto overlay = [&touch, &input, &screenOverlay, ovOn, ovStr,
                               fr = video.frame_rect()](SDL_Renderer* r) {
             if (ovOn) screenOverlay.draw(r, fr, ovStr);
@@ -861,44 +593,28 @@ int run(const AppConfig& cfg) {
                              ui::modal_backdrop_active(state) ? ui::MODAL_BACKDROP : 0);
     };
 
-    // Declared here rather than beside the frame loop because `load_pump` below has to be able to
-    // stop the app: an SDL_QUIT that arrives while a load is running must not be swallowed with the
-    // rest of the queue.
+    // Declared here so load_pump can stop the app: a quit during a load must not be swallowed.
     bool running = true;
 
+    // ── What a render needs from the shell ───────────────────────────────────────────────────────
+    //
+    // Export and resample are synchronous: the loop runs no frames while they work. ⚠️ The audio
+    // device is PAUSED, not just the transport stopped, so the callback cannot touch the engine
+    // mid-render.
     ui::InputDispatcher::RenderHooks hooks;
     hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
-    // A SYNCHRONOUS repaint — the "RENDERING... 43%" / "RESAMPLING..." readout the dispatcher pushes on
-    // screen from INSIDE a blocking render (the frame loop runs no frames for its duration). It presents
-    // through present_current, the SAME branch the loop uses, so it keeps the PORTRAIT2 skin instead of
-    // flashing the bare frame fullscreen for the render's duration. See present_current above.
+    // The progress readout pushed from inside a blocking render, through present_current.
     hooks.repaint       = [&]() {
         layout.draw(canvas, state);
         present_current();
     };
 
-    // ── The pump a LOAD runs instead of the frame loop ────────────────────────────────────────────
+    // ── What runs instead of the loop during a load ──────────────────────────────────────────────
     //
-    // While a load is in flight the frame loop is inside it, so nothing is polling. This is what
-    // polls, and it buys three separate things that all needed the same call:
-    //
-    //   1. **The lifecycle stays alive.** `SDL_APP_WILLENTERBACKGROUND` is delivered from inside
-    //      SDL's own pump, and `on_app_event` — the watcher that flushes the crash-recovery autosave
-    //      on a Home press — fires synchronously from there. A loop that has stopped polling has
-    //      silently switched that off, which made a long load a window in which work could be lost.
-    //   2. **Queued presses are CONSUMED rather than replayed.** Without this SDL keeps every button
-    //      pressed during the wait and delivers them in one burst when it ends, onto whatever screen
-    //      the load returned to. (Still true of EXPORT, which does not pump — see the plan doc.)
-    //   3. **B cancels.**
-    //
-    // ⚠️⚠️ **IT DELIBERATELY DOES NOT CALL `handle_button`.** The presses are read for exactly one
-    // question and then dropped. Dispatching them would be re-entering the dispatcher from inside a
-    // dispatcher call, on a document the load is halfway through rewriting — and `Overlay::LOADING`
-    // makes every handler inert anyway, so the only thing running them could add is that risk.
-    //
-    // ⚠️ SDL_QUIT is honoured, not consumed: a window close or a SIGTERM translation arriving here
-    // has to reach the loop, or the app finishes the load and then ignores the kill. It also cancels,
-    // so the load unwinds instead of holding the process open for its full length.
+    // Keeps SDL pumping, so (1) the background watcher can still fire, (2) presses made during the
+    // load are consumed rather than replayed afterwards, and (3) B cancels.
+    // ⚠️ It does NOT dispatch the presses: that would re-enter the dispatcher halfway through a load.
+    // ⚠️ SDL_QUIT is honoured (and cancels), or the app would finish the load and ignore the kill.
     hooks.load_pump = [&]() -> bool {
         bool cancel = false;
         const Uint64 now = SDL_GetTicks64();
@@ -917,9 +633,8 @@ int run(const AppConfig& cfg) {
         }
         input.tick(now);
 
-        // ⚠️ The queue is DRAINED whatever it holds — a press left in it would fire on the screen
-        // underneath the moment the load ended. B is the one that means anything here, and it is the
-        // PRESS edge, so a B still held from before the load started cannot cancel it by itself.
+        // ⚠️ Drained whatever it holds, or a press would fire on the screen underneath when the load
+        // ends. Only a fresh B press cancels; a B held from before the load does not.
         ui::ButtonEvent be;
         while (input.poll(be))
             if (be.button == ui::Button::B && be.action == ui::ButtonAction::PRESSED) cancel = true;
@@ -928,44 +643,22 @@ int run(const AppConfig& cfg) {
     };
     dispatch.set_render_hooks(std::move(hooks));
 
-    // ⚠️ **INSTALLED ONCE, AND ONLY BY THE SHELL.** Everything below `pt::load_tick` — the five
-    // decoders, the WAV reader and tsf's sample decode — reports through this and behaves exactly as
-    // it did before it existed when nothing is installed, which is the case for every tool and for
-    // the offline render. The clock is passed IN rather than read by the dispatcher: `set_now()`
-    // also runs due work, and the 3 s autosave firing from inside a project load would write the
-    // recovery file from a half-loaded document.
+    // ⚠️ Installed once, here. Decoders report load progress through it; with nothing installed (tools,
+    // the offline render) they run as normal. The clock is passed in because set_now() also runs due
+    // work, and an autosave firing mid-load would save a half-loaded document.
     pt::set_load_tick([&dispatch](float fraction) {
         return dispatch.load_tick(static_cast<long long>(SDL_GetTicks64()), fraction);
     });
 
-    // ── THE LIFECYCLE (S10) ──────────────────────────────────────────────────────────────────────
+    // ── Lifecycle ────────────────────────────────────────────────────────────────────────────────
     //
-    // Where a RELATIVE sample path resolves. Absolute paths (everything the browser loads) ignore it;
-    // a portable project — every golden, and anything this build ships — stores its media relative, and
-    // recovering one of those against the wrong folder brings the song back looking perfect and playing
-    // silence. So the dispatcher is TOLD the session's media dir rather than guessing one.
-    //
-    // ⚠️ It must never arrive EMPTY: an empty base resolves every relative path against the process's
-    // cwd, which on a handheld is whatever the launch script last cd'd to. The platform resolves it —
-    // the project's own directory when there is one, the app root when there is not, because that is
-    // where Samples/ lives and therefore where a recovered autosave's relative media actually is.
+    // Where relative media paths resolve (absolute ones ignore it). ⚠️ Never empty: that would resolve
+    // against the process's working directory. The platform picks the project's folder, or the app root.
     dispatch.set_media_base_dir(cfg.mediaBaseDir);
 
-    // An autosave that survived to launch means the last session did not end cleanly — a launcher's
-    // kill, a flat battery, a crash. SETTINGS → RESUME decides what happens next: ASK raises the
-    // RECOVER WORK? dialog, AUTO restores in silence.
-    //
-    // ⚠️ AFTER load_settings (RESUME is the setting being read) and AFTER push_params (a recovery
-    // re-pushes everything anyway). If there is no autosave — the common case, and the one that means
-    // everything went fine last time — this does nothing at all.
-    // Said out loud for the same reason the once-a-second status line below is: during a handheld
-    // bring-up there is no screen yet, and "did it find my crash file?" is not a question you can answer
-    // by looking at a window that is not there.
-    //
-    // ⚠️ ASCII, and that is this file's own rule being obeyed rather than a preference — the help banner
-    // below states it: the console's encoding is not ours to choose (a handheld's serial console, an ssh
-    // session, a Windows box on a legacy code page), and an em-dash arrives there as mojibake. S10 wrote
-    // one into this very line and watched it come back as `вЂ”` on the first run.
+    // An autosave found at launch means the last session ended badly; SETTINGS > RESUME decides
+    // whether to ask or restore. ⚠️ After load_settings (RESUME is read) and push_params. Printed
+    // because a handheld being brought up may have no screen yet.
     switch (dispatch.boot_recovery()) {
         using BR = ui::InputDispatcher::BootRecovery;
         case BR::NONE:     break;   // the common case, and it deserves no line of its own
@@ -974,27 +667,19 @@ int run(const AppConfig& cfg) {
         case BR::DROPPED:  std::printf("autosave: FOUND but UNREADABLE - dropped\n"); break;
     }
 
-    // ── The lifecycle watcher (C4) ───────────────────────────────────────────────────────────────
-    // Installed AFTER boot_recovery, so a backgrounding that arrives during start-up cannot flush an
-    // autosave over the one still being decided about. Removed below the loop — `bg` is a stack
-    // object and the watcher must not outlive it. See on_app_event for why this is not a thread
-    // boundary despite what the plan assumed.
+    // The background watcher. Installed after boot_recovery, so a backgrounding during start-up cannot
+    // save over the autosave being decided about. Removed below the loop.
     BackgroundContext bg{&host, &dispatch, &filesystem, &state, &audio, cfg.console, &cfg.background};
     SDL_AddEventWatch(on_app_event, &bg);
 
-    // The banner and the once-a-second status line below are the two HIGH-VOLUME things this file
-    // prints, and they are the bring-up instrument for a platform whose screen is not up yet. A
-    // platform whose stdout goes nowhere — an APK's does — turns them off and pays nothing; the
-    // handful of one-line boot diagnostics above stay unconditional, being both cheap and the answers
-    // to "did my samples load?" and "where did it put its folders?".
+    // The help banner and the once-a-second status line are the high-volume output; a platform whose
+    // stdout goes nowhere (Android) turns them off. The one-line boot diagnostics above always print.
+    // ASCII only: the console's encoding is not ours (a serial or ssh terminal, a legacy code page).
     if (cfg.console) {
         std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
         std::printf("A+LEFT/RIGHT edit   A+UP/DOWN edit fast   A+B clear   A,A insert next unused\n");
         std::printf("B+LEFT/RIGHT change WHICH phrase/chain/table   B+UP/DOWN page the song\n");
         std::printf("L+B select (tap again to widen)   B copies   L+A cut/paste   L+R deselect   L+B+A clone\n");
-        // ASCII only, deliberately: this goes to a console whose encoding is not ours to choose (a
-        // handheld's serial/ssh terminal, a Windows box on a legacy code page), and a stray em-dash
-        // arrives there as mojibake.
         std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
         std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
         std::printf("                             GROOVE MIXER EFFECTS PROJECT SETTINGS\n");
@@ -1018,21 +703,13 @@ int run(const AppConfig& cfg) {
 
     Uint64 lastStatus = 0;
 
-    // ── ⚠️ DEV BRING-UP ONLY: the two hooks that make a TIMED run scriptable (phase B3) ───────────
+    // ── Dev only: scripted timed runs ────────────────────────────────────────────────────────────
     //
     //   POCKETTRACKER_AUTOPLAY_MS=<n>   press START once, n ms after the first frame
     //   POCKETTRACKER_QUIT_AFTER_MS=<n> push SDL_QUIT n ms after the first frame
     //
-    // They exist because B3's claim is about MILLISECONDS and a human pressing SPACE cannot be a
-    // control run. Neither invents a path: autoplay pushes a `Button::START` PRESSED event through
-    // `ui::handle_button` — the identical call the SDL input layer makes, so the mapper, the
-    // preview-silencing rule and `on_start` all run exactly as they do for a finger. (What it does NOT
-    // exercise is `sdl-input.cpp` itself, which remains the tree's one untested layer; that is a
-    // different gap and this does not pretend to close it.)
-    //
-    // ⚠️ Not a general scripted-input facility, deliberately. One button, no sequence, no file: the
-    // moment this grows a script format it becomes a second input path to keep in step with the real
-    // one, and the guardrails have a name for a test that drives a path the user cannot.
+    // Autoplay goes through ui::handle_button, the same call real input makes. Deliberately one button
+    // and no script format: a second input path would have to be kept in step with the real one.
     const auto env_ms = [](const char* name) -> Uint64 {
         const char* v = SDL_getenv(name);
         if (!v || !v[0]) return 0;
@@ -1049,26 +726,18 @@ int run(const AppConfig& cfg) {
                     static_cast<unsigned long long>(quitAfterMs));
     }
 
-    // The last output size the PORTRAIT2 log line reported, so it prints once per rotation/resize rather
-    // than every frame — the portrait analogue of sdl-video's describe-on-change (which reports the
-    // centred landscape frame and would misdescribe this mode; see present() in sdl-video.cpp).
+    // The last output size the portrait log line reported, so it prints once per rotation or resize.
     int lastPortraitW = 0, lastPortraitH = 0;
 
-    // The last LAYOUT-GATE verdict reported, on the same print-on-change discipline. `lastUseTouch`
-    // starts at the value `useTouch` can never legitimately hold at boot on a touch device, and the
-    // sizes at -1, so the first frame always prints — the line's whole job is to exist at boot.
+    // The last layout decision reported. The start values make the first frame always print.
     bool lastUseTouch = false;
     int  lastGateW = -1, lastGateH = -1;
 
-    // The device skin currently decoded into `skin` + adopted by `portrait`. -1 = none loaded yet, so
-    // the first touch frame decodes the persisted choice; thereafter it reloads only when the SETTINGS
-    // skin column moves `skinIndex`. Decoding ~10 PNGs is a deliberate-action cost, never a per-frame one.
+    // The device skin currently loaded (-1 = none yet). Reloaded only when the SETTINGS skin column
+    // moves `skinIndex`.
     int loadedSkinIdx = -1;
 
-    // The screen overlay currently decoded into `screenOverlay`. -1 = nothing decoded yet, so the first
-    // frame the OVERLAY row is live loads the persisted choice (or nothing, for OFF); thereafter it
-    // reloads only when the SETTINGS OVERLAY column moves `overlayIndex`. One PNG, a deliberate-action
-    // cost, never per frame.
+    // The overlay currently decoded (-1 = none yet). Reloaded only when the choice changes.
     int loadedOverlayIdx = -1;
 
     // SETTINGS > AUDIO OUT: the row value last shown (-1 = boot, where the saved NAME is applied) and
@@ -1081,14 +750,11 @@ int run(const AppConfig& cfg) {
     Uint64 audioArrivalMs = 0;
     int    audioRetries   = 0;
 
-    // ── IS THERE A PHYSICAL PAD? (the touch vs FULL gate) ──────────────────────────────────────────
+    // ── Is there a physical pad? ─────────────────────────────────────────────────────────────────
     //
-    // `physicalGamepadPresent` is the platform's answer when it has one — Android's, because SDL's joystick
-    // count is not the truth there (it opens the emulator's keyboard as a controller; see app.h). Desktop
-    // and the handhelds leave it null and fall back to `controller_count()`, which IS the truth on those.
-    // Cached, not asked every frame: on Android that call is a JNI round trip, so it is refreshed only when
-    // SDL reports a controller add/remove (`padDirty`, set in the event loop) — which is exactly when the
-    // answer can change, so hot-plug still moves the app between the on-screen gamepad and a bare frame.
+    // The platform's answer where it has one: on Android SDL counts the emulator's keyboard as a
+    // controller (see app.h). Elsewhere, SDL's controller count. Cached, and refreshed only when SDL
+    // reports a controller added or removed (`padDirty`) — on Android the call is a JNI round trip.
     auto compute_has_pad = [&]() -> bool {
         return cfg.physicalGamepadPresent ? cfg.physicalGamepadPresent()
                                           : (input.controller_count() > 0);
@@ -1096,81 +762,49 @@ int run(const AppConfig& cfg) {
     bool physicalPad = compute_has_pad();
     bool padDirty    = false;
 
-    // Does `layoutIndex` currently carry the FULL/PORTRAIT choice? The list is one entry long
-    // without a pad and two with, so the same index means different things in the two states — and
-    // reading it as a choice while it means the other thing is how the choice gets cleared. Set
-    // from `padChoice` at the end of each gate pass; see the read-back there.
+    // Whether `layoutIndex` currently means the FULL/PORTRAIT choice. The list has one entry without a
+    // pad and two with, so the same index means different things in the two states.
     bool padLayoutLive = false;
 
-    // The last rotation permission handed to the platform, so it is pushed on CHANGE rather than
-    // every frame (each call is a JNI round trip that touches the activity). -1 = nothing sent yet,
-    // a value neither branch can produce, so the first gate pass always states the boot answer.
+    // The last rotation permission sent to the platform (-1 = none yet). Pushed only on change; each
+    // call is a JNI round trip.
     int lastLandscapeAllowed = -1;
 
-    // DEV BRING-UP ONLY, and the same knob POCKETTRACKER_TOUCH is: PT_TOP_ANCHOR=1 forces the
-    // clip-on-gamepad frame placement on a desktop, where the gate below can never fire (no
-    // touchscreen). Drag the window tall and the frame moves into the top half. It is how the
-    // placement is looked at without a phone and a controller in hand.
+    // Dev only: PT_TOP_ANCHOR=1 forces the clip-on-pad frame placement on a desktop, so it can be
+    // checked without a phone. Drag the window tall and the frame moves into the top half.
     const char* topAnchorEnv   = SDL_getenv("PT_TOP_ANCHOR");
     const bool  forceTopAnchor = topAnchorEnv && topAnchorEnv[0] == '1';
 
-    // ── C7 state ─────────────────────────────────────────────────────────────────────────────────
-    // `sawInput`     — anything happened this frame that could have changed what is on screen.
-    // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
-    //                  (Kotlin's active→idle bump; without it the scope freezes mid-wave).
-    // `drewOnce`     — the first frame always draws, or the window comes up empty until a keypress.
-    // `timedWorkEdge`— the SAME active→idle bump, for the dispatcher's timers. See the gate.
+    // ── Idle-skip state ──────────────────────────────────────────────────────────────────────────
+    // `sawInput`      — something happened this frame that may change the screen.
+    // `audibleEdge`   — audio was audible last frame, so the first silent frame is still drawn (or
+    //                   the scope freezes mid-wave).
+    // `drewOnce`      — the first frame always draws.
+    // `timedWorkEdge` — the same one-frame tail for the dispatcher's timers. See the gate.
     bool sawInput      = false;
     bool audibleEdge   = true;
     bool timedWorkEdge = false;
     bool drewOnce      = false;
 
-    // ⚠️ **THE NUMBERS BESIDE THE VERDICT, AND C7 IS UNVERIFIABLE WITHOUT THEM.** A working idle skip
-    // and a skip that never fires look IDENTICAL on screen — that is the whole point of it, the
-    // picture does not change either way. So the status line carries the frame accounting: `drew` is
-    // frames actually sent to the display, `skip` frames the animation gate dropped, `same` frames
-    // that were drawn and then found byte-identical to what was already there (gate 1 being
-    // conservative, gate 2 catching it). On a still screen `drew` should stop climbing while the
-    // frame counter keeps going; if `skip` stays 0 the feature is not working, whatever it looks like.
-    // `poll` is the same accounting for the split below: it must climb while `drew` stands still.
+    // Frame accounting for the status line: `drew` frames presented, `skip` frames the idle gate
+    // dropped, `same` frames drawn but identical to the screen, `poll` loop ticks. A working idle skip
+    // and a broken one look the same on screen; these numbers are the difference.
     long long drawn = 0, presented = 0, skipped = 0, polls = 0;
 
-    // ── THE TWO RATES ────────────────────────────────────────────────────────────────────────────
+    // ── Two rates ────────────────────────────────────────────────────────────────────────────────
     //
-    // The loop has two jobs and they do not want the same clock. Everything that decides how soon the
-    // app NOTICES something — the event drain, the input tick, the button dispatch, the MIDI-in pump
-    // and the lookahead refill — runs every POLL_MS. Everything that ends in a pixel, and the
-    // per-frame derivations that feed it, runs every FRAME_MS. Both used to run at the display's
-    // rate, so an arriving press or MIDI byte waited a mean 8 ms before anything looked at it.
+    // Input, MIDI and the sequencer refill run every POLL_MS (POLL_IDLE_MS while nothing is arriving);
+    // drawing and the per-frame derivations run once per display frame. ⚠️ The per-frame block must
+    // stay at the frame rate — at the poll rate it would cost more than the split saves.
     //
-    // ⚠️⚠️ **THE PER-FRAME BLOCK MUST STAY SLOW, AND IT IS THE REASON THIS IS A SPLIT RATHER THAN A
-    // FASTER LOOP.** It is layout selection, controller re-derivation, an SDL output-size query, a
-    // hot-plug gate and the skin decisions — at 250 Hz it would cost more than the split saves, on
-    // the device least able to afford it.
-    //
-    // ⚠️⚠️ **THE FRAME IS SCHEDULED FROM THE PANEL, NOT FROM A CONSTANT, AND WITH VSYNC THAT IS THE
-    // DIFFERENCE BETWEEN A 5 ms POLL AND A 14 ms ONE.** `SDL_RenderPresent` BLOCKS until the display
-    // is ready and nothing is polled while it does. A flat 16 ms deadline against a 16.67 ms refresh
-    // steps a third of a millisecond earlier into each vblank, so the block grows a frame at a time
-    // until it is nearly a whole refresh long — measured, the poll period went to 13.8 ms under a
-    // running transport while an idle screen held 4.7. So the next frame is anchored on the present's
-    // RETURN, which IS a vblank, and starts half a period before the following one: the draw gets
-    // that half to finish in and the display's wait lands in the loop's own paced wait, where input
-    // is still being looked at. FRAME_MS is only the fallback for a platform that will not name a
-    // refresh rate.
-    //
-    // ⚠️ The half-period is the draw's budget, and the invariant it rests on is one the app needs
-    // anyway: **a frame must draw in less than half a refresh.** Overrun it and the present misses
-    // its vblank and waits for the next — a dropped frame, which is visible, where being early only
-    // costs a little of the block back.
-    //
-    // ⚠️ THE FAST RATE IS PAID FOR IN WAKE-UPS, SO IT IS ONLY SPENT WHILE SOMETHING IS ARRIVING —
-    // see `busy` below. A still app polls at POLL_IDLE_MS, which is the rate the whole loop ran at
-    // before the split, so standing still costs a handheld exactly what it always did.
+    // ⚠️ With vsync SDL_RenderPresent blocks until the vblank, and nothing is polled meanwhile. So the
+    // next frame is scheduled from the present's return (a vblank) plus half a period, and the
+    // display's wait happens in the loop's own paced wait instead. This relies on a frame drawing in
+    // under half a refresh. FRAME_MS is the fallback for a platform that reports no refresh rate.
     constexpr Uint64 POLL_MS      = 4;
     constexpr Uint64 POLL_IDLE_MS = 16;
-    // Off the screen (Android): a song still playing needs only the lookahead pump, which works two
-    // phrases ahead, so the idle rate serves it; with nothing playing the loop just waits to come back.
+    // Off the screen (Android): a playing song needs only the lookahead pump, which works two phrases
+    // ahead, so the idle rate serves it; with nothing playing the loop just waits to come back.
     constexpr Uint64 BACKGROUND_IDLE_MS = 250;
     constexpr Uint64 QUIET_MS     = 1000;   // input this recent still counts as something arriving
     constexpr Uint64 FRAME_MS     = 16;
@@ -1181,145 +815,80 @@ int run(const AppConfig& cfg) {
     Uint64 audioReopenMs = 0;  // when the next reopen attempt may run; 0 = at once
     uint64_t midiSeen    = 0;  // messages the audio thread had handled at the last tick (see below the poll)
 
-    // ⚠️⚠️ **THE ONLY PLACE THIS LOOP SLEEPS, AND WITHOUT IT IT BURNS A WHOLE CORE.** With vsync it
-    // used to be `SDL_RenderPresent` that blocked and paced the entire app; a tick that draws nothing
-    // reaches no present at all, so the wait has to be here and every path out of the body has to
-    // reach it. Measured from the last TICK rather than from now, so a present that blocked past the
-    // next tick is followed by one immediately instead of adding its own wait on top of the block.
+    // ⚠️ The only place the loop sleeps — without it, it burns a whole core — so every path through
+    // the body must reach it. Measured from the last tick, so a present that blocked past the next tick
+    // is not followed by a second wait.
     //
-    // ⚠️⚠️ **`busy` IS A LIST OF CHANNELS THAT DELIVER WITH NO SDL EVENT BEHIND THEM**, and that is
-    // the whole test — the transport's refill, a voice still sounding, a MIDI port the loop has to
-    // PUMP. Input needs no term of its own beyond the hold-off: the press that ends a quiet spell is
-    // the only one that pays the slow rate, and it re-arms the fast one for every press behind it. An
-    // incoming MIDI message re-arms it the same way (below `host.poll()`), and a port that pushes
-    // needs nothing more: its bytes reach the audio thread's drain without this loop, so an idle
-    // keyboard no longer keeps the loop at the fast rate — the battery cost the review named.
-    //
-    // ⚠️ Nothing here may sleep past a frame that is already due, or the idle rate beats against the
-    // panel's and anything that animates without input — a falling meter, a status line clearing —
-    // steps twice in one frame and then not at all.
+    // `busy` lists what arrives with no SDL event behind it: a running transport, a sound still
+    // ringing, a MIDI port this loop must poll. A press re-arms the fast rate through `lastInputMs`.
+    // ⚠️ Never sleep past a frame already due, or animation steps twice in one frame and then not at all.
     const auto pace_tick = [&] {
         const Uint64 t    = SDL_GetTicks64();
         const bool   busy = state.isPlaying || audibleEdge ||
                             (cfg.midiIn && cfg.midiIn->open_index() >= 0 && cfg.midiIn->polled()) ||
                             t - lastInputMs < QUIET_MS;
         Uint64 due = lastPollMs + (busy ? POLL_MS : POLL_IDLE_MS);
-        // ⚠️ Off the screen no frame is ever drawn, so `nextFrameMs` stays in the past — and a due time
-        // in the past is a loop that never sleeps. A playing song keeps the fast poll; anything else
-        // only waits to be brought back.
+        // ⚠️ Off the screen no frame is drawn, so `nextFrameMs` stays in the past and would stop the
+        // loop sleeping at all.
         if (bg.backgrounded) due = lastPollMs + (state.isPlaying ? POLL_IDLE_MS : BACKGROUND_IDLE_MS);
         else if (nextFrameMs < due) due = nextFrameMs;
         if (due > t) SDL_Delay(static_cast<Uint32>(due - t));
         lastPollMs = SDL_GetTicks64();
     };
 
-    // ── ROTATION / RESIZE SETTLING (C7's blind spot on Android) ──────────────────────────────────
+    // ── Rotation and resize settling ─────────────────────────────────────────────────────────────
     //
-    // A rotation on Android resizes the SurfaceView over SEVERAL frames, and SDL does not send a
-    // WINDOWEVENT for every intermediate size — so the event-driven redraw (SDL_WINDOWEVENT_SIZE_CHANGED
-    // above) forces ONE frame, which may land on a half-transitioned surface, and then the C7 idle-skip
-    // freezes THAT half-drawn frame until the next input. That is the reported bug: rotate and the screen
-    // is half casing / half bezel-background (or half a stale landscape frame), and it only corrects when
-    // a virtual button is touched. The fix is to POLL the output size every frame and force a full redraw
-    // for a few frames after it LAST changed — so the settled geometry always gets a clean repaint with
-    // no input. `lastOutW/H` start at -1 so the very first frame is not counted as a resize.
+    // An Android rotation resizes the surface over several frames and SDL does not report every step,
+    // so the idle skip could freeze a half-transitioned frame. The output size is polled each frame and
+    // a few full redraws are forced after it last changed. -1 so the first frame is not a resize.
     constexpr int RESIZE_SETTLE_FRAMES = 4;
     int lastOutW = -1, lastOutH = -1, resizeSettle = 0;
 
-    // ⚠️ `terminate_requested` is the launcher's kill, read once per frame. On desktop it reports a FLAG
-    // set by a signal handler that does nothing else — so this loop condition is where a SIGTERM actually
-    // takes effect, and the flush below the loop is where the work is saved, on the main thread, with a
-    // heap to do it with.
-    //
-    // ⚠️⚠️ **A PLATFORM THAT FREEZES THIS LOOP CANNOT USE THIS HOOK, AND ANDROID IS ONE.** SDL blocks the
-    // native thread while the activity is paused (SDL_HINT_ANDROID_BLOCK_ON_PAUSE, on by default), which
-    // is exactly when the process is most likely to be killed — so a flag consumed here would be P4d's
-    // never-armed write in a new body. Convergence C4 flushes in an `SDL_AddEventWatch` watcher instead,
-    // which fires synchronously on the Java activity thread. This hook is nullable for that reason.
-    //
-    // ⚠️ One honest limit, stated rather than discovered later: a kill arriving while the app is inside
-    // the SYNCHRONOUS export render is not seen until the render finishes, because the frame loop is not
-    // running. The exposure is small — the autosave for everything up to that point fired 3 s after the
-    // last edit, long before the user navigated to EXPORT and pressed A — but it is not zero.
+    // ⚠️ `terminate_requested` is the launcher's kill. On desktop it reads a flag set by a signal
+    // handler that does nothing else, so the work is saved below the loop, on this thread. Android
+    // leaves it null: the background watcher saves there instead.
+    // ⚠️ A kill during the synchronous export is not seen until the export ends.
     while (running && !state.shouldQuit &&
            !(cfg.terminate_requested && cfg.terminate_requested())) {
         ++polls;
 
-        // ⚠️ FIRST in the body, and that placement is the measurement: what this samples is the period
-        // of the WHOLE iteration, the wait at the foot of the loop included, which is exactly the wait
-        // an input serves before anything looks at it. Anywhere lower and it would time a fragment of
-        // the loop and report a latency nobody experiences. Off unless POCKETTRACKER_LATENCY=1.
-        //
-        // The transport flag is the last frame's — it is refreshed from the host further down — and
-        // one frame of lag is nothing to a bin that holds hundreds of samples. Moving the call down to
-        // get a fresher flag would cost the thing the call is for.
+        // First in the body, so it times the whole iteration including the wait — the delay an input
+        // actually sees. Uses last frame's transport flag. Off unless POCKETTRACKER_LATENCY=1.
         latency::poll_tick(state.isPlaying);
 
-        // One clock reading per tick, handed to everything that needs it. The input layer's repeat
-        // is a function of time, so it takes the clock rather than reaching for it.
+        // One clock reading per tick, passed to everything that needs it.
         const Uint64 now = SDL_GetTicks64();
 
-        // Whether this tick also draws. Read ONCE, because the per-frame work is in two pieces — the
-        // derivations above the event drain and the drawing below it — and they must agree about
-        // which tick they are on.
-        // ⚠️ Never off the screen: the GL context is backed up there, so nothing may touch the renderer.
+        // Read once: the per-frame work above and below the event drain must agree about this tick.
+        // ⚠️ Never off the screen — the GL context is backed up there.
         const bool frameDue = now >= nextFrameMs && !bg.backgrounded;
 
-        // Lay the touch panels into the CURRENT letterbox bars before the drain below, so a finger
-        // hits the geometry that is actually on screen. ⚠️ On a tick that draws nothing the layout is
-        // up to FRAME_MS old — which is the staleness a rotate or resize always had, since this was
-        // only ever recomputed once a frame.
+        // Lay the touch panels out before the event drain, so a finger hits what is on screen.
         if (frameDue) {
             int outW = 0, outH = 0;
             video.output_size(outW, outH);
 
-            // A change in the polled output size (a rotation, a resize, the system bars appearing) arms a
-            // short run of forced full redraws — see RESIZE_SETTLE_FRAMES. Re-armed every frame the size
-            // is still moving, so the countdown only starts once it has SETTLED, which is when the final
-            // geometry gets its clean repaint even though no input arrived.
+            // A size change arms a few forced redraws, re-armed while the size keeps moving, so the
+            // countdown starts once it has settled.
             if (outW != lastOutW || outH != lastOutH) {
                 resizeSettle = RESIZE_SETTLE_FRAMES;
                 lastOutW = outW;
                 lastOutH = outH;
             }
 
-            // ── THE LAYOUT SELECTOR, recomputed each frame (DeviceAdapter.hasPhysicalGameButtons) ────
+            // ── Layout: on-screen buttons or full screen ─────────────────────────────────────────
             //
-            // ONE gate, read by BOTH `touch` and `portrait`, so they can never disagree about whether
-            // this is a touch device. A touchscreen with NO controller gets the virtual buttons (the
-            // PORTRAIT2 skin held portrait, the landscape panels held landscape); a device WITH a
-            // controller (built-in or plugged) gets FULL/fullscreen with no skin, in either orientation
-            // — exactly as Kotlin's hasPhysicalGameButtons()→FULL decides. Recomputed per frame because
-            // `controller_count()` tracks hot-plug: plug a pad and the skin disappears next frame.
-            // ⚠️ This is what fixed the split gate — the portrait skin used to read `cfg.touchCapable`
-            // alone and would activate on a controller-equipped phone whose buttons then did nothing.
-            //
-            // ⚠️ **NOT `controller_count()` DIRECTLY — see `physicalPad` above.** On Android SDL opens the
-            // emulator's keyboard as a game controller, so the raw count is wrong; the platform hook answers
-            // instead. `padDirty` is armed by a controller add/remove in the event loop below, so the JNI
-            // answer is refreshed the frame after the hardware changes, never every frame.
+            // One gate, read by both `touch` and `portrait`, so they cannot disagree. A touchscreen
+            // with no controller gets on-screen buttons; with a controller, full screen — unless the
+            // user keeps the buttons (the LAYOUT row offers that only where both exist). Recomputed
+            // per frame, so hot-plugging a pad switches on the next frame.
             if (padDirty) { physicalPad = compute_has_pad(); padDirty = false; }
-            // ── On-screen buttons: automatic, EXCEPT where the device has both ────────────────
-            //
-            // A pad turning the on-screen buttons off is the right default and was the whole rule
-            // until a phone could have both at once: a clip-on controller leaves the touchscreen
-            // exactly where it was, and only its owner knows whether they want the buttons too.
-            // So where both exist the LAYOUT row offers the choice, and this reads it.
-            //
-            // ⚠️ `touchButtonsWithPad` DEFAULTS FALSE, which is what keeps every existing install on
-            // the behaviour it has: a pad still means fullscreen until somebody says otherwise.
+            // ⚠️ `touchButtonsWithPad` defaults false: a pad means full screen until the user says otherwise.
             const bool padChoice = cfg.touchCapable && physicalPad;
 
-            // ⚠️ **THE ROW'S WRITE IS CONSUMED HERE, BEFORE THE INDEX IS RE-DERIVED BELOW — and the
-            // order is the whole mechanism.** Input is polled AFTER this block, so a press lands on
-            // `layoutIndex` once the frame's derive has already run; reading the index back further
-            // down the SAME frame reads only what that derive wrote, and the next frame's derive
-            // overwrites the edit before anything sees it. Reading it at the top instead means the
-            // choice takes effect on the very frame after the press, gate included.
-            //
-            // `padLayoutLive` says the index CURRENTLY means FULL/PORTRAIT. Without it the first
-            // frame under a freshly-plugged pad would read an index that meant the one-entry
-            // touch-only list (always 0) as a deliberate "FULL", silently clearing the choice.
+            // ⚠️ The row's edit is read back BEFORE the index is re-derived below. Input is polled after
+            // this block, so a read lower down would only see this frame's derive and lose the press.
+            // `padLayoutLive` stops a freshly plugged pad reading the touch-only index 0 as "FULL".
             if (padChoice && padLayoutLive)
                 state.settings.touchButtonsWithPad = (state.settings.layoutIndex == 1);
             padLayoutLive = padChoice;
@@ -1328,53 +897,24 @@ int run(const AppConfig& cfg) {
                                    (!physicalPad || state.settings.touchButtonsWithPad);
             touch.set_enabled(useTouch);
 
-            // ── Rotation follows the layout that is actually in force ────────────────────────────
-            //
-            // Landscape is allowed EXACTLY where the FULL layout is — a pad is driving and the frame
-            // is centred with no on-screen buttons, which is the one landscape presentation the app
-            // has. Every other state (no pad, or a pad with the buttons kept) would rotate into the
-            // letterboxed touch panels, a layout release deliberately does not ship: nothing in
-            // SETTINGS names it and the only way back out is to turn the phone.
-            //
-            // ⚠️ **THE BOOT HINT CANNOT DO THIS ON ITS OWN.** `SDL_HINT_ORIENTATIONS` is read once at
-            // window creation, so a pad UNPLUGGED mid-session left the activity free to stay
-            // landscape while the app had already switched back to the portrait skin. The platform
-            // re-applies it live; desktop and the handhelds leave the hook null, and it is a no-op.
+            // Landscape is allowed exactly where the FULL layout is in force (a pad, no on-screen
+            // buttons); any other state would rotate into a layout we do not ship. Pushed live because
+            // the boot orientation hint is read only once. Null on desktop and the handhelds.
             if (cfg.allowLandscape && static_cast<int>(!useTouch) != lastLandscapeAllowed) {
                 lastLandscapeAllowed = !useTouch ? 1 : 0;
                 cfg.allowLandscape(!useTouch);
             }
 
-            // ── The frame moves up when a clip-on gamepad is covering the bottom of the phone ─────
-            //
-            // A GameSir Pocket Taco or an 8BitDo FlipPad grips a phone held in PORTRAIT and its two
-            // halves sit over the bottom third of the screen. That configuration is exactly the one
-            // where nothing else moves the frame: a physical pad turns the on-screen buttons off, so
-            // the fullscreen layout centres the tracker squarely behind the controller.
-            //
-            // All three terms are needed and each excludes a real device:
-            //   touchCapable   a phone or tablet - never a desktop window dragged tall, and never a
-            //                  Linux handheld, whose cap is already false
-            //   physicalPad    a pad is actually attached (hot-plug tracked, see above)
-            //   outH > outW    held in portrait; landscape is what a handheld is and it is centred
-            //
-            // Read per frame from the live gate, so unclipping the pad or turning the phone puts the
-            // frame back with no restart and no setting to find.
-            // ⚠️ `!useTouch` IS PART OF THE GATE now that the buttons can be kept under a pad. With
-            // them up the portrait skin places the frame itself (present_skinned) and this value is
-            // never read - so without this term the layout line below would report an anchor that is
-            // not in force, which is the lying instrument its own comment block exists to prevent.
+            // The frame moves to the top half when a clip-on pad covers the bottom of a portrait phone.
+            // Each term rules out a real device: a touchscreen (not a desktop or handheld), a pad
+            // attached, portrait output, and no on-screen buttons (the portrait skin places the frame
+            // itself).
             const bool topAnchor = forceTopAnchor ||
                                    (!useTouch && cfg.touchCapable && physicalPad && outH > outW);
             video.set_top_anchor(topAnchor);
 
-            // ⚠️ **THE DECISION, SAID OUT LOUD — because a phone that lands on FULL and one that has no
-            // touchscreen at all look identical from here.** A user reporting "it opened without the
-            // virtual buttons" leaves nothing behind to tell a wrong `physicalPad` from a wrong aspect
-            // ratio from a `touchCapable` that never got set; the portrait2 line below only prints once
-            // the skin is ALREADY up, so it is silent in exactly the case that needs explaining.
-            // Printed on every CHANGE (and therefore once at boot), not per frame — hot-plugging a pad
-            // is a transition worth a line too.
+            // The layout decision, printed on each change: from a report alone, a wrong pad answer, a
+            // wrong aspect and an unset touchCapable all look the same.
             if (cfg.console && (useTouch != lastUseTouch || outW != lastGateW || outH != lastGateH)) {
                 std::printf("layout:  %s  (touchCapable=%d physicalPad=%d output=%dx%d %s%s)\n",
                             useTouch ? (outH > outW ? "PORTRAIT2 skin" : "landscape touch panels")
@@ -1388,58 +928,31 @@ int run(const AppConfig& cfg) {
                 lastGateH    = outH;
             }
 
-            // ⚠️ **THE SETTINGS > LAYOUT ROW FOLLOWS THE TOUCH GATE, NOT JUST THE STATIC CAP.**
-            // `caps.touchLayouts` is true on every Android build, but on a device WITH physical buttons —
-            // a handheld like the AYANEO, which auto-selects FULL — there is no touch layout to configure,
-            // so the row would draw a header with no options under it. Gate the row's very EXISTENCE on
-            // `useTouch` (a touchscreen AND no pad), ANDed with the platform's static cap so desktop and
-            // the Linux handhelds (cap already false) are untouched. `settings_row_visible`,
-            // `settings_row_offset_y`, the cursor wrap and the cursor context all read this one flag, so
-            // hiding it here removes the row everywhere consistently — platform_caps.h's "a setting that
-            // configures nothing is a lie", applied at runtime because the fact it rests on (a controller)
-            // is a runtime one. Recomputed with `useTouch`, so unplugging a pad brings the row back.
-            // ⚠️ AND IT IS NO LONGER GATED ON `useTouch`, which would hide the row in exactly the
-            // state it now exists for: a pad is attached, the buttons are off, and this row is how
-            // they are turned back on. It always has something to say on a touchscreen device - the
-            // skin when the buttons are up, the FULL / PORTRAIT choice when a pad is on.
+            // The SETTINGS > LAYOUT row exists on any touchscreen device: it picks the skin while the
+            // buttons are up, and FULL/PORTRAIT while a pad is attached.
             state.caps.touchLayouts = cfg.caps.touchLayouts && cfg.touchCapable;
 
-            // BTN SOUND and BTN VIBRO sound and shake the ON-SCREEN buttons, so they follow whether
-            // those are DRAWN rather than whether the device could draw them - platform_caps.h's
-            // "a setting that configures nothing is a lie", one more row than it used to reach.
+            // BTN SOUND and BTN VIBRO exist only while on-screen buttons are drawn.
             state.caps.buttonFeedback = cfg.caps.buttonFeedback && useTouch;
 
-            // The face-button swap is for a pad that misreports itself; with nothing plugged in there
-            // is nothing to swap. Hot-plugged, like the two above.
+            // The face-button swap row exists only with a pad attached.
             state.caps.padAttached = physicalPad;
 
-            // Push the user's live BTN SOUND / BTN VIBRO scalars so the next tap plays with whatever
-            // SETTINGS currently shows — read here, in the loop, because they can change live. A no-op
-            // where there is no feedback sink (button_feedback.h).
-            // The face-button swap, read live so the row takes effect on the next press.
+            // The face-button swap, read live so the row applies on the next press.
             input.set_abxy(static_cast<ui::AbxyLayout>(
                 std::clamp(state.settings.abxyIndex, 0, 2)));
 
+            // The live BTN SOUND / BTN VIBRO values; a no-op with no feedback sink.
             touch.set_feedback_settings({state.settings.buttonSoundEnabled,
                                          state.settings.buttonSoundVolume,
                                          state.settings.buttonVibroEnabled,
                                          state.settings.vibroPower});
 
-            // ── The device skin: which theme paints the chrome, and the SETTINGS row that picks it ────
+            // ── The device skin, and the LAYOUT row's columns ────────────────────────────────────
             //
-            // The skin column (NORM/DARK) is the real control on this UI's LAYOUT row; the mode column is
-            // a single "PORTRAIT" (matching release Kotlin's touch-only layout list, which has one entry
-            // — the shell already auto-selects portrait/landscape by aspect and fullscreen by controller
-            // presence, so there is no mode for the user to override). `skinCount > 0` is what makes the
-            // editor draw the second column at all; the display strings are the platform's to supply.
-            // The mode column has two entries only where there is a choice to make - a touchscreen
-            // with a pad on it. Everywhere else it is the single "PORTRAIT" it always was, because a
-            // touch-only device offered FULL would have no way left to press anything.
-            //
-            // FULL is index 0 and PORTRAIT index 1, and the INDEX IS DERIVED from the persisted
-            // boolean rather than persisted itself: the list is one entry long without a pad and two
-            // with, so a stored index would mean different things in the two states and unplugging
-            // would forget the choice.
+            // The mode column is FULL (0) / PORTRAIT (1) on a touchscreen with a pad, otherwise just
+            // PORTRAIT. The index is derived from the saved boolean, not saved itself: the list's
+            // length changes with the pad, so a stored index would change its meaning.
             if (padChoice) {
                 state.settings.layoutCount = 2;
                 state.settings.layoutIndex = state.settings.touchButtonsWithPad ? 1 : 0;
@@ -1458,31 +971,25 @@ int run(const AppConfig& cfg) {
                 state.skinText              = d.displayName;
                 state.settings.portraitSkin = d.id;   // keep the persisted id in step with the choice
 
-                // Reload the PNGs + adopt the scalars only when the choice actually changed (or on the
-                // first frame). This is where the D7 asset seam is finally driven by a setting.
+                // Reload the PNGs only when the choice changes (or on the first frame).
                 if (state.settings.skinIndex != loadedSkinIdx) {
                     skin.load(video.renderer(), d.id, cfg.console, d.art);
                     portrait.set_skin(d.casingFillArgb, d.labelRgb, d.bezelThicknessX, d.art);
                     loadedSkinIdx = state.settings.skinIndex;
                 }
 
-                // The chromeless skin draws in the LIVE theme's colours, so they are pushed every
-                // frame, not at load: a theme edit or swap must restyle the controls straight away, and
-                // the art they tint was uploaded colourless exactly so nothing has to be reloaded when
-                // it does. Inert for the chrome skins, which draw in their own table's scalars.
+                // The chromeless skin draws in the live theme's colours, pushed every frame so a theme
+                // edit restyles it at once. Inert for the chrome skins.
                 portrait.set_theme(state.theme.background, state.theme.textValue);
             } else {
                 state.settings.skinCount = 0;   // no skin column on a fullscreen (controller) layout
                 if (!padChoice) { state.settings.layoutCount = 1; state.settings.layoutIndex = 0; }
             }
 
-            // ── The screen overlay (D6): the CRT filter's SETTINGS row + its texture ──────────────
+            // ── The screen overlay (CRT filter) ──────────────────────────────────────────────────
             //
-            // Independent of the touch skin — it is a screen filter, gated on `caps.skinOverlay` (the
-            // OVERLAY row, Android/debug) rather than a touchscreen. The row edits `overlayIndex`; here
-            // the shell fills in what only it knows — the choice COUNT and the display TEXT — and keeps
-            // the persisted `overlayName` in step with the index, exactly as the skin block does with
-            // `portraitSkin`. The PNG is (re)decoded only when the choice actually changes.
+            // The shell supplies the choice count and text, keeps the saved name in step with the
+            // index, and decodes the PNG only when the choice changes.
             if (cfg.caps.skinOverlay) {
                 state.settings.overlayCount = screen_overlay_choice_count();
                 if (state.settings.overlayIndex < 0 ||
@@ -1565,23 +1072,16 @@ int run(const AppConfig& cfg) {
                 state.audioOutText = outs[static_cast<size_t>(active)];
             }
 
-            // PORTRAIT2 first — its active() decides whether `touch` hit-tests the skinned cluster
-            // (portrait) or the landscape letterbox bars. Both are a handful of int ops and a no-op with
-            // no touchscreen. The cluster geometry is PortraitSkin's, handed straight to `touch` so the
-            // hit-test and the draw share ONE source of truth: a press can never highlight a cell the
-            // finger is not over, because both read the same rects. `scalingBilinear` picks INTEGER vs
-            // FIT for where the frame lands in the bezel (see PortraitSkin::layout).
+            // Portrait first: whether it is active decides which geometry `touch` hit-tests. Hit-test
+            // and drawing share the same rects, so a press always lights the button under the finger.
+            // `scalingBilinear` picks INTEGER vs FIT for the frame in the bezel.
             portrait.layout(outW, outH, useTouch, state.settings.scalingBilinear);
             if (portrait.active())
                 touch.layout_portrait2(portrait.cluster_rect(), portrait.button_rects(), outW, outH);
             else
                 touch.layout(video.frame_rect(), outW, outH);
 
-            // A one-line account of the PORTRAIT2 skin when it activates or the output rotates — the
-            // portrait analogue of sdl-video's describe(). On console + on change only, like the status
-            // line: on a phone with no console this reads back out of logcat, and it is how "did it go
-            // into portrait, and where did the frame land?" is answered when the screen is the thing
-            // under test.
+            // One console line when the portrait skin activates or the output rotates.
             if (cfg.console && portrait.active() &&
                 (outW != lastPortraitW || outH != lastPortraitH)) {
                 const SDL_Rect fr = portrait.frame_rect();
@@ -1593,27 +1093,17 @@ int run(const AppConfig& cfg) {
             }
         }
 
-        // ⚠️ BEFORE the event loop, or a B pressed THIS frame would arm against last frame's answer.
-        // B repeats only while the qwerty overlay is up, where it is a backspace and holding it to
-        // erase a word is the expected gesture; everywhere else B is COPY / BACK / CANCEL and the
-        // modifier of B+DPAD, none of which may fire on a timer. Restated every frame from the live
-        // flag rather than pushed when the overlay opens and closes — the state cannot come apart from
-        // the overlay if nothing has to remember to say so. (`sdl-input.h::set_b_repeatable`.)
+        // ⚠️ Before the event drain, so a B pressed this frame gets this frame's answer. B repeats only
+        // in the on-screen keyboard, where it is backspace; everywhere else it must not fire on a timer.
         input.set_b_repeatable(state.qwerty.isOpen);
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            // ⚠️ C7: ANY event counts, not just the ones that map to a button. A window resize, an
-            // expose, a focus change, a rotation and the system bars appearing are all events that
-            // change what should be on screen while producing no ButtonEvent at all — and being
-            // over-inclusive here costs one redrawn frame, while being under-inclusive costs a stale
-            // window. The gate is allowed to be conservative; that is what the pixel compare in
-            // `present` is for.
+            // Any event may change the screen (a resize, an expose, a focus change), so all of them
+            // count. Over-drawing costs one frame; the pixel compare in present() catches it.
             sawInput = true;
 
-            // A controller plugged or unplugged changes the answer to "is there a physical pad?", so
-            // re-ask it next frame (see physicalPad). Cheap here — just a flag; the recompute is gated on
-            // it. Covers both the game-controller and raw-joystick add/remove SDL emits.
+            // A controller added or removed: re-ask whether a pad is present next frame.
             if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_CONTROLLERDEVICEREMOVED ||
                 e.type == SDL_JOYDEVICEADDED || e.type == SDL_JOYDEVICEREMOVED)
                 padDirty = true;
@@ -1623,15 +1113,11 @@ int run(const AppConfig& cfg) {
                 audioRetries   = 0;
             }
 
-            // ⚠️ **THE BLACK-SCREEN-ON-RESUME FIX.** `sawInput` above makes this frame DRAW, but C7's
-            // pixel gate in `present` still SKIPS the upload when the drawn frame is byte-identical to
-            // the last one — and on an Android sleep→resume nothing has changed, so it is identical,
-            // while the PLATFORM has blanked the real surface behind that gate's back. The frame stays
-            // black until the next real state change (the reported "renders only after a button press").
-            // Re-expose and a renderer reset are the same shape. So force the next present here; a DEVICE
-            // reset (GL context loss) also loses the streaming texture and must recreate it. ONE
-            // unconditional log line, because a forced present that fired and one that never installed
-            // look identical on an idle screen — the C4 silent-handler lesson.
+            // ⚠️ Force the next present when the platform may have blanked or swapped the surface behind
+            // our back; otherwise the identical-frame skip leaves the screen black until an input. That
+            // covers a resume, a short sleep (only the focus events arrive), and a rotation (a new
+            // surface — on a portrait-native phone, at boot). A device reset also loses the texture.
+            // Logged, because a forced present that fired and one that did not look the same.
             const char* redrawReason = nullptr;
             if (e.type == SDL_RENDER_DEVICE_RESET) {
                 video.invalidate_backbuffer(/*texture_lost=*/true);
@@ -1645,25 +1131,6 @@ int run(const AppConfig& cfg) {
                          e.window.event == SDL_WINDOWEVENT_SHOWN ||
                          e.window.event == SDL_WINDOWEVENT_RESTORED ||
                          e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED))) {
-                // ⚠️ **A SCREEN THAT WENT OFF AND CAME BACK IS NOT ALWAYS A BACKGROUND/FOREGROUND
-                // PAIR.** A short sleep can blank the panel while Android leaves the activity running:
-                // no pause, no re-expose, no resize — the only thing SDL delivers is the focus going
-                // away and coming back. The window is blank and the canvas is unchanged, which is the
-                // one combination the pixel gate below reads as "already on screen", so the screen
-                // stays black until an edit or a cursor move happens to change a pixel. Focus, SHOWN
-                // and RESTORED join the list for that: each costs one forced present, on an event
-                // that arrives when a human is looking at the screen anyway.
-                // ⚠️ **A ROTATION IS A SURFACE SWAP, AND ON A PORTRAIT-NATIVE PHONE THE FIRST ONE
-                // HAPPENS AT BOOT.** The window opens in the device's portrait, then SDL requests
-                // SENSOR_LANDSCAPE (windowed=false) and Android rotates — replacing the SurfaceView's
-                // buffer with a landscape one. The frames drawn before that settle are presented to the
-                // old surface, and once the app goes idle the C7 pixel gate skips re-presenting the
-                // NEW (blank) one because the canvas has not changed: a black screen until the first
-                // input redraws it. The landscape-native AYANEO never rotated, so it never showed this
-                // — the assumption "the surface we drew to is the one on screen", true there, broken
-                // here. A SIZE_CHANGED/RESIZED is exactly that swap announcing itself, so it forces the
-                // next present the same way a re-expose does. The texture is 640×480 regardless of
-                // window size, so it is not lost — only the "already on screen" assumption is.
                 video.invalidate_backbuffer(/*texture_lost=*/false);
                 redrawReason = "foreground / re-expose / resize / targets reset";
             }
@@ -1672,16 +1139,12 @@ int run(const AppConfig& cfg) {
                 std::fflush(stdout);
             }
 
-            // ⚠️ **A redraw is not a re-read, and the file browser needs the second one.** The arm
-            // above puts the same pixels back on a surface the platform took away; it does not ask the
-            // disk anything. While we were in the background the directory on screen may have been
-            // changed by a file manager or a download — and on Android by this app's own ADD FOLDER…,
-            // which grants through a picker activity and therefore ALWAYS lands while we are the
-            // backgrounded one. Inert on desktop: SDL sends this event on Android and iOS only.
+            // A redraw does not re-read the disk: the folder on screen may have changed while we were
+            // away (on Android, ADD FOLDER… always returns this way). Android and iOS only.
             if (e.type == SDL_APP_DIDENTERFOREGROUND) {
                 dispatch.refresh_browser_on_foreground();
-                // Back on the screen: draw again, and a song that played on through the background
-                // no longer needs the service (Java's onResume stops it too; `end` is idempotent).
+                // Back on the screen: draw again. A song that played on in the background no longer
+                // needs the service (`end` is idempotent).
                 bg.backgrounded = false;
                 if (bg.playingInBackground) {
                     bg.playingInBackground = false;
@@ -1690,37 +1153,19 @@ int run(const AppConfig& cfg) {
             }
 
             if (e.type == SDL_QUIT) {
-                // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
-                // built with HAVE_SIGNAL_H and nobody set SDL_NO_SIGNAL_HANDLERS — SDL's own SIGINT /
-                // SIGTERM translation. Both land here as an ordinary event.
-                //
-                // ⚠️ It is NOT the guarantee, and S10 assumed it was until it measured. On Windows SDL's
-                // signal code is `#undef HAVE_SIGNAL_H`'d out entirely, and on Linux it is gated on an
-                // ENVIRONMENT variable. So the desktop shell installs its own handler (see main.cpp) and
-                // this arm is the belt to that handler's braces — an UNCLEAN exit either way, so the
-                // flush below the loop keeps the work.
+                // A window close, or SDL's own SIGINT/SIGTERM translation where it has one. ⚠️ Not
+                // guaranteed (Windows has none), so main.cpp installs its own handler. Either way an
+                // unclean exit: the flush below the loop keeps the work.
                 running = false;
             } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F10) {
-                // Dev-only quit, and still NOT part of the button model — it is the desktop escape
-                // hatch, and it bypasses the dirty check on purpose (a dev killing a test run does not
-                // want to be asked).
-                //
-                // ⚠️ Not being ASKED is not the same as CHOOSING TO DISCARD, so F10 is an UNCLEAN exit
-                // and the flush below keeps the work. That is also the more useful behaviour for the
-                // person pressing it: F10 out of a test session, come back, and the session is still
-                // there. The one exit that throws work away is the one that says so first.
-                //
-                // The REAL exit is PROJECT → EXIT (S7): a handheld launcher offers no window chrome to
-                // close, so the app has to be able to give the process back from inside. It asks when
-                // there is unsaved work, and its YES is the app's ONE clean death — the only path that
-                // deletes the autosave rather than writing one.
+                // Dev-only quit, outside the button model, and it does not ask. An unclean exit, so the
+                // work is kept. The real exit is PROJECT > EXIT, which asks — the only exit that
+                // discards the autosave.
                 running = false;
             } else if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP ||
                        e.type == SDL_FINGERMOTION) {
-                // A virtual-button touch feeds SdlInput's OWN press/release, so downstream it is
-                // indistinguishable from a key or a pad — combos, key-repeat and held-de-dup all apply
-                // with nothing rewritten for fingers. A finger outside a button (on the frame, in a
-                // gap) is ignored.
+                // A touch on a virtual button feeds SdlInput's own press/release, so from here on it is
+                // a key like any other. A finger outside a button is ignored.
                 touch.handle_finger(e, input, now);
             } else {
                 input.handle_event(e, now);
@@ -1728,40 +1173,27 @@ int run(const AppConfig& cfg) {
         }
         input.tick(now);
 
-        // The frame's clock, handed to the dispatcher once. It feeds the L+B multi-tap window — a
-        // class whose behaviour is a function of time must be GIVEN the time, not go looking for it.
+        // The tick's clock, given to the dispatcher (multi-tap windows, timers).
         dispatch.set_now(static_cast<long long>(now));
 
         ui::ButtonEvent be;
         while (input.poll(be)) {
-            // ⚠️ Also here, and it is not redundant with the SDL loop above: KEY REPEAT is generated
-            // by `input.tick()` from the clock, so a held A+UP produces a ButtonEvent — and an edit —
-            // on frames where SDL delivered no event at all. Without this the screen would freeze
-            // while a held button was still changing the document underneath it.
+            // ⚠️ Counts as input too: key repeat comes from input.tick(), with no SDL event behind it.
             sawInput = true;
             ui::handle_button(be, dispatch, mapper, now);
         }
 
-        // Somebody is here — which is what keeps the poll rate fast (see `pace_tick`). Derived from
-        // the flag both drains above already set rather than stamped at each of them, so a third
-        // source of input cannot arrive without this noticing. ⚠️ `sawInput` is cleared once a FRAME
-        // and this reads it once a TICK, so it re-stamps for the rest of the frame — which only ever
-        // extends the hold-off, never shortens it.
+        // Somebody is here, which keeps the poll rate fast (pace_tick). Derived from `sawInput`, so a
+        // new input source cannot be missed. `sawInput` clears once a frame, so this re-stamps for the
+        // rest of the frame — which only lengthens the hold-off.
         if (sawInput) lastInputMs = now;
 
-        // ── THE AUDIO DEVICE COMES BACK ──────────────────────────────────────────────────────────
+        // ── The audio device comes back ──────────────────────────────────────────────────────────
         //
-        // Two ways to lose it — handed back on the way into the background, or taken away while open
-        // (audio-backend.h) — and one repair. Not hung off a foreground event: this loop only runs
-        // while the app is in front, and the second case has no event behind it at all.
-        //
-        // ⚠️ The close is not redundant. After a background it is a no-op; after a lost device it is
-        // what lets go of the stream object, which is this thread's job alone.
-        //
-        // ⚠️ Retried on a DEADLINE rather than a count — the app is silent until this succeeds, so
-        // there is no attempt at which giving up is the better answer. Inert on desktop.
-        // ⚠️ Not while backgrounded: the loop runs there now, and a stream closed on the way out would
-        // be reopened on the very next tick — the frozen-process bug the close exists to avoid.
+        // Lost two ways: released on the way into the background, or taken away while open
+        // (audio-backend.h). The close first lets go of a dead stream. Retried every 500 ms with no
+        // limit — the app is silent until it works. ⚠️ Not while backgrounded, or the stream released
+        // on the way out would reopen on the next tick.
         if (((bg.audioClosed && !bg.backgrounded) || audio.deviceLost()) && now >= audioReopenMs) {
             audio.closeStream();
             if (audio.openStream()) {
@@ -1774,11 +1206,10 @@ int run(const AppConfig& cfg) {
             std::fflush(stdout);
         }
 
-        // ── The scripted-run hooks (dev only; both are 0 unless an env var set them) ─────────────
+        // ── Scripted-run hooks (dev only; both are 0 unless an env var set them) ─────────────────
         if ((autoplayMs || quitAfterMs) && firstFrameMs == 0) firstFrameMs = now;
         if (autoplayMs && !autoplayFired && now - firstFrameMs >= autoplayMs) {
             autoplayFired = true;
-            // The user's path, not a shortcut around it: this is the same call the input layer makes.
             ui::handle_button({ui::Button::START, ui::ButtonAction::PRESSED, ui::ButtonMods{}}, dispatch,
                               mapper, now);
             std::printf("dev:     AUTOPLAY pressed START at %llu ms\n",
@@ -1791,49 +1222,37 @@ int run(const AppConfig& cfg) {
             running = false;
         }
 
-        // ⚠️ The thru verdict can CHANGE mid-session — picking a port on the MIDI screen is exactly how
-        // a user arrives at a loopback — and the boot line above would then be a lie for the rest of the
-        // run. One line per transition, never per frame: the screen says `THRU OFF: LOOP` where the pick
-        // was made, and this is the console's copy of the same news.
+        // THRU can change mid-session (picking a loopback port on the MIDI screen); one line per change.
         if (host.midi_in_thru() != midiThru) {
             midiThru = host.midi_in_thru();
             std::printf("midi:    THRU %s (device pick)\n", midiThru ? "on" : "OFF - loopback");
             std::fflush(stdout);
         }
 
-        // E5's Android backend is why there is a call here at all: a POLLED input backend
-        // (`MidiManager`, which delivers to Kotlin on a binder thread) fetches its bytes here into the
-        // ring the audio thread drains; the winmm and ALSA backends push from their own threads and
-        // this is a no-op for them. ⚠️ On Android this tick is therefore still in a key's path, which
-        // is why `pace_tick` keeps the fast rate for a polled port and for no other.
+        // A polled MIDI input backend (Android's) fetches its bytes here; the push backends make this a
+        // no-op. ⚠️ So on Android this tick is in a key's path, which is why pace_tick keeps the fast
+        // rate for a polled port.
         if (cfg.midiIn) cfg.midiIn->pump();
 
-        // Which poll the CCs about to be handed back belong to. See the rate meter's note: it is the
-        // quantum an apply would be collapsed into, so it has to be counted where the hand-back is,
-        // not where the frame is.
+        // Which poll the CCs about to be handed back belong to (the console's per-drain count).
         ++midiInConsole.drain;
 
-        // The lookahead pump. ⚠️ Since B3 it no longer releases the MIDI queue when the sender thread
-        // is running (host.h's set_midi_pump_external) — the scheduler's lookahead is still all its
-        // own. It is work-conserving: called four times as often it refills a quarter as much, and
-        // returns at once while the buffer is deep enough. ⚠️ It does NOT drain MIDI in any more —
-        // the audio thread does, at the top of every block (host.h) — it publishes what that drain
-        // routes against and takes back what it handled: the mapped knobs, thru, the console below.
+        // The lookahead refill. Work-conserving: it returns at once while the buffer is deep enough. It
+        // releases the MIDI queue only when the sender thread is off. MIDI in is drained by the audio
+        // thread; this publishes what that drain routes against and takes back what it handled.
         host.poll();
 
-        // Somebody is playing — a message the audio thread handled since the last tick. It re-arms the
-        // fast poll exactly as a button press does, so a knob sweep or a thru note is taken back at
-        // POLL_MS while it lasts and the loop goes quiet when the keyboard does.
+        // A MIDI message arrived since the last tick: keep the fast poll rate, as a button press does.
         if (const uint64_t seen = host.midi_in_messages(); seen != midiSeen) {
             midiSeen    = seen;
             lastInputMs = now;
         }
 
-        // ── PLAYING ON IN THE BACKGROUND (Android) ───────────────────────────────────────────────
+        // ── Playing on in the background (Android) ───────────────────────────────────────────────
         //
-        // The notification's STOP arrives as a request; acted on here, on the loop's own thread. Once
-        // the song stops in the background — that STOP or any other way — the service goes and the
-        // sound is handed back exactly as leaving the screen with nothing playing does.
+        // The notification's STOP arrives as a request and is acted on here. Once the song stops in
+        // the background, the service ends and the device is released, as when leaving with nothing
+        // playing.
         if (cfg.background.takeStopRequest && cfg.background.takeStopRequest() && host.is_playing())
             host.stop();
         if (cfg.background.publishPlaying) cfg.background.publishPlaying(host.is_playing());
@@ -1849,116 +1268,50 @@ int run(const AppConfig& cfg) {
             }
         }
 
-        // ── The tick ends here unless a frame is due ─────────────────────────────────────────────
-        //
-        // Everything above answers "has anything arrived?"; everything below turns the answer into
-        // pixels. See THE TWO RATES above the loop.
+        // The rest runs only when a frame is due (see Two rates, above the loop).
         if (!frameDue) { pace_tick(); continue; }
 
         state.isPlaying = host.is_playing();
         latency::frame_tick(state.isPlaying);
-        // Eight asks, one per track, because there is no ninth answer that covers them all. A track
-        // with no position hands back −1 in every field and the screens draw no marker for it —
-        // which is what makes auditioning a phrase leave CHAIN and SONG alone (ui/playhead.h).
+        // One position per track. A track with no position returns -1 everywhere and draws no marker.
         for (int t = 0; t < 8; ++t) {
             const PlaybackPosition p = host.playheads(t);
             state.playheads[t] = {p.songRow, p.chainId, p.chainRow, p.phraseId, p.phraseStep};
             const songcore::LiveSlot q = host.live_queue(t);
             state.liveQueue[t] = {q.targetRow, q.stop, q.immediate, q.armed()};
         }
-        // ⚠️ READ BACK FROM THE HOST, not trusted from the toggle that set it: `stop()` and a project
-        // load can both end a take, and a screen still drawing LIVE over a transport that has left it
-        // would blink markers at a queue nothing is holding.
+        // ⚠️ Read back from the host: stop() and a project load can both end a LIVE take.
         state.liveMode     = host.live_mode();
-        // The blink phase, handed to the drawing layer rather than reached for by it — see AppState.
+        // The blink phase, handed to the drawing layer.
         state.blinkPhaseMs = static_cast<int>(now % 1000);
         state.trackMask = host.track_mask();
 
-        // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored
-        // notes, the table's playing row, the SF2 preset list, the mixer's meters. AFTER the transport
-        // fields above — the waveform decay is a function of isPlaying, and the table row is only
-        // resolved on TABLE. `now` because the meters poll on their own 60 ms cadence, not per frame.
+        // Everything the UI reads back from the engine: the scope, the monitored notes, the table's
+        // playing row, the SF2 preset list, the meters. After the transport fields — the waveform's
+        // decay depends on isPlaying.
         feed.poll(engineRef, host, state, static_cast<long long>(now));
 
-        // ── SETTINGS > METRONOME, pushed live ────────────────────────────────────────────────────
-        //
-        // Read here, once a frame, rather than pushed from the row that edits it — the same shape
-        // `touch.set_feedback_settings` uses above and for the same reason: two atomic stores cost
-        // nothing, and there is then no mutation site that has to remember to tell the engine. The
-        // GRID (the transport epoch and the beat length) comes from the host, which is the only thing
-        // that knows when a take started; this is only the switch and the level.
-        //
-        // 0x80 lands at -12 dBFS, which sits over a full mix without asking for headroom the master
-        // has already spent. The click is summed below the limiter (audio-engine.h), so the scale is
-        // the finished output's, not the mix bus's.
+        // SETTINGS > METRONOME, read every frame so no edit site has to remember to push it. 0x80 lands
+        // at -12 dBFS; the click is summed below the limiter (audio-engine.h).
         engineRef.setMetronome(state.settings.metronomeEnabled,
                                static_cast<float>(state.settings.metronomeVolume) / 255.0f * 0.5f);
 
-        // ⚠️ **SETTINGS > SCALING, APPLIED — AND UNTIL C4 NOTHING APPLIED IT.** `scalingBilinear` was
-        // read from settings.json, written back to it, and drawn as the `SCALING: BILINEAR/INT` row,
-        // and `SdlVideo::set_scaling` had ZERO call sites in the entire tree: the video stayed on its
-        // `ScalingMode::INTEGER` default for the life of the process, on every platform. That is
-        // exactly what platform_caps.h calls "a setting which configures nothing is a lie told in the
-        // user's own UI", shipped on desktop and PortMaster as well as here.
-        //
-        // Polled rather than pushed on change, because there is no change notification to hook and
-        // there are two ways in (the SETTINGS row and a settings.json written by hand). `set_scaling`
-        // early-returns when the mode is unchanged, so the steady-state cost is one comparison per
-        // frame — and the texture recreation it does otherwise is why this cannot go in `present`.
+        // SETTINGS > SCALING, polled: the row and a hand-edited settings.json both change it. Returns
+        // early when unchanged; otherwise it recreates the texture, which is why it is not in present().
         video.set_scaling(state.settings.scalingBilinear ? ScalingMode::FIT : ScalingMode::INTEGER);
 
-        // ── C7: THE IDLE FRAME ───────────────────────────────────────────────────────────────────
+        // ── Idle frame skip ──────────────────────────────────────────────────────────────────────
         //
-        // The shell used to draw and present unconditionally, 60 times a second, whether or not one
-        // pixel had moved. On a handheld that was a known, accepted cost; on a PHONE it is a straight
-        // regression against the Compose app being replaced, which repaints only on real state
-        // changes precisely to keep from burning battery — users would have felt it as warmth.
-        //
-        // TWO GATES, and they answer different questions:
-        //
-        //   1. ANIMATION (here). While audio is audible the visualizer is genuinely moving, so the
-        //      screen must be redrawn every frame even though no input arrived. When nothing is
-        //      audible nothing animates, and a redraw can only reproduce what is already there —
-        //      EXCEPT after an input, which may have changed something. `audibleEdge` is Kotlin's
-        //      "one final bump on the active→idle edge": the frame where sound stops must still be
-        //      drawn once, or the scope freezes mid-wave instead of settling flat.
-        //   2. PIXELS (`video.present`). The safety net under gate 1 — if the frame is byte-identical
-        //      to what is on screen it is not sent. That is what makes gate 1 safe to be WRONG: a
-        //      state change this loop failed to anticipate still gets drawn, and merely costs a
-        //      comparison. ⚠️ It is also why gate 1 may be conservative and never has to be clever.
-        //
-        // ⚠️ The LOOP does not slow down — only the DRAWING stops. Input, `host.poll()` and the
-        // lifecycle watcher all still run on every POLL_MS tick. Kotlin could afford `delay(50L)` when
-        // idle because its visualizer was a separate coroutine; here that would be 50 ms of input lag.
-        // ⚠️ `has_pending_timed_work()` is the third term and it is NOT covered by the pixel net: the
-        // status line clears itself 3 s after it is set, with no input, and a frame that is never
-        // drawn is never compared. Without it a "PROJECT SAVED" would sit on a still screen forever.
-        //
-        // ⚠️ `resizeSettle` is the FOURTH, and it is a rotation/resize term the pixel net cannot cover
-        // either: a settling surface must be repainted at its NEW geometry with no input, or the C7 skip
-        // freezes a half-transitioned frame (the reported "rotate → half black / half theme bg, fixed
-        // only by touching a button"). While it counts down we both DRAW and clear the pixel-skip
-        // (invalidate_backbuffer), so each settle frame is genuinely re-uploaded at the current size.
-        //
-        // ⚠️ `metersFalling` is the FIFTH, and it is the one place where "audible" and "animating" come
-        // apart. The MIXER's peak markers age one segment per 60 ms peak poll and the SPECTRUM strip's
-        // bars and peak dots age one step per FRAME, but both age INSIDE the draw — so gate 1 closing is
-        // what stops them, and the pixel net cannot help because a frame that is never drawn is never
-        // compared. Stop the transport and each hangs for the fall it still owes (the markers ~5 s, the
-        // spectrum ~1 s), stepping down once per input instead — any input, mapped or not, because every
-        // SDL event sets `sawInput` and buys exactly one frame. The EQ editor's spectrum panel is a third
-        // case and a different one: nothing in it ages, but it is only ever as current as the last frame
-        // drawn, so a closed gate strands whatever was on screen. See TrackerLayout::has_falling_meters:
-        // every term is gated there on its module being drawn at all, since nothing off-screen ages and
-        // nothing would ever bring this term back to false.
-        // ⚠️⚠️ **`timedWorkEdge` IS THE SIXTH, AND WITHOUT IT THE THIRD TERM MISSES BY EXACTLY ONE
-        // FRAME — WHICH IS THE WHOLE FRAME THAT MATTERS.** `set_now()` (above) is what clears an
-        // expired status message, and it clears the DEADLINE in the same call. So on the one frame
-        // where the message actually goes away, `has_pending_timed_work()` has already gone false and
-        // the gate closes: the state is clean, the pixels still read "PROJECT SAVED", and they stay
-        // that way until the next input. Reported from the device, on both platforms — a message that
-        // sits on a still screen until a button is touched. This is `audibleEdge`'s shape applied to
-        // the same edge: the frame after the work finishes is still drawn once.
+        // Draw only when something may have changed; the loop itself keeps running. A frame is drawn if:
+        //   audible, audibleEdge        the scope is moving, or just stopped (one frame to settle flat)
+        //   sawInput, !drewOnce         an input arrived, or this is the first frame
+        //   settling                    a rotation or resize is settling (each frame forced through)
+        //   metersFalling               meters and spectrum still falling after the sound stopped
+        //   timedWork, timedWorkEdge    a status message that clears on a timer, and the frame it clears
+        //                               on (set_now() drops the deadline in the same call)
+        // Under this, present() skips a frame identical to the screen — the safety net that lets this
+        // gate be conservative. ⚠️ It cannot catch a frame that is never drawn, which is why the last
+        // three terms exist.
         const bool timedWork = dispatch.has_pending_timed_work();
         const bool metersFalling = layout.has_falling_meters(state);
         const bool audible = audio_is_audible(state);
@@ -1972,25 +1325,12 @@ int run(const AppConfig& cfg) {
             layout.draw(canvas, state);
             ++drawn;
 
-            // ── The frame, and around it whatever this orientation's skin is ──────────────────────
-            //
-            // ⚠️ The clear colour is passed per present rather than set once — the live theme's
-            // background in landscape (so the 4:3 frame on a 16:9 window reads as one surface, not a
-            // picture on a black wall), the device CASING in PORTRAIT2 — because a value that must be
-            // re-pushed on change is a value some future screen forgets to re-push (the theme editor can
-            // change the first mid-session). The on-screen controls' fingerprint joins the C7 gate so a
-            // press highlight is not skipped as an unchanged canvas. The portrait/landscape branch, the
-            // CRT overlay (D6) and the C7 signatures all live in `present_current` (declared above the
-            // render hooks), so the dispatcher's synchronous repaint takes the identical path.
             const bool didPresent = present_current();
             if (didPresent) ++presented;
             drewOnce = true;
 
-            // ⚠️ **ANCHORED ON THE PRESENT'S RETURN — see THE TWO RATES.** With vsync that instant IS
-            // a vblank, so the next frame starts half a period before the following one and the
-            // display's wait is spent in the loop's paced wait instead of inside this call. A frame
-            // that was DRAWN but not presented (the C7 pixel gate found it identical) blocked on
-            // nothing, so it anchors on the plain deadline below like a skipped one.
+            // ⚠️ Anchored on the present's return — a vblank, with vsync. See Two rates. A frame drawn
+            // but not presented blocked on nothing, so it takes the plain deadline below.
             if (didPresent) {
                 const Uint64 hz     = static_cast<Uint64>(video.refresh_hz());
                 const Uint64 period = (hz >= 30 && hz <= 240) ? 1000ull / hz : FRAME_MS;
@@ -2000,25 +1340,18 @@ int run(const AppConfig& cfg) {
             ++skipped;
         }
 
-        // The frame that neither presented nor blocked has no vblank to measure from, so it keeps the
-        // plain deadline. Re-anchored only when the loop has fallen a whole frame behind, so a stall
-        // costs one late frame and never a burst of catch-up ones.
+        // No vblank to measure from: the plain deadline. Re-anchored only once a whole frame behind, so
+        // a stall costs one late frame and never a burst of catch-up ones.
         if (nextFrameMs <= now) nextFrameMs = SDL_GetTicks64() + FRAME_MS;
 
         audibleEdge   = audible;     // so the first silent frame is still drawn (the flattened scope)
         timedWorkEdge = timedWork;   // …and the frame a timer's own work vanishes on
         sawInput      = false;
 
-        // A status line once a second, kept from the Phase 2 shell and kept for the same reason: on a
-        // headless box, over ssh, or during a handheld bring-up where you cannot yet see or hear
-        // anything, these numbers are what tell you the chain is alive. The FRAME COUNTER means the
-        // audio device is calling back, the PLAYHEAD means the sequencer is advancing, and VOICES
-        // means events are reaching the engine and turning into sound. Any one stuck at zero names the
-        // broken link. A window on screen does not answer that question when there is no screen.
-        //
-        // TRACK 0 of the eight, and it is the right one to print: a PHRASE or CHAIN audition plays
-        // track 0 by default, and under SONG any track advancing proves the clock is alive, which is
-        // the whole job of this line. −1 shows as such, and means that track has no position at all.
+        // Once a second on the console. The frame counter shows the audio device is calling back, the
+        // playhead that the sequencer advances, voices that notes reach the engine — whichever is stuck
+        // at zero names the broken link on a box with no screen. Track 0, which a PHRASE or CHAIN
+        // audition plays.
         if (cfg.console && now - lastStatus >= 1000) {
             lastStatus = now;
             const ui::TrackPlayhead& t0 = state.playheads[0];
@@ -2037,37 +1370,23 @@ int run(const AppConfig& cfg) {
 
     // ── Leaving ──────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ The watcher goes FIRST, and it is not tidiness: `bg` is a stack object in this frame and
-    // every line below can push an SDL event. A watcher left installed past this point is a
-    // use-after-free during teardown.
-    //
-    // ⚠️ Removing it does NOT make the Android exit path unsafe. A real destroy (`nativeSendQuit`)
-    // injects SDL_QUIT and unblocks the loop, so control arrives here and the two saves below run
-    // normally — the watcher's job was the Home press that never reaches this line at all.
+    // ⚠️ The watcher goes first: `bg` lives on this stack and teardown can push SDL events. On Android
+    // a real destroy still arrives here as SDL_QUIT, so the saves below run.
     SDL_DelEventWatch(on_app_event, &bg);
 
-    // ⚠️ **THE SENDER THREAD GOES BEFORE `host.stop()`, AND THE ORDER IS THE POINT.** Once it has
-    // joined, `poll()` owns the release again and the panic below runs on the only thread left — so the
-    // note-offs a stop owes are sent by definition rather than by winning a race against a thread that
-    // is being torn down. It also must be joined before `host` (its `pump` target) leaves scope, and
-    // before `audio.closeStream()` takes away the frame counter it reads.
+    // ⚠️ Join the sender thread before host.stop(), so the stop's note-offs go out from the only
+    // thread left — and before the host and the audio stream it reads go away.
     midiSender.stop();
 
-    // ⚠️⚠️ **THE INPUT PORT IS CLOSED HERE, AND IT IS A LIFETIME FIX RATHER THAN POLITENESS.** The port
-    // object belongs to the platform's `main` and OUTLIVES this function; the queue it delivers into is
-    // inside `host`, which does not. Leave it open and a byte arriving during teardown — a key released
-    // as the user quits, a controller's own all-notes-off — is a backend thread writing into a destroyed
-    // object. Unwire first, then close: `close()` is what waits for a callback already in flight.
+    // ⚠️ The port outlives this function, but `host`, which it delivers into, does not. Unwire, then
+    // close — close() waits for a callback already in flight.
     if (cfg.midiIn) {
         cfg.midiIn->set_sink(nullptr);
         cfg.midiIn->close();
     }
 
-    // The E2 verdict, and it prints on every run that opened a port — the counters ARE the instrument
-    // for a path whose failure is silence. Four stages, so a break can be located rather than guessed:
-    // the port received nothing (no cable, or the device is not sending), the queue dropped (the drain
-    // is not keeping up), the parser saw orphans (the stream was joined mid-message), or the router
-    // routed nothing (its counters say which of the reasons).
+    // The MIDI-in report, on every run that opened a port. Each stage counts, so a break can be
+    // located: nothing at the port, queue overflow, parser orphans, or the router routing nothing.
     if (cfg.midiIn && (host.midi_in_bytes() > 0 || midiInPortWasOpen)) {
         MidiInBase* base = cfg.midiIn;
         const songcore::MidiInputRouter& r = host.midi_in_router();
@@ -2077,11 +1396,8 @@ int run(const AppConfig& cfg) {
                     "%llu unsupported\n"
                     "         queue overflow %llu bytes, parser orphans %llu, messages with no record %llu\n"
                     "         dropped during an export %llu bytes, handled messages the UI never saw %llu\n"
-                    // ⭐ THE E4 LINE, and it is the one that says whether anything was HEARD. `routed`
-                    // above counts records the router made; these count records the ENGINE and the
-                    // CABLE were actually handed — the two differ by exactly the thru suppression, so a
-                    // silent keyboard on an EXTERNAL instrument names itself here instead of looking
-                    // like a dead cable three lines up.
+                    // What the engine and the cable were actually handed; differs from `routed` above
+                    // by the thru suppression.
                     "         injected %llu into the engine; thru %s: %llu to the cable, %llu suppressed\n",
                     static_cast<unsigned long long>(base->bytes_received()),
                     static_cast<unsigned long long>(base->callbacks()),
@@ -2102,8 +1418,7 @@ int run(const AppConfig& cfg) {
                     static_cast<unsigned long long>(host.midi_in_thru_sent()),
                     static_cast<unsigned long long>(host.midi_in_thru_suppressed()));
 
-        // ⭐ The rate a knob really turns at. Printed only when a CC actually arrived, so a run with
-        // none says nothing rather than printing a confident 0/s.
+        // How fast a knob really turns — only when a CC arrived.
         if (midiInConsole.ccTotal > 0) {
             const uint64_t spanMs = midiInConsole.ccLastMs - midiInConsole.ccFirstMs;
             std::printf("         CC: %llu in %.2f s = %.0f/s mean; PEAK %llu/s (busiest second), "
@@ -2119,72 +1434,46 @@ int run(const AppConfig& cfg) {
         }
     }
 
-    //
-    // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
-    // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card
-    // being hammered for a value that is still moving.
-    //
-    // ⚠️⚠️ …but NOT behind a dirty FLAG, and that distinction cost a real bug. This used to read
-    // `if (state.settingsDirty)`, and the only thing that ever SET that flag was the SETTINGS screen's
-    // edit arm — so a palette dialled in the THEME EDITOR (which mutates the theme directly, having no
-    // CursorContext to route through) armed nothing and was silently thrown away on quit. The verb below
-    // asks the DATA instead: it writes only when the bytes on disk differ from what memory holds, so it
-    // is still one write per session at most, and there is no longer anything for the next screen that
-    // touches the theme to forget. See ui/settings_store.h, and ptdispatch §27(c) — which fails if the
-    // arming ever comes apart again.
+    // Settings are saved once, here, not on every edit (a held A+UP repeats every 100 ms). ⚠️ Not
+    // behind a dirty flag: it compares with the bytes on disk, so an edit from any screen is saved.
     switch (ui::save_settings_if_changed(filesystem, state.settings, state.theme)) {
         using SW = ui::SettingsWrite;
         case SW::UNCHANGED: break;   // nothing moved this session; the file already says so
         case SW::SAVED:     std::printf("settings: saved\n"); break;
-        // A full SD card, a read-only mount. S9's lesson, one file over: the only save in the app with
-        // no result at all was a dropped error return, and it read as success.
+        // A full SD card, a read-only mount.
         case SW::FAILED:
             std::printf("settings: SAVE FAILED - %s\n", filesystem.settings_path().c_str());
             break;
     }
 
-    // ⚠️ **THE FLUSH — and every way out of the loop above arrives here, which is the design.**
-    //
-    // The 3 s debounce can lose the last few edits if the process is taken away before it fires, and on
-    // a handheld it very often is: the CFW menu kills the port, the battery goes, the power slider is a
-    // switch and not a request. So the exit path flushes synchronously, on the main thread, while there
-    // is still a heap and a filesystem to do it with.
-    //
-    // ⚠️ It is a NO-OP when the document is clean, and that is what keeps the file's meaning intact:
-    // "an autosave exists" must mean "the last session ended badly and there is work in it". A confirmed
-    // PROJECT → EXIT has already DELETED the autosave (confirm_accept) and made the project clean, so
-    // this writes nothing — the one exit the user was asked about is the one exit that leaves no trace.
-    // Everything else — SIGTERM, SIGINT, the window's close button, F10 — never asked, so it keeps the
-    // work, and the next launch says so.
+    // ⚠️ Every way out of the loop arrives here. Save unsaved work now: on a handheld the process is
+    // often killed before the 3 s autosave fires. A no-op on a clean document, so an autosave found at
+    // launch always means the last session ended badly. A confirmed PROJECT > EXIT has already deleted
+    // the autosave and left the project clean; every other exit (a signal, a window close, F10) keeps
+    // the work.
     dispatch.flush_autosave();
 
     host.stop();
 
-    // The B3 verdict, after the last message has left (the panic in `host.stop()` is part of the run).
+    // The MIDI timing report, after the last message (the stop's panic) has left. ⚠️ `senderOn` was
+    // latched at start: midiSender.stop() has cleared running() by now.
     if (jitterOn) {
         host.midi_out().set_send_observer(nullptr);
-        // ⚠️ `senderOn` is latched at START, not read here: `midiSender.stop()` above has already
-        // cleared `running()`, so asking the object would label every run "60 Hz" — a mislabelled
-        // measurement, which is worse than no measurement.
-        // The TEMPO is phase C's anchor: the clock block derives BPM from a wall clock and from the due
-        // frames, and this is the third number they are both checked against. Read from the live
-        // project, which is the same value the clock's period came from.
         midiJitter.report(senderOn ? "B3 sender thread" : "60 Hz frame loop (pre-B3)", audio.sampleRate(),
                           host.project().tempo);
     }
 
-    // ⚠️ BEFORE `audio.closeStream()`, which takes the negotiated frame count away with the device —
-    // and with it the only chance of a MEASURED output latency rather than the buffer-sized floor.
-    // Whether the poll is still in a key's path is the backend's to say (a polled port, Android).
+    // ⚠️ Before closeStream(), which takes away the frame count a measured output latency needs.
     latency::report(audio.sampleRate(), cfg.midiIn && cfg.midiIn->polled(), audio.outputLatency());
 
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();
     input.close_controllers();
-    arrowFont.unload();  // ⚠️ same reason as skin/helvFont: glyph textures belong to the renderer
-    helvFont.unload();  // ⚠️ same reason as skin: its glyph textures belong to the renderer being destroyed
-    skin.unload();   // ⚠️ before video.close(): the skin's textures belong to the renderer it destroys
-    screenOverlay.unload();  // ⚠️ same reason: the CRT overlay's texture belongs to that renderer
+    // ⚠️ Fonts, skin and overlay before video.close(): their textures belong to its renderer.
+    arrowFont.unload();
+    helvFont.unload();
+    skin.unload();
+    screenOverlay.unload();
     video.close();
     return 0;
 }

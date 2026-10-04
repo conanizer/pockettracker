@@ -3,28 +3,20 @@
 
 // ─── Scale quantization ───────────────────────────────────────────────────────────────────────────
 //
-// The pure half of roadmap 1.A: given a scale, a key and a MIDI note, which notes exist. No screen,
-// no engine, no project — every consumer (the note cursor today, the transposes and ARP/PIT later)
-// asks the same three functions so that "what is in this scale" has exactly one answer.
-//
-// ⚠️ THE IDENTITY CASE IS LOAD-BEARING, NOT AN OPTIMISATION. A chromatic scale — the default, and
-// what every existing song has — must leave every note exactly where it is, or the feature rewrites
-// music nobody asked it to touch. It is checked once, at the top of each entry point, rather than
-// falling out of the search: a search that happens to be the identity today is a search that stops
-// being the identity the first time someone changes a tie-break.
-//
-// ⚠️ A note is quantized in PITCH CLASS, so the octave a snap lands in is whatever the semitone
-// arithmetic gives. Snapping C#-4 down to C-4 stays in octave 4; snapping B#-style edge cases across
-// an octave boundary is the correct answer, not a wrap bug.
+// Given a scale, a key and a MIDI note: which notes exist. Pure; every consumer asks these functions,
+// so "what is in this scale" has one answer.
+// ⚠️ The chromatic case must leave every note exactly where it is (it is every existing song's scale),
+// so it is checked explicitly at the top of each entry point rather than falling out of the search.
+// Quantizing is by PITCH CLASS; a snap may cross an octave boundary, and that is correct.
 
 #include <algorithm>
 
-#include "effects.h"   // FX_SCA / FX_SCG and their nibble split — the phrase walk below reads them
+#include "effects.h"   // FX_SCA / FX_SCG and their nibble split
 #include "model.h"
 
 namespace songcore {
 
-/** True modulo — C++'s % is not it for negatives, and every caller here can hand one in. */
+/** True modulo — C++'s % is wrong for negatives. */
 inline int scale_mod12(int v) { return ((v % 12) + 12) % 12; }
 
 /** Is this MIDI note in the scale? Degree = its distance above the key, in pitch classes. */
@@ -35,16 +27,9 @@ inline bool scale_contains(const Scale& s, int key, int midi) {
 }
 
 /**
- * The nearest note in the scale, searching OUTWARD from `midi` and breaking a tie UPWARD.
- *
- * ⚠️ Upward on a tie is a decision, not a coin toss: a snap must never move a note below where the
- * author put it more often than above, and an equidistant pair (a note exactly between two degrees,
- * which only a whole-tone-ish scale produces) reads better resolved as a leading tone.
- *
- * Returns `midi` unchanged when the scale is chromatic, when the note is empty (< 0), or when the
- * scale has no enabled degree at all — the last is not reachable through the editor (it refuses to
- * disable the twelfth degree) but a hand-edited file can carry it, and silently returning nothing
- * would be a note that cannot be typed.
+ * The nearest in-scale note, searching OUTWARD from `midi`, ties broken UPWARD (reads as a leading
+ * tone). Returns `midi` unchanged when the scale is chromatic, the note empty (< 0), or the scale
+ * has no degree at all (only a hand-edited file can do that).
  */
 inline int scale_snap(const Scale& s, int key, int midi) {
     if (midi < 0 || scale_is_chromatic(s)) return midi;
@@ -56,19 +41,10 @@ inline int scale_snap(const Scale& s, int key, int midi) {
 }
 
 /**
- * Walk `steps` degrees of the scale from `midi`, clamped to [lo, hi].
- *
- * The note cursor's A+LEFT / A+RIGHT: one press is one note OF THE SCALE, which on a pentatonic is a
- * minor third and on the chromatic default is a semitone — so the gesture keeps the meaning it has
- * today and gains a new one only where the author asked for it.
- *
- * ⚠️ It walks semitone by semitone and counts the ones that land, rather than indexing a list of
- * degrees. Indexing needs the note to already BE in the scale; a note typed before the scale changed
- * is not, and the first press must move it somewhere sensible rather than nowhere. Walking answers
- * both cases with one rule.
- *
- * ⚠️ At the ends it CLAMPS to the last in-scale note, not to `lo`/`hi` themselves — the MIDI ceiling
- * is not a scale degree, and stepping up into a note the scale forbids would undo the whole point.
+ * Walk `steps` scale degrees from `midi`, clamped to [lo, hi] — the note cursor's A+LEFT/RIGHT (a
+ * semitone on chromatic, a minor third on a pentatonic).
+ * Walks semitone by semitone counting in-scale notes, so a note typed before the scale changed still
+ * moves sensibly. At the ends it clamps to the last IN-SCALE note, never to `lo`/`hi` themselves.
  */
 inline int scale_step(const Scale& s, int key, int midi, int steps, int lo, int hi) {
     if (steps == 0) return midi;
@@ -88,11 +64,8 @@ inline int scale_step(const Scale& s, int key, int midi, int steps, int lo, int 
 }
 
 /**
- * The twelve enable flags as a bit mask, bit 0 = the root. The form the UI's cursor carries, so that
- * a cell can be asked "is this note typeable" without holding a Project.
- *
- * A malformed pool answers "chromatic" rather than "nothing": an empty mask is a cell in which no
- * note can be typed at all.
+ * The twelve enable flags as a bit mask, bit 0 = the root, so a cell can ask "is this typeable"
+ * without a Project. A malformed pool answers chromatic — an empty mask would forbid every note.
  */
 inline unsigned scale_mask(const Scale& s) {
     if (s.enabled.size() != 12) return 0x0FFFu;
@@ -102,11 +75,7 @@ inline unsigned scale_mask(const Scale& s) {
     return m == 0 ? 0x0FFFu : m;
 }
 
-/**
- * A slot of the project's pool, clamped. Out of range answers slot 00 rather than the chromatic
- * default, because a pool that is short is a malformed file and slot 00 is the scale the song was
- * written against; a hand-typed `SCA` slot beyond the pool is the same case.
- */
+/** A pool slot, clamped. Out of range answers slot 00 (the song's base scale), not chromatic. */
 inline const Scale& scale_at(const Project& p, int slot) {
     static const Scale kChromatic{};
     if (p.scales.empty()) return kChromatic;
@@ -121,30 +90,14 @@ struct ScaleAt {
 };
 
 /**
- * The scale a PHRASE puts one of its rows in: the last `SCA` (or `SCG`) on or above `row`, falling
- * back to slot 00 and the project's key when the phrase carries none. This is what the note cursor
- * asks, so that typing under an `SCA` offers that command's notes.
- *
- * ⚠️⚠️ **IT READS THE SONG, NEVER `TrackState`, AND THAT DISTINCTION IS THE WHOLE SAFETY ARGUMENT.**
- * A track's live scale is scheduler state, and the scheduler runs TWO PHRASES AHEAD of what is being
- * heard — wiring the cursor to it would quantize a typed note to the scale of a bar the player has
- * not reached yet, the shape of every LIVE-mode defect this project has had. What this walks instead
- * is the authored cells of the phrase that is on screen: a value the transport cannot move, that
- * reads the same whether anything is playing, and that a screenshot tool can reproduce.
- *
- * ⚠️ The two commands are resolved exactly as `Sequencer` resolves them, or the cursor and the sound
- * would disagree about a step carrying both: within one row the last of each wins across the three
- * slots, then `SCG` is applied and `SCA` second — the narrower command over the broader one.
- *
- * ⚠️ A command on the cursor's OWN row counts, because the scheduler applies both above the note on
- * their step. Typing a note on the same row as an `SCA` gets that command's scale, which is what the
- * screen shows.
- *
- * ⏸️ It sees this phrase and nothing else. An `SCA` in an EARLIER phrase of the same chain, and an
- * `SCG` typed on another track, both reach this row at playback and are invisible here — the cursor
- * then offers slot 00 while the sound follows the command. Widening the walk to the chain is the
- * obvious next step and needs the chain the phrase is being viewed THROUGH, which a phrase reached
- * from the pool does not have.
+ * The scale a PHRASE puts one of its rows in: the last `SCA` / `SCG` on or above `row`, else slot 00
+ * and the project key. What the note cursor asks.
+ * ⚠️ Reads the SONG, never `TrackState`: the scheduler runs two phrases ahead, so its live scale would
+ * quantize to a bar not yet heard. The authored cells read the same playing or stopped.
+ * ⚠️ Resolved as `Sequencer` does: last-wins per command across the three slots, then SCG, then SCA
+ * on top. A command on the cursor's own row counts.
+ * ⏸️ Sees this phrase only: an `SCA` earlier in the chain, or an `SCG` on another track, is heard at
+ * playback but invisible here. Widening needs the chain the phrase is viewed through.
  */
 inline ScaleAt phrase_scale_at_row(const Phrase& ph, int row, int projectKey) {
     ScaleAt at{0, projectKey};
@@ -163,10 +116,8 @@ inline ScaleAt phrase_scale_at_row(const Phrase& ph, int row, int projectKey) {
     return at;
 }
 
-/**
- * How many degrees this scale actually has, 1..12. The SCALE screen's LEN readout, and the guard the
- * editor uses to refuse turning the last degree off.
- */
+/** How many degrees this scale has, 1..12 — the SCALE screen's LEN, and the guard against turning
+ *  off the last one. */
 inline int scale_degree_count(const Scale& s) {
     if (s.enabled.size() != 12) return 12;
     int n = 0;

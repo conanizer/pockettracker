@@ -1,4 +1,4 @@
-// ─── shell/image.cpp — the ONE stb_image implementation TU (convergence plan D2) ─────────────────
+// ─── shell/image.cpp — the ONE stb_image implementation TU ───────────────────────────────────────
 //
 // ⚠️ This is the only translation unit in the whole tree that pulls in the stb_image implementation.
 // The header is vendored under native/vendor/ so the licence guard (build-portmaster.sh) can see it,
@@ -8,9 +8,8 @@
 
 #include "image.h"
 
-// PNG only: every skin, overlay and theme asset this shell decodes is a PNG (the world ThemeLoader.kt
-// loads from). STBI_ONLY_PNG compiles the decoder + the PNG path and nothing else — no JPEG/BMP/GIF/…
-// code we do not ship an asset for. Add a format here the day an asset needs it, not before.
+// PNG only: every asset this shell decodes is a PNG, so STBI_ONLY_PNG compiles that path alone. Add
+// a format the day an asset needs it.
 #define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
 // Resolves via the PUBLIC native/ include root the engine exports (inherited through pt-ui). No

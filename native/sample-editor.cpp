@@ -389,10 +389,7 @@ void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
     sampleClipboardLength = len;
 }
 
-// Prepare the sample-editor's LEFT/RIGHT/MONO source preview NATIVELY: the Kotlin side used
-// to pull the full left + right PCM into Java arrays (plus a third for the MONO average) —
-// up to 3x the sample size transiently on the capped Java heap, exactly the OOM class the
-// native load paths exist to avoid. Slot→slot copy in native memory instead.
+// Prepare the sample editor's LEFT/RIGHT/MONO source preview as a slot→slot copy in native memory.
 void AudioEngine::prepareSourcePreview(int dstId, int srcId, int mode) {
     if (dstId < 0 || dstId >= 256 || srcId < 0 || srcId >= 256 || dstId == srcId) return;
     // Stops voices reading the dst (scratch) slot and holds the edit mutex — which also
@@ -741,10 +738,8 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
         LimiterModule lim;
         lim.reset();
         lim.setPreGain(1.0f + (limiterPreGain / 255.0f) * 3.0f);
-        // One call over the whole channel. `LimiterModule::process` goes a frame at a time because
-        // its buffer is INTERLEAVED and the two limiters must not read each other's samples; this
-        // buffer is de-interleaved mono, so the block API walks it directly. `ProcessBlock` carries
-        // nothing across calls but `peak_`, which the loop carried too — the output is identical.
+        // One call over the whole channel: this buffer is de-interleaved mono, so the block API
+        // walks it directly (`process` goes frame by frame only because its buffer is interleaved).
         lim.limL.ProcessBlock(buf, static_cast<size_t>(len), lim.preGain);
     };
 
@@ -766,17 +761,11 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
 
     // ── STEREO: what counts as a candidate, and how good it is ───────────────────────────────────
     //
-    // A stereo seam is only clean where BOTH channels are near zero, and the two channels of real
-    // audio almost never cross on the same frame — so "both cross here" as a requirement would find
-    // nothing and snap would silently stop working (the report's "there is going to be much less snap
-    // points"). Instead: the candidates are the frames where EITHER channel crosses, and the one that
-    // wins is the one whose WORST channel is quietest — `max(|L|, |R|)`, because the louder of the two
-    // steps is the click you hear. A true double crossing scores ~0 and beats everything, which is
-    // what makes this an improvement rather than a different answer.
-    //
-    // ⚠️ On a DUAL-MONO file (L == R — what `write_wav_mono` and every CHOP produce) every left
-    // crossing is a right crossing scoring 0, so the first one wins and the answer is bit-identical to
-    // the left-only search. The new path cannot regress the common case.
+    // Real channels rarely cross on the same frame, so "both cross" would find nothing. The
+    // candidates are frames where EITHER channel crosses, and the winner has the quietest WORST
+    // channel (`max(|L|, |R|)` — the louder step is the click). A true double crossing scores ~0.
+    // ⚠️ On DUAL-MONO (L == R, every CHOP) the first left crossing scores 0 and wins, matching the
+    // left-only search.
     const bool stereo = (mode == 2);
 
     auto val = [&](int i) -> float {
@@ -800,8 +789,8 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
     float bestScore = 0.0f;
     bool  found     = false;
 
-    // Returns true when the search can stop — which for a single signal is the FIRST candidate, the
-    // behaviour this has always had. Stereo keeps looking: a nearer candidate is not a better one.
+    // Returns true when the search can stop: the FIRST candidate for a single signal. Stereo keeps
+    // looking — a nearer candidate is not a better one.
     auto consider = [&](int i) {
         if (i < 1 || i >= len || !crosses(i)) return false;
         const float sc = score(i);
@@ -811,9 +800,8 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
 
     // dir > 0: forward only; dir < 0: backward only; dir == 0: nearest (both ways).
     // Directional search is seeded from the already-stepped `frame`, so the result is always at or
-    // past `frame` in the move direction — a marker can never snap back behind itself and stick (#8).
-    // Walking outward in distance order is also what breaks a stereo score tie in favour of the
-    // NEAREST candidate: `sc < bestScore` is strict.
+    // past `frame` in the move direction — a marker can never snap back behind itself and stick.
+    // Walking outward in distance order breaks a stereo score tie toward the NEAREST candidate.
     for (int d = 0; d <= searchRadius; d++) {
         if (dir >= 0 && consider(frame + d)) break;
         if (dir <= 0 && consider(frame - d)) break;

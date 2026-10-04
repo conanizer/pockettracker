@@ -1,31 +1,21 @@
 // latency_probe.h — what the app can know about its own latency, measured rather than read.
 //
-// latency-review.md §1 puts two large terms in the budget and both are READINGS, not results: the wait
-// for the app to look at an input, and the time an audio block spends in the output buffer (claimed
-// 12–42 ms). This measures the first outright and the honest half of the second, and it is
-// deliberately loud about the half it cannot see. `ptlat` and a microphone are the only things that
-// can see that half.
+// Two large terms in the latency budget are usually READINGS, not results: the wait for the app to
+// look at an input, and the time an audio block spends in the output buffer. This measures the first
+// and the visible half of the second, and is loud about the half it cannot see (only a microphone can).
 //
-// ⚠️ **TWO PERIODS, BECAUSE THE LOOP HAS TWO RATES** (app.cpp, THE TWO RATES). The POLL period is the
-// one that costs an input its wait; the FRAME period is the drawing, and it is here because the split
-// that made the first small is exactly the thing that could quietly wreck the second.
+// ⚠️ TWO PERIODS, BECAUSE THE LOOP HAS TWO RATES (app.cpp): the POLL period costs an input its wait;
+// the FRAME period is the drawing, kept here because splitting the two could quietly wreck the second.
 //
-// ⚠️ **A GLOBAL, AND DELIBERATELY NOT ON THE AUDIO SEAM.** The frame loop and the audio callback are
-// on different threads in different files, and the only object they share is `AudioBackend`. That seam
-// reports what the DEVICE is doing — its rate, its latency — and carries no instrument: accumulators
-// put there would be shipped on every platform forever for the sake of a diagnostic that is off by
-// default. So they sit here, written with relaxed atomics from both sides and read once on the way out,
-// and `report` is handed the seam's latency figure as an argument.
+// ⚠️ A GLOBAL, NOT ON THE AUDIO SEAM: `AudioBackend` reports what the device does and carries no
+// instrument, so a default-off diagnostic does not ship in it. Written with relaxed atomics from both
+// threads, read once on the way out; `report` is handed the seam's latency figure.
 //
-// ⚠️ **TWO WINDOWS, NOT ONE, AND THE SPLIT IS THE POINT.** §11: a figure taken with the transport
-// stopped and one taken under a full mix are different claims. A single session average silently
-// blends them in whatever ratio the operator happened to play, so every number below is binned by
-// whether the transport was running.
+// ⚠️ TWO WINDOWS: a figure taken with the transport stopped and one under a full mix are different
+// claims, so every number below is binned by whether the transport was running.
 //
-// ⚠️ **THE CALLBACK GAP IS SDL-ONLY.** `SdlAudioEngine::audioCallback` calls it; Oboe's callback does
-// not, because `oboe-audio-engine.cpp` is below `shell/` and cannot see this header. Android's gap rows
-// are therefore empty — its output figure comes through the seam instead, which is the one term of the
-// two that Oboe can report better than this header could measure it.
+// ⚠️ THE CALLBACK GAP IS SDL-ONLY: oboe-audio-engine.cpp is below shell/ and cannot see this header.
+// Android's output figure comes through the seam instead.
 //
 //   POCKETTRACKER_LATENCY=1   accumulate, and print the account on exit
 //
@@ -48,10 +38,9 @@ namespace latency {
  * One binned accumulator. Min/mean/max of an interval, plus the two counts that say something the
  * mean cannot: how often it ran long, and how often it did not wait at all.
  *
- * ⚠️ `over` and `burst` are the interesting ones. A loop whose MEAN is 16.7 ms and whose max is 40 is
- * not a 16.7 ms loop for the press that landed in the 40. And a run of callbacks arriving back to back
- * is a driver handing over several buffers at once — the only hint from inside the process about the
- * queue depth §1 admits it does not know.
+ * ⚠️ `over` and `burst` are the interesting ones: a 16.7 ms mean with a 40 ms max is not a 16.7 ms
+ * loop for the press that landed in the 40, and callbacks back to back are a driver handing over
+ * several buffers at once — the only hint from inside the process about its queue depth.
  */
 struct Bin {
     std::atomic<uint64_t> n{0}, sumNs{0}, maxNs{0}, over{0}, burst{0};
@@ -149,8 +138,8 @@ inline void frame_tick(bool isPlaying) {
  * ⚠️ Relaxed atomics and nothing else — no lock, no allocation, no printf. This runs in the same place
  * the engine's DSP does, and an instrument that perturbs the thing it measures is worse than none.
  *
- * `frames` is what the device actually handed over, not what was asked for. That distinction is the
- * whole of §11's warning about a boot line printing 512 while the device runs 940.
+ * `frames` is what the device actually handed over, not what was asked for (a boot line can print
+ * 512 while the device runs 940).
  */
 inline void audio_callback(int frames, int sampleRate) {
     if (!enabled()) return;
@@ -161,9 +150,8 @@ inline void audio_callback(int frames, int sampleRate) {
     const uint64_t last = s.lastCbNs.exchange(t, std::memory_order_relaxed);
     if (last != 0) {
         const int bin = s.playing.load(std::memory_order_relaxed);
-        // "Ran long" is twice the nominal block; "back to back" is a tenth of it. Both follow the
-        // frames AND the rate the device negotiated — a nominal taken at a constant 44100 is 8.8%
-        // loose in both directions on a 48 kHz device, which is what Android now opens at.
+        // "Ran long" is twice the nominal block, "back to back" a tenth of it — both from the
+        // negotiated frames AND rate (a constant 44100 is 8.8% loose on a 48 kHz device).
         const uint64_t sr      = uint64_t(sampleRate > 0 ? sampleRate : 44100);
         const uint64_t nominal = uint64_t(frames) * 1000000000ull / sr;
         s.cb[bin].add(t - last, nominal * 2, nominal / 10);
@@ -182,14 +170,11 @@ inline void print_bin(const char* what, const Bin& b, const char* unit) {
 /**
  * The account, on the way out.
  *
- * ⚠️ **IT NAMES WHAT IT DID NOT MEASURE INSTEAD OF QUIETLY LEAVING IT OUT OF THE SUM.** When the
- * backend hands over a floor rather than a figure — always on SDL, and on Oboe wherever the platform
- * withholds a timestamp — the driver's own queue is missing from the total, and a confident number
- * there would be worse than no number. The sum says "at least" and points at `ptlat` in that case.
+ * ⚠️ IT NAMES WHAT IT DID NOT MEASURE: when the backend hands over a floor (always on SDL), the
+ * driver's queue is missing from the total, and the sum says "at least".
  *
- * ⚠️ Refuses to judge a bin below 200 samples and says so — a mean period from a handful of frames is
- * noise, and a session where the transport never ran would otherwise print a playing row of zeros that
- * reads like a result.
+ * ⚠️ Refuses to judge a bin below 200 samples — a session where the transport never ran would
+ * otherwise print a playing row of zeros that reads like a result.
  */
 inline void report(int sampleRate, bool inputPolled, AudioBackend::OutputLatency out) {
     if (!enabled()) return;
@@ -224,11 +209,9 @@ inline void report(int sampleRate, bool inputPolled, AudioBackend::OutputLatency
                     "    handed %d. One of the two is not reading the device.\n", out.frames, fr);
     }
 
-    // The sum, and the missing term named beside it. A waiting row is HALVED because a gesture
-    // arrives uniformly inside the period, so the average wait is half of it — the worst case is the
-    // whole. ⚠️ The poll is in a MIDI key's path only for a backend the loop has to pump (Android);
-    // a pushed byte waits for the audio thread's next block and nothing else — the drain runs there
-    // and stamps the block's first frame, so there is no lead-in row any more.
+    // The sum, the missing term named beside it. A waiting row is HALVED: a gesture arrives uniformly
+    // inside the period. ⚠️ The poll is in a MIDI key's path only for a pumped backend (Android); a
+    // pushed byte waits only for the audio thread's next block.
     const Bin&   busiest = s.poll[1].n.load(std::memory_order_relaxed) >= s.poll[0].n.load(std::memory_order_relaxed)
                                ? s.poll[1] : s.poll[0];
     const Bin&   cbBusy  = s.cb[1].n.load(std::memory_order_relaxed) >= s.cb[0].n.load(std::memory_order_relaxed)

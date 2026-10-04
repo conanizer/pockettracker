@@ -6,9 +6,7 @@ namespace pt::ui {
 
 namespace {
 
-// Two of the app's rows, in the app's own face — the top one carries the words, the bottom one the
-// bar. Nothing here is a second typographic voice: `FONT_SCALE` and `ROW_HEIGHT` are what every other
-// line of text on every screen uses.
+// Two of the app's rows in the app's own font: the words on the top one, the bar on the bottom.
 constexpr int TEXT_Y   = TEXT_PADDING;                    // row 1
 constexpr int ROW2_Y   = ROW_HEIGHT;                      // row 2
 constexpr int GLYPH_W  = (5 + CHAR_SPACING) * FONT_SCALE; // one column's advance
@@ -16,13 +14,11 @@ constexpr int GLYPH_W  = (5 + CHAR_SPACING) * FONT_SCALE; // one column's advanc
 constexpr int INSET = 10;   // the left/right margin every bar in the app uses
 constexpr int GAP   = GLYPH_W;
 
-// The bar sits inside row 2's text band rather than filling the row, so it reads as a readout beside
-// the percentage instead of as a block the row is made of.
+// The bar sits inside row 2's text band, a readout beside the percentage rather than a block.
 constexpr int BAR_H = 9;
 constexpr int BAR_Y = ROW2_Y + TEXT_PADDING + 3;
 
-// One full sweep of the indeterminate block. Slow enough to read as progress rather than as a
-// flicker, fast enough that a stalled load is obvious within a second.
+// One sweep of the indeterminate block: slow enough not to flicker, fast enough that a stall shows.
 constexpr int SWEEP_MS = 1400;
 
 constexpr const char* PREFIX = "LOADING ";
@@ -36,9 +32,7 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
     c.fill_rect(0, 0, DESIGN_W, LOADING_STRIP_H, t.meterBackground);
 
     // ── Row 1: what is being opened, and the way out ─────────────────────────────────────────────
-    //
-    // "B=STOP" is right-aligned and measured first, because it is the one part that must never be
-    // what gets clipped: it is the only place in the app that says a load can be stopped at all.
+    // "B=STOP" is measured first: it is the one part that must never be clipped.
     const int cancelW = Canvas::text_width(CANCEL, CHAR_SPACING, FONT_SCALE);
     c.draw_text(CANCEL, DESIGN_W - INSET - cancelW, TEXT_Y, t.textParam, CHAR_SPACING, FONT_SCALE);
 
@@ -50,11 +44,8 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
     c.draw_text(line, INSET, TEXT_Y, t.textValue, CHAR_SPACING, FONT_SCALE);
 
     // ── Row 2: the bar, and the percentage where there is one ────────────────────────────────────
-    //
-    // ⚠️ A percentage only where the file states a total. Below zero means it does not — an mp3 with
-    // no Xing header — and an invented number there is a lie the user can only find out about by
-    // watching it stop. The bar takes the width the number would have used, rather than leaving a gap
-    // where a number is not coming.
+    // ⚠️ A percentage only where the file states a total (below zero: it does not, e.g. an mp3 with
+    // no Xing header). Without one, the bar takes the number's width.
     int barW = DESIGN_W - INSET * 2;
     if (s.progress >= 0.0f) {
         const float       p   = s.progress > 1.0f ? 1.0f : s.progress;
@@ -65,9 +56,7 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
         barW -= w + GAP;
     }
 
-    // ⚠️ A BACKGROUND ROLE USED AS A BLOCK, WHICH IS WHAT IT IS FOR. The bar is a filled shape on the
-    // strip's own near-black, not text, so it takes a GROUND colour one step up from the strip rather
-    // than any of the ink roles — an ink chosen to be read against something else is a smudge here.
+    // A filled shape, so a ground colour one step up from the strip rather than an ink role.
     c.fill_rect(INSET, BAR_Y, barW, BAR_H, t.rowEvery4th);
     c.stroke_rect(INSET, BAR_Y, barW, BAR_H, t.textParam);
 
@@ -76,8 +65,7 @@ void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme&
         const int   fill = static_cast<int>(p * static_cast<float>(barW - 2) + 0.5f);
         if (fill > 0) c.fill_rect(INSET + 1, BAR_Y + 1, fill, BAR_H - 2, t.textValue);
     } else {
-        // ⚠️ **A BLOCK THAT SWEEPS, NOT A BAR THAT FILLS.** Nothing here knows a total, and what this
-        // claims is the only true thing available: the load is still running.
+        // A sweeping block, not a filling bar: nothing knows a total, only that the load is running.
         const int   blockW = barW / 5;
         const int   travel = barW - 2 - blockW;
         const int   phase  = s.elapsedMs % (SWEEP_MS * 2);

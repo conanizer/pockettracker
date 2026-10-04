@@ -1,27 +1,15 @@
 #pragma once
 
-// ─── The confirm dialog — the port's SECOND true modal ────────────────────────────────────────────
+// ─── The confirm dialog ──────────────────────────────────────────────────────────────────────────
 //
-// A 261×57 box in the middle of a dimmed screen: a question, and "A=YES  B=NO". Kotlin's
-// `drawSimpleConfirmDialog`, which serves four questions (CLEAN SEQ/INST, NEW PROJECT, CHANGE TYPE,
-// RECOVER WORK) and is the thing standing between the user and every destructive action in the app.
+// A 261×57 box on a dimmed screen: a question and "A=YES  B=NO" — the thing standing between the
+// user and every destructive action in the app.
 //
-// ⚠️ ONE STATE, WHERE KOTLIN HAS FOUR BOOLEANS — and that is the whole reason this is a file rather
-// than a branch in the dispatcher. Android tracks `showCleanDialog`, `showNewProjectDialog`,
-// `showInstrTypeDialog` and `showRecoveryDialog` separately, and every button handler that must not
-// fire underneath a modal has to test all four:
+// ⚠️ ONE STATE, NOT A FLAG PER QUESTION: every handler that must not fire under a modal tests
+// `is_open()`, and adding a question does not change that. A modal one handler forgets is a button
+// that misfires once and reads as a mis-press.
 //
-//     showCleanDialog || showNewProjectDialog || showInstrTypeDialog || showRecoveryDialog || …
-//
-// with a comment above it warning that "every new show*Dialog-style modal state MUST be added to
-// this predicate". A modal one handler forgets is a button that does the wrong thing exactly once —
-// a bug nobody reports, because it reads as a mis-press. An enum with an `is_open()` cannot be
-// forgotten: there is one thing to test, and adding a question does not change it. (Same move as
-// S6a's `BrowserPurpose`, which replaced Android's untyped `instrumentFileBrowserAction` strings.)
-//
-// ⚠️ IT HAS NO CURSOR. Kotlin's `cleanDialogCursor` (0 = YES, 1 = NO) is dead state: it is passed to
-// `drawCleanDialog`, which marks it `@Suppress("UNUSED_PARAMETER")` and forwards a title. The dialog
-// draws a fixed "A=YES  B=NO" and the buttons ARE the answer. So there is nothing here to move.
+// It has no cursor: the dialog draws a fixed "A=YES  B=NO" and the buttons ARE the answer.
 
 #include <string>
 
@@ -40,18 +28,12 @@ struct ConfirmDialogState {
         EXIT,          // PROJECT → EXIT, and only when the project is DIRTY (the shell only)
 
         /**
-         * RECOVER WORK? — raised at BOOT, by nobody's button, when an autosave survived to launch
-         * (S10). The only question in the app the user did not ask for.
+         * RECOVER WORK? — raised at boot when an autosave survived to launch; the only question the
+         * user did not ask for.
          *
-         * ⚠️ **AND THE ONLY ONE WHOSE `B` DOES REAL WORK.** Every other Kind's B is a pure cancel:
-         * it closes the box and the world is exactly as it was. B here means *discard my unsaved
-         * work*, and it has to DELETE the autosave — because the file's whole meaning is "the last
-         * session ended badly", and a NO that left it on disk would ask the same question again on
-         * the next launch, and the next, forever.
-         *
-         * So `confirm_cancel()` stops being a one-liner. That is worth saying out loud rather than
-         * letting a future reader assume the symmetry still holds: cancelling this dialog is an
-         * action, and ptdispatch pins that the other five stayed pure.
+         * ⚠️ AND THE ONLY ONE WHOSE `B` DOES REAL WORK: it discards the unsaved work and must DELETE
+         * the autosave, or the same question returns every launch. Every other Kind's B is a pure
+         * cancel, so `confirm_cancel()` is not one.
          */
         RECOVER,
     };
@@ -59,14 +41,9 @@ struct ConfirmDialogState {
     Kind kind = Kind::NONE;
 
     /**
-     * What the pending answer needs to know that its Kind does not — today, only CHANGE_TYPE's
-     * DIRECTION (+1 for A+RIGHT, −1 for A+LEFT).
-     *
-     * ⚠️ It exists because the TYPE cell stopped being a two-way toggle. With two types the question
-     * "change it to what?" had one answer and the dialog could forget which button raised it; with
-     * three it does not, and the direction has to survive the round trip through the box or A+LEFT
-     * silently becomes A+RIGHT the moment the slot has a source loaded. Nothing else reads it, and it
-     * resets on `close()` so a stale value cannot reach the next dialog.
+     * What the pending answer needs that its Kind does not — today only CHANGE_TYPE's direction
+     * (+1 for A+RIGHT, −1 for A+LEFT). With three types the direction must survive the round trip
+     * through the box. Reset on `close()`.
      */
     int arg = 0;
 
@@ -79,15 +56,10 @@ struct ConfirmDialogState {
 std::string confirm_dialog_title(ConfirmDialogState::Kind kind);
 
 /**
- * THE confirm box — the geometry, the frame and the "A=YES  B=NO" line — asking `title`.
- *
- * ⚠️ IT IS SEPARATE FROM `draw_confirm_dialog` FOR ONE CALLER: the SAMPLE EDITOR asks its own
- * "ARE YOU SURE?" out of its own state, and used to draw its own box to do it — a second confirm
- * dialog, a different size, with a rule along its top edge where this one has an outline. Two boxes
- * asking the same question in two looks is the drift; one box and two callers is not.
- *
- * ⚠️ IT DOES NOT DIM THE SCREEN. `draw_confirm_dialog` does that before calling this; the sample
- * editor instead COVERS its own surface, which is a decision about that dialog and not about boxes.
+ * THE confirm box — geometry, frame and the "A=YES  B=NO" line — asking `title`.
+ * Separate from `draw_confirm_dialog` so the SAMPLE EDITOR can ask its own "ARE YOU SURE?" in the
+ * same box. ⚠️ It does not dim the screen: `draw_confirm_dialog` does that; the sample editor covers
+ * its own surface instead.
  */
 void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t);
 

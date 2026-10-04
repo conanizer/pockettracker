@@ -8,13 +8,9 @@
 // matching. Nothing downstream can ask "is this TAPE?", because after one turn of any other cell the
 // question has no answer — which is the point. A preset is a starting place, not a mode.
 //
-// ⚠️ **THE DELAY THAT SHIPPED IS `NORMAL`'S ROW, AND IT IS ALSO THE STRUCT DEFAULT** (model.h): pong
-// off, TONE FF, WOBL 00. Every project written before these cells existed loads without them, lands
-// on that row, and must sound exactly as it always did — so each of the three is gated OFF at its
-// default in delay-module.h rather than merely small.
-//
-// ⚠️ A preset row may be RE-TUNED freely — it is only a set of values a user can then edit. What is
-// NOT free is NORMAL's row, which is load-bearing above.
+// ⚠️ NORMAL'S ROW IS ALSO THE STRUCT DEFAULT (model.h): pong off, TONE FF, WOBL 00 — what a project
+// without these cells loads as, and it must sound as it always did, so each is gated OFF at its
+// default in delay-module.h. Other rows may be re-tuned freely; NORMAL's may not.
 //
 // This header has no includes on purpose: the UI reads it (for the names and the match) and so does
 // the DSP, and pulling in the delay module would drag `EqModule` into every UI translation unit,

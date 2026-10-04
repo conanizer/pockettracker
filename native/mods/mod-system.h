@@ -91,7 +91,7 @@ enum ModSourceId {
     MOD_SRC_PITCH_SLIDE,  // semitones from PSL / PBN state machine
     MOD_SRC_VIBRATO,      // −1..+1 sine from PVB / PVX state machine
 
-    // Per-note scalar sources — set at note-on from Kotlin scheduler, constant for note's lifetime
+    // Per-note scalar sources — set at note-on, constant for the note's lifetime
     MOD_SRC_PHRASE_VOL,   // 0.0–1.0 from phrase step volume column (or Vxx effect at trigger)
 
     MOD_SRC_COUNT  // = 17
@@ -100,8 +100,7 @@ enum ModSourceId {
 // ===================================
 // VOICEMODSLOT — per-voice modulation state machine (one per instrument mod slot)
 // ===================================
-// Moved from Voice (sampler-voice.h) to IAudioVoice so updateVoiceModulation()
-// can run identically for sampler, SF, and any future voice type.
+// On IAudioVoice so updateVoiceModulation() runs identically for every voice type.
 struct VoiceModSlot {
     int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
     int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
@@ -130,10 +129,7 @@ struct VoiceModSlot {
     // Per-sample interpolation: snapshot envValue before block advance, interpolate in mix loop
     float prevEnvValue;  // envValue at start of this block (= end of previous block)
 
-    // ⚠️ In DECLARATION order, which is the only order that runs. C++ initializes members in the order
-    // they are DECLARED, not the order the mem-init list names them — so a list in a different order is
-    // a lie about what happens, and gcc says so (-Wreorder). Harmless today, because every initializer
-    // here is a literal; it stops being harmless the moment one of them reads another member.
+    // ⚠️ In DECLARATION order — members initialize in that order whatever the list says (-Wreorder).
     VoiceModSlot() : type(0), dest(0), amount(0.5f),
                      stage(0), envValue(0.0f), stageCounter(0),
                      attackSamples(0), holdSamples(0), decaySamples(0),

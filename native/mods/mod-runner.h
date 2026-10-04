@@ -6,8 +6,7 @@
 #include "modules/adsr-module.h"
 #include "modules/lfo-module.h"
 
-// runModMatrix — full modulation block update for one voice.
-// Replaces the body of AudioEngine::updateVoiceModulation().
+// runModMatrix — full modulation block update for one voice (AudioEngine::updateVoiceModulation).
 //
 // Call order within processAudioBlock must not change:
 //   1. tickPitchSlide + tickVibrato  (write PITCH_SLIDE + VIBRATO into modSourceValues[])
@@ -122,8 +121,7 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
     // Step 7: Run the routing matrix.
     processRoutes(voice.modSourceValues, voice.modDestValues, routes, routeCount);
 
-    // Step 8: Bridge — copy modDestValues into params.mod[] so existing mix-loop reads
-    // of params.get(PARAM_PAN/PITCH/FILTER_CUT/FILTER_RES) continue to work unchanged.
+    // Step 8: Bridge — copy modDestValues into params.mod[], which the mix loop reads via params.get().
     for (int p = 0; p < PARAM_COUNT; p++) {
         voice.params.mod[p] = voice.modDestValues[p];
     }

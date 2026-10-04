@@ -1,4 +1,4 @@
-// ─── shell/assets.h — the ASSET SEAM (convergence plan D7) ───────────────────────────────────────
+// ─── shell/assets.h — the ASSET SEAM ─────────────────────────────────────────────────────────────
 //
 // Skins, overlays and (later) the demo project ship as files the shell has to read at run time, and
 // WHERE they live is the one thing that genuinely differs between the two worlds this shell runs in:
@@ -11,10 +11,8 @@
 //     is `fopen`, which resolves against the process's CWD (whatever a launcher last cd'd to), NOT
 //     where the resources are — so the path is anchored to `SDL_GetBasePath()`, the exe's directory.
 //
-// That fork — and it is the WHOLE fork — lives behind this one function, which is exactly the point of
-// naming the seam: `image.{h,cpp}` decode bytes and know nothing of where they came from, `skin.{h,cpp}`
-// composite textures and know nothing either, and only this file knows which world it is in. The
-// header note in `image.h` already anticipated this: `decode_png(bytes)` is fed from here.
+// That fork lives behind this one function: image.{h,cpp} decode bytes and skin.{h,cpp} composite
+// textures, and neither knows where the bytes came from.
 
 #ifndef POCKETTRACKER_ASSETS_H
 #define POCKETTRACKER_ASSETS_H

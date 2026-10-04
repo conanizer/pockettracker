@@ -11,16 +11,9 @@ using pt::ui::KeyboardBindings;
 namespace {
 
 /**
- * The built-in keyboard map. Copied key-for-key from InputMapper's `keyboardMapping`.
- *
- * A TABLE rather than the switch it used to be, because it now has a second reader: the config.json
- * starter template is generated from it (`default_keyboard_bindings`), so what the file tells the user
- * their keys are is derived from the same rows the app dispatches through. A switch can be read by the
- * compiler and by a human, and by nothing else.
- *
- * Order matters in one narrow way: `default_keyboard_bindings` emits each button's names in the order
- * they appear here, so the primary key of a pair should come first — the template reads as
- * `"A": ["K", "Return"]`, which is the order a user thinks in.
+ * The built-in keyboard map. A TABLE because it has a second reader: the config.json starter
+ * template is generated from it (`default_keyboard_bindings`), so what the file tells the user is
+ * what the app dispatches. Each button's primary key comes first: `"A": ["K", "Return"]`.
  */
 struct KeyDefault {
     SDL_Keycode key;
@@ -76,13 +69,9 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
         std::printf("config:   controller abxy = %s\n", pt::ui::abxy_name(abxy_));
     }
 
-    // ⚠️ ONE SUMMARY LINE, NOT ONE PER BUTTON, and the count is what makes it worth printing.
-    //
-    // The seeded template lists all ten buttons at their defaults, so the common case is "every button
-    // present, nothing actually different". Ten lines saying `rebound` for that is worse than silence:
-    // it claims a change on every launch of an untouched install, and a log that cries wolf is a log
-    // nobody reads on the launch that matters. Which key produced which button is the INPUT TRACE's
-    // job (`set_trace`), and it answers it per press, live.
+    // ⚠️ ONE SUMMARY LINE, NOT ONE PER BUTTON: the seeded template lists all ten at their defaults, so
+    // per-button lines would claim a change on every launch of an untouched install. Which key gave
+    // which button is the input trace's job (`set_trace`).
     int bound = 0, skipped = 0;
 
     for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
@@ -102,8 +91,7 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
         for (const std::string& name : *names) {
             const SDL_Keycode k = SDL_GetKeyFromName(name.c_str());
             if (k == SDLK_UNKNOWN) {
-                // ⚠️ Reported, never silently skipped. See the header: the failure mode this prevents
-                // is a user re-reading their own correct-looking JSON for an hour.
+                // ⚠️ Reported, never silently skipped — see the header.
                 std::printf("config:   keyboard.%s: \"%s\" is not an SDL key name - skipped\n",
                             button_name(b), name.c_str());
                 ++skipped;
@@ -113,9 +101,8 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
         }
     }
 
-    // Unconditional whenever the section was present at all — a component whose correct behaviour is
-    // silence cannot be told from one that never ran. `skipped` is on the same line as the count so a
-    // partially-applied file announces itself rather than hiding behind a plausible-looking total.
+    // Unconditional whenever the section was present; `skipped` shares the line so a partially
+    // applied file announces itself.
     if (bound > 0) {
         std::printf("config:   keyboard: %d button(s) from config.json, %d key name(s) rejected\n",
                     bound, skipped);
@@ -123,23 +110,11 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
 }
 
 bool SdlInput::key_to_button(SDL_Keycode k, Button& out) const {
-    // ⚠️ **ANDROID'S BACK BUTTON, AND WITHOUT THIS LINE IT CLOSES THE APP MID-EDIT** (C4).
-    //
-    // It arrives as an ordinary key once `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` is set — see
-    // android-main.cpp, which is where the trap has to be armed, because the UNTRAPPED default is
-    // `SDLActivity.onBackPressed()` finishing the activity out from under the frame loop.
-    //
-    // B, not SELECT and not a quit: B is already this app's universal cancel — it closes the file
-    // browser, aborts the keyboard, leaves the EQ and theme editors — so the gesture a phone user
-    // arrives with maps onto the verb the UI already has. The app is still leavable by Home (the
-    // watcher in app.cpp saves) and by PROJECT > EXIT (`PlatformCaps::sdl().appExit`).
-    //
-    // ⚠️ HARD-WIRED, AHEAD OF THE CONFIGURABLE MAP, AND DELIBERATELY NOT IN `KEY_DEFAULTS` — so it is
-    // neither listed in the starter template nor removable by rebinding B. A user who rebinds B on the
-    // desktop build has no idea they are also holding the only way to back out of a screen on Android;
-    // config.json must not be able to brick a platform it was not edited on.
-    //
-    // Harmless on every other platform: no desktop keyboard produces AC_BACK.
+    // ⚠️ ANDROID'S BACK BUTTON — WITHOUT THIS LINE IT CLOSES THE APP MID-EDIT. It arrives as a key once
+    // `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` is armed (android-main.cpp). B, because B is already the
+    // universal cancel; the app is still leavable by Home and PROJECT > EXIT.
+    // ⚠️ HARD-WIRED, AHEAD OF THE CONFIGURABLE MAP and absent from `KEY_DEFAULTS`: rebinding B on a
+    // desktop must not take away the only way back on Android. No desktop keyboard produces AC_BACK.
     if (k == SDLK_AC_BACK) { out = Button::B; return true; }
 
     for (const std::pair<SDL_Keycode, Button>& e : keyMap_) {
@@ -149,13 +124,9 @@ bool SdlInput::key_to_button(SDL_Keycode k, Button& out) const {
 }
 
 bool SdlInput::pad_to_button(Uint8 b, Button& out) const {
-    // Which face-button pair means A. See `ui/input_config.h` for why this is a user setting and not
-    // something SDL can answer: with NINTENDO the pad's labels run the other way round, so the pair
-    // that means A is the one SDL is calling B/Y.
-    //
-    // ⚠️ BOTH PAIRS SWAP TOGETHER. Swapping only A↔B would leave the X/Y aliases below still pointing
-    // the old way, so two of the four face buttons would quietly keep the wrong meaning — the exact
-    // half-fix that reads as "it works now" until someone uses the other two buttons.
+    // Which face-button pair means A (ui/input_config.h): with NINTENDO the pad's labels run the
+    // other way, so A is the pair SDL calls B/Y. ⚠️ BOTH PAIRS SWAP TOGETHER, or the X/Y aliases keep
+    // the old meaning.
     const bool nintendo = (abxy_ == AbxyLayout::NINTENDO);
 
     switch (b) {
@@ -164,9 +135,8 @@ bool SdlInput::pad_to_button(Uint8 b, Button& out) const {
         case SDL_CONTROLLER_BUTTON_DPAD_LEFT:  out = Button::DPAD_LEFT;  return true;
         case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: out = Button::DPAD_RIGHT; return true;
 
-        // X and Y are aliased onto A and B on purpose: the physical face-button layout differs
-        // across the handhelds this ships to, and a four-button app that only listens to two of them
-        // is one bad SDL mapping away from being unusable. The port plan asks for exactly this.
+        // X and Y are aliased onto A and B on purpose: face-button layouts differ across handhelds,
+        // and a four-button app listening to two is one bad SDL mapping from unusable.
         case SDL_CONTROLLER_BUTTON_A: case SDL_CONTROLLER_BUTTON_X:
             out = nintendo ? Button::B : Button::A;
             return true;
@@ -179,10 +149,8 @@ bool SdlInput::pad_to_button(Uint8 b, Button& out) const {
         case SDL_CONTROLLER_BUTTON_BACK:          out = Button::SELECT;  return true;
         case SDL_CONTROLLER_BUTTON_START:         out = Button::START;   return true;
 
-        // ⚠️ Not mapped, and both wait for a real device (Phase 4 bring-up): the L2/R2 TRIGGERS
-        // aliased onto L/R, and the analog stick deadzoned onto the D-pad. Both are axes, both differ
-        // per CFW, and neither can be verified on a keyboard — writing them blind is how an input
-        // layer ships broken.
+        // ⚠️ Not mapped: the L2/R2 triggers and the analog stick. Both are axes that differ per CFW
+        // and need a real device to verify.
         default: return false;
     }
 }
@@ -215,15 +183,9 @@ ButtonMods SdlInput::mods_now() const {
 void SdlInput::press(Button b, uint64_t now_ms) {
     const size_t i = static_cast<size_t>(b);
     if (held_[i]) {
-        // ⚠️ THE LINE P4b NEEDED AND DID NOT HAVE. Dropping a repeat press is correct — the OS auto-
-        // repeat is ignored and the 400/100 ms one below is ours — but this early return is also what
-        // made a launcher bug nearly unfindable: with gptokeyb injecting a second copy of every press,
-        // three of the four collisions were ABSORBED right here, in silence, because the two paths
-        // happened to agree. Only START, where they disagreed, was ever reported — so the de-dup that
-        // hides a fault is the same de-dup that makes it look like a sequencer bug.
-        //
-        // A press arriving for a button already down is therefore not noise: on a handheld, where one
-        // physical button should produce exactly one press, it means SOMETHING ELSE is pressing too.
+        // ⚠️ A press for a button already down is dropped (the OS auto-repeat is ignored), but on a
+        // handheld, where one button makes exactly one press, it means SOMETHING ELSE is pressing too
+        // — an injected second copy (gptokeyb) is absorbed silently here wherever the paths agree.
         if (trace_) {
             std::printf("input:              ^ ABSORBED: %s was already held - a SECOND source pressed it\n",
                         button_name(b));
@@ -231,8 +193,8 @@ void SdlInput::press(Button b, uint64_t now_ms) {
         return;
     }
     held_[i] = true;
-    // AFTER the flag is set, so a press of A itself reports A as held — which is what Kotlin's
-    // `handleButtonAction` sees, since it updates the modifier state before it resolves the combo.
+    // AFTER the flag is set, so a press of A itself reports A as held — modifier state is updated
+    // before the combo is resolved.
     queue_.push_back({b, ButtonAction::PRESSED, mods_now()});
 
     // B joins the D-pad only while `set_b_repeatable` says so — the qwerty overlay, where B is a
@@ -272,16 +234,13 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
 
     switch (e.type) {
         case SDL_KEYDOWN:
-            // e.key.repeat: the OS repeat, which is deliberately dropped. The app's repeat cadence is
-            // 400/100 ms and must be the same on a keyboard and on a handheld's D-pad, where there is
-            // no OS repeat at all.
+            // e.key.repeat: the OS repeat, deliberately dropped — the app's repeat must be the same
+            // on a keyboard and on a D-pad with no OS repeat.
             if (e.key.repeat != 0) break;
             {
                 const bool mapped = key_to_button(e.key.keysym.sym, b);
-                // ⚠️ A handheld should produce NO keyboard events at all. One appearing here is the
-                // P4b signature — some layer (a gptokeyb that crept back into the launch script, a CFW
-                // hotkey daemon) injecting phantom input the app never asked for. That bug cost a
-                // device session and read as a sequencer fault; this line is how it names itself.
+                // ⚠️ A handheld should produce NO keyboard events. One here means some layer (gptokeyb
+                // in the launch script, a CFW hotkey daemon) injects phantom input — this line names it.
                 trace("KEYDOWN", or_unknown(SDL_GetKeyName(e.key.keysym.sym)), mapped, b);
                 if (mapped) press(b, now);
             }
@@ -312,16 +271,9 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
         }
 
         case SDL_CONTROLLERAXISMOTION: {
-            // ⚠️ THERE IS DELIBERATELY NO MAPPING HERE, AND THIS ARM ADDS NONE — it existed as
-            // `default: break;` and still drops every axis on the floor. What it adds is VISIBILITY:
-            // the L2/R2 triggers and both analog sticks arrive as axes (the CFW's mapping binds
-            // `lefttrigger:a2`, `leftx:a0`), so without this line the sweep's "they are inert" row
-            // could only ever observe an absence — and an absence is equally consistent with the app
-            // ignoring them, the device never sending them, and the app being wedged.
-            //
-            // A flood of these IS a finding, not noise: it means a stick is drifting hard enough to
-            // spam the event queue, which is the axis version of P4b's "a drifting stick moves the
-            // cursor".
+            // ⚠️ DELIBERATELY NO MAPPING: every axis is dropped. This only adds VISIBILITY — triggers
+            // and sticks arrive as axes, so without it "they are inert" could only be observed as an
+            // absence (ignored? never sent? wedged?). A flood of these means a stick drifting hard.
             if (!trace_) break;
             char what[64];
             std::snprintf(what, sizeof(what), "%s value=%d",
@@ -339,19 +291,12 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
             break;
 
         case SDL_CONTROLLERDEVICEREMOVED: {
-            // ⚠️ **A REMOVED PAD SENDS NO BUTTON-UPS, so every button it had down stays "held"** —
-            // and `mods_now()` reads A, B, L, R and SELECT straight out of `held_`. A wireless pad
-            // going to sleep with L down turns every later D-pad press into a screen change, and on a
-            // fullscreen handheld the only way out is to background the app. `reset()` releases them
-            // properly; it is the same repair focus loss needs, for the same reason.
-            //
-            // ⚠️ And the handle must be CLOSED and dropped, not just forgotten: `controller_count()`
-            // is what `compute_has_pad()` falls back to on every platform but Android, so a list that
-            // only ever grows means the on-screen controls never come back on a touch device — and a
-            // pad unplugged and replugged N times leaks N handles until quit.
-            //
-            // `e.cdevice.which` is an INSTANCE id on removal (a joystick index only on ADDED), so the
-            // handle is found by asking each open controller for its own instance id.
+            // ⚠️ A REMOVED PAD SENDS NO BUTTON-UPS, so its held buttons stay held — and `mods_now()`
+            // reads A, B, L, R and SELECT from `held_` (a pad asleep with L down turns every D-pad
+            // press into a screen change). `reset()` releases them, as for focus loss.
+            // ⚠️ The handle must be CLOSED and dropped: `controller_count()` decides whether the
+            // on-screen controls come back, and replugging would leak handles.
+            // `e.cdevice.which` is an INSTANCE id on removal (an index only on ADDED).
             for (auto it = controllers_.begin(); it != controllers_.end(); ++it) {
                 SDL_Joystick* js = SDL_GameControllerGetJoystick(*it);
                 if (js && SDL_JoystickInstanceID(js) == e.cdevice.which) {
@@ -365,9 +310,7 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
         }
 
         case SDL_WINDOWEVENT:
-            // Focus loss eats the KEYUPs, and a modifier that is stuck "held" reroutes every later
-            // DPAD press into the wrong combo. Kotlin hit the identical bug through Compose
-            // cancelling its pointer coroutines without firing RELEASED, and fixed it the same way.
+            // Focus loss eats the KEYUPs, and a stuck modifier reroutes every later DPAD press.
             if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) reset();
             break;
 
@@ -385,15 +328,9 @@ uint64_t SdlInput::repeat_interval(uint64_t repeating_ms) {
 void SdlInput::tick(uint64_t now_ms) {
     if (!repeatActive_ || now_ms < repeatNextMs_) return;
 
-    // ONE repeat per tick, and the next deadline is measured from NOW rather than from the missed
-    // one. A catch-up loop here would be a bug with teeth: stall the loop for half a second — drag the
-    // window, hit a slow frame on an A53 — and it would flush five queued repeats in a single tick,
-    // so a held A+UP would jump the value by 5 in one go — and one step at a time is exactly what the
-    // ramp is for.
-    //
-    // The repeat carries the modifiers as they stand NOW, not as they stood when the D-pad went down.
-    // That is deliberate and it is Kotlin's behaviour: press A after UP is already repeating and the
-    // repeat starts editing rather than moving, with no need to remember what began it.
+    // ONE repeat per tick, the next deadline measured from NOW: a catch-up loop would flush several
+    // queued repeats after a stall and jump a held A+UP by five. The repeat carries the modifiers as
+    // they stand NOW, so pressing A while UP repeats switches from moving to editing.
     queue_.push_back({repeatButton_, ButtonAction::PRESSED, mods_now()});
     repeatNextMs_ = now_ms + repeat_interval(now_ms > repeatTrainMs_ ? now_ms - repeatTrainMs_ : 0);
 }
@@ -406,16 +343,10 @@ bool SdlInput::poll(ButtonEvent& out) {
 }
 
 void SdlInput::reset() {
-    // ⚠️ **A HELD BUTTON IS RELEASED, NOT MERELY FORGOTTEN.** A release is not bookkeeping — it is an
-    // event consumers act on, and the FX-helper overlay's ONLY close is `on_a_released()`. Dropping it
-    // leaves a full-screen picker up that B cannot dismiss and that `any_modal_open()` does not cover,
-    // so the D-pad goes on moving the cursor invisibly behind the backdrop and the A press that
-    // finally closes it commits the held effect code into whatever cell the cursor reached. The
-    // mapper's two deferred-single latches discharge on a release too.
-    //
-    // Emitted HERE rather than repaired at each consumer, so a consumer written later gets it for
-    // free — and through `release()` itself, so a synthesised release is indistinguishable from the
-    // key-up that focus loss ate, repeat cancellation included.
+    // ⚠️ A HELD BUTTON IS RELEASED, NOT MERELY FORGOTTEN: consumers act on releases — the FX-helper
+    // overlay's ONLY close is `on_a_released()`, and the mapper's deferred latches discharge on one.
+    // Emitted HERE, through `release()`, so a synthesised release is indistinguishable from the lost
+    // key-up and later consumers get it for free.
     queue_.clear();   // this frame's presses belong to a window that no longer has focus
     for (size_t i = 0; i < static_cast<size_t>(Button::COUNT); ++i)
         if (held_[i]) release(static_cast<Button>(i));

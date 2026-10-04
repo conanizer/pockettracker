@@ -2,18 +2,12 @@
 
 // ─── SONG EDITOR ─────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/SongEditorModule.kt. The top-level view: chains arranged across 8 tracks,
-// 256 rows deep, 16 visible at a time.
+// Chains across 8 tracks, 256 rows deep, 16 visible. Unlike the other grid editors:
 //
-// Two things about it are unlike every other grid editor, and both are inherited deliberately:
-//
-//   • THE CURSOR COLUMN IS A TRACK, AND IT IS 1-BASED. `cursorTrack` runs 1..8 and indexes
-//     `project.tracks[cursorTrack - 1]`. It is the SAME `AppState::cursorColumn` that PHRASE and CHAIN
-//     use — the song screen simply reads it as a track number. Column 0 is the row-number gutter and
-//     is not reachable, which is why the step cell below has no cursor colour at all.
-//   • IT SCROLLS. 256 rows through a 16-row window, so a row has an `absoluteRow` (the data, the
-//     cursor, the playhead) and a `rowIndex` (the pixels). Mixing them up is the one bug this module
-//     is prone to; they are named apart everywhere below.
+//   • The cursor column is a TRACK, 1-based (`cursorTrack` 1..8 → `tracks[cursorTrack - 1]`). Column 0
+//     is the row-number gutter and is not reachable.
+//   • It SCROLLS, so a row has an `absoluteRow` (data, cursor, playhead) and a `rowIndex` (pixels).
+//     Mixing them up is this module's one likely bug.
 
 #include "songcore/model.h"
 #include "ui/canvas.h"
@@ -32,9 +26,8 @@ struct SongEditorState {
     int  scrollPosition = 0;
     // Eight markers, one per track (ui/playhead.h) — a track with no position draws none.
     TrackPlayhead playheads[8] = {};
-    // LIVE mode's launcher: what each channel is waiting to do, and the phase its marker blinks on.
-    // ⚠️ The phase is handed in rather than read from a clock, which is what lets a tool draw the
-    // blink deterministically (ui/app_state.h).
+    // LIVE mode's launcher: what each channel is waiting to do, and the blink phase — handed in rather
+    // than read from a clock, so a tool can draw it deterministically.
     bool      liveMode     = false;
     LiveQueue liveQueue[8] = {};
     int       blinkPhaseMs = 0;
@@ -45,7 +38,7 @@ struct SongEditorState {
 
 struct SongInputResult {
     bool modified        = false;
-    bool hasChain        = false;  // Kotlin's `lastEditedChain: Int?`, minus the optional
+    bool hasChain        = false;
     int  lastEditedChain = 0;
 };
 

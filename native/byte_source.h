@@ -7,28 +7,16 @@
 // presets, the render's own read-back, the "is this file still there?" probe — and the render's
 // publish step, which deletes a stale target and renames a temp over it.
 //
-// **Why an indirection at all, when every one of them could just call `fopen`.** A path is not
-// always a path. A directory a user grants through a system file picker is addressed by a URI with
-// a scheme, and no libc call can touch one; it is resolved by the host. Deciding *which kind of
-// string this is* has to happen somewhere, and the one thing it must not be is a check at each of
-// the call sites: correctness would then rest on every future caller remembering to write it. So it
-// is derived from the data, once, below all of them.
+// A path is not always a path: a directory granted through a system picker is a URI with a scheme,
+// which no libc call can touch. Which kind of string it is gets decided here, once, below every
+// caller. On a host with no hooks every function is a plain libc call, and a URI fails.
 //
-// **On a host that installs no hooks** every function here takes its plain libc branch and this is
-// a rename. A URI with no hook fails, which is the right answer on a desktop.
+// ⚠️ THE HOOKS ARRIVE AS ONE STRUCT, installed by one call: half-hooked, a render would write its
+// temp through the host and then ask libc to rename a string libc cannot see.
 //
-// ⚠️ **The hooks arrive as ONE struct, and are installed by one call.** A host does not get to
-// resolve opens and leave deletes on libc: half-hooked is the state where a render writes its temp
-// through the host and then asks libc to rename a string libc cannot even see, which fails as
-// "the export did not appear" with nothing in the log about storage.
-//
-// ⚠️ **They live in `byte_source.cpp`, not as an inline variable in this header, and that is
-// deliberate.** On Android the engine (`libpockettracker.so`) reads them while the shell
-// (`libpockettracker-sdl.so`) installs them. An inline variable is one COMDAT symbol per binary,
-// kept single only by ELF interposition — which a `-fvisibility=hidden` added for size, at any point
-// in the future, would silently break: the shell would install into its copy and the engine would
-// keep reading its own null one, and the failure is a file that will not open with nothing in the
-// log to say why. One definition in one translation unit does not depend on a flag.
+// ⚠️ They live in `byte_source.cpp`, not an inline variable here: on Android the engine library
+// reads them and the shell library installs them, and an inline variable stays single only by ELF
+// interposition, which `-fvisibility=hidden` would silently break.
 
 #include <cstdio>
 #include <string>

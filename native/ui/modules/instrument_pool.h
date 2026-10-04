@@ -1,22 +1,15 @@
 #pragma once
 
 // ─── INSTRUMENT POOL ─────────────────────────────────────────────────────────────────────────────
+// An overview of all 128 instrument slots with the mixer values worth comparing across them (volume,
+// the two sends, the EQ slot). R+UP from INSTRUMENT; R+RIGHT jumps back into it.
 //
-// The C++ twin of ui/modules/InstrumentPoolModule.kt — an M8-style overview of all 128 instrument
-// slots with the handful of mixer values you actually want to compare ACROSS instruments (volume, the
-// two sends, the EQ slot). Reached with R+UP from INSTRUMENT, and R+RIGHT jumps back into it.
+// ⚠️ ITS CURSOR ROW IS NOT ITS OWN: the selected row IS `currentInstrument`, the field INSTRUMENT
+// edits and TABLE follows. Only the column lives here (AppState::poolCursorColumn); moving up and
+// down changes the project's selected instrument (cursor_move.h, `move_pool_selection`).
 //
-// ⚠️ ITS CURSOR ROW IS NOT ITS OWN. The selected row IS `currentInstrument` — the same field the
-// INSTRUMENT screen edits and the TABLE screen follows. That is what makes the pool a NAVIGATOR rather
-// than a table: walk down it, jump to INSTRUMENT, and you are on the slot you were looking at. So only
-// the COLUMN lives in the pool's state (AppState::poolCursorColumn); moving up and down changes the
-// project's selected instrument (ui/cursor_move.h, `move_pool_selection`).
-//
-// Columns: 0 NAME · 1 V (volume) · 2 RV (reverb send) · 3 DE (delay send) · 4 EQ.
-// Column 0 is selection-only — A on an empty slot loads a source into it (the dispatcher's job), and
-// A+B clears the slot. The four value columns edit with A+DPAD like anywhere else.
-//
-// Reorder (M8's EDIT+UP/DOWN on the name column) is deliberately not here, as in the Kotlin.
+// Columns: 0 NAME · 1 V (volume) · 2 RV (reverb send) · 3 DE (delay send) · 4 EQ. Column 0 is
+// selection-only: A on an empty slot loads a source (the dispatcher's job), A+B clears it.
 
 #include <cstdint>
 
@@ -42,10 +35,8 @@ public:
     static constexpr int WIDTH  = 620;
     static constexpr int HEIGHT = 392;
 
-    // The RAM readout in the title row, as offsets from the module's left edge. Public because only
-    // layout.h knows both this module's x AND the editor clip, and it asserts there that the widest
-    // total this can print still lands left of the right bar. The asserts stay unconditional though
-    // the readout is `caps.debug`-only: a developer build is where it has to fit.
+    // The RAM readout's offsets from the module's left edge. Public so layout.h can assert the widest
+    // total still lands left of the right bar — unconditionally, though the readout is debug-only.
     static constexpr int RAM_LABEL_X   = 280;
     static constexpr int RAM_VALUE_X   = 348;
     static constexpr int RAM_MAX_CHARS = 9;   // "1234.5 MB" — four digits before the point

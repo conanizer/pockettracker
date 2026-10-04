@@ -2,13 +2,11 @@
 
 #include <cstdint>
 
-// Native compressed-audio file decoders (dr_mp3 / dr_flac / stb_vorbis). Each decodes a whole file
-// into deinterleaved float channels in native memory — no Java-heap round trip, no MediaCodec. Used
-// by AudioEngine::loadSampleFromCompressed to bring MP3/FLAC/OGG samples in exactly like a WAV.
+// Native compressed-audio decoders (dr_mp3 / dr_flac / stb_vorbis / opus / minimp4 + FAAD2). Each
+// decodes a whole file into deinterleaved float channels, for AudioEngine::loadSampleFromCompressed.
 //
-// Convention (matches the rest of the engine): out is normalized float [-1, 1]; the left channel is
-// always filled, the right only for >=2-channel sources (null for mono). For >2 channels, ch0→L and
-// ch1→R, extras discarded — same downmix as the old Kotlin extractor.
+// Convention: out is normalized float [-1, 1]; the left channel is always filled, the right only for
+// >=2-channel sources (null for mono). For >2 channels, ch0→L and ch1→R, extras discarded.
 //
 // Returns true on success (non-empty output, sampleRate > 0); false on any open/decode failure.
 namespace ptdec {
@@ -63,12 +61,9 @@ bool decodeOggFile (const char* path, PcmSink& out, int& sampleRate);
 // Handles both `.opus` files and Opus-in-`.ogg` (where decodeOggFile/Vorbis returns false first).
 bool decodeOpusFile(const char* path, PcmSink& out, int& sampleRate);
 
-// ISO-BMFF container holding AAC audio: `.m4a` / `.mp4` / `.m4b` / `.mov` / `.3gp` — they are all the
-// same box format. minimp4 demuxes the container and hands us the first audio track's AAC access units
-// plus its AudioSpecificConfig; FAAD2 decodes the AAC to normalized float. This is the native, in-place
-// replacement for Android's MediaCodec/MediaExtractor path — same "container in, PCM out" job, no Java.
-// sampleRate is taken from the decoded stream (post-SBR for HE-AAC, so it can exceed the container's
-// stated rate). Decoder priming samples are NOT trimmed, matching the old MediaCodec extractor.
+// ISO-BMFF AAC: `.m4a` / `.mp4` / `.m4b` / `.mov` / `.3gp`, all the same box format. minimp4 demuxes
+// the first audio track, FAAD2 decodes it. sampleRate is the decoded stream's (post-SBR for HE-AAC,
+// so it can exceed the container's). Decoder priming samples are NOT trimmed.
 bool decodeMp4File(const char* path, PcmSink& out, int& sampleRate);
 
 }  // namespace ptdec

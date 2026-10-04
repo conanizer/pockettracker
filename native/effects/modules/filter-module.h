@@ -27,9 +27,8 @@
 //   sample = filter.processMono(sample);
 //   filter.processStereo(L, R);
 //
-// reset() clears integrator state via Init(). setParams() always follows
-// reset() at voice trigger, restoring all parameters before audio runs.
-// Call sites in InstrumentChain and audio-engine.cpp are unchanged.
+// reset() clears integrator state via Init(). setParams() always follows reset() at voice trigger,
+// restoring all parameters before audio runs.
 // ===========================================================================
 struct FilterModule {
     // ⚠️ **A WRITE ONTO A SOUNDING NOTE GLIDES, IT DOES NOT JUMP.** A cutoff, resonance or type change

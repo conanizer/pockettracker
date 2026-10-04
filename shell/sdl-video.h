@@ -1,12 +1,8 @@
 // sdl-video.{h,cpp} — the window, the 640×480 streaming texture, and the scaler.
 //
-// The other half of the shell seam. `pt-ui` draws the whole app into a 640×480 ARGB framebuffer and
-// knows nothing about a display; this file is the only code that does. It uploads that framebuffer to
-// one streaming texture and blits it to the screen, which is the port plan's §4.5 video plan
-// unchanged: "render the 640×480 design into a streaming texture; present with integer scale
-// (default) or fit-stretch (setting)". ⚠️ Read "fit-stretch" as "fit at a fractional scale", NOT as
-// "stretch to the window edges" — taking that word literally is what put an aspect-breaking stretch
-// behind the SCALING row; see `ScalingMode` below.
+// `pt-ui` draws the whole app into a 640×480 ARGB framebuffer and knows nothing about a display;
+// this file uploads it to one streaming texture and blits it, at an integer or a fractional (FIT)
+// scale — never stretched out of aspect (`ScalingMode`).
 //
 // GPU-optional on purpose. SDL_Renderer will take an accelerated backend when the device has one and
 // fall back to software when it does not — and a single 640×480 blit is trivial either way. That
@@ -33,18 +29,12 @@ class Canvas;
  * FRACTIONAL factor and filters the result. **Both preserve the 4:3 aspect ratio and letterbox the
  * remainder**; neither ever stretches the design out of shape.
  *
- * This is a real choice rather than a preference, and the reason is the device zoo: 640×480 is 1×
- * exactly on the RG35xx class, but a TrimUI Smart Pro is 1280×720 and an RGB30 is 720×720. On those,
- * INTEGER means 1× with thick borders (crisp, small) while FIT means 1.5× filling the height with
- * thinner ones (bigger, soft). Neither is right for everyone, so it becomes a setting — with INTEGER
- * as the default, because a pixel-art tracker that has been pixel-perfect since it was born should
- * not go blurry the first time it meets a 720p handheld.
+ * The device zoo makes it a real choice: 640×480 is 1× on the RG35xx class, but on a 1280×720 or
+ * 720×720 screen INTEGER means 1× with thick borders (crisp, small) and FIT 1.5× (bigger, soft).
+ * INTEGER is the default — a pixel-art tracker should not go blurry on a 720p handheld.
  *
- * ⚠️ FIT used to stretch to the window edges, which is a divergence from the Kotlin app this ports —
- * see `dest_rect()` in the .cpp for the mechanism and the three Kotlin call sites that settle it.
- * ⚠️ On an output that IS a whole multiple of the design the two modes now compute the same rect, and
- * differ only in the sampling filter. That is correct, not a bug: it is why the setting was invisible
- * on desktop until the window became resizable.
+ * ⚠️ On an output that IS a whole multiple of the design the two compute the same rect and differ
+ * only in the sampling filter.
  */
 enum class ScalingMode { INTEGER, FIT };
 
@@ -55,14 +45,9 @@ public:
      *                   largest integer multiple of the design that fits the desktop, instead of at
      *                   `windowW × windowH` exactly.
      *
-     * ⚠️⚠️ **ANDROID MUST PASS FALSE, AND IT IS NOT ABOUT RESIZING.** SDL feeds this flag straight
-     * to `Android_JNI_SetOrientation` (SDL_androidwindow.c:52), and `SDLActivity.setOrientationBis`
-     * branches on it: with no `SDL_HINT_ORIENTATIONS` set — and this shell sets none — a NON-resizable
-     * window picks its orientation from `w > h`, giving `SCREEN_ORIENTATION_SENSOR_LANDSCAPE` for the
-     * 640×480 design, while a RESIZABLE one becomes `SCREEN_ORIENTATION_FULL_USER` and the activity
-     * is free to rotate into PORTRAIT. That would undo C4's pixel-exact 2× landscape window on a
-     * phone, arriving through a flag whose name says nothing about orientation. Read out of the
-     * vendored source, not remembered.
+     * ⚠️⚠️ ANDROID MUST PASS FALSE, AND IT IS NOT ABOUT RESIZING: SDL passes this flag to
+     * `Android_JNI_SetOrientation`, and with no `SDL_HINT_ORIENTATIONS` a non-resizable 640×480
+     * window gets SENSOR_LANDSCAPE while a RESIZABLE one gets FULL_USER and may rotate into portrait.
      */
     bool open(const char* title, int windowW, int windowH, bool fullscreen = false,
               bool resizable = false);
@@ -77,38 +62,28 @@ public:
      *                       function of the live theme, so passing it makes a stale value
      *                       unrepresentable, where a `set_letterbox_colour` would be one more thing
      *                       every future present site has to remember to keep current.
-     * @param overlay        Drawn on the renderer AFTER the frame and BEFORE the flip — the Phase D
-     *                       touch panels, composited into the letterbox bars around the frame (the
-     *                       space this function's own comment reserved for them). Empty on every layout
-     *                       with no on-screen controls (desktop, a handheld with a pad), and then this
-     *                       is byte-for-byte the pre-D present.
-     * @param overlaySig     A cheap fingerprint of what `overlay` would draw (its geometry + which
-     *                       buttons are held). It joins the C7 pixel gate below: without it a virtual
-     *                       button's press highlight — a change OUTSIDE the 640×480 canvas the gate
-     *                       compares — would be skipped, the C7 blind-channel shape one panel over.
+     * @param overlay        Drawn AFTER the frame and BEFORE the flip — the touch panels in the
+     *                       letterbox bars. Empty on layouts with no on-screen controls.
+     * @param overlaySig     A cheap fingerprint of what `overlay` draws (geometry + held buttons).
+     *                       It joins the pixel gate: a press highlight is a change OUTSIDE the
+     *                       compared canvas and would otherwise be skipped.
      */
     bool present(const pt::ui::Canvas& canvas, uint32_t letterboxArgb,
                  const std::function<void(SDL_Renderer*)>& overlay = {}, uint64_t overlaySig = 0,
                  uint32_t modalScrimArgb = 0);
 
     /**
-     * Present the frame into an EXPLICIT rect, with a skin composited around it — the PORTRAIT2 device
-     * skin (convergence D). The one thing `present` cannot express: there the 640×480 frame always
-     * lands at the centred `dest_rect()`, and here it lands wherever the caller says (band 2's inner
-     * bezel, well up a tall screen), with chrome drawn behind it and buttons in front.
+     * Present the frame into an EXPLICIT rect, with a skin composited around it — the PORTRAIT2
+     * device skin. The frame lands where the caller says (band 2's inner bezel), with chrome behind
+     * it and buttons in front.
      *
-     * @param clearArgb  What the whole output is cleared to first — the device CASING colour, not the
-     *                   tracker's letterbox. The bands composite on top; it shows at the sides and any
-     *                   bottom gap. Part of the C7 gate, exactly as `letterboxArgb` is for `present`.
+     * @param clearArgb  What the whole output is cleared to first — the device CASING colour. Part
+     *                   of the pixel gate, as `letterboxArgb` is for `present`.
      * @param frameDest  Where the 640×480 texture blits. NOT `dest_rect()` — see `PortraitSkin`.
-     * @param underlay   Drawn after the clear and BEFORE the frame: the chrome bands + the black inner
-     *                   bezel the frame sits on. (present's overlay had no "before the frame" hook,
-     *                   because a centred landscape frame has nothing behind it but the letterbox.)
-     * @param overlay    Drawn AFTER the frame: the button cluster. Its held-button highlights ride the
-     *                   C7 gate through `overlaySig`, the same channel the landscape panels use.
+     * @param underlay   Drawn after the clear and BEFORE the frame: the chrome bands, inner bezel.
+     * @param overlay    Drawn AFTER the frame: the button cluster; highlights ride `overlaySig`.
      *
-     * Shares `present`'s texture upload, C7 pixel gate and pacing verbatim (one private `present_impl`),
-     * so an idle PORTRAIT2 screen skips the upload the same way an idle landscape one does.
+     * Shares `present`'s upload, pixel gate and pacing (one private `present_impl`).
      */
     bool present_skinned(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& frameDest,
                          const std::function<void(SDL_Renderer*)>& underlay,
@@ -119,13 +94,10 @@ public:
      * Force the NEXT present, whatever the pixels say — the frame on screen is no longer the one we
      * last put there.
      *
-     * ⚠️⚠️ **THE C7 PIXEL GATE IS BLIND TO A SURFACE THE PLATFORM CLEARED BEHIND ITS BACK.** `present`
-     * skips uploading a frame byte-identical to `lastFrame_`, on the safe assumption that the display is
-     * still SHOWING lastFrame_. Android breaks that assumption on sleep→resume: it blanks the window
-     * while the activity is paused, so the redrawn frame equals lastFrame_, the present is WRONGLY
-     * skipped, and the screen stays black until the next real state change (a keypress) — the reported
-     * bug. A re-expose and a renderer reset are the same shape. The shell calls this on those events;
-     * it drops the "already on screen" assumption so the next `present` really uploads.
+     * ⚠️⚠️ THE PIXEL GATE IS BLIND TO A SURFACE THE PLATFORM CLEARED BEHIND ITS BACK. `present` skips
+     * a frame identical to `lastFrame_`, assuming the display still SHOWS it. Android blanks the
+     * window on sleep→resume, so the redrawn identical frame would be skipped and the screen stay
+     * black until a keypress. A re-expose and a renderer reset are the same shape.
      *
      * @param texture_lost  The renderer's DEVICE was reset — GL context loss on an Android resume — so
      *                      the streaming texture is gone with it and is recreated here, or the forced
@@ -152,20 +124,14 @@ public:
     SDL_Window* window() const { return window_; }
 
     /**
-     * The renderer, for the shell's skin/texture layer (Phase D) to create its textures from and
-     * composite into the letterbox bars — the SAME handle `present`'s `overlay` callback is already
-     * handed, exposed so a `Skin` can own textures with a proper lifetime (created after `open()`,
-     * destroyed before `close()`) instead of loading itself lazily inside a draw callback. Not for the
-     * frame path: pt-ui draws into the canvas, never onto the renderer.
+     * The renderer, for the shell's skin/texture layer to create its textures from (after `open()`,
+     * destroyed before `close()`). Not for the frame path: pt-ui draws into the canvas only.
      */
     SDL_Renderer* renderer() const { return renderer_; }
 
     /**
-     * The rect the 640×480 frame lands in, in renderer-output pixels — the tracker's on-screen box.
-     * Public because Phase D lays the touch panels into the letterbox bars AROUND it, and the shell is
-     * the layer that owns that geometry. In landscape the centred frame leaves a side bar on each side,
-     * and those bars ARE the LEFT/RIGHT control panels — so this needs no change for the touch skin to
-     * have somewhere to go.
+     * The rect the 640×480 frame lands in, in renderer-output pixels. In landscape the centred frame
+     * leaves a bar on each side, and those bars are where the touch panels go.
      */
     SDL_Rect frame_rect() const { return dest_rect(); }
 
@@ -197,9 +163,9 @@ private:
     SDL_Rect dest_rect() const;
     int      frame_top(int outH, int h) const;
 
-    /** The shared body of `present` and `present_skinned`: the C7 pixel gate, the streaming-texture
-     *  upload, and clear → underlay → frame → overlay → flip. The two public entries differ only in
-     *  where the frame lands (`dest`) and whether anything draws behind it (`underlay`). */
+    /** The shared body of `present` and `present_skinned`: the pixel gate, the streaming-texture
+     *  upload, and clear → underlay → frame → overlay → flip. The two differ only in where the frame
+     *  lands (`dest`) and whether anything draws behind it (`underlay`). */
     bool present_impl(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& dest,
                       const std::function<void(SDL_Renderer*)>& underlay,
                       const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
@@ -220,13 +186,11 @@ private:
     int lastOutW_ = 0;
     int lastOutH_ = 0;
 
-    // ── The idle-redraw net (C7) ─────────────────────────────────────────────────────────────────
-    // The last frame actually PUT ON SCREEN, so an identical one can be dropped. This is the C++
-    // stand-in for Compose recomposition: Kotlin asks "did any observed state change?", and this asks
-    // the same question one layer later, of the pixels themselves — which cannot miss a field.
-    // ⚠️ The letterbox colour and the destination rect are part of the comparison, NOT just the
-    // canvas: a theme change repaints the BARS without moving a single canvas pixel, and a window
-    // resize moves the frame without changing it. Comparing the canvas alone would leave both stale.
+    // ── The idle-redraw net ──────────────────────────────────────────────────────────────────────
+    // The last frame actually PUT ON SCREEN, so an identical one can be dropped — "did anything
+    // change?" asked of the pixels themselves, which cannot miss a field.
+    // ⚠️ The letterbox colour and the destination rect are part of the comparison: a theme change
+    // repaints the BARS without moving a canvas pixel, and a resize moves the frame unchanged.
     std::vector<uint32_t> lastFrame_;
     uint32_t              lastLetterbox_ = 0;
     SDL_Rect              lastDest_      = {0, 0, 0, 0};
@@ -237,10 +201,8 @@ private:
     // which is what makes the whole net a no-op on the platforms without one.
     uint64_t              lastOverlaySig_ = 0;
 
-    // The modal-scrim colour last presented — part of the same gate (B4). A modal always repaints the
-    // 640×480 canvas when it opens or closes, so this never changes independently of the canvas memcmp;
-    // it rides the gate anyway, on the overlaySig precedent, because the scrim it controls is drawn in
-    // the BARS — a change outside the compared canvas, the exact C7 blind-channel shape.
+    // The modal-scrim colour last presented — part of the same gate: the scrim is drawn in the BARS,
+    // outside the compared canvas.
     uint32_t              lastModalScrim_ = 0;
 };
 

@@ -3,13 +3,10 @@
 
 // ─── An instrument as a NUMBER: the flat facts a note is derived from ────────────────────────────
 //
-// `Program` is everything the two note derivations read off an `Instrument`, as plain scalars. It
-// exists so the derivation can run somewhere `Instrument` cannot go — the audio thread, which must
-// not touch a std::string, a std::vector or an optional.
-//
-// ⚠️ This header is deliberately dependency-light (event.h + note_tables.h + timing.h, all POD and
-// arithmetic). Anything added here that pulls in model.h or the sequencer takes the derivation back
-// out of reach of the engine, which is the one thing it is here to avoid.
+// `Program` is what the note derivations read off an `Instrument`, as plain scalars — so they can run
+// on the audio thread, which must not touch a string, vector or optional.
+// ⚠️ Keep this header dependency-light (POD and arithmetic only). Pulling in model.h or the sequencer
+// puts the derivation back out of the engine's reach.
 
 #include <algorithm>
 #include <cstdint>
@@ -19,37 +16,32 @@
 
 namespace songcore {
 
-// Tics per phrase step. Mirrors TrackerData.TICS_PER_STEP — do not hardcode 12 anywhere else.
-// Here rather than in timing.h because that header needs the model and this one must not.
+// Tics per phrase step — never hardcode 12 elsewhere. Here, not in timing.h, because that header
+// needs the model and this one must not.
 constexpr int TICS_PER_STEP = 12;
 
-// Clamps. Here rather than in scheduler.h because the derivation needs them and has no business
-// including the sequencer — the same move note_to_midi and hex_to_float already made into model.h.
+// Here so the derivation need not include the sequencer.
 inline int   clampi(int v, int lo, int hi)        { return v < lo ? lo : (v > hi ? hi : v); }
 inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi ? hi : v); }
 
-// Reference pitch for C-4 — the canonical sample base frequency before sample-rate compensation and
-// detune. Only slice mode uses it, to strip ROOT back out of the base frequency.
-// (⚠️ NOT equal to note_hz(60): the literal is 261.63, the table's C-4 is 261.6256 from 440·2^(-9/12).
-// Each is used exactly where Kotlin uses it, and swapping them moves every rendered byte.)
+// Reference C-4 for slice mode, which strips ROOT back out of the base frequency.
+// ⚠️ Not note_hz(60) (261.6256): the literal 261.63 is what the goldens were rendered with; swapping
+// them moves every rendered byte.
 constexpr float C4_HZ = 261.63f;
 
-// Instrument kinds, as numbers — InstrumentType's own order. ⚠️ A member's number is its identity:
-// append, never insert.
+// Instrument kinds as numbers, in InstrumentType's order. ⚠️ A number is an identity: append only.
 enum ProgramType : int8_t { PROGRAM_SAMPLER = 0, PROGRAM_SOUNDFONT = 1, PROGRAM_EXTERNAL = 2 };
 
 // ─── Program ─────────────────────────────────────────────────────────────────────────────────────
-// One instrument, flattened. Built by make_program() (voice_derive.h) from an Instrument plus the two
-// facts only the loaders know — the sample-rate ratio and the SoundFont slot.
-//
-// ⚠️ `sliceMarkers` is a VIEW, not storage: it points at memory the caller owns and must outlive the
-// Program. A long-lived copy (the engine's program table) has to supply its own array.
+// One instrument, flattened by make_program() (voice_derive.h) with the two facts only the loaders
+// know: the sample-rate ratio and the SoundFont slot.
+// ⚠️ `sliceMarkers` is a VIEW into caller-owned memory that must outlive the Program.
 struct Program {
     int8_t  type           = PROGRAM_SAMPLER;
-    bool    hasSample      = false;   // sampleFilePath is set — THE empty-slot test, nothing else is
+    bool    hasSample      = false;   // sampleFilePath is set — THE empty-slot test
     bool    hasSoundfont   = false;   // soundfontPath is set
     int32_t sampleId       = -1;
-    int32_t rootMidi       = 60;      // note_to_midi(root); -1 for an empty note, as the model gives it
+    int32_t rootMidi       = 60;      // note_to_midi(root); -1 for an empty note
     int32_t detune         = 0x80;
     float   sampleRateRatio = 1.0f;   // deviceRate / fileRate; 1.0 = no correction (or unloaded)
     int32_t sfSlot         = -1;      // -1 = the SF2 never loaded → the note is dropped
@@ -64,15 +56,13 @@ struct Program {
 
 // ─── ProgramTable — the engine's own copy, one row per instrument ────────────────────────────────
 //
-// The audio thread cannot read the project: its instruments hold strings and vectors the UI thread
-// may reallocate under it. So the engine keeps this, written from the UI thread whenever an
-// instrument changes and read at the note trigger, exactly like instrumentParams[] beside it.
+// The audio thread cannot read the project (strings and vectors the UI may reallocate). Written from
+// the UI thread when an instrument changes, read at note trigger.
 
 constexpr int PROGRAM_SLOTS = 128;   // instrument ids; static_asserted against POOL_INSTRUMENTS
 
-// ⚠️ A cap, and it is provably not a limit anyone can reach: the slice a note selects is at most
-// (note 131 − transpose −128 − 60) = 199, and an SLI byte is at most 255. Markers past 255 can be
-// chosen by nothing, so truncating here cannot change a sound.
+// The slice a note can select is at most 199 (note 131 − 128 transpose − 60) and an SLI byte at most
+// 255, so markers past 256 are unreachable and truncating them changes no sound.
 constexpr int PROGRAM_SLICE_MARKERS = 256;
 
 struct ProgramTable {
@@ -87,15 +77,12 @@ struct ProgramTable {
                     : (count > PROGRAM_SLICE_MARKERS ? PROGRAM_SLICE_MARKERS : count);
         for (int i = 0; i < n; ++i) markers[id][i] = src[i];
         programs[id].sliceCount   = n;
-        programs[id].sliceMarkers = nullptr;   // the view() below re-points it; see the warning there
+        programs[id].sliceMarkers = nullptr;   // view() re-points it
     }
 
     /**
-     * Instrument `id` as a Program the derivation can use.
-     *
-     * ⚠️ The stored row's `sliceMarkers` is deliberately null — a self-pointer would dangle the
-     * moment the table were copied. It is re-pointed here, on the way out, and the returned view is
-     * valid only while this table is.
+     * Instrument `id` as a usable Program. ⚠️ The stored row's `sliceMarkers` is null (a self-pointer
+     * would dangle on copy); it is re-pointed here, valid only while this table lives.
      */
     Program view(int id) const {
         if (id < 0 || id >= PROGRAM_SLOTS) return Program{};
@@ -106,14 +93,8 @@ struct ProgramTable {
 };
 
 /**
- * Is a note on this instrument a PITCH, or is it choosing a slice?
- *
- * ⚠️ **A SLICED INSTRUMENT'S NOTE IS A SELECTOR, NOT A PITCH** — C-4 is slice 0, C#4 is slice 1, and
- * the semitone between them has nothing to do with the sound. `sliceOverride` is the step's own SLI
- * value, -1 for none: an SLI turns slice selection on for one note even with slicing mode off.
- *
- * ⚠️ model.h's note_selects_slice() decides the same question for the scale quantizer and the two
- * answers MUST agree — a note quantized there and sliced here is a drum kit playing the wrong drum.
+ * Does a note on this program select a slice rather than a pitch? `sliceOverride` is the step's SLI
+ * (-1 none). ⚠️ Must agree with model.h's note_selects_slice(), which the scale quantizer asks.
  */
 inline bool program_selects_slice(const Program& p, int sliceOverride) {
     return (p.slicingMode != 0 || sliceOverride >= 0) && p.sliceCount > 0;
@@ -121,15 +102,15 @@ inline bool program_selects_slice(const Program& p, int sliceOverride) {
 
 // ─── the engine's argument lists, as data ────────────────────────────────────────────────────────
 
-// AudioEngine::scheduleNote (the sampler path).
+// AudioEngine::scheduleNote's arguments (the sampler path).
 struct SamplerNoteArgs {
     int64_t frame = 0;
     int   sampleId = 0;
     int   trackId = 0;
     float frequency = 0.0f;
     float baseFrequency = 0.0f;
-    float volume = 1.0f;        // seam arg `volume`    — the velocity curve (velGain)
-    float phraseVolume = 1.0f;  // seam arg `phraseVol` — instrument vol | Vxx  (volGain)
+    float volume = 1.0f;        // engine arg `volume`    — the velocity curve (velGain)
+    float phraseVolume = 1.0f;  // engine arg `phraseVol` — instrument vol | Vxx (volGain)
     float pan = 0.5f;
     int   startPointOverride = -1;
     int   endPointOverride = -1;
@@ -146,7 +127,7 @@ struct SamplerNoteArgs {
     bool  valid = false;        // false = the note is dropped (empty slot)
 };
 
-// The SoundFont path's note, as resolveScheduledNote fills a ScheduledNote from it.
+// The SoundFont note's arguments.
 struct SoundfontNoteArgs {
     int64_t frame = 0;
     int   trackId = 0;
@@ -174,10 +155,10 @@ struct SoundfontNoteArgs {
 };
 
 // ─── small derivations ───────────────────────────────────────────────────────────────────────────
-// ⚠️ Each keeps its operation order: these values reach the engine's pitch math and a 1-ULP drift
-// changes every rendered byte.
+// ⚠️ Keep each operation order: these feed the pitch math, and a 1-ULP drift changes every rendered
+// byte.
 
-// Instrument.detuneSemitones(): (d>>4) + (d&0xF)/16 − 8.
+// (d>>4) + (d&0xF)/16 − 8.
 inline float detune_semitones(int detune) {
     return static_cast<float>(detune >> 4) + ((detune & 0x0F) / 16.0f) - 8.0f;
 }
@@ -206,18 +187,17 @@ inline void shift_note(int& pitch, int& octave, int semitones) {
 }
 
 // ─── the sampler note ────────────────────────────────────────────────────────────────────────────
-// `sampleLength` is the engine's length for p.sampleId — slice windows need it, and asking the engine
-// is the caller's job so this stays pure.
+// `sampleLength` is the engine's length for p.sampleId (slice windows need it); the caller asks the
+// engine so this stays pure.
 inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame, int trackId,
                                            int instrumentId, const Program& p,
                                            int tempo, int sampleRate, int64_t sampleLength) {
     SamplerNoteArgs a;
-    // ⚠️ An empty slot is "no sample FILE", nothing else. Without this, stale engine-side PCM would
-    // sound for an instrument the UI shows as empty.
+    // ⚠️ An empty slot is "no sample FILE", nothing else — or stale engine PCM would sound for an
+    // instrument the UI shows as empty.
     if (!p.hasSample) return a;   // valid = false → dropped
 
-    // The record carries the MIDI number; recover (pitch, octave) by the raw formula — a 0..127 guard
-    // here would turn an authored B-9 (131) into an empty note.
+    // Recover (pitch, octave) by the raw formula; a 0..127 guard would empty an authored B-9 (131).
     int notePitch  = n.note % 12;
     int noteOctave = n.note / 12 - 1;
 
@@ -225,9 +205,8 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
     int   effStart = n.start;
     int   effEnd   = -1;
 
-    // Slice playback: slicingMode (CUT/TRU) or an explicit SLI. Pitch becomes ROOT + chain/master
-    // transpose; the phrase note only selects the slice. PIT applies after, shifting pitch without
-    // changing the selection.
+    // Slice playback (CUT/TRU or an explicit SLI): the phrase note only selects the slice; pitch is
+    // ROOT + chain/song transpose. PIT shifts pitch afterwards without changing the selection.
     if (program_selects_slice(p, n.slice)) {
         const int markerCount = p.sliceCount;
 
@@ -243,9 +222,8 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
             notePitch  = rootMidi % 12;
             noteOctave = rootMidi / 12 - 1;
 
-            // The standard baseFreq bakes ROOT in, and the note here is ROOT-derived too, so the
-            // engine's freq/baseFreq ratio would cancel ROOT out entirely. Strip it: baseFreq carries
-            // only sampleRateRatio ÷ detune, leaving ROOT in the numerator alone.
+            // The note here is ROOT-derived and baseFreq normally bakes ROOT in, so the ratio would
+            // cancel ROOT out. baseFreq carries only sampleRateRatio ÷ detune instead.
             baseFreq = C4_HZ * p.sampleRateRatio / detune_multiplier(p.detune);
 
             // CUT bounds the slice end; OFF+SLI and TRU play on to the sample end.
@@ -303,18 +281,14 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     const int noteOctave = n.note / 12 - 1;
 
     const int baseMidi = n.note + n.arp;
-    // ROOT acts as a transpose, matching the sampler: a ROOT below C-4 raises pitch, above lowers it.
-    //
-    // ⚠️ `rootAudition` is the INSTRUMENT screen's "play me my root" preview, and it is not a nicety:
-    // that preview plays note == root, so the transpose below would resolve to root + (60 − root) = 60
-    // — a C-4 for every ROOT, and the button would appear to ignore the parameter it auditions. The
-    // sequencer NEVER sets it.
+    // ROOT acts as a transpose, as on the sampler: a ROOT below C-4 raises pitch.
+    // ⚠️ `rootAudition` (the INSTRUMENT screen's root preview) plays note == root, which this transpose
+    // would turn into C-4 for every ROOT. The sequencer never sets it.
     const int transpose = rootAudition ? 0 : 60 - p.rootMidi;
 
     const float volume = f32_from_bits(n.velGainBits);
-    // The V column IS the MIDI velocity — TSF applies its own dB curve, so the channel volume stays at
-    // 1.0 and instrument-vol/Vxx arrives via phraseVol (no double curve). Legacy callers (retrig/arp)
-    // pass −1 and derive the velocity from the gain instead.
+    // The V column IS the MIDI velocity — TSF applies its own curve, so the channel volume stays 1.0
+    // and instrument vol/Vxx arrives via phraseVol. Velocity −1 (retrig/arp) derives from the gain.
     const int   velocity  = (n.velocity >= 0) ? clampi(n.velocity, 1, 127)
                                               : clampi(static_cast<int>(volume * 127.0f), 1, 127);
     const float sfNoteVol = (n.velocity >= 0) ? 1.0f : volume;
@@ -339,23 +313,22 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     a.vibratoSpeed     = f32_from_bits(n.vibSpdBits);
     a.vibratoDepth     = f32_from_bits(n.vibDepBits);
     a.phraseVol        = f32_from_bits(n.volGainBits);
-    a.sampleId         = instrumentId;   // the SF path passes the instrument id here
+    a.sampleId         = instrumentId;   // the SF path carries the instrument id here
     a.tableId          = (n.tableId >= 0) ? n.tableId : instrumentId;
     a.tableTicRate     = p.tableTicRate;
     a.noteOctave       = noteOctave;
     a.notePitch        = notePitch;
     a.tableStartRow    = n.tableRow;
-    // Detune reaches the SF voice as a fractional pitch-wheel offset (the sampler bakes the same
-    // semitone offset into baseFreq instead).
+    // Detune reaches the SF voice as a fractional pitch-wheel offset (the sampler bakes it into
+    // baseFreq).
     a.detuneSemitones  = detune_semitones(p.detune);
     a.valid            = true;
     return a;
 }
 
 // ─── one note, either kind ───────────────────────────────────────────────────────────────────────
-// Which of the two derivations a note takes is the PROGRAM's answer, not the caller's. Asking it in
-// one place is what lets the instrument still be undecided when the note was queued: the sequencer
-// and the audio thread run this same function and cannot disagree about the fork.
+// The PROGRAM decides which derivation a note takes, so the sequencer and the audio thread run the
+// same fork and cannot disagree.
 struct DerivedNote {
     bool isSoundfont = false;
     SamplerNoteArgs   sampler;

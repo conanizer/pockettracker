@@ -6,8 +6,7 @@ namespace pt::ui {
 
 namespace {
 
-// The geometry: drawSimpleConfirmDialog's 260×55. The border grows outward from it (helpers.h), so
-// these are the fill, not the outside edge.
+// 260×55. The border grows outward from it (helpers.h), so these are the fill, not the outside edge.
 constexpr int BOX_W = 260;
 constexpr int BOX_H = 55;
 constexpr int BOX_X = (DESIGN_W - BOX_W) / 2;
@@ -17,10 +16,8 @@ constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;
 constexpr int DLG_FONT_SCALE   = 3;
 constexpr int DLG_CHAR_SPACING = 2;
 
-// Two lines of type, a fixed distance apart, and the PAIR is centred in the box. ⚠️ The top offset is
-// derived rather than typed: a hand-typed top pad is a pad that stops being centred the moment the
-// box's height or the line pitch moves, and it leaves the two lines sitting high with all the slack
-// under them — which is exactly what it did.
+// Two lines a fixed distance apart, the PAIR centred in the box. The top offset is derived, so it stays
+// centred when the box or the pitch changes.
 constexpr int DLG_LINE_PITCH = 22;
 constexpr int DLG_GLYPH_H    = 5 * DLG_FONT_SCALE;
 constexpr int DLG_CONTENT_H  = DLG_LINE_PITCH + DLG_GLYPH_H;
@@ -36,7 +33,7 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind) {
         case ConfirmDialogState::Kind::NEW_PROJECT: return "NEW PROJECT?";
         case ConfirmDialogState::Kind::CHANGE_TYPE: return "CHANGE TYPE?";
         case ConfirmDialogState::Kind::EXIT:        return "EXIT?";
-        case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";   // PixelPerfectRenderer:866
+        case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";
         case ConfirmDialogState::Kind::NONE:        break;
     }
     return "";
@@ -52,10 +49,8 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
 
     c.draw_text(title, BOX_X + (BOX_W - titleW) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle,
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
-    // ⚠️ THE LINE THAT SAYS WHICH BUTTON MEANS YES, so it takes the one INK role guaranteed bright in
-    // every palette. This box fills with `background`, the screen's own ground, and the roles that
-    // recede on purpose (TXT PARAM, TXT EMPTY) are exactly the ones a hand-made palette will have
-    // dimmed. TXT VALUE is a theme row, so that guarantee reaches a user's own theme too.
+    // ⚠️ The line saying which button means YES takes TXT VALUE, the one ink role guaranteed bright in
+    // every palette; the receding roles are the ones a hand-made palette dims.
     c.draw_text(instruction, BOX_X + (BOX_W - instrW) / 2, BOX_Y + DLG_INSTR_Y, t.textValue,
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
 }

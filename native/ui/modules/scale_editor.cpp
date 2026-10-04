@@ -23,16 +23,9 @@ inline std::string pitch_class_name(int pc) {
 
 // ── The NAME row's three cells ───────────────────────────────────────────────────────────────────
 //
-// The name gets everything up to SAVE, which is what makes the abbreviations the source sheet carries
-// unnecessary: the longest shape in the bank is "Phrygian Dominant" at 17 characters, and 17 fit.
-//
-// ⚠️ THE `*` COLUMN IS TAKEN, NOT RESERVED. An unmarked name starts on the SAME column as SCALE, KEY
-// and the twelve row numbers, so the row reads as part of the grid; the marker moves it one character
-// right when there is one to draw. Reserving the column unconditionally would indent every name on
-// every screen for the sake of a marker that is usually absent.
-//
-// ⚠️ SAVE's column therefore clears the longest name IN ITS SHIFTED position — 17 characters starting
-// one column in — not the longest name at rest. At 325 the two cursor boxes touched.
+// The name gets everything up to SAVE: the bank's longest is "Phrygian Dominant", 17 characters.
+// ⚠️ THE `*` COLUMN IS TAKEN, NOT RESERVED: an unmarked name sits on the grid's column and the marker
+// pushes it one right. SAVE's column therefore clears the longest name in its SHIFTED position.
 inline constexpr int SCALE_STAR_X   = 10;
 inline constexpr int SCALE_NAME_X   = 10;             // …+ CHAR_W while the marker is up
 inline constexpr int SCALE_SAVE_X   = 335;
@@ -64,9 +57,8 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
     const int  nameY    = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const bool onName   = (s.cursorRow == SCALE_NAME_ROW);
 
-    // ⚠️ The name SHOWN is not always the name stored: an unnamed slot is named by its intervals, so a
-    // project that has never been touched reads "Chromatic" without a `name` field ever being written
-    // to its file. `----` is the remaining case — a shape built by hand that the bank has no word for.
+    // ⚠️ The name SHOWN is not always the name stored: an unnamed slot is named by its intervals
+    // ("Chromatic" without a `name` field). `----` is a hand-built shape the bank has no word for.
     std::string shown = songcore::scale_display_name(scale);
     const bool  named = !shown.empty();
     if (!named) shown = "----";
@@ -86,18 +78,14 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
               /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
 
     // ── Row 1: KEY ───────────────────────────────────────────────────────────────────────────────
-    // ⚠️ It sits ABOVE the EN column header, not under it, and that is the whole reason for the gap
-    // below: the key belongs to the PROJECT and the twelve rows under it belong to this SLOT. Drawn
-    // inside the column, its value reads as the twelve rows' thirteenth "EN".
+    // ⚠️ Above the EN column header, not under it: the key belongs to the PROJECT, the twelve rows
+    // below to this SLOT. Inside the column it would read as a thirteenth "EN".
     const int keyY = nameY + ROW_HEIGHT;
 
     const bool keyCursor = (s.cursorRow == SCALE_KEY_ROW);
     c.draw_text("KEY", labelX, keyY, keyCursor ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                 FONT_SCALE);
-    // In the VALUE column, not beside its label: the label is three characters wide and the note
-    // column starts inside it. Every parameter screen in the app puts a value here anyway.
-    // Padded to two glyphs: the cursor's box is measured off the text it holds, and a bare "C" would
-    // make it shrink and grow as the key cycles past the sharps.
+    // In the value column, padded to two glyphs so the cursor box does not resize past the sharps.
     std::string keyName = pitch_class_name(s.key);
     if (keyName.size() < 2) keyName += " ";
     draw_cursor_cell(c, keyName, valueX, keyY, keyCursor, t.textValue, t);
@@ -116,14 +104,9 @@ void ScaleModule::draw(Canvas& c, int x, int y, const ScaleState& s) const {
         const bool isOn     = scale.enabled[static_cast<size_t>(degree)] != 0;
 
         // ── What is sounding ─────────────────────────────────────────────────────────────────────
-        // The same `>` every grid draws for a playback position, in the gap ahead of the EN cell.
-        // Here it is not a position but a PITCH: the degree the note coming out of the speaker
-        // landed on, which is how the quantizer becomes something you can watch. Play a chromatic
-        // run under a five-note scale and the marker visibly skips the rows that are off.
-        //
-        // ⚠️ A marker on a row that is OFF is not a bug — it means the pitch sounding is not in the
-        // scale on screen, because that track is under a different one or its instrument has
-        // transposing disabled. Drawing it only on enabled rows would hide exactly that.
+        // The playback `>`, here marking a PITCH: the degree the sounding note landed on.
+        // ⚠️ A marker on an OFF row is not a bug — that track is under another scale or its
+        // instrument has transposing disabled. Drawing it only on enabled rows would hide that.
         if ((s.soundingMask >> degree_pitch_class(s.key, degree)) & 1u)
             draw_playhead(c, valueX - CHAR_W, rowY, t);
 
@@ -149,12 +132,8 @@ CursorContext ScaleModule::cursor_context(const ScaleState& s) const {
         if (s.cursorColumn != SCALE_NAME_COL_NAME) return cc::read_only();
         CursorContext c = cc::index_cycle(songcore::scale_bank_cycle_index(s.scale),
                                           static_cast<int>(songcore::scale_bank().size()));
-        // A+B on the name puts the slot back to Chromatic, which is bank row 0 (scale_bank.h) and is
-        // also what a default-constructed slot already is — so "reset this slot" and "load the first
-        // entry" are one edit, and the gesture needs no arm of its own anywhere.
-        //
-        // ⚠️ A cell with no delete resets to `defaultValue`; this cycle has no delete, which is what
-        // makes the plain assignment the whole of the change.
+        // A+B on the name resets to Chromatic — bank row 0 and the default slot — so reset and "load
+        // the first entry" are one edit. This cycle has no delete, so A+B applies `defaultValue`.
         c.defaultValue = 0;
         return c;
     }
@@ -184,10 +163,8 @@ ScaleInputResult ScaleModule::handle_input(songcore::Scale& scale, int key, int 
         const int index = action.value;
         if (index < 0 || index >= static_cast<int>(songcore::scale_bank().size())) return r;
 
-        // ⚠️ Compared BEFORE the write and against both halves, because a cycle that lands back on the
-        // shape already in the slot must not bump the dirty counter — that counter is also the
-        // redraw/live-edit trigger, and a spurious bump is a phantom autosave and a phantom
-        // "RECOVER WORK?" on the next launch.
+        // ⚠️ Compared before the write: a cycle landing back on the same shape must not bump the
+        // dirty counter (a phantom autosave and RECOVER WORK?).
         songcore::Scale after = scale;
         songcore::scale_apply_bank(after, index);
         r.modified = (after.name != scale.name || after.enabled != scale.enabled);

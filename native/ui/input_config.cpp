@@ -31,8 +31,7 @@ void read_controller(const json& j, InputConfig& cfg, std::vector<InputConfigWar
     const std::string value = ait->get<std::string>();
     AbxyLayout        layout{};
     if (!abxy_from_name(value, layout)) {
-        // Name the accepted values. A user who typed "switch" or "x360" has to be told what to type
-        // instead, or the next edit is another guess.
+        // Name the accepted values, or the next edit is another guess.
         warn(warnings, "config.json: \"controller.abxy\" = \"" + value +
                            "\" is not one of auto/xbox/nintendo — using auto");
         return;
@@ -62,10 +61,8 @@ void read_keyboard(const json& j, InputConfig& cfg, std::vector<InputConfigWarni
             continue;
         }
 
-        // A listed button REPLACES its defaults, so an empty array is meaningful: it unbinds. That is
-        // why the vector is created before the loop rather than on the first accepted element — a
-        // button whose every entry was rejected ends up UNBOUND, not silently back on its defaults,
-        // which is the reading that matches what the file plainly says.
+        // A listed button REPLACES its defaults, so `[]` unbinds — and one whose every entry was
+        // rejected ends up UNBOUND, not back on its defaults, matching what the file says.
         std::vector<std::string> names;
         for (const json& k : *entry) {
             if (!k.is_string()) {
@@ -101,7 +98,7 @@ bool abxy_from_name(const std::string& name, AbxyLayout& out) {
 
 bool load_input_config(FileSystem& fs, InputConfig& out, std::vector<InputConfigWarning>& warnings) {
     std::string blob;
-    if (!fs.read_file(fs.config_path(), blob)) return false;   // no file: the common case, not an error
+    if (!fs.read_file(fs.config_path(), blob)) return false;   // no file: the common case
 
     const json j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) {

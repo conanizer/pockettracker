@@ -9,18 +9,15 @@ using songcore::Project;
 
 namespace {
 
-/** Kotlin's `tableId.coerceIn(0, project.tables.size - 1)` — the table getters all do this. */
+/** Clamp a table id into the pool. */
 int clamp_table_id(const Project& p, int tableId) {
     const int last = static_cast<int>(p.tables.size()) - 1;
     return std::max(0, std::min(tableId, last));
 }
 
 /**
- * The selection rectangle with its corners sorted.
- *
- * A selection is an anchor plus a dragged edge, so either corner may be the smaller one on either
- * axis — every copy and delete below walks `[minRow..maxRow] × [minCol..maxCol]` and there is one
- * rule for getting there.
+ * The selection rectangle with its corners sorted — either corner may be the smaller on either axis,
+ * and every copy and delete walks `[minRow..maxRow] × [minCol..maxCol]`.
  */
 struct Bounds {
     int minRow, maxRow, minCol, maxCol;
@@ -125,8 +122,7 @@ void Clipboard::copy_song_cells(const Project& p, int startRow, int startColumn,
             if (trackIndex < 0 || trackIndex >= 8) continue;
 
             const songcore::Track& track = p.tracks[static_cast<size_t>(trackIndex)];
-            // A track's chainRefs is a VARIABLE-length list (Kotlin's `mutableListOf()`), not a fixed
-            // 256 — past its end the cell is empty, and copying it must not read off the end.
+            // A track's chainRefs is variable-length; past its end the cell is empty.
             const int chainRef = (row < static_cast<int>(track.chainRefs.size()))
                                      ? track.chainRefs[static_cast<size_t>(row)]
                                      : -1;
@@ -233,8 +229,8 @@ PasteResult Clipboard::paste_phrase_steps(Project& p, int phraseId, int cursorRo
 
         songcore::PhraseStep& step = phrase.steps[static_cast<size_t>(targetRow)];
 
-        // Each arm asks for the field the TARGET column holds. An item that does not carry it — an
-        // FX-value copied onto an FX-type column, say — writes nothing and counts nothing.
+        // Each arm asks for the field the TARGET column holds; an item without it (an FX value onto an
+        // FX-type column) writes and counts nothing.
         switch (targetCol) {
             case 1: if (item.note)       { step.note       = *item.note;       ++itemsPasted; } break;
             case 2: if (item.volume)     { step.volume     = *item.volume;     ++itemsPasted; } break;
@@ -299,8 +295,7 @@ PasteResult Clipboard::paste_song_cells(Project& p, int cursorRow, int cursorCol
 
         songcore::Track& track = p.tracks[static_cast<size_t>(targetCol - 1)];
 
-        // GROW the track to reach the row. Unlike copy — which reads past the end as "empty" — a
-        // paste must materialise the intervening rows, or the ref would land at the wrong index.
+        // GROW the track to reach the row (copy reads past the end as empty; paste must materialise).
         while (static_cast<int>(track.chainRefs.size()) <= targetRow) track.chainRefs.push_back(-1);
 
         track.chainRefs[static_cast<size_t>(targetRow)] = item.chainRef;
@@ -368,9 +363,8 @@ int Clipboard::cut_table_rows(Project& p, int tableId, int startRow, int startCo
 
 // ─── Delete ──────────────────────────────────────────────────────────────────────────────────────
 //
-// The four "empty"s, in one place. They are NOT the same value and never were: a cleared velocity is
-// 0x7F (full — the phrase V column has no empty state), a cleared table volume is −1 (it does), a
-// cleared chain ref is −1, and a cleared transpose is 0x00 (no transpose, two's-complement).
+// The four "empty"s, in one place, and they differ: a cleared velocity is 0x7F (the V column has no
+// empty state), a cleared table volume −1, a cleared chain ref −1, a cleared transpose 0x00.
 
 int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int startColumn,
                                    int endRow, int endColumn) {
@@ -438,8 +432,7 @@ int Clipboard::delete_song_cells(Project& p, int startRow, int startColumn, int 
             if (trackIndex < 0 || trackIndex >= 8) continue;
 
             songcore::Track& track = p.tracks[static_cast<size_t>(trackIndex)];
-            // Only rows the track actually HAS. Delete does not grow the track (paste does) — there
-            // is nothing to clear past the end, and counting it would overstate what was deleted.
+            // Only rows the track HAS: delete does not grow it, and must not count past its end.
             if (row < static_cast<int>(track.chainRefs.size())) {
                 track.chainRefs[static_cast<size_t>(row)] = -1;
                 ++itemsDeleted;

@@ -1,12 +1,8 @@
 // sdl-audio-engine.{h,cpp} — the SDL2 audio backend.
 //
-// The desktop/handheld twin of oboe-audio-engine.{h,cpp}, and deliberately its mirror image: open a
-// stereo float stream, hand each device buffer straight to AudioEngine::processLiveBlock(), own
-// nothing else. Every sample of DSP, all scheduling, the offline-render gate, the scope/spectrum
-// capture — all of it lives in the portable core. audio-engine.h's header comment named this file
-// before it existed ("a future ALSA/JACK/SDL2 backend is a parallel file that calls
-// processLiveBlock() the same way"), and native/CMakeLists.txt's ANDROID_PLATFORM_SOURCES describes
-// the swap: the Linux port replaces exactly the Oboe/JNI shell and keeps everything above it.
+// The desktop/handheld twin of oboe-audio-engine: open a stereo float stream, hand each device
+// buffer straight to AudioEngine::processLiveBlock(), own nothing else — all DSP and scheduling live
+// in the portable core.
 //
 // ⚠️ NO DSP MAY EVER BE ADDED HERE. Same rule as onAudioReady: this is glue, not signal path.
 
@@ -26,10 +22,8 @@
 
 class AudioEngine;
 
-// `AudioBackend` since convergence C0.2 — the shared shell reaches its device through those six
-// methods and nothing else, so that C3 can hand it `OboeAudioEngine` on Android without app.cpp
-// changing a character. The interface came from THIS class's shape; see audio-backend.h for why the
-// virtuals cost nothing (they are lifecycle, never the callback).
+// The shared shell reaches its device through `AudioBackend` alone (audio-backend.h), so Android
+// can hand it `OboeAudioEngine` instead with app.cpp unchanged.
 class SdlAudioEngine : public AudioBackend {
   public:
     explicit SdlAudioEngine(AudioEngine* core);
@@ -46,14 +40,11 @@ class SdlAudioEngine : public AudioBackend {
     void resumeStream() override;
 
     /**
-     * Stop (and restart) the callback — what an OFFLINE RENDER needs (S7).
+     * Stop (and restart) the callback — what an OFFLINE RENDER needs.
      *
-     * ⚠️ The render drives the engine from the UI thread. The audio callback drives it from SDL's. A
-     * paused device is the only thing that makes "one writer" true rather than merely likely: Kotlin
-     * gets away with leaving Oboe open because a stopped transport means the callback reads a silent
-     * engine, but "silent" is not "absent", and `renderOffline` is rewriting the very buffers it reads.
-     * SDL_PauseAudioDevice blocks until the callback has returned, so after this call there is no
-     * second reader — by construction, not by timing.
+     * ⚠️ The render drives the engine from the UI thread, the callback from SDL's. "Silent" is not
+     * "absent": `renderOffline` rewrites the very buffers the callback reads. SDL_PauseAudioDevice
+     * blocks until the callback has returned, so there is one writer by construction, not by timing.
      */
     void setPaused(bool paused) override;
 

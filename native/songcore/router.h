@@ -3,20 +3,13 @@
 
 // ─── The MIDI event bus / router ─────────────────────────────────────────────────────────────────
 //
-// The songcore spine (Phase 1 S4). The scheduler (scheduler.h) speaks to a MidiRouter through the
-// SAME seam the Kotlin sequencer used against AudioEngine — one method per AudioEngine.schedule*
-// call that carried an EventTrace tap. Each method builds one songcore::Event (event.h, encoding 1)
-// and hands it to the attached IMidiConsumer. This is where the Kotlin "tap wrapper around each
-// schedule* call" (event-schema §6) becomes "the router itself" — bus records are the primary form,
-// the trace text (trace_writer.h) is one consumer of them.
+// The scheduler talks to the engine through this: one method per kind of engine call, each building
+// one songcore::Event (event.h) and handing it to every attached IMidiConsumer. The trace text
+// (trace_writer.h) is just one consumer.
 //
-// Nothing here derives audio: the router copies the seam arguments verbatim into the record (the
-// float fields as raw binary32 bits), exactly as AudioEngine.kt's tap did at ENTRY — every value
-// below the seam (SF velocity curve, slice window, baseFreq) stays consumer-side and never rides an
-// event. That is what makes the C++ event stream reproduce the Kotlin golden byte-for-byte.
-//
-// Transport (t_play / t_stop) is not a bus Event — it frames a PLAY..STOP session for the trace
-// consumer, so it passes straight through to IMidiConsumer::on_play / on_stop.
+// Nothing here derives audio: seam arguments are copied verbatim (floats as raw binary32 bits). The
+// SF velocity curve, slice window and baseFreq stay consumer-side, never on the bus.
+// Transport (t_play / t_stop) is not an Event; it passes straight to on_play / on_stop.
 
 #include <cstdint>
 #include <cstring>
@@ -26,10 +19,8 @@
 namespace songcore {
 
 // ─── NoteOn seam arguments ────────────────────────────────────────────────────────────────────────
-// Mirrors the AudioEngine.scheduleNote signature (the subset the tap records) field-for-field,
-// including the Kotlin defaults, so scheduler call sites read like the originals' named-argument
-// calls. `note` is passed as its pitch/octave pair (as the Note object was at the seam); the router
-// folds it to the MIDI number for the record, matching EventTrace.noteOn's (octave+1)*12+pitch.
+// The engine's scheduleNote arguments, with defaults, so call sites read like named-argument calls.
+// The router folds pitch/octave into the MIDI number, (octave+1)*12+pitch.
 struct NoteArgs {
     int64_t frame        = 0;
     int     track        = 0;
@@ -37,8 +28,8 @@ struct NoteArgs {
     int     notePitch    = 0;   // note.pitch  (0-11)
     int     noteOctave   = 0;   // note.octave
     int     velocity     = -1;  // midiVelocity: -1 legacy derive | 0-127
-    float   velGain      = 1.0f;  // seam arg `volume`   (velocity curve)
-    float   volGain      = 1.0f;  // seam arg `phraseVol` (instr vol | Vxx/255)
+    float   velGain      = 1.0f;  // engine arg `volume`    (velocity curve)
+    float   volGain      = 1.0f;  // engine arg `phraseVol` (instr vol | Vxx/255)
     float   pan          = 0.5f;
     int     start        = -1;  // startPointOverride
     int     slice        = -1;  // sliIndex
@@ -55,9 +46,7 @@ struct NoteArgs {
 };
 
 // ─── Consumer interface ─────────────────────────────────────────────────────────────────────────
-// A bus consumer sees the same records the future EXTERNAL/sampler/SF consumers will (MIDI plan
-// §3). For S4 the only consumer is the trace writer; on_play/on_stop carry the session context the
-// trace needs and every other (audio) consumer ignores.
+// on_play / on_stop carry the session context the trace needs; audio consumers may ignore them.
 struct IMidiConsumer {
     virtual ~IMidiConsumer() = default;
     virtual void consume(const Event& ev) = 0;
@@ -68,18 +57,11 @@ struct IMidiConsumer {
 
 // ─── Which instrument is a track's events for? ───────────────────────────────────────────────────
 //
-// ⚠️ ONLY NoteOn CARRIES AN INSTRUMENT. NoteOff, CC and every EXT event are TRACK-SCOPED and ride
-// `INSTRUMENT_NONE` (event.h) — they act on whatever is sounding on the track. That is fine for a
-// consumer which owns every track, and it is exactly what breaks the moment there are TWO consumers
-// and the routing decision is per-instrument: "is this note-off mine?" has no answer in the record.
-//
-// So the answer is derived, once, in one place: the last NoteOn on a track names the instrument every
-// following track-scoped event belongs to. Both consumers keep one of these and both therefore reach
-// the SAME verdict for the same event — which is the property that matters, because a disagreement
-// means a note is either played twice or by nobody.
-//
-// ⚠️ It assumes events arrive per track in non-decreasing frame order, which the scheduler guarantees
-// (it schedules forward, and retrig/arp notes are emitted inside the step that spawns them).
+// ⚠️ Only NoteOn carries an instrument; NoteOff, CC and EXT events are TRACK-SCOPED (`INSTRUMENT_NONE`).
+// With two consumers routing per instrument, "is this note-off mine?" needs an answer, so it is
+// derived once here: the last NoteOn on a track names the instrument of what follows. Both consumers
+// keep one, so they reach the same verdict — or a note plays twice or by nobody.
+// ⚠️ Assumes per-track events arrive in non-decreasing frame order, which the scheduler guarantees.
 struct TrackInstruments {
     // 0-7 sequencer + TRACK_PREVIEW (8). TRACK_GLOBAL never resolves to an instrument.
     static constexpr int LANES = TRACK_PREVIEW + 1;
@@ -105,11 +87,9 @@ struct TrackInstruments {
 };
 
 // ─── The router ─────────────────────────────────────────────────────────────────────────────────
-// Fans one record out to every attached consumer (MIDI plan §3: "sources → router → consumers"). In
-// the app that is the engine consumer plus, when tracing, the trace writer — they see the identical
-// record in the identical order, which is what makes a device trace a faithful witness of the audio
-// that was actually scheduled. Consumers are plain pointers owned by the host; attach/detach happens
-// on the transport thread, never during a dispatch.
+// Fans each record out to every consumer — the engine consumer, the cable, and the trace writer when
+// tracing — in the same order, so a trace is a faithful witness of what was scheduled. Consumers are
+// owned by the host; attach/detach happens on the transport thread, never mid-dispatch.
 struct MidiRouter {
     static constexpr int MAX_CONSUMERS = 4;
 
@@ -175,10 +155,8 @@ struct MidiRouter {
         emit(ev);
     }
 
-    // ── MIDI phase D (MPG / MPB) ──
-    //
-    // Track-scoped like CC, and for the same reason: the instrument they act on is whatever the track
-    // is playing (TrackInstruments), not a routing key of their own.
+    // ── MPG / MPB ──
+    // Track-scoped like CC: they act on whatever the track is playing (TrackInstruments).
 
     void program(int64_t frame, int track, int program) {
         Event ev = base(frame, track, INSTRUMENT_NONE, EV_PROGRAM);
@@ -226,7 +204,7 @@ struct MidiRouter {
         emit(ev);
     }
 
-    // EQM is global — the record rides TRACK_GLOBAL (255), instrument none (EventTrace.extMasterEq).
+    // EQM is global: TRACK_GLOBAL (255), no instrument.
     void ext_master_eq(int64_t frame, int slot) {
         Event ev = base(frame, TRACK_GLOBAL, INSTRUMENT_NONE, EV_EXT_MASTER_EQ);
         ev.extMasterEq.slot = static_cast<int16_t>(slot);

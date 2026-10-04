@@ -2,20 +2,8 @@
 
 // ─── THE QWERTY KEYBOARD ─────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/overlays/QwertyKeyboardOverlay.kt (the state) and
-// PixelPerfectRenderer.drawQwertyKeyboard (the pixels). A modal on-screen keyboard: it is how every
-// piece of TEXT in the app gets typed on a device with eight buttons and no letters on any of them.
-//
-// It is an OVERLAY, not a screen: it draws on top of whatever is behind it, and while it is open it
-// owns every button. That makes it the app's first true modal — and the one thing S6a needs that the
-// modal system (still unbuilt) would otherwise have owned.
-//
-// ── Why it lands with the file browser rather than after it ──────────────────────────────────────
-//
-// Because the browser cannot rename or create a folder without it. Kotlin's `BrowserMode.RENAME` /
-// `CREATE` — an in-place character editor driven by the CHARACTER cursor context — look like the
-// alternative, but they are DEAD CODE: nothing on Android assigns either mode, and SELECT+A / SELECT+R
-// have opened this keyboard instead since it was written. See ui/modules/file_browser.h.
+// A modal on-screen keyboard: how every piece of TEXT in the app is typed on a device with eight
+// buttons. An OVERLAY drawn over whatever is behind it, owning every button while open.
 //
 //   DPAD          move the key cursor (3 key rows, then SPACE, then the ABORT/APPLY row)
 //   A             type the key under the cursor — or, on the action row, cancel / confirm
@@ -34,19 +22,8 @@
 namespace pt::ui {
 
 /**
- * What APPLY does with the text. The keyboard itself knows none of this — it collects a string and
- * hands it back, and the dispatcher acts on the purpose it opened the keyboard WITH.
- *
- * ⚠️ SCOPE: NINE of Kotlin's ten. RESAMPLE is the ninth, and it lands here with the SONG-selection
- * render path (the render itself is project_actions::render_resample). The eight before it arrived with
- * their screens (PROJECT_NAME → the PROJECT screen; SAMPLE_NAME / SAMPLE_SAVE → the sample editor, S6b;
- * THEME_SAVE → the theme editor). VIDEO_EXTRACT lands never: the port plan's 2026-07-11 amendment
- * deletes the video→WAV converter from both platforms — the mp4-as-in-place-sample model replaces it,
- * and that model does not type a name, so it never opens this keyboard.
- *
- * ⚠️ The ORDER here is NOT Kotlin's (Kotlin opens with PROJECT_NAME). Nothing serializes a
- * QwertyContext ordinal across the boundary — the two enums have always disagreed — so RESAMPLE is
- * appended rather than slotted in, keeping every existing value stable.
+ * What APPLY does with the text. The keyboard collects a string and hands it back; the dispatcher
+ * acts on the purpose it opened the keyboard WITH. Appended to, never reordered.
  */
 enum class QwertyContext {
     FILE_RENAME,      // rename `contextExtra` (an absolute path), keeping its extension
@@ -56,7 +33,7 @@ enum class QwertyContext {
     SAMPLE_NAME,      // the sample editor's NAME row — renames the editor's sample AND its instrument
     SAMPLE_SAVE,      // SAVE-AS: write the edited sample to `contextExtra`/<text>.wav, de-duplicating
     PROJECT_NAME,     // the project's name (PROJECT row 2) — plain text, no file touched
-    THEME_SAVE,       // write the live theme to `contextExtra`/<text>.ptt, and name it <text> (S9)
+    THEME_SAVE,       // write the live theme to `contextExtra`/<text>.ptt, and name it <text>
     RESAMPLE,         // render the SONG selection to `<Resampled>/<text>.wav`, then auto-instrument it
     SCALE_SAVE,       // write the SCALE screen's slot to `contextExtra`/<text>.pts, and name it <text>
     GROOVE_SAVE       // write the GROOVE screen's slot to `contextExtra`/<text>.ptg, and name it <text>
@@ -86,10 +63,8 @@ struct QwertyKeyboardState {
     std::string fieldLabel = "NAME:";
 
     /**
-     * INSERT MODE (a SETTINGS row on Android). True: A inserts BEFORE the cursor and B backspaces
-     * (terminal-style). False: A inserts AFTER it and B forward-deletes (typewriter-style). It is one
-     * flag, and it flips the meaning of BOTH buttons — which is why they read it rather than each
-     * hard-coding a direction.
+     * INSERT MODE. True: A inserts BEFORE the cursor and B backspaces (terminal-style). False: A
+     * inserts AFTER it and B forward-deletes. One flag flips both buttons.
      */
     bool insertBefore = true;
 
@@ -114,8 +89,7 @@ struct QwertyKeyboardState {
 
 // ─── The verbs ───────────────────────────────────────────────────────────────────────────────────
 //
-// Free functions over the state, as the Kotlin extension functions are — so a golden can drive them
-// with nothing but a state struct, and `tools/ptinput` does exactly that.
+// Free functions over the state, so they can be driven with nothing but a state struct.
 
 /** Keep `keyCursorCol` inside the row `keyCursorRow` points at. Called after any row change. */
 void clamp_col(QwertyKeyboardState& s);
@@ -135,20 +109,13 @@ void move_text_cursor_left(QwertyKeyboardState& s);
 void move_text_cursor_right(QwertyKeyboardState& s);
 
 /**
- * A horizontal scroll window over `text` that keeps `textCursor` visible (v0.9.4 C1), so a long name
- * (`screen-YYYYMMDD-HHMMSS`) no longer spills out of the box. Unlike the PATH row (clips the head only)
- * or a filename (clips the tail only), BOTH ends can be clipped with a single "…" marker on the side.
- *
- * `windowCols` is how many character columns fit in the text box. Behaviour (matches the plan):
- *   • text fits            → show it all, cursor wherever it is, no markers.
- *   • cursor near the end  → pin right: show the tail, "…" on the left.
- *   • cursor near the start→ pin left: show the head, "…" on the right.
- *   • cursor in the middle → the cursor sits at the box centre and the text scrolls under it, "…" both
- *                            sides.
- * The "…" marker eats ONE column, so when a side clips the text region shrinks by one there; `first`
- * and `cols` describe the CHARACTER region only (the markers live in the reserved column beside it).
- *
- * Pure over three ints so `tools/ptinput` can golden it without pixels.
+ * A horizontal scroll window over `text` that keeps `textCursor` visible; either end can be
+ * clipped, marked by a "…".
+ *   • text fits             → all of it, no markers.
+ *   • cursor near the end   → pin right: the tail, "…" on the left.
+ *   • cursor near the start → pin left: the head, "…" on the right.
+ *   • cursor in the middle  → the cursor sits at the box centre, "…" both sides.
+ * A "…" takes ONE column from its side; `first` and `cols` describe the character region only.
  */
 struct QwertyTextWindow {
     int  first     = 0;      // first visible character index
@@ -158,7 +125,7 @@ struct QwertyTextWindow {
 };
 QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols);
 
-/** Kotlin's `text.trimEnd()` — what APPLY hands back. */
+/** `text` with trailing whitespace dropped — what APPLY hands back. */
 std::string trimmed_text(const QwertyKeyboardState& s);
 
 // ─── The overlay ─────────────────────────────────────────────────────────────────────────────────

@@ -2,29 +2,22 @@
 
 // ─── THE EQ EDITOR ───────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/EqModule.kt + ui/overlays/EqEditorOverlay.kt: three parametric bands, a
-// live spectrum, and the response curve they add up to.
+// Three parametric bands, a live spectrum, and the response curve they add up to.
 //
 // ── It is an OVERLAY, not a screen, and that is not a technicality ───────────────────────────────
 //
-// It has no cell in the 5×5 navigation grid and `currentScreen` does not change when it opens. It is
-// raised from a CELL — the EQ slot on INSTRUMENT, on INST.POOL, on MIXER's master strip, on either of
-// EFFECTS' two input rows, and on the SAMPLE EDITOR's FX row — and every one of those cells has spent
-// seven sessions dialling a slot NUMBER with nothing behind it. `EqCallerContext` is what remembers
-// which cell asked, because B+LEFT/RIGHT cycles the slot from inside the editor and that has to write
-// back into the caller's own field: `masterEqSlot`, `reverbInputEq`, `delayInputEq`, an instrument's
-// `eqSlot`, or the sample editor's `fxValue`. Five different fields, one gesture.
+// No cell in the navigation grid; `currentScreen` does not change. It is raised from an EQ slot
+// CELL — INSTRUMENT, INST.POOL, MIXER's master strip, EFFECTS' two input rows, the SAMPLE EDITOR's FX
+// row — and `EqCallerContext` remembers which, because B+LEFT/RIGHT cycles the slot from inside the
+// editor and must write back into that caller's own field.
 //
-// ⚠️ The caller is captured AT OPEN TIME and never re-read. That is deliberate and it is what makes
-// the editor safe to leave open: the pool cursor moving underneath it must not silently re-point the
-// bands at a different instrument. (Android lets that cursor move — see the note above
-// `InputDispatcher::on_b_up` — which is the bug this session found.)
+// ⚠️ The caller is captured AT OPEN TIME and never re-read, so a cursor moving underneath cannot
+// re-point the bands at a different instrument.
 //
 // ── Its geometry is its own ──────────────────────────────────────────────────────────────────────
 //
-// 495 × 392 at the normal module position, so the oscilloscope strip and the right-hand bar stay
-// drawn around it. Not full-screen like the browser and the sample editor: an EQ is something you dial
-// WHILE a note rings, and the note monitor is how you see that it is still ringing.
+// 495 × 392 at the normal module position, so the scope strip and the note monitor stay drawn — an
+// EQ is dialled WHILE a note rings.
 //
 //     y =   0.. 20   header — "EQ 07" and who opened it
 //     y =  21.. 41   one blank row (the module's own top spacer)
@@ -51,11 +44,7 @@ namespace pt::ui {
 /** The six band types, in the order the engine's `type` field indexes them. 0 = OFF = bypassed. */
 const std::vector<std::string>& eq_band_type_names();
 
-/**
- * WHICH EQ slot reference opened the editor — Kotlin's `sealed class EqCallerContext`, as a tag plus
- * the one payload any arm carries. A sealed hierarchy in C++ would be five heap-allocated types to
- * express "an enum, and sometimes an int".
- */
+/** WHICH EQ slot reference opened the editor: a tag plus the one payload any arm carries. */
 struct EqCallerContext {
     enum class Kind { MASTER, REVERB_IN, DELAY_IN, INSTRUMENT, SAMPLE_EDITOR_FX };
 
@@ -88,10 +77,8 @@ struct EqState {
     EqCallerContext          caller{};
 
     /**
-     * The spectrum of the signal this EQ actually sits on — the master bus, a send's input, or one
-     * instrument's own voices (ui/engine_feed.h picks the source from the caller). Null is not an
-     * error: it means no engine, and the visualization simply draws its grid with nothing behind it,
-     * which is exactly what `ptshot` renders.
+     * The spectrum of the signal this EQ sits on (engine_feed.h picks it from the caller). Null
+     * draws the grid with nothing behind it.
      */
     const float* spectrum      = nullptr;
     int          spectrumCount = 0;
@@ -129,16 +116,9 @@ public:
     static constexpr int MAX_CURSOR_ROW = 11;
 
     /**
-     * NOT const, and it is the port's THIRD stateful module — but a different kind of state from the
-     * other two. The oscilloscope's peak-hold and the mixer's falling meters are part of the PICTURE:
-     * the frame is a function of the previous frame. This is a pure CACHE — the picture is a function
-     * of the project alone, and the cache only makes it affordable.
-     *
-     * ⚠️ And it is needed MORE here than on Android, not less. Kotlin caches the response curve because
-     * the animating spectrum recomposes this screen ~20×/s and the 3-band transfer function would
-     * otherwise run per pixel per redraw. The shell redraws at 60 Hz — three times as often — over 495
-     * columns × 3 bands of `sin`/`cos`/`pow`/`log10`. On the 1 GHz ARM the port is aimed at, that is a
-     * frame budget spent on a curve that only changes when a band does.
+     * NOT const: a pure CACHE of the response curve (unlike the scope's and mixer's picture state).
+     * The curve is 495 columns × 3 bands of sin/cos/pow/log10 and the shell redraws at 60 Hz on a
+     * 1 GHz ARM; it only changes when a band does.
      */
     void draw(Canvas& c, int x, int y, const EqState& s);
 
@@ -153,21 +133,13 @@ public:
     EqInputResult handle_input(songcore::Project& project, int slot_index, int cursor_row,
                                const InputAction& action) const;
 
-    // ── The pieces the golden measures, exposed so `ptinput` can drive them directly ─────────────
+    // ── Pure helpers, public so they can be driven directly ──────────────────────────────────────
 
     /**
-     * ⚠️ THE DISPLAY-AWARE FREQ NUDGE, and the one place in this module where a one-step press can move
-     * the value by more than one step.
-     *
-     * `freq` is 0..255 mapped logarithmically over 20 Hz..20 kHz, so a single hex step is ~2.7% — FINER
-     * than the readout can show near 1 kHz, where "1.2kHz" covers several adjacent values. A+RIGHT there
-     * would leave the number on screen unchanged and the cell would feel stuck. So a SINGLE step keeps
-     * advancing in the direction pressed until `format_freq_hz` produces a different string (bounded by
-     * 0..255). Multi-step moves — A+UP/DOWN's ±16, and A+B's reset to 0x80 — are applied exactly.
-     *
-     * The label comparison is what decides where it stops, which makes `format_freq_hz` load-bearing for
-     * the CELL rather than merely for the picture — and therefore something the golden must measure over
-     * the whole domain rather than argue about. It does: the `EQFREQ` sweep walks all 256 values.
+     * ⚠️ THE DISPLAY-AWARE FREQ NUDGE — one press can move more than one step. `freq` is 0..255,
+     * log over 20 Hz..20 kHz, so one step (~2.7%) is finer than the readout near 1 kHz. A SINGLE step
+     * keeps going until `format_freq_hz` prints something different (bounded by 0..255); multi-step
+     * moves (±16, A+B's 0x80) are exact. So `format_freq_hz` is load-bearing for the cell.
      */
     static int step_freq_display_aware(int old_value, int target);
 
@@ -181,16 +153,9 @@ public:
     static std::string format_gain_db(float db);
 
     /**
-     * Is the spectrum panel's picture already empty? — the C7 idle gate's question, and the module's
-     * answer is about the LAST FRAME IT DREW, not about the magnitudes it would draw next.
-     *
-     * ⚠️ This is not the mixer's or the oscilloscope's kind of "at rest". Those two hold a value that
-     * ages inside their own draw, so the frames they need are frames to age IN. Nothing here ages:
-     * `engine_feed` re-polls the magnitudes every 50 ms whether or not a frame is drawn, and they go
-     * to zero on their own a few tens of milliseconds after the last sample. What hangs on the screen
-     * is simply the last frame that reached it. So the reading that matters is what was PUT on the
-     * canvas — and it is what brings the gate back to false, because once the empty frame is drawn
-     * there is nothing left for another frame to change.
+     * Is the spectrum panel's picture already empty? — the idle gate's question, answered about the
+     * LAST FRAME DRAWN. ⚠️ Nothing ages here (the feed re-polls every 50 ms regardless); what hangs
+     * on screen is the last frame, so once the empty one is drawn there is nothing left to change.
      */
     bool spectrum_at_rest() const { return spectrumAtRest_; }
 
@@ -210,20 +175,15 @@ private:
 
     // ── The response-curve cache (see draw) ──────────────────────────────────────────────────────
     //
-    // One dB value per pixel column, rebuilt only when the viewed SLOT or any of the twelve band values
-    // changes. The key is a content HASH rather than the bands themselves, because an EqBand is mutated
-    // in place by `handle_input` — the object identity never changes, so only its contents can say that
-    // the curve is stale.
+    // One dB per pixel column, rebuilt when the slot or any band value changes. Keyed by a content
+    // HASH: `handle_input` mutates an EqBand in place, so only its contents can say it is stale.
     int   curveCacheSlot_       = -1;
     long long curveCacheHash_   = 0;
     float curveCacheDb_[WIDTH]  = {};
 
     /**
-     * Whether the last drawn frame's spectrum had any height at all — see `spectrum_at_rest`.
-     *
-     * Written from the same `specY[]` the fill and the outline are drawn from, so it cannot report a
-     * picture the panel is not showing. It starts TRUE: a module that has never drawn has nothing on
-     * screen to fall.
+     * Whether the last drawn frame's spectrum had any height — written from the same `specY[]` the
+     * picture is drawn from. Starts TRUE: nothing drawn, nothing to fall.
      */
     bool spectrumAtRest_ = true;
 };

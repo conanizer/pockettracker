@@ -2,23 +2,12 @@
 
 // ─── The THEME EDITOR ────────────────────────────────────────────────────────────────────────────
 //
-// The 1:1 twin of `ui/modules/ThemeEditorModule.kt`, and the last screen in the Kotlin dispatcher the
-// port had not reached. Two header rows — THEME (the built-in cycle, SAVE, LOAD) and RANDOMIZE (the
-// colour scheme and ROLL) — and one row per colour under them, each an R/G/B triple with a live
-// swatch. The list is taller than the panel, so it scrolls — the same idea as SONG and the browser.
+// Two header rows — THEME (the built-in cycle, SAVE, LOAD) and RANDOMIZE (the colour scheme and
+// ROLL) — and one row per colour, each an R/G/B triple with a live swatch. The list scrolls.
 //
-// ⚠️ IT HAS NO CursorContext, AND THAT IS NOT AN OVERSIGHT. Kotlin's `handleGenericInput` opens with
-// `if (themeEditorState.isOpen) return` — the whole cursor-context system is bypassed, and the four
-// A+DPAD handlers call `adjustThemeColor` directly. It is the third screen in the app to work that way
-// (the file browser has no context either, and the sample editor's waveform rows have none), and for
-// the same reason all three do: a value here is a CHANNEL OF A COLOUR, not a cell of a document, and
-// nothing in `CursorContext`'s vocabulary can say that.
-//
-// So the edit lives in the two free functions below rather than in a `handle_input` override. They are
-// pure — a `Theme` in, a `Theme` out, no engine, no project, no canvas — which is what lets `ptinput`
-// byte-compare them against the real Kotlin `adjustThemeColor` and `cycle*BuiltinTheme` directly,
-// instead of a copy of their arithmetic living in the test. (S6a's lesson, one layer up: a fixture that
-// re-derives the thing it is measuring cannot catch the thing it is measuring.)
+// ⚠️ IT HAS NO CursorContext, ON PURPOSE: a value here is a CHANNEL OF A COLOUR, not a cell of a
+// document, which CursorContext cannot say (the file browser and the waveform rows are the same).
+// The edit is the two pure free functions below — a `Theme` in, a `Theme` out.
 
 #include <cstdint>
 #include <string>
@@ -59,20 +48,16 @@ struct ThemeEditorState {
     /**
      * A failed roll's message, and ONLY that.
      *
-     * ⚠️ **THE CLASH MESSAGE IS NOT STORED HERE — it is DERIVED in the draw** from the palette and
-     * the cursor. Storing it would mean every future site that moves the cursor or changes a colour
-     * has to remember to refresh it, and the cost of forgetting is a line of text describing a
-     * palette that no longer exists. A failed roll is an EVENT and has nowhere to be derived from,
-     * which is why that one is state.
+     * ⚠️ THE CLASH MESSAGE IS NOT STORED HERE — it is DERIVED in the draw, so no site that moves the
+     * cursor or changes a colour has to refresh it. A failed roll is an event, so that one is state.
      */
     std::string message;
 };
 
 // ─── The two header rows, and the one place the colour list is indexed ───────────────────────────
 //
-// ⚠️ **NOTHING MAY WRITE `cursorRow - 2` ITSELF.** The offset was 1 while THEME was the only header
-// row, it is 2 now, and it is read by the draw, the nudge, the lock, the re-roll, the clash message
-// and the help lookup — six sites, one of which silently edits the wrong colour if it is missed.
+// ⚠️ NOTHING MAY WRITE `cursorRow - 2` ITSELF: the draw, nudge, lock, re-roll, clash message and
+// help lookup all go through `theme_color_index`, and a missed site edits the wrong colour.
 
 inline constexpr int THEME_ROW_THEME  = 0;   ///< the name, SAVE and LOAD
 inline constexpr int THEME_ROW_RANDOM = 1;   ///< the scheme and ROLL
@@ -100,20 +85,14 @@ struct ThemeState {
 // ─── The edit ────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Nudge one channel of the colour under the cursor. Kotlin's `AppInputDispatcher.adjustThemeColor`.
+ * Nudge one channel of the colour under the cursor.
  *
- * ⚠️ `row` IS THE COLOUR'S OWN 1-BASED POSITION, NOT THE CURSOR ROW — `theme_color_index() + 1`.
- * The two were the same number while THEME was the only header row above the list, and they are not
- * any more. 0 and anything past the list are rejected, as Kotlin rejects them.
- * `delta` is ±0x01 from A+RIGHT / A+LEFT and ±0x10 from A+UP / A+DOWN.
+ * ⚠️ `row` IS THE COLOUR'S OWN 1-BASED POSITION (`theme_color_index() + 1`), NOT THE CURSOR ROW. 0
+ * and anything past the list are rejected. `delta` is ±0x01 (A+RIGHT/LEFT) or ±0x10 (A+UP/DOWN).
  *
- * ⚠️ Each channel CLAMPS at 0 and 255 — it does not wrap. Rolling 0xFF over to 0x00 would take a
- * colour you are dialling UP and drop it to black, which is not a nudge, it is a cliff.
- *
- * ⚠️ And the alpha is FORCED to 0xFF on every write (`0xFF000000L or …`), not preserved. A theme colour
- * is opaque by construction; there is no alpha channel in the editor and no row to reach one from, so a
- * `.ptt` hand-edited to carry a translucent colour is made opaque again by the first nudge. Kotlin's,
- * reproduced.
+ * ⚠️ Each channel CLAMPS at 0 and 255 — wrapping would drop a colour being dialled up to black.
+ * The alpha is FORCED to 0xFF on every write: a theme colour is opaque, so a hand-edited translucent
+ * one becomes opaque on the first nudge.
  */
 inline void theme_adjust_color(Theme& theme, int row, int channel, int delta) {
     const auto& rows = theme_color_rows();
@@ -131,12 +110,7 @@ inline void theme_adjust_color(Theme& theme, int row, int channel, int delta) {
     if      (channel == 0) r = clamp255(r + delta);
     else if (channel == 1) g = clamp255(g + delta);
     else if (channel == 2) b = clamp255(b + delta);
-    // else: NOTHING changes — but note that the colour is still REBUILT below with its alpha forced to
-    // 0xFF, rather than returned untouched. That is Kotlin's `else ->` arm, which reassembles r/g/b and
-    // ORs the alpha back on exactly as the three real arms do. It is unreachable (the cursor wraps 0..2
-    // and nothing else calls this), and it is mirrored anyway so the golden can sweep an out-of-range
-    // channel and PROVE it is a no-op instead of assuming it — which, on a translucent colour from a
-    // hand-edited .ptt, it would NOT be.
+    // else: nothing changes, but the colour is still rebuilt below with its alpha forced to 0xFF.
 
     theme.*field = 0xFF000000u
                  | (static_cast<Argb>(r) << 16)
@@ -145,25 +119,12 @@ inline void theme_adjust_color(Theme& theme, int row, int channel, int delta) {
 }
 
 /**
- * Step the built-in palette. `delta` is −1 (A+LEFT, Kotlin's `cyclePrevBuiltinTheme`) or +1 (A+RIGHT,
- * `cycleNextBuiltinTheme`).
+ * Step the built-in palette: `delta` −1 (A+LEFT) or +1 (A+RIGHT).
  *
- * ⚠️ IT REPLACES THE WHOLE THEME, so every colour the user has dialled on the current one is GONE. That
- * is Kotlin's — the cycle is how you pick a starting palette, and SAVE is how you keep one you have
- * changed. Reproduced without a guard, because adding a "you have unsaved changes" dialog here would be
- * a behaviour the phone does not have.
+ * ⚠️ IT REPLACES THE WHOLE THEME — dialled colours are gone; SAVE is how you keep them.
  *
- * ⚠️ The two directions are NOT exact inverses, and that falls out of Kotlin's two expressions rather
- * than being designed:
- *
- *     next = if (idx >= 0) (idx + 1) % size else 0        // an unknown name → CLASSIC
- *     prev = if (idx > 0)  idx - 1        else size - 1   // an unknown name → MONO
- *
- * `idx` is the index of the CURRENT theme's NAME among the built-ins, so a palette loaded from a `.ptt`
- * (or any edited-and-renamed one) is not in the list at all — it is −1. Stepping DOWN from it lands on
- * CLASSIC and stepping UP lands on MONO: both "enter the ring at an end", which is sane, and neither
- * takes you back where you came from, which is the honest consequence of the theme having left the ring
- * the moment it stopped being a built-in. Ported as written.
+ * ⚠️ The directions are not inverses for a theme that is not a built-in (loaded or renamed, idx −1):
+ * next lands on the first built-in, prev on the last — both enter the ring at an end.
  *
  * `visualizerType` rides across the swap — the palette belongs to the theme, the visualizer to the user.
  */
@@ -192,12 +153,8 @@ public:
     static constexpr int HEIGHT = 392;
 
     /**
-     * The last cursor row — one per colour, after the two header rows. The list scrolls; the cursor
-     * does not clamp, it WRAPS.
-     *
-     * ⚠️ DERIVED FROM THE ROW TABLE, not typed. A colour added to `theme_color_rows()` is a row the
-     * module draws; if this were a constant it would also be a row the cursor could never reach, and
-     * the only symptom would be a colour that quietly cannot be edited.
+     * The last cursor row: one per colour, after the two header rows. The cursor WRAPS.
+     * ⚠️ Derived from the row table, so a colour added to `theme_color_rows()` is reachable.
      */
     static int max_row() {
         return THEME_FIRST_COLOR_ROW + static_cast<int>(theme_color_rows().size()) - 1;
@@ -205,9 +162,7 @@ public:
 
     void draw(Canvas& c, int x, int y, const ThemeState& s) const;
 
-    // ── The geometry, exposed because the scroll is a function of the cursor and ptshot photographs
-    //    it at every row (and because a row the module can draw but the cursor cannot reach, or the
-    //    reverse, is exactly the class of bug S2 found in the nav map).
+    // ── The geometry: public because the scroll is a function of the cursor row.
 
     /** How many rows fit in the panel below the title. */
     static int visible_row_count();
@@ -218,13 +173,7 @@ public:
 private:
     static constexpr int NAME_COL_X = 10;
 
-    /**
-     * The clash mark, between the longest label and the R column.
-     *
-     * ⚠️ IT IS THE ONLY GAP ON THE ROW. The swatch runs to within 10px of the panel's edge, so there
-     * is nothing free to its right; `BACKGROUND` is ten characters and ends at 180, and R starts at
-     * 230, which leaves exactly one character of air here.
-     */
+    /** The clash mark, in the only free gap on the row: `BACKGROUND` ends at 180, R starts at 230. */
     static constexpr int WARN_COL_X = 200;
 
     static constexpr int R_COL_X    = 230;
@@ -237,10 +186,8 @@ private:
     static constexpr int SAVE_LABEL_X   = 354;
     static constexpr int LOAD_LABEL_X   = 432;
 
-    // ⚠️ THE RANDOMIZE ROW'S FIRST CELL CANNOT SIT UNDER THE THEME NAME'S. Its label is nine
-    // characters where `THEME` is five, so it runs to 163 and the name column starts at 105. The
-    // scheme cell takes the next clear space instead, and `SPLIT-COMP` — the longest of the seven —
-    // is what sets how far right it may start before it reaches ROLL.
+    // ⚠️ The RANDOMIZE label runs to 163, past the THEME name column (105), so the scheme cell starts
+    // at the next clear space; `SPLIT-COMP`, the longest scheme, bounds it before ROLL.
     static constexpr int SCHEME_LABEL_X = 175;
     static constexpr int ROLL_LABEL_X   = SAVE_LABEL_X;
 };

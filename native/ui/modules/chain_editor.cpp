@@ -22,8 +22,7 @@ void ChainEditorModule::draw(Canvas& c, int x, int y, const ChainEditorState& s)
                     t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
-    // The header lights for the column the cursor is in — it is half of what the row highlight used
-    // to say, the row number being the other half.
+    // The header lights for the cursor's column; the row number lights for its row.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     c.draw_text("PH",  phX,  rowY, header_color(s.cursorColumn, 1, 1, t), CHAR_SPACING, FONT_SCALE);
     c.draw_text("TSP", tspX, rowY, header_color(s.cursorColumn, 2, 2, t), CHAR_SPACING, FONT_SCALE);
@@ -50,9 +49,8 @@ void ChainEditorModule::draw_row(Canvas& c, int x, int y, int index, const Chain
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
-    // The whole cursor ROW's number lights, whatever column the cursor is in — that is what now says
-    // which row is being edited. Column 0 is a real cursor position, so the number goes through
-    // the painter and gets the cell background when the cursor is actually on it.
+    // The cursor row's number lights whatever the column. Column 0 is a real cursor position, so the
+    // number goes through the painter and gets the cell background when the cursor is on it.
     const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
                            : (index % 4 == 0)     ? t.textParam
                                                   : t.textEmpty;
@@ -107,8 +105,7 @@ ChainInputResult ChainEditorModule::handle_input(songcore::Chain& chain, int cur
             break;
 
         case ActionType::DELETE:
-            // clearChainSlot(): clearing the slot clears its transpose too, so a slot reused later
-            // cannot inherit a stale one.
+            // Clearing the slot clears its transpose too, so a reused slot cannot inherit a stale one.
             if (cursor_column == 1) {
                 chain.phraseRefs[row]      = -1;
                 chain.transposeValues[row] = 0x00;
@@ -130,9 +127,8 @@ ChainInputResult ChainEditorModule::handle_input(songcore::Chain& chain, int cur
             break;
     }
 
-    // ⚠️ A before/after answer, not "an action was dispatched" — see SongEditorModule::handle_input
-    // for why a phrase-ref cell dispatches DELETE while already empty, and what a phantom dirty flag
-    // costs (a phantom "unsaved work?" on EXIT, then a phantom RECOVER WORK? at the next launch).
+    // ⚠️ A before/after answer, not "an action was dispatched": a phrase-ref cell dispatches DELETE
+    // while already empty, and a phantom dirty flag means a phantom RECOVER WORK? at the next launch.
     r.modified = (chain.phraseRefs[row] != beforeRef) ||
                  (chain.transposeValues[row] != beforeTranspose);
     return r;

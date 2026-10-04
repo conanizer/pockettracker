@@ -20,13 +20,12 @@ constexpr int CONTENT_PAD = 8;
 constexpr int content_h(int stackRows) { return ROW_HEIGHT + 8 + stackRows * ROW_HEIGHT; }
 constexpr int box_h(int stackRows) { return content_h(stackRows) + 2 * CONTENT_PAD; }
 
-// ⚠️ The catalogue decides the height, so this is a CEILING on the tallest section rather than a
-// copy of it — a number copied from the data is the mistake the FX picker's own note describes.
+// ⚠️ The catalogue decides the height, so this is a CEILING on the tallest section, not a copy of it.
 constexpr int MAX_STACK_ROWS = MAP_SECTION_COUNT + 16;
 static_assert(box_h(MAX_STACK_ROWS) + 2 * (MODAL_BORDER - 1) <= DESIGN_H,
               "the destination picker is taller than the screen");
 
-/** Kotlin's run advance — `length * charW`, trailing gap included. See the FX overlay's note. */
+/** The run advance: `length * CHAR_W`, trailing gap included. */
 constexpr int run_advance(int chars) { return chars * CHAR_W; }
 
 void centred(Canvas& c, const std::string& text, int x, int width, int y, Argb color) {
@@ -34,9 +33,8 @@ void centred(Canvas& c, const std::string& text, int x, int width, int y, Argb c
                 color, CHAR_SPACING, FONT_SCALE);
 }
 
-// ⚠️ The CELLS are left-aligned where the FX picker's are centred, and the difference is the content:
-// its cells are all exactly three characters, so centring them IS a column. These run from three
-// glyphs to nine, and centring made a list that reads as a ragged cloud rather than three columns.
+// The cells are left-aligned (the FX picker centres its three-character cells): these run from three
+// glyphs to nine, and centred they read as a ragged cloud.
 constexpr int CELL_PAD = 6;
 
 }  // namespace
@@ -47,9 +45,8 @@ void draw_map_picker(Canvas& c, const MapPickerState& s, const Theme& t) {
     // Modal: it must not be clipped by whatever editor was drawing when it opened.
     c.reset_clip();
 
-    // ⚠️ THE BOX'S HEIGHT FOLLOWS THE OPEN SECTION, ITS TOP EDGE DOES NOT — the FX picker's rule and
-    // its reason: measured on its own height, the box would slide up and down under the reader every
-    // time the cursor crossed a heading.
+    // ⚠️ The height follows the open section, the top edge does not — or the box slides under the
+    // reader at every heading.
     const int stackRows = MAP_SECTION_COUNT + map_section_rows(s.map_section());
     const int BOX_H     = box_h(stackRows);
     const int BOX_Y     = (DESIGN_H - box_h(MAP_SECTION_COUNT + map_picker_max_rows())) / 2;
@@ -68,9 +65,7 @@ void draw_map_picker(Canvas& c, const MapPickerState& s, const Theme& t) {
         const auto section = static_cast<MapSection>(si);
         const bool open    = (si == s.section);
 
-        // ⚠️ BOTH ARROWS ARE RAW UTF-8, exactly as the FX picker's are: canvas.h decodes UTF-8 and
-        // font5x5.h carries the glyphs, while a Unicode ESCAPE would be converted to the system
-        // codepage by MSVC (this tree is compiled with no /utf-8 flag and no BOM).
+        // ⚠️ Raw UTF-8 arrows: a Unicode escape would be converted to the codepage by MSVC (no /utf-8).
         c.draw_text(std::string(map_section_name(section)) + (open ? " ↓" : " →"), gridX,
                     gridY + row * ROW_HEIGHT + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
         ++row;

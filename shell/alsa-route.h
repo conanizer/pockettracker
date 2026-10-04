@@ -4,8 +4,8 @@
 // alsa-route.{h,cpp} — what stands between ALSA's "default" and the sound chip, read from ALSA's own
 // configuration. No device is opened.
 //
-// ⚠️ **THE PROTOTYPES BELOW ARE HAND-COPIED (dlopen, as in alsa-rawmidi.h) — `tools/ptalsa` checks
-// them against the real header.** Run it after touching the list.
+// ⚠️ THE PROTOTYPES BELOW ARE HAND-COPIED (dlopen, as in alsa-rawmidi.h) — check them against the
+// real header after touching the list.
 
 #include <string>
 

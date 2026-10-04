@@ -19,11 +19,9 @@ namespace {
 
 SDL_Rect to_sdl(const tl::LayoutRect& lr) { return SDL_Rect{lr.x, lr.y, lr.w, lr.h}; }
 
-// `VirtualBtnThemed`'s image selection, ported: the shifts are WIDE, A/B use the DARK square variant —
-// falling back to the plain square when a theme ships no dark PNG, exactly as Kotlin's
-// `buttonSquarePressedDark ?: buttonSquarePressed` does — and everything else is the plain square, each
-// in its pressed or normal state. The fallback is resolved HERE (against what actually loaded) rather
-// than in `Skin::draw`, which only knows how to no-op a missing piece, not which piece to try instead.
+// The button image: the shifts are WIDE, A/B the DARK square (falling back to the plain square when
+// a theme ships no dark PNG), everything else the plain square, pressed or normal. The fallback is
+// resolved here, against what actually loaded — `Skin::draw` can only no-op a missing piece.
 SkinPiece piece_for(const Skin& skin, Button b, bool pressed) {
     switch (b) {
         case Button::L_SHIFT:
@@ -41,11 +39,9 @@ SkinPiece piece_for(const Skin& skin, Button b, bool pressed) {
     }
 }
 
-// A PORTRAIT2 button's label, ported one-for-one from `VirtualControlsPortrait2`'s per-button call: the
-// text (or, for the D-pad, an `Arrow` the shell draws itself — Helvetica has no arrow glyphs), which
-// SIZE class it uses (large = A/B and the arrows; small = Sel/Start and the L/R shift), and which X
-// OFFSET (wide = the two shift buttons; square for the rest). Y offset and the pressed shift are the
-// same for all, so they are read from the metrics at the call site rather than repeated here.
+// A PORTRAIT2 button's label: the text (or, for the D-pad, an `Arrow` — Helvetica has no arrow
+// glyphs), its SIZE class (large = A/B and the arrows; small = Sel/Start and the shifts) and its X
+// OFFSET (wide = the shifts). Y offset and the pressed shift are the same for all.
 struct Portrait2Label {
     const char* text;   // the letters; "" when arrow
     bool        arrow;
@@ -70,9 +66,8 @@ Portrait2Label label_for(Button b) {
     }
 }
 
-// The D-pad arrow codepoints (↑↓←→, U+2190–2193) as UTF-8, for the arrow FONT path — Kotlin drew these
-// exact characters as Text through the system fallback; the shell blits the real glyph from the bundled
-// Linux Biolinum arrow font, same as a letter. Only reached when the arrow font loaded.
+// The D-pad arrow codepoints (↑↓←→, U+2190–2193) as UTF-8, blitted from the bundled Linux Biolinum
+// arrow font like any letter. Only reached when that font loaded.
 const char* arrow_utf8(Arrow d) {
     switch (d) {
         case Arrow::Up:    return "\xE2\x86\x91";  // ↑ U+2191
@@ -83,11 +78,9 @@ const char* arrow_utf8(Arrow d) {
     return "";
 }
 
-// The arrow GLYPH is rendered at a FRACTION of the letter px. Measured against the Kotlin app's arrows
-// (before/after device shots): Biolinum's arrow glyph fills more of the em than Android's system-fallback
-// arrow did, so at the letter size it came out ~1.7x too tall. 0.6 matches the "before" size (ink height
-// ratio 27/46 ≈ 0.59), and it is BASELINE-anchored (see draw_buttons) so shrinking keeps the arrow's
-// bottom where a full glyph's baseline is — the before/after shots share that bottom edge exactly.
+// The arrow GLYPH is drawn at a FRACTION of the letter px: Biolinum's arrow fills more of the em, so
+// at letter size it reads ~1.7× too tall. BASELINE-anchored (see draw_buttons), so shrinking keeps
+// its bottom where a full glyph's baseline is.
 constexpr float ARROW_PX_FRAC = 0.6f;
 
 // Sizing the FALLBACK line-arrow (used only when the arrow font is missing) so it reads at the same
@@ -112,25 +105,16 @@ void PortraitSkin::layout(int outW, int outH, bool enabled, bool fit) {
         return;
     }
 
-    // The bands + the frame-in-bezel, host-checked by `pttouch --positions`. density=1 and the dp
-    // fallback are inert for amiga-2 (its bezelThicknessX > 0), so the only inputs that decide the
-    // geometry are the output size and the skin unit X the function derives from it.
-    //
-    // A CHROMELESS skin takes the BARE layout instead: no bands to place, so the screen area is the
-    // whole device width and the cluster hangs off the bottom. Same struct, same cluster arithmetic
-    // below — only where the two rects land differs, which is why this is one call site and not two
-    // renderers.
+    // The bands + the frame-in-bezel. density=1 and the dp fallback are inert for a skin with a
+    // bezel PNG, so the output size alone decides the geometry. A CHROMELESS skin takes the BARE
+    // layout (no bands: the screen spans the device width, the cluster hangs below) — same struct.
     geom_ = chromeless() ? tl::portrait2_skin_bare(outW, outH)
                          : tl::portrait2_skin(outW, outH, /*density=*/1.0f, /*bezelThicknessDp=*/9.0f,
                                               /*bezelThicknessX=*/bezelX_);
 
-    // SETTINGS > SCALING decides where the 640×480 frame lands inside the bezel. INTEGER uses the
-    // pre-computed integer-scaled, centred `geom_.frame` (the tracker's own black canvas hides the gap).
-    // FIT fills the bezel's inner area with the largest 4:3 fit — the SAME fractional scale Kotlin's
-    // PortraitLayout2 BILINEAR arm uses (`min(innerW/640, innerH/480)`), centred — so the picture grows
-    // to nearly fill the bezel instead of snapping to a whole multiple. The texture filtering that makes
-    // a fractional scale smooth rather than uneven follows `SdlVideo::set_scaling`, which runs on the
-    // same `scalingBilinear` value later in the frame; this only chooses the destination rect.
+    // SETTINGS > SCALING: INTEGER uses the integer-scaled, centred `geom_.frame`; FIT fills the
+    // bezel's inner area with the largest 4:3 fit (`min(innerW/640, innerH/480)`), centred. The
+    // filtering that makes a fractional scale smooth follows `SdlVideo::set_scaling`.
     if (fit && !geom_.innerBezel.empty()) {
         const tl::LayoutRect ib = geom_.innerBezel;
         const float s = std::min(static_cast<float>(ib.w) / pt::ui::DESIGN_W,
@@ -142,29 +126,23 @@ void PortraitSkin::layout(int outW, int outH, bool enabled, bool fit) {
         frame_ = to_sdl(geom_.frame);
     }
 
-    // The ten buttons inside the cluster band. `portrait2_rects` re-derives X from the band it is given,
-    // and Kotlin hands it `buttonAreaH.coerceAtLeast(100)` — so that floor is restated here, not assumed.
+    // The ten buttons inside the cluster band, with a 100 px floor on its height.
     buttons_ = tl::portrait2_rects(geom_.buttons.w, std::max(geom_.buttons.h, 100));
 }
 
 void PortraitSkin::draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t innerBezelArgb) const {
     if (!active_) return;
 
-    // A chromeless skin has no panels, no branding, no backing and no bezel. Its ground is the casing
-    // clear, which is already this same theme background — so filling the screen area here would paint
-    // the colour over itself, and every band draw below would be a no-op against a theme that ships
-    // none of that art. Leaving early says so once instead of four times.
+    // A chromeless skin has no bands, and its ground is the casing clear (already the theme
+    // background) — nothing to draw.
     if (chromeless()) return;
 
     // Band 1 — the vent panel (absent in case C, so guard on empty()).
     if (!geom_.topPanel.empty()) skin.draw(r, SkinPiece::TopPanel, to_sdl(geom_.topPanel));
 
-    // Band 2 — the bezel, then its padded inner area painted the TRACKER's own background colour. Kotlin
-    // (ScreenLayouts.kt:481) painted this black; the shell fills it with the live pt-ui theme background
-    // instead, so the letterbox gap around the frame matches the tracker's own module fill and the whole
-    // bezel reads as one surface — the same colour and the same reasoning as the landscape letterbox
-    // (SdlVideo::present). It must go down BEFORE the frame, which present_skinned draws after this
-    // underlay. The colour arrives as an argument (not stored) so the theme editor tracks live.
+    // Band 2 — the bezel, then its padded inner area in the live tracker background (an argument, so
+    // the theme editor tracks live), so the gap around the frame reads as one surface with it. BEFORE
+    // the frame, which present_skinned draws after this underlay.
     skin.draw(r, SkinPiece::ScreenBezel, to_sdl(geom_.bezel));
     if (!geom_.innerBezel.empty()) {
         const SDL_Rect ib = to_sdl(geom_.innerBezel);
@@ -187,11 +165,8 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
     const int ox = geom_.buttons.x;
     const int oy = geom_.buttons.y;
 
-    // The Helvetica label metrics, IN PIXELS. Density cancels for on-screen size exactly as it does for
-    // positions (touch_layout.h): Kotlin draws `largeSp.sp` at `largeSp * density` px, and
-    // largeSp = x*11/density, so the pixel size is x*11 — which is what `portrait2(..., density=1)`
-    // returns as `large_sp`. So the SAME golden-checked Portrait2 fields give the on-device px with no
-    // density threaded through the shell. Same coerced button-cluster box `portrait2_rects` used.
+    // The Helvetica label metrics, IN PIXELS: density cancels for on-screen size as it does for
+    // positions (touch_layout.h), so `portrait2(..., density=1)`'s `large_sp` IS the pixel size.
     const bool          useHelv = font.loaded();
     const tl::Portrait2 fm = tl::portrait2(geom_.buttons.w, std::max(geom_.buttons.h, 100), 1.0f);
     const auto          R = [](float v) { return static_cast<int>(std::lround(v)); };
@@ -207,13 +182,13 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
         const tl::ButtonRect& br = buttons_.r[i];
         const SDL_Rect        dst{br.x + ox, br.y + oy, br.w, br.h};
         const bool            pressed = input.is_held(br.button);
-        // FillBounds: RenderCopy stretches the button PNG to the cell — Compose's ContentScale.FillBounds.
-        // A missing piece is a Skin::draw no-op, so an incomplete theme shows the backing through.
+        // RenderCopy stretches the button PNG to the cell. A missing piece is a Skin::draw no-op, so
+        // an incomplete theme shows the backing through.
         const SkinPiece piece = piece_for(skin, br.button, pressed);
         if (tinted) skin.draw_tinted(r, piece, dst, ink);
         else        skin.draw(r, piece, dst);
 
-        // No Helvetica (asset missing / unparseable) → the shared 5×5 label font, as before it existed.
+        // No Helvetica (asset missing / unparseable) → the shared 5×5 label font.
         if (!useHelv) {
             draw_label(r, br.button, dst, ink);
             continue;
@@ -225,16 +200,12 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
         const int            offY = R(fm.off_y_dp) + (pressed ? R(fm.pressed_dp) : 0);
 
         if (lab.arrow) {
-            // The D-pad. Preferred: the REAL arrow glyph from the bundled arrow font (Linux Biolinum),
-            // blitted as text at the SAME left offset and top the letters use — so ↑↓←→ read like the A/B
-            // letters beside them, exactly as Kotlin drew them (Text through the system fallback). If the
-            // arrow font did not load, fall back to the shell-drawn smooth line arrow (a box a capital's
-            // height on the letters' baseline), so a missing font degrades to lines rather than nothing.
+            // The D-pad: preferably the REAL arrow glyph from the bundled arrow font, at the letters'
+            // left offset and top. Without that font, the shell-drawn line arrow (a capital's height
+            // on the letters' baseline) rather than nothing.
             if (arrowFont.loaded()) {
-                // Smaller than a letter (ARROW_PX_FRAC), BASELINE-anchored: place the shrunk glyph so its
-                // baseline is exactly where a full-size glyph's would be (dst.y+offY+ascent(px)), which
-                // keeps the arrow's BOTTOM fixed as it shrinks — matching the Kotlin "before" arrows,
-                // which share that bottom edge with the (larger) full-size render.
+                // Smaller than a letter (ARROW_PX_FRAC), BASELINE-anchored: the shrunk glyph's
+                // baseline sits where a full-size glyph's would (dst.y+offY+ascent(px)).
                 const float apx  = px * ARROW_PX_FRAC;
                 const int   yTop = dst.y + offY + arrowFont.ascent_px(px) - arrowFont.ascent_px(apx);
                 arrowFont.draw_text(arrow_utf8(lab.dir), dst.x + offX, yTop, apx, ink);
@@ -246,7 +217,7 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
                 font.draw_arrow(lab.dir, abox, ink);
             }
         } else {
-            // Top-start + offset, like Kotlin's `Text` with `Alignment.TopStart` and a start/top padding.
+            // Top-start plus the start/top offset.
             font.draw_text(lab.text, dst.x + offX, dst.y + offY, px, ink);
         }
     }
@@ -260,25 +231,19 @@ uint64_t PortraitSkin::signature(const SdlInput& input) const {
         if (input.is_held(buttons_.r[i].button))
             bits |= (1ull << static_cast<int>(buttons_.r[i].button));
 
-    // ⚠️ A CHROMELESS skin's INK colour belongs in here. It is the live theme's TXT VALUE, applied at
-    // blit time, so editing that one colour restyles the whole cluster without moving a canvas pixel or
-    // changing the casing clear — the two things the C7 gate otherwise compares. Left out, the buttons
-    // would keep the old colour until something else happened to force a frame: the gate's
-    // blind-channel shape exactly, the same one the button HIGHLIGHT hits one panel over.
-    //
-    // Bits 10-15, which nothing else uses: the ten button flags end at bit 9, geometry starts at 16.
-    // Six bits means this is a FOLD, not the colour — two inks in 64 can share a code, so it is the net
-    // under the canvas compare rather than a channel of its own. Exactness would cost a documented
-    // field; catching the case where the canvas genuinely did not change does not need it.
+    // ⚠️ A CHROMELESS skin's INK colour belongs in here: it is applied at blit time, so editing TXT
+    // VALUE changes neither a canvas pixel nor the casing — the two things the pixel gate compares —
+    // and the buttons would keep the old colour until something else forced a frame.
+    // Bits 10-15 (button flags end at 9, geometry starts at 16): a 6-bit FOLD, not the colour — a
+    // net under the canvas compare, not an exact channel.
     if (chromeless()) {
         const uint32_t ink = ink_rgb();
         const uint32_t f   = (ink ^ (ink >> 12)) ^ ((ink ^ (ink >> 12)) >> 6);
         bits ^= static_cast<uint64_t>(f & 0x3Fu) << 10;
     }
 
-    // Geometry too, so a rotate/resize that moves the skin forces a repaint even with the same buttons
-    // held. Bit 62 marks "portrait active" — distinct from SdlTouch's bit 63 — so a landscape↔portrait
-    // switch always changes the value the C7 gate compares, and the value is never 0 while active.
+    // Geometry too, so a rotate/resize forces a repaint with the same buttons held. Bit 62 marks
+    // "portrait active" (SdlTouch uses 63), so a landscape↔portrait switch always changes the value.
     return bits | (static_cast<uint64_t>(outW_ & 0xFFFF) << 16) |
            (static_cast<uint64_t>(outH_ & 0xFFFF) << 32) | (1ull << 62);
 }

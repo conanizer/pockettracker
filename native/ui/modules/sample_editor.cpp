@@ -13,11 +13,8 @@ namespace pt::ui {
 namespace {
 
 /**
- * A bounds-safe `list[i]`. Every index here comes from a `toggle_ternary` whose max is the list's own
- * size, so it cannot go out of range — but Kotlin would THROW if one ever did, and a C++ `operator[]`
- * would read off the end of the vector instead. Clamping is the one of the two that stays a bug you
- * can see rather than one you cannot. (`instrument_row_kind` is bounds-safe for the same reason, as
- * Kotlin's own `getOrElse` is there.)
+ * A bounds-safe `list[i]`. Every index comes from a cycle sized to the list, but a clamp keeps a
+ * future slip a visible wrong label rather than a read past the end.
  */
 const std::string& at(const std::vector<std::string>& v, int i) {
     static const std::string kEmpty;
@@ -25,7 +22,7 @@ const std::string& at(const std::vector<std::string>& v, int i) {
     return v[static_cast<size_t>(std::clamp(i, 0, static_cast<int>(v.size()) - 1))];
 }
 
-/** A vertical 1px rule — Compose's `drawLine` from (x, y0) to (x, y1) with a butt cap. */
+/** A vertical 1px rule from (x, y0), `h` tall. */
 void v_line(Canvas& c, int x, int y0, int h, Argb color, int thickness = 1) {
     if (h <= 0) return;   // a zero-length butt-capped line draws nothing; neither does this
     c.fill_rect(x, y0, thickness, h, color);
@@ -131,26 +128,21 @@ int SampleEditorState::manual_key_param() const {
 }
 
 bool SampleEditorState::manual_markers_live() const {
-    // ⚠️ **The STAMP alone, with no "and the list is not empty".** An EMPTY live list is a real answer —
-    // MANUAL with every boundary deleted — and it has to keep overriding `method_markers()`, which under
-    // MANUAL hands back the file's own cue points. Requiring a non-empty list would bring all of them
-    // back the instant the last one went. `manualKeyMethod` starts at −1 and no method is −1, so the
-    // stamp is the whole test.
+    // ⚠️ The STAMP alone, not "and the list is not empty": an EMPTY live list (MANUAL with every
+    // boundary deleted) must keep overriding the file's cue points. No method is −1, so the stamp
+    // is the whole test.
     return manualKeyMethod == sliceMethod && manualKeyParam == manual_key_param();
 }
 
 const std::vector<int>& SampleEditorState::method_markers() const {
-    // The answer for a method that computes rather than stores. It is a function-local static rather
-    // than a member so that there is exactly one marker list per source and no spare empty vector for a
-    // future reader to write into by mistake.
+    // For a method that computes rather than stores: one function-local empty list, nothing to
+    // write into.
     static const std::vector<int> computed;
 
     switch (sliceMethod) {
         case SampleEditorModule::SLICE_TRANSIENT: return transientMarkers;
-        // ⭐ OFF and MANUAL both answer with the FILE's own cue points, and for MANUAL that is what makes
-        // it an EDIT of the slicing a sample already carries rather than a fresh start: choose the method
-        // and the file's boundaries are already on screen to be dragged, deleted and added to. A sample
-        // with no `cue ` chunk hands back an empty list, which is the from-scratch session.
+        // ⭐ OFF and MANUAL both answer with the FILE's cue points — so MANUAL edits the slicing a
+        // sample already carries. No `cue ` chunk: an empty list, a from-scratch session.
         case SampleEditorModule::SLICE_OFF:
         case SampleEditorModule::SLICE_MANUAL:    return fileMarkers;
         // DIVIDE derives its boundaries from `sliceDivisions` on every read, so there is no list.
@@ -180,11 +172,9 @@ int SampleEditorState::slice_index_ceiling() const {
     switch (sliceMethod) {
         // N markers make N + 1 slices, so the top slice number is N …
         case SampleEditorModule::SLICE_TRANSIENT: return markers;
-        // … and MANUAL reaches ONE FURTHER, onto a slice that does not exist yet. That slot reads the
-        // boundary to its left and is born the moment it is dragged off it, which is how every boundary
-        // after the first is made. ⭐ It is also the whole of "slice N + 1 becomes available only once
-        // the ones before it hold different positions": a boundary enters the list by being placed
-        // somewhere no other one is, so the length IS the rule — no unlocked-count, no duplicate check.
+        // … and MANUAL reaches ONE FURTHER, onto a slice that does not exist yet; it is born when
+        // dragged off the boundary to its left. ⭐ So the list's length IS the rule — no
+        // unlocked-count, no duplicate check.
         case SampleEditorModule::SLICE_MANUAL:    return markers + 1;
         case SampleEditorModule::SLICE_DIVIDE:
             return markers > 0 ? markers : std::max(sliceDivisions - 1, 0);
@@ -200,10 +190,8 @@ void SampleEditorState::slice_bounds(int idx, int64_t& start, int64_t& end) cons
         return;
     }
 
-    // Marker `idx − 1` is the left edge of slice `idx`, marker `idx` its right edge — so N markers make
-    // N + 1 slices, and the first and last are bounded by the sample itself. ⚠️ A DIVIDE the user has
-    // nudged answers with a list too, and it needs no arm of its own: div − 1 interior markers ARE div
-    // slices, which is the same arithmetic said as a list.
+    // Marker `idx − 1` is slice `idx`'s left edge, marker `idx` its right. A nudged DIVIDE answers
+    // with a list too: div − 1 interior markers are div slices.
     const int n = marker_count();
     if (n > 0) {
         // ⚠️ `marker_position` clamps past the end on purpose: MANUAL's free slot is one slice past the
@@ -252,10 +240,8 @@ int64_t SampleEditorState::view_start() const {
     }
     const int64_t anchored = window_for(center);
 
-    // A running playhead pulls the window along only when the audio would otherwise leave it. If the
-    // whole selection already fits in the anchored window, the playhead cannot reach an edge, and
-    // re-centring every frame would shake a view that has nothing to reveal — worst under LOOP, which
-    // replays that same span forever.
+    // A running playhead pulls the window along only when the selection is too wide to fit;
+    // otherwise re-centring every frame would shake a view with nothing to reveal (worst under LOOP).
     if (playbackPosition >= 0.0f &&
         !(selectionStart >= anchored && selectionEnd <= anchored + visible)) {
         return window_for(static_cast<int64_t>(playbackPosition * static_cast<float>(total)));
@@ -406,13 +392,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const bool cur = (s.cursorRow == 11);
         const int ty = ry + TEXT_PADDING;
 
-        // The two cells sit under row 10's: the index under the METHOD value (x + 175) and the position
-        // under the SENS/BY LABEL (x + 335), not under its value at x + 410 — one column further right
-        // reads as detached from the row above. `/total` follows the index immediately, so its x is
-        // derived from the index's rather than typed as a second constant that has to be kept in step.
-        //
-        // ⚠️ This row has no label of its own — the SLICE row above it names both cells — so the
-        // cursor's own fill is the only thing that says the cursor is here at all.
+        // The index sits under row 10's METHOD value, the position under its SENS/BY label; `/total`
+        // follows the index directly. ⚠️ The row has no label, so the cursor's fill is the only sign
+        // the cursor is here.
         draw_cursor_cell(c, hex2(s.sliceIndex), x + 175, ty, cur && s.cursorCol == 0, t.textValue, t);
         if (s.sliceMethod == SLICE_TRANSIENT || s.sliceMethod == SLICE_MANUAL) {
             // How many the index can reach, which is one more than its ceiling. DIVIDE draws none: its
@@ -437,8 +419,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
 
         const bool onVal = (cur && s.cursorCol == 1);
         if (s.fxType == FX_EQ) {
-            // An EQ slot, drawn as every other EQ cell in the app is — the number plus the ">" that
-            // says an editor sits behind it. (That editor is not ported yet; see input_dispatcher.h.)
+            // An EQ slot, drawn as every other EQ cell is: the number plus the ">" for its editor.
             draw_eq_cell(c, x + 290, ty, s.fxValue, onVal, t);
         } else {
             const std::string val = (s.fxType == FX_SYNC) ? at(sync_types(), s.syncType)
@@ -477,10 +458,8 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     const int wfLeft  = x + 10;
     const int wfRight = wfLeft + WAVEFORM_W;
     /**
-     * The last column INSIDE the panel. ⚠️ `wfRight` is the right EDGE, one past it: a mark at the
-     * very end of the view lands there, in the frame margin, where nothing else paints — and the
-     * default selection puts E exactly there, so it is not a corner case. Every mark below tests the
-     * EDGE, so an end-of-view mark still shows, and draws at `wfLast`, so it shows inside.
+     * The last column INSIDE the panel; `wfRight` is one past it. Marks test against the EDGE (the
+     * default selection puts E exactly there) and draw at `wfLast`, so an end-of-view mark shows.
      */
     const int wfLast  = wfRight - 1;
     const int midY    = y + WAVEFORM_H / 2;
@@ -552,10 +531,8 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     };
 
     /**
-     * A slice boundary. ⚠️ The two bounding the CURRENT slice are drawn in the DIMMER colour
-     * (`textEmpty`) and the rest in the brighter `textParam` — which reads backwards, and is
-     * deliberate: it matches every built-in theme's palette and the behaviour users have. Swapping
-     * them is a UX change, not a bug fix.
+     * A slice boundary. ⚠️ The two bounding the CURRENT slice draw DIMMER (`textEmpty`) than the
+     * rest — it reads backwards, but it is the established look; swapping it is a UX change.
      */
     auto boundary = [&](int64_t frame, bool active) {
         const float mXf = frame_x(static_cast<float>(frame));
@@ -566,9 +543,8 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
 
     // ── The slice boundaries ─────────────────────────────────────────────────────────────────────
     //
-    // Whichever list the method is answering with: the detector's under TRANSIENT, and the file's own
-    // `cue ` chunk read-only under OFF — showing those is the whole reason a chopped file looks chopped
-    // when you reopen it. DIVIDE answers with nothing and computes its N − 1 cuts in the arm below.
+    // Whichever list the method answers with: the detector's under TRANSIENT, the file's `cue `
+    // chunk read-only under OFF (why a chopped file looks chopped when reopened). DIVIDE computes below.
     const int markerCount = s.marker_count();
     if (markerCount > 0) {
         if (onSliceRow) {
@@ -610,14 +586,11 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
 }
 
 void SampleEditorModule::draw_confirm_dialog(Canvas& c, int x, int y, const Theme& t) const {
-    // It covers the editor completely — an unsaved sample is not something to decide about while the
-    // waveform is still inviting you to keep editing it. ⚠️ THAT COVER IS WHY THIS DIALOG IS NOT IN
-    // `modal_backdrop_active`: it does not dim the screen, so the shell must not dim the bars either.
+    // It covers the editor completely. ⚠️ That cover is why it is not in `modal_backdrop_active`: it
+    // does not dim, so the shell must not dim the bars either.
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // THE app's confirm box, asking this screen's question. It used to be a box of its own — 320×80,
-    // a rule along its top edge instead of an outline — and two boxes asking the same question in two
-    // looks is exactly the drift a shared one cannot have.
+    // THE app's confirm box, asking this screen's question.
     draw_confirm_box(c, "ARE YOU SURE?", t);
 }
 
@@ -644,9 +617,8 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
 
         case 2:
             switch (s.cursorCol) {
-                // PITCH is ±24 semitones, carried as 0..48 with a +24 bias — the generic hex-byte
-                // handler only knows how to step an unsigned range, so the module biases on the way in
-                // and un-biases on the way out (handle_input). Kotlin does exactly this.
+                // PITCH is ±24 semitones carried as 0..48 with a +24 bias (hex_byte steps an
+                // unsigned range); handle_input un-biases.
                 case 0: return cc::hex_byte(s.pitchSemitones + 24, 0, 48);
                 case 1: return cc::toggle_ternary(at(duration_values(), s.durationIndex), duration_values());
                 case 2: {
@@ -659,9 +631,8 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();
             }
 
-        // Rows 3..8 are the WAVEFORM and the SELECTION. There is no cell here to increment: A+DPAD
-        // DRAGS an edge (by a frame count that depends on the zoom, and snaps to a zero crossing),
-        // which no CursorContext can express. The dispatcher handles it directly — see nudge_selection_edge.
+        // Rows 3..8 are the WAVEFORM and SELECTION: A+DPAD DRAGS an edge (zoom-scaled, snapped),
+        // which no CursorContext can express — the dispatcher's nudge_selection_edge.
         case 3: case 4: case 5: case 6: case 7: case 8:
             return cc::none();
 
@@ -748,10 +719,8 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
             switch (s.cursorCol) {
                 case 0:
                     s.sliceMethod = v;
-                    // Switching TO transient clears the detector's list, which is what makes the feed
-                    // re-run it (it fires on "transient mode with no markers"). Switching to DIVIDE or
-                    // OFF leaves it alone: neither reads it — OFF answers with `fileMarkers` — so
-                    // dropping it would only force a re-detect on the way back.
+                    // Switching TO transient clears the detector's list, which makes the feed re-run
+                    // it. DIVIDE and OFF do not read it, so it is kept for the way back.
                     if (v == SLICE_TRANSIENT) s.transientMarkers.clear();
                     r.modified = true;
                     break;

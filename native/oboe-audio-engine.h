@@ -1,10 +1,8 @@
 #pragma once
 // ───────────────────────────────────────────────────────────────────────────────────────────────
-// ANDROID AUDIO BACKEND — the ONLY Oboe-coupled translation unit.
-// Owns the output stream and IS its oboe::AudioStreamDataCallback. On each callback it hands the raw
-// buffer to the portable AudioEngine core via processLiveBlock(); all DSP/scheduling lives in the core
-// (audio-engine.{h,cpp}), which has no Oboe/Android dependency. A Linux port adds a sibling backend
-// (e.g. AlsaAudioEngine) that drives the same core the same way — the core stays untouched.
+// ANDROID AUDIO BACKEND — the ONLY Oboe-coupled translation unit. Owns the output stream and IS its
+// oboe::AudioStreamDataCallback; each callback hands the buffer to AudioEngine::processLiveBlock,
+// where all DSP and scheduling live.
 // ───────────────────────────────────────────────────────────────────────────────────────────────
 #include <oboe/Oboe.h>
 #include <atomic>
@@ -15,15 +13,9 @@
 
 class AudioEngine;  // portable core — full definition pulled in by the .cpp only
 
-// `AudioBackend` since convergence C3 — the shared shell (shell/app.cpp) reaches its device through
-// those six methods and nothing else, so `shell/android-main.cpp` hands it one of these where the
-// desktop hands it an `SdlAudioEngine` and app.cpp does not change a character. The interface was
-// derived from SdlAudioEngine's shape and this class already matched three of it; see
-// native/audio-backend.h for why the virtuals cost nothing (they are lifecycle, never the callback).
-//
-// Constructed by `android-main.cpp`'s `main()` for the SDL app — the one owner since convergence
-// Phase E deleted the JNI facade (`jni-bridge.cpp`) that used to build a separate instance for the
-// Compose app. Nothing here is a singleton and nothing here may become one.
+// The shared shell reaches its device through `AudioBackend` alone; android-main.cpp hands it one
+// of these where the desktop hands an `SdlAudioEngine`. Constructed by android-main's `main()`;
+// nothing here is a singleton and nothing here may become one.
 class OboeAudioEngine : public oboe::AudioStreamDataCallback,
                         public oboe::AudioStreamErrorCallback,
                         public AudioBackend {
@@ -60,19 +52,11 @@ public:
     /**
      * Stop (and restart) the callback around an OFFLINE RENDER.
      *
-     * ⚠️ **`stop()`, NOT `requestPause()`, AND THE REASON IS NOT MERELY THAT STOP IS STRONGER.**
-     * `resumeStream()` above restarts the stream whenever it finds it in `Paused` — and the engine
-     * calls `requestResume()` before *every scheduled note* (audio-engine.h:99). So a paused stream
-     * is one note-on away from being restarted by the engine itself, in the middle of the render this
-     * call exists to protect, from a code path that has no idea a render is happening. Stopping puts
-     * the stream in `Stopped`, which `resumeStream`'s check does not match, so the restart cannot
-     * happen behind the render's back. Choosing pause here would have compiled, run, and reopened
-     * exactly the race this method closes.
-     *
-     * The engine's own `isOfflineRendering` flag already makes `processLiveBlock` return silence
-     * without touching `processAudioBlock` — so what this adds is the window between setting that
-     * flag and the last in-flight callback returning. `stop()` blocks on the state transition, which
-     * is Oboe's equivalent of `SDL_PauseAudioDevice` blocking until the callback has returned.
+     * ⚠️ `stop()`, NOT `requestPause()`: `resumeStream()` restarts a stream it finds `Paused`, and
+     * the engine calls `requestResume()` before every scheduled note — so a paused stream would be
+     * restarted mid-render. `Stopped` does not match that check. `stop()` blocks on the transition,
+     * as `SDL_PauseAudioDevice` blocks until the callback returns; with `isOfflineRendering` already
+     * silencing `processLiveBlock`, this closes the window for the last in-flight callback.
      */
     void setPaused(bool paused) override;
 

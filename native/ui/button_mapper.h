@@ -2,35 +2,13 @@
 
 // ─── THE COMBO MATRIX ────────────────────────────────────────────────────────────────────────────
 //
-// `ButtonEvent` in, one named dispatcher handler out. The C++ twin of `InputMapper.handleButtonAction`
-// (input/ButtonHandlers.kt:402), and the first arrow of Android's InputMapper → ButtonHandlers →
-// AppInputDispatcher chain.
+// `ButtonEvent` in, one named dispatcher handler out — "which of the ~30 handlers does this press
+// mean?", from the button plus the modifiers held at that instant.
 //
-// ── WHY THIS MOVED, AND WHY IT IS A TEMPLATE (convergence C0.1) ──────────────────────────────────
-//
-// It lived in `shell/main.cpp`'s anonymous namespace from Phase 3 S1 until convergence C0, where it
-// had two properties that were fine for a Linux port and are not fine for a shared shell:
-//
-//   • **it existed in exactly one copy, in a file Android cannot link.** C1 gives Android the same
-//     SDL shell, and the identical matrix has to run there. A second copy is the drift Phase 3 spent
-//     itself killing;
-//   • ⚠️ **no tool could reach it.** `tools/ptdispatch` drives the dispatcher's *named handlers*
-//     directly — one layer BELOW this function — so every assertion it makes starts after the
-//     question this file answers. A block whose own comment says "the order of these checks IS the
-//     specification" had no coverage of that order at all, on either side: Kotlin's
-//     `handleButtonAction` is equally untooled (tools/testdata/README.md §3 names it as an uncovered hole),
-//     which is why there is no golden to compare against and `tools/ptmapper` asserts instead.
-//
-// The template parameter is what fixes the second one, and it costs nothing: `Dispatcher` is
-// `InputDispatcher` in every shipping build (no virtual call, no indirection, the same code
-// generated as when this took a concrete reference), and `tools/ptmapper` instantiates it with a stub
-// that records which handler was called instead of doing it. That stub is the only reason the order
-// below can be measured rather than re-read.
-//
-// ⚠️ **A `Dispatcher` must provide every `on_*` named below plus `defer_a_to_release()`,
-// `defer_b_to_release()`, `on_a_deferred()`, `on_r_held(bool)` and `help_full_open()`.** A template
-// only type-checks what it instantiates, so a typo here is caught by the shell's own instantiation
-// (which is a full build, every session) and by ptmapper's.
+// A template so a test can instantiate it with a recording stub and test the check ORDER;
+// in the app `Dispatcher` is `InputDispatcher` (no virtual call).
+// ⚠️ A `Dispatcher` must provide every `on_*` named below plus `defer_a_to_release()`,
+// `defer_b_to_release()`, `on_a_deferred()`, `on_r_held(bool)` and `help_full_open()`.
 
 #include "ui/buttons.h"
 
@@ -38,107 +16,67 @@
 
 namespace pt::ui {
 
-/**
- * The mapper's own memory — everything the combo matrix must remember BETWEEN events, and nothing
- * else. Kotlin keeps the same two fields on `InputMapper` itself.
- */
+/** The mapper's memory between events, and nothing else. */
 struct MapperState {
     /** The A,A double-tap window. */
     uint64_t lastAPress = 0;
 
     /**
-     * ⚠️ The DEFERRED-A latch (`InputMapper.aPressedAlone`). Set when A goes down on a cell whose A
-     * OPENS something — and whose A+DPAD/A+B means something ELSE. The open is then held until A is
-     * RELEASED, and CANCELLED outright if any A-combo fires in between.
-     *
-     * Without it, holding A on the INSTRUMENT NAME cell and pressing B to reset it would open the
-     * keyboard first and land the combo on top of it. The dispatcher decides which cells qualify
-     * (`defer_a_to_release()`); the mapper owns the latch, because it is the mapper that sees the
-     * press, the combo and the release as one gesture.
+     * ⚠️ The DEFERRED-A latch. Set when A goes down on a cell whose A OPENS something but whose
+     * A+DPAD / A+B means something else: the open waits for A's RELEASE and is cancelled by any A-combo
+     * in between (else A+B on the NAME cell would open the keyboard first). The dispatcher picks the
+     * cells (`defer_a_to_release()`); the mapper sees press, combo and release as one gesture.
      */
     bool aPressedAlone = false;
 
     /**
-     * ⚠️ The DEFERRED-B latch (`InputMapper.bPressedAlone`), the exact mirror of the above, and it
-     * exists for exactly one screen: the EQ EDITOR (S8).
-     *
-     * (The MUTE/SOLO latch below is a third of the same family — see `rComboArmed`.)
-     *
-     * There, B is BOTH the close AND the modifier of the slot cycle (B+LEFT/RIGHT walks the 128-preset
-     * bank). Fire the close on B's own press and the cycle is unreachable — you would be back on the
-     * mixer before LEFT ever arrived. So the close is held until B is RELEASED, and CANCELLED if any
-     * B-combo fires in between.
+     * ⚠️ The DEFERRED-B latch, the mirror of the above, for the EQ EDITOR: B is both the close and the
+     * modifier of the slot cycle (B+LEFT/RIGHT), so the close waits for B's release and any B-combo
+     * cancels it.
      */
     bool bPressedAlone = false;
 
     /**
-     * ⚠️ The MUTE/SOLO chord latch. R+B and R+A change the mix the instant they are pressed, and
-     * **which of the two buttons comes back UP first decides whether the change stays**: let go of R
-     * first and it sticks, let go of A/B first and everything the chord did is undone. That makes one
-     * chord both a latching mute and a momentary one, which is the whole gesture.
-     *
-     * It lives here for the same reason the two latches above do: the mapper is the only layer that
-     * sees the press, the combo and the release as ONE gesture. The dispatcher is told to commit or to
-     * revert and never has to guess at release order.
+     * ⚠️ The MUTE/SOLO chord latch. R+B and R+A change the mix on the press, and which button comes UP
+     * first decides whether it stays: R first keeps it, A/B first reverts it — a latching and a
+     * momentary mute in one chord. The dispatcher is told to commit or revert.
      */
     bool rComboArmed = false;
 
     /**
-     * ⚠️ The DEFERRED-SELECT latch — HELP. Set when SELECT goes down with nothing else held, and
-     * CLEARED by the press of any other button, so the handler fires on the release only if SELECT was
-     * alone from the moment it went down to the moment it came up.
-     *
-     * The fourth of the same family, and the one with the sharpest reason: on the FILE BROWSER, SELECT
-     * is PURELY a modifier — its press is what arms SELECT+A (rename), SELECT+B (delete) and SELECT+R
-     * (new folder). Fire help on the press and every one of those three flashes a help panel on its
-     * way to a dialog. Deferring to the release, and cancelling on any other press, makes "SELECT
-     * alone" and "SELECT as a modifier" two gestures that cannot be confused.
+     * ⚠️ The DEFERRED-SELECT latch (HELP). Set when SELECT goes down alone, cleared by any other press,
+     * so the handler fires on release only for a bare tap. On the FILE BROWSER SELECT is purely a
+     * modifier (SELECT+A/B/R); firing on the press would flash help on every rename, delete and mkdir.
      */
     bool selectPressedAlone = false;
 };
 
 /**
- * The COMBO MATRIX — a 1:1 port of `InputMapper.handleButtonAction`, and the last piece of the input
- * chain that is allowed to be platform-specific.
+ * The COMBO MATRIX: owns only "which named handler does this press mean?". What a handler DOES is
+ * `pt::ui::InputDispatcher`.
  *
- * Android's chain is InputMapper → ButtonHandlers → AppInputDispatcher. This function is the first
- * arrow: it owns nothing but the question "which of the ~30 named handlers does this press mean?",
- * and it answers it from the button plus the modifiers held at the instant it happened. Everything
- * downstream — what a handler DOES — is `pt::ui::InputDispatcher`, which is portable C++ and has never
- * heard of SDL.
- *
- * ⚠️ **THE ORDER OF THESE CHECKS IS THE SPECIFICATION.** They run most-specific-first, and each arm
- * RETURNS. L+B+A must be tested before L+A or a clone would paste; A+B before a plain A or a delete
- * would insert; R+A and R+B — MUTE and SOLO — before the plain A and B arms, or holding R to change
- * screens would fire an edit underneath. Reordering them silently changes what the tracker does.
- *
- * ⚠️ **The modifiers come from the EVENT, never from `input.is_held()`.** See ui/buttons.h: SDL delivers
- * a frame's worth of events at once, so a poll-time read describes the end of the frame rather than the
- * instant of each event — and B-then-A inside one 16 ms frame would fire A+B (delete) on the B press.
+ * ⚠️ THE ORDER OF THESE CHECKS IS THE SPECIFICATION. Most-specific first, each arm RETURNS: L+B+A
+ * before L+A (or a clone pastes), A+B before plain A (or a delete inserts), R+A / R+B before plain A
+ * and B (or holding R to change screens edits underneath).
+ * ⚠️ Modifiers come from the EVENT, never `input.is_held()`: a frame's events arrive at once, so a poll
+ * would see the end of the frame — B-then-A in one frame would fire A+B (delete) on the B press.
  */
 template <class Dispatcher>
 void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_t now) {
     const ButtonMods& m = e.mods;
 
-    // ── R's HELD STATE IS PUBLISHED, ABOVE EVERY ARM AND EVERY EARLY RETURN ──────────────────────
+    // ── R's held state is published first, above every early return ──────────────────────────────
     //
-    // ⚠️⚠️ **THE ONE GESTURE HERE THAT IS NOT A CHORD OF BUTTONS.** MIDI learn is "hold R and turn a
-    // knob", and a knob is a CC on a cable — it never becomes a `ButtonEvent`, so no arm below can
-    // ever see it. The matrix cannot answer that gesture; all it can do is say when R is down.
-    //
-    // ⚠️ It sits at the very top because several arms return early, and a latch that could be skipped
-    // by one of them would leave R "held" after it came up — every later knob would learn.
+    // MIDI learn is "hold R and turn a knob"; the knob is a CC, never a ButtonEvent, so all the matrix
+    // can do is say when R is down. ⚠️ At the very top, or an early-returning arm could leave R "held".
     if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
 
     // ── RELEASE ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {
-        // ⚠️ THE MUTE/SOLO CHORD ENDS ON A RELEASE, AND WHICH ONE IS THE SPECIFICATION. It is tested
-        // before everything else here because it CONSUMES the release: an armed A must not also reach
-        // `on_a_released()`. That is safe — the FX helper it would commit can only be armed by a plain
-        // A, which never arms this latch.
-        //
-        // ⚠️ `m.r`, never `is_held()`. `SdlInput::release` clears the released button's own flag and
-        // THEN snapshots, so on the A/B release `m.r` answers exactly "is R still down?".
+        // ⚠️ The MUTE/SOLO chord ends on a release, and which release is the specification. Tested
+        // first because it CONSUMES the release (an armed A must not reach `on_a_released()`; the FX
+        // helper it would commit is armed only by a plain A, which never arms this).
+        // `m.r`, never `is_held()`: on the A/B release `m.r` is exactly "is R still down?".
         if (ms.rComboArmed) {
             if (e.button == Button::R_SHIFT) {
                 ms.rComboArmed = false;
@@ -152,29 +90,25 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             }
         }
         if (e.button == Button::A) {
-            // The DEFERRED single-A: it went down on a sub-screen-opening cell and no A-combo
-            // intervened, so the open fires NOW, on the release, rather than on the press.
+            // The deferred single-A: no A-combo intervened, so the open fires now, on release.
             if (ms.aPressedAlone) {
                 ms.aPressedAlone = false;
                 d.on_button_a();
             }
-            // The FX helper commits on the RELEASE of A — which is what lets you hold A, read your way
-            // through the effect grid, and let go on the one you want.
+            // The FX helper commits on A's RELEASE: hold A, browse the grid, let go on the effect.
             d.on_a_released();
         }
         if (e.button == Button::B) {
-            // The DEFERRED single-B: it went down inside the EQ editor and no B-combo intervened, so
-            // the CLOSE fires now rather than on the press. Mirror of the A latch above.
+            // The deferred single-B (EQ editor close), mirror of the A latch.
             if (ms.bPressedAlone) {
                 ms.bPressedAlone = false;
                 d.on_button_b();
             }
         }
         if (e.button == Button::SELECT) {
-            // The DEFERRED single-SELECT: it went down alone and nothing else was pressed while it was
-            // held, so this is a bare SELECT — help, or the keyboard's abort. Same shape as the two
-            // latches above; the difference is that ANY other press clears this one, not just a combo
-            // the matrix recognises, because SELECT+DPAD is unclaimed and must not read as a tap.
+            // The deferred single-SELECT: nothing else was pressed while it was held — help, or the
+            // keyboard's abort. ANY other press clears it, not just a recognised combo, because
+            // SELECT+DPAD is unclaimed and must not read as a tap.
             if (ms.selectPressedAlone) {
                 ms.selectPressedAlone = false;
                 d.on_select();
@@ -183,14 +117,11 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         return;
     }
 
-    // ── THE FULL HELP OVERLAY: any press closes it, and goes NO further ──────────────────────────
+    // ── The FULL help overlay: any press closes it and goes NO further ───────────────────────────
     //
-    // ⚠️⚠️ **CONSUMED, THE OPPOSITE OF THE COMPACT PANEL BELOW.** The overlay covers the editor, so a
-    // press that closed it and then fell through would edit a cell the user could not see. SELECT
-    // included: its release finds no armed tap and does nothing, so the overlay cannot reopen itself.
-    //
-    // ⚠️ The ringing audition is still silenced, on the same terms as the plain press below — the
-    // overlay is gone by the time it is asked, so no modal rule stands in its way.
+    // ⚠️ CONSUMED — the opposite of the compact panel below: the overlay covers the editor, so a press
+    // falling through would edit a cell the user cannot see. SELECT's release then finds no armed tap,
+    // so the overlay cannot reopen itself. A ringing audition is still silenced.
     if (d.help_full_open()) {
         ms.selectPressedAlone = false;
         d.on_help_dismiss();
@@ -198,30 +129,24 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         return;
     }
 
-    // ── HELP: any press that is not SELECT puts the panel away and cancels a pending tap ──────────
+    // ── HELP: any press but SELECT puts the compact panel away ───────────────────────────────────
     //
-    // ⚠️ ABOVE EVERY ARM, and it consumes nothing — `on_help_dismiss` clears a flag and returns, so
-    // the press falls straight through to whatever it was going to do anyway. That is what makes help
-    // safe to bolt onto the matrix: it cannot swallow a gesture, cannot reorder one, and cannot make
-    // an arm below behave differently from the way it did before help existed.
-    //
-    // ⚠️ SELECT IS EXCLUDED, and it has to be: its own press is what ARMS the tap, and dismissing here
-    // would close the panel a few milliseconds before the release re-opened it — a toggle that never
-    // appears to turn off.
+    // ⚠️ Above every arm, and it consumes nothing: `on_help_dismiss` clears a flag and the press falls
+    // through, so help cannot swallow or reorder a gesture. SELECT is excluded — its press arms the tap,
+    // and dismissing here would close the panel just before the release reopens it.
     if (e.button != Button::SELECT) {
         ms.selectPressedAlone = false;   // SELECT is being used as a modifier, not tapped
         d.on_help_dismiss();
     }
 
-    // Silence a ringing audition on any "plain" press. START is exempt (it starts playback), and so is
-    // anything pressed while A is held — that covers every edit combo, and an edit should stay audible.
+    // Silence a ringing audition on any plain press. START (plays) and anything with A held (edit
+    // combos, which should stay audible) are exempt.
     if (e.button != Button::START && !m.a) d.on_stop_preview();
 
     // ── A + … : the tracker's core editing gesture ───────────────────────────────────────────────
     if (m.a && !m.l && !m.r) {
         switch (e.button) {
-            // ⚠️ Every arm CANCELS the deferred A first: the gesture turned out to be a combo, so the
-            // open it was holding must not fire when A comes back up.
+            // ⚠️ Every arm CANCELS the deferred A: it was a combo, so the held open must not fire.
             case Button::B:          ms.aPressedAlone = false; d.on_a_b();     return;   // delete / reset
             case Button::DPAD_UP:    ms.aPressedAlone = false; d.on_a_up();    return;   // +16 / +1 octave (or the FX helper)
             case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return;   // −16 / −1 octave
@@ -233,11 +158,8 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
 
     // ── SELECT + … : the file browser's file-management chords ───────────────────────────────────
     //
-    // ⚠️ `(!m.r || e.button == R_SHIFT)`, not `!m.r`, and this is `ButtonHandlers.kt:621` to the
-    // character. **The mods snapshot INCLUDES the button being pressed** (that is what makes the L+R
-    // arm below work at all, and why the plain-SELECT arm has to be checked ahead of the no-modifier
-    // guard). So on the SELECT+R chord, R's own press has already set `m.r` — a flat `!m.r` would
-    // reject the very gesture it is trying to match. R may be held here only when R IS the button.
+    // ⚠️ `(!m.r || e.button == R_SHIFT)`, not `!m.r`: the mods snapshot INCLUDES the button being
+    // pressed, so on SELECT+R, R's own press has already set `m.r`.
     if (m.select && !m.l && (!m.r || e.button == Button::R_SHIFT)) {
         switch (e.button) {
             case Button::A:       d.on_select_a(); return;   // rename     (opens the keyboard)
@@ -250,10 +172,8 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     // ── B + DPAD: WHICH item am I looking at? ────────────────────────────────────────────────────
     if (m.b && !m.l && !m.r && !m.a) {
         switch (e.button) {
-            // ⚠️ Every arm CANCELS the deferred B, for the same reason the A-combos cancel the deferred
-            // A: the gesture turned out to be a combo, so the CLOSE it was holding must not fire when B
-            // comes back up. Without this, cycling the EQ slot with B+RIGHT would shut the editor the
-            // moment you let go of B.
+            // ⚠️ Every arm CANCELS the deferred B, or cycling the EQ slot with B+RIGHT would shut the
+            // editor when B came up.
             case Button::DPAD_LEFT:  ms.bPressedAlone = false; d.on_b_left();  return;   // prev item / EQ slot −1
             case Button::DPAD_RIGHT: ms.bPressedAlone = false; d.on_b_right(); return;   // next item / EQ slot +1
             case Button::DPAD_UP:    ms.bPressedAlone = false; d.on_b_up();    return;   // SONG / pool: page up
@@ -265,8 +185,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     // ── L+R: leave selection mode ────────────────────────────────────────────────────────────────
     if (m.l && m.r) {
         switch (e.button) {
-            // Reserved chords: consumed so they cannot fall through to a single-button handler
-            // mid-chord and do something the user never asked for.
+            // Reserved chords: consumed so they cannot fall through to a single-button handler.
             case Button::SELECT:
             case Button::A:
             case Button::B:       return;
@@ -287,11 +206,10 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         switch (e.button) {
             case Button::A:     d.on_l_a(); return;   // cut (in a selection) / paste (outside one)
             case Button::B:     d.on_l_b(); return;   // enter selection, then widen it
-            // LIVE mode's row queue on SONG, and STILL RESERVED everywhere else — the handler's own
-            // gate is what decides, and it returns having done nothing outside LIVE. START must not
-            // toggle playback here either way.
+            // LIVE mode's row queue on SONG; reserved elsewhere (the handler's own gate returns). START
+            // must not toggle playback here either way.
             case Button::START: d.on_l_start(); return;
-            default: break;                           // L+DPAD is the file browser's; it has no screen yet
+            default: break;                           // L+DPAD is reserved
         }
     }
 
@@ -302,23 +220,15 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             case Button::DPAD_DOWN:  d.on_r_down();  return;
             case Button::DPAD_LEFT:  d.on_r_left();  return;
             case Button::DPAD_RIGHT: d.on_r_right(); return;
-            // MUTE and SOLO, on the channel under the cursor or on every channel in the selection.
-            // ⚠️ Both ARM the latch even on a screen where the dispatcher does nothing with them: the
-            // gesture is over when the buttons come up, and a chord that armed on SONG and released
-            // after an R+DPAD walked to MIXER must still be closed out rather than left hanging.
-            // ⚠️ B cancels its own deferral first — the press it was holding turned out to be a chord.
+            // MUTE and SOLO, on the cursor's channel or every channel in the selection.
+            // ⚠️ Both ARM the latch even where the dispatcher does nothing: a chord armed on SONG and
+            // released after an R+DPAD to MIXER must still be closed out.
             case Button::A:          d.on_r_a(); ms.rComboArmed = true; return;
             case Button::B:          ms.bPressedAlone = false; d.on_r_b(); ms.rComboArmed = true; return;
-            // ⚠️ R ARRIVING SECOND, and it is the other half of the mute chord rather than a nicety:
-            // two buttons are never pressed on the same frame, so half the time it is B that lands
-            // first. The screens where R+B is a mute hold their B until it comes up
-            // (`defer_b_to_release`) precisely so this arm can still claim it — and `bPressedAlone`,
-            // not `m.b`, is the test, because it is the one that says the single-B action has NOT
-            // fired yet. A B whose press already did its work must not also be read as a chord.
-            //
-            // A has no counterpart: it is deferred only on the sub-screen cells, and everywhere else
-            // its press has already inserted by the time R arrives. R+A is still whole when R goes
-            // down first, which is the order the gesture is written for.
+            // ⚠️ R arriving SECOND is the other half of the mute chord — half the time B lands first.
+            // Screens where R+B mutes hold their B (`defer_b_to_release`) so this arm can still claim
+            // it; `bPressedAlone`, not `m.b`, is the test, because a B that already acted must not
+            // also be a chord. A has no counterpart: elsewhere its press has already inserted.
             case Button::R_SHIFT:
                 if (ms.bPressedAlone) {
                     ms.bPressedAlone = false;
@@ -326,30 +236,24 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                     ms.rComboArmed = true;
                 }
                 return;
-            // LIVE mode's stop queue on SONG; reserved and consumed everywhere else, exactly as
-            // L+START above. R is held to navigate, and START must not toggle playback here.
+            // LIVE mode's stop queue on SONG; reserved and consumed elsewhere, like L+START.
             case Button::START:      d.on_r_start(); return;
             default: break;
         }
     }
 
     // ── A, and the A,A double-tap ────────────────────────────────────────────────────────────────
-    // 300 ms. The window belongs to the MAPPER on Android (`InputMapper.lastAPress`), so it lives
-    // here rather than in the dispatcher — and it is passed in rather than kept in a function-local
-    // static, because a mapper that hides its own state cannot be driven by a test.
+    // 300 ms. The window is the mapper's, passed in rather than a function-local static so a test can
+    // drive it.
     if (e.button == Button::A && !m.l && !m.r) {
-        // ⚠️ The DEFER, first: on a cell whose A opens a sub-screen, hold the action until A comes back
-        // up, so an A+DPAD or A+B on the same cell is not pre-empted by an immediate open. A deferred
-        // cell is never a double-tap cell — there is nothing there to insert — so the A,A path below is
-        // skipped for it, and `lastAPress` is cleared so the NEXT A press cannot read as the second
-        // half of a double-tap that never happened.
+        // ⚠️ The DEFER first: on a cell whose A opens a sub-screen, hold the action until release so an
+        // A+DPAD or A+B is not pre-empted. Such a cell is never a double-tap cell, and `lastAPress` is
+        // cleared so the next A cannot complete a double-tap that never happened.
         if (d.defer_a_to_release()) {
             ms.aPressedAlone = true;
             ms.lastAPress    = 0;
-            // ⚠️ The dispatcher is told the press HAPPENED, and it is the only news it gets until the
-            // release. Nothing is opened here — but a deferred cell whose action is aimed at a MOVING
-            // number (the sample editor's playhead) has to read that number now, because by the time A
-            // comes back up it is a reaction time and a D-pad press further on.
+            // ⚠️ The dispatcher is told the press happened: a deferred action aimed at a MOVING number
+            // (the sample editor's playhead) must read it now, not a reaction time later.
             d.on_a_deferred();
             return;
         }
@@ -365,8 +269,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
 
     // ── B, and the deferred close ────────────────────────────────────────────────────────────────
     if (e.button == Button::B && !m.l && !m.r && !m.a) {
-        // ⚠️ The DEFER, exactly as A's above: inside the EQ editor B is a CLOSE, but it is also the
-        // modifier of the slot cycle — so hold it until B comes back up and let a B+DPAD cancel it.
+        // ⚠️ The DEFER, as A's: in the EQ editor B closes but also modifies the slot cycle.
         if (d.defer_b_to_release()) {
             ms.bPressedAlone = true;
             return;
@@ -375,13 +278,9 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
         return;
     }
 
-    // ⚠️ SELECT and START are checked EXPLICITLY, ahead of the "no modifiers" guard below, and the
-    // reason is easy to miss: pressing SELECT sets `m.select` — its own press would be swallowed by a
-    // guard that rejects any modifier. Kotlin carries the same explicit check for the same reason.
-    //
-    // ⚠️ SELECT ARMS AND DOES NOT ACT. `on_select` fires on the RELEASE (the latch above), because on
-    // the file browser SELECT is purely the modifier of three chords and acting on its press would
-    // flash help on the way into every rename, delete and new-folder.
+    // ⚠️ SELECT and START are checked before the "no modifiers" guard below: SELECT's own press sets
+    // `m.select`, which that guard would reject.
+    // ⚠️ SELECT ARMS and does not act — `on_select` fires on release (see the latch above).
     if (e.button == Button::SELECT && !m.l && !m.r && !m.a && !m.b) {
         ms.selectPressedAlone = true;
         return;
@@ -389,7 +288,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     if (e.button == Button::START && !m.l && !m.r && !m.a && !m.b && !m.select) { d.on_start(); return; }
 
     // ── The D-pad, unmodified: move the cursor (or drag a selection's edge) ──────────────────────
-    if (m.l || m.r || m.a || m.b || m.select) return;  // any modifier down: not a plain press
+    if (m.l || m.r || m.a || m.b || m.select) return;  // a modifier is down: not a plain press
 
     switch (e.button) {
         case Button::DPAD_UP:    d.on_dpad_up();    break;

@@ -2,16 +2,9 @@
 
 // ─── NAVIGATION MAP ──────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/NavigationMapModule.kt: the 5×5 grid in the bottom-right corner that
-// says where you are and what R+DPAD can reach from here.
-//
-// It is the PICTURE of the grid that `ui/navigation.h` MOVES through — the two are written and read
-// together, and a disagreement between them (a cell you can see but not reach, a screen you land on
-// that is drawn nowhere) is the only interesting bug either can have.
-//
-// Data-driven, as the Kotlin is: the column layouts are a table, not a stack of `if`s. Only the main
-// row (row 2 — S C P I T) and the CURRENT column are ever drawn; the other columns' context screens
-// are not reachable from here, so showing them would be a lie about where R+DPAD goes.
+// The 5×5 grid in the bottom-right corner: where you are and what R+DPAD can reach. It is the PICTURE
+// of the grid `ui/navigation.h` moves through — the two must agree. Only the main row (row 2 — S C P I
+// T) and the CURRENT column are drawn; other columns' screens are not reachable from here.
 //
 // 115×105 px — five 23px cells across, five 21px rows down.
 

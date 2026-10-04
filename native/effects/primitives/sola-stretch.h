@@ -225,9 +225,8 @@ inline std::vector<float> stretch(const float* input,
         inputPosFloat += inputHop;      // tempo-dependent step in the input
     }
 
-    // Trim the headroom to the length that was ASKED for. The loop above always fills at least that
-    // far (it only exits early when the input is shorter than one chunk), so this is a trim and not
-    // a zero-pad — ptdispatch §55 asserts the tail is real material and not silence.
+    // Trim the headroom to the length ASKED for. The loop always fills at least that far (it exits
+    // early only when the input is shorter than one chunk), so this is a trim, not a zero-pad.
     output.resize((size_t)targetLen);
     return output;
 }

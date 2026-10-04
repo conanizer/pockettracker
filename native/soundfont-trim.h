@@ -12,10 +12,8 @@
 // the set of sample headers it reaches, copies only those byte ranges, and emits a complete, valid
 // SoundFont in memory that tsf loads through `tsf_load_memory` unmodified and unaware.
 //
-// ⚠️ **Nothing here parses a sample.** Compressed (SF3) sample ranges are copied as opaque bytes,
-// so the expensive half — Vorbis decoding — is skipped for every preset that is left out. That is
-// where the win is largest: a compressed bank decodes to roughly twenty times its file size, and it
-// is the decoding, not the reading, that a small device cannot afford.
+// ⚠️ Nothing here parses a sample: SF3 ranges are copied as opaque bytes, so Vorbis decoding is
+// skipped for every preset left out — the decoding, not the reading, is what a small device can't afford.
 
 #include <cstdint>
 #include <string>

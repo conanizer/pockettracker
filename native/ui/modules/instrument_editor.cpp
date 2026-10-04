@@ -13,9 +13,8 @@ using songcore::Note;
 
 namespace {
 
-// Fixed column offsets for the TRIPLE rows, relative to the module's left edge. They are NOT derived
-// from the two standard columns: three label+value pairs do not fit on the same grid two do, so the
-// Kotlin pins them and so does this.
+// Fixed column offsets for the TRIPLE rows, from the module's left edge — three pairs do not fit
+// the two-column grid.
 constexpr int TRIPLE_V1 = 90;   // first value  (ROOT / VOL)
 constexpr int TRIPLE_N2 = 185;  // second label (DETUNE / SLICE)
 constexpr int TRIPLE_V2 = 305;
@@ -32,11 +31,8 @@ constexpr int BTN_COL3   = 400;        // cursor column 3: TYPE-row EDIT, PRESET
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /**
- * "--" for an unset MIDI byte, the hex pair otherwise — BANK, PROG and both halves of a CC slot.
- *
- * −1 is the project's ONE "empty" convention (model.h), and it has to LOOK different from 00 on this
- * screen in particular: `midiProgram = 0` is a real program change and `-1` means send nothing at all,
- * so a cell that drew them alike would hide which of the two the user had dialled in.
+ * "--" for an unset MIDI byte, the hex pair otherwise. −1 must look different from 00: program 0
+ * is a real program change, −1 sends nothing.
  */
 std::string midi_opt(int v) { return v < 0 ? "--" : hex2(v); }
 
@@ -79,8 +75,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 3: VOL + TSP + PAN, on both types ────────────────────────────────────────────────────────
-    // TSP is the same switch on a SoundFont as on a sampler, so the row is the same shape on both —
-    // which is why the SoundFont's row 3 became a TRIPLE rather than growing a layout of its own.
+    // TSP is the same switch on both types, so the row is a TRIPLE on both.
     draw_triple_row(c, x, rowY, nameX,
                     "VOL", hex2(ins.volume),
                     "TSP", ins.transposeEnabled ? "on" : "off",
@@ -169,8 +164,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
                       ins.reverse ? "on" : "off", s.cursorRow, s.cursorColumn, currentRow, t);
     }
 
-    // Status messages ("SF LOADED", "SRC MISSING") are the global overlay's, drawn on the visualizer
-    // header — not inside this module. Same split as the Kotlin.
+    // Status messages are the global overlay's, drawn on the visualizer header.
 }
 
 void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
@@ -216,8 +210,7 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 5: INST PRESET ───────────────────────────────────────────────────────────────────────────
-    // A .pti round-trips an EXTERNAL patch as readily as a sampler's: the preset carries the whole
-    // Instrument through the same emit/parse, so the MIDI fields came along for free with B1.
+    // A .pti round-trips an EXTERNAL patch too: the preset carries the whole Instrument.
     draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
@@ -232,10 +225,8 @@ void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 8: TSP + TIC ─────────────────────────────────────────────────────────────────────────────
-    // The two the other layouts have that this one was missing. TSP matters here for the same reason
-    // it does anywhere — the scale quantizer moves the notes this instrument sends down the cable, so
-    // a drum machine on the other end needs a way to say no. TIC is the table clock, which an EXTERNAL
-    // instrument runs exactly as a sampler does: the table is where its FX live.
+    // TSP: the scale quantizer moves the notes sent down the cable, so a drum machine needs a way to
+    // say no. TIC: the table clock, which runs as on a sampler — the table is where its FX live.
     draw_dual_row(c, rowY, nameX, valueX, "TSP", ins.transposeEnabled ? "on" : "off",
                   "TIC", hex2(ins.tableTicRate), s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
@@ -371,9 +362,6 @@ void InstrumentEditorModule::draw_name_row(Canvas& c, int y, int name_x, int val
 void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, int name_x,
                                                      int cursor_row, int cursor_column, int this_row,
                                                      const Theme& t) const {
-    // It took an `is_soundfont` it never read: a .pti saves and loads ANY instrument type, EXTERNAL
-    // included, so both buttons are always drawn. The dead parameter is gone rather than gaining a
-    // third value nothing would look at.
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
 
@@ -414,10 +402,8 @@ void InstrumentEditorModule::draw_eq_row(Canvas& c, int y, int name_x, int value
 /**
  * A MIDI byte that can be OFF — BANK, PROG and the two halves of a CC slot.
  *
- * −1 is "send nothing", and the cell's five buttons follow from that with no new machinery: A on an
- * empty cell INSERTs (landing on 0), A+B DELETEs back to −1, and stepping is disabled while empty
- * because `hex_byte` reads `current == empty_value` as empty. Exactly the shape the phrase's chain
- * and instrument reference cells already have.
+ * −1 is "send nothing": A on an empty cell INSERTs (0), A+B DELETEs back to −1, and stepping is
+ * disabled while empty — the shape of the phrase's reference cells.
  */
 static CursorContext midi_opt_context(int current, int max) {
     return cc::hex_byte(current, /*min=*/0, /*max=*/max, /*empty_value=*/-1,
@@ -487,10 +473,8 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     const int  row = s.cursorRow;
     const int  col = s.cursorColumn;
 
-    // Rows 0 and 1 are the TYPE and NAME rows. They are READ_ONLY *to the generic handlers* — A+LEFT/RIGHT on
-    // TYPE cycles the three types and A on NAME opens the name editor, and both are dispatcher
-    // business (a type change frees a sample; a name is text, not a number). Read-only here means "the
-    // five generic handlers must not touch this", not "nothing happens".
+    // Rows 0 and 1 are read-only TO THE GENERIC HANDLERS: A+LEFT/RIGHT on TYPE and A on NAME are the
+    // dispatcher's (a type change frees a sample; a name is text).
     if (row == 0 || row == 1) return cc::read_only();
 
     if (row == 2) {  // ROOT + DETUNE + TIC
@@ -519,9 +503,7 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     if (row == 5) return cc::read_only();  // the INST PRESET SAVE / LOAD buttons — the dispatcher's, not a value
 
     if (sf && row == 6) {  // PATCH
-        // The index range is the SF2's own list length. With no SoundFont the count is 0, so `maxIdx`
-        // is 0 and stepping goes nowhere — correct, and the reason this row is drawable before a file
-        // is ever opened.
+        // The range is the SF2's own list length; with no SoundFont it is 0 and stepping goes nowhere.
         if (col != 1) return cc::none();
         const int maxIdx = (s.sfPresetCount - 1) < 0 ? 0 : (s.sfPresetCount - 1);
         return cc::hex_byte(s.sfPresetIndex, 0, maxIdx);
@@ -556,20 +538,11 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     if (row == 10 + off) return cc::none();  // spacer
 
     /**
-     * The EQ slot cell, shared by both tails. −1 is a genuine "no EQ", and A+B clears back to it.
+     * The EQ slot cell, shared by both tails. −1 is "no EQ", and A+B clears back to it.
      *
-     * ⚠️ **`can_insert` is INERT here — a Kotlin quirk carried over deliberately, not a porting slip.**
-     * `hex_byte` decides emptiness by `current == empty_value`, but the caller substitutes 0 for an
-     * unassigned −1 *before* handing it over. `0 == −1` is false, so the cell is never "empty" in the
-     * context's eyes and `can_insert && is_empty` collapses to false. (`can_delete` is unaffected: it
-     * is gated on `!is_empty`, which is exactly what it wants.)
-     *
-     * The one visible consequence: **A on an unassigned EQ jumps to slot 1 — slot 0 is unreachable
-     * with A** (it steps up from the substituted 0). A+B on an unassigned cell does nothing, having
-     * neither a delete nor a default. Both are what the Android app does; `tools/ptinput` pins all five
-     * buttons on this cell at −1, 0 and 9. The INSERT_DEFAULT arm in handle_input below is therefore
-     * unreachable today, and is kept because it is what the Kotlin has — and what would make the cell
-     * correct if the factory were ever fixed to pass −1 through.
+     * ⚠️ `can_insert` is INERT: −1 is replaced by 0 before `hex_byte` tests emptiness, so the cell
+     * is never empty. A on an unassigned EQ therefore jumps to slot 1 (slot 0 is unreachable with
+     * A), and A+B there does nothing. handle_input's INSERT_DEFAULT arm is unreachable today.
      */
     const auto eq_context = [&] {
         return cc::hex_byte(ins.eqSlot < 0 ? 0 : ins.eqSlot, /*min=*/0, /*max=*/127,
@@ -745,8 +718,7 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
         else if (col == 5) b255(ins.tableTicRate);
 
     } else if (row == 3) {
-        // VOL + TSP + PAN, identical on both types — the `sf` split this arm used to carry went with
-        // SLICE when it moved down to the EQ row.
+        // VOL + TSP + PAN, identical on both types.
         if (col == 1)      b255(ins.volume);
         else if (col == 3) { if (isSet) ins.transposeEnabled = (v == 1); }
         else if (col == 5) b255(ins.pan);
@@ -777,9 +749,8 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
     } else if (sf && row == 13) {
         b255(ins.delaySend);
     } else if ((sf && row == 14) || (!sf && row == 12)) {
-        // ⚠️ On a SAMPLER, SLICE shares this row, so the EQ arm is no longer the whole row — an edit
-        // that ignored the column would write an EQ slot of 0, 1 or 2 every time SLICE was cycled.
-        // The SoundFont has no second column here and falls into the EQ half for any column.
+        // ⚠️ On a SAMPLER, SLICE shares this row, so the EQ half must check the column or cycling
+        // SLICE writes an EQ slot. The SoundFont has no second column.
         if (col == 3 && !sf) {
             if (isSet) ins.slicingMode = clamp(v, 0, 2);
         } else {

@@ -374,10 +374,8 @@ bool decodeOpusFile(const char* path, PcmSink& out, int& sampleRate) {
 }
 
 bool decodeMp4File(const char* path, PcmSink& out, int& sampleRate) {
-    // Read the whole file into RAM. minimp4 reads sequentially and the index may sit at the end of the
-    // stream, so buffering the file up front is both simplest and what its read callback wants; a
-    // container sample is a few MB. (The convergence plan's OOM guard is a UI-level length warning on
-    // the LOAD path, not this decoder's job — a container that fits in a sample is small.)
+    // Read the whole file into RAM: minimp4 reads sequentially and the index may sit at the end, so
+    // buffering up front is what its read callback wants. A container sample is a few MB.
     FILE* f = pt_fopen(path, "rb");
     if (!f) { LOGE("decodeMp4File: cannot open %s", path); return false; }
     std::fseek(f, 0, SEEK_END);
@@ -432,12 +430,9 @@ bool decodeMp4File(const char* path, PcmSink& out, int& sampleRate) {
         return false;
     }
 
-    // ⚠️ FAAD2 UPMIXES mono AAC to two identical channels (measured: a mono .m4a decodes with
-    // fi.channels == 2 and L == R exactly). The CONTAINER's channel count is the truth — it is what the
-    // old MediaCodec path read from KEY_CHANNEL_COUNT — so it, not FAAD2's per-frame count, decides mono
-    // vs stereo. A mono container collapses FAAD2's duplicate to one channel (empty R, the engine's mono
-    // convention); a source with no declared count falls back to FAAD2's. The interleave STRIDE is always
-    // FAAD2's actual output channel count, whatever we then keep.
+    // ⚠️ FAAD2 UPMIXES mono AAC to two identical channels, so the CONTAINER's channel count decides
+    // mono vs stereo (a mono container drops FAAD2's duplicate); with no declared count, FAAD2's.
+    // The interleave STRIDE is always FAAD2's actual output channel count.
     const unsigned containerCh = tr->SampleDescription.audio.channelcount;
 
     sampleRate = 0;

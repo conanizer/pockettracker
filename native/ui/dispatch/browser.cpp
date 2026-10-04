@@ -17,11 +17,8 @@ namespace pt::ui {
 // ─── Opening and closing the browser ─────────────────────────────────────────────────────────────
 
 std::string InputDispatcher::browser_dir(BrowserDir cat) {
-    // A config.json override per category, else the built-in default. The FileSystem getters
-    // create-on-first-use, so `def` is always a real, readable directory — which is what makes it a
-    // safe answer whenever the override cannot be honoured.
-    //
-    // No debug gate: config.json ships on every platform's release from v0.9.4 (`ui/folder_config.h`).
+    // A config.json override per category, else the built-in default — created on first use, so always
+    // a real directory to fall back on.
     const std::optional<std::string>* ov = nullptr;
     std::string                       def;
     switch (cat) {
@@ -31,10 +28,8 @@ std::string InputDispatcher::browser_dir(BrowserDir cat) {
         case BrowserDir::PROJECTS:    ov = &s_.folderConfig.projects;    def = fs_.projects_directory();    break;
         case BrowserDir::THEMES:      ov = &s_.folderConfig.themes;      def = fs_.themes_directory();      break;
     }
-    // ⚠️ The whole rule lives in `resolve_browse_dir`, NOT here: the value is root-relative unless it is
-    // absolute, an override authored under another install's root is re-rooted onto ours, and one that
-    // cannot be read on this platform falls back to `def`. Inlining any part of that here is how the
-    // config and a project's sample paths would start disagreeing about where the app's folders are.
+    // ⚠️ The whole rule is `resolve_browse_dir` (root-relative unless absolute, re-rooting, the fallback);
+    // inlining any of it here would let the config and project sample paths disagree.
     return ov ? resolve_browse_dir(fs_, *ov, def) : def;
 }
 
@@ -46,11 +41,9 @@ void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const 
     s_.fileBrowser.fileExtensions = extensions;
     s_.fileBrowser.mode           = BrowserMode::NORMAL;
 
-    // D2a: for a SAMPLE load with FOLDER = REMEMBER, start at the folder the last sample came from.
-    // Keyed off the requested start being the samples dir — which is EXACTLY the two sample-load
-    // purposes (LOAD_SOURCE on a sampler, LOAD_SAMPLE_EDITOR) and nothing else, so soundfonts, presets,
-    // projects and themes keep their own directories. Falls back to `directory` if the remembered path
-    // is empty or gone (a deleted folder must not strand the browser on an empty listing).
+    // FOLDER = REMEMBER: a SAMPLE load starts in the folder the last sample came from. Keyed off the start
+    // being the samples dir, which is exactly the two sample-load purposes. A remembered folder that is
+    // gone falls back to `directory`.
     std::string start = directory;
     if (s_.settings.rememberFolder && directory == browser_dir(BrowserDir::SAMPLES) &&
         !s_.settings.lastSampleFolder.empty() && fs_.is_directory(s_.settings.lastSampleFolder)) {
@@ -62,8 +55,7 @@ void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const 
 }
 
 void InputDispatcher::close_file_browser() {
-    // The audition the user was scrolling through is over. Kotlin frees slot 255 here for the same
-    // reason: a preview left resident is a megabyte of PCM nothing will ever play again.
+    // The audition is over; a preview left resident is PCM nothing will play again.
     host_.clear_previews();
     s_.fileBrowser.selectionMode   = false;
     s_.fileBrowser.selectionAnchor = -1;
@@ -73,19 +65,13 @@ void InputDispatcher::close_file_browser() {
 void InputDispatcher::refresh_browser() {
     FileBrowserState& b = s_.fileBrowser;
 
-    // ⚠️ **A RE-LIST IS NOT A RE-READ UNLESS THE FILESYSTEM IS TOLD TO FORGET.** `SafFileSystem`
-    // serves a cached listing and drops that cache only on this app's own writes, so without this
-    // line a refresh hands back exactly what is already on screen — and a file that arrived from a
-    // PC, a download or a file manager stays invisible until the next launch.
-    //
-    // Here rather than at the five call sites, so that adding a sixth cannot forget it. A no-op on
-    // every implementation that caches nothing, which is all of them but Android's.
+    // ⚠️ A re-list is not a re-read unless the filesystem forgets: `SafFileSystem` caches and drops the
+    // cache only on this app's writes, so a file from a PC or download would stay invisible. Here, below
+    // every call site. A no-op where nothing is cached.
     fs_.forget_listing(b.currentDirectory);
 
-    // Re-list in place and KEEP THE CURSOR where it was — a refresh is not a navigation. Deleting the
-    // twentieth file in a folder should leave you on the twentieth row, not throw you back to the
-    // first. It has to be CLAMPED, though: the list may have got shorter, and a cursor past the end of
-    // it draws nothing highlighted — the row the user was on simply vanishes.
+    // Re-list in place and KEEP THE CURSOR — a refresh is not a navigation — CLAMPED, since the list may
+    // have got shorter.
     rebuild_items(b, fs_);
 
     const int last = static_cast<int>(b.items.size()) - 1;
@@ -97,16 +83,12 @@ void InputDispatcher::refresh_browser() {
 }
 
 void InputDispatcher::refresh_browser_on_foreground() {
-    // ⚠️ Guarded on the SCREEN, not on the browser's state: `fileBrowser` keeps its directory and its
-    // cursor after `close_file_browser`, so re-listing unconditionally would re-read a directory
-    // nobody is looking at on every Home-and-back — and on Android that listing is a query per entry
-    // over a content provider.
+    // ⚠️ Guarded on the SCREEN: `fileBrowser` keeps its state after closing, and re-listing on every
+    // return to the app would query a directory nobody is looking at.
     if (s_.currentScreen != ScreenType::FILE_BROWSER) return;
 
-    // ⚠️ NOT while a modal is up. The DELETE confirm names the row under the cursor, and a refresh can
-    // move what is under the cursor — so a listing rebuilt behind the prompt would leave "DELETE X?"
-    // on screen with the cursor now on Y, and A would delete Y. The browser is re-read on the next
-    // gesture instead; a stale listing is a cosmetic problem, a mislabelled confirm is not.
+    // ⚠️ NOT while a modal is up: a refresh can move what is under the cursor, leaving "DELETE X?" on
+    // screen with A deleting Y. A stale listing is cosmetic; a mislabelled confirm is not.
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     refresh_browser();
@@ -119,14 +101,12 @@ void InputDispatcher::browser_move_cursor(int delta, bool page) {
     const int         total = static_cast<int>(b.items.size());
     if (total == 0) return;
 
-    // ⚠️ UP/DOWN WRAP; the LEFT/RIGHT page jump CLAMPS. That asymmetry is Kotlin's and it is the right
-    // one: wrapping a single step off the end of a list is a convenience, but a PAGE that wrapped would
-    // fling you from the top of a 400-file directory to the bottom on one tap.
+    // ⚠️ UP/DOWN WRAP; the LEFT/RIGHT page jump CLAMPS — a wrapping page would fling you from the top of a
+    // 400-file directory to the bottom.
     if (page) {
         b.cursor = std::min(std::max(b.cursor + delta, 0), total - 1);
     } else {
-        // ⚠️ Modulo TWICE, not `+ total` once: a page step is larger than 1, and one addition of
-        // `total` only covers a step smaller than the whole list.
+        // ⚠️ Modulo TWICE: a page step can exceed the list length.
         b.cursor = ((b.cursor + delta) % total + total) % total;
     }
 
@@ -143,8 +123,8 @@ void InputDispatcher::browser_move_cursor(int delta, bool page) {
 void InputDispatcher::browser_confirm() {
     FileBrowserState& b = s_.fileBrowser;
 
-    // DELETE mode: A is the YES of "A=YES B=NO". This is the ONLY place the browser removes anything,
-    // and it is two presses away from any accident — SELECT+B to arm, A to confirm.
+    // DELETE mode: A is the YES. The only place the browser removes anything — SELECT+B to arm, A to
+    // confirm.
     if (b.mode == BrowserMode::DELETE) {
         const BrowserItem* item = b.current();
         b.mode = BrowserMode::NORMAL;
@@ -162,7 +142,7 @@ void InputDispatcher::browser_confirm() {
         return;
     }
 
-    // SET_HOME mode: A is the YES of "A=YES B=NO", armed by SELECT+A on a granted tree.
+    // SET_HOME mode: A is the YES, armed by SELECT+A on a granted tree.
     if (b.mode == BrowserMode::SET_HOME) {
         const BrowserItem* item = b.current();
         b.mode = BrowserMode::NORMAL;
@@ -170,12 +150,9 @@ void InputDispatcher::browser_confirm() {
 
         const std::string name = item->displayName;
         if (fs_.set_home_directory(item->path)) {
-            // ⚠️ **The two derived roots have to move WITH it, or the app looks in the new tree and
-            // resolves media against the old one.** Both were read from the filesystem once, at boot
-            // (`AppConfig::mediaBaseDir` and `SongcoreHost::set_app_root`), and neither is re-asked:
-            // a project's RELATIVE sample paths join onto the first, and an absolute path authored
-            // elsewhere re-roots onto the second. Derived here from an accessor rather than from the
-            // row, so pt-ui never has to know what a platform's root string looks like.
+            // ⚠️ The two derived roots (`AppConfig::mediaBaseDir`, `SongcoreHost::set_app_root`) were read
+            // at boot and must move WITH the home, or media resolves against the old tree. Derived from an
+            // accessor, so pt-ui never learns what a root string looks like.
             const std::string root = fs_.parent_path(fs_.samples_directory());
             set_media_base_dir(root);
             host_.set_app_root(root);
@@ -190,7 +167,7 @@ void InputDispatcher::browser_confirm() {
         return;
     }
 
-    // FORGET_ROOT mode: A is the YES of "A=YES B=NO", armed by SELECT+B on a granted tree.
+    // FORGET_ROOT mode: A is the YES, armed by SELECT+B on a granted tree.
     if (b.mode == BrowserMode::FORGET_ROOT) {
         const BrowserItem* item = b.current();
         b.mode = BrowserMode::NORMAL;
@@ -198,9 +175,8 @@ void InputDispatcher::browser_confirm() {
 
         const std::string name = item->displayName;
         if (fs_.revoke_access(item->path)) {
-            // ⚠️ The home may have been THIS tree, in which case the filesystem has just chosen another
-            // — so the derived roots are re-asked here exactly as they are after a home change, and for
-            // the same reason. An accessor answers the truth; a value read at boot does not.
+            // ⚠️ The home may have been this tree, and the filesystem has picked another — re-ask the
+            // derived roots exactly as after a home change.
             const std::string root = fs_.parent_path(fs_.samples_directory());
             set_media_base_dir(root);
             host_.set_app_root(root);
@@ -220,12 +196,9 @@ void InputDispatcher::browser_confirm() {
 
     if (item->is_parent()) { navigate_to_parent(b, fs_); return; }
 
-    // An ACTION is not a place, it is a thing to do, and the filesystem owns what it means.
-    //
-    // ⚠️ **NO refresh on the way out, and that is not an omission.** `activate` starts something it
-    // does not wait for — the one action there is opens Android's folder picker — so a listing rebuilt
-    // here would be rebuilt from a world that has not changed yet. What catches up is
-    // `refresh_browser_on_foreground()`, when the app comes back.
+    // An ACTION is a thing to do; the filesystem owns what it means.
+    // ⚠️ No refresh afterwards: `activate` does not wait (Android's folder picker), so the world has not
+    // changed yet. `refresh_browser_on_foreground()` catches up when the app returns.
     if (item->kind == BrowserItem::Kind::ACTION) {
         const std::string label = item->displayName;
         if (!fs_.activate(item->path)) {
@@ -237,25 +210,22 @@ void InputDispatcher::browser_confirm() {
 
     if (item->kind == BrowserItem::Kind::FOLDER) { navigate_to_folder(b, fs_, item->path); return; }
 
-    // ── It is a FILE, and what happens now is the whole reason the browser was opened ────────────
+    // ── It is a FILE — the reason the browser was opened ─────────────────────────────────────────
     const int         id   = s_.currentInstrument;
     const std::string ext  = to_lower(item->extension);
     const std::string path = item->path;
     const std::string stem = item->displayName;
 
-    // Which slot a source load lands on. The SAMPLE EDITOR's own LOAD button targets the slot the
-    // EDITOR is on, which is not necessarily the one the INSTRUMENT screen was last left showing.
+    // The SAMPLE EDITOR's LOAD targets the editor's slot, which need not be INSTRUMENT's last one.
     const int sourceId = (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR)
                              ? s_.sampleEditor.instrumentId
                              : id;
-    // The name that slot is ABOUT to stop deserving — read before the load overwrites the path it comes
-    // from. See the adopt rule below; on anything but a source load nobody looks at it.
+    // The name the slot is about to stop deserving — read before the load replaces its source (see the
+    // adopt rule below).
     const std::string previousAutoName = instrument_auto_name(host_.project(), sourceId);
 
-    // ⚠️ EVERY arm, not only the ones expected to be slow. Which loads are slow is a fact about the
-    // FILE and the DEVICE, not about the menu item — a `.ptt` theme is bytes and a `.sf3` is half a
-    // minute, and both come through here. The scope costs nothing on a fast one: below the delay
-    // nothing is drawn and nothing is dimmed.
+    // ⚠️ EVERY arm: slowness is a fact about the FILE and DEVICE, not the menu item. Below the delay
+    // nothing is drawn, so a fast load costs nothing.
     const LoadScope loadScope(*this, now_ms_, stem);
 
     bool ok = false;
@@ -265,13 +235,9 @@ void InputDispatcher::browser_confirm() {
             break;
 
         case AppState::BrowserPurpose::LOAD_SOURCE:
-            // The extension decides, not the slot's current type: picking an .sf2 from a sampler slot
-            // TURNS it into a SoundFont slot (load_instrument_soundfont sets the type), which is what
-            // the user asked for by picking one. The browser's filter usually makes this moot — but the
-            // user can navigate anywhere, and a folder full of both is not exotic.
-            //
-            // `.sf3` is here on the same footing as `.sf2` — same font, same float buffer at the end
-            // of it, and the compressed one is the CHEAPER of the two in peak memory (audio-engine.h).
+            // The extension decides, not the slot's type: picking an .sf2 from a sampler slot TURNS it
+            // into a SoundFont slot — the filter is not a guarantee, the user can navigate anywhere.
+            // `.sf3` is on the same footing as `.sf2` (and cheaper in peak memory, audio-engine.h).
             if (is_soundfont_extension(ext)) {
                 ok = host_.load_soundfont(id, path);
             } else {
@@ -280,33 +246,26 @@ void InputDispatcher::browser_confirm() {
             break;
 
         case AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR:
-            // The editor's own LOAD button. Same load, but it returns to the EDITOR rather than to
-            // INSTRUMENT — you came here to pick something to cut up, not to leave.
+            // The editor's own LOAD: the same load, returning to the EDITOR.
             ok = host_.load_sample(s_.sampleEditor.instrumentId, path);
             break;
 
         case AppState::BrowserPurpose::LOAD_PROJECT:
-            // ⚠️ The WHOLE DOCUMENT, and it returns early — everything below this switch is about an
-            // INSTRUMENT that just gained a source, and none of it applies. `load_project_file` is the
-            // guard rail S4 paid 84.4% of a render for: parse → push → load_media → push_params, in one
-            // call, so the obligation cannot be forgotten by a new caller. This is that new caller.
+            // ⚠️ The WHOLE DOCUMENT, returning early — nothing below applies. `load_project_file` is parse →
+            // push → load_media → push_params in one call, so none can be skipped.
             if (!host_.load_project_file(path, fs_.samples_directory())) {
                 b.statusMessage = "LOAD FAILED";
                 b.statusSuccess = false;
                 return;
             }
-            // ⚠️⚠️ **A CANCELLED PROJECT LOAD CANNOT BE LEFT WHERE IT STOPPED, AND THIS IS THE ONE
-            // CANCEL THAT COSTS SOMETHING.** A single file that is stopped leaves the slot it was
-            // going into untouched; a project is a whole document, already swapped in, with the
-            // instruments after the stopping point pointing at audio the engine does not have — they
-            // would look loaded on the screen and play silence. The honest state is the blank
-            // document NEW PROJECT gives, and the message says which of the two happened.
+            // ⚠️⚠️ A cancelled PROJECT load cannot stay where it stopped: the document is already swapped
+            // in, and instruments past the stop would look loaded and play silence. The honest state is
+            // NEW PROJECT's blank document, and the message says so.
             if (pt::load_cancelled()) {
                 host_.new_project();
                 host_.push_params();
-                // The same settling `load_project_done` does — an empty path, because there is no
-                // file this document came from, and the autosave cleared because the work that was
-                // in it belonged to the project the user has just left.
+                // `load_project_done`'s settling: no source path, and the autosave cleared — its work
+                // belonged to the project just left.
                 load_project_done("");
                 s_.statusMessage = "LOAD CANCELLED";
                 s_.statusSuccess = true;
@@ -316,20 +275,15 @@ void InputDispatcher::browser_confirm() {
             return;
 
         case AppState::BrowserPurpose::LOAD_THEME:
-            // ⚠️ A THEME IS NOT THE PROJECT AND NOT AN INSTRUMENT, so this returns early too — nothing
-            // below applies. It touches no engine, no sample, no slot: a palette is pixels.
-            //
-            // ⚠️ The extension is re-checked even though the browser was opened filtered to "ptt", and
-            // Kotlin re-checks it too (`item.file.extension.lowercase() == "ptt"`). The filter is not a
-            // guarantee: the user can navigate OUT of the Themes folder into anywhere, and the D-pad
-            // does not stop at a directory boundary. A failed parse must not blank the palette.
+            // ⚠️ A theme is pixels — no engine, sample or slot — so this returns early too.
+            // ⚠️ The extension is re-checked: the filter is not a guarantee (the D-pad walks out of the
+            // Themes folder), and a failed parse must not blank the palette.
             if (ext != "ptt" || !load_theme_file(fs_, path, s_.theme)) {
                 b.statusMessage = "LOAD FAILED";
                 b.statusSuccess = false;
                 return;
             }
-            // Back to the editor that raised the browser — which `theme_row_action` CLOSED on the way
-            // out, because the browser is a screen and would have been standing underneath it.
+            // Back to the editor that raised the browser (`theme_row_action` closed it on the way out).
             close_file_browser();
             open_theme_editor();
             s_.statusMessage = "THEME LOADED";
@@ -337,12 +291,8 @@ void InputDispatcher::browser_confirm() {
             return;
 
         case AppState::BrowserPurpose::LOAD_SCALE: {
-            // ⚠️ Loaded into a COPY and only committed once it parses, so a truncated or hand-mangled
-            // file cannot leave a slot half-overwritten — and the copy is what keeps the slot's `id`,
-            // which is *which of the sixteen this is* rather than anything the file gets a say in.
-            //
-            // ⚠️ The extension is re-checked even though the browser was opened filtered: the user can
-            // walk out of the Scales folder, and the D-pad does not stop at a directory boundary.
+            // ⚠️ Loaded into a COPY, committed only once it parses — no half-overwritten slot — and the copy
+            // keeps the slot's `id`. The extension is re-checked: the D-pad walks out of the Scales folder.
             songcore::Scale loaded = host_.project().scales[static_cast<size_t>(s_.currentScale)];
             if (ext != SCALE_FILE_EXT || !load_scale_file(fs_, path, loaded)) {
                 b.statusMessage = "LOAD FAILED";
@@ -358,10 +308,7 @@ void InputDispatcher::browser_confirm() {
         }
 
         case AppState::BrowserPurpose::LOAD_GROOVE: {
-            // The scale load's two guards, and for the same two reasons: a COPY so a mangled file
-            // cannot leave a slot half-overwritten and so the slot keeps its `id` — which is what
-            // `GRV` in a phrase names — and the extension re-checked because the D-pad can walk out
-            // of the Grooves folder.
+            // The scale load's two guards, for the same reasons (the slot's `id` is what `GRV` names).
             songcore::Groove loaded = host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
             if (ext != GROOVE_FILE_EXT || !load_groove_file(fs_, path, loaded)) {
                 b.statusMessage = "LOAD FAILED";
@@ -378,35 +325,25 @@ void InputDispatcher::browser_confirm() {
     }
 
     if (!ok) {
-        // ⚠️ A CANCEL IS NOT A FAILURE AND GETS NO RED LINE. The user pressed B; being told LOAD
-        // FAILED afterwards reads as "and it would not have worked anyway", which is a claim about
-        // the file that nothing here knows. It is asked first for that reason.
+        // ⚠️ A CANCEL is not a failure and gets no red line — "LOAD FAILED" would claim something about
+        // the file nobody knows.
         if (host_.last_load_cancelled()) {
             b.statusMessage = "CANCELLED";
             b.statusSuccess = true;
             return;
         }
-        // ⚠️ "LOAD FAILED" for a file the DEVICE cannot hold sends the user looking for a corrupt
-        // file that is fine. The engine separates the two, and that separation is the whole message:
-        // the file is sound, this machine cannot hold it, pick a smaller one. No free figure beside
-        // it — the only decision the number could inform has already been made by the refusal, and a
-        // megabyte count on a status line is a quantity the user has nothing to compare against.
+        // ⚠️ "LOAD FAILED" for a file the DEVICE cannot hold sends the user hunting a corruption that is not
+        // there. The file is sound; pick a smaller one.
         b.statusMessage = host_.last_load_ran_out_of_memory() ? "FILE TOO BIG" : "LOAD FAILED";
         b.statusSuccess = false;
         return;
     }
 
-    // The slot adopts the file's name — unless the user TYPED the one it has. Two names are not the
-    // user's: the default ("INST07"), and the one the slot took from the source it is replacing right
-    // now. Keeping the second is what left a slot reading RHODES C4 after a different sample was
-    // loaded onto it, which is a label that lies about what the slot plays.
-    //
-    // A typed name still survives a source swap — that is the whole reason the default-name test was
-    // here — and it is `previousAutoName`, captured before the load, that can tell the two apart.
-    //
-    // Both source loads, not just the INSTRUMENT screen's: the editor's LOAD replaces the same slot's
-    // sample, and a rule that held on one of the two doors would leave a name the other could no
-    // longer correct (it would no longer match `previousAutoName`, and would look typed forever).
+    // The slot adopts the file's name — unless the user TYPED the one it has. Not typed: the default
+    // ("INST07"), or the name it took from the source being replaced (`previousAutoName`, captured
+    // before the load) — otherwise a slot keeps reading RHODES C4 after a different sample lands.
+    // Both source loads apply it, or a name set through one door could never be corrected through the
+    // other.
     if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
          s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
         sourceId >= 0 && static_cast<size_t>(sourceId) < host_.project().instruments.size()) {
@@ -419,10 +356,8 @@ void InputDispatcher::browser_confirm() {
 
     mark_modified();
 
-    // D2a: remember the folder a SAMPLE was loaded from — `b.currentDirectory` IS that folder (the file
-    // just loaded is an item in it). Only for the two sample-load purposes, and not for a SoundFont
-    // picked out of a sampler slot — the row is about SAMPLE folders. Persisted on exit by
-    // save_settings_if_changed (no dirty flag), so nothing here has to write the file.
+    // FOLDER = REMEMBER: `b.currentDirectory` is the folder this SAMPLE came from. Sample loads only, not
+    // an SF picked from a sampler slot. Persisted on exit (save_settings_if_changed).
     if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
          s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
         !is_soundfont_extension(ext)) {
@@ -430,9 +365,8 @@ void InputDispatcher::browser_confirm() {
     }
 
     if (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) {
-        // Re-enter the EDITOR on the new audio — not `previousScreen`, which is still the INSTRUMENT
-        // screen the editor itself will return to. Everything the old sample's session knew is now false,
-        // so the state is rebuilt rather than patched.
+        // Re-enter the EDITOR on the new audio (not `previousScreen`, still INSTRUMENT, the editor's own
+        // return target). The old session's state is rebuilt, not patched.
         host_.clear_previews();
         s_.fileBrowser.selectionMode   = false;
         s_.fileBrowser.selectionAnchor = -1;
@@ -472,10 +406,9 @@ void InputDispatcher::browser_paste() {
 
         const std::string name = path_name(src);
         std::string       target = dest + "/" + name;
-        if (target == src) { ++done; continue; }   // pasted back into the folder it was copied from
+        if (target == src) { ++done; continue; }   // pasted back into the source folder
 
-        // De-duplicate: "kick.wav" → "kick_2.wav" → "kick_3.wav". Never overwrite — a paste that
-        // silently replaced a file of the same name would be a data-loss bug wearing a convenience hat.
+        // De-duplicate: "kick.wav" → "kick_2.wav" → "kick_3.wav". Never overwrite.
         if (fs_.file_exists(target)) {
             const std::string ext  = path_extension(name);
             const std::string base = path_stem(name);
@@ -492,8 +425,7 @@ void InputDispatcher::browser_paste() {
     const bool  cut  = b.fileClipboardIsCut;
     const char* verb = cut ? "MOVED" : "COPIED";
 
-    // A CUT clipboard is spent once pasted — the sources are gone. A COPY one survives, so the same
-    // files can be pasted into several folders.
+    // A CUT clipboard is spent once pasted; a COPY can be pasted into several folders.
     if (cut) b.fileClipboard.clear();
 
     refresh_browser();
@@ -513,11 +445,8 @@ void InputDispatcher::on_select_a() {
 
     const BrowserItem* item = s_.fileBrowser.current();
 
-    // ⭐ **On a granted TREE the three file chords are all meaningless, so SELECT+A means the one thing
-    // that row CAN offer: make this the folder the app keeps its own directories in.** Before this
-    // there was no way to change it at all — Android's first grant won permanently, and a user who
-    // granted the wrong folder had to clear the app's data to get out of it. Armed, never immediate:
-    // A confirms, B cancels, exactly as SELECT+B's delete does.
+    // ⭐ On a granted TREE the file chords mean nothing, so SELECT+A offers the one thing it can: make this
+    // the folder the app keeps its directories in. Armed — A confirms, B cancels.
     if (item && item->isRoot) {
         s_.fileBrowser.mode = BrowserMode::SET_HOME;
         s_.fileBrowser.statusMessage.clear();
@@ -525,7 +454,7 @@ void InputDispatcher::on_select_a() {
         return;
     }
 
-    if (!item || item->is_pseudo()) return;   // ".." and ADD FOLDER… are not files and have no name
+    if (!item || item->is_pseudo()) return;   // ".." and ADD FOLDER… are not files
 
     const bool  dir   = (item->kind == BrowserItem::Kind::FOLDER);
     const std::string ext = to_lower(item->extension);
@@ -534,8 +463,7 @@ void InputDispatcher::on_select_a() {
                         : (ext == "ptp") ? "PROJECT NAME:"
                                          : "FILE NAME:";
 
-    // A FOLDER's displayName is "[name]" — the brackets are decoration, and typing them back into the
-    // rename box would make them part of the name.
+    // A FOLDER's displayName is "[name]"; the brackets must not reach the rename box.
     const std::string base = dir ? path_name(item->path) : item->displayName;
     open_qwerty(QwertyContext::FILE_RENAME, base, label, item->path);
 }
@@ -546,11 +474,9 @@ void InputDispatcher::on_select_b() {
 
     const BrowserItem* item = s_.fileBrowser.current();
 
-    // ⚠️ **On a granted TREE this is FORGET, not DELETE, and the difference is everything the row is.**
-    // `delete_path("pt://<id>")` resolves to the granted folder's own document — the user's whole
-    // PocketTracker directory. What SELECT+B can honestly offer here is handing the PERMISSION back,
-    // which removes the row and touches not one file. It is also the only way to clear a folder that
-    // has been deleted from under its grant: Android keeps such a grant for the life of the install.
+    // ⚠️ On a granted TREE this is FORGET, not DELETE: `delete_path("pt://<id>")` would remove the user's
+    // whole PocketTracker directory. Handing back the PERMISSION removes the row and touches no file — the
+    // only way to clear a grant whose folder was deleted.
     if (item && item->isRoot) {
         s_.fileBrowser.mode = BrowserMode::FORGET_ROOT;
         s_.fileBrowser.statusMessage.clear();
@@ -560,7 +486,7 @@ void InputDispatcher::on_select_b() {
 
     if (!item || item->is_pseudo()) return;
 
-    // ARM the confirm; never delete on this press. The top bar becomes "DELETE <name>? A=YES B=NO".
+    // ARM the confirm; never delete on this press ("DELETE <name>? A=YES B=NO").
     s_.fileBrowser.mode          = BrowserMode::DELETE;
     s_.fileBrowser.statusMessage.clear();
     s_.fileBrowser.statusSuccess = true;
@@ -587,8 +513,8 @@ void InputDispatcher::open_qwerty(QwertyContext context, const std::string& init
     k.contextExtra  = context_extra;
     k.context       = context;
     k.clearOnFirstB = clear_on_first_b;
-    k.insertBefore  = s_.settings.insertBefore;   // read at OPEN, so flipping the setting cannot change what
-    s_.qwerty       = k;                 // the buttons mean under the user's thumb mid-word
+    k.insertBefore  = s_.settings.insertBefore;   // read at OPEN, so flipping the setting cannot change
+    s_.qwerty       = k;                 // what the buttons mean mid-word
 }
 
 void InputDispatcher::qwerty_apply() {
@@ -598,7 +524,7 @@ void InputDispatcher::qwerty_apply() {
 
     switch (k.context) {
         case QwertyContext::FILE_RENAME: {
-            // An empty field means "leave it alone", not "name it nothing" — Kotlin's `.ifEmpty { … }`.
+            // An empty field means "leave it alone", not "name it nothing".
             const std::string name = text.empty() ? path_stem(k.contextExtra) : text;
             if (fs_.rename_file(k.contextExtra, name)) {
                 refresh_browser();
@@ -626,20 +552,14 @@ void InputDispatcher::qwerty_apply() {
 
         case QwertyContext::INSTRUMENT_NAME: {
             Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(s_.currentInstrument)];
-            // A cleared name reverts to the default "INSTxx" rather than becoming blank — an unnamed
-            // instrument still has to be identifiable in the pool.
+            // A cleared name reverts to "INSTxx": an unnamed instrument must still be identifiable.
             ins.name = text.empty() ? songcore::default_instrument_name(ins.id) : text;
             mark_modified();
             break;
         }
 
         case QwertyContext::PROJECT_NAME:
-            // ⚠️ No empty-name fallback, unlike every other arm here. Kotlin's is a bare
-            // `trackerController.project.name = typedText`, and it is ported as-is — but note what it
-            // leads to: an empty name sanitizes to an empty filename, so SAVE writes `<Projects>/.ptp`
-            // (hidden on a POSIX box, and not listed by the browser's own filter). The same is true on
-            // Android today. Left bug-for-bug rather than quietly diverging; it wants a fix on BOTH
-            // platforms, which makes it a finding, not a port decision.
+            // An empty name is allowed; SAVE supplies a fallback filename (save_project).
             host_.edit_project().name = text;
             mark_modified();
             break;
@@ -658,15 +578,13 @@ void InputDispatcher::qwerty_apply() {
         }
 
         case QwertyContext::THEME_SAVE:
-            // The whole arm is `save_theme_as` — see it for the two names one typed string turns into,
-            // and for the error return Kotlin drops on the floor. ⚠️ `k.contextExtra`, not
-            // `s_.qwerty.contextExtra`: the live keyboard was cleared at the top of this function.
+            // See `save_theme_as`. ⚠️ `k.contextExtra`, not `s_.qwerty.contextExtra`: the live keyboard was
+            // cleared at the top of this function.
             save_theme_as(k.contextExtra, text);
             break;
 
         case QwertyContext::SCALE_SAVE:
-            // ⚠️ `k.contextExtra`, for the same reason the arm above it takes one: the live keyboard is
-            // cleared before any of these run, so reading `s_.qwerty` here writes to the filesystem root.
+            // ⚠️ `k.contextExtra` — the live keyboard is already cleared.
             save_scale_as(k.contextExtra, text);
             break;
 
@@ -675,9 +593,8 @@ void InputDispatcher::qwerty_apply() {
             break;
 
         case QwertyContext::SAMPLE_NAME: {
-            // It renames BOTH the editor's sample and the INSTRUMENT holding it — they are the same
-            // thing to the user, and the pool showing "INST05" for a slot you have just named "SNARE"
-            // would be the app disagreeing with itself. An empty field keeps the current name.
+            // Renames BOTH the editor's sample and the INSTRUMENT holding it — one thing to the user. An
+            // empty field keeps the current name.
             SampleEditorState& se = s_.sampleEditor;
             const std::string  name = text.empty() ? se.sampleName : text;
             se.sampleName = name;
@@ -687,13 +604,12 @@ void InputDispatcher::qwerty_apply() {
         }
 
         case QwertyContext::SAMPLE_SAVE: {
-            // SAVE-AS. The name is DE-DUPLICATED rather than overwritten: `SNARE.wav`, `SNARE_0001.wav`,
-            // … The editor has an OVERWRITE button and this is not it — a save that silently replaced a
-            // file you did not name would be the one destructive act with no confirm in front of it.
+            // SAVE-AS DE-DUPLICATES (`SNARE.wav`, `SNARE_0001.wav`, …) — OVERWRITE is its own button, and a
+            // silent replace would be a destructive act with no confirm.
             const std::string base = text.empty() ? "SAMPLE" : text;
             std::string       path = k.contextExtra + "/" + base + ".wav";
             for (int n = 1; fs_.file_exists(path); ++n) {
-                char suffix[16];   // 16, not 8: "_%04d" of an unbounded int is up to 12 bytes, and gcc says so (-Wformat-truncation). The counter never gets near it; the buffer now cannot be the reason.
+                char suffix[16];   // "_%04d" of an int can be 12 bytes (-Wformat-truncation)
                 std::snprintf(suffix, sizeof(suffix), "_%04d", n);
                 path = k.contextExtra + "/" + base + suffix + ".wav";
             }
@@ -702,9 +618,8 @@ void InputDispatcher::qwerty_apply() {
         }
 
         case QwertyContext::RESAMPLE:
-            // An empty field (the user cleared the pre-filled suggestion) auto-names Resample_NNNN;
-            // anything typed is used as the base name. The selection is still live — opening the
-            // keyboard never touched it — so resample_selection reads s_.selection itself.
+            // Empty → auto Resample_NNNN; anything typed is the base name. The selection is still live
+            // (the keyboard never touched it).
             resample_selection(text);
             break;
     }

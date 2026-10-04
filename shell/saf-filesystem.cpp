@@ -217,19 +217,14 @@ int SafFileSystem::root_count() { return static_cast<int>(roots().size()); }
 
 std::string SafFileSystem::home_root_path() {
     const auto& r = roots();
-    // ⚠️ **`pt://roots`, not "", when nothing is granted — and the difference is the whole no-folder
-    // state.** The seven accessors below feed `browser_dir`, so returning "" opens the browser on a
-    // listing with no entries and no "..", which is a dead end the user cannot leave. Returning the
-    // roots directory opens them on `ADD FOLDER…`: §7's "NO FOLDER SELECTED — press A to choose" is a
-    // directory with one row rather than a browser mode nothing else knows about. Writes still fail,
-    // because every mutating method already refuses the roots path.
+    // ⚠️ `pt://roots`, not "", when nothing is granted: "" would open the browser on an empty listing
+    // with no "..", a dead end. The roots directory opens on `ADD FOLDER…`. Writes still fail — every
+    // mutating method refuses the roots path.
     if (r.empty()) return kRootsPath;
 
-    // The designated home, persisted on the Java side so that granting a SECOND folder cannot move the
-    // app's seven directories. ⚠️ It must still be LIVE: a grant survives the deletion of its folder,
-    // so "the id is in the list" is not "the tree is there" — and a dead home makes every accessor
-    // below answer "" for as long as the grant exists, which is forever. Java applies the same test and
-    // re-stamps, so the two agree; this one is what makes the C++ side safe on its own.
+    // The designated home, persisted on the Java side so a SECOND grant cannot move the app's
+    // folders. ⚠️ It must still be LIVE: a grant survives the deletion of its folder, and a dead home
+    // would make every accessor answer "" forever. Java applies the same test.
     if (!homeId_.empty()) {
         for (const Root& root : r)
             if (root.id == homeId_ && root.live) return std::string(kScheme) + root.id;
@@ -255,15 +250,15 @@ std::string SafFileSystem::home_root_path() {
     return kRootsPath;
 }
 
-// ─── path arithmetic — the whole point of §5a ────────────────────────────────────────────────────
+// ─── path arithmetic ─────────────────────────────────────────────────────────────────────────────
 
 std::string SafFileSystem::parent_path(const std::string& path) {
     if (!is_pt_path(path)) return priv_.parent_path(path);
     if (path == kRootsPath) return std::string();          // the top; the browser's ".." stops here
 
     const size_t slash = path.rfind('/');
-    // "pt://<id>" — the last '/' is the scheme's own, so the parent is the roots directory. This is
-    // §7's whole reason for making the roots listing a DIRECTORY: the browser needs no new state.
+    // "pt://<id>" — the last '/' is the scheme's own, so the parent is the roots directory, which is
+    // why the roots listing is a DIRECTORY: the browser needs no new state.
     if (slash == std::string::npos || slash <= kSchemeLen) return kRootsPath;
     return path.substr(0, slash);
 }
@@ -298,16 +293,10 @@ std::string SafFileSystem::resolve(const std::string& path) {
 const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& dirPath) {
     std::vector<pt::ui::FileInfo> out;
 
-    // ⚠️ **THE ROOTS DIRECTORY IS NEVER SERVED FROM THE CACHE, and it is checked BEFORE the lookup for
-    // exactly that reason.** A grant can arrive while the app is running — that is what `ADD FOLDER…`
-    // does — and a cached listing would show the user's new folder missing from the very screen they
-    // granted it on. It costs one JNI call plus one per grant, on a screen reached by navigating
-    // rather than per frame.
-    //
-    // Every other directory is cached, and `forget`/`invalidate` are what declare an entry stale.
-    // ⚠️ Not only this app's own writes: a file can arrive from a PC, a download or a file manager
-    // while the browser is on the directory, so `forget_listing` — the browser's refresh — is the
-    // other caller, and the reason the cache is not simply keyed on what we mutated.
+    // ⚠️ THE ROOTS DIRECTORY IS NEVER CACHED, checked BEFORE the lookup: a grant arrives while running
+    // (`ADD FOLDER…`), and a cached listing would hide the new folder on the screen it was granted on.
+    // Every other directory is cached until `forget`/`invalidate` — and files arrive from outside too
+    // (a PC, a download), which is why the browser's refresh (`forget_listing`) also drops entries.
     if (dirPath == kRootsPath) {
         for (const Root& r : roots(/*refresh=*/true)) {
             pt::ui::FileInfo fi;
@@ -315,11 +304,8 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
             fi.isDirectory = true;
             fi.isRoot      = true;   // ⚠️ not a folder: no rename, no delete, and SEL+A means SET HOME
 
-            // ⭐ **The two things a user cannot otherwise find out, said on the row itself.** Which tree
-            // the app's folders are in was invisible before there was a way to change it, and a grant
-            // whose folder has been deleted is otherwise an ordinary-looking row that opens on nothing.
-            // The name is the only channel the roots directory has — these entries have no size, no
-            // date and nothing behind them to inspect.
+            // ⭐ The two things a user cannot otherwise find out, on the row itself: which tree holds
+            // the app's folders, and a grant whose folder has been deleted. The name is the only channel.
             fi.name = r.name;
             if (!r.live)                 fi.name += " (MISSING)";
             else if (r.id == homeId_)    fi.name += " (HOME)";
@@ -328,9 +314,8 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
             uriCache_[fi.path] = r.docUri;
         }
 
-        // ⭐ The way OUT of the empty state is a row IN it. With nothing granted this is the only entry
-        // in the only directory the browser can be on, so "NO FOLDER SELECTED — press A to choose" and
-        // the fix for it are the same screen, and the browser needs no state to know that.
+        // ⭐ The way OUT of the empty state is a row IN it: with nothing granted this is the only entry
+        // in the only directory the browser can be on.
         pt::ui::FileInfo add;
         add.path     = kAddRootPath;
         add.name     = "ADD FOLDER...";   // the 5x5 font has no ellipsis glyph; three dots is the glyph
@@ -681,12 +666,9 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
     const std::string uri = write ? ensure_file(path) : resolve(path);
     if (uri.empty()) return -1;
 
-    // ⚠️ **"rwt", not "wt", and the extra "r" is load-bearing.** `WavStreamWriter` streams a render past
-    // the point of no return and then SEEKS BACK TO ZERO to patch the RIFF header with the length it
-    // turned out to be. "rwt" is the mode a backward seek over a provider descriptor was measured on; a
-    // write-only descriptor has never been asked to do it here. (The other writer through this path is
-    // the log tee, which only ever appends to its own handle.) `write_bytes` does not come through here
-    // — it opens "wt" for a single forward pass, which is all it needs.
+    // ⚠️ "rwt", not "wt" — the "r" is load-bearing: `WavStreamWriter` SEEKS BACK TO ZERO to patch the
+    // RIFF header after streaming a render, and "rwt" is the mode that backward seek was verified on.
+    // `write_bytes` opens "wt" for a single forward pass.
     return open_uri_fd(uri, write ? "rwt" : "r");
 }
 
@@ -701,10 +683,8 @@ int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
     // `pt_rename` refuses a mixed pair, so both ends are `pt://` by the time this is called.
     if (!is_pt_path(from) || !is_pt_path(to)) return -1;
 
-    // A different parent is a MOVE, and `move_file` already knows how to ask the provider for one and
-    // how to fall back when it will not. Nothing below the UI renames across directories today — the
-    // two writers publish `<path>.tmp` onto `<path>` — so this arm is the general answer, not the
-    // exercised one.
+    // A different parent is a MOVE (`move_file`, with its fallback). Nothing below the UI renames
+    // across directories today — both writers publish `<path>.tmp` onto `<path>`.
     if (parent_path(from) != parent_path(to)) return move_file(from, to) ? 0 : -1;
 
     const std::string name = leaf_name(to);
@@ -713,10 +693,8 @@ int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
     const std::string uri = resolve(from);
     if (uri.empty()) return -1;
 
-    // ⚠️ The target must be gone, exactly as in `write_bytes`: `renameDocument` onto a taken name
-    // de-duplicates the way `createDocument` does. Both callers already `pt_remove` the target first,
-    // so this is the belt to that pair of braces — and it is cheap, because `resolve` on a name the
-    // caller just deleted answers out of a listing this class invalidated when it deleted it.
+    // ⚠️ The target must be gone: `renameDocument` onto a taken name de-duplicates. Both callers
+    // already `pt_remove` it first; this is the backstop, cheap off the invalidated listing.
     const std::string targetUri = resolve(to);
     if (!targetUri.empty()) {
         delete_uri(targetUri);
@@ -745,11 +723,9 @@ bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_
     const std::string name = leaf_name(path);
     if (name.empty()) return false;
 
-    // ⚠️ **The temp-then-rename dance survives, and which failure it trades for which matters.**
-    // Writing straight over the target with "wt" would mean a process killed mid-save leaves a
-    // truncated file where the whole project was — the exact failure `StdFileSystem` refuses. Here the
-    // window is between the delete and the rename, and what sits on disk during it is the COMPLETE new
-    // content under `<name>.tmp`: recoverable by hand, where a truncated `.ptp` is not.
+    // ⚠️ Temp-then-rename: writing straight over the target with "wt" leaves a truncated project if
+    // the process dies mid-save. Here the window is between delete and rename, with the COMPLETE new
+    // content under `<name>.tmp` — recoverable by hand.
     const std::string tmpPath = path + ".tmp";
     const std::string tmpUri  = ensure_file(tmpPath);
     if (tmpUri.empty()) return false;
@@ -785,11 +761,9 @@ bool SafFileSystem::is_granted_tree(const std::string& path) {
 bool SafFileSystem::delete_path(const std::string& path) {
     if (!is_pt_path(path)) return priv_.delete_path(path);
 
-    // ⚠️⚠️ **A GRANTED TREE IS NOT THE APP'S TO DELETE, and `resolve` would hand over the document that
-    // IS the user's folder.** `pt://<id>` resolves to the tree's own root document, so this call
-    // deleted `Documents/PocketTracker` — every project, sample and render in it — and reported
-    // success. The browser refuses it a row earlier (`FileInfo::isRoot`); this is the same refusal
-    // below the UI, because "the only caller is careful" is not a property anything enforces.
+    // ⚠️⚠️ A GRANTED TREE IS NOT THE APP'S TO DELETE: `pt://<id>` resolves to the tree's own root
+    // document, i.e. the user's whole folder. The browser refuses it a row earlier
+    // (`FileInfo::isRoot`); this is the same refusal below the UI.
     if (is_granted_tree(path)) return false;
 
     const std::string uri = resolve(path);

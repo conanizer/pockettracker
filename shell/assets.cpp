@@ -5,7 +5,7 @@
 namespace ptshell {
 
 std::vector<std::uint8_t> read_asset(const std::string& rel) {
-    // ── The one place the two worlds are told apart (D7) ─────────────────────────────────────────
+    // ── The one place the two worlds are told apart ──────────────────────────────────────────────
     // On Android the relative path IS the lookup key into the APK's AAssetManager, and prepending a
     // base path would break it (there is no filesystem path to prepend). Everywhere else the same
     // relative path has to be anchored to the exe's directory, or `SDL_RWFromFile` == `fopen` resolves
@@ -34,11 +34,8 @@ std::vector<std::uint8_t> read_asset(const std::string& rel) {
 
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
 
-    // ⚠️ SDL_RWread may return a SHORT read and must be looped to EOF — the APK path in particular
-    // hands back a decompressing stream, not a flat mmap, so one call is not guaranteed to fill the
-    // buffer. A single read that happened to fill it on desktop would then truncate a large skin PNG
-    // on the phone: the exact "works where it was tested, breaks where it ships" shape. Read until the
-    // buffer is full or the stream stops giving bytes.
+    // ⚠️ SDL_RWread may return a SHORT read, so loop to EOF: the APK path is a decompressing stream,
+    // and one read that fills the buffer on desktop could truncate a large PNG on the phone.
     std::size_t got = 0;
     while (got < bytes.size()) {
         const std::size_t n = SDL_RWread(rw, bytes.data() + got, 1, bytes.size() - got);

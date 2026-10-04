@@ -178,10 +178,8 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
             }
         }
     }
-    // No voice left to read the row off — the previous note's sample ran out before this one
-    // arrived. The track's cursor still holds it. Without this the table restarted at row 0
-    // every time, so how far it got depended on the instrument's ROOT note (root → playback
-    // rate → how long a one-shot lasts): a low root never left the first row or two.
+    // No voice left to read the row off (the previous one-shot ran out): the track's cursor still
+    // holds it, or the table would restart at row 0 and how far it got would depend on the root note.
     if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
         note.tableId >= 0) {
         if (const Tic00Cursor* c = tic00Slot(note.trackId, note.tableId, /*create=*/false)) {
@@ -196,23 +194,12 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
     }
 
     // ---------------------------------------------------------------
-    // VOICE ALLOCATION — mono per track + 4-step slot choice
-    //
-    // Problem: "steal old + allocate new" temporarily consumes two
-    // slots per track.  When N tracks all trigger at the same frame
-    // (phrase boundaries) this exhausts the 8-slot pool even with
-    // only 5 active tracks.
-    //
+    // VOICE ALLOCATION — mono per track + 4-step slot choice. "Steal old + allocate new" takes two
+    // slots per track, which a phrase boundary across many tracks would exhaust.
     // Step 1 — fade any playing same-track voice (mono per track).
-    // Step 2 — prefer a FREE slot, so the faded voice's declick tail
-    //           actually plays out. (Recycling the fading same-track
-    //           slot here instead cut its tail mid-fade — an audible
-    //           pop on rapid same-sample retriggers/previews.)
-    // Step 3 — no free slot: recycle a same-track fading voice
-    //           directly (0 extra slots used; trackId is preserved
-    //           through startFadeOut() precisely for this).
-    // Step 4 — last resort: preempt any fading voice (other track).
-    //           Produces at most a ~1ms click but prevents silence.
+    // Step 2 — prefer a FREE slot, so the faded voice's declick tail plays out.
+    // Step 3 — no free slot: recycle a same-track fading voice (trackId survives startFadeOut for this).
+    // Step 4 — last resort: preempt any fading voice (other track) — a ~1 ms click beats silence.
     // ---------------------------------------------------------------
 
     // A note with no sample behind it must not touch the track: fading the playing voice for
@@ -426,12 +413,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // stereo streams (the Oboe builder requests it; renderOffline is fixed at 2). Guard —
     // one silent block — rather than write past a mono buffer if a future backend drifts.
     if (channelCount != 2) return;
-    // And the same guard for the block SIZE, for the same reason. Every per-block member below —
-    // the send buses, the OCTA accumulators, sfBuf — is a fixed PROCESS_SUBBLOCK array indexed by
-    // `numFrames`. Both shipped wrappers chunk at PROCESS_SUBBLOCK so nothing reaches this today;
-    // the reader who will is the future ALSA/JACK backend audio-engine.h invites, and that reader
-    // calls this function directly. ⚠️ A block larger than this would also resolve events too
-    // coarsely — see the constant. Silence is the safe answer to both.
+    // And the same guard for the block SIZE: every per-block member below (send buses, OCTA
+    // accumulators, sfBuf) is a fixed PROCESS_SUBBLOCK array. Both wrappers chunk at that size; a
+    // backend calling this directly must too. ⚠️ A larger block would also resolve events too coarsely.
     if (numFrames > PROCESS_SUBBLOCK) return;
 
     // What waitForAudioBlockBoundary() watches: while this is set, a SoundFont handle this block
@@ -464,16 +448,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // render must be the same samples every time, and nothing in one is a gesture.
     float trackVolStart[SF_VOICE_COUNT];
     float trackVolEnd[SF_VOICE_COUNT];
-    // ⚠️ THE MUTE IS NO LONGER FOLDED INTO THE FADER — it is a RAMP now, and a ramp cannot be carried
-    // by one per-block number. The gate arrives as its value at the block's first frame and its value
-    // at the last, and both read sites interpolate between them per sample exactly as pan and the
-    // mod-destination routes already do. Slamming a track to zero in one sample is what a mute sounded
-    // like, and it was a step ~14x anything the signal does on its own.
-    //
-    // ⚠️ TWO READ SITES, AND BOTH ARE OBLIGATORY: the sampler's per-sample gain, and the SoundFont
-    // buffer's post-chain multiply. They are the only two places a track's audio exists on its own
-    // before it is summed — the SF path cannot take the gate through `tsf_channel_set_volume` because
-    // that is set once per block, which is the very staircase this removes.
+    // ⚠️ THE MUTE IS NOT FOLDED INTO THE FADER: it is a RAMP, carried as its value at the block's
+    // first and last frame and interpolated per sample, as pan and the mod routes are.
+    // ⚠️ TWO READ SITES, AND BOTH ARE OBLIGATORY: the sampler's per-sample gain and the SoundFont
+    // buffer's post-chain multiply — the only places a track's audio exists alone. The SF path cannot
+    // use `tsf_channel_set_volume`: it is once per block, the staircase this removes.
     float gateStart[SF_VOICE_COUNT];
     float gateEnd[SF_VOICE_COUNT];
     // The same pair for the three BUS gates — the two send returns and the dry sum. See setBusMutes().
@@ -530,30 +509,24 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     const bool previewBorrows   = (previewTrack >= 0 && previewTrack < 8);
     trackVolStart[PREVIEW_LANE] = previewBorrows ? trackVolStart[previewTrack] : 1.0f;
     trackVolEnd[PREVIEW_LANE]   = previewBorrows ? trackVolEnd[previewTrack]   : 1.0f;
-    // …and the gate comes with it: an audition off a muted channel stayed silent when the mute was a
-    // fold into the fader, and it has to keep doing that now the gate is carried separately.
+    // …and the gate comes with it, so an audition off a muted channel stays silent.
     gateStart[PREVIEW_LANE]        = previewBorrows ? gateStart[previewTrack] : 1.0f;
     gateEnd[PREVIEW_LANE]          = previewBorrows ? gateEnd[previewTrack]   : 1.0f;
 
-    // Zero only the [0,numFrames) slice actually used (not the full PROCESS_SUBBLOCK arrays), and
-    // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
-    // Also skip all visualizer capture during offline WAV export: the live stream is silent so the
-    // scopes already read flat, and OCTA would otherwise snapshot random mid-render frames that only
-    // repaint on progress ticks (a frozen, twitching scope). Let the visualizers sit flat mid-render.
+    // Zero only the [0,numFrames) slice used, and skip the visualizer accumulators when nobody is
+    // watching (CAPTURE_IDLE_MS) or during an offline export, where the scopes sit flat.
     const int64_t nowMsec       = nowMs();
     const bool octaWanted       = !offlineRender && (nowMsec - lastTrackWaveformReadMs.load(std::memory_order_relaxed)) < CAPTURE_IDLE_MS;
     const bool spectrumWanted   = !offlineRender && (nowMsec - lastSpectrumReadMs.load(std::memory_order_relaxed))      < CAPTURE_IDLE_MS;
     const size_t frameBytes     = (size_t)numFrames * sizeof(float);
 
-    // Per-block scratch (send buses, OCTA accumulators, instrument-spectrum sum) lives on the engine
-    // object, not the audio-thread stack — declared in the header. (Re)initialised here every block;
-    // PROCESS_SUBBLOCK is the class cap and processLiveBlock/renderOffline chunk larger requests, so
-    // only [0,numFrames) is ever touched.
+    // Per-block scratch lives on the engine object, not the audio-thread stack (see the header).
+    // Only [0,numFrames) is touched — the wrappers chunk at PROCESS_SUBBLOCK.
     memset(revSendBufL, 0, frameBytes); memset(revSendBufR, 0, frameBytes);
     memset(dlySendBufL, 0, frameBytes); memset(dlySendBufR, 0, frameBytes);
 
-    // The 64 KB+ OCTA accumulator pair is read only by OCTA — zero/fill it only when OCTA is shown.
-    // trackWasActive is reset every block (matches the former `= {}` init; read under octaWanted below).
+    // The OCTA accumulator pair (64 KB+) is touched only when OCTA is shown. trackWasActive is reset
+    // every block and read under octaWanted below.
     memset(trackWasActive, 0, sizeof(trackWasActive));
     if (octaWanted) {
         for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
@@ -583,19 +556,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         if (sv.sfSlot >= 0 && sv.sfGen != soundfonts[sv.sfSlot].gen.load()) sv.detach();
     }
 
-    // ⚠️ THE TRANSPORT-STOP RAMP HAS A DEADLINE, AND THE POOL IS ONLY EIGHT SLOTS.
-    //
-    // stopAllRamped() arms a fade and leaves the audio thread to finish it, which is right for the
-    // audio and not enough for the slots: a voice whose playhead has already run off the end of its
-    // sample mixes ONE frame per block (the bounds check pins the position and breaks), so its fade
-    // counter falls by 1 a block and the slot is held for ~256 blocks. The instant stop used to
-    // collect those voices as a side effect; nothing else ever did. Three of eight slots held after
-    // every stop is what pushes the NEXT take's allocator into step 3/4, where it preempts a fading
-    // voice and clicks — the very thing the ramp is here to remove.
-    //
-    // By this frame the ramp is over and every voice it armed is at zero, so ending them is silent.
-    // Only voices that are FADING are touched: a note triggered by a restart is not, and one that
-    // began fading inside the ramp window was within KILL_FADE_SAMPLES of silence anyway.
+    // ⚠️ THE TRANSPORT-STOP RAMP HAS A DEADLINE, AND THE POOL IS ONLY EIGHT SLOTS. A voice whose
+    // playhead ran off its sample mixes one frame per block, so its fade would hold the slot ~256
+    // blocks — enough held slots push the next take's allocator into steps 3/4, which click. By
+    // this frame the ramp is over, so ending the FADING voices is silent; new notes are untouched.
     if (stopRampRequested.exchange(false, std::memory_order_acquire)) startStopRamp(blockStartFrame);
     // Before the drain below, so the take's first note already meets the fresh state.
     if (ottRestartRequested.exchange(false, std::memory_order_acquire)) masterChain.ott.restart();
@@ -624,23 +588,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     applyBusSettings();
     size_t paramIdx = 0, killIdx = 0, noteIdx = 0;
 
-    // ⚠️ **THE THREE BATCHES ARE ONE TIMELINE, NOT THREE.** Each loop below takes everything due
-    // (`targetFrame <= currentFrame`), which orders them correctly only while the block is keeping up:
-    // one frame index per frame, so a param stamped at F+1 cannot be reached before the note at F.
-    // The moment anything is LATE that stops being true — a note at F and its params at F+1 both fall
-    // due at the SAME frame index, and the only thing left deciding which runs first is which loop is
-    // written first, which is the params. That is a silent DROP, not a reorder: every per-voice param
-    // (REV/DEL/BCK/CUT/RES/EQN ride one frame behind their note by design, `voiceFxFrame` in
-    // scheduler.h) is applied to a track whose voice the note has not started yet, and finds nothing.
-    //
-    // Late is the first step of every take, not an exotic state: `Sequencer::playPhrase` stamps it at
-    // `getCurrentFrame()`, which is the counter as of the last COMPLETED sub-block, so a T PLAY landing
-    // while the audio thread is inside processAudioBlock schedules onto a frame it has already passed.
-    //
-    // So each queue yields to the earlier of the ones after it. `<=` and not `<`: at EQUAL frames the
-    // written order stands (params, then kills, then notes), which is what `voiceFxFrame`'s +1 and a
-    // K00 sharing its step's frame both rest on. What a loop holds back is applied on the next frame
-    // index — 23 µs, and still ahead of everything authored after it. tools/ptlate.
+    // ⚠️ THE THREE BATCHES ARE ONE TIMELINE, NOT THREE. Each loop takes everything due, which orders
+    // them correctly only while the block keeps up. LATE (the first step of every take — a play
+    // stamped at the last COMPLETED sub-block), a note at F and its params at F+1 fall due on the same
+    // frame index, and params-first would DROP every per-voice param riding one frame behind its note
+    // (`voiceFxFrame`, scheduler.h). So each queue yields to the earlier of the ones after it; `<=`
+    // keeps the written order (params, kills, notes) at EQUAL frames, which `voiceFxFrame`'s +1 and a
+    // K00 on its step's frame rely on. A held-back record runs on the next frame index.
     const auto dueKill = [&] { return killIdx < killBatch.size() ? killBatch[killIdx].targetFrame : INT64_MAX; };
     const auto dueNote = [&] { return noteIdx < noteBatch.size() ? noteBatch[noteIdx].targetFrame : INT64_MAX; };
 
@@ -797,9 +751,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                killBatch[killIdx].targetFrame <= dueNote()) {
             ScheduledKill kill = killBatch[killIdx++];
             switch (kill.mode) {
-                // A live key let go of (MIDI plan §4.1). The three-way rule is inside
-                // SamplerVoice::keyRelease; the ONLY difference from a KIL is the one-shot arm, which
-                // a key leaves to play out.
+                // A live key let go of. The three-way rule is in Voice::keyRelease; unlike a KIL,
+                // a one-shot plays out.
                 case KILL_KEY_OFF: forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceKeyRelease(v, frame); }); break;
                 // KIL's note-off: each voice type runs its own release, or fades where it has none.
                 case KILL_SOFT:    forEachVoiceOnTrack(kill.trackId, [&](auto& v) { v.noteOffAt(frame); });       break;
@@ -895,12 +848,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
         {
             int sl = voice.sampleLength;
-            // START/END are re-derived every block so a mod route can move them WHILE the note rings.
-            // ⚠️ An exact-frame window (note-queue.h) survives that: it is carried on the voice because
-            // the 0-255 pair below cannot express it, and re-deriving would silently widen the sample
-            // editor's audition to the whole file the moment its first block was mixed. A voice under a
-            // frame window is not modulating its endpoints — a window is a property of the SLOT, and the
-            // one caller that arms it is auditioning a cut with the modulation switched off anyway.
+            // START/END are re-derived every block so a mod route can move them while the note rings.
+            // ⚠️ An exact-frame window (note-queue.h) is carried on the voice instead, because the
+            // 0-255 pair cannot express it — re-deriving would widen the editor's audition to the file.
             if (voice.windowStartFrame >= 0) {
                 voice.actualStart = std::max(0, std::min(voice.windowStartFrame, sl - 2));
                 voice.actualEnd   = std::max(voice.actualStart + 1, std::min(voice.windowEndFrame, sl - 1));
@@ -915,35 +865,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             // ── LPO: slide the whole window, BOTH ends by the same amount ───────────────────────
             //
-            // ⚠️⚠️ **BOTH BOUNDS OR NOTHING.** Moving one changes the loop's LENGTH, and on a looped
-            // note the length is the pitch — which is the exact opposite of what this command is for.
-            // The two lines below are the command.
-            //
-            // ⭐ The offset is derived from the RUNNING TOTAL, never accumulated as samples: on a
-            // loop length that is not a multiple of 16 each step rounds, and sixteen rounded steps
-            // do not add up to one loop. From the total, sixteen steps of `01` land exactly where one
-            // step of `10` lands, on every length.
-            //
-            // ⚠️ The COUNT is clamped, not just the offset. Clamping only the offset would let the
-            // count wind up past the end of the sample, so a step back would have an overshoot to
-            // unwind before the window moved at all. Clamped, the window simply STOPS — LGPT's
-            // behaviour, and a wrap would make a drone jump.
-            //
-            // ⚠️⚠️ **THE PLAYHEAD MOVES WITH THE WINDOW, AND THAT IS THE COMMAND'S WHOLE FEEL.** The
-            // window is not what travels — think of the window as fixed and the SAMPLE as sliding
-            // underneath it. So the playhead keeps its position WITHIN the loop and the material
-            // under it changes, right now, in the block the cell lands in.
-            //
-            // Leave the playhead where it is instead and both directions are wrong in their own way:
-            // forward, it has to run to the end of the old window before it ever enters the new one,
-            // so a whole-loop step is heard a loop late; backward, it is already past the new end, so
-            // it snaps to the loop start at an arbitrary phase and **that snap is an audible click** —
-            // certain on a whole-loop step, about one press in sixteen on a sixteenth.
-            //
-            // ⭐ Held as the offset LAST APPLIED, so the shift is a difference between two values both
-            // derived from the running total. Accumulating it per call would reintroduce the rounding
-            // drift the total exists to avoid, and a count that returns to zero would strand the
-            // playhead where the last slide left it.
+            // ⚠️⚠️ BOTH BOUNDS OR NOTHING: moving one changes the loop's LENGTH, which on a looped
+            // note is the pitch.
+            // ⭐ The offset derives from the RUNNING TOTAL of sixteenths, never accumulated samples,
+            // so sixteen steps of `01` land exactly where one step of `10` does on any length. The
+            // COUNT is clamped, so the window STOPS at the sample's ends and one step back moves it.
+            // ⚠️⚠️ THE PLAYHEAD MOVES WITH THE WINDOW: it keeps its position within the loop and hears
+            // the new material at once. Left behind, a forward step is heard a loop late and a
+            // backward one snaps to the loop start with a click. `loopSlideFrames` is the offset LAST
+            // APPLIED, so the shift is a difference of two derived values.
             const int len = voice.actualLoopEnd - voice.actualLoopStart;
             int       off = 0;
             if (voice.loopSlideSixteenths != 0 && len > 0) {
@@ -1032,12 +962,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 --voice.volGlideLeft;
             }
             voice.volRouteLast = volRoute;
-            // ⚠️ SF_VOICE_COUNT, not 8: the preview lane is index 8 and now carries a real fader.
-            // Bounded at 8 the sampler path would hold unity while the SoundFont path (which indexes
-            // the same array by trackId with no such clamp) followed it — two readings of one array.
+            // ⚠️ SF_VOICE_COUNT, not 8: the preview lane (8) carries a real fader, as on the SF path.
             // ⚠️ THE FADER AND THE MUTE GATE BOTH RIDE HERE, interpolated across the whole block on
-            // `tBlock`, never the piece's `t`: together they are everything between a mixer move
-            // and a step in the output.
+            // `tBlock`, never the piece's `t`.
             const bool onTrack = voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT;
             const float fStart = voice.faderHeld ? voice.faderHeldStart : onTrack ? trackVolStart[voice.trackId] : 1.0f;
             const float fEnd   = voice.faderHeld ? voice.faderHeldEnd   : onTrack ? trackVolEnd[voice.trackId]   : 1.0f;
@@ -1048,10 +975,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                            : 1.0f;
             float antiClick = voice.antiClickFade();
 
-            // Sample fetch + per-voice chain is the ONLY mono/stereo difference; a mono
-            // sample simply feeds the same value to both lanes (procL == procR). The shared
-            // tail below replaces two ~40-line copies (stereo semantics; the mono path's
-            // multiplies regroup by one ulp at most).
+            // Sample fetch + per-voice chain is the only mono/stereo difference; a mono sample
+            // feeds the same value to both lanes.
             float procL, procR;
             if (voice.sampleDataRight) {
                 // ── STEREO FETCH ─────────────────────────────────────────────────
@@ -1099,30 +1024,19 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             // ── SHARED TAIL: sends → global gain → fade-out → pan ────────────────
             //
-            // The send tap sits ABOVE the track fader, so a send is PRE-FADER with respect to the
-            // mixer and POST-fader with respect to everything on the instrument (VOL, the phrase `V`
-            // column, VOL mods). Pulling a track down therefore leaves its reverb and delay tails at
-            // full level, by design. ⚠️ The MASTER fader is NOT in this list — it multiplies the summed
-            // bus below, after the returns come back, so it is the one fader that carries the tails
-            // with it (the volume chain the manual documents ends at a real master).
+            // The send tap sits ABOVE the track fader: sends are PRE-FADER for the mixer and post
+            // everything on the instrument (VOL, the phrase V, VOL mods), so pulling a track down
+            // leaves its tails at full level. ⚠️ The MASTER fader multiplies the summed bus below,
+            // after the returns, so it carries the tails with it.
             float scalar = finalVol * volRoute;
             procL *= scalar;
             procR *= scalar;
 
-            // ⚠️⚠️ **THE VOICE'S OWN FADES MUST REACH THE SENDS, AND THE TRACK FADER MUST NOT.**
-            // They are two different things that used to sit on the same side of the tap:
-            //
-            //   * `antiClick` and the KIL/steal fade-out are the VOICE's envelope — the ramps that
-            //     exist so a note never starts or stops on a discontinuity. A send that misses them
-            //     receives a waveform cut off mid-cycle, so a KIL that is clean on the dry signal
-            //     puts a click into the reverb and delay tails, which then ring on for seconds.
-            //   * `trackVol` is the MIXER fader, and it stays below the tap on purpose: sends are
-            //     pre-fader, so pulling a track down leaves its tails at full level (see below).
-            //
-            // The fade is resolved HERE, once, because it advances a counter and ends the voice —
-            // and it is applied to the dry path in its original position and order below, so the
-            // dry signal is arithmetically untouched by this.
-            // A fade dispatched at frame f of this block is held until the loop reaches f.
+            // ⚠️⚠️ THE VOICE'S OWN FADES MUST REACH THE SENDS, AND THE TRACK FADER MUST NOT.
+            // `antiClick` and the KIL/steal fade-out are the voice's envelope — a send that missed
+            // them would get a waveform cut mid-cycle and ring the click on in the tails. `trackVol`
+            // stays below the tap (pre-fader sends). The fade is resolved once here and applied to the
+            // dry path in its original position below. A fade dispatched at frame f waits for f.
             const bool fading = voice.isFadingOut && i >= voice.fadeStartFrame;
             float voiceFade   = antiClick;
             float fo          = 1.0f;
@@ -1238,14 +1152,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             int to = numFrames;
             if (voice.tableId >= 0) {
                 to = from + processTableTick(voice, from, numFrames - from, sampleRate);
-                // The ONE place the track's TIC00 cursor is written — below the row logic, so it
-                // cannot drift from it. Only the voice a retrigger would have read (live, not fading)
-                // owns the cursor; letting a fading voice write it would make the value depend on
-                // slot order.
-                //
-                // Written when ANY column is at TIC00, and it stores all three: the retrigger
-                // re-checks each column's own rate, exactly as it does when reading them off a live
-                // voice.
+                // The ONE place the track's TIC00 cursor is written, below the row logic. Only the
+                // live (not fading) voice owns it, or the value would depend on slot order. Written
+                // when ANY column is at TIC00, storing all three; a retrigger re-checks each rate.
                 bool anyTic00 = false;
                 for (int l = 0; l < TABLE_LANES; ++l) anyTic00 |= (voice.lanes[l].ticRate == 0x00);
                 if (anyTic00 && !voice.isFadingOut) {
@@ -1383,25 +1292,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             applyGainRamp(sfBuf + from * 2, to - from, sv.volGainFrom, sv.volGainTo);
         } else {
-            // ⚠️⚠️ A NOTE THAT STEALS ANOTHER IS RENDERED IN TWO PASSES WITH A FADE BETWEEN THEM,
-            // AND EVERY PIECE OF THAT IS LEVERAGE AGAINST THE SAME CRACK.
-            //
-            // Pass one is the note being REPLACED, rendered up to `fadeEnd` — past the new note's own
-            // onset — so the old note is faded out rather than cut at a block edge. That is what the
-            // armed note is for: the old TSF voices are killed only once their last samples exist.
-            //
-            // ⚠️ AND THE FADE IS OURS, NOT TSF'S — this is the part that is not obvious. TSF computes
-            // its amplitude envelope ONCE PER 64-SAMPLE BLOCK and holds it flat across it
-            // (`gainMono = noteGain * v->ampenv.level` in tsf_voice_render). Its short release,
-            // `tsf_voice_endquick`, drops the level to 26% at the first of those boundaries — so
-            // asking TSF to fade a stolen note out quickly buys a smaller step, not no step. A ramp
-            // applied to the rendered samples has no such granularity, which is also why the sampler
-            // pool fades its own steals here rather than in a voice (DECLICK_SAMPLES, audio-defs.h —
-            // the same length).
-            //
-            // `fadeEnd` is clamped to the piece, so the ramp slides EARLIER when a note lands near the
-            // end of one; a note landing at frame 0 still gets the full 64 samples. It is
-            // `min(fadeEnd, DECLICK_SAMPLES)` long either way, never a stub.
+            // ⚠️⚠️ A NOTE THAT STEALS ANOTHER IS RENDERED IN TWO PASSES WITH A FADE BETWEEN THEM.
+            // Pass one renders the REPLACED note up to `fadeEnd`, past the new onset, so it fades
+            // rather than being cut at a block edge — the old TSF voices are killed only once their
+            // last samples exist (that is what the armed note is for).
+            // ⚠️ THE FADE IS OURS, NOT TSF'S: TSF holds its envelope flat per 64-sample block, so its
+            // quick release is a smaller step, not none. A ramp on the rendered samples has no such
+            // granularity (DECLICK_SAMPLES, as the sampler's steals). `fadeEnd` is clamped to the
+            // piece, sliding the ramp earlier near its end; it is never a stub.
             const int fadeEnd   = std::min(to, sfStart + DECLICK_SAMPLES);
             const int rampStart = std::max(from, fadeEnd - DECLICK_SAMPLES);
             const int rampLen   = fadeEnd - rampStart;
@@ -1529,13 +1427,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // ─── THE DRY GATE — every track's audio, summed, BELOW every send tap ────────────────────────
-    //
-    // ⚠️ It has to live here and nowhere else. Soloing a send return means "let me hear only what comes
-    // back from the reverb", and the reverb is fed by the tracks: taking the dry mix down as eight track
-    // mutes would stop the notes (both schedulers skip an inaudible track) and cut the SoundFont path's
-    // send with them, so the soloed return would have nothing to return. Everything above has already
-    // tapped the sends; this multiply is what the listener loses.
+    // ⚠️ It must live here: soloing a send return means "hear only what comes back from the reverb",
+    // and the reverb is fed by the tracks. Eight track mutes would stop the notes (schedulers skip
+    // inaudible tracks) and cut the SF sends; every send has already tapped above this multiply.
     if (dryGateStart < 1.0f || dryGateEnd < 1.0f) {
         for (int i = 0; i < numFrames; i++) {
             const float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
@@ -1603,25 +1497,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     // ─── THE MASTER FADER — one multiply over the summed bus, dry AND returns ────────────────────
     //
-    // ⚠️ It lives HERE, and not with the per-voice gains, because a fader that only scales the dry
-    // path is not a master: fading to 00 would leave the reverb and delay returns at full level,
-    // playing on over a silent mix. The volume chain the manual documents (instrument VOL × phrase V ×
-    // track fader × master) ends at this line, and only this line is downstream of the send returns.
-    //
-    // Placed before masterChain, which is where it has always been relative to the master EQ, bus FX
-    // and limiter — the limiter still sees a post-fader signal, so pulling the master down still backs
-    // it off rather than being squashed flat by it.
-    //
-    // ⚠️ IT RAMPS ACROSS THE BLOCK, like every other fader here: a `VMV` moves it once per block and
-    // nothing is lost by that, but a knob moves it between blocks and a step in the summed bus is the
-    // one a listener hears most clearly. Start and end are equal unless something moved it.
-    //
-    // The meters and visualiser accumulators were filled pre-master and are scaled to match, so every
-    // reading stays post-master as it was — by the value the block ENDS on, which is the fader the
-    // screen is showing.
-    //
-    // The `!= 1.0f` skip is an optimisation and nothing more — multiplying by exactly 1.0f is the
-    // identity in IEEE 754, so a project at the default master FF takes the same samples either way.
+    // ⚠️ HERE, not with the per-voice gains: a fader that scaled only the dry path would leave the
+    // returns playing over a silent mix. Before masterChain, so the limiter sees a post-fader signal.
+    // ⚠️ IT RAMPS ACROSS THE BLOCK, like every fader here. The meters and visualiser accumulators
+    // were filled pre-master and are scaled by the block's END value, the fader on screen. The
+    // `!= 1.0f` skip is only an optimisation — × 1.0f is the identity.
     if (masterVolStart != 1.0f || masterVolSnapshot != 1.0f) {
         for (int i = 0; i < numFrames; i++) {
             const float g = masterVolStart
@@ -1682,11 +1562,9 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         return;
     }
 
-    // ⚠️ Chunk at PROCESS_SUBBLOCK — the difference from a device-sized block is AUDIBLE, see the constant.
-    // A device hands us whatever its period is (the Flip's ALSA: 940 frames; Oboe: 192-960), and
-    // processing that in one pass resolves a block's note-ons too coarsely: same-track retriggers
-    // sharing a block exhaust the voice pool and get dropped. renderOffline has always chunked at
-    // this size, so chunking here is what makes live playback and the export agree.
+    // ⚠️ Chunk at PROCESS_SUBBLOCK — AUDIBLY different from a device-sized block (see the constant):
+    // a device period (ALSA ~940 frames, Oboe 192-960) resolves note-ons too coarsely, and same-track
+    // retriggers sharing a block exhaust the pool. renderOffline chunks the same, so live = export.
     int processed = 0;
     while (processed < numFrames) {
         int chunk = std::min((int)numFrames - processed, PROCESS_SUBBLOCK);

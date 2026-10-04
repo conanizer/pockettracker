@@ -1,46 +1,27 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_SENDER_H
 #define POCKETTRACKER_SHELL_MIDI_SENDER_H
 
-// midi-sender.{h,cpp} — the JUST-IN-TIME MIDI sender thread (MIDI plan phase B3).
-//
-// ── WHAT B3 IS FOR, in one paragraph ─────────────────────────────────────────────────────────────
+// midi-sender.{h,cpp} — the JUST-IN-TIME MIDI sender thread.
 //
 // Every MIDI message is queued against a target FRAME and released by `ExternalConsumer::pump(now)`,
-// late-never-early. Until B3 the only caller was `SongcoreHost::poll()`, on the 60 Hz frame loop — so
-// every note left the app 0–16.7 ms after it was due, and *how much* depended on where in the frame
-// interval it fell. That is inaudible on a note and disqualifying on a CLOCK: phase C's 24 PPQN sync
-// is 19.5 ms per tick at 128 BPM, so 16 ms of quantisation is most of a tick. This thread makes the
-// release cadence ~1 kHz instead, and interpolates the audio device's frame position between blocks
-// (`songcore::FrameEstimator`) so the extra cadence has something precise to compare against.
+// late-never-early. Pumped from the 60 Hz frame loop a note would leave 0–16.7 ms late — most of a
+// 24 PPQN clock tick. This thread pumps at ~1 kHz against an interpolated frame position
+// (`songcore::FrameEstimator`).
 //
-// ⚠️ **THE THREAD ALONE WOULD NOT HAVE BEEN ENOUGH, and it is worth knowing why before touching this
-// file.** `getCurrentFrame()` is written once per audio block — 512 frames, 11.6 ms — so a 1 kHz
-// caller reading it raw would swap 16.7 ms of quantisation for 11.6 ms and call that a fix. The
-// estimator is the half of B3 that actually buys the order of magnitude; the thread is what gives the
-// estimator somewhere to be read from.
+// ⚠️ THE THREAD ALONE IS NOT ENOUGH: `getCurrentFrame()` moves once per audio block (~11.6 ms), so a
+// 1 kHz reader of the raw counter would gain little. The estimator buys the precision; the thread is
+// where it is read.
 //
-// ── ⚠️ ANDROID: THIS THREAD TALKS TO THE JVM, AND THAT IS WHY IT IS AN SDL THREAD ─────────────────
+// ── ⚠️ ANDROID: AN SDL THREAD BECAUSE IT TALKS TO THE JVM ────────────────────────────────────────
 //
-// `midi-out-android.cpp` reaches `MidiManager` through JNI, and a native thread must be ATTACHED to
-// the JVM before it may make a JNI call at all. `SDL_CreateThread` is the one way to get that for
-// free: SDL's thread entry calls `Android_JNI_SetupThread()`, which attaches and registers the
-// detach-on-exit — a raw `std::thread` would work on Windows and Linux and then abort the VM on the
-// device, which is the platform the feature actually ships on. (`midi-out-android.cpp`'s own THREADING
-// note said "every method here runs on the SDL thread"; that was true when it was written and B3 is
-// the layer that invalidated it. Its comment has been corrected, and `MidiOutManager.midiSend` is now
-// `@Synchronized` so the Kotlin side's one reusable byte buffer is safe against two callers rather
-// than against one convention.)
+// midi-out-android.cpp makes JNI calls, and a native thread must be attached to the JVM first.
+// SDL's thread entry attaches it and registers the detach; a raw `std::thread` would abort the VM.
 //
 // ── WHAT THIS THREAD MAY AND MAY NOT DO ──────────────────────────────────────────────────────────
 //
-// It may: read the engine's frame counter (atomic), and call `pump`. That is all. It must NOT touch
-// the project, the UI state, the sequencer or the engine's queues — `pump`'s reach is `midi_out.h`'s
-// own state plus `IMidiOut::send`, and `ExternalConsumer`'s mutex is what makes even that safe.
-//
-// It is NOT a real-time thread in the audio sense: it does no DSP, it misses no deadline that matters
-// if it is late by a millisecond, and it is allowed to block in a port write. `SDL_THREAD_PRIORITY_HIGH`
-// rather than TIME_CRITICAL for exactly that reason — asking a handheld's scheduler for RT priority to
-// deliver three bytes is a good way to make the audio callback wait behind it.
+// It may read the engine's frame counter (atomic) and call `pump`; nothing else — not the project,
+// the UI, the sequencer or the engine's queues. Not real-time in the audio sense (it may block in a
+// port write), so HIGH priority rather than TIME_CRITICAL, which would make the audio callback wait.
 
 #include <atomic>
 #include <cstdint>
@@ -56,36 +37,22 @@ namespace songcore { class SongcoreHost; }
 namespace ptshell {
 
 /**
- * The B3 INSTRUMENT: how late did each message actually leave?
+ * The jitter instrument: how late did each message actually leave? Stamps a wall clock beside each
+ * message's DUE FRAME, fits wall against frame, and reports the residuals in ms — the slope is
+ * measured, so a drifting audio clock lands in the slope, not the verdict. A second, independent
+ * reading (consecutive-interval error) cross-checks the fit.
  *
- * ⚠️ **THIS EXISTS BECAUSE NOTHING ELSE IN THE TREE CAN ANSWER THAT QUESTION, and a B3 with no answer
- * is a B3 nobody can believe.** The byte stream is identical whether a note left 1 ms or 40 ms late;
- * ptmidi drives a synthetic clock and so measures the arithmetic rather than the delivery; the trace
- * prints bytes with no time. What this does: stamp a wall clock beside each message's DUE FRAME, then
- * fit wall against frame and report the RESIDUALS in milliseconds. The fit's slope is measured from the
- * data, not assumed, so a drifting audio clock lands in the slope and not in the verdict.
- *
- * ⚠️ It reports two numbers from the same data ON PURPOSE — the residual of a least-squares fit, and
- * the error of each consecutive INTERVAL. They are independent enough to disagree, and if they do, the
- * instrument is what is wrong (the guardrails: when two instruments disagree, go to the artifact).
- *
- * ⚠️ **It needs NO PORT, NO CABLE and NO SYNTH** — `ExternalConsumer::emit` tells the observer about a
- * released message whether or not a device was open. What B3 changes is WHEN the queue releases, which
- * is upstream of every platform backend, so the measurement is a plain desktop run with no hardware.
+ * ⚠️ Needs no port: `ExternalConsumer::emit` reports a released message whether or not a device is
+ * open, so a plain desktop run measures it.
  */
 class MidiJitterRecorder : public songcore::IMidiSendObserver {
   public:
     void on_released(const songcore::MidiMessage& m, int64_t nowFrame, bool sent) override;
 
     /**
-     * Print the verdict, with the numbers beside it. `label` names the cadence being measured so two
-     * runs can be compared by eye (the B3 control is the same binary with the thread turned off).
-     *
-     * Refuses to judge below 8 distinct due frames and says so: a maximum residual computed from two
-     * samples is a lying instrument, and a run where nothing played would otherwise report 0.00 ms and
-     * look like a triumph.
-     *
-     * `tempo` is the project's, and it is phase C's anchor rather than decoration — see `report_clock`.
+     * Print the verdict, with the numbers beside it. `label` names the cadence measured.
+     * Refuses to judge below 8 distinct due frames: a run where nothing played would otherwise
+     * report 0.00 ms. `tempo` anchors `report_clock`.
      */
     void report(const char* label, int sampleRate, int tempo) const;
 
@@ -93,9 +60,8 @@ class MidiJitterRecorder : public songcore::IMidiSendObserver {
 
   private:
     /**
-     * Phase C: the 0xF8 stream on its own, with the tempo derived from a WALL clock as the anchor.
-     * Split out because a combined fit is a clock measurement mislabelled — sync out puts fifty ticks
-     * on the wire for every note — and because a residual cannot see a period that is simply wrong.
+     * The 0xF8 clock stream on its own, with tempo derived from a WALL clock: sync out outnumbers
+     * the notes fifty to one, and a residual cannot see a period that is simply wrong.
      */
     void report_clock(int sampleRate, int tempo) const;
 
@@ -120,11 +86,8 @@ class MidiJitterRecorder : public songcore::IMidiSendObserver {
 
 /**
  * The thread itself. Constructed after the port is attached and before the frame loop starts.
- *
- * `start()` prints one unconditional ready line and `stop()` prints the tick and pump counts — because
- * a component whose correct behaviour is SILENCE cannot be told from one that never ran, and this one's
- * correct behaviour is that nobody notices it. The counts are what distinguish "the thread was created"
- * from "the thread ran": a thread that started and died immediately prints ready and then 0 ticks.
+ * `start()` prints one unconditional ready line and `stop()` the tick and pump counts: a thread
+ * that started and died immediately prints ready and then 0 ticks.
  */
 class MidiSender {
   public:

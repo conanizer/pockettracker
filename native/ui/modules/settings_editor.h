@@ -2,28 +2,16 @@
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/SettingsModule.kt — and the first screen in the port where the two
-// platforms genuinely differ. Which rows exist is a function of PlatformCaps (ui/platform_caps.h);
-// where they sit is ui/settings_row_layout.h. Neither answer is re-derived here.
+// Which rows exist is a function of PlatformCaps (platform_caps.h); where they sit is
+// settings_row_layout.h. Neither is re-derived here.
 //
-// ⚠️ THE MODULE EDITS INDICES AND FLAGS. IT DOES NOT KNOW WHAT A LAYOUT MODE IS.
+// ⚠️ THE MODULE EDITS INDICES AND FLAGS; IT DOES NOT KNOW WHAT A LAYOUT MODE IS. LAYOUT is an enum
+// cycle over `layoutCount` options; what an index MEANS (fullscreen vs portrait, which .png, how
+// loud a click is) is the platform's. The display strings are handed in as text; where they are
+// empty the rows are not drawn.
 //
-// That is the line that keeps Android's device rows portable without dragging Android into the port.
-// LAYOUT is "an enum cycle over `layoutCount` options, currently at `layoutIndex`"; OVERLAY is the
-// same plus a hex byte; BTN SOUND is a toggle plus a hex byte. What an index MEANS — FULLSCREEN vs
-// PORTRAIT, which .png, how loud a click is — is the platform's business, and it stays there. So
-// `DeviceAdapter.LayoutMode` is NOT ported (it would be dead code in a UI that can never use it),
-// and yet the LAYOUT row's cursor context and edit semantics still are — which is exactly what lets
-// `ptinput` golden all thirteen rows against Kotlin under `PlatformCaps::android()`, including the
-// ones the shell will never draw.
-//
-// The display STRINGS for those rows (the layout's name, the overlay file, the skin) are handed in
-// as text the module merely paints. On the shell they are empty, and the rows are not drawn at all.
-//
-// ⚠️ SINGLE A IS RESERVED FOR ACTIONS. Every value row changes with A+DPAD; plain A does something
-// only on THEME (opens the editor) and TEMPLATE (SAVE / CLEAR). Kotlin states this in a comment at
-// the top of its class and enforces it by giving every other row an editable context; the port does
-// the same, and the dispatcher's A arm therefore has exactly two cases.
+// ⚠️ SINGLE A IS RESERVED FOR ACTIONS: every value row changes with A+DPAD; plain A acts only on
+// THEME (opens the editor) and TEMPLATE (SAVE / CLEAR).
 
 #include <string>
 #include <vector>
@@ -54,180 +42,106 @@ struct SettingsValues {
     int  skinIndex         = 0;
     int  skinCount         = 0;   // 0 = this layout is not skinned → no second column on LAYOUT
 
-    // ⚠️ The PERSISTED skin selection is the STABLE ID STRING, not `skinIndex`. settings_store.h's rule:
-    // an index is meaningless without the list it indexes, so store the NAME and let the platform resolve
-    // it to an index against a list that now exists (Phase D). The shell resolves this to `skinIndex` at
-    // boot (device_skin.h) and writes it back from whichever skin is chosen. Serialized as
-    // `portrait_skin`, matching Android's SharedPreferences key so the C6 prefs import lands here.
+    // ⚠️ The PERSISTED skin is the STABLE ID STRING, not `skinIndex` — an index is meaningless
+    // without its list. The shell resolves it at boot (device_skin.h) and writes it back on a change.
+    // Serialized as `portrait_skin`.
     std::string portraitSkin = "amiga-2";
 
     int  overlayIndex      = 0;   // 0 = "OFF"; 1.. = a file
     int  overlayCount      = 1;   // "OFF" + however many files
     int  overlayStrength   = 128;
 
-    // ⚠️ The PERSISTED overlay selection is the STABLE ID STRING, not `overlayIndex` — same rule and
-    // same reason as `portraitSkin` above (an index is meaningless without the list it indexes). The
-    // shell resolves this to `overlayIndex` at boot (shell/overlay.h) and writes it back from whichever
-    // overlay is chosen. Serialized as `overlay_name`, matching Android's SharedPreferences key so the
-    // C6 v2 prefs import lands here. "OFF" is the no-overlay choice.
+    // ⚠️ The PERSISTED overlay is the STABLE ID STRING too, resolved at boot (shell/overlay.h).
+    // Serialized as `overlay_name`; "OFF" is no overlay.
     std::string overlayName = "OFF";
 
-    // ⚠️ THESE DEFAULTS ARE THE FIRST LAUNCH, and only the first launch — `load_settings` overwrites
-    // every one of them from settings.json, so an existing user's choices are untouched by a change
-    // here. They describe the app a stranger meets, which is why button feedback is ON: a handheld
-    // whose buttons answer nothing reads as a handheld that did not register the press. LO/quiet
-    // rather than full: the point is a confirmation, not a noise. (`vibroPower` is a LO/HI switch,
-    // 64 vs 255 — see settings_editor.cpp's POW row.)
+    // ⚠️ THESE DEFAULTS ARE THE FIRST LAUNCH ONLY — `load_settings` overwrites them from
+    // settings.json. Button feedback is ON so a stranger's first press answers; LO, since it is a
+    // confirmation, not a noise.
     bool buttonSoundEnabled = true;
     int  buttonSoundVolume  = 0x0F;
     bool buttonVibroEnabled = true;
     int  vibroPower         = 64;
     bool autosaveResumeAuto = false;
 
-    // Which way round the pad's face buttons are PRINTED: 0 AUTO, 1 XBOX, 2 NINTENDO - the order of
-    // ui::AbxyLayout, which is what the shell hands to its input layer.
-    //
-    // AUTO is a no-op, which is what makes this safe to add to an existing install: a settings.json
-    // written before the row existed has no key, falls through to this default, and nothing about
-    // that install changes.
+    // Which way round the pad's face buttons are PRINTED: 0 AUTO, 1 XBOX, 2 NINTENDO (ui::AbxyLayout).
+    // AUTO is a no-op, so an install without the key is unchanged.
     int  abxyIndex          = 0;
 
-    // Show the on-screen buttons even though a physical pad is attached - a phone with a clip-on
-    // controller has both, and only its owner knows which they want.
-    //
-    // FALSE is today's behaviour (a pad turns the buttons off), so an existing install is unchanged.
-    // It is a value of its OWN and not `layoutIndex`, because the layout list has one entry when no
-    // pad is attached and two when one is: the same index would mean different things in the two
-    // states, and unplugging the pad would forget the choice.
+    // Show the on-screen buttons even with a physical pad attached (a phone with a clip-on pad). Its
+    // own value, not `layoutIndex`: the layout list changes length with a pad, so an index would mean
+    // different things plugged and unplugged. FALSE keeps existing installs unchanged.
     bool touchButtonsWithPad = false;
 
     // ── METRONOME — drawn with the cluster above, but on every platform ──────────────────────────
     //
-    // A click on every quarter note while the transport runs, made by the audio engine (audio-engine.h)
-    // and never written into an export. OFF is today's behaviour, so an existing install is unchanged
-    // by the key being absent from its settings.json — the trap settings_store.h names.
-    //
-    // VOL is the click's level, on the same 00..FF scale as BTN SOUND's, and it is drawn whether the
-    // toggle is ON or OFF exactly as BTN SOUND's VOL is: a knob that vanishes cannot be set before the
-    // thing it belongs to is switched on.
+    // A click on every quarter note while the transport runs, made by the engine and never exported.
+    // VOL (00..FF, as BTN SOUND's) is drawn whether or not the toggle is on, so it can be set first.
     bool metronomeEnabled = false;
     int  metronomeVolume  = 0x80;
 
     // ── HELP — what a tap of SELECT shows: 0 OFF, 1 SHORT, 2 FULL (`HelpMode`) ───────────────────
-    //
-    // SHORT is the compact panel in the visualizer's box and FULL the overlay over the whole screen.
-    // ⚠️ SHORT is the default because it is what an existing install already does on SELECT — a
-    // settings.json written before this row existed has no key and lands here.
+    // SHORT is the compact panel in the visualizer's box, FULL the whole-screen overlay.
+    // ⚠️ This default reaches upgrading installs (no key yet), so it is the long-standing SELECT
+    // behaviour.
     int  helpMode         = 1;
 
     // ── The rows every platform has ──────────────────────────────────────────────────────────────
-    // BILINEAR, not INTEGER: integer scaling only fills the screen on a display that is an exact
-    // multiple of 640×480, and on everything else — the portrait overlay above all — it leaves the
-    // editor small and ringed with black. A first run should show the app filling the screen.
+    // BILINEAR by default: integer scaling fills only exact multiples of 640×480 and leaves the
+    // editor ringed with black everywhere else.
     bool scalingBilinear    = true;
     bool insertBefore       = true;
     bool cursorRemember     = false;
     bool notePreviewEnabled = true;
 
-    // FOLDER = REMEMBER / REFRESH (v0.9.4 D2a). When REMEMBER, the file browser opens a SAMPLE load at
-    // the folder the last sample was loaded from, carried in `lastSampleFolder`.
-    // ⚠️ Only `rememberFolder` PERSISTS. `lastSampleFolder` is SESSION-ONLY (never serialized) — it
-    // resets to the default folder on every launch, like CURSOR remembering: the choice survives a
-    // restart, the remembered path does not. `rememberFolder` is a new settings.json key; absent in an
-    // older file it defaults OFF, so no import-version bump is needed (it was never a prefs key).
+    // FOLDER = REMEMBER / REFRESH. REMEMBER opens a SAMPLE load at the folder of the last one.
+    // ⚠️ Only `rememberFolder` persists; `lastSampleFolder` is session-only and resets every launch.
     bool        rememberFolder   = false;
     std::string lastSampleFolder;   // runtime only — see settings_store.cpp (not saved)
 
-    // NAV = POOL / SONG. POOL is what B+LEFT/RIGHT has always done — scroll the 00..FF chain and phrase
-    // pools. SONG makes B+D-pad walk the ARRANGEMENT instead, so the cursor is a SONG CELL and the chain
-    // and phrase on screen are whatever that cell names (the LSDJ/LGPT ruleset).
+    // NAV = POOL / SONG. POOL: B+LEFT/RIGHT scroll the 00..FF chain and phrase pools. SONG: B+D-pad
+    // walks the ARRANGEMENT, so the chain and phrase on screen are whatever the song cell names.
     //
-    // DEFAULT SONG: the arrangement-relative ruleset is the one this app is modelled on, and meeting it
-    // on first launch is the point rather than a hazard to opt into.
-    //
-    // ⚠️ THIS DEFAULT REACHES EXISTING INSTALLS, not just fresh ones. The key is absent from every
-    // settings.json written before the row existed, so `get_bool` falls through to this value for
-    // everyone who upgrades — unlike the five first-launch defaults, which `load_settings` overwrites
-    // from a file that already has their keys. Under SONG a phrase nobody has placed in the song is
-    // unreachable, so an upgrading user with unplaced sketches meets that on the first launch after
-    // the update; the NAV row is the way back and the manual says so.
+    // ⚠️ THIS DEFAULT REACHES EXISTING INSTALLS, not just fresh ones: a settings.json without the key
+    // falls through to it. Under SONG a phrase not placed in the song is unreachable; the NAV row is
+    // the way back.
     bool navSongRelative = true;
 
-    // ── MIDI (plan §8.1, phase B4.3) ─────────────────────────────────────────────────────────────
+    // ── MIDI ─────────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ THESE TWO ARE NOT ON THE SETTINGS SCREEN — they belong to the MIDI screen and merely LIVE in
-    // this struct, because this struct is what settings.json round-trips. The plan puts them here on
-    // purpose (§7): the device pick and the latency alignment describe THIS MACHINE'S CABLE, not the
-    // song, so a project carried to another device keeps its routing intent and re-picks its port.
-    // Everything the SONG means by MIDI — channel, bank, program, LEN, CC slots, PROG CHG — is in
-    // `songcore::Project`/`Instrument` and travels with the .ptp.
+    // ⚠️ THESE ARE NOT ON THE SETTINGS SCREEN — they belong to the MIDI screen and live here because
+    // settings.json round-trips this struct. They describe THIS MACHINE'S CABLE; what the SONG means
+    // by MIDI (channel, bank, program, CC slots…) travels in the .ptp.
     //
-    // ⚠️ THE DEVICE IS THE NAME STRING, NEVER AN INDEX — the same rule `portraitSkin` and `overlayName`
-    // above already follow, and MIDI is the case that rule was WRITTEN for: a port list is rebuilt from
-    // the OS on every enumeration and reorders itself whenever anything is plugged or unplugged, so an
-    // index saved on Tuesday names a different synth on Wednesday. "OFF" is the no-device choice;
-    // "AUTO" takes the first device plugged in.
-    // ⚠️ The default reaches only a NEW install: settings.json stores this key, so an existing "OFF"
-    // stays OFF.
+    // ⚠️ THE DEVICE IS THE NAME STRING, NEVER AN INDEX: a port list reorders whenever anything is
+    // plugged in. "OFF" is no device, "AUTO" takes the first one plugged in. The default reaches only
+    // a new install (settings.json stores the key).
     std::string midiOutDevice = "AUTO";
 
-    // The INPUT port (phase E2) — same kind, same rule, same "OFF" and "AUTO". ⚠️ It is a NAME here
-    // too, and the input list is the one MORE likely to reorder: a USB keyboard is unplugged between
-    // sessions where a desk synth is not.
-    //
-    // ⚠️ **THE ROW THAT EDITS THIS ARRIVES IN E3, AND THIS IS NOT A SETTING WITHOUT A CONSUMER.** It is
-    // read at boot and it OPENS THE PORT (`InputDispatcher::boot_midi_in_port`), which is what makes the
-    // desk loopback survive a restart; what E3 adds is a way to change it without editing settings.json.
-    // The alternative — the shell opening an input port privately until the row exists — is the "two
-    // owners of which port is open" bug B4.3 already paid for once.
+    // The INPUT port: same kind, same rule, same "OFF" and "AUTO". Read at boot, where it OPENS the
+    // port (`InputDispatcher::boot_midi_in_port`) — one owner of which port is open.
     std::string midiInDevice = "AUTO";
 
-    // Signed milliseconds; positive = MIDI leaves LATER than the audio. A message is released the
-    // moment its block of sound is handed to the DEVICE, so the cable always runs ahead of our own
-    // speakers by the whole output latency — a fixed lead, not jitter, and the same for every note.
-    //
-    // ⚠️ **READ IT THROUGH `midi_offset_in_force()`, NEVER DIRECTLY** — while AUTO is on it is the
-    // value the user dialled LAST, not the value in force, and the two rows of this comment are the
-    // only warning a call site gets.
+    // Signed ms; positive = MIDI leaves LATER than the audio. A message leaves when its block is
+    // handed to the device, so the cable runs ahead of the speakers by the output latency.
+    // ⚠️ READ IT THROUGH `midi_offset_in_force()`, NEVER DIRECTLY: under AUTO this is the value the
+    // user dialled last, not the one in force.
     int         midiOffsetMs  = 0;
 
-    // AUTO: derive the offset from what the audio device says it is holding, instead of using the
-    // number above. On by default because the derived figure beats 0 ms on every device measured,
-    // and 0 was what a user who never found this row got.
-    //
-    // ⚠️ It is the LEAD THE APP CAN SEE — one buffer. A driver queuing more behind that is not in it,
-    // so this lands close rather than exact, and dialling it off by ear stays the last word.
+    // AUTO: derive the offset from what the audio device says it holds. ⚠️ It sees one buffer; a
+    // driver queuing more behind it is not in it, so this lands close rather than exact.
     bool        midiOffsetAuto = true;
 
-    // SYNC OUT — the 24 PPQN clock, Start/Stop/Continue and the song position (plan phase C).
-    //
-    // ⚠️ SETTINGS AND NOT THE PROJECT, where PROG CHG next to it on the same screen is the project's.
-    // The distinction is "what does the SONG mean" versus "what is plugged into THIS machine": whether
-    // an instrument states its bank and program is a musical decision that travels with the .ptp;
-    // whether there is a drum machine on the other end of the cable waiting to be told the tempo is a
-    // fact about the desk it is sitting on.
-    //
-    // Default OFF, deliberately. Clock is ~51 messages a second on a 31 250 baud wire, and a synth left
-    // switched to external sync sits silent until it gets one — so a user who has not asked for sync
-    // must not be given either surprise.
+    // SYNC OUT — 24 PPQN clock, Start/Stop/Continue and song position.
+    // ⚠️ A setting, not the project's: whether a drum machine is waiting for the tempo is a fact
+    // about the desk. Default OFF: a synth set to external sync sits silent until it gets clock.
     bool        midiSyncOut   = false;
 
-    // CTL CH — the channel a knob has to arrive on to be a MAPPING knob (`songcore/midi_map.h`).
-    // −1 = OFF, otherwise 0-15 (shown 01-16, as every channel in this app is).
-    //
-    // ⚠️ **IT IS A SETTING AND THE MAPPINGS ARE THE SONG'S, WHICH IS THE SAME SPLIT THIS SCREEN
-    // ALREADY TEACHES**: *"instrument 3's cutoff"* only means something beside a song that has an
-    // instrument 3, while *"my controller sends its knobs on channel 16"* describes the desk.
-    //
-    // ⚠️ **AND THE ROW IS NOT DECORATION — WITHOUT IT ONE KNOB DOES TWO JOBS.** An incoming CC is
-    // already routed to whichever track names its channel, where it moves that track's instrument
-    // (volume, pan, the two sends). A mapping CC arriving on the same channel would do both at once.
-    //
-    // ⚠️⚠️ **`ALL` BY DEFAULT — M8's, and it is only safe because a CC is CLAIMED RATHER THAN
-    // RESERVED** (songcore/midi_map.h): a CC that drives a mapping is consumed, one that drives
-    // nothing routes exactly as it always did. So an install with no mappings is untouched, and the
-    // first knob a user maps works without their having to know the channel it sends on — which was
-    // the whole cost of defaulting this to OFF.
+    // CTL CH — the channel a knob must arrive on to be a MAPPING knob (midi_map.h). −1 = OFF, else
+    // 0-15 (shown 01-16). A setting, while the mappings are the song's.
+    // ⚠️ Without it one knob does two jobs: a CC is already routed to the track naming its channel.
+    // ⚠️⚠️ ALL by default is safe only because a CC is CLAIMED, NOT RESERVED (midi_map.h): one that
+    // drives a mapping is consumed, one that drives nothing routes as before.
     int         midiControlChannel = songcore::MIDI_CTL_CH_ALL;
     // How a live key plays: 1 = MONO on the SONG cursor's track, 2..8 = POLY over that many tracks
     // from it. The instrument is the one the UI is on.
@@ -240,15 +154,12 @@ struct SettingsValues {
     int         audioOutIndex = 0;
     int         audioOutCount = 1;
 
-    // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
-    // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already
-    // being handed, so it needs no second channel. Note that Android deliberately CARRIES IT ACROSS a
-    // theme change (`BUILTINS[next].copy(visualizerType = appTheme.visualizerType)`): the palette is
-    // the theme's, the visualizer is the user's. `handle_input` therefore takes a `Theme&`.
+    // ⚠️ VISUALIZER is NOT here: it lives on the THEME (`Theme::visualizerType`) and is carried
+    // across a theme change — the palette is the theme's, the visualizer the user's. Hence `Theme&`.
 
     // ── Debug ────────────────────────────────────────────────────────────────────────────────────
     bool traceEnabled = false;
-    bool engineCpp    = false;   // the ENG column — Android only; there is no Kotlin here to switch to
+    bool engineCpp    = false;   // the ENG column
 };
 
 struct SettingsState {
@@ -258,9 +169,7 @@ struct SettingsState {
     int cursorColumn = 1;
 
     // Text the module paints but does not own: what the current index NAMES on this platform.
-    // (Braced defaults on all four, not just the two with a value — a member with no brace-or-equal
-    // initializer makes every aggregate `SettingsState{values}` a -Wmissing-field-initializers warning
-    // under gcc, and the port compiles clean under -Wall -Wextra.)
+    // Braced defaults on all four, or aggregate init warns under -Wmissing-field-initializers.
     std::string layoutText{};
     std::string skinText{};
     std::string overlayText = "OFF";
@@ -287,13 +196,7 @@ public:
 
     CursorContext cursor_context(const SettingsState& s) const;
 
-    /**
-     * Writes straight into `values` (and, for VISUALIZER, into `theme`) — where Kotlin returns a
-     * 16-field nullable diff for MainActivity to apply. The difference is Compose, not behaviour:
-     * Kotlin's settings live in ~16 separate `mutableStateOf` refs and SharedPreferences, so its
-     * module cannot hold a reference to them. Here they are one struct in AppState, and a module that
-     * mutates its subject is what every other screen in this port already does.
-     */
+    /** Writes straight into `values` (and, for VISUALIZER, into `theme`). */
     SettingsInputResult handle_input(SettingsValues& values, Theme& theme, const PlatformCaps& caps,
                                      int cursor_row, int cursor_column,
                                      const InputAction& action) const;

@@ -1,9 +1,8 @@
 #pragma once
 #include <cstdint>
 
-// Tiny lock-free PRNG for audio-thread use. libc rand() is cheap on bionic but takes a
-// process-global lock on glibc (the Linux port's default) — a priority-inversion hazard
-// on a real-time thread. State must never be 0 (xorshift's fixed point).
+// Tiny lock-free PRNG for audio-thread use. glibc's rand() takes a process-global lock — a
+// priority-inversion hazard on a real-time thread. State must never be 0 (xorshift's fixed point).
 inline uint32_t xorshift32(uint32_t& state) {
     state ^= state << 13;
     state ^= state >> 17;

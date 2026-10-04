@@ -12,9 +12,8 @@
 // markers on the TABLE screen all key off that one identity. `TableRamp::paramSlot` is 1-3 and is
 // converted at exactly one place (`applyTableRamps`).
 //
-// ⚠️ **IT IS ONE STRUCT FOR BOTH VOICE TYPES** because `processTableTick` is one template over them.
-// Eight parallel `[3]` arrays in each of `Voice` and `SoundfontVoice` would be the same state written
-// four times, and the reset paths are where they would drift.
+// ⚠️ ONE STRUCT FOR BOTH VOICE TYPES, because `processTableTick` is one template over them —
+// parallel arrays per voice type would drift in the reset paths.
 struct TableLane {
     int   row           =  0;   // the row this lane is standing on (0-15)
     int   lastProcessed = -1;   // the last row whose effects were applied; -1 = none yet
@@ -53,11 +52,8 @@ inline constexpr int TABLE_ROWS_TOP[TABLE_LANES]     = {0, 0, 0};
 /**
  * Place all three lanes for a note that is starting.
  *
- * ⚠️ **BOTH VOICE TYPES CALL THIS AND NOTHING ELSE WRITES A LANE AT TRIGGER.** The octave and note
- * maps need the note, which is captured late in `Voice::trigger`, so the sampler used to reset the
- * cursor in one place and then move it again in another — two sites for one decision, and the second
- * one silently owned the first's result. Deriving the row from the rate here is the whole rule:
- * a lane at TICFC or TICFE is PLACED by the note, every other lane starts where the caller says.
+ * ⚠️ BOTH VOICE TYPES CALL THIS AND NOTHING ELSE WRITES A LANE AT TRIGGER. A lane at TICFC or
+ * TICFE is PLACED by the note (octave / note map); every other lane starts where the caller says.
  *
  * `startRows` is per lane so a TIC00 lane can resume where the track's previous note left it while
  * its neighbours start at 0 — see `AudioEngine::tic00Cursor`.

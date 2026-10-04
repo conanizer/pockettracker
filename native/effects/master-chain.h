@@ -22,9 +22,8 @@ struct MasterChain {
     int   masterFx  = 0;
     float dustDepth = 0.f;
 
-    // ⚠️ No default rate. Every module below bakes it into its coefficients, so a reset that can be
-    // called without one is a reset that can be silently wrong — which is how the buses spent the
-    // whole of live playback at 44100 on a 48 kHz device.
+    // ⚠️ No default rate: every module bakes it into its coefficients, so a reset callable without
+    // one could be silently wrong.
     void reset(float sampleRate) {
         ott.reset(sampleRate);
         dust.prepare(sampleRate, 512, 2);
@@ -33,12 +32,8 @@ struct MasterChain {
         masterEq.reset(sampleRate);
     }
 
-    // ⚠️ IDEMPOTENT ON PURPOSE — a re-push of the SAME fx must not touch the chain. `push_mixer`
-    // sends this line on every mute, every solo and every fader nudge (every 100 ms while a volume
-    // key repeats), so a reset here lands mid-signal: cleared biquads, a cleared wow/drift delay
-    // line, the compressor's envelope back at silence and its makeup gain snapped to 1. That is a
-    // click per gesture, and only DUST has the state for it — OTT is untouched by this call either
-    // way, which is exactly the asymmetry that was heard.
+    // ⚠️ IDEMPOTENT ON PURPOSE: `push_mixer` re-sends this on every mute, solo and fader nudge, and a
+    // reset mid-signal clears DUST's filters, delay line and compressor envelope — a click per gesture.
     void setMasterFx(int fx) {
         if (fx == masterFx) return;
         masterFx = fx;

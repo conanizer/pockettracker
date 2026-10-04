@@ -8,10 +8,7 @@ using namespace help_overlay_geometry;
 
 namespace {
 
-/**
- * The large sprite as horizontal RUNS of lit pixels — one `fill_rect` per run, not per pixel, for the
- * compact panel's reason (`help_panel.cpp`): the canvas clips and blends per call.
- */
+/** The large sprite as horizontal runs of lit pixels — see `help_panel.cpp`. */
 void draw_large_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
     // The compact panel's rule (`help_panel.cpp`): one fill for the patch, before the runs.
     if (ink.inverted) c.fill_rect(x, y, MASCOT_LARGE_W, MASCOT_LARGE_H, ink.backdrop);
@@ -44,8 +41,7 @@ void HelpOverlayModule::draw(Canvas& c, HelpTopic topic, const Theme& t) const {
     draw_modal_backdrop(c);
     draw_modal_box(c, BOX_X, boxY, BOX_W, boxH, t);
 
-    // ⚠️ The modal's ground is `meterBackground`, not `background` — that is the panel this one
-    // stands on, and the one it must invert against.
+    // ⚠️ Invert against `meterBackground`, the ground this modal stands on.
     draw_large_mascot(c, MASCOT_X, boxY + MASCOT_DY, mascot_ink(t, t.meterBackground));
 
     const std::string title(e.line1, static_cast<size_t>(help_title_length(e.line1)));

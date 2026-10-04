@@ -2,19 +2,11 @@
 
 // ─── The large mascot sprite ─────────────────────────────────────────────────────────────────────
 //
-// A 128×128 one-bit image of the robot ant, compiled in as 2048 bytes, for the FULL help overlay.
-//
-// ⚠️ **IT IS NOT THE 64×64 SPRITE DRAWN AT 2×.** It is its own artwork
-// (`docs/internal/images/robot_ant_neutral_128x128.png`) with detail the small one has no room for, so
-// the two are encoded and checked separately and neither is derived from the other. Everything else —
-// why it is a bitmask, why it is tinted at the draw site, why the art has hard edges — is the small
-// sprite's reasoning unchanged; see ui/mascot_sprite.h.
-//
-// ⚠️ **MSB LEFTMOST, sixteen bytes per row**, the same bit order as the small sprite and `font5x5.h`.
-//
-// To regenerate after an edit to the PNG: test each pixel's red channel against 127 and set bit
-// `7 - x % 8` of byte `y * 16 + x / 8`. The check that says the encode is faithful is the POPULATION
-// COUNT — 6092 set bits here, and the same number of white pixels in the PNG.
+// A 128×128 one-bit image of the robot ant (2048 bytes), for the FULL help overlay.
+// ⚠️ Its own artwork, not the small sprite at 2× — encoded and checked separately. Otherwise the small
+// sprite's reasoning applies (ui/mascot_sprite.h). MSB leftmost, sixteen bytes per row.
+// To regenerate: test each pixel's red channel against 127 and set bit `7 - x % 8` of byte
+// `y * 16 + x / 8`. The POPULATION COUNT (6092) must match the PNG's white pixels.
 
 #include <cstdint>
 

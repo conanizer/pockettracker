@@ -12,23 +12,14 @@
 // API matches DaisySP: Process(key) updates gain, Apply(in) applies it.
 // Use linked stereo: call Process(max(|L|,|R|)), then Apply(L) and Apply(R).
 //
-// Gain is computed every GAIN_PERIOD samples (pow10f is expensive), then
-// smoothed per-sample with a first-order IIR (GAIN_SMOOTH). The smoother
-// prevents the onset pop that occurs when gainRec over-accumulates during
-// the slopeRec attack ramp: without it, the first block-rate gain_ update
-// fires with ~7dB of accumulated boost before slopeRec has settled.
+// Gain is computed every GAIN_PERIOD samples (pow10f is expensive), then smoothed per sample by a
+// first-order IIR (GAIN_SMOOTH), so a block-rate jump while slopeRec's attack ramp settles is no pop.
 //
-// ⚠️ THE BOOST WORKS IN A WINDOW BELOW THE THRESHOLD, NOT ALL THE WAY DOWN.
-// The dB-domain accumulator is unbounded by construction — the deeper the input
-// sits under the threshold the more gain it asks for — so a reverb tail decaying
-// toward the silence gate winds the gain past +60 dB (x1500). The envelope needs
-// ~5 ms to react, and a note that starts inside that window is multiplied by the
-// tail's gain: a 70x full-scale spike into the master limiter, whose peak tracker
-// then needs seconds to let go. RANGE_DB/TAPER_DB bound it: full boost down to
-// RANGE_DB under, faded to nothing by RANGE_DB+TAPER_DB under, so the noise floor
-// and the end of a tail are not lifted at all. Every reference OTT bounds this the
-// same way — Vital clamps the band gain at +30 dB, Rui-727/OTT disengages past
-// 30 dB under threshold and names the artifact it prevents.
+// ⚠️ THE BOOST WORKS IN A WINDOW BELOW THE THRESHOLD, NOT ALL THE WAY DOWN. The dB-domain
+// accumulator is unbounded — the deeper the input, the more gain — so a decaying reverb tail would
+// wind it past +60 dB, and a note starting inside the ~5 ms envelope reaction would reach the limiter
+// as a 70× spike. RANGE_DB/TAPER_DB bound it: full boost down to RANGE_DB under, faded to nothing by
+// RANGE_DB+TAPER_DB, so the noise floor and a tail's end are not lifted (as reference OTTs bound it).
 // ===========================================================================
 struct UpwardCompressor {
     float slopeRec   = 0.f;
@@ -42,9 +33,7 @@ struct UpwardCompressor {
     float ratioMul   = 0.f;
 
     static constexpr int   GAIN_PERIOD = 8;
-    // ~7ms smoothing at 44.1kHz — spreads the block-rate gain jump over enough
-    // samples to eliminate the onset pop caused by gainRec over-accumulation
-    // during the slopeRec attack ramp (see comment above struct).
+    // ~7 ms smoothing at 44.1 kHz — spreads the block-rate gain jump (see above).
     static constexpr float GAIN_SMOOTH = 0.970f;
     // dB below the threshold: full boost down to RANGE_DB, tapering to none by
     // RANGE_DB + TAPER_DB. With the OTT's -30 dB threshold that is full boost to

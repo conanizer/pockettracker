@@ -1,11 +1,8 @@
 #pragma once
 // ───────────────────────────────────────────────────────────────────────────────────────────────
-// PORTABLE AUDIO CORE — no platform/Oboe/Android dependencies.
-// This translation unit holds the whole engine: voices, note scheduling, the sample-accurate queues
-// and ALL DSP (processAudioBlock). It must stay backend-agnostic so the Linux port is a drop-in: the
-// Oboe glue (stream open/close, the audio callback) lives ONLY in oboe-audio-engine.{h,cpp}; a future
-// ALSA/JACK/SDL2 backend is a parallel file that calls processLiveBlock() the same way. Do NOT add
-// <oboe/*> or <android/*> includes here — logging already goes through the audio-defs.h shim.
+// PORTABLE AUDIO CORE — no platform dependencies: voices, note scheduling, the sample-accurate
+// queues and ALL DSP (processAudioBlock). Backends (oboe-audio-engine, shell/sdl-audio-engine) call
+// processLiveBlock(); do NOT add <oboe/*> or <android/*> here — logging goes through audio-defs.h.
 // ───────────────────────────────────────────────────────────────────────────────────────────────
 #include <atomic>
 #include <chrono>
@@ -27,51 +24,25 @@
 #include "effects/send-chain.h"
 #include "effects/master-chain.h"
 
-// Per-track soundfont voice state (shares soundfonts[sfSlot].handle via MIDI channels).
-// 9 voices: song tracks 0-7 plus the dedicated preview lane (track 8 == AudioEngine::PREVIEW_LANE
-// == Kotlin PREVIEW_TRACK_ID), so SF instrument previews never touch song tracks.
-// Defined in audio-engine.cpp; declared here for the engine-*.cpp files that share it.
+// Per-track soundfont voice state (shares soundfonts[sfSlot].handle via MIDI channels): song tracks
+// 0-7 plus the preview lane (8 == AudioEngine::PREVIEW_LANE). Defined in audio-engine.cpp.
 static const int SF_VOICE_COUNT = 9;
 extern SoundfontVoice sfVoices[SF_VOICE_COUNT];
 
 /**
- * ⚠️ **THERE IS NO SIZE LIMIT ON A SOUNDFONT, AND A LIMIT ON `.sf3` ALONE WOULD BE THE WRONG SHAPE.**
- * This is written down because it looks like an obvious thing to add.
+ * ⚠️ THERE IS NO SIZE LIMIT ON A SOUNDFONT, AND A LIMIT ON `.sf3` ALONE WOULD BE THE WRONG SHAPE.
+ * The two formats decode to the same float buffer; SF3 loads ~3× slower but peaks at about HALF the
+ * memory (SF2 holds its raw `smpl` chunk beside the floats). And no SF3 header states its decoded
+ * size, so no threshold could be derived.
  *
- * The two formats are the same font with the sample data compressed or not, and they end at the same
- * float buffer. Measured on a 3000-sample font decoding to 410 MB of float:
+ * ⚠️⚠️ NOR DOES THE ALLOCATOR BOUND IT (platform_memory.h): on Android a too-big load is killed on
+ * the write, not refused. What bounds it is a check against the DEVICE's free memory where memory
+ * grows: the counting TSF_MALLOC/TSF_REALLOC (soundfont-voice.cpp), `PcmSink::append` for compressed
+ * samples (audio-decoders.cpp), and `load_budget_bytes()` up front for WAV, whose header states it.
  *
- *   | | file | load | peak RSS |
- *   |---|---|---|---|
- *   | `.sf2` | 205 MB | 1.24 s | **825 MB** |
- *   | `.sf3` |  14 MB | 3.60 s | **443 MB** |
- *
- * SF3 costs about 3× the load time and **half the peak memory**, because the SF2 path holds the whole
- * raw `smpl` chunk alongside the float buffer while SF3's raw chunk is a fourteenth of the size. So
- * capping SF3 by file size refuses the cheaper of the two and admits the more expensive one — and it
- * would do it at a threshold nothing can derive, since **nothing in an SF3 header states the decoded
- * size**: tsf only learns it by decoding.
- *
- * ⚠️⚠️ **AND NOTHING BOUNDS IT AT THE ALLOCATOR EITHER — DO NOT ASSUME A FAILED LOAD FAILS CLEANLY.**
- * tsf does null-check every allocation it makes, so the unwind path is real; what is missing is the
- * null. Measured: **bionic granted a 256 GB request on a 7.36 GB device**, so on Android there is no
- * size at which `malloc` refuses and `tsf_load` cannot return null for want of memory — the process
- * is killed on the write instead, with no message and no autosave. glibc does refuse, but only above
- * `MemTotal + SwapTotal`: it refuses against the size of the whole machine, never against what is
- * free. Only Windows (real commit accounting) and 32-bit armhf (3 GB of address space) fail cleanly.
- *
- * What bounds it instead is a check against the DEVICE's free memory, made where the memory actually
- * grows: a counting `TSF_MALLOC`/`TSF_REALLOC` for both font formats (`soundfont-voice.cpp`),
- * `PcmSink::append` for compressed samples (`audio-decoders.cpp`), and `load_budget_bytes()` up
- * front for WAV — the one source whose decoded size a header states. ⚠️ Deliberately NOT an estimate
- * made before opening the file: that would re-parse what the loaders already parse, and **no SF3
- * header carries the decoded size at all** — tsf only learns it by decoding. The limit is therefore
- * derived per-device from the file as it loads, which is why a fixed cap on one format is still the
- * wrong shape.
- *
- * ⚠️ A load the user is WATCHING — opening a project, applying a preset — is still synchronous on the
- * drawing thread, and reports itself through `load_progress.h` while it runs. The one that is not is
- * the PATCH row's, which has no bar and must not have one; see `requestSoundfontLoad`.
+ * ⚠️ A load the user is WATCHING (opening a project, applying a preset) is synchronous on the
+ * drawing thread and reports through `load_progress.h`. The PATCH row's is not; see
+ * `requestSoundfontLoad`.
  */
 
 class AudioEngine {
@@ -84,17 +55,12 @@ public:
      * read by getSampleRate() and the scheduler-thread pitch/tic math — so the core never has to
      * reach into a platform stream object for it.
      *
-     * ⚠️ **It also re-initialises the send and master buses when the rate is not the one they were
-     * built at**, and that is the whole reason this is not a one-line store. The reverb, delay,
-     * master EQ, OTT and DUST all bake the sample rate into their coefficients at `reset(sr)`, and
-     * the constructor has no device to ask — so a 48 kHz output would otherwise run five effect
-     * modules computed for 44.1 kHz, with a synced delay writing 22050 samples where a beat is
-     * 24000. (The render path escaped it: `prepare_render` resets at the real rate.)
+     * ⚠️ It also RE-INITIALISES the send and master buses when the rate differs from the one they
+     * were built at: reverb, delay, master EQ, OTT and DUST bake the rate in at `reset(sr)`, and the
+     * constructor has no device to ask.
      *
-     * ⚠️ **The buses are at FACTORY defaults afterwards — the caller must re-push the project's FX.**
-     * At boot the shell already does: the stream opens before the project is pushed, and
-     * `push_params()` follows. Call this BEFORE the stream is unpaused; the audio callback must not
-     * be running.
+     * ⚠️ The buses are at FACTORY defaults afterwards — the caller must re-push the project's FX (at
+     * boot `push_params()` follows the stream open). Call BEFORE the stream is unpaused.
      */
     void setDeviceSampleRate(int sr);
 
@@ -115,16 +81,12 @@ public:
     enum class LoadFailure { NONE = 0, PARSE, OUT_OF_MEMORY, CANCELLED };
     LoadFailure lastLoadFailure() const { return lastLoadFailure_; }
 
-    // Decode a WAV file straight into native sample memory (no Java-heap round trip). Handles the
-    // same formats as the Kotlin parser it replaces for file loads — 16/24/32-bit PCM, 32-bit float,
-    // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0) on success, 0 on failure.
-    // Lets multi-MB samples load without OOM on the capped Java heap.
+    // Decode a WAV file straight into native sample memory: 8/16/24/32-bit PCM, 32-bit float,
+    // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0), 0 on failure.
     int loadSampleFromWavFile(int id, const char* path);
-    // Decode a compressed audio file (mp3/flac/ogg/opus, plus AAC in an ISO-BMFF container:
-    // m4a/mp4/m4b/mov/3gp) natively into native sample memory — no Java heap, no MediaCodec. Dispatches
-    // by file extension to dr_mp3 / dr_flac / stb_vorbis / libopus / (minimp4+FAAD2), decoding straight
-    // into the buffer the slot then owns. Returns the source sample rate (>0) on success, 0 on
-    // failure (incl. unsupported extension). AAC containers are handled here now — nothing needs MediaCodec.
+    // Decode a compressed audio file (mp3/flac/ogg/opus, AAC in m4a/mp4/m4b/mov/3gp) into native
+    // sample memory, by extension (audio-decoders.h). Returns the source rate (>0), 0 on failure or
+    // an unsupported extension.
     int loadSampleFromCompressed(int id, const char* path);
     bool hasStereoData(int id);
     // The bit depth the slot's audio came in at: 8/16/24/32 for a WAV, the STREAMINFO depth for a FLAC,
@@ -142,40 +104,25 @@ public:
     // ===================================
     // SOUNDFONT BANK — SF2 files → the shared tsf handles the SF voices render through
     // ===================================
-    // Loading a SoundFont is engine work, not platform work: it opens a file, parses it, and owns the
-    // handle every SF voice reads. It lived in jni-bridge.cpp until S6b, which put it out of reach of
-    // any non-Android build — tools/ptrender could not render an SF2 project, and the SDL shell would
-    // have had to reimplement the slot cache. The JNI functions are now thin forwards to these.
+    // ⭐ ONE PRESET IS LOADED, NOT THE WHOLE FILE: it is cut out into a small in-memory SoundFont
+    // (soundfont-trim.h), so a 200 MB bank costs the megabytes of the one sound in use. A file that
+    // cannot be cut apart loads whole.
     //
-    // ⭐ **ONE PRESET IS LOADED, NOT THE WHOLE FILE.** The chosen preset is cut out of the file into a
-    // small in-memory SoundFont (soundfont-trim.h) and that is what tsf parses, so a 200 MB orchestral
-    // bank costs the few megabytes of the one sound in use instead of 400 MB of everything else. A file
-    // this cannot cut apart falls back to loading it whole, which is the old behaviour exactly.
-    //
-    // MAX_SOUNDFONTS slots, shared by (path, bank, preset): the same sound asked for twice de-duplicates
-    // onto its existing slot (instruments sharing a handle play on distinct MIDI channels and apply
-    // their ADSR override per-note, so their state stays isolated), and one more distinct sound than
-    // there are slots evicts the least-recently-used one.
+    // MAX_SOUNDFONTS slots, keyed by (path, bank, preset): the same sound twice shares a slot
+    // (instruments play on distinct MIDI channels with per-note ADSR overrides), and one sound too
+    // many evicts the least-recently-used.
     int  loadSoundfont(int instrumentId, const char* path, int bank, int preset);   // → slot, or -1
     void unloadSoundfont(int slot);
     void clearAllSoundfonts();
 
     // ── the same load, off the drawing thread ─────────────────────────────────────────────────────
     //
-    // ⚠️⚠️ **A PRESET IS A DECODE, AND A DECODE DOES NOT FIT IN A FRAME.** Trimming made the cost
-    // proportional to one sound rather than to the bank, but a compressed one still has to be
-    // unpacked: measured on a 43 MB `.sf3`, 37 ms for an average preset and 288 ms for the largest —
-    // and that is on a desktop. Run where `loadSoundfont` is called from, that is the screen and the
-    // keyboard stopping dead every time the PATCH row settles.
+    // ⚠️⚠️ A PRESET IS A DECODE, AND A DECODE DOES NOT FIT IN A FRAME (a compressed preset can take
+    // hundreds of ms). So the decode runs on a worker; choosing the slot and publishing the pointer
+    // stay on the thread that owns the slot table. The instrument keeps playing its previous sound.
     //
-    // So the expensive half runs on a worker and the cheap half — choosing the slot, publishing the
-    // pointer — stays here, on the thread that owns the slot table. The instrument keeps PLAYING its
-    // previous sound the whole time; nothing goes silent waiting.
-    //
-    // ⚠️ ONE worker, and no queue. A request arriving while one is in flight is REFUSED, and the
-    // caller (which is polling anyway) asks again on the next frame. A queue would have to answer
-    // "which of the four presets you scrolled past do you still want", and the answer is always "ask
-    // me again", which is what refusing already says.
+    // ⚠️ ONE worker, no queue: a request while one is in flight is REFUSED and the polling caller
+    // asks again next frame — a queue would only keep presets already scrolled past.
     enum class SfRequest {
         READY,      ///< already resident — `readySlot` is it, and nothing was started
         STARTED,    ///< the worker has it; call collectSoundfontLoad until it comes back
@@ -265,10 +212,8 @@ public:
      */
     void startTake();
 
-    // Platform hook: the audio shell installs a callback that restarts the output stream if the
-    // platform paused it (Oboe today; ALSA/SDL on Linux). The Kotlin path called
-    // backend.resumeStream() before every scheduled note; songcore's consumer calls requestResume()
-    // for the same reason, without knowing what a stream is. Unset = no-op.
+    // Platform hook: restarts the output stream if the platform paused it. songcore's consumer
+    // calls requestResume() before every scheduled note. Unset = no-op.
     std::function<void()> onResumeRequested;
     void requestResume() { if (onResumeRequested) onResumeRequested(); }
 
@@ -295,13 +240,9 @@ public:
     /** The tempo the engine is running at (setTempo). A live note is scheduled at this one. */
     int tempo() const { return currentTempo.load(std::memory_order_relaxed); }
 
-    // The ninth voice: every audition — sampler, sample, note, SF instrument — plays HERE rather than
-    // on one of the 8 song tracks, which is what lets you hear a note you are dialling in without
-    // stealing a voice from the song under it. Kotlin names the same lane PREVIEW_TRACK_ID.
-    //
-    // Public because a preview is scheduled from OUTSIDE the engine: SongcoreHost::preview_note has to
-    // name the lane it plays on, and stop_preview the lane it kills. It was private while previews
-    // were built in Kotlin and only ever *arrived* as a track id.
+    // The ninth voice: every audition plays HERE rather than on a song track, so a note being
+    // dialled in never steals a voice from the song. Public because SongcoreHost::preview_note and
+    // stop_preview name the lane.
     static const int PREVIEW_LANE = 8;
 
     int getActiveVoiceCount();
@@ -325,16 +266,11 @@ public:
     /**
      * Every byte of audio the engine is holding, for the USED RAM readout.
      *
-     * ⚠️ IT LIVES HERE BECAUSE THE BUFFERS DO. A caller outside the engine can only reach the playable
-     * pool, through getSampleLength() — it cannot see the undo buffers, the RATE-HIGH originals, the
-     * FX-preview copy, the sample clipboard or a SoundFont's PCM, which together can be several times
-     * the pool while a sample is being edited. Summing it at the call site meant reporting a quarter of
-     * the truth and calling it a total. **A buffer added to this class must be added to this function**,
-     * and it is the only place that can be true of.
+     * ⚠️ IT LIVES HERE BECAUSE THE BUFFERS DO: undo buffers, RATE-HIGH originals, the FX-preview
+     * copy, the clipboard and SoundFont PCM are invisible outside, and can be several times the pool
+     * while editing. A buffer added to this class must be added to this function.
      *
-     * ⚠️ Deliberately takes no lock. It reads pointers and lengths the edit path swaps under
-     * `sampleEditMutex`, so a value can be one frame stale — which is the correct trade for a number
-     * drawn 60 times a second, and the reason it must never be used for an allocation decision.
+     * ⚠️ No lock: it can be a frame stale — fine for a readout, never for an allocation decision.
      */
     int64_t audio_memory_bytes() const;
 
@@ -399,20 +335,16 @@ public:
     // ALL REAL-TIME audio DSP lives here. processLiveBlock and renderOffline are thin wrappers.
     // Rule: NEVER add audio processing logic directly to processLiveBlock or renderOffline.
     //
-    // ⚠️ "Real-time" is the whole of the claim, and the word is load-bearing. There is OFFLINE DSP
-    // elsewhere — sample-editor.cpp runs OTT, DUST, DRIVE, the EQ, the limiter, a SOLA time-stretch
-    // and a resampler on the UI thread, and transient-detector.cpp and computeSpectrumFFT run FFTs.
-    // Read as "all DSP, anywhere", this line hides them: anything that protects the audio thread
-    // (flush-to-zero, for one) has to be armed on those paths separately, and they do arm it.
+    // ⚠️ REAL-TIME DSP: sample-editor.cpp, transient-detector.cpp and computeSpectrumFFT run offline
+    // DSP on the UI thread, and anything protecting the audio thread (flush-to-zero) must be armed
+    // there too.
     void processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate);
 
     // ===================================
     // LIVE BLOCK ENTRY (called by the platform backend's audio callback)
     // ===================================
-    // The platform shell (OboeAudioEngine::onAudioReady) hands its raw output buffer here. This does
-    // everything the old onAudioReady did MINUS the Oboe glue: flush-to-zero, clear the buffer, bail to
-    // silence during offline render, chunk into PROCESS_SUBBLOCK processAudioBlock calls, then capture the
-    // oscilloscope/spectrum/peak data. Backend-agnostic — no DSP lives in the callback shell.
+    // The backend's callback hands its output buffer here: flush-to-zero, clear, silence during an
+    // offline render, chunk into PROCESS_SUBBLOCK processAudioBlock calls, capture scopes and peaks.
     void processLiveBlock(float* output, int numFrames, int channelCount, float sampleRate);
 
     // What the live callback costs, over the last second of audio. A load is the time processLiveBlock
@@ -422,7 +354,7 @@ public:
     struct BlockTiming { int blockFrames = 0; int sampleRate = 0; int meanLoad = 0; int worstLoad = 0; };
     BlockTiming getBlockTiming() const;
 
-    // Get current global frame counter (for scheduling notes from Kotlin)
+    // The global frame counter, for scheduling.
     int64_t getCurrentFrame();
 
     // Schedule a note to be played at exact frame
@@ -438,12 +370,9 @@ public:
     /**
      * Schedule a note by INSTRUMENT NUMBER, leaving what it sounds like undecided.
      *
-     * ⚠️ **This is the sequencer's path, and the difference from scheduleNote() is WHEN.** That one
-     * is handed a sound — a sample id and a frequency — worked out before anyone hears it. This one is handed a number, and the engine resolves it against its
-     * program table at the trigger, which is the only moment a table row could have changed it.
-     *
-     * `tempo` is the tempo at SCHEDULE time: it sets the tick→frame scale for this note's PSL and
-     * vibrato, and must be the same one the derivation would have used then.
+     * ⚠️ The sequencer's path; the difference from scheduleNote() is WHEN. That one is handed a
+     * sound; this one a number, resolved against the program table at the trigger — the only moment
+     * a table row could have changed it. `tempo` is the tempo at SCHEDULE time (PSL/vibrato scale).
      */
     void scheduleProgramNote(int64_t targetFrame, int trackId, int instrumentId,
                              const songcore::NoteOnPayload& noteOn, int tempo,
@@ -459,10 +388,8 @@ public:
     // Schedule a soft note-off (triggers ADSR release instead of hard stop)
     void scheduleNoteOff(int64_t targetFrame, int trackId);
 
-    // Schedule a KEY release — a live MIDI-in note let go of (MIDI plan §4.1, phase E4).
-    // ⚠️ NOT the same thing as scheduleNoteOff, and the difference is the whole reason it exists: a
-    // one-shot sample with no release envelope IGNORES this and plays out (a drum hit finishes), where
-    // a KIL fades it. ADSR/TRIG release and the looping soft-kill are identical in both.
+    // Schedule a KEY release — a live MIDI-in note let go of. ⚠️ Unlike scheduleNoteOff, a one-shot
+    // with no release envelope IGNORES it and plays out; ADSR/TRIG release and the loop soft-kill match.
     void scheduleKeyRelease(int64_t targetFrame, int trackId);
 
     // Schedule a CUT: every voice on the track fades out over KILL_FADE_SAMPLES and ends, whatever
@@ -471,11 +398,9 @@ public:
 
     // End every track at once — what the END OF A RENDER'S RANGE does to the notes still sounding
     // (songcore::render_to_wav).
-    // ⚠️ A KIL, NOT A KEY RELEASE, and that is the whole point: what follows the last row of a render
-    // must be the TAILS and nothing else. An instrument with a release envelope — a sampler ADSR/TRIG,
-    // and every SoundFont preset, which always has one — fades by its OWN release; everything else
-    // gets the declicked fade, INCLUDING a one-shot, which a key release would leave to play out. A
-    // drum loop half-way through its bar at the end of the range is exactly that case.
+    // ⚠️ A KIL, NOT A KEY RELEASE: after the last row must come the TAILS only. A release envelope
+    // (sampler ADSR/TRIG, every SoundFont preset) fades by its own release; everything else, a
+    // one-shot included, gets the declicked fade.
     void scheduleNoteOffAll(int64_t targetFrame);
 
     // Clear all scheduled notes
@@ -486,12 +411,10 @@ public:
     // live edit must drop only what the track being rolled back is going to schedule again.
     void clearScheduledNotesFrom(int64_t fromFrame, int trackId = -1);
 
-    // Load table data from Kotlin
-    // rowData format: 16 rows × 8 bytes = 128 bytes
-    // Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
+    // Load a table: 16 rows × 8 bytes = [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value,
+    // fx3Type, fx3Value].
     void loadTable(int tableId, const uint8_t* rowData);
 
-    // Get current table row for a voice (for UI feedback)
     // Where each of the table's three column playheads stands on this track, or −1 for a column that
     // is not running one. Three markers on the TABLE screen; see ui/engine_feed.h.
     void getVoiceTableRows(int trackId, int out[TABLE_LANES]);
@@ -536,13 +459,9 @@ public:
     /**
      * An instrument's parameters were edited — make the notes ALREADY SOUNDING on it hear that.
      *
-     * ⚠️ **A TRIGGER COPIES THE INSTRUMENT INTO THE VOICE**, so a filter, drive, crush or send edit
-     * is otherwise silent until the next note: the note playing is running on the copy it took. Every
-     * live edit path (a mapped knob, the INSTRUMENT screen, a preset) calls this right after pushing
-     * the instrument, and the copy is refreshed on the audio thread like every other live write.
-     *
-     * ⚠️ No frame: it lands at the next drain, which is where a hand's edit belongs — there is no
-     * step it has to be aligned to, unlike an FX cell's.
+     * ⚠️ A TRIGGER COPIES THE INSTRUMENT INTO THE VOICE, so a filter, drive, crush or send edit is
+     * otherwise silent until the next note. Every live edit path calls this after pushing the
+     * instrument. No frame: it lands at the next drain — a hand's edit has no step to align to.
      */
     void refreshSoundingInstrument(int instrumentId);
 
@@ -609,10 +528,8 @@ public:
 
     // Set one band of an EQ preset slot (hex params converted to Hz/dB/Q internally).
     // slot: 0-127, band: 0-2, type: 0=OFF 1=LOSHELF 2=LOWCUT 3=BELL 4=HISHELF 5=HICUT
-    // ⚠️ A band type's NUMBER is its identity — it is stored in the project file, passed here verbatim
-    // and branched on by EqBandModule::setParams. LOWCUT and HICUT were appended, so the members are
-    // NOT in the order a reader would guess from the names. The one definition is eq-module.h; the
-    // UI's list at eq_editor.cpp agrees with it. Append, never insert.
+    // ⚠️ A band type's NUMBER is its identity (stored in the project file); LOWCUT and HICUT were
+    // appended, so the order is not the names'. Defined once in eq-module.h; append, never insert.
     // freqHex: 00-FF → 20–20kHz log, gainHex: 0-240 → −12.0..+12.0 dB (0.1 dB/step), qHex: 00-FF → 0.1–10 log
     void setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex);
 
@@ -643,16 +560,15 @@ public:
     // ===================================
 
     // Set reverb params, all 00-FF. feedbackHex is DCAY, the tail's length; sizeHex is SIZE, the room.
-    // wetHex controls return gain. ⚠️ sizeHex's default 0x60 is the room the reverb always had, so a
-    // caller that predates it changes nothing.
+    // wetHex controls return gain. sizeHex's default 0x60 is the default room.
     void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80, int sizeHex = 0x60);
 
-    // Set the reverb's character: the three cells that place and colour the tail. ⚠️ Each is NEUTRAL
-    // at the value a project written before they existed loads with — PRE 00, WIDE 80, MOD 40.
+    // Set the reverb's character: the three cells that place and colour the tail. Neutral at PRE 00,
+    // WIDE 80, MOD 40.
     void setReverbCharacter(int preHex, int widthHex, int modHex);
 
-    // Which reverb algorithm reads the cells above, 0 = the one that shipped. ⚠️ It rewrites none of
-    // them. Any thread; the audio thread switches at its next block.
+    // Which reverb algorithm reads the cells above, 0 = the default. ⚠️ It rewrites none of them.
+    // Any thread; the audio thread switches at its next block.
     void setReverbAlgo(int algo);
 
     // Set delay params. syncMode false: timeOrSubdiv is hex 00-FF (0-2s).
@@ -665,8 +581,8 @@ public:
     void setDelayTime(int timeOrSubdiv, bool syncMode, float bpm = 120.0f);
     void setDelayFeedbackWet(int feedbackHex, int wetHex);
 
-    // Set the delay's character: the three cells that shape the repeats. ⚠️ Each is OFF at the value
-    // a project written before they existed loads with — pong off, TONE FF, WOBL 00.
+    // Set the delay's character: the three cells that shape the repeats. Off at pong off, TONE FF,
+    // WOBL 00.
     void setDelayCharacter(bool pong, int toneHex, int wobbleHex);
 
     // Set delay→reverb send level. sendHex 00-FF: how much delay output feeds into reverb.
@@ -682,10 +598,9 @@ public:
     /**
      * Did a TABLE row's EQM move the master bus since this was last asked? Reading CLEARS it.
      *
-     * ⚠️ THE HOST'S "PUT THE MIXER'S EQ BACK ON STOP" IS DRIVEN BY THE SCHEDULER, WHICH A TABLE ROW
-     * NEVER REACHES — a table runs inside this class, per voice, off the audio thread. So the two
-     * ways an EQM can be authored arm the same restore from opposite sides of the seam, and this is
-     * the engine's half (songcore/host.h stop(), beside `Sequencer::eqm_active()`).
+     * ⚠️ The host's "restore the mixer's EQ on stop" is driven by the SCHEDULER, which a table row
+     * never reaches (tables run in here, per voice). So the two ways to author an EQM arm the same
+     * restore from opposite sides of the seam; this is the engine's half (songcore/host.h stop()).
      */
     bool takeTableMasterEqTouched() { return tableMasterEqTouched.exchange(false, std::memory_order_relaxed); }
 
@@ -723,7 +638,7 @@ public:
     // Schedule vibrato (PVB/PVX on an empty step) at targetFrame. depth=0 stops vibrato.
     void scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth);
 
-    // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
+    // Set a per-instrument modulation slot.
     void setInstrumentModulation(int sampleId, int slotIndex,
                                  int type, int dest, float amount,
                                  int attackSamples, int holdSamples, int decaySamples,
@@ -790,13 +705,10 @@ public:
     // render before the next one is due (at most `maxFrames`) and moves the clocks by that much.
     template <typename V> int processTableTick(V& voice, int from, int maxFrames, float sampleRate);
 
-    // The row half of the above, for ONE column's playhead: lane 0 also carries transpose and
-    // volume, and every lane carries its own FX slot. Applied on the blocks where that lane
-    // actually consumes a row. Split out so that processTableTick has ONE exit and the AUS/AUF ramp
-    // below it runs on EVERY block — the row work returning early is what used to end the tick, and
-    // a ramp that only moved on a row change would be sixteen values instead of a fade.
-    // Returns true when the row only STEERED the lane (HOP / THO) and the lane has been moved to
-    // the row that must play in this same tic — see the steering note at the definition.
+    // The row half of the above, for ONE column's playhead: lane 0 also carries transpose and volume,
+    // every lane its own FX slot. Split out so processTableTick has ONE exit and the AUS/AUF ramp runs
+    // EVERY block, not only on a row change. Returns true when the row only STEERED the lane (HOP /
+    // THO) and the lane now stands on the row that must play in this same tic.
     template <typename V> bool processTableRow(V& voice, const TableRow& row, int lane,
                                                bool shouldAdvance, int atFrame, float sampleRate,
                                                bool applyNV = true);
@@ -839,17 +751,11 @@ public:
     // Reset frame counter (for starting a new render)
     void resetFrameCounter();
 
-    // Clear every effect chain's INTERNAL STATE: the reverb's delay lines and its random-lineseg LCG,
-    // the delay buffers, and the OTT/DUST/limiter envelopes. stopAll() stops voices but leaves all of
-    // this running, so before S6b a render began inside the previous render's reverb tail — and since
-    // ReverbSc's LCG kept walking, the same song rendered differently every time. A render must be a
-    // function of the project, not of playback history.
-    //
-    // ⚠️ This is NOT a state-only reset: the module reset()s also put their factory DEFAULTS back
-    // (reverb decay 0x60, delay 500 ms, master EQ bypassed). A render pushes the whole project right
-    // after it (songcore::prepare_render); a device reopen at another rate goes through
-    // setDeviceSampleRate, which asks the audio thread to apply `busSettings` again. Never from the
-    // audio thread.
+    // Clear every effect chain's INTERNAL STATE (reverb delay lines and its LCG, delay buffers, OTT /
+    // DUST / limiter envelopes), so a render is a function of the project, not of playback history.
+    // ⚠️ Not state-only: the module resets put their factory DEFAULTS back. A render pushes the
+    // project right after (songcore::prepare_render); a device reopen replays `busSettings`. Never
+    // from the audio thread.
     void resetEffectState();
 
     // Get current frame counter
@@ -858,9 +764,8 @@ public:
     // Offline rendering flag: when true, processLiveBlock outputs silence instead of audio.
     void setOfflineRendering(bool offline);
 
-    // Current song tempo (BPM). Used by the standard-mode table advance to compute a
-    // frame-accurate, tempo-locked tic so table speed matches the sequencer (and render==live,
-    // device-independent). Set by the Kotlin scheduler before any note fires.
+    // Current song tempo (BPM), for the tempo-locked table tic (table speed matches the sequencer,
+    // render == live). Set before any note fires.
     void setTempo(int tempo);
 
     // Stems render mode: 0=normal full mix, 1-8=track N (0-indexed N-1),
@@ -898,14 +803,9 @@ private:
     /**
      * Flush-to-Zero: the engine's denormal protection, and not any compile flag.
      *
-     * ⚠️ **PER-THREAD, because FPCR/FPSCR/MXCSR are thread-local registers** — so it is not enough
-     * that "the audio thread arms it". EVERY entry point that runs DSP must call it first, on
-     * whatever thread it happens to be on. That includes the offline sample-editor operations, which
-     * run the same OTT, DUST, EQ and limiter code on the UI thread: a fade-out tail decays smoothly
-     * into the denormal range and stays there, at 10-100x the per-sample cost, which on a handheld is
-     * a frozen screen with no progress indication.
-     *
-     * Repeat calls are free — a `thread_local` flag makes it a no-op after the first.
+     * ⚠️ PER-THREAD (FPCR/FPSCR/MXCSR are thread-local), so EVERY entry point that runs DSP calls it
+     * first — including the sample editor's offline ops on the UI thread, where a fade-out tail would
+     * otherwise sit in denormals at 10-100× the cost. Repeat calls are free.
      */
     static void setFlushToZeroForCurrentThread();
 
@@ -917,27 +817,16 @@ private:
     void renderMetronome(float* output, int numFrames, int channelCount, float sampleRate,
                          int64_t blockStartFrame, bool offlineRender);
 
-    // ⚠️ THE GRANULARITY AT WHICH EVENTS ARE RESOLVED, and the size of every per-block buffer.
-    // The two are ONE constant on purpose: the correctness limit is the tighter of the pair, so a
-    // separate, larger buffer cap could only ever describe a call nothing is allowed to make.
+    // ⚠️ THE GRANULARITY AT WHICH EVENTS ARE RESOLVED, and the size of every per-block buffer — one
+    // constant, since the correctness limit is the tighter of the two.
     //
-    // The correctness half. processAudioBlock applies a block's note-ons inside one pass: each retrigger
-    // fades the previous same-track voice and takes a new slot, but a faded voice only frees up as
-    // it is MIXED. So when several same-track retriggers land in ONE block they pile up slots,
-    // exhaust the voice pool, and get recycled — i.e. notes are silently DROPPED.
+    // Correctness: a block's note-ons are applied in one pass, and a faded voice frees its slot only
+    // as it is MIXED, so several same-track retriggers in one block exhaust the pool and notes are
+    // silently DROPPED (a 940-frame ALSA period lost ~17% of an RPT 01's retriggers). Live and
+    // offline both chunk here, so what you hear is what you export.
     //
-    // That makes the audible result a function of the caller's block size, which is exactly the
-    // Phase-4 "retrig sounds different on the device" bug: the Flip's ALSA period is 940 frames and
-    // an RPT 01 at 128 BPM retriggers every ~430, so 2+ retriggers shared every block. Measured on
-    // the user's REPEAT_TEST over 20 s (tools/blocktest): 128 → 4454 onsets/44 gaps, 256 →
-    // 4457/53, 512 → 4158/277, 940 → 3680/421 (17% of the retriggers gone, gaps up to 26 ms).
-    // renderOffline always chunked at 256, which is why the EXPORT was correct while live playback
-    // pulsed. Both paths now chunk here, so what you hear is what you export.
-    //
-    // The buffer half. Every per-block scratch member below is a fixed array of this many frames,
-    // indexed by `numFrames`, so processAudioBlock rejects a larger block rather than overrun them.
-    // Both shipped wrappers chunk here and nothing else calls it — the reader who will is the future
-    // ALSA/JACK backend this header invites, and that reader calls processAudioBlock directly.
+    // Buffers: every per-block scratch member is a fixed array of this many frames, so
+    // processAudioBlock rejects a larger block rather than overrun them.
     static constexpr int PROCESS_SUBBLOCK = 256;
 
     // Device output sample rate, cached from the platform backend (see setDeviceSampleRate). Defaults to
@@ -994,19 +883,10 @@ private:
     Voice voices[MAX_VOICES];
 
     // ⚠️ The TIC00 table cursor, per TRACK — where the track's table stands once no voice is left to
-    // carry it. At TIC00 the table advances per NOTE, so the cursor has to outlive any one voice: a
-    // one-shot whose sample runs out before the next note leaves nothing to read the row off. Both the
-    // audible row and the TABLE screen's indicator then depend on the instrument's ROOT note — root
-    // sets playback rate, rate sets how long the sample lasts — which is not a property of the table.
-    //
-    // It mirrors the VOICE's pair rather than any one answer derived from it, so the two consumers
-    // (the next retrigger's start row; the row the indicator shows) derive what they need the same way
-    // they do from a live voice. Written in ONE place — the sampler table-tick loop, below the row
-    // logic. stopAll() clears it, so PLAY, and every render, begins at row 0.
-    //
-    // ⚠️ **PER COLUMN, because the columns advance separately.** Only a column actually at TIC00
-    // carries over; the entry is written for all three so the two consumers read the same shape they
-    // would from a live voice, and each of them checks that column's own rate before using it.
+    // carry it (a one-shot can run out before the next note, and the row would then depend on the
+    // root note). It mirrors the voice's pair, so the next retrigger and the TABLE screen derive from
+    // it as from a live voice. Written in ONE place (the sampler table-tick loop); stopAll() clears it.
+    // ⚠️ PER COLUMN: only a column at TIC00 carries over; each consumer checks the column's rate.
     struct Tic00Cursor {
         int tableId       = -1;  // -1 = no TIC00 table running on this track; the next note starts at row 0
         int  row[TABLE_LANES]           = {0, 0, 0};    // each column's row — where its table stands
@@ -1168,16 +1048,11 @@ private:
 
     // ── the two halves of a load, split so one of them can run somewhere else ─────────────────────
     //
-    // `parseSoundfont` is everything expensive and everything that touches a FILE — the trim, the
-    // decode, the fallback to the whole bank — and it touches no slot, so it is what the worker runs.
-    // `installSoundfont` is everything that touches the slot table, and only the owning thread runs
-    // it. `loadSoundfont` is still the two of them back to back.
-    //
-    // ⚠️ **`parseSoundfont` MUST BE THE ONLY tsf PARSE RUNNING.** tsf's allocator guard, its progress
-    // sink and its cancel flag are per-process hooks; the guard's block table is mutexed and the other
-    // two are per-thread, but two concurrent parses would still be two decodes bidding for the memory
-    // the guard measures one at a time. `waitForSoundfontLoad` is what every synchronous caller uses
-    // to keep that true.
+    // `parseSoundfont` is everything expensive and file-touching (trim, decode, whole-bank fallback)
+    // and touches no slot, so the worker runs it; `installSoundfont` touches the slot table and only
+    // the owning thread runs it. `loadSoundfont` is the two back to back.
+    // ⚠️ `parseSoundfont` MUST BE THE ONLY tsf PARSE RUNNING: two would be two decodes bidding for
+    // the memory the guard measures one at a time. `waitForSoundfontLoad` keeps that true.
     tsf* parseSoundfont(const char* path, int bank, int preset, LoadFailure* failure);
     int  installSoundfont(tsf* handle, int instrumentId, const char* path, int bank, int preset);
 
@@ -1260,11 +1135,9 @@ private:
     std::vector<ScheduledKill>        killBatch;
     std::vector<ScheduledParamUpdate> paramBatch;
 
-    // Demand-driven visualizer capture (1.2 / 1.10): the UI read methods (getTrackWaveforms /
-    // getSpectrumMagnitudes*) stamp these with the wall clock; the audio callback only does the
-    // (expensive) OCTA accumulation / spectrum-ring writes when a read happened recently. No
-    // Kotlin→C++ enable flag to keep in sync — capture simply follows actual demand, and stops
-    // ~CAPTURE_IDLE_MS after the visualizer/EQ stops polling.
+    // Demand-driven visualizer capture: the UI read methods stamp these with the wall clock, and the
+    // audio callback does the OCTA / spectrum writes only while a read happened recently (stopping
+    // ~CAPTURE_IDLE_MS after the polling stops).
     static const int64_t CAPTURE_IDLE_MS = 250;
     std::atomic<int64_t> lastTrackWaveformReadMs{-CAPTURE_IDLE_MS};
     std::atomic<int64_t> lastSpectrumReadMs{-CAPTURE_IDLE_MS};
@@ -1272,9 +1145,7 @@ private:
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::steady_clock::now().time_since_epoch()).count();
     }
-    // Written by the audio/render thread (processAudioBlock), read by the Kotlin scheduler via
-    // getCurrentFrame() JNI — atomic (relaxed) makes that formally race-free at zero cost on arm64
-    // and keeps the planned Linux port correct on unknown hardware.
+    // Written by the audio/render thread, read by the scheduler via getCurrentFrame() — relaxed atomic.
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
 
     // The frame the transport-stop ramp is over at, or −1 when no stop is in flight. Audio thread;
@@ -1285,11 +1156,9 @@ private:
     std::atomic<bool>    ottRestartRequested{false};  // startTake() → the next block's top
     void startStopRamp(int64_t blockStartFrame);
 
-    // Session entropy mixed into per-note RNG seeds (RND/DRNK LFO). Reseeded from the wall
-    // clock at construction and at every resetFrameCounter() (= offline-render start): seeds
-    // derived from the frame counter alone made repeated renders of the same song
-    // bit-identical, because the counter resets to 0 for each render. Plain (non-atomic) is
-    // fine — a torn read would just be different entropy.
+    // Session entropy mixed into per-note RNG seeds (RND/DRNK LFO), reseeded from the wall clock at
+    // construction and every resetFrameCounter() (= render start): the frame counter alone resets to
+    // 0 per render, which would make renders identical. Non-atomic: a torn read is other entropy.
     uint32_t noteSeedEntropy = 0x9E3779B9u;
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
 
@@ -1443,12 +1312,9 @@ private:
     bool  trackHasVoice[TRACK_WAVEFORM_COUNT] = {};
 
     // ── Per-block scratch for processAudioBlock (audio-thread-only) ──────────────────────────────
-    // Engine members rather than audio-thread-stack locals (~116 KB per call) so a small-stack
-    // real-time audio thread — e.g. a Linux ALSA/JACK callback — can't overflow. Safe as shared
-    // members because processAudioBlock is never concurrent: processLiveBlock skips it during offline
-    // render (isOfflineRendering gate) and the render thread is then its sole caller — the same
-    // single-caller invariant the voices[]/framePeaks members rely on. Each is (re)initialised every
-    // block; nothing persists across blocks.
+    // Engine members, not stack locals (~116 KB), so a small-stack real-time thread cannot overflow.
+    // Safe shared: processAudioBlock is never concurrent (the live path skips it during a render).
+    // Re-initialised every block.
     float revSendBufL[PROCESS_SUBBLOCK], revSendBufR[PROCESS_SUBBLOCK];   // panned reverb-send sum
     float dlySendBufL[PROCESS_SUBBLOCK], dlySendBufR[PROCESS_SUBBLOCK];   // panned delay-send sum
     float revWetL[PROCESS_SUBBLOCK], revWetR[PROCESS_SUBBLOCK];           // reverb wet output
@@ -1460,10 +1326,7 @@ private:
     float trackWaveAccumR[TRACK_WAVEFORM_COUNT][PROCESS_SUBBLOCK];
     bool  trackWasActive[TRACK_WAVEFORM_COUNT];             // OCTA: lane had a non-fading voice this block
 
-    // Downsampling for oscilloscope (capture every Nth sample)
-    // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)
-    // Adjust this value to control oscilloscope speed:
-    //   1 = 14ms visible (super fast), 10 = 140ms, 20 = 280ms, 50 = 700ms, etc.
+    // Oscilloscope capture stride: 1 = every sample (~14 ms visible), larger = slower scrolling.
     static const int WAVEFORM_DOWNSAMPLE = 1;  // 1 = capture every sample (no downsampling)
     int waveformDownsampleCounter = 0;
 };

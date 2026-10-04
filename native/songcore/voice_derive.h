@@ -3,23 +3,12 @@
 
 // ─── Below-seam derivation — the PURE half of the consumer ───────────────────────────────────────
 //
-// Everything Kotlin's AudioEngine.scheduleNote() computes between "a NoteOn happened" and "call the
-// engine": the frequency, the base frequency, the slice window, the SoundFont slot/velocity/root
-// transpose, the tick→frame conversions, and the modulation-slot pushes. Pulled out as free functions
-// over plain values — no engine, no I/O, no state — for one reason: **so it can be goldened**.
-//
-// The conformance trace stops at the router, ABOVE all of this (event-schema §6), so none of it is
-// covered by the 32 golden traces. Left inside the consumer, calling AudioEngine directly, it would
-// be verifiable only by ear on a device. As pure functions it gets the same measuring stick S3 gave
-// resolve_step_params: a JVM golden (S5ConsumerGoldenTest → tools/testdata/units/s5-consumer.txt) records
-// what the REAL Kotlin code derives, and tools/ptvoice re-derives it here and byte-compares — floats
-// as raw binary32 bits, so "close enough" cannot pass.
-//
-// engine_consumer.h is then only plumbing: derive → call the engine with the fields.
-//
-// Float exactness: note→Hz and detune→multiplier come from the generated note_tables.h (baked from
-// Kotlin's own Double pow — see there), and every other expression keeps Kotlin's operation order,
-// because these values reach the engine's pitch math and a 1-ULP drift changes every rendered byte.
+// Everything between "a NoteOn happened" and "call the engine": frequency, base frequency, slice
+// window, SoundFont slot/velocity/root transpose, tick→frame, modulation pushes. Free functions over
+// plain values so they can be tested — the event traces stop at the router, above all of this.
+// Floats are compared as raw bits, so "close enough" cannot pass.
+// note→Hz and detune come from note_tables.h; every other expression keeps its operation order, since
+// a 1-ULP drift changes every rendered byte.
 
 #include <algorithm>
 #include <cstdint>
@@ -28,15 +17,14 @@
 #include "event.h"
 #include "model.h"
 #include "note_tables.h"
-#include "program.h"     // Program + the two derivations, which live below the sequencer
+#include "program.h"     // Program + the two derivations
 #include "scheduler.h"   // note_to_midi / note_from_midi
 #include "timing.h"      // TICS_PER_STEP
 
 namespace songcore {
 
-// ─── Routing: the per-instrument facts the app resolves at load time ─────────────────────────────
-// songcore never opens a file, so the two things the file loaders learn are pushed down here. Both
-// mirror Kotlin state exactly: AudioEngine.sampleRateRatios and InstrumentController.sfSlotMap.
+// ─── Routing: the per-instrument facts learned at load time ──────────────────────────────────────
+// songcore opens no file except through the loaders, which record these two facts here.
 struct Routing {
     float sampleRateRatio[POOL_INSTRUMENTS];  // deviceRate / fileRate; 1.0 = no correction (or unloaded)
     int   sfSlot[POOL_INSTRUMENTS];           // slot the soundfontPath resolved to; -1 = none → note dropped
@@ -87,8 +75,8 @@ inline Program make_program(const Project& project, const Routing& routing, int 
     return make_program(ins, ratio, routing.sfSlot[id]);
 }
 
-// AudioEngine.setInstrumentModulation, one per slot. `type == 0` is the "clear this slot" push that
-// Kotlin makes for NONE / unrouted-dest slots — it is a real call, not an absence.
+// One modulation slot's push. `type == 0` is a real "clear this slot" call, made for NONE and
+// unrouted-dest slots.
 struct ModPush {
     int   sampleId = 0;
     int   slotIndex = 0;
@@ -98,8 +86,8 @@ struct ModPush {
     int   attackSamples = 0;
     int   holdSamples = 0;
     int   decaySamples = 0;
-    float sustainLevel = 0.5f;   // Kotlin's default for every non-ADSR/TRIG slot
-    float lfoHz = 4.0f;          // Kotlin's default for every non-LFO slot
+    float sustainLevel = 0.5f;   // the default for every non-ADSR/TRIG slot
+    float lfoHz = 4.0f;          // the default for every non-LFO slot
     int   oscShape = 0;
     int   releaseSamples = 0;
     int   lfoTrigMode = 1;
@@ -126,9 +114,8 @@ inline int mod_dest_code(ModDest dest) {
     }
 }
 
-// ⚠️ **"off" IS THE ANSWER FOR ANY NAME THIS DOES NOT KNOW**, which is how a project written by a
-// newer build opens in an older one: the loop is lost rather than mis-read as the wrong mode. That is
-// the right way to fail and it is SILENT — worth knowing before adding a mode, not after.
+// ⚠️ "off" is the answer for any name this does not know, so a newer build's project opens with the
+// loop lost rather than mis-read. That failure is SILENT — know it before adding a mode.
 inline int loop_mode_code(const std::string& mode) {
     if (mode == "fwd") return 1;
     if (mode == "png") return 2;
@@ -143,10 +130,9 @@ inline int filter_type_code(const std::string& type) {
     return 0;
 }
 
-// ─── AudioEngine.pushInstrumentModulation ────────────────────────────────────────────────────────
-// The 0.5f / 4.0f / 0 defaults below are Kotlin's *named-argument defaults* for sustainLevel / lfoHz /
-// oscShape, which the C++ engine method does not have. Passing anything else would change how a
-// non-LFO slot behaves, so they are written out.
+// ─── The instrument's modulation push ────────────────────────────────────────────────────────────
+// The 0.5f / 4.0f / 0 defaults for sustainLevel / lfoHz / oscShape are written out: anything else
+// changes how a non-LFO slot behaves.
 inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleRate) {
     ModPushes out;
     const float framesPerTic = frames_per_tic_f(tempo, sampleRate);
@@ -161,8 +147,7 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
         const ModSlot& slot = ins.modSlots[i];
         const int dest = mod_dest_code(slot.dest);
 
-        // Kotlin clears the slot when the dest is unrouted, and its `when` has no arm for NONE or
-        // TRACKING — both fall to the else branch, which also clears.
+        // An unrouted dest clears the slot; NONE and TRACKING clear it too.
         if (dest == 0 || slot.type == ModType::NONE || slot.type == ModType::TRACKING) continue;
 
         p.dest   = dest;
@@ -170,7 +155,7 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
 
         switch (slot.type) {
             case ModType::AHD:
-            case ModType::DRUM:   // DRUM = AHD semantics; type 4 so C++ can differentiate later
+            case ModType::DRUM:   // AHD semantics; its own type 4 so the engine can tell them apart
                 p.type          = (slot.type == ModType::AHD) ? 1 : 4;
                 p.attackSamples = tics_to_frames(slot.attack, framesPerTic);
                 p.holdSamples   = tics_to_frames(slot.hold,   framesPerTic);
@@ -213,12 +198,8 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
 }
 
 // The two pushes that must reach the engine BEFORE a voice triggers: the modulation slots and the
-// EQ/send routing (AudioEngine.pushInstrumentModulation + pushInstrumentEqAndSends). A template over
-// the engine, like plan_note_on, so tools/ptvoice golden-checks the calls it makes.
-//
-// Both the note path (below) and the project→engine setup (engine_setup.h) push these — Kotlin does
-// too, from scheduleNote and from RenderController.setupInstrumentParams — so they share one
-// implementation here rather than two that could drift.
+// EQ/send routing. Shared by the note path and engine_setup.h; templated so a test can check the
+// calls.
 template <typename Engine>
 void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tempo, int sampleRate) {
     const ModPushes m = derive_mod_pushes(ins, tempo, sampleRate);
@@ -233,9 +214,8 @@ void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tem
     engine.setInstrumentSendLevels(ins.sampleId, ins.reverbSend, ins.delaySend);
 }
 
-// AudioEngine.updateInstrumentPlaybackParams — the sample-playback window, loop, drive/crush/
-// downsample and filter. (Kotlin's applySoundfontFilterOverrides is this same call under another
-// name, which is why the SF and sampler setup paths push identical params.)
+// The sample-playback window, loop, drive/crush/downsample and filter. SoundFont and sampler
+// instruments push the same params.
 template <typename Engine>
 void push_instrument_playback_params(Engine& engine, const Instrument& ins) {
     engine.setInstrumentParams(ins.sampleId, ins.sampleStart, ins.sampleEnd, ins.reverse,
@@ -244,9 +224,8 @@ void push_instrument_playback_params(Engine& engine, const Instrument& ins) {
                                filter_type_code(ins.filterType), ins.filterCut, ins.filterRes);
 }
 
-// One table, in the 16 × 8 byte layout `AudioEngine::loadTable` reads. The note path pushes it
-// lazily (below) and the host pushes it eagerly for a live key (engine_consumer.h); one packer, so
-// the two cannot disagree about a byte.
+// One table in the 16 × 8 byte layout `AudioEngine::loadTable` reads. One packer for the note path's
+// lazy push and the host's eager one (engine_consumer.h), so they cannot disagree about a byte.
 template <typename Engine>
 void push_table(Engine& engine, const Project& project, int tableId) {
     if (tableId < 0 || tableId >= static_cast<int>(project.tables.size())) return;
@@ -268,18 +247,11 @@ void push_table(Engine& engine, const Project& project, int tableId) {
 }
 
 // ─── The NoteOn plan ─────────────────────────────────────────────────────────────────────────────
-// The exact sequence of engine calls a NoteOn produces — a TEMPLATE over the engine, not a call into
-// a concrete one, for a specific reason: AudioEngine satisfies it as-is (same method names), and
-// tools/ptvoice can instantiate it with a recorder instead. That means the host conformance check
-// covers not just the derived values but the *sequence* — which calls happen, in what order, and when
-// a note is dropped instead. Nothing about the note path is left to be verified only by ear.
-//
-// `tableLoaded` is the caller's POOL_TABLES-sized cache (Kotlin's `loadedTables` set).
-//
-// `rootAudition` is a PREVIEW-only flag and it is deliberately a parameter rather than a field on the
-// Event: the event schema is ratified, its records are byte-compared against the goldens, and a
-// preview is not a bus event in the first place (it never reaches the router or the trace). See
-// derive_soundfont_note for what it does and why the INSTRUMENT screen cannot work without it.
+// The exact sequence of engine calls a NoteOn produces — a template, so a test can substitute a
+// recorder and check which calls happen, in what order, and when a note is dropped.
+// `tableLoaded` is the caller's POOL_TABLES-sized cache.
+// `rootAudition` is preview-only and a parameter, not an Event field: a preview never reaches the
+// bus. See derive_soundfont_note.
 template <typename Engine>
 void plan_note_on(Engine& engine, const Event& ev, const Project& project, const Routing& routing,
                   bool* tableLoaded, bool rootAudition = false) {
@@ -290,8 +262,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     if (instrumentId < 0 || instrumentId >= static_cast<int>(project.instruments.size())) return;
     const Instrument& ins = project.instruments[instrumentId];
 
-    // Keep the engine's tempo current so the standard-mode table advance stays tempo-locked (live
-    // playback and offline render both schedule through here).
+    // Keep the engine's tempo current so the table advance stays tempo-locked.
     const int tempo      = project.tempo;
     const int sampleRate = engine.getSampleRate();
     engine.setTempo(tempo);
@@ -299,16 +270,11 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     // Modulation / EQ / sends must reach the engine BEFORE the note triggers.
     auto push_instrument_state = [&]() { push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate); };
 
-    // Lazy table push, exactly like Kotlin's `loadedTables` — but built from songcore's own project
-    // copy, so no table data has to cross the JNI boundary.
-    // ⚠️ **AND EVERY TABLE THE HIT COULD BE HANDED ON TO.** An `INS` cell sends the hit to another
-    // instrument, which brings its own table, and the engine walks that chain at the TRIGGER from its
-    // own copies — so a link whose copy was never sent, or was sent before the user edited it, routes
-    // on data that is no longer on screen. Pushing only the note's own table made an edit to a table
-    // further down the chain do nothing at all.
-    //
-    // The walk follows INS cells, table by table, and the caller's cache doubles as the visited set,
-    // so each table is built and sent at most once per invalidation.
+    // Lazy table push from songcore's own project copy.
+    // ⚠️ And every table the hit can be handed on to: an `INS` cell sends it to another instrument and
+    // its table, and the engine walks that chain at the TRIGGER from its own copies — an unsent or
+    // stale link routes on data no longer on screen. The cache doubles as the visited set, so each
+    // table is sent at most once per invalidation.
     auto ensure_table_loaded = [&](int rootTableId) {
         int  pending[POOL_TABLES];
         bool queued[POOL_TABLES] = {false};
@@ -340,29 +306,23 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     };
 
     const Program program = make_program(project, routing, instrumentId);
-    // ⚠️ **PUSHED HERE SO IT CANNOT BE STALE.** The engine resolves this note from its own copy of
-    // the instrument, and a copy that only some other call site remembered to refresh is a silent wrong
-    // sound. Writing it on the path that is about to read it makes that impossible.
+    // ⚠️ Pushed here, on the path about to read it, so the engine's copy of the instrument cannot be
+    // stale.
     engine.setProgram(instrumentId, program, program.sliceMarkers, program.sliceCount);
 
-    // ⚠️ **THE NOTE IS QUEUED BY NUMBER AND RESOLVED AT THE HIT** (AudioEngine::scheduleProgramNote),
-    // so nothing below derives a sound. What still happens HERE is everything that must already be in
-    // the engine before the voice starts: the instrument's mod/EQ/sends, its playback params, its
-    // table, and the resume.
-    //
-    // The empty-slot gate stays here too, and deliberately: a note on an empty slot must make NO
-    // engine calls at all, which it cannot do if the question is not asked until the trigger.
+    // ⚠️ The note is queued BY NUMBER and resolved at the hit (AudioEngine::scheduleProgramNote), so
+    // nothing below derives a sound — only what must be in the engine before the voice starts.
+    // The empty-slot gate stays here: a note on an empty slot must make NO engine calls at all.
     const int tableId = (n.tableId >= 0) ? n.tableId : instrumentId;
 
     if (ins.instrumentType == InstrumentType::SOUNDFONT) {
         if (!program.hasSoundfont || program.sfSlot < 0) return;   // never loaded — dropped
 
         push_instrument_state();
-        // Every trigger: the TSF preset must carry the user's ATK/DEC/SUS/REL (else a KIL note-off
-        // uses the SF2's own, often instant, release), and instrumentParams[sfId] must be reset to
-        // drive=0 + the right filter (else stale WAV drive/filter values from a previous render or
-        // project load bleed into the SF voice). Keyed by instrument id, not sampleId: two instruments
-        // sharing one de-duplicated SF2 handle must stay isolated.
+        // Every trigger: the TSF preset must carry the user's ATK/DEC/SUS/REL (or a KIL uses the SF2's
+        // own, often instant, release), and instrumentParams[sfId] is reset to drive 0 + the right
+        // filter (or stale sampler values bleed into the SF voice). Keyed by instrument id: two
+        // instruments sharing one SF2 handle must stay isolated.
         const SFOverrides& ov = ins.sfOverrides;
         engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
         push_instrument_playback_params(engine, ins);

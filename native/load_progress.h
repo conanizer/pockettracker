@@ -4,21 +4,14 @@
 
 // ─── A LOAD REPORTING ITSELF, AND THE WAY A USER STOPS ONE ───────────────────────────────────────
 //
-// Opening a file is the one thing the app does that can take longer than a frame. Most of them do
-// not: a 106 MB `.sf2` is read and converted in a quarter of a second, and every `.wav` is a read.
-// What is slow is DECODING — a compressed `.sf3` unpacks Vorbis once per sample, and an mp3/flac/
-// ogg/opus/m4a sample unpacks in proportion to its duration — and there the frame loop stops for as
-// long as it takes.
+// Opening a file can take longer than a frame when it means DECODING: an .sf3's Vorbis samples, or
+// a compressed sample in proportion to its length. The frame loop stops for as long as it takes.
 //
-// ⭐ **This is an ambient sink and not a parameter, and `tsf_load` is the reason.** The soundfont
-// decode is inside a vendored single-header library that takes no callback and cannot be handed one;
-// the only way a report gets out of it is a hook it can reach without being told about. The
-// soundfont MEMORY GUARD (soundfont-voice.cpp) is the same shape for the same reason, and this sits
-// beside it deliberately.
+// ⭐ An ambient sink, not a parameter, because `tsf_load` is a vendored single-header library that
+// takes no callback. The soundfont memory guard (soundfont-voice.cpp) has the same shape.
 //
-// ⚠️ **NOTHING IS INSTALLED BY DEFAULT.** Every `load_tick` on a tool, an offline render or a boot
-// path is a null check that returns "keep going", so a load behaves exactly as it did before this
-// existed. Only the shell installs a sink, and only while it has a window to draw into.
+// ⚠️ NOTHING IS INSTALLED BY DEFAULT: `load_tick` is a null check returning "keep going" in tools,
+// offline renders and boot. Only the shell installs a sink, while it has a window to draw into.
 namespace pt {
 
 /**
@@ -43,10 +36,8 @@ void end_load();
 /**
  * Report progress from inside a load. **False means the user cancelled and the caller must stop.**
  *
- * ⚠️ Callers already have an unwind path — the memory guard's — and this deliberately reuses it
- * rather than adding a second one: `appendBlock` returns false, `tsf_load` returns null, and the
- * LOAD FAILED at the end of each already exists and is already tested. `load_cancelled()` is what
- * separates "the user stopped it" from "the machine ran out" at the point the message is chosen.
+ * ⚠️ It reuses the memory guard's unwind path (`appendBlock` false, `tsf_load` null, LOAD FAILED);
+ * `load_cancelled()` tells a cancel from out-of-memory when the message is chosen.
  */
 bool load_tick(float fraction);
 

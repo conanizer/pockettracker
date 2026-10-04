@@ -16,12 +16,8 @@ using songcore::Phrase;
 using songcore::Project;
 
 /**
- * One load, opened and closed.
- *
- * ⚠️ **RAII BECAUSE THE LOAD PATHS RETURN EARLY, AND SEVERAL OF THEM DO.** The browser's switch has
- * four arms that `return` from inside it; a hand-written `end_load()` at the bottom would be missed
- * by each of them and would leave `Overlay::LOADING` up forever — an app that has stopped taking
- * input with nothing on screen that ever appeared to explain it.
+ * One load, opened and closed. ⚠️ RAII because load paths return early (four arms of the browser's
+ * switch do); a missed `end_load()` would leave `Overlay::LOADING` up and the app deaf to input.
  */
 struct LoadScope {
     LoadScope(InputDispatcher& d, long long now_ms, std::string detail) : d_(d) {
@@ -40,11 +36,8 @@ struct LoadScope {
 inline std::string adopted_name(const std::string& stem) { return stem.substr(0, 20); }
 
 /**
- * The name slot `id` would carry if it had adopted its CURRENT source file's — "" when it has no
- * source. Compare a slot's actual name against this to tell an auto-adopted name from a typed one.
- *
- * The source is the SoundFont path for a SoundFont slot and the sample path for everything else; an
- * EXTERNAL slot has neither, and answers "".
+ * The name slot `id` would carry had it adopted its CURRENT source file's — "" with no source (EXTERNAL
+ * has none). Compare the actual name against this to tell an adopted name from a typed one.
  */
 inline std::string instrument_auto_name(const Project& p, int id) {
     if (id < 0 || static_cast<size_t>(id) >= p.instruments.size()) return {};

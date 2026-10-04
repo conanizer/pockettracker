@@ -335,27 +335,13 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             break;
         }
 
-    // Ascending by source offset, so the emitted chunk has the same shape a real file does.
+    // Ascending by source offset, so the emitted chunk has a real file's shape. What must hold: every
+    // offset indexes the chunk emitted below, the terminal header exists, and a compressed sample's
+    // header order matches its bytes' order (one loop writes both).
     //
-    // ⚠️ **WHAT ACTUALLY HAS TO HOLD IS NARROWER THAN IT LOOKS.** tsf's uncompressed pass walks the
-    // headers in table order and reads its input at its OUTPUT cursor, which reads as "the table's
-    // order must be the chunk's order". It is not: in an all-PCM font that pass ends up copying the
-    // sample chunk STRAIGHT THROUGH, one float per frame at the same index, and the terminal header is
-    // extended to the end of the buffer unconditionally, which fills in whatever the earlier headers
-    // did not reach. The offsets then index that copy correctly whatever order they were written in —
-    // reversing this sort deliberately did not move a single sample on six real fonts.
-    //
-    // The three things that DO have to hold: every offset indexes the chunk emitted below, the terminal
-    // header exists, and a compressed sample's header order matches the order its bytes were appended
-    // — true by construction, one loop writes both.
-    //
-    // ⚠️⚠️ **IN A COMPRESSED FONT THE COMPRESSED SAMPLES MUST COME FIRST, AND THAT IS NOT COSMETIC.**
-    // The straight-through copy above is what makes gaps between PCM samples harmless, and it stops
-    // the moment tsf has decoded one Ogg stream: from then on a PCM header is read from its OWN
-    // offset instead of the output cursor. A PCM sample sitting BEFORE the first compressed one would
-    // be read the old way and land at the wrong index, silently. Putting every Ogg stream first means
-    // the switch has already happened before any PCM header is reached, so there is one rule for all
-    // of them.
+    // ⚠️⚠️ IN A COMPRESSED FONT THE COMPRESSED SAMPLES MUST COME FIRST: once tsf has decoded one Ogg
+    // stream it reads a PCM header from its OWN offset instead of the output cursor, so a PCM sample
+    // before the first Ogg one would land at the wrong index, silently.
     std::sort(shdrUsed.begin(), shdrUsed.end(), [&](int a, int b) {
         const Shdr& x = h.shdr[static_cast<size_t>(a)];
         const Shdr& y = h.shdr[static_cast<size_t>(b)];
@@ -367,32 +353,18 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
 
     // ── copy the sample bytes, and rewrite the headers onto where they landed ──
     //
-    // ⚠️⚠️ **THE SILENT TAIL IS THE WHOLE CORRECTNESS ARGUMENT, AND THE TWO LAYOUTS DELIVER IT
-    // DIFFERENTLY.** A region routinely reads a little past its own data — a loop end a frame beyond
-    // the sample, an `endAddrsOffset` generator, the interpolator's one-frame lookahead. In the whole
-    // bank those frames belong to the NEXT sample and tsf plays them; in a font holding one preset
-    // there is no next sample, so the read lands on whatever the buffer happens to hold. It has to
-    // land on silence, and it has to do so in the DECODED buffer, which is the only thing a region
-    // indexes.
+    // ⚠️⚠️ THE SILENT TAIL IS THE CORRECTNESS ARGUMENT. A region reads a little past its data (a loop
+    // end beyond the sample, `endAddrsOffset`, the interpolator's lookahead); with one preset there is
+    // no next sample, so that read must land on silence in the DECODED buffer.
+    //   all-PCM    — copied to floats straight through, so the 46 zero frames after each sample are there.
+    //   compressed — an Ogg stream cannot be padded inside, so a dummy UNCOMPRESSED header after each
+    //                one puts zeros exactly where the overrun reads (tsf appends in table order).
+    // ⭐ All pads share one 46-frame zero block (several headers may name the same `start`).
     //
-    //   all-PCM — the chunk is copied to floats straight through, so the SF2 spec's 46 zero frames
-    //             written after each sample are already there. Byte-for-byte what it always did.
-    //
-    //   compressed — an Ogg stream cannot be padded from the inside, and its decoded length is not in
-    //             the header. But tsf walks the sample TABLE in order and appends each sample to one
-    //             growing float buffer, so a dummy UNCOMPRESSED header placed after a compressed one
-    //             puts its zeros exactly where the overrun reads. Every real sample gets one.
-    //
-    // ⭐ One shared 46-frame block of zeros serves every pad — `start` is an offset and nothing stops
-    // several headers naming the same one — so the pads cost 46 bytes of table each and no audio.
-    //
-    // ⚠️⚠️ **THAT BLOCK GOES AT THE FRONT OF THE CHUNK, AND PUTTING IT AT THE BACK IS A SEGFAULT.**
-    // Once tsf has decoded one Ogg stream it rebases every later PCM header by `resNum - shdr->start`
-    // — held in an UNSIGNED 32-bit local, and then subtracted from a pointer. A header whose offset
-    // sits AHEAD of the decode cursor makes that difference negative, it wraps to about 4.29e9, and
-    // the read pointer lands four gigabytes below the buffer. Ogg data expands about tenfold when it
-    // decodes, so an offset at the front of the chunk is always behind the cursor and an offset at the
-    // back never is.
+    // ⚠️⚠️ THAT BLOCK GOES AT THE FRONT; AT THE BACK IT IS A SEGFAULT. After an Ogg decode tsf rebases
+    // later PCM headers by `resNum - shdr->start` in an UNSIGNED 32-bit local: an offset ahead of the
+    // decode cursor wraps to ~4.29e9 and the read lands 4 GB below the buffer. Ogg expands ~10× when
+    // decoded, so the front is always behind the cursor.
     std::vector<uint8_t> smpl;
     // Frame 0, by construction, for the reason above.
     const uint32_t padFrame = 0;
@@ -614,17 +586,11 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             wr_u16(body, s.sampleLink); wr_u16(body, s.sampleType);
         };
         for (const Shdr& s : newShdr) put(s);
-        // ⚠️ The terminal sample header is not ceremony: tsf extends the LAST header in the table to
-        // the end of the sample chunk whatever its offsets say. Without a sentinel here, the final
-        // real sample would swallow everything after it.
-        //
-        // ⚠️⚠️ **AND IN A COMPRESSED FONT IT IS MARKED COMPRESSED, WHICH IS WHAT MAKES IT FREE.** Left
-        // as a PCM sentinel, tsf's forced read-to-the-end appends the ENTIRE undecoded Ogg chunk
-        // reinterpreted as 16-bit PCM — half the chunk's bytes again in floats, for nothing anything
-        // will ever play. Marked compressed with an empty range, the decoder's own "this is not an Ogg
-        // stream" arm zeroes it and moves on, so the sentinel still exists in the table and costs no
-        // audio at all. ⚠️ An all-PCM font must NOT take this: there the read-to-the-end is what copies
-        // the chunk straight through, and the earlier headers depend on it.
+        // ⚠️ The terminal header is not ceremony: tsf extends the LAST header to the end of the
+        // chunk, so without it the final real sample would swallow everything after it.
+        // ⚠️⚠️ In a COMPRESSED font it is marked compressed with an empty range, so the decoder zeroes
+        // it instead of appending the whole Ogg chunk reinterpreted as PCM. An all-PCM font must NOT:
+        // there the read-to-the-end is what copies the chunk straight through.
         Shdr eos{};
         const char eosName[20] = "EOS";
         std::memcpy(eos.name, eosName, 20);
@@ -633,16 +599,9 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
         append_chunk(pdta, "shdr", body);
     }
 
-    // ⚠️⚠️ **THE SAMPLE CHUNK MUST BE EVEN-SIZED, AND RIFF's OWN PAD BYTE IS NOT ENOUGH.** RIFF pads an
-    // odd chunk to the next even boundary with a byte outside the declared size — and tsf's chunk
-    // walker does not know that. It advances by exactly `8 + size`, so an odd chunk leaves the stream
-    // sitting ON the pad byte; the next four bytes it reads as a chunk id begin with a NUL, its
-    // `*id <= ' '` check fails, and the walk stops there. Everything AFTER the samples is then never
-    // read — `pdta` most of all — and the font comes back as "incomplete" with all nine tables empty.
-    //
-    // It cannot come up in an all-PCM font: those sizes are frames × 2 and always even. Ogg streams
-    // are whatever length they are, and roughly half of them are odd — which is exactly the shape the
-    // failure had, 87 of one bank's 156 presets refusing to parse with nothing in common but parity.
+    // ⚠️⚠️ THE SAMPLE CHUNK MUST BE EVEN-SIZED: tsf's chunk walker advances by exactly `8 + size`,
+    // ignoring RIFF's pad byte, so an odd chunk leaves it on the pad, the next id starts with NUL, and
+    // `pdta` is never read. Only Ogg streams can be odd.
     if (smpl.size() & 1u) smpl.push_back(0);
 
     std::vector<uint8_t> sdta;

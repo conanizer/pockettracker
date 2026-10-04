@@ -1,10 +1,8 @@
-// button_feedback.h — the click + haptic a VIRTUAL button gives back (convergence D, Android-only).
+// button_feedback.h — the click + haptic a VIRTUAL button gives back (Android-only).
 //
-// The last of the Android device features the SDL shell had no twin for. It is the ONE outward hook
-// the convergence plan's Phase-E table names: "its TRIGGER moves into the shell's touch path (one
-// outward JNI hook)". Everything a phone user feels when they tap the on-screen gamepad — the SoundPool
-// click and the Vibrator pulse — is Java's, because both are Android system services; what is portable
-// is only the DECISION to fire, and that lives in `sdl-touch.cpp` beside the press it already emits.
+// Everything a phone user feels on tapping the on-screen gamepad — the SoundPool click and the
+// Vibrator pulse — is Java's (Android system services); what is portable is the DECISION to fire,
+// which lives in `sdl-touch.cpp` beside the press it emits.
 //
 // ⚠️ WHY AN INTERFACE AND NOT AN `#ifdef` IN sdl-touch.cpp. The same reason `AudioBackend` is one:
 // sdl-touch.cpp is SHARED, compiled on desktop and on Android both, and it must not learn the word
@@ -12,11 +10,9 @@
 // at all, the pointer stays null) and hands it down through `AppConfig`, exactly as it hands down the
 // audio backend and the filesystem. A build with no touchscreen constructs nothing and pays nothing.
 //
-// ⚠️ THIS IS PURELY UI FEEDBACK, NOT PART OF THE INPUT MEANING. The click sounds on the raw finger
-// down/up, NOT on the synthetic key-repeats a held D-pad produces, and NOT on physical pad/keyboard
-// buttons — a handheld with real buttons makes no UI click. That is why the trigger sits in the TOUCH
-// layer (`handle_finger`) and not in `SdlInput` or the dispatcher: it mirrors Kotlin exactly, where
-// `LocalButtonEventCallback` is wired only into the VirtualControls composables.
+// ⚠️ PURELY UI FEEDBACK: the click sounds on the raw finger down/up — not on a held D-pad's synthetic
+// repeats, not on physical buttons — so the trigger sits in the TOUCH layer (`handle_finger`), not in
+// `SdlInput` or the dispatcher.
 
 #ifndef POCKETTRACKER_BUTTON_FEEDBACK_H
 #define POCKETTRACKER_BUTTON_FEEDBACK_H

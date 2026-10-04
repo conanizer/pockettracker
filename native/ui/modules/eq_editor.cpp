@@ -13,32 +13,19 @@ namespace {
 
 constexpr float kPi         = 3.14159265358979323846f;
 constexpr double kPiD       = 3.14159265358979323846;
-// The rate used when nobody has told the editor one — same fallback as AudioEngine's own. ⚠️ It is
-// only a fallback: the plotted curve must be computed at the rate the ENGINE's bands were built at,
-// or the picture on the one screen whose job is showing you the shape is not the shape you have.
-// Bilinear warping is worst near Nyquist and this panel's axis runs to 20 kHz.
+// The fallback rate when none is given. ⚠️ Only a fallback: the curve must use the rate the ENGINE's
+// bands were built at — bilinear warping is worst near Nyquist and the axis runs to 20 kHz.
 constexpr float kDefaultSampleRate = 44100.0f;
 
 /**
- * ⚠️ THE CANVAS HAS FOUR PRIMITIVES AND NONE OF THEM IS A LINE (canvas.h), and the EQ editor is the
- * first screen in the port that draws one. This is how, and it is not a workaround.
- *
- * Kotlin strokes a `Path`, but look at how it BUILDS that path: `FloatArray(width) { xi -> … }`, then
- * `for (xi in 1 until width) lineTo(…)`. It is already exactly one sample per pixel column — a
- * single-valued function of x, not a general path. Such a curve needs no line rasterizer: each column
- * is a vertical SPAN from this sample to the next, and a span is a `fill_rect`. That is what a stroked
- * per-pixel polyline rasterizes to anyway, minus Compose's antialiasing.
- *
- * Joining column i to column i+1 (rather than plotting a dot per column) is the part that matters:
- * a 24 dB/oct filter skirt crosses 60 pixels of height in 20 of width, and dots would draw it as a
- * dotted staircase.
+ * ⚠️ THE CANVAS HAS NO LINE PRIMITIVE (canvas.h). The curve is one sample per pixel column, so each
+ * column is a vertical SPAN from this sample to the next — a `fill_rect`. Joining column i to i+1
+ * matters: a steep filter skirt drawn as dots would read as a dotted staircase.
  */
 void stroke_column_curve(Canvas& c, int x0, int y_top, const int* y, int n, Argb color,
                          int thickness, int panel_h) {
-    // ⚠️ A STROKE GROWS DOWNWARD FROM ITS SAMPLE, so a curve resting on the floor would hang
-    // `thickness − 1` rows BELOW the panel — over the separator that closes it, which draws after and
-    // splits the stroke down its middle. Lifting the sample keeps the line its full width and sitting
-    // ON the floor, which is where a reading pinned at the bottom of the scale belongs.
+    // ⚠️ A stroke grows DOWNWARD from its sample, so a curve on the floor would hang below the panel
+    // under the separator. Lifting the sample keeps it full width, sitting on the floor.
     const int floorY = panel_h - thickness;
     for (int i = 0; i < n; ++i) {
         const int y0 = std::min(y[i], floorY);
@@ -49,7 +36,7 @@ void stroke_column_curve(Canvas& c, int x0, int y_top, const int* y, int n, Argb
     }
 }
 
-/** The area between a per-column curve and the panel's floor — Kotlin's closed, filled `Path`. */
+/** The area between a per-column curve and the panel's floor. */
 void fill_under_curve(Canvas& c, int x0, int y_top, const int* y, int n, int bottom, Argb color) {
     for (int i = 0; i < n; ++i) {
         const int top = y[i];
@@ -58,14 +45,9 @@ void fill_under_curve(Canvas& c, int x0, int y_top, const int* y, int n, int bot
 }
 
 /**
- * The Z-domain transfer function of the DaisySP double-pass Chamberlin SVF, ported verbatim from
- * `EqModule.svfGainDb`.
- *
- * LOWCUT and HICUT are NOT biquads in this engine — they are the SVF, and the curve has to plot what
- * the audio actually does. DaisySP's `Process()` runs two sequential passes over the same input and
- * averages them, which is why this is not the textbook one-pass expression. Kotlin's derivation is
- * written out above its own copy; it is not repeated here, because the two must not drift and one
- * canonical statement of it is safer than two.
+ * The Z-domain transfer function of the DaisySP double-pass Chamberlin SVF. LOWCUT and HICUT are
+ * the SVF in this engine, not biquads, and the curve must plot what the audio does. `Process()`
+ * runs two passes over the same input and averages them — hence not the textbook expression.
  */
 double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rate) {
     const float  fcC = std::min(fc, sample_rate * 0.45f);
@@ -222,10 +204,8 @@ std::string EqModule::format_freq_hz(float hz) {
     if (rounded < 1000) {
         std::snprintf(buf, sizeof(buf), "%dHz", rounded);
     } else if (rounded < 10000) {
-        // ⚠️ The division is done in FLOAT and then widened, which is Kotlin's (`hz / 1000f`, boxed to
-        // a Float and handed to the formatter). Dividing in double would round differently at the
-        // fourth decimal and could land on the other side of a display boundary — and this string is
-        // what `step_freq_display_aware` stops on, so it is the CELL, not just the picture.
+        // ⚠️ Divided in FLOAT, then widened: double rounds differently at the fourth decimal and can
+        // cross a display boundary — and this string is what `step_freq_display_aware` stops on.
         std::snprintf(buf, sizeof(buf), "%.1fkHz", static_cast<double>(hz / 1000.0f));
     } else {
         std::snprintf(buf, sizeof(buf), "%dkHz", static_cast<int>(hz / 1000.0f + 0.5f));
@@ -307,20 +287,17 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     const int    vy     = y + HEADER_H + ROW_H;
     const int    bottom = VIS_H;  // panel-relative
 
-    // ⚠️ `eqBg`, NOT `background` — the panel has its own ground so a generated palette can choose
-    // whether it sits on the screen's ground or on the visualizer's. It derives from `vizBackground`,
-    // which every palette written so far holds equal to `background`, so nothing on disk changes look.
+    // `eqBg`, not `background`: the panel has its own ground so a generated palette can choose; it
+    // derives from `vizBackground`.
     c.fill_rect(x, vy, WIDTH, VIS_H, t.eqBg);
 
     // ── The spectrum, one sample per pixel column ────────────────────────────────────────────────
-    // Log-mapped bins come out of the engine already, so bin → pixel is a straight rescale. Fewer than
-    // two bins is no spectrum at all (Kotlin's `takeIf { it.size >= 2 }`), and a null one is silence —
-    // which is what ptshot draws, and the reason this screen renders with no engine in the process.
+    // Log-mapped bins come from the engine, so bin → pixel is a straight rescale. Fewer than two
+    // bins, or null, is silence.
     int  specY[WIDTH];
     bool haveSpectrum = (s.spectrum != nullptr && s.spectrumCount >= 2);
-    // What the idle gate reads back (see `spectrum_at_rest`). Set from the heights actually drawn, so
-    // a bar too short to occupy a pixel counts as no bar — which is what the panel shows anyway, and
-    // what lets the answer reach true instead of chasing a magnitude that only approaches zero.
+    // What the idle gate reads back, set from the heights actually drawn — a sub-pixel bar counts as
+    // none, so the answer can reach true.
     spectrumAtRest_ = true;
     if (haveSpectrum) {
         const int n = s.spectrumCount;
@@ -334,21 +311,16 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
             specY[xi]       = VIS_H - h;
             if (h > 0) spectrumAtRest_ = false;
         }
-        // ⚠️ The fill AND its outline both go down before the grid, so the grid lines render on top
-        // of the whole spectrum. Splitting them — outline after the grid — puts a hard edge over the
-        // dB and frequency lines while the area under it stays behind them, and the two halves of one
-        // shape then sit on opposite sides of the grid.
+        // ⚠️ Fill AND outline go down before the grid, so the grid renders over the whole spectrum
+        // rather than splitting one shape across it.
         fill_under_curve(c, x, vy, specY, WIDTH, bottom, t.eqFill);
         stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1, VIS_H);
     }
 
     // ── The dB grid ─────────────────────────────────────────────────────────────────────────────
-    // Axis-aligned, so a "line" here is simply a 1px (or 2px, at 0 dB) rect.
-    //
-    // ⚠️ 0 dB TAKES THE SAME COLOUR AS THE SPECTRUM OUTLINE, ON PURPOSE — the two are the panel's
-    // reference marks and the response curve is the reading, so the reading must never be mistaken for
-    // a reference. They were told apart by width alone, and 2px of one blue against 2px of another is
-    // not telling them apart.
+    // Axis-aligned, so a "line" is a 1px (2px at 0 dB) rect.
+    // ⚠️ 0 dB takes the spectrum outline's colour on purpose: both are reference marks, and the
+    // response curve — the reading — must never be mistaken for one.
     const int dbLevels[] = {-12, -6, 0, 6, 12};
     for (int db : dbLevels) {
         const int  lineY = db_to_pixel(static_cast<float>(db));
@@ -368,10 +340,8 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     constexpr int LABEL_GAP = 2;
     for (const Marker& m : markers) {
         const int fx = freq_to_pixel(m.hz);
-        // ⚠️ A GRID LINE IS MEANT TO BE A HAIR OFF THE PANEL, exactly as ROW 4TH is off BACKGROUND —
-        // it is a guide, not a mark, and what it has to read against is the SPECTRUM crossing it,
-        // which contrasts with the panel for its own reasons. Holding it to an ink's contrast floor
-        // would make the panel look ruled.
+        // A grid line is meant to be a hair off the panel (as ROW 4TH is off BACKGROUND): a guide,
+        // not an ink, so it is not held to a contrast floor.
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
         const int w  = Canvas::text_width(m.label, CHAR_SPACING, 2);
         const int tx = (fx <= 0) ? x + fx + LABEL_GAP : x + fx - LABEL_GAP - w;
@@ -431,10 +401,8 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
         const int  rowY     = edY + ROW_H + pi * ROW_H;
         const bool isParSel = (pi == curParam);
 
-        // The cursor is ONE cell — the band × parameter it is on. The parameter label says which row
-        // and the band header above says which column, which is the pair every grid uses; the row the
-        // D-pad sweeps along is still readable, because the two bands the cursor is not on print
-        // `textEmpty` while the whole cursor row's label prints `cursor_mark_ink`.
+        // The cursor is one cell: the parameter label says which row, the band header which column.
+        // The other bands print `textEmpty`; the cursor row's label prints `cursor_mark_ink`.
         c.draw_text(kParamLabels[pi], x + 6, rowY + 3, isParSel ? cursor_mark_ink(t) : t.textEmpty,
                     CHAR_SPACING, FONT_SCALE);
 
@@ -478,13 +446,9 @@ CursorContext EqModule::cursor_context(const EqState& s) const {
 
     switch (s.cursorRow % 4) {
         case 0: {
-            // ⚠️ NOT `cc::hex_byte`, and that is S7's `enum_cycle` trap wearing a different hat. Kotlin
-            // builds this context INLINE rather than through its own hexByte factory, and the two are
-            // not the same object: hexByte would give largeStep 16 and emptyValue −1, where this has
-            // largeStep 1 (there are six types — a "fast" step of 16 is meaningless) and keeps the
-            // struct's own 0xFF. Both WRAP and neither deletes, so the behaviour is nearly identical
-            // and folding them together is the most natural cleanup imaginable. ptinput byte-compares
-            // the CONTEXT, so it is red the moment you do.
+            // ⚠️ NOT `cc::hex_byte`: largeStep 1 (six types; a fast step of 16 means nothing) and
+            // the struct's own 0xFF empty value. Behaviour is nearly identical, but folding them
+            // together changes the context.
             CursorContext c;
             c.valueType                     = CursorValueType::HEX_BYTE;
             c.capabilities.canIncrement     = true;

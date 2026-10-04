@@ -3,39 +3,20 @@
 
 // ─── PCM WAV: the writers, the cue chunk, and the reader ─────────────────────────────────────────
 //
-// TWO writers, because the app writes WAVs for two unrelated reasons and they want opposite things:
+// Two writers for two jobs:
+//   • `WavStreamWriter` — the RENDER, written chunk by chunk so peak memory is one chunk, always 16-bit.
+//   • `write_wav()` — the SAMPLE EDITOR: a whole in-RAM buffer at the BIT cell's depth (8/16/24/32),
+//     plus CUE POINTS, one per slice boundary.
+// float→int16 is: clamp to ±1, × 32767, TRUNCATE toward zero — ⚠️ not rounding; existing renders must
+// not move by an LSB.
 //
-//   • `WavStreamWriter` — the RENDER. A song is far too big to hold in RAM, so it is written chunk by
-//     chunk: open → append_interleaved() per render chunk → finish(). Peak memory is one chunk, not
-//     one song, which is why the render is chunked at all (a full-song float render used to hold ~4
-//     copies of the song in RAM at once and OOM-killed 1 GB devices). The C++ twin of Kotlin's
-//     WavStreamWriter, and its replacement.
+// `read_cue_points` is the other half: a chopped WAV loaded into another slot or project carries its
+// slices only in the file.
 //
-//   • `write_wav()` — the SAMPLE EDITOR (S6b). A sample is already in RAM in its entirety (the editor
-//     has been drawing it), it is small, and it carries something a render never does: CUE POINTS,
-//     one per slice boundary. The C++ twin of Kotlin's `core/storage/WavWriter.kt`. It writes at the
-//     depth the editor's BIT cell chose — 8, 16, 24 or 32 — where the render is always 16.
-//
-// Byte-for-byte the same files the two Kotlin writers produced — the same RIFF/fmt/data header, the
-// same `cue ` chunk, and the same float→int16 conversion: clamp to ±1, scale by 32767, TRUNCATE
-// toward zero (Kotlin's `.toInt()`, not a round). That is deliberate: an existing render must not
-// change by a LSB just because the writer moved to C++.
-//
-// ⚠️ **`read_cue_points` is the half S6a deferred, and it is here because S6b writes the other half.**
-// A slice boundary survives a save/reload ONLY as a cue point in the file — `sliceMarkers` is written
-// into the .ptp too, but a WAV chopped in the editor and loaded into a *different* slot (or a
-// different project) has nothing but the file to carry them. S6a stated the gap plainly ("a sliced WAV
-// loaded on Linux plays whole") because it had no WAV writer to pair a reader with. It has one now, so
-// the round trip closes here rather than waiting for the Phase 1.5 media unification: writing markers
-// that nothing can read back is not half a feature, it is a feature that silently loses data.
-//
-// Both writers write to "<path>.tmp" and rename on completion, so a failed or cancelled write never
-// leaves a half-written .wav behind (the same atomic pattern the UI's own filesystem uses).
-//
-// ⚠️ **That dance is three operations, not one, and all three go through `byte_source.h`.** The open
-// is `pt_fopen`, but the "drop the stale target" and "publish the temp" steps are `pt_remove` and
-// `pt_rename` — a `std::remove` here would be handed a string libc cannot see on a host whose
-// storage is URI-addressed, and the render would write its temp perfectly and then never appear.
+// Both writers write "<path>.tmp" and rename on success, so a failed or cancelled write leaves no
+// half-written .wav. ⚠️ All three steps — open, drop the old target, rename — go through
+// `byte_source.h` (`pt_fopen`, `pt_remove`, `pt_rename`); `std::remove` cannot see URI-addressed
+// storage.
 
 #include <cmath>
 #include <cstdint>
@@ -44,15 +25,14 @@
 #include <string>
 #include <vector>
 
-#include "../byte_source.h"   // pt_fopen / pt_remove / pt_rename — the one file seam below the UI
+#include "../byte_source.h"   // pt_fopen / pt_remove / pt_rename
 
 namespace songcore {
 
-// ─── float → int16, the one conversion both writers share ───────────────────────────────────────
+// ─── float → int16, the conversion both writers share ───────────────────────────────────────────
 //
-// Clamp to ±1, scale by 32767, TRUNCATE toward zero. Kotlin writes `(clamped * 32767f).toInt()`, and
-// `.toInt()` on a Float truncates — it does not round. A `std::lround` here would shift half the
-// samples in every existing file by one LSB.
+// Clamp to ±1, × 32767, TRUNCATE toward zero. ⚠️ Rounding would shift half the samples of every
+// existing file by one LSB.
 inline int16_t float_to_int16(float v) {
     if (v < -1.0f) v = -1.0f;
     else if (v > 1.0f) v = 1.0f;
@@ -67,8 +47,7 @@ class WavStreamWriter {
         if (!file_) return;
         uint8_t header[44];
         build_header(header, 0);
-        // placeholder sizes, patched in finish(). A card with no room for 44 bytes has none for a
-        // render either, so this fails as "could not open" and the caller never starts rendering.
+        // Placeholder sizes, patched in finish(). No room for 44 bytes fails here as "could not open".
         if (std::fwrite(header, 1, sizeof(header), file_) != sizeof(header)) close_and_remove();
     }
 
@@ -83,20 +62,17 @@ class WavStreamWriter {
     void append_interleaved(const float* data, int frames) {
         if (!file_ || frames <= 0) return;
         const int samples = frames * channels_;
-        // Little-endian bytes, assembled explicitly rather than memcpy'd from int16: WAV is
-        // little-endian by spec, and a big-endian host would otherwise write a silently byte-swapped
-        // file. One fwrite per chunk (not per sample) keeps it fast.
+        // Little-endian bytes assembled explicitly (WAV is little-endian by spec, whatever the host).
+        // One fwrite per chunk.
         buf_.resize(static_cast<size_t>(samples) * 2);
         for (int i = 0; i < samples; ++i) {
             const uint16_t u = static_cast<uint16_t>(float_to_int16(data[i]));
             buf_[static_cast<size_t>(i) * 2 + 0] = static_cast<uint8_t>(u & 0xFF);
             buf_[static_cast<size_t>(i) * 2 + 1] = static_cast<uint8_t>((u >> 8) & 0xFF);
         }
-        // ⚠️ **THE COUNT IS CHECKED AND THE FAILURE IS STICKY**, because this returns `void`: a render
-        // is the app's largest write by far, so a card filling up mid-song lands HERE, and there is no
-        // return value for it to travel out on. Unrecorded, every later append would keep failing
-        // silently and `finish()` would patch a header over a short file and rename it into place as a
-        // finished render. `frames_written()` counts frames actually ON DISK, so it stays truthful too.
+        // ⚠️ Checked, and the failure is STICKY: this returns void, and a card filling up mid-render
+        // lands here. Otherwise finish() would publish a short file as a finished render.
+        // `frames_written()` counts frames actually on disk.
         if (std::fwrite(buf_.data(), 1, buf_.size(), file_) != buf_.size()) {
             writeFailed_ = true;
             return;
@@ -104,14 +80,13 @@ class WavStreamWriter {
         framesWritten_ += frames;
     }
 
-    // Patch the RIFF/data sizes, close, and rename to the final path. False on I/O failure or if the
-    // data would overflow WAV's 32-bit size field (> 2 GB), with the temp file removed either way.
+    // Patch the RIFF/data sizes, close, rename into place. False on I/O failure or a > 2 GB data size;
+    // the temp is removed either way.
     bool finish() {
         if (!file_) return false;
 
         const int64_t dataSize = framesWritten_ * bytes_per_frame();
-        // `writeFailed_` first: an append that could not be written makes every byte count below a lie,
-        // and the only honest outcome is to drop the temp and say so.
+        // A failed append makes every count below a lie: drop the temp.
         if (writeFailed_ || dataSize > static_cast<int64_t>(INT32_MAX) - 44) {
             close_and_remove();
             return false;
@@ -125,10 +100,8 @@ class WavStreamWriter {
             return false;
         }
 
-        // ⚠️ **`fclose` IS A WRITE — it flushes whatever stdio still holds, so it is the last place a
-        // full card can report itself, and for a render that fits inside one buffer it is the ONLY
-        // place.** Unchecked, the rename below publishes a short file as a finished render. The handle
-        // is dead whichever way it went, so `file_` is cleared before anything else can touch it.
+        // ⚠️ `fclose` is a WRITE: it flushes stdio's buffer, and for a small render it is the ONLY place
+        // a full card can report. Unchecked, the rename publishes a short file.
         const bool closed = (std::fclose(file_) == 0);
         file_ = nullptr;
         if (!closed) {
@@ -136,9 +109,8 @@ class WavStreamWriter {
             return false;
         }
 
-        // ⚠️ The target goes FIRST, and it is not only Windows that needs it: `rename()` fails on an
-        // existing target there, and a SAF `renameDocument` onto a taken name DE-DUPLICATES rather
-        // than failing — which leaves the old render beside a `song (1).wav`.
+        // ⚠️ The target goes FIRST: `rename()` fails on an existing target on Windows, and SAF's
+        // `renameDocument` de-duplicates (leaving `song (1).wav` beside the old render).
         pt_remove(path_.c_str());
         if (pt_rename(tmpPath_.c_str(), path_.c_str()) != 0) {
             pt_remove(tmpPath_.c_str());
@@ -147,8 +119,8 @@ class WavStreamWriter {
         return true;
     }
 
-    // Discard everything written so far (failed / cancelled render). Safe to call any time, and the
-    // destructor calls it — so an early return can never leave the .tmp behind.
+    // Discard everything written so far. Safe any time; the destructor calls it, so no early return
+    // leaves a .tmp behind.
     void abort() {
         if (!file_) return;
         close_and_remove();
@@ -167,7 +139,7 @@ class WavStreamWriter {
         pt_remove(tmpPath_.c_str());
     }
 
-    // The standard 44-byte RIFF/fmt/data header — the same layout Kotlin's WavStreamWriter wrote.
+    // The standard 44-byte RIFF/fmt/data header.
     void build_header(uint8_t* h, int64_t dataSize) const {
         const uint32_t byteRate   = static_cast<uint32_t>(sampleRate_ * bytes_per_frame());
         const uint16_t blockAlign = static_cast<uint16_t>(bytes_per_frame());
@@ -205,8 +177,8 @@ class WavStreamWriter {
     std::FILE* file_     = nullptr;
     int64_t  framesWritten_ = 0;
     std::vector<uint8_t> buf_;   // reused across chunks — no per-chunk allocation
-    // Sticky: set by any short write, read by finish(). `append_interleaved` returns void, so this is
-    // the only way a mid-render disk failure reaches the one function that reports success.
+    // Sticky: set by any short write, read by finish() — the only way a mid-render disk failure is
+    // reported.
     bool     writeFailed_ = false;
 };
 
@@ -229,10 +201,9 @@ inline void wav_put_tag(std::vector<uint8_t>& b, const char* tag) {
 }
 
 /**
- * One sample at the file's depth. 16 goes through `float_to_int16` so a 16-bit save stays byte-for-byte
- * what it always was. The others ROUND to their own full scale (2^(bits−1)), which is what the loader
- * divides by — so a buffer the BIT cell already put on an 8- or 24-bit grid is written exactly, and
- * reads back as the same numbers. 8-bit WAV is UNSIGNED, centred on 128.
+ * One sample at the file's depth. 16 goes through `float_to_int16` so 16-bit saves stay byte-identical.
+ * Others ROUND to their full scale (2^(bits−1)), which the loader divides by, so a buffer already on an
+ * 8- or 24-bit grid round-trips exactly. 8-bit WAV is UNSIGNED, centred on 128.
  */
 inline void wav_put_sample(std::vector<uint8_t>& b, float v, int bits, bool isFloat) {
     if (bits == 32 && isFloat) {
@@ -269,11 +240,9 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
     std::FILE* f = pt_fopen(tmp.c_str(), "wb");
     if (!f) return false;
     const size_t written = bytes.empty() ? 0 : std::fwrite(bytes.data(), 1, bytes.size(), f);
-    // ⚠️ **BOTH CHECKED, AND `fclose` UNCONDITIONALLY FIRST.** The count alone only sees what stdio had
-    // already pushed out; a sample small enough to sit inside one buffer reports a full write and
-    // reaches the disk for the first time in this flush, so a full card surfaces here or nowhere.
-    // Closing on its own line rather than as the second operand of the `&&` is what keeps it
-    // unconditional — short-circuiting past it on a short write would leak the handle.
+    // ⚠️ Both checked, and `fclose` first, unconditionally: a small sample reaches the disk only in
+    // this flush, so a full card surfaces here or nowhere. On its own line so a short write cannot
+    // short-circuit past it and leak the handle.
     const bool   flushed = (std::fclose(f) == 0);
     const bool   ok      = (written == bytes.size()) && flushed;
     if (!ok) {
@@ -291,20 +260,11 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
 }  // namespace detail
 
 /**
- * Write a PCM WAV at `bits` (8, 16, 24 or 32 — 32 as IEEE float when `isFloat`), optionally with a
- * `cue ` chunk marking slice boundaries. Any other `bits` writes 16.
- *
- * `channels` is 1 (write `left` only) or 2 (interleave both) — the CALLER decides which, because only
- * it knows the editor's SOURCE mode: a stereo sample saved as SOURCE=LEFT is a mono file, and one
- * saved as SOURCE=STEREO is not.
- *
- * ⚠️ `right` is READ ONLY WHEN `channels == 2`, and the length check applies only then. A mono caller
- * passes an empty vector rather than a copy of `left`: the copy existed solely to satisfy a length
- * check that had no business running on a channel the writer never touches, and on the downmix path
- * it was a second full-length duplicate of an already-duplicated buffer.
- *
- * The chunk order is RIFF / fmt / data / cue, which is where Kotlin puts the cue chunk (after the
- * audio, not before it) — and a byte-compared golden pins it, so it is not free to drift.
+ * Write a PCM WAV at `bits` (8, 16, 24 or 32 — 32 as IEEE float when `isFloat`; anything else writes
+ * 16), optionally with a `cue ` chunk of slice boundaries.
+ * `channels` is 1 (`left` only) or 2 (interleaved) — the caller knows the SOURCE mode.
+ * ⚠️ `right` is read, and length-checked, only when `channels == 2`; a mono caller passes it empty.
+ * Chunk order RIFF / fmt / data / cue is pinned by a byte-compared golden.
  */
 inline bool write_wav(const std::string& path, const std::vector<float>& left,
                       const std::vector<float>& right, int sampleRate,
@@ -374,14 +334,8 @@ inline bool write_wav(const std::string& path, const std::vector<float>& left,
 }
 
 /**
- * ⚠️ Kotlin's `writeWavMono` writes a **STEREO** file with the mono data duplicated into both
- * channels — it forwards to `writeWav(…, samples, samples, rate, cues)` and takes the `channels = 2`
- * DEFAULT. Its own doc comment says so ("Write mono audio data to a stereo WAV file"), and CHOP is its
- * only caller, so every chop the app has ever written is a two-channel file of identical channels.
- *
- * Ported as it stands, deliberately: this is the twin of a shipped format, and "fixing" it here would
- * make the chops the SDL shell writes differ from the ones Android writes for the same sample. The
- * SAVE path is unaffected — it passes `channels` explicitly and writes a true mono file.
+ * ⚠️ Writes a STEREO file with the mono data in both channels — the format every chop has always had.
+ * Kept deliberately; SAVE passes `channels` explicitly and writes true mono.
  */
 inline bool write_wav_mono(const std::string& path, const std::vector<float>& samples, int sampleRate,
                            const std::vector<int>& cuePoints = {}, int bits = 16, bool isFloat = false) {
@@ -389,14 +343,10 @@ inline bool write_wav_mono(const std::string& path, const std::vector<float>& sa
 }
 
 /**
- * Read the frame positions out of a WAV's `cue ` chunk. Empty if it has none, or cannot be read.
- *
- * Frame 0 is EXCLUDED: it is the implicit start of the sample, not a slice boundary, and letting it
- * through would give every sliced file a zero-length slice 0.
- *
- * Chunk headers are walked with seeks, so only the small cue chunk is ever read into memory — this is
- * called on every sample load and once per instrument on project load, and reading a multi-MB WAV to
- * find 8 integers at the end of it is exactly the cost Kotlin's own comment says it removed.
+ * The frame positions in a WAV's `cue ` chunk; empty if none or unreadable. Frame 0 is EXCLUDED —
+ * it is the sample's start, not a boundary, and would make a zero-length slice 0.
+ * Chunk headers are walked with seeks, so only the small cue chunk is read: this runs on every
+ * sample load.
  */
 inline std::vector<int> read_cue_points(const std::string& path) {
     std::vector<int> frames;
@@ -434,9 +384,8 @@ inline std::vector<int> read_cue_points(const std::string& path) {
         uint32_t chunkSize = 0;
         if (!read_tag(id) || !read_u32(chunkSize)) break;
 
-        // A size with the top bit set would be a >2 GB chunk (or garbage). Kotlin reads the field as a
-        // SIGNED int and breaks when it goes negative; the same guard, so a malformed file cannot turn
-        // the skip below into a backward seek and spin here forever.
+        // A size with the top bit set is a > 2 GB chunk or garbage; stop, or the skip below could seek
+        // backwards and loop forever.
         if (chunkSize > static_cast<uint32_t>(INT32_MAX)) break;
 
         if (std::memcmp(id, "cue ", 4) == 0) {

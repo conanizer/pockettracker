@@ -2,29 +2,19 @@
 
 // ─── PROJECT ─────────────────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/ProjectModule.kt. Two editable values (TEMPO, TRANSPOSE), one in-place
-// text field (NAME), and then the screen the whole app has been missing: the one where a song is
-// SAVED, LOADED, started fresh, EXPORTED and COMPACTED.
+// Two editable values (TEMPO, TRANSPOSE), an in-place text field (NAME), and the buttons that SAVE,
+// LOAD, start fresh, EXPORT and COMPACT a song.
 //
-// A FORM, like INSTRUMENT and EFFECTS — but the first whose rows are mostly BUTTONS rather than
-// cells. Rows 3-6 have no editable value at all: their cursor context is `read_only()` and the whole
-// of their behaviour is what plain A does on them, which lives in the dispatcher. That is why
-// `handle_input` below only ever touches rows 0-2, exactly as Kotlin's does.
+// A FORM whose rows are mostly BUTTONS: rows 3-6 are `read_only()` and their behaviour is what plain
+// A does in the dispatcher, so `handle_input` only touches rows 0-2.
 //
-// ⚠️ NAME is the port's first IN-PLACE character editor. Each of its `PROJECT_NAME_MAX_CHARS`
-// characters is its own cursor COLUMN (1..20), A+LEFT/RIGHT walks `allowed_chars()`, and A+B writes a
-// space. (A on the row opens the QWERTY keyboard instead — the deferred-A latch S6a built for the
-// INSTRUMENT NAME cell.)
+// ⚠️ NAME is an in-place character editor: each of its `PROJECT_NAME_MAX_CHARS` characters is a
+// cursor COLUMN (1..20), A+LEFT/RIGHT walks `allowed_chars()`, A+B writes a space. A on the row opens
+// the QWERTY keyboard instead. The field scrolls under the cursor with a "…" on the hidden side,
+// through `qwerty_text_window`, as the keyboard's own text box does.
 //
-// ⚠️ There are more columns than the row can show. The field scrolls under the cursor and marks the
-// hidden side with a "…", which is why the draw goes through `qwerty_text_window` — the same window
-// the keyboard's own text box uses, for the same reason.
-//
-// ⚠️ Column 0 — the row LABEL — is unreachable on this screen. `getProjectCursorLeftColumn` coerces
-// to at least 1 and the cursor starts there, so ProjectModule's four `cursorColumn == 0 -> readOnly()`
-// arms are dead code in Kotlin. They are ported anyway: they cost a line, and a screen whose cursor
-// can only be proven not to reach column 0 by reading a different file is one refactor away from
-// being wrong.
+// ⚠️ Column 0 (the label) is unreachable — the cursor's left move stops at 1 — but its `read_only()`
+// arms stay, so the screen does not depend on another file to be safe.
 
 #include <cstdint>
 #include <string>
@@ -75,14 +65,9 @@ public:
     static constexpr int VALUE_X = 210;
 
     /**
-     * How many of NAME's `PROJECT_NAME_MAX_CHARS` cells are on screen at once. The row cannot show
-     * all of them — `VALUE_X` plus 20 character columns lands past the editor clip — so the field
-     * scrolls under the cursor, exactly as the QWERTY box does, with a "…" on whichever side is
-     * hiding characters.
-     *
-     * ⚠️ **This number belongs to the clip, not to this file**, and the clip is a `layout.h` fact:
-     * two `static_assert`s there hold it to the most cells that fit. Do not adjust it to taste — move
-     * `VALUE_X` and let them re-derive it.
+     * How many of NAME's cells are on screen at once; the field scrolls under the cursor.
+     * ⚠️ This number belongs to the editor clip: two static_asserts in layout.h hold it to the most
+     * cells that fit. Move `VALUE_X` instead of adjusting it.
      */
     static constexpr int NAME_VISIBLE_CHARS = 17;
 

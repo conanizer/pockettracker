@@ -1,26 +1,18 @@
-// sdl-touch.{h,cpp} — the on-screen virtual gamepad (convergence D3/D4/D5, landscape).
+// sdl-touch.{h,cpp} — the on-screen virtual gamepad (landscape).
 //
-// The one part of the Android app with no C++ twin (convergence plan §6), landed as the plan's D1
-// split says: the hit-rect LAYOUT is shared, portable C++ (`native/ui/touch_layout.h`), and the
-// RENDERING is shell-side — the buttons are chrome drawn AROUND the letterboxed 640×480 frame, not
-// content inside the canvas, so `pt-ui` keeps its four primitives and never learns about a panel.
+// The hit-rect LAYOUT is shared, portable C++ (`native/ui/touch_layout.h`); the RENDERING is
+// shell-side — the buttons are chrome drawn AROUND the letterboxed 640×480 frame, so pt-ui never
+// learns a panel.
 //
-// This file is the shell half. It:
-//   • places the two LANDSCAPE boxes into the letterbox bars either side of the frame (D5) — the
-//     centred frame already leaves a bar on each side, and those bars ARE the panels, so nothing about
-//     the scaler had to change;
-//   • turns an SDL finger into a `Button` by hit-testing the shared rects, and feeds it through
-//     `SdlInput`'s OWN press/release (D4) — inheriting the mods snapshot, the one key-repeat engine and
-//     the held-button de-dup for free, exactly as Kotlin routes its virtual buttons through
-//     `InputMapper.onVirtualButton`;
-//   • draws the boxes, the buttons and their labels with the shared 5×5 font, highlighting a held one.
+// This file:
+//   • places the two LANDSCAPE boxes in the letterbox bars either side of the frame;
+//   • turns an SDL finger into a `Button` by hit-testing the shared rects and feeds it through
+//     `SdlInput`'s OWN press/release — inheriting the mods snapshot, the key-repeat engine and the
+//     held-button de-dup;
+//   • draws the boxes, buttons and labels with the shared 5×5 font, highlighting a held one.
 //
-// ⚠️ LANDSCAPE panels + PORTRAIT2 hit-test. `layout()` draws AND hit-tests the two landscape bars;
-// `layout_portrait2()` hit-tests the PORTRAIT2 skinned grid (which `PortraitSkin` draws — this file only
-// maps the finger). Still missing: PORTRAIT's two-box split (`touch_layout.h` has `left_rects`/
-// `right_rects` for the bars; the portrait split reuses them). The SETTINGS LAYOUT row
-// (PlatformCaps::touchLayouts) stays OFF until every mode exists, because a picker offering modes that
-// do nothing is the "setting which configures nothing" platform_caps.h refuses.
+// `layout()` draws AND hit-tests the landscape bars; `layout_portrait2()` hit-tests the PORTRAIT2
+// grid, which `PortraitSkin` draws.
 
 #ifndef POCKETTRACKER_SDL_TOUCH_H
 #define POCKETTRACKER_SDL_TOUCH_H
@@ -43,21 +35,19 @@ using pt::ui::Button;
 
 class SdlTouch {
 public:
-    /** Whether this platform has a touchscreen worth drawing a gamepad on. Set once at boot — a phone
-     *  yes, a desktop no; the SDL analogue of DeviceAdapter choosing a touch layout at all. */
+    /** Whether this platform has a touchscreen worth drawing a gamepad on. Set once at boot. */
     void set_enabled(bool on) { enabled_ = on; }
 
-    /** The click + haptic sink (convergence D). Null (the default, desktop/handheld) = no feedback;
-     *  Android hands in a JNI shim. Set once at boot — see AppConfig::buttonFeedback. */
+    /** The click + haptic sink. Null (the default, desktop/handheld) = no feedback; Android hands in
+     *  a JNI shim. Set once at boot — see AppConfig::buttonFeedback. */
     void set_feedback(ptshell::ButtonFeedback* fb) { feedback_ = fb; }
 
     /** The user's live BTN SOUND / BTN VIBRO scalars, pushed each frame from `SettingsValues` so the
      *  next tap plays with whatever the SETTINGS screen currently shows. A no-op cost with no sink. */
     void set_feedback_settings(const ptshell::ButtonFeedbackSettings& s) { fbSettings_ = s; }
 
-    /** Same env var as the input trace (POCKETTRACKER_INPUT_TRACE): print one line per finger, and what
-     *  it mapped to (or that it hit no button). The touch half of P4b's "no tool covers the layer
-     *  between the hardware and a ButtonEvent" — a tap that lands in a gap must say so POSITIVELY. */
+    /** Same env var as the input trace (POCKETTRACKER_INPUT_TRACE): one line per finger and what it
+     *  mapped to — a tap that lands in a gap must say so POSITIVELY. */
     void set_trace(bool on) { trace_ = on; }
 
     /** True when the panels are actually on screen: enabled AND the letterbox bars are wide enough to
@@ -83,8 +73,8 @@ public:
     void layout_portrait2(const SDL_Rect& cluster, const pt::ui::touch_layout::BoxRects& rects,
                           int outW, int outH);
 
-    /** Feed one SDL_FINGER{DOWN,MOTION,UP}. Down that hits a button presses it; up releases it; a slide
-     *  off the button it went down on releases it (Kotlin's per-button gesture cancels the same way). */
+    /** Feed one SDL_FINGER{DOWN,MOTION,UP}. Down that hits a button presses it; up releases it; a
+     *  slide off the button it went down on releases it. */
     void handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_ms);
 
     /** Draw the panels onto the renderer — called by `SdlVideo::present` after the frame, before the
@@ -92,9 +82,9 @@ public:
     void draw(SDL_Renderer* r, const SdlInput& input) const;
 
     /**
-     * A fingerprint of what `draw` would produce — the held buttons plus the geometry. `present`'s C7
-     * pixel gate compares the 640×480 canvas only, so without this a press highlight (a change OUTSIDE
-     * that canvas) would be skipped; feeding this into the gate is what makes the highlight appear.
+     * A fingerprint of what `draw` would produce — the held buttons plus the geometry. `present`'s
+     * pixel gate compares only the 640×480 canvas, so without this a press highlight (outside it)
+     * would be skipped.
      */
     uint64_t signature(const SdlInput& input) const;
 
@@ -128,8 +118,8 @@ private:
     // work. A finger stays bound until it lifts or slides off.
     std::unordered_map<SDL_FingerID, Button> finger_;
 
-    // The click/haptic sink and the user's current settings for it (convergence D). Null sink =
-    // desktop/handheld = no feedback; Android hands in a JNI shim. See button_feedback.h.
+    // The click/haptic sink and the user's current settings for it. Null sink = no feedback; Android
+    // hands in a JNI shim (button_feedback.h).
     ptshell::ButtonFeedback*         feedback_ = nullptr;
     ptshell::ButtonFeedbackSettings  fbSettings_;
 };

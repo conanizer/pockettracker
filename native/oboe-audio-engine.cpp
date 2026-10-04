@@ -187,14 +187,9 @@ void OboeAudioEngine::resumeStream() {
 void OboeAudioEngine::setPaused(bool paused) {
     if (!stream) return;
 
-    // ⚠️ stop(), not requestPause() — and the header explains why at length, because the difference
-    // is not "stronger" but "correct": resumeStream() restarts a stream it finds Paused, and the
-    // engine asks it to before every scheduled note. Stopped is the state that keeps the render's
-    // exclusive access exclusive.
-    //
-    // The blocking forms (stop()/start(), not requestStop()/requestStart()) for the same reason
-    // SDL_PauseAudioDevice is the right call on the other side: on the far side of this call there
-    // must be exactly one reader of the engine, by construction rather than by timing.
+    // ⚠️ stop(), not requestPause() — see the header: resumeStream() restarts a Paused stream, and
+    // the engine asks it to before every scheduled note. Blocking forms, so there is exactly one
+    // reader of the engine on the far side of this call.
     const oboe::Result r = paused ? stream->stop() : stream->start();
     if (r != oboe::Result::OK) {
         // Not fatal, and deliberately not silent. A render that proceeds against a stream which

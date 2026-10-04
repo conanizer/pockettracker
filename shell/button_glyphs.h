@@ -1,12 +1,8 @@
 // ─── shell/button_glyphs.h — one virtual-button label renderer, shared by the touch layouts ───────
 //
-// A virtual button's label is drawn with the shared 5×5 font: the D-pad gets the arrow glyphs
-// `font5x5.h` already carries (the same '↑' '←' '→' '↓' the Kotlin buttons show), the rest are the
-// short Kotlin labels ("SEL", "STA", …). Both the LANDSCAPE on-screen gamepad (`sdl-touch.cpp`) and
-// the PORTRAIT2 skinned cluster (`portrait2.cpp`) draw exactly this, so it lives here rather than in
-// either — a label routine copied into a second file is the drift the whole convergence exists to
-// kill. Inline in a header for the same reason `font5x5.h` is: it is a few dozen `SDL_RenderFillRect`
-// calls over the glyph bitmap, with no state to own.
+// A label in the shared 5×5 font: arrow glyphs for the D-pad, short words ("SEL", "STA", …) for the
+// rest. Both the landscape gamepad (sdl-touch.cpp) and the PORTRAIT2 cluster (portrait2.cpp) draw
+// it, so it lives here once. Inline: a few dozen `SDL_RenderFillRect` calls, no state.
 
 #ifndef POCKETTRACKER_BUTTON_GLYPHS_H
 #define POCKETTRACKER_BUTTON_GLYPHS_H
@@ -48,9 +44,7 @@ inline ButtonLabel label_of(pt::ui::Button b) {
  * Draw a button's label centred in `rc`, at the largest 5×5 scale that leaves a margin. One filled
  * rect per lit glyph pixel — a few dozen per label, and only on frames that actually present.
  *
- * `rgb` is the label colour, 0xRRGGBB. White by default: it is the label colour of BOTH amiga skins
- * (the classic's is dark, but the classic ships no PORTRAIT2 device art anyway), and a parameter so a
- * future light theme can pass its own without this routine caring which layout called it.
+ * `rgb` is the label colour, 0xRRGGBB — white by default, the label colour of the skins that use it.
  */
 inline void draw_label(SDL_Renderer* r, pt::ui::Button b, const SDL_Rect& rc, uint32_t rgb = 0xFFFFFF) {
     const ButtonLabel lab = label_of(b);

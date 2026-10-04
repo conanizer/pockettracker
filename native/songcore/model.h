@@ -1,39 +1,26 @@
 #ifndef POCKETTRACKER_SONGCORE_MODEL_H
 #define POCKETTRACKER_SONGCORE_MODEL_H
 
-// ─── Song data model, as C++ structs ────────────────────────────────────────────────────────────
+// ─── Song data model ────────────────────────────────────────────────────────────────────────────
 //
-// A 1:1 mirror of the Kotlin @Serializable classes in
-//   app/src/main/java/com/conanizer/pockettracker/core/data/TrackerData.kt
-//   ...................................................../InstrumentPreset.kt
-// — same fields, same declaration order, same defaults, same pool sizes. TrackerData.kt is the
-// executable spec (Linux-port plan §4.3/§4.4); this header is its C++ twin. project_io.h reads and
-// writes the .ptp/.pti JSON on top of these structs, byte-for-byte compatible with the Kotlin
-// kotlinx.serialization output.
+// The structs behind the .ptp / .pti JSON (project_io.h). Field order, defaults and pool sizes are
+// part of the file format — existing projects depend on them.
 //
-// Two flavours of "default" live here and MUST NOT be confused (project_io.h relies on the split):
-//   * FIELD default   — the value declared on the @Serializable property. This is what
-//                       encodeDefaults=false compares against to decide omission, and what a
-//                       missing JSON key deserializes to. It is encoded in the member initializers
-//                       and the (int id) constructors below.
-//   * FACTORY value   — what a *fresh default Project* actually contains. Differs from the field
-//                       default for exactly one field: Instrument.sampleId, which the Project
-//                       factory sets to the slot index (not the field default -1) — so every
-//                       instrument slot serialises its sampleId. See make_default_project().
+// Two kinds of "default", which project_io.h relies on keeping apart:
+//   * FIELD default   — the member initializer. A key equal to it is omitted on save, and a missing
+//                       key loads as it.
+//   * FACTORY value   — what a fresh Project holds. Differs only for Instrument.sampleId, which
+//                       make_default_project() sets to the slot index, so every slot saves it.
 //
-// No floating-point anywhere in this schema — every value is int / int64 / bool / string / enum /
-// nested struct / array. That is why the .ptp round-trip can be exact with no float formatting.
-//
-// This header has NO third-party dependency (no nlohmann) so the future C++ scheduler can include
-// the model without pulling the JSON library.
+// No floating point anywhere, so the .ptp round-trips exactly. No third-party includes, so the
+// scheduler can use the model without the JSON library.
 
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <optional>
 
-// The event schema — for the CC-slot ids `resolve_cc_param` below translates. event.h depends on
-// nothing but <cstdint>/<cstring>, so this stays a leaf-ward include and no cycle is possible.
+// For the CC-slot ids `resolve_cc_param` translates; event.h is a leaf, so no cycle.
 #include "event.h"
 #include "program.h"   // PROGRAM_SLOTS — the engine's program table is one row per instrument
 
@@ -41,8 +28,7 @@ namespace songcore {
 
 // ─── pool sizes ─────────────────────────────────────────────────────────────────────────────────
 
-// Canonical pool sizes (single source, mirrors TrackerData.kt). Declared above the structs so the
-// members and the accessors below can both spell them.
+// Canonical pool sizes, above the structs so members and accessors can both use them.
 constexpr int POOL_PHRASES     = 256;
 constexpr int POOL_CHAINS      = 256;
 constexpr int POOL_TRACKS      = 8;
@@ -54,13 +40,13 @@ constexpr int POOL_GROOVES     = 128;
 constexpr int POOL_EQPRESETS   = 128;
 constexpr int POOL_SCALES      = 16;
 
-// Rows in one chain, and steps in one phrase. Fixed by the screen geometry, not by a pool.
+// Rows in one chain and steps in one phrase, fixed by the screen geometry.
 constexpr int CHAIN_ROWS  = 16;
 constexpr int PHRASE_ROWS = 16;
 
 // ─── small helpers ────────────────────────────────────────────────────────────────────────────
 
-// lower 8 bits as 2-digit UPPERCASE hex — mirrors TrackerData.Int.toHex2().
+// Lower 8 bits as 2-digit UPPERCASE hex.
 inline std::string hex2(int v) {
     static const char* H = "0123456789ABCDEF";
     unsigned b = static_cast<unsigned>(v) & 0xFFu;
@@ -69,21 +55,20 @@ inline std::string hex2(int v) {
     s[1] = H[b & 0xF];
     return s;
 }
-inline std::string default_instrument_name(int id) { return "INST" + hex2(id); }  // Instrument.name default
-inline std::string default_table_name(int id)      { return "TBL"  + hex2(id); }  // Table.name default
+inline std::string default_instrument_name(int id) { return "INST" + hex2(id); }
+inline std::string default_table_name(int id)      { return "TBL"  + hex2(id); }
 
-// ─── enums (kotlinx serialises enum entries by their NAME) ──────────────────────────────────────
+// ─── enums (serialised by NAME) ─────────────────────────────────────────────────────────────────
 
 enum class ModType { NONE, AHD, ADSR, LFO, DRUM, TRIG, TRACKING, SCALAR };
 enum class ModDest {
     NONE, VOLUME, PAN, PITCH, FINE_PITCH, FILTER_CUTOFF, FILTER_RES,
     SAMPLE_START, MOD_AMT, MOD_RATE, MOD_BOTH
 };
-// The instrument's ROUTING DESTINATION — which sound module consumes its event stream (MIDI plan §1),
-// not "what kind of instrument it is". SAMPLER and SOUNDFONT are consumed by EngineConsumer; EXTERNAL
-// leaves the process as MIDI bytes (ExternalConsumer, midi_out.h). Future synth modules append here.
-// ⚠️ EXTERNAL STAYS LAST. A build without the MIDI surfaces (native/ui/platform_caps.h `midi`) walks
-// the TYPE cell over one type fewer, which only hides EXTERNAL while EXTERNAL is the tail.
+// The instrument's ROUTING DESTINATION: SAMPLER and SOUNDFONT go to EngineConsumer, EXTERNAL leaves as
+// MIDI (ExternalConsumer, midi_out.h).
+// ⚠️ EXTERNAL STAYS LAST: a build without MIDI (platform_caps.h `midi`) hides it by cycling the TYPE
+// cell over one type fewer. A new module type goes before it.
 enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL };
 
 inline const char* mod_type_name(ModType t) {
@@ -157,13 +142,11 @@ inline bool instrument_type_from_name(const std::string& s, InstrumentType& out)
 /** How many entries InstrumentType has — the INSTRUMENT screen's TYPE cell cycles on it. */
 inline constexpr int INSTRUMENT_TYPE_COUNT = 3;
 
-// ─── display names (ModType.displayName / ModDest.displayName) ──────────────────────────────────
+// ─── display names ──────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ NOT the same strings as `mod_type_name` / `mod_dest_name` above, and the difference is the whole
-// reason both exist. Those are the SERIALISED names — kotlinx writes an enum entry by its Kotlin
-// identifier, so "TRACKING" and "FILTER_CUTOFF" are load-bearing bytes in every .ptp and changing one
-// breaks every saved project. These are what the MODS screen PAINTS ("TRK", "CUT"), chosen to fit a
-// narrow cell. Reusing one for the other silently either widens the UI or corrupts the file format.
+// ⚠️ Not the serialised names above. "TRACKING" and "FILTER_CUTOFF" are bytes in every .ptp; these are
+// what the MODS screen paints in a narrow cell. Swapping one for the other widens the UI or breaks
+// the file format.
 
 inline const char* mod_type_display_name(ModType t) {
     switch (t) {
@@ -173,7 +156,7 @@ inline const char* mod_type_display_name(ModType t) {
         case ModType::LFO:      return "LFO";
         case ModType::DRUM:     return "DRUM";   // AHD semantics (engine type 4)
         case ModType::TRIG:     return "TRIG";   // ADSR semantics (engine type 5)
-        case ModType::TRACKING: return "TRK";    // future — no engine implementation
+        case ModType::TRACKING: return "TRK";    // no engine implementation yet
         case ModType::SCALAR:   return "SCL";    // constant value — `amount` IS the output
     }
     return "---";
@@ -201,20 +184,17 @@ inline constexpr int MOD_DEST_COUNT = 11;
 
 // ─── leaf structs ───────────────────────────────────────────────────────────────────────────────
 
-// Note has no field defaults in Kotlin (both ctor params are required) — a Note object always
-// serialises BOTH pitch and octave. Our default ctor is Note.EMPTY for convenience.
+// A Note always serialises BOTH pitch and octave (no field defaults). The default ctor is EMPTY.
 struct Note {
     int pitch  = -1;  // 0-11 chromatic, -1 = empty
     int octave = 0;
     bool operator==(const Note& o) const { return pitch == o.pitch && octave == o.octave; }
     bool operator!=(const Note& o) const { return !(*this == o); }
     static Note EMPTY() { return Note{-1, 0}; }
-    static Note C4()    { return Note{ 0, 4}; }  // Note.fromString("C-4")
+    static Note C4()    { return Note{ 0, 4}; }
 };
 
-// ─── Note ↔ MIDI ↔ display (TrackerData.Note's own methods) ───────────────────────────────────────
-// Note's arithmetic, not the scheduler's: it lived in scheduler.h until the UI needed it, and the UI
-// has no business including the sequencer to name a note.
+// ─── Note ↔ MIDI ↔ display ──────────────────────────────────────────────────────────────────────
 inline int note_to_midi(const Note& n) {
     if (n.pitch == -1) return -1;
     return (n.octave + 1) * 12 + n.pitch;  // C-4 = 60 (standard MIDI)
@@ -224,18 +204,15 @@ inline Note note_from_midi(int midi) {
     return Note{midi % 12, midi / 12 - 1};
 }
 
-// VolumeUtils.hexToFloat — an authored 0x00-0xFF byte as a 0-1 gain. Here for note_to_midi's reason,
-// and it moved for the third time the same argument has been made (note_to_midi, then chain_is_empty in
-// phase C): it is the model's own arithmetic, three files outside the sequencer now need it, and a
-// second copy is two rules that agree until one of them is edited. scheduler.h still sees it — it
-// includes this header — so every existing caller is untouched.
+// An authored 0x00-0xFF byte as a 0-1 gain. The model's own arithmetic, shared by the sequencer, UI
+// and MIDI — one copy.
 inline float hex_to_float(int hex) { return (hex & 0xFF) / 255.0f; }
 
-// Note.NOTES — the chromatic names, two chars each so every note renders in a fixed 3-char cell.
+// Two chars each, so every note renders in a fixed 3-char cell.
 inline const char* const NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-",
                                            "F#", "G-", "G#", "A-", "A#", "B-"};
 
-/** Note.toString(): "C-4", or "---" when empty. The 3-char cell every editor grid draws. */
+/** "C-4", or "---" when empty — the 3-char cell every grid draws. */
 inline std::string note_name(const Note& n) {
     if (n.pitch < 0 || n.pitch > 11) return "---";
     return std::string(NOTE_NAMES[n.pitch]) + std::to_string(n.octave);
@@ -250,14 +227,8 @@ struct PhraseStep {
     int  fx3Type = 0x00, fx3Value = 0x00;
 };
 
-// Indexed FX access on a PhraseStep — the flat fx{1,2,3}{Type,Value} fields read as a 1..3 slot
-// array. Mirrors PhraseStep.fx / fxType / setFx / setFxValue.
-//
-// ⚠️ They live beside the struct rather than in the sequencer that walks it, for the reason
-// `chain_is_empty` does: two layers now index a step's slots. The scheduler folds them last-wins and
-// throws the slot NUMBER away; `automation.h` pairs AUS with the effect to its LEFT and therefore
-// cannot. A second copy of the indexing would be two things that agree until the day one gains a
-// fourth slot.
+// The flat fx{1,2,3}{Type,Value} fields as slots 1..3. Beside the struct because both the scheduler
+// (last-wins, slot discarded) and `automation.h` (AUS reads the slot to its LEFT) index them.
 inline int  step_fx_type(const PhraseStep& s, int slot) {
     return slot == 1 ? s.fx1Type : slot == 2 ? s.fx2Type : slot == 3 ? s.fx3Type : 0;
 }
@@ -282,44 +253,33 @@ inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
 
 struct Phrase {
     int id = 0;
-    std::vector<PhraseStep> steps = std::vector<PhraseStep>(16);  // Array<PhraseStep>(16)
+    std::vector<PhraseStep> steps = std::vector<PhraseStep>(16);
     Phrase() = default;
     explicit Phrase(int id_) : id(id_) {}
 };
 
 struct Chain {
     int id = 0;
-    std::vector<int> phraseRefs      = std::vector<int>(16, -1);  // IntArray(16){-1}
-    std::vector<int> transposeValues = std::vector<int>(16, 0);   // IntArray(16){0}
+    std::vector<int> phraseRefs      = std::vector<int>(16, -1);
+    std::vector<int> transposeValues = std::vector<int>(16, 0);
     Chain() = default;
     explicit Chain(int id_) : id(id_) {}
 };
 
 // The phrase a chain row names, or -1 for "there is nothing to play here".
 //
-// ⚠️ Every bound on a chain row lives in this one function, because each one is a property of the
-// DATA rather than of any caller: a chain has CHAIN_ROWS rows, its arrays may be shorter than that
-// (`parse_int_array` returns whatever length the JSON held, and normalize_project repairs pool
-// sizes, not the arrays inside a Chain), and a ref outside the phrase pool names no phrase. A `.ptp`
-// is a file users copy between devices, hand-edit, and recover from a half-written autosave, so a
-// ref of 9999 is reachable without the editor ever producing one — and the value then goes straight
-// into `project.phrases[ref]`.
+// ⚠️ Every bound on a chain row lives here: a chain has CHAIN_ROWS rows, its arrays may be shorter
+// (whatever the JSON held), and a ref may lie outside the pool — a hand-edited or half-written .ptp
+// can hold 9999, and the value goes straight into `project.phrases[ref]`.
 inline int chain_phrase_ref(const Chain& c, int row) {
     if (row < 0 || row >= CHAIN_ROWS || row >= static_cast<int>(c.phraseRefs.size())) return -1;
     const int ref = c.phraseRefs[static_cast<size_t>(row)];
     return (ref >= 0 && ref < POOL_PHRASES) ? ref : -1;
 }
 
-// A chain row with no phrase in it. `-1` is the pool's "empty value" everywhere (never 0, never 0xFF).
-//
-// ⚠️ Lives HERE, not in scheduler.h where it was written, because two different layers now decide
-// how long a song row is: `updatePlaybackBuffer` (which schedules it) and `nominal_spp_beats`
-// (midi_clock.h, which tells a drum machine where the playhead landed). A second copy of the
-// predicate would be two things that agree until the day they do not — and a Song Position Pointer
-// computed from a different notion of "empty" than the scheduler's is a number that matches nothing.
-//
-// A row whose ref points outside the pool is empty for the same reason: it names no phrase, so
-// nothing can be scheduled from it, so no layer may count it as length.
+// A chain row with no phrase in it (`-1` is the empty value, never 0 or 0xFF).
+// ⚠️ Shared by the scheduler and `nominal_spp_beats` (midi_clock.h): a song row's length must mean the
+// same to both. A ref outside the pool is empty too — it names no phrase.
 inline bool chain_is_empty(const Chain& c, int index) { return chain_phrase_ref(c, index) < 0; }
 
 struct TableRow {
@@ -333,7 +293,7 @@ struct TableRow {
 struct Table {
     int id = 0;
     std::string name = default_table_name(0);
-    std::vector<TableRow> rows = std::vector<TableRow>(16);  // Array<TableRow>(16)
+    std::vector<TableRow> rows = std::vector<TableRow>(16);
     Table() = default;
     explicit Table(int id_) : id(id_), name(default_table_name(id_)) {}
 };
@@ -350,12 +310,8 @@ struct ModSlot {
 };
 
 /**
- * ModSlot.rowCount() — how many rows this slot occupies on the MODS screen, TYPE row included.
- *
- * It belongs to the data model rather than to the UI because it is a fact about the TYPE — an AHD has
- * a HOLD and an ADSR has a SUSTAIN, and no screen gets to disagree. Both the MODS cursor (how far
- * down you can walk) and its renderer (how many rows to paint) read it, and if they read different
- * tables the cursor lands on a row that is not drawn.
+ * How many rows this slot occupies on the MODS screen, TYPE row included. A fact about the TYPE, so
+ * the MODS cursor and its renderer both read it here.
  */
 inline int mod_slot_row_count(const ModSlot& s) {
     switch (s.type) {
@@ -365,26 +321,17 @@ inline int mod_slot_row_count(const ModSlot& s) {
         case ModType::LFO:      return 6;  // TYPE, DEST, AMT, OSC, TRIG, FREQ
         case ModType::DRUM:     return 6;  // as AHD
         case ModType::TRIG:     return 7;  // as ADSR
-        case ModType::TRACKING: return 5;  // future
+        case ModType::TRACKING: return 5;
         case ModType::SCALAR:   return 3;  // TYPE, DEST, AMT
     }
     return 1;
 }
 
 /**
- * What a groove holds before anything has been typed into it: two steps of the neutral length, then
- * fourteen end markers.
- *
- * ⚠️ A NEW GROOVE IS NOT BLANK, AND THIS IS AUDIBLY NOTHING. Twelve tics is exactly one plain step,
- * so a default groove and no groove at all play identically. What the two steps buy is the GROOVE
- * screen: they are the pair its swing setting bends, so a fresh slot already shows the thing you are
- * about to edit instead of sixteen dashes.
- *
- * ⚠️ AN ALL-BLANK GROOVE STAYS LEGAL and still means "no groove" — `groove_step_duration` falls back
- * to the plain step when nothing is active. Deleting both steps is how you get there.
- *
- * ⚠️ The 12 is `TICS_PER_STEP`, spelled out because `timing.h` includes THIS file and so cannot be
- * included back. `groove_bank.h` static-asserts that the two still agree.
+ * A new groove: two plain 12-tic steps, then end markers — audibly no groove at all, but the GROOVE
+ * screen shows the pair its swing bends. An all-blank groove is also legal and also means "none".
+ * ⚠️ 12 is `TICS_PER_STEP`, spelled out because timing.h includes this file; groove_bank.h asserts
+ * they agree.
  */
 inline std::vector<int> default_groove_steps() {
     std::vector<int> s(16, -1);
@@ -402,20 +349,12 @@ struct Groove {
 };
 
 /**
- * One of the project's 16 scales: which of the twelve chromatic intervals are IN the scale.
- *
- * The intervals are counted from the KEY, not from C — degree 0 is the root — so one Scale object
- * describes a shape (major, dorian, in-sen) that the key then positions. That is why the key is NOT
- * a field here: the same slot transposed to D must be the same slot.
- *
- * ⚠️ ALL TWELVE ENABLED IS THE CHROMATIC SCALE, and it is the default deliberately. A project that
- * has never seen this feature quantizes to every note, i.e. does not quantize — so the feature costs
- * an existing song nothing, with no migration step. Every consumer must keep that property.
- *
- * ⏸️ `offset` is WRITTEN AND NOT READ. Hundredths of a semitone, −2400..+2400, per degree: the
- * microtuning half of the feature, which reaches the pitch computation rather than the editor and is
- * deferred past 1.0. It is serialised from the first version so that switching it on later changes
- * no saved song.
+ * One of the project's 16 scales: which of the twelve intervals FROM THE KEY are in it. The key is
+ * not a field — the same shape transposed is the same slot.
+ * ⚠️ All twelve enabled (the default) means chromatic, i.e. no quantizing — every consumer must keep
+ * that, so the feature costs an existing song nothing.
+ * ⏸️ `offset` (centi-semitones, −2400..+2400 per degree) is saved but not yet read — the microtuning
+ * half, serialised from the start so enabling it changes no saved song.
  */
 struct Scale {
     int id = 0;
@@ -443,14 +382,14 @@ struct EqBand {
 
 struct EqPreset {
     int id = 0;
-    std::vector<EqBand> bands = std::vector<EqBand>(3);  // Array<EqBand>(3)
+    std::vector<EqBand> bands = std::vector<EqBand>(3);
     EqPreset() = default;
     explicit EqPreset(int id_) : id(id_) {}
 };
 
 struct Track {
     int id = 0;
-    std::vector<int> chainRefs;   // mutableListOf() — empty default
+    std::vector<int> chainRefs;   // empty default
     int  volume = 0xFF;
     bool mute   = false;
     bool solo   = false;
@@ -469,10 +408,8 @@ struct SFOverrides {
 };
 
 /**
- * One of an EXTERNAL instrument's four CC slots (M8's CCA–CCJ, cut to four — MIDI plan §7).
- *
- * `cc` is the controller NUMBER the slot owns and `value` the default sent WITH each note-on; −1 in
- * either means "unused", which is the project-wide empty convention and not a magic 0xFF.
+ * One of an EXTERNAL instrument's four CC slots: `cc` is the controller it owns, `value` the default
+ * sent with each note-on; −1 in either means unused.
  */
 struct MidiCcSlot {
     int cc    = -1;   // -1 = slot unused | 0-127
@@ -484,14 +421,9 @@ struct MidiCcSlot {
 constexpr int MIDI_CC_SLOTS = 4;
 
 /**
- * One of the controller's knobs pointed at one parameter of this song — the data half of
- * `midi_map.h`, which holds the catalogue `dest` indexes into and everything that reads or writes
- * through it.
- *
- * ⚠️ `dest` is a `MapDestId`, and **a number there is a number in someone's saved song**: the
- * catalogue appends, never inserts. `scopeIndex` says WHICH track or instrument, and it is resolved
- * when the mapping is learned rather than followed from the cursor. The range is in the
- * destination's own units and may be inverted (min > max).
+ * One knob pointed at one parameter of this song — the data half of `midi_map.h`.
+ * ⚠️ `dest` is a `MapDestId` saved in the song (append-only). `scopeIndex` (which track/instrument) is
+ * fixed at learn time. The range is in the destination's units and may be inverted.
  */
 struct MidiMapping {
     uint8_t controller = 0;   // the CC number the knob sends, 0-127
@@ -510,7 +442,7 @@ struct MidiMapping {
 struct Instrument {
     int id = 0;
     std::string name = default_instrument_name(0);
-    int sampleId = -1;                       // FIELD default -1 (factory overrides to slot index)
+    int sampleId = -1;                       // FIELD default -1; the factory sets the slot index
     int volume = 0xFF;
     int pan = 0x80;
     Note root = Note::C4();
@@ -524,7 +456,7 @@ struct Instrument {
     int loopStart = 0x00, loopEnd = 0xFF;
     std::optional<std::string> sampleFilePath;   // null
     int tableId = -1, tableTicRate = 0x06;
-    std::vector<ModSlot> modSlots = std::vector<ModSlot>(4);  // Array<ModSlot>(4)
+    std::vector<ModSlot> modSlots = std::vector<ModSlot>(4);
     InstrumentType instrumentType = InstrumentType::SAMPLER;
     std::optional<std::string> soundfontPath;    // null
     int sfBank = 0, sfPreset = 0;
@@ -532,38 +464,24 @@ struct Instrument {
     int reverbSend = 0x00, delaySend = 0x00;
     int eqSlot = -1;
     int slicingMode = 0;
-    std::vector<int64_t> sliceMarkers;           // emptyList()
+    std::vector<int64_t> sliceMarkers;
 
     /**
-     * Does this instrument follow note TRANSPOSITION at all? (M8's `TRANSP.`)
-     *
-     * ⚠️ It is not a scale switch, and the wider meaning is M8's rather than a choice made here: OFF
-     * silences the scale quantizer, the chain TSP column AND the project transpose for this
-     * instrument. That is what makes it useful — a drum kit whose slots are pitched by hand must not
-     * move when the song is transposed either.
-     *
-     * ⏸️ Only the scale quantizer reads it today (`Sequencer::emit_note`); the two transposes join
-     * when they are quantized.
+     * Does this instrument follow note TRANSPOSITION (M8's `TRANSP.`)? OFF exempts it from the scale
+     * quantizer, the chain TSP column AND the project transpose — a hand-pitched drum kit must not
+     * move when the song does (`effective_transpose_semitones`, `Sequencer::emit_note`).
      */
     bool transposeEnabled = true;
 
-    // ── EXTERNAL (instrumentType == EXTERNAL) — MIDI plan §7 ─────────────────────────────────────
-    // Every one of these is ignored by the other two types, and every one has a default, so an
-    // instrument that is not EXTERNAL serialises exactly the bytes it always did.
-    //
-    // `volume` and `pan` are REUSED rather than duplicated: volume scales the note-on velocity
-    // (LGPT-style) and pan becomes CC 10. An external instrument therefore mixes with the same two
-    // cells as every other instrument, which is the point of one protocol.
+    // ── EXTERNAL only ────────────────────────────────────────────────────────────────────────────
+    // Ignored by the other types, all defaulted, so a non-EXTERNAL instrument saves the same bytes.
+    // `volume` and `pan` are reused: volume scales note-on velocity and pan becomes CC 10.
     int midiChannel = 0;    // 0-15, shown 1-16
     int midiBank    = -1;   // -1 = send nothing; else the bank sent (CC0/CC32) before the program
     int midiProgram = -1;   // -1 = send nothing; else the program sent with the first note-on
     /**
-     * Gate length in TICKS (LGPT's LEN), 0 = gate-to-next.
-     *
-     * ⚠️ Non-zero and gate-to-next are different mechanisms, not one with a special case: a LEN gate
-     * schedules its own note-off at emit time, while 0 leaves the note sounding until the NEXT note-on
-     * or KIL lands on the track — which is exactly what the sampler's cut behaviour does, and is why an
-     * external synth follows a phrase's rests the way the internal one does.
+     * Gate length in TICKS, 0 = gate-to-next. A LEN gate schedules its own note-off; 0 holds the note
+     * until the next note-on or KIL on the track, like the sampler's cut.
      */
     int midiLen = 0;
     std::vector<MidiCcSlot> midiCC = std::vector<MidiCcSlot>(MIDI_CC_SLOTS);
@@ -573,75 +491,43 @@ struct Instrument {
 };
 
 /**
- * Is a note on this instrument a PITCH, or is it choosing a slice?
- *
- * ⚠️ **A SLICED INSTRUMENT'S NOTE IS A SELECTOR, NOT A PITCH** — C-4 is slice 0, C#4 is slice 1, and
- * the sound they make has nothing to do with the semitone between them. Anything that moves notes
- * around musically (the scale quantizer today, the transposes when they follow) must ask this first
- * and leave the note alone when the answer is true, or a drum kit plays a different drum.
- *
- * `sliceOverride` is the step's own SLI value, -1 for none: an SLI turns slice selection on for one
- * note even when the instrument's own slicing mode is off.
- *
- * ⚠️ It is written here, next to the two fields it reads, because `voice_derive.h` decides the very
- * same question when it picks the slice and the two answers MUST be the same one. Two copies of this
- * condition is a note quantized here and sliced there.
+ * Is a note on this instrument a PITCH, or choosing a slice? Sliced, C-4 is slice 0 and C#4 slice 1.
+ * ⚠️ Anything that moves notes musically (quantizer, transposes) must ask this and leave a slice
+ * selector alone, or a drum kit plays a different drum. `voice_derive.h` asks the same question when
+ * picking the slice, so the answer lives here once.
+ * `sliceOverride` is the step's SLI value (-1 none): it turns slicing on for one note.
  */
 inline bool note_selects_slice(const Instrument& ins, int sliceOverride) {
     return (ins.slicingMode != 0 || sliceOverride >= 0) && !ins.sliceMarkers.empty();
 }
 
-/**
- * Instrument.hasDefaultName() — the name is still the auto-generated "INSTxx", i.e. nobody has named
- * this slot. The INSTRUMENT screen draws "______" for it and the pool draws a dim placeholder row;
- * loading a sample or an SF2 overwrites it with the file's name.
- */
+/** The name is still the auto-generated "INSTxx" — nobody named this slot. */
 inline bool instrument_has_default_name(const Instrument& ins) {
     return ins.name == default_instrument_name(ins.id);
 }
 
 /**
- * Instrument.isFree() — this slot holds NOTHING and may be claimed for a new sample.
- *
- * ⚠️ `sampleFilePath == null` alone is NOT "empty", and this is the trap the predicate exists to close:
- * a fully configured SoundFont instrument ALSO has a null sampleFilePath. Search for a free slot with
- * that test and a resample will happily overwrite a SoundFont, leaving a SOUNDFONT-typed slot with a
- * WAV behind it — broken in a way that looks fine until it is played.
- *
- * (The sibling convention is unchanged and still holds: for "is there a sound in this slot to PLAY",
- * `sampleFilePath == null` IS the single signal, and the note consumer drops on it.)
+ * This slot holds NOTHING and may be claimed for a new sample.
+ * ⚠️ `sampleFilePath == null` alone is not "free": a SoundFont instrument has it too, and claiming
+ * one leaves a SOUNDFONT-typed slot with a WAV behind it. (For "is there a sample to PLAY", the null
+ * path IS the signal.)
  */
 inline bool instrument_is_free(const Instrument& ins) {
     return !ins.sampleFilePath.has_value() && !ins.soundfontPath.has_value() &&
            ins.instrumentType == InstrumentType::SAMPLER;
 }
 
-/**
- * Does this instrument's event stream leave the process (MIDI plan §4.3)?
- *
- * The ONE routing question the bus asks, and it is deliberately a model predicate rather than a
- * consumer's private test: BOTH consumers ask it, and they must agree on every event or a note is
- * either played twice or dropped. See midi_out.h.
- */
+/** Does this instrument's event stream leave the process? Both consumers ask this one predicate, so
+ *  a note is never played twice or dropped. */
 inline bool instrument_routes_external(const Instrument& ins) {
     return ins.instrumentType == InstrumentType::EXTERNAL;
 }
 
 /**
- * The controller number a bus CC event names, for THIS instrument (MIDI phase D).
- *
- * A literal 0-127 passes through. A symbolic slot id (event.h `CC_SLOT_A`..`CC_SLOT_D`, what a
- * `CCA`-`CCD` phrase command emits) names a LETTER, and the number that letter stands for is the
- * instrument's own — `midiCC[slot].cc`. **−1 = nothing to move**: the slot is unassigned, or the id
- * is one this build does not know.
- *
- * ⚠️ It lives HERE, beside `instrument_routes_external`, for the identical reason and it is not
- * tidiness: BOTH consumers translate these ids (engine_consumer.h resolves them to engine params,
- * midi_out.h to bytes on a wire), and two private copies of the rule are two things that agree until
- * the day one of them is edited. Same argument that moved `chain_is_empty` out of the scheduler.
- *
- * ⚠️ And −1 must never be "fall back to the raw id": `CC_SLOT_A` is 128, which masks to CC 0 — BANK
- * SELECT. A `CCA` on an instrument with no slot A would re-bank the device instead of doing nothing.
+ * The controller number a bus CC event names for THIS instrument. A literal 0-127 passes through; a
+ * slot id (`CC_SLOT_A`..`D`, from `CCA`-`CCD`) becomes `midiCC[slot].cc`. −1 = nothing to move.
+ * Shared by both consumers.
+ * ⚠️ −1 must never fall back to the raw id: 128 masks to CC 0, BANK SELECT.
  */
 inline int resolve_cc_param(const Instrument& ins, uint8_t param) {
     const int slot = cc_slot_index(param);
@@ -657,93 +543,68 @@ struct Project {
     int transpose = 0;
     int masterVolume = 0xFF;
     int ottDepth = 0, masterBusFx = 0, dustDepth = 0, limiterPreGain = 0;
-    std::vector<EqPreset> eqPresets;              // Array(128){EqPreset(it)} — filled by factory
-    // ⚠️ `reverbFeedback` is the DCAY cell — the tail's length — and has been since before the room
-    // could change; the name is the JSON key's and stays. The room is `reverbSize` below.
+    std::vector<EqPreset> eqPresets;              // 128, filled by the factory
+    // ⚠️ `reverbFeedback` is the DCAY cell (the tail's length); the JSON key keeps the old name. The
+    // room is `reverbSize`.
     int reverbFeedback = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbInputEq = -1;
-    // The reverb's character — three independent cells, no mode between them. The TYPE row on the
-    // EFFECTS screen writes these, DCAY, SIZE and DAMP all at once from a preset, and then reads the
-    // name back by matching (effects/modules/reverb-presets.h); it is not stored, because after one
-    // turn of any of the six there is nothing for it to be.
-    //
-    // ⚠️⚠️ **THESE DEFAULTS ARE THE REVERB THAT SHIPPED, and PRE and WIDE have to stay that way**: a
-    // project written before the cells existed loads without them, so the default is what it plays
-    // with. PRE is 00 (no line at all, not a short one) and WIDE is 80 (the mid/side pair SKIPPED, not
-    // performed). ⚠️ MOD is the exception and is deliberately BELOW the 40 the algorithm was fixed at:
-    // a wander sized for a long tail is audible as detuning on a short one.
+    // The reverb's character: three independent cells. The EFFECTS screen's TYPE row writes them (with
+    // DCAY, SIZE and DAMP) from a preset and reads the name back by matching
+    // (effects/modules/reverb-presets.h); the name is not stored.
+    // ⚠️ These defaults are what a project saved before the cells existed plays with: PRE 00 (no line),
+    // WIDE 80 (mid/side skipped). MOD is lower than the old fixed 40 — on a short tail that much
+    // wander sounds like detuning.
     int reverbPreDelay = 0x00, reverbWidth = 0x80, reverbMod = 0x10;
-    // The SIZE cell — the room's dimensions, and through them how slowly the wander moves.
-    // ⚠️⚠️ **0x60 IS THE ROOM THE REVERB ALWAYS HAD, EXACTLY** (`reverb_room_scale` is 1 there), so a
-    // project written before the cell existed loads without it and sounds as it did.
+    // The SIZE cell. ⚠️ 0x60 is exactly the original room (`reverb_room_scale` is 1), so older projects
+    // sound as they did.
     int reverbSize = 0x60;
-    // Which reverb reads the cells above — `kReverbAlgo*` in effects/modules/reverb-presets.h.
-    // ⚠️⚠️ **0 IS THE REVERB THAT SHIPPED AND A NUMBER IS ITS IDENTITY** — append, never insert. Changing
-    // it rewrites none of the cells above, so switching back returns the sound that was there.
+    // Which reverb reads the cells above (`kReverbAlgo*`). ⚠️ 0 is the original, and a number is an
+    // identity — append, never insert. Switching rewrites no cell.
     int reverbAlgo = 0;
     int delayTime = 0x40;
     bool delaySync = false;
     int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;
-    // The delay's character — three independent cells, no mode between them. The TYPE row on the
-    // EFFECTS screen writes all three at once from a preset and then reads the name back by matching
-    // (effects/modules/delay-presets.h); it is not stored, because after one turn of any of these
-    // there is nothing for it to be.
-    //
-    // ⚠️⚠️ **THESE DEFAULTS ARE THE DELAY THAT SHIPPED, and they have to stay that way**: a project
-    // written before the cells existed loads without them, so the default is what it plays with. TONE
-    // is FF (the filter switched OUT, not merely open) and WOBL is 00.
+    // The delay's character, written by the TYPE row from a preset and named back by matching
+    // (effects/modules/delay-presets.h). ⚠️ Defaults are what older projects play with: TONE FF (filter
+    // switched out), WOBL 00.
     bool delayPong = false;
     int  delayTone = 0xFF, delayWobble = 0x00;
-    // The two send RETURNS are mixer channels like the eight tracks, and they carry the same pair of
-    // performance flags. ⚠️ A SOLO here is a statement about the RETURNS and the dry sum, never about
-    // which tracks play: the notes feeding a soloed return must go on sounding, so this is deliberately
-    // not folded into `track_audible` — see `dry_audible` below.
+    // The two send RETURNS are mixer channels with their own mute/solo. ⚠️ A return SOLO never stops a
+    // track — its feed must keep sounding — so it is not part of `track_audible` (see `dry_audible`).
     bool reverbMute = false, reverbSolo = false;
     bool delayMute  = false, delaySolo  = false;
     int masterEqSlot = -1;
-    std::vector<Phrase>     phrases;              // Array(256){Phrase(it)}
-    std::vector<Chain>      chains;               // Array(256){Chain(it)}
-    std::vector<Track>      tracks;               // Array(8){Track(it)}
-    std::vector<Instrument> instruments;          // Array(128){ Instrument(id=i, sampleId=i) }
-    std::vector<Table>      tables;               // Array(128){Table(it)}
-    std::vector<Groove>     grooves;              // Array(128){Groove(it)}
-    std::vector<Scale>      scales;               // Array(16){Scale(it)} — slot 00 is every track's
+    std::vector<Phrase>     phrases;              // 256
+    std::vector<Chain>      chains;               // 256
+    std::vector<Track>      tracks;               // 8
+    std::vector<Instrument> instruments;          // 128, sampleId = slot index
+    std::vector<Table>      tables;               // 128
+    std::vector<Groove>     grooves;              // 128
+    std::vector<Scale>      scales;               // 16 — slot 00 is every track's default
 
     /**
-     * The root note of the default scale, 0-11 (0 = C). Global, and the only half of "what scale am
-     * I in" that is not the slot: a slot is a shape, the key is where that shape starts.
-     *
-     * A track can be moved off it at playback by the SCA command; nothing stores that, exactly as
-     * nothing stores the groove GRV assigns.
+     * The default scale's root, 0-11 (0 = C): a slot is a shape, the key is where it starts. SCA can
+     * move a track off it during playback; that is never stored.
      */
     int scaleKey = 0;
 
-    // ── MIDI, the parts that are MUSICAL INTENT and so travel with the song (MIDI plan §7) ───────
-    // The device PICKS do not live here — they are settings.json (settings_store.h), because a project
-    // carried to another machine keeps its routing and its sync intent and re-picks its cables.
-    int  midiSyncOut = 0;               // 0 OFF | 1 CLOCK | 2 TRANSPORT | 3 CLOCK+TRANSPORT (phase C)
+    // ── MIDI: the musical intent, which travels with the song ────────────────────────────────────
+    // The device picks are settings.json (settings_store.h): a song moved to another machine keeps
+    // its routing and re-picks its cables.
+    int  midiSyncOut = 0;               // 0 OFF | 1 CLOCK | 2 TRANSPORT | 3 CLOCK+TRANSPORT
     bool midiSendProgramChange = true;
 
     /**
-     * Which of this controller's knobs moves which parameter (`midi_map.h`).
-     *
-     * ⚠️ IN THE SONG because a mapping names song content — "instrument 3's cutoff" only means
-     * something beside a song that has an instrument 3. The CHANNEL those knobs arrive on is the
-     * opposite: it describes the cable on this desk, so it lives in settings.json.
-     *
-     * ⚠️ A COUNT, NOT 128 SLOTS. Empty is empty; each learn appends one.
+     * Which knob moves which parameter (`midi_map.h`). In the song because a mapping names song content
+     * ("instrument 3's cutoff"); the knobs' channel describes the desk, so it is in settings.json.
+     * A growing list — empty is empty.
      */
     std::vector<MidiMapping> midiMappings;
 };
 
 // ── Which tracks are making sound ────────────────────────────────────────────────────────────────
 //
-// ⚠️ DERIVED, NEVER STORED. Solo is a property of the SET of tracks, not of one of them: the answer
-// for track 3 changes when track 5 is soloed. A cached per-track "audible" flag would have to be
-// rewritten on every toggle and would be wrong the first time a site forgot, so every consumer —
-// both schedulers, the render, the traversal, the engine push and both screens — asks here instead.
-//
-// Mute wins over solo: a soloed track that is also muted stays silent, because MUTE is the explicit
-// statement about that one channel and SOLO is a statement about the others.
+// ⚠️ DERIVED, never stored: solo is a property of the SET — track 3's answer changes when track 5 is
+// soloed. Every consumer asks here. Mute wins over solo.
 inline bool any_solo(const Project& p) {
     for (const Track& t : p.tracks)
         if (t.solo) return true;
@@ -759,12 +620,10 @@ inline bool track_audible(const Project& p, int trackId) {
     return track_audible(p, p.tracks[static_cast<size_t>(trackId)]);
 }
 
-// ── …and which of the two SEND RETURNS is ────────────────────────────────────────────────────────
+// ── …and which send RETURN is ────────────────────────────────────────────────────────────────────
 //
-// The same shape as the tracks above, derived for the same reason, but a SEPARATE solo set. Soloing a
-// track leaves the returns alone (the reverb is still fed, by the one track that plays); soloing a
-// return must not stop any track, because a return with nothing feeding it is silence — a solo into a
-// hole. So the two sets meet only at the DRY sum, which is what a soloed return takes down.
+// A separate solo set. Soloing a track leaves the returns alone; soloing a return stops no track (a
+// return with no feed is silence). The two sets meet at the DRY sum, which a soloed return mutes.
 inline bool any_send_solo(const Project& p) { return p.reverbSolo || p.delaySolo; }
 
 inline bool reverb_return_audible(const Project& p) {
@@ -781,9 +640,8 @@ inline bool dry_audible(const Project& p) { return !any_send_solo(p) || any_solo
 
 // ── The mixer's ten channels ─────────────────────────────────────────────────────────────────────
 //
-// 0-7 are the song tracks, 8 and 9 the reverb and delay returns — the MIXER screen draws all ten as
-// strips, and a mute/solo gesture names one of them. ⚠️ Resolved in ONE place so that a chord's
-// snapshot, its toggle and its undo cannot disagree about where a channel's two flags live.
+// 0-7 the tracks, 8 and 9 the reverb and delay returns. Resolved in one place so a chord's
+// snapshot, toggle and undo agree on where a channel's flags live.
 constexpr int MIX_CH_REVERB = 8;
 constexpr int MIX_CH_DELAY  = 9;
 
@@ -805,11 +663,10 @@ inline MixChannelFlags mix_channel_flags(Project& p, int ch) {
 struct InstrumentPreset {
     int version = 1;
     Instrument instrument;
-    std::optional<std::vector<TableRow>> tableRows;  // null
+    std::optional<std::vector<TableRow>> tableRows;
 };
 
-// A fresh default Project — the exact object graph kotlinx builds from `Project()`. Note the one
-// factory-vs-field-default divergence: instrument.sampleId is set to the slot index here.
+// A fresh default Project. The one factory-vs-field difference: sampleId = slot index.
 inline Project make_default_project() {
     Project p;
     p.eqPresets.reserve(POOL_EQPRESETS);
@@ -823,7 +680,7 @@ inline Project make_default_project() {
     p.instruments.reserve(POOL_INSTRUMENTS);
     for (int i = 0; i < POOL_INSTRUMENTS; ++i) {
         Instrument ins(i);
-        ins.sampleId = i;  // factory value (Project's Array(128) initializer)
+        ins.sampleId = i;  // factory value
         p.instruments.push_back(std::move(ins));
     }
     p.tables.reserve(POOL_TABLES);

@@ -11,10 +11,8 @@ namespace {
 constexpr int VISIBLE_ROWS   = 16;
 constexpr int NAME_MAX_CHARS = 12;
 
-// Column offsets from the module's left edge. The module is drawn at screen-x 10 and CLIPPED at
-// screen-x 509 (ui/layout.h), so the visible table spans 10..509 — the four value columns are packed
-// 50px apart and the block sits left of centre so the EQ cell on the selected row still has room for
-// its trailing ">" before the clip.
+// Column offsets from the module's left edge. The module is drawn at x=10 and clipped at x=509
+// (layout.h); the block sits left of centre so the selected row's EQ cell keeps room for its ">".
 constexpr int ID_X   = 14;
 constexpr int NAME_X = 56;
 constexpr int VOL_X  = 297;
@@ -36,12 +34,8 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
     c.draw_text("INST.POOL", x + ID_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     // ── USED RAM, in the gap the title leaves ────────────────────────────────────────────────────
-    // The same total PROJECT shows, on the screen where the samples that make it up are listed. It
-    // is a readout, not a row: the cursor never reaches it and nothing here can edit it.
-    //
-    // ⚠️ Gated with PROJECT's pair, on the same flag and for the same reason (project_editor.cpp) —
-    // one number on two screens must appear and disappear on both at once, or a release build hides
-    // a figure the manual could still point at.
+    // The same total PROJECT shows; a readout the cursor never reaches.
+    // ⚠️ Gated on the same flag as PROJECT's, so one number appears and disappears on both screens.
     if (s.caps.debug) {
         c.draw_text("RAM", x + RAM_LABEL_X, y + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(megabytes_str(s.sampleRamBytes), x + RAM_VALUE_X, y + TEXT_PADDING, t.textValue,
@@ -59,9 +53,7 @@ void InstrumentPoolModule::draw(Canvas& c, int x, int y, const InstrumentPoolSta
     c.draw_text("DE",   x + DEL_X,  headerY, head(3), CHAR_SPACING, FONT_SCALE);
     c.draw_text("EQ",   x + EQ_X,   headerY, head(4), CHAR_SPACING, FONT_SCALE);
 
-    // The scroll is DERIVED, not stored: the selected row is kept centred, so there is no scroll state
-    // to get out of sync with the selection. (Contrast SONG, whose viewport is its own field because
-    // its cursor and its playhead move independently.)
+    // The scroll is derived (the selected row is kept centred), so there is no scroll state to drift.
     const int maxScroll = (count - VISIBLE_ROWS) < 0 ? 0 : (count - VISIBLE_ROWS);
     const int scroll    = clamp(s.selectedInstrument - VISIBLE_ROWS / 2, 0, maxScroll);
 

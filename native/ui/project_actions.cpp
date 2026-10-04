@@ -6,39 +6,25 @@
 
 #include "songcore/project_io.h"   // serialize_project — so a save can go through the FileSystem
 #include "songcore/render.h"
-#include "ui/lifecycle.h"          // autosave_clear — a save leaves nothing to recover (S10)
+#include "ui/lifecycle.h"          // autosave_clear — a save leaves nothing to recover
 
 namespace pt::ui {
 
 namespace {
 
 /**
- * ⚠️ **EVERY FILE A USER WOULD MISS IS WRITTEN THROUGH `FileSystem::write_file`** — the `.ptp` here,
- * the autosave and the template, and the `.pti` at the bottom of this file.
- *
- * `write_file` writes `<path>.tmp`, checks the close, and only then renames it over the target. Its
- * own doc comment says why, and it is not hypothetical on the hardware this port is aimed at: *"a
- * device that loses power — or a user who pulls the SD card — mid-save must not be left with a
- * half-written project where the whole one used to be."*
- *
- * The alternative a writer reaches for — an `ofstream` opened with `trunc` — fails two ways at once:
- * it destroys the previous file the moment it opens, and `f.good()` after the last `write` is read
- * *before* the destructor flushes, so a payload smaller than the stream buffer never reaches the
- * disk at all and the call still returns true. It belongs to no layer of this app.
- *
- * ⚠️ songcore deliberately provides no such writer, and that is why the write lives up here: songcore
- * must keep compiling for the NDK, where *where files live* is the host's problem, so it cannot
- * depend on `ui::FileSystem`. **pt-ui can.**
- *
- * The failure needs no imagination and no tool in the ladder could have seen it: every check asserts
- * the file LANDS and PARSES, which it does. None of them cuts the power halfway through, and none
- * fills the card.
+ * ⚠️ Every file a user would miss — `.ptp`, autosave, template, `.pti` — is written through
+ * `FileSystem::write_file` (temp, checked close, rename), so power loss or a pulled SD card mid-save
+ * leaves the old file whole. A truncating `ofstream` destroys the old file on open, and its `good()`
+ * is read before the flush, so a small payload can vanish while returning true. songcore cannot depend
+ * on `ui::FileSystem` (it compiles for the NDK), which is why writes live up here.
+ * No check in the tools cuts power mid-write or fills the card — this is the guard.
  */
 bool write_project(const songcore::SongcoreHost& host, FileSystem& fs, const std::string& path) {
     return fs.write_file(path, songcore::serialize_project(host.project()));
 }
 
-/** `0001`, `0002`, … — Kotlin's `index.toString().padStart(4, '0')`. */
+/** `0001`, `0002`, … */
 std::string pad4(int v) {
     std::string s = std::to_string(v);
     while (s.size() < 4) s.insert(s.begin(), '0');
@@ -52,19 +38,16 @@ std::string unique_render_path(FileSystem& fs, const std::string& dir, const std
         const std::string path = dir + "/" + safeName + "_" + pad4(index) + ".wav";
         if (!fs.file_exists(path)) return path;
     }
-    // Ten thousand renders of one song. Kotlin gives up the same way — it stops at 10000 and returns
-    // the last name it built, overwriting it.
+    // Ten thousand renders of one song: give up and overwrite the last name.
     return dir + "/" + safeName + "_9999.wav";
 }
 
 // ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
 
 ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState& s) {
-    // ⚠️ The empty-name fallback is load-bearing, not cosmetic. Without it an unnamed project saves to
-    // "<Projects>/.ptp" — a DOTFILE — and the browser skips dotfiles (`build_item_list`). The save
-    // succeeds, the status line says SAVED, and the file is invisible to the app forever. An empty name
-    // is reachable: A+B every character on the NAME row, or apply an empty keyboard field. Android had
-    // the same hole and is fixed with it (FileController.saveProject).
+    // ⚠️ The empty-name fallback matters: an unnamed project would save to "<Projects>/.ptp", a dotfile
+    // the browser never lists — SAVED, and invisible for ever. An empty name is reachable (A+B every
+    // character on NAME).
     std::string safeName = songcore::safe_project_name(host.project().name);
     if (safeName.empty()) safeName = "UNTITLED";
 
@@ -72,21 +55,14 @@ ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState
 
     if (!write_project(host, fs, path)) return ActionResult{false, "SAVE FAILED"};
 
-    // The document is now on disk exactly as it stands, so it is no longer dirty. This is what makes
-    // NEW and EXIT stop asking (TrackerController: `savedProjectVersion = projectVersion`).
+    // On disk exactly as it stands: no longer dirty, so NEW and EXIT stop asking.
     s.savedProjectVersion = s.projectVersion;
     s.projectPath         = path;
 
-    // …and the crash-recovery autosave goes with it: the work is now safely in a real file the user
-    // named, so there is nothing left to recover (TrackerController.saveProject, same two lines). It
-    // lives HERE, beside the version alignment, rather than in the dispatcher's SAVE arm — the two are
-    // one fact ("this document is now stored"), and a caller that gets one without the other leaves a
-    // recovery prompt hanging over a project that is safely saved.
-    //
-    // ⚠️ The dispatcher's pending 3 s deadline is NOT cancelled from here and does not need to be: it
-    // re-checks `project_dirty()` when it fires, and the line above has just made that false. That
-    // re-check is the ONLY thing standing between a save-inside-the-debounce-window and the autosave
-    // being written straight back out — see InputDispatcher::run_due_autosave.
+    // …and the crash-recovery autosave goes with it — one fact ("this document is stored"), kept with the
+    // version alignment so no caller gets one without the other.
+    // ⚠️ The dispatcher's pending 3 s deadline is not cancelled: it re-checks `project_dirty()`, which the
+    // line above made false (InputDispatcher::run_due_autosave).
     autosave_clear(fs);
 
     return ActionResult{true, "SAVED"};
@@ -96,19 +72,13 @@ ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState
 
 namespace {
 
-/**
- * The rows a render will actually cover. An unset range means the whole song, which is the answer
- * every caller outside the RENDER dialog wants — and it is derived here, once, rather than at the two
- * call sites that would otherwise each have to remember the fallback.
- */
+/** The rows a render covers. An unset range means the whole song — derived here once. */
 songcore::SongBounds resolve_range(const songcore::Project& project, const RenderRange& range) {
     if (range.startRow < 0) return songcore::find_song_bounds(project);
     songcore::SongBounds b;
     b.startRow = range.startRow;
     b.endRow   = std::max(range.startRow, range.endRow);
-    // ⚠️ A range over rows nobody has written to is EMPTY, not a file of silence. The dialog can be
-    // pointed at any row in the song, and a render that produced a minute of nothing would read as a
-    // broken export rather than as an empty selection.
+    // ⚠️ A range over unwritten rows is EMPTY, not a file of silence that reads as a broken export.
     for (int row = b.startRow; row <= b.endRow; ++row)
         if (songcore::song_row_filled(project, row)) return b;
     return songcore::SongBounds();
@@ -126,9 +96,7 @@ ActionResult render_mix(songcore::SongcoreHost& host, FileSystem& fs, AppState& 
     const std::string safeName = songcore::safe_project_name(host.project().name);
     const std::string path     = unique_render_path(fs, fs.renders_directory(), safeName);
 
-    // Master bus and all — and the file is LONGER than the rows asked for, because the render runs on
-    // past the last step until the reverb tail, the delay repeats and the note releases have decayed
-    // (songcore/render.h, S6b).
+    // Master bus and all; the file runs past the last row until the tails decay (songcore/render.h).
     songcore::RenderOptions opts;
     opts.stemsMode      = 0;
     opts.applyMasterBus = true;
@@ -147,8 +115,8 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
                           const RenderRange& range, const std::function<void(float)>& progress) {
     (void)s;
 
-    // ⚠️ RESOLVED ONCE, ABOVE THE PASS LOOP, and held. Every stem must cover the same rows, and a
-    // range recomputed per pass is a set of files that no longer line up in a DAW.
+    // ⚠️ Resolved ONCE above the pass loop: every stem must cover the same rows or they will not line up
+    // in a DAW.
     const songcore::SongBounds bounds = resolve_range(host.project(), range);
     if (bounds.empty()) return ActionResult{false, "SONG IS EMPTY"};
 
@@ -156,9 +124,8 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
         songcore::stems_plan(host.project(), bounds.startRow, bounds.endRow);
     if (passes.empty()) return ActionResult{false, "NO ACTIVE TRACKS"};
 
-    // Renders/<name>/ — one folder per project, so a stems set does not scatter across the renders
-    // directory. `ifEmpty { "project" }` is the stems path's own fallback, and unlike the mix path it
-    // HAS one, because an empty folder name would put the stems straight into Renders/.
+    // Renders/<name>/, one folder per project. Falls back to "project" — an empty folder name would put
+    // the stems straight into Renders/.
     std::string safeName = songcore::safe_project_name(host.project().name);
     if (safeName.empty()) safeName = "project";
 
@@ -175,16 +142,13 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
     for (const songcore::StemPass& pass : passes) {
         songcore::RenderOptions opts;
         opts.stemsMode = pass.stemsMode;
-        // ⚠️ Stems BYPASS the master bus (OTT / DUST / master EQ) by design — you are meant to be able
-        // to re-mix them in a DAW without the bus baked in twice.
+        // ⚠️ Stems BYPASS the master bus by design — re-mixed in a DAW, it would be applied twice.
         opts.applyMasterBus = false;
 
         const std::string path = stemDir + "/" + safeName + pass.suffix + ".wav";
 
-        // ⚠️ ONE prepare per PASS, not one for the set. prepare_render is what wipes the effect
-        // chains, and without it each stem would begin inside the PREVIOUS stem's reverb tail.
-        // `render_song_range_to_wav` does prepare → schedule → render → finish, so that comes free —
-        // and it is the same call the mix makes, which is what keeps the two paths from drifting.
+        // ⚠️ One prepare per PASS (via `render_song_range_to_wav`, the mix's own call): each stem must not
+        // begin inside the previous one's reverb tail.
         const int   from = done;
         const auto slice = [&progress, from, total](float p) {
             if (progress) progress((static_cast<float>(from) + p) / static_cast<float>(total));
@@ -195,11 +159,8 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
                                           progress ? slice : std::function<void(float)>(),
                                           range.repeat);
 
-        // ⚠️ Stop at the first pass that fails, and say how many landed. A stems set is one
-        // full-length WAV per active track — the largest write this app makes — so the reason a pass
-        // fails is almost always a card with no room, and every later pass would spend minutes
-        // filling it further before failing too. The count is the useful part: it names how many of
-        // the files now in the folder are complete.
+        // ⚠️ Stop at the first failed pass and say how many landed: stems are the largest write the app
+        // makes, so a failure is almost always a full card, and later passes would only fill it more.
         if (!stats.ok || stats.totalFrames <= 0)
             return ActionResult{false, done == 0 ? "STEMS FAILED"
                                                  : "STEMS: " + std::to_string(done) + " OF " +
@@ -219,7 +180,7 @@ std::string resample_base_name(FileSystem& fs) {
         const std::string base = "Resample_" + pad4(index);
         if (!fs.file_exists(dir + "/" + base + ".wav")) return base;
     }
-    // Ten thousand resamples with none freed. Kotlin gives up the same way, returning the last name.
+    // Ten thousand resamples with none freed: give up, return the last name.
     return "Resample_9999";
 }
 
@@ -229,17 +190,14 @@ ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
                              const std::function<void(float)>& progress) {
     const std::string dir = fs.resampled_directory();
 
-    // A typed name is used verbatim (and OVERWRITES); an empty field auto-names and de-duplicates. This
-    // is Kotlin's generateResampledFilename exactly: only the auto branch loops on file_exists. In
-    // practice the keyboard is pre-filled with resample_base_name() — already the first free slot — so
-    // the common path writes `Resample_NNNN.wav` that nothing else holds.
+    // A typed name is used verbatim (and OVERWRITES); an empty one auto-names and de-duplicates. The
+    // keyboard opens pre-filled with resample_base_name(), already the first free slot.
     const std::string path = customBaseName.empty()
                                  ? unique_render_path(fs, dir, "Resample")
                                  : dir + "/" + songcore::safe_project_name(customBaseName) + ".wav";
 
-    // prepare → schedule(range, filter) → render → finish, mirroring renderSelectionToWav. finish_render
-    // MUST run even when nothing scheduled (Kotlin's try/finally): prepare_render silenced the live
-    // stream and reset the chains, so bailing without finish would leave the engine torn down.
+    // prepare → schedule(range, filter) → render → finish. finish_render MUST run even when nothing was
+    // scheduled: prepare_render silenced the live stream and reset the chains.
     host.prepare_render(startRow, endRow);
     const int64_t songFrames = host.schedule_song_range(startRow, endRow, &trackFilter);
     if (songFrames <= 0) {
@@ -247,7 +205,7 @@ ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
         return ActionResult{false, "RESAMPLE FAILED"};
     }
 
-    // stemsMode 0 + master bus ON — a resample is a MIX of the selected tracks, not a dry stem.
+    // stemsMode 0 + master bus ON — a resample is a MIX of the selected tracks.
     const songcore::RenderStats stats =
         host.render_to_wav(path, songFrames, /*stemsMode=*/0, /*applyMasterBus=*/true, progress);
     host.finish_render();
@@ -255,7 +213,7 @@ ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
     if (!stats.ok || stats.totalFrames <= 0) return ActionResult{false, "RESAMPLE FAILED"};
 
     outPath = path;
-    return ActionResult{true, ""};   // the caller builds "RESAMPLED -> INST xx" once the slot lands
+    return ActionResult{true, ""};   // the caller reports "RESAMPLED -> INST xx" once the slot lands
 }
 
 int create_resampled_instrument(songcore::SongcoreHost& host, const std::string& wavPath) {
@@ -267,13 +225,12 @@ int create_resampled_instrument(songcore::SongcoreHost& host, const std::string&
     }
     if (slot < 0) return -1;
 
-    // load_sample decodes the WAV into the slot, learns its rate ratio, and pushes the slot's playback
-    // params. A failure here (a WAV that will not open) leaves the slot untouched and free.
+    // Decode into the slot, learn its rate ratio, push its playback params. On failure the slot stays
+    // untouched and free.
     if (!host.load_sample(slot, wavPath)) return -1;
 
-    // instrument_is_free already guaranteed a clean SAMPLER slot at defaults, but set type/SF/root/vol/
-    // pan defensively so the claimed slot can never be a hybrid — then re-push, as Kotlin re-runs
-    // updateInstrumentPlaybackParams after the field writes.
+    // The slot was free (clean SAMPLER at defaults), but type/SF/root/vol/pan are set anyway so it can
+    // never be a hybrid — then re-pushed.
     songcore::Instrument& ins = p.instruments[static_cast<size_t>(slot)];
     ins.instrumentType = songcore::InstrumentType::SAMPLER;
     ins.soundfontPath.reset();
@@ -303,8 +260,7 @@ ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs) {
 
 ActionResult clear_template(FileSystem& fs) {
     const std::string path = fs.template_project_path();
-    // Kotlin returns TRUE when there was nothing to delete: clearing an absent template is not a
-    // failure, it is a no-op that leaves you exactly where you asked to be.
+    // Clearing an absent template is not a failure.
     if (!fs.file_exists(path)) return ActionResult{true, "TEMPLATE CLEARED"};
     if (!fs.delete_path(path)) return ActionResult{false, "CLEAR FAILED"};
     return ActionResult{true, "TEMPLATE CLEARED"};

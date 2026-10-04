@@ -2,33 +2,20 @@
 
 // ─── The INSTRUMENT screen's row geometry ────────────────────────────────────────────────────────
 //
-// A 1:1 port of core/data/InstrumentRowLayout.kt: the ONE table the cursor walks. Row stepping,
-// spacer skipping, column snapping and LEFT/RIGHT column stepping all derive from it.
+// The ONE table the cursor walks: row stepping, spacer skipping, column snapping and LEFT/RIGHT all
+// derive from it. ⚠️ It must mirror the DRAWN layout in ui/modules/instrument_editor.cpp — add, remove
+// or move a row there and its entry here changes too.
 //
-// It exists because the same geometry used to be re-encoded at four movement sites as spacer-skip
-// literals and row sets, and one miss stranded the cursor on a spacer or off the screen. The DRAWN
-// layout lives in ui/modules/instrument_editor.cpp, and this table must mirror it: add, remove or move
-// a row there and the matching entry here changes too — one edit, in the file whose name says so.
-//
-// The column shape of each kind, which is what the movement code actually reads:
-//
-//   NAME   — columns 1..3, LEFT/RIGHT step by 1 (a value, then two buttons: TYPE + LOAD + EDIT). On a
-//            SoundFont the EDIT button is not drawn — there is no single waveform to edit — so the
-//            cursor caps at column 2 there, and column 3 would sit on a cell that is not drawn. On
-//            EXTERNAL neither button is drawn and the cap is 1. `instrument_name_row_max_column`.
+//   NAME   — columns 1..3 by 1 (TYPE, LOAD, EDIT). No EDIT on a SoundFont (cap 2), neither button on
+//            EXTERNAL (cap 1) — `instrument_name_row_max_column`.
 //   TRIPLE — columns 1 / 3 / 5, LEFT/RIGHT step by 2.
-//   DUAL   — columns 1 / 3, LEFT/RIGHT jump straight between them.
-//   SOURCE — two buttons, columns 2 / 3 (SAVE + LOAD the .pti preset); the cursor SNAPS to 2 on entry.
-//            Present on BOTH instrument types — a preset saves and loads either kind, so unlike the NAME
-//            row above there is no per-type cap here.
+//   DUAL   — columns 1 / 3, LEFT/RIGHT jump between them.
+//   SOURCE — SAVE + LOAD of the .pti preset, columns 2 / 3; the cursor SNAPS to 2 on entry. Every type.
 //   SINGLE — column 1 only.
-//   SPACER — not selectable; vertical movement steps straight over it.
+//   SPACER — not selectable; vertical movement steps over it.
 //
-// ⚠️ These functions took a `bool is_soundfont` until the MIDI plan's B4 — correct only while there
-// were exactly TWO layouts. EXTERNAL is the third, so the parameter is the TYPE itself. Written as a
-// switch with the SAMPLER arm last and unconditional, so the two original layouts keep byte-for-byte
-// the answers they always gave (`tools/ptinput` byte-compares 21687 cases against the Kotlin original
-// and is the check that says so) and a fourth type has to be named rather than silently defaulting.
+// The functions switch on the TYPE with the SAMPLER arm last and unconditional, so a new type must be
+// named rather than silently defaulting (the input tests byte-compare the existing layouts).
 
 #include <cstddef>
 
@@ -66,7 +53,7 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SOUNDFONT[] = {
     InstrumentRowKind::TRIPLE,  //  3  VOL + TSP + PAN
     InstrumentRowKind::SPACER,  //  4
     InstrumentRowKind::SOURCE,  //  5  INST PRESET: SAVE / LOAD (.pti)
-    InstrumentRowKind::SINGLE,  //  6  PATCH (the SF2's internal patch selector)
+    InstrumentRowKind::SINGLE,  //  6  PATCH (the SF2's patch selector)
     InstrumentRowKind::SPACER,  //  7
     InstrumentRowKind::DUAL,    //  8  DRIVE + FILTER
     InstrumentRowKind::DUAL,    //  9  CRUSH + FREQ
@@ -78,21 +65,12 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SOUNDFONT[] = {
 };
 
 /**
- * EXTERNAL: 13 rows. It owns NO source file — no sample, no SF2 — so its row 0 is the TYPE cell alone
- * (no LOAD, no EDIT) and every row is a byte the device is actually sent rather than a DSP parameter.
- * None of the sampler's voice controls apply: there is no gain stage, no filter and no loop on our
- * side of the cable. VOL and PAN are here because `ExternalConsumer` folds them into note-on velocity
- * and CC 10 — they are the two that survive the trip.
- *
- * ⚠️ **Every row is a DUAL, and BANK is why.** The obvious layout packs CHAN/BANK/PROG onto one TRIPLE
- * — but BANK is 14-bit (CC0 MSB + CC32 LSB, `midi_out.h`) and prints as FOUR hex digits, and a TRIPLE's
- * third column starts 63px after its second. `ptshot` drew it: a bank of 1024 rendered as `00`, because
- * a 2-digit cell had silently masked it. DUAL rows give the value 140px, and the row list is what had
- * to change to make the number fit.
- *
- * ⚠️ **Row 5 is the INST PRESET row on all three layouts, and that is load-bearing** —
- * `instrument_open_at_cursor` tests row 5 col 2/3 for the .pti SAVE/LOAD by literal number. Moving it
- * here would take those two buttons away from EXTERNAL without a word.
+ * EXTERNAL: 13 rows. It owns no source file, so row 0 is TYPE alone, and every row is a byte the
+ * device is sent. VOL and PAN survive as note-on velocity and CC 10 (`ExternalConsumer`).
+ * ⚠️ Every row is a DUAL because BANK is 14-bit and prints four hex digits — too wide for a TRIPLE's
+ * third column.
+ * ⚠️ Row 5 is the INST PRESET row on all three layouts — `instrument_open_at_cursor` tests row 5 col
+ * 2/3 by literal number.
  */
 inline constexpr InstrumentRowKind INSTRUMENT_ROWS_EXTERNAL[] = {
     InstrumentRowKind::NAME,    //  0  TYPE (column 1 only — nothing to LOAD or EDIT)
@@ -130,7 +108,7 @@ inline int instrument_row_count(songcore::InstrumentType type) {
     return INSTRUMENT_ROWS_SAMPLER_COUNT;
 }
 
-/** The kind of row `row`. Out-of-range reads as SINGLE, as Kotlin's `getOrElse` does. */
+/** The kind of row `row`; out-of-range reads as SINGLE. */
 inline InstrumentRowKind instrument_row_kind(songcore::InstrumentType type, int row) {
     const int count = instrument_row_count(type);
     if (row < 0 || row >= count) return InstrumentRowKind::SINGLE;
@@ -148,12 +126,8 @@ inline bool instrument_has_source_row(songcore::InstrumentType type) {
     return type != songcore::InstrumentType::EXTERNAL;
 }
 
-/**
- * The rightmost cursor column on row 0 — the cap the NAME row's LEFT/RIGHT stepping honours.
- *
- * 3 on a sampler (TYPE, LOAD, EDIT), 2 on a SoundFont (no single waveform to edit), 1 on EXTERNAL
- * (no source at all). Read off the drawn row: a cursor past the cap sits on a cell that is not drawn.
- */
+/** The rightmost cursor column on row 0: 3 on a sampler (TYPE, LOAD, EDIT), 2 on a SoundFont, 1 on
+ *  EXTERNAL — read off the drawn row. */
 inline int instrument_name_row_max_column(songcore::InstrumentType type) {
     switch (type) {
         case songcore::InstrumentType::SOUNDFONT: return 2;
@@ -163,34 +137,17 @@ inline int instrument_name_row_max_column(songcore::InstrumentType type) {
     return 3;
 }
 
-/**
- * The SoundFont layout inserts PATCH at row 6, so every row below it shifts down by one. Kotlin
- * spells this `sfOffset` and adds it to a literal row number at each site; the same name is kept here
- * so the two read alike. EXTERNAL does not share that spine at all — its tail is its own table — so
- * the offset is meaningless there and reads 0.
- */
+/** The SoundFont layout inserts PATCH at row 6, shifting every row below it down one. 0 on EXTERNAL,
+ *  whose tail is its own table. */
 inline int instrument_sf_offset(songcore::InstrumentType type) {
     return type == songcore::InstrumentType::SOUNDFONT ? 1 : 0;
 }
 
 /**
- * The EQ row — 12 on a sampler, 14 on a SoundFont (the two extra rows above it are PATCH and the four
- * sample-window rows the SF layout drops, netting +2). Its column 1 is the cell that raises the EQ
- * EDITOR (S8). **−1 on EXTERNAL, which has no EQ row** — there is no signal of ours to equalise — and
- * −1 is a row number no cursor can hold, so the callers' `cursorRow == instrument_eq_row(...)` test
- * goes false without a second condition to forget at each site.
- *
- * Named here rather than open-coded at the three sites that need it, because it is a NUMBER READ OFF
- * THE TABLE ABOVE and the table is what moves. Kotlin writes the literals `12` and `14` into
- * `openSubScreenAtCursor` and `handleSelect` and its own module, which is three places to forget when a
- * row is inserted — and S5 already found the shape of that bug once (`go_to_screen` silently skipping
- * the three screens S4 added).
- */
-/**
- * ⚠️ On a SAMPLER the EQ row is a DUAL — its second column is `SLICE`, which moved down here when
- * `TSP` took its place beside VOL. On a SoundFont it stays a SINGLE: there are no slices to put
- * there. The row NUMBER is unchanged on both, which is what mattered — it is identity (this function,
- * and the dispatcher site that tests it) where a column is free.
+ * The EQ row (which raises the EQ EDITOR): 12 on a sampler, 14 on a SoundFont, read off the tables
+ * above so an inserted row cannot strand a literal. −1 on EXTERNAL (nothing of ours to equalise) — a
+ * row no cursor can hold, so `cursorRow == instrument_eq_row(...)` needs no second condition.
+ * On a sampler it is a DUAL (EQ + SLICE); on a SoundFont a SINGLE. The row NUMBER is the identity.
  */
 inline int instrument_eq_row(songcore::InstrumentType type) {
     switch (type) {

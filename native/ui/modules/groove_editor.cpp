@@ -13,9 +13,8 @@ namespace {
 // The tick grid ends at x+84 (a two-glyph cell starting at x+50), so the panel starts clear of it
 // with a gap wide enough to read as a separate thing rather than a third column of the grid.
 //
-// ⚠️ THE NAME GETS EVERYTHING TO THE RIGHT EDGE — the longest entry in the bank is "DOUBLETIME" at
-// ten characters and the label column is twenty-one wide, so nothing in the bank needs abbreviating.
-// A loaded `.ptg` can be named anything, so the draw truncates rather than trusting that.
+// The name runs to the right edge (21 columns; the bank's longest is 10), but a loaded `.ptg` can be
+// named anything, so the draw truncates.
 constexpr int GROOVE_PANEL_X = 140;
 constexpr int GROOVE_STAR_X  = 140;  // the name shifts one glyph right when the marker is up
 constexpr int GROOVE_VALUE_X = 140 + 4 * CHAR_W;  // past "QNT " / "SWG "
@@ -40,15 +39,14 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
 
     // ── Header ───────────────────────────────────────────────────────────────────────────────────
     const int headerY = y + TEXT_PADDING;
-    // The active length is the sequencer's own answer (songcore/timing.h) — the steps before the first
-    // −1. The UI must not re-derive it: a second definition of "where does this groove end" is exactly
-    // the kind of drift that makes the picture disagree with what you hear.
+    // The active length is the sequencer's own answer (timing.h) — never re-derived here, or the
+    // picture can disagree with what you hear.
     const int activeLen = songcore::groove_active_length(groove);
 
     c.draw_text("GROOVE " + hex2(groove.id), x + 10, headerY, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     std::string lenText = std::to_string(activeLen);
-    if (lenText.size() < 2) lenText = " " + lenText;  // padStart(2, ' ')
+    if (lenText.size() < 2) lenText = " " + lenText;
     c.draw_text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
@@ -156,15 +154,9 @@ CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
                                    /*can_delete=*/tickValue != -1,
                                    /*can_insert=*/tickValue == -1);
 
-    // ⚠️ ARMED, THE CELL IS STILL EMPTY WHEN IT IS EMPTY, and the insert is why. A blank step answers
-    // a bare A by laying a step down at the neutral length, on every screen and at every quantize
-    // setting; reporting it as a materialized 12 so that the first press could swing instead took
-    // that gesture away whenever the aid was armed. A blank PARTNER is materialized all the same —
-    // that happens in the edit, where the whole group is filled at once.
-    //
-    // What armed does change: both A axes move the pair by ONE tick, and the coarse move is gone.
-    // One tick is one named swing rung, so there is no useful larger step, and ±16 on a pair is
-    // refused at every quantize setting anyway. Raw editing is what OFF is for, and there 16 stands.
+    // ⚠️ ARMED, AN EMPTY CELL STILL REPORTS EMPTY, so a bare A lays a step down at the neutral length
+    // as everywhere else. A blank partner is filled in by the edit, which fills the whole group.
+    // Armed, both A axes move the pair by one tick (one named swing rung); raw ±16 is what OFF is for.
     if (s.quantize != 0) c.largeStep = c.smallStep;
     return c;
 }

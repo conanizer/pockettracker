@@ -18,10 +18,8 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // TRACK_PITCH is 56, not the 50 it was, and the six pixels bought one marker column per track:
-    // eight of them have to fit ahead of eight cells on a 510px module. Track 7 now ends at 490 and
-    // the editor clip is 499, so the widening spends the free space on the right and no more.
-    // The step gutter takes the same pitch so track 0's marker clears the two-digit row number.
+    // 56 px per track: a marker column ahead of each of eight cells. Track 7 ends at 490, inside the
+    // editor clip at 499. The step gutter takes the same pitch so track 0's marker clears the row number.
     constexpr int TRACK_PITCH = 30 + 26;
     int       colX  = x + 10;
     const int stepX = colX; colX += TRACK_PITCH;
@@ -29,18 +27,15 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
     for (int i = 0; i < 8; ++i) { trackColumns[i] = colX; colX += TRACK_PITCH; }
 
     int rowY = y + TEXT_PADDING;
-    // The status overlay (SAVED / LOADED / …) is drawn by the layout on the visualizer header, not
-    // here — the title row stays put.
-    // The title carries the transport mode, because nothing else can: LIVE changes what START means
-    // on this screen, and a mode you have to press a button to discover is a mode that surprises you
-    // mid-performance. Both words are four glyphs, so the project name neither shifts nor re-clips.
+    // The status overlay (SAVED / LOADED / …) is drawn by the layout, not here.
+    // The title carries the transport mode: LIVE changes what START means here, and a hidden mode
+    // surprises you mid-performance. Both words are four glyphs, so the name never shifts.
     c.draw_text(std::string(s.liveMode ? "LIVE: " : "SONG: ") +
                     Canvas::clip_text(s.project.name, TITLE_MAX_CHARS),
                 x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // The track number lights for the track the cursor is in — it is half of what the row highlight
-    // used to say, the row number being the other half. `cursorTrack` is already 1-based, so it IS
-    // the column index the header stands over.
+    // The track number lights for the cursor's track; `cursorTrack` is 1-based, so it IS the header's
+    // column index.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     for (int trackId = 0; trackId < 8; ++trackId) {
         c.draw_text(std::to_string(trackId + 1), trackColumns[trackId], rowY,
@@ -68,9 +63,8 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
     // the gutters, and it can only do that if the cells arrive in the order they are laid out.
     RowCells cells(c, textY, t);
 
-    // No cell background: column 0 is a gutter the cursor cannot reach (cursorTrack starts at 1).
-    // It still lights on the cursor row, though — with the row no longer painted, the row number is
-    // the only thing saying which of 256 rows is being edited.
+    // No cell background: column 0 is a gutter the cursor cannot reach (cursorTrack starts at 1). It
+    // still lights on the cursor row — the row number is what says which of 256 rows is being edited.
     c.draw_text(hex2(absolute_row), stepX, textY,
                 (absolute_row == s.cursorRow) ? cursor_mark_ink(t)
                 : (absolute_row % 4 == 0)     ? t.textParam
@@ -79,8 +73,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
 
     for (int trackId = 0; trackId < 8; ++trackId) {
         const Track& track = s.project.tracks[static_cast<size_t>(trackId)];
-        // chainRefs is a GROWING list (`mutableListOf()`), not a fixed 256 — an untouched track is
-        // empty, and a row past its end is empty rather than out of bounds.
+        // chainRefs grows on demand; a row past its end is empty, not out of bounds.
         const int chainId = (absolute_row < static_cast<int>(track.chainRefs.size()))
                                 ? track.chainRefs[static_cast<size_t>(absolute_row)]
                                 : -1;
@@ -88,26 +81,19 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const bool isCursor   = (absolute_row == s.cursorRow) && (trackId == s.cursorTrack - 1);
         const bool isSelected = s.selectionMode && s.isCellSelected(absolute_row, trackId + 1);
 
-        // A track making no sound draws its chain numbers in the EMPTY colour, so the arrangement
-        // reads as what you are hearing rather than as what is written down. The predicate is the
-        // audible one, not `mute`, which is what gives SOLO a display for free: solo one channel and
-        // the other seven dim, because they are the ones that stopped. Cursor and selection colours
-        // still win inside the painter, so the cursor is never lost on a muted channel.
+        // A track making no sound draws its chain numbers dim, so the grid reads as what you hear. The
+        // predicate is audibility, not `mute`, so SOLO dims the other seven for free. Cursor and
+        // selection colours still win inside the painter.
         const Argb value_color = track_audible(s.project, trackId) ? t.textValue : t.textEmpty;
 
         cells.cell(chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], isCursor, isSelected,
                    /*is_empty=*/chainId == -1, value_color);
 
-        // This track and no other. Eight cursors means eight answers, and a track that has stopped
-        // (or is only lending its number to a PHRASE being auditioned) answers −1 and gets nothing
-        // drawn — which is the whole reason the row highlight had to go.
-        // ⚠️ ONE GLYPH IN ONE COLUMN, decided before anything is drawn. The marker column is a single
-        // character wide, and `draw_text` paints without erasing — so a stop queue drawn "over" the
-        // playhead it replaces superimposes `_` on `>` and reads as neither.
-        //
-        // ⚠️ THE TWO QUEUE MARKERS SIT IN DIFFERENT PLACES, because they answer different questions.
-        // A LAUNCH is drawn on the row it will jump to, so the blinking marker walks ahead of the
-        // playhead to the cell you aimed at. A STOP has no target row at all — it can only be drawn
+        // This track's own marker: a stopped track (or one only lending its number to an auditioned
+        // PHRASE) answers −1 and gets none.
+        // ⚠️ ONE GLYPH IN ONE COLUMN, chosen before drawing — `draw_text` does not erase, so `_` over
+        // `>` reads as neither.
+        // ⚠️ A LAUNCH is drawn on the row it will jump to; a STOP has no target row, so it is drawn
         // where the channel is now, in place of the `>` it is about to end.
         const int  markerX     = trackColumns[trackId] - CHAR_W;
         const bool playingHere = s.playheads[trackId].songRow == absolute_row;
@@ -163,7 +149,7 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
             break;
 
         case ActionType::DELETE:
-            // clearSongChainRef(): only touches a row the list actually has.
+            // Only touches a row the list actually has.
             if (cursor_row < static_cast<int>(track.chainRefs.size()))
                 track.chainRefs[static_cast<size_t>(cursor_row)] = -1;
             break;
@@ -179,14 +165,9 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
             break;
     }
 
-    // ⚠️ **`modified` IS A BEFORE/AFTER ANSWER, NOT "AN ACTION WAS DISPATCHED"**, and the difference
-    // is not cosmetic. A chain-ref cell reports `canDelete` even when it is EMPTY: `cc::chain_ref`
-    // hands `hex_byte` a 0 in place of the -1 sentinel, so `is_empty` is computed as `0 == -1`. That
-    // is Kotlin's behaviour and the golden pins it in 90 cases, so it is the cell that stays and this
-    // that changes. A+B on an empty cell therefore dispatches DELETE and writes -1 over -1 — and
-    // derived from the action's TYPE that read as an edit, bumping the dirty counter: EXIT then asks
-    // about unsaved work nobody did, and three seconds later the autosave lands, so the next launch
-    // offers RECOVER WORK? for a project the user only looked at.
+    // ⚠️ `modified` IS A BEFORE/AFTER ANSWER, NOT "AN ACTION WAS DISPATCHED". An empty chain-ref cell
+    // still reports `canDelete` (`cc::chain_ref` hands `hex_byte` a 0 for the −1), so A+B on it writes
+    // −1 over −1; counting that as an edit means a phantom unsaved-work prompt and RECOVER WORK?.
     r.modified = (ref_at_cursor() != before);
     return r;
 }

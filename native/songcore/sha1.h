@@ -3,14 +3,8 @@
 
 // ─── SHA-1 — the trace header's project= id ──────────────────────────────────────────────────────
 //
-// The conformance trace identifies its project by the SHA-1 of the canonical serialized project JSON
-// (event-schema §6): the exact bytes FileController.serializeProject produces, which are the exact
-// bytes of a .ptp on disk (S2 proved the C++ round-trip is byte-for-byte). Kotlin's twin is
-// EventTrace.projectSha1.
-//
-// Vendored rather than pulled from a platform crypto API for the usual songcore reason: the same
-// bytes must hash the same on the device, on the host tools, and on Linux — and a trace whose header
-// disagrees is a trace that can't be compared. It is a project id, not a security primitive.
+// The trace names its project by the SHA-1 of the .ptp bytes. Vendored so the same bytes hash the
+// same on every platform. A project id, not a security primitive.
 
 #include <cstdint>
 #include <cstdio>

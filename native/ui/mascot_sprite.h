@@ -3,28 +3,15 @@
 // ─── The mascot sprite ───────────────────────────────────────────────────────────────────────────
 //
 // A 64×64 one-bit image of the robot ant, compiled in as 512 bytes.
-//
-// ⚠️ **IT IS A BITMASK BECAUSE `canvas.h` HAS NO IMAGE BLIT AND IS NEVER GETTING ONE** — the four
-// primitives there are permanent, since porting the drawing means porting exactly four calls. So the
-// only way a picture reaches the screen is as a run of `fill_rect`s, and the only picture that costs
-// nothing to store that way is a one-bit one. That is not a compromise here: the source art
-// (`docs/internal/images/robot_ant_neutral_64x64.png`) is pure black and white, 1464 lit
-// pixels and no grey at all, so the mask IS the artwork rather than a reduction of it.
-//
-// One bit deep also means the sprite carries no colour of its own and is TINTED at the draw site — it
-// follows TXT TITLE, so it re-themes itself with the palette, and it reads as a figure rather than
-// as more of the text beside it, which is VIZ WAVE.
-//
-// ⚠️ **MSB LEFTMOST, one byte per eight columns** — the same convention as `font5x5.h`, deliberately,
-// so there is one bit order in this tree and not two. Row `y` starts at byte `y * 8`.
-//
-// ⚠️ **AUTHORED AT EXACTLY 64 × 64 WITH HARD EDGES.** The shell scales the finished 640×480 frame to
-// the display, so the art is upscaled AFTER it is drawn; anti-aliasing in the source would become mush
-// and, at one bit, would not survive the threshold anyway.
-//
-// To regenerate after an edit to the PNG: read the file, test each pixel's red channel against 127,
-// and emit `y * 8 + x / 8` with bit `7 - x % 8` set. The check that says the encode is faithful is the
-// POPULATION COUNT — 1464 set bits here, and the same number of white pixels in the PNG.
+// ⚠️ A bitmask because `canvas.h` has no image blit and never will (four primitives, permanently): a
+// picture reaches the screen as `fill_rect`s. The source art is pure black and white (1464 lit pixels,
+// no grey), so the mask IS the artwork. It carries no colour and is TINTED at the draw site (TXT
+// TITLE), so it follows the palette.
+// ⚠️ MSB LEFTMOST, one byte per eight columns — `font5x5.h`'s bit order. Row `y` starts at byte `y * 8`.
+// ⚠️ Authored at exactly 64 × 64 with hard edges: the shell upscales the finished frame, and
+// anti-aliasing would not survive one bit anyway.
+// To regenerate from the PNG: test each pixel's red channel against 127 and set bit `7 - x % 8` of
+// byte `y * 8 + x / 8`. The POPULATION COUNT (1464) must match the PNG's white pixels.
 
 #include <cstdint>
 

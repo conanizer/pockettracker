@@ -14,18 +14,11 @@ namespace ptshell {
 
 namespace {
 
-// ── The two cadences, and why they are these numbers ─────────────────────────────────────────────
-//
-// BUSY: 1 ms while messages are queued. `pump` is late-never-early, so the tick interval IS the
-// worst-case lateness this thread can add — and one millisecond is under a tenth of a phase-C clock
-// tick (19.5 ms at 128 BPM, 24 PPQN), which is the tightest deadline the plan has.
-//
-// IDLE: 4 ms when the queue is empty. ⚠️ Not a micro-optimisation: this thread runs for the whole
-// session, and on ANDROID it keeps running while the activity is paused (SDL blocks the frame loop on
-// pause; it does not block this one). A 1 kHz wakeup that has nothing to do is battery burned in the
-// background. An empty queue can still owe a LEN gate, so idling is 4 ms rather than "stop" — a
-// note-off 4 ms late is not a thing anyone can hear, and a note-off that never comes is the one bug
-// this whole file exists to avoid.
+// BUSY: 1 ms while anything is owed — `pump` is late-never-early, so the tick IS the worst lateness
+// added, under a tenth of a 24 PPQN clock tick.
+// IDLE: 4 ms when nothing is queued. This thread runs all session (on Android even while the
+// activity is paused), so a 1 kHz idle wakeup is battery; 4 ms rather than stopping, because an
+// empty queue can still owe a LEN gate.
 constexpr Uint32 BUSY_MS = 1;
 constexpr Uint32 IDLE_MS = 4;
 
@@ -35,10 +28,8 @@ int64_t monotonic_us() {
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 c    = SDL_GetPerformanceCounter();
     if (freq == 0) return static_cast<int64_t>(SDL_GetTicks64()) * 1000;
-    // ⚠️ Split, not `c * 1000000 / freq`. The performance counter is ticks since BOOT: at a 10 MHz QPC
-    // frequency a machine up for a fortnight is already at ~1.2e13, and multiplying that by 1e6
-    // overflows a 64-bit integer — silently, and into a NEGATIVE time that would make every interval
-    // in the instrument below nonsense.
+    // ⚠️ Split, not `c * 1000000 / freq`: the counter is ticks since boot, and multiplying by 1e6
+    // overflows 64 bits after about a fortnight's uptime.
     return static_cast<int64_t>((c / freq) * 1000000ull + (c % freq) * 1000000ull / freq);
 }
 
@@ -62,11 +53,8 @@ void MidiJitterRecorder::report(const char* label, int sampleRate, int tempo) co
     std::printf("   records %d (unscheduled/panic %d, no-port %d, dropped %d)\n",
                 static_cast<int>(recs_.size()), unscheduled_, unsent_, overflow_);
 
-    // ⚠️ ONE POINT PER DISTINCT DUE FRAME. A note-on arrives with its program change, its CC defaults
-    // and its pan — four messages, one due frame, released inside one `pump` call — so counting each
-    // would put four near-identical points on top of each other, inflate `n`, and hand the
-    // consecutive-interval metric a pile of zero-length intervals to average the real errors away in.
-    // The question being asked is "when did the app act on time T", and that has one answer per T.
+    // ⚠️ ONE POINT PER DISTINCT DUE FRAME: a note-on and its program change, CCs and pan share one
+    // due frame, and counting each would stack points and drown the interval metric in zeros.
     struct P { double f, w; };
     std::vector<P> pts;
     for (size_t i = 0; i < recs_.size(); ++i) {
@@ -84,10 +72,8 @@ void MidiJitterRecorder::report(const char* label, int sampleRate, int tempo) co
         return;
     }
 
-    // ⚠️ CENTRE BEFORE FITTING. Frames run to ~1e6 and the wall clock to ~1e10 microseconds; the
-    // cross-product sums of the raw values reach ~1e19, where a double's last bit is worth about a
-    // millisecond — the very quantity being measured. Centred on the first point, every term is small
-    // and the residuals are exact to nanoseconds.
+    // ⚠️ CENTRE BEFORE FITTING: raw cross-product sums reach ~1e19, where a double's last bit is
+    // worth a millisecond — the very quantity measured.
     const double f0 = pts.front().f, w0 = pts.front().w;
     double sf = 0, sw = 0, sff = 0, sfw = 0;
     const double n = static_cast<double>(pts.size());
@@ -136,14 +122,10 @@ void MidiJitterRecorder::report(const char* label, int sampleRate, int tempo) co
     std::printf("   interval error    MAX %.3f ms                    <- independent check\n",
                 maxIntervalErr / 1000.0);
 
-    // ⚠️ **WHERE the worst residuals ARE, not just how big they are** — because one number cannot tell
-    // a cadence problem from a single structural outlier, and this measurement has a known one. The
-    // FIRST message of a take is queued with its due frame ALREADY IN THE PAST: the scheduler stamps it
-    // from the block-quantised `getCurrentFrame()`, which trails the interpolated clock by up to one
-    // audio block (11.6 ms), and `pump` is late-never-early — so it is released on the first tick after
-    // it exists and reads as ~one block late however good the sender is. If the worst points are #0 and
-    // the start of each later take, the sender is not what they are measuring; if they are scattered
-    // through the run, it is.
+    // ⚠️ WHERE the worst residuals are, not just how big: a take's FIRST message is queued with its
+    // due frame already past (stamped from the block-quantised counter), so it reads ~one block late
+    // however good the sender is. Worst points at #0 and each take's start are that; scattered ones
+    // are the sender.
     std::vector<size_t> order(pts.size());
     for (size_t i = 0; i < order.size(); ++i) order[i] = i;
     std::sort(order.begin(), order.end(),
@@ -157,21 +139,12 @@ void MidiJitterRecorder::report(const char* label, int sampleRate, int tempo) co
     std::fflush(stdout);
 }
 
-// ─── The clock stream, measured on its own (phase C) ─────────────────────────────────────────────
+// ─── The clock stream, measured on its own ───────────────────────────────────────────────────────
 //
-// ⚠️ **A SEPARATE BLOCK BECAUSE THE CLOCK IS A DIFFERENT CLAIM FROM THE NOTES, and the fit above
-// cannot tell them apart.** With sync on, 0xF8 outnumbers every other message roughly fifty to one, so
-// a combined residual is a clock measurement wearing a note measurement's label — and the one
-// structural outlier the notes have (message #0 of a take, due before it was queued) is invisible
-// inside it. Two streams, two verdicts.
-//
-// ⭐⭐ **AND THE BPM IS THE POINT OF THIS BLOCK, not the residual.** A least-squares fit reports how
-// well the ticks sat on A line; it says nothing about whether that line is the RIGHT one. A clock with
-// a period wrong by 5% would fit beautifully and drive a drum machine 5% fast. So this derives the
-// tempo two ways — from the WALL CLOCK (`monotonic_us`, which knows nothing about frames, audio or
-// `frames_per_step`) and from the DUE FRAMES — and prints both beside the project's own TEMPO. The
-// wall figure is the anchor that lives outside every piece of arithmetic phase C added; agreement of
-// all three is the check, and any two of them agreeing while the third does not names the culprit.
+// ⚠️ A SEPARATE BLOCK: the clock outnumbers the notes ~50:1, so a combined residual would be a clock
+// measurement under a note label. ⭐⭐ The BPM is the point: a fit says the ticks sat on A line, not
+// the RIGHT one. So tempo is derived from the WALL clock and from the DUE FRAMES and printed beside
+// the project's TEMPO — any two agreeing while the third does not names the culprit.
 void MidiJitterRecorder::report_clock(int sampleRate, int tempo) const {
     std::vector<const Rec*> ticks;
     for (const Rec& r : recs_)
@@ -249,11 +222,9 @@ void MidiSender::stop() {
     SDL_WaitThread(thread_, nullptr);
     thread_ = nullptr;
     host_.set_midi_pump_external(false);
-    // ⚠️ The NUMBERS beside the verdict: `ready` above only proves the thread was CREATED. A tick count
-    // proves it ran, and the busy share proves it saw work — a sender that ticked 100k times with zero
-    // busy ticks never released a message and would otherwise look identical to a working one.
-    // ⚠️ "busy", not "with a queue" — since phase C a busy tick is one that owed a CLOCK or a message,
-    // and a pure sync-out song is busy for its whole length with an empty queue at every instant.
+    // ⚠️ The numbers beside the verdict: `ready` proves the thread was CREATED, the tick count that
+    // it RAN, the busy share that it saw work. "Busy" means it owed a clock or a message — a sync-out
+    // song is busy throughout with an empty queue.
     std::printf("midi:    sender thread stopped (%lld ticks, %lld busy, worst busy tick gap "
                 "%.3f ms)\n",
                 ticks_.load(), busyTicks_.load(), maxBusyGap_.load() / 1000.0);
@@ -280,20 +251,15 @@ void MidiSender::run() {
         ext.pump(clock_.estimate(frame, wallUs));
 
         ticks_.fetch_add(1, std::memory_order_relaxed);
-        // ⚠️ `needs_fast_pump`, NOT `pending_count() > 0` — phase C added a producer with no queue (the
-        // clock generates its ticks inside `pump`), so the old test read "idle" through an entire song
-        // of sync out. midi_out.h explains at length; the short version is that the predicate now comes
-        // from what is OWED rather than from what happens to be in a vector.
+        // ⚠️ `needs_fast_pump`, NOT `pending_count() > 0`: the clock generates its ticks inside
+        // `pump` with no queue, so the predicate comes from what is OWED (midi_out.h).
         const bool busy = ext.needs_fast_pump();
         if (busy) {
             busyTicks_.fetch_add(1, std::memory_order_relaxed);
-            // ⚠️ **THE THREAD'S OWN CADENCE, MEASURED — and it is what ATTRIBUTES the jitter.** `pump`
-            // is late-never-early, so this thread cannot beat its own tick interval: if the jitter
-            // instrument reports 6 ms of lateness and this says the ticks were 6 ms apart, the sleep is
-            // the whole story (on Windows `Sleep(1)` honours the process timer resolution, which is
-            // 15.6 ms unless something raises it). If the ticks were 1 ms apart and the lateness is
-            // still 6 ms, the fault is somewhere else entirely and this is what says so. Only BUSY
-            // ticks count — an idle tick is 4 ms by design and would mask the number being asked for.
+            // ⚠️ THE THREAD'S OWN CADENCE, MEASURED — it attributes the jitter: if lateness matches
+            // the tick gaps, the sleep is the whole story (Windows `Sleep(1)` follows the timer
+            // resolution, 15.6 ms unless raised); if the ticks were 1 ms apart, the fault is elsewhere.
+            // BUSY ticks only.
             if (prevBusyUs != 0) {
                 const int64_t gap = wallUs - prevBusyUs;
                 if (gap > maxBusyGap_.load(std::memory_order_relaxed))

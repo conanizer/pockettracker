@@ -31,10 +31,7 @@ public:
     // once per apply.
     //
     // ⚠️ It is the CENTRE, not the whole delay: wow and drift move the HF band around it by up to
-    // ±24 samples at full depth, and the drift is a random walk that starts wandering on the first
-    // sample — measured, a full-depth chain is already a sample off by the time its first sound
-    // arrives. **That wobble IS the effect.** Compensate the centre and leave the rest alone;
-    // a caller that tried to track the real delay would be removing the wow it asked for.
+    // ±24 samples, from the first sample on. That wobble IS the effect — compensate the centre only.
     static constexpr int kWowCenterDelay = 100;   // samples (≈ 2 ms at 48 kHz)
     static constexpr int kWowHfBufSize   = 256;   // > centerDelay + max modulation depth
 
@@ -46,7 +43,7 @@ public:
 
     void setDustAmount(float v) noexcept { dustAmount = v; }
 
-    // Stage on/off — debug aid, surfaced via right-click menu during testing.
+    // Stage on/off switches.
     struct Enables {
         bool lp = true, lowShelf = true, bitcrush = true,
              tube = true, fet = true, wow = true, clipper = true,

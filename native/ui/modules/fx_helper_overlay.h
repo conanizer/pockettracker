@@ -2,12 +2,8 @@
 
 // ─── FX HELPER OVERLAY — the drawing ─────────────────────────────────────────────────────────────
 //
-// The C++ twin of PixelPerfectRenderer.drawFxHelper. The STATE and the navigation live in
-// ui/fx_helper.h and know nothing about a canvas; this is only the paint.
-//
-// It is not a `Module` like the grid editors, because it is not laid out at an (x, y) inside the
-// editor area — it is a modal that covers the whole 640×480 frame, backdrop included. It therefore
-// takes the canvas rather than a position, and the layout draws it LAST, over everything.
+// The state and navigation live in ui/fx_helper.h, canvas-free. A full-frame modal rather than a
+// `Module`: it takes the canvas, not a position, and the layout draws it LAST.
 
 #include "ui/canvas.h"
 #include "ui/fx_helper.h"

@@ -3,26 +3,16 @@
 
 // ─── The engine consumer — bus events become audio ───────────────────────────────────────────────
 //
-// The C++ port of Kotlin's AudioEngine.scheduleNote() and its param-event siblings: everything BELOW
-// the event-schema seam. THIS is the class that makes the app portable — on Android it replaces the
-// Kotlin consumer, and the Linux/SDL shell inherits it unchanged. After it, there is no second
-// implementation of "what a note means", which is the whole point of the songcore migration.
-//
-// It is deliberately thin. All the *derivation* — frequency, base frequency, the slice window, the SF
-// slot/velocity/root transpose, tick→frame conversions, the modulation pushes — lives in voice_derive.h
-// as pure functions, because the conformance trace stops at the router ABOVE this file and cannot
-// prove any of it. Pure functions can be goldened against the real Kotlin code (S5ConsumerGoldenTest →
-// tools/ptvoice); engine calls cannot. What is left here is the plumbing: look up, derive, call.
-//
-// The end-to-end check on top of that golden: an offline render is deterministic, so the same project
-// rendered with ENGINE=KT and ENGINE=C++ must produce BYTE-IDENTICAL WAVs.
+// Everything below the event seam, for every platform. Deliberately thin: the derivation (frequency,
+// slice window, SF slot/velocity, tick→frame, modulation pushes) is pure functions in voice_derive.h,
+// where it can be tested without an engine. What is left here is look up, derive, call.
 
 #include <cstdint>
 
 #include "../audio-engine.h"
-#include "../table_automation.h"  // …and the same, for the table-ramp cross-check below
-#include "automation.h"           // …likewise: the registry one half of that check reads
-#include "effects.h"    // …only for the cross-check below; the consumer itself resolves no effects
+#include "../table_automation.h"  // only for the cross-checks below
+#include "automation.h"           // only for the cross-checks below
+#include "effects.h"              // only for the cross-checks below; no effect is resolved here
 #include "event.h"
 #include "model.h"
 #include "router.h"
@@ -30,11 +20,9 @@
 
 namespace songcore {
 
-// ⚠️ THE TABLE ENGINE KEEPS ITS OWN COPY OF THE EFFECT CODES IT PROCESSES (`native/audio-defs.h`),
-// because it sits below this seam and must not depend on the model. A copy held together by a comment
-// is a copy that drifts, and the drift is SILENT in the worst way: a table cell would go on being
-// typeable and drawn by its right name while the row it lands on did something else, or nothing.
-// This is the one place both lists are visible, so it is where they are made to agree.
+// ⚠️ The table engine keeps its own copy of the effect codes it processes (`native/audio-defs.h`),
+// because it sits below this seam. This is the one place both lists are visible, so they are made to
+// agree here — a drifted code would draw by its right name and do something else.
 static_assert(::FX_HOP    == FX_HOP,    "audio-defs.h FX_HOP has drifted from effects.h");
 static_assert(::FX_TIC    == FX_TIC,    "audio-defs.h FX_TIC has drifted from effects.h");
 static_assert(::FX_KILL   == FX_KILL,   "audio-defs.h FX_KILL has drifted from effects.h");
@@ -63,9 +51,7 @@ static_assert(::tableFxCeiling(FX_INS) == effect_value_max(FX_INS) &&
               ::tableFxCeiling(FX_CUT) == effect_value_max(FX_CUT),
               "audio-defs.h tableFxCeiling has drifted from effect_value_max");
 
-// …and CRU's nibble split, which is spelled on both sides of the seam for the same reason the codes
-// are. Checked over the whole byte rather than at a sample point: the two are three characters each
-// and the failure a typo would cause is a crush amount that is quietly the wrong grit.
+// CRU's nibble split is spelled on both sides of the seam too; checked over every byte.
 constexpr bool crush_split_matches_the_engine() {
     for (int v = 0; v <= 255; ++v)
         if (::crushBitsOf(v) != crush_cmd_bits(v) ||
@@ -77,10 +63,8 @@ static_assert(crush_split_matches_the_engine(),
 
 // ─── …and the third list: what a TABLE row's AUS may ramp ────────────────────────────────────────
 //
-// `native/table_automation.h` runs the pairing for BOTH the engine and the table editor, so it can
-// name neither side's constants and spells its codes as literals. This is the one file that sees all
-// three lists, so it is where they are made to agree — and the agreement is what makes the ramp-able
-// set an INTERSECTION that is derived rather than a hand-written list of five.
+// `native/table_automation.h` serves both the engine and the table editor, so it spells its codes as
+// literals. Checked here, in both directions, so neither list can grow an entry the other lacks.
 static_assert(table_automation::FX_AUS_CODE == FX_AUS,
               "table_automation.h AUS has drifted from effects.h");
 static_assert(table_automation::FX_AUF_CODE == FX_AUF,
@@ -88,8 +72,6 @@ static_assert(table_automation::FX_AUF_CODE == FX_AUF,
 static_assert(table_automation::EQ_PRESET_SLOTS == POOL_EQPRESETS,
               "table_automation.h's preset-slot ceiling has drifted from the pool size");
 
-// Both directions, so neither list can grow an entry the other has not: every arm declared there is
-// a code the table engine processes, and every code the table engine processes is declared there.
 constexpr bool table_arms_match_the_engine() {
     for (int i = 0; i < table_automation::ARM_COUNT; ++i) {
         const int c = table_automation::ARMS[i].code;
@@ -115,10 +97,7 @@ static_assert(table_arms_match_the_engine(),
               "table_automation.h's arm list and audio-defs.h's effect codes disagree — one of them "
               "has an effect the other does not");
 
-// ⭐ THE FLAGS ARE NOT A JUDGEMENT CALL, and this is what says so. `rampable` is exactly "the
-// registry admits it" and `eqPreset` is exactly "…and its endpoints are preset slots" — so giving
-// `OFF` a registry row, or the table a `PAN` arm, changes which effects a table AUS can ramp with no
-// third list to remember. Getting either flag wrong by hand fails here rather than at the ear.
+// The `rampable` / `eqPreset` flags are derived from the registry, not chosen: a wrong one fails here.
 constexpr bool table_arm_flags_match_the_registry() {
     for (int i = 0; i < table_automation::ARM_COUNT; ++i) {
         const AutomatableParam* p = automatable_param(table_automation::ARMS[i].code);
@@ -131,37 +110,33 @@ constexpr bool table_arm_flags_match_the_registry() {
 static_assert(table_arm_flags_match_the_registry(),
               "a table arm's rampable/eqPreset flag disagrees with AUTOMATABLE_PARAMS");
 
-// Routing + plan_note_on (the note path itself) live in voice_derive.h — engine-agnostic, so
-// tools/ptvoice can instantiate the same code against a recorder and golden it.
+// Routing and plan_note_on (the note path) live in voice_derive.h, engine-agnostic so the tests can
+// check them.
 
 class EngineConsumer : public IMidiConsumer {
   public:
     EngineConsumer(AudioEngine* engine, const Project* project, const Routing* routing)
         : engine_(engine), project_(project), routing_(routing) {}
 
-    // Transport is not an engine event — the host owns queue clearing and the master-EQ restore. The
-    // one thing that IS ours: the track→instrument map is per-session, and a stale one would route the
+    // Transport belongs to the host. The track→instrument map is ours, and a stale one would route the
     // first track-scoped event of a new take at the last take's instrument.
     void on_play(const std::string&, const std::string&, int64_t, int, int) override { tracks_.reset(); }
     void on_stop() override { tracks_.reset(); }
 
-    // A push may have changed the tables, so the "already sent to the engine" cache must not survive
-    // it. Kotlin's `loadedTables` is the same lazy cache, invalidated by its own edit hooks.
+    // A push may have changed the tables, so the "already sent" cache must not survive it.
     void invalidate_tables() {
         for (int i = 0; i < POOL_TABLES; ++i) tableLoaded_[i] = false;
     }
 
-    // Which of tracks 0-7 have had a note scheduled this session (AudioEngine.phraseTrackMask): the
-    // OCTA visualizer lights one scope lane per bit. The host clears it on stop, where Kotlin clears
-    // it in clearScheduledNotes()/stopAll().
+    // Which of tracks 0-7 had a note scheduled this session; the OCTA visualizer lights one lane per
+    // bit. The host clears it on stop.
     int  track_mask() const { return trackMask_; }
     void clear_track_mask() { trackMask_ = 0; }
 
     /**
-     * Every table the engine does not hold yet, pushed now. The note path pushes lazily, one table
-     * before the note that needs it; a live key is scheduled by the audio thread with no push in
-     * front of it, so the host calls this from its poll instead. Both go through the same cache, so
-     * neither pushes what the other already has.
+     * Every table the engine does not hold yet, pushed now. The note path pushes lazily; a live key is
+     * scheduled by the audio thread with nothing pushed ahead of it, so the host calls this from its
+     * poll. Both share the cache.
      */
     void push_tables(const Project& project) {
         if (!engine_) return;
@@ -173,22 +148,18 @@ class EngineConsumer : public IMidiConsumer {
         }
     }
 
-    /** A live key's record, already played by the engine: only LEARN from it here — which instrument
-     *  the track is playing — so the next track-scoped event on the bus resolves the way the key did. */
+    /** A live key's record, already played by the engine: only learn which instrument the track is on,
+     *  so the next track-scoped event resolves the way the key did. */
     void observe_live(const Event& ev) { tracks_.observe(ev); }
 
-    /**
-     * One resolved controller onto the engine's live-parameter queues. ⚠️ THE ONE TABLE for a CC,
-     * shared by the bus consumer above and by a live key's drain (host.h), so a controller means the
-     * same thing from a phrase and from a cable.
-     */
+    /** One resolved controller onto the engine's live-parameter queues. Shared by the bus consumer and
+     *  a live key's drain (host.h), so a controller means the same from a phrase and from a cable. */
     template <typename Engine>
     static void apply_cc(Engine& engine, int64_t frame, uint8_t track, int param, float v) {
         switch (param) {
             case CC_VOLUME:      engine.scheduleTrackPhraseVol(frame, track, v);  break;
-            // The per-voice controllers: they shape the SOUNDING note and are gone with it, so there
-            // is no restore on stop() — the instrument's values come back with the next note-on.
-            // What each one does is the engine's `applyVoiceCc`.
+            // Per-voice: they shape the sounding note and are gone with it, so nothing to restore on
+            // stop(). See the engine's `applyVoiceCc`.
             case CC_PAN:
             case CC_REVERB_SEND:
             case CC_DELAY_SEND:
@@ -203,26 +174,17 @@ class EngineConsumer : public IMidiConsumer {
             case CC_LOOP_SLIDE:
                 engine.scheduleVoiceCc(frame, track, param, v);
                 break;
-            // The mixer faders (VTR / VMV). Engine-only ids — `midi_out.h` drops both, which is the
-            // one place the two consumers are meant to disagree (event.h).
-            //
-            // ⚠️ VTR IS SUBJECT TO THE EXTERNAL GATE AND VMV IS NOT, and that asymmetry is the right
-            // one rather than an oversight: a track playing an EXTERNAL instrument makes no audio
-            // HERE, so its fader has nothing to move, while the master fader carries every other
-            // track and must move whatever track the effect was typed on. VMV rides TRACK_GLOBAL,
-            // which the gate cannot resolve to an instrument and so never claims.
+            // The mixer faders. Engine-only: `midi_out.h` drops both.
+            // ⚠️ VTR is subject to the EXTERNAL gate and VMV is not, deliberately: an EXTERNAL track
+            // makes no audio here, while the master carries every other track. VMV rides
+            // TRACK_GLOBAL, which the gate never claims.
             case CC_TRACK_VOL:   engine.scheduleTrackVolume(frame, track, v);    break;
             case CC_MASTER_VOL:  engine.scheduleMasterVolume(frame, v);          break;
-            // TIM — the delay's echo time. Global like the master fader above it, and not gated for
-            // the same reason: a shared send carries every track's audio, so it must move whatever
-            // track the command was typed on.
+            // TIM: global like the master fader, ungated for the same reason.
             case CC_DELAY_TIME:  engine.scheduleDelayTime(frame, v);             break;
-            // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION. Attack/release
-            // (72/73) and the GP drive/crush pair are real sampler params — but they are
-            // INSTRUMENT-STATIC in this engine (setInstrumentParams), and only the ids above have an
-            // entry in the sample-accurate ParamUpdateQueue. Wiring one means a new queue entry and a
-            // per-voice override in the DSP, which is what CUT/RES cost; until then a `CCA` pointing
-            // at 72 moves external gear and nothing here.
+            // Every other CC id is dropped here — a gap, not a decision. Attack/release and the GP
+            // drive/crush are instrument-static in this engine; wiring one needs a ParamUpdateQueue
+            // entry and a per-voice override. Until then a `CCA` on 72 moves external gear only.
             default: break;
         }
     }
@@ -230,22 +192,17 @@ class EngineConsumer : public IMidiConsumer {
     void consume(const Event& ev) override {
         if (!engine_ || !project_) return;
 
-        // ── The routing gate (MIDI plan §1) ──────────────────────────────────────────────────────
+        // ── The routing gate ─────────────────────────────────────────────────────────────────────
         //
-        // An instrument names its consumer. Everything routed EXTERNAL belongs to ExternalConsumer
-        // (midi_out.h) and must not raise a voice here — INCLUDING when no cable is attached, because
-        // EXTERNAL means "not this engine", not "this engine unless something better exists".
-        //
-        // ⚠️ The verdict comes from `instrument_routes_external` (model.h) and `TrackInstruments`
-        // (router.h), which the other consumer also uses: an event both consumers claim is played
-        // twice, and one neither claims is silence.
+        // An EXTERNAL instrument belongs to ExternalConsumer (midi_out.h) and raises no voice here,
+        // even with no cable attached.
+        // ⚠️ Both consumers decide through `instrument_routes_external` and `TrackInstruments`: an
+        // event both claim plays twice, one neither claims is silence.
         const int16_t prev  = tracks_.current(ev.track);
         const int16_t instr = tracks_.observe(ev);
         if (is_external(instr)) {
-            // ⚠️ A track that FLIPS from an internal instrument to an external one leaves a voice
-            // sounding with nothing left to stop it: no later event on that track resolves to this
-            // consumer, so the note-off that would have cut it is routed away. The note-on that
-            // caused the flip is where that voice ends.
+            // ⚠️ A track flipping from an internal instrument to an external one would leave its
+            // voice with nothing to stop it — later events route away — so the flip ends it.
             if (ev.type == EV_NOTE_ON && prev >= 0 && !is_external(prev))
                 engine_->scheduleKill(ev.frame, ev.track);
             return;
@@ -256,12 +213,9 @@ class EngineConsumer : public IMidiConsumer {
                 note_on(ev);
                 break;
 
-            // ⚠️ THREE MODES SINCE E4, and the third is not a synonym for the second. NOTE_OFF_KEY is
-            // a live key let go of (MIDI plan §4.1): a one-shot with no release envelope IGNORES it
-            // and plays out, where a KIL fades the same voice. The difference lives in
-            // `SamplerVoice::keyRelease`; what belongs here is only the translation, and an explicit
-            // third arm rather than a widened `else` — a mode this switch does not know must not
-            // silently become a KIL.
+            // ⚠️ Three modes. NOTE_OFF_KEY is a live key let go: a one-shot without a release
+            // envelope ignores it and plays out, where a KIL fades it (`SamplerVoice::keyRelease`).
+            // An unknown mode must not silently become a KIL.
             case EV_NOTE_OFF:
                 switch (ev.noteOff.mode) {
                     case NOTE_OFF_CUT: engine_->scheduleKill(ev.frame, ev.track);       break;
@@ -271,23 +225,16 @@ class EngineConsumer : public IMidiConsumer {
                 break;
 
             case EV_CC:
-                // A symbolic slot id (CCA-CCD) names a controller the INSTRUMENT chose, so it is
-                // resolved here — against the same instrument the routing gate above just used —
-                // and then treated as any other controller number. That is what makes one FX column
-                // drive a sampler and an external synth: `CCA` on an instrument whose slot A is CC 10
-                // pans this engine's voice and pans the gear, from the same phrase (plan §6/§8.3).
+                // A CCA-CCD slot names the instrument's chosen controller, resolved against the same
+                // instrument the gate used — so one FX column drives a sampler and external gear alike.
                 apply_cc(*engine_, ev.frame, ev.track, resolve_cc(instr, ev.cc.param),
                          f32_from_bits(ev.cc.valueBits));
                 break;
 
-            // ⚠️ NO ENGINE PATH EXISTS FOR EITHER, AND SAYING SO IS THE POINT OF THE ARMS.
-            //   • MPG: this engine has no notion of a program. The soundfont module does (a TSF
-            //     preset), but selecting one mid-take needs a per-track preset override that the
-            //     SoundFont note path does not have.
-            //   • MPB: `schedulePitchBend` is PBN — a RATE in semitones per step, applied over time.
-            //     An absolute 14-bit bend is a different quantity and there is no param to hold it.
-            // Both reach external gear correctly (midi_out.h); on a sampler they are silent. An empty
-            // arm that names why beats a `default:` that cannot tell "dropped" from "forgotten".
+            // No engine path for either:
+            //   • MPG: no notion of a program here; a per-track SF preset override does not exist.
+            //   • MPB: `schedulePitchBend` is PBN, a RATE; an absolute bend has no param to hold it.
+            // Both reach external gear (midi_out.h); on a sampler they are silent.
             case EV_PROGRAM:
             case EV_PITCH_BEND:
                 break;
@@ -321,11 +268,7 @@ class EngineConsumer : public IMidiConsumer {
                 engine_->scheduleMasterEqSlot(ev.frame, ev.extMasterEq.slot);
                 break;
 
-            // ⚠️ EQN's morph is subject to the external gate above and EQM's is not — the same
-            // asymmetry VTR/VMV carry, and the right one: a track playing an EXTERNAL instrument
-            // makes no audio here, so its EQ has nothing to move, while the master EQ carries every
-            // other track and must move whatever track the fade was typed on. The master tick rides
-            // TRACK_GLOBAL, which the gate cannot resolve to an instrument and so never claims.
+            // ⚠️ EQN's morph is gated and EQM's is not — the VTR/VMV asymmetry, for the same reason.
             case EV_EXT_EQ_MORPH:
                 engine_->scheduleVoiceEqBands(ev.frame, ev.track, eq_bands_of(ev));
                 break;
@@ -334,15 +277,12 @@ class EngineConsumer : public IMidiConsumer {
                 engine_->scheduleMasterEqBands(ev.frame, eq_bands_of(ev));
                 break;
 
-            default: break;   // schema-complete: no other emitters exist (event-schema §3)
+            default: break;   // schema-complete: no other emitters exist
         }
     }
 
   private:
-    /**
-     * A morph tick's payload in the engine's own struct. The two forms hold the same twelve authored
-     * hex numbers in the same order; this is the seam's job — copying, not deriving.
-     */
+    /** A morph tick's payload in the engine's struct: the same twelve hex numbers, copied. */
     static EqBandsHex eq_bands_of(const Event& ev) {
         EqBandsHex b;
         for (int i = 0; i < 3; ++i) {
@@ -354,19 +294,12 @@ class EngineConsumer : public IMidiConsumer {
         return b;
     }
 
-    /**
-     * The controller number for this event, via the model's shared rule (`resolve_cc_param`) — so a
-     * `CCA` means the same controller here as it does on the wire. −1 (unknown instrument, or an
-     * unassigned slot) matches no case in the switch and is therefore a no-op.
-     */
+    /** The controller number for this event, via `resolve_cc_param`, so `CCA` means the same here as on
+     *  the wire. −1 (unknown instrument, unassigned slot) matches no case and is a no-op. */
     int resolve_cc(int16_t instrument, uint8_t param) const {
-        // ⚠️ A LITERAL id RETURNS BEFORE THE INSTRUMENT IS EVEN LOOKED AT, and that early return is
-        // load-bearing rather than an optimisation. PAN/REV/DEL are track-scoped and older than any of
-        // this: on an FX-only step before the track's first note-on, `TrackInstruments` resolves to
-        // INSTRUMENT_NONE and they are applied ANYWAY — the engine acts on whatever voice the track
-        // has. Requiring an instrument for every CC would silently drop those, in a channel neither
-        // the traces (which stop above this file) nor `live == render` (same code both sides) can see.
-        // Only a SLOT id genuinely needs an instrument, because only a letter needs translating.
+        // ⚠️ A literal id returns before the instrument is looked up. PAN/REV/DEL on an FX-only step
+        // before the track's first note resolve to INSTRUMENT_NONE and must still apply; only a slot
+        // letter needs an instrument to translate it.
         if (cc_slot_index(param) < 0) return param;
         if (instrument < 0 || static_cast<size_t>(instrument) >= project_->instruments.size()) return -1;
         return resolve_cc_param(project_->instruments[static_cast<size_t>(instrument)], param);
@@ -378,9 +311,7 @@ class EngineConsumer : public IMidiConsumer {
     }
 
     void note_on(const Event& ev) {
-        // `ev.track <= 7` alone: the field is a uint8_t, so the `>= 0` half of Kotlin's guard is a
-        // tautology here (gcc says so). The bound that does the work is the upper one — TRACK_PREVIEW
-        // and TRACK_GLOBAL are above it, and neither belongs in an eight-bit track mask.
+        // `ev.track` is unsigned; the upper bound excludes TRACK_PREVIEW and TRACK_GLOBAL.
         if (ev.track <= 7) trackMask_ |= (1 << ev.track);
         plan_note_on(*engine_, ev, *project_, *routing_, tableLoaded_);
     }

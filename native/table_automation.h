@@ -41,10 +41,8 @@ namespace table_automation {
 //   • `rampable` must equal "songcore's AUTOMATABLE_PARAMS admits this effect";
 //   • `eqPreset`  must equal "…and its endpoints are preset SLOTS rather than values".
 //
-// So the set a table AUS may ramp is the INTERSECTION of two lists that already exist — the arms
-// `AudioEngine::processEffect` has, and the automation registry — and it is derived rather than
-// written down. It is twelve today (`VOL PAN CUT RES LPF HPF BPF DRV FIN TIM EQN EQM`); give `OFF` a
-// registry row and it joins on its own with no edit here beyond its flag.
+// So the set a table AUS may ramp is the INTERSECTION of the arms `AudioEngine::processEffect` has
+// and the automation registry — derived, not written down.
 struct Arm {
     int  code;
     bool rampable;   // the registry admits it → a table AUS to its right can ramp it

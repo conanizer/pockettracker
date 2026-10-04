@@ -6,16 +6,10 @@
 // The denominator the USED RAM readout never had, and the number a load has to be measured against
 // before it is attempted.
 //
-// ⚠️⚠️ **THE ALLOCATOR WILL NOT TELL US, AND ASSUMING IT WILL IS HOW THE APP DIES.** Measured on a
-// shipping device (Android 16, arm64, 7.36 GB RAM, 2.85 GB free): `malloc` GRANTED a **256 GB**
-// request — 35x the whole machine — and every smaller one. bionic never refuses for want of memory;
-// the request succeeds against untouched address space and the kernel kills the process when the
-// pages are written. glibc does refuse, but only above `MemTotal + SwapTotal`, i.e. against the size
-// of the whole machine and never against what is free: 9.6 GB was granted on a box with 7.12 GB
-// available. Only Windows (real commit accounting) and 32-bit address spaces fail early enough to
-// be useful.
-//
-// So "try it and see" is not a strategy on the platforms this ships to. Asking first is the only one.
+// ⚠️⚠️ THE ALLOCATOR WILL NOT TELL US. bionic grants requests far beyond the machine (it overcommits
+// untouched address space, and the kernel kills the process when the pages are written); glibc
+// refuses only above MemTotal + SwapTotal, never against what is free. Only Windows (commit
+// accounting) and 32-bit address spaces fail early. So a load asks first.
 
 #include <cstdint>
 
@@ -49,9 +43,7 @@ int64_t total_memory_bytes();
  * screen to explain why.
  *
  * `available` alone under-states what a foreground app can have: Android evicts background apps to
- * feed the one in front, so memory counted as "in use" is memory the system will hand over rather
- * than let the foreground process fail. The measured gap is wide — a 7.36 GB device reported 2.85 GB
- * available with most of the remainder held by evictable background apps.
+ * feed the one in front, so much of the memory counted "in use" will be handed over.
  *
  * Half of total is not a tuned constant and is not meant to be one. It is a floor chosen so a
  * refusal only ever fires on a load that is hopeless under *any* reading of the machine, leaving

@@ -1,25 +1,13 @@
-// midi-out-winmm.{h,cpp} — the WINDOWS implementation of songcore::IMidiOut (MIDI plan phase B2).
+// midi-out-winmm.{h,cpp} — the WINDOWS implementation of songcore::IMidiOut. Everything above
+// `IMidiOut` is songcore/midi_out.h; this file is the whole Windows half. Testable at a desk with a
+// loopback port (loopMIDI) and a MIDI monitor.
 //
-// The first of the three backends the plan names (§4.3 / §4.5): Windows = winmm, Linux = ALSA
-// rawmidi via libasound, Android = a JNI up-call into MidiManager. **Nothing above `IMidiOut` is
-// per-platform** — the serializer, the note lifecycle, the queue and the scaling all live in
-// native/songcore/midi_out.h and are shared by all three. This file is the whole Windows half.
-//
-// ⚠️ WHY THIS ONE FIRST, when it ships to no target device: it is the only one testable at a desk.
-// With a loopback driver (loopMIDI, or any DAW's virtual port) the entire phase-B feature — gate
-// lengths, program changes, panic, the OFFSET — can be watched on a MIDI monitor without a cable, a
-// handheld or a phone. The two backends that DO ship are ~100 lines each once the behaviour they
-// carry has been proven somewhere.
-//
-// winmm rather than WinRT MIDI: `midiOutShortMsg` is three decades stable, needs no COM, no
-// packaging identity and no manifest capability, and links against a DLL that is in every Windows
-// install. WinRT buys BLE-MIDI, which the plan defers anyway (§9).
+// winmm rather than WinRT MIDI: `midiOutShortMsg` is decades stable and needs no COM, packaging
+// identity or manifest capability. WinRT would buy BLE-MIDI.
 //
 // ── THREADING ────────────────────────────────────────────────────────────────────────────────────
-// `send` is called from whichever thread pumps the queue — today the frame loop, and after phase B3
-// a sender thread. `midiOutShortMsg` is documented as safe to call from any thread and does not
-// block (it queues into the driver), so this file needs no lock of its own. It must NOT be called
-// from an audio callback, and nothing does.
+// `send` is called by the sender thread (and the frame loop for a panic). `midiOutShortMsg` is safe
+// from any thread and does not block, so no lock here. Never from an audio callback.
 
 #include "midi-out-winmm.h"
 
@@ -64,10 +52,8 @@ bool WinmmMidiOut::open(int index) {
 
 void WinmmMidiOut::close() {
     if (!handle_) return;
-    // ⚠️ `midiOutReset` before `midiOutClose`, and it is not politeness: closing a port with notes
-    // sounding leaves the DEVICE holding them, and nothing we can ever send again will stop it. Reset
-    // sends an all-notes-off on all 16 channels. songcore's own panic runs one layer up and covers the
-    // channels it knows about; this covers the ones it does not.
+    // ⚠️ `midiOutReset` before `midiOutClose`: it sends all-notes-off on all 16 channels, or the
+    // DEVICE keeps holding notes nothing can stop (see MidiOutBase::panic_all_channels).
     ::midiOutReset(handle_);
     ::midiOutClose(handle_);
     handle_ = nullptr;

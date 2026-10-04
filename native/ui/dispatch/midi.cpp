@@ -10,17 +10,12 @@
 
 namespace pt::ui {
 
-// ─── MIDI (phase B4.3) ───────────────────────────────────────────────────────────────────────────
+// ─── MIDI OUT ────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::boot_midi_port() {
-    // The OFFSET first and unconditionally — it is a number the consumer needs whether or not a port
-    // ever opens, and forgetting it is the "a setting that round-trips is not a setting that is
-    // applied" bug in its purest form: the value would sit correct in settings.json, be drawn correctly
-    // on the screen, and change nothing anybody could hear.
+    // The OFFSET and SYNC first and unconditionally: both live in settings.json and are drawn on screen,
+    // so leaving them unapplied would show ON and send nothing.
     host_.set_midi_offset_ms(midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
-    // SYNC (phase C) for exactly the same reason, and it is the more dangerous of the two to forget:
-    // OFFSET being unapplied is a few milliseconds nobody measures, but SYNC being unapplied means a
-    // user who turned it on last session, saw ON when they came back, and got no clock at all.
     host_.set_midi_sync_out(s_.settings.midiSyncOut);
 
     refresh_midi_devices();
@@ -32,9 +27,8 @@ void InputDispatcher::boot_midi_port() {
     s_.midiStatusText.clear();                     // boot news is the console's job, not the screen's
 }
 
-// Resolve a SAVED choice against the list that exists right now: AUTO is index 1, a device its place
-// in the list, and a name not found is 0 → OFF — the whole reason the setting is a name and not an
-// index: an index would silently come back pointing at whatever port took its place.
+// Resolve a saved choice against the current list: OFF 0, AUTO 1, a device its place, a missing name
+// 0. The setting is a name because an index would silently point at whatever took its place.
 static int resolve_port_index(const std::vector<std::string>& names, const std::string& want) {
     if (want == MIDI_PORT_AUTO) return 1;
     for (size_t i = MIDI_FIRST_PORT; i < names.size(); ++i)
@@ -46,10 +40,8 @@ static bool listed(const std::vector<std::string>& names, const std::string& nam
     return std::find(names.begin(), names.end(), name) != names.end();
 }
 
-// Open the first port the choice accepts — the named device, or under AUTO any device `skip` does not
-// rule out — and return its name, "" if none took. A port that refuses (another app holds it) goes on
-// `refused` and is passed over until it has left the list and come back, so the once-a-second scan
-// does not hammer a busy port.
+// Open the first port the choice accepts (the named device, or under AUTO any `skip` allows) and return
+// its name, "" if none took. A port that refused is skipped until it leaves the list and comes back.
 template <class Skip, class Open>
 static std::string open_first_port(const std::vector<std::string>& names, const std::string& choice,
                                    std::vector<std::string>& refused, Skip skip, Open open) {
@@ -91,9 +83,8 @@ void InputDispatcher::refresh_midi_devices() {
 }
 
 void InputDispatcher::close_midi_out() {
-    // ⚠️ THE PANIC IS OURS TO SEND — see the header. `set_out` panics on a POINTER change and the
-    // pointer is not changing; only the device behind it is. Skip this and every note sounding on the
-    // port we are about to close is held by that hardware until someone power-cycles it.
+    // ⚠️ Panic here: `set_out` panics only on a pointer change, and only the device behind it is
+    // changing. Skip this and notes on the closing port hang until the hardware is power-cycled.
     host_.midi_out().panic();
     s_.midiOut->close();
     s_.midiOutOpenName.clear();
@@ -108,42 +99,34 @@ bool InputDispatcher::open_midi_out() {
 }
 
 void InputDispatcher::apply_midi_device() {
-    // Re-resolve first: `settings.midiOutDevice` is the choice, `midiDeviceIndex` is where that choice
-    // sits in the list the screen is drawing, and the module just changed the former.
+    // `midiDeviceIndex` is where the (just changed) choice sits in the drawn list.
     s_.midiDeviceIndex = resolve_port_index(s_.midiDeviceNames, s_.settings.midiOutDevice);
 
     if (!s_.midiOut) { s_.midiStatusText = "NO MIDI BACKEND"; return; }
 
     close_midi_out();
-    // A pick is the user's retry: a port that refused before gets asked again. The choice is KEPT when
-    // it refuses — usually another app holds the port, a transient the user can fix.
+    // A pick is a retry: a port that refused before is asked again. The choice is kept on refusal.
     midiOutRefused_.clear();
     const bool opened = open_midi_out();
     s_.midiStatusText = port_status(s_.settings.midiOutDevice, opened, !midiOutRefused_.empty(),
                                     "OUTPUT OFF", "PORT OPENED", "PORT BUSY");
 
-    // ⭐ ONE call, below every arm, because the loopback verdict depends on which port is OPEN and each
-    // arm above leaves that different — including "OUTPUT OFF", which is the arm that turns thru back
-    // ON. A rule repeated at each site is a rule one site will forget.
-    update_midi_thru();   // the OUT row's half of the ONE verdict (E4) — see apply_midi_in_device
+    // ⭐ One call below every arm: the loopback check depends on which port is OPEN, and each arm
+    // (including OUTPUT OFF, which turns thru back on) leaves that different.
+    update_midi_thru();
 }
 
-// ─── MIDI IN (phase E2) ──────────────────────────────────────────────────────────────────────────
+// ─── MIDI IN ─────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::boot_midi_in_port() {
-    // ⚠️ AT BOOT, not only when the row is touched: the channel is remembered in settings.json, so a
-    // session that never opens the MIDI screen must still have its knobs reaching their mappings.
-    // The same reason the port itself is opened here rather than waiting for a pick.
+    // ⚠️ At boot, not only when the row is touched: a session that never opens the MIDI screen must
+    // still have its knobs reaching their mappings.
     host_.set_midi_control_channel(s_.settings.midiControlChannel);
     refresh_midi_in_devices();
     if (s_.midiInDeviceIndex != 0) apply_midi_in_device();
-    // ⚠️ UNCONDITIONALLY, and after the OUT port's own boot (app.cpp calls them in that order): with no
-    // input device the verdict is still a verdict — thru ON, nothing to loop — and a boot that skipped
-    // it would leave the flag at whatever the default happens to be rather than at something decided.
+    // ⚠️ Unconditional, after the OUT port's boot: with no input the thru verdict is still decided.
     update_midi_thru();
-    // ⚠️ …and drop what `apply` just wrote, exactly as `boot_midi_port` does: boot news belongs on the
-    // CONSOLE, and a status line left over from launch would greet the user on the MIDI screen minutes
-    // later as though something had just happened.
+    // Boot news belongs on the console, not on the MIDI screen minutes later.
     s_.midiStatusText.clear();
 }
 
@@ -159,7 +142,7 @@ void InputDispatcher::refresh_midi_in_devices() {
 }
 
 void InputDispatcher::close_midi_in() {
-    // ⚠️ The teardown order, and every step of it answers a way this can go wrong — see the header.
+    // ⚠️ The teardown order matters — see the header.
     s_.midiIn->set_sink(nullptr);
     s_.midiIn->close();
     host_.reset_midi_in();
@@ -171,9 +154,8 @@ bool InputDispatcher::open_midi_in() {
         s_.midiInDeviceNames, s_.settings.midiInDevice, midiInRefused_,
         [](int) { return false; },
         [&](int port) {
-            // The sink BEFORE the open: an open port is already delivering, and bytes that arrive
-            // between the two would be dropped. Unwired again on a refusal, so a backend that
-            // half-opened cannot deliver into a port the app believes is closed.
+            // The sink BEFORE the open, or bytes arriving in between are dropped; unwired again on a
+            // refusal, so a half-opened backend cannot deliver into a "closed" port.
             s_.midiIn->set_sink(&host_.midi_in_sink());
             if (s_.midiIn->open(port)) return true;
             s_.midiIn->set_sink(nullptr);
@@ -193,16 +175,15 @@ void InputDispatcher::apply_midi_in_device() {
     s_.midiStatusText = port_status(s_.settings.midiInDevice, opened, !midiInRefused_.empty(),
                                     "INPUT OFF", "INPUT OPENED", "INPUT BUSY");
 
-    update_midi_thru();   // …and the IN half of the same one verdict (E4) — see apply_midi_device
+    update_midi_thru();   // the IN half of the loopback check
 }
 
 // ─── Hot-plug ────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::run_midi_hotplug() {
-    // Once a second, rescan both lists: a device that has gone is closed, and a device the choice
-    // names — or under AUTO the first one plugged in — is opened. Nothing is overwritten in the
-    // settings; a second device plugged in while one is open is left alone. A poll because winmm has
-    // no notification at all, and one mechanism is easier to trust than three.
+    // Once a second, rescan both lists: a device that has gone is closed, and one the choice names
+    // (under AUTO, the first plugged in) is opened. Settings are never overwritten. Polled, because
+    // winmm has no notification.
     if (now_ms_ < midiScanDueMs_) return;
     midiScanDueMs_ = now_ms_ + MIDI_SCAN_MS;
 
@@ -248,40 +229,30 @@ void InputDispatcher::run_midi_hotplug() {
 }
 
 void InputDispatcher::update_midi_thru() {
-    // ⚠️ **BOTH PORTS OPEN, OR THERE IS NOTHING TO LOOP** — the OPEN names, not the saved choices: a
-    // device that was picked and refused (PORT BUSY) sends nothing, and suppressing thru for it would
-    // silence a feature over a cable that does not exist.
-    // On every backend this project has met, a loopback's two directions carry the SAME display name
-    // (winmm's "loopMIDI Port" both ways).
+    // ⚠️ Compare the OPEN names, not the saved choices: a port that refused sends nothing. A loopback's
+    // two directions carry the same display name on every backend seen.
     const bool loopback = !s_.midiInOpenName.empty() && s_.midiInOpenName == s_.midiOutOpenName;
 
     host_.set_midi_in_thru(!loopback);
 
-    // ⚠️ SAID OUT LOUD, on the screen the user just used to cause it. A suppression nobody is told
-    // about is indistinguishable from an EXTERNAL instrument that does not respond to a keyboard —
-    // and it overwrites "INPUT OPENED" deliberately, because it is the more surprising news of the two.
+    // ⚠️ Said on screen, over "INPUT OPENED": a silent suppression looks like an EXTERNAL instrument
+    // that ignores the keyboard.
     if (loopback) s_.midiStatusText = "THRU OFF: LOOP";
 }
 
 void InputDispatcher::midi_action() {
     switch (static_cast<MidiRow>(s_.midiCursorRow)) {
         case MidiRow::PANIC:
-            // Every note-off we owe, on every channel we have used, right now. It goes through the
-            // CONSUMER and not the port, because the consumer is what knows which notes are sounding —
-            // and it is the same call `SongcoreHost::stop()` makes, so there is one panic in the app.
+            // Every note-off owed, through the consumer (it knows what is sounding) — the same panic
+            // SongcoreHost::stop() sends.
             host_.midi_out().panic();
             s_.midiStatusText = port_open() ? "PANIC SENT" : "NO PORT";
             break;
 
         case MidiRow::TEST: {
-            // ⚠️ THE ONE THING ON THIS SCREEN THAT WRITES TO THE PORT DIRECTLY, bypassing the bus — and
-            // that is the point of it rather than a shortcut taken. TEST answers "is there a cable, and
-            // does this machine's MIDI stack work at all?", and an answer routed through the sequencer,
-            // the router and the instrument's EXTERNAL flag would be answering a much larger question:
-            // a silent TEST would no longer mean "no cable", it would mean "something, somewhere".
-            //
-            // A note-on and its note-off in the same breath. Sustaining it would make the screen the one
-            // place in the app that can leave a note hanging with no transport to stop it.
+            // ⚠️ TEST writes to the port directly, bypassing the sequencer on purpose: a silent TEST
+            // must mean "no cable", not "something, somewhere". The note-off follows at once, so this
+            // screen cannot leave a note hanging.
             if (!port_open()) { s_.midiStatusText = "NO PORT"; break; }
             const uint8_t on[3]  = {0x90, 60, 100};   // C-4, channel 1, mf
             const uint8_t off[3] = {0x80, 60, 0};
@@ -291,9 +262,7 @@ void InputDispatcher::midi_action() {
             break;
         }
 
-        // The door into the mapping list. It carries no port and no cable, so unlike PANIC and TEST
-        // it needs nothing refreshed on the way in — only the cursor put back inside a list whose
-        // length belongs to whichever song is loaded now.
+        // The door into the mapping list: only the cursor needs putting back inside the list.
         case MidiRow::MAPPING: {
             clamp_midi_map_cursor();
             s_.midiMapReturnScreen = s_.currentScreen;
@@ -318,16 +287,13 @@ void InputDispatcher::clamp_midi_map_cursor() {
 }
 
 void InputDispatcher::midi_map_action() {
-    // The ADD row is the only one a bare A means anything on; every cell above it is an A+DPAD cell,
-    // which is the app-wide rule that a single A is for actions.
+    // Only the ADD row answers a bare A; the cells above are A+DPAD cells.
     songcore::Project& p = host_.edit_project();
     if (s_.midiMapCursorRow != static_cast<int>(p.midiMappings.size())) return;
     if (static_cast<int>(p.midiMappings.size()) >= songcore::MIDI_MAP_MAX) return;
 
-    // ⚠️ **A NEW ROW POINTS AT SOMETHING REAL FROM THE FIRST FRAME.** A mapping with no destination
-    // would be a row whose parameter cell has nothing to cycle and whose range has no units — so it
-    // starts on the catalogue's first entry, across that destination's whole range, and the user
-    // dials it from there. Track 1's fader is also the one destination every project has.
+    // A new row starts on the catalogue's first destination (track 1's fader, which every project
+    // has) across its whole range, so it points at something real from the first frame.
     songcore::MidiMapping m;
     m.controller = 0;
     m.dest       = static_cast<uint8_t>(songcore::MAP_DESTS[0].id);
@@ -336,8 +302,7 @@ void InputDispatcher::midi_map_action() {
     m.rangeMax   = songcore::MAP_DESTS[0].max;
     p.midiMappings.push_back(m);
 
-    // The cursor stays on the row it pressed A on, which is now the new mapping rather than the ADD
-    // row — the row the user is about to edit, with the ADD row still one step below it.
+    // The cursor stays put, so it is now on the new mapping with the ADD row one below.
     mark_modified();
 }
 

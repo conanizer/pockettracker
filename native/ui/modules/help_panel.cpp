@@ -8,15 +8,11 @@ namespace pt::ui {
 namespace {
 
 /**
- * The sprite, as horizontal RUNS of lit pixels.
- *
- * ⚠️ A run rather than a pixel, and it is not micro-optimisation: `fill_rect` clips and blends per
- * CALL, so one call per lit pixel would be 1464 of them a frame where 232 will do. The bitmask is
- * walked left to right and a run is closed at the first unlit column or at the right edge.
+ * The sprite as horizontal RUNS of lit pixels: `fill_rect` clips and blends per call, so one per pixel
+ * would be ~1460 calls a frame instead of ~230.
  */
 void draw_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
-    // ⚠️ ONE fill for the whole patch, before the runs — filling per row would blend the panel's
-    // colour under every run boundary and leave a seam down the figure.
+    // ⚠️ One fill for the whole patch, before the runs — per row would leave a seam down the figure.
     if (ink.inverted) c.fill_rect(x, y, MASCOT_W, MASCOT_H, ink.backdrop);
     const Argb color = ink.figure;
 
@@ -41,9 +37,8 @@ void HelpPanelModule::draw(Canvas& c, int x, int y, HelpTopic topic, const Theme
                            int box_height) const {
     c.fill_rect(x, y, WIDTH, box_height, t.vizBackground);
 
-    // The block is HEIGHT tall whatever the box is; a taller box gets the surplus as air, split top
-    // and bottom. ⚠️ Clamped at zero rather than trusted: a box SHORTER than the strip would put a
-    // negative offset here and hang the mascot off the top edge.
+    // The block is HEIGHT tall; a taller box gets the surplus as air. Clamped, so a shorter box cannot
+    // hang the mascot off the top edge.
     const int top = y + (box_height > HEIGHT ? (box_height - HEIGHT) / 2 : 0);
 
     draw_mascot(c, x + MASCOT_MARGIN, top + MASCOT_MARGIN, mascot_ink(t, t.vizBackground));

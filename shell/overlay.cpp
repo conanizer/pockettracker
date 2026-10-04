@@ -39,11 +39,8 @@ bool ScreenOverlay::load(SDL_Renderer* renderer, int index, bool log) {
     }
     SDL_UpdateTexture(tex, nullptr, img.pixels.data(), img.width * static_cast<int>(sizeof(uint32_t)));
 
-    // Blend over the frame (that is the whole job — a translucent filter), and set the alpha mod per
-    // draw from the STRENGTH row. LINEAR filtering like the skin: the PNG is authored at one resolution
-    // and stretched to the frame rect, so it must smooth under scaling — Compose drew it the same way
-    // (drawImage's default FilterQuality). NEAREST is right only for the 640×480 pixel-art framebuffer,
-    // whose texture lives in sdl-video.cpp and keeps its own scale mode.
+    // Blended over the frame, alpha per draw from STRENGTH. LINEAR filtering like the skin: the PNG
+    // is stretched to the frame rect. NEAREST is only for the pixel-art framebuffer (sdl-video.cpp).
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
     SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
 

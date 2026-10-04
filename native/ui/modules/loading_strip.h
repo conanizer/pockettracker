@@ -14,18 +14,11 @@ inline constexpr int LOADING_STRIP_H = ROW_HEIGHT * 2;
 /**
  * The line a slow load puts across the top of the screen.
  *
- * ⚠️ **NOT A MODAL, AND DELIBERATELY SO.** A load dims nothing, covers nothing and answers no
- * question — the screen underneath stays readable, and the only thing the strip claims is that a
- * file is being opened and that B stops it. It is not in `modal_backdrop_active`.
+ * ⚠️ Not a modal: it dims and covers nothing, and is not in `modal_backdrop_active`. It draws nothing
+ * until `loading.shown`, raised only once a load has outlasted the delay (`AppState::LoadingState`).
  *
- * ⚠️ It draws NOTHING until `loading.shown`, which the dispatcher raises only once a load has already
- * outlasted the delay. See `AppState::LoadingState`: the app never predicts whether a file is big, it
- * finds out by waiting, and the overwhelming majority of loads finish before this is ever reached.
- *
- * ⚠️⚠️ **IT IS DRAWN OUTSIDE `TrackerLayout::draw_frame`, NOT AT THE END OF IT.** The file browser and
- * the sample editor return from the MIDDLE of the frame, and those two screens are where every load
- * the user starts begins — drawn inside, the strip is skipped by an early return that has nothing to
- * do with it, on exactly the screens it exists for.
+ * ⚠️⚠️ Drawn OUTSIDE `TrackerLayout::draw_frame`: the file browser and the sample editor — where every
+ * load starts — return from the middle of the frame and would skip it.
  */
 void draw_loading_strip(Canvas& c, const AppState::LoadingState& s, const Theme& t);
 

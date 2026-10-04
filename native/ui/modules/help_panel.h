@@ -6,23 +6,15 @@
 // spare: the visualizer strip on the fourteen screens that have one, and the WAVEFORM panel on the
 // sample editor, which has no strip. The mascot sits at the left, the text to its right.
 //
-// ⚠️ **IT REPLACES ITS BOX RATHER THAN COVERING IT**, and on the strip the two readouts that share it
-// — the global status message top-left, and the selection/clipboard readout top-right — stand down
-// while it is up (`layout.cpp`). Three lines of 21px fill the strip exactly; there is no corner left
-// for either of them.
+// ⚠️ IT REPLACES ITS BOX RATHER THAN COVERING IT: on the strip, the status message (top-left) and the
+// selection readout (top-right) stand down while it is up (layout.cpp) — three 21px lines fill it.
 //
-// ⚠️ **THE WIDTH IS THE SAME 620 IN BOTH BOXES, AND THAT IS WHY THERE IS ONE TABLE.** `HELP_MAX_CHARS`
-// is derived from the width alone, so the sample editor costs no second budget and no second set of
-// lines. Only the HEIGHT differs — 70 on the strip, 155 in the waveform — and the extra 85px is spent
-// as air above and below rather than on more text: a fourth line would exist on one screen only.
+// ⚠️ THE WIDTH IS 620 IN BOTH BOXES, SO THERE IS ONE TABLE: `HELP_MAX_CHARS` derives from the width
+// alone. Only the height differs (70 vs 155); the extra is air — a fourth line would fit on one only.
 //
-// ⚠️ **THREE COLOURS AND NO MORE: VIZ BG behind, VIZ WAVE for the text, TXT TITLE for the mascot.**
-// The first two are the strip's own theme keys, so the panel re-themes itself with the visualizer it
-// stands in for, and a palette that made the scope readable makes this readable too. The waveform
-// panel's ground is VIZ BG as well, so the pair lands there unchanged — the wave's own TXT VALUE /
-// TXT EMPTY are not borrowed, because the guarantee that the text is legible belongs to the viz pair.
-// The mascot takes the header colour instead, so it reads as a figure rather than as more text; it is
-// one bit deep for exactly that reason — see ui/mascot_sprite.h.
+// ⚠️ THREE COLOURS: VIZ BG behind, VIZ WAVE for the text, TXT TITLE for the mascot. The first two
+// are the strip's own keys, so a palette that makes the scope readable makes this readable too; the
+// mascot takes the header colour so it reads as a figure (one bit deep — mascot_sprite.h).
 //
 // The FULL overlay is a separate screen and not this file. ⚠️ One screen can never show this one:
 // FILE_BROWSER is 640×480 of file rows with no box to spare, and SELECT is its rename/delete chord.
@@ -56,9 +48,8 @@ class HelpPanelModule {
     /** Where the text starts, measured from the panel's own left edge. */
     static constexpr int TEXT_X = MASCOT_MARGIN + MASCOT_W + MASCOT_GUTTER;
 
-    // ⚠️ HELP_MAX_CHARS is written down in ui/help_text.h and checked against the table there. This is
-    // the geometry it was derived FROM, pinned so that moving the mascot cannot silently make every
-    // help line one character too long.
+    // ⚠️ HELP_MAX_CHARS is written in help_text.h; this pins the geometry it came from, so moving the
+    // mascot cannot make every help line one character too long.
     static_assert(TEXT_X + HELP_MAX_CHARS * CHAR_W - CHAR_SPACING <= WIDTH,
                   "HELP_MAX_CHARS no longer fits beside the mascot");
     static_assert(TEXT_X + (HELP_MAX_CHARS + 1) * CHAR_W - CHAR_SPACING > WIDTH,
@@ -66,10 +57,8 @@ class HelpPanelModule {
 
     /**
      * Draw the panel filling `box_height` pixels down from `y`, WIDTH across.
-     *
-     * ⚠️ The three lines and the mascot are a fixed 70px block: a taller box is filled with VIZ BG
-     * and the block is CENTRED in it, rather than the text growing or spreading out. That keeps the
-     * strip and the waveform showing the identical panel, which is why one table serves both.
+     * ⚠️ The text and mascot are a fixed 70px block CENTRED in a taller box, so the strip and the
+     * waveform show the identical panel.
      */
     void draw(Canvas& c, int x, int y, HelpTopic topic, const Theme& t,
               int box_height = HEIGHT) const;

@@ -11,10 +11,8 @@ namespace pt::ui {
 
 namespace {
 
-// The two columns. A cell is a label and a value 110 px apart, so a column is about 160 px of glyphs;
-// ⚠️ the second one starts at 270 rather than further out because the panel's right edge is not the
-// constraint — the visualizer strip beside it is, and TIME's widest synced name ("1/16.") reaches
-// nearly 200 px past this.
+// Two columns, label and value 110 px apart. ⚠️ The second starts at 270 because the visualizer
+// strip beside the panel, not its edge, is the constraint: TIME's widest synced name reaches far.
 constexpr int LABEL_X[2] = {10, 270};
 constexpr int VALUE_GAP  = 110;
 
@@ -27,11 +25,8 @@ int delay_preset_of(const songcore::Project& p) {
 
 /**
  * Which preset the reverb's six cells are, or `kReverbPresetUser` when they are nobody's.
- *
- * ⚠️ It reads DCAY, SIZE and DAMP as well as the voicing cells, unlike the delay's, whose TYPE leaves
- * TIME and FDBK alone. A reverb's character IS its room, its decay and its brightness — a preset that
- * did not set them would be a few cells of voicing on top of whatever tail happened to be there,
- * which is not a ROOM or a HALL by any reading. The apply below writes exactly this set.
+ * ⚠️ It reads DCAY, SIZE and DAMP too (the delay's TYPE leaves TIME and FDBK alone): a reverb's
+ * character IS its room, decay and brightness. The apply below writes exactly this set.
  */
 int reverb_preset_of(const songcore::Project& p) {
     return reverb_preset_match(p.reverbFeedback, p.reverbSize, p.reverbDamp, p.reverbPreDelay,
@@ -54,9 +49,8 @@ const std::vector<std::string>& EffectModule::delay_type_names() {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> v;
         for (int i = 0; i < kDelayPresetCount; ++i) v.emplace_back(kDelayPresets[i].name);
-        // ⚠️ The name for "these cells are nobody's preset", at kDelayPresetUser. It is a LABEL and
-        // not a preset: nothing can be applied from it, and the TYPE cell reaches it only by the
-        // user turning one of the four cells below.
+        // "These cells are nobody's preset", at kDelayPresetUser — a label, never applied; TYPE
+        // reaches it only when a cell below is turned by hand.
         v.emplace_back("USER");
         return v;
     }();
@@ -85,11 +79,8 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
     // Where every row and every header lands, in one walk. Nothing below counts lines for itself.
     const EffectsLayout lay = effects_layout();
 
-    // The title stays put and the lines below it scroll under it, the way SETTINGS' debug rows do.
-    // The scroll is DERIVED from the cursor row each frame — no stored scroll state — centring the
-    // cursor in the viewport and pinned at both ends by the clamp. The lines fit the panel as the
-    // screen stands today, so it is zero throughout; the clip below is what keeps that true, and is
-    // what a line added later would scroll under rather than draw over the title.
+    // The lines below the title scroll under it, derived from the cursor row each frame. They fit
+    // today, so the scroll is zero; the clip keeps a line added later from drawing over the title.
     c.draw_text("EFFECTS", x + LABEL_X[0], y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     const int firstLineY = y + TEXT_PADDING + ROW_HEIGHT + 14;   // the gap SETTINGS leaves too
@@ -98,10 +89,8 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
     const int cursorTop  = (lay.rowLine[static_cast<size_t>(clamp(s.cursorRow, 0, MAX_CURSOR_ROW))] - 1)
                            * ROW_HEIGHT;
 
-    // ⚠️ Scrolled in WHOLE ROWS, unlike SETTINGS' free pixel scroll. This screen is a form of labelled
-    // rows and section headers, and a form cut through the middle of a header reads as broken rather
-    // than as "there is more above". The row count is rounded UP, so the last row is still reachable
-    // at full scroll even though that leaves a little blank below it.
+    // ⚠️ Scrolled in WHOLE ROWS: a form cut through a header reads as broken. Rounded up, so the
+    // last row is reachable at full scroll.
     const int maxRows = (std::max(0, contentH - viewportH) + ROW_HEIGHT - 1) / ROW_HEIGHT;
     const int rows    = clamp((cursorTop + ROW_HEIGHT / 2 - viewportH / 2 + ROW_HEIGHT / 2)
                                   / ROW_HEIGHT,
@@ -119,9 +108,8 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
                     t.textTitle, CHAR_SPACING, FONT_SCALE);
     };
 
-    // A parameter cell, addressed by its CURSOR row: both where it lands on screen and which column
-    // it lands in come out of the same table the cursor walks, so a row moved there moves here too
-    // and cannot end up drawn in one place and reachable in another.
+    // A parameter cell, addressed by its CURSOR row: its position and column come from the table the
+    // cursor walks, so it cannot be drawn in one place and reachable in another.
     const auto param = [&](const char* name, int row, const std::string& text) {
         const int  ry    = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx    = x + LABEL_X[effects_cell_pos(row).column];
@@ -191,9 +179,8 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
 
     switch (s.cursorRow) {
         case ROW_MASTER_TYPE: {
-            // ⚠️ Built by hand rather than through cc::hex_byte, because Kotlin builds it by hand: it is
-            // a two-state toggle, so it gets increment and decrement and NOTHING else — no fast step (a
-            // large step of 1 that wrapped would be a second way to do the same thing), no delete.
+            // ⚠️ Built by hand: a two-state toggle gets increment and decrement and nothing else —
+            // no fast step, no delete.
             CursorContext c;
             c.valueType                 = CursorValueType::HEX_BYTE;
             c.capabilities.canIncrement = true;
@@ -207,12 +194,9 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
         }
 
         case ROW_REV_TYPE: {
-            // A short named list, so it steps and wraps and does nothing else — no fast step, and no
-            // delete, because there is no empty preset.
-            //
-            // ⚠️ USER is inside the range only while the cells ARE nobody's preset — the same shape
-            // as the delay's TYPE below, and for the same reason: it is a place the cursor can LEAVE
-            // and never a place it can be sent.
+            // A short named list: steps and wraps, no fast step, no delete (no empty preset).
+            // ⚠️ USER is in range only while the cells ARE nobody's preset — a place the cursor
+            // can leave, never one it can be sent to.
             const int cur = reverb_preset_of(p);
             return cc::index_cycle(cur, cur == kReverbPresetUser ? kReverbPresetCount + 1
                                                                  : kReverbPresetCount);
@@ -239,12 +223,8 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
                                 /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
 
         case ROW_DLY_TYPE: {
-            // A short named list, so it steps and wraps and does nothing else — no fast step over
-            // three entries, and no delete, because there is no empty preset.
-            //
-            // ⚠️ USER is inside the range only while the cells ARE nobody's preset. That is what makes
-            // it a place the cursor can LEAVE and never a place it can be sent: from USER, one press
-            // either way lands on a real preset, and from a real preset the list is the three names.
+            // As the reverb's TYPE: steps and wraps, no fast step, no delete; USER is in range only
+            // while the cells are nobody's preset.
             const int cur = delay_preset_of(p);
             return cc::index_cycle(cur, cur == kDelayPresetUser ? kDelayPresetCount + 1
                                                                 : kDelayPresetCount);
@@ -339,14 +319,10 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
             return {true};
 
         case ROW_REV_TYPE: {
-            // ⚠️ **THE PRESET IS APPLIED AND THEN FORGOTTEN** — it writes the six cells and stores no
-            // name, so what the row reads afterwards is whatever those six now are. Landing on USER
-            // writes nothing, because USER is not a set of values: it is the absence of a match.
-            //
-            // ⚠️⚠️ **EVERY CELL `reverb_preset_match` READS MUST BE WRITTEN HERE.** Writing fewer than the
-            // match reads is not a partial preset — it is a TYPE cell that can never leave USER: the
-            // row is applied, the unwritten cell still holds what the user typed, the match fails, and
-            // the only presets still reachable are the two either side of USER in the cycle.
+            // ⚠️ THE PRESET IS APPLIED AND THEN FORGOTTEN: it writes the cells and stores no name;
+            // USER writes nothing (it is the absence of a match).
+            // ⚠️⚠️ EVERY CELL `reverb_preset_match` READS MUST BE WRITTEN HERE, or TYPE can never
+            // leave USER — the unwritten cell still holds what the user typed and the match fails.
             if (!isSet) break;
             const int idx = clamp(action.value, 0, kReverbPresetCount);
             if (idx >= kReverbPresetCount) return {false};
@@ -385,9 +361,8 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
             return {true};
 
         case ROW_DLY_TYPE: {
-            // ⚠️ **THE PRESET IS APPLIED AND THEN FORGOTTEN** — it writes the three cells and stores no
-            // name, so what the row reads afterwards is whatever those three now are. Landing on USER
-            // writes nothing, because USER is not a set of values: it is the absence of a match.
+            // ⚠️ THE PRESET IS APPLIED AND THEN FORGOTTEN: three cells written, no name; USER
+            // writes nothing.
             if (!isSet) break;
             const int idx = clamp(action.value, 0, kDelayPresetCount);
             if (idx >= kDelayPresetCount) return {false};

@@ -8,10 +8,8 @@ namespace pt::ui {
 
 // ─── The layouts ─────────────────────────────────────────────────────────────────────────────────
 //
-// Three rows of TEN, both layouts, so the columns line up: D-pad UP/DOWN then stays in one column
-// instead of drifting diagonally across ragged rows. The space bar is the fourth row and is
-// special-cased in the nav (it is one key), and the ABORT/APPLY row is virtual — it has no characters,
-// so it is not in this table at all.
+// Three rows of TEN in both layouts, so UP/DOWN stays in one column. The space bar is a fourth row
+// (one key, special-cased in the nav); the ABORT/APPLY row is virtual and not in this table.
 
 const std::vector<std::vector<char>>& qwerty_rows(int layout) {
     static const std::vector<std::vector<char>> letters = {
@@ -137,17 +135,12 @@ QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols)
         if (f > maxFirst) f = maxFirst;
         return f;
     };
-    constexpr int MARK = 1;  // the ellipsis marker (…) is ONE column wide (C1: was ".." = two)
+    constexpr int MARK = 1;  // the ellipsis marker (…) is ONE column wide
 
-    // Iterate to a FIXED POINT: the marker columns RESERVED must equal the markers the final placement
-    // actually needs. ONE refinement pass is NOT enough — reserving a marker shrinks the content window,
-    // which shifts the cursor-centred placement toward the far end and can REVEAL a clip on the near side
-    // the marker-free placement did not have. The exact case is `content == windowCols + 1` with the
-    // cursor centred: pass 1 sees a single clip and reserves one column, but the re-placement then needs
-    // TWO markers — so the old two-pass code drew a right "…" it had not reserved a column for, and it
-    // poked one column past the box (the reported bug). Re-placing until the flags stop changing keeps the
-    // reserved columns and the drawn markers in lock-step. Markers only ever grow (0→1→2) as the window
-    // shrinks, so this settles in a step or two; the loop bound is a hard guard, not the real terminator.
+    // Iterate to a FIXED POINT: the reserved marker columns must equal the markers the final
+    // placement needs. One pass is not enough — reserving a marker shrinks the window, which can
+    // reveal a clip on the near side (`content == windowCols + 1`, cursor centred), and an unreserved
+    // "…" pokes past the box. Markers only grow (0→1→2), so this settles fast; the bound is a guard.
     int  cols = windowCols;
     int  f    = place(cols);
     bool cl   = f > 0;
@@ -176,9 +169,7 @@ std::string trimmed_text(const QwertyKeyboardState& s) {
 
 // ─── Drawing ─────────────────────────────────────────────────────────────────────────────────────
 //
-// A 470×228 box, centred. The geometry is PixelPerfectRenderer.drawQwertyKeyboard's, coordinate for
-// coordinate — the keys are on a fixed 10-column grid (a ragged row just leaves its trailing columns
-// empty), which is the same reason the layout tables are 10 wide.
+// A 470×228 box, centred. The keys are on a fixed 10-column grid, as the layout tables are.
 
 void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const Theme& t) const {
     constexpr int FS    = 4;                  // 20×20px keys — this is the one place the font goes big
@@ -197,15 +188,12 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     constexpr int INNERX = BOXX + 5;
     constexpr int INNERW = BOXW - 10;
 
-    // The backdrop dims everything behind it — this is a modal, and it should look like one. The shell
-    // paints the SAME dim in the letterbox bars (B4) so it does not stop at the 4:3 edge.
+    // The backdrop dims everything behind the modal; the shell paints the same dim in the letterbox.
     draw_modal_backdrop(c);
     draw_modal_box(c, BOXX, BOXY, BOXW, BOXH, t);
 
-    // The label, the edited text and the key rows sit at FIXED offsets from one another; only where
-    // the stack STARTS is derived, by centring it in the box. ⚠️ A hand-typed top pad cannot stay
-    // centred: the box's height and the row count are both free to move, and every px they left over
-    // landed under the action row.
+    // Label, text and key rows sit at FIXED offsets from one another; only where the stack starts is
+    // derived, by centring it. ⚠️ A hand-typed top pad would not stay centred as the box or rows change.
     constexpr int TEXTROW_OFF = 30;   // the edited text, below the field label
     constexpr int KEYROWS_OFF = 66;   // the first key row, below the edited text
     const int contentH = KEYROWS_OFF + (s.total_rows() - 1) * (CELLH + ROWGAP) + CELLH;
@@ -215,10 +203,9 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     const int labelW = static_cast<int>(s.fieldLabel.size()) * CHARW;
     c.draw_text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, CS, FS);
 
-    // ── The text row: a scroll window that keeps the cursor visible (C1) ─────────────────────────
-    // Short text is centred on the box midpoint (as it always was). Once it overflows the box, the
-    // window left-aligns and scrolls under the cursor — the cursor walks to the centre, then the text
-    // slides beneath it — with a single "…" marker on whichever side is hiding characters.
+    // ── The text row: a scroll window that keeps the cursor visible ─────────────────────────────
+    // Short text is centred; once it overflows, the window left-aligns and scrolls under the cursor,
+    // with a "…" on whichever side hides characters.
     const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
     const int              textRowY   = contentY + TEXTROW_OFF;
     const int              textLen    = static_cast<int>(s.text.size());
@@ -227,8 +214,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
 
     const bool fits    = (win.cols == textLen + 1);   // only the fit branch returns the full content
     const int  leftPad = win.clipLeft ? 1 : 0;        // the "…" marker eats ONE column on a clipped side
-    // Centre only when the text fits; then clamp so the phantom end-cursor never pokes past the box edge
-    // (the reported "cursor goes out of the box" — centring accounted for the text but not the cursor).
+    // Centre only when the text fits, then clamp so the phantom end-cursor never pokes past the box.
     const int  contentRight = textLen * CHARW + 5 * FS;   // right edge of the phantom cursor from startX
     int        startX       = fits ? BOXX + BOXW / 2 - (textLen * CHARW) / 2 : INNERX;
     if (startX + contentRight > INNERX + INNERW) startX = INNERX + INNERW - contentRight;

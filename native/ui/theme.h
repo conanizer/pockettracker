@@ -2,14 +2,8 @@
 
 // ─── The theme ───────────────────────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of ui/theme/AppTheme.kt — the same field names, the same four built-in palettes, the
-// same ARGB values. Kotlin stores each colour as a `Long` because the class is kotlinx-serializable
-// straight into a `.ptt` theme file; here it is a uint32_t, which is what the canvas blends anyway.
-//
-// The field names are load-bearing. `.ptt` files on a user's SD card are JSON keyed by exactly these
-// names, and a project (and its themes) must move between an Android device and a handheld without
-// conversion — so a rename here is a file-format break, not a refactor. The .ptt reader lands with
-// the SETTINGS screen; until then these four built-ins are the whole palette set.
+// The palette fields and the four built-ins. ⚠️ The field names are a FILE FORMAT: `.ptt` files are
+// JSON keyed by exactly these names, shared between devices — a rename is a format break.
 
 #include <cstdint>
 #include <string>
@@ -17,7 +11,7 @@
 
 namespace pt::ui {
 
-using Argb = uint32_t;  // 0xAARRGGBB, straight from the Kotlin literals
+using Argb = uint32_t;  // 0xAARRGGBB
 
 enum class VisualizerType { SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS };
 
@@ -28,22 +22,16 @@ struct Theme {
     Argb background   = 0xFF0A0A0A;  // module fill + default row
     Argb rowEvery4th  = 0xFF151515;  // beat-accent rows (every 4th)
 
-    // ⚠️ THE ACCENT OF THE WHOLE PALETTE, not just a row highlight, and that is why it is bright here
-    // rather than the near-black grey it was. It is the bar behind the cursor cell, the ink of every
-    // "you are here" marker that has no bar (a row number, a column heading, the label of the row the
-    // cursor is on), the EQ response curve and the selected meter's frame. `background` is the ink
-    // that reads ON it, so anything dark enough to lose that ink makes the cursor cell unreadable.
+    // ⚠️ THE ACCENT OF THE WHOLE PALETTE: the bar behind the cursor cell, every "you are here" mark
+    // without a bar (row numbers, column headings, the cursor row's label), the EQ curve, the selected
+    // meter's frame. `background` is the ink ON it, so it must stay far from dark.
     Argb rowCursor    = 0xFFFFFF00;  // the accent — cursor bar, active labels, the EQ curve
-    // ⚠️ NO EDITOR ROW, AND IT PAINTS NOTHING — it is the SEED for `textPlayhead` below, and that is
-    // its whole job since the full-row playback highlight was deleted. A `.ptt` written before TXT PLAY
-    // existed carries only this, and `derive_borrowed_colors` is what turns it back into the marker
-    // colour that file has always drawn.
+    // ⚠️ No editor row and paints nothing: it is the SEED `derive_borrowed_colors` turns into
+    // `textPlayhead` for a `.ptt` that has no TXT PLAY.
     Argb rowPlayback  = 0xFF004400;  // the pre-TXT PLAY seed
 
-    // ⚠️ A SECOND BRIGHT GROUND, ON THE SAME TERMS AS `rowCursor` — `rowEvery4th` is the ink that reads
-    // on it. The two grounds are meant to be told apart at a glance and NOT to be far apart: a
-    // selection and a cursor are both "the thing you are working on", and a big luminance gap between
-    // them reads as two unrelated states.
+    // ⚠️ A second bright ground on `rowCursor`'s terms (`rowEvery4th` reads on it). Meant to be told
+    // apart from the cursor at a glance but NOT far from it — both are "the thing you are working on".
     Argb rowSelection = 0xFF00CC00;  // selection region
 
     // ── Text roles ───────────────────────────────────────────────────────────────────────────────
@@ -52,28 +40,19 @@ struct Theme {
     Argb textValue  = 0xFFFFFFFF;  // inactive param value
     Argb textEmpty  = 0xFF666666;  // empty / placeholder
 
-    // ── Two colours nothing draws any more ───────────────────────────────────────────────────────
+    // ── Two colours nothing draws ────────────────────────────────────────────────────────────────
     //
-    // ⚠️ DEAD TO THE SCREEN, ALIVE TO THE FILE FORMAT, AND THAT IS WHY THEY ARE STILL HERE. The cursor
-    // cell's ink is now `background` and the selected cell's is `rowEvery4th`, both read straight off
-    // the ground beside them. Deleting the fields would delete two keys from the `.ptt`, which is a
-    // file-format break for every theme already on an SD card — so they are still parsed, still
-    // written on the same terms as before, and simply never read by a draw. `theme_color_rows()` no
-    // longer lists them, so nothing can dial them either.
-    //
-    // ⚠️ `derive_borrowed_colors` STILL COMPUTES `textSelection` AND `eqBg` FROM THE SAME SOURCES, and
-    // must keep doing so: it is the yardstick `serialize_theme` omits a key against, so changing it
-    // would rewrite the bytes of files a previous build wrote.
-    Argb textCursor = 0xFFFFFF00;  // unused; was the cursor cell's ink
+    // ⚠️ Dead to the screen, alive to the file format: removing them would drop two keys from every
+    // `.ptt`. Still parsed and written, never drawn, and not in `theme_color_rows()`. The cursor cell's
+    // ink is `background` and the selected cell's `rowEvery4th`.
+    // ⚠️ `derive_borrowed_colors` still computes `textSelection` and `eqBg`: it is the yardstick
+    // `serialize_theme` omits against, and changing it would rewrite existing files' bytes.
+    Argb textCursor = 0xFFFFFF00;  // unused
     Argb textSelection = 0xFF00FF00;  // unused; = vizWave
 
-    // ⚠️ NOT AN INDEPENDENT DEFAULT EITHER — `derive_borrowed_colors` lifts it out of `rowPlayback`,
-    // which is what keeps a `.ptt` that never named this key drawing the marker it has always drawn.
-    // The literal is CLASSIC's own seed lifted: 0xFF004400 → 0xFF00E000.
-    //
-    // ⚠️ THE LIFT IS THE DEFAULT AND NOT THE DRAW. Once the key is in a file, the value is used AS
-    // TYPED — a marker the same colour as ROW SELECT is now a marker that vanishes into a selection,
-    // which is what a colour row is supposed to let someone do.
+    // ⚠️ Its DEFAULT is lifted from `rowPlayback` (`derive_borrowed_colors`), so a `.ptt` without this key
+    // draws the marker it always did (CLASSIC: 0xFF004400 → 0xFF00E000). Once in a file it is used AS
+    // TYPED — matching ROW SELECT makes the marker vanish in a selection, as the user chose.
     Argb textPlayhead = 0xFF00E000;  // the `>` playback marker's ink
 
     // ── Visualizer (oscilloscope bar) ────────────────────────────────────────────────────────────
@@ -83,21 +62,11 @@ struct Theme {
 
     // ── The EQ editor's spectrum panel ───────────────────────────────────────────────────────────
     //
-    // Four colours the screen used to BORROW — the panel from vizBackground, the outline and its
-    // shaded fill from textParam, the frequency labels from vizCenterLine. The fill was the one that
-    // hurt: it was `darken(textParam, 0.27f)`, a shade with no key of its own, so a light palette got
-    // a muddy grey wash under its own curve and no row to fix it on.
-    //
-    // ⚠️ THESE VALUES ARE NOT INDEPENDENT DEFAULTS — they are what `derive_borrowed_colors` computes
-    // for the CLASSIC palette, and that function is the authority. Every producer of a Theme runs it;
-    // the literals here are only what a bare `Theme t;` gets, and they are the same four numbers.
-    //
-    // ⚠️ `eqBorder` DRAWS TWO THINGS — the spectrum's outline and the 0 dB line under the response
-    // curve — so it is the panel's whole "reference" colour. They were separate and looked identical:
-    // the 0 dB line borrowed vizCenterLine, which on a blue palette is a shade off the curve's own.
-    // ⚠️ THE SPECTRUM PANEL'S GROUND, AND IT HAS NO EDITOR ROW ON PURPOSE. A generated palette picks
-    // it as a COPY of `background` or of `vizBackground` — never a near-value, which reads as a
-    // rendering fault rather than as a panel — so a row would be a second, disagreeing control.
+    // ⚠️ Not independent defaults: these are what `derive_borrowed_colors` computes for CLASSIC, and that
+    // function is the authority (every Theme producer runs it); the literals only serve a bare `Theme t;`.
+    // `eqBorder` draws both the spectrum outline and the 0 dB line — the panel's reference colour.
+    // `eqBg` has no editor row on purpose: a palette sets it as a COPY of `background` or
+    // `vizBackground` (a near-value reads as a rendering fault), so a row would be a second control.
     Argb eqBg     = 0xFF0A0A0A;  // = vizBackground
     Argb eqFill   = 0xFF222222;  // = darken(textParam, 0.27f)
     Argb eqBorder = 0xFF808080;  // = textParam — the spectrum outline AND the 0 dB line
@@ -114,7 +83,7 @@ struct Theme {
     VisualizerType visualizerType = VisualizerType::SCOPE;
 };
 
-/** Multiply the RGB channels by `factor` (0..1 darker, >1 brighter); alpha preserved. Int.darken(). */
+/** Multiply the RGB channels by `factor` (0..1 darker, >1 brighter); alpha preserved. */
 inline Argb darken(Argb c, float factor) {
     auto ch = [&](int shift) {
         const int v = static_cast<int>(static_cast<float>((c >> shift) & 0xFF) * factor);
@@ -125,20 +94,11 @@ inline Argb darken(Argb c, float factor) {
 
 
 /**
- * ROW PLAY's value, lifted to something readable as INK — the default `textPlayhead` takes when a
- * `.ptt` does not name TXT PLAY.
- *
- * ⚠️ IT EXISTS BECAUSE THE SEED IS A BACKGROUND COLOUR. Every value `rowPlayback` has ever held was
- * chosen to sit BEHIND text on a dark screen (CLASSIC's is 0xFF004400), and ink that dark on
- * `background` cannot be read. So the hue is the theme's and the brightness is not: scale all three
- * channels until the strongest reaches `TARGET`. That keeps green green, amber amber and blue blue
- * across the four built-ins and across anything a user typed into an older file.
- *
- * A seed already that bright scales by ~1 and is left alone; pure black has no hue to keep, so it
- * falls back to the cursor colour rather than staying invisible.
- *
- * ⚠️ THIS RUNS ONCE, AS A DEFAULT — never on the value the user typed into TXT PLAY. Lifting on every
- * draw is what made a dark marker unreachable and made two rows set to one colour draw as two.
+ * ROW PLAY's value lifted to readable INK — `textPlayhead`'s default when a `.ptt` has no TXT PLAY. The
+ * seed was always a dark BACKGROUND colour, so the hue is kept and all three channels scale until the
+ * strongest reaches `TARGET` (green stays green, amber amber). Pure black has no hue: the cursor
+ * colour instead.
+ * ⚠️ Runs ONCE, as a default — never on a value the user typed.
  */
 inline Argb lift_seed_to_ink(Argb seed, Argb fallback) {
     constexpr int TARGET = 0xE0;
@@ -150,24 +110,13 @@ inline Argb lift_seed_to_ink(Argb seed, Argb fallback) {
 }
 // ─── The colours a theme has not named ───────────────────────────────────────────────────────────
 //
-// ⚠️ THESE SIX KEYS ARE THE ONLY ONES WHOSE DEFAULT IS A FUNCTION OF THE THEME, and it has to be:
-// their default is *what the screen drew before they existed*, which was five other fields of the
-// same palette. A constant default would restyle every `.ptt` already on an SD card the moment it
-// loaded into a build that has these keys — the EQ fill of a light theme would jump from that theme's
-// own shaded param colour to CLASSIC's dark grey, and its selected cells from its own wave colour to
-// CLASSIC's green.
-//
-// So this one function is the authority, and BOTH ends read it: `parse_theme` fills in whichever of
-// the six a file does not carry, and `serialize_theme` omits whichever still equals it. That is the
-// same encodeDefaults=false bargain the other seventeen colours get, with the yardstick derived per
-// theme instead of read off `Theme{}` — and it keeps a saved theme's bytes identical to what an older
-// build wrote until the user actually dials one of these rows.
-//
-// ⚠️ ONE FUNCTION, NOT TWO, AND EVERY SITE CALLS IT LAST. A second derive beside this one is a call
-// every future producer of a Theme has to remember, and the cost of forgetting is a palette that
-// looks right in four screens and wrong in the fifth.
-//
-// 0.27f is the shade the EQ fill was hardcoded to. It stays here and nowhere else.
+// ⚠️ These six keys' DEFAULT is a function of the theme: what the screen drew before they existed was
+// other fields of the same palette, and a constant default would restyle every existing `.ptt` (a
+// light theme's EQ fill jumping to CLASSIC's grey).
+// This one function is the authority for BOTH ends: `parse_theme` fills in whichever a file lacks, and
+// `serialize_theme` omits whichever still equals it — so a theme's bytes stay unchanged until one of
+// these rows is dialled.
+// ⚠️ Every producer of a Theme calls it LAST. 0.27f is the EQ fill's shade, here and nowhere else.
 inline void derive_borrowed_colors(Theme& t) {
     t.eqBg     = t.vizBackground;
     t.eqFill   = darken(t.textParam, 0.27f);
@@ -180,37 +129,18 @@ inline void derive_borrowed_colors(Theme& t) {
 
 // ─── The editable colours ────────────────────────────────────────────────────────────────────────
 //
-// The THEME EDITOR's row list — Kotlin's `ThemeEditorModule.COLOR_ROWS`, in the same order, with the
-// same labels. It lives HERE, next to the fields it projects, rather than in the module: it is a view
-// of `Theme`'s own field list, and a table that can drift out of step with the struct it describes is
-// a bug waiting for someone to add a colour. Three consumers read it (the module draws it, the
-// dispatcher's colour nudge indexes it, and the ptinput golden sweeps it) and none may re-derive it.
-//
-// ⚠️ NINETEEN ROWS, TWENTY-FOUR COLOURS — five fields have no row, and they are serialized into a
-// `.ptt` all the same:
-//
-//   * `meterBorder` — read by the mixer's meter frames, and simply never given a way to edit it.
-//   * `rowPlayback` — the seed TXT PLAY defaults from. A row for it would be a second control over
-//     one colour, which is how one of the two becomes a lie.
-//   * `textCursor`, `textSelection` — nothing draws them at all any more (see the struct). Their rows
-//     went because the colour each one named is now read off the ground beside it: the cursor cell's
-//     ink is `background` and the selected cell's is `rowEvery4th`. A row per colour that can only
-//     ever hold ONE right answer is a row that can be set wrong, and both of them were.
-//   * `eqBg` — drawn, but only ever a COPY of another ground, so a row would be a second control
-//     over one decision.
-//
-// ⚠️ THE ROW ORDER IS GROUPED BY PREFIX and the groups are what a reader scans by, so a new colour
-// joins its group rather than landing at the end. ⚠️⚠️ BUT THE POSITION IS A NUMBER, NOT A LABEL:
-// the dispatcher's colour nudge indexes this table and ptinput's THEME sweep records the index in
-// every line, so moving a row re-points every swept line at or below it. The recorded lines are then
-// a PERMUTATION of the ones already there — the same beds, the same nudges, re-labelled — and never a
-// re-recording, which would certify whatever the table happens to say today.
-//
-// ⚠️ AND IT IS A POINTER-TO-MEMBER, NOT A GET/SET PAIR. Kotlin's row carries two lambdas — `get` and a
-// copy-based `set` — which are two statements of the same fact and can therefore disagree; that is
-// exactly the shape of the bug S8 found in `applyCallerEqSlotChange` (one function wrote the field and
-// made the call; the other only made the call). One member pointer reads and writes the same field by
-// construction, and a typo is a compile error instead of a colour that edits its neighbour.
+// The THEME EDITOR's row list, beside the fields it projects. The module draws it, the dispatcher's
+// colour nudge indexes it, the input-test golden sweeps it — none may re-derive it.
+// ⚠️ Nineteen rows for twenty-four colours; five fields have no row and are still serialized:
+//   * `meterBorder` — read by the meter frames, never given a row;
+//   * `rowPlayback` — the seed TXT PLAY defaults from (a row would be a second control over one colour);
+//   * `textCursor`, `textSelection` — drawn by nothing (see the struct);
+//   * `eqBg` — only ever a COPY of another ground.
+// ⚠️ Rows are GROUPED by prefix, so a new colour joins its group. ⚠️⚠️ But a POSITION is a number: moving
+// a row re-points every recorded THEME test line at or below it — the lines then permute, and are
+// never re-recorded.
+// A POINTER-TO-MEMBER, not a get/set pair: one member reads and writes the same field by construction,
+// and a typo is a compile error rather than a colour that edits its neighbour.
 
 struct ThemeColorRow {
     const char* label;
@@ -288,9 +218,8 @@ inline Theme theme_blue() {
     t.meterMid      = 0xFF004499;
     t.meterHigh     = 0xFF6050A0;
     derive_borrowed_colors(t);
-    // ⚠️ AFTER THE DERIVE, AND THAT ORDER IS THE POINT — these two are dialled, not borrowed, so the
-    // derive would overwrite them. The outline sits a shade off TXT PARAM, and the playback marker is
-    // the deep blue TXT EMPTY carries.
+    // ⚠️ AFTER the derive, which would overwrite these two dialled colours: the outline a shade off TXT
+    // PARAM, and the marker the deep blue of TXT EMPTY.
     t.eqBorder      = 0xFF4488AA;
     t.textPlayhead  = 0xFF224466;
     return t;
@@ -303,9 +232,8 @@ inline Theme theme_mono() {
     t.rowPlayback   = 0xFF444444;
     t.rowSelection  = 0xFFA8A8A8;
     t.textTitle     = 0xFFFFFFFF;
-    // ⚠️ A SHADE OFF TXT VALUE, AND THE GAP IS THE POINT. These two were the same grey, so a value,
-    // the label beside it and the placeholder under it all read alike — the one pair in any shipped
-    // palette the editor's clash mark has ever been right about. Dialled by hand on a device.
+    // ⚠️ A shade off TXT VALUE on purpose, so value, label and placeholder do not read alike (dialled on a
+    // device).
     t.textParam     = 0xFF8B8E8E;
     t.textValue     = 0xFFC0C0C0;
     t.textEmpty     = 0xFF444444;
@@ -319,26 +247,17 @@ inline Theme theme_mono() {
 }
 
 /**
- * The built-ins, in the order the theme cycle walks them — Kotlin's `AppTheme.BUILTINS`.
- *
- * ⚠️ `visualizerType` is a FIELD on a theme but is NOT part of a theme's identity. Android carries it
- * across a theme change deliberately (`BUILTINS[next].copy(visualizerType = appTheme.visualizerType)`):
- * the palette belongs to the theme, the visualizer belongs to the user. Anything that swaps a theme
- * must preserve it — which is what `theme_by_name` takes it as an argument for.
+ * The built-ins, in the order the theme cycle walks them.
+ * ⚠️ `visualizerType` is a field but not part of a theme's identity — the palette is the theme's, the
+ * visualizer the user's. Anything that swaps a theme preserves it (`theme_by_name` takes it).
  */
 inline std::vector<Theme> theme_builtins() {
     return {theme_classic(), theme_amber(), theme_blue(), theme_mono()};
 }
 
 /**
- * The palette and visualizer a first launch comes up in — BLUE with the OCTA bars.
- *
- * ⚠️ Not `Theme{}`. `Theme{}` IS the CLASSIC palette (`theme_classic` returns the field defaults), so moving
- * the app's opening look into the struct's field defaults would redefine one of the four built-ins
- * rather than choose between them. This picks; it does not edit.
- *
- * It applies to a launch with no settings.json and nothing else: `load_settings` replaces both the
- * palette and the visualizer from the file, so a user who has ever quit the app keeps what they had.
+ * A first launch's look — BLUE with the OCTA bars. ⚠️ Not `Theme{}`, which IS the CLASSIC palette:
+ * changing the field defaults would redefine a built-in. Only a launch with no settings.json uses this.
  */
 inline Theme theme_default() {
     Theme t          = theme_blue();
@@ -346,7 +265,7 @@ inline Theme theme_default() {
     return t;
 }
 
-/** A built-in by name, keeping `visualizer`. An unknown name reads as CLASSIC, as a bad .ptt does. */
+/** A built-in by name, keeping `visualizer`. An unknown name reads as CLASSIC. */
 inline Theme theme_by_name(const std::string& name, VisualizerType visualizer) {
     Theme found = theme_classic();
     for (const Theme& t : theme_builtins()) {

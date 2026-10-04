@@ -59,12 +59,9 @@ int64_t clamp_to_address_space(int64_t bytes) {
 /**
  * `PT_MEMORY_LIMIT_MB` — pretend the machine has only this much free.
  *
- * ⚠️⚠️ **THE ONLY WAY TO REACH THE LOW-MEMORY PATHS ON A MACHINE THAT IS NOT LOW ON MEMORY, AND THEY
- * WERE UNREACHED FOR MONTHS.** Every refusal in the app hangs off this number: the soundfont
- * allocator guard and the sample decoder's room check both refuse a file only when it will not fit,
- * so on any development box the whole mechanism is a branch nothing takes. The guard was measuring
- * the wrong quantity for a soundfont's growth (see soundfont-voice.cpp) and read green throughout,
- * because no test could make it say no.
+ * ⚠️⚠️ THE ONLY WAY TO REACH THE LOW-MEMORY PATHS ON A MACHINE THAT IS NOT LOW: every refusal (the
+ * soundfont allocator guard, the decoder's room check) hangs off this number, and on a development
+ * box none of them ever fires.
  *
  * ⚠️ It only ever makes the answer SMALLER — `std::min` — so it cannot be used to talk the app into a
  * load the machine cannot serve, and an unset or unparseable value changes nothing at all. Read on

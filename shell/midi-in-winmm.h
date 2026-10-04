@@ -5,8 +5,7 @@
 // is allowed to do so little. Compiles to nothing off Windows, so main.cpp can name the header
 // unconditionally.
 //
-// Only the platform half is here: the device list, the spec resolver, the sink and the counters are
-// `MidiInBase` and are shared with the ALSA and Android backends E5 adds.
+// Only the platform half is here: the device list, spec resolver, sink and counters are `MidiInBase`.
 
 #include "midi-in-base.h"
 

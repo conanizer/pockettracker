@@ -3,17 +3,12 @@
 
 // midi-out-base.{h,cpp} — the part of a `songcore::IMidiOut` backend that is NOT per-platform.
 //
-// `IMidiOut` is five methods and deliberately tiny (see native/songcore/midi_out.h). But a backend
-// needs more than five methods to be usable at a desk: a device list on the console, a spec resolver
-// for the env-var override, a one-shot test note, a byte trace, and a rejected-message counter.
-// None of that touches the platform — it is written entirely in terms of the five virtuals — and
-// with three backends coming (winmm, ALSA, Android) it is exactly the kind of thing that gets
-// copied twice and then diverges in one of the copies.
+// `IMidiOut` is five methods (songcore/midi_out.h); a usable backend also needs a console device
+// list, a spec resolver for the env-var override, a test note, a byte trace and a rejected-message
+// counter — none of it platform-specific, so written once here for every backend.
 //
-// ⚠️ The counters in particular are load-bearing rather than decorative. `IMidiOut::send` returns
-// void, because nothing above it could do anything useful with a failure mid-phrase — so a send path
-// that fails silently is indistinguishable from one that works. Every backend counts, and every
-// console line prints the count beside the verdict.
+// ⚠️ The counters are load-bearing: `IMidiOut::send` returns void, so a silently failing send is
+// otherwise indistinguishable from one that works. Every console line prints the count.
 
 #include <cstdint>
 #include <string>
@@ -27,17 +22,15 @@ class MidiOutBase : public songcore::IMidiOut {
     /**
      * Resolve `spec` — an index, a case-insensitive name fragment, or empty/"list" — and open it.
      *
-     * Always prints the device list first. That is the console's job: without it, "nothing happened"
-     * is indistinguishable from "there was no device", which is the single most common way an hour
-     * goes missing on a MIDI bring-up.
+     * Always prints the device list first: otherwise "nothing happened" is indistinguishable from
+     * "there was no device".
      */
     bool open_by_spec(const std::string& spec);
 
     /**
-     * One C-4 on channel 1, held for `holdMs`, then released — the plan's §8.1 TEST row, reachable
-     * from the console before a frame is drawn. It is the smallest thing that answers "is the cable
-     * alive?", and it deliberately does NOT go through the bus, so a failure here means the PORT and
-     * not songcore.
+     * One C-4 on channel 1, held for `holdMs`, then released — the TEST row, reachable from the
+     * console before a frame is drawn. It bypasses the bus, so a failure here means the PORT, not
+     * songcore.
      */
     void test_note(int holdMs);
 
@@ -52,14 +45,9 @@ class MidiOutBase : public songcore::IMidiOut {
     /**
      * All-notes-off (CC 123) on all 16 channels — what EVERY backend must send before it closes.
      *
-     * ⚠️ Not politeness: closing a port with notes sounding leaves the DEVICE holding them, and
-     * nothing we can ever send again will stop it. songcore's own panic runs one layer up and covers
-     * the channels it knows about; this covers the ones it does not — a channel some earlier session
-     * left ringing, or a device's own power-on state.
-     *
-     * Windows gets this from `midiOutReset` and calls this not at all; ALSA and Android have no reset
-     * call, so the bytes are theirs to write, and writing them ONCE here is what stops the two from
-     * drifting apart on which channels or which controller number.
+     * ⚠️ Closing a port with notes sounding leaves the DEVICE holding them for good. songcore's panic
+     * covers the channels it knows; this covers the rest. Windows gets it from `midiOutReset`; ALSA
+     * and Android write these bytes, once, here.
      */
     void panic_all_channels();
 

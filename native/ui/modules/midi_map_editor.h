@@ -6,18 +6,14 @@
 // driven across, and the destination itself. Reached by the MIDI screen's MAPPING row; B is the only
 // way out, as it is from MIDI.
 //
-// ⚠️ **THE LIST GROWS — IT IS NEVER 128 ROWS.** `Project::midiMappings` is a count plus that many
-// entries, so an untouched song carries none and this screen is its headers, the empty line and the
-// row that adds the first one. A fixed 128-slot array would put 128 blanks in every .ptp and leave
-// the screen hiding them.
+// ⚠️ THE LIST GROWS — IT IS NEVER 128 ROWS: an untouched song carries no mappings, and this screen
+// is its headers, the empty line and the ADD row.
 //
-// ⚠️ **THE DESTINATION IS TWO CELLS, NOT A LIST**: a GROUP (five of them) and a parameter within it
-// (ten at the deepest). Twenty-eight names in one cycle would be a cell nobody could aim; two cells
-// put the longest reach at ten steps and need nothing drawn that is not already a row.
+// The destination is TWO cells — a GROUP (five) and a parameter within it (ten at most) — so the
+// longest reach is ten steps, not twenty-eight.
 //
-// ⭐ **A ROW WHOSE DESTINATION HAS GONE IS KEPT, DIMMED, AND SAYS WHY** — the instrument slot cleared,
-// or an id from a newer build. Dropping it silently means a mapping the user has to notice is missing
-// before they can make it again.
+// ⭐ A row whose destination has gone (slot cleared, or an id from a newer build) is kept, dimmed,
+// and says why.
 
 #include <string>
 
@@ -33,15 +29,10 @@ namespace pt::ui {
  * The cursor columns of one mapping row. Column 0 is unreachable on every screen here, and the
  * live value has no column of its own — it is read from the song and cannot be typed.
  *
- * ⚠️⚠️ **THESE ARE IN THE ORDER THE ROW IS DRAWN, AND THAT IS LOAD-BEARING.** LEFT and RIGHT step
- * this enum by one, so a member out of place sends the highlight the other way from the press — a
- * RIGHT that jumps over the scope cell and then comes back to it from the far side, which is exactly
- * how the scope cell became unfindable. Nothing stores these numbers (a cursor column is AppState,
- * never the `.ptp`), so the order is free to follow the drawing and must.
+ * ⚠️⚠️ IN THE ORDER THE ROW IS DRAWN — LEFT/RIGHT step this enum by one, so a member out of place
+ * sends the highlight the wrong way and makes a cell unfindable. Nothing stores these numbers.
  *
- * ⚠️ SCOPE exists only where the destination has one (a track's fader, an instrument's cutoff). It
- * is SKIPPED there rather than renumbered — the columns are drawn in fixed places on every row, so a
- * destination without a scope leaves the gap rather than sliding its name left.
+ * ⚠️ SCOPE exists only where the destination has one; it is SKIPPED there, not renumbered.
  */
 enum class MapCol {
     CC    = 1,
@@ -119,9 +110,8 @@ class MidiMapModule {
     CursorContext cursor_context(const MidiMapState& s) const;
 
     /**
-     * ⚠️ ADD is absent, exactly as PANIC and TEST are absent from the MIDI screen's: it is a plain-A
-     * ACTION and it grows a vector the cursor is standing in, so the dispatcher — which owns the
-     * cursor — performs it.
+     * ⚠️ ADD is not here: a plain-A action that grows the vector the cursor stands in, so the
+     * dispatcher, which owns the cursor, performs it.
      */
     MidiMapInputResult handle_input(songcore::Project& project, int cursor_row, int cursor_column,
                                     const InputAction& action) const;

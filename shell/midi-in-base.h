@@ -1,37 +1,23 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_IN_BASE_H
 #define POCKETTRACKER_SHELL_MIDI_IN_BASE_H
 
-// midi-in-base.{h,cpp} — the part of a `songcore::IMidiIn` backend that is NOT per-platform.
+// midi-in-base.{h,cpp} — the part of a `songcore::IMidiIn` backend that is NOT per-platform: the
+// device list, the spec resolver and the counters, shared by winmm, ALSA rawmidi and `MidiManager`.
 //
-// The mirror of midi-out-base.h, written for the same reason and at the same layer: there are three
-// backends (winmm at E2, ALSA rawmidi and Android's `MidiManager` at E5), and the device list, the spec
-// resolver and the counters are identical for all three. Written once here they cannot diverge in one
-// of the copies; written three times they will.
+// ⚠️ The backends differ in how a byte arrives: winmm and ALSA PUSH (a system callback, our reader
+// thread); Android is POLLED through `pump()`. A pushed byte reaches the engine's next block on its
+// own, a polled one waits for the loop's tick — `polled()` keeps the loop fast for that backend.
 //
-// ⚠️ The three differ in ONE thing above the platform line — how a byte gets here. winmm and ALSA PUSH
-// (a system callback, a reader thread of ours); Android is POLLED through `pump()` below. That is one
-// virtual with an empty default, not a second mechanism — see the note on it. ⚠️ Since the drain moved
-// to the audio thread the difference has a cost the frame loop has to know about: a pushed byte reaches
-// the engine's next block on its own, a polled one waits for the loop's next tick — so `polled()` is
-// what keeps the loop's fast rate for the one backend that still needs it.
-//
-// ⚠️ **IT ALSO OWNS THE SINK, AND THAT IS NOT TIDINESS.** A backend's bytes arrive on a thread nobody
-// chose, and `deliver()` below is the ONE door they come through — so it is the one place that can
-// count them. Without that count, an input port has the worst failure mode in this repo: a component
-// whose correct behaviour is SILENCE, indistinguishable from one whose callback never fired at all.
-// `bytes_received()` and `callbacks()` are what tell those two apart, and every console line prints
-// them beside the verdict.
+// ⚠️ IT OWNS THE SINK, AND THAT IS NOT TIDINESS: `deliver()` is the ONE door bytes come through, so
+// it counts them. An input port whose correct behaviour is silence is otherwise indistinguishable
+// from one that never fired; `bytes_received()` and `callbacks()` tell them apart.
 //
 // ── ⚠️⚠️ WHAT MAY RUN ON THE CALLBACK THREAD ─────────────────────────────────────────────────────
 //
-// Almost nothing, and the constraint is the platform's rather than ours. winmm documents its low-level
-// MIDI callback as being allowed to call only a short list of functions — `EnterCriticalSection`,
-// `midiOutShortMsg`, `PostMessage`, `SetEvent` and a handful more — because the callback can run in an
-// interrupt-like context where the CRT's locks are not available: **a `printf` or a `malloc` there is a
-// deadlock, not a slow path.** So `deliver()` does exactly two things, an atomic add and a call into
-// `MidiInQueue::on_bytes` (a `std::mutex` and a memcpy, no allocation), and the TRACE that would be the
-// obvious instrument here does not exist: the console prints from `SongcoreHost::poll()`, on the app's
-// own thread, where a message rather than a byte is the useful unit anyway.
+// Almost nothing: winmm's MIDI callback may call only a short list of functions, from a context
+// where the CRT's locks are unavailable — a `printf` or `malloc` there is a DEADLOCK. So `deliver()`
+// is an atomic add and `MidiInQueue::on_bytes` (a mutex and a memcpy); printing happens in
+// `SongcoreHost::poll()`, on the app's own thread.
 
 #include <atomic>
 #include <cstdint>
@@ -46,16 +32,12 @@ class MidiInBase : public songcore::IMidiIn {
     /**
      * Resolve `spec` — an index, a case-insensitive name fragment, or empty/"list" — to a device NAME.
      *
-     * ⚠️ **IT RESOLVES AND DOES NOT OPEN, WHERE `MidiOutBase::open_by_spec` OPENS.** The difference is
-     * the sink: an input port that is open is a port that can deliver bytes, and the object those bytes
-     * go into (`SongcoreHost`'s queue) does not exist yet when `main` reads its environment. So the env
-     * var hands a NAME to the settings, and the one place that knows how to wire a sink — the
-     * dispatcher's `boot_midi_in_port` — is the only thing that ever calls `open`. That is B4.3's "one
-     * owner of which port is open", reached from the other direction.
+     * ⚠️ IT RESOLVES AND DOES NOT OPEN (unlike `MidiOutBase::open_by_spec`): the sink does not exist
+     * when `main` reads its environment, so the env var hands a NAME to the settings and only the
+     * dispatcher's `boot_midi_in_port` ever calls `open` — one owner of which port is open.
      *
-     * Returns "" for no match. Always prints the device list first, for `MidiOutBase`'s reason: on a
-     * machine where nothing arrives, "there were 0 devices" and "there were 3 and none matched" are
-     * different problems, and the console is where that is cheapest to answer.
+     * Returns "" for no match. Prints the device list first: "0 devices" and "3, none matched" are
+     * different problems.
      */
     std::string resolve_spec(const std::string& spec);
 
@@ -71,12 +53,9 @@ class MidiInBase : public songcore::IMidiIn {
     /**
      * Called once a tick by the frame loop. A no-op for a backend that PUSHES.
      *
-     * ⚠️ **IT EXISTS FOR ANDROID (E5) AND IT IS NOT A SECOND MECHANISM.** winmm calls us on its own
-     * callback thread and ALSA gets a reader thread of ours; `MidiManager` delivers on a binder thread
-     * to the Kotlin side, and this backend fetches from there rather than having Kotlin call down —
-     * midi-in-android.cpp says why. ⚠️ It is no longer free: the drain runs on the audio thread, so a
-     * pushed byte is heard in the engine's next block while a pumped one first waits for this call.
-     * On Android the loop's tick is still in the path; `polled()` below is how the loop knows.
+     * ⚠️ FOR ANDROID: `MidiManager` delivers on a binder thread to the Kotlin side, and this backend
+     * fetches from there (midi-in-android.cpp says why). A pumped byte waits for this call before the
+     * audio thread's drain sees it; `polled()` below tells the loop to keep ticking fast.
      */
     virtual void pump() {}
 

@@ -3,31 +3,20 @@
 
 // ─── The factory scale bank ───────────────────────────────────────────────────────────────────────
 //
-// The named shapes A+LEFT/RIGHT cycles on the SCALE screen's top row, and the same list the app writes
-// to `<card>/Scales/` as `.pts` files the first time it finds that folder without any.
-//
-// ⚠️ COMPILED IN, NOT LOADED. The cycle has to work on a fresh card, on a card someone has emptied, and
-// on the first launch before anything has been written — so the list a user picks from can never be a
-// list that has to be read off storage first. The files are the SHAREABLE copy of it, not its source.
-//
-// ⚠️ THIS IS A DISPLAY ORDER, NOT AN IDENTITY. Unlike `EFFECT_TYPES`, nothing stores an index into it:
-// a scale slot stores its twelve bits, and a `.pts` stores them too. So rows may be reordered or
-// inserted freely — which is why it is sorted for a musician (the modes together, the pentatonics
-// together) rather than kept in the order of the sheet it was transcribed from.
-//
-// ⚠️ A MASK IS COUNTED FROM THE KEY, NOT FROM C. Bit k set = the note k semitones above the key is in
-// the scale, so one entry describes a shape the KEY then positions — the same relationship `Scale`
-// itself has, and the reason bit 0 is set in every row here.
-//
-// ⭐ CHROMATIC IS INDEX 0 AND THAT IS NOT DECORATION: a default-constructed slot has all twelve degrees
-// enabled, so slot 00 of a project that has never been touched already IS this entry. "Reset this slot"
-// and "load Chromatic" are therefore the same gesture, and nothing had to be added to make it so.
+// The shapes A+LEFT/RIGHT cycles on the SCALE screen's top row, also written to `<card>/Scales/` as
+// `.pts` files when that folder is empty. Compiled in, so the cycle works on a fresh or emptied card;
+// the files are a shareable copy, not the source.
+// A display order, not an identity: slots and `.pts` files store twelve bits, never an index, so rows
+// may be reordered (they are grouped for musicians).
+// A mask counts FROM THE KEY: bit k = k semitones above the key, so bit 0 is set in every row.
+// Chromatic is index 0, and is exactly what a default slot holds — "reset" and "load Chromatic" are the
+// same gesture.
 
 #include <string>
 #include <vector>
 
 #include "model.h"
-#include "scales.h"   // scale_mask — one answer to "which intervals is this slot", not two
+#include "scales.h"   // scale_mask
 
 namespace songcore {
 
@@ -38,13 +27,8 @@ struct ScaleBankEntry {
 };
 
 /**
- * The bank. 38 shapes, every mask distinct — a duplicate would be two rows the cycle cannot tell apart
- * and two `.pts` files carrying the same scale under different names.
- *
- * ⚠️ Two rows differ DELIBERATELY from the sheet these were transcribed from, and both are recorded in
- * `docs/internal/scales.md`: TODI carries the real thaat (flat 2nd, SHARP 4th, flat 6th, natural 7th)
- * rather than the sheet's row, which is Phrygian spelled a second time; and HALF WHOLE is here because
- * "Diminished" names two different scales and the sheet only had one of them.
+ * The bank: 38 shapes, every mask distinct (a duplicate could not be told apart by the cycle).
+ * TODI is the real thaat (♭2 ♯4 ♭6 ♮7); HALF WHOLE is here because "Diminished" names two scales.
  */
 inline const std::vector<ScaleBankEntry>& scale_bank() {
     static const std::vector<ScaleBankEntry> kBank = {
@@ -90,12 +74,7 @@ inline const std::vector<ScaleBankEntry>& scale_bank() {
     return kBank;
 }
 
-/**
- * The bank entry with this exact name, or −1.
- *
- * Exact and case-sensitive, because the only names that reach it are ones this table wrote — through
- * the cycle, or through a `.pts` seeded from it. A name the user typed is expected NOT to match.
- */
+/** The entry with this exact (case-sensitive) name, or −1. Only names this table wrote reach it. */
 inline int scale_bank_index_by_name(const std::string& name) {
     if (name.empty()) return -1;
     const std::vector<ScaleBankEntry>& bank = scale_bank();
@@ -112,12 +91,8 @@ inline int scale_bank_index_by_mask(unsigned mask) {
     return -1;
 }
 
-/**
- * Overwrite `s`'s twelve degrees and its name from bank entry `index`.
- *
- * ⚠️ The slot's `id` and its microtuning `offset` are LEFT ALONE. The id is *which slot this is*, and
- * the offsets are a separate edit made to the same slot rather than part of the shape a name describes.
- */
+/** Overwrite `s`'s degrees and name from entry `index`. ⚠️ Its `id` and microtuning `offset` stay —
+ *  they are not part of the shape a name describes. */
 inline void scale_apply_bank(Scale& s, int index) {
     const std::vector<ScaleBankEntry>& bank = scale_bank();
     if (index < 0 || index >= static_cast<int>(bank.size())) return;
@@ -129,17 +104,9 @@ inline void scale_apply_bank(Scale& s, int index) {
 }
 
 /**
- * The name to SHOW for a slot, which is not always the name it stores.
- *
- * A slot that has never been named still has a shape, and on a fresh project that shape is Chromatic —
- * so the row would otherwise read blank on every untouched project while describing something the bank
- * has a perfectly good word for. An unnamed slot is therefore named by its INTERVALS; a named one is
- * named by its name, whatever its intervals have since become. Empty only when the slot is both unnamed
- * and a shape the bank does not contain, which is a scale built by hand.
- *
- * ⚠️ It does NOT write the name back. Adopting a derived name would put a `name` field into the file of
- * every project that has never opened this screen, and the scale pool is omitted from a `.ptp` whole
- * precisely so that those projects stay byte-identical.
+ * The name to SHOW for a slot: its stored name, else the bank name its intervals match (a fresh slot
+ * reads Chromatic), else empty for a hand-built shape.
+ * ⚠️ Never written back: the scale pool is omitted from an untouched .ptp, and must stay that way.
  */
 inline std::string scale_display_name(const Scale& s) {
     if (!s.name.empty()) return s.name;
@@ -147,25 +114,16 @@ inline std::string scale_display_name(const Scale& s) {
     return idx >= 0 ? std::string(scale_bank()[static_cast<size_t>(idx)].name) : std::string();
 }
 
-/**
- * Has a slot drifted from the factory shape whose name it carries? The `*` the screen draws.
- *
- * ⚠️ False for a name the bank does not know — a scale the user named MYSCALE makes no claim about a
- * factory shape, so there is nothing for it to have drifted from and no star to earn.
- */
+/** Has a slot drifted from the factory shape it is named after? (the `*`). False for a name the
+ *  bank does not know. */
 inline bool scale_differs_from_its_name(const Scale& s) {
     const int idx = scale_bank_index_by_name(s.name);
     return idx >= 0 && scale_bank()[static_cast<size_t>(idx)].mask != scale_mask(s);
 }
 
 /**
- * The bank row the cycle steps FROM: the entry this slot's name claims, else the entry its intervals
- * match, else 0.
- *
- * ⚠️ Falling back to 0 rather than to −1 is what makes A+LEFT and A+RIGHT exact inverses from a scale
- * the bank does not contain — both enter the ring at Chromatic and step away from it in the direction
- * pressed. (The THEME row, the precedent for this gesture, does NOT have that property: its two
- * expressions send an unknown palette to opposite ends of the list.)
+ * The bank row the cycle steps FROM: the entry the name claims, else the one the intervals match,
+ * else 0 — so A+LEFT and A+RIGHT are exact inverses even from a shape the bank lacks.
  */
 inline int scale_bank_cycle_index(const Scale& s) {
     int idx = scale_bank_index_by_name(s.name);

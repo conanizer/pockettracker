@@ -2,23 +2,16 @@
 
 // ─── INSTRUMENT EDITOR ───────────────────────────────────────────────────────────────────────────
 //
-// The C++ twin of ui/modules/InstrumentModule.kt — the screen where an instrument becomes a SOUND
-// rather than an arrangement. Everything the voice reads at trigger time is dialled in here: the root
-// and detune it plays at, its volume and pan, the drive / crush / downsample / filter it runs through,
-// the sample window and loop it plays out of, its reverb and delay sends and its EQ slot.
+// Where an instrument becomes a SOUND: everything the voice reads at trigger time — root and
+// detune, volume and pan, drive / crush / downsample / filter, sample window and loop, sends, EQ slot.
 //
 // ── IT IS NOT A GRID, AND THAT IS THE WHOLE DIFFICULTY ───────────────────────────────────────────
 //
-// The five editors that came before are 16 rows by N columns, and their cursor is a pair of integers
-// inside a rectangle. This screen is a FORM: rows hold one, two or three parameters, some rows are
-// unreachable spacers, some are buttons rather than values, and THE ROW LIST ITSELF DEPENDS ON THE
-// INSTRUMENT TYPE — a SoundFont gains a PATCH row and loses the four sample-window rows, so every row
-// below the source section shifts by one (`sf_offset`).
 //
-// The row geometry therefore lives in ONE place — ui/instrument_row_layout.h — which the cursor walks
-// and this module draws. They must agree: a row added here without an entry there strands the cursor
-// on a spacer or skips a live row. (Kotlin learned that the hard way; the table exists because the
-// same geometry was once re-encoded at four movement sites.)
+// A FORM, not a grid: rows hold one, two or three parameters, some are spacers or buttons, and THE
+// ROW LIST DEPENDS ON THE INSTRUMENT TYPE (a SoundFont gains PATCH and loses the sample-window rows,
+// so rows below shift by `sf_offset`). The geometry lives ONCE in instrument_row_layout.h, which the
+// cursor walks and this module draws — a row added here without an entry there strands the cursor.
 //
 // ── ROWS ─────────────────────────────────────────────────────────────────────────────────────────
 //
@@ -40,9 +33,8 @@
 //   14  LOOP ST + END                     14  EQ
 //   15  LOOP END + REVERSE
 //
-// The TYPE row's LOAD/EDIT load and edit the SOURCE (sample or SF2); the INST PRESET row's SAVE/LOAD
-// write and read the whole instrument as a .pti — the two used to share row 0 as one confusing pair of
-// LOADs. The SF's PATCH row selects a patch inside the loaded SoundFont, a different thing again.
+// TYPE's LOAD/EDIT act on the SOURCE (sample or SF2); INST PRESET's SAVE/LOAD write and read the
+// whole instrument as a .pti. The SF's PATCH row picks a patch inside the loaded SoundFont.
 //
 // ── EXTERNAL ─────────────────────────────────────────────────────────────────────────────────────
 //
@@ -93,7 +85,7 @@ struct InstrumentEditorState {
     int cursorColumn = 1;
 
     // The SF2's preset list, read back from the engine (AppState::sfPreset*). Zeroes and "---" when
-    // there is no SoundFont — which is what lets ptshot draw this screen with no engine at all.
+    // there is no SoundFont.
     std::string sfPresetName{};
     int         sfPresetCount = 0;
     int         sfPresetIndex = 0;
@@ -119,10 +111,8 @@ struct InstrumentInputResult {
     bool modified = false;
 
     /**
-     * The PRESET row was stepped. The module does NOT apply it — the new bank+preset live in the SF2's
-     * own preset list, which only the ENGINE has opened, so the dispatcher resolves the index through
-     * `SongcoreHost::set_sf_preset_by_index`. Keeping the module a pure function of the Project is what
-     * lets `tools/ptinput` measure every other row of this screen against the Kotlin original.
+     * The PRESET row was stepped. Not applied here: the preset list lives in the SF2 only the ENGINE
+     * has opened, so the dispatcher resolves the index (`SongcoreHost::set_sf_preset_by_index`).
      */
     bool presetIndexChanged = false;
     int  presetIndex        = 0;
@@ -140,14 +130,9 @@ public:
     /**
      * What the cell under the cursor is CALLED, for MIDI learn.
      *
-     * ⚠️⚠️ **THE SCOPE IS LEFT AT 0 — THE CALLER FILLS IN WHICH INSTRUMENT.** This state holds one
-     * instrument by reference and has never known its number; the dispatcher does. Every answer here
-     * is therefore half a target.
-     *
-     * ⚠️⚠️ **THE TYPE SELECTS THE ROW MAP, AND THAT IS THE WHOLE REASON THIS FUNCTION EXISTS.** A
-     * SoundFont's PATCH row pushes everything below it down by one, so row 12 is `EQ + SLICE` on a
-     * sampler and `REV` on a SoundFont. A mapping stored as a row number would point at a different
-     * knob after a type change, silently.
+     * ⚠️⚠️ THE SCOPE IS LEFT AT 0 — the caller fills in which instrument; this state never knew it.
+     * ⚠️⚠️ THE TYPE SELECTS THE ROW MAP: a SoundFont's PATCH row shifts everything below it, so a
+     * mapping stored as a row number would point at another knob after a type change.
      */
     songcore::MapTarget map_target(const InstrumentEditorState& s) const;
 
@@ -183,12 +168,8 @@ private:
                                  int cursor_column, int this_row, const Theme& t) const;
 
     /**
-     * The whole EXTERNAL screen, drawn as its own pass rather than as branches inside the sampler's.
-     *
-     * It shares only the TYPE, NAME and INST PRESET rows with the other two, and every row below them
-     * is a different parameter — so weaving it through `draw` would have put a third arm on nine `if
-     * (sf)` tests and moved the two ORIGINAL layouts' code, for no shared logic. Separate pass, and
-     * the two shipped types keep the exact path they had.
+     * The whole EXTERNAL screen, drawn as its own pass: it shares only TYPE, NAME and INST PRESET
+     * with the other two, and every row below is a different parameter.
      */
     void draw_external(Canvas& c, int x, int y, const InstrumentEditorState& s) const;
 

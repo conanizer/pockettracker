@@ -1,27 +1,17 @@
 #ifndef POCKETTRACKER_SONGCORE_SAMPLE_EDIT_H
 #define POCKETTRACKER_SONGCORE_SAMPLE_EDIT_H
 
-// ─── The sample editor, below the seam (Phase 3 S6b) ─────────────────────────────────────────────
+// ─── The sample editor, below the seam ───────────────────────────────────────────────────────────
 //
-// **Almost none of the sample editor is here, and that is the headline.** Every one of its twelve
-// operations — crop, copy, cut, dupl, paste, del, normalise, fade in, fade out, silence, reverse, undo
-// — plus the FX chain, the pitch shift, the time stretch and the transient detector, already live in
-// `native/sample-editor.cpp` and `native/transient-detector.cpp`, in C++, and always did: Android's JNI
-// layer is a thin forward and nothing more. `SongcoreHost` exposes them as verbs (host.h) and the whole
-// of that is a one-line call each.
+// The editor's operations and DSP live in the engine (`native/sample-editor.cpp`,
+// `transient-detector.cpp`); `SongcoreHost` forwards to them. This file holds only what needs the
+// ROUTING (a sample's rate ratio) or the PROJECT (the instrument auditioned):
 //
-// What lands in THIS file is only what the engine cannot do on its own, because it needs something the
-// engine does not have — the ROUTING (a sample's rate ratio, which songcore owns because songcore is
-// what opened the file) or the PROJECT (the instrument being auditioned). There are four such things:
-//
-//   • **the RATE mode's ratio cache** — Kotlin's `originalSampleRateRatios`, a map that exists so LOFI
-//     → HIGH can restore the ratio the file was loaded with rather than compounding factors;
-//   • **the SOURCE preview** — a stereo sample auditioned as LEFT / RIGHT / MONO plays out of a scratch
-//     slot, not its own, so the pitch it plays at must be borrowed from the instrument's ratio;
-//   • **the DRY audition** — the raw waveform with the instrument's EQ, sends and modulation switched
-//     off, which is the entire reason to have an audition inside an editor;
-//   • **SAVE and CHOP** — pulling the edited PCM back out and writing it, with its slice boundaries, as
-//     a WAV (`wav_writer.h`).
+//   • the RATE mode's ratio cache, so LOFI → HIGH restores the loaded ratio instead of compounding;
+//   • the SOURCE preview: LEFT / RIGHT / MONO plays from a scratch slot, pitched by the instrument's
+//     ratio;
+//   • the DRY audition: the raw waveform with EQ, sends and modulation off;
+//   • SAVE and CHOP: the edited PCM written back, with slice boundaries, as WAV (`wav_writer.h`).
 
 #include <algorithm>
 #include <cmath>
@@ -31,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-#include "engine_setup.h"   // SOURCE_PREVIEW_SLOT — the scratch slot a channel-selected audition plays from
+#include "engine_setup.h"   // SOURCE_PREVIEW_SLOT
 #include "model.h"
 #include "voice_derive.h"   // Routing, detune/root frequency math
 #include "wav_writer.h"
@@ -39,12 +29,8 @@
 namespace songcore {
 
 /**
- * Kotlin's `AudioEngine.originalSampleRateRatios` — the ratio each slot was LOADED with, remembered
- * only while the RATE row has moved it away from HIGH.
- *
- * Without it, LOFI → NORM would multiply the already-decimated ratio again and the sample would come
- * back at the wrong pitch. Kotlin uses a HashMap and keys presence on `containsKey`; an array with 0 as
- * "absent" says the same thing (a rate ratio is never 0), with no allocation on a handheld.
+ * The ratio each slot was LOADED with, remembered only while the RATE row has moved it off HIGH —
+ * otherwise LOFI → NORM would decimate an already-decimated ratio. 0 = absent (a ratio is never 0).
  */
 struct RateCache {
     float orig[POOL_INSTRUMENTS];
@@ -60,20 +46,15 @@ struct RateCache {
 };
 
 /**
- * The FILE's sample rate, recovered from the ratio it was loaded with: `deviceRate / ratio`.
- *
- * The editor's header reads it, `applySampleFx` is given it, SYNC measures the sample's length in
- * seconds with it, and SAVE writes it into the WAV — so a 22 kHz file edited on a 48 kHz device is
- * saved back as 22 kHz rather than silently resampled.
- *
- * ⚠️ 44100 when the slot holds NO sample. Kotlin's ratio map simply has no entry for an unloaded slot
- * and its `?: return 44100` catches that; a C++ `Routing` initialises every ratio to 1.0f, which would
- * instead report the DEVICE rate and put "48000Hz" in the header of an empty editor.
+ * The FILE's sample rate, `deviceRate / ratio` — for the editor header, `applySampleFx`, SYNC, and SAVE
+ * (a 22 kHz file edited on a 48 kHz device is saved as 22 kHz).
+ * ⚠️ 44100 for an EMPTY slot: `Routing` initialises every ratio to 1.0, which would report the device
+ * rate in an empty editor's header.
  */
 template <typename Engine>
 int original_sample_rate(Engine* engine, const Routing& routing, int id) {
     if (!engine || !RateCache::in_range(id)) return 44100;
-    if (engine->getSampleLength(id) <= 0) return 44100;   // no sample → Kotlin's map has no entry
+    if (engine->getSampleLength(id) <= 0) return 44100;   // no sample loaded
 
     const float ratio = routing.sampleRateRatio[id];
     if (ratio <= 0.0f) return 44100;
@@ -81,15 +62,10 @@ int original_sample_rate(Engine* engine, const Routing& routing, int id) {
 }
 
 /**
- * RATE: HIGH (1×) / NORM (2×) / LOFI (4×) — a DESTRUCTIVE decimation of the buffer, and the only edit
- * on row 1 that changes the audio rather than the view.
- *
- * The ratio is always set RELATIVE TO THE ORIGINAL, never to the current value, so NORM → LOFI → NORM
- * lands back where NORM was instead of drifting an octave each time.
- *
- * `bits` is the BIT cell (32 / 24 / 16 / 8). It never moves the ratio, but it travels with the factor
- * because the engine rebuilds the buffer from one cached original for both — a RATE change that did
- * not know the bit depth would put the full depth back.
+ * RATE: HIGH (1×) / NORM (2×) / LOFI (4×) — a DESTRUCTIVE decimation of the buffer.
+ * The ratio is always set RELATIVE TO THE ORIGINAL, so NORM → LOFI → NORM lands back on NORM.
+ * `bits` (the BIT cell: 32 / 24 / 16 / 8) travels along because the engine rebuilds both from one
+ * cached original; a RATE change unaware of it would restore full depth.
  */
 template <typename Engine>
 void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int id, int factor,
@@ -107,15 +83,13 @@ void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int
         routing.sampleRateRatio[id] = cache.orig[id] * static_cast<float>(factor);
     }
 
-    // The playback base frequency is derived from the ratio at schedule time, so the write above IS the
-    // whole pitch correction — there is no second cache to keep in step.
+    // The base frequency is derived from the ratio at schedule time, so this write IS the pitch fix.
     engine->applyRateAndBits(id, factor, bits);
 }
 
 /**
- * Both destructive resamplers. They rewrite the buffer, so whatever RATE decimation was in flight is
- * baked into it — the shifted buffer becomes the new "original", and a stale cache entry would make the
- * next HIGH restore a ratio that no longer describes the audio.
+ * Both destructive resamplers. The rewritten buffer becomes the new "original", so the cache entry is
+ * dropped — a stale one would make the next HIGH restore a ratio that no longer fits the audio.
  */
 template <typename Engine>
 void pitch_shift_sample(Engine* engine, RateCache& cache, int id, float semitones) {
@@ -132,12 +106,9 @@ void time_stretch_sample(Engine* engine, RateCache& cache, int id, float ratio) 
 }
 
 /**
- * Which SLOT the audition will actually come out of, given the editor's SOURCE mode.
- *
- * A mono sample, or STEREO mode, plays from the instrument's own slot. Anything else — LEFT, RIGHT,
- * MONO on a stereo sample — needs a channel selected or a downmix, which the engine does slot→slot into
- * the scratch slot 254. (Kotlin's old path pulled both channels into Java arrays to do it, which is the
- * OOM class the native load paths exist to avoid.)
+ * Which SLOT the audition comes out of for the SOURCE mode. A mono sample or STEREO mode plays from
+ * the instrument's own slot; LEFT, RIGHT or MONO on a stereo sample is extracted slot → slot into the
+ * scratch slot 254 (never through big intermediate arrays).
  */
 template <typename Engine>
 int prepare_source_preview(Engine& engine, int id, int sourceMode) {
@@ -148,28 +119,17 @@ int prepare_source_preview(Engine& engine, int id, int sourceMode) {
 
 /**
  * The editor's audition: the sample at its ROOT, DRY.
- *
- * ⚠️ This is the second note in the port that does not go through `plan_note_on`, and — like the file
- * browser's (engine_setup.h) — the exception is the point rather than a shortcut. `plan_note_on` derives
- * a note WITH the instrument's voice: its EQ, its sends, its modulation. An editor audition exists to
- * let you hear **the waveform you are cutting**, so those three are explicitly switched off first. A
- * reverb tail over a sample you are trying to find a zero crossing in is not a preview, it is a
- * disguise. (Drive, crush, filter and the sample window are NOT switched off — they come through
- * `push_instrument_playback_params`, which the caller has already pushed with the SELECTION as the
- * window. That is Kotlin's behaviour, comment notwithstanding: its own `previewInstrumentDry` says "no
- * filter" while `updateInstrumentPlaybackParams` pushes one.)
- *
- * `sampleRateRatio` is the INSTRUMENT's, even when `slotId` is the 254 scratch — that slot holds a copy
- * of the instrument's audio and must be pitched exactly as the instrument would be. Kotlin says the same
- * thing by assigning `sampleRateRatios[254] = sampleRateRatios[instId]` before it reads the map back.
+ * ⚠️ Deliberately not `plan_note_on`, which brings the instrument's EQ, sends and modulation — you
+ * cannot find a zero crossing under a reverb tail. Drive, crush, filter and the window still apply
+ * (the caller pushed playback params with the SELECTION as the window).
+ * `sampleRateRatio` is the INSTRUMENT's even from scratch slot 254, which holds a copy of its audio.
  */
 template <typename Engine>
 void preview_instrument_dry(Engine& engine, const Instrument& ins, int slotId, float sampleRateRatio) {
     if (ins.instrumentType == InstrumentType::SOUNDFONT) return;   // no waveform to edit
 
-    // ROOT × detune is the pitch it plays at; C-4 × the rate ratio is what "unity" means for this file.
-    // Their quotient is the resampling rate, so a 22 kHz sample plays at its own pitch, and dialling
-    // ROOT up transposes the audition — which is what makes ROOT audible at all.
+    // ROOT × detune is the playing pitch; C-4 × the rate ratio is this file's "unity". Their quotient
+    // is the resampling rate — so a 22 kHz file plays at its own pitch and ROOT transposes the audition.
     const float targetFreq = note_hz(note_to_midi(ins.root)) * detune_multiplier(ins.detune);
     const float baseFreq   = C4_HZ * sampleRateRatio;
 
@@ -189,11 +149,9 @@ void preview_instrument_dry(Engine& engine, const Instrument& ins, int slotId, f
 // ─── SAVE and CHOP ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * The channel buffers a save will write, and how many of them the WAV gets.
- *
- * ⚠️ `right` is EMPTY unless `channels == 2`. Three of the four SOURCE modes write one channel, and
- * filling `right` with a copy of `left` for them would double the peak of a buffer that is already
- * the full length of the sample — see `write_wav`, which reads `right` only for a stereo file.
+ * The channel buffers a save will write, and how many the WAV gets.
+ * ⚠️ `right` is EMPTY unless `channels == 2` — `write_wav` reads it only for a stereo file, and a copy
+ * would double a sample-length buffer for nothing.
  */
 struct SaveChannels {
     std::vector<float> left;
@@ -202,11 +160,8 @@ struct SaveChannels {
 };
 
 /**
- * Pull the edited PCM back out of the engine, honouring the editor's SOURCE mode.
- *
- * Only SOURCE=STEREO on a stereo sample writes a two-channel file. LEFT and RIGHT each pick one channel
- * and write it as mono; MONO downmixes. A mono sample ignores the mode entirely — there is nothing to
- * choose between.
+ * Pull the edited PCM out of the engine per SOURCE mode: STEREO on a stereo sample writes two
+ * channels; LEFT and RIGHT write one channel as mono; MONO downmixes. A mono sample ignores the mode.
  */
 template <typename Engine>
 SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool hasStereo) {
@@ -245,9 +200,8 @@ SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool 
         default: {   // MONO → downmix
             std::vector<float> l = pull_left();
             const std::vector<float> r = pull_right();
-            // In place, into the buffer already holding L: the downmix is the one path that would
-            // otherwise hold five full-length copies at once (l, r, the mix, and a copy into each
-            // output). Moving rather than assigning keeps it at two.
+            // In place, into the buffer holding L: moving rather than assigning keeps the downmix at
+            // two full-length copies instead of five.
             for (size_t i = 0; i < l.size() && i < r.size(); ++i) l[i] = (l[i] + r[i]) / 2.0f;
             out.left = std::move(l);
             break;
@@ -258,13 +212,8 @@ SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool 
 }
 
 /**
- * Write the edited sample to `path`, with its slice boundaries in the WAV's `cue ` chunk.
- *
- * At the file's OWN rate, not the device's: an edit is not a resample, and a 22 kHz sample that came
- * back as 48 kHz would double in size for no audible gain.
- *
- * And at the depth `bits` names — the BIT cell's — or, for 0, the depth the sample was loaded at. A
- * 24-bit sample is saved as 24 unless asked otherwise. 32 stays float only if the source was float.
+ * Write the edited sample to `path`, slices in the `cue ` chunk, at the file's OWN rate (an edit is
+ * not a resample) and at `bits` — or, for 0, the loaded depth. 32 stays float only if the source was.
  */
 template <typename Engine>
 int resolve_save_bits(Engine& engine, int id, int bits) {
@@ -282,13 +231,10 @@ bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::
 }
 
 /**
- * CHOP: every slice out to its own WAV in `dir`, named `<base>_00.wav`, `<base>_01.wav`, …
- *
- * Returns how many were written. The PCM is pulled ONCE and sliced in memory — the alternative (a pull
- * per slice) is the same bytes copied N times for a sample that may be minutes long.
- *
- * ⚠️ It writes the LEFT channel only, through `write_wav_mono` — which, being Kotlin's, produces a
- * two-channel file with that one channel in both. See wav_writer.h; the format is a shipped one.
+ * CHOP: every slice to its own WAV in `dir`, `<base>_00.wav`, `<base>_01.wav`, … Returns how many.
+ * The PCM is pulled once and sliced in memory.
+ * ⚠️ Writes the LEFT channel only, through `write_wav_mono` — a two-channel file with that channel in
+ * both (wav_writer.h; a shipped format).
  */
 template <typename Engine>
 int chop_sample(Engine& engine, const Routing& routing, int id, const std::string& dir,

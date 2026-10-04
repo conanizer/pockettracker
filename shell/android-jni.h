@@ -1,11 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_ANDROID_JNI_H
 #define POCKETTRACKER_SHELL_ANDROID_JNI_H
 
-// android-jni.h — the one JNI attach/local-ref helper the Android backends share (MIDI plan E5).
-//
-// It was `midi-out-android.cpp`'s private helper until the INPUT backend needed the identical thing.
-// Written twice, the two copies are two chances to get local-reference lifetime wrong in a file nobody
-// looks at again; written once, there is one place that knows the rule.
+// android-jni.h — the one JNI attach/local-ref helper the Android MIDI backends share.
 
 #ifdef __ANDROID__
 

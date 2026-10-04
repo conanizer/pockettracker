@@ -2,22 +2,16 @@
 
 // ─── FileSystem, on the Storage Access Framework ─────────────────────────────────────────────────
 //
-// The Android implementation of `ui/filesystem.h`, and the second one to exist — `StdFileSystem` is
-// the portable one every other platform uses. The seam has been abstract since S6a precisely so that
-// the worst case is a second implementation rather than a redesign; this is that second
-// implementation, and on Android it is the only one: the app declares no storage permission, so
-// `/storage/emulated/0` is unreadable to the process and a granted tree is the only way to a user's
-// files.
+// The Android implementation of `ui/filesystem.h` (`StdFileSystem` is the portable one), and on
+// Android the only one: the app declares no storage permission, so a granted tree is the only way to
+// a user's files.
 //
 // ── What a PATH is here, and why it is not a document URI ────────────────────────────────────────
 //
-// ⚠️ **`ui::FileSystem` assumes paths COMPOSE.** `parent_path` is a string trim, `rename_file` builds
-// its target as `parent_path(path) / new_name`, and `project_actions.cpp:70` writes
-// `projects_directory() + "/" + name + ".ptp"`. A SAF document URI supports none of that: it is an
-// opaque handle with no derivable parent and no derivable child, and `DocumentsContract` has no
-// parent-of-this-document primitive at all. Putting document URIs in `FileInfo.path` would leave the
-// browser's ".." with nothing to trim and `rename_file` unable to name its own target — **and none of
-// that is a compile error.**
+// ⚠️ `ui::FileSystem` ASSUMES PATHS COMPOSE: `parent_path` is a string trim, `rename_file` builds its
+// target from `parent_path(path) / new_name`, the project path is `projects_directory() + "/" + name`.
+// A SAF document URI is an opaque handle with no derivable parent or child, so putting one in
+// `FileInfo.path` would break ".." and rename — and none of that is a compile error.
 //
 // So paths stay composable and the document URI becomes an implementation detail:
 //
@@ -34,11 +28,9 @@
 //
 // ── Two kinds of string arrive here, and both must work ──────────────────────────────────────────
 //
-// ⚠️ `settings.json`, `template.ptp` and `autosave.ptp` are PLAIN app-private paths (P2) and are read
-// at boot before any picker has run. They arrive at `read_file`/`write_file` like anything else. So
-// every method dispatches on the string — a `pt://` path goes to SAF, anything else is handed to an
-// embedded `StdFileSystem`. That dispatch is `pt_path_is_uri`'s job, the same predicate `pt_fopen`
-// uses below the engine, so there is one rule about what a URI is and not two.
+// ⚠️ `settings.json`, `template.ptp` and `autosave.ptp` are PLAIN app-private paths, read at boot
+// before any picker has run. So every method dispatches on the string: `pt://` goes to SAF, anything
+// else to an embedded `StdFileSystem` — by `pt_path_is_uri`, the same predicate `pt_fopen` uses.
 
 #include "ui/filesystem.h"
 #include "ui/std_filesystem.h"
@@ -59,7 +51,7 @@ class SafFileSystem : public pt::ui::FileSystem {
   public:
     /**
      * `private_root` is `context.filesDir` — where `settings.json`, `template.ptp` and `autosave.ptp`
-     * live since P2, and the reason a fresh install with no grant still boots with its settings.
+     * live, so a fresh install with no grant still boots with its settings.
      */
     explicit SafFileSystem(std::string private_root);
 
@@ -114,9 +106,8 @@ class SafFileSystem : public pt::ui::FileSystem {
 
     // ── The app's own files ─────────────────────────────────────────────────────────────────────
     //
-    // Three come off the private root, byte-for-byte as `StdFileSystem` answers them (P2). Only
-    // `config.json` is in the granted tree, because it is the one file the USER hand-edits and
-    // app-private storage is reachable over adb alone.
+    // Three come off the private root, as `StdFileSystem` answers them. Only `config.json` is in the
+    // granted tree: it is the file the USER hand-edits, and app-private storage is adb-only.
     std::string template_project_path() override { return priv_.template_project_path(); }
     std::string settings_path() override         { return priv_.settings_path(); }
     std::string autosave_file_path() override    { return priv_.autosave_file_path(); }
@@ -173,8 +164,8 @@ class SafFileSystem : public pt::ui::FileSystem {
 
     // ── Writing ─────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ A PLAIN path still goes to the inner `StdFileSystem`, which is what keeps `settings.json`,
-    // `autosave.ptp` and `template.ptp` saving on a device that has granted nothing (P2).
+    // ⚠️ A PLAIN path still goes to the inner `StdFileSystem`, so settings, autosave and template
+    // save on a device that has granted nothing.
     bool write_file(const std::string& path, const std::string& content) override;
     bool write_bytes(const std::string& path, const void* data, size_t len) override;
     bool delete_path(const std::string& path) override;
@@ -186,11 +177,8 @@ class SafFileSystem : public pt::ui::FileSystem {
     /**
      * `pt://…` → an owned OS descriptor, or -1. Public because the hook trampoline calls it.
      *
-     * ⭐ **A write mode CREATES the document, and `byte_source.h`'s note that a hook cannot is about
-     * the URI it assumed, not about this.** The restriction was that a document must exist before it
-     * can be opened for write and an opaque `content://` handle has no nameable child — but a `pt://`
-     * path's parent is a string trim and its name is the tail, so the create is derivable here. That
-     * is the second thing §5a's composable paths bought, after the browser's "..".
+     * ⭐ A write mode CREATES the document: a `pt://` path's parent is a string trim and its name the
+     * tail, so the create is derivable here — which an opaque `content://` handle would not allow.
      */
     int open_fd(const std::string& path, const char* mode);
 

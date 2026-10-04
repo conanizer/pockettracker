@@ -4,21 +4,15 @@
 //
 // OKLab/OKLCh and the WCAG contrast ratio, over the `Argb` the theme stores.
 //
-// ⚠️ **THE CONSTANTS ARE COPIED, NOT DERIVED HERE** — from `soreja/colorm` (public domain, the
-// Unlicense), commit `4d41b6e0fbc32b3237e7e7171850e5f461368050`, keeping only the conversions and the
-// contrast ratio. Its CSS colour parser is what the rest of that header is for, and it drags
-// `<sstream>` and `<iomanip>` in with it; nothing in this app parses a colour string. A digit changed
-// in a matrix below is unverifiable without that provenance, which is why it is written down.
+// ⚠️ The constants are COPIED from `soreja/colorm` (public domain, the Unlicense), commit
+// `4d41b6e0fbc32b3237e7e7171850e5f461368050` — only the conversions and the contrast ratio. A digit
+// changed in a matrix below is unverifiable without that provenance.
 //
-// ⭐ **Why a second colour space at all:** OKLab's L is perceptually uniform, so "a shade lighter than
-// the background" is one number that means the same thing on a dark palette and a light one — the
-// thing HSL's L does not give. Chroma is independent of it, so "another shade of the same colour" is
-// literally "hold H, move L and C".
-//
-// ⚠️ **TWO DIFFERENT LIGHTNESSES LIVE HERE AND THEY ARE NOT INTERCHANGEABLE.** `OkLab::L` is
-// perceptual and is what the palette's ladders are built on; `relative_luminance` is the WCAG
-// quantity and is only ever a step inside `wcag_contrast`. Legibility bounds are ratios of the
-// second; separation bounds are differences of the first.
+// OKLab's L is perceptually uniform, so "a shade lighter than the background" means the same on dark
+// and light palettes; chroma is independent of it ("another shade" = hold H, move L and C).
+// ⚠️ Two lightnesses, not interchangeable: `OkLab::L` (perceptual; the palette ladders) and
+// `relative_luminance` (WCAG; only inside `wcag_contrast`). Legibility bounds are ratios of the second,
+// separation bounds differences of the first.
 
 #include <cmath>
 #include <cstdint>
@@ -80,12 +74,9 @@ inline OkLab to_oklab(Argb c) {
 
 /**
  * OKLab → `Argb`, always opaque.
- *
- * ⚠️ **OUT-OF-GAMUT COLOURS LOSE CHROMA, NEVER LIGHTNESS.** Most of the OKLab cube is not printable
- * in sRGB, and clamping the three channels is the obvious answer and the wrong one: it shifts the hue
- * and quietly moves L, so a generator that asked for a given lightness would not get it and the
- * validator would then disagree with the generator about what it built. Desaturating toward the grey
- * of the same L keeps both L and H exactly and gives up only what could not be shown anyway.
+ * ⚠️ Out-of-gamut colours lose CHROMA, never lightness: clamping channels would shift hue and L, and
+ * the validator would disagree with the generator. Desaturating toward the grey of the same L keeps
+ * both.
  */
 inline Argb to_argb(const OkLab& c) {
     using namespace color_detail;
@@ -94,8 +85,7 @@ inline Argb to_argb(const OkLab& c) {
     oklab_to_linear(c, r, g, b);
 
     if (!in_gamut(r, g, b)) {
-        // Binary search on the chroma scale. 18 steps is finer than one 8-bit code, so the result is
-        // the same as an exact solve once it is quantized.
+        // Binary search on chroma; 18 steps is finer than one 8-bit code.
         double lo = 0.0, hi = 1.0;
         for (int i = 0; i < 18; ++i) {
             const double mid = 0.5 * (lo + hi);
@@ -117,8 +107,7 @@ inline Argb to_argb(const OkLab& c) {
 
 inline OkLch to_oklch(const OkLab& c) {
     const double chroma = std::sqrt(c.a * c.a + c.b * c.b);
-    // A grey has no hue to report, and returning atan2(0, 0) as one makes a hue rotation of grey
-    // produce a colour. Hue stays 0 and chroma stays 0, so the round trip is still grey.
+    // A grey has no hue; atan2(0, 0) as one would make a hue rotation of grey produce a colour.
     if (chroma < 1e-9) return {c.L, 0.0, 0.0};
     double hue = std::atan2(c.b, c.a) * 180.0 / 3.14159265358979323846;
     if (hue < 0.0) hue += 360.0;

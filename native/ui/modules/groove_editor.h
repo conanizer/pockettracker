@@ -17,10 +17,8 @@
 // `panelRow` is the panel row, both live at once. The swing percentage reports on the group the TICK
 // cursor is in, so walking into the panel to change QNT must not move the number QNT governs.
 //
-// The only grid editor with NO playback marker and NO selection — so it has no row background at all,
-// and no `row_bg_color` priority ladder to run. Its rows are laid out from a `dataStartY` that
-// already includes TEXT_PADDING (the others add it per row), which is why the y passed to `draw_cell`
-// needs no adjusting here.
+// No playback marker and no selection, so no row background. Rows are laid out from a
+// `dataStartY` that already includes TEXT_PADDING, so `draw_cell` gets the y unadjusted.
 
 #include <string>
 
@@ -105,10 +103,8 @@ inline int groove_partner_step(int step, int quantize) {
  * The swing percentage for the group `step` sits in — the first half's share of the whole group — in
  * TENTHS of a percent. Straight is 500; classic triplet swing is 667.
  *
- * ⚠️ THE TENTH IS NOT DECORATION, IT IS WHAT STOPS THE READOUT CONTRADICTING THE PRESET BESIDE IT.
- * The named swing rungs are thirds and halves of 24 tics — 54.17, 58.33, 62.5, 66.67, 70.83 — and the
- * names the world uses for them round in both directions (66 down, 71 up). A whole-number readout
- * would print 67 next to a preset called 16TH 66 and read as a bug; 66.7 reads as the same number.
+ * ⚠️ The tenth stops the readout contradicting the preset name beside it: the named rungs round both
+ * ways (66 down, 71 up), so a whole-number 67 beside "16TH 66" would read as a bug.
  *
  * A blank step reads as the neutral length, so an empty groove reports 500 rather than dividing by
  * zero.

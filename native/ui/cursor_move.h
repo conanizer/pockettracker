@@ -2,58 +2,27 @@
 
 // ─── Cursor movement ─────────────────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of `TrackerController.moveCursorUp/Down/Left/Right` — what the D-PAD ALONE does, as
-// opposed to R+DPAD (which moves between screens: ui/navigation.h) and A+DPAD (which edits the cell
-// under the cursor: ui/cursor.h).
+// What the D-PAD ALONE does (R+DPAD changes screens: ui/navigation.h; A+DPAD edits: ui/cursor.h). A
+// per-screen table of bounds, and every irregularity is deliberate:
 //
-// It is a per-screen table of bounds, and the bounds are NOT uniform — this is the whole content of
-// the file, and every irregularity in it is deliberate:
-//
-//   • ROWS WRAP, COLUMNS CLAMP. Off the bottom of a phrase you land back on step 0; off the right of
-//     it you simply stay. (A tracker is a loop vertically and a record horizontally.)
-//   • …EXCEPT ON SONG, WHERE ROWS CLAMP TOO — its 256 rows are a document, not a loop, and wrapping
-//     from row 255 to row 0 in a long arrangement would be a way to lose your place, not to save time.
-//   • THE STEP-NUMBER COLUMN IS NEVER REACHABLE. Every editor's minimum column is 1, not 0 (0 is the
-//     read-only row-number gutter). The cursor context for column 0 exists — `cc::read_only()` — but
-//     only because a module must answer for every column, not because you can get there.
-//   • TABLE AND GROOVE CARRY THEIR OWN CURSORS. SONG / CHAIN / PHRASE share `cursorRow`/`cursorColumn`
-//     so that moving between them keeps your place; the other two do not, exactly as Kotlin has it.
-//
-// The three screens S4 adds are each irregular in their own way, and none of them is a grid:
-//
-//   • INSTRUMENT walks a ROW-KIND TABLE (ui/instrument_row_layout.h), not a range — rows have 1, 2 or
-//     3 value columns, some are unreachable spacers, and the column you land on depends on the column
-//     you left.
-//   • MODS has no columns at all. Its cursor is (pair, side, row), and how far DOWN you may go is a
-//     function of the mod TYPE under you — an ADSR is 7 rows deep where a NONE is 1.
-//   • INST.POOL's cursor ROW *is* `currentInstrument`. Moving up and down the pool selects a different
-//     instrument; only the column lives in the pool's own state.
-//
-// And the two S5 adds:
-//
-//   • MIXER is a SHAPE, not a rectangle. Rows 2 and 3 exist only in column 8, so the cursor walks the
-//     eight track meters along row 0, drops to the two send returns on row 1, and reaches the master
-//     strip by continuing DOWN column 8. Its row-0 columns are the only ones in the app that WRAP
-//     (track 0 ← master → track 0), because a mixer is a ring of channels rather than a document.
-//   • EFFECTS' rows CLAMP at both ends, and the order they are WALKED is the order they are DRAWN,
-//     which is not the order they are numbered (ui/effects_row_layout.h). It is the one screen with
-//     no cursor COLUMN: both sends' cells draw two to a line, so LEFT and RIGHT move to the row
-//     beside this one and the table alone knows which that is.
-//
-//   • PROJECT and SETTINGS are FORMS whose rows WRAP, and whose every row change snaps the column
-//     back to 1 — their rows have 1, 2, 3 and 20 columns, so a carried column would land nowhere.
-//     SETTINGS additionally wraps over its VISIBLE rows only (ui/settings_row_layout.h), which is a
-//     loop where Kotlin gets away with a single substitution.
-//
-// Any screen not named below falls through to the shared 16-row default, which is what the Kotlin
-// `else` branch does for anything it has not named.
-//
-// And the one thing a SETTING changes (ui/song_pointer.h):
-//
-//   • PHRASE SPILLS ACROSS CHAIN ROWS under NAV = SONG. Stepping off step 0F lands on step 00 of the
-//     next filled row's phrase rather than back at 00 of the same one — the 16 steps stop being the
-//     loop and the CHAIN becomes it. Under NAV = POOL, PHRASE is the plain 16-row default it has
-//     always been, which is why the arm below states both answers rather than branching around one.
+//   • ROWS WRAP, COLUMNS CLAMP — a tracker is a loop vertically and a record horizontally.
+//   • …except SONG, whose 256 rows clamp too: wrapping a long arrangement loses your place.
+//   • Column 0, the row-number gutter, is never reachable (a module still answers for it).
+//   • SONG / CHAIN / PHRASE share `cursorRow`/`cursorColumn`, so moving between them keeps your place;
+//     TABLE and GROOVE carry their own.
+//   • INSTRUMENT walks a ROW-KIND TABLE (ui/instrument_row_layout.h): rows have 1–3 value columns,
+//     spacers are skipped, and the column you land on depends on the one you left.
+//   • MODS has no columns: (pair, side, row), and the depth below you depends on the mod TYPE.
+//   • INST.POOL's row IS `currentInstrument`.
+//   • MIXER is a SHAPE: tracks on row 0, the two sends on row 1, the master strip reached by going DOWN
+//     column 8. Row 0 WRAPS (track 0 ← master → track 0) — a mixer is a ring of channels.
+//   • EFFECTS clamps, walks in DRAWN order (ui/effects_row_layout.h), and has no column: LEFT/RIGHT
+//     move to the row beside.
+//   • PROJECT and SETTINGS are forms whose rows WRAP and every row change snaps the column to 1 (rows
+//     have 1, 2, 3 or 20 columns). SETTINGS wraps over its VISIBLE rows only.
+//   • Under NAV = SONG, PHRASE SPILLS across chain rows: off step 0F you land on 00 of the next filled
+//     row's phrase (ui/song_pointer.h). Under NAV = POOL it is the plain 16-row loop.
+// Any screen not named falls through to the shared 16-row default.
 
 #include <algorithm>
 
@@ -77,7 +46,7 @@ inline songcore::InstrumentType instrument_type_of(const AppState& s) {
     return s.project->instruments[static_cast<size_t>(s.currentInstrument)].instrumentType;
 }
 
-/** Step ±1 rows with wrap, stepping straight OVER the spacers. `TrackerController.instrumentRowStep`. */
+/** Step ±1 rows with wrap, stepping OVER the spacers. */
 inline int instrument_row_step(songcore::InstrumentType type, int from, int delta) {
     const int count = instrument_row_count(type);
     int       r     = from;
@@ -90,12 +59,8 @@ inline int instrument_row_step(songcore::InstrumentType type, int from, int delt
 }
 
 /**
- * The column to land on after a vertical move — `TrackerController.instrumentColumnFor`.
- *
- * The rule is "keep the column you were in, if the new row has one like it". Walking down the
- * right-hand column (FILTER → FREQ → RES) must stay in the right-hand column; walking off it onto a
- * row that has no such column falls back to 1 rather than leaving the cursor on a cell that is not
- * drawn. SOURCE always snaps to LOAD, whichever column you came from.
+ * The column to land on after a vertical move: keep the column if the new row has one like it
+ * (walking FILTER → FREQ → RES stays right), else 1. SOURCE always snaps to LOAD.
  */
 inline int instrument_column_for(songcore::InstrumentType type, int new_row, int old_row,
                                  int old_column) {
@@ -118,9 +83,8 @@ inline int instrument_column_for(songcore::InstrumentType type, int new_row, int
             return (has_right(old) && old_column >= 3) ? 3 : 1;
 
         case InstrumentRowKind::NAME:
-            // Row 0's EDIT (column 3) is drawn on samplers only, so a SoundFont must not land on it —
-            // nor may EXTERNAL, which draws neither button. The cap is the row's own, read off the
-            // table, so the three types cannot disagree with what is drawn.
+            // Row 0's EDIT (column 3) is drawn on samplers only; the cap is the row's own, read off the
+            // table, so no type can land on an undrawn cell.
             return (has_right(old) && old_column >= 3 &&
                     instrument_name_row_max_column(type) >= 3)
                        ? 3
@@ -131,7 +95,7 @@ inline int instrument_column_for(songcore::InstrumentType type, int new_row, int
     }
 }
 
-/** The leftmost column reachable from `column` on this row. getInstrumentCursorLeftColumn. */
+/** The leftmost column reachable from `column` on this row. */
 inline int instrument_left_column(songcore::InstrumentType type, int row, int column) {
     switch (instrument_row_kind(type, row)) {
         case InstrumentRowKind::NAME:   return column - 1 < 1 ? 1 : column - 1;  // 3→2→1
@@ -142,20 +106,18 @@ inline int instrument_left_column(songcore::InstrumentType type, int row, int co
     }
 }
 
-/** The rightmost. getInstrumentCursorRightColumn. */
+/** The rightmost. */
 inline int instrument_right_column(songcore::InstrumentType type, int row, int column) {
     switch (instrument_row_kind(type, row)) {
         case InstrumentRowKind::NAME: {
-            // Row 0's EDIT (column 3) is drawn on samplers only — a SoundFont has no waveform to edit,
-            // and EXTERNAL has no source at all — so the cursor caps at LOAD (2) or at TYPE (1); a
-            // cursor past the cap would sit on a cell that is not drawn.
+            // Row 0's EDIT is drawn on samplers only (and EXTERNAL has no source), so the cap is LOAD
+            // (2) or TYPE (1).
             const int cap = instrument_name_row_max_column(type);
             const int c   = column + 1;
             return c > cap ? cap : c;
         }
         case InstrumentRowKind::SOURCE: {
-            // The INST PRESET row: SAVE (2) and LOAD (3) are both drawn for EITHER instrument type — a
-            // preset round-trips a sampler or a SoundFont alike — so there is no per-type cap here.
+            // The INST PRESET row: SAVE and LOAD are drawn for every type — no per-type cap.
             const int c = column + 1;
             return c > 3 ? 3 : c;
         }
@@ -184,9 +146,8 @@ inline void move_pool_selection(AppState& s, int delta) {
 
 // ─── SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────────
 //
-// Its rows are a SPARSE map (1, 2, 8, 10, 11, 13, 14, 16, 18, 19) — the gaps are the waveform and the
-// section spacers — so a step is a table lookup, not `row ± 1`. And the row you land on may have fewer
-// columns than the one you left (NAME has one; the op rows have six), so the column CLAMPS on the way.
+// Rows are a SPARSE map (1, 2, 8, 10, 11, 13, 14, 16, 18, 19) — the gaps are the waveform and spacers
+// — so a step is a lookup, and the column CLAMPS (NAME has one column, the op rows six).
 // See ui/modules/sample_editor.h.
 namespace detail {
 
@@ -200,12 +161,8 @@ inline void sample_editor_step_row(AppState& s, int delta) {
 }
 
 /**
- * ⚠️ The two OP rows (13 = CROP…DEL, 14 = NORM…UNDO) WRAP; every other row clamps.
- *
- * That is not an inconsistency — it is what those rows are. They are a ring of six BUTTONS, not a range
- * of values, and stepping right off DEL to reach CROP is the same gesture as stepping right off the
- * master strip on the MIXER (the app's only other wrapping column, and for the same reason: a ring of
- * channels rather than a document).
+ * ⚠️ The two OP rows (13 = CROP…DEL, 14 = NORM…UNDO) WRAP; every other row clamps. They are a ring of
+ * six buttons, not a range — like the MIXER's master strip.
  */
 inline void sample_editor_step_col(AppState& s, int delta) {
     SampleEditorState& se     = s.sampleEditor;
@@ -238,10 +195,8 @@ inline void move_cursor_up(AppState& s) {
         case ScreenType::TABLE:
             s.tableCursorRow = (s.tableCursorRow > 0) ? s.tableCursorRow - 1 : 15;
             break;
-        // ⚠️ THE PANEL WRAPS WITHIN ITSELF and the tick row stays where it was. Walking off the
-        // panel's last row into the 12 grid rows beside it would put the cursor on a cell that is not
-        // drawn; wrapping also means the swing readout — which follows the TICK row — holds still
-        // while the panel is being walked.
+        // ⚠️ The panel wraps within itself and the tick row stays put — walking off it would land on
+        // an undrawn cell, and the swing readout (which follows the tick row) holds still.
         case ScreenType::GROOVE:
             if (s.grooveCursorColumn == GROOVE_COL_PANEL) {
                 s.groovePanelRow =
@@ -267,9 +222,8 @@ inline void move_cursor_up(AppState& s) {
         }
 
         case ScreenType::MODS:
-            // Up out of the top of a pair drops to the BOTTOM of the pair above — clamped to that
-            // slot's own depth, because the slot you are arriving at may be shorter than the one you
-            // left (an ADSR above a NONE). At pair 0 row 0 there is nothing above: stay, no wrap.
+            // Up out of a pair drops to the BOTTOM of the pair above, clamped to that slot's depth. At
+            // pair 0 row 0: stay.
             if (s.modCursorRow > 0) {
                 s.modCursorRow--;
             } else if (s.modCursorPair > 0) {
@@ -284,8 +238,7 @@ inline void move_cursor_up(AppState& s) {
             break;
 
         case ScreenType::MIXER:
-            // Out of a send return, UP lands on the FIRST TRACK — not on the track above it, because
-            // there is no track above it: the sends sit under the whole meter row, not under a channel.
+            // Out of a send, UP lands on the FIRST TRACK: the sends sit under the whole meter row.
             if (s.mixerMasterRow == 1 && (s.mixerCursorColumn == 0 || s.mixerCursorColumn == 1)) {
                 s.mixerMasterRow    = 0;
                 s.mixerCursorColumn = 0;
@@ -295,17 +248,13 @@ inline void move_cursor_up(AppState& s) {
             // Row 0 (the meters): nothing above them — stay.
             break;
 
-        // EFFECTS does NOT wrap — it clamps at both ends. A step is one DRAWN LINE, not one row
-        // number: the rows draw in an order of their own and most draw two to a line, so the
-        // table is the only thing that knows what is above what (ui/effects_row_layout.h). The column
-        // is carried, and a single-cell line takes the cursor whichever column it comes down in.
+        // EFFECTS clamps at both ends. A step is one DRAWN LINE (ui/effects_row_layout.h); the column
+        // is carried, and a single-cell line takes the cursor from either column.
         case ScreenType::EFFECTS:
             s.effectsCursorRow = effects_next_row(s.effectsCursorRow, -1);
             break;
 
-        // PROJECT's rows WRAP, and every row change snaps the column back to 1 — you never arrive on
-        // a row holding the column you left the last one on, because the rows have 1, 2, 3 and 20 of
-        // them and a carried column would land nowhere.
+        // PROJECT wraps, and every row change snaps the column back to 1.
         case ScreenType::PROJECT:
             s.projectCursorRow    = project_next_visible_row(s.projectCursorRow, -1, s.caps);
             s.projectCursorColumn = 1;
@@ -317,16 +266,14 @@ inline void move_cursor_up(AppState& s) {
             s.settingsCursorColumn = 1;
             break;
 
-        // MIDI wraps over its rows — no caps filter, because every row is on every platform.
+        // MIDI wraps over its rows (every row exists on every platform).
         case ScreenType::MIDI:
             s.midiCursorRow    = (s.midiCursorRow > 0) ? s.midiCursorRow - 1 : MIDI_ROW_COUNT - 1;
             s.midiCursorColumn = 1;
             break;
 
-        // ⚠️ THE MAPPING LIST'S ROWS ARE HOMOGENEOUS, so the column is CARRIED rather than snapped
-        // back to 1 — walking a table and losing your column on every step is what the grids never
-        // do. It is then clamped, because two rows do have fewer cells: the ADD row at the bottom
-        // has one, and a destination with no scope number has five.
+        // ⚠️ The mapping list's rows are alike, so the column is CARRIED, then clamped: the ADD row has
+        // one cell, and a destination with no scope number has five.
         case ScreenType::MIDI_MAP:
             if (s.project) {
                 const int rows = midi_map_row_count(*s.project);
@@ -336,11 +283,9 @@ inline void move_cursor_up(AppState& s) {
             }
             break;
 
-        // Off the top step, under NAV = SONG: the pointer climbs to the previous FILLED chain row and
-        // the cursor lands on the last step of whatever phrase sits there. The move itself is the same
-        // wrap either way — only the pointer is extra — so the assignment below is said once.
-        // ⚠️ A chain with a single filled row answers `from` and nothing moves, which is exactly right:
-        // the wrap then happens inside the one phrase, as it does under POOL.
+        // Off the top step under NAV = SONG, the pointer climbs to the previous FILLED chain row and the
+        // cursor lands on that phrase's last step. A chain with one filled row answers `from`, and the
+        // wrap stays inside the phrase, as under POOL.
         case ScreenType::PHRASE:
             if (s.settings.navSongRelative && s.cursorRow == 0) {
                 const int from = pointer_chain_row(s);
@@ -414,8 +359,8 @@ inline void move_cursor_down(AppState& s) {
 
         case ScreenType::MIXER:
             if (s.mixerMasterRow == 0 && s.mixerCursorColumn < 8) {
-                // Down off ANY track meter → the REV send. (The tracks feed the sends; the gesture says
-                // so.) Column 8 is excluded because the master strip continues downward instead.
+                // Down off any track meter → the REV send (the tracks feed the sends). Column 8
+                // continues down the master strip instead.
                 s.mixerMasterRow    = 1;
                 s.mixerCursorColumn = 0;
             } else if (s.mixerCursorColumn == 8 && s.mixerMasterRow < 3) {
@@ -501,15 +446,13 @@ inline void move_cursor_left(AppState& s) {
             if (s.tableCursorColumn > 1) s.tableCursorColumn--;
             return;
 
-        // ⚠️ ONLY THE NAME ROW HAS COLUMNS HERE — the KEY row and the twelve degrees are a single
-        // column, so LEFT/RIGHT below row 0 must be a no-op rather than falling through to the shared
-        // `cursorColumn` at the bottom of this function, which belongs to SONG/CHAIN/PHRASE.
+        // ⚠️ Only the NAME row has columns; LEFT/RIGHT below row 0 must do nothing rather than fall
+        // through to the shared `cursorColumn`.
         case ScreenType::SCALE:
             if (s.scaleCursorRow == SCALE_NAME_ROW && s.scaleCursorColumn > 0) s.scaleCursorColumn--;
             return;
 
-        // The panel's cells first, then out of the panel and back to the tick column. The tick row
-        // is untouched, so LEFT returns you to the step you left.
+        // The panel's cells first, then back to the tick column (the tick row is untouched).
         case ScreenType::GROOVE:
             if (s.grooveCursorColumn != GROOVE_COL_PANEL) return;
             if (s.groovePanelColumn > 0) {
@@ -527,9 +470,8 @@ inline void move_cursor_left(AppState& s) {
         }
 
         case ScreenType::MODS: {
-            // LEFT/RIGHT do not move along a row here — they change WHICH SLOT of the pair you are
-            // editing. The row must then be clamped into the new slot's depth: cross from a 7-row ADSR
-            // onto a 1-row NONE and row 6 does not exist there.
+            // LEFT/RIGHT change WHICH SLOT of the pair you edit; the row is clamped into the new slot's
+            // depth (a 7-row ADSR beside a 1-row NONE).
             s.modCursorSide = 0;
             const int rows  = detail::mod_slot_rows(s, s.modCursorPair, 0);
             const int max   = rows - 1 < 0 ? 0 : rows - 1;
@@ -543,36 +485,30 @@ inline void move_cursor_left(AppState& s) {
 
         case ScreenType::MIXER:
             if (s.mixerMasterRow == 0) {
-                // The meter row WRAPS — the only wrapping column in the app. Track 0 → master, and the
-                // master → track 7.
+                // The meter row WRAPS: track 0 → master, master → track 7.
                 s.mixerCursorColumn = (s.mixerCursorColumn > 0) ? s.mixerCursorColumn - 1 : 8;
             } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 1) {
                 s.mixerCursorColumn = 0;   // DEL → REV
             } else if (s.mixerCursorColumn == 8) {
-                // The whole master strip (EQ / OTT / LIM) exits LEFT onto the DEL send, whichever row
-                // it was on — the strip is a column, and this is the door out of it.
+                // The whole master strip exits LEFT onto the DEL send — the strip's door.
                 s.mixerMasterRow    = 1;
                 s.mixerCursorColumn = 1;
             }
             // REV (row 1, column 0): nothing to its left — stay.
             return;
 
-        // Both step back toward column 1, never to 0: column 0 is the row LABEL, and it is not a cell.
+        // Toward column 1, never 0: column 0 is the row LABEL.
         case ScreenType::PROJECT:
             if (s.projectCursorColumn > 1) s.projectCursorColumn--;
             return;
 
-        // ⚠️ SETTINGS SNAPS, it does not step. LEFT from the second column goes straight to the first,
-        // because there are only ever two and there is nothing between them. (Kotlin: a bare
-        // `settingsCursorColumn = 1`.)
+        // ⚠️ SETTINGS SNAPS to the first column: there are only ever two.
         case ScreenType::SETTINGS:
             s.settingsCursorColumn = 1;
             return;
 
-        // ⚠️ EFFECTS HAS NO COLUMN OF ITS OWN IN AppState — the row IS the column, because the display
-        // table says which side of its section each row is drawn on. So a sideways move is a move to the
-        // row beside this one, and on the single-cell lines (all three TYPEs, the delay's EQ) that is
-        // this row again.
+        // ⚠️ EFFECTS has no column in AppState — the row IS the column. A sideways move is a move to the
+        // row beside (this row again on a single-cell line).
         case ScreenType::EFFECTS:
             s.effectsCursorRow = effects_step_column(s.effectsCursorRow, -1);
             return;
@@ -581,8 +517,7 @@ inline void move_cursor_left(AppState& s) {
         case ScreenType::MIDI:
             return;
 
-        // ⚠️ Through the clamp, not a bare `--`: the SCOPE cell is not drawn on a destination that
-        // has none, and a step onto it would highlight a gap.
+        // ⚠️ Through the clamp, not `--`: the SCOPE cell is not drawn on a destination without one.
         case ScreenType::MIDI_MAP:
             if (s.project && s.midiMapCursorColumn > 1)
                 s.midiMapCursorColumn = midi_map_clamp_column(
@@ -613,10 +548,9 @@ inline void move_cursor_right(AppState& s) {
                 s.scaleCursorColumn++;
             return;
 
-        // ⚠️ RIGHT FROM ANY OF THE SIXTEEN TICK ROWS ENTERS THE PANEL, not only from the four it is
-        // drawn beside: the panel is four rows tall and the grid is sixteen, so anchoring the door to
-        // the row you happen to be on would leave three quarters of the screen with no way in. The
-        // panel keeps whichever row it was last on.
+        // ⚠️ RIGHT from ANY of the sixteen tick rows enters the panel — it is four rows tall, and
+        // anchoring the door to those four would leave most rows with no way in. The panel keeps its
+        // last row.
         case ScreenType::GROOVE:
             if (s.grooveCursorColumn != GROOVE_COL_PANEL) {
                 s.grooveCursorColumn = GROOVE_COL_PANEL;
@@ -655,18 +589,16 @@ inline void move_cursor_right(AppState& s) {
             // Already in column 8: it is the rightmost — stay.
             return;
 
-        // PROJECT steps right within the row's own column count: 20 on NAME (one per character),
-        // 3 on PROJECT, 2 on EXPORT and COMPACT, 1 everywhere else.
+        // PROJECT steps within the row's own column count: 20 on NAME (one per character), 3 on
+        // PROJECT, 2 on EXPORT and COMPACT, 1 elsewhere.
         case ScreenType::PROJECT: {
             const int max = project_row_max_column(static_cast<ProjectRow>(s.projectCursorRow));
             if (s.projectCursorColumn < max) s.projectCursorColumn++;
             return;
         }
 
-        // ⚠️ SETTINGS SNAPS to column 2 — if the row has one at all. Which rows do is caps-dependent:
-        // TRACE's second column is ENG, and on the shell there is no second sequencer to select, so
-        // RIGHT there must not move. (Kotlin asks the same question with a hard-coded row set,
-        // `settingsCursorRow in setOf(2, 3, 4, 10, 12)`, plus the dynamic LAYOUT case.)
+        // ⚠️ SETTINGS SNAPS to column 2 — if the row has one, which is caps-dependent (TRACE's ENG column
+        // only exists where there is a second sequencer).
         case ScreenType::SETTINGS: {
             const SettingsRow row = static_cast<SettingsRow>(s.settingsCursorRow);
             const bool hasSkins   = s.settings.skinCount > 0;
@@ -683,8 +615,8 @@ inline void move_cursor_right(AppState& s) {
         case ScreenType::MIDI:
             return;
 
-        // ⚠️ The bound is the ROW's, not the screen's — the ADD row has one cell — and the step goes
-        // through the clamp because the SCOPE cell in the middle is not drawn on every destination.
+        // ⚠️ The bound is the ROW's (ADD has one cell), and the step goes through the clamp because the
+        // SCOPE cell is not drawn on every destination.
         case ScreenType::MIDI_MAP:
             if (s.project &&
                 s.midiMapCursorColumn < midi_map_max_column(*s.project, s.midiMapCursorRow))

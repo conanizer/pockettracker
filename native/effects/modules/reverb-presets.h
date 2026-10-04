@@ -8,7 +8,7 @@
 // DCAY, SIZE, DAMP, PRE, WIDE and MOD; the TYPE cell writes all six at once and then reads the name
 // back by matching. Nothing downstream can ask "is this HALL?", because after one turn of any other
 // cell the question has no answer — which is the point. A preset is a starting place, not a mode.
-// This is the shape delay-presets.h already has, and the two are deliberately the same shape.
+// Same shape as delay-presets.h, on purpose.
 //
 // ⚠️⚠️ **`NORMAL`'S ROW IS THE STRUCT DEFAULT** (model.h): DCAY 60, SIZE 60, DAMP 80, PRE 00, WIDE 80,
 // MOD 10 — and a project written before these cells existed loads without them and lands on that
@@ -103,10 +103,8 @@ inline int reverb_preset_match(int decay, int room, int damp, int pre, int width
 }
 
 /**
- * MOD's cell → ReverbSc's `SetPitchMod`. ⚠️ **THE DIVISOR IS 64 AND NOT 255 SO THAT 0x40 IS EXACTLY
- * 1.0** — 1.0 is the wander the algorithm was fixed at before the cell existed, and a default that
- * only came close to it would change the sound of every project ever saved. FF reaches just under
- * four, which is the ceiling the delay lines are sized for.
+ * MOD's cell → ReverbSc's `SetPitchMod`. ⚠️ THE DIVISOR IS 64 SO THAT 0x40 IS EXACTLY 1.0 — the
+ * algorithm's native wander. FF reaches just under four, the ceiling the delay lines are sized for.
  */
 inline float reverb_mod_scale(int modHex) { return modHex / 64.0f; }
 
@@ -177,17 +175,13 @@ inline float reverb_decay_feedback(int decayHex, int sizeHex = 0x60) {
 inline float reverb_damp_freq(int dampHex) { return 1200.0f * powf(16.667f, dampHex / 255.0f); }
 
 /**
- * The wet gain that DCAY must not set. ⚠️⚠️ **THE REVERB'S OUTPUT IS BUILT ONLY OUT OF THE DELAY
- * LINES' OWN STATE — the dry signal never reaches it — so its LEVEL is proportional to the feedback,
- * and a short tail used to be a quiet one by about 19 dB across the cell.** This divides that level
- * back out, against the level the default cells sit at, so DCAY changes how LONG the tail is and the
- * REV fader on the MIXER screen changes how loud.
+ * The wet gain that DCAY must not set. ⚠️⚠️ THE OUTPUT IS BUILT ONLY FROM THE DELAY LINES' STATE,
+ * so its LEVEL is proportional to the feedback — a short tail would be ~19 dB quieter. This divides
+ * that back out against the default cells' level, so DCAY sets how LONG and the REV fader how loud.
  *
- * ⚠️ The exponent is a FIT to the measured onset level, not a derivation — the level rises as
- * `g·(1-g²)^-0.32` because the damping filter takes a share of the loop that the gain alone does not
- * predict. It is read off the GAIN, so a bigger room, which needs a higher gain for the same tail,
- * is compensated through the same curve. ⚠️ `g` is capped before the second term: at FF it is exactly
- * 1, and `(1-g²)` there is zero, which would divide the reverb into silence at the freeze.
+ * ⚠️ The exponent is a FIT to the measured onset level (`g·(1-g²)^-0.32` — the damping takes a
+ * share the gain alone does not predict). Read off the GAIN, so a bigger room is compensated too.
+ * `g` is capped first: at FF `(1-g²)` is zero.
  */
 inline float reverb_decay_gain(int decayHex, int sizeHex = 0x60) {
     auto level = [](float g) {

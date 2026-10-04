@@ -13,14 +13,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * The Android MIDI **input** port — the Java half of `songcore::IMidiIn` (MIDI plan phase E5).
- *
- * The mirror of [MidiOutManager], written for the same unavoidable reason: `MidiManager` is the only
- * sanctioned route to USB, virtual and BLE MIDI on Android and it is a Java API (AMidi is API 29+, this
- * app's floor is 26, and it still needs the Java side to enumerate and open). Everything above it — the
- * MIDI 1.0 parser, the channel→track map, which instrument a live key plays, whether the key goes back
- * out on the cable — is C++ and is shared with the Windows and Linux builds. Nothing musical is
- * decided here.
+ * The Android MIDI **input** port — the Java half of `songcore::IMidiIn`. Java because `MidiManager`
+ * is the only sanctioned route to USB, virtual and BLE MIDI (see [MidiOutManager]); everything
+ * musical is decided in C++.
  *
  * ## ⚠️⚠️ THE DIRECTION GOTCHA — and it is the OPPOSITE of [MidiOutManager]'s
  *
@@ -34,9 +29,8 @@ import java.util.concurrent.TimeUnit
  *
  * [onSend] arrives on a **binder thread** owned by the MIDI service. Everything else ([deviceCount],
  * [deviceName], [open], [close], [read]) is called from the **SDL thread** (the native frame loop).
- * Those two meet at [ring], and that is the only thing `@Synchronized` here protects. The C++ side
- * holds no lock of its own for this, deliberately: the lock lives next to the data it protects rather
- * than in a language that cannot see it — the same argument [MidiOutManager.send] carries since B3.
+ * Those two meet at [ring], the only thing `@Synchronized` here protects — the lock lives next to
+ * the data, not in C++, which cannot see it.
  */
 class MidiInManager(context: Context) {
 
@@ -52,16 +46,11 @@ class MidiInManager(context: Context) {
 
     // ── The ring, and why it is these numbers ────────────────────────────────────────────────────
     //
-    // ⚠️ 1024 bytes and DROP THE NEWEST — deliberately the same capacity and the same policy as
-    // `songcore::MidiInQueue`, whose reasoning is written out in midi_in.h: MIDI 1.0 is 31 250 baud
-    // ≈ 1 040 three-byte messages a second, so a 60 Hz drain has two orders of magnitude of headroom,
-    // and dropping the OLDEST instead would throw away note-ONs whose note-OFFs are still coming — the
-    // one failure mode that costs a stuck note.
-    //
-    // ⚠️ **THE CASE THAT ACTUALLY FILLS IT IS THE PAUSED ACTIVITY**, not a fast player: SDL freezes the
-    // native thread while the app is in the background, so nothing reads this for as long as the user is
-    // away and a connected keyboard keeps sending. That is why the drops are counted and logged rather
-    // than assumed impossible.
+    // ⚠️ 1024 bytes and DROP THE NEWEST — the same capacity and policy as `songcore::MidiInQueue`
+    // (midi_in.h): a 60 Hz drain has two orders of magnitude of headroom, and dropping the OLDEST
+    // would lose note-ONs whose note-OFFs are still coming.
+    // ⚠️ What actually fills it is the PAUSED activity: SDL freezes the native thread in the
+    // background while a keyboard keeps sending. Drops are counted and logged.
     private val ring = ByteArray(1024)
     private var head = 0
     private var count = 0
@@ -107,11 +96,8 @@ class MidiInManager(context: Context) {
     /**
      * Open device [index] for receiving. Returns whether a port is actually live.
      *
-     * ⚠️ **THIS BLOCKS THE CALLING THREAD** for up to [OPEN_TIMEOUT_MS], for [MidiOutManager.open]'s
-     * reason exactly: `MidiManager.openDevice` is asynchronous, and the MIDI screen's rows show what is
-     * OPEN rather than what was WANTED. An optimistic `true` would make the INPUT row claim a keyboard
-     * that may never arrive — and on an input path, "the row says it is open and nothing happens" is
-     * indistinguishable from every other way MIDI in can be silent.
+     * ⚠️ THIS BLOCKS THE CALLING THREAD for up to [OPEN_TIMEOUT_MS], as [MidiOutManager.open] does:
+     * `openDevice` is asynchronous, and the INPUT row shows what is OPEN rather than what was WANTED.
      */
     fun open(index: Int): Boolean {
         close()
@@ -205,11 +191,8 @@ class MidiInManager(context: Context) {
     /** The binder-thread end of the ring. Nothing else in this class runs on that thread. */
     private inner class Receiver : MidiReceiver() {
         override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
-            // ⚠️ The timestamp is DISCARDED, and that is a decision. `MidiManager` stamps events in
-            // `System.nanoTime()`, but the app has nowhere to put it: a live key is scheduled against
-            // the AUDIO clock at `clock + 100` frames (songcore/host.h) and the two clocks have no
-            // agreed relationship. Keeping the value would mean pretending to a precision the injection
-            // does not have. winmm's backend discards its timestamp for the same reason.
+            // ⚠️ The timestamp is DISCARDED: a live key is scheduled against the AUDIO clock
+            // (songcore/host.h), which has no agreed relationship with `System.nanoTime()`.
             push(msg, offset, count)
         }
     }
