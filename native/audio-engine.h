@@ -691,7 +691,7 @@ public:
         if (track >= 0 && track < SF_VOICE_COUNT) fn(sfVoices[track]);
     }
 
-    // M8-style: a TIC FX in the table's LAST row overrides the instrument's tic rate at
+    // A TIC FX in the table's LAST row overrides the instrument's tic rate at
     // note trigger — per COLUMN, one rate per playhead. Shared by the sampler and SF dispatch
     // paths (audio thread only).
     void effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_LANES]);

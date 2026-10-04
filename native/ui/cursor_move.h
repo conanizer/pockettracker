@@ -597,8 +597,7 @@ inline void move_cursor_right(AppState& s) {
             return;
         }
 
-        // ⚠️ SETTINGS SNAPS to column 2 — if the row has one, which is caps-dependent (TRACE's ENG column
-        // only exists where there is a second sequencer).
+        // ⚠️ SETTINGS SNAPS to column 2 — if the row has one, which can depend on the caps and the layout.
         case ScreenType::SETTINGS: {
             const SettingsRow row = static_cast<SettingsRow>(s.settingsCursorRow);
             const bool hasSkins   = s.settings.skinCount > 0;

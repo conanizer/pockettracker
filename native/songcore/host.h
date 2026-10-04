@@ -172,15 +172,6 @@ class SongcoreHost {
         return true;
     }
 
-    // Set the two per-instrument facts songcore cannot derive (rate ratio, SF2 slot) from outside.
-    void push_routing(const float* sampleRateRatios, const int* sfSlots, int count) {
-        const int n = std::min(count, POOL_INSTRUMENTS);
-        for (int i = 0; i < n; ++i) {
-            routing_.sampleRateRatio[i] = sampleRateRatios[i];
-            routing_.sfSlot[i] = sfSlots[i];
-        }
-    }
-
     // ── ↓ transport ──────────────────────────────────────────────────────────────────────────────
     // Each returns the frame the transport latched (the trace's session base).
     // CHAIN and PHRASE take the MIXER TRACK they play on — its fader, mute, voice slot and FX —

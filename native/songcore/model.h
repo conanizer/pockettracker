@@ -467,7 +467,7 @@ struct Instrument {
     std::vector<int64_t> sliceMarkers;
 
     /**
-     * Does this instrument follow note TRANSPOSITION (M8's `TRANSP.`)? OFF exempts it from the scale
+     * Does this instrument follow note TRANSPOSITION? OFF exempts it from the scale
      * quantizer, the chain TSP column AND the project transpose — a hand-pitched drum kit must not
      * move when the song does (`effective_transpose_semitones`, `Sequencer::emit_note`).
      */

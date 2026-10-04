@@ -358,7 +358,7 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_KILL:   p.killAtFrame = base_frame; p.killOffsetTicks = value; break;
             case FX_ARC:    p.arcValue = value; break;
             case FX_REPEAT: {
-                // M8-style RXY: y!=0 → retrig every y ticks + vol ramp x; y=0 → retrig every x ticks.
+                // RXY: y!=0 → retrig every y ticks + vol ramp x; y=0 → retrig every x ticks.
                 int highNibble = (value >> 4) & 0x0F;
                 int lowNibble  = value & 0x0F;
                 if (lowNibble != 0) { p.repeatCount = lowNibble;  p.repeatVolRamp = highNibble; }

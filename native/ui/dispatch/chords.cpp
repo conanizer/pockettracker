@@ -68,8 +68,8 @@ std::set<int> used_chain_ids(const Project& p) {
 // ⚠️ `pt::ui::on_a_b` must stay qualified: inside a member, unqualified lookup finds the member of the
 // same name first. The other handlers are qualified to match.
 //
-// ⚠️ Which chord fires which step follows LGPT: the HORIZONTAL axis is the small step (±1), the
-// VERTICAL the large one (±`largeStep`). Every screen override below keeps that split.
+// ⚠️ The HORIZONTAL axis is the small step (±1), the VERTICAL the large one (±`largeStep`) — the
+// split handheld-tracker users already have in their fingers. Every screen override below keeps it.
 
 /**
  * A+DPAD on the INSTRUMENT screen's TYPE cell. Switching type frees the slot's source, so a loaded slot
@@ -418,7 +418,7 @@ void InputDispatcher::cycle_current_item(int delta) {
         return;
     }
 
-    // ⭐ On SONG, B+LEFT/RIGHT toggles the transport mode (LGPT's gesture); both directions toggle,
+    // ⭐ On SONG, B+LEFT/RIGHT toggles the transport mode; both directions toggle,
     // since there are only two modes. ⚠️ Gated on SONG alone — the handler is shared.
     if (s_.currentScreen == ScreenType::SONG) {
         host_.set_live_mode(!host_.live_mode());

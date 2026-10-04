@@ -597,8 +597,8 @@ int main(int argc, char** argv) {
     cfg.mediaBaseDir = mediaRoot;
 
     // ⚠️ `converged()`, not `sdl()` or `android()` — the profile this app runs: the touch layouts,
-    // BTN SOUND/VIBRO and CRT overlay rows on, `sdl()`'s `appExit` and RESUME row kept,
-    // `engineToggle` off (platform_caps.h::converged).
+    // BTN SOUND/VIBRO and CRT overlay rows on, `sdl()`'s `appExit` and RESUME row kept
+    // (platform_caps.h::converged).
 #ifdef NDEBUG
     cfg.caps = ui::PlatformCaps::converged(/*debug_build=*/false);
 #else

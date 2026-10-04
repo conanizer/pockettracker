@@ -11,7 +11,7 @@ namespace {
 
 constexpr int NAME_X     = 10;   // the row label
 constexpr int VAL1_X     = 190;  // the primary value
-constexpr int SUBLABEL_X = 355;  // the secondary column's own label (STR / VOL / POW / ENG)
+constexpr int SUBLABEL_X = 355;  // the secondary column's own label (STR / VOL / POW)
 constexpr int VAL2_X     = 408;  // the secondary value
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -69,7 +69,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         draw_cursor_cell(c, value, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
-    /** A row with two values, the second behind its own little label (STR / VOL / POW / ENG). */
+    /** A row with two values, the second behind its own little label (STR / VOL / POW). */
     const auto dual_row = [&](SettingsRow row, const char* name, const std::string& value1,
                               const char* sublabel, const std::string& value2) {
         if (!settings_row_visible(row, s.caps)) return;
@@ -159,15 +159,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     param_row(SettingsRow::RESUME, "RESUME", v.autosaveResumeAuto ? "AUTO" : "ASK");
 
-    // ── TRACE (+ ENG) ────────────────────────────────────────────────────────────────────────────
-    // ⚠️ The only row whose column count is caps-dependent. ENG shares TRACE's row because a further
-    // row would not fit the panel.
-    if (s.caps.engineToggle) {
-        dual_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled),
-                 "ENG", v.engineCpp ? "C++" : "KT");
-    } else {
-        param_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled));
-    }
+    param_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled));
 
     // FOLDER = REMEMBER / REFRESH. It positions itself by its own offset_y, so drawing it last is
     // source order only.
@@ -233,12 +225,7 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
 
         case SettingsRow::RESUME:     return cc::toggle_binary(v.autosaveResumeAuto);
 
-        case SettingsRow::TRACE:
-            if (s.cursorColumn == 1) return cc::toggle_binary(v.traceEnabled);
-            // Column 2 is ENG. Unreachable without the cap — the cursor cannot move right onto it —
-            // but answered honestly rather than guessed at, the way MIXER answers its dead cells.
-            if (!s.caps.engineToggle) return cc::none();
-            return cc::toggle_binary(v.engineCpp);
+        case SettingsRow::TRACE:      return cc::toggle_binary(v.traceEnabled);
     }
     return cc::none();
 }
@@ -341,10 +328,7 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
             break;
 
         case SettingsRow::TRACE:
-            if (set) {
-                if (cursor_column == 1)                            v.traceEnabled = action.value > 0;
-                else if (cursor_column == 2 && caps.engineToggle)  v.engineCpp    = action.value > 0;
-            }
+            if (set) v.traceEnabled = action.value > 0;
             break;
     }
 

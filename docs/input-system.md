@@ -1,7 +1,7 @@
 # Input System
 
-PocketTracker uses a hybrid input system combining M8's editing precision with LGPT's dual-modifier
-approach. One generic input handler serves every screen, so the same kind of value behaves the same
+Every button has one job: A edits, B picks which item you are looking at, L handles the clipboard
+and R moves between screens. One generic input handler serves every screen, so the same kind of value behaves the same
 way wherever you meet it.
 
 ---
@@ -64,8 +64,6 @@ This creates a consistent, learnable pattern where:
 - You don't memorize different controls per screen
 - The same value type behaves the same everywhere
 - Modifiers have clear, distinct purposes
-
-**Heritage:** M8-style editing precision + LGPT-style dual-modifier ergonomics.
 
 ---
 
@@ -228,7 +226,7 @@ INST.POOL still walk their pools.
 
 ---
 
-## Copy/Paste (M8-Style)
+## Copy/Paste
 
 | Control | Action |
 |---------|--------|
@@ -395,23 +393,3 @@ increment / decrement / fast-step / delete / insert for free.
 1. Return a `CursorContext` from your module's `cursor_context(state)` for each cursor position
 2. Use the `cc::` factories (`hex_byte`, `note`, `toggle_ternary`, …) rather than filling the struct
 3. All A+direction and A+B combos then work automatically
-
----
-
-## M8 vs LGPT Design Decisions
-
-PocketTracker takes the best of both systems:
-
-| Feature | Source | Rationale |
-|---------|--------|-----------|
-| A + directions for editing | M8 | More precise control |
-| LEFT/RIGHT small step, UP/DOWN large step | LGPT | The axis split LGPT users already have in their fingers |
-| Dual modifiers (L/R) | LGPT | More ergonomic |
-| Deep clone | M8 | Powerful unique feature |
-| Selection mode cycling | M8 | More flexible |
-| L + A for paste | LGPT | Simpler than SHIFT+EDIT |
-| R + directions for screen nav | LGPT | Logical separation |
-
-### Sources
-- [M8 Tracker Shortcuts](https://gist.github.com/devin-dominguez/587720c9ab71b2d9f3c4bd48d9c812ca)
-- [LGPT Reference Manual](http://wiki.littlegptracker.com/doku.php?id=lgpt%3Areference_manual)

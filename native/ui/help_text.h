@@ -240,7 +240,6 @@ enum class HelpTopic {
     SET_TEMPLATE_CLEAR,
     SET_RESUME,
     SET_TRACE,
-    SET_ENGINE,
 
     // MIDI
     MIDI_OUTPUT,
@@ -1519,11 +1518,6 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "sequencer does, for chasing a",
       "bug. Leave it off unless asked."},
      {"A+D-PAD turns it on or off"}},
-    /* SET_ENGINE */
-    {"ENG: which sequencer runs", "A developer switch. Leave it", "where it is.",
-     {"A developer switch. Leave it",
-      "where it is."},
-     {"A+D-PAD switches it"}},
 
     // ── MIDI ─────────────────────────────────────────────────────────────────────────────────────
     /* MIDI_OUTPUT */
@@ -2583,7 +2577,7 @@ inline HelpTopic effects_cell_topic(int row) {
 }
 
 /**
- * SETTINGS — column 2 is the row's SECOND cell where it has one (the skin, STR, VOL, POW, ENG), and
+ * SETTINGS — column 2 is the row's SECOND cell where it has one (the skin, STR, VOL, POW), and
  * on TEMPLATE it is the second BUTTON. Column 0 is the label and is unreachable, as on PROJECT.
  */
 inline HelpTopic settings_cell_topic(int row, int column) {
@@ -2613,7 +2607,7 @@ inline HelpTopic settings_cell_topic(int row, int column) {
         case SettingsRow::TEMPLATE:
             return second ? HelpTopic::SET_TEMPLATE_CLEAR : HelpTopic::SET_TEMPLATE_SAVE;
         case SettingsRow::RESUME:     return HelpTopic::SET_RESUME;
-        case SettingsRow::TRACE:      return second ? HelpTopic::SET_ENGINE : HelpTopic::SET_TRACE;
+        case SettingsRow::TRACE:      return HelpTopic::SET_TRACE;
     }
     return HelpTopic::NONE;
 }

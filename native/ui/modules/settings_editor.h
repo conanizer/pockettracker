@@ -159,7 +159,6 @@ struct SettingsValues {
 
     // ── Debug ────────────────────────────────────────────────────────────────────────────────────
     bool traceEnabled = false;
-    bool engineCpp    = false;   // the ENG column
 };
 
 struct SettingsState {

@@ -46,9 +46,9 @@
 //   BANK  "----" = send nothing; else the 14-bit bank sent as CC0/CC32 ahead of the program. FOUR
 //         hex digits, which is why it sits on a DUAL row rather than sharing a TRIPLE with PROG.
 //   PROG  "--" = send nothing; else the program change sent with the patch's first note-on.
-//   VOL   scales note-on VELOCITY (there is no gain stage on our side of the cable — LGPT does this).
+//   VOL   scales note-on VELOCITY (there is no gain stage on our side of the cable).
 //   PAN   is sent as CC 10, de-duplicated per channel.
-//   LEN   gate length in TICKS, 00 = gate-to-next (LGPT's LEN). See midi_out.h's `end_note`.
+//   LEN   gate length in TICKS, 00 = gate-to-next. See midi_out.h's `end_note`.
 //   CC A-D   number + default value, both "--" when unused; the defaults ride every note-on.
 //
 // Columns: 0 = the label, 1 = the first value, 2 = a button (LOAD / SAVE), 3 = the second value or

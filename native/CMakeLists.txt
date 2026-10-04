@@ -191,7 +191,7 @@ endif()
 # ENGINE_CORE_SOURCES is the whole portable engine — no <oboe/*>, <android/*>, or <jni.h>
 # anywhere in it (logging goes through the audio-defs.h shim). A desktop/Linux build reuses
 # this list verbatim and supplies its own shell in place of ANDROID_PLATFORM_SOURCES.
-# TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only; native-audio.cpp is a stub.
+# TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only.
 set(ENGINE_CORE_SOURCES
         songcore/schema-check.cpp
         # The single definition of the file-open hook every layer above resolves against. It is a

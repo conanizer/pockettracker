@@ -7,9 +7,9 @@ Everything you can do with PocketTracker.
 ## Making Music
 
 - Write melodies and rhythms in a 16-step phrase editor, chain phrases into longer patterns, arrange everything in an 8-track song
-- LGPT-style controls: directional buttons + modifier combos, fast editing with A+direction for value changes, key repeat for scrolling through values quickly
+- Controls built for a D-pad and a few buttons: modifier combos, fast editing with A+direction for value changes, key repeat for scrolling through values quickly
 - Transpose phrases per chain slot — sequence the same phrase in different keys
-- Select cells, rows, or entire screens and copy, cut, paste, or delete them (M8-style selection)
+- Select cells, rows, or entire screens and copy, cut, paste, or delete them
 - Set swing and shuffle per track or globally with groove patterns, written as a tick length per phrase step. Start from the built-in list — straight, the twelve classic swing settings a drum machine offers, triplets, half and double time — or bend a pair yourself with the quantize aid, which moves one step and its partner the other way so the bar line stays put, and reads back the swing as a percentage. Save your own to `PocketTracker/Grooves` as files you can rename, edit and carry between devices
 - Build up to 16 scales per project by switching each of the twelve notes on or off, and set the song's key. A track using a scale plays only the notes in it: anything out of the scale is moved to the nearest note that is in, both as you type and as the song plays, so a phrase written before you chose the scale falls into it. The scale screen marks the note being heard; sliced instruments are left alone, and any instrument can be taken out of transposition entirely with its TSP switch
 - Start from 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — and save your own to `PocketTracker/Scales` as files you can rename, edit and carry between devices

@@ -96,7 +96,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
     sv.instrId = note.sampleId;
 
-    // M8-style: a TIC in the table's last row overrides the instrument tic rate —
+    // A TIC in the table's last row overrides the instrument tic rate —
     // one rate per FX column.
     int effectiveTicRates[TABLE_LANES];
     effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
@@ -256,7 +256,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
             }
             float rate = note.frequency / note.baseFrequency;
 
-            // M8-style: a TIC in the table's last row overrides the instrument tic rate —
+            // A TIC in the table's last row overrides the instrument tic rate —
             // one rate per FX column.
             int effectiveTicRates[TABLE_LANES];
             effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);

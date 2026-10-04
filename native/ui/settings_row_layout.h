@@ -29,7 +29,7 @@ namespace pt::ui {
  * 9  THEME       opens the theme editor
  * 10 TEMPLATE    SAVE / CLEAR
  * 11 RESUME      ASK / AUTO                          (what to do with a crash autosave)
- * 12 TRACE       ON / OFF, + ENG                     (debug)
+ * 12 TRACE       ON / OFF                           (debug)
  * 13 FOLDER      REMEMBER / REFRESH                 (remember the last sample folder)
  * 14 NAV         POOL / SONG                        (what B+D-pad walks: the 00..FF pool, or the song)
  * 15 ABXY        AUTO / XBOX / NINTENDO             (which face button is PRINTED A; only with a pad)
@@ -153,9 +153,7 @@ inline int settings_first_visible_row(const PlatformCaps& caps) {
 
 /**
  * Does this row have a SECOND column?
- * ⚠️ TRACE's is caps-dependent: its column 2 (ENG) only exists with a second sequencer, so RIGHT must
- * not move there otherwise. LAYOUT's is dynamic: the skin column exists only for a skinned layout
- * (`layoutHasSkins`).
+ * ⚠️ LAYOUT's is dynamic: the skin column exists only for a skinned layout (`layoutHasSkins`).
  */
 inline bool settings_row_has_second_column(SettingsRow row, const PlatformCaps& caps,
                                            bool layoutHasSkins) {
@@ -167,7 +165,6 @@ inline bool settings_row_has_second_column(SettingsRow row, const PlatformCaps& 
         case SettingsRow::METRONOME: // VOL
         case SettingsRow::TEMPLATE:  // SAVE | CLEAR
             return true;
-        case SettingsRow::TRACE:     return caps.engineToggle;  // ENG
         default:                     return false;
     }
 }

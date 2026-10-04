@@ -38,10 +38,6 @@ struct PlatformCaps {
      */
     bool autosave = false;
 
-    /** The ENG column of the TRACE row (which sequencer walks the song) — only in the `android()`
-     *  golden profile; no shipping build has a second sequencer. */
-    bool engineToggle = false;
-
     /** PROJECT gains an EXIT row: a handheld launcher needs the process back. */
     bool appExit = false;
 
@@ -75,7 +71,6 @@ struct PlatformCaps {
         c.skinOverlay    = true;
         c.buttonFeedback = true;
         c.autosave       = true;
-        c.engineToggle   = true;
         c.appExit        = false;
         c.midi           = debug_build;
         c.loopWindow     = debug_build;
@@ -94,7 +89,6 @@ struct PlatformCaps {
         c.skinOverlay    = false;
         c.buttonFeedback = false;
         c.autosave       = true;
-        c.engineToggle   = false;
         c.appExit        = true;
         c.midi           = true;
         c.loopWindow     = debug_build;
@@ -104,8 +98,8 @@ struct PlatformCaps {
     /**
      * What the Android app RUNS (`android-main.cpp`): `sdl()` plus the three rows a touch UI brings —
      * not `sdl()` edited in place (those rows would appear on devices with no touch screen) and not
-     * `android()` (which carries `engineToggle`). Written as `sdl()` plus flips so the shared fields
-     * cannot drift.
+     * `android()` (the tests' fixed profile: no EXIT, MIDI only in debug). Written as `sdl()` plus
+     * flips so the shared fields cannot drift.
      * ⚠️ The LAYOUT row is additionally gated at RUNTIME on a touch screen and no pad (`app.cpp`'s
      * `useTouch`); this is the static half.
      */

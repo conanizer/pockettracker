@@ -1044,7 +1044,7 @@ class Sequencer {
     /**
      * Can the walk ENTER this song cell? The one definition of a block boundary.
      * ⚠️ A cell the walk cannot enter ENDS A BLOCK — it is not a rest. A track reaching one loops back to
-     * the top of its block, for ever (as M8 and LGPT do), so unrelated sketches can share a project.
+     * the top of its block, for ever, so unrelated sketches can share a project.
      * Unequal blocks drift apart; a track that should rest a few bars needs a chain of empty phrases.
      * ⚠️ A chain whose FIRST row is empty is a boundary too. Later holes are walked over
      * (`next_chain_row_no_wrap`).
@@ -1146,7 +1146,7 @@ class Sequencer {
 
         // ⚠️ NO AUDIBILITY TEST — mute is a MIXER gate, never a sequencer one. A muted track is scheduled
         // like any other and the engine zeroes it (`setTrackMuted`), so unmuting mid-phrase lands in
-        // the sequence where it really is. (LGPT does the same.)
+        // the sequence where it really is.
         const int transposeSemitones = chain_transpose_semitones(chain, chainRow)
                                        + project_transpose_semitones(project);
         const int hopStartRow = trackState.consumeHopTarget();
@@ -1500,8 +1500,8 @@ class Sequencer {
             }
             if (right <= 3 && rng_int(15) >= (value & 0x0F)) step_set_fx(effectiveStep, right, 0x00, 0x00);
         }
-        // RND/RNL ADD a random 0..XY to the value already there, capped at the effect's ceiling (as
-        // on the M8). 00 adds and draws nothing. In FX1, RNL adds 0..X to the note and 0..Y to the
+        // RND/RNL ADD a random 0..XY to the value already there, capped at the effect's ceiling.
+        // 00 adds and draws nothing. In FX1, RNL adds 0..X to the note and 0..Y to the
         // instrument instead.
         const int lastInstrument = (project_ && !project_->instruments.empty())
                                  ? static_cast<int>(project_->instruments.size()) - 1 : 127;
