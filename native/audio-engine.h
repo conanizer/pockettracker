@@ -655,21 +655,49 @@ public:
     void triggerSoundfontNote(const ScheduledNote& note, int frame, int64_t currentFrame, float sampleRate);
     void triggerSamplerNote(const ScheduledNote& note, int frame, int64_t currentFrame, float sampleRate);
 
-    // What chainTrackPiece and mixTrackBuffer need from the block — processAudioBlock's per-block values.
-    struct TrackBufferMix {
-        float*       output;          // interleaved stereo, the block being summed into
-        int          numFrames;
-        const float* trackVolStart;   // per track: the fader's ramp across this block
-        const float* trackVolEnd;
-        const float* gateStart;       // per track: the mute gate's ramp across this block
-        const float* gateEnd;
-        bool         octaWanted;      // the OCTA scopes are being drawn
-        int          monitoredInstrId;
+    // What one processAudioBlock call's stages share. On the audio thread's stack, built per block;
+    // every ramp is a (start, end) pair the mix interpolates per sample across the whole block.
+    struct BlockMix {
+        float*  output;               // interleaved stereo, the block being summed into
+        int     numFrames;
+        int     channelCount;
+        float   sampleRate;
+        int64_t startFrame;           // the block's first frame on the engine clock
+        bool    offlineRender;
+        bool    octaWanted;           // the OCTA scopes are being drawn
+        bool    spectrumWanted;       // the send spectra are being drawn
+        int     monitoredInstrId;     // the EQ screen's instrument, or -1
+        float   faderStep;            // how far a fader may move in this block
+        // Per track, the preview lane included: the fader and the mute gate.
+        float   trackVolStart[SF_VOICE_COUNT], trackVolEnd[SF_VOICE_COUNT];
+        float   gateStart[SF_VOICE_COUNT],     gateEnd[SF_VOICE_COUNT];
+        float   revGateStart, revGateEnd, dlyGateStart, dlyGateEnd, dryGateStart, dryGateEnd;
+        float   masterVolStart, masterVolEnd;
+        int     previewTrack;         // the track the preview lane borrows its fader from, or -1
+        bool    previewBorrows;
     };
+    // processAudioBlock's stages, in the order it calls them (engine-mix.cpp).
+    void walkMixerRamps(BlockMix& b);
+    void clearBlockScratch(BlockMix& b);
+    void takeQueuedWork(BlockMix& b);
+    void dispatchEvents(BlockMix& b);
+    void applyParamUpdate(const ScheduledParamUpdate& upd, BlockMix& b);
+    void applyKill(const ScheduledKill& kill, int frame);
+    void mixSamplerVoices(BlockMix& b);
+    void storeTic00Cursor(const Voice& voice);
+    void prepareSamplerPiece(Voice& voice, int frames, float sampleRate);
+    void mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to);
+    void mixSoundfontVoices(BlockMix& b);
+    void prepareSoundfontPiece(SoundfontVoice& sv, int t, int from, int frames, float sampleRate);
+    void renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const BlockMix& b, int from, int to);
+    void carryFadesToNextBlock();
+    void captureTrackScopes(const BlockMix& b);
+    void mixBuses(const BlockMix& b);
+    void mixMaster(const BlockMix& b);
     template <typename V>
-    void chainTrackPiece(V& v, int t, float* buf, const TrackBufferMix& c, int from, int to);
+    void chainTrackPiece(V& v, int t, float* buf, const BlockMix& c, int from, int to);
     template <typename V>
-    float mixTrackBuffer(V& v, int t, float* buf, const TrackBufferMix& c, bool& stopFadeDone);
+    float mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bool& stopFadeDone);
 
     // The voices of one track, for the code that changes or ends them. `fn` is called with each voice
     // as its own type, so a per-type overload decides what it does. A new voice type adds its pool
