@@ -34,6 +34,7 @@
 #include <android/log.h>
 #include <jni.h>
 #include <pthread.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -513,6 +514,12 @@ int main(int argc, char** argv) {
     // granted, and the refusal shows only under MediaProvider's own logcat tag. `relocate_log_file`
     // moves it later.
     redirect_stdio_to_logcat(privateRoot);
+
+    // No environment on Android: `adb shell setprop debug.pockettracker.latency 1` turns the latency
+    // probe on. ⚠️ Before the first frame — the probe reads its switch once.
+    char latencyProp[PROP_VALUE_MAX] = {};
+    if (__system_property_get("debug.pockettracker.latency", latencyProp) > 0 && latencyProp[0] == '1')
+        setenv("POCKETTRACKER_LATENCY", "1", 1);
 
     // ⚠️ THE BACK BUTTON, TRAPPED. Untrapped, back runs `SDLActivity.onBackPressed()` → `finish()`,
     // closing the activity mid-edit. Trapped, the key reaches native as `SDLK_AC_BACK`, mapped to B

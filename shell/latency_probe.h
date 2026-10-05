@@ -113,7 +113,17 @@ inline void poll_tick(bool isPlaying) {
     State&         s  = state();
     const uint64_t t  = now_ns();
     s.playing.store(isPlaying ? 1 : 0, std::memory_order_relaxed);
-    if (s.lastPollNs != 0) s.poll[isPlaying ? 1 : 0].add(t - s.lastPollNs, 8000000ull, 1000000ull);
+    if (s.lastPollNs != 0) {
+        const uint64_t gap = t - s.lastPollNs;
+        s.poll[isPlaying ? 1 : 0].add(gap, 8000000ull, 1000000ull);
+        // Each one as it happens, timestamped, so a stall can be matched to what was being done: the
+        // sequencer is not refilled while the loop is away, so the lookahead must outlast the longest.
+        if (isPlaying && gap > 30000000ull) {
+            std::printf("latency: STALL %.1f ms while playing, at %.2f s\n", double(gap) / 1e6,
+                        double(SDL_GetTicks64()) / 1000.0);
+            std::fflush(stdout);
+        }
+    }
     s.lastPollNs = t;
 }
 
