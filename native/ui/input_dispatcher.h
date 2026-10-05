@@ -801,11 +801,6 @@ class InputDispatcher {
      */
     bool open_sub_screen_at_cursor(bool peek);
 
-    /** Is ANY modal already up? Then no cell "opens a sub-screen" — the modal owns the button. */
-    bool any_modal_open() const {
-        return confirm_open() || qwerty_open() || eq_open() || theme_open();
-    }
-
     // ── The THEME EDITOR (ui/dispatch/layers/theme.cpp) ──────────────────────────────────────────
     //
     // Raised from SETTINGS, and `currentScreen` STAYS `SETTINGS` underneath it.

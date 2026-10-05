@@ -86,9 +86,9 @@ bool InputDispatcher::instrument_open_at_cursor() {
 }
 
 bool InputDispatcher::defer_a_to_release() const {
-    // ⚠️ No cell opens a sub-screen while a modal is up. The cursor under the EQ editor sits on the EQ
+    // ⚠️ No cell opens a sub-screen while a layer is up. The cursor under the EQ editor sits on the EQ
     // cell that raised it, so without this every A inside the editor would be deferred for nothing.
-    if (any_modal_open()) return false;
+    if (top_layer()) return false;
 
     // ⚠️ Opens nothing, but deferred too: on row 11 under MANUAL a plain A cuts a boundary at the
     // playhead, and the same A is held for the slice step, the drag and the delete.
