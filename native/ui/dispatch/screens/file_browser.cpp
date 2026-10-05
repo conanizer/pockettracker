@@ -214,21 +214,30 @@ void InputDispatcher::browser_confirm() {
     FileBrowserState& b = s_.fileBrowser;
 
     // DELETE mode: A is the YES. The only place the browser removes anything — SELECT+B to arm, A to
-    // confirm.
+    // confirm. Deletes what the question on screen named: the selection, or the entry under the cursor.
     if (b.mode == BrowserMode::DELETE) {
-        const BrowserItem* item = b.current();
         b.mode = BrowserMode::NORMAL;
-        if (!item || item->is_pseudo()) return;
+        // Copied out first: the refresh below rebuilds the list the targets point into.
+        const std::vector<const BrowserItem*> targets = b.delete_targets();
+        if (targets.empty()) return;
+        const std::string        name = targets.front()->displayName;
+        std::vector<std::string> paths;
+        for (const BrowserItem* item : targets) paths.push_back(item->path);
 
-        const std::string name = item->displayName;
-        if (fs_.delete_path(item->path)) {
-            refresh_browser();
-            b.statusMessage = "DELETED: " + name;
-            b.statusSuccess = true;
-        } else {
-            b.statusMessage = "DELETE FAILED";
-            b.statusSuccess = false;
+        int done = 0, failed = 0;
+        for (const std::string& path : paths) {
+            if (fs_.delete_path(path)) ++done; else ++failed;
         }
+        b.selectionMode   = false;
+        b.selectionAnchor = -1;
+        if (done > 0) refresh_browser();
+
+        if (paths.size() == 1)
+            b.statusMessage = done ? "DELETED: " + name : std::string("DELETE FAILED");
+        else
+            b.statusMessage = "DELETED " + std::to_string(done) + (done == 1 ? " FILE" : " FILES") +
+                              (failed ? ", FAILED " + std::to_string(failed) : std::string());
+        b.statusSuccess = (failed == 0);
         return;
     }
 
@@ -609,16 +618,16 @@ void InputDispatcher::browser_arm_delete() {
     // ⚠️ On a granted TREE this is FORGET, not DELETE: `delete_path("pt://<id>")` would remove the user's
     // whole PocketTracker directory. Handing back the PERMISSION removes the row and touches no file — the
     // only way to clear a grant whose folder was deleted.
-    if (item && item->isRoot) {
+    if (!s_.fileBrowser.selectionMode && item && item->isRoot) {
         s_.fileBrowser.mode = BrowserMode::FORGET_ROOT;
         s_.fileBrowser.statusMessage.clear();
         s_.fileBrowser.statusSuccess = true;
         return;
     }
 
-    if (!item || item->is_pseudo()) return;
+    if (s_.fileBrowser.delete_targets().empty()) return;
 
-    // ARM the confirm; never delete on this press ("DELETE <name>? A=YES B=NO").
+    // ARM the confirm; never delete on this press ("DELETE <name>? A=YES B=NO", or "DELETE 3 FILES?").
     s_.fileBrowser.mode          = BrowserMode::DELETE;
     s_.fileBrowser.statusMessage.clear();
     s_.fileBrowser.statusSuccess = true;

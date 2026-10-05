@@ -531,7 +531,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "L+B marks files, B copies them",
       "L+A cuts them, or pastes here",
       "SELECT+A renames what you are on",
-      "SELECT+B deletes it, asks first",
+      "SELECT+B deletes it or all marks",
       "SELECT+R makes a new folder"}},
     /* SCREEN_SETTINGS */
     {"SETTINGS: how the app acts", "Display, buttons, theme, and", "what happens after a crash.",

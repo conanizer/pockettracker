@@ -2272,7 +2272,7 @@ modifiers.
 | Input | Action |
 |---|---|
 | SELECT + A | Rename the file or folder under the cursor. A keyboard opens with the current name. |
-| SELECT + B | Delete it. An `A=YES  B=NO` confirm appears first — nothing is deleted on the press itself. |
+| SELECT + B | Delete it — or, inside a selection, every selected file. An `A=YES  B=NO` confirm appears first — nothing is deleted on the press itself. |
 | SELECT + R | Create a folder here. A keyboard opens for the name. |
 
 **Moving and copying several files** works like the tracker's own copy/paste:
@@ -2700,7 +2700,7 @@ exports and sample-editor saves keep their own folders.
 | B | Close the browser |
 | START | Preview highlighted WAV |
 | SELECT + A | Rename |
-| SELECT + B | Delete (asks first) |
+| SELECT + B | Delete, or delete the selection (asks first) |
 | SELECT + R | New folder |
 | L + B | Start a file selection (tap again: select all) |
 | B *(in selection)* | Copy the selected files |

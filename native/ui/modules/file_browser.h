@@ -151,6 +151,10 @@ struct FileBrowserState {
     /** True when `index` falls inside the live anchor..cursor range. */
     bool is_selected(int index) const;
 
+    /** What SELECT+B deletes: every entry in a live selection, else the one under the cursor. Never a
+     *  pinned row or a granted tree. */
+    std::vector<const BrowserItem*> delete_targets() const;
+
     /** "CPY 3 FILES" / "CUT 1 FILE"; empty when the clipboard is. */
     std::string clipboard_info() const;
 };

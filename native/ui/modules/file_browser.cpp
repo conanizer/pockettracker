@@ -110,6 +110,18 @@ bool FileBrowserState::is_selected(int index) const {
     return index >= lo && index <= hi;
 }
 
+std::vector<const BrowserItem*> FileBrowserState::delete_targets() const {
+    std::vector<const BrowserItem*> out;
+    if (selectionMode) {
+        for (int i = 0; i < static_cast<int>(items.size()); ++i)
+            if (is_selected(i) && !items[static_cast<size_t>(i)].is_pseudo())
+                out.push_back(&items[static_cast<size_t>(i)]);
+    } else if (const BrowserItem* item = current(); item && !item->is_pseudo()) {
+        out.push_back(item);
+    }
+    return out;
+}
+
 std::string FileBrowserState::clipboard_info() const {
     if (fileClipboard.empty()) return "";
     const size_t n = fileClipboard.size();
@@ -292,8 +304,10 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
     std::string hint;
     Argb        hintColor;
     if (s.mode == BrowserMode::DELETE) {
-        const BrowserItem* item = s.current();
-        hint = "DELETE " + Canvas::clip_text(item ? item->displayName : "", 16) + "? A=YES B=NO";
+        const std::vector<const BrowserItem*> doomed = s.delete_targets();
+        const std::string what = doomed.size() == 1 ? Canvas::clip_text(doomed[0]->displayName, 16)
+                                                    : std::to_string(doomed.size()) + " FILES";
+        hint = "DELETE " + what + "? A=YES B=NO";
         hintColor = 0xFFFF0000;
     } else if (s.mode == BrowserMode::SET_HOME) {
         const BrowserItem* item = s.current();
