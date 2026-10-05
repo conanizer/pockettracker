@@ -1,4 +1,4 @@
-// The file browser — opening, the cursor, loading, the file clipboard.
+// The file browser — its buttons, opening, the cursor, loading, the file clipboard.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -13,6 +13,96 @@
 #include <vector>
 
 namespace pt::ui {
+
+// ─── The buttons ─────────────────────────────────────────────────────────────────────────────────
+
+GestureResult InputDispatcher::file_browser_screen(Gesture g) {
+    FileBrowserState& fb = s_.fileBrowser;
+    switch (g) {
+        // UP/DOWN move a row; LEFT/RIGHT page by a screenful.
+        case Gesture::DPAD_UP:    browser_move_cursor(-1, /*page=*/false); break;
+        case Gesture::DPAD_DOWN:  browser_move_cursor(+1, /*page=*/false); break;
+        case Gesture::DPAD_LEFT:  browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); break;
+        case Gesture::DPAD_RIGHT: browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); break;
+
+        case Gesture::A:     browser_confirm(); break;
+        case Gesture::B:     browser_back(); break;
+        case Gesture::START: browser_audition(); break;
+
+        // ⚠️ An audition here rings until stopped, and scrolling a folder of kicks would stack them.
+        case Gesture::STOP_PREVIEW: host_.stop_preview(); break;
+
+        // Help is the shared path's, which knows the panel has no room here.
+        case Gesture::SELECT: return GestureResult::PASS;
+
+        // ⚠️ R+DPAD is not navigation here: the browser is not a cell in the screen grid. No R+RIGHT —
+        // going down a directory is A on a folder.
+        case Gesture::R_UP:   browser_cycle_sort(+1); break;
+        case Gesture::R_DOWN: browser_cycle_sort(-1); break;
+        case Gesture::R_LEFT: navigate_to_parent(fb, fs_); break;
+
+        case Gesture::L_B: browser_select(); break;
+        case Gesture::L_A: browser_cut_or_paste(); break;
+        case Gesture::L_R:
+            fb.selectionMode   = false;
+            fb.selectionAnchor = -1;
+            break;
+
+        case Gesture::SELECT_A: browser_rename(); break;
+        case Gesture::SELECT_B: browser_arm_delete(); break;
+        case Gesture::SELECT_R: browser_new_folder(); break;
+
+        default: break;   // every other gesture means nothing here
+    }
+    return GestureResult::TAKEN;
+}
+
+void InputDispatcher::browser_back() {
+    FileBrowserState& fb = s_.fileBrowser;
+
+    // B is the NO: it disarms whatever is armed rather than leaving, so SELECT+A/B pressed by accident
+    // are harmless. Written against the MODE, so a new mode has a way out.
+    if (fb.mode != BrowserMode::NORMAL) { fb.mode = BrowserMode::NORMAL; return; }
+
+    // Inside a file selection, B COPIES it — as over a grid.
+    if (fb.selectionMode) {
+        std::vector<std::string> files = browser_selected_paths();
+        if (!files.empty()) {
+            const size_t n = files.size();
+            fb.fileClipboard      = std::move(files);
+            fb.fileClipboardIsCut = false;
+            fb.statusMessage = "CPY " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
+            fb.statusSuccess = true;
+        }
+        fb.selectionMode   = false;
+        fb.selectionAnchor = -1;
+        return;
+    }
+
+    close_file_browser();
+}
+
+void InputDispatcher::browser_audition() {
+    // ⚠️ Decoded into slot 255 on the preview lane (songcore::preview_sample_file — no instrument to
+    // derive from). Every audible extension, from every browser context.
+    const BrowserItem* item = s_.fileBrowser.current();
+    if (!item || item->kind != BrowserItem::Kind::FILE) return;
+
+    const std::string ext = to_lower(item->extension);
+    const bool audible = std::find(sample_extensions().begin(), sample_extensions().end(), ext) !=
+                         sample_extensions().end();
+    if (!audible) return;   // a .pti or an .sf2 has no waveform
+
+    // A file has no song cell behind it: neutral gain, never a channel a previous audition used.
+    host_.set_preview_track(-1);
+    // ⚠️ An audition is a full DECODE — a four-minute mp3 costs a real load. Same strip, same B.
+    const LoadScope previewScope(*this, now_ms_, item->displayName);
+    if (!host_.preview_file(item->path)) {
+        if (host_.last_load_cancelled()) return;   // stopped on purpose
+        s_.fileBrowser.statusMessage = "PREVIEW FAILED";
+        s_.fileBrowser.statusSuccess = false;
+    }
+}
 
 // ─── Opening and closing the browser ─────────────────────────────────────────────────────────────
 
@@ -380,6 +470,50 @@ void InputDispatcher::browser_confirm() {
 
 // ─── The multi-select and the file clipboard ─────────────────────────────────────────────────────
 
+void InputDispatcher::browser_select() {
+    // ⚠️ A plain anchor..cursor range over a list (a second tap inside the window selects all) — a
+    // different machine from the grid editors' CELL→ROW→SCREEN widener.
+    FileBrowserState& b = s_.fileBrowser;
+    if (b.mode != BrowserMode::NORMAL) return;
+
+    if (!b.selectionMode) {
+        b.selectionMode   = true;
+        b.selectionAnchor = b.cursor;
+        b.lastSelectTapMs = now_ms_;
+    } else if (now_ms_ - b.lastSelectTapMs <= 500) {
+        // Tap again inside the window: select everything, skipping the ".." row.
+        const int first = b.first_selectable();
+        const int last  = std::max(static_cast<int>(b.items.size()) - 1, first);
+        b.selectionAnchor = first;
+        b.cursor          = last;
+        b.scroll          = std::max(0, last - BROWSER_VISIBLE_ROWS + 1);
+        b.lastSelectTapMs = 0;   // …so a third tap re-anchors rather than re-selecting all
+    } else {
+        b.selectionAnchor = b.cursor;   // the window lapsed — start a fresh range here
+        b.lastSelectTapMs = now_ms_;
+    }
+}
+
+void InputDispatcher::browser_cut_or_paste() {
+    FileBrowserState& b = s_.fileBrowser;
+    if (b.mode != BrowserMode::NORMAL) return;
+
+    if (b.selectionMode) {
+        std::vector<std::string> files = browser_selected_paths();
+        if (files.empty()) return;
+        const size_t n = files.size();
+
+        b.fileClipboard      = std::move(files);
+        b.fileClipboardIsCut = true;
+        b.selectionMode      = false;
+        b.selectionAnchor    = -1;
+        b.statusMessage = "CUT " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
+        b.statusSuccess = true;
+    } else if (!b.fileClipboard.empty()) {
+        browser_paste();
+    }
+}
+
 std::vector<std::string> InputDispatcher::browser_selected_paths() const {
     const FileBrowserState& b = s_.fileBrowser;
     std::vector<std::string> out;
@@ -439,9 +573,7 @@ void InputDispatcher::browser_paste() {
 
 // ─── SELECT + A / B / R — the browser's file-management chords ───────────────────────────────────
 
-void InputDispatcher::on_select_a() {
-    if (route(Gesture::SELECT_A)) return;
-    if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
+void InputDispatcher::browser_rename() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
@@ -469,9 +601,7 @@ void InputDispatcher::on_select_a() {
     open_qwerty(QwertyContext::FILE_RENAME, base, label, item->path);
 }
 
-void InputDispatcher::on_select_b() {
-    if (route(Gesture::SELECT_B)) return;
-    if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
+void InputDispatcher::browser_arm_delete() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     const BrowserItem* item = s_.fileBrowser.current();
@@ -494,12 +624,27 @@ void InputDispatcher::on_select_b() {
     s_.fileBrowser.statusSuccess = true;
 }
 
-void InputDispatcher::on_select_r() {
-    if (route(Gesture::SELECT_R)) return;
-    if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
+void InputDispatcher::browser_new_folder() {
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
     open_qwerty(QwertyContext::FOLDER_CREATE, "NEW FOLDER", "FOLDER NAME:",
                 s_.fileBrowser.currentDirectory);
+}
+
+// ─── Sorting ─────────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::browser_cycle_sort(int delta) {
+    FileBrowserState& b = s_.fileBrowser;
+
+    // Steps the modes by index, so the enum's order is behaviour (ui/filesystem.h).
+    const int next = (static_cast<int>(b.sortMode) + delta + FILE_SORT_MODE_COUNT) % FILE_SORT_MODE_COUNT;
+    b.sortMode = static_cast<FileSortMode>(next);
+
+    // ⚠️ Rebuild rather than re-sort in place, or the tie-break depends on the previous sort mode.
+    rebuild_items(b, fs_);
+
+    // The cursor stays put, so the row under it now holds a different file — the list is re-ordered.
+    b.statusMessage = file_sort_label(b.sortMode);
+    b.statusSuccess = true;
 }
 
 }  // namespace pt::ui

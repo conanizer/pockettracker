@@ -805,34 +805,29 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 
 // ─── D-pad alone ─────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ THE MODAL RULE (input_dispatcher.h): the editors first, then browser, then the screen.
+// ⚠️ THE MODAL RULE (input_dispatcher.h): the layers first, then the screen's handler, then this.
 
 void InputDispatcher::on_dpad_up() {
     if (route(Gesture::DPAD_UP)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::UP);
 }
 
 void InputDispatcher::on_dpad_down() {
     if (route(Gesture::DPAD_DOWN)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::DOWN);
 }
 
 void InputDispatcher::on_dpad_left() {
     if (route(Gesture::DPAD_LEFT)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    // LEFT/RIGHT page the browser by a screenful.
-    if (on_browser())  { browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::LEFT);
 }
 
 void InputDispatcher::on_dpad_right() {
     if (route(Gesture::DPAD_RIGHT)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::RIGHT);
 }
 

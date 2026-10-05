@@ -10,10 +10,9 @@
 // ── ⚠️ THE MODAL RULE ────────────────────────────────────────────────────────────────────────────
 //
 // Whatever sits over the screen — a load, the confirm dialogs, the RENDER dialog, the QWERTY keyboard,
-// the THEME and EQ editors (partial), the FX and map pickers, the FILE BROWSER — OWNS THE BUTTONS
-// while up, and the order a press is offered to them is the specification: the keyboard can sit on
-// top of the browser (rename) or the theme editor (its SAVE), and a D-pad press there must move the
-// KEY cursor.
+// the THEME and EQ editors (partial), the FX and map pickers — OWNS THE BUTTONS while up, and the order
+// a press is offered to them is the specification: the keyboard can sit on top of the theme editor
+// (its SAVE), and a D-pad press there must move the KEY cursor.
 // ⭐ That order is written once, in `LAYERS` (ui/dispatch/route.cpp). Every gesture asks the top layer
 // first (`route`), and a gesture a layer does not answer is swallowed there. A layer with no handler yet
 // is answered inside each gesture's body instead (`overlay_swallows`). With no layer up, a screen in
@@ -685,7 +684,6 @@ class InputDispatcher {
 
     // ── The modal guards (see THE MODAL RULE at the top) ─────────────────────────────────────────
     bool qwerty_open() const { return s_.qwerty.isOpen; }
-    bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
     bool fx_helper_open() const { return s_.fxHelper.isOpen; }
     bool map_picker_open() const { return s_.mapPicker.isOpen; }
 
@@ -696,8 +694,8 @@ class InputDispatcher {
     // ⭐ The default for a gesture a layer does not answer is SWALLOW, so a new layer is one row in
     // `LAYERS` plus its handler (ui/dispatch/layers/): until it answers a gesture, that gesture does
     // nothing under it rather than editing the screen behind.
-    // FX_HELPER and BROWSER are not modals, but every handler asks about them in the same breath, so
-    // they are layers here. `modal_backdrop_active` (ui/app_state.h) is the separate scrim question.
+    // FX_HELPER is not a modal, but every handler asks about it in the same breath, so it is a layer
+    // here. `modal_backdrop_active` (ui/app_state.h) is the separate scrim question.
 
     /** BITS, so a handler's `arms` set is an OR. `top_overlay()` returns one; `overlay_swallows()` takes
      *  any number. */
@@ -708,7 +706,6 @@ class InputDispatcher {
         THEME        = 1u << 2,
         EQ           = 1u << 3,
         FX_HELPER    = 1u << 4,
-        BROWSER      = 1u << 5,
         LOADING      = 1u << 6,
         HELP         = 1u << 7,
         RENDER       = 1u << 8,
@@ -981,7 +978,24 @@ class InputDispatcher {
      */
     void resample_selection(const std::string& customBaseName);
 
-    // ── The FILE BROWSER ────────────────────────────────────────────────────────────────────────
+    // ── The FILE BROWSER (ui/dispatch/screens/file_browser.cpp) ─────────────────────────────────
+    bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
+    /** The browser's own buttons. */
+    GestureResult file_browser_screen(Gesture g);
+    /** B: disarm a pending SELECT chord, copy a selection, or leave. */
+    void browser_back();
+    /** START: audition the file under the cursor, if it is audible. */
+    void browser_audition();
+    /** L+B: start a selection, select all on a quick second tap, or re-anchor. */
+    void browser_select();
+    /** L+A: cut the selection to the file clipboard, or paste it here. */
+    void browser_cut_or_paste();
+    /** SELECT+A: rename what is under the cursor (opens the keyboard); on a granted folder, SET HOME. */
+    void browser_rename();
+    /** SELECT+B: arm the delete confirm, never delete on the press; on a granted folder, FORGET. */
+    void browser_arm_delete();
+    /** SELECT+R: create a folder here (opens the keyboard). */
+    void browser_new_folder();
     /** Leave the browser for the screen it was opened from, dropping the audition on the way out. */
     void close_file_browser();
     /** Re-list the current directory in place — after a rename, a create, a delete or a paste. */

@@ -23,10 +23,7 @@ bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<
 void InputDispatcher::on_button_a() {
     if (route(Gesture::A)) return;
     // A layer with no handler yet is INERT on A rather than inserting behind it.
-    if (overlay_swallows(Overlay::BROWSER)) return;
-
-    // A on the BROWSER: open a folder, go up, or load the file (browser_confirm).
-    if (on_browser()) { browser_confirm(); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
 
     // A on a cell that OPENS a sub-screen — the two NAME rows and all five EQ cells. Before the per-screen
     // arms below.
@@ -136,33 +133,7 @@ void InputDispatcher::on_button_a() {
 void InputDispatcher::on_button_b() {
     if (route(Gesture::B)) return;
     // A layer with no handler yet is inert on B.
-    if (overlay_swallows(Overlay::BROWSER)) return;
-
-    if (on_browser()) {
-        FileBrowserState& fb = s_.fileBrowser;
-
-        // B is the NO: it disarms whatever is armed rather than leaving, so SELECT+A/B pressed by accident
-        // are harmless. Written against the MODE, so a new mode has a way out.
-        if (fb.mode != BrowserMode::NORMAL) { fb.mode = BrowserMode::NORMAL; return; }
-
-        // Inside a file selection, B COPIES it — as over a grid.
-        if (fb.selectionMode) {
-            std::vector<std::string> files = browser_selected_paths();
-            if (!files.empty()) {
-                const size_t n = files.size();
-                fb.fileClipboard      = std::move(files);
-                fb.fileClipboardIsCut = false;
-                fb.statusMessage = "CPY " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
-                fb.statusSuccess = true;
-            }
-            fb.selectionMode   = false;
-            fb.selectionAnchor = -1;
-            return;
-        }
-
-        close_file_browser();
-        return;
-    }
+    if (overlay_swallows(Overlay::NONE)) return;
 
     // ⚠️ B LEAVES SETTINGS. Its POSITION matters:
     //   • AFTER the modals — the THEME EDITOR, EQ editor or keyboard over it own B;
@@ -244,10 +215,10 @@ void InputDispatcher::on_select() {
     // ⚠️ Bare SELECT is HELP — nothing else.
     // ⚠️ It arrives on the RELEASE (ui/button_mapper.h): on the browser SELECT is a modifier, and any other
     // press during it cancels this. (Unrelated to the A-deferral, which keeps sub-screen cells editable.)
-    // The EQ and theme editors are named: they leave the oscilloscope strip drawn, so the panel has a
-    // place, and their cell names (EQ FILL, Q, MTR BG) need it. ⚠️⚠️ The browser is named too — safe only
-    // because this runs on an uninterrupted release.
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
+    // The EQ and theme editors let it through: they leave the oscilloscope strip drawn, so the panel has
+    // a place, and their cell names (EQ FILL, Q, MTR BG) need it. ⚠️⚠️ The browser lets it through too —
+    // safe only because this runs on an uninterrupted release.
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
 
     // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
     //
@@ -279,14 +250,13 @@ void InputDispatcher::on_help_dismiss() {
 void InputDispatcher::on_stop_preview() {
     if (route(Gesture::STOP_PREVIEW)) return;
     // ⚠️ The one handler a confirm does not own — its layer passes it on, so it stays armed here: a dialog
-    // over an INSTRUMENT audition must not leave the note hanging. The FX helper and browser likewise — the screen behind them started the
-    // preview, and `previewScreen` decides whether there is one.
-    if (overlay_swallows(Overlay::CONFIRM | Overlay::FX_HELPER | Overlay::BROWSER)) return;
+    // over an INSTRUMENT audition must not leave the note hanging. The FX helper likewise — the screen
+    // behind it started the preview, and `previewScreen` decides whether there is one.
+    if (overlay_swallows(Overlay::CONFIRM | Overlay::FX_HELPER)) return;
 
     // Only screens that can START an audition stop one: PHRASE when its preview setting is on; the
-    // instrument screens always (their START rings out until stopped). ⚠️ The BROWSER too: its audition
-    // rings, and scrolling a folder of kicks would stack them.
-    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_browser() ||
+    // instrument screens always (their START rings out until stopped). The browser answers for itself.
+    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) ||
                                on_instrument_screen() ||
                                (s_.currentScreen == ScreenType::PHRASE && s_.settings.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
@@ -296,31 +266,7 @@ void InputDispatcher::on_start() {
     if (route(Gesture::START)) return;
     // ⚠️ The THEME and EQ editors are armed to LET START THROUGH: the transport underneath is how you hear
     // an edit while dialling it.
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-
-    // ⚠️ START on the BROWSER AUDITIONS the file under the cursor, decoded into slot 255 on the preview
-    // lane (songcore::preview_sample_file — no instrument to derive from). Every audible extension, from
-    // every browser context.
-    if (on_browser()) {
-        const BrowserItem* item = s_.fileBrowser.current();
-        if (!item || item->kind != BrowserItem::Kind::FILE) return;
-
-        const std::string ext = to_lower(item->extension);
-        const bool audible = std::find(sample_extensions().begin(), sample_extensions().end(), ext) !=
-                             sample_extensions().end();
-        if (!audible) return;   // a .pti or an .sf2 has no waveform
-
-        // A file has no song cell behind it: neutral gain, never a channel a previous audition used.
-        host_.set_preview_track(-1);
-        // ⚠️ An audition is a full DECODE — a four-minute mp3 costs a real load. Same strip, same B.
-        const LoadScope previewScope(*this, now_ms_, item->displayName);
-        if (!host_.preview_file(item->path)) {
-            if (host_.last_load_cancelled()) return;   // stopped on purpose
-            s_.fileBrowser.statusMessage = "PREVIEW FAILED";
-            s_.fileBrowser.statusSuccess = false;
-        }
-        return;
-    }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
 
     // ⚠️ START IS NOT ALWAYS THE TRANSPORT. On INSTRUMENT, INST.POOL, MODS and TABLE it AUDITIONS the
     // instrument at its root on the preview lane, ringing until the next plain press — over a running

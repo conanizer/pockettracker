@@ -10,8 +10,8 @@ namespace pt::ui {
 //     editor's LOAD from its confirm), and only finishing or cancelling ends it. `running`, not
 //     `shown` — a load owns the buttons from its first moment.
 //   • RENDER is up while a render runs; a load inside it ranks above.
-//   • the full HELP opens over the browser and the two in-place editors, never over a confirm, the
-//     keyboard or the FX picker.
+//   • the full HELP opens over the two in-place editors, never over a confirm, the keyboard or the FX
+//     picker.
 //   • QWERTY above THEME: the theme editor's SAVE raises the keyboard without closing.
 // A null handler means the layer is still answered inside each gesture's own body (`overlay_swallows`).
 const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
@@ -25,7 +25,6 @@ const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
     {Overlay::EQ,            &InputDispatcher::eq_open,            &InputDispatcher::eq_layer},
     {Overlay::FX_HELPER,     &InputDispatcher::fx_helper_open,     &InputDispatcher::fx_helper_layer},
     {Overlay::MAP_PICK,      &InputDispatcher::map_picker_open,    &InputDispatcher::map_picker_layer},
-    {Overlay::BROWSER,       &InputDispatcher::on_browser,         nullptr},
 };
 
 const InputDispatcher::Layer* InputDispatcher::top_layer() const {
@@ -42,6 +41,7 @@ InputDispatcher::Overlay InputDispatcher::top_overlay() const {
 // The screens with buttons of their own. Every other screen runs each gesture's generic path.
 const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
     {ScreenType::SAMPLE_EDITOR, &InputDispatcher::sample_editor_screen},
+    {ScreenType::FILE_BROWSER,  &InputDispatcher::file_browser_screen},
 };
 
 bool InputDispatcher::route(Gesture g) {

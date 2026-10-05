@@ -439,7 +439,6 @@ add_library(pt-ui STATIC
         ui/canvas.cpp
         ui/clipboard.cpp
         ui/input_dispatcher.cpp
-        ui/dispatch/browser.cpp
         ui/dispatch/buttons.cpp
         ui/dispatch/chords.cpp
         ui/dispatch/route.cpp
@@ -453,6 +452,7 @@ add_library(pt-ui STATIC
         ui/dispatch/midi.cpp
         ui/dispatch/project.cpp
         ui/dispatch/scale_groove.cpp
+        ui/dispatch/screens/file_browser.cpp
         ui/dispatch/screens/sample_editor.cpp
         ui/dispatch/sub_screens.cpp
         ui/layout.cpp

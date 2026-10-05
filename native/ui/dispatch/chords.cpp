@@ -103,7 +103,8 @@ void InputDispatcher::toggle_instrument_type(int delta) {
     const int from  = (cur >= count) ? count - 1 : cur;
     const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
 
-    // The name the slot adopted from the source it is about to lose (see the adopt rule in browser.cpp).
+    // The name the slot adopted from the source it is about to lose (see the adopt rule in
+    // screens/file_browser.cpp).
     const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
 
     host_.set_instrument_type(s_.currentInstrument, next);
@@ -125,8 +126,8 @@ bool InputDispatcher::on_instrument_type_cell() const {
            s_.instrumentCursorColumn == 1;
 }
 
-// A+DPAD is swallowed under the keyboard and the browser, so an A held over one never reaches the
-// screen underneath.
+// A+DPAD is taken by the keyboard and by the browser's own handler, so an A held over either never
+// edits a cell.
 
 void InputDispatcher::on_a_up() {
     if (route(Gesture::A_UP)) return;
@@ -457,15 +458,13 @@ void InputDispatcher::on_b_down() {
 
 // ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
 //
-// ⚠️ On the modals R+DPAD is not navigation. BROWSER: R+UP/DOWN cycles the sort, R+LEFT goes up a
-// directory. SAMPLE EDITOR (its own handler): R+UP/DOWN zooms, R+LEFT/RIGHT swallowed. EQ EDITOR: all
-// four swallowed. None may fall through to `navigate_*` — a popup is not a cell in the screen grid, and
+// ⚠️ On the modals R+DPAD is not navigation. The FILE BROWSER and SAMPLE EDITOR answer it in their own
+// handlers (sort / zoom, up a directory / swallowed). EQ EDITOR: all four swallowed. None may fall through to `navigate_*` — a popup is not a cell in the screen grid, and
 // the user would land on a screen with the popup's state still live.
 
 void InputDispatcher::on_r_up() {
     if (route(Gesture::R_UP)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser()) { browser_cycle_sort(+1); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
     s_.selection.exit();   // a selection belongs to the screen it was made on
@@ -473,26 +472,10 @@ void InputDispatcher::on_r_up() {
 
 void InputDispatcher::on_r_down() {
     if (route(Gesture::R_DOWN)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser()) { browser_cycle_sort(-1); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
     s_.selection.exit();
-}
-
-void InputDispatcher::browser_cycle_sort(int delta) {
-    FileBrowserState& b = s_.fileBrowser;
-
-    // Steps the modes by index, so the enum's order is behaviour (ui/filesystem.h).
-    const int next = (static_cast<int>(b.sortMode) + delta + FILE_SORT_MODE_COUNT) % FILE_SORT_MODE_COUNT;
-    b.sortMode = static_cast<FileSortMode>(next);
-
-    // ⚠️ Rebuild rather than re-sort in place, or the tie-break depends on the previous sort mode.
-    rebuild_items(b, fs_);
-
-    // The cursor stays put, so the row under it now holds a different file — the list is re-ordered.
-    b.statusMessage = file_sort_label(b.sortMode);
-    b.statusSuccess = true;
 }
 
 // ─── R+LEFT/R+RIGHT: carry the edited item across screens ────────────────────────────────────────
@@ -554,8 +537,7 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
 
 void InputDispatcher::on_r_left() {
     if (route(Gesture::R_LEFT)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_left(ns);
     if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
@@ -565,8 +547,7 @@ void InputDispatcher::on_r_left() {
 
 void InputDispatcher::on_r_right() {
     if (route(Gesture::R_RIGHT)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
+    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_right(ns);
     // ⚠️ The NAV = SONG entry gate sits above the sync: a refused press must leave nothing behind, and
@@ -581,32 +562,7 @@ void InputDispatcher::on_r_right() {
 
 void InputDispatcher::on_l_b() {
     if (route(Gesture::L_B)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-
-    // ⚠️ The browser's selection is a plain anchor..cursor range over a list (a second tap inside the
-    // window selects all) — a different machine from the grid editors' CELL→ROW→SCREEN widener.
-    if (on_browser()) {
-        FileBrowserState& b = s_.fileBrowser;
-        if (b.mode != BrowserMode::NORMAL) return;
-
-        if (!b.selectionMode) {
-            b.selectionMode   = true;
-            b.selectionAnchor = b.cursor;
-            b.lastSelectTapMs = now_ms_;
-        } else if (now_ms_ - b.lastSelectTapMs <= 500) {
-            // Tap again inside the window: select everything, skipping the ".." row.
-            const int first = b.first_selectable();
-            const int last  = std::max(static_cast<int>(b.items.size()) - 1, first);
-            b.selectionAnchor = first;
-            b.cursor          = last;
-            b.scroll          = std::max(0, last - BROWSER_VISIBLE_ROWS + 1);
-            b.lastSelectTapMs = 0;   // …so a third tap re-anchors rather than re-selecting all
-        } else {
-            b.selectionAnchor = b.cursor;   // the window lapsed — start a fresh range here
-            b.lastSelectTapMs = now_ms_;
-        }
-        return;
-    }
+    if (overlay_swallows(Overlay::NONE)) return;
 
     switch (s_.currentScreen) {
         case ScreenType::PHRASE:
@@ -623,30 +579,7 @@ void InputDispatcher::on_l_b() {
 
 void InputDispatcher::on_l_a() {
     if (route(Gesture::L_A)) return;
-    // ⚠️ Every layer an arm below tests for must be in this set, or the gesture is thrown away here.
-    if (overlay_swallows(Overlay::BROWSER)) return;
-
-    // On the browser L+A cuts/pastes FILES — the same shape as the grid editors below.
-    if (on_browser()) {
-        FileBrowserState& b = s_.fileBrowser;
-        if (b.mode != BrowserMode::NORMAL) return;
-
-        if (b.selectionMode) {
-            std::vector<std::string> files = browser_selected_paths();
-            if (files.empty()) return;
-            const size_t n = files.size();
-
-            b.fileClipboard      = std::move(files);
-            b.fileClipboardIsCut = true;
-            b.selectionMode      = false;
-            b.selectionAnchor    = -1;
-            b.statusMessage = "CUT " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
-            b.statusSuccess = true;
-        } else if (!b.fileClipboard.empty()) {
-            browser_paste();
-        }
-        return;
-    }
+    if (overlay_swallows(Overlay::NONE)) return;
 
     // Inside a selection L+A CUTS; outside one it PASTES.
     Project& p = host_.edit_project();
@@ -830,12 +763,7 @@ void InputDispatcher::run_selection_recency() {
 
 void InputDispatcher::on_l_r() {
     if (route(Gesture::L_R)) return;
-    if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_browser()) {
-        s_.fileBrowser.selectionMode   = false;
-        s_.fileBrowser.selectionAnchor = -1;
-        return;
-    }
+    if (overlay_swallows(Overlay::NONE)) return;
 
     // One press undoes one thing, most recent first (`s_.lastClearable`): the mix (any channel muted
     // or soloed) or the selection with its buffer. ⚠️ A rung with nothing to clear falls through to
@@ -870,6 +798,12 @@ void InputDispatcher::on_l_r() {
     // the press doing nothing at all.
     if (!had_buffer && mix_touched) restore_full_playback();
 }
+
+// ─── SELECT + A / B / R: the browser's file chords — only its handler answers them ───────────────
+
+void InputDispatcher::on_select_a() { route(Gesture::SELECT_A); }
+void InputDispatcher::on_select_b() { route(Gesture::SELECT_B); }
+void InputDispatcher::on_select_r() { route(Gesture::SELECT_R); }
 
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
