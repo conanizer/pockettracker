@@ -670,7 +670,10 @@ class InputDispatcher {
     /** Write an effect CODE into the FX column under the cursor. */
     void apply_fx_type_change(int effect_code);
 
-    // ── The mapping destination picker ──────────────────────────────────────────────────────────
+    // ── The mapping destination picker (ui/dispatch/layers/map_picker.cpp) ──────────────────────
+    LayerResult map_picker_layer(Gesture g);
+    /** Raise the picker on the destination the mapping under the cursor already has. */
+    void open_map_picker();
     /** On a mapping row's GROUP or PARAMETER cell — what the picker stands in for. Not the ADD row. */
     bool on_map_dest_cell() const;
     /** Point the mapping under the cursor at the picked destination, and close. */

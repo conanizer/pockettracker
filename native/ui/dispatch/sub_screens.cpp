@@ -1,5 +1,5 @@
-// What a cell opens: the mapping destination picker, INSTRUMENT's buttons, the
-// cells whose A or B waits for the release, and the EQ editor.
+// What a cell opens: INSTRUMENT's buttons, the cells whose A or B waits for the release, and the EQ
+// editor.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -8,31 +8,6 @@
 #include <algorithm>
 
 namespace pt::ui {
-
-// ─── The mapping destination picker ──────────────────────────────────────────────────────────────
-
-bool InputDispatcher::on_map_dest_cell() const {
-    if (s_.currentScreen != ScreenType::MIDI_MAP) return false;
-    const Project& p = *s_.project;
-    if (s_.midiMapCursorRow < 0 ||
-        s_.midiMapCursorRow >= static_cast<int>(p.midiMappings.size()))
-        return false;   // the ADD row — a plain A is its whole behaviour
-    return s_.midiMapCursorColumn == static_cast<int>(MapCol::GROUP) ||
-           s_.midiMapCursorColumn == static_cast<int>(MapCol::PARAM);
-}
-
-void InputDispatcher::apply_map_picker_choice() {
-    const songcore::MapDest* d = s_.mapPicker.selected();
-    s_.mapPicker = MapPickerState{};
-    if (d == nullptr || !on_map_dest_cell()) return;
-
-    Project& p = host_.edit_project();
-    // ⚠️ `take_dest`, not a field write: a new destination brings its own RANGE and clears its SCOPE.
-    if (songcore::take_dest(p.midiMappings[static_cast<size_t>(s_.midiMapCursorRow)], *d))
-        mark_dirty_and_arm_autosave();
-
-    // No cursor clamp needed: the picker opens only on GROUP and PARAM, which every destination has.
-}
 
 // The one place the FX list's length is decided — the picker and the FX column both read it.
 //

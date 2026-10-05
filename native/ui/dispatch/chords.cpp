@@ -139,16 +139,11 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 
 void InputDispatcher::on_a_up() {
     if (layer_takes(Gesture::A_UP)) return;
-    if (overlay_swallows(Overlay::MAP_PICK)) return;
-    if (s_.mapPicker.isOpen) { map_picker_move_up(s_.mapPicker); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { open_fx_helper(); return; }
-    if (on_map_dest_cell()) {
-        s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
-            s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
-        return;
-    }
+    if (on_map_dest_cell()) { open_map_picker(); return; }
     // The TYPE cell has no coarse step, so both axes walk it — through the confirm dialog on a loaded slot.
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment_fast);
@@ -156,24 +151,18 @@ void InputDispatcher::on_a_up() {
 
 void InputDispatcher::on_a_down() {
     if (layer_takes(Gesture::A_DOWN)) return;
-    if (overlay_swallows(Overlay::MAP_PICK)) return;
-    if (s_.mapPicker.isOpen) { map_picker_move_down(s_.mapPicker); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { open_fx_helper(); return; }
-    if (on_map_dest_cell()) {
-        s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
-            s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
-        return;
-    }
+    if (on_map_dest_cell()) { open_map_picker(); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement_fast);
 }
 
 void InputDispatcher::on_a_left() {
     if (layer_takes(Gesture::A_LEFT)) return;
-    if (overlay_swallows(Overlay::MAP_PICK)) return;
-    if (s_.mapPicker.isOpen) { map_picker_move_left(s_.mapPicker); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
@@ -182,8 +171,7 @@ void InputDispatcher::on_a_left() {
 
 void InputDispatcher::on_a_right() {
     if (layer_takes(Gesture::A_RIGHT)) return;
-    if (overlay_swallows(Overlay::MAP_PICK)) return;
-    if (s_.mapPicker.isOpen) { map_picker_move_right(s_.mapPicker); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
@@ -197,10 +185,8 @@ void InputDispatcher::on_a_released() {
         heldNotePreview_ = false;
         host_.stop_preview(/*cut=*/true);
     }
-    if (layer_takes(Gesture::A_RELEASE)) return;
-
-    // The map picker commits on RELEASE, so you can hold A, read the list, and let go on your choice.
-    if (top_overlay() == Overlay::MAP_PICK) apply_map_picker_choice();
+    // Only a layer answers the release — the two pickers commit on it.
+    layer_takes(Gesture::A_RELEASE);
 }
 
 void InputDispatcher::on_a_deferred() {
