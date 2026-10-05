@@ -192,7 +192,7 @@ class SongcoreHost {
      * Stop the transport — the scheduler AND the engine.
      *
      * ⚠️ Stopping only the scheduler is not enough: notes already handed to the engine sit in its
-     * queue up to two phrases ahead, and would keep playing — and a START would then layer a second
+     * queue ahead of the clock, and would keep playing — and a START would then layer a second
      * stream on top.
      * ⚠️ Order matters: the master EQ is restored BEFORE the queues are cleared, because an EQM
      * override may be waiting in the param queue.
@@ -261,12 +261,12 @@ class SongcoreHost {
     }
 
     /**
-     * The sequencer's half of `poll`, for a long operation that has the UI thread: tops the lookahead
-     * up and releases the MIDI that has come due. Nothing input-side runs, so it is safe mid-load.
+     * The sequencer's half of `poll`: tops the lookahead up to `aheadMs` and releases the MIDI that has
+     * come due. Nothing input-side runs, so a long operation may call it mid-load with a deeper ask.
      */
-    void keep_walking() {
+    void keep_walking(int64_t aheadMs = Sequencer::HORIZON_MS) {
         sync_clock();
-        seq_.updatePlaybackBuffer();
+        seq_.updatePlaybackBuffer(aheadMs);
         // ⚠️ The MIDI queue is released here (unless a sender thread owns it), even when stopped: a
         // LEN gate and a panic's note-offs are owed after the last note.
         if (!midiPumpExternal_) external_.pump(seq_.clock());
@@ -935,7 +935,7 @@ class SongcoreHost {
     // ── ↕ LIVE mode ──────────────────────────────────────────────────────────────────────────────
     //
     // Queue-and-launch. Each verb arms a slot and rewinds its track so the launch lands on the
-    // boundary it was aimed at (the scheduler runs two phrases ahead). Dropping the queued notes past
+    // boundary it was aimed at (the scheduler runs ahead of the clock). Dropping the queued notes past
     // that frame is the host's half.
 
     bool               live_mode() const              { return seq_.live_mode(); }

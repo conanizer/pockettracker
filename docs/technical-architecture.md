@@ -341,6 +341,11 @@ host's project in place. Two mutable copies of a document is a desync waiting to
 (current chain, phrase, step, table row, groove position), applies effects, resolves chance and
 randomization, and emits **events** rather than engine calls.
 
+The window is short — `Sequencer::HORIZON_MS`, filled a phrase row at a time — so an edit is heard
+from the next row not yet scheduled. Only the frame loop's poll refills it: anything that holds the UI
+thread longer than the window calls `InputDispatcher::before_long_operation()` first, which fills
+deeper (no edit can arrive while the thread is blocked, so the depth costs nothing).
+
 Timing is frame-based: `frames_per_step` and `frames_per_tic` derive from the tempo, and grooves
 change a step's length per position. Everything downstream is stamped in frames.
 

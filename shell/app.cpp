@@ -544,8 +544,8 @@ struct Screen {
 // FRAME_MS is the fallback for a platform that reports no refresh rate.
 constexpr Uint64 POLL_MS      = 4;
 constexpr Uint64 POLL_IDLE_MS = 16;
-// Off the screen (Android): a playing song needs only the lookahead pump, which works two phrases
-// ahead, so the idle rate serves it; with nothing playing the loop just waits to come back.
+// Off the screen (Android): a playing song needs only the lookahead pump, which the idle rate serves;
+// with nothing playing the loop just waits to come back.
 constexpr Uint64 BACKGROUND_IDLE_MS = 250;
 constexpr Uint64 QUIET_MS     = 1000;   // input this recent still counts as something arriving
 constexpr Uint64 FRAME_MS     = 16;

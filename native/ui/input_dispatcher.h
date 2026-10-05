@@ -429,11 +429,12 @@ class InputDispatcher {
     /**
      * Call at the top of anything that holds the UI thread long enough to be heard — a load, a SAMPLE
      * EDITOR operation, a save. The sequencer is only refilled by the frame loop's poll, so a song
-     * playing meanwhile runs on what is already scheduled; this fills it first. A load also refills at
-     * its progress reports (`load_tick`). No edit can arrive while the operation runs, so filling
-     * ahead here costs no edit latency. A missed site shows up as a `STALL` line in the latency probe.
+     * playing meanwhile runs on what is already scheduled; this fills it deeper than the poll does
+     * first. A load also refills at its progress reports (`load_tick`). No edit can arrive while the
+     * operation runs, so the depth costs no edit latency. A missed site shows up as a `STALL` line in
+     * the latency probe.
      */
-    void before_long_operation() { host_.keep_walking(); }
+    void before_long_operation() { host_.keep_walking(songcore::Sequencer::LONG_OPERATION_MS); }
 
     /** See set_media_base_dir. Empty means "relative paths stay relative" (resolve_media_path). */
     std::string mediaBaseDir_{};

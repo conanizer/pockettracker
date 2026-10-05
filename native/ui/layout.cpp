@@ -223,7 +223,7 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
                 cs.cursorRow    = s.scaleCursorRow;
                 cs.cursorColumn = s.scaleCursorColumn;
                 // The pitch classes coming out of the speaker, from the voice readback the note monitor
-                // uses — ⚠️ NOT the sequencer, two phrases ahead. All eight tracks fold into one mask.
+                // uses — ⚠️ NOT the sequencer, which runs ahead. All eight tracks fold into one mask.
                 for (int i = 0; i < 8; ++i) {
                     const songcore::Note n = s.trackNotes[i];
                     if (n == songcore::Note::EMPTY()) continue;

@@ -72,7 +72,7 @@ struct ScaleState {
     /**
      * Which PITCH CLASSES are sounding right now, bit 0 = C — the degrees that get a `>` marker.
      *
-     * ⚠️⚠️ **IT MUST BE WHAT IS HEARD, NOT WHAT IS SCHEDULED.** The sequencer runs two phrases ahead,
+     * ⚠️⚠️ **IT MUST BE WHAT IS HEARD, NOT WHAT IS SCHEDULED.** The sequencer runs ahead of the clock,
      * so a marker fed from it would light the degree of a bar nobody has reached. It is filled from
      * the ENGINE's voices (`AppState::trackNotes`), the same source the note monitor uses, which is
      * the only place in the app that knows what is coming out of the speaker.

@@ -16,7 +16,7 @@
 //   • the route to the wire: this serializer and `MidiClock` share `emit`, the OFFSET, the port and
 //     the send observer.
 //
-// Events arrive at LOOKAHEAD time (two phrases ahead), are queued by target frame and released by
+// Events arrive at LOOKAHEAD time (ahead of the clock), are queued by target frame and released by
 // `pump(now)` — from a ~1 kHz sender thread (`shell/midi-sender.h`) driven by `FrameEstimator`, or
 // from `SongcoreHost::poll` when no such thread owns the job. Two threads, hence `mu_`.
 

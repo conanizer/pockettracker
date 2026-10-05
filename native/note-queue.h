@@ -95,7 +95,7 @@ struct ScheduledNote {
     float detuneSemitones = 0.0f; // SF: static fine pitch offset in semitones (instrument detune)
 
     // ── Deferred resolution: the instrument as a NUMBER ──────────────────────────────────────────
-    // ⚠️ **A NOTE IS QUEUED ABOUT TWO PHRASES BEFORE IT SOUNDS.** When `instrumentId >= 0` every
+    // ⚠️ **A NOTE IS QUEUED BEFORE IT SOUNDS (the lookahead).** When `instrumentId >= 0` every
     // field above is still UNSET and gets derived at the trigger instead, from the engine's program
     // table — which is what lets a table row name a different instrument on the hit itself.
     // -1 means the note arrived already derived (previews, retrigger, MIDI in, the file browser).

@@ -85,7 +85,7 @@ struct RollbackPlan {
 // changes, so nothing that switches on `playbackMode_` (playheads, rollback, traces) needs a new arm,
 // and a project that never enters LIVE schedules identically.
 // `targetRow < 0 && !stop` is the empty slot.
-// ⚠️ A slot is SCHEDULED up to two phrases before it is HEARD. `firesAt` is the frame it lands on: the
+// ⚠️ A slot is SCHEDULED before it is HEARD (the lookahead). `firesAt` is the frame it lands on: the
 // scheduler treats it as spent once set, the display keeps showing it until the transport gets there.
 struct LiveSlot {
     int     targetRow = -1;      // the song row to launch on this channel
@@ -293,15 +293,25 @@ class Sequencer {
     }
     int  sample_rate() const { return sampleRate_; }
 
+    // PHRASE/CHAIN: walk the phrase in progress to its end now, whatever the clock (for the tests,
+    // which count one whole pass; the app never calls it).
+    void finish_phrase_now() {
+        if (!isPlaying_ || project_ == nullptr) return;
+        if (playbackMode_ != PlaybackMode::PHRASE && playbackMode_ != PlaybackMode::CHAIN) return;
+        nextFrameToSchedule_ += finish_walk(playbackTrack_, frames_per_step(project_->tempo, sampleRate_));
+    }
+
     // The frame the current session latched at T PLAY — the trace's session base.
     int64_t playback_start_frame() const { return playbackStartFrame_; }
 
-    static constexpr int64_t LOOKAHEAD_MS = 50;
-    static constexpr int BUFFER_PHRASES = 2;
-    // Per-track scheduling steps one SONG poll may take — a step is one phrase ROW: 8 tracks × 2
-    // buffered phrases × 16 rows of real work, plus headroom for units that cost no frames (which could
-    // otherwise spin).
-    static constexpr int SONG_STEPS_PER_POLL = 1024;
+    // How far past the clock the walk keeps scheduled, so an edit is heard from the next row not yet
+    // walked. ⚠️ It must outlast the longest gap between two polls; an operation that holds the UI
+    // thread longer fills to LONG_OPERATION_MS first.
+    static constexpr int64_t HORIZON_MS = 250;
+    static constexpr int64_t LONG_OPERATION_MS = 2000;
+    // Units one fill may take, per phrase of depth — a unit is one phrase ROW: 8 tracks × 16 rows of
+    // real work, plus headroom for units that cost no frames (which could otherwise spin).
+    static constexpr int STEPS_PER_PHRASE_OF_DEPTH = 512;
 
     bool is_playing() const { return isPlaying_; }
     PlaybackMode playback_mode() const { return playbackMode_; }
@@ -428,7 +438,7 @@ class Sequencer {
 
     /**
      * The scale one track is scheduling against — where its last SCA (or SCG) left it.
-     * ⚠️ The SCHEDULER's clock, up to two phrases ahead of what is heard. The note cursor asks
+     * ⚠️ The SCHEDULER's clock, ahead of what is heard by the lookahead. The note cursor asks
      * `songcore::track_scale` instead (scales.h).
      */
     int track_scale_slot(int trackId) const { return trackStates_[clampi(trackId, 0, 7)].scaleSlot; }
@@ -477,11 +487,10 @@ class Sequencer {
         playbackMode_ = PlaybackMode::PHRASE;
         isPlaying_ = true;
         int tempo = project_->tempo;
-        int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         router_.t_play("PHRASE", "id=" + hex2(phraseId), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
-        nextFrameToSchedule_ += schedulePhrase(phraseId, playbackStartFrame_, playbackTrack_,
-                                               project_transpose_semitones(*project_), framesPerStep, 0);
+        begin_phrase(phraseId, playbackStartFrame_, playbackTrack_, project_transpose_semitones(*project_), 0);
+        updatePlaybackBuffer();
     }
 
     void playChain(int chainId, int trackId = 0) {
@@ -495,7 +504,6 @@ class Sequencer {
         playbackMode_ = PlaybackMode::CHAIN;
         isPlaying_ = true;
         int tempo = project_->tempo;
-        int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         router_.t_play("CHAIN", "id=" + hex2(chainId), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
         nextChainRowToSchedule_ = 0;
@@ -505,11 +513,11 @@ class Sequencer {
         if (firstRow >= 0) {
             int phraseId = chain_phrase_ref(chain, firstRow);
             int transposeSemitones = chain_transpose_semitones(chain, firstRow);
-            nextFrameToSchedule_ += schedulePhrase(phraseId, playbackStartFrame_, playbackTrack_,
-                                                   transposeSemitones + project_transpose_semitones(*project_),
-                                                   framesPerStep, 0, &chain, firstRow);
+            begin_phrase(phraseId, playbackStartFrame_, playbackTrack_,
+                         transposeSemitones + project_transpose_semitones(*project_), 0, &chain, firstRow);
             chainRowStartFrames_.emplace_back(firstRow, playbackStartFrame_);
             nextChainRowToSchedule_ = firstRow + 1;
+            updatePlaybackBuffer();
         }
     }
 
@@ -601,7 +609,7 @@ class Sequencer {
     /**
      * Toggle the mode under a running transport: every track keeps its place and repeats (or, leaving
      * LIVE, resumes walking from) the row it is on. Nothing jumps or goes silent.
-     * ⚠️ It REWINDS: a chain end inside the two-phrase lookahead has already been committed as
+     * ⚠️ It REWINDS: a chain end inside the lookahead has already been committed as
      * "advance", and without the rewind the change would land a lap late.
      */
     RollbackPlan set_live_mode(bool on, int64_t currentFrame) {
@@ -683,44 +691,52 @@ class Sequencer {
         return head;
     }
 
-    void updatePlaybackBuffer() {
+    // Fill until every track is `aheadMs` past the clock, a row at a time. Work-conserving: it returns
+    // at once while the buffer is deep enough.
+    void updatePlaybackBuffer(int64_t aheadMs = HORIZON_MS) {
         if (!isPlaying_ || project_ == nullptr) return;
         const Project& project = *project_;
         int tempo = project.tempo;
         int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         int64_t framesPerPhrase = framesPerStep * 16;
         int64_t currentFrame = getCurrentFrame();
-        int64_t bufferRemaining = buffer_head() - currentFrame;
-        int64_t minBuffer = static_cast<int64_t>(BUFFER_PHRASES) * framesPerPhrase;
-        if (bufferRemaining >= minBuffer && walking_track() < 0) return;
+        const int64_t minBuffer = aheadMs * sampleRate_ / 1000;
+        if (buffer_head() - currentFrame >= minBuffer) return;
+        // ⚠️ The cap bounds the work one fill can do.
+        const int stepCap = STEPS_PER_PHRASE_OF_DEPTH * static_cast<int>(1 + minBuffer / framesPerPhrase);
 
         switch (playbackMode_) {
             case PlaybackMode::PHRASE: {
                 TrackState& trackState = trackStates_[playbackTrack_];
-                if (!trackState.walk.active) {
-                    save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_});
-                    int hopStartRow = trackState.consumeHopTarget();
-                    int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                    begin_phrase(currentPhraseId_, nextFrameToSchedule_, playbackTrack_,
-                                 project_transpose_semitones(project), effectiveStartRow);
+                for (int step = 0; step < stepCap && nextFrameToSchedule_ - currentFrame < minBuffer; ++step) {
+                    if (!trackState.walk.active) {
+                        save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_});
+                        int hopStartRow = trackState.consumeHopTarget();
+                        int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
+                        // HOP FF stopped the track: the phrase is silent from here.
+                        if (!begin_phrase(currentPhraseId_, nextFrameToSchedule_, playbackTrack_,
+                                          project_transpose_semitones(project), effectiveStartRow))
+                            break;
+                    }
+                    nextFrameToSchedule_ += walk_phrase_row(playbackTrack_, framesPerStep);
                 }
-                nextFrameToSchedule_ += finish_walk(playbackTrack_, framesPerStep);
                 break;
             }
             case PlaybackMode::CHAIN: {
                 const Chain& chain = project.chains[currentChainId_];
                 TrackState& trackState = trackStates_[playbackTrack_];
-                if (trackState.walk.active) {
-                    nextFrameToSchedule_ += finish_walk(playbackTrack_, framesPerStep);
-                    break;
-                }
-                if (trackState.trackStopped) {
-                    nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
-                    nextFrameToSchedule_ += framesPerPhrase;
-                    return;
-                }
-                int nextRow = findNextNonEmptyChainRow(nextChainRowToSchedule_, chain);
-                if (nextRow >= 0) {
+                for (int step = 0; step < stepCap && nextFrameToSchedule_ - currentFrame < minBuffer; ++step) {
+                    if (trackState.walk.active) {
+                        nextFrameToSchedule_ += walk_phrase_row(playbackTrack_, framesPerStep);
+                        continue;
+                    }
+                    if (trackState.trackStopped) {
+                        nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
+                        nextFrameToSchedule_ += framesPerPhrase;
+                        continue;
+                    }
+                    int nextRow = findNextNonEmptyChainRow(nextChainRowToSchedule_, chain);
+                    if (nextRow < 0) { stop(); return; }
                     int phraseId = chain_phrase_ref(chain, nextRow);
                     int transposeSemitones = chain_transpose_semitones(chain, nextRow)
                                              + project_transpose_semitones(project);
@@ -731,9 +747,7 @@ class Sequencer {
                     nextChainRowToSchedule_ = (nextRow + 1) % 16;
                     begin_phrase(phraseId, nextFrameToSchedule_, playbackTrack_, transposeSemitones,
                                  effectiveStartRow, &chain, nextRow);
-                    nextFrameToSchedule_ += finish_walk(playbackTrack_, framesPerStep);
-                } else {
-                    stop();
+                    nextFrameToSchedule_ += walk_phrase_row(playbackTrack_, framesPerStep);
                 }
                 break;
             }
@@ -745,11 +759,10 @@ class Sequencer {
 
                 // ─── EIGHT INDEPENDENT CURSORS ───────────────────────────────────────────────────
                 //
-                // Fill whichever track is furthest behind, a row at a time, until each is
-                // BUFFER_PHRASES ahead — so a two-row chain moves on while a sixteen-row one beside it
-                // runs. The per-track walk is schedule_track_unit().
-                // ⚠️ The step cap bounds the work one poll can do.
-                for (int step = 0; step < SONG_STEPS_PER_POLL; ++step) {
+                // Fill whichever track is furthest behind, a row at a time, until each is deep
+                // enough — so a two-row chain moves on while a sixteen-row one beside it runs. The
+                // per-track walk is schedule_track_unit().
+                for (int step = 0; step < stepCap; ++step) {
                     int nextTrack = -1;
                     int64_t earliest = 0;
                     for (int t = 0; t < 8; ++t) {
@@ -762,12 +775,7 @@ class Sequencer {
                     // Nothing left to fill, and the transport keeps running: a block loops for ever,
                     // so all eight done means PLAY landed on an unwritten row. STOP is the only end.
                     if (nextTrack < 0) break;
-                    // Deep enough — but a phrase begun is finished, so the lookahead still ends on
-                    // phrase boundaries.
-                    if (earliest - currentFrame >= minBuffer) {
-                        nextTrack = walking_track();
-                        if (nextTrack < 0) break;
-                    }
+                    if (earliest - currentFrame >= minBuffer) break;
                     schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase);
                 }
                 break;
@@ -852,7 +860,7 @@ class Sequencer {
     /**
      * Rewind ONE song-mode track to its earliest boundary past `currentFrame`; returns the frame to
      * drop queued notes from (−1 = nothing queued past now). Shared by a live EDIT (heard on the next
-     * loop) and a LIVE launch (lands on the next boundary, not after the buffered two phrases).
+     * loop) and a LIVE launch (lands on the next boundary, not after the lookahead).
      * ⚠️ TrackState and the RNG come back with it (see Checkpoint).
      */
     int64_t rewind_song_track(int trackId, int64_t currentFrame) {
@@ -980,7 +988,7 @@ class Sequencer {
         if (checkpoints_[trackId].size() > 4) checkpoints_[trackId].pop_front();
     }
 
-    // APPEND, never overwrite. A song shorter than the two-phrase lookahead comes back round to a
+    // APPEND, never overwrite. A song shorter than the lookahead comes back round to a
     // (songRow, chainRow) it already queued; overwriting would replace the frame of the row SOUNDING
     // NOW with its next occurrence and freeze the playhead. Duplicates cannot pile up: prune_past runs
     // on every read and the lookahead is bounded. The entry names the TRACK — eight cursors, eight
@@ -1124,13 +1132,6 @@ class Sequencer {
         cp.songRow = songRow;
         cp.songChainRow = rowUnit;
         save_checkpoint(trackId, cp);
-    }
-
-    // A track with a phrase part-way through, or −1.
-    int walking_track() const {
-        for (int t = 0; t < 8; ++t)
-            if (trackStates_[t].walk.active) return t;
-        return -1;
     }
 
     // Advance ONE track by one unit: a phrase row, a bar sat out, or the end of its block (in SONG, a
@@ -1278,14 +1279,6 @@ class Sequencer {
         begin_phrase(chain_phrase_ref(chain, chainRow), trackNextFrame_[trackId], trackId, transposeSemitones,
                      effectiveStartRow, &chain, chainRow);
         trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
-    }
-
-    // A whole phrase in one call — the transport starts, which schedule their first phrase at PLAY.
-    // Returns the frames it took.
-    int64_t schedulePhrase(int phraseId, int64_t startFrame, int trackId, int transposeSemitones,
-                           int64_t framesPerStep, int startRow, const Chain* chain = nullptr, int chainRow = 0) {
-        if (!begin_phrase(phraseId, startFrame, trackId, transposeSemitones, startRow, chain, chainRow)) return 0;
-        return finish_walk(trackId, framesPerStep);
     }
 
     // The rest of the phrase in progress, in one call. Returns the frames it took.

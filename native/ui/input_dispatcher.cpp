@@ -81,7 +81,7 @@ bool InputDispatcher::load_tick(long long now_ms, float fraction) {
         if (render_.load_pump && render_.load_pump()) s_.loading.cancelRequested = true;
 
         // A song playing through the load keeps going: the frame loop that refills it is not running.
-        host_.keep_walking();
+        before_long_operation();
 
         if (s_.loading.shown && render_.repaint) render_.repaint();
     }

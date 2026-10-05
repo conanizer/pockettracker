@@ -92,7 +92,7 @@ struct ScaleAt {
 /**
  * The scale a PHRASE puts one of its rows in: the last `SCA` / `SCG` on or above `row`, else slot 00
  * and the project key. What the note cursor asks.
- * ⚠️ Reads the SONG, never `TrackState`: the scheduler runs two phrases ahead, so its live scale would
+ * ⚠️ Reads the SONG, never `TrackState`: the scheduler runs ahead of what is heard, so its live scale would
  * quantize to a bar not yet heard. The authored cells read the same playing or stopped.
  * ⚠️ Resolved as `Sequencer` does: last-wins per command across the three slots, then SCG, then SCA
  * on top. A command on the cursor's own row counts.

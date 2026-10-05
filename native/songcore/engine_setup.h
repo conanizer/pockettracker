@@ -521,7 +521,7 @@ bool request_instrument_soundfont(Engine& engine, const Instrument& ins, Routing
 /**
  * Install a finished background load; call once a frame, free when nothing has finished.
  * Returns the instrument whose slot MOVED, or -1. ⚠️ The caller needs it: a note's slot is read when it
- * is SCHEDULED, two phrases ahead, so a mid-take install is unheard until the caller reschedules.
+ * is SCHEDULED, ahead of the clock, so a mid-take install is unheard until the caller reschedules.
  */
 template <typename Engine>
 int collect_instrument_soundfont(Engine& engine, const Project& project, Routing& routing,
