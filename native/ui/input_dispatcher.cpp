@@ -51,6 +51,7 @@ void InputDispatcher::set_now(long long now_ms) {
 // ─── A slow load ─────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::begin_load(long long now_ms, std::string detail) {
+    before_long_operation();
     pt::begin_load();                 // clears the engine-side cancel flag; see load_progress.h
     s_.loading = AppState::LoadingState{};
     s_.loading.running = true;
@@ -78,6 +79,9 @@ bool InputDispatcher::load_tick(long long now_ms, float fraction) {
         // ⚠️ The pump first — it is also what keeps the app's lifecycle alive during a load
         // (`RenderHooks::load_pump`).
         if (render_.load_pump && render_.load_pump()) s_.loading.cancelRequested = true;
+
+        // A song playing through the load keeps going: the frame loop that refills it is not running.
+        host_.keep_walking();
 
         if (s_.loading.shown && render_.repaint) render_.repaint();
     }
@@ -113,12 +117,14 @@ void InputDispatcher::run_due_autosave() {
     // back — and a spurious RECOVER WORK? on the next launch.
     if (!s_.project_dirty()) return;
 
+    before_long_operation();
     autosave_write(host_, fs_);   // a failure is silent — see lifecycle.h
 }
 
 void InputDispatcher::flush_autosave() {
     autosavePending_ = false;
     if (!s_.project_dirty()) return;
+    before_long_operation();
     autosave_write(host_, fs_);
 }
 

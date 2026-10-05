@@ -431,6 +431,7 @@ void InputDispatcher::on_start() {
                                   (se.fxType <= SampleEditorModule::FX_DRIVE && se.fxValue > 0);
         host_.restore_fx_preview_backup();
         if (hasFxPreview) {
+            before_long_operation();
             host_.save_fx_preview_backup(se.instrumentId);
             host_.apply_sample_fx(se.instrumentId, se.fxType, se.fxValue);
         }

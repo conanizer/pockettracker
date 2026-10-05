@@ -668,6 +668,21 @@ class Sequencer {
 
     // ── the polling scheduler (live modes) ──
 
+    // The first frame not yet scheduled. ⚠️ SONG has eight lookaheads, so it is the track FURTHEST
+    // BEHIND; PHRASE and CHAIN keep the one shared cursor. With every track finished it is pinned to
+    // the clock rather than +∞, so a fill still runs.
+    int64_t buffer_head() const {
+        if (playbackMode_ != PlaybackMode::SONG) return nextFrameToSchedule_;
+        int64_t head = getCurrentFrame();
+        bool anyLive = false;
+        for (int t = 0; t < 8; ++t) {
+            if (trackDone_[t]) continue;
+            if (!anyLive || trackNextFrame_[t] < head) head = trackNextFrame_[t];
+            anyLive = true;
+        }
+        return head;
+    }
+
     void updatePlaybackBuffer() {
         if (!isPlaying_ || project_ == nullptr) return;
         const Project& project = *project_;
@@ -675,22 +690,7 @@ class Sequencer {
         int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         int64_t framesPerPhrase = framesPerStep * 16;
         int64_t currentFrame = getCurrentFrame();
-
-        // ⚠️ SONG has eight lookaheads, so the buffer depth is asked of the track FURTHEST BEHIND.
-        // PHRASE and CHAIN keep the one shared cursor.
-        // With every track finished, the head is pinned to `currentFrame` rather than +∞, so the fill
-        // below still runs.
-        int64_t bufferHead = nextFrameToSchedule_;
-        if (playbackMode_ == PlaybackMode::SONG) {
-            bufferHead = currentFrame;
-            bool anyLive = false;
-            for (int t = 0; t < 8; ++t) {
-                if (trackDone_[t]) continue;
-                if (!anyLive || trackNextFrame_[t] < bufferHead) bufferHead = trackNextFrame_[t];
-                anyLive = true;
-            }
-        }
-        int64_t bufferRemaining = bufferHead - currentFrame;
+        int64_t bufferRemaining = buffer_head() - currentFrame;
         int64_t minBuffer = static_cast<int64_t>(BUFFER_PHRASES) * framesPerPhrase;
         if (bufferRemaining >= minBuffer && walking_track() < 0) return;
 

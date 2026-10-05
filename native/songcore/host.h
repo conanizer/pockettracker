@@ -255,12 +255,21 @@ class SongcoreHost {
         // ⚠️ Between the drain and the pass: a mapped knob's lookahead roll must precede the pass it
         // affects, and happen once per batch rather than once per message.
         flush_mapped_edits();
+        keep_walking();
+        // TEMPO is editable while playing, so the beat length is pushed every time.
+        if (engine_) engine_->setMetronomeBeat(frames_per_quarter());
+    }
+
+    /**
+     * The sequencer's half of `poll`, for a long operation that has the UI thread: tops the lookahead
+     * up and releases the MIDI that has come due. Nothing input-side runs, so it is safe mid-load.
+     */
+    void keep_walking() {
+        sync_clock();
         seq_.updatePlaybackBuffer();
         // ⚠️ The MIDI queue is released here (unless a sender thread owns it), even when stopped: a
         // LEN gate and a panic's note-offs are owed after the last note.
         if (!midiPumpExternal_) external_.pump(seq_.clock());
-        // TEMPO is editable while playing, so the beat length is pushed every time.
-        if (engine_) engine_->setMetronomeBeat(frames_per_quarter());
         flush_trace();
     }
 

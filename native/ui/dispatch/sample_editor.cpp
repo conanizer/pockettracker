@@ -333,6 +333,7 @@ void InputDispatcher::tap_slice_marker() {
 // ─── RATE and BIT: the two cells that rebuild the audio ──────────────────────────────────────────
 
 void InputDispatcher::apply_sample_rate_and_bits() {
+    before_long_operation();
     SampleEditorState& se     = s_.sampleEditor;
     const int          factor = (se.rateMode == 1) ? 2 : (se.rateMode == 2) ? 4 : 1;
     const int          oldLen = se.totalFrames;
@@ -407,6 +408,7 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
 // ─── A on the op rows, the FX row, the name and the save buttons ─────────────────────────────────
 
 void InputDispatcher::sample_editor_confirm() {
+    before_long_operation();
     SampleEditorState& se     = s_.sampleEditor;
     const int          instId = se.instrumentId;
     const int          startF = static_cast<int>(se.selectionStart);
@@ -712,6 +714,7 @@ std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const
 // ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
+    before_long_operation();
     SampleEditorState& se   = s_.sampleEditor;
     const std::vector<int> cues = compute_slice_cue_points();
 

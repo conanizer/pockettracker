@@ -334,6 +334,7 @@ void InputDispatcher::project_action() {
         case ProjectRow::PROJECT:
             switch (s_.projectCursorColumn) {
                 case 1: {   // SAVE
+                    before_long_operation();
                     const ActionResult r = save_project(host_, fs_, s_);
                     s_.statusMessage = r.message;
                     s_.statusSuccess = r.ok;

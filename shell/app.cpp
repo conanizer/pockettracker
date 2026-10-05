@@ -776,6 +776,10 @@ bool FrameLoop::load_pump() {
     bool cancel = false;
     const Uint64 now = SDL_GetTicks64();
 
+    // The load refills the sequencer at this same cadence (`InputDispatcher::load_tick`), so to the
+    // latency probe this is a poll: a load that keeps the song going is not a stall.
+    latency::poll_tick(state.isPlaying);
+
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {

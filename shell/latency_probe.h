@@ -118,7 +118,8 @@ inline void poll_tick(bool isPlaying) {
         s.poll[isPlaying ? 1 : 0].add(gap, 8000000ull, 1000000ull);
         // Each one as it happens, timestamped, so a stall can be matched to what was being done: the
         // sequencer is not refilled while the loop is away, so the lookahead must outlast the longest.
-        if (isPlaying && gap > 30000000ull) {
+        // ⚠️ Above the 33 ms a load refills at (`LOADING_REPAINT_MS`), or every load would print.
+        if (isPlaying && gap > 50000000ull) {
             std::printf("latency: STALL %.1f ms while playing, at %.2f s\n", double(gap) / 1e6,
                         double(SDL_GetTicks64()) / 1000.0);
             std::fflush(stdout);
