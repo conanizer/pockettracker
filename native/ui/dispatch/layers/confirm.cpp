@@ -8,15 +8,15 @@
 
 namespace pt::ui {
 
-LayerResult InputDispatcher::confirm_layer(Gesture g) {
+GestureResult InputDispatcher::confirm_layer(Gesture g) {
     switch (g) {
         case Gesture::A: confirm_accept(); break;
         case Gesture::B: confirm_cancel(); break;
         // Silencing a note is not an edit: an audition the dialog opened over must not be left ringing.
-        case Gesture::STOP_PREVIEW: return LayerResult::PASS;
+        case Gesture::STOP_PREVIEW: return GestureResult::PASS;
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 
 void InputDispatcher::confirm_accept() {

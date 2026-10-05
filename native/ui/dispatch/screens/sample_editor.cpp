@@ -1,4 +1,4 @@
-// The sample editor: the selection, the slice markers, the ops, SAVE and CHOP.
+// The sample editor: its buttons, the selection, the slice markers, the ops, SAVE and CHOP.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -20,7 +20,134 @@ int waveform_channel(int source_mode) {
     return (source_mode == 0) ? 0 : (source_mode == 1) ? 1 : 2;
 }
 
+/** A+LEFT/RIGHT nudge by about one visible pixel, A+UP/DOWN by sixteen — both scaled by the zoom. */
+int64_t fine_step(const SampleEditorState& se) {
+    return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (256LL << se.zoomLevel));
+}
+int64_t coarse_step(const SampleEditorState& se) {
+    return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (16LL << se.zoomLevel));
+}
+
 }  // namespace
+
+// ─── The buttons ─────────────────────────────────────────────────────────────────────────────────
+
+GestureResult InputDispatcher::sample_editor_screen(Gesture g) {
+    SampleEditorState& se = s_.sampleEditor;
+
+    // A+DPAD drags the selection's active edge on rows 3..8, the slice boundary on row 11's POSITION
+    // cell; elsewhere it edits the cell like any screen.
+    auto nudge = [&](int64_t delta) {
+        if (on_sample_selection_row())        nudge_selection_edge(delta);
+        else if (on_sample_slice_marker_row()) nudge_slice_marker(delta);
+        else return GestureResult::PASS;
+        return GestureResult::TAKEN;
+    };
+
+    switch (g) {
+        // ⚠️ A cell that OPENS something first (the EQ cell), or it would run its FX APPLY instead.
+        case Gesture::A:
+            if (!open_sub_screen_at_cursor(/*peek=*/false)) sample_editor_confirm();
+            return GestureResult::TAKEN;
+
+        // ⚠️ B is BACK, but asks first if anything would be lost: the edits live in the ENGINE, not the
+        // project.
+        case Gesture::B:
+            if (se.isModified) se.showConfirmClose = true;
+            else               close_sample_editor();
+            return GestureResult::TAKEN;
+
+        case Gesture::START:
+            sample_editor_audition();
+            return GestureResult::TAKEN;
+
+        case Gesture::A_UP:    return nudge(+coarse_step(se));
+        case Gesture::A_DOWN:  return nudge(-coarse_step(se));
+        case Gesture::A_LEFT:  return nudge(-fine_step(se));
+        case Gesture::A_RIGHT: return nudge(+fine_step(se));
+
+        case Gesture::A_B:
+            // The SELECTION row: back to the sample's own bound — START to 0, END to the last frame.
+            if (se.cursorRow == 8) {
+                if (se.cursorCol == 0)      se.selectionStart = 0;
+                else if (se.cursorCol == 1) se.selectionEnd   = se.totalFrames;
+                return GestureResult::TAKEN;
+            }
+            // The SLICE DETAIL row: the boundary back where its method would put it; under MANUAL, gone.
+            if (se.cursorRow == 11) {
+                reset_slice_marker();
+                return GestureResult::TAKEN;
+            }
+            return GestureResult::PASS;
+
+        // ZOOM: `zoomLevel` 0 = 1× … 4 = 16×; the feed re-bins the waveform.
+        case Gesture::R_UP:   se.zoomLevel = std::min(se.zoomLevel + 1, 4); return GestureResult::TAKEN;
+        case Gesture::R_DOWN: se.zoomLevel = std::max(se.zoomLevel - 1, 0); return GestureResult::TAKEN;
+
+        // ⚠️ Swallowed: the editor has no cell in the screen grid, so navigating would fall through to
+        // PHRASE and bypass ARE YOU SURE?, silently discarding an unsaved edit.
+        case Gesture::R_LEFT:
+        case Gesture::R_RIGHT:
+            return GestureResult::TAKEN;
+
+        // Not the clipboard's or the mix's to clear from here: neither is on this screen.
+        case Gesture::L_R:
+            return GestureResult::TAKEN;
+
+        default:
+            return GestureResult::PASS;
+    }
+}
+
+GestureResult InputDispatcher::sample_close_layer(Gesture g) {
+    SampleEditorState& se = s_.sampleEditor;
+    switch (g) {
+        case Gesture::A:   // YES — discard and leave
+            se.showConfirmClose = false;
+            close_sample_editor();
+            break;
+        case Gesture::B:   // NO — stay
+            se.showConfirmClose = false;
+            break;
+        default:
+            break;
+    }
+    return GestureResult::TAKEN;
+}
+
+void InputDispatcher::sample_editor_audition() {
+    SampleEditorState& se = s_.sampleEditor;
+
+    // Only while the TRANSPORT IS STOPPED: `playbackPosition` also tracks song voices on this sample.
+    if (se.playbackPosition >= 0.0f && !host_.is_playing()) {
+        host_.stop_preview();
+        se.playbackPosition = -1.0f;
+        return;
+    }
+
+    // ⚠️ The rapid double-START guard: a pending restore from the PREVIOUS preview must land first, or
+    // it would strip this audition's EQ, sends and modulation mid-preview.
+    run_due_sample_preview_restore(/*force=*/true);
+
+    samplePending_.previewRestore     = true;
+    samplePending_.previewRestoreAtMs = now_ms_ + 100;
+    samplePending_.previewRestoreInst = se.instrumentId;
+
+    // The FX row is auditioned by APPLYING it for real and restoring the clean audio after — a
+    // destructive chain has no dry/wet path. (EQ always previews; the others need a nonzero amount.)
+    const bool hasFxPreview = (se.fxType == SampleEditorModule::FX_EQ) ||
+                              (se.fxType <= SampleEditorModule::FX_DRIVE && se.fxValue > 0);
+    host_.restore_fx_preview_backup();
+    if (hasFxPreview) {
+        before_long_operation();
+        host_.save_fx_preview_backup(se.instrumentId);
+        host_.apply_sample_fx(se.instrumentId, se.fxType, se.fxValue);
+    }
+
+    host_.set_preview_track(-1);   // a waveform being edited is not in the arrangement
+    host_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
+                                se.totalFrames, se.pitchSemitones);
+}
 
 // ─── Opening and closing ─────────────────────────────────────────────────────────────────────────
 
@@ -307,8 +434,8 @@ void InputDispatcher::tap_slice_marker() {
     SampleEditorState& se = s_.sampleEditor;
 
     // Consumed: a press that ended in an A+DPAD must not leave a snapshot for the next tap.
-    const float at    = sliceTapPlayhead_;
-    sliceTapPlayhead_ = -1.0f;
+    const float at                  = samplePending_.sliceTapPlayhead;
+    samplePending_.sliceTapPlayhead = -1.0f;
 
     if (se.sliceMethod != SampleEditorModule::SLICE_MANUAL) return;
     if (se.totalFrames <= 0 || at < 0.0f) return;
@@ -777,11 +904,11 @@ void InputDispatcher::sample_editor_chop() {
 // ─── The audition's deferred restore ─────────────────────────────────────────────────────────────
 
 void InputDispatcher::run_due_sample_preview_restore(bool force) {
-    if (!previewRestorePending_) return;
-    if (!force && now_ms_ < previewRestoreAtMs_) return;
+    if (!samplePending_.previewRestore) return;
+    if (!force && now_ms_ < samplePending_.previewRestoreAtMs) return;
 
-    previewRestorePending_ = false;
-    host_.finish_sample_preview(previewRestoreInst_);
+    samplePending_.previewRestore = false;
+    host_.finish_sample_preview(samplePending_.previewRestoreInst);
 }
 
 }  // namespace pt::ui

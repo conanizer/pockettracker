@@ -10,7 +10,7 @@
 
 namespace pt::ui {
 
-LayerResult InputDispatcher::qwerty_layer(Gesture g) {
+GestureResult InputDispatcher::qwerty_layer(Gesture g) {
     QwertyKeyboardState& k = s_.qwerty;
     switch (g) {
         case Gesture::DPAD_UP:    move_key_cursor_up(k);    break;
@@ -38,7 +38,7 @@ LayerResult InputDispatcher::qwerty_layer(Gesture g) {
 
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 
 void InputDispatcher::open_qwerty(QwertyContext context, const std::string& initial_text,

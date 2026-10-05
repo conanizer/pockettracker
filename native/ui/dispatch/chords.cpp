@@ -128,20 +128,9 @@ bool InputDispatcher::on_instrument_type_cell() const {
 // A+DPAD is swallowed under the keyboard and the browser, so an A held over one never reaches the
 // screen underneath.
 
-// On the SAMPLE EDITOR, A+DPAD on rows 3..8 drags the selection's active edge (START on col 0, END on
-// col 1), scaled by the zoom so a nudge is about one visible pixel.
-static int64_t sample_fine_step(const SampleEditorState& se) {
-    return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (256LL << se.zoomLevel));
-}
-static int64_t sample_coarse_step(const SampleEditorState& se) {
-    return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (16LL << se.zoomLevel));
-}
-
 void InputDispatcher::on_a_up() {
-    if (layer_takes(Gesture::A_UP)) return;
+    if (route(Gesture::A_UP)) return;
     if (overlay_swallows(Overlay::NONE)) return;
-    if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
-    if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) { open_map_picker(); return; }
     // The TYPE cell has no coarse step, so both axes walk it — through the confirm dialog on a loaded slot.
@@ -150,10 +139,8 @@ void InputDispatcher::on_a_up() {
 }
 
 void InputDispatcher::on_a_down() {
-    if (layer_takes(Gesture::A_DOWN)) return;
+    if (route(Gesture::A_DOWN)) return;
     if (overlay_swallows(Overlay::NONE)) return;
-    if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
-    if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) { open_map_picker(); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
@@ -161,19 +148,15 @@ void InputDispatcher::on_a_down() {
 }
 
 void InputDispatcher::on_a_left() {
-    if (layer_takes(Gesture::A_LEFT)) return;
+    if (route(Gesture::A_LEFT)) return;
     if (overlay_swallows(Overlay::NONE)) return;
-    if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
-    if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement);
 }
 
 void InputDispatcher::on_a_right() {
-    if (layer_takes(Gesture::A_RIGHT)) return;
+    if (route(Gesture::A_RIGHT)) return;
     if (overlay_swallows(Overlay::NONE)) return;
-    if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
-    if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment);
 }
@@ -186,18 +169,18 @@ void InputDispatcher::on_a_released() {
         host_.stop_preview(/*cut=*/true);
     }
     // Only a layer answers the release — the two pickers commit on it.
-    layer_takes(Gesture::A_RELEASE);
+    route(Gesture::A_RELEASE);
 }
 
 void InputDispatcher::on_a_deferred() {
     // The mapper is holding this press; record the playhead now, since it will have moved by release.
-    sliceTapPlayhead_ = on_slice_tap_cell() ? s_.sampleEditor.playbackPosition : -1.0f;
+    samplePending_.sliceTapPlayhead = on_slice_tap_cell() ? s_.sampleEditor.playbackPosition : -1.0f;
 }
 
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_b() {
-    if (layer_takes(Gesture::A_B)) return;
+    if (route(Gesture::A_B)) return;
     if (overlay_swallows(Overlay::NONE)) return;
 
     if (s_.selection.active) {
@@ -229,19 +212,6 @@ void InputDispatcher::on_a_b() {
         return;
     }
 
-    // The SAMPLE EDITOR's SELECTION row (8): A+B resets the edge under the cursor to the sample's own
-    // bound — START to 0, END to the last frame.
-    if (on_sample_editor() && s_.sampleEditor.cursorRow == 8) {
-        SampleEditorState& se = s_.sampleEditor;
-        if (se.cursorCol == 0)      se.selectionStart = 0;
-        else if (se.cursorCol == 1) se.selectionEnd   = se.totalFrames;
-        return;
-    }
-
-    // The SLICE DETAIL row (11): A+B puts the boundary back where its method would — the detected
-    // position under TRANSIENT, the arithmetic cut under DIVIDE. Under MANUAL it deletes the boundary.
-    if (on_sample_editor() && s_.sampleEditor.cursorRow == 11) { reset_slice_marker(); return; }
-
     // The pool's NAME column: A+B CLEARS the slot, freeing its sample (and the .sf2, if this was its
     // last user) — a host verb, not a field write. The TYPE survives.
     if (s_.currentScreen == ScreenType::INST_POOL && s_.poolCursorColumn == 0) {
@@ -260,7 +230,7 @@ void InputDispatcher::on_a_b() {
 // phrase the user cannot see.
 
 void InputDispatcher::on_a_a() {
-    if (layer_takes(Gesture::A_A)) return;
+    if (route(Gesture::A_A)) return;
     if (overlay_swallows(Overlay::NONE)) return;
 
     // The sample editor's row 11 needs no arm: its A is deferred, and the mapper clears `lastAPress`
@@ -404,13 +374,13 @@ void InputDispatcher::cycle_current_item(int delta) {
 }
 
 void InputDispatcher::on_b_left() {
-    if (layer_takes(Gesture::B_LEFT)) return;
+    if (route(Gesture::B_LEFT)) return;
     if (overlay_swallows(Overlay::NONE)) return;
     cycle_current_item(-1);
 }
 
 void InputDispatcher::on_b_right() {
-    if (layer_takes(Gesture::B_RIGHT)) return;
+    if (route(Gesture::B_RIGHT)) return;
     if (overlay_swallows(Overlay::NONE)) return;
     cycle_current_item(+1);
 }
@@ -442,7 +412,7 @@ bool InputDispatcher::song_relative_b_vertical(int delta) {
 }
 
 void InputDispatcher::on_b_up() {
-    if (layer_takes(Gesture::B_UP)) return;
+    if (route(Gesture::B_UP)) return;
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(-1)) return;
 
@@ -464,7 +434,7 @@ void InputDispatcher::on_b_up() {
 }
 
 void InputDispatcher::on_b_down() {
-    if (layer_takes(Gesture::B_DOWN)) return;
+    if (route(Gesture::B_DOWN)) return;
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(+1)) return;
 
@@ -488,34 +458,23 @@ void InputDispatcher::on_b_down() {
 // ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
 //
 // ⚠️ On the modals R+DPAD is not navigation. BROWSER: R+UP/DOWN cycles the sort, R+LEFT goes up a
-// directory. SAMPLE EDITOR: R+UP/DOWN zooms, R+LEFT/RIGHT swallowed. EQ EDITOR: all four swallowed. None
-// may fall through to `navigate_*` — a popup is not a cell in the screen grid, and the user would land on
-// a screen with the popup's state still live.
+// directory. SAMPLE EDITOR (its own handler): R+UP/DOWN zooms, R+LEFT/RIGHT swallowed. EQ EDITOR: all
+// four swallowed. None may fall through to `navigate_*` — a popup is not a cell in the screen grid, and
+// the user would land on a screen with the popup's state still live.
 
 void InputDispatcher::on_r_up() {
-    if (layer_takes(Gesture::R_UP)) return;
+    if (route(Gesture::R_UP)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) { browser_cycle_sort(+1); return; }
-    // Sample-editor ZOOM: R+UP/DOWN step `zoomLevel` (0=1×…4=16×); the feed re-bins the waveform.
-    if (on_sample_editor()) {
-        if (s_.sampleEditor.showConfirmClose) return;   // the ARE YOU SURE? dialog owns the buttons
-        s_.sampleEditor.zoomLevel = std::min(s_.sampleEditor.zoomLevel + 1, 4);
-        return;
-    }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
     s_.selection.exit();   // a selection belongs to the screen it was made on
 }
 
 void InputDispatcher::on_r_down() {
-    if (layer_takes(Gesture::R_DOWN)) return;
+    if (route(Gesture::R_DOWN)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) { browser_cycle_sort(-1); return; }
-    if (on_sample_editor()) {   // ZOOM OUT — see on_r_up
-        if (s_.sampleEditor.showConfirmClose) return;
-        s_.sampleEditor.zoomLevel = std::max(s_.sampleEditor.zoomLevel - 1, 0);
-        return;
-    }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
     s_.selection.exit();
@@ -594,9 +553,8 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
 }
 
 void InputDispatcher::on_r_left() {
-    if (layer_takes(Gesture::R_LEFT)) return;
+    if (route(Gesture::R_LEFT)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
-    if (on_sample_editor()) return;   // see on_r_right
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_left(ns);
@@ -606,11 +564,8 @@ void InputDispatcher::on_r_left() {
 }
 
 void InputDispatcher::on_r_right() {
-    if (layer_takes(Gesture::R_RIGHT)) return;
+    if (route(Gesture::R_RIGHT)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
-    // ⚠️ Swallowed on the sample editor: it has no cell in the screen grid, so navigating would fall
-    // through to PHRASE and bypass ARE YOU SURE?, silently discarding an unsaved edit.
-    if (on_sample_editor()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_right(ns);
@@ -625,7 +580,7 @@ void InputDispatcher::on_r_right() {
 // ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b() {
-    if (layer_takes(Gesture::L_B)) return;
+    if (route(Gesture::L_B)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
 
     // ⚠️ The browser's selection is a plain anchor..cursor range over a list (a second tap inside the
@@ -667,7 +622,7 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
-    if (layer_takes(Gesture::L_A)) return;
+    if (route(Gesture::L_A)) return;
     // ⚠️ Every layer an arm below tests for must be in this set, or the gesture is thrown away here.
     if (overlay_swallows(Overlay::BROWSER)) return;
 
@@ -815,13 +770,13 @@ void InputDispatcher::restore_full_playback() {
 }
 
 void InputDispatcher::on_r_b() {
-    if (layer_takes(Gesture::R_B)) return;
+    if (route(Gesture::R_B)) return;
     if (!mute_solo_chord_live()) return;
     toggle_mute_solo(/*solo=*/false);
 }
 
 void InputDispatcher::on_r_a() {
-    if (layer_takes(Gesture::R_A)) return;
+    if (route(Gesture::R_A)) return;
     if (!mute_solo_chord_live()) return;
     toggle_mute_solo(/*solo=*/true);
 }
@@ -874,7 +829,7 @@ void InputDispatcher::run_selection_recency() {
 }
 
 void InputDispatcher::on_l_r() {
-    if (layer_takes(Gesture::L_R)) return;
+    if (route(Gesture::L_R)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
@@ -887,7 +842,6 @@ void InputDispatcher::on_l_r() {
     // the other, or L+R reads as a dead button. The mix check covers all MIX_CHANNELS, so the REV and
     // DEL returns count.
     const bool mix_touched = [&] {
-        if (s_.currentScreen == ScreenType::SAMPLE_EDITOR) return false;
         Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
         for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
             const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
@@ -908,10 +862,9 @@ void InputDispatcher::on_l_r() {
         return;
     }
 
-    // ⚠️ A deny-list: the readout is drawn on every screen, so the clear must work everywhere except
-    // SAMPLE_EDITOR, where L+R is the editor's own selection.
+    // The readout is drawn on every screen, so the clear works everywhere.
     const bool had_buffer = !clip_.info().empty();
-    if (s_.currentScreen != ScreenType::SAMPLE_EDITOR) clip_.clear();
+    clip_.clear();
 
     // Nothing on the selection rung to clear, but the mix has something: take it rather than leave
     // the press doing nothing at all.
@@ -921,7 +874,7 @@ void InputDispatcher::on_l_r() {
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b_a() {
-    if (layer_takes(Gesture::L_B_A)) return;
+    if (route(Gesture::L_B_A)) return;
     if (overlay_swallows(Overlay::NONE)) return;
 
     Project& p = host_.edit_project();

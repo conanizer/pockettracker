@@ -1,5 +1,5 @@
-// The gestures a layer can own — one per `on_*` entry point that a dialog or editor on top answers
-// for (ui/dispatch/layers.cpp). Never stored, so the order means nothing.
+// The gestures a layer or a screen can own — one per `on_*` entry point that is routed
+// (ui/dispatch/route.cpp). Never stored, so the order means nothing.
 #pragma once
 
 namespace pt::ui {
@@ -19,10 +19,12 @@ enum class Gesture {
 };
 
 /**
- * What a layer did with a gesture. ⚠️ TAKEN is also the answer for a gesture it ignores — a button
- * under a dialog must never reach the screen behind. PASS is the deliberate exception (START under the
- * theme and EQ editors, so the song plays while you dial).
+ * What a layer or a screen did with a gesture.
+ * • A LAYER: ⚠️ TAKEN is also the answer for a gesture it ignores — a button under a dialog must never
+ *   reach the screen behind. PASS is the deliberate exception (START under the theme and EQ editors, so
+ *   the song plays while you dial).
+ * • A SCREEN: PASS is the usual answer — the gesture's generic path runs, as on a screen with no handler.
  */
-enum class LayerResult { TAKEN, PASS };
+enum class GestureResult { TAKEN, PASS };
 
 }  // namespace pt::ui

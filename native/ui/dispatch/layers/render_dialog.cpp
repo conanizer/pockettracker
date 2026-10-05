@@ -14,7 +14,7 @@ int coarse_step(const RenderDialogState& rd) { return rd.is_on(RenderRow::REPEAT
 
 }  // namespace
 
-LayerResult InputDispatcher::render_dialog_layer(Gesture g) {
+GestureResult InputDispatcher::render_dialog_layer(Gesture g) {
     switch (g) {
         case Gesture::DPAD_UP:   render_dialog_move_cursor(-1); break;
         case Gesture::DPAD_DOWN: render_dialog_move_cursor(+1); break;
@@ -39,7 +39,7 @@ LayerResult InputDispatcher::render_dialog_layer(Gesture g) {
 
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 
 void InputDispatcher::open_render_dialog(RenderDialogState::Output output) {

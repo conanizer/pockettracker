@@ -7,7 +7,7 @@
 
 namespace pt::ui {
 
-LayerResult InputDispatcher::map_picker_layer(Gesture g) {
+GestureResult InputDispatcher::map_picker_layer(Gesture g) {
     switch (g) {
         case Gesture::A_UP:    map_picker_move_up(s_.mapPicker); break;
         case Gesture::A_DOWN:  map_picker_move_down(s_.mapPicker); break;
@@ -19,7 +19,7 @@ LayerResult InputDispatcher::map_picker_layer(Gesture g) {
 
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 
 void InputDispatcher::open_map_picker() {

@@ -9,7 +9,7 @@
 
 namespace pt::ui {
 
-LayerResult InputDispatcher::theme_layer(Gesture g) {
+GestureResult InputDispatcher::theme_layer(Gesture g) {
     ThemeEditorState& es = s_.themeEditor;
     switch (g) {
         // Both axes WRAP: UP/DOWN walk the rows, LEFT/RIGHT the row's own cells.
@@ -46,11 +46,11 @@ LayerResult InputDispatcher::theme_layer(Gesture g) {
 
         case Gesture::START:
         case Gesture::SELECT:
-            return LayerResult::PASS;
+            return GestureResult::PASS;
 
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
     // Both axes wrap: a list of colours is a ring. The panel scrolls to follow the row.

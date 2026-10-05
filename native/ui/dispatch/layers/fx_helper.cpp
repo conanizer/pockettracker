@@ -6,7 +6,7 @@
 
 namespace pt::ui {
 
-LayerResult InputDispatcher::fx_helper_layer(Gesture g) {
+GestureResult InputDispatcher::fx_helper_layer(Gesture g) {
     switch (g) {
         case Gesture::A_UP:    fx_move_up(s_.fxHelper); break;
         case Gesture::A_DOWN:  fx_move_down(s_.fxHelper); break;
@@ -20,11 +20,11 @@ LayerResult InputDispatcher::fx_helper_layer(Gesture g) {
             break;
 
         // The screen behind may have an audition ringing.
-        case Gesture::STOP_PREVIEW: return LayerResult::PASS;
+        case Gesture::STOP_PREVIEW: return GestureResult::PASS;
 
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 
 void InputDispatcher::open_fx_helper() {

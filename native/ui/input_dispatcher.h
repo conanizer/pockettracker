@@ -9,14 +9,15 @@
 //
 // ── ⚠️ THE MODAL RULE ────────────────────────────────────────────────────────────────────────────
 //
-// Whatever sits over the screen — a load, the confirm dialog, the RENDER dialog, the QWERTY keyboard,
+// Whatever sits over the screen — a load, the confirm dialogs, the RENDER dialog, the QWERTY keyboard,
 // the THEME and EQ editors (partial), the FX and map pickers, the FILE BROWSER — OWNS THE BUTTONS
 // while up, and the order a press is offered to them is the specification: the keyboard can sit on
 // top of the browser (rename) or the theme editor (its SAVE), and a D-pad press there must move the
 // KEY cursor.
-// ⭐ That order is written once, in `LAYERS` (ui/dispatch/layers.cpp). Every gesture asks the top layer
-// first (`layer_takes`), and a gesture a layer does not answer is swallowed there. A layer with no
-// handler yet is answered inside each gesture's body instead (`overlay_swallows`).
+// ⭐ That order is written once, in `LAYERS` (ui/dispatch/route.cpp). Every gesture asks the top layer
+// first (`route`), and a gesture a layer does not answer is swallowed there. A layer with no handler yet
+// is answered inside each gesture's body instead (`overlay_swallows`). With no layer up, a screen in
+// `SCREENS` is asked next; its own buttons live in ui/dispatch/screens/.
 // ⚠️ The EQ editor is PARTIAL: it swallows the D-pad, A, B and SELECT but lets START through, so a band
 // can be swept across a held INSTRUMENT audition. Every other modal swallows everything.
 //
@@ -384,7 +385,7 @@ class InputDispatcher {
     bool load_running() const { return s_.loading.running; }
 
     /** A load answers no button: the shell's pump reads the cancel itself (`load_tick`). */
-    LayerResult loading_layer(Gesture) { return LayerResult::TAKEN; }
+    GestureResult loading_layer(Gesture) { return GestureResult::TAKEN; }
 
     /**
      * Open the MIDI port the settings name, once at boot (after `AppState::midiOut` and settings.json).
@@ -660,7 +661,7 @@ class InputDispatcher {
     int  max_selection_row() const;
 
     // ── The FX helper (ui/dispatch/layers/fx_helper.cpp) ───────────────────────────────────────
-    LayerResult fx_helper_layer(Gesture g);
+    GestureResult fx_helper_layer(Gesture g);
     /** Raise the helper on the effect the cursor's FX column holds. */
     void open_fx_helper();
     /** True when the cursor is on an FX-TYPE column (PHRASE 4/6/8, TABLE 3/5/7). */
@@ -671,7 +672,7 @@ class InputDispatcher {
     void apply_fx_type_change(int effect_code);
 
     // ── The mapping destination picker (ui/dispatch/layers/map_picker.cpp) ──────────────────────
-    LayerResult map_picker_layer(Gesture g);
+    GestureResult map_picker_layer(Gesture g);
     /** Raise the picker on the destination the mapping under the cursor already has. */
     void open_map_picker();
     /** On a mapping row's GROUP or PARAMETER cell — what the picker stands in for. Not the ADD row. */
@@ -701,17 +702,18 @@ class InputDispatcher {
     /** BITS, so a handler's `arms` set is an OR. `top_overlay()` returns one; `overlay_swallows()` takes
      *  any number. */
     enum class Overlay : unsigned {
-        NONE      = 0,
-        CONFIRM   = 1u << 0,
-        QWERTY    = 1u << 1,
-        THEME     = 1u << 2,
-        EQ        = 1u << 3,
-        FX_HELPER = 1u << 4,
-        BROWSER   = 1u << 5,
-        LOADING   = 1u << 6,
-        HELP      = 1u << 7,
-        RENDER    = 1u << 8,
-        MAP_PICK  = 1u << 9,
+        NONE         = 0,
+        CONFIRM      = 1u << 0,
+        QWERTY       = 1u << 1,
+        THEME        = 1u << 2,
+        EQ           = 1u << 3,
+        FX_HELPER    = 1u << 4,
+        BROWSER      = 1u << 5,
+        LOADING      = 1u << 6,
+        HELP         = 1u << 7,
+        RENDER       = 1u << 8,
+        MAP_PICK     = 1u << 9,
+        SAMPLE_CLOSE = 1u << 10,   // the sample editor's ARE YOU SURE?
     };
 
     friend constexpr Overlay operator|(Overlay a, Overlay b) {
@@ -722,18 +724,25 @@ class InputDispatcher {
     struct Layer {
         Overlay id;
         bool (InputDispatcher::*isOpen)() const;
-        LayerResult (InputDispatcher::*handle)(Gesture);
+        GestureResult (InputDispatcher::*handle)(Gesture);
     };
-    /** Top first. The order, and why, is in ui/dispatch/layers.cpp. */
+    /** Top first. The order, and why, is in ui/dispatch/route.cpp. */
     static const Layer LAYERS[];
 
     /** The topmost open layer, or null. */
     const Layer* top_layer() const;
     Overlay      top_overlay() const;
 
-    /** Offer `g` to the top layer. True when it took it — or swallowed it — and the screen must not see
-     *  it; false when no layer is up, the layer let it through, or it has no handler yet. */
-    bool layer_takes(Gesture g);
+    /** A screen with buttons of its own (ui/dispatch/screens/). */
+    struct ScreenHandler {
+        ScreenType id;
+        GestureResult (InputDispatcher::*handle)(Gesture);
+    };
+    static const ScreenHandler SCREENS[];
+
+    /** Offer `g` to the top layer, then to the screen's handler. True when one of them took it and the
+     *  gesture's body must not run; false when it is the body's to answer. */
+    bool route(Gesture g);
 
     /**
      * THE MODAL RULE: true when a layer this handler does not answer for is up — return without
@@ -750,7 +759,7 @@ class InputDispatcher {
     /** The confirm dialog: A and B answer it; every other button is inert while it is up, except the
      *  audition's stop (ui/dispatch/layers/confirm.cpp). */
     bool confirm_open() const { return s_.confirm.is_open(); }
-    LayerResult confirm_layer(Gesture g);
+    GestureResult confirm_layer(Gesture g);
 
     /** A on the dialog: do the thing it asked about. */
     void confirm_accept();
@@ -769,7 +778,7 @@ class InputDispatcher {
     // ⚠️ An OVERLAY, so `currentScreen` still names the screen underneath.
 
     bool eq_open() const { return s_.eq.isOpen; }
-    LayerResult eq_layer(Gesture g);
+    GestureResult eq_layer(Gesture g);
 
     /** A+DPAD and A+B: the edit, through the EQ module's own cursor rather than the screen's. */
     void eq_edit(InputAction (*fn)(const CursorContext&));
@@ -807,7 +816,7 @@ class InputDispatcher {
     // ⚠️ SAVE raises the keyboard ON TOP of it, so QWERTY sits above THEME in the layer stack.
 
     bool theme_open() const { return s_.themeEditor.isOpen; }
-    LayerResult theme_layer(Gesture g);
+    GestureResult theme_layer(Gesture g);
 
     // The roll's seed starts from the frame clock, so each opening walks a different sequence.
     void open_theme_editor() {
@@ -951,7 +960,7 @@ class InputDispatcher {
     bool render_dialog_open() const { return s_.renderDialog.isOpen; }
 
     /** Its buttons, as a layer (ui/dispatch/layers/render_dialog.cpp). */
-    LayerResult render_dialog_layer(Gesture g);
+    GestureResult render_dialog_layer(Gesture g);
 
     /** UP/DOWN on the panel. Clamps at both ends — four rows are not a ring worth wrapping. */
     void render_dialog_move_cursor(int delta);
@@ -989,7 +998,7 @@ class InputDispatcher {
     void browser_paste();
 
     // ── The QWERTY keyboard (ui/dispatch/layers/qwerty.cpp) ─────────────────────────────────────
-    LayerResult qwerty_layer(Gesture g);
+    GestureResult qwerty_layer(Gesture g);
     void open_qwerty(QwertyContext context, const std::string& initial_text,
                      const std::string& field_label, const std::string& context_extra,
                      int max_length = 20, bool clear_on_first_b = false);
@@ -1010,6 +1019,19 @@ class InputDispatcher {
     // ═════════════════════════════════════════════════════════════════════════════════════════════
 
     bool on_sample_editor() const { return s_.currentScreen == ScreenType::SAMPLE_EDITOR; }
+
+    /** The editor's own buttons (ui/dispatch/screens/sample_editor.cpp). */
+    GestureResult sample_editor_screen(Gesture g);
+
+    /** "ARE YOU SURE?" — B on a modified sample. A discards and leaves, B stays; nothing else. */
+    bool sample_close_open() const { return on_sample_editor() && s_.sampleEditor.showConfirmClose; }
+    GestureResult sample_close_layer(Gesture g);
+
+    /**
+     * START: TOGGLES the audition of the selection — the only audition that does. Long loops are
+     * auditioned here, and "any button silences a preview" is exempt on this screen.
+     */
+    void sample_editor_audition();
 
     /** Rows 3..8: the D-pad DRAGS the selection instead of moving a cursor. */
     bool on_sample_selection_row() const {
@@ -1049,8 +1071,7 @@ class InputDispatcher {
      * tap on the PRESS would precede each with an unasked boundary.
      */
     bool on_slice_tap_cell() const {
-        return on_sample_editor() && !s_.sampleEditor.showConfirmClose &&
-               s_.sampleEditor.cursorRow == 11 &&
+        return on_sample_editor() && s_.sampleEditor.cursorRow == 11 &&
                s_.sampleEditor.sliceMethod == SampleEditorModule::SLICE_MANUAL;
     }
 
@@ -1105,13 +1126,18 @@ class InputDispatcher {
      */
     void run_due_sample_preview_restore(bool force = false);
 
-    bool      previewRestorePending_ = false;
-    long long previewRestoreAtMs_    = 0;
-    int       previewRestoreInst_    = 0;
+    /** What the editor's buttons leave for later. Not the editor's session (`s_.sampleEditor`): none of
+     *  it is drawn. */
+    struct SamplePending {
+        bool      previewRestore     = false;   // run_due_sample_preview_restore
+        long long previewRestoreAtMs = 0;
+        int       previewRestoreInst = 0;
 
-    /** The playhead when A went down on the tap cell (0..1, or −1 = nothing sounding). Written by
-     *  `on_a_deferred`, CONSUMED by `tap_slice_marker`, so a press that became a combo leaves nothing. */
-    float sliceTapPlayhead_ = -1.0f;
+        /** The playhead when A went down on the tap cell (0..1, or −1 = nothing sounding). Written by
+         *  `on_a_deferred`, CONSUMED by `tap_slice_marker`, so a press that became a combo leaves nothing. */
+        float sliceTapPlayhead = -1.0f;
+    };
+    SamplePending samplePending_{};
 
     SampleEditorModule sample_{};
 };

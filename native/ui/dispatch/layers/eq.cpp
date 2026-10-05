@@ -9,7 +9,7 @@
 
 namespace pt::ui {
 
-LayerResult InputDispatcher::eq_layer(Gesture g) {
+GestureResult InputDispatcher::eq_layer(Gesture g) {
     switch (g) {
         // UP/DOWN walk the band's parameters. ⚠️ LEFT/RIGHT change BAND keeping the PARAM, so one
         // parameter sweeps across all three bands.
@@ -41,12 +41,12 @@ LayerResult InputDispatcher::eq_layer(Gesture g) {
 
         case Gesture::START:
         case Gesture::SELECT:
-            return LayerResult::PASS;
+            return GestureResult::PASS;
 
         // A plain A included: the editor's vocabulary is A+DPAD, A+B and B.
         default: break;
     }
-    return LayerResult::TAKEN;
+    return GestureResult::TAKEN;
 }
 
 void InputDispatcher::eq_edit(InputAction (*fn)(const CursorContext&)) {

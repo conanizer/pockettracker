@@ -808,21 +808,21 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 // ⚠️ THE MODAL RULE (input_dispatcher.h): the editors first, then browser, then the screen.
 
 void InputDispatcher::on_dpad_up() {
-    if (layer_takes(Gesture::DPAD_UP)) return;
+    if (route(Gesture::DPAD_UP)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
     dpad_nav(NavDir::UP);
 }
 
 void InputDispatcher::on_dpad_down() {
-    if (layer_takes(Gesture::DPAD_DOWN)) return;
+    if (route(Gesture::DPAD_DOWN)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
     dpad_nav(NavDir::DOWN);
 }
 
 void InputDispatcher::on_dpad_left() {
-    if (layer_takes(Gesture::DPAD_LEFT)) return;
+    if (route(Gesture::DPAD_LEFT)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     // LEFT/RIGHT page the browser by a screenful.
     if (on_browser())  { browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
@@ -830,7 +830,7 @@ void InputDispatcher::on_dpad_left() {
 }
 
 void InputDispatcher::on_dpad_right() {
-    if (layer_takes(Gesture::DPAD_RIGHT)) return;
+    if (route(Gesture::DPAD_RIGHT)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
     dpad_nav(NavDir::RIGHT);

@@ -21,26 +21,16 @@ bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_button_a() {
-    if (layer_takes(Gesture::A)) return;
+    if (route(Gesture::A)) return;
     // A layer with no handler yet is INERT on A rather than inserting behind it.
     if (overlay_swallows(Overlay::BROWSER)) return;
 
     // A on the BROWSER: open a folder, go up, or load the file (browser_confirm).
     if (on_browser()) { browser_confirm(); return; }
 
-    // ⚠️ A on the SAMPLE EDITOR's "ARE YOU SURE?" is YES — discard and leave. Checked first: the dialog
-    // owns the buttons.
-    if (on_sample_editor() && s_.sampleEditor.showConfirmClose) {
-        s_.sampleEditor.showConfirmClose = false;
-        close_sample_editor();
-        return;
-    }
-
     // A on a cell that OPENS a sub-screen — the two NAME rows and all five EQ cells. Before the per-screen
-    // arms, or the sample editor's EQ cell would run its FX APPLY instead.
+    // arms below.
     if (open_sub_screen_at_cursor(/*peek=*/false)) return;
-
-    if (on_sample_editor()) { sample_editor_confirm(); return; }
 
     // INSTRUMENT's LOAD / SAVE / EDIT buttons and the pool's empty NAME slot. Not deferred (no A+DPAD to
     // protect), hence not in `open_sub_screen_at_cursor`.
@@ -144,7 +134,7 @@ void InputDispatcher::on_button_a() {
 }
 
 void InputDispatcher::on_button_b() {
-    if (layer_takes(Gesture::B)) return;
+    if (route(Gesture::B)) return;
     // A layer with no handler yet is inert on B.
     if (overlay_swallows(Overlay::BROWSER)) return;
 
@@ -220,16 +210,6 @@ void InputDispatcher::on_button_b() {
         return;
     }
 
-    // ⚠️ B on the SAMPLE EDITOR is BACK — but asks first if anything would be lost: its edits live in the
-    // ENGINE, not the project. Dialog up → NO (stay); modified → arm the dialog; clean → go.
-    if (on_sample_editor()) {
-        SampleEditorState& se = s_.sampleEditor;
-        if (se.showConfirmClose)  { se.showConfirmClose = false; return; }
-        if (se.isModified)        { se.showConfirmClose = true;  return; }
-        close_sample_editor();
-        return;
-    }
-
     // B inside a selection COPIES it and exits. Outside one, B on the main-row screens does nothing.
     if (!s_.selection.active) return;
 
@@ -260,7 +240,7 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
-    if (layer_takes(Gesture::SELECT)) return;
+    if (route(Gesture::SELECT)) return;
     // ⚠️ Bare SELECT is HELP — nothing else.
     // ⚠️ It arrives on the RELEASE (ui/button_mapper.h): on the browser SELECT is a modifier, and any other
     // press during it cancels this. (Unrelated to the A-deferral, which keeps sub-screen cells editable.)
@@ -271,10 +251,6 @@ void InputDispatcher::on_select() {
 
     // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
     //
-    // ⚠️ The editor's "ARE YOU SURE?" is not an `Overlay`, and SELECT is the one button that does not
-    // dismiss help — so help is refused over it here.
-    if (on_sample_editor() && s_.sampleEditor.showConfirmClose) return;
-
     // SETTINGS > HELP: FULL is the overlay everywhere; SHORT is the compact panel, toggled by SELECT.
     // ⚠️ The FILE BROWSER has no box for the panel (it fills 640×480), so SHORT shows nothing there; the
     // SAMPLE EDITOR's waveform panel hosts it.
@@ -301,7 +277,7 @@ void InputDispatcher::on_help_dismiss() {
 }
 
 void InputDispatcher::on_stop_preview() {
-    if (layer_takes(Gesture::STOP_PREVIEW)) return;
+    if (route(Gesture::STOP_PREVIEW)) return;
     // ⚠️ The one handler a confirm does not own — its layer passes it on, so it stays armed here: a dialog
     // over an INSTRUMENT audition must not leave the note hanging. The FX helper and browser likewise — the screen behind them started the
     // preview, and `previewScreen` decides whether there is one.
@@ -317,7 +293,7 @@ void InputDispatcher::on_stop_preview() {
 }
 
 void InputDispatcher::on_start() {
-    if (layer_takes(Gesture::START)) return;
+    if (route(Gesture::START)) return;
     // ⚠️ The THEME and EQ editors are armed to LET START THROUGH: the transport underneath is how you hear
     // an edit while dialling it.
     if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
@@ -343,45 +319,6 @@ void InputDispatcher::on_start() {
             s_.fileBrowser.statusMessage = "PREVIEW FAILED";
             s_.fileBrowser.statusSuccess = false;
         }
-        return;
-    }
-
-    // ⚠️ START on the SAMPLE EDITOR TOGGLES — the only audition that does. You audition long loops here,
-    // and "any button silences a preview" is exempt on this screen (you press buttons constantly).
-    // Only while the TRANSPORT IS STOPPED: `playbackPosition` also tracks song voices on this sample.
-    if (on_sample_editor()) {
-        if (s_.sampleEditor.showConfirmClose) return;
-
-        if (s_.sampleEditor.playbackPosition >= 0.0f && !host_.is_playing()) {
-            host_.stop_preview();
-            s_.sampleEditor.playbackPosition = -1.0f;
-            return;
-        }
-
-        // ⚠️ The rapid double-START guard: a pending restore from the PREVIOUS preview must land first, or
-        // it would strip this audition's EQ, sends and modulation mid-preview.
-        run_due_sample_preview_restore(/*force=*/true);
-
-        SampleEditorState& se = s_.sampleEditor;
-
-        previewRestoreInst_    = se.instrumentId;
-        previewRestorePending_ = true;
-        previewRestoreAtMs_    = now_ms_ + 100;
-
-        // The FX row is auditioned by APPLYING it for real and restoring the clean audio after — a
-        // destructive chain has no dry/wet path. (EQ always previews; the others need a nonzero amount.)
-        const bool hasFxPreview = (se.fxType == SampleEditorModule::FX_EQ) ||
-                                  (se.fxType <= SampleEditorModule::FX_DRIVE && se.fxValue > 0);
-        host_.restore_fx_preview_backup();
-        if (hasFxPreview) {
-            before_long_operation();
-            host_.save_fx_preview_backup(se.instrumentId);
-            host_.apply_sample_fx(se.instrumentId, se.fxType, se.fxValue);
-        }
-
-        host_.set_preview_track(-1);   // a waveform being edited is not in the arrangement
-        host_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
-                                    se.totalFrames, se.pitchSemitones);
         return;
     }
 
@@ -485,7 +422,7 @@ bool InputDispatcher::live_row_armed(int songRow) const {
 }
 
 void InputDispatcher::on_l_start() {
-    if (layer_takes(Gesture::L_START)) return;
+    if (route(Gesture::L_START)) return;
     if (!live_song_gesture()) return;
     if (!host_.is_playing()) {
         // From a standing start the row launches together on one downbeat; an empty cell starts silent.
@@ -496,7 +433,7 @@ void InputDispatcher::on_l_start() {
 }
 
 void InputDispatcher::on_r_start() {
-    if (layer_takes(Gesture::R_START)) return;
+    if (route(Gesture::R_START)) return;
     if (!live_song_gesture()) return;
     if (!host_.is_playing()) return;   // nothing sounding, nothing to queue a stop for
     const int track = s_.cursorColumn - 1;

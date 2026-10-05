@@ -56,7 +56,7 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     // ⚠️ `&& !s.eq.isOpen`: the EQ editor opened from the sample editor's FX row REPLACES it and the
     // normal furniture returns.
     // The sample editor's HELP goes in the waveform's place: same left edge and width as the strip,
-    // 85 px taller. Never over its "ARE YOU SURE?" — `on_select` refuses help while that is up.
+    // 85 px taller. Never over its "ARE YOU SURE?" — its layer takes SELECT while that is up.
     if (full_screen_module(s)) {
         if (s.currentScreen == ScreenType::FILE_BROWSER) {
             fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
