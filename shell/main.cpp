@@ -34,6 +34,7 @@
 #include "audio-outputs-win.h"  // SETTINGS > AUDIO OUT; empty off Windows
 
 #include <csignal>
+#include <cstdlib>       // setenv — the window's app id, below
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -152,6 +153,14 @@ int main(int argc, char** argv) {
     // keeps ours — and a kill during start-up (a big SF2 off a slow card) finds it rather than abort().
     std::signal(SIGTERM, on_terminate_signal);
     std::signal(SIGINT, on_terminate_signal);
+
+#ifndef _WIN32
+    // The window's name to the desktop (Wayland app_id, X11 WM_CLASS). A taskbar or launcher finds the
+    // icon by matching it to `pockettracker.desktop`; left alone it is the executable's file name.
+    // SDL2 reads the WMCLASS variables, SDL3 (and sdl2-compat over it) SDL_APP_ID. A user's own wins.
+    setenv("SDL_APP_ID", "pockettracker", 0);
+    setenv("SDL_VIDEO_X11_WMCLASS", "pockettracker", 0);
+#endif
 
     // ⚠️ NO `SDL_INIT_AUDIO`. `SdlAudioEngine::openStream` initialises the audio subsystem itself, which
     // is what lets Android drop this backend for Oboe without SDL ever opening a device to fight over —

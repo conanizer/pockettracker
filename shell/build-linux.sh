@@ -117,6 +117,9 @@ echo "############ 3/4  stage ############"
 # ONE top-level folder: a tarball that unpacks a dozen loose files into someone's home directory is a
 # tarball they will lose. The binary is renamed on the way in — the build target is a developer name.
 install -m 755 "$BIN" "$STAGE/PocketTracker"
+# The application-menu entry: the script writes a .desktop file pointing at wherever this folder is.
+install -m 755 "$SRC/shell/linux/install-desktop.sh" "$STAGE/install-desktop.sh"
+cp "$SRC/docs/images/logo-app.png"                 "$STAGE/pockettracker.png"
 
 mkdir -p "$STAGE/licenses"
 cp "$SRC/LICENSE"                                  "$STAGE/licenses/LICENSE"
@@ -144,6 +147,9 @@ PocketTracker $VERSION — Linux (x86-64)
 
 Run:
     ./PocketTracker
+
+Add it to your application menu and launcher, with its icon (again after moving this folder):
+    ./install-desktop.sh
 
 Requires SDL2 at runtime (most distributions call the package libsdl2-2.0-0 or sdl2):
     Debian / Ubuntu   sudo apt install libsdl2-2.0-0
@@ -179,7 +185,7 @@ tar tzf "$TARBALL"
 # back out of the finished file — sizes included, because a zero-byte member also extracts cleanly.
 echo
 echo "read back out of the tarball:"
-for NEEDED in "PocketTracker" "README.txt" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" \
+for NEEDED in "PocketTracker" "README.txt" "install-desktop.sh" "pockettracker.png" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" \
               "licenses/CREDITS.md" "licenses/OFL-1.1-LinuxBiolinum.txt" \
               "licenses/libogg-COPYING" "licenses/libopus-COPYING" \
               "licenses/libopus-LICENSE_PLEASE_READ.txt"; do

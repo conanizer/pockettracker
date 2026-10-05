@@ -112,6 +112,8 @@ cd PocketTracker-<version>
 ./PocketTracker
 ```
 
+`./install-desktop.sh` adds it to your application menu and launcher, with its icon.
+
 SDL2 is the only runtime dependency:
 
 | Distribution | Command |
