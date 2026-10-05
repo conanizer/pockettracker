@@ -139,16 +139,11 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 
 void InputDispatcher::on_a_up() {
     if (layer_takes(Gesture::A_UP)) return;
-    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
+    if (overlay_swallows(Overlay::MAP_PICK)) return;
     if (s_.mapPicker.isOpen) { map_picker_move_up(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_coarse_step(s_.sampleEditor)); return; }
-    if (on_fx_type_column()) {
-        s_.fxHelper = fx_helper_opened_at(current_fx_type_code(),
-                                          fx_layout_for(visible_effect_type_count()));
-        return;
-    }
+    if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) {
         s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
             s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
@@ -161,16 +156,11 @@ void InputDispatcher::on_a_up() {
 
 void InputDispatcher::on_a_down() {
     if (layer_takes(Gesture::A_DOWN)) return;
-    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
+    if (overlay_swallows(Overlay::MAP_PICK)) return;
     if (s_.mapPicker.isOpen) { map_picker_move_down(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_coarse_step(s_.sampleEditor)); return; }
-    if (on_fx_type_column()) {
-        s_.fxHelper = fx_helper_opened_at(current_fx_type_code(),
-                                          fx_layout_for(visible_effect_type_count()));
-        return;
-    }
+    if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) {
         s_.mapPicker = map_picker_opened_at(static_cast<songcore::MapDestId>(
             s_.project->midiMappings[static_cast<size_t>(s_.midiMapCursorRow)].dest));
@@ -182,8 +172,7 @@ void InputDispatcher::on_a_down() {
 
 void InputDispatcher::on_a_left() {
     if (layer_takes(Gesture::A_LEFT)) return;
-    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
+    if (overlay_swallows(Overlay::MAP_PICK)) return;
     if (s_.mapPicker.isOpen) { map_picker_move_left(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(-sample_fine_step(s_.sampleEditor)); return; }
@@ -193,8 +182,7 @@ void InputDispatcher::on_a_left() {
 
 void InputDispatcher::on_a_right() {
     if (layer_takes(Gesture::A_RIGHT)) return;
-    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
+    if (overlay_swallows(Overlay::MAP_PICK)) return;
     if (s_.mapPicker.isOpen) { map_picker_move_right(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_sample_slice_marker_row()) { nudge_slice_marker(+sample_fine_step(s_.sampleEditor)); return; }
@@ -211,11 +199,8 @@ void InputDispatcher::on_a_released() {
     }
     if (layer_takes(Gesture::A_RELEASE)) return;
 
-    // Both pickers commit on RELEASE, so you can hold A, read the list, and let go on your choice.
-    if (top_overlay() == Overlay::MAP_PICK) { apply_map_picker_choice(); return; }
-    if (top_overlay() != Overlay::FX_HELPER) return;
-    apply_fx_type_change(s_.fxHelper.selected_effect_code());
-    s_.fxHelper = FxHelperState{};
+    // The map picker commits on RELEASE, so you can hold A, read the list, and let go on your choice.
+    if (top_overlay() == Overlay::MAP_PICK) apply_map_picker_choice();
 }
 
 void InputDispatcher::on_a_deferred() {

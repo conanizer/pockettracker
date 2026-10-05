@@ -1,4 +1,4 @@
-// What a cell opens: the FX helper, the mapping destination picker, INSTRUMENT's buttons, the
+// What a cell opens: the mapping destination picker, INSTRUMENT's buttons, the
 // cells whose A or B waits for the release, and the EQ editor.
 
 #include "ui/dispatch/dispatch_common.h"
@@ -8,20 +8,6 @@
 #include <algorithm>
 
 namespace pt::ui {
-
-// ─── The FX-type column, and the helper it opens ──────────────────────────────────────────────────
-
-bool InputDispatcher::on_fx_type_column() const {
-    switch (s_.currentScreen) {
-        case ScreenType::PHRASE:
-            return s_.cursorColumn == 4 || s_.cursorColumn == 6 || s_.cursorColumn == 8;
-        case ScreenType::TABLE:
-            return s_.tableCursorColumn == 3 || s_.tableCursorColumn == 5 ||
-                   s_.tableCursorColumn == 7;
-        default:
-            return false;
-    }
-}
 
 // ─── The mapping destination picker ──────────────────────────────────────────────────────────────
 
@@ -48,32 +34,6 @@ void InputDispatcher::apply_map_picker_choice() {
     // No cursor clamp needed: the picker opens only on GROUP and PARAM, which every destination has.
 }
 
-int InputDispatcher::current_fx_type_code() const {
-    const Project& p = *s_.project;
-    int            code = 0;
-
-    if (s_.currentScreen == ScreenType::PHRASE) {
-        const songcore::PhraseStep& step =
-            p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
-        switch (s_.cursorColumn) {
-            case 4: code = step.fx1Type; break;
-            case 6: code = step.fx2Type; break;
-            case 8: code = step.fx3Type; break;
-            default: break;
-        }
-    } else if (s_.currentScreen == ScreenType::TABLE) {
-        const songcore::TableRow& row =
-            p.tables[static_cast<size_t>(s_.currentTable)].rows[static_cast<size_t>(s_.tableCursorRow)];
-        switch (s_.tableCursorColumn) {
-            case 3: code = row.fx1Type; break;
-            case 5: code = row.fx2Type; break;
-            case 7: code = row.fx3Type; break;
-            default: break;
-        }
-    }
-    return code;
-}
-
 // The one place the FX list's length is decided — the picker and the FX column both read it.
 //
 // ⚠️ Two trims off one tail, so they nest: `LPO` sits directly below the MIDI six and can only be
@@ -82,32 +42,6 @@ int InputDispatcher::visible_effect_type_count() const {
     if (s_.caps.midi)       return songcore::EFFECT_TYPE_COUNT;
     if (s_.caps.loopWindow) return songcore::EFFECT_TYPE_COUNT_NO_MIDI;
     return songcore::EFFECT_TYPE_COUNT_STABLE;
-}
-
-void InputDispatcher::apply_fx_type_change(int effect_code) {
-    Project& p = host_.edit_project();
-
-    if (s_.currentScreen == ScreenType::PHRASE) {
-        songcore::PhraseStep& step =
-            p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
-        switch (s_.cursorColumn) {
-            case 4: step.fx1Type = effect_code; break;
-            case 6: step.fx2Type = effect_code; break;
-            case 8: step.fx3Type = effect_code; break;
-            default: return;
-        }
-        mark_modified();
-    } else if (s_.currentScreen == ScreenType::TABLE) {
-        songcore::TableRow& row =
-            p.tables[static_cast<size_t>(s_.currentTable)].rows[static_cast<size_t>(s_.tableCursorRow)];
-        switch (s_.tableCursorColumn) {
-            case 3: row.fx1Type = effect_code; break;
-            case 5: row.fx2Type = effect_code; break;
-            case 7: row.fx3Type = effect_code; break;
-            default: return;
-        }
-        mark_modified(/*table_touched=*/true);
-    }
 }
 
 // ─── INSTRUMENT's buttons ────────────────────────────────────────────────────────────────────────

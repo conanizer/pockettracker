@@ -659,7 +659,10 @@ class InputDispatcher {
     /** 255 on SONG (a selection spans the document, not the viewport); 15 everywhere else. */
     int  max_selection_row() const;
 
-    // ── FX helper ───────────────────────────────────────────────────────────────────────────────
+    // ── The FX helper (ui/dispatch/layers/fx_helper.cpp) ───────────────────────────────────────
+    LayerResult fx_helper_layer(Gesture g);
+    /** Raise the helper on the effect the cursor's FX column holds. */
+    void open_fx_helper();
     /** True when the cursor is on an FX-TYPE column (PHRASE 4/6/8, TABLE 3/5/7). */
     bool on_fx_type_column() const;
     /** The effect CODE the cursor's FX column currently holds — where the picker opens. */
