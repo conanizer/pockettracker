@@ -149,8 +149,36 @@ struct NoteCarry {
     }
 };
 
+// Where an AUS/AUF ramp has got to: a BYTE ramp's last byte, or an EQ morph's last band set.
+struct RampLastValue {
+    int               byte = 0;
+    ExtEqMorphPayload eq{};
+};
+
+// ─── A phrase part-way through being scheduled ──────────────────────────────────────────────────
+//
+// The walk schedules a phrase ROW BY ROW and resumes here. It lives in TrackState, so the checkpoint
+// (taken before a phrase begins) and every reset leave it inactive — no rewind has to remember it.
+struct PhraseWalk {
+    bool    active     = false;
+    int     phraseId   = 0;
+    int     chainId    = -1;      // −1: PHRASE mode, ramps pair within the phrase
+    int     transpose  = 0;
+    int64_t startFrame = 0;
+    int     row        = 0;       // the next row to schedule
+    int     localGrooveStep = 0;
+    bool    anyGrooveActive = false;
+    int64_t frameOffset = 0;      // frames scheduled so far, from `startFrame`
+    int     rowsScheduled = 0;
+    // The ramps the phrase declares, paired when it began (automation.h), and where each has got to.
+    std::vector<RampSpec>      ramps;
+    std::vector<RampLastValue> rampLast;
+};
+
 // ─── Per-track persistent effect state ──────────────────────────────────────────────────────────
 struct TrackState {
+    PhraseWalk walk;
+
     Note  lastNote = Note::EMPTY();
     int   lastInstrument = 0;
     int   lastStartPoint = -1;
@@ -270,9 +298,10 @@ class Sequencer {
 
     static constexpr int64_t LOOKAHEAD_MS = 50;
     static constexpr int BUFFER_PHRASES = 2;
-    // Per-track scheduling steps one SONG poll may take: 8 tracks × 2 buffered phrases of real work,
-    // plus headroom for rows that cost no frames (which could otherwise spin).
-    static constexpr int SONG_STEPS_PER_POLL = 64;
+    // Per-track scheduling steps one SONG poll may take — a step is one phrase ROW: 8 tracks × 2
+    // buffered phrases × 16 rows of real work, plus headroom for units that cost no frames (which could
+    // otherwise spin).
+    static constexpr int SONG_STEPS_PER_POLL = 1024;
 
     bool is_playing() const { return isPlaying_; }
     PlaybackMode playback_mode() const { return playbackMode_; }
@@ -445,16 +474,14 @@ class Sequencer {
         playbackTrack_ = clamp_track(trackId);
         playbackStartFrame_ = getCurrentFrame();
         if (phraseId < 0 || phraseId > 255) return;
-        const Phrase& phrase = project_->phrases[phraseId];
         playbackMode_ = PlaybackMode::PHRASE;
         isPlaying_ = true;
         int tempo = project_->tempo;
         int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
         router_.t_play("PHRASE", "id=" + hex2(phraseId), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
-        SchedulePhraseResult r = schedulePhrase(phrase, playbackStartFrame_, playbackTrack_,
-                                                project_transpose_semitones(*project_), framesPerStep, 0);
-        nextFrameToSchedule_ += r.framesScheduled;
+        nextFrameToSchedule_ += schedulePhrase(phraseId, playbackStartFrame_, playbackTrack_,
+                                               project_transpose_semitones(*project_), framesPerStep, 0);
     }
 
     void playChain(int chainId, int trackId = 0) {
@@ -478,12 +505,10 @@ class Sequencer {
         if (firstRow >= 0) {
             int phraseId = chain_phrase_ref(chain, firstRow);
             int transposeSemitones = chain_transpose_semitones(chain, firstRow);
-            SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_,
-                                                    playbackTrack_,
-                                                    transposeSemitones + project_transpose_semitones(*project_),
-                                                    framesPerStep, 0, &chain, firstRow);
+            nextFrameToSchedule_ += schedulePhrase(phraseId, playbackStartFrame_, playbackTrack_,
+                                                   transposeSemitones + project_transpose_semitones(*project_),
+                                                   framesPerStep, 0, &chain, firstRow);
             chainRowStartFrames_.emplace_back(firstRow, playbackStartFrame_);
-            nextFrameToSchedule_ += r.framesScheduled;
             nextChainRowToSchedule_ = firstRow + 1;
         }
     }
@@ -667,24 +692,28 @@ class Sequencer {
         }
         int64_t bufferRemaining = bufferHead - currentFrame;
         int64_t minBuffer = static_cast<int64_t>(BUFFER_PHRASES) * framesPerPhrase;
-        if (bufferRemaining >= minBuffer) return;
+        if (bufferRemaining >= minBuffer && walking_track() < 0) return;
 
         switch (playbackMode_) {
             case PlaybackMode::PHRASE: {
-                const Phrase& phrase = project.phrases[currentPhraseId_];
                 TrackState& trackState = trackStates_[playbackTrack_];
-                save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_});
-                int hopStartRow = trackState.consumeHopTarget();
-                int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                SchedulePhraseResult r = schedulePhrase(phrase, nextFrameToSchedule_, playbackTrack_,
-                                                        project_transpose_semitones(project), framesPerStep,
-                                                        effectiveStartRow);
-                nextFrameToSchedule_ += r.framesScheduled;
+                if (!trackState.walk.active) {
+                    save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_});
+                    int hopStartRow = trackState.consumeHopTarget();
+                    int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
+                    begin_phrase(currentPhraseId_, nextFrameToSchedule_, playbackTrack_,
+                                 project_transpose_semitones(project), effectiveStartRow);
+                }
+                nextFrameToSchedule_ += finish_walk(playbackTrack_, framesPerStep);
                 break;
             }
             case PlaybackMode::CHAIN: {
                 const Chain& chain = project.chains[currentChainId_];
                 TrackState& trackState = trackStates_[playbackTrack_];
+                if (trackState.walk.active) {
+                    nextFrameToSchedule_ += finish_walk(playbackTrack_, framesPerStep);
+                    break;
+                }
                 if (trackState.trackStopped) {
                     nextChainRowToSchedule_ = (nextChainRowToSchedule_ + 1) % 16;
                     nextFrameToSchedule_ += framesPerPhrase;
@@ -698,13 +727,11 @@ class Sequencer {
                     save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_, nextRow});
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-                    SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_,
-                                                            playbackTrack_,
-                                                            transposeSemitones, framesPerStep, effectiveStartRow,
-                                                            &chain, nextRow);
                     chainRowStartFrames_.emplace_back(nextRow, nextFrameToSchedule_);
-                    nextFrameToSchedule_ += r.framesScheduled;
                     nextChainRowToSchedule_ = (nextRow + 1) % 16;
+                    begin_phrase(phraseId, nextFrameToSchedule_, playbackTrack_, transposeSemitones,
+                                 effectiveStartRow, &chain, nextRow);
+                    nextFrameToSchedule_ += finish_walk(playbackTrack_, framesPerStep);
                 } else {
                     stop();
                 }
@@ -718,7 +745,7 @@ class Sequencer {
 
                 // ─── EIGHT INDEPENDENT CURSORS ───────────────────────────────────────────────────
                 //
-                // Fill whichever track is furthest behind, a phrase at a time, until each is
+                // Fill whichever track is furthest behind, a row at a time, until each is
                 // BUFFER_PHRASES ahead — so a two-row chain moves on while a sixteen-row one beside it
                 // runs. The per-track walk is schedule_track_unit().
                 // ⚠️ The step cap bounds the work one poll can do.
@@ -735,7 +762,12 @@ class Sequencer {
                     // Nothing left to fill, and the transport keeps running: a block loops for ever,
                     // so all eight done means PLAY landed on an unwritten row. STOP is the only end.
                     if (nextTrack < 0) break;
-                    if (earliest - currentFrame >= minBuffer) break;
+                    // Deep enough — but a phrase begun is finished, so the lookahead still ends on
+                    // phrase boundaries.
+                    if (earliest - currentFrame >= minBuffer) {
+                        nextTrack = walking_track();
+                        if (nextTrack < 0) break;
+                    }
                     schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase);
                 }
                 break;
@@ -902,12 +934,6 @@ class Sequencer {
         return true;
     }
 
-    struct SchedulePhraseResult {
-        int rowsScheduled = 0;
-        bool hopTriggered = false;
-        bool trackStopped = false;
-        int64_t framesScheduled = 0;
-    };
     struct ScheduleStepResult {
         bool noteScheduled = false;
         bool hopTriggered = false;
@@ -925,7 +951,7 @@ class Sequencer {
 
     // Snapshot taken just BEFORE scheduling a phrase, so notify_data_changed() can roll back to the
     // earliest future phrase boundary.
-    // ⚠️ schedulePhrase() CONSUMES STATE — the groove step, the pending HOP, the track's RNG stream. A
+    // ⚠️ The walk CONSUMES STATE — the groove step, the pending HOP, the track's RNG stream. A
     // rollback restoring only the frame replays the phrase against a track that has moved on: a groove
     // whose length does not divide 16 re-times the track, and the dice roll again. This is the state.
     struct Checkpoint {
@@ -1100,8 +1126,15 @@ class Sequencer {
         save_checkpoint(trackId, cp);
     }
 
-    // Advance ONE track by one unit: a phrase, a bar sat out, or the end of its block (in SONG, a loop
-    // — see advance_track_song_row).
+    // A track with a phrase part-way through, or −1.
+    int walking_track() const {
+        for (int t = 0; t < 8; ++t)
+            if (trackStates_[t].walk.active) return t;
+        return -1;
+    }
+
+    // Advance ONE track by one unit: a phrase row, a bar sat out, or the end of its block (in SONG, a
+    // loop — see advance_track_song_row).
     // `lastSongRow` bounds the RENDER path's walk (−1 = the column's own end); it takes no checkpoints.
     void schedule_track_unit(const Project& project, int trackId, int64_t framesPerStep,
                              int64_t framesPerPhrase, int lastSongRow = -1,
@@ -1114,6 +1147,10 @@ class Sequencer {
         }
 
         TrackState& trackState = trackStates_[trackId];
+        if (trackState.walk.active) {   // a phrase part-way through goes on where it stopped
+            trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
+            return;
+        }
         const int songRow = trackSongRow_[trackId];
 
         // ⚠️ A cell the walk cannot enter SILENCES this track until STOP — it does not search upward.
@@ -1151,13 +1188,12 @@ class Sequencer {
                                        + project_transpose_semitones(project);
         const int hopStartRow = trackState.consumeHopTarget();
         const int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-        SchedulePhraseResult r = schedulePhrase(project.phrases[chain_phrase_ref(chain, chainRow)],
-                                                trackNextFrame_[trackId], trackId, transposeSemitones,
-                                                framesPerStep, effectiveStartRow, &chain, chainRow);
         // ⚠️ Recorded for a muted track too: the playhead says where the track IS.
         put_song_position(trackId, songRow, chainRow, trackNextFrame_[trackId]);
-        trackNextFrame_[trackId] += r.framesScheduled;
         trackChainRow_[trackId] = chainRow + 1;
+        begin_phrase(chain_phrase_ref(chain, chainRow), trackNextFrame_[trackId], trackId, transposeSemitones,
+                     effectiveStartRow, &chain, chainRow);
+        trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
     }
 
     // ─── LIVE mode's unit of work ────────────────────────────────────────────────────────────────
@@ -1167,6 +1203,11 @@ class Sequencer {
     void schedule_live_unit(const Project& project, int trackId, int64_t framesPerStep,
                             int64_t framesPerPhrase, bool takeCheckpoint) {
         TrackState& trackState = trackStates_[trackId];
+        // A phrase part-way through goes on first: a launch lands only on a phrase boundary.
+        if (trackState.walk.active) {
+            trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
+            return;
+        }
 
         // Every unit begins on a phrase boundary, so an IMMEDIATE queue lands here; a chain-boundary
         // one lands here too, on the unit that BEGINS A LAP.
@@ -1232,49 +1273,67 @@ class Sequencer {
                                        + project_transpose_semitones(project);
         const int hopStartRow = trackState.consumeHopTarget();
         const int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
-        SchedulePhraseResult r = schedulePhrase(project.phrases[chain_phrase_ref(chain, chainRow)],
-                                                trackNextFrame_[trackId], trackId, transposeSemitones,
-                                                framesPerStep, effectiveStartRow, &chain, chainRow);
         put_song_position(trackId, songRow, chainRow, trackNextFrame_[trackId]);
-        trackNextFrame_[trackId] += r.framesScheduled;
         trackChainRow_[trackId] = chainRow + 1;
+        begin_phrase(chain_phrase_ref(chain, chainRow), trackNextFrame_[trackId], trackId, transposeSemitones,
+                     effectiveStartRow, &chain, chainRow);
+        trackNextFrame_[trackId] += walk_phrase_row(trackId, framesPerStep);
     }
 
-    // `chain`/`chainRow` locate the phrase in the chain being played, for AUS/AUF: a fade may span
-    // into a later phrase. PHRASE mode passes nullptr and pairs within the phrase.
-    SchedulePhraseResult schedulePhrase(const Phrase& phrase, int64_t startFrame, int trackId,
-                                        int transposeSemitones, int64_t framesPerStep, int startRow,
-                                        const Chain* chain = nullptr, int chainRow = 0) {
+    // A whole phrase in one call — the transport starts, which schedule their first phrase at PLAY.
+    // Returns the frames it took.
+    int64_t schedulePhrase(int phraseId, int64_t startFrame, int trackId, int transposeSemitones,
+                           int64_t framesPerStep, int startRow, const Chain* chain = nullptr, int chainRow = 0) {
+        if (!begin_phrase(phraseId, startFrame, trackId, transposeSemitones, startRow, chain, chainRow)) return 0;
+        return finish_walk(trackId, framesPerStep);
+    }
+
+    // The rest of the phrase in progress, in one call. Returns the frames it took.
+    int64_t finish_walk(int trackId, int64_t framesPerStep) {
+        int64_t frames = 0;
+        while (trackStates_[clampi(trackId, 0, 7)].walk.active) frames += walk_phrase_row(trackId, framesPerStep);
+        return frames;
+    }
+
+    /**
+     * Start walking a phrase on `trackId` from `startFrame`; `walk_phrase_row` then schedules it.
+     * `chain`/`chainRow` locate the phrase in the chain being played, for AUS/AUF: a fade may span
+     * into a later phrase. PHRASE mode passes nullptr and pairs within the phrase.
+     * Returns false, and walks nothing, on a track HOP FF stopped.
+     */
+    bool begin_phrase(int phraseId, int64_t startFrame, int trackId, int transposeSemitones, int startRow,
+                      const Chain* chain = nullptr, int chainRow = 0) {
         const Project& project = *project_;
-        int rowsScheduled = 0;
         TrackState& trackState = trackStates_[clampi(trackId, 0, 7)];
-        // Every random draw happens inside this call, so the track's stream is selected once here.
-        schedulingTrack_ = clampi(trackId, 0, 7);
+        if (trackState.trackStopped) return false;
 
-        if (trackState.trackStopped) return SchedulePhraseResult{0, false, true, 0};
-
-        int localGrooveStep = trackState.grooveStep;
-        bool anyGrooveActive = false;
-
-        int effectiveStartRow = clampi(startRow, 0, 15);
-        int64_t frameOffset = 0;
+        PhraseWalk& w = trackState.walk;
+        w.active          = true;
+        w.phraseId        = clampi(phraseId, 0, 255);
+        w.chainId         = chain ? chain->id : -1;
+        w.transpose       = transposeSemitones;
+        w.startFrame      = startFrame;
+        w.row             = clampi(startRow, 0, 15);
+        w.localGrooveStep = trackState.grooveStep;
+        w.anyGrooveActive = false;
+        w.frameOffset     = 0;
+        w.rowsScheduled   = 0;
 
         // ─── The ramps this phrase declares (AUS/AUF — automation.h) ─────────────────────────────
         //
-        // Pairing gives spans in step indices; the walk below emits them using each step's real
-        // duration — so grooves cost nothing and a HOP truncates a fade by ending the walk. A phrase
-        // entered below its AUS runs no ramp. With a chain, spans can cross phrases
-        // (`find_ramps_in_chain`, re-derived every time).
-        const std::vector<RampSpec> ramps =
-            chain ? find_ramps_in_chain(project, *chain, chainRow, effectiveStartRow)
-                  : find_ramps(phrase, effectiveStartRow);
+        // Pairing gives spans in step indices; the walk emits them using each step's real duration —
+        // so grooves cost nothing and a HOP truncates a fade by ending the walk. A phrase entered below
+        // its AUS runs no ramp. With a chain, spans can cross phrases (`find_ramps_in_chain`,
+        // re-derived for every phrase).
+        w.ramps = chain ? find_ramps_in_chain(project, *chain, chainRow, w.row)
+                        : find_ramps(project.phrases[w.phraseId], w.row);
         // The last value each ramp emitted, for de-duplication (an ease curve holds one byte for many
         // ticks). Seeded with the curve's value one tic BEFORE this phrase: where the AUS is here that
         // clamps to the start byte the start effect already sent; in a crossed phrase it is where the
         // previous phrase left off. An EQ morph seeds the same way against its start preset.
-        std::vector<RampLastValue> rampLast;
-        rampLast.reserve(ramps.size());
-        for (const RampSpec& r : ramps) {
+        w.rampLast.clear();
+        w.rampLast.reserve(w.ramps.size());
+        for (const RampSpec& r : w.ramps) {
             const double seedT = (static_cast<double>(r.stepOffset) * TICS_PER_STEP - 1.0) /
                                  (static_cast<double>(r.span) * TICS_PER_STEP);
             RampLastValue seed;
@@ -1282,17 +1341,34 @@ class Sequencer {
                 seed.eq = eq_morph_at(project, r.startByte, r.destByte, r.curveByte, seedT);
             else
                 seed.byte = automation_value_byte(r.startByte, r.destByte, r.curveByte, seedT);
-            rampLast.push_back(seed);
+            w.rampLast.push_back(seed);
         }
+        return true;
+    }
 
-        for (int stepIndex = effectiveStartRow; stepIndex < 16; ++stepIndex) {
+    /**
+     * Schedule the walk's next row that takes time — rows a groove gives no length are passed on the
+     * way. Returns the frames it took. The walk goes inactive when the phrase ends or HOPs; a HOP row
+     * takes no time, so that call returns 0.
+     */
+    int64_t walk_phrase_row(int trackId, int64_t framesPerStep) {
+        const Project& project = *project_;
+        TrackState& trackState = trackStates_[clampi(trackId, 0, 7)];
+        PhraseWalk& w = trackState.walk;
+        if (!w.active) return 0;
+        // Every random draw happens inside this call, so the track's stream is selected once here.
+        schedulingTrack_ = clampi(trackId, 0, 7);
+        const Phrase& phrase = project.phrases[w.phraseId];
+
+        for (; w.row < 16; ++w.row) {
+            const int stepIndex = w.row;
             const PhraseStep& step = phrase.steps[stepIndex];
 
             // Pre-scan GRV so a new groove takes effect on its own step; the last GRV wins.
             for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {
                 if (step_fx_type(step, fxSlot) == FX_GRV) {
                     trackState.grooveId = step_fx_value(step, fxSlot);
-                    localGrooveStep = 0;
+                    w.localGrooveStep = 0;
                 }
             }
 
@@ -1301,35 +1377,36 @@ class Sequencer {
             bool currentGrooveActive = groove_active_length(currentGroove) > 0;
 
             // The length comes from `timing.h` — one definition, the one the tools measure.
-            if (currentGrooveActive) anyGrooveActive = true;
-            int64_t stepDuration = groove_step_duration(currentGroove, localGrooveStep, framesPerStep);
+            if (currentGrooveActive) w.anyGrooveActive = true;
+            int64_t stepDuration = groove_step_duration(currentGroove, w.localGrooveStep, framesPerStep);
 
             if (stepDuration == 0) {
-                rowsScheduled++;
-                localGrooveStep++;
+                w.rowsScheduled++;
+                w.localGrooveStep++;
                 continue;
             }
 
-            int64_t targetFrame = startFrame + frameOffset;
+            int64_t targetFrame = w.startFrame + w.frameOffset;
 
-            stepRamps_ = ramps.empty() ? nullptr : &ramps;
+            stepRamps_ = w.ramps.empty() ? nullptr : &w.ramps;
             stepIndex_ = stepIndex;
             ScheduleStepResult stepResult = scheduleStepWithEffects(step, targetFrame, stepDuration, trackId,
-                                                                    transposeSemitones, trackState, stepIndex);
+                                                                    w.transpose, trackState, stepIndex);
             stepRamps_ = nullptr;
 
             // ⚠️ A HOP row costs NOTHING — no time, no marker, no ramp tic; it IS the jump. So the walk
             // leaves before `frameOffset`, the playhead or a fade moves. `localGrooveStep` stays too,
             // or the next phrase enters on the wrong tic.
             if (stepResult.hopTriggered) {
-                if (anyGrooveActive) trackState.grooveStep = localGrooveStep;
+                if (w.anyGrooveActive) trackState.grooveStep = w.localGrooveStep;
                 // A hop leaving with nothing played may be part of a ring (TrackState::emptyHops).
-                if (frameOffset == 0) {
+                if (w.frameOffset == 0) {
                     if (++trackState.emptyHops > MAX_EMPTY_HOPS) trackState.trackStopped = true;
                 } else {
                     trackState.emptyHops = 0;
                 }
-                return SchedulePhraseResult{rowsScheduled, true, trackState.trackStopped, frameOffset};
+                w.active = false;
+                return 0;
             }
 
             // The playhead's row stamp, made as the walk passes (put_phrase_step_position).
@@ -1337,17 +1414,28 @@ class Sequencer {
 
             // After the step's own events: a ramp is emitted as the walk passes, never ahead — a fade
             // baked past a HOP would keep moving the parameter after the phrase ended.
-            if (!ramps.empty())
-                emit_ramp_ticks(ramps, rampLast, chain ? chain->id : -1, stepResult.effectiveStep, stepIndex, targetFrame,
+            if (!w.ramps.empty())
+                emit_ramp_ticks(w.ramps, w.rampLast, w.chainId, stepResult.effectiveStep, stepIndex, targetFrame,
                                 stepDuration, trackId, trackState, stepResult.noteFrame, stepResult.fxFrame);
-            rowsScheduled++;
-            frameOffset += stepDuration;
-            if (currentGrooveActive) localGrooveStep++;
+            w.rowsScheduled++;
+            w.frameOffset += stepDuration;
+            if (currentGrooveActive) w.localGrooveStep++;
+            ++w.row;
+            if (w.row < 16) return stepDuration;
+            finish_phrase(trackState);
+            return stepDuration;
         }
 
-        if (anyGrooveActive) trackState.grooveStep = localGrooveStep;
-        if (rowsScheduled > 0) trackState.emptyHops = 0;
-        return SchedulePhraseResult{rowsScheduled, false, false, frameOffset};
+        finish_phrase(trackState);
+        return 0;
+    }
+
+    // The phrase ran to its last row.
+    static void finish_phrase(TrackState& trackState) {
+        PhraseWalk& w = trackState.walk;
+        if (w.anyGrooveActive) trackState.grooveStep = w.localGrooveStep;
+        if (w.rowsScheduled > 0) trackState.emptyHops = 0;
+        w.active = false;
     }
 
     // ─── AUS / AUF — a declared span, emitted as the walk crosses it ────────────────────────────────
@@ -1357,11 +1445,6 @@ class Sequencer {
     // `t` is measured in STEPS, not frames: `(stepsSoFar + tic/12) / span`, so a fade covers an exact
     // fraction at every step boundary whatever the groove does, with no look-ahead.
     // A tic is `stepDuration / TICS_PER_STEP` — the same warped grid LAT and KIL use.
-    // Where a ramp has got to: a BYTE ramp's last byte, or an EQ morph's last band set.
-    struct RampLastValue {
-        int               byte = 0;
-        ExtEqMorphPayload eq{};
-    };
 
     void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<RampLastValue>& lastValue,
                          int chainId, const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
@@ -2286,7 +2369,7 @@ class Sequencer {
 
     // The random draws for CHA / RND / RNL / ARP-RANDOM. `rng_range(a, b)` is half-open at the top;
     // negative `lo` is allowed (rng.h).
-    // The stream is chosen by `schedulingTrack_`, set on entry to `schedulePhrase` — the one place a
+    // The stream is chosen by `schedulingTrack_`, set on entry to `walk_phrase_row` — the one place a
     // draw can be reached from.
     int rng_int(int bound) { return rngs_[schedulingTrack_].next_int(bound); }
     int rng_range(int lo, int hi) { return rngs_[schedulingTrack_].next_int(lo, hi); }
@@ -2295,7 +2378,7 @@ class Sequencer {
     // rewound for one track without un-drawing another's dice.
     Rng rngs_[8];
     int schedulingTrack_ = 0;
-    // The step being scheduled, for `voice_at`. `stepRamps_` is set by schedulePhrase for one step
+    // The step being scheduled, for `voice_at`. `stepRamps_` is set by walk_phrase_row for one step
     // and null otherwise.
     const std::vector<RampSpec>* stepRamps_ = nullptr;
     int     stepIndex_     = 0;
