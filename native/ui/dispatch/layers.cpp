@@ -19,7 +19,7 @@ const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
     {Overlay::CONFIRM,   &InputDispatcher::confirm_open,       &InputDispatcher::confirm_layer},
     {Overlay::RENDER,    &InputDispatcher::render_dialog_open, &InputDispatcher::render_dialog_layer},
     {Overlay::HELP,      &InputDispatcher::help_full_open,     nullptr},
-    {Overlay::QWERTY,    &InputDispatcher::qwerty_open,        nullptr},
+    {Overlay::QWERTY,    &InputDispatcher::qwerty_open,        &InputDispatcher::qwerty_layer},
     {Overlay::THEME,     &InputDispatcher::theme_open,         nullptr},
     {Overlay::EQ,        &InputDispatcher::eq_open,            nullptr},
     {Overlay::FX_HELPER, &InputDispatcher::fx_helper_open,     nullptr},

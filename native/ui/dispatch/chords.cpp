@@ -562,16 +562,14 @@ void InputDispatcher::on_b_down() {
 
 // ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
 //
-// ⚠️ On the modals R+DPAD is not navigation. KEYBOARD: R+UP/DOWN switches layout, R+LEFT/RIGHT moves
-// the text cursor. BROWSER: R+UP/DOWN cycles the sort, R+LEFT goes up a directory. SAMPLE EDITOR:
-// R+UP/DOWN zooms, R+LEFT/RIGHT swallowed. EQ EDITOR: all four swallowed. None may fall through to
-// `navigate_*` — a popup is not a cell in the screen grid, and the user would land on a screen with the
-// popup's state still live.
+// ⚠️ On the modals R+DPAD is not navigation. BROWSER: R+UP/DOWN cycles the sort, R+LEFT goes up a
+// directory. SAMPLE EDITOR: R+UP/DOWN zooms, R+LEFT/RIGHT swallowed. EQ EDITOR: all four swallowed. None
+// may fall through to `navigate_*` — a popup is not a cell in the screen grid, and the user would land on
+// a screen with the popup's state still live.
 
 void InputDispatcher::on_r_up() {
     if (layer_takes(Gesture::R_UP)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
-    if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) { browser_cycle_sort(+1); return; }
     // Sample-editor ZOOM: R+UP/DOWN step `zoomLevel` (0=1×…4=16×); the feed re-bins the waveform.
     if (on_sample_editor()) {
@@ -586,8 +584,7 @@ void InputDispatcher::on_r_up() {
 
 void InputDispatcher::on_r_down() {
     if (layer_takes(Gesture::R_DOWN)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
-    if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) { browser_cycle_sort(-1); return; }
     if (on_sample_editor()) {   // ZOOM OUT — see on_r_up
         if (s_.sampleEditor.showConfirmClose) return;
@@ -673,11 +670,7 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
 
 void InputDispatcher::on_r_left() {
     if (layer_takes(Gesture::R_LEFT)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
-    if (qwerty_open()) {
-        move_text_cursor_left(s_.qwerty);
-        return;
-    }
+    if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_sample_editor()) return;   // see on_r_right
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
@@ -689,11 +682,7 @@ void InputDispatcher::on_r_left() {
 
 void InputDispatcher::on_r_right() {
     if (layer_takes(Gesture::R_RIGHT)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
-    if (qwerty_open()) {
-        move_text_cursor_right(s_.qwerty);
-        return;
-    }
+    if (overlay_swallows(Overlay::BROWSER)) return;
     // ⚠️ Swallowed on the sample editor: it has no cell in the screen grid, so navigating would fall
     // through to PHRASE and bypass ARE YOU SURE?, silently discarding an unsaved edit.
     if (on_sample_editor()) return;

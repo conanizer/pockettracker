@@ -24,19 +24,7 @@ void InputDispatcher::on_button_a() {
     if (layer_takes(Gesture::A)) return;
     // Every layer is ARMED (A means something on each), so this swallows only the FX helper — and a
     // layer added later is INERT on A rather than inserting behind it.
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-
-    // A on the KEYBOARD types the key under the cursor — except on the action row: ABORT (col 0) and
-    // APPLY (col 1).
-    if (qwerty_open()) {
-        if (s_.qwerty.is_on_action_row()) {
-            if (s_.qwerty.keyCursorCol == 0) qwerty_cancel();
-            else                             qwerty_apply();
-        } else {
-            insert_current_key(s_.qwerty);
-        }
-        return;
-    }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     // A on the BROWSER: open a folder, go up, or load the file (browser_confirm).
     if (on_browser()) { browser_confirm(); return; }
@@ -170,9 +158,7 @@ void InputDispatcher::on_button_a() {
 void InputDispatcher::on_button_b() {
     if (layer_takes(Gesture::B)) return;
     // Every layer is ARMED (B closes or answers on each); a layer added later is inert on B.
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-
-    if (qwerty_open()) { delete_char(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     // ⚠️ B CLOSES THE THEME EDITOR with no "are you sure": the live theme IS the applied theme, and it
     // survives the close and the quit.
@@ -295,16 +281,13 @@ void InputDispatcher::on_button_b() {
 
 void InputDispatcher::on_select() {
     if (layer_takes(Gesture::SELECT)) return;
-    // ⚠️ Bare SELECT is HELP, and the keyboard's ABORT — nothing else.
+    // ⚠️ Bare SELECT is HELP — nothing else.
     // ⚠️ It arrives on the RELEASE (ui/button_mapper.h): on the browser SELECT is a modifier, and any other
     // press during it cancels this. (Unrelated to the A-deferral, which keeps sub-screen cells editable.)
     // The EQ and theme editors are named: they leave the oscilloscope strip drawn, so the panel has a
     // place, and their cell names (EQ FILL, Q, MTR BG) need it. ⚠️⚠️ The browser is named too — safe only
     // because this runs on an uninterrupted release.
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-
-    // The keyboard's ABORT: B backspaces here, so this is the quick way to abandon a rename.
-    if (qwerty_open()) { qwerty_cancel(); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
     //
@@ -362,9 +345,7 @@ void InputDispatcher::on_start() {
     if (layer_takes(Gesture::START)) return;
     // ⚠️ The THEME and EQ editors are armed to LET START THROUGH: the transport underneath is how you hear
     // an edit while dialling it.
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    // START is the keyboard's APPLY.
-    if (qwerty_open()) { qwerty_apply(); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     // ⚠️ START on the BROWSER AUDITIONS the file under the cursor, decoded into slot 255 on the preview
     // lane (songcore::preview_sample_file — no instrument to derive from). Every audible extension, from

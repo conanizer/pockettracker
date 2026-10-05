@@ -800,7 +800,7 @@ class InputDispatcher {
     // A PARTIAL modal: owns the D-pad, A, A+DPAD, B, B+DPAD and SELECT; START reaches the transport.
     // ⚠️ Raised from SETTINGS and `currentScreen` STAYS `SETTINGS`: ask `theme_open()` before the
     // screen's cursor, or A+UP cycles the row underneath.
-    // ⚠️ SAVE raises the keyboard ON TOP of it, so `qwerty_open()` is tested BEFORE `theme_open()`.
+    // ⚠️ SAVE raises the keyboard ON TOP of it, so QWERTY sits above THEME in the layer stack.
 
     bool theme_open() const { return s_.themeEditor.isOpen; }
 
@@ -983,7 +983,8 @@ class InputDispatcher {
     /** Copy or move the clipboard into the directory on screen, de-duplicating names. */
     void browser_paste();
 
-    // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
+    // ── The QWERTY keyboard (ui/dispatch/layers/qwerty.cpp) ─────────────────────────────────────
+    LayerResult qwerty_layer(Gesture g);
     void open_qwerty(QwertyContext context, const std::string& initial_text,
                      const std::string& field_label, const std::string& context_extra,
                      int max_length = 20, bool clear_on_first_b = false);

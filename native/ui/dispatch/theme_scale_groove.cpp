@@ -111,8 +111,8 @@ void InputDispatcher::theme_row_action() {
     }
     switch (s_.themeEditor.cursorChannel) {
         case 1: {   // SAVE — name it, then write it
-            // ⚠️ The keyboard opens WITHOUT closing the editor, hence `qwerty_open()` is tested before
-            // `theme_open()` everywhere. Seeded with the sanitized name — what the file will be called.
+            // ⚠️ The keyboard opens WITHOUT closing the editor, hence QWERTY above THEME in the layer
+            // stack. Seeded with the sanitized name — what the file will be called.
             const std::string seed = sanitize_theme_filename(s_.theme.name);
             open_qwerty(QwertyContext::THEME_SAVE, seed.empty() ? "THEME" : seed, "SAVE THEME:",
                         fs_.themes_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);

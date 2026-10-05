@@ -832,12 +832,11 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 
 // ─── D-pad alone ─────────────────────────────────────────────────────────────────────────────────
 //
-// ⚠️ THE MODAL RULE (input_dispatcher.h): keyboard first, then browser, then the screen.
+// ⚠️ THE MODAL RULE (input_dispatcher.h): the editors first, then browser, then the screen.
 
 void InputDispatcher::on_dpad_up() {
     if (layer_takes(Gesture::DPAD_UP)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (theme_open())  { theme_move_cursor(-1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, -1); return; }
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
@@ -846,8 +845,7 @@ void InputDispatcher::on_dpad_up() {
 
 void InputDispatcher::on_dpad_down() {
     if (layer_takes(Gesture::DPAD_DOWN)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (theme_open())  { theme_move_cursor(+1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, +1); return; }
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
@@ -856,8 +854,7 @@ void InputDispatcher::on_dpad_down() {
 
 void InputDispatcher::on_dpad_left() {
     if (layer_takes(Gesture::DPAD_LEFT)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     // ⚠️ In the THEME editor LEFT/RIGHT change CHANNEL (R→G→B) and WRAP — three channels are a ring.
     if (theme_open())  { theme_move_cursor(0, -1); return; }
     // ⚠️ In the EQ editor LEFT/RIGHT change BAND keeping the PARAM, so one parameter sweeps across all
@@ -870,8 +867,7 @@ void InputDispatcher::on_dpad_left() {
 
 void InputDispatcher::on_dpad_right() {
     if (layer_takes(Gesture::DPAD_RIGHT)) return;
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (theme_open())  { theme_move_cursor(0, +1); return; }
     if (eq_open())     { eq_move_cursor(+1, 0); return; }
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }

@@ -444,6 +444,7 @@ add_library(pt-ui STATIC
         ui/dispatch/chords.cpp
         ui/dispatch/layers.cpp
         ui/dispatch/layers/confirm.cpp
+        ui/dispatch/layers/qwerty.cpp
         ui/dispatch/layers/render_dialog.cpp
         ui/dispatch/midi.cpp
         ui/dispatch/project.cpp
