@@ -338,11 +338,9 @@ void InputDispatcher::apply_sample_rate_and_bits() {
     const int          factor = (se.rateMode == 1) ? 2 : (se.rateMode == 2) ? 4 : 1;
     const int          oldLen = se.totalFrames;
 
+    // ⚠️ Notes already scheduled keep the OLD base frequency — up to LONG_OPERATION_MS of them, filled
+    // just above.
     host_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth);
-
-    // ⚠️ The lookahead already scheduled notes against the OLD base frequency; roll it back so they
-    // re-derive.
-    if (host_.is_playing()) host_.notify_data_changed();
 
     const int newLen = host_.sample_length(se.instrumentId);
     auto scale = [&](int64_t f) -> int64_t {

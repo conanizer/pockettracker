@@ -10,8 +10,7 @@
 //
 // Kept alongside the walk, carrying no bus event (and so no golden):
 //   * getPlaybackPosition() and its frame maps — the UI's playheads;
-//   * the checkpoint ring + notify_data_changed() — the live-edit rollback (only the POSITION rolls
-//     back, never TrackState);
+//   * the checkpoint ring — the LIVE rewind, so a launch lands on the boundary it was aimed at;
 //   * eqm_active() / mixer_vol_active() / delay_time_active() — EQM, VTR/VMV and TIM REPLACE engine
 //     state, and the host restores it on stop().
 // Random FX (CHA/RND/RNL/ARP-RANDOM) are not in the goldens; a test checks their distributions
@@ -73,8 +72,8 @@ struct StepPos {
     int step  = 0;
 };
 
-// What notify_data_changed() asks the host to drop: per track, the frame its lookahead rolled back to,
-// or −1 for nothing queued past now. One frame cannot express this with eight independent cursors.
+// What a LIVE rewind asks the host to drop: per track, the frame its lookahead rolled back to, or −1
+// for nothing queued past now. One frame cannot express this with eight independent cursors.
 struct RollbackPlan {
     int64_t frames[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 };
@@ -316,7 +315,7 @@ class Sequencer {
     bool is_playing() const { return isPlaying_; }
     PlaybackMode playback_mode() const { return playbackMode_; }
 
-    // ── UI cursor + live-edit reaction (side-records, no bus events) ──
+    // ── UI cursor feedback (side-records, no bus events) ──
 
     // `trackId < 0` means "whichever track's marker is oldest" — only meaningful in PHRASE mode, where
     // one track plays; the tools use it, the app does not.
@@ -394,46 +393,6 @@ class Sequencer {
             }
             default: return pos;
         }
-    }
-
-    // Roll the lookahead back to the earliest UNPLAYED phrase boundary, so an edit is heard on the
-    // next loop instead of 2–3 phrases later.
-    // ⚠️ The answer is PER TRACK: each track's boundary is its own, and one engine-wide frame would drop
-    // notes a track will not re-schedule or keep ones it is about to re-emit. The host clears the
-    // queues; this holds no engine.
-    RollbackPlan notify_data_changed(int64_t currentFrame) {
-        RollbackPlan plan;
-        if (!isPlaying_) return plan;
-
-        // SONG's eight cursors share the rewind with LIVE launches (rewind_song_track).
-        if (playbackMode_ == PlaybackMode::SONG) return rewind_all_song_tracks(currentFrame);
-
-        // PHRASE and CHAIN schedule one track only, so only that track has anything queued.
-        const int t = playbackTrack_;
-        std::deque<Checkpoint>& ring = checkpoints_[t];
-        const Checkpoint* hit = nullptr;
-        for (const Checkpoint& c : ring) {
-            if (c.frame > currentFrame) { hit = &c; break; }
-        }
-        if (!hit) return plan;
-        Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
-
-        // ⚠️ And the state the re-schedule consumes (see Checkpoint): replayed against an already-moved
-        // groove phase, HOP and RNG, the phrase comes back different — re-timed, with a groove whose
-        // length does not divide 16.
-        trackStates_[t] = cp.trackState;
-        rngs_[t] = cp.rng;
-        nextFrameToSchedule_ = cp.frame;
-        if (playbackMode_ == PlaybackMode::CHAIN) nextChainRowToSchedule_ = cp.chainRow;
-        // PHRASE: resetting nextFrameToSchedule_ is enough.
-        while (!ring.empty() && ring.back().frame >= cp.frame) ring.pop_back();
-        // …and the marker's row stamps with them (drop_positions_from), in both modes.
-        if (playbackMode_ == PlaybackMode::CHAIN)
-            drop_positions_from(chainRowStartFrames_, cp.frame, [](int) { return true; });
-        drop_positions_from(phraseStepStartFrames_, cp.frame,
-                            [&](const StepPos& s) { return s.track == t; });
-        plan.frames[t] = cp.frame;
-        return plan;
     }
 
     /**
@@ -710,7 +669,6 @@ class Sequencer {
                 TrackState& trackState = trackStates_[playbackTrack_];
                 for (int step = 0; step < stepCap && nextFrameToSchedule_ - currentFrame < minBuffer; ++step) {
                     if (!trackState.walk.active) {
-                        save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_});
                         int hopStartRow = trackState.consumeHopTarget();
                         int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                         // HOP FF stopped the track: the phrase is silent from here.
@@ -740,7 +698,6 @@ class Sequencer {
                     int phraseId = chain_phrase_ref(chain, nextRow);
                     int transposeSemitones = chain_transpose_semitones(chain, nextRow)
                                              + project_transpose_semitones(project);
-                    save_checkpoint(playbackTrack_, Checkpoint{nextFrameToSchedule_, nextRow});
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                     chainRowStartFrames_.emplace_back(nextRow, nextFrameToSchedule_);
@@ -834,8 +791,8 @@ class Sequencer {
         }
 
         // The SAME per-track walk the live arm takes — a render must not disagree with playback. It
-        // does not loop and takes no checkpoints (nothing edits mid-export). Every unit ends a track or
-        // advances a cursor, so it terminates without a step cap.
+        // does not loop and takes no checkpoints (an export has no LIVE launch). Every unit ends a
+        // track or advances a cursor, so it terminates without a step cap.
         for (;;) {
             int nextTrack = -1;
             int64_t earliest = 0;
@@ -859,8 +816,9 @@ class Sequencer {
 
     /**
      * Rewind ONE song-mode track to its earliest boundary past `currentFrame`; returns the frame to
-     * drop queued notes from (−1 = nothing queued past now). Shared by a live EDIT (heard on the next
-     * loop) and a LIVE launch (lands on the next boundary, not after the lookahead).
+     * drop queued notes from (−1 = nothing queued past now). A LIVE launch or toggle lands on that
+     * boundary rather than after the lookahead. An edit never rewinds: it is heard from the next row
+     * the walk reaches.
      * ⚠️ TrackState and the RNG come back with it (see Checkpoint).
      */
     int64_t rewind_song_track(int trackId, int64_t currentFrame) {
@@ -878,7 +836,7 @@ class Sequencer {
         trackNextFrame_[trackId] = cp.frame;
         trackSongRow_[trackId]   = cp.songRow;
         trackChainRow_[trackId]  = cp.songChainRow;
-        // ⚠️ A track that had finished is live again: the edit may be the chain it was missing.
+        // A rewound track walks again; the walk decides afresh whether it is done.
         trackDone_[trackId] = false;
         // ⚠️ …and a launch this rewind rolled back over is waiting again; its stamp names a frame the
         // cursor will no longer reach, and the walk would skip it as spent.
@@ -957,14 +915,13 @@ class Sequencer {
         PhraseStep effectiveStep;
     };
 
-    // Snapshot taken just BEFORE scheduling a phrase, so notify_data_changed() can roll back to the
-    // earliest future phrase boundary.
+    // Snapshot taken just BEFORE a SONG-mode unit, so a LIVE rewind can return to the earliest future
+    // phrase boundary.
     // ⚠️ The walk CONSUMES STATE — the groove step, the pending HOP, the track's RNG stream. A
     // rollback restoring only the frame replays the phrase against a track that has moved on: a groove
     // whose length does not divide 16 re-times the track, and the dice roll again. This is the state.
     struct Checkpoint {
         int64_t frame = 0;
-        int chainRow = 0;
         int songRow = 0;
         int songChainRow = 0;
         // ⚠️ Filled by save_checkpoint(), never by the call sites, so none can forget.
@@ -978,7 +935,7 @@ class Sequencer {
 
     int64_t getCurrentFrame() const { return currentFrame_; }
 
-    // ⚠️ By value; the state is captured HERE, below the four call sites.
+    // ⚠️ By value; the state is captured HERE, below the call sites.
     void save_checkpoint(int trackId, Checkpoint cp) {
         cp.trackState = trackStates_[trackId];
         cp.rng = rngs_[trackId];
@@ -1124,7 +1081,7 @@ class Sequencer {
     }
 
     // The snapshot every unit of work takes before it commits — a phrase, a bar of rest, a bar sat
-    // out after HOP FF. ⚠️ A unit with no checkpoint is one `notify_data_changed` cannot revise.
+    // out after HOP FF. ⚠️ A unit with no checkpoint is one a LIVE launch cannot rewind past.
     void checkpoint_track(int trackId, int songRow, int rowUnit, bool take) {
         if (!take) return;
         Checkpoint cp;
@@ -2367,8 +2324,8 @@ class Sequencer {
     int rng_int(int bound) { return rngs_[schedulingTrack_].next_int(bound); }
     int rng_range(int lo, int hi) { return rngs_[schedulingTrack_].next_int(lo, hi); }
 
-    // One stream per track, because the live-edit rollback is per track: a shared stream could not be
-    // rewound for one track without un-drawing another's dice.
+    // One stream per track, because the LIVE rewind is per track: a shared stream could not be rewound
+    // for one track without un-drawing another's dice.
     Rng rngs_[8];
     int schedulingTrack_ = 0;
     // The step being scheduled, for `voice_at`. `stepRamps_` is set by walk_phrase_row for one step
@@ -2426,7 +2383,7 @@ class Sequencer {
     PlaybackMode playbackMode_ = PlaybackMode::STOPPED;
     bool isPlaying_ = false;
 
-    // ── side-records: playheads, live-edit rollback, the restore flags ──
+    // ── side-records: playheads, the LIVE rewind, the restore flags ──
     std::deque<Checkpoint> checkpoints_[8];                                // ring of 4, per track
     // The ring bound for TrackState::emptyHops. Sixteen is a full chain of pass-through phrases
     // (legitimate); past 32 nothing is going to play.

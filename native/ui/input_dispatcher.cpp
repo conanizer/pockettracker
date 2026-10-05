@@ -117,14 +117,14 @@ void InputDispatcher::run_due_autosave() {
     // back — and a spurious RECOVER WORK? on the next launch.
     if (!s_.project_dirty()) return;
 
-    before_long_operation();
+    before_save();
     autosave_write(host_, fs_);   // a failure is silent — see lifecycle.h
 }
 
 void InputDispatcher::flush_autosave() {
     autosavePending_ = false;
     if (!s_.project_dirty()) return;
-    before_long_operation();
+    before_save();
     autosave_write(host_, fs_);
 }
 
@@ -569,7 +569,7 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             if (r.rateModeChanged || r.bitDepthChanged) apply_sample_rate_and_bits();
 
             // ⚠️ `false`: the editor's session (zoom, selection, slice index, pending pitch) is not the
-            // document. `true` would roll the lookahead back sixty times a second on a held A+UP on ZOOM.
+            // document. `true` would dirty the song and arm an autosave on a held A+UP on ZOOM.
             // RATE and BIT, which DO rebuild the buffer, push for themselves
             // (`apply_sample_rate_and_bits()`).
             return false;
@@ -609,9 +609,6 @@ void InputDispatcher::mark_modified(bool table_touched) {
     // MIXER and EFFECTS edit state the engine holds on its own (mixer, master bus, sends, master EQ).
     // Pushed wholesale, so a deleted EQ slot (−1, the engine's bypass) reaches the engine too.
     if (on_globals_screen()) host_.push_globals();
-
-    // An edit WHILE PLAYING must reach the lookahead already scheduled past it.
-    if (host_.is_playing()) host_.notify_data_changed();
 }
 
 void InputDispatcher::run_mapped_cc_dirty() {
@@ -762,7 +759,6 @@ void InputDispatcher::generic_input(InputAction (*fn)(const CursorContext&)) {
             // key-repeat when the screen behind is MIXER/EFFECTS. The band needs two calls;
             // apply_caller_eq_slot_change bumps `projectVersion`.
             push_eq_band_to_engine();
-            if (host_.is_playing()) host_.notify_data_changed();
         }
         return;
     }

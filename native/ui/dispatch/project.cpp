@@ -334,7 +334,7 @@ void InputDispatcher::project_action() {
         case ProjectRow::PROJECT:
             switch (s_.projectCursorColumn) {
                 case 1: {   // SAVE
-                    before_long_operation();
+                    before_save();
                     const ActionResult r = save_project(host_, fs_, s_);
                     s_.statusMessage = r.message;
                     s_.statusSuccess = r.ok;
@@ -448,7 +448,7 @@ void InputDispatcher::tap_tempo() {
 
     Project& p = host_.edit_project();
     const int clamped = std::min(999, std::max(20, bpm));
-    if (p.tempo == clamped) return;   // no edit, so no dirty bump and no lookahead rollback
+    if (p.tempo == clamped) return;   // no edit, so no dirty bump
     p.tempo = clamped;
     mark_modified();
 }

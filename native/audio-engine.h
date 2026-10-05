@@ -407,8 +407,8 @@ public:
     void clearScheduledNotes();
 
     // Clear only notes/kills at or after fromFrame (leaves the current phrase intact).
-    // ⚠️ `trackId >= 0` clears ONE track's — the eight song cursors roll back independently, so a
-    // live edit must drop only what the track being rolled back is going to schedule again.
+    // ⚠️ `trackId >= 0` clears ONE track's — the eight song cursors rewind independently, so a LIVE
+    // launch must drop only what the track being rewound is going to schedule again.
     void clearScheduledNotesFrom(int64_t fromFrame, int trackId = -1);
 
     // Load a table: 16 rows × 8 bytes = [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value,

@@ -135,18 +135,18 @@ struct ScheduledKill {
     }
 };
 
-// A live edit rolls one track's lookahead back and drops what that track had already queued from
-// the rollback frame on. The drop is LAZY: the UI only records "generation g of lane L ended at frame
+// A LIVE launch rewinds one track's lookahead and drops what that track had already queued from the
+// rewind frame on. The drop is LAZY: the UI only records "generation g of lane L ended at frame
 // F" here, and the audio thread skips an entry at drain time when a cancel issued after it was queued
 // reaches its frame. Nothing walks or rebuilds the heap, and the UI holds the queue mutex for a push
 // and nothing longer — so the audio thread, which drains under the same mutex, never waits on a
 // rebuild the UI thread was preempted in the middle of.
 //
-// ⚠️ The check scans every cancel since the entry's generation, not just the latest: two rollbacks
+// ⚠️ The check scans every cancel since the entry's generation, not just the latest: two rewinds
 // at different frames both bound what they threw away, and a note queued between them is kept.
 // The history is a ring of HISTORY cancels per lane; an entry that outlives more than that is treated
 // as cancelled. A kept entry drains before the next phrase boundary, so reaching that takes HISTORY
-// edits on one track inside one phrase.
+// launches on one track inside one phrase.
 class CancelLedger {
 public:
     static constexpr int LANES   = 10;   // tracks 0-8 (8 is the preview lane) + one for trackId -1
@@ -222,7 +222,7 @@ public:
     // Drain every note with targetFrame <= maxFrame into `out` (ascending frame order, since the
     // heap pops earliest-first) under a SINGLE lock. Lets the audio callback dispatch a whole
     // block's worth of notes without taking this mutex once per frame. `out` is appended to.
-    // A note a rollback cancelled is popped here and goes nowhere.
+    // A note a rewind cancelled is popped here and goes nowhere.
     void drainUntil(int64_t maxFrame, std::vector<ScheduledNote>& out) {
         std::lock_guard<std::mutex> lock(mutex);
         while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
@@ -245,9 +245,9 @@ public:
     // notes stay in the heap and are skipped when drained — see CancelLedger.
     //
     // ⚠️ `trackId >= 0` clears ONE track's, and the sequencer needs that: the eight song tracks each
-    // roll their lookahead back to their own phrase boundary, so a live edit must drop exactly the
-    // notes the track being rolled back is about to schedule again — and nothing another track has
-    // already queued past that frame and will not.
+    // rewind to their own phrase boundary, so a LIVE launch must drop exactly the notes the track
+    // being rewound is about to schedule again — and nothing another track has already queued past
+    // that frame and will not.
     void clearFrom(int64_t fromFrame, int trackId = -1) { cancels.cancel(fromFrame, trackId); }
 };
 
@@ -395,7 +395,7 @@ public:
 
     // `trackId >= 0` clears one track's — see NoteQueue::clearFrom. ⚠️ The two GLOBAL actions
     // (PARAM_UPDATE_MASTER_EQ / _VOL) carry the trackId of the track that AUTHORED them, and go with
-    // it: the track being rolled back is the one that will emit them again.
+    // it: the track being rewound is the one that will emit them again.
     void clearFrom(int64_t fromFrame, int trackId = -1) { cancels.cancel(fromFrame, trackId); }
 };
 

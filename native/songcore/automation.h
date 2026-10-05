@@ -280,9 +280,8 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
 // The AUF may sit in a later phrase of the SAME chain, so a fade can span up to 256 steps.
 // ⚠️ The chain is the boundary: a span past it would have to survive song moves, a chain played from
 // two rows, and CHAIN-mode wraps.
-// ⚠️ Re-derived from (chain, chainRow) on every call — never carried in `TrackState`. A live edit
-// rolls the lookahead back without rewinding `TrackState`, a chain can be re-entered, and a phrase
-// can be scheduled twice; carried state would be wrong in all three.
+// ⚠️ Re-derived from (chain, chainRow) on every call — never carried in `TrackState`. A chain can be
+// re-entered and a LIVE rewind schedules a phrase twice; carried state would be wrong in both.
 
 /**
  * Every ramp playing over the phrase at `chainRow`, whether it opened there or earlier.

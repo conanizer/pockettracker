@@ -252,9 +252,6 @@ class SongcoreHost {
         if (!engine_) midiIn_.run(seq_.clock(), nullptr);
         // What the drain handled since the last poll: mapped knobs, thru, counters, observer.
         drain_midi_in();
-        // ⚠️ Between the drain and the pass: a mapped knob's lookahead roll must precede the pass it
-        // affects, and happen once per batch rather than once per message.
-        flush_mapped_edits();
         keep_walking();
         // TEMPO is editable while playing, so the beat length is pushed every time.
         if (engine_) engine_->setMetronomeBeat(frames_per_quarter());
@@ -453,29 +450,15 @@ class SongcoreHost {
             if (!engine_) continue;
 
             if (d->scope == MapScope::INSTRUMENT) {
+                // VOL and PAN are baked into a note when it is scheduled, so they reach the next row
+                // the walk reaches; every other mapped parameter is engine state a voice reads live.
                 push_instrument(m.scopeIndex);
-                // ⚠️ VOL and PAN are baked into a note when it is EMITTED, so they must reach notes the
-                // lookahead already scheduled — hence the roll. Every other mapped parameter is engine
-                // state a voice reads live.
-                if (d->id == MapDestId::INS_VOL || d->id == MapDestId::INS_PAN)
-                    mappedNotifyDue_ = true;
             } else {
                 push_mapped_dest(*engine_, project_, d->id, m.scopeIndex);
                 release_song_hold(d->id, m.scopeIndex);
             }
         }
         return applied;
-    }
-
-    /**
-     * The lookahead roll a mapped knob may owe, at most once per poll.
-     * ⚠️ `notify_data_changed()` rolls back to the next phrase boundary; once per message (~30/s) the
-     * scheduler would never get ahead — heard as stutter.
-     */
-    void flush_mapped_edits() {
-        if (!mappedNotifyDue_) return;
-        mappedNotifyDue_ = false;
-        if (is_playing()) notify_data_changed();
     }
 
     /**
@@ -578,28 +561,22 @@ class SongcoreHost {
      *  so safe every frame. */
     void sync_sf_preset(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
-        const int was = routing_.sfSlot[id];
         songcore::sync_instrument_soundfont(*engine_, project_.instruments[static_cast<size_t>(id)],
                                             routing_, mediaRoots_);
-        if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
     }
 
     /** The PATCH row's load, started rather than done. False = engine busy, ask again. */
     bool request_sf_preset(int id) {
         if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return true;
-        const int was = routing_.sfSlot[id];
-        const bool taken = songcore::request_instrument_soundfont(
+        return songcore::request_instrument_soundfont(
             *engine_, project_.instruments[static_cast<size_t>(id)], routing_, mediaRoots_);
-        // An already-resident preset is answered on the spot, moving the slot here.
-        if (routing_.sfSlot[id] != was) notify_sf_slot_moved();
-        return taken;
     }
 
-    /** Install a finished background preset load. Called once a frame by the feed. */
+    /** Install a finished background preset load. Called once a frame by the feed. Notes already
+     *  scheduled keep the old slot; the next row the walk reaches takes the new one. */
     void poll_sf_load() {
         if (!engine_) return;
-        if (songcore::collect_instrument_soundfont(*engine_, project_, routing_, mediaRoots_) >= 0)
-            notify_sf_slot_moved();
+        songcore::collect_instrument_soundfont(*engine_, project_, routing_, mediaRoots_);
     }
 
     // ── ↕ the FILE verbs ─────────────────────────────────────────────────────────────────────────
@@ -916,21 +893,11 @@ class SongcoreHost {
 
     // ── ↕ live editing ───────────────────────────────────────────────────────────────────────────
     //
-    // The UI edits THIS project in place; the Sequencer reads the same object and sees edits as they
-    // land. Two obligations:
-    //   • an edit WHILE PLAYING → notify_data_changed(), or it is not heard until the lookahead passes;
-    //   • a TABLE edit → invalidate_tables(): the consumer caches what it already pushed.
+    // The UI edits THIS project in place; the Sequencer reads the same object, so an edit while
+    // playing is heard from the next row the walk reaches (Sequencer::HORIZON_MS ahead).
+    // ⚠️ A TABLE edit must call invalidate_tables(): the consumer caches what it already pushed.
     Project& edit_project() { return project_; }
     void     invalidate_tables() { consumer_.invalidate_tables(); }
-
-    // ── ↑ live-edit reaction ─────────────────────────────────────────────────────────────────────
-    // Roll the lookahead back to the earliest unplayed phrase boundary and drop the queued notes past
-    // it, so an edit is heard on the next loop. The Sequencer picks the boundary; the host clears the
-    // queue because only it holds the engine.
-    void notify_data_changed() {
-        sync_clock();
-        apply_rollback(seq_.notify_data_changed(seq_.clock()));
-    }
 
     // ── ↕ LIVE mode ──────────────────────────────────────────────────────────────────────────────
     //
@@ -1097,7 +1064,6 @@ class SongcoreHost {
         }
     }
 
-    bool     mappedNotifyDue_ = false;   // a mapped INS VOL/PAN owes the lookahead a roll this poll
     int      controlChannel_  = -1;      // -1 = no channel is reserved for mapping knobs
     uint64_t mappedCcWrites_  = 0;
     bool     learnArmed_      = false;   // `R` is down: the next knob NAMES rather than drives
@@ -1106,17 +1072,7 @@ class SongcoreHost {
     int      learnChannel_    = -1;
     int      lastCcChannel_   = -1;      // whatever channel the cable last carried a CC on
 
-    /**
-     * A SoundFont slot moved under a playing take, so the lookahead is re-derived.
-     * ⚠️ The PATCH edit and its sound arrive apart: by the time the decode lands, the buffer holds notes
-     * on the OLD slot, which the residency sweep then frees. The arrival is a second edit. Called
-     * from the loaders, below every call site.
-     */
-    void notify_sf_slot_moved() {
-        if (seq_.is_playing()) notify_data_changed();
-    }
-
-    // Drop what the rolled-back tracks had queued. ⚠️ One frame PER TRACK: clearing every track from
+    // Drop what the rewound tracks had queued. ⚠️ One frame PER TRACK: clearing every track from
     // the earliest boundary would drop notes a track further ahead will not schedule again.
     void apply_rollback(const songcore::RollbackPlan& plan) {
         if (!engine_) return;

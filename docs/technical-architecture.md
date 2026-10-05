@@ -342,9 +342,11 @@ host's project in place. Two mutable copies of a document is a desync waiting to
 randomization, and emits **events** rather than engine calls.
 
 The window is short — `Sequencer::HORIZON_MS`, filled a phrase row at a time — so an edit is heard
-from the next row not yet scheduled. Only the frame loop's poll refills it: anything that holds the UI
-thread longer than the window calls `InputDispatcher::before_long_operation()` first, which fills
-deeper (no edit can arrive while the thread is blocked, so the depth costs nothing).
+from the next row not yet scheduled, and **an edit never rewinds the walk**: what is already scheduled
+plays as it was. Only the frame loop's poll refills the window: anything that holds the UI thread
+longer calls `InputDispatcher::before_long_operation()` first, which fills deeper. No edit can arrive
+while the thread is blocked, but the depth outlives the operation — an edit made just after it waits
+for the walk to get past it — so a save, which fits inside the window, only tops it up.
 
 Timing is frame-based: `frames_per_step` and `frames_per_tic` derive from the tempo, and grooves
 change a step's length per position. Everything downstream is stamped in frames.
@@ -381,12 +383,11 @@ its range once through and a track that meets a boundary inside the range is fin
 
 **LIVE mode is a modifier on SONG, not a fifth transport mode.** The mode changes only what happens at
 a track's boundary — a launched song row re-enters itself instead of the cursor moving down the column
-— so everything that branches on the playback mode (the playhead readback, the live-edit rollback, the
-event trace) needs no arm for it, and a project that never enters LIVE schedules identically. The
-launch itself is the live-edit rollback with the song row overwritten on the way back in: both rewind
-one track to its earliest unplayed boundary and hand the host a frame to drop queued notes from, which
-is why a launch aimed at a boundary already inside the lookahead still lands on it rather than a lap
-late.
+— so everything that branches on the playback mode (the playhead readback, the event trace) needs no
+arm for it, and a project that never enters LIVE schedules identically. A launch is **the one place the
+walk is undone**: it rewinds one track to its earliest unplayed phrase boundary (a per-track checkpoint
+ring, SONG mode only) and hands the host a frame to drop queued notes from, which is why a launch
+pressed in the last moments before a boundary still lands on it rather than a bar or a lap late.
 
 **Scale quantization happens once, where a note is emitted.** By that point the chain and project
 transposes are folded into the note and the PIT and ARP offsets sit beside it, so quantizing that sum
@@ -452,9 +453,9 @@ step's real duration as it walks, so a groove-warped span costs it nothing.
 A span may cross phrases, and **the chain is the boundary** — a chain is the unit a track repeats and
 re-enters, so pairing that ran past it would have to survive a chain played from two song rows at once
 and CHAIN mode's wrap. ⚠️ The open ramp is **re-derived from `(chain, chainRow)` on every call**, never
-carried in `TrackState`: a live edit rolls the lookahead back without rewinding track state, a chain
-re-entered from a later song row would inherit the previous one's open ramp, and a phrase scheduled
-twice would advance it twice. Deriving makes all three unaskable.
+carried in `TrackState`: a chain re-entered from a later song row would inherit the previous one's
+open ramp, and a phrase scheduled twice (a LIVE rewind) would advance it twice. Deriving makes both
+unaskable.
 
 The PHRASE editor draws an `AUS`/`AUF` cell that no ramp uses **dimmed**, and it asks the same pairing
 code the emitter does, so the grid can neither claim a fade that will not play nor deny one that will.
