@@ -29,6 +29,7 @@
 //   Comparison: within a PLAY..STOP segment, lines sort STABLY by (frame, track, sortRank), then the
 //   files compare byte for byte. Order among equal keys is semantic (FX slots resolve 1→3, last-wins).
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -194,6 +195,16 @@ struct NoteOnPayload {
     uint32_t vibSpdBits;  // vibSpd    f32ᵇ Hz, tempo-scaled at emit
     uint32_t vibDepBits;  // vibDep    f32ᵇ semitones
 };
+
+/** The note's velocity, 0..1 — the V column, or for velocity −1 the root of the squared velGain.
+ *  ⚠️ Every consumer that turns a note into a velocity reads it here: a retrigger carries only
+ *  velGain, and a consumer that read it differently would hear the note and its repeats apart. */
+inline float note_velocity_unit(const NoteOnPayload& n) {
+    if (n.velocity >= 0) return static_cast<float>(n.velocity) / 127.0f;
+    float g;
+    std::memcpy(&g, &n.velGainBits, sizeof g);
+    return g > 0.0f ? std::sqrt(g) : 0.0f;
+}
 
 struct NoteOffPayload  { uint8_t mode; };                          // mode      NOTE_OFF_*
 struct CcPayload       { uint8_t param; uint32_t valueBits; };     // param value

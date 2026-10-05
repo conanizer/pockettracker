@@ -431,14 +431,7 @@ class ExternalConsumer : public IMidiConsumer {
      * Clamped to ≥ 1: velocity 0 IS a note-off.
      */
     static int midi_velocity(const NoteOnPayload& n) {
-        float unit;
-        if (n.velocity >= 0) {
-            unit = static_cast<float>(n.velocity) / 127.0f;
-        } else {
-            const float g = f32_from_bits(n.velGainBits);
-            unit = g > 0.0f ? std::sqrt(g) : 0.0f;
-        }
-        unit *= f32_from_bits(n.volGainBits);
+        const float unit = note_velocity_unit(n) * f32_from_bits(n.volGainBits);
         const int v = to7bit(unit);
         return v < 1 ? 1 : v;
     }

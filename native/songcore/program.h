@@ -286,12 +286,11 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     // would turn into C-4 for every ROOT. The sequencer never sets it.
     const int transpose = rootAudition ? 0 : 60 - p.rootMidi;
 
-    const float volume = f32_from_bits(n.velGainBits);
-    // The V column IS the MIDI velocity — TSF applies its own curve, so the channel volume stays 1.0
-    // and instrument vol/Vxx arrives via phraseVol. Velocity −1 (retrig/arp) derives from the gain.
-    const int   velocity  = (n.velocity >= 0) ? clampi(n.velocity, 1, 127)
-                                              : clampi(static_cast<int>(volume * 127.0f), 1, 127);
-    const float sfNoteVol = (n.velocity >= 0) ? 1.0f : volume;
+    // The velocity IS the MIDI velocity and TSF applies its own curve, so the note's own gain stays
+    // 1.0 and instrument vol/Vxx arrives via phraseVol. ⚠️ A retrigger must land on the same velocity
+    // as the note it repeats — hence the shared derivation, and no velGain on top of it.
+    const int   velocity  = clampi(static_cast<int>(note_velocity_unit(n) * 127.0f + 0.5f), 1, 127);
+    const float sfNoteVol = 1.0f;
 
     const float framesPerTic  = frames_per_tic_f(tempo, sampleRate);
     const float framesPerStep = framesPerTic * TICS_PER_STEP;

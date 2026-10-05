@@ -945,13 +945,14 @@ class SongcoreHost {
 
         NoteOnPayload& n = ev.noteOn;
         n.note        = static_cast<uint8_t>(note_to_midi(note));
-        // ⚠️ The velocity fields are wired differently per destination. The engine takes VOL as
-        // `velGain` (the crossed wiring, see event.h). `midi_velocity` (midi_out.h) reads velocity −1
-        // as "derive from velGain = (V/127)²" and takes a square root, which would boost a raw VOL. So
-        // the cable gets full velocity, with VOL in the field that scales by VOL.
-        n.velocity    = external ? 127 : -1;
-        n.velGainBits = f32_bits(external ? 1.0f : hex_to_float(ins.volume));   // seam arg `volume`
-        n.volGainBits = f32_bits(external ? hex_to_float(ins.volume) : 1.0f);   // seam arg `phraseVol`
+        // ⚠️ The velocity fields are wired differently per destination. The sampler takes VOL as
+        // `velGain` (the crossed wiring, see event.h). The cable and the SoundFont read velocity −1
+        // as "derive from velGain = (V/127)²" and take a square root, which would boost a raw VOL. So
+        // they get full velocity, with VOL in the field that scales by VOL — as a played note has it.
+        const bool fullVelocity = external || ins.instrumentType == InstrumentType::SOUNDFONT;
+        n.velocity    = fullVelocity ? 127 : -1;
+        n.velGainBits = f32_bits(fullVelocity ? 1.0f : hex_to_float(ins.volume));   // seam arg `volume`
+        n.volGainBits = f32_bits(fullVelocity ? hex_to_float(ins.volume) : 1.0f);   // seam arg `phraseVol`
         n.panBits     = f32_bits(hex_to_float(ins.pan));
         n.start = -1; n.slice = -1; n.tableId = tableIdOverride; n.tableRow = -1;
         n.transpose = 0; n.pit = 0; n.arp = 0;
