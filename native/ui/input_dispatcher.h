@@ -383,6 +383,9 @@ class InputDispatcher {
     /** Is a load in flight? The shell asks before it does anything that assumes a settled document. */
     bool load_running() const { return s_.loading.running; }
 
+    /** A load answers no button: the shell's pump reads the cancel itself (`load_tick`). */
+    LayerResult loading_layer(Gesture) { return LayerResult::TAKEN; }
+
     /**
      * Open the MIDI port the settings name, once at boot (after `AppState::midiOut` and settings.json).
      * ⚠️ The same two calls the MIDI screen makes, so there is one answer to "which port is open and
@@ -738,13 +741,10 @@ class InputDispatcher {
                (static_cast<unsigned>(arms) & static_cast<unsigned>(top)) == 0;
     }
 
-    /**
-     * The confirm dialog owns every button but A and B; topmost, so checked FIRST, and it simply
-     * RETURNS. Every handler checks it except `on_button_a` / `on_button_b` (the answers) and
-     * `on_stop_preview` (silencing a note is not an edit). The tests assert every other button is
-     * inert with a confirm up — that check, not the code shape, is the guarantee.
-     */
+    /** The confirm dialog: A and B answer it; every other button is inert while it is up, except the
+     *  audition's stop (ui/dispatch/layers/confirm.cpp). */
     bool confirm_open() const { return s_.confirm.is_open(); }
+    LayerResult confirm_layer(Gesture g);
 
     /** A on the dialog: do the thing it asked about. */
     void confirm_accept();

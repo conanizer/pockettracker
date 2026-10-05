@@ -15,8 +15,8 @@ namespace pt::ui {
 //   • QWERTY above THEME: the theme editor's SAVE raises the keyboard without closing.
 // A null handler means the layer is still answered inside each gesture's own body (`overlay_swallows`).
 const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
-    {Overlay::LOADING,   &InputDispatcher::load_running,       nullptr},
-    {Overlay::CONFIRM,   &InputDispatcher::confirm_open,       nullptr},
+    {Overlay::LOADING,   &InputDispatcher::load_running,       &InputDispatcher::loading_layer},
+    {Overlay::CONFIRM,   &InputDispatcher::confirm_open,       &InputDispatcher::confirm_layer},
     {Overlay::RENDER,    &InputDispatcher::render_dialog_open, &InputDispatcher::render_dialog_layer},
     {Overlay::HELP,      &InputDispatcher::help_full_open,     nullptr},
     {Overlay::QWERTY,    &InputDispatcher::qwerty_open,        nullptr},

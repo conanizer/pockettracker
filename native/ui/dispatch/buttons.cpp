@@ -24,11 +24,7 @@ void InputDispatcher::on_button_a() {
     if (layer_takes(Gesture::A)) return;
     // Every layer is ARMED (A means something on each), so this swallows only the FX helper — and a
     // layer added later is INERT on A rather than inserting behind it.
-    if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
-                         Overlay::BROWSER)) return;
-
-    // ⚠️ The CONFIRM DIALOG first: topmost, and it owns the buttons of whatever it covers.
-    if (confirm_open()) { confirm_accept(); return; }
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     // A on the KEYBOARD types the key under the cursor — except on the action row: ABORT (col 0) and
     // APPLY (col 1).
@@ -174,11 +170,7 @@ void InputDispatcher::on_button_a() {
 void InputDispatcher::on_button_b() {
     if (layer_takes(Gesture::B)) return;
     // Every layer is ARMED (B closes or answers on each); a layer added later is inert on B.
-    if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
-                         Overlay::BROWSER)) return;
-
-    // B is the NO of "A=YES  B=NO"; the dialog owns the buttons.
-    if (confirm_open()) { confirm_cancel(); return; }
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
 
     if (qwerty_open()) { delete_char(s_.qwerty); return; }
 
@@ -347,8 +339,8 @@ void InputDispatcher::on_help_dismiss() {
 
 void InputDispatcher::on_stop_preview() {
     if (layer_takes(Gesture::STOP_PREVIEW)) return;
-    // ⚠️ The one handler a confirm does not own (armed here): a dialog over an INSTRUMENT audition must not
-    // leave the note hanging. The FX helper and browser likewise — the screen behind them started the
+    // ⚠️ The one handler a confirm does not own — its layer passes it on, so it stays armed here: a dialog
+    // over an INSTRUMENT audition must not leave the note hanging. The FX helper and browser likewise — the screen behind them started the
     // preview, and `previewScreen` decides whether there is one.
     if (overlay_swallows(Overlay::CONFIRM | Overlay::EQ | Overlay::FX_HELPER |
                          Overlay::BROWSER)) return;
