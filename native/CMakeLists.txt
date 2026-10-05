@@ -446,11 +446,12 @@ add_library(pt-ui STATIC
         ui/dispatch/layers/confirm.cpp
         ui/dispatch/layers/qwerty.cpp
         ui/dispatch/layers/render_dialog.cpp
+        ui/dispatch/layers/theme.cpp
         ui/dispatch/midi.cpp
         ui/dispatch/project.cpp
         ui/dispatch/sample_editor.cpp
+        ui/dispatch/scale_groove.cpp
         ui/dispatch/sub_screens.cpp
-        ui/dispatch/theme_scale_groove.cpp
         ui/layout.cpp
         ui/lifecycle.cpp
         ui/std_filesystem.cpp

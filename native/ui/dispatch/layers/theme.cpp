@@ -1,18 +1,57 @@
-// The THEME, SCALE and GROOVE screens: what A does on their action rows, and saving to a file.
+// The THEME EDITOR: a colour list raised from SETTINGS. It owns the buttons while it is up, but lets
+// START through (the song plays while you dial) and SELECT (its cells have help).
 
 #include "ui/dispatch/dispatch_common.h"
 
-#include "ui/groove_io.h"        // .ptg — save_groove_file / load_groove_file / the factory seed
-#include "ui/scale_io.h"         // .pts — save_scale_file / load_scale_file / the factory seed
-#include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
+#include "ui/theme_io.h"         // .ptt — save_theme_file
 
-#include <algorithm>
 #include <string>
 
 namespace pt::ui {
 
-// ─── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────────
+LayerResult InputDispatcher::theme_layer(Gesture g) {
+    ThemeEditorState& es = s_.themeEditor;
+    switch (g) {
+        // Both axes WRAP: UP/DOWN walk the rows, LEFT/RIGHT the row's own cells.
+        case Gesture::DPAD_UP:    theme_move_cursor(-1, 0); break;
+        case Gesture::DPAD_DOWN:  theme_move_cursor(+1, 0); break;
+        case Gesture::DPAD_LEFT:  theme_move_cursor(0, -1); break;
+        case Gesture::DPAD_RIGHT: theme_move_cursor(0, +1); break;
 
+        // A+LEFT / A+RIGHT: the THEME row steps the built-in palettes; a colour channel moves by 0x01.
+        // A+UP   / A+DOWN:  the palettes too; a colour channel moves by 0x10.
+        case Gesture::A_UP:    theme_dpad_edit(+1, +0x10); break;
+        case Gesture::A_DOWN:  theme_dpad_edit(-1, -0x10); break;
+        case Gesture::A_LEFT:  theme_dpad_edit(-1, -0x01); break;
+        case Gesture::A_RIGHT: theme_dpad_edit(+1, +0x01); break;
+
+        // A means something only on the action rows (SAVE, LOAD, ROLL); colours are A+DPAD.
+        case Gesture::A:
+            if (theme_color_index(es.cursorRow) < 0) theme_row_action();
+            break;
+
+        // ⚠️ B closes with no "are you sure": the live theme IS the applied theme, and it survives the
+        // close and the quit.
+        case Gesture::B: close_theme_editor(); break;
+
+        // On a colour row: L+A locks it against a roll, R+A re-rolls it alone.
+        case Gesture::L_A: {
+            const int color = theme_color_index(es.cursorRow);
+            if (color >= 0) es.locks.toggle(color);
+            break;
+        }
+        case Gesture::R_A:
+            if (theme_color_index(es.cursorRow) >= 0) theme_roll_palette(/*rowOnly=*/true);
+            break;
+
+        case Gesture::START:
+        case Gesture::SELECT:
+            return LayerResult::PASS;
+
+        default: break;
+    }
+    return LayerResult::TAKEN;
+}
 void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
     // Both axes wrap: a list of colours is a ring. The panel scrolls to follow the row.
     if (d_row != 0) {
@@ -129,105 +168,6 @@ void InputDispatcher::theme_row_action() {
         default:    // column 0 is the NAME; a bare A on it does nothing
             break;
     }
-}
-
-// ─── The SCALE screen's NAME row ─────────────────────────────────────────────────────────────────
-
-void InputDispatcher::scale_row_action() {
-    const songcore::Scale& scale =
-        host_.project().scales[static_cast<size_t>(s_.currentScale)];
-
-    switch (scale_name_action(s_.scaleCursorRow, s_.scaleCursorColumn)) {
-        case ScaleNameAction::SAVE: {
-            // Seeded with the sanitized DISPLAY name (a slot that stores none still shows one), so
-            // what you see is what the file will be called.
-            const std::string seed = sanitize_scale_filename(songcore::scale_display_name(scale));
-            open_qwerty(QwertyContext::SCALE_SAVE, seed.empty() ? "SCALE" : seed, "SAVE SCALE:",
-                        fs_.scales_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
-            break;
-        }
-        case ScaleNameAction::LOAD:
-            // SCALE is a screen, so the browser replaces it and nothing has to be closed (the theme
-            // editor, an overlay, must be). Starts at the built-in folder: config.json's `folders` has
-            // no scales key.
-            open_file_browser(AppState::BrowserPurpose::LOAD_SCALE, fs_.scales_directory(),
-                              {SCALE_FILE_EXT});
-            break;
-        case ScaleNameAction::NONE:
-            break;
-    }
-}
-
-void InputDispatcher::save_scale_as(const std::string& dir, const std::string& typed_text) {
-    // Sanitized FILENAME (survives FAT32), raw name in the file. An empty field keeps the shown name and
-    // falls back to "SCALE" — never the dotfile `.pts`.
-    const std::string safe = sanitize_scale_filename(typed_text);
-    const std::string file = (safe.empty() ? std::string("SCALE") : safe) + ".pts";
-
-    songcore::Scale& slot = host_.edit_project().scales[static_cast<size_t>(s_.currentScale)];
-
-    // The slot adopts the name it was saved under (the theme does not): it is the only thing on screen
-    // naming this slot's file, and adopting it clears the `*`.
-    const std::string want = !typed_text.empty()          ? typed_text
-                           : !slot.name.empty()           ? slot.name
-                                                          : songcore::scale_display_name(slot);
-    if (slot.name != want) {
-        slot.name = want;
-        mark_modified();
-    }
-
-    const bool ok = save_scale_file(fs_, dir + "/" + file, slot);
-    s_.statusMessage = ok ? "SCALE SAVED" : "SAVE FAILED";
-    s_.statusSuccess = ok;
-}
-
-// ─── The GROOVE screen's SAVE / LOAD cells ───────────────────────────────────────────────────────
-
-void InputDispatcher::groove_row_action() {
-    const songcore::Groove& groove =
-        host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
-
-    switch (groove_file_action(s_.groovePanelRow, s_.groovePanelColumn)) {
-        case GrooveFileAction::SAVE: {
-            // Seeded with the sanitized DISPLAY name (a slot that stores none still shows one), so
-            // what you see is what the file will be called.
-            const std::string seed = sanitize_groove_filename(songcore::groove_display_name(groove));
-            open_qwerty(QwertyContext::GROOVE_SAVE, seed.empty() ? "GROOVE" : seed, "SAVE GROOVE:",
-                        fs_.grooves_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
-            break;
-        }
-        case GrooveFileAction::LOAD:
-            // GROOVE is a screen, so the browser replaces it and nothing has to be closed. Starts at
-            // the built-in folder: config.json's `folders` has no grooves key.
-            open_file_browser(AppState::BrowserPurpose::LOAD_GROOVE, fs_.grooves_directory(),
-                              {GROOVE_FILE_EXT});
-            break;
-        case GrooveFileAction::NONE:
-            break;
-    }
-}
-
-void InputDispatcher::save_groove_as(const std::string& dir, const std::string& typed_text) {
-    // As for scales: sanitized FILENAME, raw name in the file; an empty field keeps the shown name and
-    // falls back to "GROOVE" (never the dotfile `.ptg`).
-    const std::string safe = sanitize_groove_filename(typed_text);
-    const std::string file = (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
-
-    songcore::Groove& slot = host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)];
-
-    // The slot adopts the name it was saved under — the only thing on the panel naming its file — which
-    // also clears the `*`.
-    const std::string want = !typed_text.empty()          ? typed_text
-                           : !slot.name.empty()           ? slot.name
-                                                          : songcore::groove_display_name(slot);
-    if (slot.name != want) {
-        slot.name = want;
-        mark_modified();
-    }
-
-    const bool ok = save_groove_file(fs_, dir + "/" + file, slot);
-    s_.statusMessage = ok ? "GROOVE SAVED" : "SAVE FAILED";
-    s_.statusSuccess = ok;
 }
 
 void InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {

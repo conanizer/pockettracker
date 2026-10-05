@@ -139,18 +139,10 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 
 // ⚠️ The EQ arm comes first in all five A-combo handlers: the other arms ask about `currentScreen`,
 // which is the screen UNDERNEATH the overlay.
-//
-// The THEME arm comes first in all four, and holds the editor's whole edit:
-//   A+LEFT / A+RIGHT → THEME row: previous / next built-in palette; colour row: channel ∓0x01.
-//   A+UP   / A+DOWN  → THEME row: the palette too; colour row: channel ±0x10.
 
 void InputDispatcher::on_a_up() {
     if (layer_takes(Gesture::A_UP)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (theme_open()) {
-        theme_dpad_edit(+1, +0x10);
-        return;
-    }
+    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (eq_open()) { generic_input(pt::ui::increment_fast); return; }
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_up(s_.mapPicker); return; }
@@ -173,11 +165,7 @@ void InputDispatcher::on_a_up() {
 
 void InputDispatcher::on_a_down() {
     if (layer_takes(Gesture::A_DOWN)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (theme_open()) {
-        theme_dpad_edit(-1, -0x10);
-        return;
-    }
+    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (eq_open()) { generic_input(pt::ui::decrement_fast); return; }
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_down(s_.mapPicker); return; }
@@ -199,11 +187,7 @@ void InputDispatcher::on_a_down() {
 
 void InputDispatcher::on_a_left() {
     if (layer_takes(Gesture::A_LEFT)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (theme_open()) {
-        theme_dpad_edit(-1, -0x01);
-        return;
-    }
+    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (eq_open()) { generic_input(pt::ui::decrement); return; }
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_left(s_.mapPicker); return; }
@@ -215,11 +199,7 @@ void InputDispatcher::on_a_left() {
 
 void InputDispatcher::on_a_right() {
     if (layer_takes(Gesture::A_RIGHT)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (theme_open()) {
-        theme_dpad_edit(+1, +0x01);
-        return;
-    }
+    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (eq_open()) { generic_input(pt::ui::increment); return; }
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_right(s_.mapPicker); return; }
@@ -404,10 +384,6 @@ void InputDispatcher::on_a_a() {
 // ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
 
 void InputDispatcher::cycle_current_item(int delta) {
-    // ⚠️ The THEME editor swallows B+LEFT/RIGHT: A+LEFT/RIGHT already walks the palettes, and the
-    // press would otherwise reach SETTINGS underneath.
-    if (theme_open()) return;
-
     // ⚠️ In the EQ editor B+LEFT/RIGHT changes the SLOT and CLAMPS at 0 and 127 where everything else
     // wraps: wrapping would silently re-point the mixer channel at an unrelated curve.
     if (eq_open()) {
@@ -476,17 +452,16 @@ void InputDispatcher::cycle_current_item(int delta) {
     }
 }
 
-// The THEME and EQ arms live inside cycle_current_item: one swallows B+LEFT/RIGHT, the other re-points
-// the EQ slot with it.
+// The EQ arm lives inside cycle_current_item: B+LEFT/RIGHT re-points the EQ slot.
 void InputDispatcher::on_b_left() {
     if (layer_takes(Gesture::B_LEFT)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
+    if (overlay_swallows(Overlay::EQ)) return;
     cycle_current_item(-1);
 }
 
 void InputDispatcher::on_b_right() {
     if (layer_takes(Gesture::B_RIGHT)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
+    if (overlay_swallows(Overlay::EQ)) return;
     cycle_current_item(+1);
 }
 
@@ -744,15 +719,7 @@ void InputDispatcher::on_l_b() {
 void InputDispatcher::on_l_a() {
     if (layer_takes(Gesture::L_A)) return;
     // ⚠️ Every layer an arm below tests for must be in this set, or the gesture is thrown away here.
-    if (overlay_swallows(Overlay::THEME | Overlay::BROWSER)) return;
-
-    // ⚠️ Must return: `currentScreen` is still SETTINGS underneath, and falling through would edit
-    // a screen the user cannot see.
-    if (theme_open()) {
-        const int color = theme_color_index(s_.themeEditor.cursorRow);
-        if (color >= 0) s_.themeEditor.locks.toggle(color);
-        return;
-    }
+    if (overlay_swallows(Overlay::BROWSER)) return;
 
     // On the browser L+A cuts/pastes FILES — the same shape as the grid editors below.
     if (on_browser()) {
@@ -905,11 +872,6 @@ void InputDispatcher::on_r_b() {
 
 void InputDispatcher::on_r_a() {
     if (layer_takes(Gesture::R_A)) return;
-    // ⚠️ Before the mute/solo guard: the editor stands on SETTINGS, which that guard would refuse.
-    if (theme_open()) {
-        if (theme_color_index(s_.themeEditor.cursorRow) >= 0) theme_roll_palette(/*rowOnly=*/true);
-        return;
-    }
     if (!mute_solo_chord_live()) return;
     toggle_mute_solo(/*solo=*/true);
 }

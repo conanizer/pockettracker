@@ -737,11 +737,6 @@ void InputDispatcher::preview_held_note() {
 // ─── The three generic paths ─────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::generic_input(InputAction (*fn)(const CursorContext&)) {
-    // ⚠️ The THEME EDITOR has no CursorContext (a colour channel is not a cell), so it RETURNS here; its
-    // edits happen in `on_a_up`/`on_a_down`/`on_a_left`/`on_a_right`. Without this, A+UP would nudge the
-    // SETTINGS row parked underneath.
-    if (theme_open()) return;
-
     // ⚠️ The EQ EDITOR first: it is an OVERLAY, so `currentScreen` is the screen underneath, and A+UP
     // would nudge a mixer fader.
     if (eq_open()) {
@@ -836,8 +831,7 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 
 void InputDispatcher::on_dpad_up() {
     if (layer_takes(Gesture::DPAD_UP)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (theme_open())  { theme_move_cursor(-1, 0); return; }
+    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
     if (eq_open())     { eq_move_cursor(0, -1); return; }
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
     dpad_nav(NavDir::UP);
@@ -845,8 +839,7 @@ void InputDispatcher::on_dpad_up() {
 
 void InputDispatcher::on_dpad_down() {
     if (layer_takes(Gesture::DPAD_DOWN)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (theme_open())  { theme_move_cursor(+1, 0); return; }
+    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
     if (eq_open())     { eq_move_cursor(0, +1); return; }
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
     dpad_nav(NavDir::DOWN);
@@ -854,9 +847,7 @@ void InputDispatcher::on_dpad_down() {
 
 void InputDispatcher::on_dpad_left() {
     if (layer_takes(Gesture::DPAD_LEFT)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    // ⚠️ In the THEME editor LEFT/RIGHT change CHANNEL (R→G→B) and WRAP — three channels are a ring.
-    if (theme_open())  { theme_move_cursor(0, -1); return; }
+    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
     // ⚠️ In the EQ editor LEFT/RIGHT change BAND keeping the PARAM, so one parameter sweeps across all
     // three bands.
     if (eq_open())     { eq_move_cursor(-1, 0); return; }
@@ -867,8 +858,7 @@ void InputDispatcher::on_dpad_left() {
 
 void InputDispatcher::on_dpad_right() {
     if (layer_takes(Gesture::DPAD_RIGHT)) return;
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-    if (theme_open())  { theme_move_cursor(0, +1); return; }
+    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
     if (eq_open())     { eq_move_cursor(+1, 0); return; }
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
     dpad_nav(NavDir::RIGHT);

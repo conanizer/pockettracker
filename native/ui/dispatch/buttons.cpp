@@ -24,7 +24,7 @@ void InputDispatcher::on_button_a() {
     if (layer_takes(Gesture::A)) return;
     // Every layer is ARMED (A means something on each), so this swallows only the FX helper — and a
     // layer added later is INERT on A rather than inserting behind it.
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
+    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
 
     // A on the BROWSER: open a folder, go up, or load the file (browser_confirm).
     if (on_browser()) { browser_confirm(); return; }
@@ -34,13 +34,6 @@ void InputDispatcher::on_button_a() {
     if (on_sample_editor() && s_.sampleEditor.showConfirmClose) {
         s_.sampleEditor.showConfirmClose = false;
         close_sample_editor();
-        return;
-    }
-
-    // ⚠️ In the THEME EDITOR, A means something only on the THEME row's SAVE and LOAD; colours are A+DPAD.
-    // It RETURNS: `currentScreen` is still SETTINGS, whose own A on row 9 would re-open the editor.
-    if (theme_open()) {
-        if (theme_color_index(s_.themeEditor.cursorRow) < 0) theme_row_action();
         return;
     }
 
@@ -158,11 +151,7 @@ void InputDispatcher::on_button_a() {
 void InputDispatcher::on_button_b() {
     if (layer_takes(Gesture::B)) return;
     // Every layer is ARMED (B closes or answers on each); a layer added later is inert on B.
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
-
-    // ⚠️ B CLOSES THE THEME EDITOR with no "are you sure": the live theme IS the applied theme, and it
-    // survives the close and the quit.
-    if (theme_open()) { close_theme_editor(); return; }
+    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
 
     // ⚠️ B CLOSES THE EQ EDITOR — on B's RELEASE (`defer_b_to_release`), cancelled by a B+DPAD, or the slot
     // cycle would be unreachable.

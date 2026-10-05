@@ -795,14 +795,13 @@ class InputDispatcher {
         return confirm_open() || qwerty_open() || eq_open() || theme_open();
     }
 
-    // ── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────
+    // ── The THEME EDITOR (ui/dispatch/layers/theme.cpp) ──────────────────────────────────────────
     //
-    // A PARTIAL modal: owns the D-pad, A, A+DPAD, B, B+DPAD and SELECT; START reaches the transport.
-    // ⚠️ Raised from SETTINGS and `currentScreen` STAYS `SETTINGS`: ask `theme_open()` before the
-    // screen's cursor, or A+UP cycles the row underneath.
+    // Raised from SETTINGS, and `currentScreen` STAYS `SETTINGS` underneath it.
     // ⚠️ SAVE raises the keyboard ON TOP of it, so QWERTY sits above THEME in the layer stack.
 
     bool theme_open() const { return s_.themeEditor.isOpen; }
+    LayerResult theme_layer(Gesture g);
 
     // The roll's seed starts from the frame clock, so each opening walks a different sequence.
     void open_theme_editor() {
