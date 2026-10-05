@@ -22,9 +22,8 @@ bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<
 
 void InputDispatcher::on_button_a() {
     if (layer_takes(Gesture::A)) return;
-    // Every layer is ARMED (A means something on each), so this swallows only the FX helper — and a
-    // layer added later is INERT on A rather than inserting behind it.
-    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
+    // A layer with no handler yet is INERT on A rather than inserting behind it.
+    if (overlay_swallows(Overlay::BROWSER)) return;
 
     // A on the BROWSER: open a folder, go up, or load the file (browser_confirm).
     if (on_browser()) { browser_confirm(); return; }
@@ -36,10 +35,6 @@ void InputDispatcher::on_button_a() {
         close_sample_editor();
         return;
     }
-
-    // ⚠️ A plain A does nothing in the EQ editor (its vocabulary is A+DPAD, A+B, B+DPAD, B/SELECT) — and
-    // it must RETURN: `currentScreen` is the screen underneath.
-    if (eq_open()) return;
 
     // A on a cell that OPENS a sub-screen — the two NAME rows and all five EQ cells. Before the per-screen
     // arms, or the sample editor's EQ cell would run its FX APPLY instead.
@@ -150,12 +145,8 @@ void InputDispatcher::on_button_a() {
 
 void InputDispatcher::on_button_b() {
     if (layer_takes(Gesture::B)) return;
-    // Every layer is ARMED (B closes or answers on each); a layer added later is inert on B.
-    if (overlay_swallows(Overlay::EQ | Overlay::BROWSER)) return;
-
-    // ⚠️ B CLOSES THE EQ EDITOR — on B's RELEASE (`defer_b_to_release`), cancelled by a B+DPAD, or the slot
-    // cycle would be unreachable.
-    if (eq_open()) { close_eq_editor(); return; }
+    // A layer with no handler yet is inert on B.
+    if (overlay_swallows(Overlay::BROWSER)) return;
 
     if (on_browser()) {
         FileBrowserState& fb = s_.fileBrowser;
@@ -314,18 +305,13 @@ void InputDispatcher::on_stop_preview() {
     // ⚠️ The one handler a confirm does not own — its layer passes it on, so it stays armed here: a dialog
     // over an INSTRUMENT audition must not leave the note hanging. The FX helper and browser likewise — the screen behind them started the
     // preview, and `previewScreen` decides whether there is one.
-    if (overlay_swallows(Overlay::CONFIRM | Overlay::EQ | Overlay::FX_HELPER |
-                         Overlay::BROWSER)) return;
+    if (overlay_swallows(Overlay::CONFIRM | Overlay::FX_HELPER | Overlay::BROWSER)) return;
 
     // Only screens that can START an audition stop one: PHRASE when its preview setting is on; the
     // instrument screens always (their START rings out until stopped). ⚠️ The BROWSER too: its audition
-    // rings, and scrolling a folder of kicks would stack them. ⚠️ The EQ editor only when opened over an
-    // INSTRUMENT — the one case a preview rings underneath.
-    const bool eqOverInstrument =
-        eq_open() && s_.eq.caller.kind == EqCallerContext::Kind::INSTRUMENT;
-
+    // rings, and scrolling a folder of kicks would stack them.
     const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_browser() ||
-                               on_instrument_screen() || eqOverInstrument ||
+                               on_instrument_screen() ||
                                (s_.currentScreen == ScreenType::PHRASE && s_.settings.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
 }

@@ -21,7 +21,7 @@ const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
     {Overlay::HELP,      &InputDispatcher::help_full_open,     nullptr},
     {Overlay::QWERTY,    &InputDispatcher::qwerty_open,        &InputDispatcher::qwerty_layer},
     {Overlay::THEME,     &InputDispatcher::theme_open,         &InputDispatcher::theme_layer},
-    {Overlay::EQ,        &InputDispatcher::eq_open,            nullptr},
+    {Overlay::EQ,        &InputDispatcher::eq_open,            &InputDispatcher::eq_layer},
     {Overlay::FX_HELPER, &InputDispatcher::fx_helper_open,     nullptr},
     {Overlay::MAP_PICK,  &InputDispatcher::map_picker_open,    nullptr},
     {Overlay::BROWSER,   &InputDispatcher::on_browser,         nullptr},

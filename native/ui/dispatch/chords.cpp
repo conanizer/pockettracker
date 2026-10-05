@@ -137,13 +137,9 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
     return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (16LL << se.zoomLevel));
 }
 
-// ⚠️ The EQ arm comes first in all five A-combo handlers: the other arms ask about `currentScreen`,
-// which is the screen UNDERNEATH the overlay.
-
 void InputDispatcher::on_a_up() {
     if (layer_takes(Gesture::A_UP)) return;
-    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (eq_open()) { generic_input(pt::ui::increment_fast); return; }
+    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_up(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
@@ -165,8 +161,7 @@ void InputDispatcher::on_a_up() {
 
 void InputDispatcher::on_a_down() {
     if (layer_takes(Gesture::A_DOWN)) return;
-    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (eq_open()) { generic_input(pt::ui::decrement_fast); return; }
+    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_down(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
@@ -187,8 +182,7 @@ void InputDispatcher::on_a_down() {
 
 void InputDispatcher::on_a_left() {
     if (layer_takes(Gesture::A_LEFT)) return;
-    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (eq_open()) { generic_input(pt::ui::decrement); return; }
+    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_left(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
@@ -199,8 +193,7 @@ void InputDispatcher::on_a_left() {
 
 void InputDispatcher::on_a_right() {
     if (layer_takes(Gesture::A_RIGHT)) return;
-    if (overlay_swallows(Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
-    if (eq_open()) { generic_input(pt::ui::increment); return; }
+    if (overlay_swallows(Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     if (s_.mapPicker.isOpen) { map_picker_move_right(s_.mapPicker); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
@@ -234,11 +227,7 @@ void InputDispatcher::on_a_deferred() {
 
 void InputDispatcher::on_a_b() {
     if (layer_takes(Gesture::A_B)) return;
-    if (overlay_swallows(Overlay::EQ)) return;
-
-    // A+B in the EQ editor resets the param under the cursor: FREQ 0x80 (≈450 Hz), GAIN 120 (0 dB),
-    // Q 0x80. TYPE has no default.
-    if (eq_open()) { generic_input(pt::ui::on_a_b); return; }
+    if (overlay_swallows(Overlay::NONE)) return;
 
     if (s_.selection.active) {
         const SelectionBounds b = s_.selection.bounds();
@@ -384,15 +373,6 @@ void InputDispatcher::on_a_a() {
 // ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
 
 void InputDispatcher::cycle_current_item(int delta) {
-    // ⚠️ In the EQ editor B+LEFT/RIGHT changes the SLOT and CLAMPS at 0 and 127 where everything else
-    // wraps: wrapping would silently re-point the mixer channel at an unrelated curve.
-    if (eq_open()) {
-        const int newSlot = std::min(127, std::max(0, s_.eq.slotIndex + delta));
-        s_.eq.slotIndex   = newSlot;
-        apply_caller_eq_slot_change(newSlot);
-        return;
-    }
-
     // ⭐ On SONG, B+LEFT/RIGHT toggles the transport mode; both directions toggle,
     // since there are only two modes. ⚠️ Gated on SONG alone — the handler is shared.
     if (s_.currentScreen == ScreenType::SONG) {
@@ -452,16 +432,15 @@ void InputDispatcher::cycle_current_item(int delta) {
     }
 }
 
-// The EQ arm lives inside cycle_current_item: B+LEFT/RIGHT re-points the EQ slot.
 void InputDispatcher::on_b_left() {
     if (layer_takes(Gesture::B_LEFT)) return;
-    if (overlay_swallows(Overlay::EQ)) return;
+    if (overlay_swallows(Overlay::NONE)) return;
     cycle_current_item(-1);
 }
 
 void InputDispatcher::on_b_right() {
     if (layer_takes(Gesture::B_RIGHT)) return;
-    if (overlay_swallows(Overlay::EQ)) return;
+    if (overlay_swallows(Overlay::NONE)) return;
     cycle_current_item(+1);
 }
 

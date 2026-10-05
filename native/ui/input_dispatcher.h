@@ -757,14 +757,19 @@ class InputDispatcher {
     void confirm_cancel();
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // THE EQ EDITOR
+    // THE EQ EDITOR (ui/dispatch/layers/eq.cpp)
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //
-    // A PARTIAL modal: owns the D-pad, A, A+DPAD, A+B, B, B+DPAD and SELECT; START passes through.
-    // ⚠️ An OVERLAY, so `currentScreen` still names the screen underneath — any handler reaching for the
-    // cursor must ask `eq_open()` first, which is why `generic_input()` opens with the EQ arm.
+    // ⚠️ An OVERLAY, so `currentScreen` still names the screen underneath.
 
     bool eq_open() const { return s_.eq.isOpen; }
+    LayerResult eq_layer(Gesture g);
+
+    /** A+DPAD and A+B: the edit, through the EQ module's own cursor rather than the screen's. */
+    void eq_edit(InputAction (*fn)(const CursorContext&));
+
+    /** B+LEFT/RIGHT: step the slot 0..127 (CLAMPED — a bank index). */
+    void eq_step_slot(int delta);
 
     /** Raise the editor on `slot`, remembering WHICH cell asked (the slot cycle has to write back). */
     void open_eq_editor(int slot, EqCallerContext caller);
@@ -773,8 +778,8 @@ class InputDispatcher {
     /** The D-pad: LEFT/RIGHT change band, UP/DOWN change param. Both CLAMP; neither wraps. */
     void eq_move_cursor(int d_band, int d_param);
 
-    /** B+LEFT/RIGHT: step the slot 0..127 (CLAMPED — a bank index) and re-point the cell that opened
-     *  the editor; the caller tag says which of five fields. */
+    /** Re-point the cell that opened the editor at `new_slot`; the caller tag says which of five
+     *  fields. */
     void apply_caller_eq_slot_change(int new_slot);
 
     /** ⚠️ After EVERY band nudge — two engine calls: writing the bank changes nothing until the
