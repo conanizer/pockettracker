@@ -641,16 +641,6 @@ class InputDispatcher {
     /** True on the two that edit the GLOBALS — the mixer, the master bus, the send buses. */
     bool on_globals_screen() const;
 
-    /**
-     * INSTRUMENT row 0, A+LEFT/RIGHT on TYPE: switch at once on an EMPTY slot, else ask first (the
-     * source is dropped). `delta` (+1 / −1) rides through the dialog in `ConfirmDialogState::arg`.
-     */
-    void request_instrument_type_toggle(int delta);
-    void toggle_instrument_type(int delta);
-
-    /** True when the cursor is on INSTRUMENT's TYPE cell — where A+LEFT/RIGHT toggles rather than steps. */
-    bool on_instrument_type_cell() const;
-
     // ── The cursor's live row/column for the screen we are on ────────────────────────────────────
     int  cursor_row() const;
     int  cursor_column() const;
@@ -989,12 +979,33 @@ class InputDispatcher {
     /** ABORT — SELECT, and A on the ABORT button. Discards the text. */
     void qwerty_cancel() { s_.qwerty = QwertyKeyboardState{}; }
 
-    // ── INSTRUMENT's four buttons ────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // INSTRUMENT, THE POOL AND MODS (ui/dispatch/screens/instrument.cpp)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    GestureResult instrument_screen(Gesture g);
+    GestureResult pool_screen(Gesture g);
+    GestureResult mods_screen(Gesture g);
+    /** What the three share: START auditions the instrument, any plain press stops it. */
+    GestureResult instrument_audition(Gesture g);
+
     /**
-     * A on one of the four cells that open something: the preset LOAD/SAVE on row 0, and the source
-     * LOAD and EDIT on the SOURCE row. Returns true if it handled the press.
+     * A on one of INSTRUMENT's four cells that open something: the source LOAD and EDIT on row 0, the
+     * preset SAVE and LOAD on row 5. True if it handled the press.
      */
     bool instrument_open_at_cursor();
+    /** A on the pool's NAME column of an EMPTY slot: browse for a source. True if it opened. */
+    bool pool_load_into_empty_slot();
+
+    /**
+     * INSTRUMENT row 0, A+DPAD on TYPE: switch at once on an EMPTY slot, else ask first (the source is
+     * dropped). `delta` (+1 / −1) rides through the dialog in `ConfirmDialogState::arg`.
+     */
+    void request_instrument_type_toggle(int delta);
+    void toggle_instrument_type(int delta);
+
+    /** True when the cursor is on INSTRUMENT's TYPE cell — where A+DPAD toggles rather than steps. */
+    bool on_instrument_type_cell() const;
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE SAMPLE EDITOR
@@ -1020,7 +1031,7 @@ class InputDispatcher {
         return on_sample_editor() && s_.sampleEditor.cursorRow >= 3 && s_.sampleEditor.cursorRow <= 8;
     }
 
-    /** INSTRUMENT's EDIT button (row 5, col 3). Samplers only — an SF2 has no waveform to cut. */
+    /** INSTRUMENT's EDIT button (row 0, col 3). Samplers only — an SF2 has no waveform to cut. */
     void open_sample_editor();
     /** B on an unmodified sample: free the undo, drop the scratch slots, go back. */
     void close_sample_editor();

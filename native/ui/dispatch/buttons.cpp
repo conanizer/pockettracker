@@ -27,10 +27,6 @@ void InputDispatcher::on_button_a() {
     // arms below.
     if (open_sub_screen_at_cursor(/*peek=*/false)) return;
 
-    // INSTRUMENT's LOAD / SAVE / EDIT buttons and the pool's empty NAME slot. Not deferred (no A+DPAD to
-    // protect), hence not in `open_sub_screen_at_cursor`.
-    if (instrument_open_at_cursor()) return;
-
     // The SCALE screen's SAVE / LOAD cells — a screen, not an overlay, so placed among the "A on a
     // button" arms.
     if (s_.currentScreen == ScreenType::SCALE) {
@@ -247,10 +243,9 @@ void InputDispatcher::on_stop_preview() {
     // ⚠️ Runs under the confirm and the FX picker too (their layers pass it on): a dialog over an
     // INSTRUMENT audition must not leave the note hanging, and the screen behind the picker started it.
 
-    // Only screens that can START an audition stop one: PHRASE when its preview setting is on; the
-    // instrument screens always (their START rings out until stopped). The browser answers for itself.
+    // Only screens that can START an audition stop one: TABLE, and PHRASE when its preview setting is
+    // on. The instrument screens and the browser answer for themselves.
     const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) ||
-                               on_instrument_screen() ||
                                (s_.currentScreen == ScreenType::PHRASE && s_.settings.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
 }
@@ -260,18 +255,9 @@ void InputDispatcher::on_start() {
     // ⚠️ Runs under the THEME and EQ editors too (their layers pass it on): the transport underneath is
     // how you hear an edit while dialling it.
 
-    // ⚠️ START IS NOT ALWAYS THE TRANSPORT. On INSTRUMENT, INST.POOL, MODS and TABLE it AUDITIONS the
-    // instrument at its root on the preview lane, ringing until the next plain press — over a running
-    // song too (a ninth voice; it steals nothing).
-    // ⚠️ TABLE auditions THROUGH the table on screen (instrument N owns table N), or you would hear the
-    // instrument's own table instead of the one you are checking.
-    // The lane borrows the fader of the song cell you came through, so a pad heard mostly through its
-    // sends auditions where it really sits.
-    if (on_instrument_screen()) {
-        host_.set_preview_track(audition_track());
-        host_.preview_instrument(s_.currentInstrument);
-        return;
-    }
+    // ⚠️ START IS NOT ALWAYS THE TRANSPORT. On TABLE, as on the instrument screens, it AUDITIONS on the
+    // preview lane (screens/instrument.cpp) — THROUGH the table on screen (instrument N owns table N),
+    // or you would hear the instrument's own table instead of the one you are checking.
     if (s_.currentScreen == ScreenType::TABLE) {
         host_.set_preview_track(audition_track());
         host_.preview_instrument(s_.currentTable, /*tableIdOverride=*/s_.currentTable);

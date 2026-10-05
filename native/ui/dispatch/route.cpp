@@ -36,6 +36,9 @@ const InputDispatcher::Layer* InputDispatcher::top_layer() const {
 const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
     {ScreenType::SAMPLE_EDITOR, &InputDispatcher::sample_editor_screen},
     {ScreenType::FILE_BROWSER,  &InputDispatcher::file_browser_screen},
+    {ScreenType::INSTRUMENT,    &InputDispatcher::instrument_screen},
+    {ScreenType::INST_POOL,     &InputDispatcher::pool_screen},
+    {ScreenType::MODS,          &InputDispatcher::mods_screen},
 };
 
 bool InputDispatcher::route(Gesture g) {

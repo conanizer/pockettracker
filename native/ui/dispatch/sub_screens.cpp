@@ -1,5 +1,4 @@
-// What a cell opens: INSTRUMENT's buttons, the cells whose A or B waits for the release, and the EQ
-// editor.
+// What a cell opens: the cells whose A or B waits for the release, and the EQ editor.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -17,72 +16,6 @@ int InputDispatcher::visible_effect_type_count() const {
     if (s_.caps.midi)       return songcore::EFFECT_TYPE_COUNT;
     if (s_.caps.loopWindow) return songcore::EFFECT_TYPE_COUNT_NO_MIDI;
     return songcore::EFFECT_TYPE_COUNT_STABLE;
-}
-
-// ─── INSTRUMENT's buttons ────────────────────────────────────────────────────────────────────────
-
-bool InputDispatcher::instrument_open_at_cursor() {
-    Project& p = host_.edit_project();
-
-    if (s_.currentScreen == ScreenType::INST_POOL) {
-        // A on the pool's NAME column of an EMPTY slot loads a source into it. A loaded slot is
-        // managed from INSTRUMENT, where you can see what you would be replacing.
-        if (s_.poolCursorColumn != 0) return false;
-        const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
-        const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
-        // ⚠️ An EXTERNAL slot has no source: without this it would open the SAMPLES browser, and a load
-        // would flip the slot's type back.
-        if (!instrument_has_source_row(ins.instrumentType)) return false;
-        if (isSF ? ins.soundfontPath.has_value() : !songcore::instrument_is_free(ins)) return false;
-
-        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
-                          isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
-                          isSF ? soundfont_extensions() : sample_extensions());
-        return true;
-    }
-
-    if (s_.currentScreen != ScreenType::INSTRUMENT) return false;
-
-    const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
-    const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
-    const int         row  = s_.instrumentCursorRow;
-    const int         col  = s_.instrumentCursorColumn;
-
-    // Row 0 — TYPE (col 1), LOAD (col 2) browses for a source, EDIT (col 3) opens the sample editor.
-    // EXTERNAL draws neither button; refuse rather than browse for a source it cannot have.
-    if (row == 0 && col >= 2 && !instrument_has_source_row(ins.instrumentType)) return true;
-
-    if (row == 0 && col == 2) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
-                          isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
-                          isSF ? soundfont_extensions() : sample_extensions());
-        return true;
-    }
-    // Samplers only: a SoundFont has no single waveform to cut. EDIT is not drawn on SF, so the isSF
-    // guard only consumes the press.
-    if (row == 0 && col == 3) {
-        if (isSF) return true;   // handled: the press is CONSUMED, it just opens nothing
-        open_sample_editor();
-        return true;
-    }
-
-    // Row 5 — the INSTRUMENT PRESET (.pti: params, mods, table, source path). SAVE (col 2), LOAD (col 3).
-    if (row == 5 && col == 2) {
-        const std::string dir  = fs_.instruments_directory();
-        const std::string name = ins.name.empty() ? songcore::default_instrument_name(ins.id) : ins.name;
-        open_qwerty(QwertyContext::INSTRUMENT_SAVE, name, "SAVE PRESET:", dir, /*max_length=*/20,
-                    /*clear_on_first_b=*/true);
-        return true;
-    }
-    if (row == 5 && col == 3) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, browser_dir(BrowserDir::INSTRUMENTS),
-                          {"pti"});
-        return true;
-    }
-
-    // Row 1 (NAME) and the EQ cell are not here: their A must wait for the RELEASE, so they live in
-    // `open_sub_screen_at_cursor`. These are read-only buttons that fire on the press.
-    return false;
 }
 
 bool InputDispatcher::defer_a_to_release() const {

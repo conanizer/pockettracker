@@ -69,62 +69,7 @@ std::set<int> used_chain_ids(const Project& p) {
 // same name first. The other handlers are qualified to match.
 //
 // ⚠️ The HORIZONTAL axis is the small step (±1), the VERTICAL the large one (±`largeStep`) — the
-// split handheld-tracker users already have in their fingers. Every screen override below keeps it.
-
-/**
- * A+DPAD on the INSTRUMENT screen's TYPE cell. Switching type frees the slot's source, so a loaded slot
- * goes through the confirm dialog; only an empty one switches outright. ⚠️ Do not add a path around it.
- */
-void InputDispatcher::request_instrument_type_toggle(int delta) {
-    const Instrument& ins =
-        host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
-
-    if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) {
-        s_.confirm.open(ConfirmDialogState::Kind::CHANGE_TYPE, delta);
-        return;
-    }
-    toggle_instrument_type(delta);   // an empty slot has nothing to lose — switch it outright
-}
-
-/**
- * Step the TYPE cell by `delta`, wrapping through the types this build offers. ⚠️ EXTERNAL is the
- * last type, so a build that hides MIDI simply stops one short; an instrument already EXTERNAL keeps it.
- */
-void InputDispatcher::toggle_instrument_type(int delta) {
-    Project&    p   = host_.edit_project();
-    Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
-
-    const int count = s_.caps.midi ? songcore::INSTRUMENT_TYPE_COUNT
-                                   : songcore::INSTRUMENT_TYPE_COUNT - 1;
-    const int cur   = static_cast<int>(ins.instrumentType);
-    const int step  = delta < 0 ? -1 : +1;
-    // An EXTERNAL instrument in a build that hides the type is outside the cycle; step from the last
-    // reachable type.
-    const int from  = (cur >= count) ? count - 1 : cur;
-    const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
-
-    // The name the slot adopted from the source it is about to lose (see the adopt rule in
-    // screens/file_browser.cpp).
-    const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
-
-    host_.set_instrument_type(s_.currentInstrument, next);
-
-    // ⚠️ A type change drops the source, so a name ADOPTED from it must go too — otherwise the next
-    // load reads it as a typed name and keeps it forever. A name the user typed survives.
-    if (!previousAutoName.empty() && ins.name == previousAutoName)
-        ins.name = songcore::default_instrument_name(ins.id);
-
-    // Row 0 exists in all three layouts and the cursor is on its TYPE cell, so nothing to clamp; the
-    // feed re-reads the SF preset next frame.
-    s_.statusMessage = std::string("TYPE: ") + songcore::instrument_type_name(next);
-    s_.statusSuccess = true;
-}
-
-/** True when the cursor is on INSTRUMENT's TYPE cell, the one A+DPAD does not merely increment. */
-bool InputDispatcher::on_instrument_type_cell() const {
-    return s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 0 &&
-           s_.instrumentCursorColumn == 1;
-}
+// split handheld-tracker users already have in their fingers. The screen handlers keep it too.
 
 // A+DPAD is taken by the keyboard and by the browser's own handler, so an A held over either never
 // edits a cell.
@@ -133,8 +78,6 @@ void InputDispatcher::on_a_up() {
     if (route(Gesture::A_UP)) return;
     if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) { open_map_picker(); return; }
-    // The TYPE cell has no coarse step, so both axes walk it — through the confirm dialog on a loaded slot.
-    if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment_fast);
 }
 
@@ -142,19 +85,16 @@ void InputDispatcher::on_a_down() {
     if (route(Gesture::A_DOWN)) return;
     if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) { open_map_picker(); return; }
-    if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement_fast);
 }
 
 void InputDispatcher::on_a_left() {
     if (route(Gesture::A_LEFT)) return;
-    if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement);
 }
 
 void InputDispatcher::on_a_right() {
     if (route(Gesture::A_RIGHT)) return;
-    if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment);
 }
 
@@ -205,14 +145,6 @@ void InputDispatcher::on_a_b() {
         }
         mark_modified();
         s_.selection.exit();
-        return;
-    }
-
-    // The pool's NAME column: A+B CLEARS the slot, freeing its sample (and the .sf2, if this was its
-    // last user) — a host verb, not a field write. The TYPE survives.
-    if (s_.currentScreen == ScreenType::INST_POOL && s_.poolCursorColumn == 0) {
-        host_.clear_instrument(s_.currentInstrument);
-        mark_modified();
         return;
     }
 
@@ -352,13 +284,6 @@ void InputDispatcher::cycle_current_item(int delta) {
         case ScreenType::SCALE:
             s_.currentScale = wrap(s_.currentScale, songcore::POOL_SCALES - 1);
             break;
-        // INSTRUMENT and MODS cycle the instrument (MODS is a view of one). Not INST_POOL: there the
-        // D-pad already selects it.
-        case ScreenType::INSTRUMENT:
-        case ScreenType::MODS:
-            s_.currentInstrument    = wrap(s_.currentInstrument, 127);
-            s_.lastEditedInstrument = s_.currentInstrument;
-            break;
         default:
             break;
     }
@@ -410,12 +335,6 @@ void InputDispatcher::on_b_up() {
         return;
     }
 
-    // The pool pages by 16 but CLAMPS at the ends, where a single D-pad step wraps 00↔7F.
-    if (s_.currentScreen == ScreenType::INST_POOL) {
-        s_.currentInstrument    = std::max(0, s_.currentInstrument - 16);
-        s_.lastEditedInstrument = s_.currentInstrument;
-        return;
-    }
     if (s_.currentScreen != ScreenType::SONG) return;
     s_.cursorRow = std::max(0, s_.cursorRow - 16);
     scroll_song_to_row(s_, s_.cursorRow);
@@ -431,12 +350,6 @@ void InputDispatcher::on_b_down() {
         return;
     }
 
-    if (s_.currentScreen == ScreenType::INST_POOL) {
-        const int last = static_cast<int>(s_.project->instruments.size()) - 1;
-        s_.currentInstrument    = std::min(last, s_.currentInstrument + 16);
-        s_.lastEditedInstrument = s_.currentInstrument;
-        return;
-    }
     if (s_.currentScreen != ScreenType::SONG) return;
     s_.cursorRow = std::min(255, s_.cursorRow + 16);
     scroll_song_to_row(s_, s_.cursorRow);
