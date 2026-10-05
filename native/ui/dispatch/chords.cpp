@@ -167,15 +167,6 @@ void InputDispatcher::on_a_a() {
         return;
     }
 
-    // ⚠️ Tap tempo: a second A inside 300 ms (= 200 BPM) arrives here, not at `on_button_a`. Without
-    // this arm every other fast tap would be swallowed by the gate below and the tempo would halve.
-    if (s_.currentScreen == ScreenType::PROJECT &&
-        s_.projectCursorRow == static_cast<int>(ProjectRow::TEMPO) &&
-        s_.projectCursorColumn == 2) {
-        tap_tempo();
-        return;
-    }
-
     // A double-tap only counts if the cursor has not moved between the presses. ⚠️ The PHRASE
     // audition is owed on both exits — a quick second A never reaches `on_button_a`.
     if (!hasInsertPos_ || insertScreen_ != s_.currentScreen || insertRow_ != s_.cursorRow ||

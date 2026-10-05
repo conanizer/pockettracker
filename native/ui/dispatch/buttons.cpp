@@ -3,7 +3,6 @@
 #include "ui/dispatch/dispatch_common.h"
 
 #include "songcore/traversal.h"
-#include "ui/navigation.h"
 #include "ui/std_filesystem.h"
 
 #include <algorithm>
@@ -113,12 +112,6 @@ void InputDispatcher::on_button_a() {
             if (cursor_context().capabilities.isEmpty) generic_input(pt::ui::increment);
             break;
 
-        // The two screens whose rows are BUTTONS: A is the action.
-        case ScreenType::PROJECT:  project_action();  break;
-        case ScreenType::SETTINGS: settings_action(); break;
-        case ScreenType::MIDI:     midi_action();     break;
-        case ScreenType::MIDI_MAP: midi_map_action(); break;
-
         default:
             break;
     }
@@ -126,39 +119,6 @@ void InputDispatcher::on_button_a() {
 
 void InputDispatcher::on_button_b() {
     if (route(Gesture::B)) return;
-
-    // ⚠️ B LEAVES SETTINGS. Its POSITION matters:
-    //   • AFTER the modals — the THEME EDITOR, EQ editor or keyboard over it own B;
-    //   • BEFORE the selection arm — B in a selection copies and returns, and SETTINGS has no clipboard,
-    //     so the screen would be intermittently stuck.
-    if (s_.currentScreen == ScreenType::SETTINGS) {
-        s_.selection.exit();
-        NavResult nav;
-        nav.screen = s_.settingsReturnScreen;
-        nav.column = s_.previousColumn;   // SETTINGS owns no column — keep the one it came in with
-        go_to_screen(s_, nav);            // not a bare assignment: cursors are saved/restored here
-        return;
-    }
-
-    // MIDI leaves the same way, same position — and B is its ONLY way out (it is not on the grid).
-    if (s_.currentScreen == ScreenType::MIDI) {
-        s_.selection.exit();
-        NavResult nav;
-        nav.screen = s_.midiReturnScreen;
-        nav.column = s_.previousColumn;
-        go_to_screen(s_, nav);
-        return;
-    }
-
-    // …and the mapping list, one level further in, back to MIDI (stored, like the two above).
-    if (s_.currentScreen == ScreenType::MIDI_MAP) {
-        s_.selection.exit();
-        NavResult nav;
-        nav.screen = s_.midiMapReturnScreen;
-        nav.column = s_.previousColumn;
-        go_to_screen(s_, nav);
-        return;
-    }
 
     // ⚠️ EFFECTS' TIME row: B toggles DELAY SYNC (milliseconds ↔ note divisions). A gesture of its own,
     // because the cell's value means different things on either side (0x40 a length; 4 a 1/16 note).

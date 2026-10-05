@@ -819,30 +819,7 @@ class InputDispatcher {
     /** Apply the typed name and write `<dir>/<name>.ptg`. The QWERTY's GROOVE_SAVE arm. */
     void save_groove_as(const std::string& dir, const std::string& typed_text);
 
-    // ── PROJECT + SETTINGS: the buttons ──────────────────────────────────────────────────────────
-    /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
-    void project_action();
-
-    /**
-     * TAP TEMPO — A on the TEMPO row, in time. The tempo averages the last `TAP_TEMPO_KEEP` gaps (one
-     * gap jumps on every uneven tap). The first tap sets nothing; a gap past `TAP_TEMPO_TIMEOUT_MS`
-     * starts a new count.
-     */
-    void tap_tempo();
-    /** A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) do anything — the rest are A+DPAD. */
-    void settings_action();
-
-    // ── MIDI: the screen, the port and the two buttons ───────────────────────────────────────────
-    /** A on MIDI: only PANIC and TEST do anything — OUTPUT / OFFSET / PROG CHG are A+DPAD. */
-    void midi_action();
-
-    /** A on the mapping list — the ADD row, and nothing else on that screen answers a bare press. */
-    void midi_map_action();
-
-    /** Put the mapping cursor back inside a list whose length changed — owed on the way IN too (a
-     *  different project's list under a remembered cursor). */
-    void clamp_midi_map_cursor();
-
+    // ── MIDI: the ports ──────────────────────────────────────────────────────────────────────────
     /**
      * Re-enumerate the ports and re-resolve the saved device NAME — on every screen entry and once a
      * second (`run_midi_hotplug`). A saved name not in the list resolves to 0 = OFF: the row shows
@@ -978,6 +955,44 @@ class InputDispatcher {
     void qwerty_apply();
     /** ABORT — SELECT, and A on the ABORT button. Discards the text. */
     void qwerty_cancel() { s_.qwerty = QwertyKeyboardState{}; }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // PROJECT AND SETTINGS (ui/dispatch/screens/project.cpp)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    GestureResult project_screen(Gesture g);
+    GestureResult settings_screen(Gesture g);
+    /** B on SETTINGS, MIDI and the mapping list: back to `back`, the screen stored on the way in. */
+    void leave_to(ScreenType back);
+
+    /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
+    void project_action();
+
+    /**
+     * TAP TEMPO — A on the TEMPO row, in time. The tempo averages the last `TAP_TEMPO_KEEP` gaps (one
+     * gap jumps on every uneven tap). The first tap sets nothing; a gap past `TAP_TEMPO_TIMEOUT_MS`
+     * starts a new count.
+     */
+    void tap_tempo();
+    /** A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) do anything — the rest are A+DPAD. */
+    void settings_action();
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // MIDI AND THE MAPPING LIST (ui/dispatch/screens/midi.cpp)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    GestureResult midi_screen(Gesture g);
+    GestureResult midi_map_screen(Gesture g);
+
+    /** A on MIDI: only PANIC and TEST do anything — OUTPUT / OFFSET / PROG CHG are A+DPAD. */
+    void midi_action();
+
+    /** A on the mapping list — the ADD row, and nothing else on that screen answers a bare press. */
+    void midi_map_action();
+
+    /** Put the mapping cursor back inside a list whose length changed — owed on the way IN too (a
+     *  different project's list under a remembered cursor). */
+    void clamp_midi_map_cursor();
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // INSTRUMENT, THE POOL AND MODS (ui/dispatch/screens/instrument.cpp)

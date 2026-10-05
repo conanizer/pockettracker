@@ -454,6 +454,8 @@ add_library(pt-ui STATIC
         ui/dispatch/scale_groove.cpp
         ui/dispatch/screens/file_browser.cpp
         ui/dispatch/screens/instrument.cpp
+        ui/dispatch/screens/midi.cpp
+        ui/dispatch/screens/project.cpp
         ui/dispatch/screens/sample_editor.cpp
         ui/dispatch/sub_screens.cpp
         ui/layout.cpp
