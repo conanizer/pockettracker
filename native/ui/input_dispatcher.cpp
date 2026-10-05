@@ -722,6 +722,7 @@ int InputDispatcher::audition_track() const {
 void InputDispatcher::preview_held_note() {
     if (!s_.settings.notePreviewEnabled || s_.selection.active) return;
     if (s_.currentScreen != ScreenType::PHRASE || s_.cursorColumn != 1) return;
+    if (host_.is_playing()) return;   // over a playing song it clashes with the track's own notes
 
     const Project& p = *s_.project;
     const songcore::PhraseStep& step =
