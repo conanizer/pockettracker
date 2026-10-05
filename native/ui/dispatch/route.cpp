@@ -13,29 +13,23 @@ namespace pt::ui {
 //   • the full HELP opens over the two in-place editors, never over a confirm, the keyboard or the FX
 //     picker.
 //   • QWERTY above THEME: the theme editor's SAVE raises the keyboard without closing.
-// A null handler means the layer is still answered inside each gesture's own body (`overlay_swallows`).
 const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
-    {Overlay::LOADING,       &InputDispatcher::load_running,       &InputDispatcher::loading_layer},
-    {Overlay::CONFIRM,       &InputDispatcher::confirm_open,       &InputDispatcher::confirm_layer},
-    {Overlay::SAMPLE_CLOSE,  &InputDispatcher::sample_close_open,  &InputDispatcher::sample_close_layer},
-    {Overlay::RENDER,        &InputDispatcher::render_dialog_open, &InputDispatcher::render_dialog_layer},
-    {Overlay::HELP,          &InputDispatcher::help_full_open,     nullptr},
-    {Overlay::QWERTY,        &InputDispatcher::qwerty_open,        &InputDispatcher::qwerty_layer},
-    {Overlay::THEME,         &InputDispatcher::theme_open,         &InputDispatcher::theme_layer},
-    {Overlay::EQ,            &InputDispatcher::eq_open,            &InputDispatcher::eq_layer},
-    {Overlay::FX_HELPER,     &InputDispatcher::fx_helper_open,     &InputDispatcher::fx_helper_layer},
-    {Overlay::MAP_PICK,      &InputDispatcher::map_picker_open,    &InputDispatcher::map_picker_layer},
+    {&InputDispatcher::load_running,       &InputDispatcher::loading_layer},
+    {&InputDispatcher::confirm_open,       &InputDispatcher::confirm_layer},
+    {&InputDispatcher::sample_close_open,  &InputDispatcher::sample_close_layer},
+    {&InputDispatcher::render_dialog_open, &InputDispatcher::render_dialog_layer},
+    {&InputDispatcher::help_full_open,     &InputDispatcher::help_layer},
+    {&InputDispatcher::qwerty_open,        &InputDispatcher::qwerty_layer},
+    {&InputDispatcher::theme_open,         &InputDispatcher::theme_layer},
+    {&InputDispatcher::eq_open,            &InputDispatcher::eq_layer},
+    {&InputDispatcher::fx_helper_open,     &InputDispatcher::fx_helper_layer},
+    {&InputDispatcher::map_picker_open,    &InputDispatcher::map_picker_layer},
 };
 
 const InputDispatcher::Layer* InputDispatcher::top_layer() const {
     for (const Layer& layer : LAYERS)
         if ((this->*layer.isOpen)()) return &layer;
     return nullptr;
-}
-
-InputDispatcher::Overlay InputDispatcher::top_overlay() const {
-    const Layer* top = top_layer();
-    return top ? top->id : Overlay::NONE;
 }
 
 // The screens with buttons of their own. Every other screen runs each gesture's generic path.
@@ -45,12 +39,8 @@ const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
 };
 
 bool InputDispatcher::route(Gesture g) {
-    if (const Layer* top = top_layer()) {
-        // ⚠️ No handler yet: the gesture's body answers the layer (`overlay_swallows`), and the screen
-        // behind must not be asked.
-        if (!top->handle) return false;
+    if (const Layer* top = top_layer())
         if ((this->*top->handle)(g) == GestureResult::TAKEN) return true;
-    }
     for (const ScreenHandler& screen : SCREENS)
         if (screen.id == s_.currentScreen) return (this->*screen.handle)(g) == GestureResult::TAKEN;
     return false;

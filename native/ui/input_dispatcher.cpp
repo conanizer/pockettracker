@@ -809,25 +809,21 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 
 void InputDispatcher::on_dpad_up() {
     if (route(Gesture::DPAD_UP)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::UP);
 }
 
 void InputDispatcher::on_dpad_down() {
     if (route(Gesture::DPAD_DOWN)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::DOWN);
 }
 
 void InputDispatcher::on_dpad_left() {
     if (route(Gesture::DPAD_LEFT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::LEFT);
 }
 
 void InputDispatcher::on_dpad_right() {
     if (route(Gesture::DPAD_RIGHT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     dpad_nav(NavDir::RIGHT);
 }
 

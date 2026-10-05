@@ -131,7 +131,6 @@ bool InputDispatcher::on_instrument_type_cell() const {
 
 void InputDispatcher::on_a_up() {
     if (route(Gesture::A_UP)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) { open_map_picker(); return; }
     // The TYPE cell has no coarse step, so both axes walk it — through the confirm dialog on a loaded slot.
@@ -141,7 +140,6 @@ void InputDispatcher::on_a_up() {
 
 void InputDispatcher::on_a_down() {
     if (route(Gesture::A_DOWN)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     if (on_fx_type_column()) { open_fx_helper(); return; }
     if (on_map_dest_cell()) { open_map_picker(); return; }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
@@ -150,14 +148,12 @@ void InputDispatcher::on_a_down() {
 
 void InputDispatcher::on_a_left() {
     if (route(Gesture::A_LEFT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::decrement);
 }
 
 void InputDispatcher::on_a_right() {
     if (route(Gesture::A_RIGHT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::increment);
 }
@@ -182,7 +178,6 @@ void InputDispatcher::on_a_deferred() {
 
 void InputDispatcher::on_a_b() {
     if (route(Gesture::A_B)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
 
     if (s_.selection.active) {
         const SelectionBounds b = s_.selection.bounds();
@@ -226,13 +221,8 @@ void InputDispatcher::on_a_b() {
 
 // ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
 
-// The EQ editor cannot be raised on any screen these handlers act on, so the overlay guards in
-// on_a_a / on_l_* are defensive — kept so an EQ cell added to a clipboard screen cannot paste into a
-// phrase the user cannot see.
-
 void InputDispatcher::on_a_a() {
     if (route(Gesture::A_A)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
 
     // The sample editor's row 11 needs no arm: its A is deferred, and the mapper clears `lastAPress`
     // on every defer, so no tap reaches this handler.
@@ -376,13 +366,11 @@ void InputDispatcher::cycle_current_item(int delta) {
 
 void InputDispatcher::on_b_left() {
     if (route(Gesture::B_LEFT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     cycle_current_item(-1);
 }
 
 void InputDispatcher::on_b_right() {
     if (route(Gesture::B_RIGHT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     cycle_current_item(+1);
 }
 
@@ -414,7 +402,6 @@ bool InputDispatcher::song_relative_b_vertical(int delta) {
 
 void InputDispatcher::on_b_up() {
     if (route(Gesture::B_UP)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(-1)) return;
 
     // B+UP/DOWN steps the GROOVE screen's quantize from any cell on it.
@@ -436,7 +423,6 @@ void InputDispatcher::on_b_up() {
 
 void InputDispatcher::on_b_down() {
     if (route(Gesture::B_DOWN)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(+1)) return;
 
     if (s_.currentScreen == ScreenType::GROOVE) {
@@ -464,7 +450,6 @@ void InputDispatcher::on_b_down() {
 
 void InputDispatcher::on_r_up() {
     if (route(Gesture::R_UP)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
     s_.selection.exit();   // a selection belongs to the screen it was made on
@@ -472,7 +457,6 @@ void InputDispatcher::on_r_up() {
 
 void InputDispatcher::on_r_down() {
     if (route(Gesture::R_DOWN)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
     s_.selection.exit();
@@ -537,7 +521,6 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
 
 void InputDispatcher::on_r_left() {
     if (route(Gesture::R_LEFT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_left(ns);
     if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
@@ -547,7 +530,6 @@ void InputDispatcher::on_r_left() {
 
 void InputDispatcher::on_r_right() {
     if (route(Gesture::R_RIGHT)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
     const NavState ns = nav_state_of(s_);
     const NavResult r = navigate_right(ns);
     // ⚠️ The NAV = SONG entry gate sits above the sync: a refused press must leave nothing behind, and
@@ -562,7 +544,6 @@ void InputDispatcher::on_r_right() {
 
 void InputDispatcher::on_l_b() {
     if (route(Gesture::L_B)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
 
     switch (s_.currentScreen) {
         case ScreenType::PHRASE:
@@ -579,7 +560,6 @@ void InputDispatcher::on_l_b() {
 
 void InputDispatcher::on_l_a() {
     if (route(Gesture::L_A)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
 
     // Inside a selection L+A CUTS; outside one it PASTES.
     Project& p = host_.edit_project();
@@ -716,7 +696,7 @@ void InputDispatcher::on_r_a() {
 
 // Is R+A/R+B a MUTE/SOLO here? Asked by the chord and by the deferred B alike.
 bool InputDispatcher::mute_solo_chord_live() const {
-    if (overlay_swallows(Overlay::NONE)) return false;   // a modal owns the buttons while it is up
+    if (top_layer()) return false;   // a modal owns the buttons while it is up
     return s_.currentScreen == ScreenType::SONG || s_.currentScreen == ScreenType::MIXER;
 }
 
@@ -763,7 +743,6 @@ void InputDispatcher::run_selection_recency() {
 
 void InputDispatcher::on_l_r() {
     if (route(Gesture::L_R)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
 
     // One press undoes one thing, most recent first (`s_.lastClearable`): the mix (any channel muted
     // or soloed) or the selection with its buffer. ⚠️ A rung with nothing to clear falls through to
@@ -809,7 +788,6 @@ void InputDispatcher::on_select_r() { route(Gesture::SELECT_R); }
 
 void InputDispatcher::on_l_b_a() {
     if (route(Gesture::L_B_A)) return;
-    if (overlay_swallows(Overlay::NONE)) return;
 
     Project& p = host_.edit_project();
 

@@ -17,7 +17,7 @@ using songcore::Project;
 
 /**
  * One load, opened and closed. ⚠️ RAII because load paths return early (four arms of the browser's
- * switch do); a missed `end_load()` would leave `Overlay::LOADING` up and the app deaf to input.
+ * switch do); a missed `end_load()` would leave the LOADING layer up and the app deaf to input.
  */
 struct LoadScope {
     LoadScope(InputDispatcher& d, long long now_ms, std::string detail) : d_(d) {

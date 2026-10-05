@@ -14,11 +14,11 @@
 // a press is offered to them is the specification: the keyboard can sit on top of the theme editor
 // (its SAVE), and a D-pad press there must move the KEY cursor.
 // ⭐ That order is written once, in `LAYERS` (ui/dispatch/route.cpp). Every gesture asks the top layer
-// first (`route`), and a gesture a layer does not answer is swallowed there. A layer with no handler yet
-// is answered inside each gesture's body instead (`overlay_swallows`). With no layer up, a screen in
+// first (`route`), and a gesture a layer does not answer is swallowed there — so a gesture's body runs
+// only with no layer up, or under one that deliberately lets it through. With no layer up, a screen in
 // `SCREENS` is asked next; its own buttons live in ui/dispatch/screens/.
-// ⚠️ The EQ editor is PARTIAL: it swallows the D-pad, A, B and SELECT but lets START through, so a band
-// can be swept across a held INSTRUMENT audition. Every other modal swallows everything.
+// ⚠️ The THEME and EQ editors are PARTIAL: they let START and SELECT through, so a band can be swept
+// across a held INSTRUMENT audition. The confirm and the FX picker let the audition's stop through.
 //
 // ── Input layers ─────────────────────────────────────────────────────────────────────────────────
 //
@@ -245,6 +245,8 @@ class InputDispatcher {
 
     /** Is the full help overlay up? Asked by the mapper before it routes a press anywhere. */
     bool help_full_open() const { return s_.helpFull; }
+    /** The mapper closes the overlay on any press and consumes it, so nothing reaches this. */
+    GestureResult help_layer(Gesture) { return GestureResult::TAKEN; }
     /** START: play/stop. What it plays depends on the screen you are on. */
     void on_start();
 
@@ -262,7 +264,7 @@ class InputDispatcher {
      */
     bool live_song_gesture() const {
         return host_.live_mode() && s_.currentScreen == ScreenType::SONG &&
-               !overlay_swallows(Overlay::NONE);
+               !top_layer();
     }
 
     /** Bit N set where track N has a chain on `songRow` — the channels a row launch starts sounding. */
@@ -694,32 +696,11 @@ class InputDispatcher {
     // ⭐ The default for a gesture a layer does not answer is SWALLOW, so a new layer is one row in
     // `LAYERS` plus its handler (ui/dispatch/layers/): until it answers a gesture, that gesture does
     // nothing under it rather than editing the screen behind.
-    // FX_HELPER is not a modal, but every handler asks about it in the same breath, so it is a layer
-    // here. `modal_backdrop_active` (ui/app_state.h) is the separate scrim question.
+    // The FX picker is not a modal, but it owns the buttons the same way, so it is a layer here.
+    // `modal_backdrop_active` (ui/app_state.h) is the separate scrim question.
 
-    /** BITS, so a handler's `arms` set is an OR. `top_overlay()` returns one; `overlay_swallows()` takes
-     *  any number. */
-    enum class Overlay : unsigned {
-        NONE         = 0,
-        CONFIRM      = 1u << 0,
-        QWERTY       = 1u << 1,
-        THEME        = 1u << 2,
-        EQ           = 1u << 3,
-        FX_HELPER    = 1u << 4,
-        LOADING      = 1u << 6,
-        HELP         = 1u << 7,
-        RENDER       = 1u << 8,
-        MAP_PICK     = 1u << 9,
-        SAMPLE_CLOSE = 1u << 10,   // the sample editor's ARE YOU SURE?
-    };
-
-    friend constexpr Overlay operator|(Overlay a, Overlay b) {
-        return static_cast<Overlay>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
-    }
-
-    /** One row of the stack: which layer, whether it is up, and what it does with a gesture. */
+    /** One row of the stack: whether the layer is up, and what it does with a gesture. */
     struct Layer {
-        Overlay id;
         bool (InputDispatcher::*isOpen)() const;
         GestureResult (InputDispatcher::*handle)(Gesture);
     };
@@ -728,7 +709,6 @@ class InputDispatcher {
 
     /** The topmost open layer, or null. */
     const Layer* top_layer() const;
-    Overlay      top_overlay() const;
 
     /** A screen with buttons of its own (ui/dispatch/screens/). */
     struct ScreenHandler {
@@ -740,18 +720,6 @@ class InputDispatcher {
     /** Offer `g` to the top layer, then to the screen's handler. True when one of them took it and the
      *  gesture's body must not run; false when it is the body's to answer. */
     bool route(Gesture g);
-
-    /**
-     * THE MODAL RULE: true when a layer this handler does not answer for is up — return without
-     * touching the screen. `arms` are the layers the handler takes responsibility for, by serving them
-     * or deliberately letting them through (START under the two partial overlays). `Overlay::NONE` =
-     * "any layer owns this button".
-     */
-    bool overlay_swallows(Overlay arms) const {
-        const Overlay top = top_overlay();
-        return top != Overlay::NONE &&
-               (static_cast<unsigned>(arms) & static_cast<unsigned>(top)) == 0;
-    }
 
     /** The confirm dialog: A and B answer it; every other button is inert while it is up, except the
      *  audition's stop (ui/dispatch/layers/confirm.cpp). */

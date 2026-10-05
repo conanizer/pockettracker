@@ -334,7 +334,7 @@ struct AppState {
     // flashes is worse than none. A load RUNS from its first moment and is SHOWN only after
     // `LOADING_DELAY_MS` — no size prediction, so a slow device shows it exactly when it is slow.
     struct LoadingState {
-        /** A load is in flight. Owns every button (Overlay::LOADING) from the first moment. */
+        /** A load is in flight. Owns every button (the LOADING layer) from the first moment. */
         bool running = false;
         /** …and has outlasted the delay, so there is a strip on the screen. */
         bool shown = false;
@@ -434,7 +434,7 @@ struct AppState {
     bool helpOpen = false;
 
     // The FULL help overlay (HELP = FULL). ⚠️ This one IS an overlay — every fact above is inverted: it
-    // is in the `Overlay` stack and `modal_backdrop_active`, and its closing press is consumed. Never
+    // is on the layer stack and in `modal_backdrop_active`, and its closing press is consumed. Never
     // both flags at once.
     bool helpFull = false;
 

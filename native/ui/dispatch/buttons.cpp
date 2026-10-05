@@ -22,8 +22,6 @@ bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<
 
 void InputDispatcher::on_button_a() {
     if (route(Gesture::A)) return;
-    // A layer with no handler yet is INERT on A rather than inserting behind it.
-    if (overlay_swallows(Overlay::NONE)) return;
 
     // A on a cell that OPENS a sub-screen — the two NAME rows and all five EQ cells. Before the per-screen
     // arms below.
@@ -132,8 +130,6 @@ void InputDispatcher::on_button_a() {
 
 void InputDispatcher::on_button_b() {
     if (route(Gesture::B)) return;
-    // A layer with no handler yet is inert on B.
-    if (overlay_swallows(Overlay::NONE)) return;
 
     // ⚠️ B LEAVES SETTINGS. Its POSITION matters:
     //   • AFTER the modals — the THEME EDITOR, EQ editor or keyboard over it own B;
@@ -218,7 +214,6 @@ void InputDispatcher::on_select() {
     // The EQ and theme editors let it through: they leave the oscilloscope strip drawn, so the panel has
     // a place, and their cell names (EQ FILL, Q, MTR BG) need it. ⚠️⚠️ The browser lets it through too —
     // safe only because this runs on an uninterrupted release.
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
 
     // ── HELP ─────────────────────────────────────────────────────────────────────────────────────
     //
@@ -249,10 +244,8 @@ void InputDispatcher::on_help_dismiss() {
 
 void InputDispatcher::on_stop_preview() {
     if (route(Gesture::STOP_PREVIEW)) return;
-    // ⚠️ The one handler a confirm does not own — its layer passes it on, so it stays armed here: a dialog
-    // over an INSTRUMENT audition must not leave the note hanging. The FX helper likewise — the screen
-    // behind it started the preview, and `previewScreen` decides whether there is one.
-    if (overlay_swallows(Overlay::CONFIRM | Overlay::FX_HELPER)) return;
+    // ⚠️ Runs under the confirm and the FX picker too (their layers pass it on): a dialog over an
+    // INSTRUMENT audition must not leave the note hanging, and the screen behind the picker started it.
 
     // Only screens that can START an audition stop one: PHRASE when its preview setting is on; the
     // instrument screens always (their START rings out until stopped). The browser answers for itself.
@@ -264,9 +257,8 @@ void InputDispatcher::on_stop_preview() {
 
 void InputDispatcher::on_start() {
     if (route(Gesture::START)) return;
-    // ⚠️ The THEME and EQ editors are armed to LET START THROUGH: the transport underneath is how you hear
-    // an edit while dialling it.
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
+    // ⚠️ Runs under the THEME and EQ editors too (their layers pass it on): the transport underneath is
+    // how you hear an edit while dialling it.
 
     // ⚠️ START IS NOT ALWAYS THE TRANSPORT. On INSTRUMENT, INST.POOL, MODS and TABLE it AUDITIONS the
     // instrument at its root on the preview lane, ringing until the next plain press — over a running
