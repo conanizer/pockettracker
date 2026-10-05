@@ -440,6 +440,7 @@ void InputDispatcher::browser_paste() {
 // ─── SELECT + A / B / R — the browser's file-management chords ───────────────────────────────────
 
 void InputDispatcher::on_select_a() {
+    if (layer_takes(Gesture::SELECT_A)) return;
     if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
@@ -469,6 +470,7 @@ void InputDispatcher::on_select_a() {
 }
 
 void InputDispatcher::on_select_b() {
+    if (layer_takes(Gesture::SELECT_B)) return;
     if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
@@ -493,6 +495,7 @@ void InputDispatcher::on_select_b() {
 }
 
 void InputDispatcher::on_select_r() {
+    if (layer_takes(Gesture::SELECT_R)) return;
     if (top_overlay() != Overlay::BROWSER) return;   // a browser-only chord
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
     open_qwerty(QwertyContext::FOLDER_CREATE, "NEW FOLDER", "FOLDER NAME:",

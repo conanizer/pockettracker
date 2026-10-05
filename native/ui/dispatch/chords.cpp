@@ -145,9 +145,8 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 //   A+UP   / A+DOWN  → THEME row: the palette too; colour row: channel ±0x10.
 
 void InputDispatcher::on_a_up() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
-                         Overlay::MAP_PICK)) return;
-    if (render_dialog_open()) { render_dialog_edit(+render_dialog_coarse_step()); return; }
+    if (layer_takes(Gesture::A_UP)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (theme_open()) {
         theme_dpad_edit(+1, +0x10);
         return;
@@ -173,9 +172,8 @@ void InputDispatcher::on_a_up() {
 }
 
 void InputDispatcher::on_a_down() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
-                         Overlay::MAP_PICK)) return;
-    if (render_dialog_open()) { render_dialog_edit(-render_dialog_coarse_step()); return; }
+    if (layer_takes(Gesture::A_DOWN)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (theme_open()) {
         theme_dpad_edit(-1, -0x10);
         return;
@@ -200,9 +198,8 @@ void InputDispatcher::on_a_down() {
 }
 
 void InputDispatcher::on_a_left() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
-                         Overlay::MAP_PICK)) return;
-    if (render_dialog_open()) { render_dialog_edit(-1); return; }
+    if (layer_takes(Gesture::A_LEFT)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (theme_open()) {
         theme_dpad_edit(-1, -0x01);
         return;
@@ -217,9 +214,8 @@ void InputDispatcher::on_a_left() {
 }
 
 void InputDispatcher::on_a_right() {
-    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::RENDER |
-                         Overlay::MAP_PICK)) return;
-    if (render_dialog_open()) { render_dialog_edit(+1); return; }
+    if (layer_takes(Gesture::A_RIGHT)) return;
+    if (overlay_swallows(Overlay::THEME | Overlay::EQ | Overlay::FX_HELPER | Overlay::MAP_PICK)) return;
     if (theme_open()) {
         theme_dpad_edit(+1, +0x01);
         return;
@@ -240,6 +236,7 @@ void InputDispatcher::on_a_released() {
         heldNotePreview_ = false;
         host_.stop_preview(/*cut=*/true);
     }
+    if (layer_takes(Gesture::A_RELEASE)) return;
 
     // Both pickers commit on RELEASE, so you can hold A, read the list, and let go on your choice.
     if (top_overlay() == Overlay::MAP_PICK) { apply_map_picker_choice(); return; }
@@ -256,6 +253,7 @@ void InputDispatcher::on_a_deferred() {
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_b() {
+    if (layer_takes(Gesture::A_B)) return;
     if (overlay_swallows(Overlay::EQ)) return;
 
     // A+B in the EQ editor resets the param under the cursor: FREQ 0x80 (≈450 Hz), GAIN 120 (0 dB),
@@ -322,6 +320,7 @@ void InputDispatcher::on_a_b() {
 // phrase the user cannot see.
 
 void InputDispatcher::on_a_a() {
+    if (layer_takes(Gesture::A_A)) return;
     if (overlay_swallows(Overlay::NONE)) return;
 
     // The sample editor's row 11 needs no arm: its A is deferred, and the mapper clears `lastAPress`
@@ -480,11 +479,13 @@ void InputDispatcher::cycle_current_item(int delta) {
 // The THEME and EQ arms live inside cycle_current_item: one swallows B+LEFT/RIGHT, the other re-points
 // the EQ slot with it.
 void InputDispatcher::on_b_left() {
+    if (layer_takes(Gesture::B_LEFT)) return;
     if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
     cycle_current_item(-1);
 }
 
 void InputDispatcher::on_b_right() {
+    if (layer_takes(Gesture::B_RIGHT)) return;
     if (overlay_swallows(Overlay::THEME | Overlay::EQ)) return;
     cycle_current_item(+1);
 }
@@ -516,6 +517,7 @@ bool InputDispatcher::song_relative_b_vertical(int delta) {
 }
 
 void InputDispatcher::on_b_up() {
+    if (layer_takes(Gesture::B_UP)) return;
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(-1)) return;
 
@@ -537,6 +539,7 @@ void InputDispatcher::on_b_up() {
 }
 
 void InputDispatcher::on_b_down() {
+    if (layer_takes(Gesture::B_DOWN)) return;
     if (overlay_swallows(Overlay::NONE)) return;
     if (song_relative_b_vertical(+1)) return;
 
@@ -566,9 +569,8 @@ void InputDispatcher::on_b_down() {
 // popup's state still live.
 
 void InputDispatcher::on_r_up() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER | Overlay::RENDER)) return;
-    // R+UP/DOWN steps the RENDER dialog's range to the previous or next part of the song.
-    if (render_dialog_open()) { render_dialog_step_section(-1); return; }
+    if (layer_takes(Gesture::R_UP)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(+1); return; }
     // Sample-editor ZOOM: R+UP/DOWN step `zoomLevel` (0=1×…4=16×); the feed re-bins the waveform.
@@ -583,8 +585,8 @@ void InputDispatcher::on_r_up() {
 }
 
 void InputDispatcher::on_r_down() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER | Overlay::RENDER)) return;
-    if (render_dialog_open()) { render_dialog_step_section(+1); return; }
+    if (layer_takes(Gesture::R_DOWN)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(-1); return; }
     if (on_sample_editor()) {   // ZOOM OUT — see on_r_up
@@ -670,6 +672,7 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
 }
 
 void InputDispatcher::on_r_left() {
+    if (layer_takes(Gesture::R_LEFT)) return;
     if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) {
         move_text_cursor_left(s_.qwerty);
@@ -685,6 +688,7 @@ void InputDispatcher::on_r_left() {
 }
 
 void InputDispatcher::on_r_right() {
+    if (layer_takes(Gesture::R_RIGHT)) return;
     if (overlay_swallows(Overlay::QWERTY | Overlay::BROWSER)) return;
     if (qwerty_open()) {
         move_text_cursor_right(s_.qwerty);
@@ -707,6 +711,7 @@ void InputDispatcher::on_r_right() {
 // ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b() {
+    if (layer_takes(Gesture::L_B)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
 
     // ⚠️ The browser's selection is a plain anchor..cursor range over a list (a second tap inside the
@@ -748,6 +753,7 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
+    if (layer_takes(Gesture::L_A)) return;
     // ⚠️ Every layer an arm below tests for must be in this set, or the gesture is thrown away here.
     if (overlay_swallows(Overlay::THEME | Overlay::BROWSER)) return;
 
@@ -903,11 +909,13 @@ void InputDispatcher::restore_full_playback() {
 }
 
 void InputDispatcher::on_r_b() {
+    if (layer_takes(Gesture::R_B)) return;
     if (!mute_solo_chord_live()) return;
     toggle_mute_solo(/*solo=*/false);
 }
 
 void InputDispatcher::on_r_a() {
+    if (layer_takes(Gesture::R_A)) return;
     // ⚠️ Before the mute/solo guard: the editor stands on SETTINGS, which that guard would refuse.
     if (theme_open()) {
         if (theme_color_index(s_.themeEditor.cursorRow) >= 0) theme_roll_palette(/*rowOnly=*/true);
@@ -965,6 +973,7 @@ void InputDispatcher::run_selection_recency() {
 }
 
 void InputDispatcher::on_l_r() {
+    if (layer_takes(Gesture::L_R)) return;
     if (overlay_swallows(Overlay::BROWSER)) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
@@ -1011,6 +1020,7 @@ void InputDispatcher::on_l_r() {
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b_a() {
+    if (layer_takes(Gesture::L_B_A)) return;
     if (overlay_swallows(Overlay::NONE)) return;
 
     Project& p = host_.edit_project();

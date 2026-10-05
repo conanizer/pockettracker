@@ -442,6 +442,8 @@ add_library(pt-ui STATIC
         ui/dispatch/browser.cpp
         ui/dispatch/buttons.cpp
         ui/dispatch/chords.cpp
+        ui/dispatch/layers.cpp
+        ui/dispatch/layers/render_dialog.cpp
         ui/dispatch/midi.cpp
         ui/dispatch/project.cpp
         ui/dispatch/sample_editor.cpp

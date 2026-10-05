@@ -835,9 +835,8 @@ void InputDispatcher::dpad_nav(NavDir direction) {
 // ⚠️ THE MODAL RULE (input_dispatcher.h): keyboard first, then browser, then the screen.
 
 void InputDispatcher::on_dpad_up() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER |
-                         Overlay::RENDER)) return;
-    if (render_dialog_open()) { render_dialog_move_cursor(-1); return; }
+    if (layer_takes(Gesture::DPAD_UP)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(-1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, -1); return; }
@@ -846,9 +845,8 @@ void InputDispatcher::on_dpad_up() {
 }
 
 void InputDispatcher::on_dpad_down() {
-    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER |
-                         Overlay::RENDER)) return;
-    if (render_dialog_open()) { render_dialog_move_cursor(+1); return; }
+    if (layer_takes(Gesture::DPAD_DOWN)) return;
+    if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(+1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, +1); return; }
@@ -857,6 +855,7 @@ void InputDispatcher::on_dpad_down() {
 }
 
 void InputDispatcher::on_dpad_left() {
+    if (layer_takes(Gesture::DPAD_LEFT)) return;
     if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
     // ⚠️ In the THEME editor LEFT/RIGHT change CHANNEL (R→G→B) and WRAP — three channels are a ring.
@@ -870,6 +869,7 @@ void InputDispatcher::on_dpad_left() {
 }
 
 void InputDispatcher::on_dpad_right() {
+    if (layer_takes(Gesture::DPAD_RIGHT)) return;
     if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
     if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
     if (theme_open())  { theme_move_cursor(0, +1); return; }

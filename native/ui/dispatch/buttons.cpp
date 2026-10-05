@@ -21,16 +21,11 @@ bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_button_a() {
+    if (layer_takes(Gesture::A)) return;
     // Every layer is ARMED (A means something on each), so this swallows only the FX helper — and a
     // layer added later is INERT on A rather than inserting behind it.
     if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
-                         Overlay::BROWSER | Overlay::RENDER)) return;
-
-    // A on the RENDER dialog fires it, from the RENDER row alone (the rows above are A+DPAD).
-    if (render_dialog_open()) {
-        if (s_.renderDialog.is_on(RenderRow::RENDER)) render_dialog_fire();
-        return;
-    }
+                         Overlay::BROWSER)) return;
 
     // ⚠️ The CONFIRM DIALOG first: topmost, and it owns the buttons of whatever it covers.
     if (confirm_open()) { confirm_accept(); return; }
@@ -177,13 +172,10 @@ void InputDispatcher::on_button_a() {
 }
 
 void InputDispatcher::on_button_b() {
+    if (layer_takes(Gesture::B)) return;
     // Every layer is ARMED (B closes or answers on each); a layer added later is inert on B.
     if (overlay_swallows(Overlay::CONFIRM | Overlay::QWERTY | Overlay::THEME | Overlay::EQ |
-                         Overlay::BROWSER | Overlay::RENDER)) return;
-
-    // B closes the RENDER dialog (it writes nothing). During a render the loop is inside it, so no press
-    // can arrive until it has closed itself.
-    if (render_dialog_open()) { s_.renderDialog.isOpen = false; return; }
+                         Overlay::BROWSER)) return;
 
     // B is the NO of "A=YES  B=NO"; the dialog owns the buttons.
     if (confirm_open()) { confirm_cancel(); return; }
@@ -310,6 +302,7 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
+    if (layer_takes(Gesture::SELECT)) return;
     // ⚠️ Bare SELECT is HELP, and the keyboard's ABORT — nothing else.
     // ⚠️ It arrives on the RELEASE (ui/button_mapper.h): on the browser SELECT is a modifier, and any other
     // press during it cancels this. (Unrelated to the A-deferral, which keeps sub-screen cells editable.)
@@ -353,6 +346,7 @@ void InputDispatcher::on_help_dismiss() {
 }
 
 void InputDispatcher::on_stop_preview() {
+    if (layer_takes(Gesture::STOP_PREVIEW)) return;
     // ⚠️ The one handler a confirm does not own (armed here): a dialog over an INSTRUMENT audition must not
     // leave the note hanging. The FX helper and browser likewise — the screen behind them started the
     // preview, and `previewScreen` decides whether there is one.
@@ -373,6 +367,7 @@ void InputDispatcher::on_stop_preview() {
 }
 
 void InputDispatcher::on_start() {
+    if (layer_takes(Gesture::START)) return;
     // ⚠️ The THEME and EQ editors are armed to LET START THROUGH: the transport underneath is how you hear
     // an edit while dialling it.
     if (overlay_swallows(Overlay::QWERTY | Overlay::THEME | Overlay::EQ | Overlay::BROWSER)) return;
@@ -542,6 +537,7 @@ bool InputDispatcher::live_row_armed(int songRow) const {
 }
 
 void InputDispatcher::on_l_start() {
+    if (layer_takes(Gesture::L_START)) return;
     if (!live_song_gesture()) return;
     if (!host_.is_playing()) {
         // From a standing start the row launches together on one downbeat; an empty cell starts silent.
@@ -552,6 +548,7 @@ void InputDispatcher::on_l_start() {
 }
 
 void InputDispatcher::on_r_start() {
+    if (layer_takes(Gesture::R_START)) return;
     if (!live_song_gesture()) return;
     if (!host_.is_playing()) return;   // nothing sounding, nothing to queue a stop for
     const int track = s_.cursorColumn - 1;

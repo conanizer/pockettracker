@@ -9,12 +9,14 @@
 //
 // ── ⚠️ THE MODAL RULE ────────────────────────────────────────────────────────────────────────────
 //
-// The confirm dialog, the QWERTY keyboard, the THEME and EQ editors (partial), the FX helper and the
-// FILE BROWSER each OWN THE BUTTONS while up, and the order a press is offered to them is the
-// specification: the keyboard can sit on top of the browser (rename) or the theme editor (its SAVE),
-// and a D-pad press there must move the KEY cursor.
-// ⭐ That order is written once, in `top_overlay()`; every handler asks `overlay_swallows()` with the
-// layers it answers for. A modal one handler forgets is a button that silently does the wrong thing.
+// Whatever sits over the screen — a load, the confirm dialog, the RENDER dialog, the QWERTY keyboard,
+// the THEME and EQ editors (partial), the FX and map pickers, the FILE BROWSER — OWNS THE BUTTONS
+// while up, and the order a press is offered to them is the specification: the keyboard can sit on
+// top of the browser (rename) or the theme editor (its SAVE), and a D-pad press there must move the
+// KEY cursor.
+// ⭐ That order is written once, in `LAYERS` (ui/dispatch/layers.cpp). Every gesture asks the top layer
+// first (`layer_takes`), and a gesture a layer does not answer is swallowed there. A layer with no
+// handler yet is answered inside each gesture's body instead (`overlay_swallows`).
 // ⚠️ The EQ editor is PARTIAL: it swallows the D-pad, A, B and SELECT but lets START through, so a band
 // can be swept across a held INSTRUMENT audition. Every other modal swallows everything.
 //
@@ -33,6 +35,7 @@
 #include "ui/app_state.h"
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
+#include "ui/dispatch/gesture.h"
 #include "ui/song_pointer.h"     // NAV = SONG — the ctor clamps the pointer onto a real cell
 #include "ui/filesystem.h"
 #include "ui/modules/chain_editor.h"
@@ -673,15 +676,16 @@ class InputDispatcher {
     // ── The modal guards (see THE MODAL RULE at the top) ─────────────────────────────────────────
     bool qwerty_open() const { return s_.qwerty.isOpen; }
     bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
+    bool fx_helper_open() const { return s_.fxHelper.isOpen; }
+    bool map_picker_open() const { return s_.mapPicker.isOpen; }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // THE OVERLAY STACK — `top_overlay()` is the ONE place its order is written
+    // THE LAYER STACK — `LAYERS` is the ONE place its order is written
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //
-    // A handler names the layers it answers for; `overlay_swallows()` answers for the rest.
-    // ⭐ The default for an unnamed layer is SWALLOW, so a new overlay is ONE registration (enumerator +
-    // its line in `top_overlay()`): a handler not taught about it does nothing under it, rather than
-    // editing the screen behind.
+    // ⭐ The default for a gesture a layer does not answer is SWALLOW, so a new layer is one row in
+    // `LAYERS` plus its handler (ui/dispatch/layers/): until it answers a gesture, that gesture does
+    // nothing under it rather than editing the screen behind.
     // FX_HELPER and BROWSER are not modals, but every handler asks about them in the same breath, so
     // they are layers here. `modal_backdrop_active` (ui/app_state.h) is the separate scrim question.
 
@@ -705,30 +709,22 @@ class InputDispatcher {
         return static_cast<Overlay>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
     }
 
-    /**
-     * The topmost open layer. ⚠️ QWERTY sits above THEME because it stacks on it (the editor's SAVE
-     * raises the keyboard without closing). Every other pair below is disjoint by construction.
-     */
-    Overlay top_overlay() const {
-        // ⚠️ FIRST, above even the confirm: a load can open behind another modal (the sample editor's
-        // LOAD from its confirm) and only finishing or cancelling ends it. `running`, not `shown` — a
-        // load owns the buttons from its first moment.
-        if (s_.loading.running) return Overlay::LOADING;
-        if (confirm_open())     return Overlay::CONFIRM;
-        // The render dialog is up while a render runs; a load inside it ranks above.
-        if (s_.renderDialog.isOpen) return Overlay::RENDER;
-        // The full help can open over the browser and the two in-place editors, never over a confirm,
-        // the keyboard or the FX picker.
-        if (s_.helpFull)        return Overlay::HELP;
-        if (qwerty_open())      return Overlay::QWERTY;
-        if (theme_open())       return Overlay::THEME;
-        if (eq_open())          return Overlay::EQ;
-        if (s_.fxHelper.isOpen) return Overlay::FX_HELPER;
-        // Disjoint from the FX picker: one opens on a PHRASE/TABLE FX column, the other on a mapping row.
-        if (s_.mapPicker.isOpen) return Overlay::MAP_PICK;
-        if (on_browser())       return Overlay::BROWSER;
-        return Overlay::NONE;
-    }
+    /** One row of the stack: which layer, whether it is up, and what it does with a gesture. */
+    struct Layer {
+        Overlay id;
+        bool (InputDispatcher::*isOpen)() const;
+        LayerResult (InputDispatcher::*handle)(Gesture);
+    };
+    /** Top first. The order, and why, is in ui/dispatch/layers.cpp. */
+    static const Layer LAYERS[];
+
+    /** The topmost open layer, or null. */
+    const Layer* top_layer() const;
+    Overlay      top_overlay() const;
+
+    /** Offer `g` to the top layer. True when it took it — or swallowed it — and the screen must not see
+     *  it; false when no layer is up, the layer let it through, or it has no handler yet. */
+    bool layer_takes(Gesture g);
 
     /**
      * THE MODAL RULE: true when a layer this handler does not answer for is up — return without
@@ -949,11 +945,8 @@ class InputDispatcher {
 
     bool render_dialog_open() const { return s_.renderDialog.isOpen; }
 
-    /** A+UP/DOWN's step on the panel: a page of song rows, or ONE repetition — REPEAT runs OFF..×16, so
-     *  a page would cross the whole range. */
-    int render_dialog_coarse_step() const {
-        return s_.renderDialog.is_on(RenderRow::REPEAT) ? 1 : 16;
-    }
+    /** Its buttons, as a layer (ui/dispatch/layers/render_dialog.cpp). */
+    LayerResult render_dialog_layer(Gesture g);
 
     /** UP/DOWN on the panel. Clamps at both ends — four rows are not a ring worth wrapping. */
     void render_dialog_move_cursor(int delta);
