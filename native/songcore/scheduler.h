@@ -1579,111 +1579,175 @@ class Sequencer {
         return effectiveStep;
     }
 
+    // ─── One phrase step ────────────────────────────────────────────────────────────────────────────
+    //
+    // `scheduleStepWithEffects` runs the stages below in a fixed order; `StepPlay` is what they share.
+    // ⚠️ The order is the event order — and CHA/RND/RNL and a RANDOM arpeggio draw from one generator,
+    // so moving a stage that draws reshuffles every later roll.
+
+    struct StepPlay {
+        const PhraseStep& step;      // as authored
+        TrackState& ts;
+        int64_t targetFrame;
+        int64_t stepDuration;
+        int trackId;
+        int transpose;               // TSX and the instrument's TRANSP. are folded in by `place_step`
+
+        bool hasNote  = false;
+        bool skipNote = false;       // a CHA gated the note away
+        PhraseStep effectiveStep;    // after CHA/RND/RNL
+        ResolvedStepParams params;
+        int   velocityByte = 0;
+        float velocityGain = 0.0f;
+        float phraseVol    = 0.0f;   // the instrument's volume, VOL applied
+        float notePan      = 0.0f;
+        // A running REPEAT's ramp before this step, or -1: an empty step re-arming REPEAT resumes it.
+        float savedRampVolume    = -1.0f;
+        float savedRampPhraseVol = 0.0f;
+
+        int     delayTicks = 0;
+        int64_t effectiveTargetFrame = 0;  // the step frame after LAT
+        // +1 on a note step: a parameter on the note's own frame reaches the voice the note REPLACES.
+        int64_t voiceFxFrame = 0;
+        int64_t scheduledNoteFrame = -1;   // this step's note-on, or -1
+        int tableId  = -1;
+        int tableRow = -1;
+
+        StepPlay(const PhraseStep& step_, TrackState& ts_, int64_t target, int64_t duration, int track, int semis)
+            : step(step_), ts(ts_), targetFrame(target), stepDuration(duration), trackId(track), transpose(semis) {}
+        bool triggers() const { return hasNote && !skipNote; }
+    };
+
     // `stepIndex` is unused; named only in a comment so the compiler does not warn.
     ScheduleStepResult scheduleStepWithEffects(const PhraseStep& step, int64_t targetFrame, int64_t stepDuration,
                                                int trackId, int transposeSemitones, TrackState& trackState,
                                                int /*stepIndex*/) {
+        StepPlay s(step, trackState, targetFrame, stepDuration, trackId, transposeSemitones);
+        end_repeat_and_arpeggio(s);
+        resolve_step(s);
+        if (s.params.hopValue.has_value()) return take_hop(s);
+        place_step(s);
+        apply_step_state(s);
+        expose_step_to_voice_at(s);
+        if (s.triggers()) schedule_step_note(s);
+        schedule_kill(s);
+        emit_step_fx(s);
+        if (!s.hasNote) emit_mid_note_pitch_and_volume(s);
+        schedule_repeat(s);
+        schedule_arpeggio(s);
+        remember_column_fx(s);
+        return ScheduleStepResult{s.triggers(), false, s.scheduledNoteFrame, s.voiceFxFrame, s.effectiveStep};
+    }
+
+    static Note transposed(const Note& note, int semitones) {
+        if (semitones == 0) return note;
+        const int midi = note_to_midi(note);
+        return midi >= 0 ? note_from_midi(clampi(midi + semitones, 0, 127)) : note;
+    }
+
+    // PBN's rate in semitones per tic: 00-7F up, 80-FF down.
+    static float pitch_bend_rate(int v) { return v < 0x80 ? (v / 16.0f) : -((v & 0x7F) / 16.0f); }
+
+    // PVB / PVX: X is the speed, Y the depth. PVX runs twice as fast and four times as deep.
+    static void vibrato_from(int v, bool wide, int tempo, float& speed, float& depth) {
+        const int speedNibble = (v >> 4) & 0x0F;
+        const int depthNibble = v & 0x0F;
+        if (wide) {
+            speed = (2.0f + speedNibble * 0.5f) * 2.0f * (tempo / 120.0f);
+            depth = depthNibble * 0.125f * 4.0f;
+        } else {
+            speed = (2.0f + speedNibble * 0.5f) * (tempo / 120.0f);
+            depth = depthNibble * 0.125f;
+        }
+    }
+
+    // STEP 1: a KIL or a new note ends a running REPEAT / ARPEGGIO, and so does any command in the
+    // column that started it.
+    static void end_repeat_and_arpeggio(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const PhraseStep& step = s.step;
+        const bool hasKill = step.fx1Type == FX_KILL || step.fx2Type == FX_KILL || step.fx3Type == FX_KILL;
+        if (hasKill) { ts.clearRepeat(); ts.clearArpeggio(); }
+
+        s.hasNote = !step_empty(step);
+        if (s.hasNote) { ts.clearRepeat(); ts.clearArpeggio(); }
+
+        s.savedRampPhraseVol = ts.repeatBasePhraseVol;
+        if (ts.hasActiveRepeat() && ts.repeatRetrigCount > 0) {
+            float oldDelta = REPEAT_RAMP_DELTAS[clampi(ts.repeatVolRamp, 0, 15)];
+            s.savedRampVolume = clampf(ts.repeatBaseVolume + ts.repeatRetrigCount * oldDelta, 0.0f, 1.0f);
+        }
+
+        if (ts.hasActiveRepeat() && step_fx_type(step, ts.repeatActiveColumn) != FX_NONE) ts.clearRepeat();
+        if (ts.hasActiveArpeggio() && step_fx_type(step, ts.arpeggioActiveColumn) != FX_NONE) ts.clearArpeggio();
+    }
+
+    // STEP 2: CHA/RND/RNL, then the step's resolved parameters.
+    void resolve_step(StepPlay& s) {
         const Project& project = *project_;
+        s.effectiveStep = applyChanceAndRandomize(s.step, s.ts, s.skipNote);
 
-        // STEP 1: cancellation of persistent REPEAT / ARPEGGIO
-        bool hasKill = step.fx1Type == FX_KILL || step.fx2Type == FX_KILL || step.fx3Type == FX_KILL;
-        if (hasKill) { trackState.clearRepeat(); trackState.clearArpeggio(); }
-
-        bool hasNote = !step_empty(step);
-        if (hasNote) { trackState.clearRepeat(); trackState.clearArpeggio(); }
-
-        float savedRampVolume;
-        const float savedRampPhraseVol = trackState.repeatBasePhraseVol;
-        if (trackState.hasActiveRepeat() && trackState.repeatRetrigCount > 0) {
-            float oldDelta = REPEAT_RAMP_DELTAS[clampi(trackState.repeatVolRamp, 0, 15)];
-            savedRampVolume = clampf(trackState.repeatBaseVolume + trackState.repeatRetrigCount * oldDelta, 0.0f, 1.0f);
-        } else {
-            savedRampVolume = -1.0f;
-        }
-
-        if (trackState.hasActiveRepeat()) {
-            if (step_fx_type(step, trackState.repeatActiveColumn) != FX_NONE) trackState.clearRepeat();
-        }
-        if (trackState.hasActiveArpeggio()) {
-            if (step_fx_type(step, trackState.arpeggioActiveColumn) != FX_NONE) trackState.clearArpeggio();
-        }
-
-        // STEP 2: CHA/RND/RNL, resolve, schedule
-        bool skipNote = false;
-        PhraseStep effectiveStep = applyChanceAndRandomize(step, trackState, skipNote);
-
-        const Instrument& instrument = project.instruments[clampi(effectiveStep.instrument, 0,
+        const Instrument& instrument = project.instruments[clampi(s.effectiveStep.instrument, 0,
                                                                   static_cast<int>(project.instruments.size()) - 1)];
-        float instrVol = hex_to_float(instrument.volume);
+        s.velocityByte = clampi(s.effectiveStep.volume, 0, 127);
+        s.velocityGain = (s.velocityByte / 127.0f) * (s.velocityByte / 127.0f);
+        s.params = resolve_step_params(s.effectiveStep, s.targetFrame, hex_to_float(instrument.volume));
+        s.phraseVol = s.params.volume;
+        s.notePan = s.params.panValue.has_value() ? (*s.params.panValue / 255.0f) : hex_to_float(instrument.pan);
+    }
 
-        int velocityByte = clampi(effectiveStep.volume, 0, 127);
-        float velocityGain = (velocityByte / 127.0f) * (velocityByte / 127.0f);
+    // ⚠️ A ROW THAT HOPS IS NEVER HEARD — as on a TABLE's steering row (`processTableRow`). The jump
+    // is the whole row: no note, no effects, NO TIME, so a four-row loop lasts four rows. A note
+    // beside a HOP does not sound; put it on the row above.
+    // ⚠️ Decided on the RESOLVED step: a `CHA` can gate the HOP away, and then the row plays.
+    // A running REPEAT or ARPEGGIO still ends here (STEP 1 has run) — leaving the phrase ends them.
+    static ScheduleStepResult take_hop(StepPlay& s) {
+        if (*s.params.hopValue == 0xFF) s.ts.trackStopped = true;
+        else                            s.ts.hopTargetRow = *s.params.hopValue & 0x0F;
+        ScheduleStepResult hop;
+        hop.hopTriggered  = true;
+        hop.effectiveStep = s.effectiveStep;
+        return hop;
+    }
 
-        ResolvedStepParams params = resolve_step_params(effectiveStep, targetFrame, instrVol);
-        float instrVolWithVxx = params.volume;
+    // TSX and TRANSP. folded in by reassignment, so no later site (note, REPEAT retrigger, arpeggio)
+    // can reach the unscaled value; then STEP 2.1, DEL (LAT), moves the step's frame.
+    void place_step(StepPlay& s) const {
+        s.transpose = effective_transpose_semitones(s.transpose, *project_, s.effectiveStep.instrument,
+                                                    s.params.tsxMultiplier);
+        s.delayTicks = s.params.delayTicks.value_or(0);
+        s.effectiveTargetFrame = s.delayTicks > 0
+                               ? s.targetFrame + s.delayTicks * (s.stepDuration / TICS_PER_STEP)
+                               : s.targetFrame;
+        s.voiceFxFrame       = s.triggers() ? s.effectiveTargetFrame + 1 : s.effectiveTargetFrame;
+        s.scheduledNoteFrame = s.triggers() ? s.effectiveTargetFrame : -1;
+    }
 
-        // ⚠️ A ROW THAT HOPS IS NEVER HEARD — as on a TABLE's steering row (`processTableRow`). The jump
-        // is the whole row: no note, no effects, NO TIME, so a four-row loop lasts four rows. A note
-        // beside a HOP does not sound; put it on the row above.
-        // ⚠️ Decided on the RESOLVED step: a `CHA` can gate the HOP away, and then the row plays.
-        // A running REPEAT or ARPEGGIO still ends here (STEP 1 has run) — leaving the phrase ends them.
-        if (params.hopValue.has_value()) {
-            if (*params.hopValue == 0xFF) trackState.trackStopped = true;
-            else                          trackState.hopTargetRow = *params.hopValue & 0x0F;
-            ScheduleStepResult hop;
-            hop.hopTriggered  = true;
-            hop.effectiveStep = effectiveStep;
-            return hop;
-        }
-
-        // TSX and the instrument's TRANSP. switch, folded in by reassignment so no later site (note,
-        // REPEAT retrigger, arpeggio) can reach the unscaled value.
-        transposeSemitones = effective_transpose_semitones(transposeSemitones, project,
-                                                           effectiveStep.instrument,
-                                                           params.tsxMultiplier);
-
-        float instrumentPan = hex_to_float(instrument.pan);
-        float notePan = params.panValue.has_value() ? (*params.panValue / 255.0f) : instrumentPan;
-
-        // STEP 2.1: DEL (LAT) — offset the target frame
-        int delayTicks = params.delayTicks.value_or(0);
-        int64_t effectiveTargetFrame;
-        if (delayTicks > 0) {
-            int64_t fpt = stepDuration / TICS_PER_STEP;
-            effectiveTargetFrame = targetFrame + delayTicks * fpt;
-        } else {
-            effectiveTargetFrame = targetFrame;
-        }
-
-        // STEP 2.2: TBL / THO
-        int tableIdOverride;
+    // STEP 2.2: TBL / THO, GRV, SCA / SCG — state the step's own note already plays under.
+    void apply_step_state(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const ResolvedStepParams& params = s.params;
         if (params.tableOverride.has_value() && *params.tableOverride >= 0) {
-            trackState.lastTableOverride = *params.tableOverride;
-            tableIdOverride = *params.tableOverride;
-        } else if (hasNote) {
-            trackState.lastTableOverride = -1;
-            tableIdOverride = -1;
+            ts.lastTableOverride = *params.tableOverride;
+            s.tableId = *params.tableOverride;
+        } else if (s.hasNote) {
+            ts.lastTableOverride = -1;
         } else {
-            tableIdOverride = trackState.lastTableOverride;
+            s.tableId = ts.lastTableOverride;
         }
 
-        int tableStartRow;
         if (params.tableHopTarget.has_value()) {
-            int targetRow = *params.tableHopTarget % 16;
-            trackState.lastTableStartRow = targetRow;
-            if (!hasNote) router_.ext_table_row(effectiveTargetFrame, trackId, targetRow);
-            tableStartRow = targetRow;
-        } else {
-            tableStartRow = -1;
+            const int targetRow = *params.tableHopTarget % 16;
+            ts.lastTableStartRow = targetRow;
+            if (!s.hasNote) router_.ext_table_row(s.effectiveTargetFrame, s.trackId, targetRow);
+            s.tableRow = targetRow;
         }
 
-        // GRV assignment
         if (params.grooveId.has_value()) {
-            trackState.grooveId = *params.grooveId;
-            trackState.grooveStep = 0;
+            ts.grooveId = *params.grooveId;
+            ts.grooveStep = 0;
         }
 
-        // SCA / SCG, above the note so the command's own step is already in the new scale (as GRV).
         // SCG writes all eight TrackStates; on the same step SCA is applied second and wins.
         if (params.scaleGlobalByte.has_value()) {
             const int key = scale_cmd_key(*params.scaleGlobalByte);
@@ -1691,435 +1755,359 @@ class Sequencer {
             for (int t = 0; t < 8; ++t) { trackStates_[t].scaleSlot = slot; trackStates_[t].scaleKey = key; }
         }
         if (params.scaleTrackByte.has_value()) {
-            trackState.scaleSlot = scale_cmd_slot(*params.scaleTrackByte);
-            trackState.scaleKey  = scale_cmd_key(*params.scaleTrackByte);
+            ts.scaleSlot = scale_cmd_slot(*params.scaleTrackByte);
+            ts.scaleKey  = scale_cmd_key(*params.scaleTrackByte);
+        }
+    }
+
+    // What `voice_at` needs to know about this step — set before the first note-on it emits.
+    void expose_step_to_voice_at(const StepPlay& s) {
+        stepEffective_   = &s.effectiveStep;
+        stepTarget_      = s.targetFrame;
+        stepDuration_    = s.stepDuration;
+        stepNoteFrame_   = s.scheduledNoteFrame;
+        stepFxFrame_     = s.voiceFxFrame;
+        stepCarryBefore_ = s.ts.carry;
+        stepCarryFrom_   = s.effectiveTargetFrame;
+    }
+
+    // The step's own note, with its PSL / PBN / PVB / PVX, on a freshly reset carry.
+    void schedule_step_note(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const ResolvedStepParams& params = s.params;
+        const Note note = transposed(s.effectiveStep.note, s.transpose);
+        const int previousMidi = ts.lastNoteMidi;
+
+        float pslInitialOffset = 0.0f, pslDuration = 0.0f, pbnRate = 0.0f, vibratoSpeed = 0.0f, vibratoDepth = 0.0f;
+
+        if (params.pslDuration.has_value() && *params.pslDuration > 0 && previousMidi >= 0) {
+            int currentMidi = note_to_midi(note);
+            if (currentMidi >= 0 && previousMidi != currentMidi) {
+                pslInitialOffset = static_cast<float>(previousMidi - currentMidi);
+                pslDuration = static_cast<float>(*params.pslDuration);
+            }
+        }
+        if (params.pbnValue.has_value() && *params.pbnValue != 0) {
+            pbnRate = pitch_bend_rate(*params.pbnValue);
+            ts.pitchBendActive = true;
+        }
+        if (params.pvbValue.has_value() && *params.pvbValue != 0) {
+            vibrato_from(*params.pvbValue, false, project_->tempo, vibratoSpeed, vibratoDepth);
+            ts.vibratoActive = true;
+        }
+        if (params.pvxValue.has_value() && *params.pvxValue != 0) {
+            vibrato_from(*params.pvxValue, true, project_->tempo, vibratoSpeed, vibratoDepth);
+            ts.vibratoActive = true;
         }
 
-        // What `voice_at` needs to know about this step — set before the first note-on it emits.
-        stepEffective_  = &effectiveStep;
-        stepTarget_     = targetFrame;
-        stepDuration_   = stepDuration;
-        stepNoteFrame_  = (hasNote && !skipNote) ? effectiveTargetFrame : -1;
-        stepFxFrame_    = (hasNote && !skipNote) ? effectiveTargetFrame + 1 : effectiveTargetFrame;
-        stepCarryBefore_ = trackState.carry;
-        stepCarryFrom_   = effectiveTargetFrame;
-
-        bool noteScheduled = false;
-        if (hasNote && !skipNote) {
-            Note note;
-            if (transposeSemitones != 0) {
-                int originalMidi = note_to_midi(effectiveStep.note);
-                note = originalMidi >= 0 ? note_from_midi(clampi(originalMidi + transposeSemitones, 0, 127))
-                                         : effectiveStep.note;
-            } else {
-                note = effectiveStep.note;
-            }
-
-            int previousMidi = trackState.lastNoteMidi;
-
-            float pslInitialOffset = 0.0f, pslDuration = 0.0f, pbnRate = 0.0f, vibratoSpeed = 0.0f, vibratoDepth = 0.0f;
-
-            if (params.pslDuration.has_value() && *params.pslDuration > 0 && previousMidi >= 0) {
-                int currentMidi = note_to_midi(note);
-                if (currentMidi >= 0 && previousMidi != currentMidi) {
-                    pslInitialOffset = static_cast<float>(previousMidi - currentMidi);
-                    pslDuration = static_cast<float>(*params.pslDuration);
-                }
-            }
-            if (params.pbnValue.has_value() && *params.pbnValue != 0) {
-                int v = *params.pbnValue;
-                pbnRate = v < 0x80 ? (v / 16.0f) : -((v & 0x7F) / 16.0f);
-                trackState.pitchBendActive = true;
-            }
-            if (params.pvbValue.has_value() && *params.pvbValue != 0) {
-                int v = *params.pvbValue;
-                int speedNibble = (v >> 4) & 0x0F;
-                int depthNibble = v & 0x0F;
-                vibratoSpeed = (2.0f + speedNibble * 0.5f) * (project.tempo / 120.0f);
-                vibratoDepth = depthNibble * 0.125f;
-                trackState.vibratoActive = true;
-            }
-            if (params.pvxValue.has_value() && *params.pvxValue != 0) {
-                int v = *params.pvxValue;
-                int speedNibble = (v >> 4) & 0x0F;
-                int depthNibble = v & 0x0F;
-                vibratoSpeed = (2.0f + speedNibble * 0.5f) * 2.0f * (project.tempo / 120.0f);
-                vibratoDepth = depthNibble * 0.125f * 4.0f;
-                trackState.vibratoActive = true;
-            }
-
-            NoteCarry& carry = trackState.carry;
-            carry = NoteCarry{};
-            carry.velGain = velocityGain;
-            carry.phraseVol = instrVolWithVxx;
-            carry.pan = notePan;
-            carry.vibSpeed = vibratoSpeed;
-            carry.vibDepth = vibratoDepth;
-            record_voice_commands(carry, params);
-            // A note inside a VOL or PAN fade starts where the fade has got to; the fade's next tic need
-            // not move to correct it.
-            {
-                const NoteCarry v = voice_at(trackState, effectiveTargetFrame);
-                carry.phraseVol = v.phraseVol;
-                carry.pan = v.pan;
-            }
-
-            NoteArgs a;
-            a.frame = effectiveTargetFrame; a.track = trackId; a.instrument = effectiveStep.instrument;
-            a.notePitch = note.pitch; a.noteOctave = note.octave;
-            a.velocity = velocityByte; a.velGain = velocityGain; a.volGain = carry.phraseVol; a.pan = carry.pan;
-            a.start = params.startPoint; a.slice = params.sliIndex.value_or(-1);
-            a.transpose = transposeSemitones; a.pit = params.pitSemitones.value_or(0); a.arp = 0;
-            a.tableId = tableIdOverride; a.tableRow = tableStartRow;
-            a.pslOff = pslInitialOffset; a.pslDur = pslDuration; a.pbnRate = pbnRate;
-            a.vibSpd = vibratoSpeed; a.vibDep = vibratoDepth;
-            emit_note(a, note);
-            noteScheduled = true;
-
-            trackState.lastNote = note;
-            trackState.lastInstrument = effectiveStep.instrument;
-            trackState.lastStartPoint = params.startPoint;
-            trackState.lastNoteMidi = note_to_midi(note);
-
-            if (trackState.hasPitchMod() && pbnRate == 0.0f && vibratoDepth == 0.0f) trackState.clearPitchMod();
-        }
-
-        int64_t scheduledNoteFrame = noteScheduled ? effectiveTargetFrame : -1;
-        // STEP 2.3's frame, hoisted: a crossing ramp yields to it (ScheduleStepResult).
-        const int64_t voiceFxFrame = (hasNote && !skipNote) ? effectiveTargetFrame + 1 : effectiveTargetFrame;
-
-        // KIL: soft note-off at the sample-accurate kill frame (with LAT + KIL-offset latency)
-        if (params.killAtFrame.has_value()) {
-            int64_t fpt = stepDuration / TICS_PER_STEP;
-            int64_t killFrame = *params.killAtFrame + (delayTicks + params.killOffsetTicks) * fpt;
-            router_.note_off(killFrame, trackId, NOTE_OFF_RELEASE);
-            trackState.clearPitchMod();
-        }
-
-        // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / CUT / RES / EQN / EQM)
+        NoteCarry& carry = ts.carry;
+        carry = NoteCarry{};
+        carry.velGain = s.velocityGain;
+        carry.phraseVol = s.phraseVol;
+        carry.pan = s.notePan;
+        carry.vibSpeed = vibratoSpeed;
+        carry.vibDepth = vibratoDepth;
+        record_voice_commands(carry, params);
+        // A note inside a VOL or PAN fade starts where the fade has got to; the fade's next tic need
+        // not move to correct it.
         {
-            bool triggeredNote = hasNote && !skipNote;
-            if (!triggeredNote && params.panValue.has_value()) {
-                router_.cc(effectiveTargetFrame, trackId, CC_PAN, *params.panValue / 255.0f);
-                trackState.carry.pan = *params.panValue / 255.0f;
-            }
-            // The note step recorded its own above, on a freshly reset carry.
-            if (!triggeredNote) record_voice_commands(trackState.carry, params);
-            if (params.reverbSendValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_REVERB_SEND, *params.reverbSendValue / 255.0f);
-            if (params.delaySendValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_DELAY_SEND, *params.delaySendValue / 255.0f);
-            if (params.bckValue.has_value())
-                router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
-            // CUT / RES at `voiceFxFrame`, like REV and DEL: on a note step, a param at the note's own
-            // frame reaches the voice the note REPLACES.
-            if (params.filterCutValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
-            if (params.filterResValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
-            // LPF / HPF / BPF: one record, the type in the CC ID and the cutoff in the value, so the
-            // two cannot land a block apart (event.h).
-            if (params.filterModeValue.has_value())
-                router_.cc(voiceFxFrame, trackId,
-                           params.filterModeType == 1 ? CC_FILTER_LP :
-                           params.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
-                           *params.filterModeValue / 255.0f);
-            // DRV / CRU at `voiceFxFrame` likewise. CRU's byte goes over whole; the engine splits it.
-            if (params.driveValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_DRIVE, *params.driveValue / 255.0f);
-            if (params.crushValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_CRUSH, *params.crushValue / 255.0f);
-            // FIN at `voiceFxFrame`: the +1 makes it tune the note on its own step, not the one replaced.
-            if (params.fineTuneValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_FINE_TUNE, *params.fineTuneValue / 255.0f);
-            // LPO sends the AUTHORED byte (the engine decodes it), at `voiceFxFrame` so a slide on a
-            // note step moves THAT note's window.
-            if (params.loopSlideValue.has_value())
-                router_.cc(voiceFxFrame, trackId, CC_LOOP_SLIDE,
-                           (*params.loopSlideValue & 0xFF) / 255.0f);
-            if (params.eqnSlot.has_value())
-                router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
-            // The mixer faders REPLACE the authored value and hold, so the host restores it on stop()
-            // (as for EQM).
-            if (params.trackVolValue.has_value()) {
-                router_.cc(voiceFxFrame, trackId, CC_TRACK_VOL, *params.trackVolValue / 255.0f);
-                mixerVolTracks_ |= 1 << clampi(trackId, 0, 7);
-            }
-            if (params.masterVolValue.has_value()) {
-                // TRACK_GLOBAL: the master belongs to no track, and the track lane is where the
-                // EXTERNAL gate would swallow it (event.h).
-                router_.cc(effectiveTargetFrame, TRACK_GLOBAL, CC_MASTER_VOL,
-                           *params.masterVolValue / 255.0f);
-                masterVolActive_ = true;
-            }
-            if (params.delayTimeValue.has_value()) {
-                // TRACK_GLOBAL for the same reason: the delay send belongs to no track.
-                router_.cc(effectiveTargetFrame, TRACK_GLOBAL, CC_DELAY_TIME,
-                           *params.delayTimeValue / 255.0f);
-                delayTimeActive_ = true;
-            }
-            if (params.eqmSlot.has_value()) {
-                // Master EQ — global, held until the next EQM; the host restores it on stop().
-                router_.ext_master_eq(effectiveTargetFrame, *params.eqmSlot);
-                eqmActive_ = true;
-            }
-
-            // ── MPG / MPB / CCA-CCD ──────────────────────────────────────────────────────────────
-            //
-            // ⚠️ They must come AFTER the step's note-on in BOTH orders that exist:
-            //  • ARRIVAL (records are consumed as emitted): both consumers resolve the instrument from
-            //    the last note-on, so a command on a step that changes instrument must follow it.
-            //  • QUEUE (released by due frame): a note-on carries the instrument's CC-slot DEFAULTS
-            //    (midi_out.h); the step's command must be released after them, or every CCA in the song
-            //    is quietly undone. `voiceFxFrame` (+1 on a note step) does both, and keeps the engine's
-            //    param off the old voice.
-            // On an empty step `voiceFxFrame` is the step frame: the command acts on the sounding note.
-            if (params.midiProgram.has_value())
-                router_.program(voiceFxFrame, trackId, *params.midiProgram);
-            if (params.midiBend.has_value())
-                router_.pitch_bend(voiceFxFrame, trackId, *params.midiBend << 6);
-            for (int slot = 0; slot < MIDI_CC_SLOTS; ++slot) {
-                if (!params.ccSlotValue[slot].has_value()) continue;
-                router_.cc(voiceFxFrame, trackId, CC_SLOT_A + slot, *params.ccSlotValue[slot] / 255.0f);
-            }
+            const NoteCarry v = voice_at(ts, s.effectiveTargetFrame);
+            carry.phraseVol = v.phraseVol;
+            carry.pan = v.pan;
         }
 
-        // STEP 2.4: pitch/vol FX on steps WITHOUT notes (mid-note changes)
-        if (!hasNote) {
-            // ⚠️ Deliberate: an empty-step pitch rate uses the LIVE tempo during playback but 120 on the
-            // render path (currentProject_ is set only by live starts). The goldens record it.
-            int tempo = currentProject_ ? currentProject_->tempo : 120;
-            if (params.volumeFromVxx) {
-                router_.cc(effectiveTargetFrame, trackId, CC_VOLUME, instrVolWithVxx);
-                trackState.carry.phraseVol = instrVolWithVxx;
-            }
-            if (params.pbnValue.has_value()) {
-                int v = *params.pbnValue;
-                if (v == 0) {
-                    router_.ext_pitch_rate(effectiveTargetFrame, trackId, 0.0f, tempo);
-                    trackState.pitchBendActive = false;
-                } else {
-                    float semitonesPerTick = v < 0x80 ? (v / 16.0f) : -((v & 0x7F) / 16.0f);
-                    router_.ext_pitch_rate(effectiveTargetFrame, trackId, semitonesPerTick, tempo);
-                    trackState.pitchBendActive = true;
-                }
-            }
-            if (params.pvbValue.has_value()) {
-                int v = *params.pvbValue;
-                if (v == 0) {
-                    router_.ext_vibrato(effectiveTargetFrame, trackId, 0.0f, 0.0f);
-                    trackState.vibratoActive = false;
-                    trackState.carry.vibSpeed = trackState.carry.vibDepth = 0.0f;
-                } else {
-                    int speedNibble = (v >> 4) & 0x0F;
-                    int depthNibble = v & 0x0F;
-                    float speed = (2.0f + speedNibble * 0.5f) * (tempo / 120.0f);
-                    float depth = depthNibble * 0.125f;
-                    router_.ext_vibrato(effectiveTargetFrame, trackId, speed, depth);
-                    trackState.vibratoActive = true;
-                    trackState.carry.vibSpeed = speed;
-                    trackState.carry.vibDepth = depth;
-                }
-            }
-            if (params.pvxValue.has_value()) {
-                int v = *params.pvxValue;
-                if (v == 0) {
-                    router_.ext_vibrato(effectiveTargetFrame, trackId, 0.0f, 0.0f);
-                    trackState.vibratoActive = false;
-                    trackState.carry.vibSpeed = trackState.carry.vibDepth = 0.0f;
-                } else {
-                    int speedNibble = (v >> 4) & 0x0F;
-                    int depthNibble = v & 0x0F;
-                    float speed = (2.0f + speedNibble * 0.5f) * 2.0f * (tempo / 120.0f);
-                    float depth = depthNibble * 0.125f * 4.0f;
-                    router_.ext_vibrato(effectiveTargetFrame, trackId, speed, depth);
-                    trackState.vibratoActive = true;
-                    trackState.carry.vibSpeed = speed;
-                    trackState.carry.vibDepth = depth;
-                }
-            }
+        NoteArgs a;
+        a.frame = s.effectiveTargetFrame; a.track = s.trackId; a.instrument = s.effectiveStep.instrument;
+        a.notePitch = note.pitch; a.noteOctave = note.octave;
+        a.velocity = s.velocityByte; a.velGain = s.velocityGain; a.volGain = carry.phraseVol; a.pan = carry.pan;
+        a.start = params.startPoint; a.slice = params.sliIndex.value_or(-1);
+        a.transpose = s.transpose; a.pit = params.pitSemitones.value_or(0); a.arp = 0;
+        a.tableId = s.tableId; a.tableRow = s.tableRow;
+        a.pslOff = pslInitialOffset; a.pslDur = pslDuration; a.pbnRate = pbnRate;
+        a.vibSpd = vibratoSpeed; a.vibDep = vibratoDepth;
+        emit_note(a, note);
+
+        ts.lastNote = note;
+        ts.lastInstrument = s.effectiveStep.instrument;
+        ts.lastStartPoint = params.startPoint;
+        ts.lastNoteMidi = note_to_midi(note);
+
+        if (ts.hasPitchMod() && pbnRate == 0.0f && vibratoDepth == 0.0f) ts.clearPitchMod();
+    }
+
+    // KIL: soft note-off at the sample-accurate kill frame (with LAT + KIL-offset latency).
+    void schedule_kill(StepPlay& s) {
+        if (!s.params.killAtFrame.has_value()) return;
+        int64_t fpt = s.stepDuration / TICS_PER_STEP;
+        int64_t killFrame = *s.params.killAtFrame + (s.delayTicks + s.params.killOffsetTicks) * fpt;
+        router_.note_off(killFrame, s.trackId, NOTE_OFF_RELEASE);
+        s.ts.clearPitchMod();
+    }
+
+    // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / CUT / RES / EQN / EQM).
+    void emit_step_fx(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const ResolvedStepParams& params = s.params;
+        const int trackId = s.trackId;
+        const int64_t voiceFxFrame = s.voiceFxFrame;
+        const bool triggeredNote = s.triggers();
+        if (!triggeredNote && params.panValue.has_value()) {
+            router_.cc(s.effectiveTargetFrame, trackId, CC_PAN, *params.panValue / 255.0f);
+            ts.carry.pan = *params.panValue / 255.0f;
+        }
+        // The note step recorded its own, on a freshly reset carry.
+        if (!triggeredNote) record_voice_commands(ts.carry, params);
+        if (params.reverbSendValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_REVERB_SEND, *params.reverbSendValue / 255.0f);
+        if (params.delaySendValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_DELAY_SEND, *params.delaySendValue / 255.0f);
+        if (params.bckValue.has_value())
+            router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
+        if (params.filterCutValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_FILTER_CUT, *params.filterCutValue / 255.0f);
+        if (params.filterResValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_FILTER_RES, *params.filterResValue / 255.0f);
+        // LPF / HPF / BPF: one record, the type in the CC ID and the cutoff in the value, so the
+        // two cannot land a block apart (event.h).
+        if (params.filterModeValue.has_value())
+            router_.cc(voiceFxFrame, trackId,
+                       params.filterModeType == 1 ? CC_FILTER_LP :
+                       params.filterModeType == 2 ? CC_FILTER_HP : CC_FILTER_BP,
+                       *params.filterModeValue / 255.0f);
+        // CRU's byte goes over whole; the engine splits it.
+        if (params.driveValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_DRIVE, *params.driveValue / 255.0f);
+        if (params.crushValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_CRUSH, *params.crushValue / 255.0f);
+        if (params.fineTuneValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_FINE_TUNE, *params.fineTuneValue / 255.0f);
+        // LPO sends the AUTHORED byte (the engine decodes it).
+        if (params.loopSlideValue.has_value())
+            router_.cc(voiceFxFrame, trackId, CC_LOOP_SLIDE, (*params.loopSlideValue & 0xFF) / 255.0f);
+        if (params.eqnSlot.has_value())
+            router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
+        // The mixer faders REPLACE the authored value and hold, so the host restores it on stop()
+        // (as for EQM).
+        if (params.trackVolValue.has_value()) {
+            router_.cc(voiceFxFrame, trackId, CC_TRACK_VOL, *params.trackVolValue / 255.0f);
+            mixerVolTracks_ |= 1 << clampi(trackId, 0, 7);
+        }
+        // Master volume and delay time ride TRACK_GLOBAL: they belong to no track, and the track lane
+        // is where the EXTERNAL gate would swallow them (event.h).
+        if (params.masterVolValue.has_value()) {
+            router_.cc(s.effectiveTargetFrame, TRACK_GLOBAL, CC_MASTER_VOL, *params.masterVolValue / 255.0f);
+            masterVolActive_ = true;
+        }
+        if (params.delayTimeValue.has_value()) {
+            router_.cc(s.effectiveTargetFrame, TRACK_GLOBAL, CC_DELAY_TIME, *params.delayTimeValue / 255.0f);
+            delayTimeActive_ = true;
+        }
+        if (params.eqmSlot.has_value()) {
+            // Master EQ — global, held until the next EQM; the host restores it on stop().
+            router_.ext_master_eq(s.effectiveTargetFrame, *params.eqmSlot);
+            eqmActive_ = true;
         }
 
-        // A row that hops returned above, so from here on the step is a played one.
-        const bool hopTriggered = false;
+        // ── MPG / MPB / CCA-CCD ──────────────────────────────────────────────────────────────
+        //
+        // ⚠️ They must come AFTER the step's note-on in BOTH orders that exist:
+        //  • ARRIVAL (records are consumed as emitted): both consumers resolve the instrument from
+        //    the last note-on, so a command on a step that changes instrument must follow it.
+        //  • QUEUE (released by due frame): a note-on carries the instrument's CC-slot DEFAULTS
+        //    (midi_out.h); the step's command must be released after them, or every CCA in the song
+        //    is quietly undone. `voiceFxFrame` (+1 on a note step) does both, and keeps the engine's
+        //    param off the old voice.
+        // On an empty step `voiceFxFrame` is the step frame: the command acts on the sounding note.
+        if (params.midiProgram.has_value())
+            router_.program(voiceFxFrame, trackId, *params.midiProgram);
+        if (params.midiBend.has_value())
+            router_.pitch_bend(voiceFxFrame, trackId, *params.midiBend << 6);
+        for (int slot = 0; slot < MIDI_CC_SLOTS; ++slot) {
+            if (!params.ccSlotValue[slot].has_value()) continue;
+            router_.cc(voiceFxFrame, trackId, CC_SLOT_A + slot, *params.ccSlotValue[slot] / 255.0f);
+        }
+    }
 
-        // STEP 3: REPEAT
+    // STEP 2.4: VOL / PBN / PVB / PVX on a step without a note change the sounding one.
+    void emit_mid_note_pitch_and_volume(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const ResolvedStepParams& params = s.params;
+        const int64_t frame = s.effectiveTargetFrame;
+        // ⚠️ Deliberate: an empty-step pitch rate uses the LIVE tempo during playback but 120 on the
+        // render path (currentProject_ is set only by live starts). The goldens record it.
+        const int tempo = currentProject_ ? currentProject_->tempo : 120;
+        if (params.volumeFromVxx) {
+            router_.cc(frame, s.trackId, CC_VOLUME, s.phraseVol);
+            ts.carry.phraseVol = s.phraseVol;
+        }
+        if (params.pbnValue.has_value()) {
+            const int v = *params.pbnValue;
+            router_.ext_pitch_rate(frame, s.trackId, v == 0 ? 0.0f : pitch_bend_rate(v), tempo);
+            ts.pitchBendActive = v != 0;
+        }
+        auto vibrato = [&](int v, bool wide) {
+            float speed = 0.0f, depth = 0.0f;
+            if (v != 0) vibrato_from(v, wide, tempo, speed, depth);
+            router_.ext_vibrato(frame, s.trackId, speed, depth);
+            ts.vibratoActive = v != 0;
+            ts.carry.vibSpeed = speed;
+            ts.carry.vibDepth = depth;
+        };
+        if (params.pvbValue.has_value()) vibrato(*params.pvbValue, false);
+        if (params.pvxValue.has_value()) vibrato(*params.pvxValue, true);
+    }
+
+    // STEP 3: REPEAT — arm it from this step, then retrigger on its tic grid up to the step's end.
+    void schedule_repeat(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const PhraseStep& effectiveStep = s.effectiveStep;
+        const int64_t targetFrame = s.targetFrame;
+        const int64_t stepDuration = s.stepDuration;
+
         int newRepeatColumn = 0;
         if (effectiveStep.fx1Type == FX_REPEAT && effectiveStep.fx1Value > 0) newRepeatColumn = 1;
         else if (effectiveStep.fx2Type == FX_REPEAT && effectiveStep.fx2Value > 0) newRepeatColumn = 2;
         else if (effectiveStep.fx3Type == FX_REPEAT && effectiveStep.fx3Value > 0) newRepeatColumn = 3;
-        int newRepeatTicInterval = params.repeatCount.value_or(0);
-        int newRepeatVolRamp = params.repeatVolRamp.value_or(0);
+        int newRepeatTicInterval = s.params.repeatCount.value_or(0);
+        int newRepeatVolRamp = s.params.repeatVolRamp.value_or(0);
 
         if (newRepeatColumn > 0) {
-            trackState.repeatActiveColumn = newRepeatColumn;
-            trackState.repeatTicInterval = newRepeatTicInterval;
-            trackState.repeatVolRamp = newRepeatVolRamp;
-            trackState.repeatStartFrame = targetFrame;
-            trackState.repeatRetrigCount = 0;
-            if (!hasNote && savedRampVolume >= 0.0f) {
-                trackState.repeatBaseVolume    = savedRampVolume;
-                trackState.repeatBasePhraseVol = savedRampPhraseVol;
+            ts.repeatActiveColumn = newRepeatColumn;
+            ts.repeatTicInterval = newRepeatTicInterval;
+            ts.repeatVolRamp = newRepeatVolRamp;
+            ts.repeatStartFrame = targetFrame;
+            ts.repeatRetrigCount = 0;
+            if (!s.hasNote && s.savedRampVolume >= 0.0f) {
+                ts.repeatBaseVolume    = s.savedRampVolume;
+                ts.repeatBasePhraseVol = s.savedRampPhraseVol;
             } else {
-                trackState.repeatBaseVolume    = trackState.carry.velGain * trackState.carry.phraseVol;
-                trackState.repeatBasePhraseVol = trackState.carry.phraseVol;
+                ts.repeatBaseVolume    = ts.carry.velGain * ts.carry.phraseVol;
+                ts.repeatBasePhraseVol = ts.carry.phraseVol;
             }
         }
 
         int activeRepeatInterval = newRepeatTicInterval > 0 ? newRepeatTicInterval
-                                 : (trackState.hasActiveRepeat() ? trackState.repeatTicInterval : 0);
+                                 : (ts.hasActiveRepeat() ? ts.repeatTicInterval : 0);
         int activeVolRamp = newRepeatTicInterval > 0 ? newRepeatVolRamp
-                          : (trackState.hasActiveRepeat() ? trackState.repeatVolRamp : 0);
+                          : (ts.hasActiveRepeat() ? ts.repeatVolRamp : 0);
+        if (activeRepeatInterval <= 0 || ts.lastNote == Note::EMPTY()) return;
 
-        if (activeRepeatInterval > 0 && trackState.lastNote != Note::EMPTY()) {
-            Note retrigNote;
-            if (hasNote) {
-                if (transposeSemitones != 0) {
-                    int originalMidi = note_to_midi(effectiveStep.note);
-                    retrigNote = originalMidi >= 0 ? note_from_midi(clampi(originalMidi + transposeSemitones, 0, 127))
-                                                   : effectiveStep.note;
-                } else {
-                    retrigNote = effectiveStep.note;
-                }
-            } else {
-                retrigNote = trackState.lastNote;
-            }
-            int retrigInstrument = hasNote ? effectiveStep.instrument : trackState.lastInstrument;
-            int retrigStartPoint = hasNote ? params.startPoint : trackState.lastStartPoint;
-            float rampDelta = REPEAT_RAMP_DELTAS[clampi(activeVolRamp, 0, 15)];
+        const Note retrigNote = s.hasNote ? transposed(effectiveStep.note, s.transpose) : ts.lastNote;
+        int retrigInstrument = s.hasNote ? effectiveStep.instrument : ts.lastInstrument;
+        int retrigStartPoint = s.hasNote ? s.params.startPoint : ts.lastStartPoint;
+        float rampDelta = REPEAT_RAMP_DELTAS[clampi(activeVolRamp, 0, 15)];
 
-            int64_t stepEndFrame = targetFrame + stepDuration;
-            int64_t gridStep = static_cast<int64_t>(activeRepeatInterval) * stepDuration;
-            int64_t gridDenom = TICS_PER_STEP;
-            if (gridStep > 0) {
-                int64_t framesSinceStart = targetFrame - trackState.repeatStartFrame;
-                int64_t k = framesSinceStart <= 0 ? 0
-                          : (framesSinceStart * gridDenom + gridStep - 1) / gridStep;
-                while (true) {
-                    int64_t triggerFrame = trackState.repeatStartFrame + (k * gridStep) / gridDenom;
-                    if (triggerFrame >= stepEndFrame) break;
-                    if (triggerFrame >= targetFrame && triggerFrame != scheduledNoteFrame) {
-                        trackState.repeatRetrigCount++;
-                        float retrigVolume = clampf(trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta,
-                                                    0.0f, 1.0f);
-                        // The ramp's product with the VOL channel it was taken at divided out;
-                        // `emit_retrigger` multiplies in the channel as it stands NOW. A base taken at
-                        // VOL 00 has nothing to divide, and ramps the velocity alone.
-                        const float retrigVelGain = trackState.repeatBasePhraseVol > 0.0f
-                            ? retrigVolume / trackState.repeatBasePhraseVol
-                            : clampf(trackState.carry.velGain + trackState.repeatRetrigCount * rampDelta, 0.0f, 1.0f);
-                        NoteArgs a;
-                        a.frame = triggerFrame; a.track = trackId; a.instrument = retrigInstrument;
-                        a.notePitch = retrigNote.pitch; a.noteOctave = retrigNote.octave;
-                        a.velocity = -1; a.start = retrigStartPoint;
-                        a.transpose = transposeSemitones; a.arp = 0;
-                        a.tableId = trackState.lastTableOverride; a.tableRow = -1;
-                        emit_retrigger(a, retrigNote, trackId, trackState, retrigVelGain);
-                    }
-                    k++;
-                }
+        int64_t stepEndFrame = targetFrame + stepDuration;
+        int64_t gridStep = static_cast<int64_t>(activeRepeatInterval) * stepDuration;
+        int64_t gridDenom = TICS_PER_STEP;
+        if (gridStep <= 0) return;
+        int64_t framesSinceStart = targetFrame - ts.repeatStartFrame;
+        int64_t k = framesSinceStart <= 0 ? 0
+                  : (framesSinceStart * gridDenom + gridStep - 1) / gridStep;
+        while (true) {
+            int64_t triggerFrame = ts.repeatStartFrame + (k * gridStep) / gridDenom;
+            if (triggerFrame >= stepEndFrame) break;
+            if (triggerFrame >= targetFrame && triggerFrame != s.scheduledNoteFrame) {
+                ts.repeatRetrigCount++;
+                float retrigVolume = clampf(ts.repeatBaseVolume + ts.repeatRetrigCount * rampDelta, 0.0f, 1.0f);
+                // The ramp's product with the VOL channel it was taken at divided out;
+                // `emit_retrigger` multiplies in the channel as it stands NOW. A base taken at
+                // VOL 00 has nothing to divide, and ramps the velocity alone.
+                const float retrigVelGain = ts.repeatBasePhraseVol > 0.0f
+                    ? retrigVolume / ts.repeatBasePhraseVol
+                    : clampf(ts.carry.velGain + ts.repeatRetrigCount * rampDelta, 0.0f, 1.0f);
+                NoteArgs a;
+                a.frame = triggerFrame; a.track = s.trackId; a.instrument = retrigInstrument;
+                a.notePitch = retrigNote.pitch; a.noteOctave = retrigNote.octave;
+                a.velocity = -1; a.start = retrigStartPoint;
+                a.transpose = s.transpose; a.arp = 0;
+                a.tableId = ts.lastTableOverride; a.tableRow = -1;
+                emit_retrigger(a, retrigNote, s.trackId, ts, retrigVelGain);
             }
+            k++;
         }
+    }
 
-        // STEP 4: ARC (arpeggio config)
-        if (params.arcValue.has_value()) {
-            int v = *params.arcValue;
+    // STEP 4: ARC configures the arpeggio; STEP 5: ARP arms or clears it, then it plays.
+    void schedule_arpeggio(StepPlay& s) {
+        TrackState& ts = s.ts;
+        const PhraseStep& effectiveStep = s.effectiveStep;
+        if (s.params.arcValue.has_value()) {
+            int v = *s.params.arcValue;
             int mode = (v >> 4) & 0x0F;
             int speed = v & 0x0F;
-            trackState.arpeggioMode = clampi(mode, 0, 3);
-            trackState.arpeggioSpeed = speed > 0 ? speed : 4;
+            ts.arpeggioMode = clampi(mode, 0, 3);
+            ts.arpeggioSpeed = speed > 0 ? speed : 4;
         }
 
-        // STEP 5: ARPEGGIO
         int newArpColumn = 0, newArpValue = 0;
         if (effectiveStep.fx1Type == FX_ARPEGGIO) { newArpColumn = 1; newArpValue = effectiveStep.fx1Value; }
         else if (effectiveStep.fx2Type == FX_ARPEGGIO) { newArpColumn = 2; newArpValue = effectiveStep.fx2Value; }
         else if (effectiveStep.fx3Type == FX_ARPEGGIO) { newArpColumn = 3; newArpValue = effectiveStep.fx3Value; }
 
         if (newArpColumn > 0 && newArpValue == 0) {
-            trackState.clearArpeggio();
+            ts.clearArpeggio();
         } else if (newArpColumn > 0 && newArpValue > 0) {
-            trackState.arpeggioActiveColumn = newArpColumn;
-            trackState.arpeggioValue = newArpValue;
-            trackState.arpeggioStartFrame = targetFrame;
+            ts.arpeggioActiveColumn = newArpColumn;
+            ts.arpeggioValue = newArpValue;
+            ts.arpeggioStartFrame = s.targetFrame;
         }
 
         int activeArpValue = newArpValue > 0 ? newArpValue
-                           : (trackState.hasActiveArpeggio() ? trackState.arpeggioValue : 0);
-
-        if (activeArpValue > 0 && trackState.lastNote != Note::EMPTY()) {
-            scheduleArpeggioNotes(targetFrame, stepDuration, trackId, trackState, hasNote, effectiveStep, params,
-                                  transposeSemitones, scheduledNoteFrame);
-        }
-
-        // Per-column FX memory for RND — real effects only, from the ORIGINAL step.
-        for (int col = 1; col <= 3; ++col) {
-            int fxType = step_fx_type(step, col);
-            int fxValue = step_fx_value(step, col);
-            if (fxType != FX_NONE && fxType != FX_RND && fxType != FX_RNL && fxType != FX_CHA) {
-                trackState.lastColFxType[col] = fxType;
-                trackState.lastColFxValue[col] = fxValue;
-            }
-        }
-
-        return ScheduleStepResult{noteScheduled, hopTriggered, scheduledNoteFrame, voiceFxFrame,
-                                  effectiveStep};
+                           : (ts.hasActiveArpeggio() ? ts.arpeggioValue : 0);
+        if (activeArpValue > 0 && ts.lastNote != Note::EMPTY()) schedule_arpeggio_notes(s);
     }
 
-    void scheduleArpeggioNotes(int64_t targetFrame, int64_t stepDuration, int trackId, TrackState& trackState,
-                               bool hasNote, const PhraseStep& step, const ResolvedStepParams& params,
-                               int transposeSemitones, int64_t scheduledNoteFrame) {
-        int semi1 = (trackState.arpeggioValue >> 4) & 0x0F;
-        int semi2 = trackState.arpeggioValue & 0x0F;
+    void schedule_arpeggio_notes(StepPlay& s) {
+        TrackState& ts = s.ts;
+        int semi1 = (ts.arpeggioValue >> 4) & 0x0F;
+        int semi2 = ts.arpeggioValue & 0x0F;
 
-        Note baseNote;
-        if (hasNote) {
-            if (transposeSemitones != 0) {
-                int originalMidi = note_to_midi(step.note);
-                baseNote = originalMidi >= 0 ? note_from_midi(clampi(originalMidi + transposeSemitones, 0, 127))
-                                             : step.note;
-            } else {
-                baseNote = step.note;
-            }
-        } else {
-            baseNote = trackState.lastNote;
-        }
-
+        const Note baseNote = s.hasNote ? transposed(s.effectiveStep.note, s.transpose) : ts.lastNote;
         int baseMidi = note_to_midi(baseNote);
         if (baseMidi < 0) return;
 
-        int64_t framesPerTic = stepDuration / TICS_PER_STEP;
-        int ticInterval = trackState.arpeggioSpeed;
+        int64_t framesPerTic = s.stepDuration / TICS_PER_STEP;
+        int ticInterval = ts.arpeggioSpeed;
         int64_t framesPerArpNote = static_cast<int64_t>(ticInterval) * framesPerTic;
         if (framesPerArpNote <= 0) return;  // guard against division by zero
 
-        int patternLength = trackState.arpeggioMode == 2 ? 4 : 3;
+        int patternLength = ts.arpeggioMode == 2 ? 4 : 3;
 
-        int instrumentId = hasNote ? step.instrument : trackState.lastInstrument;
-        int startPoint = hasNote ? params.startPoint : trackState.lastStartPoint;
+        int instrumentId = s.hasNote ? s.effectiveStep.instrument : ts.lastInstrument;
+        int startPoint = s.hasNote ? s.params.startPoint : ts.lastStartPoint;
 
-        int64_t stepEndFrame = targetFrame + stepDuration;
-        int64_t framesSinceStart = targetFrame - trackState.arpeggioStartFrame;
+        int64_t stepEndFrame = s.targetFrame + s.stepDuration;
+        int64_t framesSinceStart = s.targetFrame - ts.arpeggioStartFrame;
+        if (framesSinceStart < 0) return;
 
-        if (framesSinceStart >= 0) {
-            int64_t firstTriggerIndex = (framesSinceStart + framesPerArpNote - 1) / framesPerArpNote;
-            int64_t triggerIndex = firstTriggerIndex;
-            int64_t triggerFrame = trackState.arpeggioStartFrame + triggerIndex * framesPerArpNote;
-            while (triggerFrame < stepEndFrame) {
-                if (triggerFrame >= targetFrame && triggerFrame != scheduledNoteFrame) {
-                    int patternPosition = static_cast<int>(triggerIndex % patternLength);
-                    int arpMidi = getArpeggioNote(baseMidi, semi1, semi2, trackState.arpeggioMode, patternPosition);
-                    NoteArgs a;
-                    a.frame = triggerFrame; a.track = trackId; a.instrument = instrumentId;
-                    a.notePitch = baseNote.pitch; a.noteOctave = baseNote.octave;
-                    a.velocity = -1; a.start = startPoint;
-                    a.transpose = transposeSemitones;
-                    a.arp = arpMidi - baseMidi;
-                    a.tableId = trackState.lastTableOverride; a.tableRow = -1;
-                    emit_retrigger(a, baseNote, trackId, trackState);
-                }
-                triggerIndex++;
-                triggerFrame += framesPerArpNote;
+        int64_t triggerIndex = (framesSinceStart + framesPerArpNote - 1) / framesPerArpNote;
+        int64_t triggerFrame = ts.arpeggioStartFrame + triggerIndex * framesPerArpNote;
+        while (triggerFrame < stepEndFrame) {
+            if (triggerFrame >= s.targetFrame && triggerFrame != s.scheduledNoteFrame) {
+                int patternPosition = static_cast<int>(triggerIndex % patternLength);
+                int arpMidi = getArpeggioNote(baseMidi, semi1, semi2, ts.arpeggioMode, patternPosition);
+                NoteArgs a;
+                a.frame = triggerFrame; a.track = s.trackId; a.instrument = instrumentId;
+                a.notePitch = baseNote.pitch; a.noteOctave = baseNote.octave;
+                a.velocity = -1; a.start = startPoint;
+                a.transpose = s.transpose;
+                a.arp = arpMidi - baseMidi;
+                a.tableId = ts.lastTableOverride; a.tableRow = -1;
+                emit_retrigger(a, baseNote, s.trackId, ts);
+            }
+            triggerIndex++;
+            triggerFrame += framesPerArpNote;
+        }
+    }
+
+    // Per-column FX memory for RND — real effects only, from the AUTHORED step.
+    static void remember_column_fx(StepPlay& s) {
+        for (int col = 1; col <= 3; ++col) {
+            int fxType = step_fx_type(s.step, col);
+            if (fxType != FX_NONE && fxType != FX_RND && fxType != FX_RNL && fxType != FX_CHA) {
+                s.ts.lastColFxType[col] = fxType;
+                s.ts.lastColFxValue[col] = step_fx_value(s.step, col);
             }
         }
     }
