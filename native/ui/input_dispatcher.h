@@ -15,8 +15,8 @@
 // (its SAVE), and a D-pad press there must move the KEY cursor.
 // ⭐ That order is written once, in `LAYERS` (ui/dispatch/route.cpp). Every gesture asks the top layer
 // first (`route`), and a gesture a layer does not answer is swallowed there — so a gesture's body runs
-// only with no layer up, or under one that deliberately lets it through. With no layer up, the screen's
-// handler in `SCREENS` is asked next; its own buttons live in ui/dispatch/screens/.
+// only with no layer up, or under one that deliberately lets it through. Then the screen's handler in
+// `SCREENS` is asked; its own buttons live in ui/dispatch/screens/.
 // ⚠️ The THEME and EQ editors are PARTIAL: they let START and SELECT through, so a band can be swept
 // across a held INSTRUMENT audition. The confirm and the FX picker let the audition's stop through.
 //

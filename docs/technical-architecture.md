@@ -120,8 +120,9 @@ native/                            The portable program
     ├── screen.h / navigation.h      Screens and the R+DPAD navigation grid
     ├── cursor.h / cursor_move.h     CursorContext: what is under the cursor, and how it steps
     ├── input_dispatcher.cpp / .h    Every button and combo: one class, its spine here
-    ├── dispatch/                    …and its per-screen halves (chords, buttons, browser,
-    │                                sample editor, project, midi, sub-screens, theme/scale/groove)
+    ├── dispatch/                    …its gesture bodies, and route.cpp: the layer stack and the
+    │   ├── layers/                  screen table. One file per modal (dialogs, editors, pickers)
+    │   └── screens/                 and per screen: its buttons, cursor and edits
     ├── selection.h / clipboard.*    Multi-cell selection and copy/paste
     ├── layout.cpp / .h              Screen composition, top strip, right bar
     ├── theme.h / theme_io.h         Palettes and the theme file
@@ -671,14 +672,28 @@ boundary may be dragged past its neighbours and its number follows its position 
 it sits on screen, not which cut it is. ⚠️ An op that changes the sample's **length** drops all three:
 a marker is a frame index, and the frames have been replaced.
 
-**Modals own the buttons while they are up**, and every new modal has to be added to the predicate
-that says so.
+**Modals own the buttons while they are up** — the layer stack, under Input Layer below.
 
 ---
 
 ## Input Layer
 
 `ui/input_dispatcher.*` and `ui/dispatch/` are every button and combo — one class, split by screen.
+Each entry point the mapper calls (`on_a_up`, `on_start`, …) names its gesture and hands it to
+`route()`, which asks two tables in `ui/dispatch/route.cpp`:
+
+1. **`LAYERS`, the modal stack**, top first — every dialog, editor and picker drawn over a screen. The
+   first open one gets the gesture. ⚠️ **A layer takes every gesture it does not answer**, so a button
+   pressed under a dialog never edits the screen behind it; letting one through is the deliberate
+   exception (START under the theme and EQ editors, so the song plays while you dial). The table's order
+   is which modal sits on top of which, and it is the only list of modals: a new one is a row here.
+2. **`SCREENS`, one row per screen**: its own buttons (`ui/dispatch/screens/`), what is under its cursor,
+   how an edit applies, and for the four grids where the cursor and the selection's bounds live. A
+   gesture the screen passes on runs the generic path below, which reads the same row.
+
+A new screen is a file under `screens/` and one row; no gesture function learns its name. What must
+happen under any layer — releasing a held preview note, the R-chord's modifier snapshot — runs in the
+entry point before `route()`.
 
 **Modifiers are snapshotted at EVENT time, not at poll time.** SDL delivers a whole frame's events at
 once, so asking "is A held?" while processing a B press describes the *end* of the frame. Roll B and
