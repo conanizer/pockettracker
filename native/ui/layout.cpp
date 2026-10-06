@@ -22,7 +22,7 @@ constexpr int STATUS_MAX_CHARS = 34;
  * Is an overlay standing in the editor's place (so `currentScreen`'s module is NOT drawn)? Overlays do
  * not change `currentScreen`, so a module that ages its picture in its own draw stops ageing under one
  * — `has_falling_meters` must ask, or it holds the idle gate open forever.
- * ⚠️ Mirrors `draw`'s if/else chain below: a new overlay there goes here too.
+ * ⚠️ Mirrors `draw_editor`'s ifs: a new overlay there goes here too.
  */
 bool editor_overlay_up(const AppState& s) {
     return s.eq.isOpen || s.themeEditor.isOpen;
@@ -42,330 +42,21 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
 }
 
 void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
-    const Theme& t = s.theme;
-
-    c.fill_rect(0, 0, DESIGN_W, DESIGN_H, t.background);
+    c.fill_rect(0, 0, DESIGN_W, DESIGN_H, s.theme.background);
 
     if (!s.project) return;  // no document: the background alone
 
-    // ── The FILE BROWSER and SAMPLE EDITOR are FULL-SCREEN ───────────────────────────────────────
-    //
-    // They return before any furniture (no scope strip, right bar or nav map): the browser needs the
-    // width for nineteen rows of filenames, a waveform every pixel of it. The QWERTY keyboard still draws
-    // on top (rename; A on the NAME row).
-    // ⚠️ `&& !s.eq.isOpen`: the EQ editor opened from the sample editor's FX row REPLACES it and the
-    // normal furniture returns.
-    // The sample editor's HELP goes in the waveform's place: same left edge and width as the strip,
-    // 85 px taller. Never over its "ARE YOU SURE?" — its layer takes SELECT while that is up.
     if (full_screen_module(s)) {
-        if (s.currentScreen == ScreenType::FILE_BROWSER) {
-            fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
-        } else {
-            sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
-            if (s.helpOpen)
-                helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
-                                SampleEditorModule::WAVEFORM_H);
-        }
-        if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
+        draw_full_screen(c, s);
         return;
     }
 
-    const songcore::Project& p       = *s.project;
-    const int                moduleX = SIDE_SPACER;
+    draw_scope_strip(c, s);
+    draw_editor(c, s);
 
-    // ── The oscilloscope strip — or the HELP PANEL standing in for it ────────────────────────────
-    //
-    // Help takes the whole strip (three 21 px lines = 63 of its 70), so the scope, status line and
-    // selection readout are not drawn under it.
-    if (s.helpOpen) {
-        helpPanel_.draw(c, moduleX, SCREEN_SPACER, help_topic(s), t);
-    } else {
-        OscilloscopeState os;
-        os.waveform = s.waveform;
-        os.theme    = t;
-
-        const bool isOctaFull = (t.visualizerType == VisualizerType::OCTA_FULL);
-        const bool isOcta     = (t.visualizerType == VisualizerType::OCTA);
-        if (isOcta || isOctaFull) os.trackWaveforms = s.trackWaveforms;
-
-        // OCTA_FULL forces all 8 lanes on, so the strip never reflows mid-song. OCTA shows the tracks
-        // that have played — plus the preview lane, only while stopped.
-        if (isOctaFull) {
-            os.activeTrackMask = 0xFF;
-        } else if (isOcta) {
-            os.activeTrackMask = s.trackMask & 0xFF;
-            if (!s.isPlaying && s.previewLaneActive) os.activeTrackMask |= (1 << PREVIEW_LANE);
-        }
-
-        if (t.visualizerType == VisualizerType::SPECTRUM ||
-            t.visualizerType == VisualizerType::SPECTRUM_PEAKS) {
-            os.spectrum = s.spectrum;
-        }
-
-        oscilloscope_.draw(c, moduleX, SCREEN_SPACER, os);
-    }
-
-    // ── The editor ───────────────────────────────────────────────────────────────────────────────
-    // Clipped to the left of the right bar.
-    {
-        Canvas::ClipScope clip(c, 0, 0, EDITOR_CLIP_RIGHT, DESIGN_H);
-
-        // ── The EQ EDITOR replaces the module, and leaves the furniture alone ────────────────────
-        //
-        // Same clip and origin; the scope, BPM, note monitor and nav map keep drawing — an EQ is dialled
-        // while a note rings, and the note monitor shows that it still is.
-        if (s.eq.isOpen) {
-            EqState es{p};
-            es.slotIndex     = s.eq.slotIndex;
-            es.cursorRow     = s.eq.cursorRow;
-            es.caller        = s.eq.caller;
-            es.spectrum      = s.eqSpectrum;
-            es.spectrumCount = s.eqSpectrumCount;
-            es.sampleRate    = static_cast<float>(s.eqSampleRate);
-            es.theme         = t;
-            eq_.draw(c, moduleX, EDITOR_Y, es);
-        } else if (s.themeEditor.isOpen) {
-            // ── The THEME EDITOR replaces the module on the same terms ───────────────────────────
-            //
-            // The oscilloscope strip keeps drawing — VIZ BG / LINE / WAVE are the strip, dialled against
-            // a moving waveform (START passes through). The right bar is absent because SETTINGS hides
-            // it, so the meter colours (MTR *) cannot be previewed in situ.
-            ThemeState ts;
-            ts.theme  = t;
-            ts.editor = s.themeEditor;
-            themeEditor_.draw(c, moduleX, EDITOR_Y, ts);
-        } else switch (s.currentScreen) {   // an overlay is drawn INSTEAD of `currentScreen`
-            case ScreenType::PHRASE: {
-                PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
-                ps.cursorRow      = s.cursorRow;
-                ps.cursorColumn   = s.cursorColumn;
-                std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ps.playheads));
-                ps.selectionMode  = s.selection_mode();
-                ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
-                ps.theme          = t;
-                // Whether an AUS/AUF cell is live depends on every chain walk this phrase appears in;
-                // the editor finds them from the phrase's id.
-                ps.project        = &p;
-                // Under NAV = SONG the phrase is seen THROUGH a chain row and a song cell, which decide
-                // where the next B+D-pad press goes. −1 under POOL (ui/song_pointer.h).
-                if (s.settings.navSongRelative) {
-                    ps.viaChain    = s.currentChain;
-                    ps.viaChainRow = pointer_chain_row(s);
-                    ps.songRow     = pointer_song_row(s);
-                    ps.songTrack   = pointer_track(s);
-                }
-                phraseEditor_.draw(c, moduleX, EDITOR_Y, ps);
-                break;
-            }
-
-            case ScreenType::CHAIN: {
-                ChainEditorState cs{p.chains[static_cast<size_t>(s.currentChain)]};
-                cs.cursorRow      = s.cursorRow;
-                cs.cursorColumn   = s.cursorColumn;
-                std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(cs.playheads));
-                cs.selectionMode  = s.selection_mode();
-                cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
-                cs.theme          = t;
-                if (s.settings.navSongRelative) {   // see the PHRASE arm above
-                    cs.songRow   = pointer_song_row(s);
-                    cs.songTrack = pointer_track(s);
-                }
-                chainEditor_.draw(c, moduleX, EDITOR_Y, cs);
-                break;
-            }
-
-            case ScreenType::SONG: {
-                SongEditorState ss{p};
-                ss.cursorRow      = s.cursorRow;
-                ss.cursorTrack    = s.cursorColumn;  // on SONG the column IS the track (1..8)
-                ss.scrollPosition = s.songScrollPosition;
-                std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ss.playheads));
-                ss.liveMode      = s.liveMode;
-                std::copy(std::begin(s.liveQueue), std::end(s.liveQueue), std::begin(ss.liveQueue));
-                ss.blinkPhaseMs  = s.blinkPhaseMs;
-                ss.selectionMode  = s.selection_mode();
-                ss.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
-                ss.theme          = t;
-                songEditor_.draw(c, moduleX, EDITOR_Y, ss);
-                break;
-            }
-
-            case ScreenType::TABLE: {
-                TableState ts{p.tables[static_cast<size_t>(s.currentTable)]};
-                ts.cursorRow    = s.tableCursorRow;
-                ts.cursorColumn = s.tableCursorColumn;
-                for (int l = 0; l < TABLE_LANES; ++l) ts.playbackRows[l] = s.tablePlaybackRows[l];
-                // The tic rate is the INSTRUMENT's, not the table's — one table run by two instruments
-                // runs at two speeds; this shows the one you are looking through.
-                ts.ticRate      = p.instruments[static_cast<size_t>(s.currentInstrument)].tableTicRate;
-                ts.selectionMode  = s.selection_mode();
-                ts.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
-                ts.theme          = t;
-                tableModule_.draw(c, moduleX, EDITOR_Y, ts);
-                break;
-            }
-
-            case ScreenType::GROOVE: {
-                GrooveState gs{p.grooves[static_cast<size_t>(s.currentGroove)]};
-                gs.cursorRow    = s.grooveCursorRow;
-                gs.cursorColumn = s.grooveCursorColumn;
-                gs.panelRow     = s.groovePanelRow;
-                gs.panelColumn  = s.groovePanelColumn;
-                gs.quantize     = s.grooveQuantize;
-                gs.theme        = t;
-                grooveModule_.draw(c, moduleX, EDITOR_Y, gs);
-                break;
-            }
-
-            case ScreenType::SCALE: {
-                ScaleState cs{p.scales[static_cast<size_t>(s.currentScale)]};
-                cs.key          = p.scaleKey;
-                cs.cursorRow    = s.scaleCursorRow;
-                cs.cursorColumn = s.scaleCursorColumn;
-                // The pitch classes coming out of the speaker, from the voice readback the note monitor
-                // uses — ⚠️ NOT the sequencer, which runs ahead. All eight tracks fold into one mask.
-                for (int i = 0; i < 8; ++i) {
-                    const songcore::Note n = s.trackNotes[i];
-                    if (n == songcore::Note::EMPTY()) continue;
-                    const int midi = songcore::note_to_midi(n);
-                    if (midi >= 0) cs.soundingMask |= 1u << songcore::scale_mod12(midi);
-                }
-                cs.theme     = t;
-                scaleModule_.draw(c, moduleX, EDITOR_Y, cs);
-                break;
-            }
-
-            case ScreenType::INSTRUMENT: {
-                InstrumentEditorState is{p.instruments[static_cast<size_t>(s.currentInstrument)]};
-                is.cursorRow     = s.instrumentCursorRow;
-                is.cursorColumn  = s.instrumentCursorColumn;
-                // The SF2's preset list as the engine last answered (engine_feed.h); zeroes and "---"
-                // with no engine, which a headless screenshot draws.
-                is.sfPresetName  = s.sfPresetName;
-                is.sfPresetCount = s.sfPresetCount;
-                is.sfPresetIndex = s.sfPresetIndex;
-                is.theme         = t;
-                instrumentEditor_.draw(c, moduleX, EDITOR_Y, is);
-                break;
-            }
-
-            case ScreenType::INST_POOL: {
-                InstrumentPoolState ps{p};
-                // Its cursor ROW is the selected instrument itself.
-                ps.selectedInstrument = s.currentInstrument;
-                ps.cursorColumn       = s.poolCursorColumn;
-                ps.sampleRamBytes     = s.sampleRamBytes;
-                ps.caps               = s.caps;
-                ps.theme              = t;
-                instrumentPool_.draw(c, moduleX, EDITOR_Y, ps);
-                break;
-            }
-
-            case ScreenType::MODS: {
-                ModulationState ms{p.instruments[static_cast<size_t>(s.currentInstrument)]};
-                ms.cursorRow  = s.modCursorRow;
-                ms.cursorPair = s.modCursorPair;
-                ms.cursorSide = s.modCursorSide;
-                ms.theme      = t;
-                modulation_.draw(c, moduleX, EDITOR_Y, ms);
-                break;
-            }
-
-            case ScreenType::MIXER: {
-                MixerState xs{p};
-                xs.cursorColumn   = s.mixerCursorColumn;
-                xs.mixerMasterRow = s.mixerMasterRow;
-                // The engine's meters as last read (ui/engine_feed.h); zeroes with no engine.
-                xs.trackPeaks   = s.trackPeaks;
-                xs.masterPeaks  = s.masterPeaks;
-                xs.reverbPeaks  = &s.sendPeaks[0];
-                xs.delayPeaks   = &s.sendPeaks[2];
-                xs.peaksVersion = s.peaksVersion;
-                xs.theme        = t;
-                mixer_.draw(c, moduleX, EDITOR_Y, xs);
-                break;
-            }
-
-            case ScreenType::EFFECTS: {
-                EffectState es{p};
-                es.cursorRow = s.effectsCursorRow;
-                es.theme     = t;
-                effects_.draw(c, moduleX, EDITOR_Y, es);
-                break;
-            }
-
-            case ScreenType::PROJECT: {
-                ProjectState prs{p};
-                prs.cursorRow      = s.projectCursorRow;
-                prs.cursorColumn   = s.projectCursorColumn;
-                prs.isRendering    = s.isRendering;
-                prs.renderProgress = s.renderProgress;
-                prs.sampleRamBytes = s.sampleRamBytes;
-                prs.freeRamBytes   = s.freeRamBytes;
-                prs.caps           = s.caps;
-                prs.theme          = t;
-                project_.draw(c, moduleX, EDITOR_Y, prs);
-                break;
-            }
-
-            case ScreenType::SETTINGS: {
-                SettingsState ss{s.settings};
-                ss.cursorRow    = s.settingsCursorRow;
-                ss.cursorColumn = s.settingsCursorColumn;
-                // The DEVICE rows' text — only the platform can name what an index means. Empty on the
-                // shell, which does not draw them.
-                ss.layoutText   = s.layoutText;
-                ss.skinText     = s.skinText;
-                ss.overlayText  = s.overlayText;
-                ss.audioOutText = s.audioOutText;
-                ss.themeName    = t.name;
-                ss.caps         = s.caps;
-                ss.theme        = t;
-                settings_.draw(c, moduleX, EDITOR_Y, ss);
-                break;
-            }
-
-            case ScreenType::MIDI: {
-                // The port lists as the dispatcher enumerated them — text the module paints but does
-                // not own.
-                MidiState ms{p, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
-                ms.lastCcChannel  = s.midiInCcChannel;
-                ms.cursorRow    = s.midiCursorRow;
-                ms.cursorColumn = s.midiCursorColumn;
-                ms.deviceIndex   = s.midiDeviceIndex;
-                ms.inDeviceIndex = s.midiInDeviceIndex;
-                ms.outOpenName   = s.midiOutOpenName;
-                ms.inOpenName    = s.midiInOpenName;
-                ms.autoOffsetMs  = s.midiAutoOffsetMs;
-                ms.audioLoad     = s.audioLoad;
-                ms.statusText    = s.midiStatusText;
-                ms.caps          = s.caps;
-                ms.theme         = t;
-                midi_.draw(c, moduleX, EDITOR_Y, ms);
-                break;
-            }
-
-            case ScreenType::MIDI_MAP: {
-                MidiMapState mm{p};
-                mm.cursorRow    = s.midiMapCursorRow;
-                mm.cursorColumn = s.midiMapCursorColumn;
-                mm.theme        = t;
-                midiMap_.draw(c, moduleX, EDITOR_Y, mm);
-                break;
-            }
-
-            default:
-                draw_placeholder(c, moduleX, EDITOR_Y, s.currentScreen, t);
-                break;
-        }
-    }
-
-    // ── The right bar ────────────────────────────────────────────────────────────────────────────
-    //
     // Hidden on SETTINGS: no playhead or notes to monitor there.
     if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
 
-    // ── The status line, and the selection/clipboard readout ──────────────────────────────────────
     // Over the scope strip so every screen can report: status top-LEFT, selection + clipboard
     // top-RIGHT. Both stand down while HELP is up — help IS the strip.
     if (!s.helpOpen) {
@@ -373,8 +64,340 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
         draw_selection_clipboard(c, s);
     }
 
-    // ── The overlays ─────────────────────────────────────────────────────────────────────────────
-    // LAST, over everything including the right bar — a modal's backdrop dims the whole frame.
+    draw_overlays(c, s);
+}
+
+// ─── The FILE BROWSER and SAMPLE EDITOR are FULL-SCREEN ──────────────────────────────────────────
+//
+// No furniture (scope strip, right bar, nav map): the browser needs the width for nineteen rows of
+// filenames, a waveform every pixel of it. The QWERTY keyboard still draws on top (rename; A on the
+// NAME row).
+// The sample editor's HELP goes in the waveform's place: same left edge and width as the strip, 85 px
+// taller. Never over its "ARE YOU SURE?" — its layer takes SELECT while that is up.
+void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
+    const Theme& t = s.theme;
+    if (s.currentScreen == ScreenType::FILE_BROWSER) {
+        fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
+    } else {
+        sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
+        if (s.helpOpen)
+            helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
+                            SampleEditorModule::WAVEFORM_H);
+    }
+    if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
+}
+
+// ─── The oscilloscope strip — or the HELP PANEL standing in for it ───────────────────────────────
+//
+// Help takes the whole strip (three 21 px lines = 63 of its 70), so the scope, status line and
+// selection readout are not drawn under it.
+void TrackerLayout::draw_scope_strip(Canvas& c, const AppState& s) {
+    const Theme& t = s.theme;
+    if (s.helpOpen) {
+        helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
+        return;
+    }
+
+    OscilloscopeState os;
+    os.waveform = s.waveform;
+    os.theme    = t;
+
+    const bool isOctaFull = (t.visualizerType == VisualizerType::OCTA_FULL);
+    const bool isOcta     = (t.visualizerType == VisualizerType::OCTA);
+    if (isOcta || isOctaFull) os.trackWaveforms = s.trackWaveforms;
+
+    // OCTA_FULL forces all 8 lanes on, so the strip never reflows mid-song. OCTA shows the tracks that
+    // have played — plus the preview lane, only while stopped.
+    if (isOctaFull) {
+        os.activeTrackMask = 0xFF;
+    } else if (isOcta) {
+        os.activeTrackMask = s.trackMask & 0xFF;
+        if (!s.isPlaying && s.previewLaneActive) os.activeTrackMask |= (1 << PREVIEW_LANE);
+    }
+
+    if (t.visualizerType == VisualizerType::SPECTRUM ||
+        t.visualizerType == VisualizerType::SPECTRUM_PEAKS) {
+        os.spectrum = s.spectrum;
+    }
+
+    oscilloscope_.draw(c, SIDE_SPACER, SCREEN_SPACER, os);
+}
+
+// ─── What each screen's module is handed ─────────────────────────────────────────────────────────
+
+namespace {
+
+const songcore::Instrument& current_instrument(const AppState& s) {
+    return s.project->instruments[static_cast<size_t>(s.currentInstrument)];
+}
+
+PhraseEditorState phrase_state(const AppState& s) {
+    const songcore::Project& p = *s.project;
+    PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
+    ps.cursorRow      = s.cursorRow;
+    ps.cursorColumn   = s.cursorColumn;
+    std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ps.playheads));
+    ps.selectionMode  = s.selection_mode();
+    ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
+    ps.theme          = s.theme;
+    // Whether an AUS/AUF cell is live depends on every chain walk this phrase appears in; the editor
+    // finds them from the phrase's id.
+    ps.project        = &p;
+    // Under NAV = SONG the phrase is seen THROUGH a chain row and a song cell, which decide where the
+    // next B+D-pad press goes. −1 under POOL (ui/song_pointer.h).
+    if (s.settings.navSongRelative) {
+        ps.viaChain    = s.currentChain;
+        ps.viaChainRow = pointer_chain_row(s);
+        ps.songRow     = pointer_song_row(s);
+        ps.songTrack   = pointer_track(s);
+    }
+    return ps;
+}
+
+ChainEditorState chain_state(const AppState& s) {
+    ChainEditorState cs{s.project->chains[static_cast<size_t>(s.currentChain)]};
+    cs.cursorRow      = s.cursorRow;
+    cs.cursorColumn   = s.cursorColumn;
+    std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(cs.playheads));
+    cs.selectionMode  = s.selection_mode();
+    cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
+    cs.theme          = s.theme;
+    if (s.settings.navSongRelative) {   // see phrase_state
+        cs.songRow   = pointer_song_row(s);
+        cs.songTrack = pointer_track(s);
+    }
+    return cs;
+}
+
+SongEditorState song_state(const AppState& s) {
+    SongEditorState ss{*s.project};
+    ss.cursorRow      = s.cursorRow;
+    ss.cursorTrack    = s.cursorColumn;  // on SONG the column IS the track (1..8)
+    ss.scrollPosition = s.songScrollPosition;
+    std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ss.playheads));
+    ss.liveMode       = s.liveMode;
+    std::copy(std::begin(s.liveQueue), std::end(s.liveQueue), std::begin(ss.liveQueue));
+    ss.blinkPhaseMs   = s.blinkPhaseMs;
+    ss.selectionMode  = s.selection_mode();
+    ss.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
+    ss.theme          = s.theme;
+    return ss;
+}
+
+TableState table_state(const AppState& s) {
+    TableState ts{s.project->tables[static_cast<size_t>(s.currentTable)]};
+    ts.cursorRow    = s.tableCursorRow;
+    ts.cursorColumn = s.tableCursorColumn;
+    for (int l = 0; l < TABLE_LANES; ++l) ts.playbackRows[l] = s.tablePlaybackRows[l];
+    // The tic rate is the INSTRUMENT's, not the table's — one table run by two instruments runs at two
+    // speeds; this shows the one you are looking through.
+    ts.ticRate        = current_instrument(s).tableTicRate;
+    ts.selectionMode  = s.selection_mode();
+    ts.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
+    ts.theme          = s.theme;
+    return ts;
+}
+
+GrooveState groove_state(const AppState& s) {
+    GrooveState gs{s.project->grooves[static_cast<size_t>(s.currentGroove)]};
+    gs.cursorRow    = s.grooveCursorRow;
+    gs.cursorColumn = s.grooveCursorColumn;
+    gs.panelRow     = s.groovePanelRow;
+    gs.panelColumn  = s.groovePanelColumn;
+    gs.quantize     = s.grooveQuantize;
+    gs.theme        = s.theme;
+    return gs;
+}
+
+ScaleState scale_state(const AppState& s) {
+    ScaleState cs{s.project->scales[static_cast<size_t>(s.currentScale)]};
+    cs.key          = s.project->scaleKey;
+    cs.cursorRow    = s.scaleCursorRow;
+    cs.cursorColumn = s.scaleCursorColumn;
+    // The pitch classes coming out of the speaker, from the voice readback the note monitor uses —
+    // ⚠️ NOT the sequencer, which runs ahead. All eight tracks fold into one mask.
+    for (int i = 0; i < 8; ++i) {
+        const songcore::Note n = s.trackNotes[i];
+        if (n == songcore::Note::EMPTY()) continue;
+        const int midi = songcore::note_to_midi(n);
+        if (midi >= 0) cs.soundingMask |= 1u << songcore::scale_mod12(midi);
+    }
+    cs.theme = s.theme;
+    return cs;
+}
+
+InstrumentEditorState instrument_state(const AppState& s) {
+    InstrumentEditorState is{current_instrument(s)};
+    is.cursorRow     = s.instrumentCursorRow;
+    is.cursorColumn  = s.instrumentCursorColumn;
+    // The SF2's preset list as the engine last answered (engine_feed.h); zeroes and "---" with no
+    // engine, which a headless screenshot draws.
+    is.sfPresetName  = s.sfPresetName;
+    is.sfPresetCount = s.sfPresetCount;
+    is.sfPresetIndex = s.sfPresetIndex;
+    is.theme         = s.theme;
+    return is;
+}
+
+InstrumentPoolState pool_state(const AppState& s) {
+    InstrumentPoolState ps{*s.project};
+    ps.selectedInstrument = s.currentInstrument;   // its cursor ROW is the selected instrument itself
+    ps.cursorColumn       = s.poolCursorColumn;
+    ps.sampleRamBytes     = s.sampleRamBytes;
+    ps.caps               = s.caps;
+    ps.theme              = s.theme;
+    return ps;
+}
+
+ModulationState mods_state(const AppState& s) {
+    ModulationState ms{current_instrument(s)};
+    ms.cursorRow  = s.modCursorRow;
+    ms.cursorPair = s.modCursorPair;
+    ms.cursorSide = s.modCursorSide;
+    ms.theme      = s.theme;
+    return ms;
+}
+
+MixerState mixer_state(const AppState& s) {
+    MixerState xs{*s.project};
+    xs.cursorColumn   = s.mixerCursorColumn;
+    xs.mixerMasterRow = s.mixerMasterRow;
+    // The engine's meters as last read (ui/engine_feed.h); zeroes with no engine.
+    xs.trackPeaks     = s.trackPeaks;
+    xs.masterPeaks    = s.masterPeaks;
+    xs.reverbPeaks    = &s.sendPeaks[0];
+    xs.delayPeaks     = &s.sendPeaks[2];
+    xs.peaksVersion   = s.peaksVersion;
+    xs.theme          = s.theme;
+    return xs;
+}
+
+EffectState effects_state(const AppState& s) {
+    EffectState es{*s.project};
+    es.cursorRow = s.effectsCursorRow;
+    es.theme     = s.theme;
+    return es;
+}
+
+ProjectState project_state(const AppState& s) {
+    ProjectState prs{*s.project};
+    prs.cursorRow      = s.projectCursorRow;
+    prs.cursorColumn   = s.projectCursorColumn;
+    prs.isRendering    = s.isRendering;
+    prs.renderProgress = s.renderProgress;
+    prs.sampleRamBytes = s.sampleRamBytes;
+    prs.freeRamBytes   = s.freeRamBytes;
+    prs.caps           = s.caps;
+    prs.theme          = s.theme;
+    return prs;
+}
+
+SettingsState settings_state(const AppState& s) {
+    SettingsState ss{s.settings};
+    ss.cursorRow    = s.settingsCursorRow;
+    ss.cursorColumn = s.settingsCursorColumn;
+    // The DEVICE rows' text — only the platform can name what an index means. Empty on the shell,
+    // which does not draw them.
+    ss.layoutText   = s.layoutText;
+    ss.skinText     = s.skinText;
+    ss.overlayText  = s.overlayText;
+    ss.audioOutText = s.audioOutText;
+    ss.themeName    = s.theme.name;
+    ss.caps         = s.caps;
+    ss.theme        = s.theme;
+    return ss;
+}
+
+MidiState midi_state(const AppState& s) {
+    // The port lists as the dispatcher enumerated them — text the module paints but does not own.
+    MidiState ms{*s.project, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
+    ms.lastCcChannel = s.midiInCcChannel;
+    ms.cursorRow     = s.midiCursorRow;
+    ms.cursorColumn  = s.midiCursorColumn;
+    ms.deviceIndex   = s.midiDeviceIndex;
+    ms.inDeviceIndex = s.midiInDeviceIndex;
+    ms.outOpenName   = s.midiOutOpenName;
+    ms.inOpenName    = s.midiInOpenName;
+    ms.autoOffsetMs  = s.midiAutoOffsetMs;
+    ms.audioLoad     = s.audioLoad;
+    ms.statusText    = s.midiStatusText;
+    ms.caps          = s.caps;
+    ms.theme         = s.theme;
+    return ms;
+}
+
+MidiMapState midi_map_state(const AppState& s) {
+    MidiMapState mm{*s.project};
+    mm.cursorRow    = s.midiMapCursorRow;
+    mm.cursorColumn = s.midiMapCursorColumn;
+    mm.theme        = s.theme;
+    return mm;
+}
+
+EqState eq_state(const AppState& s) {
+    EqState es{*s.project};
+    es.slotIndex     = s.eq.slotIndex;
+    es.cursorRow     = s.eq.cursorRow;
+    es.caller        = s.eq.caller;
+    es.spectrum      = s.eqSpectrum;
+    es.spectrumCount = s.eqSpectrumCount;
+    es.sampleRate    = static_cast<float>(s.eqSampleRate);
+    es.theme         = s.theme;
+    return es;
+}
+
+ThemeState theme_state(const AppState& s) {
+    ThemeState ts;
+    ts.theme  = s.theme;
+    ts.editor = s.themeEditor;
+    return ts;
+}
+
+}  // namespace
+
+// ─── The editor, clipped to the left of the right bar ────────────────────────────────────────────
+//
+// The EQ and THEME editors replace the screen's module and leave the furniture alone: an EQ is dialled
+// while a note rings and the note monitor shows that it still is; VIZ BG / LINE / WAVE are the scope
+// strip, dialled against a moving waveform. (SETTINGS hides the right bar, so the meter colours cannot
+// be previewed in situ.)
+void TrackerLayout::draw_editor(Canvas& c, const AppState& s) {
+    Canvas::ClipScope clip(c, 0, 0, EDITOR_CLIP_RIGHT, DESIGN_H);
+    const int         x = SIDE_SPACER;
+    const int         y = EDITOR_Y;
+
+    if (s.eq.isOpen) {
+        eq_.draw(c, x, y, eq_state(s));
+        return;
+    }
+    if (s.themeEditor.isOpen) {
+        themeEditor_.draw(c, x, y, theme_state(s));
+        return;
+    }
+
+    switch (s.currentScreen) {
+        case ScreenType::PHRASE:     phraseEditor_.draw(c, x, y, phrase_state(s)); break;
+        case ScreenType::CHAIN:      chainEditor_.draw(c, x, y, chain_state(s)); break;
+        case ScreenType::SONG:       songEditor_.draw(c, x, y, song_state(s)); break;
+        case ScreenType::TABLE:      tableModule_.draw(c, x, y, table_state(s)); break;
+        case ScreenType::GROOVE:     grooveModule_.draw(c, x, y, groove_state(s)); break;
+        case ScreenType::SCALE:      scaleModule_.draw(c, x, y, scale_state(s)); break;
+        case ScreenType::INSTRUMENT: instrumentEditor_.draw(c, x, y, instrument_state(s)); break;
+        case ScreenType::INST_POOL:  instrumentPool_.draw(c, x, y, pool_state(s)); break;
+        case ScreenType::MODS:       modulation_.draw(c, x, y, mods_state(s)); break;
+        case ScreenType::MIXER:      mixer_.draw(c, x, y, mixer_state(s)); break;
+        case ScreenType::EFFECTS:    effects_.draw(c, x, y, effects_state(s)); break;
+        case ScreenType::PROJECT:    project_.draw(c, x, y, project_state(s)); break;
+        case ScreenType::SETTINGS:   settings_.draw(c, x, y, settings_state(s)); break;
+        case ScreenType::MIDI:       midi_.draw(c, x, y, midi_state(s)); break;
+        case ScreenType::MIDI_MAP:   midiMap_.draw(c, x, y, midi_map_state(s)); break;
+        default:                     draw_placeholder(c, x, y, s.currentScreen, s.theme); break;
+    }
+}
+
+// LAST, over everything including the right bar — a modal's backdrop dims the whole frame.
+void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
+    const Theme& t = s.theme;
     draw_fx_helper(c, s.fxHelper, t);
     draw_map_picker(c, s.mapPicker, t);
     draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);

@@ -102,10 +102,22 @@ public:
 
 private:
     /**
-     * Everything below the loading strip. ⚠️ It RETURNS FROM THE MIDDLE three times (no document, and
-     * each full-screen module), so anything that must appear on EVERY screen goes in `draw`.
+     * Everything below the loading strip. ⚠️ It RETURNS EARLY with no document and on the full-screen
+     * modules, so anything that must appear on EVERY screen goes in `draw`.
      */
     void draw_frame(Canvas& c, const AppState& state);
+
+    /** The FILE BROWSER or SAMPLE EDITOR, edge to edge, with no furniture. */
+    void draw_full_screen(Canvas& c, const AppState& s);
+
+    /** The oscilloscope strip, or the help panel in its place. */
+    void draw_scope_strip(Canvas& c, const AppState& s);
+
+    /** The current screen's module — or the EQ / THEME editor standing in for it. */
+    void draw_editor(Canvas& c, const AppState& s);
+
+    /** The modals, over everything. */
+    void draw_overlays(Canvas& c, const AppState& s);
 
     /** A screen with no module: its title and "COMING SOON". */
     void draw_placeholder(Canvas& c, int x, int y, ScreenType screen, const Theme& t) const;
