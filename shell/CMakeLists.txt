@@ -235,9 +235,9 @@ endif()
 # ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────
 #
 # This is copied from tools/CMakeLists.txt on purpose, and it is the least obvious setting in this
-# file. app.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target's translation
-# units. Its float params (velGain/volGain/pan, PSL/PBN/vibrato rates) are the ones the conformance
-# traces compare as raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c`
+# file. app.cpp #includes songcore's headers, so the sequencer's inline parts are compiled into this
+# target's translation units. Its float params (velGain/volGain/pan, PSL/PBN/vibrato rates) are the
+# ones the conformance traces compare as raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c`
 # into an fma BY DEFAULT, -ffast-math or not, which rounds once where the JVM rounds twice.
 #
 # ⚠️ PER-TARGET is what keeps this correct across the C0.2 split: the flags below apply to every TU in
@@ -266,8 +266,8 @@ endif()
 
 
 # pt-ui is the portable UI — the screen modules, the software canvas, the 5×5 font, the cursor-context
-# system (native/ui/). It links `pockettracker` itself, so this one line brings the engine, songcore
-# and the UI in together. It contains no SDL and no POSIX: the seam is exactly at this line, which is
+# system (native/ui/). It links `songcore`, which links the engine, so this one line brings the
+# engine, songcore and the UI in together. It contains no SDL and no POSIX: the seam is exactly at this line, which is
 # what lets tools/ptshot draw a screen with no window at all.
 target_link_libraries(pockettracker-sdl PRIVATE pt-ui)
 

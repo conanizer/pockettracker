@@ -400,6 +400,27 @@ if(ANDROID)
     )
 endif()
 
+# ─── songcore: the sequencer and the runtime that owns it ──────────────────────────────────────
+#
+# The rest of songcore is still header-only; these are the bodies of its two largest classes.
+# Static, so a tool that uses only the sequencer links only scheduler.cpp's object.
+add_library(songcore STATIC
+        songcore/scheduler.cpp
+        songcore/host.cpp
+)
+# PUBLIC: host.h includes the engine's header and calls into it.
+target_link_libraries(songcore PUBLIC pockettracker)
+
+# ⚠️ IEEE-exact, the rule stated at the `pockettracker` target: the sequencer's float params are
+# byte-compared against the goldens, and aarch64 clang fma-contracts `a + b*c` by default.
+if(MSVC)
+    target_compile_options(songcore PRIVATE /fp:precise /W4 $<$<BOOL:${PT_WERROR}>:/WX>)
+    target_compile_definitions(songcore PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+else()
+    target_compile_options(songcore PRIVATE -fno-fast-math -ffp-contract=off)
+    target_compile_options(songcore PRIVATE -Wall -Wextra -Wshadow $<$<BOOL:${PT_WERROR}>:-Werror>)
+endif()
+
 # ─── pt-ui: the portable UI (Linux-port plan Phase 3) ──────────────────────────────────────────
 #
 # The screen modules, the software canvas, the 5×5 font, the theme and the cursor-context system —
@@ -511,9 +532,9 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
     target_link_libraries(pt-ui PUBLIC stdc++fs)
 endif()
 
-# PUBLIC: pt-ui's headers include songcore's (model.h, effects.h), so anything linking pt-ui
-# inherits the engine's include roots too — the same reasoning as pockettracker's own PUBLIC roots.
-target_link_libraries(pt-ui PUBLIC pockettracker)
+# PUBLIC: pt-ui's headers include songcore's (model.h, host.h), so anything linking pt-ui gets the
+# sequencer and the engine with it.
+target_link_libraries(pt-ui PUBLIC songcore)
 
 # ui/std_filesystem.cpp asks Windows where `Documents` is — SHGetKnownFolderPath (shell32) and the
 # CoTaskMemFree that releases its result (ole32). Stated explicitly rather than inherited: CMake puts
@@ -621,7 +642,7 @@ if(ANDROID)
     # own -ffast-math policy, which it is entitled to make for itself.
     target_compile_options(pockettracker-sdl PRIVATE -fno-fast-math -ffp-contract=off)
 
-    # pt-ui brings the engine and songcore with it (it links `pockettracker` PUBLIC), so this one line
+    # pt-ui brings the engine and songcore with it (it links `songcore` PUBLIC), so this one line
     # is the whole tracker. SDL2 is the vendored shared library from C1 — the same libSDL2.so
     # SDLActivity.java loads by name, so there is exactly one copy in the APK and the C/Java version
     # lock above governs it. `log` is android-main.cpp's own __android_log_print for the boot path,

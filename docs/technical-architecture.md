@@ -38,7 +38,7 @@ filesystem root — and nothing else.
                     │  no SDL, no POSIX, no window, no engine*    │  cursor, input dispatch
                     ├─────────────────────────────────────────────┤
                     │  native/songcore                            │  document, sequencer,
-                    │  header-only, platform-free                 │  event bus, render, I/O
+                    │  platform-free                              │  event bus, render, I/O
                     ├─────────────────────────────────────────────┤
                     │  native/  (the engine)                      │  voices, modulation, DSP
                     └─────────────────────────────────────────────┘
@@ -90,7 +90,7 @@ native/                            The portable program
 ├── common/                        Below every layer: pt_fopen and the URI hooks, the memory
 │                                  probe a load asks first, a slow load's progress and cancel
 │
-├── songcore/                      Header-only, platform-free. No SDL, no JNI, no POSIX.
+├── songcore/                      Platform-free. No SDL, no JNI, no POSIX.
 │   ├── model.h                      Project, Chain, Phrase, Table, Groove, Instrument, Note
 │   ├── project_io.h                 .ptp / .pti parse + emit (minified), and JsonWriter
 │   ├── project_ops.h                Compact, transitive table walks, slot surgery
@@ -102,11 +102,11 @@ native/                            The portable program
 │   ├── rng.h                        PCG32, seeded and bounded like kotlin.random
 │   ├── event.h                      The event schema (versioned, frozen)
 │   ├── router.h                     MidiRouter, IMidiConsumer, TrackInstruments
-│   ├── scheduler.h                  The sequencer: phrases, chains, song, transport
+│   ├── scheduler.h / .cpp           The sequencer: phrases, chains, song, transport
 │   ├── engine_consumer.h            Events → engine calls
 │   ├── voice_derive.h               Note → voice parameters
 │   ├── engine_setup.h               Project → engine push (instruments, buses, EQ bank)
-│   ├── host.h                       SongcoreHost — the one runtime object a shell constructs
+│   ├── host.h / .cpp                SongcoreHost — the one runtime object a shell constructs
 │   ├── render.h / wav_writer.h      Offline render, WAV output
 │   ├── midi_out.h / midi_in.h       The MIDI seams, serializer, parser, router
 │   ├── midi_clock.h                 24 PPQN clock, transport, song position
@@ -328,8 +328,9 @@ never read. Uncompressed sizes are frames × 2 and cannot be odd; Ogg streams ar
 
 ## Songcore — the platform-free runtime
 
-`native/songcore/` is header-only and has no platform dependency whatsoever. It is the whole program
-minus the pixels and the device.
+`native/songcore/` has no platform dependency whatsoever. It is the whole program minus the pixels
+and the device. It is headers, except the sequencer's and the host's bodies (`scheduler.cpp`,
+`host.cpp`), which build as the `songcore` library.
 
 `SongcoreHost` (`host.h`) is the object a shell constructs. It owns the one `Project` in the process,
 the sequencer, the engine consumer, the external MIDI consumer and the transport. There is exactly
@@ -481,8 +482,9 @@ compared as raw binary32 bits:
 
 - `note_tables.h` bakes all 132 note frequencies and 256 detune values as constants rather than
   computing `pow()` at runtime.
-- Songcore's translation unit is compiled with `-ffp-contract=off` and without `-ffast-math`. GCC
-  defaults to contracting `a + b*c` into an FMA, which would silently change the last bits.
+- The `songcore` library, and every target that includes a songcore header, is compiled with
+  `-ffp-contract=off` and without `-ffast-math`. GCC defaults to contracting `a + b*c` into an FMA,
+  which would silently change the last bits.
 
 Random effects (CHA, RND, RNL, random-mode ARP), `oscShape >= 8` RND/DRNK LFOs, and DUST on the
 master bus are clock-seeded and therefore **not** byte-reproducible. Whether a given project can be
