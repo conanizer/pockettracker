@@ -1,4 +1,4 @@
-// The SCALE and GROOVE screens: what A does on their action rows, and saving to a file.
+// The GROOVE and SCALE screens: their buttons, what A does on their action rows, and saving to a file.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -9,6 +9,54 @@
 #include <string>
 
 namespace pt::ui {
+
+// ─── The buttons ─────────────────────────────────────────────────────────────────────────────────
+
+GestureResult InputDispatcher::groove_screen(Gesture g) {
+    switch (g) {
+        // The panel's SAVE and LOAD cells. On the tick grid, A on the end-of-pattern marker lays a step
+        // down at the default tick count. ⚠️ Only there: on an existing tick a bare A would step it.
+        case Gesture::A:
+            if (s_.grooveCursorColumn == GROOVE_COL_PANEL)
+                groove_row_action();
+            else if (cursor_context().capabilities.isEmpty)
+                generic_input(pt::ui::increment);
+            return GestureResult::TAKEN;
+
+        case Gesture::B_LEFT:
+        case Gesture::B_RIGHT:
+            s_.currentGroove =
+                step_wrapping(s_.currentGroove, (g == Gesture::B_LEFT) ? -1 : +1, songcore::POOL_GROOVES);
+            return GestureResult::TAKEN;
+
+        // The quantize, from any cell.
+        case Gesture::B_UP:
+        case Gesture::B_DOWN:
+            s_.grooveQuantize =
+                step_wrapping(s_.grooveQuantize, (g == Gesture::B_UP) ? +1 : -1, GROOVE_QUANTIZE_COUNT);
+            return GestureResult::TAKEN;
+
+        default:
+            return GestureResult::PASS;
+    }
+}
+
+GestureResult InputDispatcher::scale_screen(Gesture g) {
+    switch (g) {
+        case Gesture::A:
+            scale_row_action();
+            return GestureResult::TAKEN;
+
+        case Gesture::B_LEFT:
+        case Gesture::B_RIGHT:
+            s_.currentScale =
+                step_wrapping(s_.currentScale, (g == Gesture::B_LEFT) ? -1 : +1, songcore::POOL_SCALES);
+            return GestureResult::TAKEN;
+
+        default:
+            return GestureResult::PASS;
+    }
+}
 
 // ─── The SCALE screen's NAME row ─────────────────────────────────────────────────────────────────
 

@@ -15,8 +15,8 @@
 // (its SAVE), and a D-pad press there must move the KEY cursor.
 // ⭐ That order is written once, in `LAYERS` (ui/dispatch/route.cpp). Every gesture asks the top layer
 // first (`route`), and a gesture a layer does not answer is swallowed there — so a gesture's body runs
-// only with no layer up, or under one that deliberately lets it through. With no layer up, a screen in
-// `SCREENS` is asked next; its own buttons live in ui/dispatch/screens/.
+// only with no layer up, or under one that deliberately lets it through. With no layer up, the screen's
+// handler in `SCREENS` is asked next; its own buttons live in ui/dispatch/screens/.
 // ⚠️ The THEME and EQ editors are PARTIAL: they let START and SELECT through, so a band can be swept
 // across a held INSTRUMENT audition. The confirm and the FX picker let the audition's stop through.
 //
@@ -667,9 +667,6 @@ class InputDispatcher {
     /** Point the mapping under the cursor at the picked destination, and close. */
     void apply_map_picker_choice();
 
-    /** B+LEFT/RIGHT on GROOVE and SCALE: the previous or next item in the pool, wrapping. */
-    void cycle_current_item(int delta);
-
     // ── The modal guards (see THE MODAL RULE at the top) ─────────────────────────────────────────
     bool qwerty_open() const { return s_.qwerty.isOpen; }
     bool fx_helper_open() const { return s_.fxHelper.isOpen; }
@@ -802,18 +799,6 @@ class InputDispatcher {
      * keyboard's `contextExtra` is already gone (reading it wrote to the filesystem ROOT).
      */
     void save_theme_as(const std::string& dir, const std::string& typed_text);
-
-    /** A on the SCALE screen's NAME row: column 1 = SAVE, column 2 = LOAD. Column 0 cycles on A+DPAD. */
-    void scale_row_action();
-
-    /** Apply the typed name and write `<dir>/<name>.pts`. The QWERTY's SCALE_SAVE arm. */
-    void save_scale_as(const std::string& dir, const std::string& typed_text);
-
-    /** A on the GROOVE screen's panel: the SAVE and LOAD cells. Every other panel row ignores it. */
-    void groove_row_action();
-
-    /** Apply the typed name and write `<dir>/<name>.ptg`. The QWERTY's GROOVE_SAVE arm. */
-    void save_groove_as(const std::string& dir, const std::string& typed_text);
 
     // ── MIDI: the ports ──────────────────────────────────────────────────────────────────────────
     /**
@@ -1075,6 +1060,32 @@ class InputDispatcher {
     void live_launch_cell();
     void live_launch_row();
     void live_stop_track();
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // GROOVE AND SCALE (ui/dispatch/screens/scale_groove.cpp)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    GestureResult groove_screen(Gesture g);
+    GestureResult scale_screen(Gesture g);
+
+    /** A on the SCALE screen's NAME row: column 1 = SAVE, column 2 = LOAD. Column 0 cycles on A+DPAD. */
+    void scale_row_action();
+
+    /** Apply the typed name and write `<dir>/<name>.pts`. The QWERTY's SCALE_SAVE arm. */
+    void save_scale_as(const std::string& dir, const std::string& typed_text);
+
+    /** A on the GROOVE screen's panel: the SAVE and LOAD cells. Every other panel row ignores it. */
+    void groove_row_action();
+
+    /** Apply the typed name and write `<dir>/<name>.ptg`. The QWERTY's GROOVE_SAVE arm. */
+    void save_groove_as(const std::string& dir, const std::string& typed_text);
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // MIXER AND EFFECTS (ui/dispatch/screens/mixer.cpp)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    GestureResult mixer_screen(Gesture g);
+    GestureResult effects_screen(Gesture g);
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE SAMPLE EDITOR

@@ -32,6 +32,11 @@ struct LoadScope {
     InputDispatcher& d_;
 };
 
+/** B+LEFT/RIGHT through a pool of `count` items, wrapping at both ends. */
+inline int step_wrapping(int value, int delta, int count) {
+    return ((value + delta) % count + count) % count;
+}
+
 /** The 20 characters a slot's name is cut to when it is taken from a file. One writer, two readers. */
 inline std::string adopted_name(const std::string& stem) { return stem.substr(0, 20); }
 

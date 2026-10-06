@@ -32,7 +32,7 @@ const InputDispatcher::Layer* InputDispatcher::top_layer() const {
     return nullptr;
 }
 
-// The screens with buttons of their own. Every other screen runs each gesture's generic path.
+// Every screen's own buttons. A gesture its handler passes on runs the gesture's generic path.
 const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
     {ScreenType::SAMPLE_EDITOR, &InputDispatcher::sample_editor_screen},
     {ScreenType::FILE_BROWSER,  &InputDispatcher::file_browser_screen},
@@ -47,6 +47,10 @@ const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
     {ScreenType::CHAIN,         &InputDispatcher::chain_screen},
     {ScreenType::PHRASE,        &InputDispatcher::phrase_screen},
     {ScreenType::TABLE,         &InputDispatcher::table_screen},
+    {ScreenType::GROOVE,        &InputDispatcher::groove_screen},
+    {ScreenType::SCALE,         &InputDispatcher::scale_screen},
+    {ScreenType::MIXER,         &InputDispatcher::mixer_screen},
+    {ScreenType::EFFECTS,       &InputDispatcher::effects_screen},
 };
 
 bool InputDispatcher::route(Gesture g) {

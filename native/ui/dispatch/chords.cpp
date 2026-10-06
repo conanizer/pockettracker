@@ -1,5 +1,5 @@
-// The held-button chords: A, B, R and L with the D-pad, delete, MUTE and SOLO. Most are answered by a
-// screen's handler first (ui/dispatch/screens/); what is here is the path every other screen takes.
+// The held-button chords: A, B, R and L with the D-pad, delete, MUTE and SOLO. The screen's handler is
+// asked first (ui/dispatch/screens/); what is here runs when it passes the gesture on.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -68,49 +68,12 @@ void InputDispatcher::on_a_b() {
 
 void InputDispatcher::on_a_a() { route(Gesture::A_A); }
 
-// ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
+// ─── B + D-pad: which item am I looking at? — each screen answers it ─────────────────────────────
 
-void InputDispatcher::cycle_current_item(int delta) {
-    // A flooring modulo, so −1 wraps to the top.
-    auto wrap = [delta](int value, int max) {
-        const int n = max + 1;
-        return ((value + delta) % n + n) % n;
-    };
-
-    switch (s_.currentScreen) {
-        case ScreenType::GROOVE:
-            s_.currentGroove = wrap(s_.currentGroove, 127);
-            break;
-        case ScreenType::SCALE:
-            s_.currentScale = wrap(s_.currentScale, songcore::POOL_SCALES - 1);
-            break;
-        default:
-            break;
-    }
-}
-
-void InputDispatcher::on_b_left() {
-    if (route(Gesture::B_LEFT)) return;
-    cycle_current_item(-1);
-}
-
-void InputDispatcher::on_b_right() {
-    if (route(Gesture::B_RIGHT)) return;
-    cycle_current_item(+1);
-}
-
-void InputDispatcher::on_b_up() {
-    if (route(Gesture::B_UP)) return;
-    // B+UP/DOWN steps the GROOVE screen's quantize from any cell on it.
-    if (s_.currentScreen == ScreenType::GROOVE)
-        s_.grooveQuantize = (s_.grooveQuantize + 1) % GROOVE_QUANTIZE_COUNT;
-}
-
-void InputDispatcher::on_b_down() {
-    if (route(Gesture::B_DOWN)) return;
-    if (s_.currentScreen == ScreenType::GROOVE)
-        s_.grooveQuantize = (s_.grooveQuantize + GROOVE_QUANTIZE_COUNT - 1) % GROOVE_QUANTIZE_COUNT;
-}
+void InputDispatcher::on_b_left()  { route(Gesture::B_LEFT); }
+void InputDispatcher::on_b_right() { route(Gesture::B_RIGHT); }
+void InputDispatcher::on_b_up()    { route(Gesture::B_UP); }
+void InputDispatcher::on_b_down()  { route(Gesture::B_DOWN); }
 
 // ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
 //

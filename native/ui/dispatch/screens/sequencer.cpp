@@ -60,9 +60,6 @@ std::set<int> used_chain_ids(const Project& p) {
     return used;
 }
 
-/** B+LEFT/RIGHT through a pool of `count` items, wrapping at both ends. */
-int step_wrapping(int value, int delta, int count) { return ((value + delta) % count + count) % count; }
-
 }  // namespace
 
 // ─── The buttons ─────────────────────────────────────────────────────────────────────────────────

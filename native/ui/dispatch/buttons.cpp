@@ -4,53 +4,13 @@
 
 #include "songcore/traversal.h"
 
-#include <algorithm>
-
 namespace pt::ui {
 
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
 
-void InputDispatcher::on_button_a() {
-    if (route(Gesture::A)) return;
-
-    // A on a cell that OPENS a sub-screen — the two NAME rows and all five EQ cells. Before the per-screen
-    // arms below.
-    if (open_sub_screen_at_cursor(/*peek=*/false)) return;
-
-    // The SCALE screen's SAVE / LOAD cells — a screen, not an overlay, so placed among the "A on a
-    // button" arms.
-    if (s_.currentScreen == ScreenType::SCALE) {
-        scale_row_action();
-        return;
-    }
-
-    // The GROOVE panel. ⚠️ Not the tick grid — a bare A there lays a step down (the insert arm below).
-    if (s_.currentScreen == ScreenType::GROOVE && s_.grooveCursorColumn == GROOVE_COL_PANEL) {
-        groove_row_action();
-        return;
-    }
-
-    // A on the end-of-pattern marker lays a step down at the default tick count (the cell's own insert).
-    // ⚠️ Guarded on EMPTY — otherwise a bare A on an existing tick would step it.
-    if (s_.currentScreen == ScreenType::GROOVE && cursor_context().capabilities.isEmpty)
-        generic_input(pt::ui::increment);
-}
-
-void InputDispatcher::on_button_b() {
-    if (route(Gesture::B)) return;
-
-    // ⚠️ EFFECTS' TIME row: B toggles DELAY SYNC (milliseconds ↔ note divisions). A gesture of its own,
-    // because the cell's value means different things on either side (0x40 a length; 4 a 1/16 note).
-    // B is otherwise free on this screen, so no release latch is needed.
-    // delayTime is re-clamped into 0..B on the way IN: a free time of 0xF0 would index past the names.
-    if (s_.currentScreen == ScreenType::EFFECTS &&
-        s_.effectsCursorRow == EffectModule::ROW_DLY_TIME) {
-        songcore::Project& p = host_.edit_project();
-        p.delaySync = !p.delaySync;
-        if (p.delaySync) p.delayTime = std::min(std::max(p.delayTime, 0), 11);
-        mark_modified();
-    }
-}
+// A and B are the screen's: every screen's handler answers them (ui/dispatch/screens/).
+void InputDispatcher::on_button_a() { route(Gesture::A); }
+void InputDispatcher::on_button_b() { route(Gesture::B); }
 
 void InputDispatcher::on_select() {
     if (route(Gesture::SELECT)) return;

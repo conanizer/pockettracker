@@ -451,12 +451,13 @@ add_library(pt-ui STATIC
         ui/dispatch/layers/theme.cpp
         ui/dispatch/midi.cpp
         ui/dispatch/project.cpp
-        ui/dispatch/scale_groove.cpp
         ui/dispatch/screens/file_browser.cpp
         ui/dispatch/screens/instrument.cpp
         ui/dispatch/screens/midi.cpp
+        ui/dispatch/screens/mixer.cpp
         ui/dispatch/screens/project.cpp
         ui/dispatch/screens/sample_editor.cpp
+        ui/dispatch/screens/scale_groove.cpp
         ui/dispatch/screens/sequencer.cpp
         ui/dispatch/sub_screens.cpp
         ui/layout.cpp
