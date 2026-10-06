@@ -624,10 +624,6 @@ class InputDispatcher {
      *  `songcore::track_of_*` (from the saved songCursorColumn), so a stale one cannot misroute. */
     int remembered_song_track() const;
 
-    /** B+UP/DOWN under NAV = SONG: CHAIN walks the song column, PHRASE the chain's filled rows. True when
-     *  it owned the press, even if the walk clamped (ui/song_pointer.h). */
-    bool song_relative_b_vertical(int delta);
-
     /**
      * The mixer channel an audition on the preview lane borrows, or -1 (unity gain). ⚠️ An instrument is
      * not IN the song, only its uses: this is the song cell you came through, while it still holds a
@@ -671,7 +667,7 @@ class InputDispatcher {
     /** Point the mapping under the cursor at the picked destination, and close. */
     void apply_map_picker_choice();
 
-    // ── A,A / L+B+A helpers ─────────────────────────────────────────────────────────────────────
+    /** B+LEFT/RIGHT on GROOVE and SCALE: the previous or next item in the pool, wrapping. */
     void cycle_current_item(int delta);
 
     // ── The modal guards (see THE MODAL RULE at the top) ─────────────────────────────────────────
@@ -1021,6 +1017,64 @@ class InputDispatcher {
 
     /** True when the cursor is on INSTRUMENT's TYPE cell — where A+DPAD toggles rather than steps. */
     bool on_instrument_type_cell() const;
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // SONG, CHAIN, PHRASE AND TABLE (ui/dispatch/screens/sequencer.cpp)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    GestureResult song_screen(Gesture g);
+    GestureResult chain_screen(Gesture g);
+    GestureResult phrase_screen(Gesture g);
+    GestureResult table_screen(Gesture g);
+
+    /** What a selection's clipboard does to the marked block. */
+    enum class ClipOp { COPY, CUT, DELETE };
+    /** One screen's three clipboard operations, on the item it shows. */
+    using ClipFn = void (InputDispatcher::*)(ClipOp, const SelectionBounds&);
+    void song_clip(ClipOp op, const SelectionBounds& b);
+    void chain_clip(ClipOp op, const SelectionBounds& b);
+    void phrase_clip(ClipOp op, const SelectionBounds& b);
+    void table_clip(ClipOp op, const SelectionBounds& b);
+
+    /**
+     * What the four share: L+B marks a selection; inside one B copies, A+B deletes and L+A cuts it.
+     * Outside one L+A pastes at the cursor into item `pasteTarget`, and A+B is the cell's own delete.
+     */
+    GestureResult grid_clipboard(Gesture g, ClipFn clip, int pasteTarget);
+
+    /** A on an EMPTY cell: insert the item last edited, and arm A,A. On PHRASE, the NOTE column only,
+     *  and A on a filled note auditions it instead. */
+    void song_insert();
+    void chain_insert();
+    void phrase_insert();
+    /** A,A: insert the next UNUSED chain or phrase; on PHRASE, keep the note and re-point it at the next
+     *  FREE instrument. */
+    void song_insert_next();
+    void chain_insert_next();
+    void phrase_next_instrument();
+    /** Remember where an inserting A landed, so a second A there counts as A,A. */
+    void arm_double_tap();
+    /** Was the first A of this A,A an insert on this same cell? Consumes the arm. */
+    bool take_double_tap();
+
+    /** L+B+A. SONG deep-clones the chain under the cursor (its phrases too), CHAIN the phrase under the
+     *  cursor, PHRASE itself — and follows the copy. Each into a FREE slot, or not at all. */
+    void song_clone_chain();
+    void chain_clone_phrase();
+    void phrase_clone();
+
+    /** B+LEFT/RIGHT under NAV = SONG: step along the song row. False off NAV = SONG, where B+LEFT/RIGHT
+     *  steps through the pool instead (ui/song_pointer.h). */
+    bool song_relative_b_horizontal(int delta);
+    /** B+UP/DOWN under NAV = SONG: CHAIN walks the song column, PHRASE the chain's filled rows. Off NAV =
+     *  SONG it does nothing. */
+    void song_relative_b_vertical(int delta);
+
+    /** LIVE on SONG: START launches the cursor's cell, L+START its row, R+START stops its track — each a
+     *  second time promotes the launch from the chain's end to the next phrase boundary. */
+    void live_launch_cell();
+    void live_launch_row();
+    void live_stop_track();
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE SAMPLE EDITOR

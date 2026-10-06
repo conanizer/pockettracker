@@ -1,67 +1,14 @@
-// The held-button chords: A, B, R and L with the D-pad, delete, insert, clone, MUTE and SOLO.
+// The held-button chords: A, B, R and L with the D-pad, delete, MUTE and SOLO. Most are answered by a
+// screen's handler first (ui/dispatch/screens/); what is here is the path every other screen takes.
 
 #include "ui/dispatch/dispatch_common.h"
 
-#include "songcore/traversal.h"
 #include "ui/navigation.h"
 #include "ui/song_pointer.h"
 
 #include <algorithm>
-#include <map>
-#include <set>
-#include <string>
-#include <vector>
 
 namespace pt::ui {
-
-namespace {
-
-/** A phrase nobody has written a note into. */
-bool phrase_is_blank(const Phrase& p) {
-    for (const songcore::PhraseStep& s : p.steps)
-        if (!songcore::step_is_empty(s)) return false;
-    return true;
-}
-
-/** A chain that references no phrase. */
-bool chain_is_blank(const Chain& c) {
-    for (const int ref : c.phraseRefs)
-        if (ref != -1) return false;
-    return true;
-}
-
-/**
- * Search forward from `start`, wrapping once; −1 when the pool is full. Starting after the last edited
- * item hands you a free one near it, not slot 0 every time.
- */
-template <typename Pred>
-int first_from_wrapping(int start, int count, Pred pred) {
-    for (int i = start; i < count; ++i)
-        if (pred(i)) return i;
-    for (int i = 0; i < start && i < count; ++i)
-        if (pred(i)) return i;
-    return -1;
-}
-
-/** Phrase IDs any chain references — "used" even when blank (a silent spacer inside a pad chain). */
-std::set<int> used_phrase_ids(const Project& p) {
-    std::set<int> used;
-    for (const Chain& c : p.chains)
-        for (const int ref : c.phraseRefs)
-            if (ref != -1) used.insert(ref);
-    return used;
-}
-
-/** Chain IDs any song track references — same "used even if blank" reasoning. */
-std::set<int> used_chain_ids(const Project& p) {
-    std::set<int> used;
-    for (const songcore::Track& t : p.tracks)
-        for (const int ref : t.chainRefs)
-            if (ref != -1) used.insert(ref);
-    return used;
-}
-
-}  // namespace
 
 // ─── A + D-pad ───────────────────────────────────────────────────────────────────────────────────
 
@@ -76,15 +23,11 @@ std::set<int> used_chain_ids(const Project& p) {
 
 void InputDispatcher::on_a_up() {
     if (route(Gesture::A_UP)) return;
-    if (on_fx_type_column()) { open_fx_helper(); return; }
-    if (on_map_dest_cell()) { open_map_picker(); return; }
     selection_or_single(pt::ui::increment_fast);
 }
 
 void InputDispatcher::on_a_down() {
     if (route(Gesture::A_DOWN)) return;
-    if (on_fx_type_column()) { open_fx_helper(); return; }
-    if (on_map_dest_cell()) { open_map_picker(); return; }
     selection_or_single(pt::ui::decrement_fast);
 }
 
@@ -118,138 +61,16 @@ void InputDispatcher::on_a_deferred() {
 
 void InputDispatcher::on_a_b() {
     if (route(Gesture::A_B)) return;
-
-    if (s_.selection.active) {
-        const SelectionBounds b = s_.selection.bounds();
-        Project&              p = host_.edit_project();
-        switch (s_.currentScreen) {
-            case ScreenType::PHRASE:
-                clip_.delete_phrase_steps(p, s_.currentPhrase, b.topLeftRow, b.topLeftColumn,
-                                          b.bottomRightRow, b.bottomRightColumn);
-                break;
-            case ScreenType::CHAIN:
-                clip_.delete_chain_rows(p, s_.currentChain, b.topLeftRow, b.topLeftColumn,
-                                        b.bottomRightRow, b.bottomRightColumn);
-                break;
-            case ScreenType::SONG:
-                clip_.delete_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow,
-                                        b.bottomRightColumn);
-                break;
-            case ScreenType::TABLE:
-                clip_.delete_table_rows(p, s_.currentTable, b.topLeftRow, b.topLeftColumn,
-                                        b.bottomRightRow, b.bottomRightColumn);
-                break;
-            default:
-                s_.selection.exit();
-                return;
-        }
-        mark_modified();
-        s_.selection.exit();
-        return;
-    }
-
     generic_input(pt::ui::on_a_b);
 }
 
-// ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
+// ─── A,A: insert the next UNUSED item — SONG, CHAIN and PHRASE answer it ─────────────────────────
 
-void InputDispatcher::on_a_a() {
-    if (route(Gesture::A_A)) return;
-
-    // The sample editor's row 11 needs no arm: its A is deferred, and the mapper clears `lastAPress`
-    // on every defer, so no tap reaches this handler.
-
-    // ⚠️ RESAMPLE goes before the double-tap gate: under a SONG selection the first A copied rather
-    // than inserting, so the gate would return and this arm would never run.
-    if (s_.currentScreen == ScreenType::SONG && s_.selection.active) {
-        open_qwerty(QwertyContext::RESAMPLE, resample_base_name(fs_), "SAMPLE NAME:", "",
-                    /*max_length=*/20, /*clear_on_first_b=*/true);
-        return;
-    }
-
-    // A double-tap only counts if the cursor has not moved between the presses. ⚠️ The PHRASE
-    // audition is owed on both exits — a quick second A never reaches `on_button_a`.
-    if (!hasInsertPos_ || insertScreen_ != s_.currentScreen || insertRow_ != s_.cursorRow ||
-        insertCol_ != s_.cursorColumn) {
-        preview_held_note();
-        return;
-    }
-    hasInsertPos_ = false;
-
-    Project& p = host_.edit_project();
-
-    if (s_.currentScreen == ScreenType::SONG) {
-        if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return;
-        songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
-
-        const int next = first_from_wrapping(s_.lastEditedChain + 1, 256, [&](int i) {
-            return chain_is_blank(p.chains[static_cast<size_t>(i)]);
-        });
-        if (next < 0) return;
-
-        while (static_cast<int>(track.chainRefs.size()) <= s_.cursorRow) track.chainRefs.push_back(-1);
-        track.chainRefs[static_cast<size_t>(s_.cursorRow)] = next;
-        s_.lastEditedChain                                 = next;
-        mark_modified();
-
-    } else if (s_.currentScreen == ScreenType::CHAIN) {
-        Chain& chain = p.chains[static_cast<size_t>(s_.currentChain)];
-
-        const int next = first_from_wrapping(s_.lastEditedPhrase + 1, 256, [&](int i) {
-            return phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-        });
-        if (next < 0) return;
-
-        chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = next;
-        chain.transposeValues[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedTranspose;
-        s_.lastEditedPhrase                                      = next;
-        mark_modified();
-
-    } else if (s_.currentScreen == ScreenType::PHRASE) {
-        // Advance the NOTE cell's instrument to the next FREE slot. `instrument_is_free` also skips
-        // configured SoundFonts, which have a null sampleFilePath too.
-        if (s_.cursorColumn != 1) return;   // the NOTE column only
-        Phrase&               ph   = p.phrases[static_cast<size_t>(s_.currentPhrase)];
-        songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
-
-        const int count = static_cast<int>(p.instruments.size());
-        const int next  = first_from_wrapping(s_.lastEditedInstrument + 1, count, [&](int i) {
-            return songcore::instrument_is_free(p.instruments[static_cast<size_t>(i)]);
-        });
-        if (next >= 0) {
-            step.instrument         = next;
-            s_.lastEditedInstrument = next;
-            mark_modified();
-        }
-        preview_held_note();
-    }
-}
+void InputDispatcher::on_a_a() { route(Gesture::A_A); }
 
 // ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
 
 void InputDispatcher::cycle_current_item(int delta) {
-    // ⭐ On SONG, B+LEFT/RIGHT toggles the transport mode; both directions toggle,
-    // since there are only two modes. ⚠️ Gated on SONG alone — the handler is shared.
-    if (s_.currentScreen == ScreenType::SONG) {
-        host_.set_live_mode(!host_.live_mode());
-        return;
-    }
-
-    // ⭐ Under NAV = SONG this walks the SONG row instead of the pool. CHAIN steps to the nearest filled
-    // cell either side; PHRASE to the nearest whose chain also holds a phrase at this chain row
-    // (songcore/traversal.h). Both clamp. `chainRow` is not reset — the CHAIN→PHRASE gate already
-    // refuses an empty row.
-    if (s_.settings.navSongRelative &&
-        (s_.currentScreen == ScreenType::CHAIN || s_.currentScreen == ScreenType::PHRASE)) {
-        const int requireRow = (s_.currentScreen == ScreenType::PHRASE) ? pointer_chain_row(s_) : -1;
-        const int songRow    = pointer_song_row(s_);
-        const int track      = songcore::next_song_cell_h(*s_.project, songRow, pointer_track(s_),
-                                                          delta, requireRow);
-        set_pointer_song_cell(s_, songRow, track);
-        refresh_song_relative_refs(s_);
-        return;
-    }
-
     // A flooring modulo, so −1 wraps to the top.
     auto wrap = [delta](int value, int max) {
         const int n = max + 1;
@@ -257,18 +78,6 @@ void InputDispatcher::cycle_current_item(int delta) {
     };
 
     switch (s_.currentScreen) {
-        case ScreenType::CHAIN:
-            s_.currentChain    = wrap(s_.currentChain, 255);
-            s_.lastEditedChain = s_.currentChain;
-            break;
-        case ScreenType::PHRASE:
-            s_.currentPhrase    = wrap(s_.currentPhrase, 255);
-            s_.lastEditedPhrase = s_.currentPhrase;
-            break;
-        case ScreenType::TABLE:
-            s_.currentTable    = wrap(s_.currentTable, 127);
-            s_.lastEditedTable = s_.currentTable;
-            break;
         case ScreenType::GROOVE:
             s_.currentGroove = wrap(s_.currentGroove, 127);
             break;
@@ -290,60 +99,17 @@ void InputDispatcher::on_b_right() {
     cycle_current_item(+1);
 }
 
-/**
- * B+UP/DOWN under NAV = SONG. On CHAIN it walks the track column to the nearest filled song row,
- * skipping gaps. On PHRASE it walks the chain's own filled rows and never leaves the chain.
- *
- * ⚠️ Returns true even when the walk clamps — falling through would page the song from under the pointer.
- */
-bool InputDispatcher::song_relative_b_vertical(int delta) {
-    if (!s_.settings.navSongRelative) return false;
-
-    if (s_.currentScreen == ScreenType::CHAIN) {
-        const int track = pointer_track(s_);
-        const int row   = songcore::next_song_cell_v(*s_.project, pointer_song_row(s_), track, delta);
-        set_pointer_song_cell(s_, row, track);
-        refresh_song_relative_refs(s_);
-        return true;
-    }
-    if (s_.currentScreen == ScreenType::PHRASE) {
-        const int row = songcore::next_chain_row(*s_.project, s_.currentChain, pointer_chain_row(s_),
-                                                 delta, /*wrap=*/false);
-        set_pointer_chain_row(s_, row);
-        refresh_song_relative_refs(s_);
-        return true;
-    }
-    return false;
-}
-
 void InputDispatcher::on_b_up() {
     if (route(Gesture::B_UP)) return;
-    if (song_relative_b_vertical(-1)) return;
-
     // B+UP/DOWN steps the GROOVE screen's quantize from any cell on it.
-    if (s_.currentScreen == ScreenType::GROOVE) {
+    if (s_.currentScreen == ScreenType::GROOVE)
         s_.grooveQuantize = (s_.grooveQuantize + 1) % GROOVE_QUANTIZE_COUNT;
-        return;
-    }
-
-    if (s_.currentScreen != ScreenType::SONG) return;
-    s_.cursorRow = std::max(0, s_.cursorRow - 16);
-    scroll_song_to_row(s_, s_.cursorRow);
 }
 
 void InputDispatcher::on_b_down() {
     if (route(Gesture::B_DOWN)) return;
-    if (song_relative_b_vertical(+1)) return;
-
-    if (s_.currentScreen == ScreenType::GROOVE) {
-        s_.grooveQuantize =
-            (s_.grooveQuantize + GROOVE_QUANTIZE_COUNT - 1) % GROOVE_QUANTIZE_COUNT;
-        return;
-    }
-
-    if (s_.currentScreen != ScreenType::SONG) return;
-    s_.cursorRow = std::min(255, s_.cursorRow + 16);
-    scroll_song_to_row(s_, s_.cursorRow);
+    if (s_.currentScreen == ScreenType::GROOVE)
+        s_.grooveQuantize = (s_.grooveQuantize + GROOVE_QUANTIZE_COUNT - 1) % GROOVE_QUANTIZE_COUNT;
 }
 
 // ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
@@ -444,70 +210,10 @@ void InputDispatcher::on_r_right() {
     s_.selection.exit();
 }
 
-// ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
+// ─── L+B / L+A: the selection and the clipboard — only the four grid screens answer them ─────────
 
-void InputDispatcher::on_l_b() {
-    if (route(Gesture::L_B)) return;
-
-    switch (s_.currentScreen) {
-        case ScreenType::PHRASE:
-        case ScreenType::CHAIN:
-        case ScreenType::SONG:
-        case ScreenType::TABLE:
-            s_.selection.handle_select_b(now_ms_, cursor_row(), cursor_column(),
-                                         max_selection_column(), max_selection_row());
-            break;
-        default:
-            break;  // GROOVE has one column and no clipboard type — nothing to select
-    }
-}
-
-void InputDispatcher::on_l_a() {
-    if (route(Gesture::L_A)) return;
-
-    // Inside a selection L+A CUTS; outside one it PASTES.
-    Project& p = host_.edit_project();
-
-    if (s_.selection.active) {
-        const SelectionBounds b = s_.selection.bounds();
-        switch (s_.currentScreen) {
-            case ScreenType::PHRASE:
-                clip_.cut_phrase_steps(p, s_.currentPhrase, b.topLeftRow, b.topLeftColumn,
-                                       b.bottomRightRow, b.bottomRightColumn);
-                break;
-            case ScreenType::CHAIN:
-                clip_.cut_chain_rows(p, s_.currentChain, b.topLeftRow, b.topLeftColumn,
-                                     b.bottomRightRow, b.bottomRightColumn);
-                break;
-            case ScreenType::SONG:
-                clip_.cut_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow,
-                                     b.bottomRightColumn);
-                break;
-            case ScreenType::TABLE:
-                clip_.cut_table_rows(p, s_.currentTable, b.topLeftRow, b.topLeftColumn,
-                                     b.bottomRightRow, b.bottomRightColumn);
-                break;
-            default:
-                s_.selection.exit();
-                return;
-        }
-        mark_modified();
-        s_.selection.exit();
-        return;
-    }
-
-    // Paste. The target id is the item being edited; SONG has none (its clip carries its own tracks).
-    int targetId = 0;
-    switch (s_.currentScreen) {
-        case ScreenType::PHRASE: targetId = s_.currentPhrase; break;
-        case ScreenType::CHAIN:  targetId = s_.currentChain;  break;
-        case ScreenType::TABLE:  targetId = s_.currentTable;  break;
-        default:                 targetId = 0;                break;
-    }
-    const PasteResult r =
-        clip_.paste(p, s_.currentScreen, targetId, cursor_row(), cursor_column());
-    if (r.kind == PasteResult::Kind::SUCCESS && r.itemsPasted > 0) mark_modified();
-}
+void InputDispatcher::on_l_b() { route(Gesture::L_B); }
+void InputDispatcher::on_l_a() { route(Gesture::L_A); }
 
 // ─── R+A / R+B: MUTE and SOLO ────────────────────────────────────────────────────────────────────
 
@@ -688,114 +394,12 @@ void InputDispatcher::on_select_a() { route(Gesture::SELECT_A); }
 void InputDispatcher::on_select_b() { route(Gesture::SELECT_B); }
 void InputDispatcher::on_select_r() { route(Gesture::SELECT_R); }
 
-// ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
+// ─── L+B+A: clone — SONG, CHAIN and PHRASE answer it ─────────────────────────────────────────────
 
 void InputDispatcher::on_l_b_a() {
     if (route(Gesture::L_B_A)) return;
-
-    Project& p = host_.edit_project();
-
-    if (s_.currentScreen == ScreenType::SONG) {
-        if (s_.cursorColumn < 1 || s_.cursorColumn > 8) { s_.selection.exit(); return; }
-        songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
-        const int currentChainId =
-            (s_.cursorRow < static_cast<int>(track.chainRefs.size()))
-                ? track.chainRefs[static_cast<size_t>(s_.cursorRow)]
-                : -1;
-
-        if (currentChainId != -1) {
-            const Chain&        src         = p.chains[static_cast<size_t>(currentChainId)];
-            const std::set<int> usedChains  = used_chain_ids(p);
-            const std::set<int> usedPhrases = used_phrase_ids(p);
-
-            // The destination must be a FREE chain: blank AND unreferenced.
-            const int dstChainId = first_from_wrapping(currentChainId + 1, 256, [&](int i) {
-                return usedChains.count(i) == 0 && chain_is_blank(p.chains[static_cast<size_t>(i)]);
-            });
-
-            // A DEEP clone: every phrase the chain references gets its own free slot, so the copy is
-            // fully independent. `reserved` stops two source phrases claiming the same destination;
-            // duplicate refs inside the chain map to the SAME clone, which is what keeps a chain that
-            // plays phrase 5 twice still playing one phrase twice.
-            std::vector<int>   srcPhraseIds;
-            for (const int ref : src.phraseRefs)
-                if (ref != -1 &&
-                    std::find(srcPhraseIds.begin(), srcPhraseIds.end(), ref) == srcPhraseIds.end())
-                    srcPhraseIds.push_back(ref);
-
-            std::set<int>      reserved;
-            std::map<int, int> phraseMap;
-            bool               enoughPhrases = true;
-            for (const int pid : srcPhraseIds) {
-                const int slot = first_from_wrapping(0, 256, [&](int i) {
-                    return reserved.count(i) == 0 && usedPhrases.count(i) == 0 &&
-                           phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-                });
-                if (slot < 0) { enoughPhrases = false; break; }
-                reserved.insert(slot);
-                phraseMap[pid] = slot;
-            }
-
-            // Capacity is checked in FULL before anything is written. Abort, never half-clone: a
-            // partial clone leaves a chain pointing at phrases that were never copied.
-            if (dstChainId < 0) {
-                s_.statusMessage = "NO FREE CHAINS";
-                s_.statusSuccess = false;
-            } else if (!enoughPhrases) {
-                s_.statusMessage = "NO FREE PHRASES";
-                s_.statusSuccess = false;
-            } else {
-                for (const auto& kv : phraseMap)
-                    p.phrases[static_cast<size_t>(kv.second)].steps =
-                        p.phrases[static_cast<size_t>(kv.first)].steps;
-
-                Chain& dst = p.chains[static_cast<size_t>(dstChainId)];
-                for (size_t i = 0; i < src.phraseRefs.size(); ++i) {
-                    const int ref     = src.phraseRefs[i];
-                    dst.phraseRefs[i] = (ref == -1) ? -1 : phraseMap[ref];
-                }
-                dst.transposeValues = src.transposeValues;
-
-                track.chainRefs[static_cast<size_t>(s_.cursorRow)] = dstChainId;
-                s_.lastEditedChain = dstChainId;
-                s_.statusMessage   = "CHAIN CLONED";
-                s_.statusSuccess   = true;
-                mark_modified();
-            }
-        }
-
-    } else if (s_.currentScreen == ScreenType::CHAIN) {
-        Chain&    chain           = p.chains[static_cast<size_t>(s_.currentChain)];
-        const int currentPhraseId = chain.phraseRefs[static_cast<size_t>(s_.cursorRow)];
-        if (currentPhraseId != -1) {
-            const std::set<int> usedPhrases = used_phrase_ids(p);
-            const int next = first_from_wrapping(currentPhraseId + 1, 256, [&](int i) {
-                return usedPhrases.count(i) == 0 && phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-            });
-            if (next >= 0) {
-                p.phrases[static_cast<size_t>(next)].steps =
-                    p.phrases[static_cast<size_t>(currentPhraseId)].steps;
-                chain.phraseRefs[static_cast<size_t>(s_.cursorRow)] = next;
-                s_.lastEditedPhrase                                 = next;
-                mark_modified();
-            }
-        }
-
-    } else if (s_.currentScreen == ScreenType::PHRASE) {
-        const int srcPhraseId = s_.currentPhrase;
-        const std::set<int> usedPhrases = used_phrase_ids(p);
-        const int next = first_from_wrapping(srcPhraseId + 1, 256, [&](int i) {
-            return i != srcPhraseId && usedPhrases.count(i) == 0 &&
-                   phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
-        });
-        if (next >= 0) {
-            p.phrases[static_cast<size_t>(next)].steps =
-                p.phrases[static_cast<size_t>(srcPhraseId)].steps;
-            s_.currentPhrase = next;   // …and follow the clone, so you are editing the copy
-            mark_modified();
-        }
-    }
-
+    // Below the sites, so every screen does it: the chord ends a selection — after SONG, CHAIN or
+    // PHRASE has cloned.
     s_.selection.exit();
 }
 

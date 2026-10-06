@@ -23,7 +23,15 @@ GestureResult InputDispatcher::midi_map_screen(Gesture g) {
     switch (g) {
         case Gesture::A: midi_map_action();                 return GestureResult::TAKEN;
         case Gesture::B: leave_to(s_.midiMapReturnScreen);  return GestureResult::TAKEN;
-        default:         return GestureResult::PASS;
+
+        // A mapping's GROUP and PARAMETER cells open the destination picker rather than stepping.
+        case Gesture::A_UP:
+        case Gesture::A_DOWN:
+            if (!on_map_dest_cell()) return GestureResult::PASS;
+            open_map_picker();
+            return GestureResult::TAKEN;
+
+        default: return GestureResult::PASS;
     }
 }
 

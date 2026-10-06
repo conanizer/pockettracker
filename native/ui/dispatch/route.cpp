@@ -43,6 +43,10 @@ const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
     {ScreenType::SETTINGS,      &InputDispatcher::settings_screen},
     {ScreenType::MIDI,          &InputDispatcher::midi_screen},
     {ScreenType::MIDI_MAP,      &InputDispatcher::midi_map_screen},
+    {ScreenType::SONG,          &InputDispatcher::song_screen},
+    {ScreenType::CHAIN,         &InputDispatcher::chain_screen},
+    {ScreenType::PHRASE,        &InputDispatcher::phrase_screen},
+    {ScreenType::TABLE,         &InputDispatcher::table_screen},
 };
 
 bool InputDispatcher::route(Gesture g) {
