@@ -67,6 +67,14 @@
 
 namespace pt::ui {
 
+/** The cursor of a screen that takes a selection: where it is, and how far a selection reaches. */
+struct GridCursor {
+    int AppState::*row;
+    int AppState::*column;
+    int maxRow;     // 255 on SONG: a selection spans the arrangement, not the 16 rows shown
+    int maxColumn;  // the rightmost selectable column — a ROW-scope selection ends there
+};
+
 class InputDispatcher {
   public:
     /**
@@ -577,11 +585,8 @@ class InputDispatcher {
 
     // ── The spine ────────────────────────────────────────────────────────────────────────────────
 
-    /** "What is under the cursor?" — the ONE place that asks which screen is up. */
+    /** "What is under the cursor?" — asked of the current screen's row in `SCREENS`. */
     CursorContext cursor_context() const;
-
-    /** The GROOVE screen's cursor state, assembled once for both the context and the edit. */
-    GrooveState groove_state(const songcore::Project& p) const;
 
     /** Apply a resolved action to the live document. True if anything changed. */
     bool apply_edit(const InputAction& action);
@@ -637,16 +642,6 @@ class InputDispatcher {
     /** True on the two that edit the GLOBALS — the mixer, the master bus, the send buses. */
     bool on_globals_screen() const;
 
-    // ── The cursor's live row/column for the screen we are on ────────────────────────────────────
-    int  cursor_row() const;
-    int  cursor_column() const;
-    void set_cursor_row(int row);
-
-    /** The rightmost selectable column, per screen — the selection's ROW scope needs it. */
-    int  max_selection_column() const;
-    /** 255 on SONG (a selection spans the document, not the viewport); 15 everywhere else. */
-    int  max_selection_row() const;
-
     // ── The FX helper (ui/dispatch/layers/fx_helper.cpp) ───────────────────────────────────────
     GestureResult fx_helper_layer(Gesture g);
     /** Raise the helper on the effect the cursor's FX column holds. */
@@ -693,12 +688,22 @@ class InputDispatcher {
     /** The topmost open layer, or null. */
     const Layer* top_layer() const;
 
-    /** A screen with buttons of its own (ui/dispatch/screens/). */
+    /** One screen (ui/dispatch/screens/): its buttons, the cell under its cursor, an edit applied there,
+     *  what a knob would map there (null: nothing), and its grid (null: no selection). */
     struct ScreenHandler {
         ScreenType id;
         GestureResult (InputDispatcher::*handle)(Gesture);
+        CursorContext (InputDispatcher::*context)() const;
+        bool (InputDispatcher::*edit)(const InputAction&);
+        songcore::MapTarget (InputDispatcher::*knob)() const;
+        const GridCursor* grid;
     };
     static const ScreenHandler SCREENS[];
+
+    /** The current screen's row in `SCREENS`, or null. */
+    const ScreenHandler* screen() const;
+    /** The current screen's grid cursor, or null where there is no selection. */
+    const GridCursor* grid() const;
 
     /** Offer `g` to the top layer, then to the screen's handler. True when one of them took it and the
      *  gesture's body must not run; false when it is the body's to answer. */
@@ -943,6 +948,10 @@ class InputDispatcher {
 
     GestureResult project_screen(Gesture g);
     GestureResult settings_screen(Gesture g);
+    CursorContext project_context() const;
+    bool          project_edit(const InputAction& action);
+    CursorContext settings_context() const;
+    bool          settings_edit(const InputAction& action);
     /** B on SETTINGS, MIDI and the mapping list: back to `back`, the screen stored on the way in. */
     void leave_to(ScreenType back);
 
@@ -964,6 +973,10 @@ class InputDispatcher {
 
     GestureResult midi_screen(Gesture g);
     GestureResult midi_map_screen(Gesture g);
+    CursorContext midi_context() const;
+    bool          midi_edit(const InputAction& action);
+    CursorContext midi_map_context() const;
+    bool          midi_map_edit(const InputAction& action);
 
     /** A on MIDI: only PANIC and TEST do anything — OUTPUT / OFFSET / PROG CHG are A+DPAD. */
     void midi_action();
@@ -982,6 +995,13 @@ class InputDispatcher {
     GestureResult instrument_screen(Gesture g);
     GestureResult pool_screen(Gesture g);
     GestureResult mods_screen(Gesture g);
+    CursorContext instrument_context() const;
+    bool          instrument_edit(const InputAction& action);
+    songcore::MapTarget instrument_knob() const;
+    CursorContext pool_context() const;
+    bool          pool_edit(const InputAction& action);
+    CursorContext mods_context() const;
+    bool          mods_edit(const InputAction& action);
     /** What the three share: START auditions the instrument, any plain press stops it. */
     GestureResult instrument_audition(Gesture g);
 
@@ -1011,6 +1031,14 @@ class InputDispatcher {
     GestureResult chain_screen(Gesture g);
     GestureResult phrase_screen(Gesture g);
     GestureResult table_screen(Gesture g);
+    CursorContext song_context() const;
+    bool          song_edit(const InputAction& action);
+    CursorContext chain_context() const;
+    bool          chain_edit(const InputAction& action);
+    CursorContext phrase_context() const;
+    bool          phrase_edit(const InputAction& action);
+    CursorContext table_context() const;
+    bool          table_edit(const InputAction& action);
 
     /** What a selection's clipboard does to the marked block. */
     enum class ClipOp { COPY, CUT, DELETE };
@@ -1067,6 +1095,12 @@ class InputDispatcher {
 
     GestureResult groove_screen(Gesture g);
     GestureResult scale_screen(Gesture g);
+    CursorContext groove_context() const;
+    bool          groove_edit(const InputAction& action);
+    CursorContext scale_context() const;
+    bool          scale_edit(const InputAction& action);
+    /** The GROOVE screen's cursor state, assembled once for both the context and the edit. */
+    GrooveState groove_state(const songcore::Project& p) const;
 
     /** A on the SCALE screen's NAME row: column 1 = SAVE, column 2 = LOAD. Column 0 cycles on A+DPAD. */
     void scale_row_action();
@@ -1086,6 +1120,12 @@ class InputDispatcher {
 
     GestureResult mixer_screen(Gesture g);
     GestureResult effects_screen(Gesture g);
+    CursorContext mixer_context() const;
+    bool          mixer_edit(const InputAction& action);
+    songcore::MapTarget mixer_knob() const;
+    CursorContext effects_context() const;
+    bool          effects_edit(const InputAction& action);
+    songcore::MapTarget effects_knob() const;
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE SAMPLE EDITOR
@@ -1095,6 +1135,8 @@ class InputDispatcher {
 
     /** The editor's own buttons (ui/dispatch/screens/sample_editor.cpp). */
     GestureResult sample_editor_screen(Gesture g);
+    CursorContext sample_editor_context() const;
+    bool          sample_editor_edit(const InputAction& action);
 
     /** "ARE YOU SURE?" — B on a modified sample. A discards and leaves, B stays; nothing else. */
     bool sample_close_open() const { return on_sample_editor() && s_.sampleEditor.showConfirmClose; }

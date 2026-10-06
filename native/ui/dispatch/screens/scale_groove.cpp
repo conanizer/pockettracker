@@ -157,4 +157,52 @@ void InputDispatcher::save_groove_as(const std::string& dir, const std::string& 
     s_.statusSuccess = ok;
 }
 
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+/** The GROOVE screen's state, assembled once for both the cursor context and the edit. */
+GrooveState InputDispatcher::groove_state(const Project& p) const {
+    GrooveState gs{p.grooves[static_cast<size_t>(s_.currentGroove)]};
+    gs.cursorRow    = s_.grooveCursorRow;
+    gs.cursorColumn = s_.grooveCursorColumn;
+    gs.panelRow     = s_.groovePanelRow;
+    gs.panelColumn  = s_.groovePanelColumn;
+    gs.quantize     = s_.grooveQuantize;
+    return gs;
+}
+
+CursorContext InputDispatcher::groove_context() const {
+    const Project& p = *s_.project;
+    return groove_.cursor_context(groove_state(p));
+}
+
+bool InputDispatcher::groove_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    const GrooveInputResult r = groove_.handle_input(
+        p.grooves[static_cast<size_t>(s_.currentGroove)], groove_state(p), action);
+    // ⚠️ The quantize pointer is not song data: it comes back separately, and moving it must
+    // not dirty the project or arm an autosave.
+    if (r.newQuantize >= 0) s_.grooveQuantize = r.newQuantize;
+    return r.modified;
+}
+
+CursorContext InputDispatcher::scale_context() const {
+    const Project& p = *s_.project;
+    ScaleState cs{p.scales[static_cast<size_t>(s_.currentScale)]};
+    cs.key          = p.scaleKey;
+    cs.cursorRow    = s_.scaleCursorRow;
+    cs.cursorColumn = s_.scaleCursorColumn;
+    return scale_.cursor_context(cs);
+}
+
+bool InputDispatcher::scale_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    // ⚠️ The KEY row edits the PROJECT, not the scale handed in; the module returns the new key
+    // rather than holding a Project.
+    const ScaleInputResult r = scale_.handle_input(
+        p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursorRow,
+        s_.scaleCursorColumn, action);
+    if (r.newKey >= 0) p.scaleKey = r.newKey;
+    return r.modified;
+}
+
 }  // namespace pt::ui

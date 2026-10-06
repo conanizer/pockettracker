@@ -32,33 +32,51 @@ const InputDispatcher::Layer* InputDispatcher::top_layer() const {
     return nullptr;
 }
 
-// Every screen's own buttons. A gesture its handler passes on runs the gesture's generic path.
-const InputDispatcher::ScreenHandler InputDispatcher::SCREENS[] = {
-    {ScreenType::SAMPLE_EDITOR, &InputDispatcher::sample_editor_screen},
-    {ScreenType::FILE_BROWSER,  &InputDispatcher::file_browser_screen},
-    {ScreenType::INSTRUMENT,    &InputDispatcher::instrument_screen},
-    {ScreenType::INST_POOL,     &InputDispatcher::pool_screen},
-    {ScreenType::MODS,          &InputDispatcher::mods_screen},
-    {ScreenType::PROJECT,       &InputDispatcher::project_screen},
-    {ScreenType::SETTINGS,      &InputDispatcher::settings_screen},
-    {ScreenType::MIDI,          &InputDispatcher::midi_screen},
-    {ScreenType::MIDI_MAP,      &InputDispatcher::midi_map_screen},
-    {ScreenType::SONG,          &InputDispatcher::song_screen},
-    {ScreenType::CHAIN,         &InputDispatcher::chain_screen},
-    {ScreenType::PHRASE,        &InputDispatcher::phrase_screen},
-    {ScreenType::TABLE,         &InputDispatcher::table_screen},
-    {ScreenType::GROOVE,        &InputDispatcher::groove_screen},
-    {ScreenType::SCALE,         &InputDispatcher::scale_screen},
-    {ScreenType::MIXER,         &InputDispatcher::mixer_screen},
-    {ScreenType::EFFECTS,       &InputDispatcher::effects_screen},
+// The grids: SONG, CHAIN and PHRASE share one cursor; TABLE keeps its own.
+constexpr GridCursor SONG_GRID{&AppState::cursorRow, &AppState::cursorColumn, 255, 8};
+constexpr GridCursor CHAIN_GRID{&AppState::cursorRow, &AppState::cursorColumn, 15, 2};
+constexpr GridCursor PHRASE_GRID{&AppState::cursorRow, &AppState::cursorColumn, 15, 9};
+constexpr GridCursor TABLE_GRID{&AppState::tableCursorRow, &AppState::tableCursorColumn, 15, 8};
+
+// Every screen: a gesture its handler passes on runs the gesture's generic path, which asks the same
+// row for the cell under the cursor and for the edit.
+using D = InputDispatcher;
+const D::ScreenHandler D::SCREENS[] = {
+    {ScreenType::SAMPLE_EDITOR, &D::sample_editor_screen, &D::sample_editor_context, &D::sample_editor_edit, nullptr, nullptr},
+    {ScreenType::FILE_BROWSER,  &D::file_browser_screen,  nullptr,                   nullptr,                nullptr, nullptr},
+    {ScreenType::INSTRUMENT,    &D::instrument_screen,    &D::instrument_context,    &D::instrument_edit,    &D::instrument_knob, nullptr},
+    {ScreenType::INST_POOL,     &D::pool_screen,          &D::pool_context,          &D::pool_edit,          nullptr, nullptr},
+    {ScreenType::MODS,          &D::mods_screen,          &D::mods_context,          &D::mods_edit,          nullptr, nullptr},
+    {ScreenType::PROJECT,       &D::project_screen,       &D::project_context,       &D::project_edit,       nullptr, nullptr},
+    {ScreenType::SETTINGS,      &D::settings_screen,      &D::settings_context,      &D::settings_edit,      nullptr, nullptr},
+    {ScreenType::MIDI,          &D::midi_screen,          &D::midi_context,          &D::midi_edit,          nullptr, nullptr},
+    {ScreenType::MIDI_MAP,      &D::midi_map_screen,      &D::midi_map_context,      &D::midi_map_edit,      nullptr, nullptr},
+    {ScreenType::SONG,          &D::song_screen,          &D::song_context,          &D::song_edit,          nullptr, &SONG_GRID},
+    {ScreenType::CHAIN,         &D::chain_screen,         &D::chain_context,         &D::chain_edit,         nullptr, &CHAIN_GRID},
+    {ScreenType::PHRASE,        &D::phrase_screen,        &D::phrase_context,        &D::phrase_edit,        nullptr, &PHRASE_GRID},
+    {ScreenType::TABLE,         &D::table_screen,         &D::table_context,         &D::table_edit,         nullptr, &TABLE_GRID},
+    {ScreenType::GROOVE,        &D::groove_screen,        &D::groove_context,        &D::groove_edit,        nullptr, nullptr},
+    {ScreenType::SCALE,         &D::scale_screen,         &D::scale_context,         &D::scale_edit,         nullptr, nullptr},
+    {ScreenType::MIXER,         &D::mixer_screen,         &D::mixer_context,         &D::mixer_edit,         &D::mixer_knob, nullptr},
+    {ScreenType::EFFECTS,       &D::effects_screen,       &D::effects_context,       &D::effects_edit,       &D::effects_knob, nullptr},
 };
+
+const InputDispatcher::ScreenHandler* InputDispatcher::screen() const {
+    for (const ScreenHandler& h : SCREENS)
+        if (h.id == s_.currentScreen) return &h;
+    return nullptr;
+}
+
+const GridCursor* InputDispatcher::grid() const {
+    const ScreenHandler* h = screen();
+    return h ? h->grid : nullptr;
+}
 
 bool InputDispatcher::route(Gesture g) {
     if (const Layer* top = top_layer())
         if ((this->*top->handle)(g) == GestureResult::TAKEN) return true;
-    for (const ScreenHandler& screen : SCREENS)
-        if (screen.id == s_.currentScreen) return (this->*screen.handle)(g) == GestureResult::TAKEN;
-    return false;
+    const ScreenHandler* h = screen();
+    return h && (this->*h->handle)(g) == GestureResult::TAKEN;
 }
 
 }  // namespace pt::ui

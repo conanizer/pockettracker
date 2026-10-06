@@ -203,4 +203,43 @@ void InputDispatcher::settings_action() {
     }
 }
 
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+CursorContext InputDispatcher::project_context() const {
+    const Project& p = *s_.project;
+    ProjectState prs{p};
+    prs.cursorRow    = s_.projectCursorRow;
+    prs.cursorColumn = s_.projectCursorColumn;
+    prs.caps         = s_.caps;
+    return project_.cursor_context(prs);
+}
+
+bool InputDispatcher::project_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    return project_
+        .handle_input(p, s_.projectCursorRow, s_.projectCursorColumn, action)
+        .modified;
+}
+
+CursorContext InputDispatcher::settings_context() const {
+    SettingsState ss{s_.settings};
+    ss.cursorRow    = s_.settingsCursorRow;
+    ss.cursorColumn = s_.settingsCursorColumn;
+    ss.caps         = s_.caps;
+    ss.theme        = s_.theme;   // VISUALIZER's value lives on the theme
+    return settings_.cursor_context(ss);
+}
+
+// ⚠️ SETTINGS edits the SETTINGS, not the project — `false`, so no mark_modified(): a visualizer
+// change must not make a song dirty or prompt at NEW / EXIT. The shell writes settings.json.
+bool InputDispatcher::settings_edit(const InputAction& action) {
+    const bool navBefore = s_.settings.navSongRelative;
+    settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
+                           s_.settingsCursorColumn, action);
+    // ⚠️ Turning NAV on must land the pointer on a real cell, or the first R+RIGHT is refused
+    // silently.
+    if (!navBefore && s_.settings.navSongRelative) clamp_song_pointer(s_);
+    return false;
+}
+
 }  // namespace pt::ui

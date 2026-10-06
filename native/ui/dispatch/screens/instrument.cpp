@@ -226,4 +226,76 @@ void InputDispatcher::toggle_instrument_type(int delta) {
     s_.statusSuccess = true;
 }
 
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+CursorContext InputDispatcher::instrument_context() const {
+    const Project& p = *s_.project;
+    InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+    is.cursorRow     = s_.instrumentCursorRow;
+    is.cursorColumn  = s_.instrumentCursorColumn;
+    // The PRESET row's range is the SF2's own list length.
+    is.sfPresetName  = s_.sfPresetName;
+    is.sfPresetCount = s_.sfPresetCount;
+    is.sfPresetIndex = s_.sfPresetIndex;
+    is.allowOscLoop  = s_.caps.loopWindow;
+    return instrument_.cursor_context(is);
+}
+
+bool InputDispatcher::instrument_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    const InstrumentInputResult r = instrument_.handle_input(
+        p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursorRow,
+        s_.instrumentCursorColumn, action);
+
+    // The PRESET row: the bank+preset behind an index live in the SF2's list, which only the
+    // engine has opened — resolved here so the module stays a pure function of the Project.
+    if (r.presetIndexChanged) host_.set_sf_preset_by_index(s_.currentInstrument, r.presetIndex);
+    return r.modified;
+}
+
+songcore::MapTarget InputDispatcher::instrument_knob() const {
+    const Project& p = *s_.project;
+    InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+    is.cursorRow    = s_.instrumentCursorRow;
+    is.cursorColumn = s_.instrumentCursorColumn;
+    // The module holds the instrument by reference and never knew its number — finished here.
+    songcore::MapTarget t = instrument_.map_target(is);
+    t.scope = static_cast<uint8_t>(s_.currentInstrument);
+    return t;
+}
+
+CursorContext InputDispatcher::pool_context() const {
+    const Project& p = *s_.project;
+    InstrumentPoolState ps{p};
+    ps.selectedInstrument = s_.currentInstrument;
+    ps.cursorColumn       = s_.poolCursorColumn;
+    return pool_.cursor_context(ps);
+}
+
+bool InputDispatcher::pool_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    return pool_.handle_input(p.instruments[static_cast<size_t>(s_.currentInstrument)],
+                              s_.poolCursorColumn, action);
+}
+
+CursorContext InputDispatcher::mods_context() const {
+    const Project& p = *s_.project;
+    ModulationState ms{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+    ms.cursorRow  = s_.modCursorRow;
+    ms.cursorPair = s_.modCursorPair;
+    ms.cursorSide = s_.modCursorSide;
+    return mods_.cursor_context(ms);
+}
+
+bool InputDispatcher::mods_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    ModulationState ms{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+    ms.cursorPair = s_.modCursorPair;
+    ms.cursorSide = s_.modCursorSide;
+    return mods_
+        .handle_input(p.instruments[static_cast<size_t>(s_.currentInstrument)],
+                      ms.active_slot_index(), s_.modCursorRow, action)
+        .modified;
+}
+
 }  // namespace pt::ui

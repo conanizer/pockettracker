@@ -231,48 +231,6 @@ InputDispatcher::BootRecovery InputDispatcher::boot_recovery() {
 
 // ─── The cursor ──────────────────────────────────────────────────────────────────────────────────
 
-int InputDispatcher::cursor_row() const {
-    switch (s_.currentScreen) {
-        case ScreenType::TABLE:  return s_.tableCursorRow;
-        case ScreenType::GROOVE: return s_.grooveCursorRow;
-        case ScreenType::SCALE:  return s_.scaleCursorRow;
-        default:                 return s_.cursorRow;
-    }
-}
-
-int InputDispatcher::cursor_column() const {
-    switch (s_.currentScreen) {
-        case ScreenType::TABLE:  return s_.tableCursorColumn;
-        case ScreenType::GROOVE: return 1;
-        case ScreenType::SCALE:  return 1;
-        default:                 return s_.cursorColumn;
-    }
-}
-
-void InputDispatcher::set_cursor_row(int row) {
-    switch (s_.currentScreen) {
-        case ScreenType::TABLE:  s_.tableCursorRow = row;  break;
-        case ScreenType::GROOVE: s_.grooveCursorRow = row; break;
-        case ScreenType::SCALE:  s_.scaleCursorRow = row;  break;
-        default:                 s_.cursorRow = row;       break;
-    }
-}
-
-int InputDispatcher::max_selection_column() const {
-    switch (s_.currentScreen) {
-        case ScreenType::PHRASE: return 9;
-        case ScreenType::CHAIN:  return 2;
-        case ScreenType::SONG:   return 8;
-        case ScreenType::TABLE:  return 8;
-        default:                 return 1;
-    }
-}
-
-int InputDispatcher::max_selection_row() const {
-    // SONG is 256 rows deep and shows 16: a SCREEN-scope selection there is the whole arrangement.
-    return (s_.currentScreen == ScreenType::SONG) ? 255 : 15;
-}
-
 bool InputDispatcher::on_instrument_screen() const {
     return s_.currentScreen == ScreenType::INSTRUMENT ||
            s_.currentScreen == ScreenType::INST_POOL ||
@@ -283,301 +241,17 @@ bool InputDispatcher::on_globals_screen() const {
     return s_.currentScreen == ScreenType::MIXER || s_.currentScreen == ScreenType::EFFECTS;
 }
 
-/** The GROOVE screen's state, assembled once for both the cursor context and the edit. */
-GrooveState InputDispatcher::groove_state(const Project& p) const {
-    GrooveState gs{p.grooves[static_cast<size_t>(s_.currentGroove)]};
-    gs.cursorRow    = s_.grooveCursorRow;
-    gs.cursorColumn = s_.grooveCursorColumn;
-    gs.panelRow     = s_.groovePanelRow;
-    gs.panelColumn  = s_.groovePanelColumn;
-    gs.quantize     = s_.grooveQuantize;
-    return gs;
-}
-
 CursorContext InputDispatcher::cursor_context() const {
-    const Project& p = *s_.project;
-    switch (s_.currentScreen) {
-        case ScreenType::SONG: {
-            SongEditorState ss{p};
-            ss.cursorRow   = s_.cursorRow;
-            ss.cursorTrack = s_.cursorColumn;  // on SONG the column IS the track
-            return song_.cursor_context(ss);
-        }
-        case ScreenType::CHAIN: {
-            ChainEditorState cs{p.chains[static_cast<size_t>(s_.currentChain)]};
-            cs.cursorRow    = s_.cursorRow;
-            cs.cursorColumn = s_.cursorColumn;
-            return chain_.cursor_context(cs);
-        }
-        case ScreenType::PHRASE: {
-            PhraseEditorState ps{p.phrases[static_cast<size_t>(s_.currentPhrase)]};
-            ps.cursorRow        = s_.cursorRow;
-            ps.cursorColumn     = s_.cursorColumn;
-            ps.effectTypeCount  = visible_effect_type_count();
-            // ⚠️ The CURSOR needs the project too: the NOTE cell's scale comes from it, and null reads as
-            // chromatic with no error. `layout.cpp` sets its own, separate PhraseEditorState.
-            ps.project          = &p;
-            ps.insertInstrument = s_.lastEditedInstrument;
-            return phrase_.cursor_context(ps);
-        }
-        case ScreenType::TABLE: {
-            TableState ts{p.tables[static_cast<size_t>(s_.currentTable)]};
-            ts.cursorRow       = s_.tableCursorRow;
-            ts.cursorColumn    = s_.tableCursorColumn;
-            ts.effectTypeCount = visible_effect_type_count();
-            return table_.cursor_context(ts);
-        }
-        case ScreenType::GROOVE:
-            return groove_.cursor_context(groove_state(p));
-        case ScreenType::SCALE: {
-            ScaleState cs{p.scales[static_cast<size_t>(s_.currentScale)]};
-            cs.key          = p.scaleKey;
-            cs.cursorRow    = s_.scaleCursorRow;
-            cs.cursorColumn = s_.scaleCursorColumn;
-            return scale_.cursor_context(cs);
-        }
-
-        case ScreenType::INSTRUMENT: {
-            InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
-            is.cursorRow     = s_.instrumentCursorRow;
-            is.cursorColumn  = s_.instrumentCursorColumn;
-            // The PRESET row's range is the SF2's own list length.
-            is.sfPresetName  = s_.sfPresetName;
-            is.sfPresetCount = s_.sfPresetCount;
-            is.sfPresetIndex = s_.sfPresetIndex;
-            is.allowOscLoop  = s_.caps.loopWindow;
-            return instrument_.cursor_context(is);
-        }
-
-        case ScreenType::INST_POOL: {
-            InstrumentPoolState ps{p};
-            ps.selectedInstrument = s_.currentInstrument;
-            ps.cursorColumn       = s_.poolCursorColumn;
-            return pool_.cursor_context(ps);
-        }
-
-        case ScreenType::MODS: {
-            ModulationState ms{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
-            ms.cursorRow  = s_.modCursorRow;
-            ms.cursorPair = s_.modCursorPair;
-            ms.cursorSide = s_.modCursorSide;
-            return mods_.cursor_context(ms);
-        }
-
-        case ScreenType::MIXER: {
-            MixerState ms{p};
-            ms.cursorColumn   = s_.mixerCursorColumn;
-            ms.mixerMasterRow = s_.mixerMasterRow;
-            return mixer_.cursor_context(ms);
-        }
-
-        case ScreenType::EFFECTS: {
-            EffectState es{p};
-            es.cursorRow = s_.effectsCursorRow;
-            return effects_.cursor_context(es);
-        }
-
-        case ScreenType::PROJECT: {
-            ProjectState prs{p};
-            prs.cursorRow    = s_.projectCursorRow;
-            prs.cursorColumn = s_.projectCursorColumn;
-            prs.caps         = s_.caps;
-            return project_.cursor_context(prs);
-        }
-
-        case ScreenType::SETTINGS: {
-            SettingsState ss{s_.settings};
-            ss.cursorRow    = s_.settingsCursorRow;
-            ss.cursorColumn = s_.settingsCursorColumn;
-            ss.caps         = s_.caps;
-            ss.theme        = s_.theme;   // VISUALIZER's value lives on the theme
-            return settings_.cursor_context(ss);
-        }
-
-        case ScreenType::MIDI: {
-            MidiState ms{*s_.project, s_.settings, s_.midiDeviceNames, s_.midiInDeviceNames};
-            ms.lastCcChannel  = s_.midiInCcChannel;
-            ms.cursorRow      = s_.midiCursorRow;
-            ms.cursorColumn   = s_.midiCursorColumn;
-            ms.deviceIndex    = s_.midiDeviceIndex;
-            ms.inDeviceIndex  = s_.midiInDeviceIndex;
-            ms.autoOffsetMs   = s_.midiAutoOffsetMs;
-            ms.caps           = s_.caps;
-            return midi_.cursor_context(ms);
-        }
-
-        case ScreenType::MIDI_MAP: {
-            MidiMapState mm{p};
-            mm.cursorRow    = s_.midiMapCursorRow;
-            mm.cursorColumn = s_.midiMapCursorColumn;
-            return midiMap_.cursor_context(mm);
-        }
-
-        case ScreenType::SAMPLE_EDITOR:
-            return sample_.cursor_context(s_.sampleEditor);
-
-        default:
-            return cc::none();  // a placeholder screen has nothing to edit
-    }
+    const ScreenHandler* h = screen();
+    if (!h || !h->context) return cc::none();  // nothing to edit here
+    return (this->*h->context)();
 }
 
 // ─── Applying an edit ────────────────────────────────────────────────────────────────────────────
 
 bool InputDispatcher::apply_edit(const InputAction& action) {
-    Project& p = host_.edit_project();  // the SAME Project the Sequencer reads
-
-    switch (s_.currentScreen) {
-        case ScreenType::SONG: {
-            const SongInputResult r = song_.handle_input(p, s_.cursorRow, s_.cursorColumn, action);
-            if (r.hasChain) s_.lastEditedChain = r.lastEditedChain;
-            return r.modified;
-        }
-
-        case ScreenType::CHAIN: {
-            const ChainInputResult r = chain_.handle_input(
-                p.chains[static_cast<size_t>(s_.currentChain)], s_.cursorRow, s_.cursorColumn, action);
-            if (r.hasPhrase)    s_.lastEditedPhrase    = r.lastEditedPhrase;
-            if (r.hasTranspose) s_.lastEditedTranspose = r.lastEditedTranspose;
-            return r.modified;
-        }
-
-        case ScreenType::PHRASE: {
-            Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
-            const PhraseInputResult r = phrase_.handle_input(ph, s_.cursorRow, s_.cursorColumn, action);
-            if (!r.modified) return false;
-
-            // "Last edited" and the audition: only a step WITH a note is remembered, and only a NOTE
-            // edit auditions — dialling a velocity must not retrigger the voice.
-            const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
-            if ((r.hasNote || r.hasVolume || r.hasInstrument) && step.note != Note::EMPTY()) {
-                s_.lastEditedNote       = step.note;
-                s_.lastEditedVolume     = step.volume;
-                s_.lastEditedInstrument = step.instrument;
-                if (r.hasNote) preview_held_note();
-            }
-            // A+B under a held audition: the note is gone, so is the sound.
-            if (heldNotePreview_ && step.note == Note::EMPTY()) {
-                heldNotePreview_ = false;
-                host_.stop_preview(/*cut=*/true);
-            }
-            return true;
-        }
-
-        case ScreenType::TABLE:
-            return table_
-                .handle_input(p.tables[static_cast<size_t>(s_.currentTable)], s_.tableCursorRow,
-                              s_.tableCursorColumn, action)
-                .modified;
-
-        case ScreenType::GROOVE: {
-            const GrooveInputResult r = groove_.handle_input(
-                p.grooves[static_cast<size_t>(s_.currentGroove)], groove_state(p), action);
-            // ⚠️ The quantize pointer is not song data: it comes back separately, and moving it must
-            // not dirty the project or arm an autosave.
-            if (r.newQuantize >= 0) s_.grooveQuantize = r.newQuantize;
-            return r.modified;
-        }
-
-        case ScreenType::SCALE: {
-            // ⚠️ The KEY row edits the PROJECT, not the scale handed in; the module returns the new key
-            // rather than holding a Project.
-            const ScaleInputResult r = scale_.handle_input(
-                p.scales[static_cast<size_t>(s_.currentScale)], p.scaleKey, s_.scaleCursorRow,
-                s_.scaleCursorColumn, action);
-            if (r.newKey >= 0) p.scaleKey = r.newKey;
-            return r.modified;
-        }
-
-        case ScreenType::INSTRUMENT: {
-            const InstrumentInputResult r = instrument_.handle_input(
-                p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursorRow,
-                s_.instrumentCursorColumn, action);
-
-            // The PRESET row: the bank+preset behind an index live in the SF2's list, which only the
-            // engine has opened — resolved here so the module stays a pure function of the Project.
-            if (r.presetIndexChanged) host_.set_sf_preset_by_index(s_.currentInstrument, r.presetIndex);
-            return r.modified;
-        }
-
-        case ScreenType::INST_POOL:
-            return pool_.handle_input(p.instruments[static_cast<size_t>(s_.currentInstrument)],
-                                      s_.poolCursorColumn, action);
-
-        case ScreenType::MODS: {
-            ModulationState ms{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
-            ms.cursorPair = s_.modCursorPair;
-            ms.cursorSide = s_.modCursorSide;
-            return mods_
-                .handle_input(p.instruments[static_cast<size_t>(s_.currentInstrument)],
-                              ms.active_slot_index(), s_.modCursorRow, action)
-                .modified;
-        }
-
-        // MIXER and EFFECTS take the whole PROJECT: their fields are scattered across it.
-        case ScreenType::MIXER:
-            return mixer_.handle_input(p, s_.mixerMasterRow, s_.mixerCursorColumn, action).modified;
-
-        case ScreenType::EFFECTS:
-            return effects_.handle_input(p, s_.effectsCursorRow, action).modified;
-
-        case ScreenType::PROJECT:
-            return project_
-                .handle_input(p, s_.projectCursorRow, s_.projectCursorColumn, action)
-                .modified;
-
-        // ⚠️ SETTINGS edits the SETTINGS, not the project — `false`, so no mark_modified(): a visualizer
-        // change must not make a song dirty or prompt at NEW / EXIT. The shell writes settings.json.
-        case ScreenType::SETTINGS: {
-            const bool navBefore = s_.settings.navSongRelative;
-            settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
-                                   s_.settingsCursorColumn, action);
-            // ⚠️ Turning NAV on must land the pointer on a real cell, or the first R+RIGHT is refused
-            // silently.
-            if (!navBefore && s_.settings.navSongRelative) clamp_song_pointer(s_);
-            return false;
-        }
-
-        // ⚠️ MIDI edits BOTH: PROG CHG is a Project field (dirties the song, like TEMPO); OUTPUT, INPUT
-        // and OFFSET are settings.json's and must not.
-        case ScreenType::MIDI: {
-            const MidiInputResult r =
-                midi_.handle_input(p, s_.settings, s_.midiCursorRow, s_.midiCursorColumn,
-                                   s_.midiDeviceNames, s_.midiInDeviceNames, action);
-            // The side effects the module cannot perform — it has no port.
-            if (r.deviceChanged)   apply_midi_device();
-            if (r.inDeviceChanged) apply_midi_in_device();
-            if (r.offsetChanged)   host_.set_midi_offset_ms(
-                                       midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
-            if (r.syncChanged)     host_.set_midi_sync_out(s_.settings.midiSyncOut);
-            if (r.controlChannelChanged)
-                host_.set_midi_control_channel(s_.settings.midiControlChannel);
-            return r.projectModified;
-        }
-
-        // ⚠️ Mappings are the SONG's, so every edit dirties it. Nothing is pushed: a mapping moves no
-        // parameter until a knob turns.
-        case ScreenType::MIDI_MAP: {
-            const MidiMapInputResult r = midiMap_.handle_input(p, s_.midiMapCursorRow,
-                                                               s_.midiMapCursorColumn, action);
-            // A delete leaves the cursor one past the end — the ADD row, where it should land.
-            if (r.rowDeleted) clamp_midi_map_cursor();
-            return r.modified;
-        }
-
-        case ScreenType::SAMPLE_EDITOR: {
-            const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
-            if (r.rateModeChanged || r.bitDepthChanged) apply_sample_rate_and_bits();
-
-            // ⚠️ `false`: the editor's session (zoom, selection, slice index, pending pitch) is not the
-            // document. `true` would dirty the song and arm an autosave on a held A+UP on ZOOM.
-            // RATE and BIT, which DO rebuild the buffer, push for themselves
-            // (`apply_sample_rate_and_bits()`).
-            return false;
-        }
-
-        default:
-            return false;
-    }
+    const ScreenHandler* h = screen();
+    return h && h->edit && (this->*h->edit)(action);
 }
 
 void InputDispatcher::mark_dirty_and_arm_autosave() {
@@ -626,40 +300,13 @@ void InputDispatcher::run_mapped_cc_dirty() {
 void InputDispatcher::on_r_held(bool down) { host_.set_midi_learn_armed(down); }
 
 songcore::MapTarget InputDispatcher::map_target() const {
-    const Project& p = *s_.project;
-
     // ⚠️ A modal owns the screen; the cursor underneath is not what the user aims at. A knob is the one
     // "press" that bypasses the mapper.
     if (modal_backdrop_active(s_) || s_.eq.isOpen) return {};
 
-    switch (s_.currentScreen) {
-        case ScreenType::MIXER: {
-            MixerState ms{p};
-            ms.cursorColumn   = s_.mixerCursorColumn;
-            ms.mixerMasterRow = s_.mixerMasterRow;
-            return mixer_.map_target(ms);
-        }
-
-        case ScreenType::EFFECTS: {
-            EffectState es{p};
-            es.cursorRow = s_.effectsCursorRow;
-            return effects_.map_target(es);
-        }
-
-        case ScreenType::INSTRUMENT: {
-            InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
-            is.cursorRow    = s_.instrumentCursorRow;
-            is.cursorColumn = s_.instrumentCursorColumn;
-            // The module holds the instrument by reference and never knew its number — finished here.
-            songcore::MapTarget t = instrument_.map_target(is);
-            t.scope = static_cast<uint8_t>(s_.currentInstrument);
-            return t;
-        }
-
-        // Every other screen names no parameter a knob sweeps.
-        default:
-            return {};
-    }
+    const ScreenHandler* h = screen();
+    if (!h || !h->knob) return {};  // no parameter here a knob sweeps
+    return (this->*h->knob)();
 }
 
 void InputDispatcher::run_midi_learn() {
@@ -743,54 +390,40 @@ void InputDispatcher::generic_input(InputAction (*fn)(const CursorContext&)) {
 }
 
 void InputDispatcher::selection_or_single(InputAction (*fn)(const CursorContext&)) {
-    if (!s_.selection.active) {
+    const GridCursor* g = grid();
+    if (!s_.selection.active || !g) {
         generic_input(fn);
         return;
     }
     // Every row of the selection through the SAME path, the cursor walked down and put back — so a
     // column can never behave differently under a selection.
-    const SelectionBounds b       = s_.selection.bounds();
-    const int             savedRow = cursor_row();
+    const SelectionBounds b        = s_.selection.bounds();
+    int&                  row      = s_.*g->row;
+    const int             savedRow = row;
     bool                  any      = false;
 
-    switch (s_.currentScreen) {
-        case ScreenType::PHRASE:
-        case ScreenType::CHAIN:
-        case ScreenType::SONG:
-        case ScreenType::TABLE:
-            for (int row = b.topLeftRow; row <= b.bottomRightRow; ++row) {
-                set_cursor_row(row);
-                const InputAction action = fn(cursor_context());
-                if (action.type != ActionType::NONE && apply_edit(action)) any = true;
-            }
-            set_cursor_row(savedRow);
-            if (any) mark_modified();
-            break;
-
-        default:
-            generic_input(fn);
-            break;
+    for (int r = b.topLeftRow; r <= b.bottomRightRow; ++r) {
+        row = r;
+        const InputAction action = fn(cursor_context());
+        if (action.type != ActionType::NONE && apply_edit(action)) any = true;
     }
+    row = savedRow;
+    if (any) mark_modified();
 }
 
 void InputDispatcher::dpad_nav(NavDir direction) {
-    if (s_.selection.active) {
+    const GridCursor* g = grid();
+    if (s_.selection.active && g) {
         const CursorPosition edgeBefore = s_.selection.end;
-        s_.selection.expand(direction, max_selection_row(), max_selection_column());
+        s_.selection.expand(direction, g->maxRow, g->maxColumn);
 
         // Drag the CURSOR with the selection's active edge so it stays on screen (a SONG selection past
         // row 16). Only when the edge MOVED, so a clamp or SCREEN scope cannot teleport it.
         const CursorPosition edge = s_.selection.end;
         if (edge != edgeBefore) {
-            const ScreenType sc = s_.currentScreen;
-            if (sc == ScreenType::PHRASE || sc == ScreenType::CHAIN || sc == ScreenType::SONG) {
-                s_.cursorRow    = edge.row;
-                s_.cursorColumn = edge.column;
-                if (sc == ScreenType::SONG) scroll_song_to_row(s_, edge.row);
-            } else if (sc == ScreenType::TABLE) {
-                s_.tableCursorRow    = edge.row;
-                s_.tableCursorColumn = edge.column;
-            }
+            s_.*g->row    = edge.row;
+            s_.*g->column = edge.column;
+            if (s_.currentScreen == ScreenType::SONG) scroll_song_to_row(s_, edge.row);
         }
         return;
     }

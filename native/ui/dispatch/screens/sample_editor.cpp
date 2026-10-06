@@ -911,4 +911,21 @@ void InputDispatcher::run_due_sample_preview_restore(bool force) {
     host_.finish_sample_preview(samplePending_.previewRestoreInst);
 }
 
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+CursorContext InputDispatcher::sample_editor_context() const {
+    return sample_.cursor_context(s_.sampleEditor);
+}
+
+bool InputDispatcher::sample_editor_edit(const InputAction& action) {
+    const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
+    if (r.rateModeChanged || r.bitDepthChanged) apply_sample_rate_and_bits();
+
+    // ⚠️ `false`: the editor's session (zoom, selection, slice index, pending pitch) is not the
+    // document. `true` would dirty the song and arm an autosave on a held A+UP on ZOOM.
+    // RATE and BIT, which DO rebuild the buffer, push for themselves
+    // (`apply_sample_rate_and_bits()`).
+    return false;
+}
+
 }  // namespace pt::ui

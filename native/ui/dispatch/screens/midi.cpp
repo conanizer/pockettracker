@@ -103,4 +103,55 @@ void InputDispatcher::midi_map_action() {
     mark_modified();
 }
 
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+CursorContext InputDispatcher::midi_context() const {
+    MidiState ms{*s_.project, s_.settings, s_.midiDeviceNames, s_.midiInDeviceNames};
+    ms.lastCcChannel  = s_.midiInCcChannel;
+    ms.cursorRow      = s_.midiCursorRow;
+    ms.cursorColumn   = s_.midiCursorColumn;
+    ms.deviceIndex    = s_.midiDeviceIndex;
+    ms.inDeviceIndex  = s_.midiInDeviceIndex;
+    ms.autoOffsetMs   = s_.midiAutoOffsetMs;
+    ms.caps           = s_.caps;
+    return midi_.cursor_context(ms);
+}
+
+// ⚠️ MIDI edits BOTH: PROG CHG is a Project field (dirties the song, like TEMPO); OUTPUT, INPUT
+// and OFFSET are settings.json's and must not.
+bool InputDispatcher::midi_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    const MidiInputResult r =
+        midi_.handle_input(p, s_.settings, s_.midiCursorRow, s_.midiCursorColumn,
+                           s_.midiDeviceNames, s_.midiInDeviceNames, action);
+    // The side effects the module cannot perform — it has no port.
+    if (r.deviceChanged)   apply_midi_device();
+    if (r.inDeviceChanged) apply_midi_in_device();
+    if (r.offsetChanged)   host_.set_midi_offset_ms(
+                               midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
+    if (r.syncChanged)     host_.set_midi_sync_out(s_.settings.midiSyncOut);
+    if (r.controlChannelChanged)
+        host_.set_midi_control_channel(s_.settings.midiControlChannel);
+    return r.projectModified;
+}
+
+CursorContext InputDispatcher::midi_map_context() const {
+    const Project& p = *s_.project;
+    MidiMapState mm{p};
+    mm.cursorRow    = s_.midiMapCursorRow;
+    mm.cursorColumn = s_.midiMapCursorColumn;
+    return midiMap_.cursor_context(mm);
+}
+
+// ⚠️ Mappings are the SONG's, so every edit dirties it. Nothing is pushed: a mapping moves no
+// parameter until a knob turns.
+bool InputDispatcher::midi_map_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    const MidiMapInputResult r = midiMap_.handle_input(p, s_.midiMapCursorRow,
+                                                       s_.midiMapCursorColumn, action);
+    // A delete leaves the cursor one past the end — the ADD row, where it should land.
+    if (r.rowDeleted) clamp_midi_map_cursor();
+    return r.modified;
+}
+
 }  // namespace pt::ui

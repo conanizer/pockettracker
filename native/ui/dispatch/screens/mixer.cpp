@@ -42,4 +42,47 @@ GestureResult InputDispatcher::effects_screen(Gesture g) {
     }
 }
 
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+CursorContext InputDispatcher::mixer_context() const {
+    const Project& p = *s_.project;
+    MixerState ms{p};
+    ms.cursorColumn   = s_.mixerCursorColumn;
+    ms.mixerMasterRow = s_.mixerMasterRow;
+    return mixer_.cursor_context(ms);
+}
+
+// MIXER and EFFECTS take the whole PROJECT: their fields are scattered across it.
+bool InputDispatcher::mixer_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    return mixer_.handle_input(p, s_.mixerMasterRow, s_.mixerCursorColumn, action).modified;
+}
+
+songcore::MapTarget InputDispatcher::mixer_knob() const {
+    const Project& p = *s_.project;
+    MixerState ms{p};
+    ms.cursorColumn   = s_.mixerCursorColumn;
+    ms.mixerMasterRow = s_.mixerMasterRow;
+    return mixer_.map_target(ms);
+}
+
+CursorContext InputDispatcher::effects_context() const {
+    const Project& p = *s_.project;
+    EffectState es{p};
+    es.cursorRow = s_.effectsCursorRow;
+    return effects_.cursor_context(es);
+}
+
+bool InputDispatcher::effects_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    return effects_.handle_input(p, s_.effectsCursorRow, action).modified;
+}
+
+songcore::MapTarget InputDispatcher::effects_knob() const {
+    const Project& p = *s_.project;
+    EffectState es{p};
+    es.cursorRow = s_.effectsCursorRow;
+    return effects_.map_target(es);
+}
+
 }  // namespace pt::ui

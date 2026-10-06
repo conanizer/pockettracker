@@ -228,10 +228,11 @@ GestureResult InputDispatcher::table_screen(Gesture g) {
 // ─── The selection's clipboard ───────────────────────────────────────────────────────────────────
 
 GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteTarget) {
+    const GridCursor& cursor = *grid();  // only the four grid screens call this
     switch (g) {
         case Gesture::L_B:
-            s_.selection.handle_select_b(now_ms_, cursor_row(), cursor_column(),
-                                         max_selection_column(), max_selection_row());
+            s_.selection.handle_select_b(now_ms_, s_.*cursor.row, s_.*cursor.column,
+                                         cursor.maxColumn, cursor.maxRow);
             return GestureResult::TAKEN;
 
         // Inside a selection: B copies, A+B deletes, L+A cuts — and each ends it. Outside one, B does
@@ -257,7 +258,7 @@ GestureResult InputDispatcher::grid_clipboard(Gesture g, ClipFn clip, int pasteT
                 return GestureResult::TAKEN;
             }
             const PasteResult r = clip_.paste(host_.edit_project(), s_.currentScreen, pasteTarget,
-                                              cursor_row(), cursor_column());
+                                              s_.*cursor.row, s_.*cursor.column);
             if (r.kind == PasteResult::Kind::SUCCESS && r.itemsPasted > 0) mark_modified();
             return GestureResult::TAKEN;
         }
@@ -631,6 +632,93 @@ bool InputDispatcher::live_row_armed(int songRow) const {
         if (!q.stop && q.targetRow == songRow) return true;
     }
     return false;
+}
+
+// ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
+
+CursorContext InputDispatcher::song_context() const {
+    const Project& p = *s_.project;
+    SongEditorState ss{p};
+    ss.cursorRow   = s_.cursorRow;
+    ss.cursorTrack = s_.cursorColumn;  // on SONG the column IS the track
+    return song_.cursor_context(ss);
+}
+
+bool InputDispatcher::song_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    const SongInputResult r = song_.handle_input(p, s_.cursorRow, s_.cursorColumn, action);
+    if (r.hasChain) s_.lastEditedChain = r.lastEditedChain;
+    return r.modified;
+}
+
+CursorContext InputDispatcher::chain_context() const {
+    const Project& p = *s_.project;
+    ChainEditorState cs{p.chains[static_cast<size_t>(s_.currentChain)]};
+    cs.cursorRow    = s_.cursorRow;
+    cs.cursorColumn = s_.cursorColumn;
+    return chain_.cursor_context(cs);
+}
+
+bool InputDispatcher::chain_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    const ChainInputResult r = chain_.handle_input(
+        p.chains[static_cast<size_t>(s_.currentChain)], s_.cursorRow, s_.cursorColumn, action);
+    if (r.hasPhrase)    s_.lastEditedPhrase    = r.lastEditedPhrase;
+    if (r.hasTranspose) s_.lastEditedTranspose = r.lastEditedTranspose;
+    return r.modified;
+}
+
+CursorContext InputDispatcher::phrase_context() const {
+    const Project& p = *s_.project;
+    PhraseEditorState ps{p.phrases[static_cast<size_t>(s_.currentPhrase)]};
+    ps.cursorRow        = s_.cursorRow;
+    ps.cursorColumn     = s_.cursorColumn;
+    ps.effectTypeCount  = visible_effect_type_count();
+    // ⚠️ The CURSOR needs the project too: the NOTE cell's scale comes from it, and null reads as
+    // chromatic with no error. `layout.cpp` sets its own, separate PhraseEditorState.
+    ps.project          = &p;
+    ps.insertInstrument = s_.lastEditedInstrument;
+    return phrase_.cursor_context(ps);
+}
+
+bool InputDispatcher::phrase_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
+    const PhraseInputResult r = phrase_.handle_input(ph, s_.cursorRow, s_.cursorColumn, action);
+    if (!r.modified) return false;
+
+    // "Last edited" and the audition: only a step WITH a note is remembered, and only a NOTE
+    // edit auditions — dialling a velocity must not retrigger the voice.
+    const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
+    if ((r.hasNote || r.hasVolume || r.hasInstrument) && step.note != Note::EMPTY()) {
+        s_.lastEditedNote       = step.note;
+        s_.lastEditedVolume     = step.volume;
+        s_.lastEditedInstrument = step.instrument;
+        if (r.hasNote) preview_held_note();
+    }
+    // A+B under a held audition: the note is gone, so is the sound.
+    if (heldNotePreview_ && step.note == Note::EMPTY()) {
+        heldNotePreview_ = false;
+        host_.stop_preview(/*cut=*/true);
+    }
+    return true;
+}
+
+CursorContext InputDispatcher::table_context() const {
+    const Project& p = *s_.project;
+    TableState ts{p.tables[static_cast<size_t>(s_.currentTable)]};
+    ts.cursorRow       = s_.tableCursorRow;
+    ts.cursorColumn    = s_.tableCursorColumn;
+    ts.effectTypeCount = visible_effect_type_count();
+    return table_.cursor_context(ts);
+}
+
+bool InputDispatcher::table_edit(const InputAction& action) {
+    Project& p = host_.edit_project();
+    return table_
+        .handle_input(p.tables[static_cast<size_t>(s_.currentTable)], s_.tableCursorRow,
+                      s_.tableCursorColumn, action)
+        .modified;
 }
 
 }  // namespace pt::ui
