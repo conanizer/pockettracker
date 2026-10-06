@@ -2,26 +2,21 @@
 
 // ─── Screen navigation ───────────────────────────────────────────────────────────────────────────
 //
-// The 5×5 screen grid R+DPAD moves around — the same grid `modules/navigation_map.h` draws. A cell you
-// can see but not reach, or a landing the map does not show, is the bug to watch for.
+// The 5×5 screen grid R+DPAD moves around. `SCREEN_GRID` is the one copy: the movement below and the
+// map in the corner (`modules/navigation_map.cpp`) both read it, so a screen is placed by adding it there.
 //
-//        col 0     col 1     col 2     col 3       col 4
-//  row 0                     SCALE     INST.POOL              ← column-specific
-//  row 1  PROJECT  PROJECT   GROOVE    MODS        PROJECT    ← column-specific
-//  row 2  SONG     CHAIN     PHRASE    INSTRUMENT  TABLE      ← the main row, always visible
-//  row 3  MIXER    MIXER     MIXER     MIXER       MIXER      ← shared
-//  row 4  EFFECTS  EFFECTS   EFFECTS   EFFECTS     EFFECTS    ← shared
-//
-// PROJECT / MIXER / EFFECTS have no column of their own; `previousColumn` remembers the one you came
-// from, so leaving them is relative to it. The new column travels with the new screen, or they desync.
-// The four `navigate_*` functions are PURE; `go_to_screen` applies the answer and the bookkeeping that
-// goes with it.
+// A screen in several columns (PROJECT / MIXER / EFFECTS) has no column of its own; `previousColumn`
+// remembers the one you came from, so leaving them is relative to it. The new column travels with the
+// new screen, or they desync. The four `navigate_*` functions are PURE; `go_to_screen` applies the
+// answer and the bookkeeping that goes with it.
 
 #include "app_state.h"
 #include "cursor_move.h"
+#include "mixer_cell_layout.h"
 #include "screen.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace pt::ui {
 
@@ -41,37 +36,40 @@ struct NavState {
     bool       instrumentFromPool = false;
 };
 
-/** The column a screen owns, or −1 for the shared screens (PROJECT / MIXER / EFFECTS) that own none. */
+inline constexpr int NAV_ROWS     = 5;
+inline constexpr int NAV_COLUMNS  = 5;
+inline constexpr int NAV_MAIN_ROW = 2;   // always drawn on the map; R+LEFT/RIGHT walk along it
+
+/** [row][column]. Empty where nothing is. Popups (SETTINGS, MIDI, the browser…) are not on it. */
+inline constexpr std::optional<ScreenType> SCREEN_GRID[NAV_ROWS][NAV_COLUMNS] = {
+    {std::nullopt,         std::nullopt,        ScreenType::SCALE,   ScreenType::INST_POOL,  std::nullopt},
+    {ScreenType::PROJECT,  ScreenType::PROJECT, ScreenType::GROOVE,  ScreenType::MODS,       ScreenType::PROJECT},
+    {ScreenType::SONG,     ScreenType::CHAIN,   ScreenType::PHRASE,  ScreenType::INSTRUMENT, ScreenType::TABLE},
+    {ScreenType::MIXER,    ScreenType::MIXER,   ScreenType::MIXER,   ScreenType::MIXER,      ScreenType::MIXER},
+    {ScreenType::EFFECTS,  ScreenType::EFFECTS, ScreenType::EFFECTS, ScreenType::EFFECTS,    ScreenType::EFFECTS},
+};
+
+/** The column a screen owns, or −1 for one in several columns or none (the popups). */
 inline int screen_column(ScreenType s) {
-    switch (s) {
-        case ScreenType::SONG:  return 0;
-        case ScreenType::CHAIN: return 1;
-        case ScreenType::PHRASE:
-        case ScreenType::GROOVE:
-        case ScreenType::SCALE: return 2;
-        case ScreenType::INSTRUMENT:
-        case ScreenType::MODS:
-        case ScreenType::INST_POOL: return 3;
-        case ScreenType::TABLE: return 4;
-        default: return -1;  // shared / popup — the caller substitutes previousColumn
-    }
+    int found = -1;
+    for (int row = 0; row < NAV_ROWS; ++row)
+        for (int col = 0; col < NAV_COLUMNS; ++col)
+            if (SCREEN_GRID[row][col] == s) {
+                if (found != -1 && found != col) return -1;
+                found = col;
+            }
+    return found;
 }
 
-/** The main-row (row 2) screen of a column. */
+/** The main-row screen of a column. */
 inline ScreenType main_screen_for_column(int column) {
-    switch (column) {
-        case 0:  return ScreenType::SONG;
-        case 1:  return ScreenType::CHAIN;
-        case 2:  return ScreenType::PHRASE;
-        case 3:  return ScreenType::INSTRUMENT;
-        case 4:  return ScreenType::TABLE;
-        default: return ScreenType::PHRASE;
-    }
+    if (column < 0 || column >= NAV_COLUMNS) return ScreenType::PHRASE;
+    return *SCREEN_GRID[NAV_MAIN_ROW][column];
 }
 
 inline bool is_main_row(ScreenType s) {
-    for (ScreenType m : MAIN_ROW_SCREENS)
-        if (m == s) return true;
+    for (const auto& cell : SCREEN_GRID[NAV_MAIN_ROW])
+        if (cell == s) return true;
     return false;
 }
 
@@ -82,78 +80,65 @@ inline int context_column(const NavState& s) {
     return (c == -1) ? s.previousColumn : c;
 }
 
-/**
- * Does R+LEFT/RIGHT step SIDEWAYS off this screen onto the MAIN row one column over? True for row 1
- * and the shared rows — walking along row 4 would change nothing you can see. Not INST.POOL (it owns
- * the fast-jump pair), SCALE (drops to its own column's main screen) or the popups.
- */
-inline bool exits_sideways_to_main_row(ScreenType s) {
-    return s == ScreenType::PROJECT || s == ScreenType::GROOVE || s == ScreenType::MODS ||
-           s == ScreenType::MIXER   || s == ScreenType::EFFECTS;
+/** The grid row a screen sits on (each sits on one), or −1 off the grid. */
+inline int screen_row(ScreenType s) {
+    for (int row = 0; row < NAV_ROWS; ++row)
+        for (const auto& cell : SCREEN_GRID[row])
+            if (cell == s) return row;
+    return -1;
 }
 
 /**
- * A POPUP: no cell in the grid — no column of its own, and not a shared row.
- * ⚠️⚠️ R+DPAD must not move off one; B is the only way out. Without this, R+LEFT from SETTINGS, MIDI or
- * MIDI MAPPING fell through to `main_screen_for_column(-1)` = PHRASE. Derived from `screen_column`
- * (what the map paints from), so a new popup is covered automatically.
+ * Does R+LEFT/RIGHT step SIDEWAYS off this screen onto the MAIN row one column over? True for rows 1,
+ * 3 and 4 — walking along row 4 would change nothing you can see. Row 0 drops to its own column's main
+ * screen instead (INST.POOL also owns a fast-jump pair, handled before this is asked).
  */
-inline bool is_popup(ScreenType s) {
-    return screen_column(s) == -1 && !exits_sideways_to_main_row(s);
+inline bool exits_sideways_to_main_row(ScreenType s) {
+    const int row = screen_row(s);
+    return row > 0 && row != NAV_MAIN_ROW;
+}
+
+/**
+ * A POPUP: no cell in the grid.
+ * ⚠️⚠️ R+DPAD must not move off one; B is the only way out. Without this, R+LEFT from SETTINGS, MIDI or
+ * MIDI MAPPING fell through to `main_screen_for_column(-1)` = PHRASE.
+ */
+inline bool is_popup(ScreenType s) { return screen_row(s) == -1; }
+
+/** R+UP / R+DOWN: the nearest screen above (−1) or below (+1) in the context column; stay if none. */
+inline NavResult step_in_column(const NavState& s, int step) {
+    const int col = context_column(s);
+    if (col < 0 || col >= NAV_COLUMNS) return {s.currentScreen, col};
+
+    int row = -1;
+    for (int r = 0; r < NAV_ROWS; ++r)
+        if (SCREEN_GRID[r][col] == s.currentScreen) row = r;
+    if (row == -1) return {s.currentScreen, col};   // a popup, or a screen this column does not hold
+
+    for (int r = row + step; r >= 0 && r < NAV_ROWS; r += step)
+        if (SCREEN_GRID[r][col]) return {*SCREEN_GRID[r][col], col};
+    return {s.currentScreen, col};
+}
+
+/** R+LEFT / R+RIGHT along the main row; stay at either end. */
+inline NavResult step_along_main_row(ScreenType s, int step) {
+    const int col = std::clamp(screen_column(s) + step, 0, NAV_COLUMNS - 1);
+    return {main_screen_for_column(col), col};
 }
 }  // namespace detail
 
 inline NavResult navigate_up(const NavState& s) {
-    const int col = detail::context_column(s);
-
     // Row-0 instrument (entered from the pool): nothing above it — stay.
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::INSTRUMENT, 3, true};
-
-    switch (s.currentScreen) {
-        case ScreenType::EFFECTS: return {ScreenType::MIXER, col};                    // row 4 → 3
-        case ScreenType::MIXER:   return {main_screen_for_column(col), col};          // row 3 → 2
-
-        case ScreenType::SONG:                                                        // row 2 → 1
-        case ScreenType::CHAIN:
-        case ScreenType::TABLE:      return {ScreenType::PROJECT, col};
-        case ScreenType::PHRASE:     return {ScreenType::GROOVE, 2};
-        case ScreenType::INSTRUMENT: return {ScreenType::MODS, 3};
-
-        case ScreenType::PROJECT: return {ScreenType::PROJECT, col};                  // row 1 → 0
-        case ScreenType::GROOVE:  return {ScreenType::SCALE, 2};
-        case ScreenType::MODS:    return {ScreenType::INST_POOL, 3};
-
-        default: return {s.currentScreen, col};  // row 0 (SCALE / INST_POOL) and the popups: stay
-    }
+    return detail::step_in_column(s, -1);
 }
 
 inline NavResult navigate_down(const NavState& s) {
-    const int col = detail::context_column(s);
-
     // Row-0 instrument (from the pool) drops to MODS, like the pool to its left.
     if (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool)
         return {ScreenType::MODS, 3};
-
-    switch (s.currentScreen) {
-        case ScreenType::SCALE:     return {ScreenType::GROOVE, 2};                   // row 0 → 1
-        case ScreenType::INST_POOL: return {ScreenType::MODS, 3};
-
-        case ScreenType::GROOVE:  return {ScreenType::PHRASE, 2};                     // row 1 → 2
-        case ScreenType::MODS:    return {ScreenType::INSTRUMENT, 3};
-        case ScreenType::PROJECT: return {main_screen_for_column(col), col};
-
-        case ScreenType::SONG:                                                        // row 2 → 3
-        case ScreenType::CHAIN:
-        case ScreenType::PHRASE:
-        case ScreenType::INSTRUMENT:
-        case ScreenType::TABLE: return {ScreenType::MIXER, col};
-
-        case ScreenType::MIXER:   return {ScreenType::EFFECTS, col};                  // row 3 → 4
-        case ScreenType::EFFECTS: return {ScreenType::EFFECTS, col};                  // row 4: stay
-
-        default: return {s.currentScreen, col};
-    }
+    return detail::step_in_column(s, +1);
 }
 
 inline NavResult navigate_left(const NavState& s) {
@@ -181,14 +166,7 @@ inline NavResult navigate_left(const NavState& s) {
         return {main_screen_for_column(c), c};
     }
 
-    switch (s.currentScreen) {  // along the main row: S C P I T
-        case ScreenType::TABLE:      return {ScreenType::INSTRUMENT, 3};
-        case ScreenType::INSTRUMENT: return {ScreenType::PHRASE, 2};
-        case ScreenType::PHRASE:     return {ScreenType::CHAIN, 1};
-        case ScreenType::CHAIN:      return {ScreenType::SONG, 0};
-        case ScreenType::SONG:       return {ScreenType::SONG, 0};  // leftmost: stay
-        default: return {s.currentScreen, s.previousColumn};
-    }
+    return detail::step_along_main_row(s.currentScreen, -1);
 }
 
 inline NavResult navigate_right(const NavState& s) {
@@ -213,14 +191,7 @@ inline NavResult navigate_right(const NavState& s) {
         return {main_screen_for_column(c), c};
     }
 
-    switch (s.currentScreen) {
-        case ScreenType::SONG:       return {ScreenType::CHAIN, 1};
-        case ScreenType::CHAIN:      return {ScreenType::PHRASE, 2};
-        case ScreenType::PHRASE:     return {ScreenType::INSTRUMENT, 3};
-        case ScreenType::INSTRUMENT: return {ScreenType::TABLE, 4};
-        case ScreenType::TABLE:      return {ScreenType::TABLE, 4};  // rightmost: stay
-        default: return {s.currentScreen, s.previousColumn};
-    }
+    return detail::step_along_main_row(s.currentScreen, +1);
 }
 
 // ─── Applying it ─────────────────────────────────────────────────────────────────────────────────

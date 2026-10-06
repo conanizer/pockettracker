@@ -2,9 +2,9 @@
 
 // ─── NAVIGATION MAP ──────────────────────────────────────────────────────────────────────────────
 //
-// The 5×5 grid in the bottom-right corner: where you are and what R+DPAD can reach. It is the PICTURE
-// of the grid `ui/navigation.h` moves through — the two must agree. Only the main row (row 2 — S C P I
-// T) and the CURRENT column are drawn; other columns' screens are not reachable from here.
+// The 5×5 grid in the bottom-right corner: where you are and what R+DPAD can reach — drawn from the
+// `SCREEN_GRID` that `ui/navigation.h` moves through. Only the main row (S C P I T) and the CURRENT
+// column are drawn; other columns' screens are not reachable from here.
 //
 // 115×105 px — five 23px cells across, five 21px rows down.
 

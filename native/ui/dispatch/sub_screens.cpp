@@ -3,6 +3,7 @@
 #include "ui/dispatch/dispatch_common.h"
 
 #include "ui/instrument_row_layout.h"
+#include "ui/mixer_cell_layout.h"
 
 #include <algorithm>
 
@@ -91,7 +92,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             break;
 
         case ScreenType::MIXER:
-            if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 8) {
+            if (mixer_cell_at(s_.mixerMasterRow, s_.mixerCursorColumn) == MixerCell::MASTER_EQ) {
                 if (!peek) open_eq_editor(std::max(0, p.masterEqSlot), EqCallerContext::master());
                 return true;
             }

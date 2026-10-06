@@ -5,30 +5,6 @@
 
 namespace pt::ui {
 
-namespace {
-
-/**
- * The 5×5 template: what each COLUMN holds, top to bottom; EMPTY_CELL is empty. Rows 3 and 4 are the
- * shared MIXER/EFFECTS; row 2, the main row, is filled in separately.
- */
-constexpr int EMPTY_CELL = -1;
-
-int column_layout(int col, int row) {
-    // -1 = empty; otherwise a ScreenType cast to int.
-    static const int L[5][5] = {
-        // row 0            row 1                             row 2                             row 3                          row 4
-        {EMPTY_CELL,        (int)ScreenType::PROJECT,   (int)ScreenType::SONG,       (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
-        {EMPTY_CELL,        (int)ScreenType::PROJECT,   (int)ScreenType::CHAIN,      (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
-        {(int)ScreenType::SCALE,     (int)ScreenType::GROOVE, (int)ScreenType::PHRASE,     (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
-        {(int)ScreenType::INST_POOL, (int)ScreenType::MODS,   (int)ScreenType::INSTRUMENT, (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
-        {EMPTY_CELL,        (int)ScreenType::PROJECT,   (int)ScreenType::TABLE,      (int)ScreenType::MIXER, (int)ScreenType::EFFECTS},
-    };
-    if (col < 0 || col > 4) col = 2;  // the phrase column is the fallback
-    return L[col][row];
-}
-
-}  // namespace
-
 void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState& s) const {
     const Theme& t = s.theme;
 
@@ -38,32 +14,24 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
     const int screenCol  = screen_column(s.currentScreen);
     const int currentCol = (screenCol == -1) ? s.sourceColumn : screenCol;
 
-    // The grid: the always-visible main row, plus this column's own screens.
-    int grid[5][5];
-    for (int row = 0; row < 5; ++row)
-        for (int col = 0; col < 5; ++col) grid[row][col] = EMPTY_CELL;
-
-    grid[2][0] = static_cast<int>(ScreenType::SONG);
-    grid[2][1] = static_cast<int>(ScreenType::CHAIN);
-    grid[2][2] = static_cast<int>(ScreenType::PHRASE);
-    grid[2][3] = static_cast<int>(ScreenType::INSTRUMENT);
-    grid[2][4] = static_cast<int>(ScreenType::TABLE);
-
-    const int col = (currentCol < 0 || currentCol > 4) ? 2 : currentCol;
-    for (int row = 0; row < 5; ++row) grid[row][col] = column_layout(col, row);
+    // The always-visible main row, plus this column's own screens.
+    const int col = (currentCol < 0 || currentCol >= NAV_COLUMNS) ? 2 : currentCol;
+    std::optional<ScreenType> grid[NAV_ROWS][NAV_COLUMNS] = {};
+    for (int gcol = 0; gcol < NAV_COLUMNS; ++gcol)
+        grid[NAV_MAIN_ROW][gcol] = SCREEN_GRID[NAV_MAIN_ROW][gcol];
+    for (int row = 0; row < NAV_ROWS; ++row) grid[row][col] = SCREEN_GRID[row][col];
 
     // The pool's fast-jump INSTRUMENT cell at row 0 / col 4, right of the pool. On an INSTRUMENT reached
     // from the pool, THAT cell is the current position (same ScreenType, so position disambiguates).
     const bool onPoolInstrument = (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool);
     if (s.currentScreen == ScreenType::INST_POOL || onPoolInstrument)
-        grid[0][4] = static_cast<int>(ScreenType::INSTRUMENT);
+        grid[0][4] = ScreenType::INSTRUMENT;
 
-    for (int row = 0; row < 5; ++row) {
-        for (int gcol = 0; gcol < 5; ++gcol) {
-            const int cell = grid[row][gcol];
-            if (cell == EMPTY_CELL) continue;  // empty cells are just background
+    for (int row = 0; row < NAV_ROWS; ++row) {
+        for (int gcol = 0; gcol < NAV_COLUMNS; ++gcol) {
+            if (!grid[row][gcol]) continue;  // empty cells are just background
 
-            const ScreenType screen = static_cast<ScreenType>(cell);
+            const ScreenType screen = *grid[row][gcol];
             const int        cellX  = x + (gcol * CELL_WIDTH);
             const int        cellY  = y + (row * CELL_HEIGHT);
 

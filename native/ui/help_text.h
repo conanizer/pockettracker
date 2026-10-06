@@ -21,6 +21,7 @@
 
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
+#include "ui/mixer_cell_layout.h"
 #include "ui/modules/effects_editor.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/midi_map_editor.h"
@@ -2537,17 +2538,16 @@ inline HelpTopic pool_cell_topic(int column) {
 
 /** MIXER — not a grid: rows 2 and 3 exist only on the master strip (column 8). See `mixer.h`. */
 inline HelpTopic mixer_cell_topic(int master_row, int column) {
-    if (master_row == 0)
-        return (column < 8) ? HelpTopic::MIXER_TRACK_VOL : HelpTopic::MIXER_MASTER_VOL;
-    if (master_row == 1) {
-        if (column == 0) return HelpTopic::MIXER_REVERB_RETURN;
-        if (column == 1) return HelpTopic::MIXER_DELAY_RETURN;
-        if (column == 8) return HelpTopic::MIXER_MASTER_EQ;
-        return HelpTopic::NONE;
+    switch (mixer_cell_at(master_row, column)) {
+        case MixerCell::TRACK_VOL:  return HelpTopic::MIXER_TRACK_VOL;
+        case MixerCell::MASTER_VOL: return HelpTopic::MIXER_MASTER_VOL;
+        case MixerCell::REV_WET:    return HelpTopic::MIXER_REVERB_RETURN;
+        case MixerCell::DLY_WET:    return HelpTopic::MIXER_DELAY_RETURN;
+        case MixerCell::MASTER_EQ:  return HelpTopic::MIXER_MASTER_EQ;
+        case MixerCell::MASTER_FX:  return HelpTopic::MIXER_MASTER_FX;
+        case MixerCell::LIMITER:    return HelpTopic::MIXER_LIMITER;
+        case MixerCell::NONE:       break;
     }
-    if (column != 8) return HelpTopic::NONE;
-    if (master_row == 2) return HelpTopic::MIXER_MASTER_FX;
-    if (master_row == 3) return HelpTopic::MIXER_LIMITER;
     return HelpTopic::NONE;
 }
 

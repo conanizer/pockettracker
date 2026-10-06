@@ -6,6 +6,7 @@
 #include "common/byte_source.h"       // pt_fopen — the WAV reader opens through it
 #include "common/platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
 #include "common/load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
+#include "common/sample_formats.h"    // sample_decoder_for — which decoder an extension takes
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -265,32 +266,31 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
 
     ptdec::PcmSink pcm;
     int sr = 0;
-    bool ok;
+    bool ok = false;
 
     // ⚠️ THE ONLY `catch` IN native/: the decoders' block buffers and the MP4 whole-file read are
     // std::vectors sized by the file, with no nothrow site. An uncaught bad_alloc takes the unsaved
     // song with it; a caught one is a LOAD FAILED. (64-bit Android kills on the write instead.)
     try {
-        if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, pcm, sr);
-        else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, pcm, sr);
-        else if (std::strcmp(ext, "ogg")  == 0) {
-            // An .ogg holds Vorbis or Opus: try Vorbis, then Opus on a miss. ⚠️ A CANCEL IS NOT A
-            // MISS — without that check the retry decodes the whole file again after a stop.
-            ok = ptdec::decodeOggFile(path, pcm, sr);
-            if (!ok && !pt::load_cancelled()) {
-                pcm.clear();
-                ok = ptdec::decodeOpusFile(path, pcm, sr);
-            }
+        switch (pt::sample_decoder_for(ext)) {
+            case pt::SampleDecoder::MP3:  ok = ptdec::decodeMp3File(path, pcm, sr);  break;
+            case pt::SampleDecoder::FLAC: ok = ptdec::decodeFlacFile(path, pcm, sr); break;
+            case pt::SampleDecoder::OGG:
+                // An .ogg holds Vorbis or Opus: try Vorbis, then Opus on a miss. ⚠️ A CANCEL IS NOT A
+                // MISS — without that check the retry decodes the whole file again after a stop.
+                ok = ptdec::decodeOggFile(path, pcm, sr);
+                if (!ok && !pt::load_cancelled()) {
+                    pcm.clear();
+                    ok = ptdec::decodeOpusFile(path, pcm, sr);
+                }
+                break;
+            case pt::SampleDecoder::OPUS: ok = ptdec::decodeOpusFile(path, pcm, sr); break;
+            case pt::SampleDecoder::MP4:  ok = ptdec::decodeMp4File(path, pcm, sr);  break;   // minimp4 + FAAD2
+            case pt::SampleDecoder::WAV:
+            case pt::SampleDecoder::NONE:
+                LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext);
+                return 0;
         }
-        else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, pcm, sr);
-        // ISO-BMFF containers holding AAC (minimp4 demux + FAAD2). One decoder covers them all — .m4a and
-        // the container extensions are the same box format. Raw .aac (ADTS) is deliberately NOT here: it is
-        // a bare stream, not a container, and is not a sample format the app offers.
-        else if (std::strcmp(ext, "m4a") == 0 || std::strcmp(ext, "mp4") == 0 ||
-                 std::strcmp(ext, "m4b") == 0 || std::strcmp(ext, "mov") == 0 ||
-                 std::strcmp(ext, "3gp") == 0)
-            ok = ptdec::decodeMp4File(path, pcm, sr);
-        else { LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext); return 0; }
     } catch (const std::bad_alloc&) {
         LOGE("loadSampleFromCompressed: out of memory decoding %s", path);
         lastLoadFailure_ = LoadFailure::OUT_OF_MEMORY;

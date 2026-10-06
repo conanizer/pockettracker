@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "ui/helpers.h"
+#include "ui/mixer_cell_layout.h"
 
 namespace pt::ui {
 
@@ -111,13 +112,15 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const unsigned steps = std::min(s.peaksVersion - lastPeaksVersion_, MAX_HOLD_STEPS);
     lastPeaksVersion_    = s.peaksVersion;
 
+    const MixerCell cur = mixer_cell_at(s.mixerMasterRow, s.cursorColumn);
+
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
     c.draw_text("MIXER", x + 10, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     // ── The eight track meters, with their volumes underneath ────────────────────────────────────
     for (int i = 0; i < 8; ++i) {
         const int  mX    = x + FIRST_METER_X + i * METER_SPACING;
-        const bool isSel = (s.mixerMasterRow == 0 && s.cursorColumn == i);
+        const bool isSel = (cur == MixerCell::TRACK_VOL && s.cursorColumn == i);
 
         // Muted, unsoloed under another solo, or under a soloed send return: meter and value say so.
         const bool audible = track_audible(p, i) && dry_audible(p);
@@ -139,8 +142,8 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
                       /*is_muted=*/false, t, 16, 17, steps);
 
     // ── The two send returns, side by side under the tracks ──────────────────────────────────────
-    const bool revSendSel = (s.mixerMasterRow == 1 && s.cursorColumn == 0);
-    const bool delSendSel = (s.mixerMasterRow == 1 && s.cursorColumn == 1);
+    const bool revSendSel = (cur == MixerCell::REV_WET);
+    const bool delSendSel = (cur == MixerCell::DLY_WET);
 
     // The returns answer the same question the tracks do, with their own solo set: muted, or unsoloed
     // while the other return is soloed.
@@ -177,10 +180,10 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const char* depthLabel = isOtt ? "OTT" : "DST";
     const int   depthValue = isOtt ? p.ottDepth : p.dustDepth;
 
-    const bool mixSel   = masterSel && s.mixerMasterRow == 0;
-    const bool eqSel    = masterSel && s.mixerMasterRow == 1;
-    const bool depthSel = masterSel && s.mixerMasterRow == 2;
-    const bool limSel   = masterSel && s.mixerMasterRow == 3;
+    const bool mixSel   = (cur == MixerCell::MASTER_VOL);
+    const bool eqSel    = (cur == MixerCell::MASTER_EQ);
+    const bool depthSel = (cur == MixerCell::MASTER_FX);
+    const bool limSel   = (cur == MixerCell::LIMITER);
 
     // Label/value rows as on every other screen. ⚠️ The meter stays lit for all four (`masterSel`):
     // which strip is a different question from which row.
@@ -283,73 +286,59 @@ void MixerModule::draw_peak_marker(Canvas& c, int x, int y, int h, int peak_idx,
 CursorContext MixerModule::cursor_context(const MixerState& s) const {
     const songcore::Project& p = s.project;
 
-    if (s.mixerMasterRow == 0) {
-        return (s.cursorColumn < 8)
-                   ? cc::hex_byte(p.tracks[static_cast<size_t>(s.cursorColumn)].volume, 0, 255, -1,
-                                  false, false, false, /*def=*/0xFF)
-                   : cc::hex_byte(p.masterVolume, 0, 255, -1, false, false, false, /*def=*/0xFF);
+    switch (mixer_cell_at(s.mixerMasterRow, s.cursorColumn)) {
+        case MixerCell::TRACK_VOL:
+            return cc::hex_byte(p.tracks[static_cast<size_t>(s.cursorColumn)].volume, 0, 255, -1, false,
+                                false, false, /*def=*/0xFF);
+        case MixerCell::MASTER_VOL:
+            return cc::hex_byte(p.masterVolume, 0, 255, -1, false, false, false, /*def=*/0xFF);
+
+        // The send returns. A+B resets to 0x80 (unity-ish), not to silence — a send you cannot hear is
+        // not a useful default for a control whose whole job is to be dialled in by ear.
+        case MixerCell::REV_WET:
+            return cc::hex_byte(p.reverbWet, 0, 255, -1, false, false, false, /*def=*/0x80);
+        case MixerCell::DLY_WET:
+            return cc::hex_byte(p.delayWet, 0, 255, -1, false, false, false, /*def=*/0x80);
+
+        case MixerCell::MASTER_EQ:
+            // ⚠️ The −1 is passed THROUGH, so an unassigned master EQ is `isEmpty` and A inserts slot 0.
+            // (INSTRUMENT's EQ cell substitutes 0 first, so A there jumps to slot 1.)
+            return cc::hex_byte(p.masterEqSlot < 0 ? -1 : p.masterEqSlot, 0, 127,
+                                /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
+        case MixerCell::MASTER_FX:
+            return cc::hex_byte(p.masterBusFx == 0 ? p.ottDepth : p.dustDepth, 0, 255, -1, false, false,
+                                false, /*def=*/0x00);
+        case MixerCell::LIMITER:
+            return cc::hex_byte(p.limiterPreGain, 0, 255, -1, false, false, false, /*def=*/0x00);
+
+        // Between cells: answered honestly rather than guessed at, which is what keeps the (row,
+        // column) pair safe as two independent ints.
+        case MixerCell::NONE:
+            break;
     }
-
-    // The send returns. A+B resets to 0x80 (unity-ish), not to silence — a send you cannot hear is not
-    // a useful default for a control whose whole job is to be dialled in by ear.
-    if (s.mixerMasterRow == 1 && s.cursorColumn == 0)
-        return cc::hex_byte(p.reverbWet, 0, 255, -1, false, false, false, /*def=*/0x80);
-    if (s.mixerMasterRow == 1 && s.cursorColumn == 1)
-        return cc::hex_byte(p.delayWet, 0, 255, -1, false, false, false, /*def=*/0x80);
-
-    if (s.cursorColumn == 8) {
-        switch (s.mixerMasterRow) {
-            case 1:
-                // ⚠️ The −1 is passed THROUGH, so an unassigned master EQ is `isEmpty` and A inserts
-                // slot 0. (INSTRUMENT's EQ cell substitutes 0 first, so A there jumps to slot 1.)
-                return cc::hex_byte(p.masterEqSlot < 0 ? -1 : p.masterEqSlot, 0, 127,
-                                    /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
-            case 2:
-                return cc::hex_byte(p.masterBusFx == 0 ? p.ottDepth : p.dustDepth, 0, 255, -1, false,
-                                    false, false, /*def=*/0x00);
-            case 3:
-                return cc::hex_byte(p.limiterPreGain, 0, 255, -1, false, false, false, /*def=*/0x00);
-            default:
-                return cc::none();
-        }
-    }
-
-    // Rows 2 and 3 outside column 8: unreachable by navigation, and answered honestly rather than
-    // guessed at. This is what keeps the (row, column) pair safe as two independent ints.
     return cc::none();
 }
 
 // ─── What the cursor is standing on, by NAME ─────────────────────────────────────────────────────
-//
-// ⚠️ The same (row, column) table `cursor_context` above reads, answering the other question. The two
-// must agree about which cells exist: a cell this names but that one calls `none()` would be a
-// mapping onto something the user cannot edit by hand.
 
 songcore::MapTarget MixerModule::map_target(const MixerState& s) const {
     using songcore::MapDestId;
     const int col = s.cursorColumn;
 
-    // ⚠️ The cursor here is two INDEPENDENT ints over a grid that is not rectangular, so the pair can
-    // land where nothing is drawn — and `col` indexes `tracks` a line below. The row arms take care
-    // of the gaps; this one takes care of the ends.
-    if (col < 0 || col > 8) return {};
-
-    if (s.mixerMasterRow == 0)
-        return col < 8 ? songcore::MapTarget{MapDestId::TRACK_VOL, static_cast<uint8_t>(col)}
-                       : songcore::MapTarget{MapDestId::MASTER_VOL, 0};
-
-    // The two send returns. Their WET is the mixer's; everything else about those buses is EFFECTS'.
-    if (s.mixerMasterRow == 1 && col == 0) return {MapDestId::REV_WET, 0};
-    if (s.mixerMasterRow == 1 && col == 1) return {MapDestId::DLY_WET, 0};
-
-    if (col == 8) {
-        switch (s.mixerMasterRow) {
-            // ⚠️ Row 2 is ONE cell drawing whichever of the two master effects is switched on, so the
-            // name it answers with depends on the project — not on the cursor.
-            case 2: return {s.project.masterBusFx == 0 ? MapDestId::OTT_DEPTH : MapDestId::DUST_DEPTH, 0};
-            case 3: return {MapDestId::LIMIT_PRE, 0};
-            default: break;   // row 1 is the master EQ SLOT — a choice of preset, not a value to sweep
-        }
+    switch (mixer_cell_at(s.mixerMasterRow, col)) {
+        case MixerCell::TRACK_VOL:  return {MapDestId::TRACK_VOL, static_cast<uint8_t>(col)};
+        case MixerCell::MASTER_VOL: return {MapDestId::MASTER_VOL, 0};
+        // The two send returns. Their WET is the mixer's; everything else about those buses is EFFECTS'.
+        case MixerCell::REV_WET:    return {MapDestId::REV_WET, 0};
+        case MixerCell::DLY_WET:    return {MapDestId::DLY_WET, 0};
+        // ⚠️ ONE cell drawing whichever of the two master effects is switched on, so the name it
+        // answers with depends on the project — not on the cursor.
+        case MixerCell::MASTER_FX:
+            return {s.project.masterBusFx == 0 ? MapDestId::OTT_DEPTH : MapDestId::DUST_DEPTH, 0};
+        case MixerCell::LIMITER:    return {MapDestId::LIMIT_PRE, 0};
+        case MixerCell::MASTER_EQ:  // a choice of preset, not a value to sweep
+        case MixerCell::NONE:
+            break;
     }
     return {};
 }
@@ -359,46 +348,35 @@ songcore::MapTarget MixerModule::map_target(const MixerState& s) const {
 MixerInputResult MixerModule::handle_input(songcore::Project& p, int cursor_row, int cursor_column,
                                            const InputAction& action) const {
     const auto clamp = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
+    const MixerCell cell = mixer_cell_at(cursor_row, cursor_column);
 
-    // The master EQ slot is checked FIRST and on its own, because it is the one cell here that DELETEs
-    // and INSERTs rather than only taking a value.
-    if (cursor_column == 8 && cursor_row == 1) {
+    // The master EQ slot is the one cell here that DELETEs and INSERTs rather than only taking a value.
+    if (cell == MixerCell::MASTER_EQ) {
         switch (action.type) {
-            case ActionType::SET_VALUE:
-                p.masterEqSlot = clamp(action.value, 0, 127);
-                return {true};
-            case ActionType::DELETE:
-                p.masterEqSlot = -1;
-                return {true};
-            case ActionType::INSERT_DEFAULT:
-                p.masterEqSlot = 0;
-                return {true};
-            default:
-                break;   // …and fall through to the value arms
+            case ActionType::SET_VALUE:      p.masterEqSlot = clamp(action.value, 0, 127); return {true};
+            case ActionType::DELETE:         p.masterEqSlot = -1;                          return {true};
+            case ActionType::INSERT_DEFAULT: p.masterEqSlot = 0;                           return {true};
+            default:                         return {false};
         }
     }
 
     if (action.type != ActionType::SET_VALUE) return {false};
     const int v = clamp(action.value, 0, 255);
 
-    // ⚠️ Arm order is load-bearing: `row == 0` (master volume) must be tested after `row == 0 &&
-    // column < 8` (a track), or every track volume would write the master's.
-    if (cursor_row == 1 && cursor_column == 0) { p.reverbWet = v; return {true}; }
-    if (cursor_row == 1 && cursor_column == 1) { p.delayWet = v; return {true}; }
-    if (cursor_row == 0 && cursor_column < 8) {
-        p.tracks[static_cast<size_t>(cursor_column)].volume = v;
-        return {true};
+    switch (cell) {
+        case MixerCell::TRACK_VOL:  p.tracks[static_cast<size_t>(cursor_column)].volume = v; return {true};
+        case MixerCell::MASTER_VOL: p.masterVolume = v;                                     return {true};
+        case MixerCell::REV_WET:    p.reverbWet = v;                                        return {true};
+        case MixerCell::DLY_WET:    p.delayWet = v;                                         return {true};
+        case MixerCell::MASTER_FX:
+            if (p.masterBusFx == 0) p.ottDepth = v;
+            else                    p.dustDepth = v;
+            return {true};
+        case MixerCell::LIMITER:    p.limiterPreGain = v;                                   return {true};
+        case MixerCell::MASTER_EQ:  // above
+        case MixerCell::NONE:
+            break;
     }
-    if (cursor_row == 0) { p.masterVolume = v; return {true}; }
-
-    // Rows 2/3 exist only in column 8 (`none()` elsewhere, so no SET_VALUE there): no column test.
-    if (cursor_row == 2) {
-        if (p.masterBusFx == 0) p.ottDepth = v;
-        else                    p.dustDepth = v;
-        return {true};
-    }
-    if (cursor_row == 3) { p.limiterPreGain = v; return {true}; }
-
     return {false};
 }
 

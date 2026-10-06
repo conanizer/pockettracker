@@ -86,9 +86,4 @@ inline const char* screen_short_label(ScreenType s) {
     return "";
 }
 
-/** The always-visible middle row of the navigation map. */
-inline constexpr ScreenType MAIN_ROW_SCREENS[] = {ScreenType::SONG, ScreenType::CHAIN,
-                                                  ScreenType::PHRASE, ScreenType::INSTRUMENT,
-                                                  ScreenType::TABLE};
-
 }  // namespace pt::ui

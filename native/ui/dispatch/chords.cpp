@@ -3,6 +3,7 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
+#include "ui/mixer_cell_layout.h"
 #include "ui/navigation.h"
 #include "ui/song_pointer.h"
 
@@ -196,13 +197,17 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
         }
         case ScreenType::MIXER:
             // ⚠️ The row is part of the address: row 1 puts the REV and DEL returns under the columns
-            // of tracks 1-2. Column 8 is MASTER and has no mute — a no-op. The selection is not consulted.
-            if (s_.mixerMasterRow == 0 && s_.mixerCursorColumn >= 0 && s_.mixerCursorColumn <= 7)
-                out[count++] = s_.mixerCursorColumn;
-            else if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 0)
-                out[count++] = songcore::MIX_CH_REVERB;
-            else if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 1)
-                out[count++] = songcore::MIX_CH_DELAY;
+            // of tracks 1-2. The master strip has no mute — a no-op. The selection is not consulted.
+            switch (mixer_cell_at(s_.mixerMasterRow, s_.mixerCursorColumn)) {
+                case MixerCell::TRACK_VOL: out[count++] = s_.mixerCursorColumn;      break;
+                case MixerCell::REV_WET:   out[count++] = songcore::MIX_CH_REVERB;   break;
+                case MixerCell::DLY_WET:   out[count++] = songcore::MIX_CH_DELAY;    break;
+                case MixerCell::MASTER_VOL:
+                case MixerCell::MASTER_EQ:
+                case MixerCell::MASTER_FX:
+                case MixerCell::LIMITER:
+                case MixerCell::NONE:      break;
+            }
             return;
         default:
             return;   // every other screen: the chord is the consumed no-op it has always been

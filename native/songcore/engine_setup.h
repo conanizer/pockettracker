@@ -20,6 +20,7 @@
 
 #include "../common/byte_source.h"     // pt_fopen
 #include "../common/load_progress.h"   // LoadSpan
+#include "../common/sample_formats.h"  // SAMPLE_FORMATS
 #include "media_path.h"
 #include "midi_map.h"     // MapDestId
 #include "model.h"
@@ -280,11 +281,10 @@ inline std::string path_extension_lower(const std::string& path) {
     return ext;
 }
 
-// The compressed formats the bundled decoders handle (dr_mp3 / dr_flac / stb_vorbis / libopus, and
-// minimp4 + FAAD2 for the m4a/mp4/m4b/mov/3gp box format).
+// A sample format other than WAV — one the engine decodes whole (`common/sample_formats.h`).
 inline bool is_native_compressed(const std::string& ext) {
-    return ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "opus" ||
-           ext == "m4a" || ext == "mp4"  || ext == "m4b" || ext == "mov"  || ext == "3gp";
+    const pt::SampleDecoder d = pt::sample_decoder_for(ext.c_str());
+    return d != pt::SampleDecoder::NONE && d != pt::SampleDecoder::WAV;
 }
 
 // A WAV's cue points as `Instrument::sliceMarkers` wants them (int64).
@@ -298,7 +298,8 @@ inline std::vector<int64_t> read_cue_markers(const std::string& path) {
 template <typename Engine>
 int load_sample_file(Engine& engine, int instrumentId, const std::string& path) {
     const std::string ext = path_extension_lower(path);
-    if (ext == "wav") return engine.loadSampleFromWavFile(instrumentId, path.c_str());
+    if (pt::sample_decoder_for(ext.c_str()) == pt::SampleDecoder::WAV)
+        return engine.loadSampleFromWavFile(instrumentId, path.c_str());
     if (is_native_compressed(ext)) return engine.loadSampleFromCompressed(instrumentId, path.c_str());
     return 0;   // unknown or unsupported (raw .aac ADTS, video-only container, …)
 }

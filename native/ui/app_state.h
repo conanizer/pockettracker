@@ -94,8 +94,7 @@ struct AppState {
     int modCursorPair = 0;  // 0 = MOD1+MOD2, 1 = MOD3+MOD4
     int modCursorSide = 0;  // 0 = left, 1 = right
 
-    // MIXER: two ints but not a grid — rows 2 and 3 exist only in column 8 (master), reached by walking
-    // down it. Other pairs are unreachable; the module answers `none()` there (mixer_cell_exists).
+    // MIXER: two ints but not a grid — which pair is which cell is `ui/mixer_cell_layout.h`.
     int mixerCursorColumn = 0;  // 0..7 = tracks, 8 = master
     int mixerMasterRow    = 0;  // 0 = volumes, 1 = sends / EQ, 2 = OTT|DUST, 3 = LIM
 
@@ -494,18 +493,6 @@ inline bool modal_backdrop_active(const AppState& s) {
 inline bool full_screen_module(const AppState& s) {
     return s.currentScreen == ScreenType::FILE_BROWSER ||
            (s.currentScreen == ScreenType::SAMPLE_EDITOR && !s.eq.isOpen);
-}
-
-/**
- * Is (row, column) a cell the MIXER draws? The grid is not rectangular — rows 2 and 3 only on the
- * master strip, row 1 only under REV, DEL and master. Anything that writes one of the two ints alone
- * can land between cells, where the cursor vanishes; ask here.
- */
-inline bool mixer_cell_exists(int row, int column) {
-    if (column < 0 || column > 8) return false;
-    if (row == 0) return true;                   // eight track faders + the master fader
-    if (row == 1) return column == 0 || column == 1 || column == 8;   // REV, DEL, master EQ
-    return (row == 2 || row == 3) && column == 8;                     // OTT|DUST and LIM
 }
 
 /** Keep `cursorRow` inside SONG's 16-row window. The state's own invariant — the D-pad, `go_to_screen`

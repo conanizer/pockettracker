@@ -13,13 +13,8 @@
 // that passed (engine_feed.h) — including ones spent on another screen — and the hold steps by as
 // much as it moved, so a marker resumes where the clock is, not where it was parked.
 //
-// The CURSOR here is (mixerMasterRow, cursorColumn) and it is not a grid — see ui/cursor_move.h:
-//   row 0: cols 0..7 = track volumes, col 8 = master MIX
-//   row 1: col 0 = REV wet, col 1 = DEL wet, col 8 = master EQ slot
-//   row 2: col 8 = OTT/DUST depth   (which of the two is a function of masterBusFx)
-//   row 3: col 8 = LIM pre-gain
-// Rows 2 and 3 exist ONLY in column 8. Every other (row, column) pair is unreachable by navigation,
-// and `cursor_context` answers `none()` there — which is what makes the unreachable states harmless.
+// The CURSOR here is (mixerMasterRow, cursorColumn) and it is not a grid — which pair is which cell is
+// `ui/mixer_cell_layout.h`; between cells `cursor_context` answers `none()`.
 
 #include "songcore/midi_map.h"
 #include "songcore/model.h"

@@ -10,6 +10,7 @@
 // "which file did the user pick" — which the dispatcher acts on according to WHY the browser was
 // opened (browser_purpose.h). Rename and new-folder go through the QWERTY keyboard.
 
+#include "common/sample_formats.h"
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/filesystem.h"
@@ -39,14 +40,13 @@ inline const std::vector<std::string>& video_extensions() {
     return v;
 }
 
-/**
- * The sample formats the browser offers for a SAMPLER instrument. Kept in lockstep with
- * `songcore::is_native_compressed` and `AudioEngine::loadSampleFromCompressed`'s dispatch. Raw
- * `.aac` (ADTS) stays out — a bare stream, not a container the demuxer can open.
- */
+/** The sample formats the browser offers for a SAMPLER instrument — every one the loader reads. */
 inline const std::vector<std::string>& sample_extensions() {
-    static const std::vector<std::string> v = {"wav", "mp3", "flac", "ogg", "opus",
-                                               "m4a", "mp4", "m4b", "mov", "3gp"};
+    static const std::vector<std::string> v = [] {
+        std::vector<std::string> out;
+        for (const SampleFormat& f : SAMPLE_FORMATS) out.emplace_back(f.ext);
+        return out;
+    }();
     return v;
 }
 
