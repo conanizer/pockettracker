@@ -6,7 +6,7 @@
 
 using pt::ui::AbxyLayout;
 using pt::ui::button_name;
-using pt::ui::KeyboardBindings;
+using pt::ui::ButtonBindings;
 
 namespace {
 
@@ -40,6 +40,95 @@ constexpr KeyDefault KEY_DEFAULTS[] = {
     {SDLK_SPACE,  Button::START},
 };
 
+/** The built-in pad map, by PRINTED name (the ABXY swap is applied before lookup). A table for the same
+ *  reason as `KEY_DEFAULTS`: the config.json template is generated from it. */
+struct PadDefault {
+    SDL_GameControllerButton pad;
+    Button                   button;
+};
+
+constexpr PadDefault PAD_DEFAULTS[] = {
+    {SDL_CONTROLLER_BUTTON_DPAD_UP,    Button::DPAD_UP},
+    {SDL_CONTROLLER_BUTTON_DPAD_DOWN,  Button::DPAD_DOWN},
+    {SDL_CONTROLLER_BUTTON_DPAD_LEFT,  Button::DPAD_LEFT},
+    {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, Button::DPAD_RIGHT},
+
+    // X and Y are aliased onto A and B on purpose: face-button layouts differ across handhelds, and a
+    // four-button app listening to two is one bad SDL mapping from unusable.
+    {SDL_CONTROLLER_BUTTON_A, Button::A}, {SDL_CONTROLLER_BUTTON_X, Button::A},
+    {SDL_CONTROLLER_BUTTON_B, Button::B}, {SDL_CONTROLLER_BUTTON_Y, Button::B},
+
+    {SDL_CONTROLLER_BUTTON_LEFTSHOULDER,  Button::L_SHIFT},
+    {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, Button::R_SHIFT},
+    {SDL_CONTROLLER_BUTTON_BACK,          Button::SELECT},
+    {SDL_CONTROLLER_BUTTON_START,         Button::START},
+
+    // ⚠️ No default for the L2/R2 triggers (bindable in config.json as lefttrigger/righttrigger) or
+    // the analog stick: both are axes that differ per CFW and need a real device to verify.
+};
+
+/**
+ * Apply one config section to a live map. A listed button loses its own entries, then takes each
+ * input it lists from whichever button holds it. Buttons go in enum order, so when the FILE lists one
+ * input under two buttons the later one wins — reported, since only one of the two lines can work.
+ * Returns how many buttons the section listed.
+ */
+template <typename Code, typename Resolve>
+int apply_bindings(std::vector<std::pair<Code, Button>>& map, const ButtonBindings& cfg,
+                   const char* section, const char* what, Resolve resolve, int& skipped) {
+    std::vector<std::pair<Code, const std::string*>> codes[static_cast<size_t>(Button::COUNT)];
+    int listed = 0;
+    for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
+        const Button b = static_cast<Button>(i);
+        if (!cfg[b]) continue;
+        ++listed;
+        map.erase(std::remove_if(map.begin(), map.end(),
+                                 [b](const std::pair<Code, Button>& e) { return e.second == b; }),
+                  map.end());
+        for (const std::string& name : *cfg[b]) {
+            Code c{};
+            if (!resolve(name, c)) {
+                // ⚠️ Reported, never silently skipped — see the header.
+                std::printf("config:   %s.%s: \"%s\" is not an SDL %s name - skipped\n", section,
+                            button_name(b), name.c_str(), what);
+                ++skipped;
+                continue;
+            }
+            codes[i].emplace_back(c, &name);
+        }
+    }
+
+    for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
+        const Button b = static_cast<Button>(i);
+        for (const auto& [c, name] : codes[i]) {
+            for (auto it = map.begin(); it != map.end();) {
+                if (it->first != c) { ++it; continue; }
+                if (it->second != b && cfg[it->second]) {
+                    std::printf("config:   %s: \"%s\" is listed under both %s and %s - %s gets it\n",
+                                section, name->c_str(), button_name(it->second), button_name(b),
+                                button_name(b));
+                }
+                it = map.erase(it);
+            }
+            map.emplace_back(c, b);
+        }
+    }
+    return listed;
+}
+
+// The two triggers, bindable like buttons. SDL reports them as AXES, so they get codes past its last
+// button; `pad_from_name` and the axis handler are the only places that know.
+const auto PAD_LEFT_TRIGGER  = static_cast<SDL_GameControllerButton>(SDL_CONTROLLER_BUTTON_MAX);
+const auto PAD_RIGHT_TRIGGER = static_cast<SDL_GameControllerButton>(SDL_CONTROLLER_BUTTON_MAX + 1);
+
+bool pad_from_name(const std::string& name, SDL_GameControllerButton& out) {
+    const SDL_GameControllerAxis axis = SDL_GameControllerGetAxisFromString(name.c_str());
+    if (axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) { out = PAD_LEFT_TRIGGER; return true; }
+    if (axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) { out = PAD_RIGHT_TRIGGER; return true; }
+    out = SDL_GameControllerGetButtonFromString(name.c_str());
+    return out != SDL_CONTROLLER_BUTTON_INVALID;
+}
+
 /** SDL returns NULL for an enum it does not recognise, and "%s" with NULL is UB. Never trust it. */
 const char* or_unknown(const char* s) { return s ? s : "?"; }
 
@@ -51,10 +140,22 @@ const char* or_unknown(const char* s) { return s ? s : "?"; }
 SdlInput::SdlInput() {
     keyMap_.reserve(std::size(KEY_DEFAULTS));
     for (const KeyDefault& d : KEY_DEFAULTS) keyMap_.emplace_back(d.key, d.button);
+    padMap_.reserve(std::size(PAD_DEFAULTS));
+    for (const PadDefault& d : PAD_DEFAULTS) padMap_.emplace_back(d.pad, d.button);
 }
 
-KeyboardBindings SdlInput::default_keyboard_bindings() {
-    KeyboardBindings out;
+ButtonBindings SdlInput::default_gamepad_bindings() {
+    ButtonBindings out;
+    for (const PadDefault& d : PAD_DEFAULTS) {
+        auto& slot = out[d.button];
+        if (!slot) slot.emplace();
+        slot->emplace_back(or_unknown(SDL_GameControllerGetStringForButton(d.pad)));
+    }
+    return out;
+}
+
+ButtonBindings SdlInput::default_keyboard_bindings() {
+    ButtonBindings out;
     for (const KeyDefault& d : KEY_DEFAULTS) {
         auto& slot = out[d.button];
         if (!slot) slot.emplace();
@@ -63,49 +164,64 @@ KeyboardBindings SdlInput::default_keyboard_bindings() {
     return out;
 }
 
+bool SdlInput::on_miyoo_mini() {
+    const char* driver = SDL_GetCurrentVideoDriver();
+    return driver && SDL_strcasecmp(driver, "mmiyoo") == 0;
+}
+
 void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
     abxy_ = cfg.abxy;
     if (abxy_ != AbxyLayout::AUTO) {
         std::printf("config:   controller abxy = %s\n", pt::ui::abxy_name(abxy_));
     }
 
-    // ⚠️ ONE SUMMARY LINE, NOT ONE PER BUTTON: the seeded template lists all ten at their defaults, so
-    // per-button lines would claim a change on every launch of an untouched install. Which key gave
-    // which button is the input trace's job (`set_trace`).
-    int bound = 0, skipped = 0;
+    // ⚠️ ONE SUMMARY LINE PER SECTION, NOT ONE PER BUTTON: the seeded template lists all ten at
+    // their defaults, so per-button lines would claim a change on every launch of an untouched
+    // install. Which input gave which button is the input trace's job (`set_trace`).
+    // ⚠️ THE MIYOO MINI'S BUTTONS ARRIVE AS A PAD, NEVER AS KEYS: its SDL posts keys only while no
+    // controller subsystem is up (SDL_MMIYOO_INPUT_MODE), and ours is. Its keyboard mode is no answer —
+    // there SELECT fires only as a tap on release, and SELECT is a held modifier here. Its config files
+    // name the buttons in `keyboard`, so on the Mini that section is applied to the PAD; `gamepad`
+    // wins for a button both list.
+    ButtonBindings pad      = cfg.gamepad;
+    const bool     miyoo    = on_miyoo_mini();
+    if (miyoo) {
+        for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
+            const Button b = static_cast<Button>(i);
+            if (cfg.keyboard[b] && !pad[b]) pad[b] = cfg.keyboard[b];
+        }
+        pt::ui::miyoo_mini_to_pad_names(pad);
+        std::printf("config:   Miyoo Mini: \"keyboard\" is read as its buttons (A B X Y L1 L2 R1 R2 ...)\n");
+    }
 
-    for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
-        const Button b     = static_cast<Button>(i);
-        const auto&  names = cfg.keyboard[b];
-        if (!names) continue;   // not listed → keeps its defaults
-        ++bound;
-
-        // REPLACE, not merge — the header's contract, and the only way to free a key that is in the
-        // way. An empty list therefore leaves the button unbound, which is what `[]` plainly says.
-        keyMap_.erase(std::remove_if(keyMap_.begin(), keyMap_.end(),
-                                     [b](const std::pair<SDL_Keycode, Button>& e) {
-                                         return e.second == b;
-                                     }),
-                      keyMap_.end());
-
-        for (const std::string& name : *names) {
-            const SDL_Keycode k = SDL_GetKeyFromName(name.c_str());
-            if (k == SDLK_UNKNOWN) {
-                // ⚠️ Reported, never silently skipped — see the header.
-                std::printf("config:   keyboard.%s: \"%s\" is not an SDL key name - skipped\n",
-                            button_name(b), name.c_str());
-                ++skipped;
-                continue;
-            }
-            keyMap_.emplace_back(k, b);
+    int skipped = 0;
+    if (!miyoo) {
+        const int keys = apply_bindings(
+            keyMap_, cfg.keyboard, "keyboard", "key",
+            [](const std::string& name, SDL_Keycode& out) {
+                out = SDL_GetKeyFromName(name.c_str());
+                return out != SDLK_UNKNOWN;
+            },
+            skipped);
+        if (keys > 0) {
+            std::printf("config:   keyboard: %d button(s) from config.json, %d key name(s) rejected\n",
+                        keys, skipped);
         }
     }
 
-    // Unconditional whenever the section was present; `skipped` shares the line so a partially
-    // applied file announces itself.
-    if (bound > 0) {
-        std::printf("config:   keyboard: %d button(s) from config.json, %d key name(s) rejected\n",
-                    bound, skipped);
+    skipped = 0;
+    const int pads = apply_bindings(padMap_, pad, "gamepad", "controller button", pad_from_name, skipped);
+    if (pads > 0) {
+        std::printf("config:   gamepad: %d button(s) from config.json, %d name(s) rejected\n", pads,
+                    skipped);
+    }
+
+    repeatDelayMs_ = static_cast<uint64_t>(cfg.repeat.delay);
+    repeatFastMs_  = static_cast<uint64_t>(cfg.repeat.interval);
+    if (cfg.repeat.delay != pt::ui::RepeatConfig::DEFAULT_DELAY ||
+        cfg.repeat.interval != pt::ui::RepeatConfig::DEFAULT_INTERVAL) {
+        std::printf("config:   repeat: delay %d ms, interval %d ms\n", cfg.repeat.delay,
+                    cfg.repeat.interval);
     }
 }
 
@@ -125,34 +241,23 @@ bool SdlInput::key_to_button(SDL_Keycode k, Button& out) const {
 
 bool SdlInput::pad_to_button(Uint8 b, Button& out) const {
     // Which face-button pair means A (ui/input_config.h): with NINTENDO the pad's labels run the
-    // other way, so A is the pair SDL calls B/Y. ⚠️ BOTH PAIRS SWAP TOGETHER, or the X/Y aliases keep
-    // the old meaning.
-    const bool nintendo = (abxy_ == AbxyLayout::NINTENDO);
-
-    switch (b) {
-        case SDL_CONTROLLER_BUTTON_DPAD_UP:    out = Button::DPAD_UP;    return true;
-        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  out = Button::DPAD_DOWN;  return true;
-        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:  out = Button::DPAD_LEFT;  return true;
-        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: out = Button::DPAD_RIGHT; return true;
-
-        // X and Y are aliased onto A and B on purpose: face-button layouts differ across handhelds,
-        // and a four-button app listening to two is one bad SDL mapping from unusable.
-        case SDL_CONTROLLER_BUTTON_A: case SDL_CONTROLLER_BUTTON_X:
-            out = nintendo ? Button::B : Button::A;
-            return true;
-        case SDL_CONTROLLER_BUTTON_B: case SDL_CONTROLLER_BUTTON_Y:
-            out = nintendo ? Button::A : Button::B;
-            return true;
-
-        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  out = Button::L_SHIFT; return true;
-        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: out = Button::R_SHIFT; return true;
-        case SDL_CONTROLLER_BUTTON_BACK:          out = Button::SELECT;  return true;
-        case SDL_CONTROLLER_BUTTON_START:         out = Button::START;   return true;
-
-        // ⚠️ Not mapped: the L2/R2 triggers and the analog stick. Both are axes that differ per CFW
-        // and need a real device to verify.
-        default: return false;
+    // other way, so the raw button is turned into its PRINTED name first. ⚠️ BOTH PAIRS SWAP
+    // TOGETHER, or a config line naming "x" would mean the wrong button.
+    auto pad = static_cast<SDL_GameControllerButton>(b);
+    if (abxy_ == AbxyLayout::NINTENDO) {
+        switch (pad) {
+            case SDL_CONTROLLER_BUTTON_A: pad = SDL_CONTROLLER_BUTTON_B; break;
+            case SDL_CONTROLLER_BUTTON_B: pad = SDL_CONTROLLER_BUTTON_A; break;
+            case SDL_CONTROLLER_BUTTON_X: pad = SDL_CONTROLLER_BUTTON_Y; break;
+            case SDL_CONTROLLER_BUTTON_Y: pad = SDL_CONTROLLER_BUTTON_X; break;
+            default: break;
+        }
     }
+
+    for (const std::pair<SDL_GameControllerButton, Button>& e : padMap_) {
+        if (e.first == pad) { out = e.second; return true; }
+    }
+    return false;
 }
 
 void SdlInput::open_controllers() {
@@ -202,7 +307,7 @@ void SdlInput::press(Button b, uint64_t now_ms) {
     if (is_dpad(b) || (b == Button::B && bRepeatable_)) {
         repeatActive_  = true;
         repeatButton_  = b;
-        repeatNextMs_  = now_ms + REPEAT_INITIAL_DELAY;
+        repeatNextMs_  = now_ms + repeatDelayMs_;
         repeatTrainMs_ = repeatNextMs_;
     }
 }
@@ -271,9 +376,25 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
         }
 
         case SDL_CONTROLLERAXISMOTION: {
-            // ⚠️ DELIBERATELY NO MAPPING: every axis is dropped. This only adds VISIBILITY — triggers
-            // and sticks arrive as axes, so without it "they are inert" could only be observed as an
-            // absence (ignored? never sent? wedged?). A flood of these means a stick drifting hard.
+            // A trigger is a button here, pressed past half-way. The lower release line keeps an
+            // analog trigger resting near the edge from chattering.
+            if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ||
+                e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
+                const bool left = e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT;
+                bool&      held = triggerHeld_[left ? 0 : 1];
+                const bool down = e.caxis.value > (held ? 8000 : 16000);
+                if (down == held) break;
+                held = down;
+                const bool mapped = pad_to_button(left ? PAD_LEFT_TRIGGER : PAD_RIGHT_TRIGGER, b);
+                trace(down ? "PAD DOWN" : "PAD UP", left ? "lefttrigger" : "righttrigger", mapped, b);
+                if (mapped) {
+                    if (down) press(b, now);
+                    else release(b);
+                }
+                break;
+            }
+            // Sticks are dropped. This only adds VISIBILITY, so "they are inert" is not an absence
+            // (ignored? never sent? wedged?). A flood of these means a stick drifting hard.
             if (!trace_) break;
             char what[64];
             std::snprintf(what, sizeof(what), "%s value=%d",
@@ -319,10 +440,10 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
     }
 }
 
-uint64_t SdlInput::repeat_interval(uint64_t repeating_ms) {
-    if (repeating_ms >= REPEAT_RAMP_MS) return REPEAT_INTERVAL_FAST;
-    const uint64_t span = REPEAT_INTERVAL_SLOW - REPEAT_INTERVAL_FAST;
-    return REPEAT_INTERVAL_SLOW - span * repeating_ms / REPEAT_RAMP_MS;
+uint64_t SdlInput::repeat_interval(uint64_t repeating_ms) const {
+    if (repeating_ms >= REPEAT_RAMP_MS) return repeatFastMs_;
+    const uint64_t slow = 2 * repeatFastMs_;
+    return slow - repeatFastMs_ * repeating_ms / REPEAT_RAMP_MS;
 }
 
 void SdlInput::tick(uint64_t now_ms) {
@@ -350,5 +471,6 @@ void SdlInput::reset() {
     queue_.clear();   // this frame's presses belong to a window that no longer has focus
     for (size_t i = 0; i < static_cast<size_t>(Button::COUNT); ++i)
         if (held_[i]) release(static_cast<Button>(i));
-    repeatActive_ = false;
+    repeatActive_   = false;
+    triggerHeld_[0] = triggerHeld_[1] = false;
 }

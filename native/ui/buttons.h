@@ -56,15 +56,28 @@ inline const char* button_name(Button b) {
     return "?";
 }
 
+/** Equality as a hand-typed config.json name means it: any case, and a space or `-` for `_`
+ *  ("Dpad down" is DPAD_DOWN). */
+inline bool same_name_any_case(const char* a, const char* b) {
+    auto fold = [](char c) {
+        if (c >= 'a' && c <= 'z') return static_cast<char>(c - 32);
+        return (c == ' ' || c == '-') ? '_' : c;
+    };
+    for (; *a && *b; ++a, ++b) {
+        if (fold(*a) != fold(*b)) return false;
+    }
+    return *a == *b;
+}
+
 /**
- * The inverse. False for an unknown name — which the caller must REPORT: a typo'd key in config.json
- * must say so. Derived from `button_name`, so the two cannot disagree.
+ * The inverse, in any case. False for an unknown name — which the caller must REPORT: a typo'd key in
+ * config.json must say so. Derived from `button_name`, so the two cannot disagree.
  */
 inline bool button_from_name(const char* name, Button& out) {
     if (!name) return false;
     for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
         const Button b = static_cast<Button>(i);
-        if (std::strcmp(name, button_name(b)) == 0) { out = b; return true; }
+        if (same_name_any_case(name, button_name(b))) { out = b; return true; }
     }
     return false;
 }

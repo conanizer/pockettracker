@@ -309,9 +309,18 @@ void load_settings_and_config(ui::FileSystem& filesystem, ui::AppState& state, S
     //
     // Read at boot on every platform. A starter template is seeded only when the file is absent; it
     // states every current value, so seeding changes nothing.
-    // ⚠️ The keyboard defaults come from the input layer: pt-ui cannot name an SDL key.
-    if (ui::seed_config_template(filesystem, SdlInput::default_keyboard_bindings()))
+    // ⚠️ The binding defaults come from the input layer: pt-ui cannot name an SDL key or pad button.
+    if (ui::seed_config_template(filesystem, SdlInput::default_keyboard_bindings(),
+                                 SdlInput::default_gamepad_bindings()))
         std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
+
+    // The same text again as config.example.json, so settings newer than the user's file can be
+    // found. Not on the Miyoo Mini: its launcher copies the Miyoo template there, and ours would
+    // name the desktop keys.
+    if (!SdlInput::on_miyoo_mini() &&
+        ui::write_config_example(filesystem, SdlInput::default_keyboard_bindings(),
+                                 SdlInput::default_gamepad_bindings()))
+        std::printf("config:   wrote %s\n", ui::config_example_path(filesystem).c_str());
 
     // The factory scales as editable files, written only when the folder has no .pts at all, so a
     // user's pruning is kept. The count is printed: a seed that wrote nothing is otherwise invisible.
@@ -328,7 +337,7 @@ void load_settings_and_config(ui::FileSystem& filesystem, ui::AppState& state, S
     if (ui::load_folder_config(filesystem, state.folderConfig))
         std::printf("config:   %s\n", filesystem.config_path().c_str());
 
-    // `controller` + `keyboard` → this shell's input layer. Every rejected entry is printed: a
+    // `controller`, `keyboard`, `gamepad`, `repeat` → this shell's input layer. Every rejected entry is printed: a
     // hand-edited file that looks applied and is not is the worst way for this to fail.
     {
         ui::InputConfig                     inputCfg;

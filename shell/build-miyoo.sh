@@ -308,13 +308,14 @@ fi
 echo "libstdc++          : absorbed (not a runtime dependency)"
 
 # --- 6. the ten-button map, resolved through the SDL2 THAT SHIPS -------------------------------
-# ⚠️ THE ONLY PART OF THE KEYMAP THAT CAN BE CHECKED WITHOUT THE DEVICE, and its failure is quiet:
-# a key name SDL cannot resolve leaves that button doing nothing at all. So the names are read OUT
+# ⚠️ THE ONLY PART OF THE BUTTON MAP THAT CAN BE CHECKED WITHOUT THE DEVICE, and its failure is
+# quiet: a name SDL cannot resolve leaves that button doing nothing at all. So the names are read OUT
 # of miyoo-config.json (never retyped here — a hand-typed pair prints "got off, want off" forever)
-# and handed to the shipped libSDL2 under qemu.
+# and handed to the shipped libSDL2 under qemu. The Mini's buttons arrive as a PAD (sdl-input.cpp,
+# apply_input_config), so they are checked as controller button and trigger names.
 #
 # ⚠️ The vendor libraries libSDL2 needs are on the DEVICE. Empty stubs with the right sonames are
-# what let the loader finish; SDL_GetKeyFromName touches none of them and needs no SDL_Init.
+# what let the loader finish; the name lookups touch none of them and need no SDL_Init.
 command -v qemu-arm-static >/dev/null || { echo "FAIL: qemu-arm-static missing (apt install qemu-user-static)."; exit 1; }
 mkdir -p "$STUBS"
 : > "$CACHE/empty.c"
@@ -329,8 +330,12 @@ cat > "$CACHE/keycheck.c" <<'EOF'
 int main(int argc, char** argv) {
     int bad = 0;
     for (int i = 1; i < argc; ++i) {
-        SDL_Keycode k = SDL_GetKeyFromName(argv[i]);
-        if (k == SDLK_UNKNOWN) { printf("  UNRESOLVED  %s\n", argv[i]); bad++; }
+        const SDL_GameControllerAxis a = SDL_GameControllerGetAxisFromString(argv[i]);
+        const int trigger = a == SDL_CONTROLLER_AXIS_TRIGGERLEFT || a == SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
+        if (!trigger && SDL_GameControllerGetButtonFromString(argv[i]) == SDL_CONTROLLER_BUTTON_INVALID) {
+            printf("  UNRESOLVED  %s\n", argv[i]);
+            bad++;
+        }
     }
     printf("unresolved = %d\n", bad);
     return bad != 0 ? 1 : 0;
@@ -339,37 +344,56 @@ EOF
 "${CROSS}gcc" -O1 -I"$SDK/include/SDL2" -o "$CACHE/keycheck" "$CACHE/keycheck.c" \
     -L"$SDK/lib" -lSDL2 -Wl,--allow-shlib-undefined
 
-# Every quoted string to the RIGHT of a colon inside the "keyboard" object — i.e. the key names,
-# never the button names.
-mapfile -t KEYNAMES < <(sed -n '/"keyboard"/,/^  }/p' "$GAMEDIR/miyoo-config.json" \
+# Every quoted string to the RIGHT of a colon inside the "gamepad" object — i.e. the Miyoo button
+# names, never PocketTracker's button names.
+mapfile -t CFGNAMES < <(sed -n '/"gamepad"/,/^  }/p' "$GAMEDIR/miyoo-config.json" \
     | sed 's/^[^:]*://' | grep -oE '"[^"]+"' | tr -d '"')
 echo
-echo "key names in miyoo-config.json : ${#KEYNAMES[@]}"
-[ "${#KEYNAMES[@]}" -ge 12 ] || { echo "FAIL: only ${#KEYNAMES[@]} key names parsed - the sed no longer matches the file."; exit 1; }
+echo "names in miyoo-config.json     : ${#CFGNAMES[@]}"
+[ "${#CFGNAMES[@]}" -ge 12 ] || { echo "FAIL: only ${#CFGNAMES[@]} names parsed - the sed no longer matches the file."; exit 1; }
+
+# Miyoo button names ("X", "L1") become controller names through the APP'S OWN translation,
+# compiled for the host — never a table retyped here.
+cat > "$CACHE/expand.cpp" <<'EOF'
+#include "ui/input_config.h"
+#include <cstdio>
+int main(int argc, char** argv) {
+    pt::ui::ButtonBindings b;
+    auto& slot = b[pt::ui::Button::A];
+    slot.emplace();
+    for (int i = 1; i < argc; ++i) slot->emplace_back(argv[i]);
+    pt::ui::miyoo_mini_to_pad_names(b);
+    for (const std::string& k : *slot) std::puts(k.c_str());
+}
+EOF
+g++ -std=c++17 -O1 -I"$SRC/native" -o "$CACHE/expand" "$CACHE/expand.cpp" "$SRC/native/ui/input_config.cpp"
+mapfile -t KEYNAMES < <("$CACHE/expand" "${CFGNAMES[@]}")
+echo "controller names they become    : ${#KEYNAMES[@]}"
+[ "${#KEYNAMES[@]}" -ge "${#CFGNAMES[@]}" ] || { echo "FAIL: the translation lost names."; exit 1; }
 
 run_keycheck() {   # names... -> prints the tool's own line, returns its exit code
     qemu-arm-static -L "$TOOLCHAIN/arm-linux-gnueabihf/libc" \
         -E LD_LIBRARY_PATH="$SDK/lib:$STUBS" "$CACHE/keycheck" "$@"
 }
 if ! run_keycheck "${KEYNAMES[@]}"; then
-    echo "FAIL: a key name in miyoo-config.json is not one SDL answers to - that button does nothing."
+    echo "FAIL: a name in miyoo-config.json is not one SDL answers to - that button does nothing."
     exit 1
 fi
 # ⚠️ THE CONTROL, and it is not ceremony: this check's pass is "nothing was printed", which cannot
 # tell a working lookup from a keycheck that never ran.
-if run_keycheck "Nonexistent Key" >/dev/null 2>&1; then
+if run_keycheck "nonexistentbutton" >/dev/null 2>&1; then
     echo "FAIL: the control passed - keycheck resolves a name that does not exist, so it proves nothing."
     exit 1
 fi
 echo "control            : an invented name IS rejected"
 
-# --- 7. no key doing two jobs -------------------------------------------------------------------
+# --- 7. no button doing two jobs -------------------------------------------------------------------
 # ⚠️ A DIFFERENT FAILURE FROM 6, and the one §3.4 of the scope warns about: a name can resolve
 # perfectly and still be bound to two buttons, and the symptom then looks like the gptokeyb
 # double-input bug rather than like a config typo.
 DUPES=$(printf '%s\n' "${KEYNAMES[@]}" | sort | uniq -d | tr '\n' ' ')
-echo "keys bound twice   : ${DUPES:-none}"
-[ -z "$DUPES" ] || { echo "FAIL: those keys are bound to more than one button."; exit 1; }
+echo "bound twice        : ${DUPES:-none}"
+[ -z "$DUPES" ] || { echo "FAIL: those Miyoo buttons are bound to more than one app button."; exit 1; }
 
 # --- 8. every statically linked component must have a notice -----------------------------------
 # ⚠️ DERIVED FROM THE TREE, NOT FROM A LIST SOMEONE MUST REMEMBER TO UPDATE — the same commit that

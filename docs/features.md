@@ -160,6 +160,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Effect picker: hold A on an FX type to browse the commands grouped by what they act on, reading what each one does before you let go
 - Song-relative navigation, on by default: B+D-pad walks the arrangement instead of the 00–FF pools, so the chain and phrase on screen are always the ones the song plays (SETTINGS → NAV = POOL restores the old behaviour)
 - Full physical button support (tested on Miyoo Flip and Ayaneo Pocket Air Mini)
+- Remap keyboard keys and controller buttons, and set how fast a held direction repeats, in `config.json`
 - Touch layout: virtual buttons in portrait orientation
 - Virtual button clicks: choose a sound and volume
 - Haptic feedback on button press (toggle on/off)

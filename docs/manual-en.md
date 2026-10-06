@@ -286,7 +286,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 | A + DOWN | −16 / −1 octave (large step) |
 | A + B | Delete / clear value |
 
-- **Key repeat is active:** hold the combo for ~400 ms and it starts repeating at ~10/s.
+- **Key repeat is active:** hold the combo for ~400 ms and it starts repeating, speeding up to ~30/s. Both can be changed in `config.json` — see [section 26](#26-configuration-file-configjson).
 - For **note values**, large step = ±12 semitones (one octave).
 - For **hex byte values**, large step = ±0x10.
 - Under a scale, a note's small step is the next note **of that scale** rather than the next semitone — see [section 14](#14-scale-screen). The large step stays a full octave.
@@ -2455,9 +2455,9 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 ## 26. Configuration File (config.json)
 
 Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in
-PocketTracker's home folder, beside the `Projects` and `Samples` directories, and covers three of them:
-**your controller's button layout**, **your keyboard bindings**, and **which folder a load browse
-opens at**.
+PocketTracker's home folder, beside the `Projects` and `Samples` directories, and covers these:
+**your controller's button layout**, **your keyboard and controller bindings**, **how fast a held
+direction repeats**, and **which folder a load browse opens at**.
 
 It is the opposite of `settings.json`, which the app writes whenever you change something on the
 SETTINGS screen. **`config.json` is yours** — the app reads it once at startup and never writes to it
@@ -2466,6 +2466,10 @@ again.
 **Finding it.** The app creates a starter copy filled in with everything at its current value — on
 first launch, or on Android on the first launch after you have granted it a folder to live in. So the file already shows you the exact shape and spelling of every option, and as
 seeded it changes nothing. Open it in any text editor, change what you want, and **restart the app**.
+
+Beside it sits `config.example.json`: every setting at its default, kept up to date by the app. If
+your `config.json` is from an older version, the newer settings are there — copy the lines you want
+across. Edits to the example itself are lost.
 
 Every key is optional. Delete a line to go back to the built-in default. A missing, empty or
 malformed file costs you nothing — the defaults simply stand.
@@ -2519,9 +2523,9 @@ Relevant on the Windows and Linux desktop builds. The defaults are:
 
 Those ten names are the complete set. Each takes a list of keys of any length.
 
-**A button you list replaces its defaults. A button you leave out keeps them.** This matters when you
-want a key that's already in use: to put `K` somewhere else you must also rebind `A`, or `K` stays
-attached to it. To free a button entirely, list it as `[]`.
+**A button you list replaces its defaults, and takes the keys it lists away from any other button.**
+A button you leave out keeps its defaults. So `"SELECT": ["K"]` alone moves `K` from **A** to
+**SELECT**, and **A** keeps `Return`. To free a button entirely, list it as `[]`.
 
 **Key names** are SDL's, and their spelling is not guessable — some are spaced and some are not.
 Copy them from here:
@@ -2544,10 +2548,65 @@ is known to work.
 name and skipped; that one binding is lost and nothing else is. `"Ctrl"` is the usual culprit — it
 has to be `"Left Ctrl"` or `"Right Ctrl"`.
 
-Binding the same key to two buttons isn't rejected, but only one of them will fire. Avoid it.
+If you list the same key under two buttons, only one of them gets it, and the log says which.
 
 On Android the hardware **Back** key is always **B**, whatever this section says — so a file you
 edited on a desktop can't leave you unable to back out of a screen on a phone.
+
+### Controller bindings
+
+The same idea for a gamepad or a handheld's built-in buttons. Nothing needs listing unless you want a
+change; the defaults are:
+
+```json
+"gamepad": {
+  "DPAD_UP":    ["dpup"],
+  "DPAD_DOWN":  ["dpdown"],
+  "DPAD_LEFT":  ["dpleft"],
+  "DPAD_RIGHT": ["dpright"],
+  "A":      ["a", "x"],
+  "B":      ["b", "y"],
+  "L":      ["leftshoulder"],
+  "R":      ["rightshoulder"],
+  "SELECT": ["back"],
+  "START":  ["start"]
+}
+```
+
+X and Y do the same as A and B out of the box, so they are free to take something else. To put START
+and SELECT on Y and X:
+
+```json
+"gamepad": {
+  "START":  ["start", "y"],
+  "SELECT": ["back", "x"]
+}
+```
+
+The rules are the keyboard's: a listed button replaces its defaults and takes what it lists from
+any other button, so these two lines are all it takes — A and B keep their own buttons.
+
+Names are what is **printed** on the pad: `a` `b` `x` `y`, `back` (SELECT), `start`, `leftshoulder`,
+`rightshoulder`, `dpup` `dpdown` `dpleft` `dpright`. `leftstick` and `rightstick` (pressing a stick
+in), `guide` and `paddle1`–`paddle4` work too where the pad has them, and so do the triggers,
+`lefttrigger` and `righttrigger` (L2/R2), which do nothing until you bind them. If **ABXY** on the
+SETTINGS screen is set to NINTENDO, `y` still means the button printed Y. The sticks cannot be bound.
+
+> **On a Miyoo Mini** this section takes the Miyoo's own button names: `UP` `DOWN` `LEFT` `RIGHT`
+> `A` `B` `X` `Y` `L1` `L2` `R1` `R2` `SELECT` `START` `MENU`, and `L` / `R` for both shoulders on a
+> side. For the shoulders on X and Y: `"L": ["X"], "R": ["Y"]`. A file from an older version that
+> lists them under `keyboard`, with names like `"Left Shift"`, still works.
+
+### Key repeat
+
+```json
+"repeat": { "delay": 400, "interval": 32 }
+```
+
+How a held direction (or A/B + direction) repeats, in milliseconds. **delay** is the wait before it
+starts repeating (100–2000). **interval** is the gap between repeats at full speed (16–500): the
+repeat starts at twice that and speeds up to it over about a second. Smaller is faster. A value out
+of range is pulled back into it, and the log says so.
 
 ### Default folders
 

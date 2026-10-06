@@ -67,7 +67,10 @@ bool load_folder_config(FileSystem& fs, FolderConfig& out) {
     std::string blob;
     if (!fs.read_file(fs.config_path(), blob)) return false;   // no file: the common case
 
-    const json j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
+    json j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
+    // The input loader reports what was wrong; this one reads the file the same way, silently.
+    if (!j.is_object() && straighten_typographic_punctuation(blob))
+        j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
 
     const auto fit = j.find("folders");
@@ -82,20 +85,20 @@ bool load_folder_config(FileSystem& fs, FolderConfig& out) {
     return true;
 }
 
-bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaults) {
-    const std::string path = fs.config_path();
-    // ⚠️ Empty: Android with nothing granted yet — nowhere to seed into.
-    if (path.empty()) return false;
-    if (fs.file_exists(path)) return false;   // the user's file — never rewritten
+namespace {
 
+/** The starter file and the example share this text, so the two cannot drift apart. */
+std::string config_template_text(FileSystem& fs, const ButtonBindings& keyboardDefaults,
+                                 const ButtonBindings& gamepadDefaults) {
     // Every key pre-filled with what the app is doing now, so the user sees the schema with real values.
     // The `..._directory()` calls create those folders on first use (harmless). "_README" keys are for
     // the human; load ignores them.
     json j;
     j["_README"] =
-        "PocketTracker configuration. This file is YOURS: the app reads it at startup and never "
-        "rewrites it. Every key is optional — delete a line to use the built-in default. Values below "
-        "are the defaults, so the file as seeded changes nothing.";
+        "PocketTracker configuration. config.json is YOURS: the app reads it at startup and never "
+        "rewrites it. config.example.json beside it lists every setting at its default and is "
+        "rewritten by the app, so a newer version's settings show up there — copy the lines you want "
+        "into config.json. Every key is optional — delete a line to use the built-in default.";
 
     // ⭐ Seeded ROOT-RELATIVE ("Samples"), so the file is portable and typable — on Android the absolute
     // form is a granted-tree id that changes with the home folder.
@@ -127,8 +130,9 @@ bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaul
     j["controller"] = {{"abxy", abxy_name(AbxyLayout::AUTO)}};
 
     j["_README_keyboard"] =
-        "Keyboard keys per button. A button listed here REPLACES its defaults (so [] unbinds it); a "
-        "button left out keeps them. Names are SDL key names — single characters are capitalised (\"K\"), "
+        "Keyboard keys per button. A button listed here REPLACES its defaults (so [] unbinds it) and "
+        "takes the keys it lists away from any other button; a button left out keeps its defaults. "
+        "Names are SDL key names — single characters are capitalised (\"K\"), "
         "and multi-word names use spaces (\"Left Shift\", \"Return\", \"Escape\", \"Space\", the arrows "
         "\"Up\"/\"Down\"/\"Left\"/\"Right\"). An unrecognised name is reported in the app's log and that "
         "one entry is skipped.";
@@ -141,7 +145,54 @@ bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaul
     }
     j["keyboard"] = std::move(keyboard);
 
-    return fs.write_file(path, j.dump(2) + "\n");
+    j["_README_gamepad"] =
+        "Controller buttons per app button, the same rules as \"keyboard\". Names are what is PRINTED "
+        "on the pad: a b x y, back, start, leftshoulder, rightshoulder, dpup dpdown dpleft dpright "
+        "(also lefttrigger, righttrigger, leftstick, rightstick, guide, misc1, paddle1-4). Example - START and SELECT on Y and X: "
+        "\"START\": [\"start\", \"y\"], \"SELECT\": [\"back\", \"x\"].";
+    json gamepad = json::object();
+    for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
+        const Button b = static_cast<Button>(i);
+        if (const auto& names = gamepadDefaults[b]) gamepad[button_name(b)] = *names;
+    }
+    j["gamepad"] = std::move(gamepad);
+
+    j["_README_repeat"] =
+        "Holding a direction: \"delay\" = ms before it starts repeating, \"interval\" = ms between "
+        "repeats at full speed (it starts at twice that and speeds up over about a second). Smaller is "
+        "faster. delay 100-2000, interval 16-500.";
+    j["repeat"] = {{"delay", RepeatConfig::DEFAULT_DELAY}, {"interval", RepeatConfig::DEFAULT_INTERVAL}};
+
+    return j.dump(2) + "\n";
+}
+
+}  // namespace
+
+bool seed_config_template(FileSystem& fs, const ButtonBindings& keyboardDefaults,
+                          const ButtonBindings& gamepadDefaults) {
+    const std::string path = fs.config_path();
+    // ⚠️ Empty: Android with nothing granted yet — nowhere to seed into.
+    if (path.empty()) return false;
+    if (fs.file_exists(path)) return false;   // the user's file — never rewritten
+    return fs.write_file(path, config_template_text(fs, keyboardDefaults, gamepadDefaults));
+}
+
+bool write_config_example(FileSystem& fs, const ButtonBindings& keyboardDefaults,
+                          const ButtonBindings& gamepadDefaults) {
+    const std::string path = config_example_path(fs);
+    if (path.empty()) return false;
+    const std::string text = config_template_text(fs, keyboardDefaults, gamepadDefaults);
+    std::string old;
+    if (fs.read_file(path, old) && old == text) return false;   // no write per launch
+    return fs.write_file(path, text);
+}
+
+std::string config_example_path(FileSystem& fs) {
+    const std::string config = fs.config_path();
+    const std::string name   = "config.json";
+    if (config.size() < name.size() || config.compare(config.size() - name.size(), name.size(), name) != 0)
+        return {};
+    return config.substr(0, config.size() - name.size()) + "config.example.json";
 }
 
 }  // namespace pt::ui

@@ -61,12 +61,24 @@ std::string resolve_browse_dir(FileSystem& fs, const std::optional<std::string>&
                                const std::string& def);
 
 /**
- * Write a STARTER config.json when none exists, so the feature can be found: all three sections, each
+ * Write a STARTER config.json when none exists, so the feature can be found: every section
  * pre-filled with what the app does now plus a note on changing it — the schema as a no-op config.
- * `keyboardDefaults` is the shell's live key map, spelled as `SDL_GetKeyName` does so an edited line
+ * The two binding maps are the shell's built-in ones, spelled as SDL names them so an edited line
  * round-trips; never a second copy.
  * ⚠️ NEVER CLOBBERS an existing file. True iff a new file was written.
  */
-bool seed_config_template(FileSystem& fs, const KeyboardBindings& keyboardDefaults);
+bool seed_config_template(FileSystem& fs, const ButtonBindings& keyboardDefaults,
+                          const ButtonBindings& gamepadDefaults);
+
+/**
+ * Keep `config.example.json` beside config.json: the same text as the starter file, so a user whose
+ * config.json predates a setting can still find it. The app's file, rewritten whenever the text
+ * changes. True iff it was written.
+ */
+bool write_config_example(FileSystem& fs, const ButtonBindings& keyboardDefaults,
+                          const ButtonBindings& gamepadDefaults);
+
+/** Where that example lives: config.json's folder. "" when there is no config.json path. */
+std::string config_example_path(FileSystem& fs);
 
 }  // namespace pt::ui

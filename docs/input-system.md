@@ -84,7 +84,8 @@ This creates a consistent, learnable pattern where:
 - **START** - Play/Stop sequencer
 
 ### Key Repeat
-- Hold D-PAD, A+DPAD, or B+DPAD for continuous input (400ms delay, 100ms interval)
+- Hold D-PAD, A+DPAD, or B+DPAD for continuous input: 400 ms delay, then repeats that speed up from
+  64 ms to 32 ms apart. Both numbers can be changed in `config.json` (`repeat`)
 - The modifiers are re-read as the repeat fires, so pressing A while UP is already repeating turns a
   cursor move into a value edit without letting go.
 

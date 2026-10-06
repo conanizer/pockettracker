@@ -47,17 +47,26 @@ public:
      * Names come from `SDL_GetKeyName`, so they round-trip through the `SDL_GetKeyFromName` that reads
      * them back. `SDLK_AC_BACK` is deliberately absent — see `apply_input_config`.
      */
-    static pt::ui::KeyboardBindings default_keyboard_bindings();
+    static pt::ui::ButtonBindings default_keyboard_bindings();
+
+    /** The built-in pad map, as SDL's controller button names — config.json's `gamepad` seed. */
+    static pt::ui::ButtonBindings default_gamepad_bindings();
 
     /**
-     * Apply config.json's `controller` and `keyboard` sections.
+     * True on the Miyoo Mini, told by the video driver: only that device's SDL fork has `mmiyoo`.
+     * Its config names buttons its own way, and its template is the launcher's. ⚠️ After SDL_Init.
+     */
+    static bool on_miyoo_mini();
+
+    /**
+     * Apply config.json's input sections: `controller`, `keyboard`, `gamepad`, `repeat`.
      *
      * Call ONCE at boot, before the first event. Anything the config does not mention keeps its
      * built-in value, so this is safe to call with a default-constructed `InputConfig` (the no-file
      * case) and does nothing.
      *
-     * ⚠️ An unresolvable key name is REPORTED on stdout and skipped, never silently dropped — or the
-     * user re-reads their correct-looking JSON instead of the line saying `Ctrl` is not a key name.
+     * ⚠️ An unresolvable name is REPORTED on stdout and skipped, never silently dropped — or the user
+     * re-reads their correct-looking JSON instead of the line saying `Ctrl` is not a key name.
      */
     void apply_input_config(const pt::ui::InputConfig& cfg);
 
@@ -89,8 +98,8 @@ public:
     void handle_event(const SDL_Event& e, uint64_t now_ms);
 
     /**
-     * Once per frame. Emits the synthetic repeat presses — 400 ms to the first, then a train that
-     * TIGHTENS with the hold: see the REPEAT_ constants.
+     * Once per loop tick. Emits the synthetic repeat presses — a delay to the first, then a train
+     * that TIGHTENS with the hold: see `repeat_interval`.
      */
     void tick(uint64_t now_ms);
 
@@ -139,7 +148,7 @@ private:
     /** Keycode → button, against the LIVE map (defaults, as edited by config.json). */
     bool key_to_button(SDL_Keycode k, Button& out) const;
 
-    /** Controller button → button, honouring the configured face-button layout. */
+    /** Controller button → button, against the LIVE pad map, after the face-button layout swap. */
     bool pad_to_button(Uint8 b, Button& out) const;
 
     /** The modifiers as they stand right now — stamped onto each event as it is queued. */
@@ -150,21 +159,20 @@ private:
 
     // A held button speeds UP; it never moves more than one step at a time. That distinction is the
     // whole design: a multiplied step jumps 2 then 4 rows per frame, which reads as a stutter however
-    // fast the frames come, while a tightening interval stays one row a frame and simply arrives more
-    // often. The ramp is linear in the hold's elapsed time.
-    //
-    // ⚠️ `tick` emits AT MOST ONE repeat per frame, so the real cadence is these intervals rounded UP
-    // to a whole 16 ms frame: 64 → 4 frames (~15/s), 48 → 3 (~21/s), 32 → 2 (~31/s). Picking values
-    // near frame multiples is what keeps the ramp from alternating between two frame counts.
-    static constexpr uint64_t REPEAT_INITIAL_DELAY = 400;  // ms before the first repeat
-    static constexpr uint64_t REPEAT_INTERVAL_SLOW = 64;   // ms between the first repeats
-    static constexpr uint64_t REPEAT_INTERVAL_FAST = 32;   // ms once the ramp has run out
-    static constexpr uint64_t REPEAT_RAMP_MS       = 1200; // ms of repeating to get from one to the other
+    // fast the frames come, while a tightening interval stays one row a step and simply arrives more
+    // often. The train starts at 2 × the configured interval and ramps linearly down to it.
+    // ⚠️ `tick` emits AT MOST ONE repeat per call, so the real cadence is the interval rounded up to
+    // the loop's poll period (4 ms while input is arriving).
+    static constexpr uint64_t REPEAT_RAMP_MS = 1200;  // ms of repeating to get from slow to fast
+
+    uint64_t repeatDelayMs_ = pt::ui::RepeatConfig::DEFAULT_DELAY;     // ms before the first repeat
+    uint64_t repeatFastMs_  = pt::ui::RepeatConfig::DEFAULT_INTERVAL;  // ms once the ramp has run out
 
     /** The gap to the next repeat, for a train that has been running `repeating_ms`. */
-    static uint64_t repeat_interval(uint64_t repeating_ms);
+    uint64_t repeat_interval(uint64_t repeating_ms) const;
 
     bool held_[static_cast<size_t>(Button::COUNT)] = {false};
+    bool triggerHeld_[2] = {false, false};   // left, right — triggers arrive as axes
 
     // ONE repeat at a time. A DPAD button always, plus B while `bRepeatable_` (the qwerty backspace);
     // a D-pad press mid-backspace steals the slot. The modifiers are re-read when the repeat fires, so
@@ -175,7 +183,7 @@ private:
     uint64_t repeatNextMs_ = 0;
 
     /** When the repeat TRAIN starts — the press plus the initial delay, not the press. The ramp is
-     *  measured from here, so the silent first 400 ms does not count towards it. */
+     *  measured from here, so the silent delay does not count towards it. */
     uint64_t repeatTrainMs_ = 0;
 
     /** Whether B currently counts as repeatable — see set_b_repeatable. */
@@ -186,10 +194,14 @@ private:
     /**
      * The live keyboard map: seeded from `KEY_DEFAULTS`, then per-button REPLACED by config.json.
      *
-     * A flat vector scanned linearly (~14 entries, once per key event). First match wins, so one
-     * key bound to two buttons resolves to the first registered (stated in the manual).
+     * A flat vector scanned linearly (~14 entries, once per key event). Each key appears at most
+     * once: a config binding takes the key from whatever button held it.
      */
     std::vector<std::pair<SDL_Keycode, Button>> keyMap_;
+
+    /** The live pad map, built the same way from `PAD_DEFAULTS` and config.json's `gamepad`. Keyed by
+     *  the button's PRINTED name: `pad_to_button` applies the ABXY swap before looking it up. */
+    std::vector<std::pair<SDL_GameControllerButton, Button>> padMap_;
 
     /** Which way round the pad's face buttons are printed. See `ui/input_config.h` — AUTO is right on
      *  every platform whose pad SDL can classify, which is every platform except a desktop with a

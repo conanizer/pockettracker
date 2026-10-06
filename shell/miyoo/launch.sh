@@ -21,8 +21,9 @@
 #   here         there IS no system libSDL2. Every Miyoo port carries the `mmiyoo` fork itself, so
 #                the libs/ directory beside this script is load-bearing rather than a mistake.
 #
-# The gptokeyb warning in the PortMaster script does not apply either: OnionOS has no gptokeyb and
-# the buttons arrive as plain SDL keycodes, which is what the shipped key map sets.
+# The gptokeyb warning in the PortMaster script does not apply either: OnionOS has no gptokeyb.
+# ⚠️ The buttons arrive as a GAMEPAD, not as keys: the bundled SDL sends keys only to an app that
+# opens no controllers, and this one does.
 
 mydir=$(cd "$(dirname "$0")" && pwd)
 cd "$mydir" || exit 1
@@ -55,10 +56,9 @@ export POCKETTRACKER_HOME="$PT_HOME"
 mkdir -p "$PT_HOME"
 
 # ── The Miyoo button map, seeded ONCE ─────────────────────────────────────────────────────────────
-# ⚠️⚠️ THIS IS THE ONLY THING THAT MAKES THE BUTTONS RIGHT, and it has to land before the FIRST
-# launch. The app seeds its own starter config.json when none is present, and it never rewrites the
-# file after that — so if it boots first, this device keeps the DESKTOP key map permanently and the
-# collisions in miyoo-config.json's header are what the user gets.
+# ⚠️⚠️ It has to land before the FIRST launch: the app seeds its own starter config.json when none
+# is present, and never rewrites the file after that. Without this one, L2/R2 do nothing and the
+# file names desktop keys this device never sends.
 #
 # ⚠️ It prints which branch it took. A copy that silently does nothing is exactly how a config file
 # looks applied and is not.
@@ -68,6 +68,15 @@ elif cp "$mydir/miyoo-config.json" "$PT_HOME/config.json" 2>/dev/null; then
     echo "config.json      : seeded from miyoo-config.json (Miyoo key map)"
 else
     echo "config.json      : SEED FAILED - the buttons will use the desktop map and will be wrong"
+fi
+
+# The same file again as config.example.json, on EVERY launch: a config.json seeded by an older
+# package never shows newer settings, and this is where the user finds them. The app does not write
+# this file on the Mini — its own template would name the desktop keys.
+if cp -f "$mydir/miyoo-config.json" "$PT_HOME/config.example.json" 2>/dev/null; then
+    echo "config.example   : refreshed from miyoo-config.json"
+else
+    echo "config.example   : COPY FAILED"
 fi
 
 # ── The demo song, seeded ONCE ────────────────────────────────────────────────────────────────────
