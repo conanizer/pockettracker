@@ -2350,96 +2350,48 @@ inline HelpTopic table_cell_topic(int column) {
     }
 }
 
-/**
- * INSTRUMENT, external MIDI — the shortest of the three layouts.
- *
- * Rows 0/1/5 (TYPE, NAME, the preset buttons) are shared with the other two types and are answered by
- * the caller before this is reached; 4 and 6 are spacers.
- */
-inline HelpTopic instrument_external_topic(int row, int column) {
-    switch (row) {
-        case 2: return column == 1 ? HelpTopic::INST_MIDI_CHANNEL : HelpTopic::INST_MIDI_BANK;
-        case 3: return column == 1 ? HelpTopic::INST_MIDI_PROGRAM : HelpTopic::INST_MIDI_LENGTH;
-        case 7: return column == 1 ? HelpTopic::INST_VOLUME : HelpTopic::INST_PAN;
-        case 8: return column == 1 ? HelpTopic::INST_TRANSPOSE : HelpTopic::INST_TIC;
-        default: break;
-    }
-    // The four CC rows are one pair repeated, exactly as `cursor_context` reads them.
-    const int cc = row - INSTRUMENT_EXTERNAL_CC_ROW;
-    if (cc >= 0 && cc < 4)
-        return column == 1 ? HelpTopic::INST_MIDI_CC_NUMBER : HelpTopic::INST_MIDI_CC_VALUE;
-    return HelpTopic::NONE;
-}
-
-/**
- * INSTRUMENT, sampler and SoundFont.
- *
- * ⚠️ `off` is the SAME one-row shift `cursor_context` applies, and for the same reason: the
- * SoundFont layout has a PATCH row at 6 that the sampler does not, so every row below it sits one
- * lower. Written the same way here so the two cannot disagree about which row DRIVE is on.
- */
-inline HelpTopic instrument_sample_topic(bool sf, int row, int column) {
-    const int off = sf ? 1 : 0;
-
-    if (row == 2) {
-        if (column == 1) return HelpTopic::INST_ROOT;
-        if (column == 3) return HelpTopic::INST_DETUNE;
-        if (column == 5) return HelpTopic::INST_TIC;
-        return HelpTopic::NONE;
-    }
-    if (row == 3) {  // VOL + TSP + PAN, the same three on both types
-        if (column == 1) return HelpTopic::INST_VOLUME;
-        if (column == 3) return HelpTopic::INST_TRANSPOSE;
-        if (column == 5) return HelpTopic::INST_PAN;
-        return HelpTopic::NONE;
-    }
-    if (sf && row == 6) return column == 1 ? HelpTopic::INST_PATCH : HelpTopic::NONE;
-
-    if (row == 7 + off) return column == 1 ? HelpTopic::INST_DRIVE : HelpTopic::INST_FILTER;
-    if (row == 8 + off) return column == 1 ? HelpTopic::INST_CRUSH : HelpTopic::INST_FILTER_FREQ;
-    if (row == 9 + off) return column == 1 ? HelpTopic::INST_DOWNSAMPLE : HelpTopic::INST_FILTER_RES;
-
-    if (sf) {
-        // The SoundFont tail is one parameter per row, so any column but the label is the value.
-        if (row == 12) return HelpTopic::INST_REVERB_SEND;
-        if (row == 13) return HelpTopic::INST_DELAY_SEND;
-        if (row == 14) return HelpTopic::INST_EQ;
-        return HelpTopic::NONE;
-    }
-
-    switch (row) {
-        case 11: return column == 1 ? HelpTopic::INST_REVERB_SEND : HelpTopic::INST_DELAY_SEND;
-        case 12: return column == 1 ? HelpTopic::INST_EQ : HelpTopic::INST_SLICE;
-        case 13: return column == 1 ? HelpTopic::INST_LOOP_MODE : HelpTopic::INST_SAMPLE_START;
-        case 14: return column == 1 ? HelpTopic::INST_LOOP_START : HelpTopic::INST_SAMPLE_END;
-        case 15: return column == 1 ? HelpTopic::INST_LOOP_END : HelpTopic::INST_REVERSE;
-        default: return HelpTopic::NONE;
-    }
-}
-
-/** INSTRUMENT, all three types. Rows 0, 1 and 5 are shared; the tail is per type. */
+/** INSTRUMENT, all three types: the topic of the cell the type's table puts at (row, column). */
 inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int column) {
-    if (row == 0) {
-        // TYPE, then the two buttons beside it. On a SoundFont there is no EDIT (no single waveform
-        // to edit) and on EXTERNAL neither button is drawn, so those columns are never reached.
-        if (column == 1) return HelpTopic::INST_TYPE;
-        if (column == 2) return HelpTopic::INST_SOURCE_LOAD;
-        if (column == 3) return HelpTopic::INST_SOURCE_EDIT;
-        return HelpTopic::NONE;
+    using Cell = InstrumentCell;
+    switch (instrument_cell_at(type, row, column)) {
+        case Cell::NONE:         return HelpTopic::NONE;
+        case Cell::TYPE:         return HelpTopic::INST_TYPE;
+        case Cell::SOURCE_LOAD:  return HelpTopic::INST_SOURCE_LOAD;
+        case Cell::SOURCE_EDIT:  return HelpTopic::INST_SOURCE_EDIT;
+        case Cell::NAME:         return HelpTopic::INST_NAME;
+        case Cell::PRESET_SAVE:  return HelpTopic::INST_PRESET_SAVE;
+        case Cell::PRESET_LOAD:  return HelpTopic::INST_PRESET_LOAD;
+        case Cell::VOL:          return HelpTopic::INST_VOLUME;
+        case Cell::PAN:          return HelpTopic::INST_PAN;
+        case Cell::TSP:          return HelpTopic::INST_TRANSPOSE;
+        case Cell::TIC:          return HelpTopic::INST_TIC;
+        case Cell::ROOT:         return HelpTopic::INST_ROOT;
+        case Cell::DETUNE:       return HelpTopic::INST_DETUNE;
+        case Cell::DRIVE:        return HelpTopic::INST_DRIVE;
+        case Cell::FILTER:       return HelpTopic::INST_FILTER;
+        case Cell::CRUSH:        return HelpTopic::INST_CRUSH;
+        case Cell::FREQ:         return HelpTopic::INST_FILTER_FREQ;
+        case Cell::DOWNSAMPLE:   return HelpTopic::INST_DOWNSAMPLE;
+        case Cell::RES:          return HelpTopic::INST_FILTER_RES;
+        case Cell::REV:          return HelpTopic::INST_REVERB_SEND;
+        case Cell::DEL:          return HelpTopic::INST_DELAY_SEND;
+        case Cell::EQ:           return HelpTopic::INST_EQ;
+        case Cell::PATCH:        return HelpTopic::INST_PATCH;
+        case Cell::SLICE:        return HelpTopic::INST_SLICE;
+        case Cell::LOOP:         return HelpTopic::INST_LOOP_MODE;
+        case Cell::START:        return HelpTopic::INST_SAMPLE_START;
+        case Cell::LOOP_START:   return HelpTopic::INST_LOOP_START;
+        case Cell::END:          return HelpTopic::INST_SAMPLE_END;
+        case Cell::LOOP_END:     return HelpTopic::INST_LOOP_END;
+        case Cell::REVERSE:      return HelpTopic::INST_REVERSE;
+        case Cell::MIDI_CHANNEL: return HelpTopic::INST_MIDI_CHANNEL;
+        case Cell::MIDI_BANK:    return HelpTopic::INST_MIDI_BANK;
+        case Cell::MIDI_PROGRAM: return HelpTopic::INST_MIDI_PROGRAM;
+        case Cell::MIDI_LENGTH:  return HelpTopic::INST_MIDI_LENGTH;
+        case Cell::CC_NUMBER:    return HelpTopic::INST_MIDI_CC_NUMBER;
+        case Cell::CC_VALUE:     return HelpTopic::INST_MIDI_CC_VALUE;
     }
-    if (row == 1) return HelpTopic::INST_NAME;
-    if (row == 5) {
-        // The .pti preset buttons, on every layout: the cursor snaps to column 2 on entry.
-        if (column == 2) return HelpTopic::INST_PRESET_SAVE;
-        if (column == 3) return HelpTopic::INST_PRESET_LOAD;
-        return HelpTopic::NONE;
-    }
-
-    switch (type) {
-        case songcore::InstrumentType::EXTERNAL:  return instrument_external_topic(row, column);
-        case songcore::InstrumentType::SOUNDFONT: return instrument_sample_topic(true, row, column);
-        default:                                  return instrument_sample_topic(false, row, column);
-    }
+    return HelpTopic::NONE;
 }
 
 /**

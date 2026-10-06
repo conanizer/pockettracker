@@ -305,6 +305,10 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
                                   : 0;
     }
 
+    // ⚠️ And for INSTRUMENT: under REMEMBER the pair was set on whatever instrument was shown last, and
+    // the layouts differ by type.
+    if (r.screen == ScreenType::INSTRUMENT) snap_instrument_cursor(s);
+
     // SONG's viewport must contain its cursor, whichever branch above set it.
     if (r.screen == ScreenType::SONG) scroll_song_to_row(s, s.cursorRow);
 

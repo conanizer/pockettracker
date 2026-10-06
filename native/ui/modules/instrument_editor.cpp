@@ -10,13 +10,14 @@ namespace pt::ui {
 using songcore::Instrument;
 using songcore::InstrumentType;
 using songcore::Note;
+using Cell = InstrumentCell;
 
 namespace {
 
 // Fixed column offsets for the TRIPLE rows, from the module's left edge — three pairs do not fit
 // the two-column grid.
 constexpr int TRIPLE_V1 = 90;   // first value  (ROOT / VOL)
-constexpr int TRIPLE_N2 = 185;  // second label (DETUNE / SLICE)
+constexpr int TRIPLE_N2 = 185;  // second label (DETUNE / TSP)
 constexpr int TRIPLE_V2 = 305;
 constexpr int TRIPLE_N3 = 368;  // third label  (TIC / PAN)
 constexpr int TRIPLE_V3 = 438;
@@ -28,6 +29,10 @@ constexpr int TYPE_VALUE = TRIPLE_V1;  // the TYPE value, under the ROOT/VOL col
 constexpr int BTN_COL2   = 300;        // cursor column 2: TYPE-row LOAD, PRESET-row SAVE
 constexpr int BTN_COL3   = 400;        // cursor column 3: TYPE-row EDIT, PRESET-row LOAD
 
+// A DUAL row's second pair, from the first pair's label and value.
+constexpr int DUAL_N2 = 230;
+constexpr int DUAL_V2 = 220;
+
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /**
@@ -36,276 +41,210 @@ int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
  */
 std::string midi_opt(int v) { return v < 0 ? "--" : hex2(v); }
 
+/** The CC slot a CC row edits, or null past the slots the instrument carries. */
+template <typename Ins>
+auto* cc_slot(Ins& ins, int slot) {
+    return (slot >= 0 && slot < static_cast<int>(ins.midiCC.size()))
+               ? &ins.midiCC[static_cast<size_t>(slot)]
+               : nullptr;
+}
+
+const char* cell_label(Cell cell, int cc_slot_index) {
+    static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
+    switch (cell) {
+        case Cell::NAME:         return "NAME";
+        case Cell::VOL:          return "VOL";
+        case Cell::PAN:          return "PAN";
+        case Cell::TSP:          return "TSP";
+        case Cell::TIC:          return "TIC";
+        case Cell::ROOT:         return "ROOT";
+        case Cell::DETUNE:       return "DETUNE";
+        case Cell::DRIVE:        return "DRIVE";
+        case Cell::FILTER:       return "FILTER";
+        case Cell::CRUSH:        return "CRUSH";
+        case Cell::FREQ:         return "FREQ";
+        case Cell::DOWNSAMPLE:   return "DWNSMPL";
+        case Cell::RES:          return "RES";
+        case Cell::REV:          return "REV";
+        case Cell::DEL:          return "DEL";
+        case Cell::EQ:           return "EQ";
+        case Cell::PATCH:        return "PATCH";
+        case Cell::SLICE:        return "SLICE";
+        case Cell::LOOP:         return "LOOP";
+        case Cell::START:        return "START";
+        case Cell::LOOP_START:   return "LOOP ST";
+        case Cell::END:          return "END";
+        case Cell::LOOP_END:     return "LOOP END";
+        case Cell::REVERSE:      return "REVERSE";
+        case Cell::MIDI_CHANNEL: return "CHAN";
+        case Cell::MIDI_BANK:    return "BANK";
+        case Cell::MIDI_PROGRAM: return "PROG";
+        case Cell::MIDI_LENGTH:  return "LEN";
+        case Cell::CC_NUMBER:    return CC_LABELS[clamp(cc_slot_index, 0, 3)];
+        case Cell::CC_VALUE:     return "VAL";
+        // drawn by their own rows
+        case Cell::NONE:
+        case Cell::TYPE:
+        case Cell::SOURCE_LOAD:
+        case Cell::SOURCE_EDIT:
+        case Cell::PRESET_SAVE:
+        case Cell::PRESET_LOAD:
+            return "";
+    }
+    return "";
+}
+
+const char* on_off(bool v) { return v ? "on" : "off"; }
+
+std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState& s) {
+    const Instrument& ins = s.instrument;
+    switch (cell) {
+        case Cell::NAME:
+            // "______" until a sample or SF2 is loaded (or the user names the slot) — the
+            // auto-generated "INSTxx" is treated as "unset", never shown.
+            return songcore::instrument_has_default_name(ins) ? "______" : ins.name;
+        case Cell::VOL:        return hex2(ins.volume);
+        case Cell::PAN:        return hex2(ins.pan);
+        case Cell::TSP:        return on_off(ins.transposeEnabled);
+        case Cell::TIC:        return hex2(ins.tableTicRate);
+        case Cell::ROOT:       return note_name(ins.root);
+        case Cell::DETUNE:     return hex2(ins.detune);
+        case Cell::DRIVE:      return hex2(ins.drive);
+        case Cell::FILTER:     return ins.filterType;
+        case Cell::CRUSH:      return hex1(ins.crush);
+        case Cell::FREQ:       return hex2(ins.filterCut);
+        case Cell::DOWNSAMPLE: return hex1(ins.downsample);
+        case Cell::RES:        return hex2(ins.filterRes);
+        case Cell::REV:        return hex2(ins.reverbSend);
+        case Cell::DEL:        return hex2(ins.delaySend);
+        case Cell::PATCH: {
+            // "3/128 Acoustic Grand" — the 1-based position in the SF2's patch list, then its name.
+            // "--" when the file has no patches (or none is loaded). Labelled PATCH, not PRESET, so it
+            // is not confused with the INST PRESET (.pti) row above.
+            const std::string num = (s.sfPresetCount > 0) ? std::to_string(s.sfPresetIndex + 1) + "/" +
+                                                                std::to_string(s.sfPresetCount)
+                                                          : "--";
+            return s.sfPresetName.empty() ? num : num + " " + s.sfPresetName;
+        }
+        case Cell::SLICE:      return slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))];
+        case Cell::LOOP:       return ins.loopMode;
+        case Cell::START:      return hex2(ins.sampleStart);
+        case Cell::LOOP_START: return hex2(ins.loopStart);
+        case Cell::END:        return hex2(ins.sampleEnd);
+        case Cell::LOOP_END:   return hex2(ins.loopEnd);
+        case Cell::REVERSE:    return on_off(ins.reverse);
+        // CHAN is stored 0-15 and shown 1-16 — the MIDI convention; only the drawing adds the 1.
+        case Cell::MIDI_CHANNEL: return dec2(clamp(ins.midiChannel, 0, 15) + 1);
+        // 14-bit, so FOUR hex digits — why EXTERNAL's rows are DUALs.
+        case Cell::MIDI_BANK:    return ins.midiBank < 0 ? "----" : hex4(ins.midiBank);
+        case Cell::MIDI_PROGRAM: return midi_opt(ins.midiProgram);
+        case Cell::MIDI_LENGTH:  return hex2(ins.midiLen);
+        case Cell::CC_NUMBER: {
+            const auto* slot = cc_slot(ins, cc_slot_index);
+            return slot ? midi_opt(slot->cc) : "";
+        }
+        case Cell::CC_VALUE: {
+            const auto* slot = cc_slot(ins, cc_slot_index);
+            return slot ? midi_opt(slot->value) : "";
+        }
+        // EQ has its own painter; the rest are drawn by their own rows
+        case Cell::EQ:
+        case Cell::NONE:
+        case Cell::TYPE:
+        case Cell::SOURCE_LOAD:
+        case Cell::SOURCE_EDIT:
+        case Cell::PRESET_SAVE:
+        case Cell::PRESET_LOAD:
+            return "";
+    }
+    return "";
+}
+
 }  // namespace
 
 // ─── Draw ────────────────────────────────────────────────────────────────────────────────────────
 
 void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEditorState& s) const {
-    if (s.is_external()) { draw_external(c, x, y, s); return; }
-
-    const Theme&      t   = s.theme;
-    const Instrument& ins = s.instrument;
-    const bool        sf  = s.is_soundfont();
+    const Theme&         t    = s.theme;
+    const Instrument&    ins  = s.instrument;
+    const InstrumentType type = ins.instrumentType;
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
     const int nameX  = x + 10;
     const int valueX = x + 150;
 
-    int rowY       = y + TEXT_PADDING;
-    int currentRow = 0;
+    int rowY = y + TEXT_PADDING;
 
     c.draw_text("INSTRUMENT " + hex2(ins.id), nameX, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
     rowY += ROW_HEIGHT + 14;
 
-    // ── 0: TYPE + LOAD + SAVE ────────────────────────────────────────────────────────────────────
-    draw_type_load_row(c, x, rowY, nameX, valueX, ins, s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
+    const int rows = instrument_row_count(type);
+    for (int row = 0; row < rows; ++row, rowY += ROW_HEIGHT) {
+        const InstrumentRow r     = instrument_row(type, row);
+        const int           textY = rowY + TEXT_PADDING;
+        const auto on = [&](int i) {
+            return s.cursorRow == row && s.cursorColumn == instrument_row_column(r.kind, i);
+        };
+        const auto pair = [&](int i, int label_x, int value_x) {
+            draw_cell(c, label_x, value_x, textY, r.cells[i], r.ccSlot, on(i), s);
+        };
 
-    // ── 1: NAME ──────────────────────────────────────────────────────────────────────────────────
-    draw_name_row(c, rowY, nameX, valueX, s, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
+        // A CC row past the slots the instrument carries stays blank.
+        if (r.ccSlot >= static_cast<int>(ins.midiCC.size())) continue;
 
-    // ── 2: ROOT + DETUNE + TIC ───────────────────────────────────────────────────────────────────
-    draw_triple_row(c, x, rowY, nameX,
-                    "ROOT",   note_name(ins.root),
-                    "DETUNE", hex2(ins.detune),
-                    "TIC",    hex2(ins.tableTicRate),
-                    s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 3: VOL + TSP + PAN, on both types ────────────────────────────────────────────────────────
-    // TSP is the same switch on both types, so the row is a TRIPLE on both.
-    draw_triple_row(c, x, rowY, nameX,
-                    "VOL", hex2(ins.volume),
-                    "TSP", ins.transposeEnabled ? "on" : "off",
-                    "PAN", hex2(ins.pan),
-                    s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 4: spacer ────────────────────────────────────────────────────────────────────────────────
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 5: the source section ────────────────────────────────────────────────────────────────────
-    draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 6 (SF only): PATCH ───────────────────────────────────────────────────────────────────────
-    if (sf) {
-        // "3/128 Acoustic Grand" — the 1-based position in the SF2's patch list, then its name. "--"
-        // when the file has no patches (or none is loaded), which is also what an empty SF slot shows.
-        // Labelled PATCH, not PRESET, so it is not confused with the INST PRESET (.pti) row above.
-        const std::string num = (s.sfPresetCount > 0)
-                                    ? std::to_string(s.sfPresetIndex + 1) + "/" +
-                                          std::to_string(s.sfPresetCount)
-                                    : "--";
-        const std::string value = s.sfPresetName.empty() ? num : num + " " + s.sfPresetName;
-
-        const bool onRow = (s.cursorRow == currentRow);
-        c.draw_text("PATCH", nameX, rowY + TEXT_PADDING, onRow ? cursor_mark_ink(t) : t.textParam,
-                    CHAR_SPACING, FONT_SCALE);
-        draw_cursor_cell(c, value, valueX, rowY + TEXT_PADDING, onRow, t.textValue, t);
-        rowY += ROW_HEIGHT; currentRow++;
-    }
-
-    // ── 6/7: spacer ──────────────────────────────────────────────────────────────────────────────
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── The DSP block: DRIVE+FILTER, CRUSH+FREQ, DWNSMPL+RES ─────────────────────────────────────
-    draw_dual_row(c, rowY, nameX, valueX, "DRIVE", hex2(ins.drive), "FILTER", ins.filterType,
-                  s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    draw_dual_row(c, rowY, nameX, valueX, "CRUSH", hex1(ins.crush), "FREQ", hex2(ins.filterCut),
-                  s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    draw_dual_row(c, rowY, nameX, valueX, "DWNSMPL", hex1(ins.downsample), "RES",
-                  hex2(ins.filterRes), s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── spacer ───────────────────────────────────────────────────────────────────────────────────
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── The type-specific tail ───────────────────────────────────────────────────────────────────
-    if (sf) {
-        // The SoundFont has no sample window and no loop, so its sends get a row each and the screen
-        // ends at EQ.
-        const auto on = [&](int col) { return s.cursorRow == currentRow && s.cursorColumn == col; };
-
-        draw_parameter_row(c, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), on(0), on(1), t);
-        rowY += ROW_HEIGHT; currentRow++;
-
-        draw_parameter_row(c, rowY, nameX, valueX, "DEL", hex2(ins.delaySend), on(0), on(1), t);
-        rowY += ROW_HEIGHT; currentRow++;
-
-        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot, "", "", s.cursorRow,
-                    s.cursorColumn, currentRow, t);
-
-    } else {
-        draw_dual_row(c, rowY, nameX, valueX, "REV", hex2(ins.reverbSend), "DEL",
-                      hex2(ins.delaySend), s.cursorRow, s.cursorColumn, currentRow, t);
-        rowY += ROW_HEIGHT; currentRow++;
-
-        draw_eq_row(c, rowY, nameX, valueX, ins.eqSlot,
-                    "SLICE", slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))],
-                    s.cursorRow, s.cursorColumn, currentRow, t);
-        rowY += ROW_HEIGHT; currentRow++;
-
-        draw_dual_row(c, rowY, nameX, valueX, "LOOP", ins.loopMode, "START", hex2(ins.sampleStart),
-                      s.cursorRow, s.cursorColumn, currentRow, t);
-        rowY += ROW_HEIGHT; currentRow++;
-
-        draw_dual_row(c, rowY, nameX, valueX, "LOOP ST", hex2(ins.loopStart), "END",
-                      hex2(ins.sampleEnd), s.cursorRow, s.cursorColumn, currentRow, t);
-        rowY += ROW_HEIGHT; currentRow++;
-
-        draw_dual_row(c, rowY, nameX, valueX, "LOOP END", hex2(ins.loopEnd), "REVERSE",
-                      ins.reverse ? "on" : "off", s.cursorRow, s.cursorColumn, currentRow, t);
+        switch (r.kind) {
+            case InstrumentRowKind::NAME:
+                draw_type_load_row(c, x, rowY, nameX, ins, s.cursorRow, s.cursorColumn, row, t);
+                break;
+            case InstrumentRowKind::SOURCE:
+                draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, row, t);
+                break;
+            case InstrumentRowKind::SINGLE:
+                pair(0, nameX, valueX);
+                break;
+            case InstrumentRowKind::DUAL:
+                pair(0, nameX, valueX);
+                pair(1, nameX + DUAL_N2, valueX + DUAL_V2);
+                break;
+            case InstrumentRowKind::TRIPLE:
+                pair(0, nameX, x + TRIPLE_V1);
+                pair(1, x + TRIPLE_N2, x + TRIPLE_V2);
+                pair(2, x + TRIPLE_N3, x + TRIPLE_V3);
+                break;
+            case InstrumentRowKind::SPACER:
+                break;
+        }
     }
 
     // Status messages are the global overlay's, drawn on the visualizer header.
-}
-
-void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
-                                           const InstrumentEditorState& s) const {
-    const Theme&      t   = s.theme;
-    const Instrument& ins = s.instrument;
-
-    c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
-
-    const int nameX  = x + 10;
-    const int valueX = x + 150;
-
-    int rowY       = y + TEXT_PADDING;
-    int currentRow = 0;
-
-    c.draw_text("INSTRUMENT " + hex2(ins.id), nameX, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
-    rowY += ROW_HEIGHT + 14;
-
-    // ── 0: TYPE (no LOAD, no EDIT — there is no source) ──────────────────────────────────────────
-    draw_type_load_row(c, x, rowY, nameX, valueX, ins, s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 1: NAME ──────────────────────────────────────────────────────────────────────────────────
-    draw_name_row(c, rowY, nameX, valueX, s, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 2: CHAN + BANK ───────────────────────────────────────────────────────────────────────────
-    // CHAN is shown 1-16 and stored 0-15 — the MIDI convention. The +1 lives here and the −1 lives in
-    // handle_input; nothing between them ever sees the display number. BANK is FOUR hex digits: it is
-    // 14-bit, and it shares this row with one cell rather than two so the number has room to print.
-    draw_dual_row(c, rowY, nameX, valueX,
-                  "CHAN", dec2(clamp(ins.midiChannel, 0, 15) + 1),
-                  "BANK", ins.midiBank < 0 ? "----" : hex4(ins.midiBank),
-                  s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 3: PROG + LEN ────────────────────────────────────────────────────────────────────────────
-    draw_dual_row(c, rowY, nameX, valueX, "PROG", midi_opt(ins.midiProgram), "LEN",
-                  hex2(ins.midiLen), s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 4: spacer ────────────────────────────────────────────────────────────────────────────────
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 5: INST PRESET ───────────────────────────────────────────────────────────────────────────
-    // A .pti round-trips an EXTERNAL patch too: the preset carries the whole Instrument.
-    draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 6: spacer ────────────────────────────────────────────────────────────────────────────────
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 7: VOL + PAN ─────────────────────────────────────────────────────────────────────────────
-    // The two that survive the cable: VOL scales the note-on velocity (there is no gain stage on our
-    // side of it) and PAN leaves as CC 10. Everything else in the sampler's DSP block has no meaning.
-    draw_dual_row(c, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
-                  s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 8: TSP + TIC ─────────────────────────────────────────────────────────────────────────────
-    // TSP: the scale quantizer moves the notes sent down the cable, so a drum machine needs a way to
-    // say no. TIC: the table clock, which runs as on a sampler — the table is where its FX live.
-    draw_dual_row(c, rowY, nameX, valueX, "TSP", ins.transposeEnabled ? "on" : "off",
-                  "TIC", hex2(ins.tableTicRate), s.cursorRow, s.cursorColumn, currentRow, t);
-    rowY += ROW_HEIGHT; currentRow++;
-
-    // ── 9-12: the four CC slots, number then default value ───────────────────────────────────────
-    static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
-    const int ccRows = std::min(songcore::MIDI_CC_SLOTS, static_cast<int>(ins.midiCC.size()));
-    for (int i = 0; i < ccRows; ++i) {
-        const songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(i)];
-        draw_dual_row(c, rowY, nameX, valueX, CC_LABELS[i], midi_opt(slot.cc), "VAL",
-                      midi_opt(slot.value), s.cursorRow, s.cursorColumn, currentRow, t);
-        rowY += ROW_HEIGHT; currentRow++;
-    }
 }
 
 // ─── Draw helpers ────────────────────────────────────────────────────────────────────────────────
 
 // ⚠️ NO ROW BACKGROUND ANYWHERE ON THIS SCREEN. The cursor is the CELL it is on, as it is on every
 // grid; what says WHICH ROW is the label beside it, which takes `cursor_mark_ink` while the cursor is
-// anywhere along its row. A label is only a CELL — only filled — where the cursor can land on it.
+// on its cell. A label is only a CELL — only filled — where the cursor can land on it.
 
-void InstrumentEditorModule::draw_parameter_row(Canvas& c, int y, int name_x, int value_x,
-                                                const std::string& name, const std::string& value,
-                                                bool cursor_on_name, bool cursor_on_value,
-                                                const Theme& t) const {
-    const int  textY = y + TEXT_PADDING;
-    const bool onRow = cursor_on_name || cursor_on_value;
-
-    draw_cursor_cell(c, name, name_x, textY, cursor_on_name,
-                     onRow ? cursor_mark_ink(t) : t.textParam, t);
-    draw_cursor_cell(c, value, value_x, textY, cursor_on_value, t.textValue, t);
+void InstrumentEditorModule::draw_cell(Canvas& c, int label_x, int value_x, int text_y, Cell cell,
+                                       int cc_slot_index, bool is_cursor,
+                                       const InstrumentEditorState& s) const {
+    const Theme& t = s.theme;
+    c.draw_text(cell_label(cell, cc_slot_index), label_x, text_y,
+                is_cursor ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
+    // The shared painter, so the EQ cell cannot drift from the pool's or the mixer's: "--" when
+    // unassigned, and a trailing ">" that says the cell opens the EQ editor.
+    if (cell == Cell::EQ) {
+        draw_eq_cell(c, value_x, text_y, s.instrument.eqSlot, is_cursor, t);
+        return;
+    }
+    draw_cursor_cell(c, cell_text(cell, cc_slot_index, s), value_x, text_y, is_cursor, t.textValue, t);
 }
 
-void InstrumentEditorModule::draw_dual_row(Canvas& c, int y, int name_x, int value_x,
-                                           const std::string& n1, const std::string& v1,
-                                           const std::string& n2, const std::string& v2,
-                                           int cursor_row, int cursor_column, int this_row,
-                                           const Theme& t) const {
-    const int  textY = y + TEXT_PADDING;
-    const bool onRow = (cursor_row == this_row);
-
-    const int name2X  = name_x + 230;
-    const int value2X = value_x + 220;
-
-    const bool c1 = onRow && cursor_column == 1;
-    const bool c3 = onRow && cursor_column == 3;
-
-    c.draw_text(n1, name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    draw_cursor_cell(c, v1, value_x, textY, c1, t.textValue, t);
-    c.draw_text(n2, name2X, textY, c3 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    draw_cursor_cell(c, v2, value2X, textY, c3, t.textValue, t);
-}
-
-void InstrumentEditorModule::draw_triple_row(Canvas& c, int x, int y, int name_x,
-                                             const std::string& n1, const std::string& v1,
-                                             const std::string& n2, const std::string& v2,
-                                             const std::string& n3, const std::string& v3,
-                                             int cursor_row, int cursor_column, int this_row,
-                                             const Theme& t) const {
-    const int  textY = y + TEXT_PADDING;
-    const bool onRow = (cursor_row == this_row);
-
-    const bool c1 = onRow && cursor_column == 1;
-    const bool c3 = onRow && cursor_column == 3;
-    const bool c5 = onRow && cursor_column == 5;
-
-    c.draw_text(n1, name_x,        textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    draw_cursor_cell(c, v1, x + TRIPLE_V1, textY, c1, t.textValue, t);
-    c.draw_text(n2, x + TRIPLE_N2, textY, c3 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    draw_cursor_cell(c, v2, x + TRIPLE_V2, textY, c3, t.textValue, t);
-    c.draw_text(n3, x + TRIPLE_N3, textY, c5 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    draw_cursor_cell(c, v3, x + TRIPLE_V3, textY, c5, t.textValue, t);
-}
-
-void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int name_x, int value_x,
+void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int name_x,
                                                 const Instrument& ins, int cursor_row,
                                                 int cursor_column, int this_row,
                                                 const Theme& t) const {
-    (void)value_x;   // the TYPE row aligns to the TRIPLE grid, not the two-column grid
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
 
@@ -329,34 +268,13 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     c.draw_text("TYPE", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
     draw_cursor_cell(c, typeText, x + TYPE_VALUE, textY, c1, t.textValue, t);
 
-    // ⚠️ Both buttons are drawn only where they DO something, and `instrument_row_layout.h` caps the
-    // cursor at the same numbers — one table, so a button that is not drawn is also not reachable.
-    // No LOAD on EXTERNAL: it has no source file of any kind, only a channel and a patch number.
-    // No EDIT on a SoundFont: there is no single waveform to edit.
-    const int maxCol = instrument_name_row_max_column(type);
-    if (maxCol >= 2) {
+    // Both buttons are drawn only where the type's table has them, which is also where the cursor stops.
+    if (instrument_cell_at(type, this_row, 2) == Cell::SOURCE_LOAD) {
         draw_cursor_cell(c, "LOAD", x + BTN_COL2, textY, c2, t.textValue, t);
     }
-    if (maxCol >= 3) {
+    if (instrument_cell_at(type, this_row, 3) == Cell::SOURCE_EDIT) {
         draw_cursor_cell(c, "EDIT >", x + BTN_COL3, textY, c3, t.textValue, t);
     }
-}
-
-void InstrumentEditorModule::draw_name_row(Canvas& c, int y, int name_x, int value_x,
-                                           const InstrumentEditorState& s, int this_row,
-                                           const Theme& t) const {
-    const int  textY = y + TEXT_PADDING;
-    const bool onRow = (s.cursorRow == this_row);
-
-    c.draw_text("NAME", name_x, textY, onRow ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-
-    // "______" until a sample or SF2 is loaded (or the user names the slot) — the auto-generated
-    // "INSTxx" is treated as "unset", never shown. songcore::instrument_has_default_name is the single
-    // test for that, everywhere.
-    const std::string display = songcore::instrument_has_default_name(s.instrument)
-                                    ? "______"
-                                    : s.instrument.name;
-    draw_cursor_cell(c, display, value_x, textY, onRow, t.textValue, t);
 }
 
 void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, int name_x,
@@ -374,29 +292,6 @@ void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, in
     draw_cursor_cell(c, "LOAD", x + BTN_COL3, textY, onRow && cursor_column == 3, t.textValue, t);
 }
 
-void InstrumentEditorModule::draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot,
-                                         const std::string& n2, const std::string& v2,
-                                         int cursor_row, int cursor_column, int this_row,
-                                         const Theme& t) const {
-    const int  textY = y + TEXT_PADDING;
-    const bool onRow = (cursor_row == this_row);
-
-    const bool c1 = onRow && cursor_column == 1;
-    const bool c3 = onRow && cursor_column == 3;
-
-    c.draw_text("EQ", name_x, textY, c1 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    // The shared painter, so this cell cannot drift from the pool's or the mixer's: "--" when
-    // unassigned, and a trailing ">" that says the cell opens the EQ editor.
-    draw_eq_cell(c, value_x, textY, eq_slot, c1, t);
-
-    // ⚠️ An EMPTY name means this row has no second pair — the SoundFont tail, where there are no
-    // slices to put beside the EQ and the row stays a SINGLE. The offsets are `draw_dual_row`'s, so
-    // the pair that IS drawn lands where every other second column on the screen does.
-    if (n2.empty()) return;
-    c.draw_text(n2, name_x + 230, textY, c3 ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-    draw_cursor_cell(c, v2, value_x + 220, textY, c3, t.textValue, t);
-}
-
 // ─── Cursor context ──────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -410,248 +305,160 @@ static CursorContext midi_opt_context(int current, int max) {
                         /*can_delete=*/current >= 0, /*can_insert=*/current < 0);
 }
 
+/** A plain byte with an A+B reset value. */
+static CursorContext byte_context(int current, int def) {
+    return cc::hex_byte(current, 0, 255, -1, false, false, false, def);
+}
+
 CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState& s) const {
-    const Instrument& ins = s.instrument;
+    const Instrument&   ins  = s.instrument;
+    const InstrumentRow r    = instrument_row(ins.instrumentType, s.cursorRow);
+    const Cell          cell = instrument_cell_at(ins.instrumentType, s.cursorRow, s.cursorColumn);
 
-    if (s.is_external()) {
-        const int row = s.cursorRow;
-        const int col = s.cursorColumn;
-
-        // Rows 0/1 (TYPE, NAME) and 5 (the .pti buttons) are the dispatcher's on every layout.
-        if (row == 0 || row == 1) return cc::read_only();
-        if (row == 5) return cc::read_only();
-
-        if (row == 2) {  // CHAN + BANK
-            // CHAN is stored 0-15 and shown 1-16. The CONTEXT carries the stored number, so stepping
-            // wraps 15→0 the way the wire numbers it; only the drawing adds the 1.
-            if (col == 1) return cc::hex_byte(clamp(ins.midiChannel, 0, 15), 0, 15, -1, false, false,
-                                              false, /*def=*/0);
-            // BANK is 14-bit (CC0 MSB + CC32 LSB, midi_out.h), so its large step is a whole MSB — 16
-            // would take 1024 presses to cross the range.
-            if (col == 3) {
-                CursorContext c = midi_opt_context(ins.midiBank, 16383);
-                c.largeStep     = 128;
-                return c;
-            }
+    switch (cell) {
+        case Cell::NONE:
             return cc::none();
+
+        // Read-only TO THE GENERIC HANDLERS: TYPE, the buttons and NAME are the dispatcher's (a type
+        // change frees a sample; a name is text; the buttons are host verbs).
+        case Cell::TYPE:
+        case Cell::SOURCE_LOAD:
+        case Cell::SOURCE_EDIT:
+        case Cell::NAME:
+        case Cell::PRESET_SAVE:
+        case Cell::PRESET_LOAD:
+            return cc::read_only();
+
+        case Cell::ROOT: {
+            const bool empty = (ins.root == Note::EMPTY());
+            return cc::note(empty ? 0 : songcore::note_to_midi(ins.root), empty);
+        }
+        case Cell::DETUNE: return byte_context(ins.detune, 0x80);
+        case Cell::TIC:    return byte_context(ins.tableTicRate, 0x06);
+        case Cell::VOL:    return byte_context(ins.volume, 0xFF);
+        case Cell::TSP:    return cc::toggle_binary(ins.transposeEnabled);
+        case Cell::PAN:    return byte_context(ins.pan, 0x80);
+
+        case Cell::PATCH: {
+            // The range is the SF2's own list length; with no SoundFont it is 0 and stepping goes nowhere.
+            const int maxIdx = (s.sfPresetCount - 1) < 0 ? 0 : (s.sfPresetCount - 1);
+            return cc::hex_byte(s.sfPresetIndex, 0, maxIdx);
         }
 
-        if (row == 3) {  // PROG + LEN
-            if (col == 1) return midi_opt_context(ins.midiProgram, 127);
-            // LEN 00 is not "empty" — it is gate-to-next, a MODE (midi_out.h), so the cell steps
-            // through it like any other value and A+B resets to it rather than deleting.
-            if (col == 3) return cc::hex_byte(ins.midiLen, 0, 255, -1, false, false, false, /*def=*/0x00);
-            return cc::none();
+        case Cell::DRIVE:      return byte_context(ins.drive, 0x00);
+        case Cell::FILTER:     return cc::toggle_ternary(ins.filterType, filter_types());
+        case Cell::CRUSH:      return cc::hex_nibble(ins.crush, /*def=*/0);
+        case Cell::FREQ:       return byte_context(ins.filterCut, 0x00);
+        case Cell::DOWNSAMPLE: return cc::hex_nibble(ins.downsample, /*def=*/0);
+        case Cell::RES:        return byte_context(ins.filterRes, 0x00);
+        case Cell::REV:        return byte_context(ins.reverbSend, 0x00);
+        case Cell::DEL:        return byte_context(ins.delaySend, 0x00);
+
+        /**
+         * −1 is "no EQ", and A+B clears back to it.
+         *
+         * ⚠️ `can_insert` is INERT: −1 is replaced by 0 before `hex_byte` tests emptiness, so the cell
+         * is never empty. A on an unassigned EQ therefore jumps to slot 1 (slot 0 is unreachable with
+         * A), and A+B there does nothing. handle_input's INSERT_DEFAULT arm is unreachable today.
+         */
+        case Cell::EQ:
+            return cc::hex_byte(ins.eqSlot < 0 ? 0 : ins.eqSlot, /*min=*/0, /*max=*/127,
+                                /*empty_value=*/-1, /*can_delete=*/ins.eqSlot >= 0,
+                                /*can_insert=*/ins.eqSlot < 0);
+
+        case Cell::SLICE:
+            return cc::toggle_ternary(slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))],
+                                      slice_modes());
+
+        case Cell::LOOP: {
+            CursorContext c = cc::toggle_ternary(ins.loopMode, loop_modes());
+            // A ceiling rather than a second, shorter list, so `loop_modes()` stays the one place the
+            // modes are named. A slot already saved as `osc` still reads as `osc` here and still draws
+            // as `osc`; the cursor can step out of it and cannot climb back.
+            if (!s.allowOscLoop) c.maxValue = static_cast<int>(loop_modes().size()) - 2;
+            return c;
         }
+        // ⚠️ START and END are deliberately NOT bounded against each other. A HEX_BYTE WRAPS at its
+        // limits, so a floor of START+1 would send END from just under START to FF in one press — in
+        // the middle of the trim that put it there. An inverted pair has a defined sound instead
+        // (`derive_sample_window`: START → the end of the sample).
+        case Cell::START:      return byte_context(ins.sampleStart, 0x00);
+        case Cell::LOOP_START: return byte_context(ins.loopStart, 0x00);
+        case Cell::END:        return byte_context(ins.sampleEnd, 0xFF);
+        case Cell::LOOP_END:   return byte_context(ins.loopEnd, 0xFF);
+        case Cell::REVERSE:    return cc::toggle_binary(ins.reverse);
 
-        if (row == 4 || row == 6) return cc::none();  // spacers
-
-        if (row == 7) {  // VOL + PAN
-            if (col == 1) return cc::hex_byte(ins.volume, 0, 255, -1, false, false, false, /*def=*/0xFF);
-            if (col == 3) return cc::hex_byte(ins.pan, 0, 255, -1, false, false, false, /*def=*/0x80);
-            return cc::none();
+        // The CONTEXT carries the stored 0-15, so stepping wraps 15→0 the way the wire numbers it.
+        case Cell::MIDI_CHANNEL:
+            return cc::hex_byte(clamp(ins.midiChannel, 0, 15), 0, 15, -1, false, false, false, /*def=*/0);
+        case Cell::MIDI_BANK: {
+            // 14-bit (CC0 MSB + CC32 LSB, midi_out.h), so the large step is a whole MSB — 16 would take
+            // 1024 presses to cross the range.
+            CursorContext c = midi_opt_context(ins.midiBank, 16383);
+            c.largeStep     = 128;
+            return c;
         }
-
-        if (row == 8) {  // TSP + TIC
-            if (col == 1) return cc::toggle_binary(ins.transposeEnabled);
-            if (col == 3) return cc::hex_byte(ins.tableTicRate, 0, 255, -1, false, false, false,
-                                              /*def=*/0x06);
-            return cc::none();
+        case Cell::MIDI_PROGRAM: return midi_opt_context(ins.midiProgram, 127);
+        // LEN 00 is not "empty" — it is gate-to-next, a MODE (midi_out.h), so the cell steps through it
+        // like any other value and A+B resets to it rather than deleting.
+        case Cell::MIDI_LENGTH:  return byte_context(ins.midiLen, 0x00);
+        case Cell::CC_NUMBER: {
+            const auto* slot = cc_slot(ins, r.ccSlot);
+            return slot ? midi_opt_context(slot->cc, 127) : cc::none();
         }
-
-        const int ccIndex = row - INSTRUMENT_EXTERNAL_CC_ROW;
-        if (ccIndex >= 0 && ccIndex < static_cast<int>(ins.midiCC.size())) {
-            const songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(ccIndex)];
-            if (col == 1) return midi_opt_context(slot.cc, 127);
-            if (col == 3) return midi_opt_context(slot.value, 127);
-        }
-        return cc::none();
-    }
-
-    const bool sf  = s.is_soundfont();
-    const int  off = sf ? 1 : 0;   // the SoundFont's PRESET row pushes everything below it down
-    const int  row = s.cursorRow;
-    const int  col = s.cursorColumn;
-
-    // Rows 0 and 1 are read-only TO THE GENERIC HANDLERS: A+LEFT/RIGHT on TYPE and A on NAME are the
-    // dispatcher's (a type change frees a sample; a name is text).
-    if (row == 0 || row == 1) return cc::read_only();
-
-    if (row == 2) {  // ROOT + DETUNE + TIC
-        switch (col) {
-            case 1: {
-                const bool empty = (ins.root == Note::EMPTY());
-                return cc::note(empty ? 0 : songcore::note_to_midi(ins.root), empty);
-            }
-            case 3: return cc::hex_byte(ins.detune, 0, 255, -1, false, false, false, /*def=*/0x80);
-            case 5: return cc::hex_byte(ins.tableTicRate, 0, 255, -1, false, false, false, /*def=*/0x06);
-            default: return cc::none();
-        }
-    }
-
-    // VOL + TSP + PAN — the same three cells on both types, so no `sf` arm.
-    if (row == 3) {
-        switch (col) {
-            case 1: return cc::hex_byte(ins.volume, 0, 255, -1, false, false, false, /*def=*/0xFF);
-            case 3: return cc::toggle_binary(ins.transposeEnabled);
-            case 5: return cc::hex_byte(ins.pan, 0, 255, -1, false, false, false, /*def=*/0x80);
-            default: return cc::none();
-        }
-    }
-
-    if (row == 4) return cc::none();       // spacer
-    if (row == 5) return cc::read_only();  // the INST PRESET SAVE / LOAD buttons — the dispatcher's, not a value
-
-    if (sf && row == 6) {  // PATCH
-        // The range is the SF2's own list length; with no SoundFont it is 0 and stepping goes nowhere.
-        if (col != 1) return cc::none();
-        const int maxIdx = (s.sfPresetCount - 1) < 0 ? 0 : (s.sfPresetCount - 1);
-        return cc::hex_byte(s.sfPresetIndex, 0, maxIdx);
-    }
-
-    if (row == 6 + off) return cc::none();  // spacer
-
-    if (row == 7 + off) {  // DRIVE + FILTER
-        switch (col) {
-            case 1: return cc::hex_byte(ins.drive, 0, 255, -1, false, false, false, /*def=*/0x00);
-            case 3: return cc::toggle_ternary(ins.filterType, filter_types());
-            default: return cc::none();
+        case Cell::CC_VALUE: {
+            const auto* slot = cc_slot(ins, r.ccSlot);
+            return slot ? midi_opt_context(slot->value, 127) : cc::none();
         }
     }
-
-    if (row == 8 + off) {  // CRUSH + FREQ
-        switch (col) {
-            case 1: return cc::hex_nibble(ins.crush, /*def=*/0);
-            case 3: return cc::hex_byte(ins.filterCut, 0, 255, -1, false, false, false, /*def=*/0x00);
-            default: return cc::none();
-        }
-    }
-
-    if (row == 9 + off) {  // DWNSMPL + RES
-        switch (col) {
-            case 1: return cc::hex_nibble(ins.downsample, /*def=*/0);
-            case 3: return cc::hex_byte(ins.filterRes, 0, 255, -1, false, false, false, /*def=*/0x00);
-            default: return cc::none();
-        }
-    }
-
-    if (row == 10 + off) return cc::none();  // spacer
-
-    /**
-     * The EQ slot cell, shared by both tails. −1 is "no EQ", and A+B clears back to it.
-     *
-     * ⚠️ `can_insert` is INERT: −1 is replaced by 0 before `hex_byte` tests emptiness, so the cell
-     * is never empty. A on an unassigned EQ therefore jumps to slot 1 (slot 0 is unreachable with
-     * A), and A+B there does nothing. handle_input's INSERT_DEFAULT arm is unreachable today.
-     */
-    const auto eq_context = [&] {
-        return cc::hex_byte(ins.eqSlot < 0 ? 0 : ins.eqSlot, /*min=*/0, /*max=*/127,
-                            /*empty_value=*/-1, /*can_delete=*/ins.eqSlot >= 0,
-                            /*can_insert=*/ins.eqSlot < 0);
-    };
-
-    if (sf) {
-        // 12 REV · 13 DEL · 14 EQ — one parameter each, so column 0 (the label) is read-only and any
-        // other column is the value.
-        if (row == 12) return (col == 0) ? cc::read_only()
-                                         : cc::hex_byte(ins.reverbSend, 0, 255, -1, false, false, false, 0x00);
-        if (row == 13) return (col == 0) ? cc::read_only()
-                                         : cc::hex_byte(ins.delaySend, 0, 255, -1, false, false, false, 0x00);
-        if (row == 14) return (col == 0) ? cc::read_only() : eq_context();
-        return cc::none();
-    }
-
-    switch (row) {
-        case 11:  // REV + DEL
-            if (col == 1) return cc::hex_byte(ins.reverbSend, 0, 255, -1, false, false, false, 0x00);
-            if (col == 3) return cc::hex_byte(ins.delaySend, 0, 255, -1, false, false, false, 0x00);
-            return cc::none();
-
-        case 12:  // EQ + SLICE
-            if (col == 1) return eq_context();
-            if (col == 3) return cc::toggle_ternary(
-                slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))], slice_modes());
-            return cc::none();
-
-        case 13:  // LOOP + START
-            if (col == 1) {
-                CursorContext c = cc::toggle_ternary(ins.loopMode, loop_modes());
-                // A ceiling rather than a second, shorter list, so `loop_modes()` stays the one place
-                // the modes are named. A slot already saved as `osc` still reads as `osc` here and
-                // still draws as `osc`; the cursor can step out of it and cannot climb back.
-                if (!s.allowOscLoop) c.maxValue = static_cast<int>(loop_modes().size()) - 2;
-                return c;
-            }
-            // ⚠️ START and END are deliberately NOT bounded against each other. A HEX_BYTE WRAPS at
-            // its limits, so a floor of START+1 would send END from just under START to FF in one
-            // press — in the middle of the trim that put it there. An inverted pair has a defined
-            // sound instead (`derive_sample_window`: START → the end of the sample).
-            if (col == 3) return cc::hex_byte(ins.sampleStart, 0, 255, -1, false, false, false, 0x00);
-            return cc::none();
-
-        case 14:  // LOOP ST + END
-            if (col == 1) return cc::hex_byte(ins.loopStart, 0, 255, -1, false, false, false, 0x00);
-            if (col == 3) return cc::hex_byte(ins.sampleEnd, 0, 255, -1, false, false, false, 0xFF);
-            return cc::none();
-
-        case 15:  // LOOP END + REVERSE
-            if (col == 1) return cc::hex_byte(ins.loopEnd, 0, 255, -1, false, false, false, 0xFF);
-            if (col == 3) return cc::toggle_binary(ins.reverse);
-            return cc::none();
-
-        default:
-            return cc::none();
-    }
+    return cc::none();
 }
 
 // ─── What the cursor is standing on, by NAME ─────────────────────────────────────────────────────
 
 songcore::MapTarget InstrumentEditorModule::map_target(const InstrumentEditorState& s) const {
     using songcore::MapDestId;
-    const int row = s.cursorRow;
-    const int col = s.cursorColumn;
+    switch (instrument_cell_at(s.type(), s.cursorRow, s.cursorColumn)) {
+        case Cell::DETUNE:     return {MapDestId::INS_DETUNE, 0};
+        // On EXTERNAL these are velocity and CC 10 — the two that survive the cable.
+        case Cell::VOL:        return {MapDestId::INS_VOL, 0};
+        case Cell::PAN:        return {MapDestId::INS_PAN, 0};
+        case Cell::DRIVE:      return {MapDestId::INS_DRIVE, 0};
+        case Cell::CRUSH:      return {MapDestId::INS_CRUSH, 0};
+        case Cell::FREQ:       return {MapDestId::INS_CUT, 0};
+        case Cell::DOWNSAMPLE: return {MapDestId::INS_DWN, 0};
+        case Cell::RES:        return {MapDestId::INS_RES, 0};
+        case Cell::REV:        return {MapDestId::INS_REV, 0};
+        case Cell::DEL:        return {MapDestId::INS_DLY, 0};
 
-    // EXTERNAL owns no gain stage, no filter and no loop — every row of it is a byte sent down the
-    // cable. VOL and PAN are the two that survive the trip (velocity and CC 10), so they are the two
-    // that can be swept from a knob.
-    if (s.is_external()) {
-        if (row == 7 && col == 1) return {MapDestId::INS_VOL, 0};
-        if (row == 7 && col == 3) return {MapDestId::INS_PAN, 0};
-        return {};
-    }
-
-    const bool sf  = s.is_soundfont();
-    const int  off = sf ? 1 : 0;   // the SoundFont's PATCH row pushes everything below it down
-
-    if (row == 2 && col == 3) return {MapDestId::INS_DETUNE, 0};
-    if (row == 3) {
-        if (col == 1) return {MapDestId::INS_VOL, 0};
-        if (col == 5) return {MapDestId::INS_PAN, 0};   // column 3 is TSP, a switch
-        return {};
-    }
-    if (row == 7 + off && col == 1) return {MapDestId::INS_DRIVE, 0};   // column 3 is the filter TYPE
-    if (row == 8 + off) {
-        if (col == 1) return {MapDestId::INS_CRUSH, 0};
-        if (col == 3) return {MapDestId::INS_CUT, 0};
-        return {};
-    }
-    if (row == 9 + off) {
-        if (col == 1) return {MapDestId::INS_DWN, 0};
-        if (col == 3) return {MapDestId::INS_RES, 0};
-        return {};
-    }
-
-    // The two sends. On a SoundFont they are a row each and the value is any column but the label's;
-    // on a sampler they share one row. Below them both layouts are EQ, slices and the loop window —
-    // slots and boundaries, not values a knob sweeps.
-    if (sf) {
-        if (row == 12 && col != 0) return {MapDestId::INS_REV, 0};
-        if (row == 13 && col != 0) return {MapDestId::INS_DLY, 0};
-        return {};
-    }
-    if (row == 11) {
-        if (col == 1) return {MapDestId::INS_REV, 0};
-        if (col == 3) return {MapDestId::INS_DLY, 0};
+        // Switches, modes, slots, boundaries and bytes for the cable — nothing a knob sweeps.
+        case Cell::NONE:
+        case Cell::TYPE:
+        case Cell::SOURCE_LOAD:
+        case Cell::SOURCE_EDIT:
+        case Cell::NAME:
+        case Cell::PRESET_SAVE:
+        case Cell::PRESET_LOAD:
+        case Cell::TSP:
+        case Cell::TIC:
+        case Cell::ROOT:
+        case Cell::FILTER:
+        case Cell::EQ:
+        case Cell::PATCH:
+        case Cell::SLICE:
+        case Cell::LOOP:
+        case Cell::START:
+        case Cell::LOOP_START:
+        case Cell::END:
+        case Cell::LOOP_END:
+        case Cell::REVERSE:
+        case Cell::MIDI_CHANNEL:
+        case Cell::MIDI_BANK:
+        case Cell::MIDI_PROGRAM:
+        case Cell::MIDI_LENGTH:
+        case Cell::CC_NUMBER:
+        case Cell::CC_VALUE:
+            return {};
     }
     return {};
 }
@@ -661,124 +468,84 @@ songcore::MapTarget InstrumentEditorModule::map_target(const InstrumentEditorSta
 InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int row, int col,
                                                            const InputAction& action) const {
     InstrumentInputResult r;
-    const bool sf  = (ins.instrumentType == InstrumentType::SOUNDFONT);
-    const int  off = sf ? 1 : 0;
+    r.modified = (action.type != ActionType::NONE);
 
     const bool isSet = (action.type == ActionType::SET_VALUE);
     const int  v     = action.value;
 
     const auto b255 = [&](int& field) { if (isSet) field = clamp(v, 0, 255); };
     const auto b15  = [&](int& field) { if (isSet) field = clamp(v, 0, 15); };
+    const auto flag = [&](bool& field) { if (isSet) field = (v == 1); };
+    const auto pick = [&](std::string& field, const std::vector<std::string>& list) {
+        if (isSet && v >= 0 && v < static_cast<int>(list.size())) field = list[static_cast<size_t>(v)];
+    };
+    // The three-state byte: SET writes it, DELETE clears to −1 ("off"), INSERT lands on 0.
+    const auto optional = [&](int& field, int max) {
+        if (isSet)                                          field = clamp(v, 0, max);
+        else if (action.type == ActionType::DELETE)         field = -1;
+        else if (action.type == ActionType::INSERT_DEFAULT) field = 0;
+    };
 
-    if (ins.instrumentType == InstrumentType::EXTERNAL) {
-        // The three-state MIDI byte: SET writes it, DELETE clears to −1 ("send nothing"), INSERT lands
-        // on 0. One lambda, because BANK, PROG and both halves of all four CC slots behave alike.
-        const auto midiOpt = [&](int& field, int max) {
-            if (isSet)                                          field = clamp(v, 0, max);
-            else if (action.type == ActionType::DELETE)         field = -1;
-            else if (action.type == ActionType::INSERT_DEFAULT) field = 0;
-        };
+    const int ccSlot = instrument_row(ins.instrumentType, row).ccSlot;
 
-        if (row == 2) {
-            if (col == 1) { if (isSet) ins.midiChannel = clamp(v, 0, 15); }   // stored 0-15, shown 1-16
-            else if (col == 3) midiOpt(ins.midiBank, 16383);
+    switch (instrument_cell_at(ins.instrumentType, row, col)) {
+        case Cell::ROOT:
+            if (isSet) ins.root = songcore::note_from_midi(v);
+            else if (action.type == ActionType::DELETE) ins.root = Note::C4();
+            break;
+        case Cell::DETUNE:     b255(ins.detune);       break;
+        case Cell::TIC:        b255(ins.tableTicRate); break;
+        case Cell::VOL:        b255(ins.volume);       break;
+        case Cell::TSP:        flag(ins.transposeEnabled); break;
+        case Cell::PAN:        b255(ins.pan);          break;
 
-        } else if (row == 3) {
-            if (col == 1)      midiOpt(ins.midiProgram, 127);
-            else if (col == 3) b255(ins.midiLen);
-
-        } else if (row == 7) {
-            if (col == 1)      b255(ins.volume);
-            else if (col == 3) b255(ins.pan);
-
-        } else if (row == 8) {
-            if (col == 1)      { if (isSet) ins.transposeEnabled = (v == 1); }
-            else if (col == 3) b255(ins.tableTicRate);
-
-        } else {
-            const int ccIndex = row - INSTRUMENT_EXTERNAL_CC_ROW;
-            if (ccIndex >= 0 && ccIndex < static_cast<int>(ins.midiCC.size())) {
-                songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(ccIndex)];
-                if (col == 1)      midiOpt(slot.cc, 127);
-                else if (col == 3) midiOpt(slot.value, 127);
+        // The module cannot resolve this itself: the bank+preset behind index `v` live in the SF2's
+        // list, which only the engine has read. Hand it back to the dispatcher.
+        case Cell::PATCH:
+            if (isSet) {
+                r.presetIndexChanged = true;
+                r.presetIndex        = v;
             }
-        }
+            break;
 
-        r.modified = (action.type != ActionType::NONE);
-        return r;
+        case Cell::DRIVE:      b255(ins.drive);                    break;
+        case Cell::FILTER:     pick(ins.filterType, filter_types()); break;
+        case Cell::CRUSH:      b15(ins.crush);                     break;
+        case Cell::FREQ:       b255(ins.filterCut);                break;
+        case Cell::DOWNSAMPLE: b15(ins.downsample);                break;
+        case Cell::RES:        b255(ins.filterRes);                break;
+        case Cell::REV:        b255(ins.reverbSend);               break;
+        case Cell::DEL:        b255(ins.delaySend);                break;
+        case Cell::EQ:         optional(ins.eqSlot, 127);          break;
+        case Cell::SLICE:      if (isSet) ins.slicingMode = clamp(v, 0, 2); break;
+        case Cell::LOOP:       pick(ins.loopMode, loop_modes());   break;
+        case Cell::START:      b255(ins.sampleStart);              break;
+        case Cell::LOOP_START: b255(ins.loopStart);                break;
+        case Cell::END:        b255(ins.sampleEnd);                break;
+        case Cell::LOOP_END:   b255(ins.loopEnd);                  break;
+        case Cell::REVERSE:    flag(ins.reverse);                  break;
+
+        case Cell::MIDI_CHANNEL: if (isSet) ins.midiChannel = clamp(v, 0, 15); break;  // stored 0-15
+        case Cell::MIDI_BANK:    optional(ins.midiBank, 16383);   break;
+        case Cell::MIDI_PROGRAM: optional(ins.midiProgram, 127);  break;
+        case Cell::MIDI_LENGTH:  b255(ins.midiLen);               break;
+        case Cell::CC_NUMBER:
+            if (auto* slot = cc_slot(ins, ccSlot)) optional(slot->cc, 127);
+            break;
+        case Cell::CC_VALUE:
+            if (auto* slot = cc_slot(ins, ccSlot)) optional(slot->value, 127);
+            break;
+
+        // The dispatcher's: TYPE, NAME and the buttons are host verbs, not field writes.
+        case Cell::NONE:
+        case Cell::TYPE:
+        case Cell::SOURCE_LOAD:
+        case Cell::SOURCE_EDIT:
+        case Cell::NAME:
+        case Cell::PRESET_SAVE:
+        case Cell::PRESET_LOAD:
+            break;
     }
-
-    // Rows 0/1 (TYPE, NAME) and 4/5 (spacer, INST PRESET buttons) are handled by the dispatcher: the
-    // TYPE row's source LOAD/EDIT and the preset row's SAVE/LOAD are host verbs, not field writes.
-
-    if (row == 2) {
-        if (isSet && col == 1) ins.root = songcore::note_from_midi(v);
-        else if (action.type == ActionType::DELETE && col == 1) ins.root = Note::C4();
-        else if (col == 3) b255(ins.detune);
-        else if (col == 5) b255(ins.tableTicRate);
-
-    } else if (row == 3) {
-        // VOL + TSP + PAN, identical on both types.
-        if (col == 1)      b255(ins.volume);
-        else if (col == 3) { if (isSet) ins.transposeEnabled = (v == 1); }
-        else if (col == 5) b255(ins.pan);
-
-    } else if (sf && row == 6) {
-        // PATCH — the module cannot resolve this itself: the bank+preset behind index `v` live in the
-        // SF2's list, which only the engine has read. Hand it back to the dispatcher.
-        if (isSet && col == 1) {
-            r.presetIndexChanged = true;
-            r.presetIndex        = v;
-        }
-
-    } else if (row == 7 + off) {
-        if (col == 1) b255(ins.drive);
-        else if (col == 3 && isSet && v >= 0 && v < static_cast<int>(filter_types().size()))
-            ins.filterType = filter_types()[static_cast<size_t>(v)];
-
-    } else if (row == 8 + off) {
-        if (col == 1) b15(ins.crush);
-        else if (col == 3) b255(ins.filterCut);
-
-    } else if (row == 9 + off) {
-        if (col == 1) b15(ins.downsample);
-        else if (col == 3) b255(ins.filterRes);
-
-    } else if (sf && row == 12) {
-        b255(ins.reverbSend);
-    } else if (sf && row == 13) {
-        b255(ins.delaySend);
-    } else if ((sf && row == 14) || (!sf && row == 12)) {
-        // ⚠️ On a SAMPLER, SLICE shares this row, so the EQ half must check the column or cycling
-        // SLICE writes an EQ slot. The SoundFont has no second column.
-        if (col == 3 && !sf) {
-            if (isSet) ins.slicingMode = clamp(v, 0, 2);
-        } else {
-            // The EQ slot. −1 is "no EQ", so DELETE clears to it and INSERT lands on slot 0.
-            if (isSet)                                       ins.eqSlot = clamp(v, 0, 127);
-            else if (action.type == ActionType::DELETE)      ins.eqSlot = -1;
-            else if (action.type == ActionType::INSERT_DEFAULT) ins.eqSlot = 0;
-        }
-
-    } else if (!sf && row == 11) {
-        if (col == 1) b255(ins.reverbSend);
-        else if (col == 3) b255(ins.delaySend);
-
-    } else if (!sf && row == 13) {
-        if (col == 1 && isSet && v >= 0 && v < static_cast<int>(loop_modes().size()))
-            ins.loopMode = loop_modes()[static_cast<size_t>(v)];
-        else if (col == 3) b255(ins.sampleStart);
-
-    } else if (!sf && row == 14) {
-        if (col == 1) b255(ins.loopStart);
-        else if (col == 3) b255(ins.sampleEnd);
-
-    } else if (!sf && row == 15) {
-        if (col == 1) b255(ins.loopEnd);
-        else if (col == 3 && isSet) ins.reverse = (v == 1);
-    }
-
-    r.modified = (action.type != ActionType::NONE);
     return r;
 }
 

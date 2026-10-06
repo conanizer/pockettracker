@@ -143,6 +143,17 @@ inline void move_pool_selection(AppState& s, int delta) {
 
 }  // namespace detail
 
+/**
+ * Put the INSTRUMENT cursor back on a cell after the instrument under it changed type — B+LEFT/RIGHT,
+ * or a different instrument picked elsewhere. Called where either happens; on a cell it is a no-op.
+ */
+inline void snap_instrument_cursor(AppState& s) {
+    const InstrumentCursor c = instrument_nearest_cell(detail::instrument_type_of(s), s.instrumentCursorRow,
+                                                       s.instrumentCursorColumn);
+    s.instrumentCursorRow    = c.row;
+    s.instrumentCursorColumn = c.column;
+}
+
 
 // ─── SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────────
 //

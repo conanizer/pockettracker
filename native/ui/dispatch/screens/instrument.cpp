@@ -3,6 +3,7 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
+#include "ui/cursor_move.h"
 #include "ui/instrument_row_layout.h"
 
 #include <algorithm>
@@ -12,10 +13,12 @@ namespace pt::ui {
 
 namespace {
 
-/** B+LEFT/RIGHT on INSTRUMENT and MODS: the previous or next instrument, wrapping 00↔7F. */
+/** B+LEFT/RIGHT on INSTRUMENT and MODS: the previous or next instrument, wrapping 00↔7F. The next one
+ *  may be another type, whose layout has no cell where the cursor was. */
 void cycle_instrument(AppState& s, int delta) {
     s.currentInstrument    = ((s.currentInstrument + delta) % 128 + 128) % 128;
     s.lastEditedInstrument = s.currentInstrument;
+    snap_instrument_cursor(s);
 }
 
 }  // namespace
@@ -114,44 +117,35 @@ GestureResult InputDispatcher::instrument_audition(Gesture g) {
 bool InputDispatcher::instrument_open_at_cursor() {
     const Instrument& ins  = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
     const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
-    const int         row  = s_.instrumentCursorRow;
-    const int         col  = s_.instrumentCursorColumn;
 
-    // Row 0 — TYPE (col 1), LOAD (col 2) browses for a source, EDIT (col 3) opens the sample editor.
-    // EXTERNAL draws neither button; refuse rather than browse for a source it cannot have.
-    if (row == 0 && col >= 2 && !instrument_has_source_row(ins.instrumentType)) return true;
+    switch (instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow, s_.instrumentCursorColumn)) {
+        case InstrumentCell::SOURCE_LOAD:
+            open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
+                              isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
+                              isSF ? soundfont_extensions() : sample_extensions());
+            return true;
+        case InstrumentCell::SOURCE_EDIT:
+            open_sample_editor();
+            return true;
 
-    if (row == 0 && col == 2) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
-                          isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
-                          isSF ? soundfont_extensions() : sample_extensions());
-        return true;
-    }
-    // Samplers only: a SoundFont has no single waveform to cut. EDIT is not drawn on SF, so the isSF
-    // guard only consumes the press.
-    if (row == 0 && col == 3) {
-        if (isSF) return true;   // handled: the press is CONSUMED, it just opens nothing
-        open_sample_editor();
-        return true;
-    }
+        // The INSTRUMENT PRESET (.pti: params, mods, table, source path).
+        case InstrumentCell::PRESET_SAVE: {
+            const std::string dir  = fs_.instruments_directory();
+            const std::string name = ins.name.empty() ? songcore::default_instrument_name(ins.id) : ins.name;
+            open_qwerty(QwertyContext::INSTRUMENT_SAVE, name, "SAVE PRESET:", dir, /*max_length=*/20,
+                        /*clear_on_first_b=*/true);
+            return true;
+        }
+        case InstrumentCell::PRESET_LOAD:
+            open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, browser_dir(BrowserDir::INSTRUMENTS),
+                              {"pti"});
+            return true;
 
-    // Row 5 — the INSTRUMENT PRESET (.pti: params, mods, table, source path). SAVE (col 2), LOAD (col 3).
-    if (row == 5 && col == 2) {
-        const std::string dir  = fs_.instruments_directory();
-        const std::string name = ins.name.empty() ? songcore::default_instrument_name(ins.id) : ins.name;
-        open_qwerty(QwertyContext::INSTRUMENT_SAVE, name, "SAVE PRESET:", dir, /*max_length=*/20,
-                    /*clear_on_first_b=*/true);
-        return true;
+        // NAME and EQ are not here: their A must wait for the RELEASE, so they live in
+        // `open_sub_screen_at_cursor`. These are buttons that fire on the press.
+        default:
+            return false;
     }
-    if (row == 5 && col == 3) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, browser_dir(BrowserDir::INSTRUMENTS),
-                          {"pti"});
-        return true;
-    }
-
-    // Row 1 (NAME) and the EQ cell are not here: their A must wait for the RELEASE, so they live in
-    // `open_sub_screen_at_cursor`. These are read-only buttons that fire on the press.
-    return false;
 }
 
 bool InputDispatcher::pool_load_into_empty_slot() {
@@ -173,8 +167,10 @@ bool InputDispatcher::pool_load_into_empty_slot() {
 // ─── The TYPE cell ───────────────────────────────────────────────────────────────────────────────
 
 bool InputDispatcher::on_instrument_type_cell() const {
-    return s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 0 &&
-           s_.instrumentCursorColumn == 1;
+    if (s_.currentScreen != ScreenType::INSTRUMENT) return false;
+    const Instrument& ins = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
+    return instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow, s_.instrumentCursorColumn) ==
+           InstrumentCell::TYPE;
 }
 
 /**

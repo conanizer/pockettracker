@@ -5,33 +5,10 @@
 // Where an instrument becomes a SOUND: everything the voice reads at trigger time — root and
 // detune, volume and pan, drive / crush / downsample / filter, sample window and loop, sends, EQ slot.
 //
-// ── IT IS NOT A GRID, AND THAT IS THE WHOLE DIFFICULTY ───────────────────────────────────────────
-//
-//
-// A FORM, not a grid: rows hold one, two or three parameters, some are spacers or buttons, and THE
-// ROW LIST DEPENDS ON THE INSTRUMENT TYPE (a SoundFont gains PATCH and loses the sample-window rows,
-// so rows below shift by `sf_offset`). The geometry lives ONCE in instrument_row_layout.h, which the
-// cursor walks and this module draws — a row added here without an entry there strands the cursor.
-//
-// ── ROWS ─────────────────────────────────────────────────────────────────────────────────────────
-//
-//   SAMPLER (16)                          SOUNDFONT (15)               EXTERNAL (12)
-//    0  TYPE + LOAD + EDIT                 0  TYPE + LOAD               0  TYPE
-//    1  NAME                               1  NAME                      1  NAME
-//    2  ROOT + DETUNE + TIC                2  ROOT + DETUNE + TIC       2  CHAN + BANK
-//    3  VOL + SLICE + PAN                  3  VOL + PAN                 3  PROG + LEN
-//    4  ·spacer·                           4  ·spacer·                  4  ·spacer·
-//    5  INST PRESET: SAVE | LOAD           5  INST PRESET: SAVE | LOAD  5  INST PRESET: SAVE | LOAD
-//    6  ·spacer·                           6  PATCH                     6  ·spacer·
-//    7  DRIVE + FILTER                     7  ·spacer·                  7  VOL + PAN
-//    8  CRUSH + FREQ                       8  DRIVE + FILTER            8  CC A + value
-//    9  DWNSMPL + RES                      9  CRUSH + FREQ              9  CC B + value
-//   10  ·spacer·                          10  DWNSMPL + RES            10  CC C + value
-//   11  REV + DEL                         11  ·spacer·                 11  CC D + value
-//   12  EQ                                12  REV
-//   13  LOOP + START                      13  DEL
-//   14  LOOP ST + END                     14  EQ
-//   15  LOOP END + REVERSE
+// A FORM, not a grid: rows hold one, two or three parameters, some are spacers or buttons, and the
+// row list depends on the instrument type. Which cell sits where is ONE table per type, in
+// `ui/instrument_row_layout.h`; everything here — drawing, editing, MIDI learn — switches on the
+// cell that table names, never on a row number.
 //
 // TYPE's LOAD/EDIT act on the SOURCE (sample or SF2); INST PRESET's SAVE/LOAD write and read the
 // whole instrument as a .pti. The SF's PATCH row picks a patch inside the loaded SoundFont.
@@ -50,9 +27,6 @@
 //   PAN   is sent as CC 10, de-duplicated per channel.
 //   LEN   gate length in TICKS, 00 = gate-to-next. See midi_out.h's `end_note`.
 //   CC A-D   number + default value, both "--" when unused; the defaults ride every note-on.
-//
-// Columns: 0 = the label, 1 = the first value, 2 = a button (LOAD / SAVE), 3 = the second value or
-// button (EDIT / LOAD), and on the two TRIPLE rows additionally 5 = the third value.
 
 #include <string>
 #include <vector>
@@ -61,6 +35,7 @@
 #include "songcore/model.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/instrument_row_layout.h"
 #include "ui/theme.h"
 
 namespace pt::ui {
@@ -141,41 +116,15 @@ public:
                                        const InputAction& action) const;
 
 private:
-    /** One parameter, label + value, at the standard two columns. */
-    void draw_parameter_row(Canvas& c, int y, int name_x, int value_x, const std::string& name,
-                            const std::string& value, bool cursor_on_name, bool cursor_on_value,
-                            const Theme& t) const;
+    /** One label + value pair; the EQ cell gets the shared EQ painter. */
+    void draw_cell(Canvas& c, int label_x, int value_x, int text_y, InstrumentCell cell,
+                   int cc_slot_index, bool is_cursor, const InstrumentEditorState& s) const;
 
-    /** Two parameters. Cursor columns 1 and 3. */
-    void draw_dual_row(Canvas& c, int y, int name_x, int value_x, const std::string& n1,
-                       const std::string& v1, const std::string& n2, const std::string& v2,
-                       int cursor_row, int cursor_column, int this_row, const Theme& t) const;
-
-    /** Three parameters, at fixed offsets rather than the two standard columns. Cursor 1 / 3 / 5. */
-    void draw_triple_row(Canvas& c, int x, int y, int name_x, const std::string& n1,
-                         const std::string& v1, const std::string& n2, const std::string& v2,
-                         const std::string& n3, const std::string& v3, int cursor_row,
-                         int cursor_column, int this_row, const Theme& t) const;
-
-    void draw_type_load_row(Canvas& c, int x, int y, int name_x, int value_x,
-                            const songcore::Instrument& ins, int cursor_row, int cursor_column,
-                            int this_row, const Theme& t) const;
-
-    void draw_name_row(Canvas& c, int y, int name_x, int value_x,
-                       const InstrumentEditorState& s, int this_row, const Theme& t) const;
+    void draw_type_load_row(Canvas& c, int x, int y, int name_x, const songcore::Instrument& ins,
+                            int cursor_row, int cursor_column, int this_row, const Theme& t) const;
 
     void draw_section_source_row(Canvas& c, int x, int y, int name_x, int cursor_row,
                                  int cursor_column, int this_row, const Theme& t) const;
-
-    /**
-     * The whole EXTERNAL screen, drawn as its own pass: it shares only TYPE, NAME and INST PRESET
-     * with the other two, and every row below is a different parameter.
-     */
-    void draw_external(Canvas& c, int x, int y, const InstrumentEditorState& s) const;
-
-    void draw_eq_row(Canvas& c, int y, int name_x, int value_x, int eq_slot,
-                     const std::string& n2, const std::string& v2,
-                     int cursor_row, int cursor_column, int this_row, const Theme& t) const;
 };
 
 }  // namespace pt::ui

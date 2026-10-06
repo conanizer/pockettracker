@@ -60,9 +60,11 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             break;
 
         case ScreenType::INSTRUMENT: {
-            const Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+            const Instrument&    ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+            const InstrumentCell cell = instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow,
+                                                           s_.instrumentCursorColumn);
 
-            if (s_.instrumentCursorRow == 1) {
+            if (cell == InstrumentCell::NAME) {
                 if (!peek) {
                     // A default-named slot opens the box EMPTY, not with "INST07" to delete first.
                     const std::string cur =
@@ -71,9 +73,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
                 }
                 return true;
             }
-            // EXTERNAL has no EQ row: `instrument_eq_row` answers −1, which no cursor row matches.
-            if (s_.instrumentCursorRow == instrument_eq_row(ins.instrumentType) &&
-                s_.instrumentCursorColumn == 1) {
+            if (cell == InstrumentCell::EQ) {
                 // ⚠️ An unassigned EQ is −1 (bypass), which is not a slot; the editor opens on slot 0.
                 if (!peek) open_eq_editor(std::max(0, ins.eqSlot),
                                           EqCallerContext::instrument(s_.currentInstrument));
