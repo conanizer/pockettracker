@@ -129,36 +129,39 @@ if(WIN32)
 endif()
 
 # app.cpp is the SHARED shell — the boot sequence, the frame loop and the teardown, identical on every
-# platform (convergence C0.2). main.cpp is the desktop/handheld residue beside it: argv, the signal
-# handler, SDL_Init/SDL_Quit, and the choice of audio backend, root and caps. Convergence C1 adds an
-# Android entry point ALONGSIDE main.cpp and links the same app.cpp.
+# platform. main.cpp is the desktop/handheld residue beside it: argv, the signal handler,
+# SDL_Init/SDL_Quit, and the choice of audio backend, root and caps. Android's entry point is
+# android/android-main.cpp, built by native/CMakeLists.txt against the same app.cpp.
 add_executable(pockettracker-sdl
         app.cpp
         main.cpp
-        image.cpp          # PNG decode (convergence D2): the one stb_image implementation TU
-        assets.cpp         # the asset seam (convergence D7): SDL_RWFromFile, APK vs beside-the-exe
-        skin.cpp           # the touch-skin textures (convergence D1): decode once, own per renderer
-        overlay.cpp        # the CRT screen overlay (convergence D6): one texture, composited over the frame
-        portrait2.cpp      # the PORTRAIT2 device-skin renderer (convergence D): composite the bands
-        font_raster.cpp    # glyph rasterization (convergence D): the one stb_truetype implementation TU
-        font.cpp           # the button-label font (convergence D): Helvetica glyphs + D-pad triangles → textures
-        midi-out-base.cpp  # the platform-FREE half of a MIDI backend (MIDI plan B2b): list, TEST, trace
-        midi-out-winmm.cpp # the WINDOWS songcore::IMidiOut (MIDI plan B2);  empty TU elsewhere
-        midi-out-alsa.cpp  # the LINUX   songcore::IMidiOut (MIDI plan B2b); empty TU elsewhere
-        alsa-rawmidi.cpp   # the ONE libasound loader + rawmidi device walk (E5); empty TU elsewhere
-        alsa-route.cpp     # what stands between ALSA's default and the chip; empty TU elsewhere
-        midi-in-base.cpp   # the platform-FREE half of a MIDI INPUT backend (E2): list, sink, counters
-        midi-in-winmm.cpp  # the WINDOWS songcore::IMidiIn  (MIDI plan E2);  empty TU elsewhere
-        midi-in-alsa.cpp   # the LINUX   songcore::IMidiIn  (MIDI plan E5);  empty TU elsewhere
-        midi-sender.cpp    # the just-in-time MIDI sender thread + its jitter instrument (MIDI plan B3)
-        sdl-audio-engine.cpp
-        asio-audio-engine.cpp   # the ASIO output (SETTINGS > AUDIO OUT); empty TU elsewhere
-        audio-outputs-win.cpp   # the switch between the system output and ASIO; empty TU elsewhere
-        sdl-input.cpp
-        sdl-touch.cpp
-        sdl-video.cpp
+        skin/image.cpp                  # the one stb_image implementation TU
+        skin/assets.cpp                 # SDL_RWFromFile: APK assets vs files beside the exe
+        skin/skin.cpp                   # the touch-skin textures: decode once, own per renderer
+        skin/overlay.cpp                # the CRT screen overlay, composited over the frame
+        skin/portrait2.cpp              # the PORTRAIT2 device skin: composite the bands
+        skin/font_raster.cpp            # the one stb_truetype implementation TU
+        skin/font.cpp                   # the button-label font: glyphs + D-pad triangles → textures
+        midi/midi-out-base.cpp          # the platform-free half of a MIDI output: list, TEST, trace
+        midi/midi-in-base.cpp           # the platform-free half of a MIDI input: list, sink, counters
+        midi/midi-sender.cpp            # the just-in-time MIDI sender thread
+        linux/alsa-rawmidi.cpp          # the one libasound loader + device walk; empty TU elsewhere
+        linux/alsa-route.cpp            # what stands between ALSA's default and the chip; empty elsewhere
+        linux/midi-out-alsa.cpp         # empty TU off Linux, as are the rest of linux/ and windows/
+        linux/midi-in-alsa.cpp
+        windows/midi-out-winmm.cpp
+        windows/midi-in-winmm.cpp
+        windows/asio-audio-engine.cpp   # the ASIO output (SETTINGS > AUDIO OUT)
+        windows/audio-outputs-win.cpp   # the switch between the system output and ASIO
+        sdl/sdl-audio-engine.cpp
+        sdl/sdl-input.cpp
+        sdl/sdl-touch.cpp
+        sdl/sdl-video.cpp
         ${PT_WIN_RESOURCES}
 )
+
+# Shell headers are included by their path from here ("midi/midi-out-base.h").
+target_include_directories(pockettracker-sdl PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # app.cpp's boot banner. A bug report arrives as a log file and a sentence, and without this the
 # version is only in the download's filename — which a reporter has usually thrown away.

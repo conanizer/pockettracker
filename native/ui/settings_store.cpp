@@ -107,7 +107,7 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // know them, the first quit would drop them. A key one component writes and another drops is worse
     // than a key nobody writes.
     // SKIN and OVERLAY are persisted as STABLE STRINGS (`portrait_skin`, `overlay_name`) that survive the
-    // shell's lists being reordered; the shell resolves them at boot (device_skin.h, shell/overlay.h).
+    // shell's lists being reordered; the shell resolves them at boot (device_skin.h, shell/skin/overlay.h).
     // LAYOUT's mode is NOT here: the shell auto-selects it (orientation, controller presence), so there
     // is nothing to resolve a name against.
     values.portraitSkin       = get_string(j, "portrait_skin", values.portraitSkin);

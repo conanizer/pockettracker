@@ -567,37 +567,35 @@ if(ANDROID)
     set(PT_SHELL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../shell")
 
     # app.cpp is the SHARED shell — the same boot sequence, frame loop and teardown the desktop runs,
-    # character for character (C0.2). sdl-input/sdl-video are shared too. android-main.cpp is the only
-    # file here that is Android's, and it is the twin of shell/main.cpp; set them side by side and the
-    # difference is the whole of the port.
+    # character for character. Only what is under shell/android/ is Android's; android-main.cpp is the
+    # twin of shell/main.cpp — set them side by side and the difference is the whole of the port.
     add_library(pockettracker-sdl SHARED
             "${PT_SHELL_DIR}/app.cpp"
-            "${PT_SHELL_DIR}/android-main.cpp"
-            "${PT_SHELL_DIR}/saf-filesystem.cpp" # the SAF ui::FileSystem (SAF migration P3): ten JNI
-                                                 # up-calls, and byte_source.h's three hooks for pt:// paths
-            "${PT_SHELL_DIR}/image.cpp"        # PNG decode (convergence D2): the one stb_image impl TU
-            "${PT_SHELL_DIR}/assets.cpp"       # the asset seam (convergence D7): SDL_RWFromFile → APK assets
-            "${PT_SHELL_DIR}/skin.cpp"         # the touch-skin textures (convergence D1)
-            "${PT_SHELL_DIR}/overlay.cpp"      # the CRT screen overlay (convergence D6)
-            "${PT_SHELL_DIR}/portrait2.cpp"    # the PORTRAIT2 device-skin renderer (convergence D)
-            "${PT_SHELL_DIR}/font_raster.cpp"  # glyph rasterization (convergence D): the one stb_truetype impl TU
-            "${PT_SHELL_DIR}/font.cpp"         # the button-label font (convergence D): Helvetica + D-pad triangles
-            "${PT_SHELL_DIR}/midi-out-base.cpp"    # the platform-FREE half of a MIDI backend (MIDI plan B2b)
-            "${PT_SHELL_DIR}/midi-out-android.cpp" # the ANDROID songcore::IMidiOut: five JNI up-calls (B2b)
-            "${PT_SHELL_DIR}/midi-in-base.cpp"     # the platform-FREE half of a MIDI INPUT backend (E2)
-            "${PT_SHELL_DIR}/midi-in-android.cpp"  # the ANDROID songcore::IMidiIn: five JNI up-calls (E5).
-                                                   # ⚠️ POLLED once a frame, where winmm and ALSA push —
-                                                   # see its header, and MidiInBase::pump
-            "${PT_SHELL_DIR}/midi-sender.cpp"      # the just-in-time MIDI sender thread (MIDI plan B3).
-                                                   # ⚠️ SDL_CreateThread, so SDL attaches it to the JVM —
-                                                   # midi-out-android.cpp makes JNI calls FROM this thread
-            "${PT_SHELL_DIR}/sdl-input.cpp"
-            "${PT_SHELL_DIR}/sdl-touch.cpp"
-            "${PT_SHELL_DIR}/sdl-video.cpp"
+            "${PT_SHELL_DIR}/android/android-main.cpp"
+            "${PT_SHELL_DIR}/android/saf-filesystem.cpp"   # the SAF ui::FileSystem, and byte_source.h's
+                                                           # three hooks for pt:// paths
+            "${PT_SHELL_DIR}/android/midi-out-android.cpp" # MIDI out over five JNI up-calls
+            "${PT_SHELL_DIR}/android/midi-in-android.cpp"  # ⚠️ POLLED once a frame, where winmm and ALSA
+                                                           # push — see its header, and MidiInBase::pump
+            "${PT_SHELL_DIR}/midi/midi-out-base.cpp"
+            "${PT_SHELL_DIR}/midi/midi-in-base.cpp"
+            "${PT_SHELL_DIR}/midi/midi-sender.cpp"         # ⚠️ SDL_CreateThread, so SDL attaches it to
+                                                           # the JVM — midi-out-android.cpp makes JNI
+                                                           # calls FROM this thread
+            "${PT_SHELL_DIR}/skin/image.cpp"
+            "${PT_SHELL_DIR}/skin/assets.cpp"
+            "${PT_SHELL_DIR}/skin/skin.cpp"
+            "${PT_SHELL_DIR}/skin/overlay.cpp"
+            "${PT_SHELL_DIR}/skin/portrait2.cpp"
+            "${PT_SHELL_DIR}/skin/font_raster.cpp"
+            "${PT_SHELL_DIR}/skin/font.cpp"
+            "${PT_SHELL_DIR}/sdl/sdl-input.cpp"
+            "${PT_SHELL_DIR}/sdl/sdl-touch.cpp"
+            "${PT_SHELL_DIR}/sdl/sdl-video.cpp"
     )
 
-    # app.h, sdl-input.h, sdl-video.h. The engine's and pt-ui's roots arrive PUBLIC through the link
-    # below, so this is the only path that has to be stated.
+    # Shell headers are included by their path from shell/ ("sdl/sdl-input.h"). The engine's and
+    # pt-ui's roots arrive PUBLIC through the link below, so this is the only path that has to be stated.
     target_include_directories(pockettracker-sdl PRIVATE "${PT_SHELL_DIR}")
 
     # app.cpp's boot banner, from the same parse the desktop and the Windows .rc use. On Android the

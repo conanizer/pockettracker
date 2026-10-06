@@ -28,10 +28,10 @@
 #include "ui/std_filesystem.h"
 
 #include "app.h"
-#include "midi-in.h"          // picks the platform's IMidiIn
-#include "midi-out.h"         // picks the platform's IMidiOut; the block below has no #ifdef of its own
-#include "sdl-audio-engine.h"
-#include "audio-outputs-win.h"  // SETTINGS > AUDIO OUT; empty off Windows
+#include "midi/midi-in.h"          // picks the platform's IMidiIn
+#include "midi/midi-out.h"         // picks the platform's IMidiOut; the block below has no #ifdef of its own
+#include "sdl/sdl-audio-engine.h"
+#include "windows/audio-outputs-win.h"  // SETTINGS > AUDIO OUT; empty off Windows
 
 #include <csignal>
 #include <cstdlib>       // setenv — the window's app id, below

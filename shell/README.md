@@ -26,9 +26,9 @@ So the platforms differ in exactly three things, and this directory is where tho
 
 | | Android | desktop · handheld |
 |---|---|---|
-| Entry point | `shell/android-main.cpp` | `shell/main.cpp` |
-| Audio backend | `native/oboe-audio-engine.cpp` | `shell/sdl-audio-engine.cpp` |
-| Filesystem | `shell/saf-filesystem.cpp` — the app holds no storage permission | `native/ui/std_filesystem.cpp` |
+| Entry point | `shell/android/android-main.cpp` | `shell/main.cpp` |
+| Audio backend | `native/oboe-audio-engine.cpp` | `shell/sdl/sdl-audio-engine.cpp` |
+| Filesystem | `shell/android/saf-filesystem.cpp` — the app holds no storage permission | `native/ui/std_filesystem.cpp` |
 | Video · input · frame loop | *shared* — `sdl-video.cpp`, `sdl-input.cpp`, `app.cpp` | *the same files* |
 | **Engine · songcore · UI** | **shared — the same files** | **shared — the same files** |
 

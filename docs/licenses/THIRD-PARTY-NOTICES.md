@@ -267,7 +267,7 @@ Used for: decoding the touch-skin, CRT-overlay and theme PNGs (`native/vendor/st
 v2.30). Copyright (c) 2017 Sean Barrett. The full dual-licence statement is at the end of that file.
 
 ⚠️ **Shell-side, not in the engine** — the same footnote the SDL2 section carries. `stb_image` is
-compiled into the SDL *shell* (`shell/image.cpp`), so it ships in **every** artifact — the
+compiled into the SDL *shell* (`shell/skin/image.cpp`), so it ships in **every** artifact — the
 **PortMaster** and **Windows** packages, and the APK's SDL-app `.so`. It is **not** linked into the
 `pockettracker` engine library, but every artifact runs the shell, so that distinction does not
 change what is distributed. It is under
@@ -285,7 +285,7 @@ Used for: rasterizing the PORTRAIT2 device skin's button-label glyphs from the a
 dual-licence statement is at the end of that file.
 
 ⚠️ **Shell-side, not in the engine** — the same footnote stb_image carries. `stb_truetype` is
-compiled into the SDL *shell* (`shell/font_raster.cpp`), so it ships in **every** artifact — the
+compiled into the SDL *shell* (`shell/skin/font_raster.cpp`), so it ships in **every** artifact — the
 **PortMaster** and **Windows** packages, and the APK's SDL-app `.so`. It is **not** linked into the
 `pockettracker` engine library, but every artifact runs the shell, so that distinction does not
 change what is distributed. It is under

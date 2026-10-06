@@ -17,10 +17,10 @@ textures, and there was no PNG *reader* in the C++ tree (`tools/ptshot` has only
 derives its notice checklist from `native/vendor/*/`, so a decoder vendored anywhere else would be
 invisible to it. Physical location is not permission to include: **this header is SHELL-ONLY.**
 
-- The one translation unit that `#define STB_IMAGE_IMPLEMENTATION`s it is `shell/image.cpp`.
+- The one translation unit that `#define STB_IMAGE_IMPLEMENTATION`s it is `shell/skin/image.cpp`.
 - Nothing in `native/` (the engine) or `native/ui/` (pt-ui) includes it. The canvas keeps its four
   primitives; the skin is composited shell-side (D1). pt-ui stays image-free **by construction**:
-  `ptshot`/`ptinput`/`ptmapper`/`ptdispatch` link `pt-ui` *without* `shell/image.cpp`, so any
+  `ptshot`/`ptinput`/`ptmapper`/`ptdispatch` link `pt-ui` *without* `shell/skin/image.cpp`, so any
   stb_image reference leaking into a screen module breaks *those* tools' link.
 
 ## Verbatim — do not edit
@@ -32,9 +32,9 @@ Never hand-edit the header (the same rule the SDL2 and codec vendors carry).
 ## Build wiring
 
 - Desktop shell: `shell/CMakeLists.txt` compiles `image.cpp` into `pockettracker-sdl`.
-- Android shell: `native/CMakeLists.txt`'s `if(ANDROID)` block compiles `shell/image.cpp` into the
+- Android shell: `native/CMakeLists.txt`'s `if(ANDROID)` block compiles `shell/skin/image.cpp` into the
   `pockettracker-sdl` `.so`.
 - The `native/` include root (PUBLIC on the `pockettracker` target) is what makes
   `#include "vendor/stb_image/stb_image.h"` resolve from a shell TU — no include line is restated.
-- Decode is proven by `tools/ptdecode` (ctest `d-image-decode`), which compiles `shell/image.cpp`
+- Decode is proven by `tools/ptdecode` (ctest `d-image-decode`), which compiles `shell/skin/image.cpp`
   and links nothing else — the standing proof the decoder needs only stb_image + the standard library.

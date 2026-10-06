@@ -70,7 +70,7 @@ class PlaybackService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP     = "com.conanizer.pockettracker.STOP"
 
-        /** Native (shell/android-main.cpp): the loop stops the transport on its next tick. */
+        /** Native (shell/android/android-main.cpp): the loop stops the transport on its next tick. */
         @JvmStatic external fun nativeRequestStop()
     }
 }

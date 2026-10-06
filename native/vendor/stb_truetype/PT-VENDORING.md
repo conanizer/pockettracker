@@ -20,7 +20,7 @@ derives its notice checklist from `native/vendor/*/`, so a rasterizer vendored a
 invisible to it. Physical location is not permission to include: **this header is SHELL-ONLY**, exactly
 like stb_image.
 
-- The one translation unit that `#define STB_TRUETYPE_IMPLEMENTATION`s it is `shell/font_raster.cpp`.
+- The one translation unit that `#define STB_TRUETYPE_IMPLEMENTATION`s it is `shell/skin/font_raster.cpp`.
 - Nothing in `native/` (the engine) or `native/ui/` (pt-ui) includes it. Text is drawn shell-side onto
   the device skin, never in the canvas — pt-ui keeps its four primitives. pt-ui stays font-free **by
   construction**: `ptshot`/`ptinput`/`ptmapper`/`ptdispatch` link `pt-ui` *without* `font_raster.cpp`,
@@ -36,7 +36,7 @@ is `OTTO` and that every letter the labels use produces ink. Re-run it after any
 
 - ⚠️ **Helvetica has no arrow glyphs.** U+2190–2193 return `.notdef` (a tofu box). On Android those
   D-pad arrows came from SYSTEM FONT FALLBACK, which stb_truetype (one font, no fallback) has not — so
-  the shell draws the D-pad arrows itself as smooth triangles (`shell/font.cpp` `draw_arrow`). ptfont
+  the shell draws the D-pad arrows itself as smooth triangles (`shell/skin/font.cpp` `draw_arrow`). ptfont
   documents this and would flag a future font that shipped real arrows.
 
 ## Verbatim — do not edit

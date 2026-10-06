@@ -5,7 +5,7 @@
         ⚠️ **NO STORAGE PERMISSION OF ANY KIND, AND THAT IS THE DESIGN.** The app reaches the user's
         projects and samples through the Storage Access Framework: the user grants a folder from the
         system picker (ADD FOLDER… in the browser's roots directory), the grant is persisted with
-        `takePersistableUriPermission`, and `shell/saf-filesystem.cpp` is the whole of the access.
+        `takePersistableUriPermission`, and `shell/android/saf-filesystem.cpp` is the whole of the access.
         A granted tree needs no `uses-permission` line, which is precisely the property SAF is for.
 
         Its own three files (`settings.json`, `template.ptp`, `autosave.ptp`) are read during the

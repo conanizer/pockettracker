@@ -80,7 +80,7 @@ class SongcoreHost {
     bool midi_sync_out() const { return external_.sync_out(); }
 
     /**
-     * Hand the queue's release to a sender thread (`shell/midi-sender.h`).
+     * Hand the queue's release to a sender thread (`shell/midi/midi-sender.h`).
      * ⚠️ One owner only: with `poll()` still pumping beside the thread, a broken sender would look
      * like a working one with worse jitter. Hosts that never call this keep pumping in `poll()`.
      */

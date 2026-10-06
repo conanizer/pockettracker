@@ -30,7 +30,7 @@
  *
  * `mode` is the stdio mode string as given to `pt_fopen`. A write mode may CREATE, because the
  * strings that reach here are composable — the host can derive the parent and the name from the
- * path (`shell/saf-filesystem.h`). ⚠️ **Append is not required of a hook**: nothing below the UI
+ * path (`shell/android/saf-filesystem.h`). ⚠️ **Append is not required of a hook**: nothing below the UI
  * opens for append, and a mode nobody exercises is a mode nobody notices breaking.
  */
 using PtOpenHook = int (*)(const char* path, const char* mode);

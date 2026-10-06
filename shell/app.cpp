@@ -21,18 +21,18 @@
 #include "ui/groove_io.h"             // seed_groove_bank
 #include "ui/settings_store.h"
 
-#include "device_skin.h"
-#include "skin.h"
-#include "overlay.h"
-#include "font.h"
-#include "portrait2.h"
+#include "skin/device_skin.h"
+#include "skin/skin.h"
+#include "skin/overlay.h"
+#include "skin/font.h"
+#include "skin/portrait2.h"
 
 #include "latency_probe.h"   // POCKETTRACKER_LATENCY=1
-#include "midi-in.h"      // the platform's IMidiIn, or nothing
-#include "midi-sender.h"
-#include "sdl-input.h"
-#include "sdl-touch.h"
-#include "sdl-video.h"
+#include "midi/midi-in.h"      // the platform's IMidiIn, or nothing
+#include "midi/midi-sender.h"
+#include "sdl/sdl-input.h"
+#include "sdl/sdl-touch.h"
+#include "sdl/sdl-video.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -355,7 +355,7 @@ void load_settings_and_config(ui::FileSystem& filesystem, ui::AppState& state, S
     // falls back to DARK.
     state.settings.skinIndex = device_skin_index(state.settings.portraitSkin);
 
-    // The saved overlay name → its index (0 = OFF), on the same stable-string terms (shell/overlay.h).
+    // The saved overlay name → its index (0 = OFF), on the same stable-string terms (shell/skin/overlay.h).
     state.settings.overlayIndex = screen_overlay_index(state.settings.overlayName);
 }
 

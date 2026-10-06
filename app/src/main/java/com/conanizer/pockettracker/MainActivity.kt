@@ -42,7 +42,7 @@ import java.io.File
  * ⚠️ The system bars are Java's; the lifecycle is NOT — the autosave/settings flush is an
  * `SDL_AddEventWatch` watcher in `shell/app.cpp`, because `SDL_APP_WILLENTERBACKGROUND` fires on the
  * native thread inside the frame loop's own `SDL_PollEvent`. The back button is armed in
- * `shell/android-main.cpp` and mapped in `shell/sdl-input.cpp`.
+ * `shell/android/android-main.cpp` and mapped in `shell/sdl/sdl-input.cpp`.
  */
 class MainActivity : SDLActivity() {
 
@@ -57,7 +57,7 @@ class MainActivity : SDLActivity() {
     /**
      * ⚠️ ORDER MATTERS AND THE LAST ONE IS SPECIAL. `SDLActivity.getMainSharedObject()` takes the
      * LAST entry and `dlsym`s `SDL_main` out of `lib<that>.so` — so `pockettracker-sdl` must be
-     * last, and it is the library `shell/android-main.cpp` compiles into.
+     * last, and it is the library `shell/android/android-main.cpp` compiles into.
      *
      * `libpockettracker.so` (the engine) is deliberately absent: it is a NEEDED dependency of
      * `libpockettracker-sdl.so`, so the dynamic linker loads it from the same directory without
@@ -222,7 +222,7 @@ class MainActivity : SDLActivity() {
 
     /**
      * Takes the playback service down; harmless when it is not running. Also **called from native**
-     * (`shell/android-main.cpp`) once a song stops in the background — so `@Keep` and a
+     * (`shell/android/android-main.cpp`) once a song stops in the background — so `@Keep` and a
      * `proguard-rules.pro` `-keep`, like every method resolved by name over JNI.
      */
     @Keep
@@ -252,7 +252,7 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * Called from native (`shell/android-main.cpp`, on the SDL thread) on every virtual-button press
+     * Called from native (`shell/android/android-main.cpp`, on the SDL thread) on every virtual-button press
      * and release. The touch layer decides to fire and passes the live BTN SOUND / BTN VIBRO scalars;
      * this routes them to the two managers. ⚠️ Resolved by name over JNI: `@Keep` plus a `-keep` in
      * `proguard-rules.pro`, or release gets an `UnsatisfiedLinkError`.
@@ -291,7 +291,7 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * **Called from native (`shell/android-main.cpp`) to decide the touch vs FULL layout.** True iff a
+     * **Called from native (`shell/android/android-main.cpp`) to decide the touch vs FULL layout.** True iff a
      * real game controller is attached; the shared shell draws the on-screen gamepad + PORTRAIT2 skin
      * only when this is false and the hardware is a touchscreen.
      *
@@ -400,7 +400,7 @@ class MainActivity : SDLActivity() {
     // Five by-name JNI hooks forwarding to `MidiOutManager` (which explains why MidiManager is
     // unavoidable, and that to SEND you open the device's INPUT port).
     // ⚠️ All `@Keep` AND listed in `proguard-rules.pro`: a renamed member kills MIDI in release only.
-    // `shell/midi-out-android.cpp` logs at resolve time whether it found them.
+    // `shell/android/midi-out-android.cpp` logs at resolve time whether it found them.
 
     private var midiOut: MidiOutManager? = null
 
@@ -463,7 +463,7 @@ class MainActivity : SDLActivity() {
 
     // ── Storage Access Framework ─────────────────────────────────────────────────────────────────
     //
-    // `shell/saf-filesystem.cpp` reaches `ContentResolver` / `DocumentsContract` through these
+    // `shell/android/saf-filesystem.cpp` reaches `ContentResolver` / `DocumentsContract` through these
     // one-line delegates to [SafStorage]. ⚠️ `@Keep` AND a `proguard-rules.pro` rule each — CI reads
     // the count from that file.
 
@@ -526,7 +526,7 @@ class MainActivity : SDLActivity() {
      *
      * Nothing is pushed to native here. The grant is persisted, and the browser picks it up when the
      * app returns to the foreground — the roots directory is never cached, so re-listing IS the
-     * refresh (`shell/saf-filesystem.cpp`).
+     * refresh (`shell/android/saf-filesystem.cpp`).
      */
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -654,7 +654,7 @@ class MainActivity : SDLActivity() {
             json.put("overlayStrength",   prefs.getInt("overlay_strength", 128))
 
             // ── The device-row SELECTIONS, as STABLE STRINGS (v2) ────────────────────────────────
-            // SKIN and OVERLAY resolve against `device_skin.h` / `shell/overlay.h`, so their stored ids
+            // SKIN and OVERLAY resolve against `device_skin.h` / `shell/skin/overlay.h`, so their stored ids
             // move across (`portrait_skin` / `overlay_name`). ⚠️ LAYOUT (`layout_mode`) is not: the
             // shell picks the layout by orientation and controller, so it has nothing to resolve to.
             json.put("portrait_skin", prefs.getString("portrait_skin", DEFAULT_SKIN_ID))

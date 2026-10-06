@@ -17,7 +17,7 @@
 //     the send observer.
 //
 // Events arrive at LOOKAHEAD time (ahead of the clock), are queued by target frame and released by
-// `pump(now)` — from a ~1 kHz sender thread (`shell/midi-sender.h`) driven by `FrameEstimator`, or
+// `pump(now)` — from a ~1 kHz sender thread (`shell/midi/midi-sender.h`) driven by `FrameEstimator`, or
 // from `SongcoreHost::poll` when no such thread owns the job. Two threads, hence `mu_`.
 
 #include <algorithm>
@@ -108,7 +108,7 @@ struct MidiMessage {
 
 /**
  * Told about every message as it is released — the only way to measure how close to its due frame
- * a message leaves (`shell/midi-sender.h` fits its own wall clock against `dueFrame`).
+ * a message leaves (`shell/midi/midi-sender.h` fits its own wall clock against `dueFrame`).
  * ⚠️ Called under the lock, from whichever thread released the message: be quick, and never call back
  * into `ExternalConsumer`.
  * Called even with no port open (`sent` says so), so timing can be measured with no hardware.
@@ -262,7 +262,7 @@ class ExternalConsumer : public IMidiConsumer {
 
     /**
      * Release everything due at or before `nowFrame` and close expired LEN gates. Late, never early,
-     * so the caller's cadence is the precision (shell/midi-sender.h).
+     * so the caller's cadence is the precision (shell/midi/midi-sender.h).
      */
     void pump(int64_t nowFrame) {
         std::lock_guard<std::mutex> lk(mu_);
@@ -309,7 +309,7 @@ class ExternalConsumer : public IMidiConsumer {
      * deadlines: a running clock owes a tick, a non-empty queue a message.
      * ⚠️ The clock queues nothing, so `pending_count() > 0` alone would idle the thread during pure
      * sync out — 20% of a tick in jitter. LEN gates are deliberately excluded (4 ms idle bound is
-     * inaudible; shell/midi-sender.cpp).
+     * inaudible; shell/midi/midi-sender.cpp).
      */
     bool needs_fast_pump() const {
         std::lock_guard<std::mutex> lk(mu_);

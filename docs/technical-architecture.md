@@ -136,15 +136,15 @@ native/                            The portable program
 
 shell/                             The only SDL in the tree
 ├── main.cpp                       Desktop / handheld entry point
-├── android-main.cpp               SDL_main for the Android build
 ├── app.cpp / .h                   The shared frame loop, signal handling, config
-├── sdl-video, sdl-audio-engine, sdl-input, sdl-touch    The device
-├── image, font_raster, assets, skin, overlay, portrait2 Presentation
-├── midi-{out,in}-{base,winmm,alsa,android}.*            Two backend families, one #ifdef each
-├── alsa-rawmidi.*                 Runtime libasound loader (dlopen; no link-time dependency)
-├── midi-sender.*                  The MIDI output thread
-├── portmaster/                    Launch script and PortMaster metadata
-└── build-linux.sh, build-windows.ps1, build-portmaster.sh, Dockerfile.portmaster
+├── sdl/                           The device: video, audio, input, touch
+├── skin/                          Presentation: skins, CRT overlay, button font, images, assets
+├── midi/                          The platform-free half of MIDI in and out, and the sender thread
+├── android/                       SDL_main, the SAF filesystem, MIDI over JNI
+├── linux/                         ALSA MIDI (libasound loaded at runtime, no link-time dependency)
+├── windows/                       ASIO output, winmm MIDI, the exe's icon and manifest
+├── miyoo/, portmaster/            Handheld launch scripts and metadata
+└── build-*.sh, build-windows.ps1, Dockerfile.*, toolchain-*.cmake
 
 app/                               Android: manifest, resources, and a seven-file Kotlin shim
 docs/                              The manual, this document, and the licence notices

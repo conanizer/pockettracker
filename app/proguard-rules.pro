@@ -1,7 +1,7 @@
 # ─── The by-name JNI callbacks from native into Kotlin (convergence Phase E) ──────────────────
 #
 # The shared C++ shell calls these Kotlin methods on MainActivity by name, resolving each with
-# GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp, shell/midi-in-android.cpp).
+# GetMethodID (shell/android/android-main.cpp, shell/android/midi-out-android.cpp, shell/android/midi-in-android.cpp).
 # ⚠️ No count in prose — this comment carried three different ones at once. The list below IS the
 # count, and CI reads it out of this file rather than out of a sentence.
 #     onButtonFeedback(IZZIZI)V     — routes a virtual-button press to the sound/haptic managers
@@ -83,7 +83,7 @@
     void stopPlaybackService();
 }
 # The background-playback JNI natives: their class and method names ARE the C symbol names
-# (shell/android-main.cpp), so neither may be renamed.
+# (shell/android/android-main.cpp), so neither may be renamed.
 -keepclasseswithmembernames class com.conanizer.pockettracker.MainActivity { native <methods>; }
 -keepclasseswithmembernames class com.conanizer.pockettracker.PlaybackService { native <methods>; }
 

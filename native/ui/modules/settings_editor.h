@@ -51,7 +51,7 @@ struct SettingsValues {
     int  overlayCount      = 1;   // "OFF" + however many files
     int  overlayStrength   = 128;
 
-    // ⚠️ The PERSISTED overlay is the STABLE ID STRING too, resolved at boot (shell/overlay.h).
+    // ⚠️ The PERSISTED overlay is the STABLE ID STRING too, resolved at boot (shell/skin/overlay.h).
     // Serialized as `overlay_name`; "OFF" is no overlay.
     std::string overlayName = "OFF";
 

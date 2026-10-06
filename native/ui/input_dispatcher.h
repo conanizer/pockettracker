@@ -22,7 +22,7 @@
 //
 // ── Input layers ─────────────────────────────────────────────────────────────────────────────────
 //
-//   • `shell/sdl-input.h`  — keycodes, controller buttons, axes, key repeat. SDL's.
+//   • `shell/sdl/sdl-input.h`  — keycodes, controller buttons, axes, key repeat. SDL's.
 //   • `ui/button_mapper.h` — the COMBO MATRIX: which named handler a press means. Portable.
 //   • here                 — what each named handler DOES.
 // No `handle(ButtonEvent)` here: the matrix is a free function so a tool can drive it with a stub,
@@ -463,7 +463,7 @@ class InputDispatcher {
     // ── Hold acceleration lives in the SHELL ─────────────────────────────────────────────────────
     //
     // ⚠️ A handler here is one step, always. Holding a direction arrives as more presses, closer together
-    // (`shell/sdl-input.h`), never a bigger step — a 2- or 4-row jump is the stutter the ramp avoids.
+    // (`shell/sdl/sdl-input.h`), never a bigger step — a 2- or 4-row jump is the stutter the ramp avoids.
 
     // ── The autosave's debounce ──────────────────────────────────────────────────────────────────
     //

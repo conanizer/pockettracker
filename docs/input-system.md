@@ -387,7 +387,7 @@ increment / decrement / fast-step / delete / insert for free.
 - `native/ui/cursor.h` — the value types, capabilities, stepping rules and the five button→action functions
 - `native/ui/button_mapper.h` — the combo matrix: which of the ~30 named handlers a press means
 - `native/ui/input_dispatcher.{h,cpp}` — what each handler does
-- `shell/sdl-input.cpp` — the only platform-specific part: SDL keys and pad buttons → the ten buttons
+- `shell/sdl/sdl-input.cpp` — the only platform-specific part: SDL keys and pad buttons → the ten buttons
 
 ### Adding Input to a New Screen
 
