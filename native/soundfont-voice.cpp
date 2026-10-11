@@ -268,7 +268,7 @@ void SoundfontVoice::noteOff() { noteOffAt(0); }
 void SoundfontVoice::noteOffAt(int atFrame) {
     isReleasingOnly = true;
     // Same reason as hardStop's: an arm this block that a note-off in the SAME block supersedes (a
-    // sampler note taking the track, a KIL) must not sound after the thing that ended it.
+    // sampler note taking the track, an OFF) must not sound after the thing that ended it.
     hasArmedNote = false;
 
     // Decide whether to defer tsf_channel_note_off based on active ADSR/TRIG VOL mods.
@@ -312,7 +312,7 @@ void SoundfontVoice::noteOffAt(int atFrame) {
             if (h && activeNote >= 0) {
                 // ⚠️⚠️ A SHORT RELEASE IS RUN AS OUR OWN RAMP, BECAUSE TSF CANNOT FADE ONE: its
                 // envelope is held flat per 64-sample chunk, so a release of a few ms lands as one
-                // step — a crack on every key release and KIL. Below the threshold TSF holds sustain
+                // step — a crack on every key release and OFF. Below the threshold TSF holds sustain
                 // while our ramp takes the samples down over the release time (never faster than the
                 // declick fade). Above it, TSF's own release is left alone — a pad keeps its tail.
                 const float rel = longest_release(h, _trackId);
@@ -400,7 +400,7 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
     const ArmedNote a = armed;
 
     // Hard-kill every TSF voice on this channel: a new note on the track is a steal, as on the
-    // sampler; noteOff() and KIL keep the SF REL envelope, this does not.
+    // sampler; noteOff() keeps the SF REL envelope, this does not.
     // ⚠️ The cut is UNFADED because TSF cannot fade (its envelope is flat per 64-sample block). The
     // steal is faded in the RENDER instead, over DECLICK_SAMPLES of the rendered samples — and that
     // fade must ALREADY have been applied when this runs; the caller's ordering is the contract.

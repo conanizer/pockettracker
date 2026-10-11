@@ -214,11 +214,11 @@ class EngineConsumer : public IMidiConsumer {
                 break;
 
             // ⚠️ Three modes. NOTE_OFF_KEY is a live key let go: a one-shot without a release
-            // envelope ignores it and plays out, where a KIL fades it (`SamplerVoice::keyRelease`).
+            // envelope ignores it and plays out, where an OFF fades it (`SamplerVoice::keyRelease`).
             // An unknown mode must not silently become a KIL.
             case EV_NOTE_OFF:
                 switch (ev.noteOff.mode) {
-                    case NOTE_OFF_CUT: engine_->scheduleKill(ev.frame, ev.track);       break;
+                    case NOTE_OFF_CUT: engine_->scheduleCut(ev.frame, ev.track);        break;
                     case NOTE_OFF_KEY: engine_->scheduleKeyRelease(ev.frame, ev.track); break;
                     default:           engine_->scheduleNoteOff(ev.frame, ev.track);    break;
                 }

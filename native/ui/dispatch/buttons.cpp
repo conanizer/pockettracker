@@ -3,6 +3,7 @@
 #include "ui/dispatch/dispatch_common.h"
 
 #include "songcore/traversal.h"
+#include "ui/song_pointer.h"
 
 namespace pt::ui {
 
@@ -57,8 +58,7 @@ void InputDispatcher::on_start() {
     // ⚠️ Runs under the THEME and EQ editors too (their layers pass it on): the transport underneath is
     // how you hear an edit while dialling it.
 
-    // START is the transport — except where a screen's handler took it: the instrument screens and TABLE
-    // audition, LIVE mode on SONG launches.
+    // START is the transport — except where a screen's handler took it: LIVE mode on SONG launches.
     if (host_.is_playing()) {
         host_.stop();
         return;
@@ -86,8 +86,8 @@ void InputDispatcher::on_start() {
         case ScreenType::MIDI:
         case ScreenType::MIDI_MAP: host_.play_song(0); break;
 
-        // PHRASE, GROOVE, SCALE…: the phrase, asked through the chain on screen first (the same phrase may
-        // sit in five chains).
+        // PHRASE, GROOVE, SCALE, TABLE and the instrument screens: the phrase, asked through the chain on
+        // screen first (the same phrase may sit in five chains).
         default:
             host_.play_phrase(s_.currentPhrase,
                               songcore::track_of_phrase(*s_.project, s_.currentPhrase, s_.currentChain,
@@ -96,8 +96,36 @@ void InputDispatcher::on_start() {
     }
 }
 
-// LIVE mode's chords: SONG's handler answers them; everywhere else they are reserved and do nothing.
+// LIVE mode's chords: SONG's handler answers them. L+START is reserved everywhere else.
 void InputDispatcher::on_l_start() { route(Gesture::L_START); }
-void InputDispatcher::on_r_start() { route(Gesture::R_START); }
+
+// Below SONG, where START plays one chain or phrase, R+START plays every track from the song row you
+// came through. ⚠️ A list, not a default: the chord reaches the browser and the sample editor too.
+void InputDispatcher::on_r_start() {
+    if (route(Gesture::R_START)) return;
+    switch (s_.currentScreen) {
+        case ScreenType::CHAIN:
+        case ScreenType::PHRASE:
+        case ScreenType::TABLE:
+        case ScreenType::GROOVE:
+        case ScreenType::SCALE:
+        case ScreenType::INSTRUMENT:
+        case ScreenType::INST_POOL:
+        case ScreenType::MODS:
+            if (host_.is_playing()) {
+                host_.stop();
+            } else if (host_.live_mode()) {
+                // LIVE has no "all eight": the row launches as a scene, an empty cell silent.
+                host_.play_song_live(pointer_song_row(s_), live_row_mask(pointer_song_row(s_)));
+            } else {
+                host_.play_song(pointer_song_row(s_));
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void InputDispatcher::on_a_start() { route(Gesture::A_START); }
 
 }  // namespace pt::ui

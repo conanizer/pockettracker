@@ -712,7 +712,11 @@ class Sequencer {
     // The step's own note, with its PSL / PBN / PVB / PVX, on a freshly reset carry.
     void schedule_step_note(StepPlay& s);
 
-    // KIL: soft note-off at the sample-accurate kill frame (with LAT + KIL-offset latency).
+    // An OFF in the note column: the sounding note goes to its release, on the step's own frame (so a
+    // CHA can skip it and a LAT moves it, as they would a note).
+    void schedule_note_off(StepPlay& s);
+
+    // KIL: cuts the note at the sample-accurate kill frame (with LAT + KIL-offset latency) — no release.
     void schedule_kill(StepPlay& s);
 
     // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / CUT / RES / EQN / EQM).

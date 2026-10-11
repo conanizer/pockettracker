@@ -394,6 +394,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "plays a phrase higher or lower",
       "without copying it."},
      {"START plays this chain",
+      "R+START plays the whole song",
       "R+→ opens the phrase under you",
       "R+← goes back to the song",
       "B+D-PAD walks to another chain",
@@ -405,6 +406,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "note, a volume, an instrument",
       "and three FX commands."},
      {"START plays this phrase",
+      "R+START plays the whole song",
       "R+→ opens the instrument",
       "R+← goes back to the chain",
       "B+D-PAD walks to another phrase",
@@ -418,7 +420,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "and shapes it with pitch,",
       "volume, filter, drive and the",
       "effect sends."},
-     {"START plays the instrument",
+     {"START plays the phrase",
+      "R+START plays the whole song",
+      "A+START plays the instrument",
       "B+←/→ walks to another slot",
       "R+↑ opens its MODS",
       "R+← goes back to the phrase"}},
@@ -430,7 +434,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "Instrument 05 uses table 05",
       "unless a TBL command says",
       "otherwise."},
-     {"START plays it on its instrument",
+     {"START plays the phrase",
+      "R+START plays the whole song",
+      "A+START plays the table",
       "B+←/→ walks to another table",
       "L+B marks cells, B copies them",
       "L+A pastes"}},
@@ -479,7 +485,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B resets the value",
       "B+←/→ walks the instruments",
-      "START plays the instrument",
+      "START plays the phrase",
+      "A+START plays the instrument",
       "R+↓ goes back to the instrument"}},
     /* SCREEN_INST_POOL */
     {"INST.POOL: all the slots", "Every instrument in one list,", "with volume and sends.",
@@ -491,7 +498,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "B+↑/↓ jumps 16 slots",
       "A on an empty name loads a file",
       "A+B on a name empties the slot",
-      "START plays the slot",
+      "START plays the phrase",
+      "A+START plays the slot",
       "R+→ opens it on INSTRUMENT",
       "R+← goes to the phrase"}},
     /* SCREEN_MIXER */
@@ -638,6 +646,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+←/→ steps one note",
       "A+↑/↓ steps an octave",
       "A+B clears the note",
+      "A+B on --- puts OFF: lets go",
+      "of the note that is sounding",
       "Hold A to hear it (NOTE PREV)",
       "R+→ opens its instrument"}},
     /* PHRASE_VOLUME */
@@ -669,6 +679,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+↑/↓ opens the command list",
       "Keep A held and move to browse",
       "Let go of A to pick one",
+      "A on --- repeats the last one",
       "A+B clears the command"}},
     /* PHRASE_FX_VALUE */
     {"FX VALUE: what it is set to", "The meaning comes from the FX", "to its left.",
@@ -677,6 +688,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "depends on the command - the",
       "command list describes each."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to 00",
       "START plays the phrase"}},
 
     // ── TABLE ────────────────────────────────────────────────────────────────────────────────────
@@ -689,7 +701,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+←/→ steps a semitone",
       "A+↑/↓ steps an octave",
       "A+B sets it back to 00",
-      "START plays the table"}},
+      "A+START plays the table"}},
     /* TABLE_VOLUME */
     {"V: volume, per tick", "00 is silent, FF is full.", "Empty leaves the volume be.",
      {"Sets the volume of the note",
@@ -698,7 +710,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "-- leaves the volume alone."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to --",
-      "START plays the table"}},
+      "A+START plays the table"}},
     /* TABLE_FX_TYPE */
     {"FX: a command on this tick", "A+↑/↓ opens the picker and", "shows what each one does.",
      {"A three-letter command that",
@@ -710,6 +722,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+↑/↓ opens the command list",
       "Keep A held and move to browse",
       "Let go of A to pick one",
+      "A on --- repeats the last one",
       "A+B clears the command"}},
     /* TABLE_FX_VALUE */
     {"FX VALUE: what it is set to", "The meaning comes from the FX", "to its left.",
@@ -718,7 +731,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "depends on the command - the",
       "command list describes each."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
-      "START plays the table"}},
+      "A+B sets it back to 00",
+      "A+START plays the table"}},
 
     // ── INSTRUMENT, on every type ────────────────────────────────────────────────────────────────
     /* INST_TYPE */
@@ -730,7 +744,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "device. On a loaded slot it",
       "asks before changing."},
      {"A+D-PAD changes the type",
-      "START plays the instrument"}},
+      "A+START plays the instrument"}},
     /* INST_SOURCE_LOAD */
     {"LOAD: pick a source file", "Opens the browser for a", "sample or a SoundFont.",
      {"Opens the file browser to pick",
@@ -768,7 +782,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+←/→ steps a semitone",
       "A+↑/↓ steps an octave",
       "A+B sets it back to C-4",
-      "START plays the instrument"}},
+      "A+START plays the instrument"}},
     /* INST_DETUNE */
     {"DETUNE: fine pitch trim", "80 is centre. Below is flat,", "above is sharp.",
      {"Tunes the slot up or down. 80",
@@ -777,7 +791,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "second sixteenths of one."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to 80",
-      "START plays the instrument"}},
+      "A+START plays the instrument"}},
     /* INST_TIC */
     {"TIC: table speed", "Ticks per table row, for", "notes on this instrument.",
      {"How many ticks the table waits",
@@ -914,7 +928,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "start to FF at the very end."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to 00",
-      "START plays the instrument"}},
+      "A+START plays the instrument"}},
     /* INST_LOOP_START */
     {"LOOP ST: where a loop begins", "The point playback jumps back", "to. Needs LOOP switched on.",
      {"The point a loop jumps back to",
@@ -951,7 +965,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "piano, strings, drums. This",
       "picks the one the slot plays."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
-      "START plays the voice"}},
+      "A+START plays the voice"}},
 
     // ── INSTRUMENT, external MIDI only ───────────────────────────────────────────────────────────
     /* INST_MIDI_CHANNEL */
@@ -1223,7 +1237,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* MOD_RELEASE */
     {"REL: time to fall at the end", "Starts when the note stops.", "",
      {"How long it takes to fall away",
-      "once the note ends."},
+      "once the note ends. An OFF in",
+      "the note column ends it."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to 00"}},
     /* MOD_OSC */
@@ -1259,7 +1274,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A on an empty slot loads a file",
       "A+B empties the slot, no undo",
       "R+→ opens it on INSTRUMENT",
-      "START plays it"}},
+      "A+START plays it"}},
 
     // ── MIXER ────────────────────────────────────────────────────────────────────────────────────
     /* MIXER_TRACK_VOL */

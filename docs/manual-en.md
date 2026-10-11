@@ -409,8 +409,9 @@ tracks go on playing and feeding it.
 | START | Play / Stop (context-aware) |
 | START on SONG | Play full song from top |
 | START on CHAIN | Play current chain |
-| START on PHRASE | Play current phrase (loops) |
-| START on INSTRUMENT | Preview current instrument |
+| START on PHRASE, INSTRUMENT, MODULATION, TABLE | Play current phrase (loops) |
+| R + START on CHAIN, PHRASE, INSTRUMENT, MODULATION, TABLE | Play the whole song from the song row you came through |
+| A + START on INSTRUMENT, MODULATION, TABLE | Preview current instrument |
 | START on SAMPLE EDITOR | Preview edited sample |
 | START on SONG in LIVE mode | Queue the chain under the cursor ([LIVE Mode](#live-mode)) |
 
@@ -564,12 +565,13 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 | A + LEFT/RIGHT | +1 / −1 semitone (note — or the next note of the scale, see [section 14](#14-scale-screen)), +1 / −1 (other values) |
 | A + UP/DOWN | ±1 octave (note), ±16 (other values) |
 | A + B | Delete value at cursor |
+| A + B on an empty note | Insert **OFF** — the note sounding on the track is let go |
 | B + LEFT/RIGHT | Switch to previous / next phrase |
 | START | Play current phrase (loops) |
 
 ### FX columns
 
-Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker. Effects are listed in §22.
+Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker. A on an empty type inserts the effect you entered last, with its value. Effects are listed in §22.
 
 The picker groups the commands by what they act on — **SEQUENCE**, **INSTRUMENT** and **GLOBAL** — and keeps one group open at a time. A closed group shows `→` after its name, the open one `↓`. Move past the last row of a group and the next one opens; every group starts with `---`, which clears the slot. Keep holding A while you look — the description above the grid follows the cursor — and release A on the command you want.
 
@@ -673,7 +675,7 @@ When slice markers exist on the sample (set via the SAMPLE EDITOR), the SLICE pa
 
 When **LOOP** is FWD or PNG, playback flows **START → LOOP END** once, then repeats the region **[LOOP ST, LOOP END]**. The sample's **END** no longer bounds the loop — it bounds the *release tail*.
 
-If the instrument also has an **ADSR** volume envelope (MODULATION screen), releasing the note — the note-off at the end of its step, or a **KIL** (`K00`) effect — leaves the loop and plays **LOOP END → END** once as the release tail, under the ADSR release stage. The sample therefore splits into three regions:
+If the instrument also has an **ADSR** volume envelope (MODULATION screen), releasing the note — an **OFF** in the note column — leaves the loop and plays **LOOP END → END** once as the release tail, under the ADSR release stage. The sample therefore splits into three regions:
 
 | Region | Role |
 |---|---|
@@ -1686,7 +1688,7 @@ Stops the sample on this track and cancels all persistent effects (ARP, RPT, pit
 - `KIL 06` = stop half a step later (6 of 12 ticks).
 - `KIL 0C` = stop one full step later (the start of the next row).
 
-If the instrument has an **ADSR** volume envelope, KIL triggers its **release** stage instead (see §11).
+KIL cuts the note whatever envelope the instrument has. An **OFF** in the note column lets it go through its release instead.
 
 ---
 
@@ -2230,7 +2232,7 @@ One-shot envelope triggered on each note. `AMT` controls how much the destinatio
 
 ### ADSR Envelope
 
-Release is triggered when the note ends (voice steal or KILL).
+Release is triggered by an **OFF** in the phrase's note column, or by letting go of a MIDI key.
 
 - **ATK** — attack time
 - **DEC** — decay to sustain level
@@ -2742,8 +2744,9 @@ exports and sample-editor saves keep their own folders.
 | START | Play / Stop |
 | START on SONG | Play from current row |
 | START on CHAIN | Play current chain |
-| START on PHRASE | Play current phrase (loops) |
-| START on INSTRUMENT | Preview instrument |
+| START on PHRASE, INSTRUMENT, MODULATION, TABLE | Play current phrase (loops) |
+| R + START on CHAIN, PHRASE, INSTRUMENT, MODULATION, TABLE | Play the whole song |
+| A + START on INSTRUMENT, MODULATION, TABLE | Preview instrument |
 | START on SAMPLE EDITOR | Preview sample |
 | START in file browser | Preview highlighted WAV |
 

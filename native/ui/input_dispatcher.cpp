@@ -36,7 +36,7 @@ void InputDispatcher::set_now(long long now_ms) {
     if (s_.currentScreen == ScreenType::PHRASE) {
         const songcore::PhraseStep& step =
             s_.project->phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
-        if (step.note != Note::EMPTY() && step.instrument >= 0) keysInstrument = step.instrument;
+        if (songcore::step_has_note(step) && step.instrument >= 0) keysInstrument = step.instrument;
     }
     keysInstrument = std::min(static_cast<int>(s_.project->instruments.size()) - 1, std::max(0, keysInstrument));
     host_.set_midi_in_play(keysInstrument, pointer_track(s_), s_.settings.midiInVoices,
@@ -374,7 +374,7 @@ void InputDispatcher::preview_held_note() {
     const Project& p = *s_.project;
     const songcore::PhraseStep& step =
         p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
-    if (step.note == Note::EMPTY()) return;
+    if (!songcore::step_has_note(step)) return;
 
     host_.set_preview_track(audition_track());
     host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note, /*durationFrames=*/0);

@@ -129,6 +129,11 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
 
 CursorContext TableModule::cursor_context(const TableState& s) const {
     const songcore::TableRow& row = s.table.rows[static_cast<size_t>(s.cursorRow)];
+    // An FX value is never empty: A+B puts it back to 00.
+    const auto fx_value = [](int value, int type) {
+        return cc::hex_byte(value, 0, effect_value_max(type), /*empty_value=*/-1, /*can_delete=*/false,
+                            /*can_insert=*/false, /*can_create=*/false, /*def=*/0);
+    };
     switch (s.cursorColumn) {
         case 0: return cc::read_only();
 
@@ -144,11 +149,11 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
                                     /*can_insert=*/true);
 
         case 3: return cc::effect_type(row.fx1Type, 1, s.effectTypeCount);
-        case 4: return cc::hex_byte(row.fx1Value, 0, effect_value_max(row.fx1Type));
+        case 4: return fx_value(row.fx1Value, row.fx1Type);
         case 5: return cc::effect_type(row.fx2Type, 2, s.effectTypeCount);
-        case 6: return cc::hex_byte(row.fx2Value, 0, effect_value_max(row.fx2Type));
+        case 6: return fx_value(row.fx2Value, row.fx2Type);
         case 7: return cc::effect_type(row.fx3Type, 3, s.effectTypeCount);
-        case 8: return cc::hex_byte(row.fx3Value, 0, effect_value_max(row.fx3Type));
+        case 8: return fx_value(row.fx3Value, row.fx3Type);
 
         default: return cc::none();
     }

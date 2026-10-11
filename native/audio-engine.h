@@ -382,18 +382,18 @@ public:
     // applied atomically at note trigger, so instruments sharing a de-duplicated handle don't clash.
     void setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel);
 
-    // Schedule a kill event (for Kill effect K00)
+    // End what sounds on a track: a sampler voice fades, a SoundFont plays its release.
     void scheduleKill(int64_t targetFrame, int trackId);
 
-    // Schedule a soft note-off (triggers ADSR release instead of hard stop)
+    // Schedule a note-off (an OFF note): the ADSR or SoundFont release, a declick fade where there is none
     void scheduleNoteOff(int64_t targetFrame, int trackId);
 
     // Schedule a KEY release — a live MIDI-in note let go of. ⚠️ Unlike scheduleNoteOff, a one-shot
     // with no release envelope IGNORES it and plays out; ADSR/TRIG release and the loop soft-kill match.
     void scheduleKeyRelease(int64_t targetFrame, int trackId);
 
-    // Schedule a CUT: every voice on the track fades out over KILL_FADE_SAMPLES and ends, whatever
-    // release the instrument has — a SoundFont's REL tail and an ADSR release included.
+    // Schedule a CUT (KIL): every voice on the track fades out over KILL_FADE_SAMPLES and ends,
+    // whatever release the instrument has — a SoundFont's REL tail and an ADSR release included.
     void scheduleCut(int64_t targetFrame, int trackId);
 
     // End every track at once — what the END OF A RENDER'S RANGE does to the notes still sounding

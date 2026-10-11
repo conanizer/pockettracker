@@ -94,6 +94,73 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
         }
         mark_modified(/*table_touched=*/true);
     }
+    remember_fx_at_cursor();
+}
+
+// ─── A on an empty command cell ──────────────────────────────────────────────────────────────────
+
+namespace {
+
+// A phrase step and a table row carry the same six FX fields; `slot` is 0-2.
+template <class Row> auto& fx_type_of(Row& r, int slot) {
+    return slot == 0 ? r.fx1Type : slot == 1 ? r.fx2Type : r.fx3Type;
+}
+template <class Row> auto& fx_value_of(Row& r, int slot) {
+    return slot == 0 ? r.fx1Value : slot == 1 ? r.fx2Value : r.fx3Value;
+}
+
+}  // namespace
+
+int InputDispatcher::fx_slot_at_cursor() const {
+    if (s_.currentScreen == ScreenType::PHRASE && s_.cursorColumn >= 4) return (s_.cursorColumn - 4) / 2;
+    if (s_.currentScreen == ScreenType::TABLE && s_.tableCursorColumn >= 3)
+        return (s_.tableCursorColumn - 3) / 2;
+    return -1;
+}
+
+void InputDispatcher::remember_fx_at_cursor() {
+    const int slot = fx_slot_at_cursor();
+    if (slot < 0) return;
+    const Project& p = *s_.project;
+    int type  = songcore::FX_NONE;
+    int value = 0;
+    if (s_.currentScreen == ScreenType::PHRASE) {
+        const songcore::PhraseStep& step =
+            p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+        type  = fx_type_of(step, slot);
+        value = fx_value_of(step, slot);
+    } else {
+        const songcore::TableRow& row =
+            p.tables[static_cast<size_t>(s_.currentTable)].rows[static_cast<size_t>(s_.tableCursorRow)];
+        type  = fx_type_of(row, slot);
+        value = fx_value_of(row, slot);
+    }
+    if (type == songcore::FX_NONE) return;   // a cleared cell leaves the memory alone
+    s_.lastEditedFxType  = type;
+    s_.lastEditedFxValue = value;
+}
+
+bool InputDispatcher::fx_insert_last(bool peek) {
+    if (!on_fx_type_column() || s_.selection.active) return false;
+    if (s_.lastEditedFxType == songcore::FX_NONE || current_fx_type_code() != songcore::FX_NONE) return false;
+    if (peek) return true;
+
+    Project&  p    = host_.edit_project();
+    const int slot = fx_slot_at_cursor();
+    if (s_.currentScreen == ScreenType::PHRASE) {
+        songcore::PhraseStep& step =
+            p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+        fx_type_of(step, slot)  = s_.lastEditedFxType;
+        fx_value_of(step, slot) = s_.lastEditedFxValue;
+        mark_modified();
+    } else {
+        songcore::TableRow& row =
+            p.tables[static_cast<size_t>(s_.currentTable)].rows[static_cast<size_t>(s_.tableCursorRow)];
+        fx_type_of(row, slot)  = s_.lastEditedFxType;
+        fx_value_of(row, slot) = s_.lastEditedFxValue;
+        mark_modified(/*table_touched=*/true);
+    }
+    return true;
 }
 
 }  // namespace pt::ui

@@ -44,7 +44,7 @@ inline UsedRefs collect_used_refs(const Project& project) {
         if (phraseId >= static_cast<int>(project.phrases.size())) continue;
         for (const PhraseStep& step : project.phrases[static_cast<size_t>(phraseId)].steps) {
             if (step_has_fx(step, FX_RND) || step_has_fx(step, FX_RNL)) sawRandom = true;
-            if (!step_is_empty(step)) {
+            if (step_has_note(step)) {
                 used.instruments.insert(step.instrument);
                 // An INS cell's instrument is played too, so COMPACT must not wipe it.
                 const int ins = step_ins_instrument(step);

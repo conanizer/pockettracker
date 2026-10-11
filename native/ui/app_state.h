@@ -417,6 +417,9 @@ struct AppState {
     int           lastEditedTranspose  = 0;
     songcore::Note lastEditedNote      = songcore::Note::C4();
     int           lastEditedVolume     = 0x7F;
+    // The FX command last entered on PHRASE or TABLE, as a CODE, with its value. FX_NONE until one is.
+    int           lastEditedFxType     = 0;
+    int           lastEditedFxValue    = 0;
 
     // ── The status line ──────────────────────────────────────────────────────────────────────────
     //

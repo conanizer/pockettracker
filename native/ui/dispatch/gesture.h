@@ -7,7 +7,7 @@ namespace pt::ui {
 enum class Gesture {
     DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT,
     A_UP, A_DOWN, A_LEFT, A_RIGHT,
-    A_B, A_A, A_RELEASE,
+    A_B, A_A, A_RELEASE, A_START,
     B_UP, B_DOWN, B_LEFT, B_RIGHT,
     R_UP, R_DOWN, R_LEFT, R_RIGHT,
     R_A, R_B,

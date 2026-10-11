@@ -49,6 +49,7 @@ void InputDispatcher::on_a_released() {
         heldNotePreview_ = false;
         host_.stop_preview(/*cut=*/true);
     }
+    insertHeld_ = false;
     // Only a layer answers the release — the two pickers commit on it.
     route(Gesture::A_RELEASE);
 }

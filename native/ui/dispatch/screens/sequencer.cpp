@@ -155,6 +155,7 @@ GestureResult InputDispatcher::phrase_screen(Gesture g) {
     switch (g) {
         case Gesture::A:
             if (open_sub_screen_at_cursor(/*peek=*/false)) return GestureResult::TAKEN;
+            if (fx_insert_last(/*peek=*/false)) return GestureResult::TAKEN;
             phrase_insert();
             return GestureResult::TAKEN;
 
@@ -182,6 +183,10 @@ GestureResult InputDispatcher::phrase_screen(Gesture g) {
         case Gesture::B_UP:   song_relative_b_vertical(-1); return GestureResult::TAKEN;
         case Gesture::B_DOWN: song_relative_b_vertical(+1); return GestureResult::TAKEN;
 
+        case Gesture::A_B:
+            if (phrase_put_note_off()) return GestureResult::TAKEN;
+            return grid_clipboard(g, &InputDispatcher::phrase_clip, s_.currentPhrase);
+
         case Gesture::L_B_A:
             phrase_clone();
             return GestureResult::PASS;   // the body ends the selection
@@ -198,6 +203,9 @@ GestureResult InputDispatcher::phrase_screen(Gesture g) {
 
 GestureResult InputDispatcher::table_screen(Gesture g) {
     switch (g) {
+        case Gesture::A:
+            return fx_insert_last(/*peek=*/false) ? GestureResult::TAKEN : GestureResult::PASS;
+
         case Gesture::A_UP:
         case Gesture::A_DOWN:
             if (!on_fx_type_column()) return GestureResult::PASS;
@@ -210,9 +218,9 @@ GestureResult InputDispatcher::table_screen(Gesture g) {
             s_.lastEditedTable = s_.currentTable;
             return GestureResult::TAKEN;
 
-        // ⚠️ START is not the transport here: it auditions on the preview lane THROUGH the table on
-        // screen (instrument N owns table N), or you would hear the instrument's own table instead.
-        case Gesture::START:
+        // A+START auditions on the preview lane THROUGH the table on screen (instrument N owns table
+        // N), or you would hear the instrument's own table instead.
+        case Gesture::A_START:
             host_.set_preview_track(audition_track());
             host_.preview_instrument(s_.currentTable, /*tableIdOverride=*/s_.currentTable);
             return GestureResult::TAKEN;
@@ -419,8 +427,26 @@ void InputDispatcher::phrase_insert() {
         step.volume     = s_.lastEditedVolume;
         mark_modified();
         arm_double_tap();   // a second press keeps the note and re-points it at the next FREE instrument
+        insertHeld_ = true;
     }
     preview_held_note();
+}
+
+bool InputDispatcher::phrase_put_note_off() {
+    if (s_.cursorColumn != 1 || s_.selection.active) return false;
+    songcore::PhraseStep& step = host_.edit_project()
+                                     .phrases[static_cast<size_t>(s_.currentPhrase)]
+                                     .steps[static_cast<size_t>(s_.cursorRow)];
+    if (step.note != Note::EMPTY() && !insertHeld_) return false;   // a note of its own: A+B clears it
+    step.note     = Note::OFF();
+    insertHeld_   = false;
+    hasInsertPos_ = false;   // an A,A would re-point the instrument of a step that plays none
+    if (heldNotePreview_) {
+        heldNotePreview_ = false;
+        host_.stop_preview(/*cut=*/true);
+    }
+    mark_modified();
+    return true;
 }
 
 void InputDispatcher::phrase_next_instrument() {
@@ -686,18 +712,20 @@ bool InputDispatcher::phrase_edit(const InputAction& action) {
     Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
     const PhraseInputResult r = phrase_.handle_input(ph, s_.cursorRow, s_.cursorColumn, action);
     if (!r.modified) return false;
+    remember_fx_at_cursor();
+    insertHeld_ = false;
 
     // "Last edited" and the audition: only a step WITH a note is remembered, and only a NOTE
     // edit auditions — dialling a velocity must not retrigger the voice.
     const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
-    if ((r.hasNote || r.hasVolume || r.hasInstrument) && step.note != Note::EMPTY()) {
+    if ((r.hasNote || r.hasVolume || r.hasInstrument) && songcore::step_has_note(step)) {
         s_.lastEditedNote       = step.note;
         s_.lastEditedVolume     = step.volume;
         s_.lastEditedInstrument = step.instrument;
         if (r.hasNote) preview_held_note();
     }
     // A+B under a held audition: the note is gone, so is the sound.
-    if (heldNotePreview_ && step.note == Note::EMPTY()) {
+    if (heldNotePreview_ && !songcore::step_has_note(step)) {
         heldNotePreview_ = false;
         host_.stop_preview(/*cut=*/true);
     }
@@ -715,10 +743,12 @@ CursorContext InputDispatcher::table_context() const {
 
 bool InputDispatcher::table_edit(const InputAction& action) {
     Project& p = host_.edit_project();
-    return table_
+    const bool modified = table_
         .handle_input(p.tables[static_cast<size_t>(s_.currentTable)], s_.tableCursorRow,
                       s_.tableCursorColumn, action)
         .modified;
+    if (modified) remember_fx_at_cursor();
+    return modified;
 }
 
 }  // namespace pt::ui

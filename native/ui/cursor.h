@@ -414,6 +414,7 @@ inline CursorContext effect_value(int current, int fx_slot, int max = 255) {
     c.maxValue     = max;
     c.smallStep    = 1;
     c.largeStep    = 16;
+    c.defaultValue = 0;
     c.fxSlot       = fx_slot;
     return c;
 }

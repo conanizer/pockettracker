@@ -186,17 +186,22 @@ inline constexpr int MOD_DEST_COUNT = 11;
 
 // A Note always serialises BOTH pitch and octave (no field defaults). The default ctor is EMPTY.
 struct Note {
-    int pitch  = -1;  // 0-11 chromatic, -1 = empty
+    int pitch  = -1;  // 0-11 chromatic, -1 = empty, -2 = OFF
     int octave = 0;
     bool operator==(const Note& o) const { return pitch == o.pitch && octave == o.octave; }
     bool operator!=(const Note& o) const { return !(*this == o); }
     static Note EMPTY() { return Note{-1, 0}; }
+    static Note OFF()   { return Note{-2, 0}; }   // lets go of the note sounding on the track
     static Note C4()    { return Note{ 0, 4}; }
 };
 
+// ⚠️ A note cell has THREE states. "Not empty" is not "plays a note": ask the one you mean.
+inline bool note_is_off(const Note& n)   { return n.pitch == -2; }
+inline bool note_is_pitch(const Note& n) { return n.pitch >= 0; }
+
 // ─── Note ↔ MIDI ↔ display ──────────────────────────────────────────────────────────────────────
 inline int note_to_midi(const Note& n) {
-    if (n.pitch == -1) return -1;
+    if (n.pitch < 0) return -1;
     return (n.octave + 1) * 12 + n.pitch;  // C-4 = 60 (standard MIDI)
 }
 inline Note note_from_midi(int midi) {
@@ -212,8 +217,9 @@ inline float hex_to_float(int hex) { return (hex & 0xFF) / 255.0f; }
 inline const char* const NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-",
                                            "F#", "G-", "G#", "A-", "A#", "B-"};
 
-/** "C-4", or "---" when empty — the 3-char cell every grid draws. */
+/** "C-4", "OFF", or "---" when empty — the 3-char cell every grid draws. */
 inline std::string note_name(const Note& n) {
+    if (note_is_off(n)) return "OFF";
     if (n.pitch < 0 || n.pitch > 11) return "---";
     return std::string(NOTE_NAMES[n.pitch]) + std::to_string(n.octave);
 }
@@ -249,7 +255,8 @@ inline void step_set_fx_value(PhraseStep& s, int slot, int value) {
 inline bool step_has_fx(const PhraseStep& s, int type) {
     return s.fx1Type == type || s.fx2Type == type || s.fx3Type == type;
 }
-inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
+/** A step that triggers a note — an OFF does not, and neither does its instrument column. */
+inline bool step_has_note(const PhraseStep& s) { return note_is_pitch(s.note); }
 
 struct Phrase {
     int id = 0;

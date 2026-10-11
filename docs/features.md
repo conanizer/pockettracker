@@ -29,6 +29,7 @@ Write these into any phrase step to shape how a note plays:
 - **Volume** — ramp volume within a step
 - **Pan** — set a note's stereo position; the next note reverts to the instrument pan
 - **Kill** — stop the note, immediately or after a set number of ticks
+- **Note off** — an OFF in the note column lets the note go through its envelope's release
 - **Retrigger** — stutter the sample with optional volume ramp
 - **Playback direction** — play a sampler note backward or forward; flip it live to "scratch"
 - **Pitch slide** — glide to the next note (portamento)

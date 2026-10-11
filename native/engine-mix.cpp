@@ -809,10 +809,10 @@ void AudioEngine::applyParamUpdate(const ScheduledParamUpdate& upd, BlockMix& b)
 // One scheduled kill, on every voice of its track, at `frame` inside the block.
 void AudioEngine::applyKill(const ScheduledKill& kill, int frame) {
     switch (kill.mode) {
-        // A live key let go of. The three-way rule is in Voice::keyRelease; unlike a KIL,
+        // A live key let go of. The three-way rule is in Voice::keyRelease; unlike an OFF,
         // a one-shot plays out.
         case KILL_KEY_OFF: forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceKeyRelease(v, frame); }); break;
-        // KIL's note-off: each voice type runs its own release, or fades where it has none.
+        // An OFF note: each voice type runs its own release, or fades where it has none.
         case KILL_SOFT:    forEachVoiceOnTrack(kill.trackId, [&](auto& v) { v.noteOffAt(frame); });       break;
         case KILL_CUT:     forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceCut(v, frame); });        break;
         default:           forEachVoiceOnTrack(kill.trackId, [&](auto& v) { voiceKill(v, frame); });       break;

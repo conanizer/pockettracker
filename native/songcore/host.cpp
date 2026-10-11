@@ -541,7 +541,7 @@ int SongcoreHost::chop_sample(int id, const std::string& dir, const std::string&
 void SongcoreHost::preview_note(int instrumentId, const Note& note, int64_t durationFrames,
                                 bool rootAudition, int tableIdOverride) {
     if (!engine_) return;
-    if (note == Note::EMPTY()) return;   // A on an empty cell must not thump the lane
+    if (!note_is_pitch(note)) return;   // A on an empty cell or an OFF must not thump the lane
     if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
     const Instrument& ins = project_.instruments[instrumentId];
     const bool external = instrument_routes_external(ins);
@@ -691,7 +691,7 @@ void SongcoreHost::LiveInput::apply(const Event& ev, bool external) {
             return;
         case EV_NOTE_OFF:
             switch (ev.noteOff.mode) {
-                case NOTE_OFF_CUT: engine->scheduleKill(ev.frame, ev.track);       return;
+                case NOTE_OFF_CUT: engine->scheduleCut(ev.frame, ev.track);        return;
                 case NOTE_OFF_KEY: engine->scheduleKeyRelease(ev.frame, ev.track); return;
                 default:           engine->scheduleNoteOff(ev.frame, ev.track);    return;
             }

@@ -91,9 +91,9 @@ constexpr int sortRank(uint8_t type) {
 // Field order below IS the trace k=v order; trace field names are in the trailing comments.
 
 // NoteOff modes
-constexpr uint8_t NOTE_OFF_RELEASE = 0;  // scheduleNoteOff — KIL soft kill / ADSR release
-constexpr uint8_t NOTE_OFF_CUT     = 1;  // scheduleKill / killTrack — declick fade
-// ⚠️ A key release is not a KIL. KIL ends the note (a declick fade on a one-shot); letting go of a
+constexpr uint8_t NOTE_OFF_RELEASE = 0;  // scheduleNoteOff — an OFF note: the release, or a fade where there is none
+constexpr uint8_t NOTE_OFF_CUT     = 1;  // scheduleCut — KIL: a declick fade and gone, whatever release there is
+// ⚠️ A key release is not an OFF. An OFF ends the note (a declick fade on a one-shot); letting go of a
 // KEY lets a drum hit play out. `SamplerVoice::keyRelease` holds the rule (ADSR/TRIG → release,
 // looping → soft kill, one-shot → ignore).
 // Only MIDI input emits mode 2, and it does not ride `MidiRouter`, so no trace holds one. The day the

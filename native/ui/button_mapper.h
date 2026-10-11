@@ -152,6 +152,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return;   // −16 / −1 octave
             case Button::DPAD_RIGHT: ms.aPressedAlone = false; d.on_a_right(); return;   // +1
             case Button::DPAD_LEFT:  ms.aPressedAlone = false; d.on_a_left();  return;   // −1
+            case Button::START:      ms.aPressedAlone = false; d.on_a_start(); return;   // audition
             default: break;
         }
     }
@@ -236,7 +237,7 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
                     ms.rComboArmed = true;
                 }
                 return;
-            // LIVE mode's stop queue on SONG; reserved and consumed elsewhere, like L+START.
+            // LIVE mode's stop queue on SONG; the whole song from the editors below it.
             case Button::START:      d.on_r_start(); return;
             default: break;
         }

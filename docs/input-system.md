@@ -106,11 +106,13 @@ Hold A and press directions to edit values:
 ### Delete
 - **A + B** - Delete the value at the cursor, or reset it to its default where the cell cannot be
   empty (PAN, DRIVE, the sends…)
+- **A + B** on an empty PHRASE note cell inserts **OFF**; A + B on the OFF clears it.
 
 ### Insert
 - **A** on an empty cell inserts the **last-edited** chain/phrase.
 - **A, A** (a double-tap inside 300 ms) inserts the next **unused** one instead — the fast way to
   start a fresh phrase.
+- **A** on an empty FX command cell (PHRASE, TABLE) inserts the command entered last, with its value.
 
 ---
 
@@ -192,7 +194,7 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 - **A + B** on the NAME column — clear the slot (keeps its instrument type).
 - **A** (tap) on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
   the slot; the open is deferred to A-release so the two don't clash). Inside the editor, **B** closes it.
-- **START** — preview the selected instrument (when stopped).
+- **A + START** — preview the selected instrument.
 
 ---
 
@@ -312,6 +314,7 @@ A + LEFT                Decrement by small step (-1)
 A + UP                  Increment by large step (+16 or +12)
 A + DOWN                Decrement by large step (-16 or -12)
 A + B                   Delete value / reset it to its default
+A + START               Preview the instrument (INSTRUMENT, INST.POOL, MODULATION, TABLE)
 B                       Cancel / Exit / Back / Copy a selection
 B on EFFECTS' TIME row  Switch the delay time between milliseconds and note lengths
 SELECT                  Help for the cell under the cursor (and the file-management modifier;
@@ -347,6 +350,8 @@ R + LEFT                Up one directory (file browser)
 R + LEFT/RIGHT          Scroll the text cursor (QWERTY overlay)
 R + B                   Mute the track under the cursor  (SONG, MIXER)
 R + A                   Solo it                          (SONG, MIXER)
+R + START               Play the whole song from the song row you came through
+                        (CHAIN, PHRASE, TABLE, GROOVE, SCALE and the instrument screens)
 ```
 
 ### Tier 5: SELECT Modifier (File management)
@@ -366,9 +371,8 @@ underneath it. They are listed so they aren't mistaken for broken controls:
 L + R + A, L + R + B, L + R + SELECT
 ```
 
-`L + START` and `R + START` are consumed the same way everywhere except the SONG screen in LIVE
-mode, where they queue a row and queue a channel's stop. They never toggle playback and never
-silence a preview.
+`L + START` is consumed the same way everywhere except the SONG screen in LIVE mode, where it queues
+a row. It never toggles playback and never silences a preview.
 
 ---
 

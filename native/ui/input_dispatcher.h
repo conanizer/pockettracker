@@ -179,6 +179,9 @@ class InputDispatcher {
     /** Release of A: commits the FX helper's highlighted effect. */
     void on_a_released();
 
+    /** A+START: audition the instrument on the three instrument screens and TABLE. */
+    void on_a_start();
+
     /**
      * A went down on a cell the mapper DEFERS; nothing fires here but the instant is recorded: the
      * sample editor's row-11 chop tap is aimed by ear at the playhead, and the release comes a
@@ -259,8 +262,9 @@ class InputDispatcher {
     void on_start();
 
     /**
-     * LIVE mode's chords, SONG only: L+START queues the cursor ROW as one scene, R+START queues the
-     * cursor's channel to fall silent. Elsewhere they are reserved and do nothing.
+     * LIVE mode's chords on SONG: L+START queues the cursor ROW as one scene, R+START queues the
+     * cursor's channel to fall silent. Below SONG, R+START plays the whole song from the row you came
+     * through; L+START is reserved and does nothing.
      */
     void on_l_start();
     void on_r_start();
@@ -577,6 +581,10 @@ class InputDispatcher {
     MidiMapModule          midiMap_{};
     EqModule               eq_{};   // stateful: caches its response curve (eq_editor.h)
 
+    /** The A still held is the one that inserted the PHRASE note under the cursor — so an A+B now is
+     *  a chord on what was an EMPTY cell. Cleared by A's release and by any edit of the note. */
+    bool         insertHeld_ = false;
+
     /** A,A only counts if the cursor did not move between the presses: where the first A landed. */
     bool         hasInsertPos_ = false;
     ScreenType   insertScreen_ = ScreenType::PHRASE;
@@ -652,6 +660,16 @@ class InputDispatcher {
     int  current_fx_type_code() const;
     /** Write an effect CODE into the FX column under the cursor. */
     void apply_fx_type_change(int effect_code);
+    /** The cursor's FX slot (0-2) on PHRASE or TABLE, from either of its two cells; -1 anywhere else. */
+    int  fx_slot_at_cursor() const;
+    /** After an edit: a command in the cursor's FX slot becomes the one a plain A lays down next. */
+    void remember_fx_at_cursor();
+    /**
+     * A on an EMPTY FX command cell: lay down the command last entered, with its value. True if it did
+     * (peek = true: if it would — the mapper holds this A for the release, so A+UP/DOWN still opens the
+     * list on an empty cell and A+START leaves nothing behind on TABLE).
+     */
+    bool fx_insert_last(bool peek);
 
     // ── The mapping destination picker (ui/dispatch/layers/map_picker.cpp) ──────────────────────
     GestureResult map_picker_layer(Gesture g);
@@ -1002,16 +1020,18 @@ class InputDispatcher {
     bool          pool_edit(const InputAction& action);
     CursorContext mods_context() const;
     bool          mods_edit(const InputAction& action);
-    /** What the three share: START auditions the instrument, any plain press stops it. */
+    /** What the three share: A+START auditions the instrument, any plain press stops it. */
     GestureResult instrument_audition(Gesture g);
 
     /**
      * A on one of INSTRUMENT's four cells that open something: the source LOAD and EDIT on row 0, the
-     * preset SAVE and LOAD on row 5. True if it handled the press.
+     * preset SAVE and LOAD on row 5. True if it opened (peek = true: if it would).
+     * ⚠️ Deferred to A's release like NAME and EQ, or A+START would open a browser before it auditions.
      */
-    bool instrument_open_at_cursor();
-    /** A on the pool's NAME column of an EMPTY slot: browse for a source. True if it opened. */
-    bool pool_load_into_empty_slot();
+    bool instrument_open_at_cursor(bool peek);
+    /** A on the pool's NAME column of an EMPTY slot: browse for a source. True if it opened (peek =
+     *  true: if it would). Deferred with the above. */
+    bool pool_load_into_empty_slot(bool peek);
 
     /**
      * INSTRUMENT row 0, A+DPAD on TYPE: switch at once on an EMPTY slot, else ask first (the source is
@@ -1060,6 +1080,11 @@ class InputDispatcher {
     void song_insert();
     void chain_insert();
     void phrase_insert();
+    /**
+     * A+B on an EMPTY note cell: put an OFF there. True if it did.
+     * ⚠️ The chord's A lands first and has already inserted a note, so "empty" means `insertHeld_` too.
+     */
+    bool phrase_put_note_off();
     /** A,A: insert the next UNUSED chain or phrase; on PHRASE, keep the note and re-point it at the next
      *  FREE instrument. */
     void song_insert_next();

@@ -28,7 +28,22 @@ bool InputDispatcher::defer_a_to_release() const {
     // playhead, and the same A is held for the slice step, the drag and the delete.
     if (on_slice_tap_cell()) return true;
 
-    return const_cast<InputDispatcher*>(this)->open_sub_screen_at_cursor(/*peek=*/true);
+    InputDispatcher& self = const_cast<InputDispatcher&>(*this);
+    switch (s_.currentScreen) {
+        case ScreenType::INSTRUMENT:
+            if (self.instrument_open_at_cursor(/*peek=*/true)) return true;
+            break;
+        case ScreenType::INST_POOL:
+            if (self.pool_load_into_empty_slot(/*peek=*/true)) return true;
+            break;
+        case ScreenType::PHRASE:
+        case ScreenType::TABLE:
+            if (self.fx_insert_last(/*peek=*/true)) return true;
+            break;
+        default:
+            break;
+    }
+    return self.open_sub_screen_at_cursor(/*peek=*/true);
 }
 
 bool InputDispatcher::defer_b_to_release() const {

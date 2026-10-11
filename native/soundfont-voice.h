@@ -142,7 +142,7 @@ struct SoundfontVoice : public IAudioVoice {
     // The render loop detects silence and calls hardStop() to clean up.
     void noteOff() override;
     // The same, at frame `atFrame` of the current block: the audio thread's dispatch loop passes
-    // the frame a KIL or key release was stamped for; a UI-thread caller uses noteOff().
+    // the frame an OFF or key release was stamped for; a UI-thread caller uses noteOff().
     void noteOffAt(int atFrame);
 
     void setVolume(float v) override;

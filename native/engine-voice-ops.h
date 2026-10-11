@@ -4,11 +4,11 @@
 #include "audio-engine.h"
 
 // Per-voice-type table FX behaviour, resolved at compile time inside processTableTick:
-//   KIL:    sampler = declicked kill fade; SF = noteOff (TSF plays its own release).
+//   KIL:    a declicked fade and gone on both — no envelope or SoundFont release outlives it.
 //   OFFSET: sampler repositions playback; SF voices have no sample position — ignored.
 // `at` is the frame of the block the row plays on.
 static inline void tableKill(Voice& v, int at)          { v.startFadeOut(KILL_FADE_SAMPLES, at); }
-static inline void tableKill(SoundfontVoice& v, int at) { v.noteOffAt(at); }
+static inline void tableKill(SoundfontVoice& v, int at) { v.startStopFade(KILL_FADE_SAMPLES, at); }
 static inline void tableOffset(Voice& v, uint8_t fxValue) {
     if (v.sampleLength > 0) {
         double normalizedPos = fxValue / 255.0;

@@ -984,7 +984,7 @@ void Sequencer::emit_eq_morph(int64_t frame, const RampSpec& r, int trackId, con
 }
 
 PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState& trackState, bool& skipNote) {
-    bool hasNote = !step_empty(step);
+    bool hasNote = step_has_note(step);
     skipNote = false;
     PhraseStep effectiveStep = step;
     // CHA XY: X is the chance of the nearest filled FX column on the LEFT (or the note, if none),
@@ -1059,6 +1059,7 @@ Sequencer::ScheduleStepResult Sequencer::scheduleStepWithEffects(const PhraseSte
     apply_step_state(s);
     expose_step_to_voice_at(s);
     if (s.triggers()) schedule_step_note(s);
+    schedule_note_off(s);
     schedule_kill(s);
     emit_step_fx(s);
     if (!s.hasNote) emit_mid_note_pitch_and_volume(s);
@@ -1090,9 +1091,9 @@ void Sequencer::end_repeat_and_arpeggio(StepPlay& s) {
     TrackState& ts = s.ts;
     const PhraseStep& step = s.step;
     const bool hasKill = step.fx1Type == FX_KILL || step.fx2Type == FX_KILL || step.fx3Type == FX_KILL;
-    if (hasKill) { ts.clearRepeat(); ts.clearArpeggio(); }
+    if (hasKill || note_is_off(step.note)) { ts.clearRepeat(); ts.clearArpeggio(); }
 
-    s.hasNote = !step_empty(step);
+    s.hasNote = step_has_note(step);
     if (s.hasNote) { ts.clearRepeat(); ts.clearArpeggio(); }
 
     s.savedRampPhraseVol = ts.repeatBasePhraseVol;
@@ -1247,11 +1248,17 @@ void Sequencer::schedule_step_note(StepPlay& s) {
     if (ts.hasPitchMod() && pbnRate == 0.0f && vibratoDepth == 0.0f) ts.clearPitchMod();
 }
 
+void Sequencer::schedule_note_off(StepPlay& s) {
+    if (!note_is_off(s.effectiveStep.note) || s.skipNote) return;
+    router_.note_off(s.effectiveTargetFrame, s.trackId, NOTE_OFF_RELEASE);
+    s.ts.clearPitchMod();
+}
+
 void Sequencer::schedule_kill(StepPlay& s) {
     if (!s.params.killAtFrame.has_value()) return;
     int64_t fpt = s.stepDuration / TICS_PER_STEP;
     int64_t killFrame = *s.params.killAtFrame + (s.delayTicks + s.params.killOffsetTicks) * fpt;
-    router_.note_off(killFrame, s.trackId, NOTE_OFF_RELEASE);
+    router_.note_off(killFrame, s.trackId, NOTE_OFF_CUT);
     s.ts.clearPitchMod();
 }
 
@@ -1637,7 +1644,7 @@ void Sequencer::carry_fade(NoteCarry& c, const RampSpec& r, int byte) {
 }
 
 void Sequencer::emit_note(NoteArgs a, const Note& note) {
-    if (note == Note::EMPTY()) return;
+    if (!note_is_pitch(note)) return;
     apply_track_scale(a);
     router_.note_on(a);
 }

@@ -406,7 +406,7 @@ struct Voice : public IAudioVoice {
 
     void noteOff() override { noteOffAt(0); }
 
-    // THE release decision for sampler voices, what a KIL's note-off calls: live ADSR/TRIG VOL mods
+    // THE release decision for sampler voices, what an OFF note calls: live ADSR/TRIG VOL mods
     // with a release go to the release stage (an already-releasing mod counts); no release envelope
     // → the declicked kill fade from `atFrame`. The envelope path takes no frame: the mod matrix runs
     // once per block, so a release begins on a block edge.
@@ -417,12 +417,12 @@ struct Voice : public IAudioVoice {
     /**
      * A live KEY was let go of.
      *
-     * ⚠️ IDENTICAL TO `noteOff` EXCEPT IN ONE ARM: a KIL means "end this note", releasing a key
+     * ⚠️ IDENTICAL TO `noteOff` EXCEPT IN ONE ARM: an OFF means "end this note", releasing a key
      * does not.
-     *   • ADSR/TRIG with a release → the release stage, as a KIL.
+     *   • ADSR/TRIG with a release → the release stage, as an OFF.
      *   • a LOOPING voice with no release → the declicked soft kill, or it would loop for ever.
      *   • a ONE-SHOT with no release → NOTHING: the hit plays out, as on any sampler with keys.
-     * Release envelope + loop takes the same `loopReleasing` path as a KIL.
+     * Release envelope + loop takes the same `loopReleasing` path as an OFF.
      */
     void keyRelease(int atFrame = 0) {
         if (releaseVolMods()) return;

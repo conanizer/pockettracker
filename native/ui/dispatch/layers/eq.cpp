@@ -39,7 +39,9 @@ GestureResult InputDispatcher::eq_layer(Gesture g) {
             if (s_.eq.caller.kind == EqCallerContext::Kind::INSTRUMENT) host_.stop_preview();
             break;
 
+        // The transport and the audition are how an edit is heard while it is dialled.
         case Gesture::START:
+        case Gesture::A_START:
         case Gesture::SELECT:
             return GestureResult::PASS;
 

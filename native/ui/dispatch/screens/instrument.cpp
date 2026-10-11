@@ -27,9 +27,9 @@ void cycle_instrument(AppState& s, int delta) {
 
 GestureResult InputDispatcher::instrument_screen(Gesture g) {
     switch (g) {
-        // A cell that opens on the release (NAME, EQ) first, then the buttons that fire on the press.
+        // NAME and EQ, then the four buttons. All of them open on A's release.
         case Gesture::A:
-            return (open_sub_screen_at_cursor(/*peek=*/false) || instrument_open_at_cursor())
+            return (open_sub_screen_at_cursor(/*peek=*/false) || instrument_open_at_cursor(/*peek=*/false))
                        ? GestureResult::TAKEN : GestureResult::PASS;
 
         // The TYPE cell has no coarse step, so both axes walk it — through the confirm dialog on a
@@ -57,7 +57,7 @@ GestureResult InputDispatcher::pool_screen(Gesture g) {
     switch (g) {
         // The EQ column opens on the release; the NAME column of an EMPTY slot loads a source into it.
         case Gesture::A:
-            return (open_sub_screen_at_cursor(/*peek=*/false) || pool_load_into_empty_slot())
+            return (open_sub_screen_at_cursor(/*peek=*/false) || pool_load_into_empty_slot(/*peek=*/false))
                        ? GestureResult::TAKEN : GestureResult::PASS;
 
         // The NAME column: A+B CLEARS the slot, freeing its sample (and the .sf2, if this was its last
@@ -94,13 +94,12 @@ GestureResult InputDispatcher::mods_screen(Gesture g) {
     }
 }
 
-// ⚠️ START is not the transport here: it auditions the instrument at its root on the preview lane,
-// ringing until the next plain press — over a running song too (a ninth voice; it steals nothing).
-// The lane borrows the fader of the song cell you came through, so a pad heard mostly through its
-// sends auditions where it really sits.
+// A+START auditions the instrument at its root on the preview lane, ringing until the next plain press
+// — over a running song too (a ninth voice; it steals nothing). The lane borrows the fader of the song
+// cell you came through, so a pad heard mostly through its sends auditions where it really sits.
 GestureResult InputDispatcher::instrument_audition(Gesture g) {
     switch (g) {
-        case Gesture::START:
+        case Gesture::A_START:
             host_.set_preview_track(audition_track());
             host_.preview_instrument(s_.currentInstrument);
             return GestureResult::TAKEN;
@@ -114,11 +113,17 @@ GestureResult InputDispatcher::instrument_audition(Gesture g) {
 
 // ─── What A opens ────────────────────────────────────────────────────────────────────────────────
 
-bool InputDispatcher::instrument_open_at_cursor() {
+bool InputDispatcher::instrument_open_at_cursor(bool peek) {
     const Instrument& ins  = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
     const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
 
-    switch (instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow, s_.instrumentCursorColumn)) {
+    const InstrumentCell cell =
+        instrument_cell_at(ins.instrumentType, s_.instrumentCursorRow, s_.instrumentCursorColumn);
+    if (peek) {
+        return cell == InstrumentCell::SOURCE_LOAD || cell == InstrumentCell::SOURCE_EDIT ||
+               cell == InstrumentCell::PRESET_SAVE || cell == InstrumentCell::PRESET_LOAD;
+    }
+    switch (cell) {
         case InstrumentCell::SOURCE_LOAD:
             open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
                               isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
@@ -141,14 +146,13 @@ bool InputDispatcher::instrument_open_at_cursor() {
                               {"pti"});
             return true;
 
-        // NAME and EQ are not here: their A must wait for the RELEASE, so they live in
-        // `open_sub_screen_at_cursor`. These are buttons that fire on the press.
+        // NAME and EQ are not here: they live in `open_sub_screen_at_cursor`.
         default:
             return false;
     }
 }
 
-bool InputDispatcher::pool_load_into_empty_slot() {
+bool InputDispatcher::pool_load_into_empty_slot(bool peek) {
     // A loaded slot is managed from INSTRUMENT, where you can see what you would be replacing.
     if (s_.poolCursorColumn != 0) return false;
     const Instrument& ins  = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
@@ -157,6 +161,7 @@ bool InputDispatcher::pool_load_into_empty_slot() {
     // would flip the slot's type back.
     if (!instrument_has_source_row(ins.instrumentType)) return false;
     if (isSF ? ins.soundfontPath.has_value() : !songcore::instrument_is_free(ins)) return false;
+    if (peek) return true;
 
     open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
                       isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),

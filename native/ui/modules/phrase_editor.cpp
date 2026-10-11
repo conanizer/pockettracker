@@ -93,10 +93,12 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     for (const TrackPlayhead& ph : s.playheads)
         if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
+    // An OFF is drawn bright, but it plays nothing: its V and I dim as on an empty step.
     const bool noteEmpty = (step.note == Note::EMPTY());
+    const bool noNote    = !songcore::step_has_note(step);
     cells.cell(note_name(step.note),  noteX, cur(1), sel(1), noteEmpty, t.textValue);
-    cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noteEmpty, t.textParam);
-    cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noteEmpty, t.textParam);
+    cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noNote, t.textParam);
+    cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
 
     // An FX pair dims when unset, and an AUS/AUF cell when no ramp uses it — an inert cell does what
     // an unset one does.
@@ -120,6 +122,13 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
     switch (s.cursorColumn) {
         case 0: return cc::read_only();
         case 1: {
+            // An OFF has no pitch to step: A+B clears it, nothing else answers.
+            if (songcore::note_is_off(step.note)) {
+                CursorContext off = cc::note(0);
+                off.capabilities           = {};
+                off.capabilities.canDelete = true;
+                return off;
+            }
             const bool isEmpty = (step.note == Note::EMPTY());
             // ⚠️ THIS QUANTIZES TYPING, NOT THE SONG. `step.note` is never rewritten; the playback
             // quantizer (scheduler.h) moves notes, and the cell never shows that.

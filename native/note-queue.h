@@ -117,10 +117,10 @@ struct ScheduledNote {
 // ⚠️ ONE `mode`, NOT TWO BOOLS: two bools could encode a meaningless state (hard AND key-release).
 // These numbers are the engine's own, unrelated to event.h's NOTE_OFF_* — the consumer translates.
 enum KillMode : uint8_t {
-    KILL_HARD    = 0,   // K00 / killTrack — declick fade, whatever the instrument is
-    KILL_SOFT    = 1,   // KIL's soft note-off — ADSR release, else a declick fade
+    KILL_HARD    = 0,   // an audition ending, a track handed to MIDI out — a sampler fades, a SoundFont releases
+    KILL_SOFT    = 1,   // an OFF note — ADSR release, else a declick fade
     KILL_KEY_OFF = 2,   // a KEY released (MIDI in) — a one-shot IGNORES it and plays out
-    KILL_CUT     = 3,   // a held audition let go of — KILL_FADE_SAMPLES and gone, no release tail at all
+    KILL_CUT     = 3,   // KIL, a held audition let go of — KILL_FADE_SAMPLES and gone, no release tail at all
 };
 
 struct ScheduledKill {

@@ -15,7 +15,7 @@
 
 namespace songcore {
 
-// True when a step carries no note.
+// True when a step's note cell is blank. ⚠️ An OFF is not blank, though it plays nothing.
 inline bool step_is_empty(const PhraseStep& step) { return step.note == Note::EMPTY(); }
 
 // Visit every phrase step in song rows [start_row, end_row] across all 8 tracks. Rows past a track's
@@ -50,7 +50,7 @@ inline std::set<int> collect_used_instruments(const Project& project, int start_
     for_each_step_in_song_range(project, start_row, end_row, /*include_inaudible=*/false,
         [&](const PhraseStep& step) {
             if (step_has_fx(step, FX_RND) || step_has_fx(step, FX_RNL)) sawRandom = true;
-            if (step_is_empty(step)) return;
+            if (!step_has_note(step)) return;
             if (step.instrument >= 0 && step.instrument < n) used.insert(step.instrument);
             // An INS cell plays its instrument instead.
             const int ins = step_ins_instrument(step);
