@@ -53,11 +53,40 @@ inline int groove_active_length(const Groove& g) {
     return static_cast<int>(g.steps.size());
 }
 
+// The rulers a groove can be written in, as tics per plain step; four steps make the quarter note.
+inline constexpr int GROOVE_RULERS[]     = {6, 12, 24};
+inline constexpr int GROOVE_RULER_COUNT  = 3;
+inline constexpr int GROOVE_DEFAULT_RULER = 12;
+
+// The groove's ruler, or the default for a value no ruler has (a hand-edited file).
+inline int groove_ticks_per_step(const Groove& g) {
+    for (int r : GROOVE_RULERS)
+        if (g.ticksPerStep == r) return r;
+    return GROOVE_DEFAULT_RULER;
+}
+
 // Tics for a groove position (wrapping the active window); an all-empty groove gives a plain step.
 inline int groove_ticks_for_step(const Groove& g, int groove_step) {
     int len = groove_active_length(g);
-    if (len == 0) return TICS_PER_STEP;
+    if (len == 0) return groove_ticks_per_step(g);
     return g.steps[groove_step % len];
+}
+
+// Rewrite a groove's steps in another ruler, so it plays the same. Doubling is exact; halving rounds
+// to the nearest tic. ⚠️ A step never rounds to 0 — 0 skips its row, which is a different groove.
+// Refused whole (false, nothing changed) when a step would pass 255.
+inline bool groove_set_ruler(Groove& g, int ticks_per_step) {
+    const int from = groove_ticks_per_step(g);
+    std::vector<int> out = g.steps;
+    for (int& v : out) {
+        if (v <= 0) continue;   // the end marker and a skipped row mean the same in every ruler
+        v = (v * ticks_per_step * 2 + from) / (from * 2);
+        if (v < 1) v = 1;
+        if (v > 255) return false;
+    }
+    g.steps        = out;
+    g.ticksPerStep = ticks_per_step;
+    return true;
 }
 
 // Per-step duration in frames. An active groove scales the step by its tic count — 0 skips the row;
@@ -68,11 +97,11 @@ inline int groove_ticks_for_step(const Groove& g, int groove_step) {
 // step in 33 bars at 140 BPM). This deliberately differs from the recorded golden, which the test
 // accounts for as an exact offset.
 // `frames_per_tic` is still the unit an EFFECT positions itself in within a step — just not what a
-// step's length is built from.
+// step's length is built from, and not the groove's ruler either.
 inline int64_t groove_step_duration(const Groove& g, int groove_step,
                                     int64_t frames_per_step_value) {
     if (groove_active_length(g) == 0) return frames_per_step_value;
-    return frames_per_step_value * groove_ticks_for_step(g, groove_step) / TICS_PER_STEP;
+    return frames_per_step_value * groove_ticks_for_step(g, groove_step) / groove_ticks_per_step(g);
 }
 
 }  // namespace songcore

@@ -363,6 +363,7 @@ enum class HelpTopic {
 
     MIDI_VELOCITY,
     SET_AUDIO_OUT,
+    GROOVE_PPQ,
 
     COUNT
 };
@@ -1141,11 +1142,11 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* GROOVE_TIC */
     {"TIC: how long a step lasts", "In ticks. A on -- adds a", "step, A+B takes it away.",
      {"How many ticks this step lasts.",
-      "0C is even, more plays the next",
-      "step later, less sooner. 00",
-      "skips the step. The first --",
-      "ends the list."},
-     {"A on -- adds a step of 0C",
+      "0C is even at PPQ 48. More plays",
+      "the next step later, less",
+      "sooner. 00 skips the step. The",
+      "first -- ends the list."},
+     {"A on -- adds an even step",
       "A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B ends the list on this row",
       "START plays the phrase"}},
@@ -2137,29 +2138,113 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "three seconds to start over."},
      {"A taps, at least twice"}},
     /* FX_DELAY_TYPE */
-    {"TYPE: a starting point", "Sets the three cells below.", "Change one and it says USER."},
+    {"TYPE: a starting point", "Sets the three cells below.", "Change one and it says USER.",
+     {"A ready-made character for the",
+      "repeats. NORMAL is the plain",
+      "delay, PING bounces left and",
+      "right, TAPE is dark and drifts.",
+      "It sets PONG, TONE and WOBL.",
+      "Turn one of them afterwards",
+      "and TYPE reads USER."},
+     {"A+D-PAD picks a type"}},
     /* FX_DELAY_TONE */
-    {"TONE: how bright repeats are", "Lower makes each echo darker", "than the one before it."},
+    {"TONE: how bright repeats are", "Lower makes each echo darker", "than the one before it.",
+     {"How bright the echoes stay.",
+      "Lower makes each one darker",
+      "than the one before it. FF",
+      "leaves them untouched."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to FF"}},
     /* FX_DELAY_WOBBLE */
-    {"WOBL: tape speed wobble", "Makes the echoes drift in", "pitch. 00 holds them steady."},
+    {"WOBL: tape speed wobble", "Makes the echoes drift in", "pitch. 00 holds them steady.",
+     {"How far the echoes drift in",
+      "pitch, like a tape running",
+      "unevenly. 00 holds them steady."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to 00"}},
     /* FX_DELAY_PONG */
-    {"PONG: echoes bounce", "Repeats alternate left and", "right, ignoring the pan."},
+    {"PONG: echoes bounce", "Repeats alternate left and", "right, ignoring the pan.",
+     {"ON makes the echoes alternate",
+      "left and right. The delay",
+      "places them, so the pan of the",
+      "instrument no longer matters.",
+      "OFF keeps an echo on the side",
+      "its instrument sits on."},
+     {"A+D-PAD turns it on or off"}},
     /* FX_REVERB_TYPE */
-    {"TYPE: a starting point", "Sets the cells around it.", "Change one and it says USER."},
+    {"TYPE: a starting point", "Sets the cells around it.", "Change one and it says USER.",
+     {"A ready-made room. NORMAL is",
+      "the plain reverb, ROOM is tight",
+      "and bright, HALL has a gap and",
+      "a long dark tail, CAVE is the",
+      "longest, darkest and widest.",
+      "It sets SIZE, DCAY, DAMP, PRE,",
+      "WIDE and MOD. Turn one of them",
+      "and TYPE reads USER."},
+     {"A+D-PAD picks a type"}},
     /* FX_REVERB_PRE */
-    {"PRE: a gap before the tail", "The reverb starts late, so the", "sound stays in front of it."},
+    {"PRE: a gap before the tail", "The reverb starts late, so the", "sound stays in front of it.",
+     {"A gap before the tail starts,",
+      "up to 150 ms, so the sound",
+      "stays in front of the reverb.",
+      "00 starts it at once."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to 00"}},
     /* FX_REVERB_WIDE */
-    {"WIDE: how far it spreads", "00 is mono, 80 is normal,", "FF pushes it to the sides."},
+    {"WIDE: how far it spreads", "00 is mono, 80 is normal,", "FF pushes it to the sides.",
+     {"How wide the reverb sounds. 00",
+      "is mono, 80 leaves it as the",
+      "reverb makes it, FF pushes it",
+      "out to the sides. The level",
+      "stays the same."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to 80"}},
     /* FX_REVERB_MOD */
-    {"MOD: movement in the tail", "The tail drifts in pitch. 00 is", "still. PLATE and FOIL ignore it."},
+    {"MOD: movement in the tail", "The tail drifts in pitch. 00 is", "still. PLATE and FOIL ignore it.",
+     {"Makes the tail drift in pitch.",
+      "Higher drifts further. 00 holds",
+      "it still, which sounds bright",
+      "and metallic. PLATE and FOIL",
+      "ignore it."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to 40"}},
     /* FX_REVERB_DECAY */
-    {"DCAY: how long it rings", "Higher rings longer. On OLD,", "FF never stops."},
+    {"DCAY: how long it rings", "Higher rings longer. On OLD,", "FF never stops.",
+     {"How long the tail rings. Higher",
+      "rings longer, and the level",
+      "stays where it is. On OLD, FF",
+      "is a tail that never stops."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B sets it back to 60"}},
     /* SE_BIT */
-    {"BIT: bits per sample", "The file depth, or lower for", "grit. SAVE writes at this depth."},
+    {"BIT: bits per sample", "The file depth, or lower for", "grit. SAVE writes at this depth.",
+     {"Bits per sample. It opens at",
+      "the depth of the file and",
+      "offers that depth and lower.",
+      "Lower rounds the sound to",
+      "coarser steps, for grit. SAVE,",
+      "OVERWRITE and CHOP write the",
+      "file at the depth shown."},
+     {"A+D-PAD picks the depth"}},
     /* FX_REVERB_ALGO */
-    {"ALGO: which reverb", "OLD, or a Dragonfly HALL, ROOM,", "PLATE or FOIL."},
+    {"ALGO: which reverb", "OLD, or a Dragonfly HALL, ROOM,", "PLATE or FOIL.",
+     {"Which reverb is used. OLD is",
+      "the one the app has always",
+      "had. HALL is a large space,",
+      "ROOM a small one. PLATE and",
+      "FOIL are metal plates with no",
+      "room, so they ignore SIZE and",
+      "MOD."},
+     {"A+D-PAD picks a reverb"}},
     /* SET_HELP */
-    {"HELP: what SELECT shows", "SHORT uses the top strip, FULL", "a big page. OFF shows nothing."},
+    {"HELP: what SELECT shows", "SHORT uses the top strip, FULL", "a big page. OFF shows nothing.",
+     {"What a tap of SELECT shows.",
+      "SHORT puts three lines in the",
+      "strip at the top. FULL opens a",
+      "page like this one, and any",
+      "button closes it. OFF shows",
+      "nothing."},
+     {"A+D-PAD picks OFF, SHORT, FULL"}},
     /* GROOVE_NAME */
     {"NAME: the shape of the groove", "A+D-PAD walks the built-in", "grooves.",
      {"Steps through the built-in",
@@ -2221,6 +2306,18 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "less delay. Its buffer size is",
       "set in the driver panel."},
      {"A+D-PAD picks the output"}},
+    /* GROOVE_PPQ */
+    {"PPQ: the ruler for the ticks", "How many ticks make a quarter", "note: 24, 48 or 96.",
+     {"How fine the TIC column counts.",
+      "At 48 a plain step is 0C, at 24",
+      "it is 06, at 96 it is 18. A",
+      "change rewrites the ticks so the",
+      "groove sounds the same. Going",
+      "down rounds them. Only grooves",
+      "use it: FX ticks stay twelve to",
+      "the step."},
+     {"A+←/→ picks 24, 48 or 96",
+      "A+B goes back to 48"}},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -2447,7 +2544,7 @@ inline HelpTopic project_cell_topic(int row, int column) {
     return HelpTopic::NONE;
 }
 
-/** GROOVE — the tick column is one cell repeated sixteen times; the panel beside it is four rows. */
+/** GROOVE — the tick column is one cell repeated sixteen times; the panel beside it is five rows. */
 inline HelpTopic groove_cell_topic(int column, int panel_row, int panel_column) {
     if (column != GROOVE_COL_PANEL) return HelpTopic::GROOVE_TIC;
     switch (panel_row) {
@@ -2456,6 +2553,7 @@ inline HelpTopic groove_cell_topic(int column, int panel_row, int panel_column) 
             return panel_column == 0 ? HelpTopic::GROOVE_SAVE : HelpTopic::GROOVE_LOAD;
         case GROOVE_PANEL_QNT:  return HelpTopic::GROOVE_QNT;
         case GROOVE_PANEL_SWG:  return HelpTopic::GROOVE_SWG;
+        case GROOVE_PANEL_PPQ:  return HelpTopic::GROOVE_PPQ;
         default:                return HelpTopic::NONE;
     }
 }

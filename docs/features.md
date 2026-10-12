@@ -11,7 +11,7 @@ Everything you can do with PocketTracker.
 - Transpose phrases per chain slot — sequence the same phrase in different keys
 - Select cells, rows, or entire screens and copy, cut, paste, or delete them
 - Fill a phrase from one cell: repeat it every 2nd, 3rd, 4th, 6th or 8th row, scatter it at random, roll random notes inside the scale, or ramp a value from one row to another
-- Set swing and shuffle per track or globally with groove patterns, written as a tick length per phrase step. Start from the built-in list — straight, the twelve classic swing settings a drum machine offers, triplets, half and double time — or bend a pair yourself with the quantize aid, which moves one step and its partner the other way so the bar line stays put, and reads back the swing as a percentage. Save your own to `PocketTracker/Grooves` as files you can rename, edit and carry between devices
+- Set swing and shuffle per track or globally with groove patterns, written as a tick length per phrase step, counted 24, 48 or 96 to the quarter note. Start from the built-in list — straight, the twelve classic swing settings a drum machine offers, triplets, half and double time — or bend a pair yourself with the quantize aid, which moves one step and its partner the other way so the bar line stays put, and reads back the swing as a percentage. Save your own to `PocketTracker/Grooves` as files you can rename, edit and carry between devices
 - Build up to 16 scales per project by switching each of the twelve notes on or off, and set the song's key. A track using a scale plays only the notes in it: anything out of the scale is moved to the nearest note that is in, both as you type and as the song plays, so a phrase written before you chose the scale falls into it. The scale screen marks the note being heard; sliced instruments are left alone, and any instrument can be taken out of transposition entirely with its TSP switch
 - Start from 38 built-in scales — the modes, the pentatonics, the bebop and diminished scales, and a set of Japanese and Indian ones — and save your own to `PocketTracker/Scales` as files you can rename, edit and carry between devices
 - Set the tempo by feel: RIGHT from the tempo value on the PROJECT screen reaches a TAP button — press A in time and the number follows your taps
@@ -128,6 +128,15 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Master bus: OTT 3-band compressor or DUST (lofi/vinyl texture) — switchable, with wet/dry depth control — followed by a soft peak limiter
 - Per-instrument EQ also accessible from the instrument screen
 - On Windows, play through an ASIO driver for low-latency sound from an audio interface (SETTINGS → AUDIO OUT)
+
+## MIDI
+
+- Sequence outside gear: an EXTERNAL instrument sends its notes to a MIDI device, with its own channel, bank, program, note length and four controller slots
+- Send program changes, pitch bends and controller values from a phrase step; the volume, pan, filter and send commands reach the device as their standard controllers
+- Send a MIDI clock with start and stop, so other gear follows the tempo, and nudge the timing in milliseconds — or let the app work the offset out
+- Play any instrument from a MIDI keyboard, one note at a time or as chords spread over up to 8 tracks, with or without velocity
+- Map a controller's knobs and faders to the mixer, the reverb, the delay, the master effects and instrument settings: hold R on a value and turn the knob, or edit the list by hand
+- A device is found by itself and reconnected when it is plugged back in
 
 ## Export
 

@@ -5,6 +5,7 @@
 // The twin of `ui/scale_io.h` (the reasoning is there): a small human-readable file to save, share
 // or drop onto an SD card.
 // ⚠️ ALWAYS writes `steps` — under the .ptp's omit-defaults rule a STRAIGHT groove would be `{}`.
+// The file carries its ruler with its steps, so a groove loads back as it was written.
 // ⚠️ A load never touches the slot's `id`: `GRV` names slots, and an id copied from a file would
 // renumber them.
 
@@ -30,6 +31,7 @@ inline std::string serialize_groove(const songcore::Groove& g) {
     w.begin_object();
     if (!g.name.empty()) w.field_string("name", g.name);
     songcore::detail::emit_int_array(w, "steps", g.steps);
+    if (g.ticksPerStep != songcore::GROOVE_DEFAULT_RULER) w.field_int("ticksPerStep", g.ticksPerStep);
     w.end_object();
     return std::move(w.out);
 }
@@ -43,6 +45,9 @@ inline bool parse_groove_text(const std::string& text, songcore::Groove& out) {
     songcore::Groove g = out;                    // the id, and any field the file is silent about
     g.name  = songcore::detail::get_str(j, "name", g.name);
     g.steps = songcore::detail::parse_int_array(j, "steps", g.steps);
+    // ⚠️ NOT the slot's: a file that names no ruler was written in the default one, and its steps
+    // must not be read in whatever the slot happened to hold.
+    g.ticksPerStep = songcore::detail::get_int(j, "ticksPerStep", songcore::GROOVE_DEFAULT_RULER);
 
     // The GROOVE screen indexes all sixteen by cursor row; a hand-edited file may hold fewer.
     g.steps.resize(16, -1);

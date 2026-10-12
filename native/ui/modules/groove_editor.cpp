@@ -120,6 +120,14 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
                 FONT_SCALE);
     draw_cursor_cell(c, swing_text(groove_swing_tenths(groove, s.cursorRow, s.quantize)),
                      x + GROOVE_VALUE_X, swgY, here(GROOVE_PANEL_SWG, 0), t.textParam, t);
+
+    // PPQ — the ruler: how many of the tick column's tics make a quarter note.
+    const int ppqY = panelY(GROOVE_PANEL_PPQ);
+    c.draw_text("PPQ", x + GROOVE_PANEL_X, ppqY,
+                here(GROOVE_PANEL_PPQ, 0) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
+                FONT_SCALE);
+    draw_cursor_cell(c, std::to_string(songcore::groove_ticks_per_step(groove) * 4),
+                     x + GROOVE_VALUE_X, ppqY, here(GROOVE_PANEL_PPQ, 0), t.textValue, t);
 }
 
 CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
@@ -134,6 +142,14 @@ CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
             }
             case GROOVE_PANEL_QNT:
                 return cc::index_cycle(s.quantize, GROOVE_QUANTIZE_COUNT);
+            case GROOVE_PANEL_PPQ: {
+                // ⚠️ A nibble, because a nibble CLAMPS: a list cell wraps, and 96 wrapping round to
+                // 24 would quarter every step in one press.
+                CursorContext c = cc::hex_nibble(groove_ruler_index(s.groove), /*def=*/1);
+                c.maxValue  = songcore::GROOVE_RULER_COUNT - 1;
+                c.largeStep = c.smallStep;
+                return c;
+            }
             default:
                 // ⚠️ SAVE and LOAD are READ-ONLY rather than absent: they answer a bare A, and a
                 // `none()` would also switch off the cursor box that says which one you are on. SWG
@@ -172,6 +188,14 @@ GrooveInputResult GrooveModule::handle_input(songcore::Groove& groove, const Gro
             r.modified = true;
         } else if (s.panelRow == GROOVE_PANEL_QNT) {
             r.newQuantize = action.value;  // not the song's — the dispatcher owns the pointer
+        } else if (s.panelRow == GROOVE_PANEL_PPQ) {
+            const int index = action.value < 0 ? 0
+                            : (action.value >= songcore::GROOVE_RULER_COUNT ? songcore::GROOVE_RULER_COUNT - 1
+                                                                            : action.value);
+            const int ruler = songcore::GROOVE_RULERS[index];
+            if (ruler == songcore::groove_ticks_per_step(groove)) return r;
+            r.modified     = songcore::groove_set_ruler(groove, ruler);
+            r.rulerRefused = !r.modified;
         }
         return r;
     }
@@ -195,7 +219,7 @@ GrooveInputResult GrooveModule::handle_input(songcore::Groove& groove, const Gro
             step = -1;  // A+B: back to the end-of-pattern marker
             break;
         case ActionType::INSERT_DEFAULT:
-            step = songcore::TICS_PER_STEP;  // A on "--": the standard 12 tics per step
+            step = songcore::groove_ticks_per_step(groove);  // A on "--": one plain step
             break;
         default:
             break;

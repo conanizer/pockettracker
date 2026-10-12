@@ -151,8 +151,8 @@ Projects are saved as `.ptp` files in `Projects/`, inside the folder you granted
 ## Where to go next
 
 - **Copy / paste and selections** — [manual §5.6](manual-en.md#56-copy--paste): duplicate phrases and build variations fast.
-- **Step effects** — [manual §21](manual-en.md#21-effects-reference): `ARP`, `RPT` (retrigger), pitch slides, per-note reverb/delay sends — three FX columns per step.
+- **Step effects** — [manual §23](manual-en.md#23-effects-reference): `ARP`, `RPT` (retrigger), pitch slides, per-note reverb/delay sends — three FX columns per step.
 - **Sample editor** — [manual §11](manual-en.md#11-sample-editor-screen): trim, repitch, time-stretch, slice breaks, offline FX.
-- **Modulation** — [manual §14](manual-en.md#14-modulation-screen): envelopes and LFOs per instrument.
-- **Mixer & master bus** — [manual §15](manual-en.md#15-mixer-screen) / [§16](manual-en.md#16-effects-screen): levels, sends, OTT/DUST.
+- **Modulation** — [manual §15](manual-en.md#15-modulation-screen): envelopes and LFOs per instrument.
+- **Mixer & master bus** — [manual §16](manual-en.md#16-mixer-screen) / [§17](manual-en.md#17-effects-screen): levels, sends, OTT/DUST.
 - **Full controls cheat sheet** — [input-system.md](input-system.md).

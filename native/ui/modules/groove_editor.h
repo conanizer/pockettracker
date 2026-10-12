@@ -7,11 +7,11 @@
 //
 //   −1    end of pattern ("--") — the groove loops back to step 0 from here
 //   0x00  skip: the phrase row is not triggered and takes no time
-//   0x01+ that step lasts this many ticks (0x0C = 12 = the default, one step = one beat/4)
+//   0x01+ that step lasts this many ticks (0x0C = 12 = one plain step, in the default ruler)
 //
-// The tick rows own the left of the screen. A PANEL sits to their right, on the first four data rows:
-// the preset name, SAVE/LOAD, the quantize pointer, and the swing percentage. It is a table the
-// cursor walks — see `groove_panel_cell_count`.
+// The tick rows own the left of the screen. A PANEL sits to their right, on the first five data rows:
+// the preset name, SAVE/LOAD, the quantize pointer, the swing percentage and the ruler (PPQ). It is
+// a table the cursor walks — see `groove_panel_cell_count`.
 //
 // ⚠️ TWO ROW CURSORS, AND THE SECOND ONE IS NOT REDUNDANT. `cursorRow` is the tick row and
 // `panelRow` is the panel row, both live at once. The swing percentage reports on the group the TICK
@@ -39,7 +39,16 @@ inline constexpr int GROOVE_PANEL_NAME = 0;
 inline constexpr int GROOVE_PANEL_FILE = 1;  // SAVE · LOAD
 inline constexpr int GROOVE_PANEL_QNT  = 2;
 inline constexpr int GROOVE_PANEL_SWG  = 3;
-inline constexpr int GROOVE_PANEL_ROWS = 4;
+inline constexpr int GROOVE_PANEL_PPQ  = 4;  // the ruler the tick column is written in
+inline constexpr int GROOVE_PANEL_ROWS = 5;
+
+/** The PPQ cell's cycle: 24 · 48 · 96 to the quarter note, in `songcore::GROOVE_RULERS` order. */
+inline int groove_ruler_index(const songcore::Groove& g) {
+    const int ruler = songcore::groove_ticks_per_step(g);
+    for (int i = 0; i < songcore::GROOVE_RULER_COUNT; ++i)
+        if (songcore::GROOVE_RULERS[i] == ruler) return i;
+    return 1;
+}
 
 /** How many cells a panel row holds. The FILE row is the only one with two. */
 inline int groove_panel_cell_count(int panel_row) {
@@ -119,7 +128,7 @@ inline int groove_swing_tenths(const songcore::Groove& g, int step, int quantize
         const int at = start + i;
         if (at >= static_cast<int>(g.steps.size())) break;
         const int v = g.steps[static_cast<size_t>(at)];
-        (i < n ? first : second) += (v < 0 ? songcore::TICS_PER_STEP : v);
+        (i < n ? first : second) += (v < 0 ? songcore::groove_ticks_per_step(g) : v);
     }
     const int total = first + second;
     if (total <= 0) return 500;
@@ -149,7 +158,7 @@ inline bool groove_apply_paired(songcore::Groove& g, int step, int delta, int qu
 
     auto materialized = [&](int at) {
         const int v = g.steps[static_cast<size_t>(at)];
-        return v < 0 ? songcore::TICS_PER_STEP : v;
+        return v < 0 ? songcore::groove_ticks_per_step(g) : v;
     };
 
     const int a = materialized(step) + delta;
@@ -176,6 +185,7 @@ struct GrooveState {
 struct GrooveInputResult {
     bool modified    = false;
     int  newQuantize = -1;  // ≥ 0 → the QNT cell moved; the pointer lives in AppState, not the song
+    bool rulerRefused = false;  // the PPQ cell was turned and a step would have passed FF
 };
 
 class GrooveModule {

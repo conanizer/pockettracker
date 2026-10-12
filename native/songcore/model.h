@@ -351,6 +351,11 @@ struct Groove {
     int id = 0;
     std::string name;  // "" = unnamed; the screen then names it by its steps (groove_bank.h)
     std::vector<int> steps = default_groove_steps();
+    /**
+     * The ruler `steps` is written in: how many tics make one plain step — 6, 12 or 24 (24, 48 or
+     * 96 to the quarter note). ⚠️ The groove's alone: an effect's tic stays a twelfth of the step.
+     */
+    int ticksPerStep = 12;
     Groove() = default;
     explicit Groove(int id_) : id(id_) {}
 };

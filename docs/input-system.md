@@ -45,7 +45,7 @@ Keyboard and gamepad work simultaneously.
 
 Every binding above is a default. The face-button layout and all ten key bindings can be changed by
 hand in `config.json` in your PocketTracker folder; the app writes a starter copy on first launch and
-then never touches the file again. See **[the manual, section 25](manual-en.md#25-configuration-file-configjson)**
+then never touches the file again. See **[the manual, section 27](manual-en.md#27-configuration-file-configjson)**
 for the schema, the key-name spellings and the 8BitDo/XInput case that makes A and B swap.
 
 ---

@@ -28,12 +28,13 @@
 19. [PROJECT Screen](#19-project-screen)
 20. [SETTINGS Screen](#20-settings-screen)
 21. [THEME EDITOR](#21-theme-editor)
-22. [Effects Reference](#22-effects-reference)
-23. [Modulation Reference](#23-modulation-reference)
-24. [File Management](#24-file-management)
-25. [Workflow Tips](#25-workflow-tips)
-26. [Configuration File (config.json)](#26-configuration-file-configjson)
-27. [Appendix: Controls Cheat Sheet](#appendix-controls-cheat-sheet)
+22. [MIDI Screen](#22-midi-screen)
+23. [Effects Reference](#23-effects-reference)
+24. [Modulation Reference](#24-modulation-reference)
+25. [File Management](#25-file-management)
+26. [Workflow Tips](#26-workflow-tips)
+27. [Configuration File (config.json)](#27-configuration-file-configjson)
+28. [Appendix: Controls Cheat Sheet](#appendix-controls-cheat-sheet)
 
 ---
 
@@ -286,7 +287,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 | A + DOWN | −16 / −1 octave (large step) |
 | A + B | Delete / clear value |
 
-- **Key repeat is active:** hold the combo for ~400 ms and it starts repeating, speeding up to ~30/s. Both can be changed in `config.json` — see [section 26](#26-configuration-file-configjson).
+- **Key repeat is active:** hold the combo for ~400 ms and it starts repeating, speeding up to ~30/s. Both can be changed in `config.json` — see [section 27](#27-configuration-file-configjson).
 - For **note values**, large step = ±12 semitones (one octave).
 - For **hex byte values**, large step = ±0x10.
 - Under a scale, a note's small step is the next note **of that scale** rather than the next semitone — see [section 14](#14-scale-screen). The large step stays a full octave.
@@ -611,9 +612,9 @@ cursor or edit something else.
 
 ### FX columns
 
-Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker. A on an empty type inserts the effect you entered last, with its value. Effects are listed in §22.
+Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+LEFT/RIGHT on the type to step through the available effects one at a time, or A+UP/DOWN to open the effect picker. A on an empty type inserts the effect you entered last, with its value. Effects are listed in §23.
 
-The picker groups the commands by what they act on — **SEQUENCE**, **INSTRUMENT** and **GLOBAL** — and keeps one group open at a time. A closed group shows `→` after its name, the open one `↓`. Move past the last row of a group and the next one opens; every group starts with `---`, which clears the slot. Keep holding A while you look — the description above the grid follows the cursor — and release A on the command you want.
+The picker groups the commands by what they act on — **SEQUENCE**, **INSTRUMENT**, **GLOBAL** and **MIDI** — and keeps one group open at a time. A closed group shows `→` after its name, the open one `↓`. Move past the last row of a group and the next one opens; every group starts with `---`, which clears the slot. Keep holding A while you look — the description above the grid follows the cursor — and release A on the command you want.
 
 > [!WARNING]
 > Some effects (**ARP**, **RPT**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
@@ -623,14 +624,14 @@ note at all, so nothing cancels them but the next `VTR`/`VMV` — and stopping p
 faders back to the values on the MIXER screen.
 
 **AUS** and **AUF** are the only effects the grid can draw **dimmed**, in the colour of an empty cell.
-That means the pair did not come out: the fade will not play, and §21 lists the reasons. A pair that
+That means the pair did not come out: the fade will not play, and §23 lists the reasons. A pair that
 works stays lit even when its two halves are in different phrases of the same chain.
 
 ---
 
 ## 10. INSTRUMENT Screen
 
-The INSTRUMENT screen configures how a sample or SF2 preset is played.
+The INSTRUMENT screen configures how a sample or SF2 preset is played, or what an outside MIDI device is sent.
 
 Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch between instruments without leaving the screen, and **B+UP/DOWN** to jump 16 at a time.
 
@@ -678,6 +679,23 @@ When the loaded file is a SoundFont, additional override fields appear for the p
 | CUT | Filter cutoff override |
 | RES | Filter resonance override |
 
+### EXTERNAL instrument parameters
+
+An EXTERNAL instrument makes no sound of its own: its notes are sent to the device on the MIDI screen's
+OUTPUT row ([section 22](#22-midi-screen)). Choose it with A + D-pad on TYPE.
+
+| Parameter | Range | Description |
+|---|---|---|
+| CHAN | 1–16 | The MIDI channel this instrument sends on. |
+| BANK | `----` / 0000–3FFF | Bank select, sent just before PROG. `----` sends none. |
+| PROG | `--` / 00–7F | Program change — the patch on the device. `--` sends none. BANK and PROG go out only while PROG CHG is ON on the MIDI screen. |
+| LEN | 00–FF | How long each note is held, in ticks. `00` holds it until the next note on the track. |
+| VOL | 00–FF | Scales the velocity of every note. |
+| PAN | 00–FF | Sent as controller 10. |
+| TSP | ON / OFF | As on a WAV instrument. |
+| TIC | 00–FF | How fast this instrument's table runs, in ticks per table row. |
+| CC A – CC D | `--` / 00–7F | Four controller slots, each a controller number and the **VAL** to send to it. A filled slot is sent with every note; `CCA`–`CCD` move it from a phrase (section 23). |
+
 ### Volume chain
 
 Volume is applied in this order:
@@ -699,7 +717,7 @@ into the mix before it, so master volume takes the reverb and delay down with ev
 the master to `00` really does end in silence, tails included.
 
 The last two stages can also be written from a phrase: `VTR` replaces the track fader and `VMV` the
-master one for as long as the song is playing (§22).
+master one for as long as the song is playing (§23).
 
 ### Slice playback
 
@@ -751,14 +769,14 @@ own.
 | B | Close the browser |
 | START | Preview highlighted audio (WAV / MP3 / FLAC / OGG / OPUS / M4A) or video file |
 
-The browser can also manage files — see [section 24](#24-file-management).
+The browser can also manage files — see [section 25](#25-file-management).
 
 A load that takes more than a moment puts a **LOADING** line across the top of the screen with the
 file's name and how far along it is. **B** stops it: nothing is loaded, and the slot keeps what it
 had. Cancelling a *project* load leaves you on an empty project. Quick loads show nothing at all.
 
 Compressed audio (MP3 / FLAC / OGG / Opus / M4A) loads as a sample too — it decodes in place, with no
-WAV written. Video files are instead **converted** to a WAV in the Samples folder. See §23 →
+WAV written. Video files are instead **converted** to a WAV in the Samples folder. See §25 →
 *Audio from video files*.
 
 ---
@@ -977,7 +995,7 @@ threes under a volume moving in fours.
 
 ### Fades in a table
 
-`AUS` and `AUF` work on a table row as they do on a phrase step (§22), with **rows** as the span:
+`AUS` and `AUF` work on a table row as they do on a phrase step (§23), with **rows** as the span:
 
 ```
      N    VOL  FX1      FX2      FX3
@@ -1026,7 +1044,7 @@ GROOVE 00                     LEN: 2
 00   0C         SAVE  LOAD
 01   0C         QNT   1/16
 02   --         SWG   50.0%
-03   --
+03   --         PPQ   48
 ```
 
 A new groove holds **two steps of 12 ticks**, which is the pair swing works on. It plays exactly the same as no groove at all, so a fresh groove changes nothing until you edit it. Clearing both rows with A+B gives an empty groove, which also plays even.
@@ -1040,6 +1058,7 @@ A new groove holds **two steps of 12 ticks**, which is the pair swing works on. 
 | Name | The groove this slot was taken from. A+LEFT/RIGHT steps through the built-in grooves and loads the one you land on. **SAVE** and **LOAD** write and read groove files — see below. A `*` means the ticks no longer match the name. |
 | QNT | The quantize pointer — see below. |
 | SWG | Read-only. How long the first half of the group is, as a share of the whole. `50.0%` is even, `66.7%` is a triplet feel. It follows the **TIC** cursor, not the panel, so changing QNT never moves the number. |
+| PPQ | How finely this groove's ticks count: **24**, **48** or **96** to the quarter note, which makes an even step `06`, `0C` or `18`. Changing it rewrites the ticks so the groove sounds the same — going down rounds them to the nearest tick, and a change that would push a step past `FF` is refused. It is this groove's own: the ticks that `LAT`, `KIL`, `RPT` and the other effects count in stay twelve to the step. |
 
 ### Swing example
 
@@ -1081,7 +1100,7 @@ Armed, both A axes do the same move of 1, because one tick is exactly one step o
 
 The name row cycles a built-in list: **STRAIGHT**, the six `16TH` and six `8TH` swing settings (54 / 58 / 62 / 66 / 71 / 75, the same numbers drum machines have used since the MPC60 — each one tick apart), then **TRIPLET 8**, **TRIPLET 4**, **HALFTIME** and **DOUBLETIME**. Landing on one replaces every tick in the slot, so save a groove you have built before stepping off it.
 
-**SAVE** names the slot and writes it to `PocketTracker/Grooves` as a `.ptg` file; **LOAD** reads one back into the slot you are looking at. The built-ins are written into that folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and the name row still offers them all.
+**SAVE** names the slot and writes it to `PocketTracker/Grooves` as a `.ptg` file; **LOAD** reads one back into the slot you are looking at, with the PPQ it was written in. The built-ins are written into that folder the first time the app finds it empty, so they are there to edit, rename and copy between devices. Deleting the ones you do not use is permanent — the app does not put them back, and the name row still offers them all.
 
 ### Assigning grooves
 
@@ -1091,7 +1110,7 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 > To reset a track back to even timing after a groove section, place `GRV 00` in an FX column. Groove `00` is empty by default, which plays perfectly even — but it is a real, editable groove: if you put tick values into groove `00`, every track that hasn't been assigned another groove will swing with it.
 
 > [!WARNING]
-> For the grooved track to stay in sync, each complete cycle of your groove list should **average 12 ticks per entry**. A 2-entry swing sums to 24 (14+10 ✓). A 4-entry groove should sum to 48. If the average is not 12, the track drifts against un-grooved tracks within each phrase; in SONG mode all tracks re-align at every chain row, so an off-average groove produces a gap (or a cut) at the end of each phrase rather than unbounded drift.
+> For the grooved track to stay in sync, each complete cycle of your groove list should **average 12 ticks per entry** (at PPQ 48 — 6 at 24, 24 at 96). A 2-entry swing sums to 24 (14+10 ✓). A 4-entry groove should sum to 48. If the average is not 12, the track drifts against un-grooved tracks within each phrase; in SONG mode all tracks re-align at every chain row, so an off-average groove produces a gap (or a cut) at the end of each phrase rather than unbounded drift.
 
 ### Controls
 
@@ -1099,10 +1118,10 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 |---|---|
 | D-pad UP/DOWN | Move between rows |
 | D-pad RIGHT / LEFT | Move into the panel and back |
-| A | On a `--` row, add a step at 12 ticks. On SAVE or LOAD, press the button |
-| A + LEFT/RIGHT | Edit tick value. On the name row, step through the built-in grooves. On QNT, change it |
+| A | On a `--` row, add an even step. On SAVE or LOAD, press the button |
+| A + LEFT/RIGHT | Edit tick value. On the name row, step through the built-in grooves. On QNT or PPQ, change it |
 | A + UP/DOWN | Edit tick value (large step) |
-| A + B | Clear row. On the name row, back to STRAIGHT |
+| A + B | Clear row. On the name row, back to STRAIGHT. On PPQ, back to 48 |
 | B + UP/DOWN | Set QNT from anywhere on the screen |
 | B + LEFT/RIGHT | Previous / next groove |
 
@@ -1300,7 +1319,7 @@ The master volume is applied to everything — the eight tracks **and** the reve
 returns — so pulling MIX down takes the tails with it.
 
 Both kinds of fader can also be moved from a phrase while the song plays: `VTR` writes the fader of the
-track it is on, `VMV` writes the master (§21), and `AUS`/`AUF` fade either of them smoothly. The numbers
+track it is on, `VMV` writes the master (§23), and `AUS`/`AUF` fade either of them smoothly. The numbers
 on this screen keep showing what you typed — they are where playback *starts*, and stopping puts the
 faders back there.
 
@@ -1367,7 +1386,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 |---|---|
 | TYPE | A starting point for the three character cells: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). Choosing one sets PONG, TONE and WOBL together; turn any of those afterwards and TYPE reads **USER**. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§22) writes the same time from a phrase or a table. |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. From about `E0` the repeats stop fading and the delay begins to sing: around `F0` they hang almost forever, and above it they bloom into a steady tone that keeps going after the input stops. Turn WOBL up to make that tone drift. |
 | WOBL | How far the tape speed drifts (`00`–`FF`), bending the pitch of the repeats. `00` holds them steady. |
@@ -1472,6 +1491,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 | CLEAN SEQ | Remove unused chains and phrases (with confirmation dialog). |
 | CLEAN INST | Remove unused instruments (with confirmation dialog). |
 | SETTINGS | Open the SETTINGS screen (press A). |
+| MIDI | Open the MIDI screen (press A) — see [section 22](#22-midi-screen). |
 
 WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's home folder (section 2) — with auto-incremented filenames (`ProjectName_0001.wav`). Stems are written to a per-project subfolder — `Renders/ProjectName/ProjectName_1.wav`, `_2.wav`, … — plus `_reverb.wav` / `_delay.wav` when those sends are in use.
 
@@ -1528,7 +1548,7 @@ All value rows are edited with **A + D-pad**. A single **A** press is reserved f
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
 | NAV | POOL / SONG | What B + D-pad walks. **SONG** (the default) walks the arrangement: the cursor is a song cell, and the chain and phrase on screen are the ones that cell holds. **POOL** steps through the 00–FF chain and phrase pools instead, which is what earlier versions did — see §5.4. |
-| FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 26). |
+| FOLDER | REMEMBER / REFRESH | With REMEMBER, a sample load reopens at the folder you last loaded a sample from, for as long as the app is running. With REFRESH it always starts at the default (or at whatever `config.json` names — see section 27). |
 | NOTE PREV | ON / OFF | On the PHRASE screen, play the note under the cursor for as long as you hold **A** — when you insert it, change it with A + D-pad, or just hold A on it. Not in selection mode, and not while playing. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
 | HELP | OFF / SHORT / FULL | What a tap of **SELECT** shows: nothing, three lines in the visualizer strip, or a full help screen (see §5.2, *Help on SELECT*). |
@@ -1626,7 +1646,107 @@ ROW CURSOR and ROW SELECT are the two blocks text is read *against*, so pick the
 
 ---
 
-## 22. Effects Reference
+## 22. MIDI Screen
+
+PocketTracker can drive outside MIDI gear — notes, controllers, patch changes and a clock — and can
+itself be played from a MIDI keyboard and steered from a controller's knobs. The MIDI screen is where
+the two connections are chosen.
+
+Open it from the PROJECT screen (cursor on the **MIDI >** row, press A). Press **B** to return.
+**START** plays the song from here as well, so the timing rows can be set by ear.
+
+| Row | Options | Description |
+|---|---|---|
+| OUTPUT | OFF / AUTO / a device | The device EXTERNAL instruments and the clock are sent to. **AUTO** takes the first device it finds, and takes it again when it is plugged back in. While nothing is open the row also says how many ports the system has. |
+| INPUT | OFF / AUTO / a device | The keyboard or controller you play from. AUTO works the same way. |
+| OFFSET | AUTO / −99 to +99 ms | Sends everything earlier (minus) or later (plus), so an outside synth lines up with the app's own sound. **AUTO** works the number out from this device's sound delay and shows it. A + LEFT/RIGHT steps 1 ms, A + UP/DOWN steps 10; A + B goes back to AUTO. |
+| SYNC | ON / OFF | Sends a MIDI clock — 24 pulses per quarter note, with start and stop — so other gear follows the tempo. |
+| CTL CH | ALL / 01–16 | The channel mapped knobs are listened for on — see *Mapping knobs* below. |
+| PROG CHG | ON / OFF | ON sends each EXTERNAL instrument's BANK and PROG ahead of its notes, so the device is on the right patch. |
+| KEYS | MONO / POLY 2–8 | How many keys of a keyboard can sound at once — see *Playing from a keyboard* below. |
+| VELOCITY | ON / OFF | ON: a harder key plays louder. OFF: every key plays at full strength. |
+| MAPPING | — | Press A to open the list of mapped knobs. |
+| PANIC | — | Press A to send all-notes-off, for a note left hanging on an outside synth. |
+| TEST | — | Press A to send one short C-4 on channel 1. The line under the rows says whether it went out. |
+
+PROG CHG and the mapped knobs are saved with the project. The other rows describe your setup and stay
+as they are from one project to the next.
+
+### Sending to a MIDI device
+
+Set an instrument's TYPE to **EXTERNAL** ([section 10](#10-instrument-screen)) and its notes go out of
+the OUTPUT port instead of being played by the app. Each track holds one note at a time: a note ends at
+the next note on its track, after the instrument's LEN, at a `KIL` or an `OFF`, or when playback stops.
+
+| In the phrase | What is sent |
+|---|---|
+| A note | Note on, on the instrument's channel. Chain and project transpose, `PIT` and `ARP` move the note number |
+| The V column, the instrument's VOL, `VOL` beside the note | The note's velocity |
+| `VOL` on a later step | Controller 7 (volume) |
+| `PAN`, the instrument's PAN | Controller 10 (pan) |
+| `CUT` · `RES` | Controllers 74 (cutoff) and 71 (resonance) |
+| `REV` · `DEL` | Controllers 91 and 93 |
+| `MPG` · `MPB` · `CCA`–`CCD` | A program change, a pitch bend, and the instrument's four controller slots — see [section 23](#23-effects-reference) |
+
+Commands that shape the app's own sound — the filter switches, drive, crush, pitch slides, slices —
+send nothing.
+
+### Playing from a keyboard
+
+With a keyboard on INPUT, its keys play the instrument you are working on: on the PHRASE screen, the
+instrument of the note under the cursor; anywhere else, the one you last typed or picked. They sound on
+the track the SONG cursor is on.
+
+**KEYS** sets how many can sound together. **MONO** is one note at a time, on that track. **POLY 2–8**
+lets a chord spread over that many tracks, counted rightwards from the cursor's track; each key takes
+the lowest one that is free, and when all are busy the oldest key gives way.
+
+Keys are played, not recorded: nothing is written into the phrase.
+
+### Mapping knobs
+
+A knob or fader on a controller can move a value in the project. The quick way is to learn it: put the
+cursor on the value — on MIXER, EFFECTS or INSTRUMENT — hold **R** and turn the knob. The status line
+names what the knob moves from now on.
+
+| Group | What can be mapped |
+|---|---|
+| TRK | A track's fader |
+| MIX | The master volume, the limiter, the OTT and DUST depth |
+| REV | DCAY, DAMP, WET, SIZE, PRE, WIDE, MOD |
+| DLY | TIME, FDBK, WET, TONE, WOBL, the send into the reverb |
+| INS | An instrument's VOL, PAN, DETUNE, FREQ, RES, DRIVE, CRUSH, DWNSMPL, REV and DEL |
+
+**MAPPING** on the MIDI screen opens the list of them, one line per knob:
+
+| Column | Description |
+|---|---|
+| CC | The controller number the knob sends, `00`–`7F`. |
+| VAL | The control's value right now. It is only shown; the cursor passes over it. |
+| MIN · MAX | The values the control takes with the knob fully down and fully up. Put MIN above MAX and the knob works backwards. |
+| DEST | What the knob moves, in up to three cells: the group, the track (`01`–`08`) or instrument (`00`–`7F`) where there is one to choose, and the control. A + LEFT/RIGHT steps through them; A + UP/DOWN on the group or the control shows every control at once — keep holding A, move, and release on the one you want. |
+
+| Input | Action |
+|---|---|
+| A on the last line | Add a knob |
+| A + D-pad | Change the cell |
+| A + B | Remove the line — on MIN or MAX, put that end back instead |
+| B | Back to the MIDI screen |
+
+One knob can move several controls at once: give each its own line with the same CC. A project holds
+up to 128 lines.
+
+A knob that is mapped is used up by its mapping; one that is not is left alone. **CTL CH** is **ALL**
+to begin with, which listens for mapped knobs on every channel — narrow it to one channel when two
+devices send the same controller numbers.
+
+> [!NOTE]
+> A knob on an instrument's VOL, PAN or DETUNE is heard from the next note. The other controls follow
+> the knob while a note is sounding.
+
+---
+
+## 23. Effects Reference
 
 Effects are placed in the **FX1**, **FX2**, and **FX3** columns of a phrase step, or in the FX columns of a table row. Each has a 3-letter code and a 2-digit hex value.
 
@@ -2098,7 +2218,7 @@ One ramp runs at a time on a track, so to fade two parameters at once, write the
 ### CUT `XX` — Filter Cutoff · RES `XX` — Filter Resonance
 
 Move the **instrument's own filter** on **this note only**: `CUT` sets the cutoff frequency and `RES` the
-resonance, both `00`–`FF`, the same two values as the FREQ and RES cells on the INSTRUMENT screen (§9).
+resonance, both `00`–`FF`, the same two values as the FREQ and RES cells on the INSTRUMENT screen (§10).
 The next note starts from the instrument's values again.
 
 > ⚠️ **The note must have a filter for these two to move.** `CUT` and `RES` move the filter that is
@@ -2117,6 +2237,9 @@ Both can be **ramped** with `AUS`/`AUF`, which is what a filter sweep is:
 
 Both also work in a **table**, once per tic, so a sweep written once follows every note that instrument
 plays — the shortest way to give a sample a filter envelope without spending a modulation slot.
+
+On an **EXTERNAL** instrument the same two cells send controller 74 (cutoff) and controller 71
+(resonance) to the MIDI device.
 
 ---
 
@@ -2273,9 +2396,41 @@ every scale command carries one: only stopping playback returns a track to the p
 
 ---
 
-## 23. Modulation Reference
+### MPG `XX` — MIDI Program Change
 
-See §14 for how to edit mod slots. Envelope times are in **tics**, so they track project BPM.
+Sends a program change `XX` (`00`–`7F`) on the channel of the EXTERNAL instrument playing this track —
+a patch switch in the middle of a song.
+
+Put it on an **empty step**, between notes: on a step that also has a note, that note has already
+started on the old patch. With PROG CHG on, an instrument that has a PROG of its own states it again
+with its next note, so leave the instrument's PROG at `--` when the phrase is choosing the patches.
+
+---
+
+### MPB `XX` — MIDI Pitch Bend
+
+Sends a pitch bend to the EXTERNAL instrument's channel: `00` is fully down, `80` is centre, `FF` is
+fully up. How far that bends the note is set on the receiving device.
+
+It is a position, not a movement — the bend stays where you put it until the next `MPB`. Stopping
+playback returns it to centre.
+
+---
+
+### CCA · CCB · CCC · CCD `XX` — MIDI Controller Slots
+
+Sends value `XX` (`00`–`FF`, scaled to MIDI's 0–127) to the controller named in the instrument's
+**CC A**–**CC D** rows. The phrase names the slot and the instrument names the controller, so pointing
+CC A at another controller re-points every `CCA` in the song with it. A slot with no controller set
+sends nothing.
+
+Beside a note, the command wins over the slot's own VAL for that note.
+
+---
+
+## 24. Modulation Reference
+
+See §15 for how to edit mod slots. Envelope times are in **tics**, so they track project BPM.
 
 ### AHD Envelope
 
@@ -2323,7 +2478,7 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 
 ---
 
-## 24. File Management
+## 25. File Management
 
 Throughout this section `<home>` is PocketTracker's home folder: on Android the folder you granted it
 (section 2), and elsewhere the `PocketTracker` folder the app keeps beside itself.
@@ -2446,7 +2601,7 @@ needs and what is hardest to describe from memory. If something is wrong, attach
 
 ---
 
-## 25. Workflow Tips
+## 26. Workflow Tips
 
 ### Making your first phrase
 
@@ -2517,7 +2672,7 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 ---
 
-## 26. Configuration File (config.json)
+## 27. Configuration File (config.json)
 
 Some things are easier to set in a text file than on a 640×480 screen. `config.json` lives in
 PocketTracker's home folder, beside the `Projects` and `Samples` directories, and covers these:
@@ -3034,6 +3189,9 @@ Open with **A** on an EQ cell.
 | INS | Instrument | `XX` | This note plays instrument `XX` (00–7F); randomize it with RND or RNL. On a table row it hands the note on to that instrument and its table |
 | SCA | Track Scale | `XY` | Puts this track on scale `Y` in key `X` (`0`=C … `B`=B); resets on stop |
 | SCG | Global Scale | `XY` | The same for all eight tracks |
+| MPG | MIDI Program | `XX` | Program change (00–7F) on an EXTERNAL instrument's channel |
+| MPB | MIDI Bend | `XX` | Pitch bend position (00=down 80=centre FF=up); EXTERNAL only, centred on stop |
+| CCA–CCD | MIDI CC slot | `XX` | Value for the controller in the EXTERNAL instrument's CC A–D row |
 
 ---
 

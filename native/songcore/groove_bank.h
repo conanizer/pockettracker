@@ -25,12 +25,13 @@
 #include <vector>
 
 #include "model.h"
-#include "timing.h"  // TICS_PER_STEP, groove_active_length
+#include "timing.h"  // groove_active_length, the rulers
 
 namespace songcore {
 
-// ⚠️ Every number below is in 48 PPQ; a change of PPQ must convert this table.
-static_assert(TICS_PER_STEP == 12, "the factory groove bank is written in tics of a 48-PPQ step");
+// ⚠️ Every number below is in the default ruler, 12 tics to the step. A groove in another ruler is
+// compared and filled through it (`groove_matches_bank`, `groove_apply_bank`).
+static_assert(GROOVE_DEFAULT_RULER == 12, "the factory groove bank is written 12 tics to the step");
 
 /** One factory groove: a name and its active steps. Everything after them is the end marker. */
 struct GrooveBankEntry {
@@ -68,10 +69,20 @@ inline std::vector<int> groove_active_steps(const Groove& g) {
     return std::vector<int>(g.steps.begin(), g.steps.begin() + n);
 }
 
-inline int groove_bank_index_by_steps(const std::vector<int>& steps) {
+/** Is `g` this factory groove, whatever ruler it is written in? `0D 0B` at 12 is `1A 16` at 24. */
+inline bool groove_matches_bank(const Groove& g, const GrooveBankEntry& e) {
+    const std::vector<int> steps = groove_active_steps(g);
+    if (steps.size() != e.steps.size()) return false;
+    const int ruler = groove_ticks_per_step(g);
+    for (size_t i = 0; i < steps.size(); ++i)
+        if (steps[i] * GROOVE_DEFAULT_RULER != e.steps[i] * ruler) return false;
+    return true;
+}
+
+inline int groove_bank_index_by_steps(const Groove& g) {
     const std::vector<GrooveBankEntry>& bank = groove_bank();
     for (size_t i = 0; i < bank.size(); ++i)
-        if (bank[i].steps == steps) return static_cast<int>(i);
+        if (groove_matches_bank(g, bank[i])) return static_cast<int>(i);
     return -1;
 }
 
@@ -83,14 +94,25 @@ inline int groove_bank_index_by_name(const std::string& name) {
     return -1;
 }
 
-/** Replace a slot's steps with a factory groove's, and take its name. Everything past them is blank. */
+/**
+ * Replace a slot's steps with a factory groove's, and take its name. Everything past them is blank.
+ * The slot keeps its ruler when the groove can be written in it exactly; otherwise it takes the
+ * bank's (an odd tic count has no half).
+ */
 inline void groove_apply_bank(Groove& g, int index) {
     const std::vector<GrooveBankEntry>& bank = groove_bank();
     if (index < 0 || index >= static_cast<int>(bank.size())) return;
     const GrooveBankEntry& e = bank[static_cast<size_t>(index)];
-    g.steps.assign(16, -1);
-    for (size_t i = 0; i < e.steps.size() && i < 16; ++i) g.steps[i] = e.steps[i];
-    g.name = e.name;
+    const int ruler = groove_ticks_per_step(g);
+
+    Groove filled = g;
+    filled.steps.assign(16, -1);
+    for (size_t i = 0; i < e.steps.size() && i < 16; ++i) filled.steps[i] = e.steps[i];
+    filled.ticksPerStep = GROOVE_DEFAULT_RULER;
+    filled.name         = e.name;
+
+    Groove kept = filled;
+    g = (groove_set_ruler(kept, ruler) && groove_matches_bank(kept, e)) ? kept : filled;
 }
 
 /**
@@ -99,7 +121,7 @@ inline void groove_apply_bank(Groove& g, int index) {
  */
 inline std::string groove_display_name(const Groove& g) {
     if (!g.name.empty()) return g.name;
-    const int idx = groove_bank_index_by_steps(groove_active_steps(g));
+    const int idx = groove_bank_index_by_steps(g);
     return idx >= 0 ? std::string(groove_bank()[static_cast<size_t>(idx)].name) : std::string();
 }
 
@@ -107,7 +129,7 @@ inline std::string groove_display_name(const Groove& g) {
  *  name the bank does not know. */
 inline bool groove_differs_from_its_name(const Groove& g) {
     const int idx = groove_bank_index_by_name(g.name);
-    return idx >= 0 && groove_bank()[static_cast<size_t>(idx)].steps != groove_active_steps(g);
+    return idx >= 0 && !groove_matches_bank(g, groove_bank()[static_cast<size_t>(idx)]);
 }
 
 /**
@@ -116,7 +138,7 @@ inline bool groove_differs_from_its_name(const Groove& g) {
  */
 inline int groove_bank_cycle_index(const Groove& g) {
     int idx = groove_bank_index_by_name(g.name);
-    if (idx < 0) idx = groove_bank_index_by_steps(groove_active_steps(g));
+    if (idx < 0) idx = groove_bank_index_by_steps(g);
     return idx < 0 ? 0 : idx;
 }
 

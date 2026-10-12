@@ -351,7 +351,9 @@ while the thread is blocked, but the depth outlives the operation — an edit ma
 for the walk to get past it — so a save, which fits inside the window, only tops it up.
 
 Timing is frame-based: `frames_per_step` and `frames_per_tic` derive from the tempo, and grooves
-change a step's length per position. Everything downstream is stamped in frames.
+change a step's length per position. A groove counts its lengths in a ruler of its own (6, 12 or 24
+tics to the plain step); an effect's tic is always a twelfth of the step it is in, so no effect
+changes meaning when a track changes groove. Everything downstream is stamped in frames.
 
 **Mute and solo never reach the sequencer.** A muted track is scheduled exactly like any other; the
 gate is `AudioEngine::setTrackMuted`, folded into the track's gain where the audio block snapshots it,
@@ -562,7 +564,7 @@ Project
 ├── chains[256]           16 phrase slots + a transpose each
 ├── phrases[256]          16 steps: note, volume, instrument, 3 × (FX type, FX value)
 ├── tables[128]           16 rows: transpose, volume, 3 × (FX type, FX value)
-├── grooves[128]          16 step lengths in tics, and a name
+├── grooves[128]          16 step lengths in tics, the ruler they count in, and a name
 ├── instruments[128]      sampler | SoundFont | external
 ├── eqPresets[128]        the shared EQ slot bank
 ├── mixer, master bus, reverb, delay

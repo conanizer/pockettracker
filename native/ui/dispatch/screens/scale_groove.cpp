@@ -182,6 +182,10 @@ bool InputDispatcher::groove_edit(const InputAction& action) {
     // ⚠️ The quantize pointer is not song data: it comes back separately, and moving it must
     // not dirty the project or arm an autosave.
     if (r.newQuantize >= 0) s_.grooveQuantize = r.newQuantize;
+    if (r.rulerRefused) {
+        s_.statusMessage = "A STEP WOULD PASS FF";
+        s_.statusSuccess = false;
+    }
     return r.modified;
 }
 

@@ -154,6 +154,7 @@ inline Groove parse_groove(const json& j, int index) {
     Groove g(get_int(j, "id", index));
     g.name  = get_str(j, "name", g.name);
     g.steps = parse_int_array(j, "steps", g.steps);
+    g.ticksPerStep = get_int(j, "ticksPerStep", g.ticksPerStep);
     // The GROOVE screen indexes all sixteen by cursor row; same repair as `parse_chain`.
     g.steps.resize(16, -1);
     return g;
@@ -602,6 +603,7 @@ inline void emit_groove(JsonWriter& w, const Groove& g) {
     // ⚠️ `steps` is never default-guarded: every project on disk writes all sixteen, so old blank
     // grooves load back blank whatever a fresh Groove is born with.
     emit_int_array(w, "steps", g.steps);
+    if (g.ticksPerStep != 12) w.field_int("ticksPerStep", g.ticksPerStep);
     w.end_object();
 }
 
