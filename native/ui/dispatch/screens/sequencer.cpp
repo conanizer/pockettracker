@@ -224,6 +224,11 @@ GestureResult InputDispatcher::table_screen(Gesture g) {
             s_.currentTable    = step_wrapping(s_.currentTable, (g == Gesture::B_LEFT) ? -1 : +1, 128);
             s_.lastEditedTable = s_.currentTable;
             return GestureResult::TAKEN;
+        case Gesture::B_UP:
+        case Gesture::B_DOWN:
+            s_.currentTable    = page_clamping(s_.currentTable, (g == Gesture::B_UP) ? +1 : -1, 128);
+            s_.lastEditedTable = s_.currentTable;
+            return GestureResult::TAKEN;
 
         // A+START auditions on the preview lane THROUGH the table on screen (instrument N owns table
         // N), or you would hear the instrument's own table instead.

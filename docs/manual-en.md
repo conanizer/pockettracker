@@ -306,6 +306,8 @@ Hold **B** and press LEFT/RIGHT to switch between items of the same type without
 | TABLE | Previous / next table (00–7F) |
 | GROOVE | Previous / next groove (00–7F) |
 
+On INSTRUMENT, MODULATION and TABLE, **B + UP/DOWN** jumps 16 at a time and stops at `00` and `7F`.
+
 **`SETTINGS → NAV` is `SONG` by default**, and B + D-pad on CHAIN and PHRASE walks the arrangement instead
 of the pools. The cursor becomes a song cell, and the chain or phrase you are looking at is whichever
 one that cell holds — the CHAIN and PHRASE headers show it (`CHAIN 20  S01 T3`).
@@ -630,7 +632,7 @@ works stays lit even when its two halves are in different phrases of the same ch
 
 The INSTRUMENT screen configures how a sample or SF2 preset is played.
 
-Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch between instruments without leaving the screen.
+Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch between instruments without leaving the screen, and **B+UP/DOWN** to jump 16 at a time.
 
 ### WAV instrument parameters
 
@@ -1004,6 +1006,7 @@ By default, instrument N uses table N. Override per-note with the **TBL** phrase
 | A + LEFT/RIGHT | Edit value |
 | A + B | Delete value |
 | B + LEFT/RIGHT | Previous / next table |
+| B + UP/DOWN | Jump 16 tables |
 | L + B / copy / paste | Selection, copy, paste (same as phrase) |
 
 ---
@@ -1263,6 +1266,7 @@ Example: MOD1 (LFO) with DEST=MOD A targeting MOD2 (AHD) — the LFO rhythmicall
 | A + UP/DOWN | Edit value (large step) |
 | A + B | Reset to default |
 | B + LEFT/RIGHT | Previous / next instrument |
+| B + UP/DOWN | Jump 16 instruments |
 
 ---
 
@@ -2777,6 +2781,8 @@ exports and sample-editor saves keep their own folders.
 | B + LEFT / RIGHT | GROOVE | Previous / next groove |
 | B + LEFT / RIGHT | MODULATION | Previous / next instrument (mods follow) |
 | B + UP / DOWN | SONG | Page up / down (16 rows) |
+| B + UP / DOWN | INSTRUMENT, MODULATION | Jump 16 instruments |
+| B + UP / DOWN | TABLE | Jump 16 tables |
 
 ---
 
@@ -2879,6 +2885,7 @@ exports and sample-editor saves keep their own folders.
 | A + LEFT / RIGHT | Edit current parameter |
 | A + B | Reset to default |
 | B + LEFT / RIGHT | Previous / next instrument |
+| B + UP / DOWN | Jump 16 instruments |
 
 ---
 
@@ -2905,6 +2912,7 @@ exports and sample-editor saves keep their own folders.
 | A + LEFT / RIGHT | Edit value |
 | A + B | Delete value |
 | B + LEFT / RIGHT | Previous / next table |
+| B + UP / DOWN | Jump 16 tables |
 | L + B | Enter selection mode |
 
 ---
@@ -2934,6 +2942,7 @@ exports and sample-editor saves keep their own folders.
 | A + UP / DOWN | Large step |
 | A + B | Reset to default |
 | B + LEFT / RIGHT | Previous / next instrument |
+| B + UP / DOWN | Jump 16 instruments |
 
 ---
 

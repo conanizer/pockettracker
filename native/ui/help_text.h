@@ -425,6 +425,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "R+START plays the whole song",
       "A+START plays the instrument",
       "B+←/→ walks to another slot",
+      "B+↑/↓ jumps 16 slots",
       "R+↑ opens its MODS",
       "R+← goes back to the phrase"}},
     /* SCREEN_TABLE */
@@ -439,6 +440,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "R+START plays the whole song",
       "A+START plays the table",
       "B+←/→ walks to another table",
+      "B+↑/↓ jumps 16 tables",
       "L+B marks cells, B copies them",
       "L+A pastes"}},
     /* SCREEN_PROJECT */
@@ -486,6 +488,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B resets the value",
       "B+←/→ walks the instruments",
+      "B+↑/↓ jumps 16 instruments",
       "START plays the phrase",
       "A+START plays the instrument",
       "R+↓ goes back to the instrument"}},

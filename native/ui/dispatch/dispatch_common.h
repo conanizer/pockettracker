@@ -5,6 +5,7 @@
 #include "ui/input_dispatcher.h"
 #include "ui/std_filesystem.h"   // path_stem
 
+#include <algorithm>
 #include <string>
 
 namespace pt::ui {
@@ -35,6 +36,11 @@ struct LoadScope {
 /** B+LEFT/RIGHT through a pool of `count` items, wrapping at both ends. */
 inline int step_wrapping(int value, int delta, int count) {
     return ((value + delta) % count + count) % count;
+}
+
+/** B+UP/DOWN through the same pool, 16 at a time. Stops at the ends, where a single step wraps. */
+inline int page_clamping(int value, int direction, int count) {
+    return std::clamp(value + direction * 16, 0, count - 1);
 }
 
 /** The 20 characters a slot's name is cut to when it is taken from a file. One writer, two readers. */

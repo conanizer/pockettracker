@@ -13,12 +13,23 @@ namespace pt::ui {
 
 namespace {
 
-/** B+LEFT/RIGHT on INSTRUMENT and MODS: the previous or next instrument, wrapping 00↔7F. The next one
- *  may be another type, whose layout has no cell where the cursor was. */
-void cycle_instrument(AppState& s, int delta) {
-    s.currentInstrument    = ((s.currentInstrument + delta) % 128 + 128) % 128;
-    s.lastEditedInstrument = s.currentInstrument;
+/** Put another instrument on INSTRUMENT and MODS. It may be another type, whose layout has no cell
+ *  where the cursor was. */
+void show_instrument(AppState& s, int id) {
+    s.currentInstrument    = id;
+    s.lastEditedInstrument = id;
     snap_instrument_cursor(s);
+}
+
+/** B+LEFT/RIGHT: the previous or next instrument, wrapping 00↔7F. */
+void cycle_instrument(AppState& s, int delta) {
+    show_instrument(s, step_wrapping(s.currentInstrument, delta, songcore::POOL_INSTRUMENTS));
+}
+
+/** B+UP/DOWN: 16 instruments on or back, stopping at 00 and 7F. UP raises the number, as A+UP raises
+ *  a value. */
+void page_instrument(AppState& s, int direction) {
+    show_instrument(s, page_clamping(s.currentInstrument, direction, songcore::POOL_INSTRUMENTS));
 }
 
 }  // namespace
@@ -47,6 +58,8 @@ GestureResult InputDispatcher::instrument_screen(Gesture g) {
 
         case Gesture::B_LEFT:  cycle_instrument(s_, -1); return GestureResult::TAKEN;
         case Gesture::B_RIGHT: cycle_instrument(s_, +1); return GestureResult::TAKEN;
+        case Gesture::B_UP:    page_instrument(s_, +1);  return GestureResult::TAKEN;
+        case Gesture::B_DOWN:  page_instrument(s_, -1);  return GestureResult::TAKEN;
 
         default:
             return instrument_audition(g);
@@ -68,15 +81,13 @@ GestureResult InputDispatcher::pool_screen(Gesture g) {
             mark_modified();
             return GestureResult::TAKEN;
 
-        // Pages by 16 but CLAMPS at the ends, where a single D-pad step wraps 00↔7F. No B+LEFT/RIGHT:
-        // here the D-pad already selects the instrument.
+        // Pages by 16 but CLAMPS at the ends, where a single D-pad step wraps 00↔7F. UP is toward 00:
+        // this is a list, and the cursor moves up it. No B+LEFT/RIGHT: here the D-pad already selects
+        // the instrument.
         case Gesture::B_UP:
-            s_.currentInstrument    = std::max(0, s_.currentInstrument - 16);
-            s_.lastEditedInstrument = s_.currentInstrument;
-            return GestureResult::TAKEN;
         case Gesture::B_DOWN:
-            s_.currentInstrument    = std::min(static_cast<int>(s_.project->instruments.size()) - 1,
-                                               s_.currentInstrument + 16);
+            s_.currentInstrument    = page_clamping(s_.currentInstrument, (g == Gesture::B_UP) ? -1 : +1,
+                                                    static_cast<int>(s_.project->instruments.size()));
             s_.lastEditedInstrument = s_.currentInstrument;
             return GestureResult::TAKEN;
 
@@ -87,9 +98,11 @@ GestureResult InputDispatcher::pool_screen(Gesture g) {
 
 GestureResult InputDispatcher::mods_screen(Gesture g) {
     switch (g) {
-        // MODS is a view of one instrument, so B+LEFT/RIGHT steps it as on INSTRUMENT.
+        // MODS is a view of one instrument, so B+D-PAD steps it as on INSTRUMENT.
         case Gesture::B_LEFT:  cycle_instrument(s_, -1); return GestureResult::TAKEN;
         case Gesture::B_RIGHT: cycle_instrument(s_, +1); return GestureResult::TAKEN;
+        case Gesture::B_UP:    page_instrument(s_, +1);  return GestureResult::TAKEN;
+        case Gesture::B_DOWN:  page_instrument(s_, -1);  return GestureResult::TAKEN;
         default:               return instrument_audition(g);
     }
 }
