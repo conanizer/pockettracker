@@ -12,6 +12,7 @@ enum class Gesture {
     R_UP, R_DOWN, R_LEFT, R_RIGHT,
     R_A, R_B,
     L_A, L_B, L_R, L_B_A,
+    L_UP, L_DOWN, L_LEFT, L_RIGHT,
     SELECT_A, SELECT_B, SELECT_R,
     A, B, SELECT, START,
     L_START, R_START,

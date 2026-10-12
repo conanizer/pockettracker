@@ -412,7 +412,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "B+D-PAD walks to another phrase",
       "L+B marks cells, B copies them",
       "L+A pastes",
-      "L+B+A copies it to a new phrase"}},
+      "L+B+A copies it to a new phrase",
+      "L+D-PAD fills the rows below"}},
     /* SCREEN_INSTRUMENT */
     {"INSTRUMENT: one sound", "A sample, a SoundFont, or an", "external MIDI device.",
      {"One of 128 sound slots. It",
@@ -643,13 +644,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "semitone up the next one."},
      {"A on --- puts the last note",
       "A twice picks a free instrument",
-      "A+←/→ steps one note",
-      "A+↑/↓ steps an octave",
+      "A+←/→ one note, A+↑/↓ an octave",
       "A+B clears the note",
       "A+B on --- puts OFF: lets go",
       "of the note that is sounding",
       "Hold A to hear it (NOTE PREV)",
-      "R+→ opens its instrument"}},
+      "R+→ opens its instrument",
+      "L+D-PAD fills the rows below"}},
     /* PHRASE_VOLUME */
     {"VOL: how loud this step is", "How hard the note is played,", "from 00 silent to 7F full.",
      {"How hard this step plays its",
@@ -658,6 +659,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "instrument VOL and the mixer."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to 7F",
+      "L+D-PAD fills the rows below",
       "START plays the phrase"}},
     /* PHRASE_INSTRUMENT */
     {"INST: which sound to use", "Points at an instrument slot,", "00 to 7F.",
@@ -667,6 +669,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "INSTRUMENT screen."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "R+→ opens this instrument",
+      "L+D-PAD fills the rows below",
       "START plays the phrase"}},
     /* PHRASE_FX_TYPE */
     {"FX: a command on this step", "A+↑/↓ opens the picker and", "shows what each one does.",
@@ -680,7 +683,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "Keep A held and move to browse",
       "Let go of A to pick one",
       "A on --- repeats the last one",
-      "A+B clears the command"}},
+      "A+B clears the command",
+      "L+D-PAD fills the rows below"}},
     /* PHRASE_FX_VALUE */
     {"FX VALUE: what it is set to", "The meaning comes from the FX", "to its left.",
      {"The number the command to its",
@@ -689,6 +693,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "command list describes each."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B sets it back to 00",
+      "L+D-PAD fills the rows below",
       "START plays the phrase"}},
 
     // ── TABLE ────────────────────────────────────────────────────────────────────────────────────

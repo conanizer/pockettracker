@@ -246,6 +246,15 @@ INST.POOL still walk their pools.
 
 **Selection increment:** A+DPAD applies to all selected rows in active column.
 
+**Fill (PHRASE):** L + a direction fills rows from the selection's top row — or, with no selection,
+from the cell under the cursor down to the end of the phrase.
+
+| Control | Action |
+|---------|--------|
+| **L+RIGHT / L+LEFT** | Walk the line: as it was, every 8th / 6th / 4th / 3rd / 2nd row, every row, ramp |
+| **L+UP** | A new random value in every cell that holds one |
+| **L+DOWN** | The top row on random rows |
+
 ---
 
 ## Mute & Solo — a chord that is momentary or latching
@@ -335,6 +344,7 @@ B + UP/DOWN             Page the SONG screen / jump 16 instrument slots
 L + A                   Paste (outside selection) / Cut (in selection)
 L + B                   Enter selection mode / widen it
 L + B + A               Clone current item (deep clone)
+L + UP/DOWN/LEFT/RIGHT  Fill rows from one cell (PHRASE)
 L + R                   Restore muted tracks / leave selection mode / clear the copy buffer
 ```
 

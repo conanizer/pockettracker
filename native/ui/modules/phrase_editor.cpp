@@ -54,18 +54,24 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
     if (s.project) rampCells = songcore::find_ramp_cells(*s.project, s.phrase.id);
     else           rampCells.mark(songcore::find_ramps(s.phrase));
 
+    // Rows a certain HOP cuts off draw dimmed: they are in the phrase and do not play.
+    const int hopRow = songcore::phrase_certain_hop_row(s.phrase);
+
     for (int i = 0; i < static_cast<int>(s.phrase.steps.size()); ++i) {
-        draw_row(c, x, y, i, s.phrase.steps[static_cast<size_t>(i)], s, rampCells, stepX, noteX,
+        draw_row(c, x, y, i, s.phrase.steps[static_cast<size_t>(i)], s, rampCells, hopRow, stepX, noteX,
                  volX, instX, fx1NameX, fx1ValueX, fx2NameX, fx2ValueX, fx3NameX, fx3ValueX);
     }
 }
 
 void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const PhraseStep& step,
                                   const PhraseEditorState& s,
-                                  const songcore::RampCells& rampCells, int stepX,
+                                  const songcore::RampCells& rampCells, int hopRow, int stepX,
                                   int noteX, int volX, int instX, int fx1NameX, int fx1ValueX,
                                   int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const {
     const Theme& t = s.theme;
+
+    // The HOP's own row plays nothing either, but the HOP cell itself is what acts, so it stays lit.
+    const bool cutOff = hopRow >= 0 && index >= hopRow;
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
 
@@ -85,8 +91,8 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     // Every 4th row number is brighter (a beat); the cursor row's number lights whatever the column.
     // Column 0 is a real cursor position, so the number goes through the painter like any cell.
     const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
-                           : (index % 4 == 0)     ? t.textParam
-                                                  : t.textEmpty;
+                           : (index % 4 == 0 && !cutOff) ? t.textParam
+                                                         : t.textEmpty;
     cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
 
     // The playhead marker sits beside the one-character row number, in the existing gutter.
@@ -94,8 +100,8 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
         if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
     // An OFF is drawn bright, but it plays nothing: its V and I dim as on an empty step.
-    const bool noteEmpty = (step.note == Note::EMPTY());
-    const bool noNote    = !songcore::step_has_note(step);
+    const bool noteEmpty = cutOff || (step.note == Note::EMPTY());
+    const bool noNote    = cutOff || !songcore::step_has_note(step);
     cells.cell(note_name(step.note),  noteX, cur(1), sel(1), noteEmpty, t.textValue);
     cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noNote, t.textParam);
     cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
@@ -103,6 +109,7 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     // An FX pair dims when unset, and an AUS/AUF cell when no ramp uses it — an inert cell does what
     // an unset one does.
     const auto fxDim = [&](int type, int slot) {
+        if (cutOff && !(index == hopRow && type == songcore::FX_HOP)) return true;
         return type == 0x00 || !rampCells.active(type, index, slot);
     };
 
@@ -134,21 +141,16 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
             // quantizer (scheduler.h) moves notes, and the cell never shows that.
             // The scale is the one the phrase's own SCA/SCG puts this row in — a walk of the AUTHORED
             // cells above the cursor, never the sequencer's live scale (see `phrase_scale_at_row`).
-            // ⚠️ The same two exemptions as `apply_track_scale`: a slice-selecting note is not a pitch,
-            // and a TSP-off instrument ignores the scale — typing must offer every note there.
+            // An exempt instrument (sliced, or TSP off) must be offered every note.
             unsigned mask = 0x0FFFu;
             int      key  = 0;
-            const int  instId = isEmpty ? s.insertInstrument : step.instrument;
-            const bool exempt = s.project != nullptr && instId >= 0 &&
-                                  instId < static_cast<int>(s.project->instruments.size()) && [&] {
-                const songcore::Instrument& ins = s.project->instruments[static_cast<size_t>(instId)];
-                return !ins.transposeEnabled || songcore::note_selects_slice(ins, -1);
-            }();
-            if (s.project != nullptr && !exempt) {
-                const songcore::ScaleAt at =
-                    songcore::phrase_scale_at_row(s.phrase, s.cursorRow, s.project->scaleKey);
-                mask = songcore::scale_mask(songcore::scale_at(*s.project, at.slot));
-                key  = at.key;
+            if (s.project != nullptr) {
+                const songcore::NoteScale ns = songcore::phrase_note_scale(
+                    *s.project, s.phrase, s.cursorRow, isEmpty ? s.insertInstrument : step.instrument);
+                if (ns.scale != nullptr) {
+                    mask = songcore::scale_mask(*ns.scale);
+                    key  = ns.key;
+                }
             }
             return cc::note(isEmpty ? 0 : songcore::note_to_midi(step.note), isEmpty, mask, key);
         }

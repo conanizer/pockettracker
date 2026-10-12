@@ -9,7 +9,8 @@ namespace pt::ui {
 // ─── The layouts ─────────────────────────────────────────────────────────────────────────────────
 //
 // Three rows of TEN in both layouts, so UP/DOWN stays in one column. The space bar is a fourth row
-// (one key, special-cased in the nav); the ABORT/APPLY row is virtual and not in this table.
+// (sharing it with the layout key, both special-cased in the nav); the ABORT/APPLY row is virtual
+// and not in this table.
 
 const std::vector<std::vector<char>>& qwerty_rows(int layout) {
     static const std::vector<std::vector<char>> letters = {
@@ -31,6 +32,7 @@ const std::vector<std::vector<char>>& qwerty_rows(int layout) {
 
 int QwertyKeyboardState::current_row_cols() const {
     if (is_on_action_row()) return QWERTY_ACTION_COLS;
+    if (keyCursorRow == space_row_index()) return QWERTY_SPACE_ROW_COLS;
     const auto& rows = qwerty_rows(layout);
     if (keyCursorRow < 0 || keyCursorRow >= static_cast<int>(rows.size())) return 1;
     return static_cast<int>(rows[static_cast<size_t>(keyCursorRow)].size());
@@ -53,14 +55,30 @@ void clamp_col(QwertyKeyboardState& s) {
     s.keyCursorCol = std::min(std::max(s.keyCursorCol, 0), cols - 1);
 }
 
-void move_key_cursor_up(QwertyKeyboardState& s) {
-    s.keyCursorRow = (s.keyCursorRow == 0) ? s.total_rows() - 1 : s.keyCursorRow - 1;
+namespace {
+
+// The SPACE row's two keys are wider than a key column, so crossing it maps the column by what is
+// drawn above and below: columns 0-7 meet SPACE, 8-9 the layout key, and the layout key leads back
+// up to the last column.
+void move_key_cursor_to_row(QwertyKeyboardState& s, int row) {
+    const int  spaceRow  = s.space_row_index();
+    const bool fromKeys  = s.keyCursorRow < spaceRow;
+    const bool fromSpace = s.keyCursorRow == spaceRow;
+    const int  lastCol   = static_cast<int>(qwerty_rows(s.layout)[0].size()) - 1;
+    if (row == spaceRow && fromKeys)      s.keyCursorCol = s.keyCursorCol >= QWERTY_SPACE_KEY_COLS ? 1 : 0;
+    else if (row < spaceRow && fromSpace) s.keyCursorCol = s.keyCursorCol == 1 ? lastCol : 0;
+    s.keyCursorRow = row;
     clamp_col(s);
 }
 
+}  // namespace
+
+void move_key_cursor_up(QwertyKeyboardState& s) {
+    move_key_cursor_to_row(s, (s.keyCursorRow == 0) ? s.total_rows() - 1 : s.keyCursorRow - 1);
+}
+
 void move_key_cursor_down(QwertyKeyboardState& s) {
-    s.keyCursorRow = (s.keyCursorRow + 1) % s.total_rows();
-    clamp_col(s);
+    move_key_cursor_to_row(s, (s.keyCursorRow + 1) % s.total_rows());
 }
 
 void move_key_cursor_left(QwertyKeyboardState& s) {
@@ -74,7 +92,7 @@ void move_key_cursor_right(QwertyKeyboardState& s) {
 }
 
 void insert_current_key(QwertyKeyboardState& s) {
-    if (s.is_on_action_row()) return;                              // ABORT/APPLY type nothing
+    if (s.is_on_action_row() || s.is_on_layout_key()) return;      // these keys type nothing
     if (static_cast<int>(s.text.size()) >= s.maxLength) return;
 
     const char ch = s.current_key();
@@ -246,14 +264,20 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         const int rowY = rowBaseY + r * (CELLH + ROWGAP);
 
         if (r == lastRow) {
-            // The space bar: one wide key, centred.
-            const int  spaceW  = 7 * CELLW;
-            const int  spaceX  = BOXX + (BOXW - spaceW) / 2;
-            const bool cursor  = (s.keyCursorRow == r);
-            c.fill_rect(spaceX, rowY, spaceW, CELLH,
-                        cursor ? t.rowCursor : t.background);
-            c.draw_text("SPACE", spaceX + (spaceW - 5 * CHARW) / 2, rowY + 3,
-                        cursor ? cursor_cell_ink(t) : t.textParam, CS, FS);
+            // Two wide keys on the key grid: SPACE, then the layout key naming the layout it switches to.
+            const std::string labels[QWERTY_SPACE_ROW_COLS] = {"SPACE", qwerty_layout_label(1 - s.layout)};
+            const int         spans[QWERTY_SPACE_ROW_COLS]  = {QWERTY_SPACE_KEY_COLS,
+                                                               10 - QWERTY_SPACE_KEY_COLS};
+            int keyX = INNERX;
+            for (int col = 0; col < QWERTY_SPACE_ROW_COLS; ++col) {
+                const int  keyW   = spans[col] * CELLW - 1;
+                const bool cursor = (s.keyCursorRow == r && s.keyCursorCol == col);
+                const int  textW  = static_cast<int>(labels[col].size()) * CHARW - CS;
+                c.fill_rect(keyX, rowY, keyW, CELLH, cursor ? t.rowCursor : t.background);
+                c.draw_text(labels[col], keyX + (keyW - textW) / 2, rowY + 3,
+                            cursor ? cursor_cell_ink(t) : t.textParam, CS, FS);
+                keyX += spans[col] * CELLW;
+            }
             continue;
         }
 

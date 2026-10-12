@@ -81,7 +81,7 @@ public:
 
 private:
     void draw_row(Canvas& c, int x, int y, int index, const songcore::PhraseStep& step,
-                  const PhraseEditorState& s, const songcore::RampCells& rampCells,
+                  const PhraseEditorState& s, const songcore::RampCells& rampCells, int hopRow,
                   int stepX, int noteX, int volX, int instX, int fx1NameX, int fx1ValueX,
                   int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const;
 };

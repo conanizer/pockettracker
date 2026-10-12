@@ -116,6 +116,26 @@ inline ScaleAt phrase_scale_at_row(const Phrase& ph, int row, int projectKey) {
     return at;
 }
 
+/**
+ * The scale a note on `row` of `ph` is held to when it plays `instrument`. `scale` is null where every
+ * note is allowed — the two exemptions `apply_track_scale` makes: a slice-selecting note is not a
+ * pitch, and a TSP-off instrument ignores the scale.
+ */
+struct NoteScale {
+    const Scale* scale = nullptr;
+    int          key   = 0;
+    int snap(int midi) const { return scale ? scale_snap(*scale, key, midi) : midi; }
+    bool contains(int midi) const { return !scale || scale_contains(*scale, key, midi); }
+};
+inline NoteScale phrase_note_scale(const Project& p, const Phrase& ph, int row, int instrument) {
+    if (instrument >= 0 && instrument < static_cast<int>(p.instruments.size())) {
+        const Instrument& ins = p.instruments[static_cast<size_t>(instrument)];
+        if (!ins.transposeEnabled || note_selects_slice(ins, -1)) return {};
+    }
+    const ScaleAt at = phrase_scale_at_row(ph, row, p.scaleKey);
+    return {&scale_at(p, at.slot), at.key};
+}
+
 /** How many degrees this scale has, 1..12 — the SCALE screen's LEN, and the guard against turning
  *  off the last one. */
 inline int scale_degree_count(const Scale& s) {

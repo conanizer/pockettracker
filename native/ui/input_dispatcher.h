@@ -57,6 +57,7 @@
 #include "ui/modules/settings_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
+#include "ui/phrase_fill.h"
 #include "ui/project_actions.h"
 
 #include <functional>
@@ -227,6 +228,12 @@ class InputDispatcher {
     void on_l_r();
     /** L+B+A: deep-clone the chain/phrase under the cursor into free slots. */
     void on_l_b_a();
+    /** L + a direction: fill rows from the selection's top row, or from the cell under the cursor
+     *  (PHRASE). LEFT/RIGHT walk the spacings, UP rolls random values, DOWN scatters. */
+    void on_l_up();
+    void on_l_down();
+    void on_l_left();
+    void on_l_right();
 
     // ── SELECT + … : the file browser's verbs ────────────────────────────────────────────────────
     // Browser-only chords, each opening the keyboard or a confirm.
@@ -584,6 +591,23 @@ class InputDispatcher {
     /** The A still held is the one that inserted the PHRASE note under the cursor — so an A+B now is
      *  a chord on what was an EMPTY cell. Cleared by A's release and by any edit of the note. */
     bool         insertHeld_ = false;
+
+    /**
+     * L + direction on PHRASE, three layers: the phrase before the first press (`base` — the undo),
+     * the stop or scatter laid over it (`placed`), and that with any random roll (`shown`).
+     * ⚠️ Good only while the phrase still holds `shown` over the same range: any other edit, or a
+     * move, makes what is on screen the new `base`.
+     */
+    struct FillMemory {
+        bool             live     = false;
+        int              phraseId = -1;
+        FillRange        range{};
+        songcore::Phrase base{}, placed{}, shown{};
+        int              stop = 0;   // index into fill_stops(base, range)
+    };
+    FillMemory    fill_{};
+    songcore::Rng fillRng_{};
+    void phrase_fill(Gesture g);
 
     /** A,A only counts if the cursor did not move between the presses: where the first A landed. */
     bool         hasInsertPos_ = false;

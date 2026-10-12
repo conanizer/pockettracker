@@ -178,6 +178,13 @@ void InputDispatcher::on_r_right() {
 // ─── L+B / L+A: the selection and the clipboard — only the four grid screens answer them ─────────
 
 void InputDispatcher::on_l_b() { route(Gesture::L_B); }
+
+// ─── L + D-pad: fill rows — PHRASE answers it ────────────────────────────────────────────────────
+
+void InputDispatcher::on_l_up()    { route(Gesture::L_UP); }
+void InputDispatcher::on_l_down()  { route(Gesture::L_DOWN); }
+void InputDispatcher::on_l_left()  { route(Gesture::L_LEFT); }
+void InputDispatcher::on_l_right() { route(Gesture::L_RIGHT); }
 void InputDispatcher::on_l_a() { route(Gesture::L_A); }
 
 // ─── R+A / R+B: MUTE and SOLO ────────────────────────────────────────────────────────────────────

@@ -191,6 +191,13 @@ GestureResult InputDispatcher::phrase_screen(Gesture g) {
             phrase_clone();
             return GestureResult::PASS;   // the body ends the selection
 
+        case Gesture::L_UP:
+        case Gesture::L_DOWN:
+        case Gesture::L_LEFT:
+        case Gesture::L_RIGHT:
+            phrase_fill(g);
+            return GestureResult::TAKEN;
+
         // Only stops what it can start: a held-A preview, when the setting is on.
         case Gesture::STOP_PREVIEW:
             if (s_.settings.notePreviewEnabled) host_.stop_preview();
@@ -430,6 +437,48 @@ void InputDispatcher::phrase_insert() {
         insertHeld_ = true;
     }
     preview_held_note();
+}
+
+void InputDispatcher::phrase_fill(Gesture g) {
+    FillRange range;
+    if (s_.selection.active) {
+        const SelectionBounds b = s_.selection.bounds();
+        range = {b.topLeftRow, b.bottomRightRow, std::max(1, b.topLeftColumn), b.bottomRightColumn,
+                 /*wholeUnit=*/false};
+    } else {
+        if (s_.cursorColumn < 1) return;   // the row number is not a cell
+        range = {s_.cursorRow, 15, s_.cursorColumn, s_.cursorColumn, /*wholeUnit=*/true};
+    }
+
+    Project&          p  = host_.edit_project();
+    songcore::Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
+    if (!fill_.live || fill_.phraseId != s_.currentPhrase || !(fill_.range == range) ||
+        !fill_same_steps(fill_.shown, ph))
+        fill_ = FillMemory{true, s_.currentPhrase, range, ph, ph, ph, 0};
+
+    switch (g) {
+        case Gesture::L_LEFT:
+        case Gesture::L_RIGHT: {
+            const std::vector<int> stops = fill_stops(fill_.base, range);
+            const int              count = static_cast<int>(stops.size());
+            fill_.stop   = (fill_.stop + (g == Gesture::L_RIGHT ? 1 : count - 1)) % count;
+            fill_.placed = fill_at_stop(fill_.base, range, stops[static_cast<size_t>(fill_.stop)], p);
+            fill_.shown  = fill_.placed;
+            break;
+        }
+        case Gesture::L_DOWN:
+            fill_.stop   = 0;   // a scatter is on no stop: the next walk starts from "as it was"
+            fill_.placed = fill_scatter(fill_.base, range, fillRng_);
+            fill_.shown  = fill_.placed;
+            break;
+        default:
+            fill_.shown = fill_randomize(fill_.placed, range, p, fillRng_);
+            break;
+    }
+
+    if (fill_same_steps(fill_.shown, ph)) return;
+    ph.steps = fill_.shown.steps;
+    mark_modified();
 }
 
 bool InputDispatcher::phrase_put_note_off() {

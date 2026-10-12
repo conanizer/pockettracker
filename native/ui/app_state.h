@@ -399,6 +399,8 @@ struct AppState {
     std::string skinText{};
     std::string overlayText = "OFF";
     std::string audioOutText = "SYSTEM";   // the output playing now (SETTINGS > AUDIO OUT)
+    /** The running build's version, drawn on SETTINGS. Empty where no shell set it (the tools). */
+    std::string appVersion{};
 
     /** USED RAM: sample + SoundFont PCM the engine is holding. Drawn on PROJECT and INST.POOL. */
     int64_t sampleRamBytes = 0;

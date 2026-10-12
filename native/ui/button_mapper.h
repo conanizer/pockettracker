@@ -210,7 +210,17 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
             // LIVE mode's row queue on SONG; reserved elsewhere (the handler's own gate returns). START
             // must not toggle playback here either way.
             case Button::START: d.on_l_start(); return;
-            default: break;                           // L+DPAD is reserved
+            default: break;
+        }
+        // L + a direction fills rows — L alone, so a clipboard chord still held cannot fire it.
+        if (!m.a && !m.b && !m.select) {
+            switch (e.button) {
+                case Button::DPAD_UP:    d.on_l_up();    return;
+                case Button::DPAD_DOWN:  d.on_l_down();  return;
+                case Button::DPAD_LEFT:  d.on_l_left();  return;
+                case Button::DPAD_RIGHT: d.on_l_right(); return;
+                default: break;
+            }
         }
     }
 

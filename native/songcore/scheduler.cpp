@@ -754,6 +754,7 @@ bool Sequencer::begin_phrase(int phraseId, int64_t startFrame, int trackId, int 
     w.anyGrooveActive = false;
     w.frameOffset     = 0;
     w.rowsScheduled   = 0;
+    w.pass            = static_cast<int>(++trackState.phrasePasses[static_cast<size_t>(w.phraseId)]);
 
     // ─── The ramps this phrase declares (AUS/AUF — automation.h) ─────────────────────────────
     //
@@ -791,9 +792,13 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
     schedulingTrack_ = clampi(trackId, 0, 7);
     const Phrase& phrase = project.phrases[w.phraseId];
 
+    static const PhraseStep emptyStep{};
     for (; w.row < 16; ++w.row) {
         const int stepIndex = w.row;
-        const PhraseStep& step = phrase.steps[stepIndex];
+        // A row its NTH holds back this pass is walked as an empty one: it takes its time, and its
+        // note, its commands, its GRV and its HOP are not there.
+        const PhraseStep& step = step_plays_on_pass(phrase.steps[stepIndex], w.pass)
+                               ? phrase.steps[stepIndex] : emptyStep;
 
         // Pre-scan GRV so a new groove takes effect on its own step; the last GRV wins.
         for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {
@@ -987,6 +992,10 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
     bool hasNote = step_has_note(step);
     skipNote = false;
     PhraseStep effectiveStep = step;
+    // NTH has done its work in the walk. Taken out here so CHA and RNL look past it to the cell
+    // they would reach without it.
+    for (int slot = 1; slot <= 3; ++slot)
+        if (step_fx_type(effectiveStep, slot) == FX_NTH) step_set_fx(effectiveStep, slot, FX_NONE, 0x00);
     // CHA XY: X is the chance of the nearest filled FX column on the LEFT (or the note, if none),
     // Y of the one on the RIGHT (nothing, if none); 0 never, F always (a roll is 0-14). A CHA an
     // earlier one cleared gates nothing.
@@ -1518,7 +1527,8 @@ void Sequencer::schedule_arpeggio_notes(StepPlay& s) {
 void Sequencer::remember_column_fx(StepPlay& s) {
     for (int col = 1; col <= 3; ++col) {
         int fxType = step_fx_type(s.step, col);
-        if (fxType != FX_NONE && fxType != FX_RND && fxType != FX_RNL && fxType != FX_CHA) {
+        if (fxType != FX_NONE && fxType != FX_RND && fxType != FX_RNL && fxType != FX_CHA &&
+            fxType != FX_NTH) {
             s.ts.lastColFxType[col] = fxType;
             s.ts.lastColFxValue[col] = step_fx_value(s.step, col);
         }

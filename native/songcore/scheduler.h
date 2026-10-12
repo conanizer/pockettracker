@@ -17,6 +17,7 @@
 // (rng.h).
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -169,6 +170,7 @@ struct PhraseWalk {
     bool    anyGrooveActive = false;
     int64_t frameOffset = 0;      // frames scheduled so far, from `startFrame`
     int     rowsScheduled = 0;
+    int     pass = 1;             // which entry of this phrase on this track this is (NTH), from 1
     // The ramps the phrase declares, paired when it began (automation.h), and where each has got to.
     std::vector<RampSpec>      ramps;
     std::vector<RampLastValue> rampLast;
@@ -209,6 +211,10 @@ struct TrackState {
      * chain steps over a phrase); any row that plays resets it.
      */
     int   emptyHops = 0;
+
+    // How many times this track has entered each phrase since playback started — what NTH counts.
+    // In here so a LIVE rewind takes the count back with the phrases it un-plays.
+    std::array<uint32_t, 256> phrasePasses{};
 
     bool  pitchBendActive = false;
     bool  vibratoActive = false;

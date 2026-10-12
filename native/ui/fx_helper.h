@@ -51,7 +51,7 @@ inline constexpr int FX_SEQUENCE_CODES[] = {
     // a thing done to the note. First, because that is where it is reached for.
     songcore::FX_KILL,
     songcore::FX_HOP, songcore::FX_THO, songcore::FX_TBL, songcore::FX_TIC,
-    songcore::FX_GRV, songcore::FX_LAT, songcore::FX_CHA, songcore::FX_RND, songcore::FX_RNL,
+    songcore::FX_GRV, songcore::FX_LAT, songcore::FX_CHA, songcore::FX_NTH, songcore::FX_RND, songcore::FX_RNL,
     songcore::FX_INS,   // beside RND/RNL, which it is made to be driven by
     songcore::FX_ARC, songcore::FX_ARPEGGIO,
     // The TRACK scale. Its global twin is in GLOBAL, where it moves all eight tracks at once.
@@ -382,13 +382,15 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 43 INS */ {"INS: Instrument for this note", "xx=instrument (00-7F)", "RNL beside or RND below it", "picks a random instrument"},
         /* 44 TIM */ {"TIM: Delay echo time", "xx=time (00-FF = 0-2 sec)", "repeats bend as the time moves",
                       "holds till next TIM or stop"},
-        /* 45 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
-        /* 46 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 47 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
-        /* 48 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 49 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 50 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 51 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 45 NTH */ {"NTH: Row for some passes only", "plays on pass x of every y", "y=0: on pass x, then never",
+                      "does nothing in a table"},
+        /* 46 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
+        /* 47 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 48 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        /* 49 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 50 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 51 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 52 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

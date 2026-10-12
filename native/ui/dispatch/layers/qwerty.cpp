@@ -18,9 +18,11 @@ GestureResult InputDispatcher::qwerty_layer(Gesture g) {
         case Gesture::DPAD_LEFT:  move_key_cursor_left(k);  break;
         case Gesture::DPAD_RIGHT: move_key_cursor_right(k); break;
 
-        // A types the key under the cursor — except on the action row: ABORT (col 0) and APPLY (col 1).
+        // A types the key under the cursor — except on the layout key, and on the action row: ABORT
+        // (col 0) and APPLY (col 1).
         case Gesture::A:
-            if (!k.is_on_action_row())   insert_current_key(k);
+            if (k.is_on_layout_key())         k.layout = 1 - k.layout;
+            else if (!k.is_on_action_row())   insert_current_key(k);
             else if (k.keyCursorCol == 0) qwerty_cancel();
             else                          qwerty_apply();
             break;

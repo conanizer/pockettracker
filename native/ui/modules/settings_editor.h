@@ -173,6 +173,7 @@ struct SettingsState {
     std::string skinText{};
     std::string overlayText = "OFF";
     std::string audioOutText = "SYSTEM";
+    std::string appVersion{};
     std::string themeName   = "CLASSIC";
 
     PlatformCaps caps{};

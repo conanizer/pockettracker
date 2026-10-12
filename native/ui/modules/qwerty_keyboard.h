@@ -5,10 +5,10 @@
 // A modal on-screen keyboard: how every piece of TEXT in the app is typed on a device with eight
 // buttons. An OVERLAY drawn over whatever is behind it, owning every button while open.
 //
-//   DPAD          move the key cursor (3 key rows, then SPACE, then the ABORT/APPLY row)
-//   A             type the key under the cursor — or, on the action row, cancel / confirm
+//   DPAD          move the key cursor (3 key rows, then SPACE and the layout key, then ABORT/APPLY)
+//   A             type the key under the cursor — or switch layout, or cancel / confirm
 //   B             delete (backspace or forward-delete, per the INSERT MODE setting)
-//   R+DOWN / UP   switch layout: letters ↔ numbers+symbols
+//   R+DOWN / UP   switch layout: letters ↔ numbers+symbols — the layout key, as a chord
 //   R+LEFT/RIGHT  move the TEXT cursor (not the key cursor)
 //   SELECT        cancel      — the ABORT button, as a chord
 //   START         apply       — the APPLY button, as a chord
@@ -42,8 +42,12 @@ enum class QwertyContext {
 /** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */
 const std::vector<std::vector<char>>& qwerty_rows(int layout);
 
-/** "ABC" / "123" — the layout indicator the box draws. */
+/** "ABC" / "123" — a layout's name. The layout key shows the one it switches TO. */
 inline const char* qwerty_layout_label(int layout) { return layout == 0 ? "ABC" : "123"; }
+
+/** The SPACE row holds two keys: SPACE under key columns 0-7, the layout key under 8-9. */
+inline constexpr int QWERTY_SPACE_ROW_COLS = 2;
+inline constexpr int QWERTY_SPACE_KEY_COLS = 8;
 
 /** The virtual action row has exactly two buttons: col 0 = ABORT, col 1 = APPLY. */
 inline constexpr int QWERTY_ACTION_COLS = 2;
@@ -80,6 +84,8 @@ struct QwertyKeyboardState {
     /** One past the last key row — the virtual ABORT/APPLY row, which has no characters on it. */
     int action_row_index() const { return static_cast<int>(qwerty_rows(layout).size()); }
     bool is_on_action_row() const { return keyCursorRow == action_row_index(); }
+    int  space_row_index() const { return action_row_index() - 1; }
+    bool is_on_layout_key() const { return keyCursorRow == space_row_index() && keyCursorCol == 1; }
     int  total_rows() const { return action_row_index() + 1; }
     int  current_row_cols() const;
 
@@ -99,7 +105,7 @@ void move_key_cursor_down(QwertyKeyboardState& s);  // wraps the action row → 
 void move_key_cursor_left(QwertyKeyboardState& s);  // wraps within the row
 void move_key_cursor_right(QwertyKeyboardState& s);
 
-/** Type the key under the cursor. A no-op on the action row and at `maxLength`. */
+/** Type the key under the cursor. A no-op on the action row, the layout key and at `maxLength`. */
 void insert_current_key(QwertyKeyboardState& s);
 
 /** Backspace or forward-delete, per `insertBefore` — or clear the field, per `clearOnFirstB`. */

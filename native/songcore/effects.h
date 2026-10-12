@@ -166,6 +166,28 @@ constexpr int FX_INS      = 0x3C;  // INS  play this note on instrument xx
 constexpr int FX_TIM      = 0x3D;  // TIM  delay echo time, free scale (00-FF = 0-2 s), global
 
 /** The instrument an INS cell on this step names, or -1. Rightmost wins, as in the scheduler. */
+// ─── A row for some passes only ───────────────────────────────────────────────────────────────────
+// NTH xy: the row plays on pass x of every y passes of its phrase, and is an empty row on the others.
+// y = 0: on pass x and never again. 00 holds nothing back. A pass is one entry of the phrase on its
+// track, counted from 1 since playback started.
+constexpr int FX_NTH      = 0x3E;
+
+inline constexpr bool nth_plays(int value, int pass) {
+    const int x = (value >> 4) & 0x0F, y = value & 0x0F;
+    if (x == 0 && y == 0) return true;
+    if (y == 0) return pass == x;
+    return (pass - 1) % y + 1 == x;
+}
+/** True when no pass can hold the row back: `00`, or one of every one. */
+inline constexpr bool nth_always(int value) { return (value & 0xFF) == 0x00 || (value & 0xFF) == 0x11; }
+
+/** Every NTH on the row must agree. */
+inline bool step_plays_on_pass(const PhraseStep& s, int pass) {
+    for (int slot = 1; slot <= 3; ++slot)
+        if (step_fx_type(s, slot) == FX_NTH && !nth_plays(step_fx_value(s, slot), pass)) return false;
+    return true;
+}
+
 inline int step_ins_instrument(const PhraseStep& s) {
     if (s.fx3Type == FX_INS) return s.fx3Value & 0xFF;
     if (s.fx2Type == FX_INS) return s.fx2Value & 0xFF;
@@ -194,7 +216,7 @@ inline std::string effect_name(int code) {
         case FX_LPF: return "LPF"; case FX_HPF: return "HPF"; case FX_BPF: return "BPF";
         case FX_DRV: return "DRV"; case FX_CRU: return "CRU";
         case FX_FIN: return "FIN"; case FX_TSX: return "TSX"; case FX_LPO: return "LPO";
-        case FX_INS: return "INS"; case FX_TIM: return "TIM";
+        case FX_INS: return "INS"; case FX_TIM: return "TIM"; case FX_NTH: return "NTH";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
@@ -241,9 +263,10 @@ inline constexpr int EFFECT_TYPES[] = {
     FX_DRV, FX_CRU,
     FX_FIN,
     FX_TSX,
-    // INS and TIM sit above LPO because the tail is what a release build trims.
+    // INS, TIM and NTH sit above LPO because the tail is what a release build trims.
     FX_INS,
     FX_TIM,
+    FX_NTH,
     FX_LPO,
     // The MIDI commands — must stay the LAST six (asserted below)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
@@ -284,6 +307,35 @@ inline int effect_type_index(int code) {
 /** EFFECT_TYPES[i], or FX_NONE when out of range. */
 inline int effect_type_at(int index) {
     return (index >= 0 && index < EFFECT_TYPE_COUNT) ? EFFECT_TYPES[index] : FX_NONE;
+}
+
+// ─── Where a phrase is certain to end ─────────────────────────────────────────────────────────────
+// The first row carrying a HOP that fires on every pass, or -1. An NTH on the row holds the HOP back
+// with it, and a CHA beside the HOP gates it (the nearest filled slot either side, as the scheduler
+// rolls it, which looks past an NTH), so only an always-pass nibble (F) leaves it certain.
+// ⚠️ A hint for the editor: the phrase before can still HOP in below this row.
+inline int phrase_certain_hop_row(const Phrase& phrase) {
+    const auto unused = [](int type) { return type == FX_NONE || type == FX_NTH; };
+    for (int row = 0; row < static_cast<int>(phrase.steps.size()); ++row) {
+        const PhraseStep& step = phrase.steps[static_cast<size_t>(row)];
+        bool everyPass = true;
+        for (int slot = 1; slot <= 3; ++slot)
+            if (step_fx_type(step, slot) == FX_NTH && !nth_always(step_fx_value(step, slot))) everyPass = false;
+        if (!everyPass) continue;
+        for (int slot = 1; slot <= 3; ++slot) {
+            if (step_fx_type(step, slot) != FX_HOP) continue;
+            int left = slot - 1, right = slot + 1;
+            while (left >= 1 && unused(step_fx_type(step, left))) --left;
+            while (right <= 3 && unused(step_fx_type(step, right))) ++right;
+            // The CHA to the right gates leftwards with its high nibble, the one to the left with its low.
+            const bool gatedFromRight = right <= 3 && step_fx_type(step, right) == FX_CHA &&
+                                        ((step_fx_value(step, right) >> 4) & 0x0F) != 0x0F;
+            const bool gatedFromLeft  = left >= 1 && step_fx_type(step, left) == FX_CHA &&
+                                        (step_fx_value(step, left) & 0x0F) != 0x0F;
+            if (!gatedFromRight && !gatedFromLeft) return row;
+        }
+    }
+    return -1;
 }
 
 // ─── Resolved bundle ──────────────────────────────────────────────────────────────────────────────

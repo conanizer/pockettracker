@@ -1521,6 +1521,7 @@ int run(const AppConfig& cfg) {
 
     // The UI edits the host's live project in place. The boot screen is AppState's own default.
     ui::AppState state;
+    state.appVersion = PT_VERSION_STRING;
     state.project = &host.edit_project();
 
     // Which SETTINGS rows exist, and whether PROJECT has an EXIT — a value, not an #ifdef

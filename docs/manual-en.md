@@ -567,7 +567,45 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 | A + B | Delete value at cursor |
 | A + B on an empty note | Insert **OFF** — the note sounding on the track is let go |
 | B + LEFT/RIGHT | Switch to previous / next phrase |
+| L + D-pad | Fill rows from the cell under the cursor — see *Fill* below |
 | START | Play current phrase (loops) |
+
+### Fill
+
+Hold **L** and press a direction to fill rows from one cell, without
+typing each row.
+
+| Input | Action |
+|---|---|
+| L + RIGHT / LEFT | Repeat the top row on every 8th, 6th, 4th, 3rd, 2nd row, then on every row |
+| L + UP | Give every value in the range a new random one |
+| L + DOWN | Put the top row on random rows of the range |
+
+**What is filled.** With no selection: the cell under the cursor, from its row down to the end of the
+phrase. A note takes its volume and instrument with it, and a command its value. In a selection: the
+selected columns, from the selection's top row down to its last.
+
+**L + RIGHT** steps along this line and **L + LEFT** steps back; both wrap round:
+
+`as it was` → `8` → `6` → `4` → `3` → `2` → `every row` → `ramp`
+
+Rows the fill does not land on are left as they were. A spacing too wide for the range is skipped.
+
+**Ramp** is offered in a selection whose first and last rows hold different values in the same column.
+The rows between are stepped evenly from one to the other — volume `10` on the first row and `50` on
+the fifth gives `20`, `30`, `40` between. Notes ramp in the row's scale. An FX value ramps when both
+ends hold the same command; a row that holds a different command there is left alone.
+
+**L + UP** rolls again on every press. Each column draws between the lowest and highest value it
+holds in the range. When they are all the same, notes are drawn from the octave above, and volumes and
+FX values from their whole range. Notes stay in the row's scale; FX commands are never changed.
+
+**Undo.** `as it was` puts back the phrase from before the first press. It is kept until you move the
+cursor or edit something else.
+
+> [!TIP]
+> Put a kick on the first row and press **L + RIGHT** three times for a kick on every 4th row. For a
+> melody, type one note, fill every 2nd row, then press **L + UP** until you like it.
 
 ### FX columns
 
@@ -1647,6 +1685,27 @@ happens at all — on that step and for the whole of the fade.
 
 It works on a **table row** too, rolled each time the row plays; there, with nothing filled to its
 left, `X` gates the row's N and V columns.
+
+---
+
+### NTH `XY` — Nth Pass
+
+The row plays on pass `X` of every `Y` passes of its phrase. On the other passes it is an empty row:
+the note and every effect on it are skipped, and the row still takes its time.
+
+- `Y` = `0`: the row plays on pass `X` and never again
+- `NTH 00` holds nothing back
+
+```
+    00    C-4 00  ---                ← every pass
+    04    E-4 00  NTH 12             ← passes 1, 3, 5 …
+    08    G-4 00  NTH 22             ← passes 2, 4, 6 …
+    0A    A-4 00  NTH 30             ← the third pass only
+    0C    --- --  HOP 00  NTH 44     ← every fourth pass the phrase ends here
+```
+
+A pass is one time the track starts the phrase, counted on each track from the moment playback
+starts — so starting from the middle of a song counts from 1 again. `NTH` does nothing in a table.
 
 ---
 
@@ -2732,6 +2791,7 @@ exports and sample-editor saves keep their own folders.
 | A + B *(in selection)* | Delete selection (no clipboard), exit |
 | A + LEFT / RIGHT *(in selection)* | Increment / decrement all selected values |
 | L + B + A | Deep-clone the chain / phrase under the cursor |
+| L + D-pad | Fill rows from one cell (PHRASE) |
 | L + R *(in selection)* | Leave selection mode; the copy buffer survives |
 | L + R *(outside selection)* | Clear the copy buffer |
 
@@ -2923,6 +2983,7 @@ Open with **A** on an EQ cell.
 | ARP | Arpeggio | `XY` = intervals | Persists — cancel with `ARP 00` |
 | ARC | Arpeggio Config | `XY` | High nibble=mode (0=UP 1=DN 2=PP 3=RND), low=speed |
 | CHA | Chance | `XY` | X = chance of the nearest filled FX to its left (or the note), Y = to its right (0=never F=always) |
+| NTH | Nth Pass | `XY` | The row plays on pass X of every Y passes of its phrase (Y=0: on pass X only). Phrase only |
 | LAT | Latency | `XX` ticks | Delays row trigger |
 | GRV | Groove | `XX` | Assigns groove to this track |
 | HOP | Hop/Jump | `XY` | Phrase: next phrase starts at row Y (FF=stop track). Table: jump to row Y, X times (0=forever) |

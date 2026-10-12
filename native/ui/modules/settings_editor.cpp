@@ -39,6 +39,12 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const int val2X  = x + VAL2_X;
 
     c.draw_text("SETTINGS", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    // The running build, right-aligned on the title line — what a bug report is asked for.
+    if (!s.appVersion.empty()) {
+        const std::string version = "V" + s.appVersion;
+        c.draw_text(version, x + WIDTH - NAME_X - Canvas::text_width(version, CHAR_SPACING, FONT_SCALE),
+                    y + TEXT_PADDING, t.textEmpty, CHAR_SPACING, FONT_SCALE);
+    }
 
     const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
 
