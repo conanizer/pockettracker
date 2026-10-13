@@ -2,6 +2,7 @@
  *  DelayLine Processor Base Class
  *
  *  Copyright (C) 2006-2018 Teru Kamogashira
+ *  Modified for PocketTracker, 2026-10: a modulated read takes its whole part by truncation.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -52,7 +53,7 @@ class _FV3_(delayline)
 
   inline _fv3_float_t at(_fv3_float_t rindex, _fv3_float_t& ap_save)
   {
-    _fv3_float_t floor_mod = std::floor(rindex); // >= 0
+    _fv3_float_t floor_mod = (_fv3_float_t)(long)(rindex); // >= 0, so this is floor() with no library call
     _fv3_float_t frac = rindex - floor_mod; // >= 0
     
     long readidx_a = baseidx + (long)floor_mod;

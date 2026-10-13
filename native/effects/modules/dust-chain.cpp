@@ -226,6 +226,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         for (int sample = 0; sample < n; ++sample)
         {
             float  inputSample[2] = { 0.0f, 0.0f };
+            double inAbsDb[2]     = { 0.0,  0.0  };   // the input's level, taken once for both uses below
             double grDb[2]        = { 0.0,  0.0  };
 
             // Per-channel: envelope detection → gain computation → inertia.
@@ -235,7 +236,8 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
 
                 inputSample[ch] = buf[sample * channelCount + ch];
 
-                double inDb = gainToDb((double)std::fabs(inputSample[ch]));
+                inAbsDb[ch] = gainToDb((double)std::fabs(inputSample[ch]));
+                double inDb = inAbsDb[ch];
                 if (std::isnan(inDb)) inDb = -200.0;
                 inDb = std::clamp(inDb, -200.0, 4.0);
 
@@ -276,8 +278,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
             // Apply GR + tanh soft-clip (ceiling = 1.0 → straight tanh).
             float preMakeup[2] = { 0.0f, 0.0f };
             for (int ch = 0; ch < ncp; ++ch) {
-                const double inAbsDb = gainToDb((double)std::fabs(inputSample[ch]));
-                const double outDb   = inAbsDb - grDb[ch];
+                const double outDb   = inAbsDb[ch] - grDb[ch];
                 float outLin = (float)dbToGain(outDb);
                 if (inputSample[ch] < 0.0f) outLin = -outLin;
                 outLin = std::tanh(outLin);

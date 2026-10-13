@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #include "../../modules/reverb-presets.h"
@@ -31,6 +32,20 @@ constexpr int kBlock = 256;
 struct Cells {
     int decay = -1, size = -1, damp = -1, mod = -1;
 };
+
+/**
+ * Copy, with any sample that is not a finite number replaced by silence. Freeverb is built without
+ * its own guards (DISABLE_UNDENORMAL), and a NaN let into a feedback line stays until the next clear.
+ * ⚠️ By the bits, not `std::isfinite`: under -ffast-math the compiler may fold that test to "true".
+ */
+void copy_finite(float* dst, const float* src, int n) {
+    for (int i = 0; i < n; i++) {
+        uint32_t bits;
+        std::memcpy(&bits, src + i, sizeof bits);
+        if ((bits & 0x7f800000u) == 0x7f800000u) bits = 0;
+        std::memcpy(dst + i, &bits, sizeof bits);
+    }
+}
 
 // ─── The cell → Dragonfly-unit mappings every engine shares ─────────────────────────────────────
 
@@ -416,8 +431,8 @@ void DragonflyReverb::process(int algo, bool switched, const float* inL, const f
     const float trim = kTrim[algo];
     for (int done = 0; done < numFrames;) {
         const int n = std::min(kBlock, numFrames - done);
-        std::memcpy(m.inL, inL + done, sizeof(float) * n);
-        std::memcpy(m.inR, inR + done, sizeof(float) * n);
+        copy_finite(m.inL, inL + done, n);
+        copy_finite(m.inR, inR + done, n);
         e.run(m.inL, m.inR, outL + done, outR + done, n);
         for (int i = 0; i < n; i++) {
             outL[done + i] *= trim;

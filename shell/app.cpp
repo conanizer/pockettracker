@@ -1327,19 +1327,25 @@ void FrameLoop::draw_frame(Uint64 now) {
  * Once a second on the console. The frame counter shows the audio device is calling back, the playhead
  * that the sequencer advances, voices that notes reach the engine — whichever is stuck at zero names
  * the broken link on a box with no screen. Track 0, which a PHRASE or CHAIN audition plays.
+ *
+ * `cpu` and `max` are the last second's audio work as a share of real time, mean and worst block;
+ * `late` counts every block since launch that overran — each one is a dropout the user heard.
  */
 void FrameLoop::print_status(Uint64 now) {
     if (!cfg.console || now - lastStatus < 1000) return;
 
     lastStatus = now;
     const ui::TrackPlayhead& t0 = state.playheads[0];
+    const AudioEngine::BlockTiming bt = engineRef.getBlockTiming();
     std::printf(
         "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d"
-        "   drew %lld skip %lld same %lld poll %lld\n",
+        "   drew %lld skip %lld same %lld poll %lld   cpu %d.%d%% max %d.%d%% late %lld\n",
         host.is_playing() ? "play" : "stop",
         static_cast<long long>(engineRef.getCurrentFrame()), t0.songRow, t0.chainRow,
         t0.step, engineRef.getActiveVoiceCount(), ui::screen_label(state.currentScreen),
-        state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented, polls);
+        state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented, polls,
+        bt.meanLoad / 10, bt.meanLoad % 10, bt.worstLoad / 10, bt.worstLoad % 10,
+        static_cast<long long>(bt.lateBlocks));
     std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
 }
 

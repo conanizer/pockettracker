@@ -1715,9 +1715,11 @@ void AudioEngine::recordBlockTiming(std::chrono::steady_clock::time_point start,
     const auto load = [sampleRate](int64_t busyNs, int64_t frames) {
         return (int)std::min<double>(busyNs * (double)sampleRate / (frames * 1e6), 1e6);
     };
+    const int blockLoad = load(ns, numFrames);
     timingBusyNs += ns;
     timingFrames += numFrames;
-    timingWorst   = std::max(timingWorst, load(ns, numFrames));
+    timingWorst   = std::max(timingWorst, blockLoad);
+    if (blockLoad >= 1000) timingLateBlocks.fetch_add(1, std::memory_order_relaxed);
     if (timingFrames < (int64_t)sampleRate) return;
 
     timingPubFrames.store(numFrames, std::memory_order_relaxed);
@@ -1735,5 +1737,6 @@ AudioEngine::BlockTiming AudioEngine::getBlockTiming() const {
     t.sampleRate  = timingPubRate.load(std::memory_order_relaxed);
     t.meanLoad    = timingPubMean.load(std::memory_order_relaxed);
     t.worstLoad   = timingPubWorst.load(std::memory_order_relaxed);
+    t.lateBlocks  = timingLateBlocks.load(std::memory_order_relaxed);
     return t;
 }

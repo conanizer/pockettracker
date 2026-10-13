@@ -20,12 +20,33 @@
 //   q       — bandwidth/Q, 0.1–10.0
 // ===========================================================================
 
+// One sample through a shelf/bell band. `sp_pareq_compute` derives the coefficients on the first
+// sample after fc, v or q change (`derive`); from then on the same biquad runs here, with no call
+// out of the mix loop per sample per band.
+inline float pareq_tick(sp_data& sp, sp_pareq& p, bool& derive, float in) {
+    if (derive) {
+        derive = false;
+        SPFLOAT out;
+        sp_pareq_compute(&sp, &p, &in, &out);
+        return out;
+    }
+    const float yn = p.b0 * in + p.b1 * p.xnm1 + p.b2 * p.xnm2 - p.a1 * p.ynm1 - p.a2 * p.ynm2;
+    p.xnm2 = p.xnm1;
+    p.xnm1 = in;
+    p.ynm2 = p.ynm1;
+    p.ynm1 = yn;
+    return yn;
+}
+
 // One EQ band: sp_pareq for shelf/bell, DaisySP SVF for HP/LP.
 // SVF is double-sampled so it stays stable near Nyquist.
 // Q → SVF resonance: damp = 1/Q in SVF terms, res = 1 − 1/(2Q), clamped to [0, 1).
 struct EqBandModule {
     sp_pareq pL, pR;
     sp_data  sp;
+    // Each side's coefficients are owed. Set wherever fc, v or q are written — `reset` and
+    // `setParams`, the only two places — and one per side, since a mono voice never runs pR.
+    bool deriveL = true, deriveR = true;
     bool bypass   = true;
     bool useHpLp  = false;  // true for type 2 (lowcut) and 5 (hicut)
     int  hpLpType = 0;      // 2=HP 5=LP, used in processMono/processStereo
@@ -35,6 +56,7 @@ struct EqBandModule {
         sp.sr = sr;
         sp_pareq_init(&sp, &pL);
         sp_pareq_init(&sp, &pR);
+        deriveL = deriveR = true;
         svfL.Init(sr);
         svfR.Init(sr);
         bypass = true; useHpLp = false; hpLpType = 0;
@@ -63,6 +85,7 @@ struct EqBandModule {
             pL.prv_fc = pL.prv_v = pL.prv_q = -1.0f;
             pR.fc = freqHz; pR.v = v; pR.q = q; pR.mode = mode;
             pR.prv_fc = pR.prv_v = pR.prv_q = -1.0f;
+            deriveL = deriveR = true;
         }
     }
 
@@ -72,9 +95,7 @@ struct EqBandModule {
             svfL.Process(in);
             return (hpLpType == 2) ? svfL.High() : svfL.Low();
         }
-        SPFLOAT out, s = in;
-        sp_pareq_compute(&sp, &pL, &s, &out);
-        return out;
+        return pareq_tick(sp, pL, deriveL, in);
     }
 
     inline void processStereo(float& L, float& R) {
@@ -86,10 +107,8 @@ struct EqBandModule {
             else               { L = svfL.Low();  R = svfR.Low();  }
             return;
         }
-        SPFLOAT outL, outR, sL = L, sR = R;
-        sp_pareq_compute(&sp, &pL, &sL, &outL);
-        sp_pareq_compute(&sp, &pR, &sR, &outR);
-        L = outL; R = outR;
+        L = pareq_tick(sp, pL, deriveL, L);
+        R = pareq_tick(sp, pR, deriveR, R);
     }
 };
 

@@ -365,11 +365,17 @@ endif()
 # freeverb3 is compiled for float samples, and names its own headers from the dragonfly/ root
 # (`#include "freeverb/utils.hpp"`, `#include "fv3_config.h"`). Both are scoped to those files, so
 # neither the define nor the extra root reaches the rest of the engine or anything that links it.
+#
+# ⚠️ DISABLE_UNDENORMAL compiles out freeverb's own per-filter denormal test (two float compares after
+# every filter, ~60 a sample in HALL). The engine's protection is flush-to-zero, armed on every thread
+# that runs DSP (`setFlushToZeroForCurrentThread`), so a host that runs these files on a thread of its
+# own must arm it too. That test also zeroed a NaN as a side effect: `DragonflyReverb::process` now
+# keeps one out at the door instead.
 file(GLOB PT_DRAGONFLY_SOURCES CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly/freeverb/*.cpp)
 set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES
-        COMPILE_DEFINITIONS LIBFV3_FLOAT
+        COMPILE_DEFINITIONS "LIBFV3_FLOAT;DISABLE_UNDENORMAL"
         INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/effects/primitives/dragonfly)
 set_source_files_properties(${PT_DRAGONFLY_SOURCES} PROPERTIES COMPILE_OPTIONS
         $<IF:$<BOOL:${MSVC}>,/W0,-w>)   # vendored

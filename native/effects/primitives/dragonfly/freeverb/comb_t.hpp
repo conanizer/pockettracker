@@ -2,6 +2,7 @@
  *  Comb (delay) filter with LPF
  *
  *  Copyright (C) 2000 Jezar at Dreampoint
+ *  Modified for PocketTracker, 2026-10: a modulated read takes its whole part by truncation.
  *  Copyright (C) 2006-2018 Teru Kamogashira
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -139,7 +140,7 @@ public:
   {
     if(bufsize == 0) return input;
     modulation = (modulation + 1.) * modulationsize_f;
-    _fv3_float_t floor_mod = std::floor(modulation); // >= 0
+    _fv3_float_t floor_mod = (_fv3_float_t)(long)(modulation); // >= 0, so this is floor() with no library call
     _fv3_float_t m_frac = 1. - (modulation - floor_mod); // >= 0
     
     long readidx_a = readidx - (long)floor_mod; if(readidx_a < 0) readidx_a += bufsize;

@@ -2,6 +2,7 @@
  *  Many Types of 1st order Filters
  *
  *  Copyright (C) 2006-2018 Teru Kamogashira
+ *  Modified for PocketTracker, 2026-10: noisegen_pink_frac builds its table a sample at a time.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -214,6 +215,8 @@ class _FV3_(ahdsr)
   bool loopMode;
 };
 
+// Modified for PocketTracker, 2026-10. The table is built one entry per output sample while the
+// other one plays: a whole table inside one sample is a multi-millisecond stall on the audio thread.
 class _FV3_(noisegen_pink_frac)
 {
  public:
@@ -223,7 +226,7 @@ class _FV3_(noisegen_pink_frac)
   }
 
   /**
-   * Set the pink noise parameters.
+   * Set the pink noise parameters. Allocates, and builds the first table whole.
    * @param[in] param1 The Hurst constant, between 0 and 0.9999 (fractal dimension).
    * @param[in] length The fractal noise generator size will be 2^length.
    */
@@ -231,25 +234,30 @@ class _FV3_(noisegen_pink_frac)
   {
     pfn1_param = param1;
     pfn1_length = (1<<length);
-    if(pfn1_slot.getsize() != pfn1_length)
-      {
-	pfn1_slot.alloc(pfn1_length, 1);
-	pfn1_count = 0;
-      }
-    mute();
+    if(pfn1_slot.getsize() != pfn1_length) pfn1_slot.alloc(pfn1_length, 2);
+    pfn1_cur = pfn1_slot.L; pfn1_next = pfn1_slot.R;
+    fractal_start(pfn1_cur);
+    while(fractal_step(pfn1_cur)){}
+    fractal_start(pfn1_next);
+    pfn1_count = pfn1_length;
   }
-  
-  void mute(){ pfn1_slot.mute(); pfn1_count = 0; }
-  
+
+  // The noise carries no tail, and restarting it would mean a whole table at once: it plays on.
+  void mute(){}
+
   inline _fv3_float_t process()
   {
     if(pfn1_count == 0)
       {
-	fractal(pfn1_slot.L, pfn1_length, pfn1_param);
+	while(fractal_step(pfn1_next)){}
+	_fv3_float_t * played = pfn1_cur;
+	pfn1_cur = pfn1_next; pfn1_next = played;
+	fractal_start(pfn1_next);
 	pfn1_count = pfn1_length;
       }
+    fractal_step(pfn1_next);
     pfn1_count --;
-    return pfn1_slot.L[pfn1_length - (pfn1_count+1)];
+    return pfn1_cur[pfn1_length - (pfn1_count+1)];
   }
   inline _fv3_float_t operator()(){ return this->process(); }
   inline _fv3_float_t process(_fv3_float_t input){ return this->process()*input; }
@@ -261,33 +269,39 @@ class _FV3_(noisegen_pink_frac)
   
   /**
    * generate fractal pattern using Midpoint Displacement Method
-   * v: buffer of floats to output fractal pattern to
-   * N: length of v, MUST be integer power of 2 (ie 128, 256, ...)
-   * H: Hurst constant, between 0 and 0.9999 (fractal dimension)
+   * v: buffer of floats to output fractal pattern to; its length is pfn1_length,
+   *    which MUST be integer power of 2 (ie 128, 256, ...)
    * based on the tap-plugins
+   * A table is pfn1_length-1 steps, each level reading only the level above it.
    */
-  void fractal(_fv3_float_t * v, int N, _fv3_float_t H)
+  void fractal_start(_fv3_float_t * v)
   {
-    int l = N, k, c;
-    _fv3_float_t r = 2.0 * (H*H) + 0.3;
+    frac_l = pfn1_length; frac_c = 0;
+    frac_r = 2.0 * (pfn1_param*pfn1_param) + 0.3;
     v[0] = 0;
-    while (l > 1)
+  }
+
+  /** One entry. False once the table is complete. */
+  inline bool fractal_step(_fv3_float_t * v)
+  {
+    if(frac_l <= 1) return false;
+    const long N = pfn1_length, l = frac_l, c = frac_c;
+    v[c*l + l/2] = (v[c*l] + v[((c+1) * l) % N]) / 2.0
+      + 2.0 * frac_r * ((_fv3_float_t)std::rand() - (_fv3_float_t)RAND_MAX/2.0) / (_fv3_float_t)RAND_MAX;
+    if(v[c*l + l/2] < -1.) v[c*l + l/2] = -1.;
+    if(v[c*l + l/2] >  1.) v[c*l + l/2] =  1.;
+    if(++frac_c == N / l)
       {
-	k = N / l;
-	for (c = 0; c < k; c++)
-	  {
-	    v[c*l + l/2] = (v[c*l] + v[((c+1) * l) % N]) / 2.0
-	      + 2.0 * r * ((_fv3_float_t)std::rand() - (_fv3_float_t)RAND_MAX/2.0) / (_fv3_float_t)RAND_MAX;
-	    if(v[c*l + l/2] < -1.) v[c*l + l/2] = -1.;
-	    if(v[c*l + l/2] >  1.) v[c*l + l/2] =  1.;
-	  }
-	l /= 2;
-	r /= std::pow((_fv3_float_t)2., H);
+	frac_c = 0;
+	frac_l /= 2;
+	frac_r /= std::pow((_fv3_float_t)2., pfn1_param);
       }
+    return true;
   }
   
-  _fv3_float_t pfn1_param;
-  long pfn1_length, pfn1_count;
+  _fv3_float_t pfn1_param, frac_r;
+  long pfn1_length, pfn1_count, frac_l, frac_c;
+  _fv3_float_t *pfn1_cur, *pfn1_next;
   _FV3_(slot) pfn1_slot;
 };
 

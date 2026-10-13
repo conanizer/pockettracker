@@ -351,7 +351,12 @@ public:
     // took over the time its block of sound lasts, in tenths of a percent: 1000 means the callback
     // needed as long as the sound it made, and the device is about to run dry. All zero until the
     // device has played a second. Any thread; the four fields may come from adjacent seconds.
-    struct BlockTiming { int blockFrames = 0; int sampleRate = 0; int meanLoad = 0; int worstLoad = 0; };
+    // `lateBlocks` is the one field that is not a second's worth: every block since launch that took
+    // longer to compute than it lasts.
+    struct BlockTiming {
+        int blockFrames = 0; int sampleRate = 0; int meanLoad = 0; int worstLoad = 0;
+        int64_t lateBlocks = 0;
+    };
     BlockTiming getBlockTiming() const;
 
     // The global frame counter, for scheduling.
@@ -1196,6 +1201,7 @@ private:
     int64_t timingFrames = 0;    // audio thread only
     int     timingWorst  = 0;    // audio thread only
     std::atomic<int> timingPubFrames{0}, timingPubRate{0}, timingPubMean{0}, timingPubWorst{0};
+    std::atomic<int64_t> timingLateBlocks{0};
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
     std::atomic<LiveInputSource*> liveInput{nullptr};   // see setLiveInput
 

@@ -2,6 +2,7 @@
  *  Allpass filter
  *
  *  Copyright (C) 2000 Jezar at Dreampoint
+ *  Modified for PocketTracker, 2026-10: a modulated read takes its whole part by truncation.
  *  Copyright (C) 2006-2018 Teru Kamogashira
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -177,7 +178,7 @@ class _FV3_(allpassm)
   inline _fv3_float_t _process(_fv3_float_t input, _fv3_float_t modulation)
   {
     modulation = (modulation + 1.) * modulationsize_f;
-    _fv3_float_t floor_mod = std::floor(modulation); // >= 0
+    _fv3_float_t floor_mod = (_fv3_float_t)(long)(modulation); // >= 0, so this is floor() with no library call
     _fv3_float_t m_frac = 1. - (modulation - floor_mod); // >= 0
     
     long readidx_a = readidx - (long)floor_mod; if(readidx_a < 0) readidx_a += bufsize;
@@ -229,7 +230,7 @@ class _FV3_(allpassm)
   inline _fv3_float_t _process_dc(_fv3_float_t input, _fv3_float_t modulation)
   {
     modulation = (modulation + 1.) * modulationsize_f;
-    _fv3_float_t floor_mod = std::floor(modulation); // >= 0
+    _fv3_float_t floor_mod = (_fv3_float_t)(long)(modulation); // >= 0, so this is floor() with no library call
     _fv3_float_t m_frac = 1. - (modulation - floor_mod); // >= 0
     
     long readidx_a = readidx - (long)floor_mod; if(readidx_a < 0) readidx_a += bufsize;
@@ -272,7 +273,7 @@ class _FV3_(allpassm)
   inline _fv3_float_t _process_li(_fv3_float_t input, _fv3_float_t modulation)
   {
     modulation = (modulation + 1.) * modulationsize_f;
-    _fv3_float_t floor_mod = std::floor(modulation); // >= 0
+    _fv3_float_t floor_mod = (_fv3_float_t)(long)(modulation); // >= 0, so this is floor() with no library call
     _fv3_float_t frac = modulation - floor_mod; // >= 0
     
     long readidx_a = readidx - (long)floor_mod; if(readidx_a < 0) readidx_a += bufsize;
@@ -519,7 +520,7 @@ class _FV3_(allpass3)
   inline _fv3_float_t _process(_fv3_float_t input, _fv3_float_t modulation)
   {
     modulation = (modulation + 1.) * modulationsize_f;
-    _fv3_float_t floor_mod = std::floor(modulation); // >= 0
+    _fv3_float_t floor_mod = (_fv3_float_t)(long)(modulation); // >= 0, so this is floor() with no library call
     _fv3_float_t frac = modulation - floor_mod; // >= 0
     
     long readidx_a = readidx1 - (long)floor_mod;
