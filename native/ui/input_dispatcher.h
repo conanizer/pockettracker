@@ -799,8 +799,9 @@ class InputDispatcher {
     void push_eq_band_to_engine();
 
     /**
-     * The ONE list of cells whose plain A opens something — both what A DOES (peek = false) and what
-     * the mapper must DEFER (peek = true). One function, or a cell drifts into openable-not-deferred
+     * The ONE list of cells whose plain A opens something (or, on the delay's TIME, switches its
+     * sync) — both what A DOES (peek = false) and what the mapper must DEFER (peek = true). One
+     * function, or a cell drifts into openable-not-deferred
      * (its A+DPAD pre-empted) or deferred-not-openable (the press eaten).
      * ⚠️ `defer_a_to_release` has one more arm (the sample editor's chop tap, which opens nothing); the
      * same rule applies: only an A the RELEASE can still perform may be deferred.
@@ -1201,8 +1202,9 @@ class InputDispatcher {
      *  on any other row. */
     bool effects_preset_action(int row);
 
-    /** A on a send's INP EQ row: the EQ editor on that send's input (peek = true: would it?). */
-    bool effects_open_input_eq(int row, bool peek);
+    /** A, on its release, on a send's cell — `row` as above (peek = true: would it answer?). INP EQ
+     *  opens the EQ editor on that send's input; the delay's TIME switches free time ↔ note sync. */
+    bool effects_release_action(int row, bool peek);
 
     /** Apply the typed name and write `<dir>/<name>.ptr`. The QWERTY's REVERB_SAVE arm. */
     void save_reverb_preset_as(const std::string& dir, const std::string& typed_text);

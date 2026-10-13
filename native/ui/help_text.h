@@ -532,7 +532,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B resets the value",
       "A on an EQ row opens the editor",
       "A on SAVE or LOAD: a preset file",
-      "B on TIME switches note sync",
+      "A on TIME switches note sync",
       "START plays the song from 00",
       "R+↑ goes to the MIXER"}},
     /* SCREEN_FILE_BROWSER */
@@ -1345,13 +1345,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+←/→ picks the EQ slot",
       "A+B sets it back to --"}},
     /* FX_DELAY_TIME */
-    {"TIME: the gap between echoes", "A free value or a note length.", "On EFFECTS, B switches them.",
+    {"TIME: the gap between echoes", "A free value or a note length.", "A switches between them.",
      {"Free, it runs 00 to FF. In note",
       "sync it is a note length from",
       "1/1 to 1/32, plain, triplet or",
       "dotted, and follows the TEMPO."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
-      "On EFFECTS, B switches the sync",
+      "A switches the sync",
       "A+B sets free time back to 40"}},
     /* FX_DELAY_FEEDBACK */
     {"FDBK: how many echoes", "Higher repeats for longer.", "Very high never stops.",

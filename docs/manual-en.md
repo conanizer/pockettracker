@@ -206,7 +206,7 @@ The navigation map always shows where you are.
 |---|---|
 | SAMPLE EDITOR | INSTRUMENT screen → **TYPE** row → cursor on **EDIT >** → **A** |
 | EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ cell → **A**. Close with **B**. |
-| REVERB / DELAY | INSTRUMENT / INST.POOL / MIXER → cursor on a REV or DEL cell → **A**. The same cells as that section of EFFECTS. Close with **B** — the TIME row's sync switch is on EFFECTS only. |
+| REVERB / DELAY | INSTRUMENT / INST.POOL / MIXER → cursor on a REV or DEL cell → **A**. The same cells as that section of EFFECTS. Close with **B**. |
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
@@ -1401,7 +1401,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 | *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). A built-in sets PONG, TONE and WOBL together and leaves the rest alone. Turn one of the three afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to NORMAL. |
 | SAVE / LOAD | To the right of the name. **SAVE** names the delay and writes every cell of the section except EQ — TIME and its sync, FDBK and REV included — to `PocketTracker/Delays` as a `.ptd` file; **LOAD** reads one back, into this or any other project. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
-| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **A** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. From about `E0` the repeats stop fading and the delay begins to sing: around `F0` they hang almost forever, and above it they bloom into a steady tone that keeps going after the input stops. Turn WOBL up to make that tone drift. |
 | WOBL | How far the tape speed drifts (`00`–`FF`), bending the pitch of the repeats. `00` holds them steady. |

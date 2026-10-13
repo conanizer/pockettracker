@@ -22,12 +22,12 @@ GestureResult InputDispatcher::send_editor_layer(Gesture g) {
         case Gesture::A_RIGHT: send_editor_edit(pt::ui::increment); break;
         case Gesture::A_B:     send_editor_edit(pt::ui::on_a_b); break;
 
-        // The preset line's SAVE and LOAD; INP EQ opens the EQ editor over this one, on the release.
+        // The preset line's SAVE and LOAD. On the release: INP EQ opens the EQ editor over this one,
+        // TIME switches its sync.
         case Gesture::A:
-            if (!effects_preset_action(row)) effects_open_input_eq(row, /*peek=*/false);
+            if (!effects_preset_action(row)) effects_release_action(row, /*peek=*/false);
             break;
 
-        // ⚠️ B closes from every cell, TIME included: its sync switch is EFFECTS' alone.
         case Gesture::B: close_send_editor(); break;
 
         // The transport and the audition are how an edit is heard while it is dialled; the screen

@@ -24,23 +24,10 @@ GestureResult InputDispatcher::mixer_screen(Gesture g) {
 
 GestureResult InputDispatcher::effects_screen(Gesture g) {
     switch (g) {
-        // A preset line's SAVE and LOAD; the two input EQ cells open the EQ editor on the release.
+        // A preset line's SAVE and LOAD; an input EQ cell and TIME answer on the release.
         case Gesture::A:
             if (!effects_preset_action(s_.effectsCursorRow)) open_sub_screen_at_cursor(/*peek=*/false);
             return GestureResult::TAKEN;
-
-        // ⚠️ The TIME row: B toggles DELAY SYNC (milliseconds ↔ note divisions). A gesture of its own,
-        // because the cell's value means different things on either side (0x40 a length; 4 a 1/16 note).
-        // B is otherwise free on this screen, so no release latch is needed.
-        // delayTime is re-clamped into 0..B on the way IN: a free time of 0xF0 would index past the names.
-        case Gesture::B: {
-            if (s_.effectsCursorRow != EffectModule::ROW_DLY_TIME) return GestureResult::PASS;
-            songcore::Project& p = host_.edit_project();
-            p.delaySync = !p.delaySync;
-            if (p.delaySync) p.delayTime = std::min(std::max(p.delayTime, 0), 11);
-            mark_modified();
-            return GestureResult::TAKEN;
-        }
 
         default:
             return GestureResult::PASS;
@@ -81,8 +68,19 @@ bool InputDispatcher::effects_preset_action(int row) {
     }
 }
 
-bool InputDispatcher::effects_open_input_eq(int row, bool peek) {
+bool InputDispatcher::effects_release_action(int row, bool peek) {
     const songcore::Project& p = host_.project();
+    // TIME: a free time ↔ a note length. The value means different things on either side (0x40 a
+    // length; 4 a 1/16 note), so it is re-clamped into the 12 note lengths on the way IN.
+    if (row == EffectModule::ROW_DLY_TIME) {
+        if (!peek) {
+            songcore::Project& e = host_.edit_project();
+            e.delaySync = !e.delaySync;
+            if (e.delaySync) e.delayTime = std::min(std::max(e.delayTime, 0), 11);
+            mark_modified();
+        }
+        return true;
+    }
     // ⚠️ An unassigned EQ is −1 (bypass), which is not a slot; the editor opens on slot 0.
     if (row == EffectModule::ROW_REV_EQ) {
         if (!peek) open_eq_editor(std::max(0, p.reverbInputEq), EqCallerContext::reverb_in());

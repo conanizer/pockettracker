@@ -9,7 +9,7 @@
 // blank lines, and `effects_row_layout.h` maps one onto the other — so a header can be inserted
 // without renumbering cursor rows, and the highlight and a cell's column both come from that table.
 //
-// TIME reads as a hex byte or a note division ("1/8T") depending on `delaySync`; B toggles which.
+// TIME reads as a hex byte or a note division ("1/8T") depending on `delaySync`; A toggles which.
 //
 // Each send opens with a PRESET line — its name, SAVE, LOAD — laid out like the SCALE screen's name row
 // (ui/fx_preset_bank.h for the name, ui/fx_preset_io.h for the file).

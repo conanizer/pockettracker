@@ -24,10 +24,10 @@ bool InputDispatcher::defer_a_to_release() const {
 
     // ⚠️ No cell opens a sub-screen while a layer is up. The cursor under the EQ editor sits on the EQ
     // cell that raised it, so without this every A inside the editor would be deferred for nothing.
-    // The send editor's INP EQ cell is the one exception: a layer's own cell that opens another.
+    // The send editor's INP EQ and TIME cells are the exception: a layer's own cells with a plain A.
     if (top_layer()) {
         return send_editor_on_top() &&
-               self.effects_open_input_eq(s_.sendEditor.cursorRow, /*peek=*/true);
+               self.effects_release_action(s_.sendEditor.cursorRow, /*peek=*/true);
     }
 
     // ⚠️ Opens nothing, but deferred too: on row 11 under MANUAL a plain A cuts a boundary at the
@@ -145,7 +145,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             break;
 
         case ScreenType::EFFECTS:
-            if (effects_open_input_eq(s_.effectsCursorRow, peek)) return true;
+            if (effects_release_action(s_.effectsCursorRow, peek)) return true;
             break;
 
         case ScreenType::SAMPLE_EDITOR:
