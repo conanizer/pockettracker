@@ -10,7 +10,8 @@
 
 namespace pt::ui {
 
-// A on the master EQ cell opens the EQ editor on the release; nothing else here answers a bare A.
+// A opens the EQ editor from the master EQ cell and the send editor from the two returns, on the
+// release; nothing else here answers a bare A.
 GestureResult InputDispatcher::mixer_screen(Gesture g) {
     switch (g) {
         case Gesture::A:
@@ -25,7 +26,7 @@ GestureResult InputDispatcher::effects_screen(Gesture g) {
     switch (g) {
         // A preset line's SAVE and LOAD; the two input EQ cells open the EQ editor on the release.
         case Gesture::A:
-            if (!effects_preset_action()) open_sub_screen_at_cursor(/*peek=*/false);
+            if (!effects_preset_action(s_.effectsCursorRow)) open_sub_screen_at_cursor(/*peek=*/false);
             return GestureResult::TAKEN;
 
         // ⚠️ The TIME row: B toggles DELAY SYNC (milliseconds ↔ note divisions). A gesture of its own,
@@ -48,13 +49,13 @@ GestureResult InputDispatcher::effects_screen(Gesture g) {
 
 // ─── EFFECTS: a preset line's SAVE and LOAD ──────────────────────────────────────────────────────
 
-bool InputDispatcher::effects_preset_action() {
+bool InputDispatcher::effects_preset_action(int row) {
     const songcore::Project& p = host_.project();
 
     // SAVE is seeded with the sanitized name the row SHOWS (a built-in that was never cycled to stores
     // none), so what you see is what the file will be called. LOAD starts at the built-in folder:
     // config.json's `folders` has no key for either.
-    switch (s_.effectsCursorRow) {
+    switch (row) {
         case EffectModule::ROW_REV_SAVE: {
             const std::string seed = sanitize_fx_preset_filename(reverb_preset_display_name(p));
             open_qwerty(QwertyContext::REVERB_SAVE, seed.empty() ? "REVERB" : seed, "SAVE REVERB:",
@@ -78,6 +79,20 @@ bool InputDispatcher::effects_preset_action() {
         default:
             return false;
     }
+}
+
+bool InputDispatcher::effects_open_input_eq(int row, bool peek) {
+    const songcore::Project& p = host_.project();
+    // ⚠️ An unassigned EQ is −1 (bypass), which is not a slot; the editor opens on slot 0.
+    if (row == EffectModule::ROW_REV_EQ) {
+        if (!peek) open_eq_editor(std::max(0, p.reverbInputEq), EqCallerContext::reverb_in());
+        return true;
+    }
+    if (row == EffectModule::ROW_DLY_EQ) {
+        if (!peek) open_eq_editor(std::max(0, p.delayInputEq), EqCallerContext::delay_in());
+        return true;
+    }
+    return false;
 }
 
 void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::string& typed_text) {

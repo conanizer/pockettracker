@@ -238,7 +238,10 @@ bool InputDispatcher::on_instrument_screen() const {
 }
 
 bool InputDispatcher::on_globals_screen() const {
-    return s_.currentScreen == ScreenType::MIXER || s_.currentScreen == ScreenType::EFFECTS;
+    // ⚠️ `isOpen`, not `send_editor_up`: a preset loaded through the editor's own file browser must
+    // reach the engine too, whichever of the browser and the edit closes first.
+    return s_.currentScreen == ScreenType::MIXER || s_.currentScreen == ScreenType::EFFECTS ||
+           s_.sendEditor.isOpen;
 }
 
 CursorContext InputDispatcher::cursor_context() const {
@@ -302,6 +305,12 @@ void InputDispatcher::on_r_held(bool down) { host_.set_midi_learn_armed(down); }
 songcore::MapTarget InputDispatcher::map_target() const {
     // ⚠️ A modal owns the screen; the cursor underneath is not what the user aims at. A knob is the one
     // "press" that bypasses the mapper.
+    // The exception is the send editor with nothing over it: its cells are EFFECTS' own parameters.
+    if (send_editor_on_top()) {
+        EffectState es{*s_.project};
+        es.cursorRow = s_.sendEditor.cursorRow;
+        return effects_.map_target(es);
+    }
     if (modal_backdrop_active(s_) || s_.eq.isOpen) return {};
 
     const ScreenHandler* h = screen();

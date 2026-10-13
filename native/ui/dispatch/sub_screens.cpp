@@ -1,4 +1,4 @@
-// What a cell opens: the cells whose A or B waits for the release, and the EQ editor.
+// What a cell opens: the cells whose A or B waits for the release, and the EQ and send editors.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -20,15 +20,20 @@ int InputDispatcher::visible_effect_type_count() const {
 }
 
 bool InputDispatcher::defer_a_to_release() const {
+    InputDispatcher& self = const_cast<InputDispatcher&>(*this);
+
     // ⚠️ No cell opens a sub-screen while a layer is up. The cursor under the EQ editor sits on the EQ
     // cell that raised it, so without this every A inside the editor would be deferred for nothing.
-    if (top_layer()) return false;
+    // The send editor's INP EQ cell is the one exception: a layer's own cell that opens another.
+    if (top_layer()) {
+        return send_editor_on_top() &&
+               self.effects_open_input_eq(s_.sendEditor.cursorRow, /*peek=*/true);
+    }
 
     // ⚠️ Opens nothing, but deferred too: on row 11 under MANUAL a plain A cuts a boundary at the
     // playhead, and the same A is held for the slice step, the drag and the delete.
     if (on_slice_tap_cell()) return true;
 
-    InputDispatcher& self = const_cast<InputDispatcher&>(*this);
     switch (s_.currentScreen) {
         case ScreenType::INSTRUMENT:
             if (self.instrument_open_at_cursor(/*peek=*/true)) return true;
@@ -94,10 +99,22 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
                                           EqCallerContext::instrument(s_.currentInstrument));
                 return true;
             }
+            // The two sends open the unit they feed.
+            if (cell == InstrumentCell::REV || cell == InstrumentCell::DEL) {
+                if (!peek) open_send_editor(cell == InstrumentCell::REV ? EffectsSection::REVERB
+                                                                        : EffectsSection::DELAY);
+                return true;
+            }
             break;
         }
 
         case ScreenType::INST_POOL:
+            // Columns 2 and 3 are the same two sends.
+            if (s_.poolCursorColumn == 2 || s_.poolCursorColumn == 3) {
+                if (!peek) open_send_editor(s_.poolCursorColumn == 2 ? EffectsSection::REVERB
+                                                                     : EffectsSection::DELAY);
+                return true;
+            }
             if (s_.poolCursorColumn == 4) {
                 const Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
                 if (!peek) open_eq_editor(std::max(0, ins.eqSlot),
@@ -107,21 +124,28 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             break;
 
         case ScreenType::MIXER:
-            if (mixer_cell_at(s_.mixerMasterRow, s_.mixerCursorColumn) == MixerCell::MASTER_EQ) {
-                if (!peek) open_eq_editor(std::max(0, p.masterEqSlot), EqCallerContext::master());
-                return true;
+            switch (mixer_cell_at(s_.mixerMasterRow, s_.mixerCursorColumn)) {
+                case MixerCell::MASTER_EQ:
+                    if (!peek) open_eq_editor(std::max(0, p.masterEqSlot), EqCallerContext::master());
+                    return true;
+                // The two returns open the unit they bring back.
+                case MixerCell::REV_WET:
+                    if (!peek) open_send_editor(EffectsSection::REVERB);
+                    return true;
+                case MixerCell::DLY_WET:
+                    if (!peek) open_send_editor(EffectsSection::DELAY);
+                    return true;
+                case MixerCell::TRACK_VOL:
+                case MixerCell::MASTER_VOL:
+                case MixerCell::MASTER_FX:
+                case MixerCell::LIMITER:
+                case MixerCell::NONE:
+                    break;
             }
             break;
 
         case ScreenType::EFFECTS:
-            if (s_.effectsCursorRow == EffectModule::ROW_REV_EQ) {
-                if (!peek) open_eq_editor(std::max(0, p.reverbInputEq), EqCallerContext::reverb_in());
-                return true;
-            }
-            if (s_.effectsCursorRow == EffectModule::ROW_DLY_EQ) {
-                if (!peek) open_eq_editor(std::max(0, p.delayInputEq), EqCallerContext::delay_in());
-                return true;
-            }
+            if (effects_open_input_eq(s_.effectsCursorRow, peek)) return true;
             break;
 
         case ScreenType::SAMPLE_EDITOR:

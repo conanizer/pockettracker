@@ -401,6 +401,11 @@ void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
     draw_fx_helper(c, s.fxHelper, t);
     draw_map_picker(c, s.mapPicker, t);
+    if (send_editor_drawn(s)) {
+        draw_send_editor(c, s.sendEditor, *s.project, t);
+        // Its cells have help, and the compact panel sits in the strip the backdrop just dimmed.
+        if (s.helpOpen) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
+    }
     draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);
     if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
     draw_confirm_dialog(c, s.confirm, t);

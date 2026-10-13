@@ -672,7 +672,8 @@ class InputDispatcher {
     /** True on the three screens that edit an INSTRUMENT rather than the arrangement. */
     bool on_instrument_screen() const;
 
-    /** True on the two that edit the GLOBALS — the mixer, the master bus, the send buses. */
+    /** True on the two that edit the GLOBALS — the mixer, the master bus, the send buses — and on
+     *  any screen while the send editor is open over it. */
     bool on_globals_screen() const;
 
     // ── The FX helper (ui/dispatch/layers/fx_helper.cpp) ───────────────────────────────────────
@@ -805,6 +806,25 @@ class InputDispatcher {
      * same rule applies: only an A the RELEASE can still perform may be deferred.
      */
     bool open_sub_screen_at_cursor(bool peek);
+
+    // ── The SEND EDITOR (ui/dispatch/layers/send_editor.cpp) ─────────────────────────────────────
+    //
+    // ⚠️ An OVERLAY, so `currentScreen` still names the screen underneath.
+
+    bool send_editor_open() const { return send_editor_up(s_); }
+    /** …with no keyboard or EQ editor over it. */
+    bool send_editor_on_top() const {
+        const Layer* top = top_layer();
+        return top && top->handle == &InputDispatcher::send_editor_layer;
+    }
+    GestureResult send_editor_layer(Gesture g);
+
+    /** Raise the editor on the reverb or the delay, cursor on the section's top-left cell. */
+    void open_send_editor(EffectsSection section);
+    void close_send_editor() { s_.sendEditor = SendEditorState{}; }
+
+    /** A+DPAD and A+B: the edit, through the editor's own cursor rather than the screen's. */
+    void send_editor_edit(InputAction (*fn)(const CursorContext&));
 
     // ── The THEME EDITOR (ui/dispatch/layers/theme.cpp) ──────────────────────────────────────────
     //
@@ -1177,8 +1197,12 @@ class InputDispatcher {
     bool          effects_edit(const InputAction& action);
     songcore::MapTarget effects_knob() const;
 
-    /** A on an EFFECTS preset line's SAVE or LOAD cell. False anywhere else. */
-    bool effects_preset_action();
+    /** A on a preset line's SAVE or LOAD cell — `row` is EFFECTS' cursor or the send editor's. False
+     *  on any other row. */
+    bool effects_preset_action(int row);
+
+    /** A on a send's INP EQ row: the EQ editor on that send's input (peek = true: would it?). */
+    bool effects_open_input_eq(int row, bool peek);
 
     /** Apply the typed name and write `<dir>/<name>.ptr`. The QWERTY's REVERB_SAVE arm. */
     void save_reverb_preset_as(const std::string& dir, const std::string& typed_text);

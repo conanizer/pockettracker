@@ -43,52 +43,41 @@ const std::vector<std::string>& EffectModule::delay_sync_names() {
 
 // ─── Draw ────────────────────────────────────────────────────────────────────────────────────────
 
-void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
+namespace {
+
+constexpr const char* SECTION_NAMES[EFFECTS_SECTION_COUNT] = {"MASTER FX", "REVERB", "DELAY"};
+
+/**
+ * The cells of every section `lay` gives a line to (`only` = that one section, without its header;
+ * −1 = all three). `line1_y` is the text y of line 1; `x` the left edge the two columns hang off.
+ * A cell's position and column come from the table the cursor walks, so it cannot be drawn in one
+ * place and reachable in another.
+ */
+void draw_cells(Canvas& c, int x, int line1_y, const EffectsLayout& lay, int only,
+                const EffectState& s) {
     const Theme&             t = s.theme;
     const songcore::Project& p = s.project;
 
-    c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
-
-    // Where every row and every header lands, in one walk. Nothing below counts lines for itself.
-    const EffectsLayout lay = effects_layout();
-
-    // The lines below the title scroll under it, derived from the cursor row each frame. They fit
-    // today, so the scroll is zero; the clip keeps a line added later from drawing over the title.
-    c.draw_text("EFFECTS", x + LABEL_X[0], y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
-
-    const int firstLineY = y + TEXT_PADDING + ROW_HEIGHT + 14;   // the gap SETTINGS leaves too
-    const int viewportH  = HEIGHT - (firstLineY - y);
-    const int contentH   = (lay.lineCount - 1) * ROW_HEIGHT;
-    const int cursorTop  = (lay.rowLine[static_cast<size_t>(clamp(s.cursorRow, 0, MAX_CURSOR_ROW))] - 1)
-                           * ROW_HEIGHT;
-
-    // ⚠️ Scrolled in WHOLE ROWS: a form cut through a header reads as broken. Rounded up, so the
-    // last row is reachable at full scroll.
-    const int maxRows = (std::max(0, contentH - viewportH) + ROW_HEIGHT - 1) / ROW_HEIGHT;
-    const int rows    = clamp((cursorTop + ROW_HEIGHT / 2 - viewportH / 2 + ROW_HEIGHT / 2)
-                                  / ROW_HEIGHT,
-                              0, maxRows);
-    const int scrollY = rows * ROW_HEIGHT;
-
-    const auto rowY = [&](int line) { return firstLineY + (line - 1) * ROW_HEIGHT - scrollY; };
-
-    // Everything below is drawn through `rowY`, which subtracts the scroll — clip it to the viewport
-    // so a scrolled row cannot overdraw the title above or spill past the panel edge.
-    const Canvas::ClipScope rowsClip(c, x, firstLineY, WIDTH, viewportH);
-
-    const auto header = [&](const char* text, EffectsSection section) {
-        c.draw_text(text, x + LABEL_X[0], rowY(lay.sectionHeaderLine[static_cast<int>(section)]),
-                    t.textTitle, CHAR_SPACING, FONT_SCALE);
+    const auto rowY  = [&](int line) { return line1_y + (line - 1) * ROW_HEIGHT; };
+    const auto drawn = [&](EffectsSection section) {
+        return only < 0 || static_cast<int>(section) == only;
     };
 
-    // A parameter cell, addressed by its CURSOR row: its position and column come from the table the
-    // cursor walks, so it cannot be drawn in one place and reachable in another.
-    const auto param = [&](const char* name, int row, const std::string& text) {
+    const auto header = [&](EffectsSection section) {
+        if (only >= 0) return;   // alone, its name is the title
+        c.draw_text(SECTION_NAMES[static_cast<int>(section)], x + LABEL_X[0],
+                    rowY(lay.sectionHeaderLine[static_cast<int>(section)]), t.textTitle, CHAR_SPACING,
+                    FONT_SCALE);
+    };
+
+    /** `unread` greys a cell the chosen algorithm ignores. It still holds its value and still edits. */
+    const auto param = [&](const char* name, int row, const std::string& text, bool unread = false) {
         const int  ry    = rowY(lay.rowLine[static_cast<size_t>(row)]);
         const int  lx    = x + LABEL_X[effects_cell_pos(row).column];
         const bool sel   = (s.cursorRow == row);
-        c.draw_text(name, lx, ry, sel ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
-        draw_cursor_cell(c, text, lx + VALUE_GAP, ry, sel, t.textValue, t);
+        c.draw_text(name, lx, ry, sel ? cursor_mark_ink(t) : unread ? t.textEmpty : t.textParam,
+                    CHAR_SPACING, FONT_SCALE);
+        draw_cursor_cell(c, text, lx + VALUE_GAP, ry, sel, unread ? t.textEmpty : t.textValue, t);
     };
 
     /** The same cell, whose value is an EQ slot rather than a number. */
@@ -120,47 +109,129 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
     };
 
     // ── Master bus ───────────────────────────────────────────────────────────────────────────────
-    header("MASTER FX", EffectsSection::MASTER);
-    param("TYPE", ROW_MASTER_TYPE, p.masterBusFx == 0 ? "OTT" : "DUST");
+    if (drawn(EffectsSection::MASTER)) {
+        header(EffectsSection::MASTER);
+        param("TYPE", EffectModule::ROW_MASTER_TYPE, p.masterBusFx == 0 ? "OTT" : "DUST");
+    }
 
     // ── Reverb ───────────────────────────────────────────────────────────────────────────────────
-    header("REVERB", EffectsSection::REVERB);
-    preset_line(ROW_REV_TYPE, ROW_REV_SAVE, ROW_REV_LOAD, reverb_preset_display_name(p),
-                reverb_preset_differs_from_its_name(p));
+    if (drawn(EffectsSection::REVERB)) {
+        header(EffectsSection::REVERB);
+        preset_line(EffectModule::ROW_REV_TYPE, EffectModule::ROW_REV_SAVE, EffectModule::ROW_REV_LOAD,
+                    reverb_preset_display_name(p), reverb_preset_differs_from_its_name(p));
 
-    // Which reverb reads the cells below. ⚠️ Turning it by hand writes none of them, so the numbers
-    // stay what the user typed and only the sound changes.
-    param("ALGO", ROW_REV_ALGO, reverb_algo_name(p.reverbAlgo));
-    param("SIZE", ROW_REV_SIZE, hex2(p.reverbSize));
+        // Which reverb reads the cells below. ⚠️ Turning it by hand writes none of them, so the
+        // numbers stay what the user typed and only the sound changes.
+        const bool unread = !reverb_algo_reads_size_and_mod(p.reverbAlgo);
+        param("ALGO", EffectModule::ROW_REV_ALGO, reverb_algo_name(p.reverbAlgo));
+        param("SIZE", EffectModule::ROW_REV_SIZE, hex2(p.reverbSize), unread);
 
-    param("PRE",  ROW_REV_PRE,  hex2(p.reverbPreDelay));
-    param("DCAY", ROW_REV_DECAY, hex2(p.reverbFeedback));
+        param("PRE",  EffectModule::ROW_REV_PRE,   hex2(p.reverbPreDelay));
+        param("DCAY", EffectModule::ROW_REV_DECAY, hex2(p.reverbFeedback));
 
-    param("WIDE", ROW_REV_WIDE, hex2(p.reverbWidth));
-    param("DAMP", ROW_REV_DAMP, hex2(p.reverbDamp));
+        param("WIDE", EffectModule::ROW_REV_WIDE, hex2(p.reverbWidth));
+        param("DAMP", EffectModule::ROW_REV_DAMP, hex2(p.reverbDamp));
 
-    eq_param(ROW_REV_EQ, p.reverbInputEq);
-    param("MOD",  ROW_REV_MOD,  hex2(p.reverbMod));
+        eq_param(EffectModule::ROW_REV_EQ, p.reverbInputEq);
+        param("MOD",  EffectModule::ROW_REV_MOD, hex2(p.reverbMod), unread);
+    }
 
     // ── Delay ────────────────────────────────────────────────────────────────────────────────────
-    header("DELAY", EffectsSection::DELAY);
-    preset_line(ROW_DLY_TYPE, ROW_DLY_SAVE, ROW_DLY_LOAD, delay_preset_display_name(p),
-                delay_preset_differs_from_its_name(p));
+    if (drawn(EffectsSection::DELAY)) {
+        header(EffectsSection::DELAY);
+        preset_line(EffectModule::ROW_DLY_TYPE, EffectModule::ROW_DLY_SAVE, EffectModule::ROW_DLY_LOAD,
+                    delay_preset_display_name(p), delay_preset_differs_from_its_name(p));
 
-    param("PONG", ROW_DLY_PONG, p.delayPong ? "ON" : "OFF");
-    // Synced, TIME is a note division rather than a raw byte — the same cell speaking a second
-    // vocabulary, which is why its cursor range changes with it (0..B instead of 00..FF).
-    param("TIME", ROW_DLY_TIME,
-          p.delaySync ? delay_sync_names()[static_cast<size_t>(clamp(p.delayTime, 0, 11))]
-                      : hex2(p.delayTime));
+        param("PONG", EffectModule::ROW_DLY_PONG, p.delayPong ? "ON" : "OFF");
+        // Synced, TIME is a note division rather than a raw byte — the same cell speaking a second
+        // vocabulary, which is why its cursor range changes with it (0..B instead of 00..FF).
+        const auto& divisions = EffectModule::delay_sync_names();
+        param("TIME", EffectModule::ROW_DLY_TIME,
+              p.delaySync ? divisions[static_cast<size_t>(clamp(p.delayTime, 0, 11))]
+                          : hex2(p.delayTime));
 
-    param("TONE", ROW_DLY_TONE,   hex2(p.delayTone));
-    param("FDBK", ROW_DLY_FDBK,   hex2(p.delayFeedback));
+        param("TONE", EffectModule::ROW_DLY_TONE, hex2(p.delayTone));
+        param("FDBK", EffectModule::ROW_DLY_FDBK, hex2(p.delayFeedback));
 
-    param("WOBL", ROW_DLY_WOBBLE, hex2(p.delayWobble));
-    param("REV",  ROW_DLY_REV,    hex2(p.delayReverbSend));
+        param("WOBL", EffectModule::ROW_DLY_WOBBLE, hex2(p.delayWobble));
+        param("REV",  EffectModule::ROW_DLY_REV,    hex2(p.delayReverbSend));
 
-    eq_param(ROW_DLY_EQ, p.delayInputEq);
+        eq_param(EffectModule::ROW_DLY_EQ, p.delayInputEq);
+    }
+}
+
+// ── The send editor's box ────────────────────────────────────────────────────────────────────────
+// The two columns as EFFECTS spaces them, and room for TIME's widest synced name past the second.
+constexpr int BOX_W       = 480;
+constexpr int BOX_X       = (DESIGN_W - BOX_W) / 2;
+constexpr int CONTENT_PAD = 8;
+constexpr int TITLE_GAP   = 8;
+
+/** The title, air, then the section's lines, with 8 px above and below. */
+constexpr int box_h(int lines) { return ROW_HEIGHT + TITLE_GAP + lines * ROW_HEIGHT + 2 * CONTENT_PAD; }
+
+static_assert(box_h(EFFECTS_LINE_COUNT) + 2 * (MODAL_BORDER - 1) <= DESIGN_H,
+              "the send editor is taller than the screen");
+
+}  // namespace
+
+void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
+    const Theme& t = s.theme;
+
+    c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
+
+    // Where every row and every header lands, in one walk. Nothing below counts lines for itself.
+    const EffectsLayout lay = effects_layout();
+
+    // The lines below the title scroll under it, derived from the cursor row each frame.
+    c.draw_text("EFFECTS", x + LABEL_X[0], y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
+
+    const int firstLineY = y + TEXT_PADDING + ROW_HEIGHT + 14;   // the gap SETTINGS leaves too
+    const int viewportH  = HEIGHT - (firstLineY - y);
+    const int contentH   = (lay.lineCount - 1) * ROW_HEIGHT;
+    const int cursorTop  = (lay.rowLine[static_cast<size_t>(clamp(s.cursorRow, 0, MAX_CURSOR_ROW))] - 1)
+                           * ROW_HEIGHT;
+
+    // ⚠️ Scrolled in WHOLE ROWS: a form cut through a header reads as broken. Rounded up, so the
+    // last row is reachable at full scroll.
+    const int maxRows = (std::max(0, contentH - viewportH) + ROW_HEIGHT - 1) / ROW_HEIGHT;
+    const int rows    = clamp((cursorTop + ROW_HEIGHT / 2 - viewportH / 2 + ROW_HEIGHT / 2)
+                                  / ROW_HEIGHT,
+                              0, maxRows);
+
+    // Clipped to the viewport, so a scrolled row cannot overdraw the title above or spill past the
+    // panel edge.
+    const Canvas::ClipScope rowsClip(c, x, firstLineY, WIDTH, viewportH);
+    draw_cells(c, x, firstLineY - rows * ROW_HEIGHT, lay, /*only=*/-1, s);
+}
+
+void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Project& project,
+                      const Theme& t) {
+    if (!s.isOpen) return;
+
+    // Modal: it must not be clipped by whatever editor was drawing when it opened.
+    c.reset_clip();
+
+    const int section =
+        static_cast<int>(effects_row_section(static_cast<EffectsRow>(
+            clamp(s.cursorRow, 0, EffectModule::MAX_CURSOR_ROW))));
+    const EffectsLayout lay   = effects_layout(section);
+    const int           BOX_H = box_h(lay.lineCount - 1);
+    const int           BOX_Y = (DESIGN_H - BOX_H) / 2;
+
+    draw_modal_backdrop(c);
+    draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
+
+    // ⚠️ `text_width` measures ink and drops the trailing gap; the run's advance centres it.
+    const std::string title = SECTION_NAMES[section];
+    const int         textY = BOX_Y + CONTENT_PAD + TEXT_PADDING;
+    c.draw_text(title, BOX_X + (BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2, textY,
+                t.textTitle, CHAR_SPACING, FONT_SCALE);
+
+    EffectState es{project};
+    es.cursorRow = s.cursorRow;
+    es.theme     = t;
+    draw_cells(c, BOX_X, textY + ROW_HEIGHT + TITLE_GAP, lay, section, es);
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────────────────────────

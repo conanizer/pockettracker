@@ -82,6 +82,11 @@ inline constexpr int kReverbAlgoPlate = 3;   // Dragonfly Plate, "Nested" — SI
 inline constexpr int kReverbAlgoFoil  = 4;   // Dragonfly Plate, "Simple" — SIZE and MOD read nothing
 inline constexpr int kReverbAlgoCount = 5;
 
+/** False for the two plates: they have no room to size and nothing that moves. */
+inline constexpr bool reverb_algo_reads_size_and_mod(int algo) {
+    return algo != kReverbAlgoPlate && algo != kReverbAlgoFoil;
+}
+
 inline const char* reverb_algo_name(int algo) {
     static constexpr const char* kNames[kReverbAlgoCount] = {"OLD", "HALL", "ROOM", "PLATE", "FOIL"};
     return (algo >= 0 && algo < kReverbAlgoCount) ? kNames[algo] : kNames[0];

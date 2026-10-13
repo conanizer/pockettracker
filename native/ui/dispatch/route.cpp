@@ -13,6 +13,7 @@ namespace pt::ui {
 //   • the full HELP opens over the two in-place editors, never over a confirm, the keyboard or the FX
 //     picker.
 //   • QWERTY above THEME: the theme editor's SAVE raises the keyboard without closing.
+//   • QWERTY and EQ above the SEND editor: its SAVE and its INP EQ cell raise them without closing.
 const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
     {&InputDispatcher::load_running,       &InputDispatcher::loading_layer},
     {&InputDispatcher::confirm_open,       &InputDispatcher::confirm_layer},
@@ -22,6 +23,7 @@ const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
     {&InputDispatcher::qwerty_open,        &InputDispatcher::qwerty_layer},
     {&InputDispatcher::theme_open,         &InputDispatcher::theme_layer},
     {&InputDispatcher::eq_open,            &InputDispatcher::eq_layer},
+    {&InputDispatcher::send_editor_open,   &InputDispatcher::send_editor_layer},
     {&InputDispatcher::fx_helper_open,     &InputDispatcher::fx_helper_layer},
     {&InputDispatcher::map_picker_open,    &InputDispatcher::map_picker_layer},
 };

@@ -32,6 +32,16 @@ struct EffectState {
     Theme theme     = theme_classic();
 };
 
+/**
+ * THE SEND EDITOR: the reverb's or the delay's section in a box over INSTRUMENT, INST.POOL or MIXER,
+ * raised from a REV or DEL cell, so a send is dialled without leaving the sound that feeds it.
+ * ⚠️ A modal — `currentScreen` still names the screen underneath.
+ */
+struct SendEditorState {
+    bool isOpen    = false;
+    int  cursorRow = 0;   // an EffectsRow; its section is the one drawn, and the cursor never leaves it
+};
+
 struct EffectInputResult {
     bool modified = false;
 };
@@ -83,5 +93,10 @@ public:
     EffectInputResult handle_input(songcore::Project& project, int cursor_row,
                                    const InputAction& action) const;
 };
+
+/** Paint the send editor's box over the finished frame: the section's name, then its cells as EFFECTS
+ *  draws them. No-op when it is not open. */
+void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Project& project,
+                      const Theme& t);
 
 }  // namespace pt::ui

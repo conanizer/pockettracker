@@ -15,6 +15,7 @@
 #include "ui/fx_helper.h"
 #include "ui/map_picker.h"
 #include "ui/modules/confirm_dialog.h"
+#include "ui/modules/effects_editor.h"
 #include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/qwerty_keyboard.h"
@@ -370,6 +371,14 @@ struct AppState {
     // The engine's device rate, so the EQ curve plots at the rate the bands were built at.
     int          eqSampleRate    = 44100;
 
+    // ── The SEND EDITOR ──────────────────────────────────────────────────────────────────────────
+    //
+    // The reverb's or the delay's cells in a box, raised from a REV or DEL cell. START passes through,
+    // as under the EQ editor — which its INP EQ cell opens over it.
+    // ⚠️ It stays open under the file browser its LOAD raises and under that EQ editor — ask
+    // `send_editor_up` / `send_editor_drawn`, not `isOpen`.
+    SendEditorState sendEditor{};
+
     // ── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────
     //
     // A partial modal like the EQ editor: START reaches the transport, so VIZ BG / LINE / WAVE can be
@@ -478,16 +487,26 @@ struct AppState {
     FolderConfig folderConfig{};
 };
 
+/** Does the send editor hold the buttons? Not under the file browser its LOAD raises: that is a
+ *  screen, and it closes back onto the editor. */
+inline bool send_editor_up(const AppState& s) {
+    return s.sendEditor.isOpen && s.currentScreen != ScreenType::FILE_BROWSER;
+}
+
+/** …and is its box on the frame? Not under the EQ editor its INP EQ cell raises, which takes the
+ *  module's place underneath and would be covered. */
+inline bool send_editor_drawn(const AppState& s) { return send_editor_up(s) && !s.eq.isOpen; }
+
 /**
  * Is a modal up that paints the full-canvas MODAL_BACKDROP? The shell extends the dim into the
  * letterbox bars when it is.
- * ⚠️ Exactly those modals: qwerty, confirm, full help, render dialog, FX helper, map picker. The EQ and
- * theme editors REPLACE the module and leave the frame bright, so they are not here.
+ * ⚠️ Exactly those modals: qwerty, confirm, full help, render dialog, FX helper, map picker, send
+ * editor. The EQ and theme editors REPLACE the module and leave the frame bright, so they are not here.
  */
 inline bool modal_backdrop_active(const AppState& s) {
     // A load is not here: its strip dims nothing.
     return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.mapPicker.isOpen ||
-           s.helpFull || s.renderDialog.isOpen;
+           s.helpFull || s.renderDialog.isOpen || send_editor_drawn(s);
 }
 
 /**

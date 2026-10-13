@@ -194,6 +194,7 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 - **A + B** on the NAME column — clear the slot (keeps its instrument type).
 - **A** (tap) on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
   the slot; the open is deferred to A-release so the two don't clash). Inside the editor, **B** closes it.
+- **A** (tap) on the RV or DE column — open the reverb's or the delay's settings; **B** closes them.
 - **A + START** — preview the selected instrument.
 
 ---

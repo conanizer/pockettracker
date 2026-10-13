@@ -173,6 +173,8 @@ inline EffectsCellPos effects_cell_pos(int row) {
 /**
  * Where every row and header lands, in LINES from the title: per section a blank line, a header, then
  * its lines. A paired line's two rows share one line number.
+ * `only` lays out ONE section by itself (the send editor's box): its name is the title, so its lines
+ * start straight under it. ⚠️ The other sections' rows then have no line — do not draw them.
  */
 struct EffectsLayout {
     int rowLine[EFFECTS_ROW_COUNT];
@@ -180,16 +182,17 @@ struct EffectsLayout {
     int lineCount;
 };
 
-inline EffectsLayout effects_layout() {
+inline EffectsLayout effects_layout(int only = -1) {
     EffectsLayout out{};
-    int line    = 0;    // line 0 is the "EFFECTS" title
+    int line    = 0;    // line 0 is the title
     int section = -1;
     for (int i = 0; i < EFFECTS_LINE_COUNT; ++i) {
         const EffectsDisplayLine& l          = EFFECTS_DISPLAY_LINES[i];
         const int                 rowSection = static_cast<int>(effects_row_section(l.cell[0]));
+        if (only >= 0 && rowSection != only) continue;
         if (rowSection != section) {
             section = rowSection;
-            line += 2;                                  // the blank line, then the header
+            if (only < 0) line += 2;                    // the blank line, then the header
             out.sectionHeaderLine[rowSection] = line;
         }
         line += 1;
@@ -207,6 +210,23 @@ inline int effects_next_row(int from, int delta) {
     const int            line = at.line + delta;
     if (line < 0 || line >= EFFECTS_LINE_COUNT) return from;   // the clamp
     return static_cast<int>(EFFECTS_DISPLAY_LINES[line].cell[at.column > 0 ? 1 : 0]);
+}
+
+/** The same step, stopping at the ends of the row's own SECTION — the send editor shows only one. */
+inline int effects_next_row_in_section(int from, int delta) {
+    const int to = effects_next_row(from, delta);
+    return effects_row_section(static_cast<EffectsRow>(to)) ==
+                   effects_row_section(static_cast<EffectsRow>(from))
+               ? to
+               : from;
+}
+
+/** A section's top-left cell — where a cursor entering it starts. */
+inline int effects_section_first_row(EffectsSection section) {
+    for (int i = 0; i < EFFECTS_LINE_COUNT; ++i)
+        if (effects_row_section(EFFECTS_DISPLAY_LINES[i].cell[0]) == section)
+            return static_cast<int>(EFFECTS_DISPLAY_LINES[i].cell[0]);
+    return 0;
 }
 
 /** The row one cell left or right on its line. Stops at the line's ends. */

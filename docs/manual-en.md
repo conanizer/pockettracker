@@ -206,6 +206,7 @@ The navigation map always shows where you are.
 |---|---|
 | SAMPLE EDITOR | INSTRUMENT screen → **TYPE** row → cursor on **EDIT >** → **A** |
 | EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ cell → **A**. Close with **B**. |
+| REVERB / DELAY | INSTRUMENT / INST.POOL / MIXER → cursor on a REV or DEL cell → **A**. The same cells as that section of EFFECTS. Close with **B** — the TIME row's sync switch is on EFFECTS only. |
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
@@ -1366,6 +1367,7 @@ The master column also has stereo send peak meters showing REV and DEL bus level
 | A + LEFT/RIGHT | Increase / decrease value by 1 |
 | A + UP/DOWN | Increase / decrease value by 16 |
 | A (on the master EQ cell) | Open EQ EDITOR. A + LEFT/RIGHT picks the EQ slot. |
+| A (on REV or DEL) | Open the reverb's or the delay's settings. B closes them. |
 
 ---
 
