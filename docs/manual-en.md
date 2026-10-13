@@ -580,7 +580,8 @@ typing each row.
 
 | Input | Action |
 |---|---|
-| L + RIGHT / LEFT | Repeat the top row on every 8th, 6th, 4th, 3rd, 2nd row, then on every row |
+| L + RIGHT | Repeat the top row on every 8th, 6th, 4th, 3rd, 2nd row, then on every row |
+| L + LEFT | Spread 3, 5, 6, 7, 9, 11 or 13 copies of the top row evenly over the range |
 | L + UP | Give every value in the range a new random one |
 | L + DOWN | Put the top row on random rows of the range |
 
@@ -588,11 +589,20 @@ typing each row.
 phrase. A note takes its volume and instrument with it, and a command its value. In a selection: the
 selected columns, from the selection's top row down to its last.
 
-**L + RIGHT** steps along this line and **L + LEFT** steps back; both wrap round:
+**L + RIGHT** steps along this line and wraps round:
 
 `as it was` → `8` → `6` → `4` → `3` → `2` → `every row` → `ramp`
 
-Rows the fill does not land on are left as they were. A spacing too wide for the range is skipped.
+**L + LEFT** steps along its own, counted in notes rather than rows:
+
+`as it was` → `3` → `5` → `6` → `7` → `9` → `11` → `13`
+
+That many copies are placed as evenly as they fit, the first on the top row — 5 over a whole phrase
+land on rows `00`, `03`, `06`, `09` and `0C`. Each button starts from the phrase as it was, so a press
+of one replaces what the other placed.
+
+Rows the fill does not land on are left as they were. A spacing too wide for the range is skipped, and
+so is a count that does not fit it or that lands on the same rows as one of the spacings.
 
 **Ramp** is offered in a selection whose first and last rows hold different values in the same column.
 The rows between are stepped evenly from one to the other — volume `10` on the first row and `50` on

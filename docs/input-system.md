@@ -251,7 +251,8 @@ from the cell under the cursor down to the end of the phrase.
 
 | Control | Action |
 |---------|--------|
-| **L+RIGHT / L+LEFT** | Walk the line: as it was, every 8th / 6th / 4th / 3rd / 2nd row, every row, ramp |
+| **L+RIGHT** | Walk the line: as it was, every 8th / 6th / 4th / 3rd / 2nd row, every row, ramp |
+| **L+LEFT** | Walk the line: as it was, then 3 / 5 / 6 / 7 / 9 / 11 / 13 copies spread evenly |
 | **L+UP** | A new random value in every cell that holds one |
 | **L+DOWN** | The top row on random rows |
 

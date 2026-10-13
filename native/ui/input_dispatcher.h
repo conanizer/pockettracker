@@ -229,7 +229,7 @@ class InputDispatcher {
     /** L+B+A: deep-clone the chain/phrase under the cursor into free slots. */
     void on_l_b_a();
     /** L + a direction: fill rows from the selection's top row, or from the cell under the cursor
-     *  (PHRASE). LEFT/RIGHT walk the spacings, UP rolls random values, DOWN scatters. */
+     *  (PHRASE). RIGHT walks the spacings, LEFT the even spreads, UP rolls random values, DOWN scatters. */
     void on_l_up();
     void on_l_down();
     void on_l_left();
@@ -603,7 +603,8 @@ class InputDispatcher {
         int              phraseId = -1;
         FillRange        range{};
         songcore::Phrase base{}, placed{}, shown{};
-        int              stop = 0;   // index into fill_stops(base, range)
+        int              stop   = 0;       // index into the line it is on
+        bool             spread = false;   // that line: fill_spread_stops (L+LEFT), else fill_stops
     };
     FillMemory    fill_{};
     songcore::Rng fillRng_{};

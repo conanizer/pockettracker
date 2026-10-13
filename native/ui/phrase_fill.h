@@ -2,9 +2,9 @@
 
 // ─── Filling rows of a phrase ────────────────────────────────────────────────────────────────────
 //
-// L + a direction on PHRASE. The range's top row is the source: repeat it every N rows, ramp a column
-// between the range's two ends, scatter it over random rows, or roll fresh values into the cells
-// that hold one. Pure functions over a Phrase — the dispatcher keeps the phrase from before the first
+// L + a direction on PHRASE. The range's top row is the source: repeat it every N rows, spread N copies
+// of it evenly, ramp a column between the range's two ends, scatter it over random rows, or roll fresh
+// values into the cells that hold one. Pure functions over a Phrase — the dispatcher keeps the phrase from before the first
 // press, which is the undo.
 //
 // A fill adds and never erases: a blank source cell contributes nothing, and rows a fill does not land
@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
+#include <string>
 #include <vector>
 
 #include "songcore/effects.h"
@@ -36,9 +38,12 @@ struct FillRange {
     }
 };
 
-/** The stops L+LEFT/RIGHT walk: this, then a spacing in rows (8, 6, 4, 3, 2, 1), then the ramp. */
+/** Both lines start here. L+RIGHT's goes on through the spacings, in rows, to the ramp; L+LEFT's
+ *  through the spreads, in notes. */
 inline constexpr int FILL_AS_IT_WAS = 0;
 inline constexpr int FILL_RAMP      = -1;
+inline constexpr int FILL_SPACINGS[] = {8, 6, 4, 3, 2, 1};
+inline constexpr int FILL_SPREADS[]  = {3, 5, 6, 7, 9, 11, 13};
 
 inline constexpr bool fill_is_fx_type(int column)  { return column >= 4 && column % 2 == 0; }
 inline constexpr bool fill_is_fx_value(int column) { return column >= 5 && column % 2 == 1; }
@@ -132,6 +137,47 @@ inline songcore::Phrase fill_every(const songcore::Phrase& base, const FillRange
     return out;
 }
 
+/**
+ * `count` hits over `rows` rows, as evenly as they go: 'x' on a hit, '.' off it. Row 0 is always a
+ * hit and no two gaps differ by more than a row. A count that shares a factor with the rows is the
+ * smaller pattern repeated — 6 over 16 is 3 over 8, twice.
+ */
+inline std::string fill_even_pattern(int count, int rows) {
+    if (count >= rows) return std::string(static_cast<size_t>(std::max(rows, 0)), 'x');
+    const int reps = std::gcd(count, rows);
+    std::vector<std::string> head(static_cast<size_t>(count / reps), "x");
+    std::vector<std::string> tail(static_cast<size_t>((rows - count) / reps), ".");
+    // Pair a group from each pile, and let whichever pile has groups left over be the next tail.
+    do {
+        const size_t pairs = std::min(head.size(), tail.size());
+        for (size_t i = 0; i < pairs; ++i) head[i] += tail[i];
+        if (head.size() > pairs) {
+            tail.assign(head.begin() + static_cast<std::ptrdiff_t>(pairs), head.end());
+            head.resize(pairs);
+        } else {
+            tail.erase(tail.begin(), tail.begin() + static_cast<std::ptrdiff_t>(pairs));
+        }
+    } while (tail.size() > 1);
+
+    std::string once, out;
+    for (const std::string& group : head) once += group;
+    for (const std::string& group : tail) once += group;
+    for (int i = 0; i < reps; ++i) out += once;
+    return out;
+}
+
+/** The top row on `count` rows of the range, spread as evenly as they go. */
+inline songcore::Phrase fill_spread(const songcore::Phrase& base, const FillRange& r, int count) {
+    songcore::Phrase out = base;
+    if (count == FILL_AS_IT_WAS) return out;
+    const songcore::PhraseStep src  = base.steps[static_cast<size_t>(r.top)];
+    const std::string          hits = fill_even_pattern(count, r.bottom - r.top + 1);
+    for (int row = r.top + 1; row <= r.bottom; ++row)
+        if (hits[static_cast<size_t>(row - r.top)] == 'x')
+            fill_place(out.steps[static_cast<size_t>(row)], src, r);
+    return out;
+}
+
 /** Can this column run from the top row's value to the bottom row's? Both must hold one, and differ. */
 inline bool fill_ramps(const songcore::Phrase& base, const FillRange& r, int column) {
     if (r.wholeUnit || r.bottom - r.top < 2 || !r.has(column) || fill_is_fx_type(column)) return false;
@@ -181,11 +227,11 @@ inline songcore::Phrase fill_ramp(const songcore::Phrase& base, const FillRange&
     return out;
 }
 
-/** The line L+LEFT/RIGHT walks for this range. A spacing that reaches no second row is left off. */
+/** The line L+RIGHT walks for this range. A spacing that reaches no second row is left off. */
 inline std::vector<int> fill_stops(const songcore::Phrase& base, const FillRange& r) {
     std::vector<int> stops{FILL_AS_IT_WAS};
     if (fill_source_holds(base.steps[static_cast<size_t>(r.top)], r))
-        for (const int every : {8, 6, 4, 3, 2, 1})
+        for (const int every : FILL_SPACINGS)
             if (r.top + every <= r.bottom) stops.push_back(every);
     for (int column = 1; column <= 9; ++column) {
         if (!fill_ramps(base, r, column)) continue;
@@ -199,6 +245,30 @@ inline songcore::Phrase fill_at_stop(const songcore::Phrase& base, const FillRan
                                      const songcore::Project& p) {
     if (stop == FILL_AS_IT_WAS) return base;
     return stop == FILL_RAMP ? fill_ramp(base, r, p) : fill_every(base, r, stop);
+}
+
+/**
+ * The line L+LEFT walks for this range: so many notes, spread evenly. A count is left off when it
+ * does not leave a row free, or when it lands on the very rows a spacing of the other line does.
+ */
+inline std::vector<int> fill_spread_stops(const songcore::Phrase& base, const FillRange& r) {
+    std::vector<int> stops{FILL_AS_IT_WAS};
+    if (!fill_source_holds(base.steps[static_cast<size_t>(r.top)], r)) return stops;
+
+    const int rows = r.bottom - r.top + 1;
+    for (const int count : FILL_SPREADS) {
+        if (count >= rows) break;
+        const std::string hits = fill_even_pattern(count, rows);
+        bool spacing = false;
+        for (const int every : FILL_SPACINGS) {
+            bool same = true;
+            for (int row = 0; row < rows && same; ++row)
+                same = (hits[static_cast<size_t>(row)] == 'x') == (row % every == 0);
+            spacing = spacing || same;
+        }
+        if (!spacing) stops.push_back(count);
+    }
+    return stops;
 }
 
 /** The top row on a random third of the rows below it — at least one. */

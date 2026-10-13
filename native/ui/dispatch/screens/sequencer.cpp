@@ -464,10 +464,15 @@ void InputDispatcher::phrase_fill(Gesture g) {
     switch (g) {
         case Gesture::L_LEFT:
         case Gesture::L_RIGHT: {
-            const std::vector<int> stops = fill_stops(fill_.base, range);
-            const int              count = static_cast<int>(stops.size());
-            fill_.stop   = (fill_.stop + (g == Gesture::L_RIGHT ? 1 : count - 1)) % count;
-            fill_.placed = fill_at_stop(fill_.base, range, stops[static_cast<size_t>(fill_.stop)], p);
+            // A line each, both laid over `base`: the other button's stop is replaced, never added to.
+            const bool             spread = g == Gesture::L_LEFT;
+            const std::vector<int> stops  = spread ? fill_spread_stops(fill_.base, range)
+                                                   : fill_stops(fill_.base, range);
+            if (fill_.spread != spread) fill_.stop = 0;
+            fill_.spread = spread;
+            fill_.stop   = (fill_.stop + 1) % static_cast<int>(stops.size());
+            const int at = stops[static_cast<size_t>(fill_.stop)];
+            fill_.placed = spread ? fill_spread(fill_.base, range, at) : fill_at_stop(fill_.base, range, at, p);
             fill_.shown  = fill_.placed;
             break;
         }
