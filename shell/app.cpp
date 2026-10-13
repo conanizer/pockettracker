@@ -135,8 +135,8 @@ struct BackgroundContext {
     bool                 console    = false;
     const AppConfig::BackgroundPlayback* background = nullptr;
 
-    // Set by the watcher, cleared by the loop once it has reopened the device. No lock: the watcher
-    // runs on the loop's own thread (see on_app_event).
+    // No device is open and the loop owes a reopen: set by the watcher and by a reopen that failed,
+    // cleared once one succeeds. No lock: the watcher runs on the loop's own thread (see on_app_event).
     bool audioClosed = false;
 
     // Off the screen: nothing may be drawn (the GL context is backed up). Cleared on
@@ -1158,11 +1158,15 @@ void FrameLoop::handle_sdl_event(const SDL_Event& e, Uint64 now) {
  * The audio device comes back. Lost two ways: released on the way into the background, or taken away
  * while open (audio-backend.h). The close first lets go of a dead stream. Retried every 500 ms with no
  * limit — the app is silent until it works. ⚠️ Not while backgrounded, or the stream released on the
- * way out would reopen on the next tick.
+ * way out would reopen on the next tick — unless a song is playing there, which needs its device.
  */
 void FrameLoop::reopen_audio_if_lost(Uint64 now) {
-    if (((bg.audioClosed && !bg.backgrounded) || audio.deviceLost()) && now >= audioReopenMs) {
+    const bool owed = bg.audioClosed && (!bg.backgrounded || bg.playingInBackground);
+    if ((owed || audio.deviceLost()) && now >= audioReopenMs) {
         audio.closeStream();
+        // ⚠️ Owed from here until an open succeeds: a backend's report of a lost device is spent by
+        // the attempt, so nothing else would ask for the next one.
+        bg.audioClosed = true;
         if (audio.openStream()) {
             bg.audioClosed = false;
             std::printf("audio:   device reopened\n");
