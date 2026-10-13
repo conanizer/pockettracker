@@ -1169,6 +1169,9 @@ void FrameLoop::reopen_audio_if_lost(Uint64 now) {
         bg.audioClosed = true;
         if (audio.openStream()) {
             bg.audioClosed = false;
+            // The new stream may sit on a slower or faster path than the one it replaces.
+            derive_midi_auto_offset(audio, state);
+            host.set_midi_offset_ms(ui::midi_offset_in_force(state.settings, state.midiAutoOffsetMs));
             std::printf("audio:   device reopened\n");
         } else {
             audioReopenMs = now + 500;

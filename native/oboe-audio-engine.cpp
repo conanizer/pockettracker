@@ -28,10 +28,24 @@ void OboeAudioEngine::setSlowOpenMarker(std::string path) {
     slowOpenMarker_ = std::move(path);
 }
 
+void OboeAudioEngine::setPlaybackCaptured(const std::atomic<bool>* captured) {
+    playbackCaptured_ = captured;
+}
+
+bool OboeAudioEngine::deviceLost() const {
+    if (deviceLost_.load(std::memory_order_relaxed)) return true;
+    if (!playbackCaptured_) return false;
+    return playbackCaptured_->load(std::memory_order_relaxed) ? reopenOnRecording_
+                                                              : reopenAfterRecording_;
+}
+
 bool OboeAudioEngine::openStream() {
     // ⚠️ Cleared BEFORE the attempt, not after a successful one: a stream dying while this runs
     // raises it again, and clearing on the way out would erase that second death.
     deviceLost_.store(false, std::memory_order_relaxed);
+
+    // Read once, so the open and what is remembered about it agree if the recording ends meanwhile.
+    const bool captured = playbackCaptured_ && playbackCaptured_->load(std::memory_order_relaxed);
 
     oboe::AudioStreamBuilder builder;
     builder.setDataCallback(this);
@@ -64,7 +78,12 @@ bool OboeAudioEngine::openStream() {
         builder.setAudioApi(oboe::AudioApi::Unspecified);
         builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
         builder.setSharingMode(oboe::SharingMode::Exclusive);
+        // ⚠️ Kept off the direct path BY HAND under a recording. Android refuses it too, but only
+        // once the recorder has attached, and the shell may hear of a recording sooner than that.
+        const bool offDirect = captured && oboe::OboeExtensions::isMMapSupported();
+        if (offDirect) oboe::OboeExtensions::setMMapEnabled(false);
         result = builder.openStream(stream);
+        if (offDirect) oboe::OboeExtensions::setMMapEnabled(true);
     } else {
         LOGD("openStream: a past open was slow (%s) - OpenSL ES only", slowOpenMarker_.c_str());
     }
@@ -107,14 +126,24 @@ bool OboeAudioEngine::openStream() {
         stream->setBufferSizeInFrames(burst * kBurstsPerBuffer);
     }
 
-    LOGD("Stream opened: %d Hz, burst=%d, bufSz=%d, api=%s, perf=%s, sharing=%s "
-         "(platform said %d Hz / %d frames)",
+    // ⚠️ Each is false once a reopen has answered it, or the frame loop would reopen every tick. And
+    // only a stream that could have had the direct path is worth reopening after a recording:
+    // OpenSL ES never has it, and a device without it would reopen for nothing.
+    const bool direct = oboe::OboeExtensions::isMMapUsed(stream.get());
+    reopenOnRecording_    = direct && !captured;
+    reopenAfterRecording_ = captured && !direct &&
+                            stream->getAudioApi() == oboe::AudioApi::AAudio &&
+                            oboe::OboeExtensions::isMMapSupported();
+
+    LOGD("Stream opened: %d Hz, burst=%d, bufSz=%d, api=%s, perf=%s, sharing=%s, direct=%d, "
+         "recorded=%d (platform said %d Hz / %d frames)",
          stream->getSampleRate(),
          burst,
          stream->getBufferSizeInFrames(),
          oboe::convertToText(stream->getAudioApi()),
          oboe::convertToText(stream->getPerformanceMode()),
          oboe::convertToText(stream->getSharingMode()),
+         (int)direct, (int)captured,
          platformRate_, platformBurst_);
 
     // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
@@ -170,6 +199,9 @@ AudioBackend::OutputLatency OboeAudioEngine::outputLatency() const {
 }
 
 void OboeAudioEngine::closeStream() {
+    // No stream, no reason to ask for a reopen — a failed open or a backgrounded app must not loop.
+    reopenOnRecording_    = false;
+    reopenAfterRecording_ = false;
     if (stream) {
         stream->stop();
         stream->close();

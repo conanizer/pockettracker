@@ -278,6 +278,10 @@ std::atomic<bool> g_bgPlaying{false};          // the transport, published by th
 std::atomic<bool> g_bgServiceStarted{false};   // onPause brought the playback service up
 std::atomic<bool> g_bgStopRequested{false};    // the notification's STOP, waiting for the loop
 
+// A screen recording shows the app, so it may be taking its sound too (MainActivity.kt, Android 15+).
+// Read by the audio backend, which reopens its stream around one — OboeAudioEngine::setPlaybackCaptured.
+std::atomic<bool> g_playbackCaptured{false};
+
 // The song stopped in the background (or never kept playing): Java takes the service down. Same
 // by-name, exception-safe shape as the hooks above.
 void android_stop_playback_service() {
@@ -490,6 +494,11 @@ Java_com_conanizer_pockettracker_PlaybackService_nativeRequestStop(JNIEnv*, jcla
     g_bgStopRequested.store(true);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_MainActivity_nativeSetPlaybackCaptured(JNIEnv*, jobject, jboolean captured) {
+    g_playbackCaptured.store(captured == JNI_TRUE);
+}
+
 int main(int argc, char** argv) {
     // ⚠️ THE ROOTS FIRST, then the redirect: the pump tees into a file and must know where before
     // the first line. The lines below use `__android_log_print` directly.
@@ -554,6 +563,7 @@ int main(int argc, char** argv) {
     query_device_audio_defaults(deviceRate, deviceBurst);
     audio.setPlatformDefaults(deviceRate, deviceBurst);
     if (!privateRoot.empty()) audio.setSlowOpenMarker(privateRoot + "/audio-slow-open");
+    audio.setPlaybackCaptured(&g_playbackCaptured);
 
     if (!audio.openStream()) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "openStream failed - no audio device");

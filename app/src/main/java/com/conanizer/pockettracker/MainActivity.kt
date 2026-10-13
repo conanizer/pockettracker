@@ -27,6 +27,7 @@ import com.conanizer.pockettracker.platform.android.MidiOutManager
 import org.json.JSONObject
 import org.libsdl.app.SDLActivity
 import java.io.File
+import java.util.function.Consumer
 
 /**
  * PocketTracker's Android entry point: an `SDLActivity` subclass. The app is the shared C++ SDL shell
@@ -212,10 +213,13 @@ class MainActivity : SDLActivity() {
             Log.w(TAG, "native library not loaded - no background playback")
         }
         try { nativeSetServiceStarted(started) } catch (_: UnsatisfiedLinkError) {}
+        unwatchScreenRecording()
         super.onPause()
     }
 
     override fun onResume() {
+        // Before the native loop is told it is back, so the sound reopens on the right path at once.
+        watchScreenRecording()
         super.onResume()
         stopPlaybackService()
     }
@@ -233,6 +237,50 @@ class MainActivity : SDLActivity() {
 
     private external fun nativeIsPlaying(): Boolean
     private external fun nativeSetServiceStarted(started: Boolean)
+
+    // ── A screen recording hears the app ─────────────────────────────────────────────────────────
+    //
+    // The fast audio path does not reach a recording, so native leaves it while one shows the app
+    // (`OboeAudioEngine::setPlaybackCaptured`). ⚠️ **ANDROID 15+ ONLY** — earlier versions tell an
+    // app nothing, and there a recording started over a running app is silent.
+    //
+    // ⚠️ Watched only while resumed, and `onResume` reads the state afresh: leaving the screen also
+    // reads as "no longer recorded", and a song playing on in the background must not have its sound
+    // reopened for that.
+    private val recordingCallback = Consumer<Int> { state -> onScreenRecording(state) }
+    private val recordingEnded = Runnable { setPlaybackCaptured(false) }
+
+    private fun watchScreenRecording() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+        try {
+            onScreenRecording(windowManager.addScreenRecordingCallback(mainExecutor, recordingCallback))
+        } catch (e: Exception) {
+            Log.w(TAG, "screen recording state unavailable: $e")
+        }
+    }
+
+    private fun unwatchScreenRecording() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+        try { windowManager.removeScreenRecordingCallback(recordingCallback) } catch (_: Exception) {}
+        window.decorView.removeCallbacks(recordingEnded)
+    }
+
+    private fun onScreenRecording(state: Int) {
+        window.decorView.removeCallbacks(recordingEnded)
+        if (state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE) {
+            setPlaybackCaptured(true)
+        } else {
+            // ⚠️ Late on purpose: a stream reopened while the recorder still holds the sound is
+            // refused the fast path, and would stay slow.
+            window.decorView.postDelayed(recordingEnded, RECORDING_END_SETTLE_MS)
+        }
+    }
+
+    private fun setPlaybackCaptured(captured: Boolean) {
+        try { nativeSetPlaybackCaptured(captured) } catch (_: UnsatisfiedLinkError) {}
+    }
+
+    private external fun nativeSetPlaybackCaptured(captured: Boolean)
 
     override fun onDestroy() {
         buttonSound?.release()
@@ -705,6 +753,8 @@ class MainActivity : SDLActivity() {
         /** How long a rotation the device DID accept has to complete, before [portraitCheck] reads
          *  the configuration back and concludes it was refused. */
         const val ORIENTATION_SETTLE_MS = 2000L
+
+        const val RECORDING_END_SETTLE_MS = 1000L
 
         /**
          * Bump this when there are new keys to migrate, and add an arm for them.

@@ -29,6 +29,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+        Android 15+: lets the app hear that a screen recording has started, which is when it leaves
+        the fast audio path — that path does not reach a recording (MainActivity.kt). Granted at
+        install, never asked for; it reveals that a recording runs and nothing about it.
+    -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_RECORDING" />
+
+    <!--
         EXTERNAL MIDI out (MIDI plan phase B2b). No PERMISSION is needed: USB and virtual (app-to-app)
         MIDI through MidiManager are unguarded — only BLE MIDI would want BLUETOOTH_SCAN, and the plan
         defers BLE (§9). ⚠️ required="false" is load-bearing: `true` would hide the app on the Play

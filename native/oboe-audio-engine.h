@@ -45,6 +45,15 @@ public:
      */
     void setSlowOpenMarker(std::string path);
 
+    /**
+     * Where the shell keeps "something is recording what the device plays" (a screen recording).
+     *
+     * ⚠️ **THE DIRECT PATH IS SILENT IN A RECORDING, AND A STREAM KEEPS THE PATH IT OPENED ON.** So
+     * while this is set `openStream` stays off the direct path, and `deviceLost` asks for ONE reopen
+     * each time it flips — and only where that reopen would change the path. Null means never.
+     */
+    void setPlaybackCaptured(const std::atomic<bool>* captured);
+
     bool openStream() override;
     void closeStream() override;
     void resumeStream() override;
@@ -85,7 +94,7 @@ public:
      */
     void onErrorAfterClose(oboe::AudioStream* audioStream, oboe::Result error) override;
 
-    bool deviceLost() const override { return deviceLost_.load(std::memory_order_relaxed); }
+    bool deviceLost() const override;
 
 private:
     AudioEngine* core;
@@ -104,6 +113,11 @@ private:
     int platformBurst_ = 0;
 
     std::string slowOpenMarker_;
+
+    // Written by openStream and closeStream, read by deviceLost — the frame loop's thread, all three.
+    const std::atomic<bool>* playbackCaptured_ = nullptr;
+    bool reopenOnRecording_    = false;  // on the direct path, opened with no recording running
+    bool reopenAfterRecording_ = false;  // kept off the direct path by one
 
     // Raised on Oboe's error thread, read by the frame loop, cleared when a reopen is ATTEMPTED (see
     // openStream) rather than when one succeeds.
