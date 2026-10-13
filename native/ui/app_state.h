@@ -98,7 +98,7 @@ struct AppState {
     int mixerCursorColumn = 0;  // 0..7 = tracks, 8 = master
     int mixerMasterRow    = 0;  // 0 = volumes, 1 = sends / EQ, 2 = OTT|DUST, 3 = LIM
 
-    /** EFFECTS. Eight editable rows among fifteen drawn. */
+    /** EFFECTS. A row is one cell, not one line (ui/effects_row_layout.h). */
     int effectsCursorRow = 0;
 
     /**
@@ -243,7 +243,9 @@ struct AppState {
         LOAD_PROJECT,       // a .ptp — the whole document (PROJECT's LOAD)
         LOAD_THEME,         // a .ptt — and back into the THEME EDITOR that raised the browser
         LOAD_SCALE,         // a .pts into the slot the SCALE screen is showing
-        LOAD_GROOVE         // a .ptg into the slot the GROOVE screen is showing
+        LOAD_GROOVE,        // a .ptg into the slot the GROOVE screen is showing
+        LOAD_REVERB,        // a .ptr into EFFECTS' reverb section
+        LOAD_DELAY          // a .ptd into EFFECTS' delay section
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 

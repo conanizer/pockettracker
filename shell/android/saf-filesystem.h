@@ -103,6 +103,8 @@ class SafFileSystem : public pt::ui::FileSystem {
     std::string themes_directory() override;
     std::string scales_directory() override;
     std::string grooves_directory() override;
+    std::string reverbs_directory() override;
+    std::string delays_directory() override;
 
     // ── The app's own files ─────────────────────────────────────────────────────────────────────
     //

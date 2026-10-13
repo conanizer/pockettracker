@@ -617,7 +617,7 @@ inline void move_cursor_right(AppState& s) {
             return;
         }
 
-        // …and right, onto a section's second column. See the matching arm in move_cursor_left.
+        // …and right, to the next cell on the line. See the matching arm in move_cursor_left.
         case ScreenType::EFFECTS:
             s.effectsCursorRow = effects_step_column(s.effectsCursorRow, +1);
             return;

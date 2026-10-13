@@ -278,6 +278,8 @@ void make_app_folders(const AppConfig& cfg, ui::FileSystem& filesystem) {
     filesystem.themes_directory();
     filesystem.scales_directory();
     filesystem.grooves_directory();
+    filesystem.reverbs_directory();
+    filesystem.delays_directory();
     std::printf("files:   %s\n", cfg.appRoot.c_str());
 
     // The app's own files (settings, template, autosave) may live elsewhere — on Android they do.

@@ -2,6 +2,7 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
+#include "ui/fx_preset_io.h"
 #include "ui/groove_io.h"
 #include "ui/scale_io.h"
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
@@ -418,6 +419,40 @@ void InputDispatcher::browser_confirm() {
             mark_modified();
             close_file_browser();
             s_.statusMessage = "GROOVE LOADED";
+            s_.statusSuccess = true;
+            return;
+        }
+
+        case AppState::BrowserPurpose::LOAD_REVERB: {
+            // Read into a COPY of the cells, committed only once the file parses.
+            ReverbCells cells = reverb_cells_of(host_.project());
+            if (ext != REVERB_FILE_EXT || !load_reverb_file(fs_, path, cells)) {
+                b.statusMessage = "LOAD FAILED";
+                b.statusSuccess = false;
+                return;
+            }
+            apply_reverb_cells(host_.edit_project(), cells);
+            // ⚠️ Closed FIRST: `mark_modified` pushes to the engine only from EFFECTS, and until the
+            // browser closes this is not EFFECTS — the preset would show and not be heard.
+            close_file_browser();
+            mark_modified();
+            s_.statusMessage = "REVERB LOADED";
+            s_.statusSuccess = true;
+            return;
+        }
+
+        case AppState::BrowserPurpose::LOAD_DELAY: {
+            // As the reverb's, including the order of the last two calls.
+            DelayCells cells = delay_cells_of(host_.project());
+            if (ext != DELAY_FILE_EXT || !load_delay_file(fs_, path, cells)) {
+                b.statusMessage = "LOAD FAILED";
+                b.statusSuccess = false;
+                return;
+            }
+            apply_delay_cells(host_.edit_project(), cells);
+            close_file_browser();
+            mark_modified();
+            s_.statusMessage = "DELAY LOADED";
             s_.statusSuccess = true;
             return;
         }

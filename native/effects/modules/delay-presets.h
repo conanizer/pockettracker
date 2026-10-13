@@ -1,12 +1,12 @@
 #pragma once
 
 // ───────────────────────────────────────────────────────────────────────────
-// The delay's PRESETS — three names for three sets of cell values, and nothing else.
+// The delay's built-in PRESETS — three names for three sets of cell values, and nothing else.
 //
-// ⚠️⚠️ **THE NAME IS NOT STORED IN THE PROJECT AND IS NOT AN ARGUMENT TO THE DSP.** A project holds
-// PONG, TONE and WOBL; the TYPE cell writes all three at once and then reads the name back by
-// matching. Nothing downstream can ask "is this TAPE?", because after one turn of any other cell the
-// question has no answer — which is the point. A preset is a starting place, not a mode.
+// ⚠️⚠️ **A PRESET'S NAME IS NOT AN ARGUMENT TO THE DSP.** A project holds PONG, TONE and WOBL; the
+// preset cell writes all three at once and the project keeps the name only as a label
+// (ui/fx_preset_bank.h). A preset is a starting place, not a mode.
+// ⚠️ A built-in row leaves TIME, FDBK and REV alone; a saved file (ui/fx_preset_io.h) carries them.
 //
 // ⚠️ NORMAL'S ROW IS ALSO THE STRUCT DEFAULT (model.h): pong off, TONE FF, WOBL 00 — what a project
 // without these cells loads as, and it must sound as it always did, so each is gated OFF at its
@@ -32,16 +32,11 @@ inline constexpr DelayPreset kDelayPresets[] = {
 };
 inline constexpr int kDelayPresetCount = 3;
 
-// The index shown on the TYPE cell when no preset matches. It is one past the last, so the cell's
-// range is 0..kDelayPresetCount while the cells are hand-set and 0..kDelayPresetCount-1 once a preset
-// is chosen — which is what makes USER reachable to LEAVE and impossible to ENTER on purpose.
-inline constexpr int kDelayPresetUser = kDelayPresetCount;
-
-/** Which preset these three cells are, or `kDelayPresetUser` when they are nobody's. */
+/** Which built-in preset these three cells are, or −1 when they are nobody's. */
 inline int delay_preset_match(bool pong, int tone, int wobble) {
     for (int i = 0; i < kDelayPresetCount; ++i) {
         const DelayPreset& d = kDelayPresets[i];
         if (d.pong == pong && d.tone == tone && d.wobble == wobble) return i;
     }
-    return kDelayPresetUser;
+    return -1;
 }

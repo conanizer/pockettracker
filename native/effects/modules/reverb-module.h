@@ -38,7 +38,7 @@ struct ReverbModule {
 
     // ⚠️⚠️ THREE INDEPENDENT CELLS; PRE AND WIDE ARE NEUTRAL AT THEIR DEFAULTS and gated so their
     // arithmetic is SKIPPED there rather than performed as an identity — an old project's pre-delay
-    // and stereo image stay exact. Any combination is legal: the TYPE cell only writes them.
+    // and stereo image stay exact. Any combination is legal: a preset only writes them.
     // ⚠️ MOD IS NOT GATED: its default is a real setting, driven on every reset and push.
     // ⚠️ WIDE's neutral is 0x80 (a width cell reaches both sides of "as it is"); the mid/side pair is
     // not bit-identical to leaving L/R alone, so 0x80 skips it.

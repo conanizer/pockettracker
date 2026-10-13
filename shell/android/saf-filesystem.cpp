@@ -421,6 +421,8 @@ std::string SafFileSystem::soundfonts_directory()  { return ensure_dir("Soundfon
 std::string SafFileSystem::themes_directory()      { return ensure_dir("Themes"); }
 std::string SafFileSystem::scales_directory()      { return ensure_dir("Scales"); }
 std::string SafFileSystem::grooves_directory()     { return ensure_dir("Grooves"); }
+std::string SafFileSystem::reverbs_directory()     { return ensure_dir("Reverbs"); }
+std::string SafFileSystem::delays_directory()      { return ensure_dir("Delays"); }
 
 bool SafFileSystem::activate(const std::string& path) {
     if (path != kAddRootPath) return false;

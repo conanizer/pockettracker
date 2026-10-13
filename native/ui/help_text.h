@@ -364,6 +364,10 @@ enum class HelpTopic {
     MIDI_VELOCITY,
     SET_AUDIO_OUT,
     GROOVE_PPQ,
+    FX_REVERB_SAVE,
+    FX_REVERB_LOAD,
+    FX_DELAY_SAVE,
+    FX_DELAY_LOAD,
 
     COUNT
 };
@@ -528,6 +532,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+←/→ steps 1, A+↑/↓ steps 16",
       "A+B resets the value",
       "A on an EQ row opens the editor",
+      "A on SAVE or LOAD: a preset file",
       "B on TIME switches note sync",
       "START plays the song from 00",
       "R+↑ goes to the MIXER"}},
@@ -2138,15 +2143,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "three seconds to start over."},
      {"A taps, at least twice"}},
     /* FX_DELAY_TYPE */
-    {"TYPE: a starting point", "Sets the three cells below.", "Change one and it says USER.",
+    {"PRESET: a ready-made delay", "A+D-PAD walks the built-in", "ones. SAVE and LOAD are beside.",
      {"A ready-made character for the",
       "repeats. NORMAL is the plain",
       "delay, PING bounces left and",
       "right, TAPE is dark and drifts.",
-      "It sets PONG, TONE and WOBL.",
-      "Turn one of them afterwards",
-      "and TYPE reads USER."},
-     {"A+D-PAD picks a type"}},
+      "A built-in one sets PONG, TONE",
+      "and WOBL. A star marks one you",
+      "have changed since."},
+     {"A+D-PAD picks a built-in preset",
+      "A+B goes back to NORMAL"}},
     /* FX_DELAY_TONE */
     {"TONE: how bright repeats are", "Lower makes each echo darker", "than the one before it.",
      {"How bright the echoes stay.",
@@ -2172,16 +2178,17 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "its instrument sits on."},
      {"A+D-PAD turns it on or off"}},
     /* FX_REVERB_TYPE */
-    {"TYPE: a starting point", "Sets the cells around it.", "Change one and it says USER.",
+    {"PRESET: a ready-made reverb", "A+D-PAD walks the built-in", "ones. SAVE and LOAD are beside.",
      {"A ready-made room. NORMAL is",
       "the plain reverb, ROOM is tight",
       "and bright, HALL has a gap and",
       "a long dark tail, CAVE is the",
       "longest, darkest and widest.",
-      "It sets SIZE, DCAY, DAMP, PRE,",
-      "WIDE and MOD. Turn one of them",
-      "and TYPE reads USER."},
-     {"A+D-PAD picks a type"}},
+      "It sets every cell below but",
+      "INP EQ. A star marks one you",
+      "have changed since."},
+     {"A+D-PAD picks a built-in preset",
+      "A+B goes back to NORMAL"}},
     /* FX_REVERB_PRE */
     {"PRE: a gap before the tail", "The reverb starts late, so the", "sound stays in front of it.",
      {"A gap before the tail starts,",
@@ -2318,6 +2325,42 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "the step."},
      {"A+←/→ picks 24, 48 or 96",
       "A+B goes back to 48"}},
+    /* FX_REVERB_SAVE */
+    {"SAVE: store this reverb", "Writes a file you can load", "into any other project.",
+     {"Names this reverb and writes it",
+      "to the Reverbs folder, so LOAD",
+      "can bring it into any song. The",
+      "file holds every cell here but",
+      "INP EQ."},
+     {"A opens the keyboard to name it",
+      "START on the keyboard saves",
+      "SELECT on the keyboard cancels"}},
+    /* FX_REVERB_LOAD */
+    {"LOAD: recall a reverb", "Replaces the reverb cells", "below it.",
+     {"Opens the file browser on your",
+      "saved reverbs. Loading one",
+      "replaces every reverb cell but",
+      "INP EQ."},
+     {"A opens the file browser",
+      "A there loads it, B goes back"}},
+    /* FX_DELAY_SAVE */
+    {"SAVE: store this delay", "Writes a file you can load", "into any other project.",
+     {"Names this delay and writes it",
+      "to the Delays folder, so LOAD",
+      "can bring it into any song. The",
+      "file holds every cell here but",
+      "INP EQ."},
+     {"A opens the keyboard to name it",
+      "START on the keyboard saves",
+      "SELECT on the keyboard cancels"}},
+    /* FX_DELAY_LOAD */
+    {"LOAD: recall a delay", "Replaces the delay cells", "below it.",
+     {"Opens the file browser on your",
+      "saved delays. Loading one",
+      "replaces every delay cell but",
+      "INP EQ."},
+     {"A opens the file browser",
+      "A there loads it, B goes back"}},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -2645,6 +2688,10 @@ inline HelpTopic effects_cell_topic(int row) {
         case EffectModule::ROW_REV_WIDE:    return HelpTopic::FX_REVERB_WIDE;
         case EffectModule::ROW_REV_MOD:     return HelpTopic::FX_REVERB_MOD;
         case EffectModule::ROW_REV_ALGO:    return HelpTopic::FX_REVERB_ALGO;
+        case EffectModule::ROW_REV_SAVE:    return HelpTopic::FX_REVERB_SAVE;
+        case EffectModule::ROW_REV_LOAD:    return HelpTopic::FX_REVERB_LOAD;
+        case EffectModule::ROW_DLY_SAVE:    return HelpTopic::FX_DELAY_SAVE;
+        case EffectModule::ROW_DLY_LOAD:    return HelpTopic::FX_DELAY_LOAD;
         default:                            return HelpTopic::NONE;
     }
 }

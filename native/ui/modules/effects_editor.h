@@ -10,6 +10,9 @@
 // without renumbering cursor rows, and the highlight and a cell's column both come from that table.
 //
 // TIME reads as a hex byte or a note division ("1/8T") depending on `delaySync`; B toggles which.
+//
+// Each send opens with a PRESET line — its name, SAVE, LOAD — laid out like the SCALE screen's name row
+// (ui/fx_preset_bank.h for the name, ui/fx_preset_io.h for the file).
 
 #include <string>
 #include <vector>
@@ -25,7 +28,7 @@ namespace pt::ui {
 
 struct EffectState {
     const songcore::Project& project;
-    int   cursorRow = 0;   // 0..15 — see the ROW_* constants
+    int   cursorRow = 0;   // see the ROW_* constants
     Theme theme     = theme_classic();
 };
 
@@ -47,26 +50,24 @@ public:
     static constexpr int ROW_DLY_FDBK    = static_cast<int>(EffectsRow::DLY_FDBK);
     static constexpr int ROW_DLY_REV     = static_cast<int>(EffectsRow::DLY_REV);      // delay → reverb send
     static constexpr int ROW_DLY_EQ      = static_cast<int>(EffectsRow::DLY_EQ);
-    static constexpr int ROW_DLY_TYPE    = static_cast<int>(EffectsRow::DLY_TYPE);     // a delay preset
+    static constexpr int ROW_DLY_TYPE    = static_cast<int>(EffectsRow::DLY_TYPE);     // the delay preset's name
     static constexpr int ROW_DLY_TONE    = static_cast<int>(EffectsRow::DLY_TONE);
     static constexpr int ROW_DLY_WOBBLE  = static_cast<int>(EffectsRow::DLY_WOBBLE);
     static constexpr int ROW_DLY_PONG    = static_cast<int>(EffectsRow::DLY_PONG);
-    static constexpr int ROW_REV_TYPE    = static_cast<int>(EffectsRow::REV_TYPE);     // a reverb preset
+    static constexpr int ROW_REV_TYPE    = static_cast<int>(EffectsRow::REV_TYPE);     // the reverb preset's name
     static constexpr int ROW_REV_PRE     = static_cast<int>(EffectsRow::REV_PRE);      // pre-delay
     static constexpr int ROW_REV_WIDE    = static_cast<int>(EffectsRow::REV_WIDE);     // 80 = untouched
     static constexpr int ROW_REV_MOD     = static_cast<int>(EffectsRow::REV_MOD);      // 40 = as it shipped
     static constexpr int ROW_REV_SIZE    = static_cast<int>(EffectsRow::REV_SIZE);     // the room; 60 = as shipped
     static constexpr int ROW_REV_ALGO    = static_cast<int>(EffectsRow::REV_ALGO);     // 0 = as it shipped
+    static constexpr int ROW_REV_SAVE    = static_cast<int>(EffectsRow::REV_SAVE);     // a bare A, no value
+    static constexpr int ROW_REV_LOAD    = static_cast<int>(EffectsRow::REV_LOAD);
+    static constexpr int ROW_DLY_SAVE    = static_cast<int>(EffectsRow::DLY_SAVE);
+    static constexpr int ROW_DLY_LOAD    = static_cast<int>(EffectsRow::DLY_LOAD);
     static constexpr int MAX_CURSOR_ROW  = EFFECTS_ROW_COUNT - 1;
 
     /** The sync subdivisions, in the order kDelaySyncBeats[] has them in delay-module.h. */
     static const std::vector<std::string>& delay_sync_names();
-
-    /** The delay presets, in the order delay-presets.h has them, plus USER at the end. */
-    static const std::vector<std::string>& delay_type_names();
-
-    /** The reverb presets, in the order reverb-presets.h has them, plus USER at the end. */
-    static const std::vector<std::string>& reverb_type_names();
 
     void draw(Canvas& c, int x, int y, const EffectState& s) const;
 
@@ -74,8 +75,8 @@ public:
 
     /**
      * What the row under the cursor is CALLED, for MIDI learn. The rows that pick a PRESET or a MODE
-     * — the master FX type, the two EQ slots, the two algorithm rows, PONG — decline: a knob sweeping
-     * a list of reverb algorithms is not a parameter, it is a page turn.
+     * — the master FX type, the two EQ slots, the two preset lines, ALGO, PONG — decline: a knob
+     * sweeping a list of reverb algorithms is not a parameter, it is a page turn.
      */
     songcore::MapTarget map_target(const EffectState& s) const;
 

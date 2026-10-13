@@ -2,7 +2,11 @@
 
 #include "ui/dispatch/dispatch_common.h"
 
+#include "ui/fx_preset_bank.h"
+#include "ui/fx_preset_io.h"     // .ptr / .ptd
+
 #include <algorithm>
+#include <string>
 
 namespace pt::ui {
 
@@ -19,9 +23,9 @@ GestureResult InputDispatcher::mixer_screen(Gesture g) {
 
 GestureResult InputDispatcher::effects_screen(Gesture g) {
     switch (g) {
-        // The two input EQ cells open the EQ editor on the release.
+        // A preset line's SAVE and LOAD; the two input EQ cells open the EQ editor on the release.
         case Gesture::A:
-            open_sub_screen_at_cursor(/*peek=*/false);
+            if (!effects_preset_action()) open_sub_screen_at_cursor(/*peek=*/false);
             return GestureResult::TAKEN;
 
         // ⚠️ The TIME row: B toggles DELAY SYNC (milliseconds ↔ note divisions). A gesture of its own,
@@ -40,6 +44,74 @@ GestureResult InputDispatcher::effects_screen(Gesture g) {
         default:
             return GestureResult::PASS;
     }
+}
+
+// ─── EFFECTS: a preset line's SAVE and LOAD ──────────────────────────────────────────────────────
+
+bool InputDispatcher::effects_preset_action() {
+    const songcore::Project& p = host_.project();
+
+    // SAVE is seeded with the sanitized name the row SHOWS (a built-in that was never cycled to stores
+    // none), so what you see is what the file will be called. LOAD starts at the built-in folder:
+    // config.json's `folders` has no key for either.
+    switch (s_.effectsCursorRow) {
+        case EffectModule::ROW_REV_SAVE: {
+            const std::string seed = sanitize_fx_preset_filename(reverb_preset_display_name(p));
+            open_qwerty(QwertyContext::REVERB_SAVE, seed.empty() ? "REVERB" : seed, "SAVE REVERB:",
+                        fs_.reverbs_directory(), FX_PRESET_NAME_MAX, /*clear_on_first_b=*/true);
+            return true;
+        }
+        case EffectModule::ROW_REV_LOAD:
+            open_file_browser(AppState::BrowserPurpose::LOAD_REVERB, fs_.reverbs_directory(),
+                              {REVERB_FILE_EXT});
+            return true;
+        case EffectModule::ROW_DLY_SAVE: {
+            const std::string seed = sanitize_fx_preset_filename(delay_preset_display_name(p));
+            open_qwerty(QwertyContext::DELAY_SAVE, seed.empty() ? "DELAY" : seed, "SAVE DELAY:",
+                        fs_.delays_directory(), FX_PRESET_NAME_MAX, /*clear_on_first_b=*/true);
+            return true;
+        }
+        case EffectModule::ROW_DLY_LOAD:
+            open_file_browser(AppState::BrowserPurpose::LOAD_DELAY, fs_.delays_directory(),
+                              {DELAY_FILE_EXT});
+            return true;
+        default:
+            return false;
+    }
+}
+
+void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::string& typed_text) {
+    // Sanitized FILENAME (survives FAT32), raw name in the file and on the row. An empty field keeps
+    // the shown name and falls back to "REVERB" — never the dotfile `.ptr`.
+    const std::string shown = reverb_preset_display_name(host_.project());
+    const std::string want  = !typed_text.empty() ? typed_text : !shown.empty() ? shown : "REVERB";
+    const std::string safe  = sanitize_fx_preset_filename(want);
+
+    // The row adopts the name it was saved under — the only thing on screen naming the file.
+    if (host_.project().reverbPreset != want) {
+        host_.edit_project().reverbPreset = want;
+        mark_modified();
+    }
+
+    const bool ok = save_reverb_file(fs_, dir + "/" + safe + ".ptr", reverb_cells_of(host_.project()));
+    s_.statusMessage = ok ? "REVERB SAVED" : "SAVE FAILED";
+    s_.statusSuccess = ok;
+}
+
+void InputDispatcher::save_delay_preset_as(const std::string& dir, const std::string& typed_text) {
+    // As the reverb's.
+    const std::string shown = delay_preset_display_name(host_.project());
+    const std::string want  = !typed_text.empty() ? typed_text : !shown.empty() ? shown : "DELAY";
+    const std::string safe  = sanitize_fx_preset_filename(want);
+
+    if (host_.project().delayPreset != want) {
+        host_.edit_project().delayPreset = want;
+        mark_modified();
+    }
+
+    const bool ok = save_delay_file(fs_, dir + "/" + safe + ".ptd", delay_cells_of(host_.project()));
+    s_.statusMessage = ok ? "DELAY SAVED" : "SAVE FAILED";
+    s_.statusSuccess = ok;
 }
 
 // ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────

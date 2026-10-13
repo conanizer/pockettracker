@@ -559,9 +559,8 @@ struct Project {
     // ⚠️ `reverbFeedback` is the DCAY cell (the tail's length); the JSON key keeps the old name. The
     // room is `reverbSize`.
     int reverbFeedback = 0x60, reverbDamp = 0x80, reverbWet = 0x80, reverbInputEq = -1;
-    // The reverb's character: three independent cells. The EFFECTS screen's TYPE row writes them (with
-    // DCAY, SIZE and DAMP) from a preset and reads the name back by matching
-    // (effects/modules/reverb-presets.h); the name is not stored.
+    // The reverb's character: three independent cells. The EFFECTS screen's preset row writes them
+    // (with ALGO, DCAY, SIZE and DAMP) from a built-in preset or a file.
     // ⚠️ These defaults are what a project saved before the cells existed plays with: PRE 00 (no line),
     // WIDE 80 (mid/side skipped). MOD is lower than the old fixed 40 — on a short tail that much
     // wander sounds like detuning.
@@ -572,12 +571,15 @@ struct Project {
     // Which reverb reads the cells above (`kReverbAlgo*`). ⚠️ 0 is the original, and a number is an
     // identity — append, never insert. Switching rewrites no cell.
     int reverbAlgo = 0;
+    // The names the two preset rows show: the built-in last cycled to, or the file last saved or
+    // loaded. ⚠️ LABELS ONLY — nothing sounds different for them. Empty = named by matching the cells
+    // against the built-ins (ui/fx_preset_bank.h), which is how every older project reads.
+    std::string reverbPreset, delayPreset;
     int delayTime = 0x40;
     bool delaySync = false;
     int delayFeedback = 0x60, delayWet = 0x80, delayReverbSend = 0x00, delayInputEq = -1;
-    // The delay's character, written by the TYPE row from a preset and named back by matching
-    // (effects/modules/delay-presets.h). ⚠️ Defaults are what older projects play with: TONE FF (filter
-    // switched out), WOBL 00.
+    // The delay's character, written by the preset row (effects/modules/delay-presets.h).
+    // ⚠️ Defaults are what older projects play with: TONE FF (filter switched out), WOBL 00.
     bool delayPong = false;
     int  delayTone = 0xFF, delayWobble = 0x00;
     // The two send RETURNS are mixer channels with their own mute/solo. ⚠️ A return SOLO never stops a

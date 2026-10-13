@@ -119,8 +119,9 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - True dBFS peak meters per track
 - Two send effects: a reverb and a stereo delay
 - Reverb room size and decay set separately — a small room can ring long, a big one die fast
-- Reverb character: pre-delay, stereo width and tail modulation — with TYPE presets (ROOM, HALL, CAVE) that set the whole section at once
-- Delay character: ping-pong repeats, repeat tone and tape wobble — with TYPE presets that set all three at once
+- Reverb character: pre-delay, stereo width and tail modulation — with built-in presets (ROOM, HALL, CAVE) that set the whole section at once
+- Delay character: ping-pong repeats, repeat tone and tape wobble — with built-in presets that set all three at once
+- Save a reverb or a delay you have dialled in as a preset file, and load it into any other project
 - Push the delay's feedback past `E0` and it self-oscillates — the repeats bloom into a steady singing tone that carries on after the input stops
 - Write the delay time from a phrase or a table with `TIM`, and fade it with AUS/AUF — the repeats bend in pitch as the time moves, like a tape delay
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency

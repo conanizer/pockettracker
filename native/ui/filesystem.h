@@ -98,6 +98,8 @@ class FileSystem {
     virtual std::string themes_directory()     = 0;
     virtual std::string scales_directory()     = 0;
     virtual std::string grooves_directory()   = 0;
+    virtual std::string reverbs_directory()    = 0;
+    virtual std::string delays_directory()     = 0;
 
     // ── The app's own files ──────────────────────────────────────────────────────────────────────
     //

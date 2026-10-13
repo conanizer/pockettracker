@@ -1177,6 +1177,15 @@ class InputDispatcher {
     bool          effects_edit(const InputAction& action);
     songcore::MapTarget effects_knob() const;
 
+    /** A on an EFFECTS preset line's SAVE or LOAD cell. False anywhere else. */
+    bool effects_preset_action();
+
+    /** Apply the typed name and write `<dir>/<name>.ptr`. The QWERTY's REVERB_SAVE arm. */
+    void save_reverb_preset_as(const std::string& dir, const std::string& typed_text);
+
+    /** Apply the typed name and write `<dir>/<name>.ptd`. The QWERTY's DELAY_SAVE arm. */
+    void save_delay_preset_as(const std::string& dir, const std::string& typed_text);
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE SAMPLE EDITOR
     // ═════════════════════════════════════════════════════════════════════════════════════════════

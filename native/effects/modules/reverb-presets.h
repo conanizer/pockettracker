@@ -1,19 +1,18 @@
 #pragma once
 
 // ───────────────────────────────────────────────────────────────────────────
-// The reverb's PRESETS — four names for four sets of cell values — and the names of the algorithms
-// that read those cells.
+// The reverb's built-in PRESETS — four names for four sets of cell values — and the names of the
+// algorithms that read those cells.
 //
-// ⚠️⚠️ **THE NAME IS NOT STORED IN THE PROJECT AND IS NOT AN ARGUMENT TO THE DSP.** A project holds
-// DCAY, SIZE, DAMP, PRE, WIDE and MOD; the TYPE cell writes all six at once and then reads the name
-// back by matching. Nothing downstream can ask "is this HALL?", because after one turn of any other
-// cell the question has no answer — which is the point. A preset is a starting place, not a mode.
-// Same shape as delay-presets.h, on purpose.
+// ⚠️⚠️ **A PRESET'S NAME IS NOT AN ARGUMENT TO THE DSP.** A project holds ALGO, DCAY, SIZE, DAMP, PRE,
+// WIDE and MOD; the preset cell writes all seven at once and the project keeps the name only as a
+// label (ui/fx_preset_bank.h). A preset is a starting place, not a mode. Same shape as
+// delay-presets.h, on purpose.
 //
-// ⚠️⚠️ **`NORMAL`'S ROW IS THE STRUCT DEFAULT** (model.h): DCAY 60, SIZE 60, DAMP 80, PRE 00, WIDE 80,
-// MOD 10 — and a project written before these cells existed loads without them and lands on that
-// row, so the row and the struct must be changed TOGETHER or a brand-new project reads as USER. It
-// is the one row whose values are not free.
+// ⚠️⚠️ **`NORMAL`'S ROW IS THE STRUCT DEFAULT** (model.h): ALGO OLD, DCAY 60, SIZE 60, DAMP 80, PRE 00,
+// WIDE 80, MOD 10 — and a project written before these cells existed loads without them and lands on
+// that row, so the row and the struct must be changed TOGETHER or a brand-new project reads as
+// nobody's preset. It is the one row whose values are not free.
 //
 // ⚠️⚠️ **ONLY PRE AND WIDE ARE GATED OUT AT THEIR DEFAULTS**, which is what keeps an old project's
 // pre-delay and stereo image exactly as they were. **DCAY, DAMP and MOD are not, and cannot be.**
@@ -35,6 +34,7 @@
 
 struct ReverbPreset {
     const char* name;
+    int         algo;     // which reverb reads the rest — the project's `reverbAlgo`
     int         decay;    // 00-FF, the tail's length — the project's `reverbFeedback`
     int         room;     // 00-FF, the room's dimensions — the project's `reverbSize`; 60 = as shipped
     int         damp;     // 00-FF, how bright it stays
@@ -50,18 +50,20 @@ struct ReverbPreset {
 //
 // ⚠️ **SIZE follows the name, and the wander's SPEED follows SIZE** (`reverb_mod_rate`), so the bigger
 // rows also drift more slowly without a column of their own for it.
+//
+// ⚠️ Every row is voiced on the original algorithm (0), so every row names it.
 inline constexpr ReverbPreset kReverbPresets[] = {
     // 1.9 s in the room the reverb has always had, and bright enough to sit under anything.
-    {"NORMAL", 0x60, 0x60, 0x80, 0x00, 0x80, 0x10},
+    {"NORMAL", 0, 0x60, 0x60, 0x80, 0x00, 0x80, 0x10},
     // Tight, bright and close in: 0.6 s in a smaller room, almost no gap before it, a narrower image
     // than the others because a small room does not arrive from the sides, and a tail held still.
-    {"ROOM",   0x18, 0x20, 0xA0, 0x04, 0x70, 0x00},
+    {"ROOM",   0, 0x18, 0x20, 0xA0, 0x04, 0x70, 0x00},
     // The gap is what makes it a hall — 30 ms of clear air before the tail, so the source stays in
     // front of it — and 3.6 s of darker, wider tail in a room half as large again.
-    {"HALL",   0x88, 0xB0, 0x60, 0x33, 0xC0, 0x20},
+    {"HALL",   0, 0x88, 0xB0, 0x60, 0x33, 0xC0, 0x20},
     // 12 s, the darkest of the four, in nearly the largest room, with the widest image and the
     // deepest wander. FF is the freeze, and a preset is a starting place, not a held chord.
-    {"CAVE",   0xD0, 0xF0, 0x20, 0x55, 0xFF, 0x40},
+    {"CAVE",   0, 0xD0, 0xF0, 0x20, 0x55, 0xFF, 0x40},
 };
 inline constexpr int kReverbPresetCount = 4;
 
@@ -71,9 +73,8 @@ inline constexpr int kReverbPresetCount = 4;
 // ⚠️⚠️ **A NUMBER HERE IS WHAT A PROJECT STORES. Append, never insert** — and 0 must go on meaning the
 // reverb that shipped, because a project written before the cell existed loads as 0.
 //
-// ⚠️ The presets above do NOT write this, and choosing an algorithm writes no other cell: each
-// algorithm reads the same DCAY/SIZE/DAMP/MOD its own way (dragonfly/dragonfly-reverb.cpp), so
-// switching back returns exactly the sound that was there.
+// ⚠️ Choosing an algorithm writes no other cell: each reads the same DCAY/SIZE/DAMP/MOD its own way
+// (dragonfly/dragonfly-reverb.cpp), so switching back returns exactly the sound that was there.
 inline constexpr int kReverbAlgoOld   = 0;   // ReverbSc — every cell
 inline constexpr int kReverbAlgoHall  = 1;   // Dragonfly Hall — every cell
 inline constexpr int kReverbAlgoRoom  = 2;   // Dragonfly Room — every cell
@@ -86,20 +87,15 @@ inline const char* reverb_algo_name(int algo) {
     return (algo >= 0 && algo < kReverbAlgoCount) ? kNames[algo] : kNames[0];
 }
 
-// The index shown on the TYPE cell when no preset matches. It is one past the last, so the cell's
-// range is 0..kReverbPresetCount while the cells are hand-set and 0..kReverbPresetCount-1 once a
-// preset is chosen — which is what makes USER reachable to LEAVE and impossible to ENTER on purpose.
-inline constexpr int kReverbPresetUser = kReverbPresetCount;
-
-/** Which preset these cells are, or `kReverbPresetUser` when they are nobody's. */
-inline int reverb_preset_match(int decay, int room, int damp, int pre, int width, int mod) {
+/** Which built-in preset these cells are, or −1 when they are nobody's. */
+inline int reverb_preset_match(int algo, int decay, int room, int damp, int pre, int width, int mod) {
     for (int i = 0; i < kReverbPresetCount; ++i) {
         const ReverbPreset& r = kReverbPresets[i];
-        if (r.decay == decay && r.room == room && r.damp == damp && r.pre == pre &&
-            r.width == width && r.mod == mod)
+        if (r.algo == algo && r.decay == decay && r.room == room && r.damp == damp &&
+            r.pre == pre && r.width == width && r.mod == mod)
             return i;
     }
-    return kReverbPresetUser;
+    return -1;
 }
 
 /**

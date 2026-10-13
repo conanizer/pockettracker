@@ -70,10 +70,10 @@ PocketTracker holds no storage permission, so it can only see folders you hand i
 > ADD FOLDER...
 ```
 
-Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its eight sub-folders inside it the moment it needs them:
+Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its ten sub-folders inside it the moment it needs them:
 
 ```
-Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/  Scales/  Grooves/
+Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/  Scales/  Grooves/  Reverbs/  Delays/
 ```
 
 Anything already in the folder is left exactly as it is — so if you have used PocketTracker before, pick your existing `Documents/PocketTracker` and every project, sample and theme is where it was.
@@ -89,7 +89,7 @@ That top-level list of granted folders is a screen with two gestures of its own,
 
 | | |
 |---|---|
-| **SELECT + A** | **Make this the home folder.** The app's eight sub-folders move to it — meaning it starts *looking* in the new place; nothing on disk is moved or copied. Confirm with **A**. |
+| **SELECT + A** | **Make this the home folder.** The app's ten sub-folders move to it — meaning it starts *looking* in the new place; nothing on disk is moved or copied. Confirm with **A**. |
 | **SELECT + B** | **Forget this folder.** Hands the access back to Android and removes the row. Confirm with **A**. |
 
 The folder currently in use is marked `(HOME)`. One whose directory has been deleted or unplugged since you granted it is marked `(MISSING)` — the app will not use a missing folder as its home, and `SELECT + B` is how you clear the row.
@@ -130,7 +130,7 @@ Resampled instruments and CHOP exports are saved to:
 <home>/Samples/Chops/{name}/
 ```
 
-On Linux, Windows and PortMaster handhelds there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same eight sub-folders live in it.
+On Linux, Windows and PortMaster handhelds there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same ten sub-folders live in it.
 
 ---
 
@@ -1379,7 +1379,9 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 
 | Parameter | Description |
 |---|---|
-| TYPE | A starting point for the whole section: **NORMAL** (the plain reverb), **ROOM** (tight, bright, close), **HALL** (a gap, then a long dark tail), **CAVE** (longest, darkest, widest). Choosing one sets SIZE, DCAY, DAMP, PRE, WIDE and MOD together; turn any of those afterwards and TYPE reads **USER**. |
+| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets: **NORMAL** (the plain reverb), **ROOM** (tight, bright, close), **HALL** (a gap, then a long dark tail), **CAVE** (longest, darkest, widest). Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to NORMAL. |
+| SAVE / LOAD | To the right of the name. **SAVE** names the reverb and writes every cell of the section except EQ to `PocketTracker/Reverbs` as a `.ptr` file; **LOAD** reads one back, into this or any other project. |
+| ALGO | Which reverb the cells below drive: **OLD** (the original), **HALL** (a large space), **ROOM** (a small one), **PLATE** and **FOIL** (metal plates — they have no room, so they ignore SIZE and MOD). Turning it changes no other cell. |
 | PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
 | SIZE | Size of the room (`00`–`FF`) — how far apart its walls are. A bigger room also makes the movement from MOD slower. It does not change how long the tail rings or how loud it is. |
 | DCAY | Length of the reverb tail (`00`–`FF`), from about half a second to about twenty-five, whatever the room. `FF` is a tail that never ends. The level stays where it is as you turn it. |
@@ -1394,7 +1396,8 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| TYPE | A starting point for the three character cells: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). Choosing one sets PONG, TONE and WOBL together; turn any of those afterwards and TYPE reads **USER**. |
+| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). A built-in sets PONG, TONE and WOBL together and leaves the rest alone. Turn one of the three afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to NORMAL. |
+| SAVE / LOAD | To the right of the name. **SAVE** names the delay and writes every cell of the section except EQ — TIME and its sync, FDBK and REV included — to `PocketTracker/Delays` as a `.ptd` file; **LOAD** reads one back, into this or any other project. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to about 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **B** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |

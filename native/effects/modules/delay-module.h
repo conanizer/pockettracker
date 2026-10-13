@@ -99,7 +99,7 @@ struct DelayModule {
 
     // ⚠️⚠️ THREE INDEPENDENT SWITCHES, EACH OFF AT ITS DEFAULT — and at its default the arithmetic in
     // `process` is exactly the plain delay's, so an older project plays unchanged. Any combination
-    // is legal: the TYPE cell only writes them.
+    // is legal: a preset only writes them.
     // ⚠️ Below `kDelayOscOnset` the regeneration gain is FDBK alone, topping out at exactly 1.0 (the
     // repeats hold, never grow); above it the gain passes unity and `SoftLimit` is the bound.
     bool  pong      = false;   // a side's repeat feeds the OTHER line

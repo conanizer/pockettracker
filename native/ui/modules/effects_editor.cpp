@@ -3,8 +3,7 @@
 
 #include <algorithm>
 
-#include "effects/modules/delay-presets.h"
-#include "effects/modules/reverb-presets.h"
+#include "ui/fx_preset_bank.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
@@ -16,21 +15,18 @@ namespace {
 constexpr int LABEL_X[2] = {10, 270};
 constexpr int VALUE_GAP  = 110;
 
+// A preset line: the name where a left-column label would be, SAVE and LOAD on the right column's
+// label and value. ⚠️ The `*` takes the name's column and pushes the name one right, as on SCALE.
+constexpr int PRESET_SAVE_X = LABEL_X[1];
+constexpr int PRESET_LOAD_X = LABEL_X[1] + VALUE_GAP;
+
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-/** Which preset the delay's three cells are, or `kDelayPresetUser` when they are nobody's. */
-int delay_preset_of(const songcore::Project& p) {
-    return delay_preset_match(p.delayPong, p.delayTone, p.delayWobble);
-}
-
-/**
- * Which preset the reverb's six cells are, or `kReverbPresetUser` when they are nobody's.
- * ⚠️ It reads DCAY, SIZE and DAMP too (the delay's TYPE leaves TIME and FDBK alone): a reverb's
- * character IS its room, decay and brightness. The apply below writes exactly this set.
- */
-int reverb_preset_of(const songcore::Project& p) {
-    return reverb_preset_match(p.reverbFeedback, p.reverbSize, p.reverbDamp, p.reverbPreDelay,
-                               p.reverbWidth, p.reverbMod);
+/** A preset line's name cell: the bank's own cycle, with A+B back to row 0 (NORMAL, the defaults). */
+CursorContext preset_name_context(int cycle_index, int count) {
+    CursorContext c = cc::index_cycle(cycle_index, count);
+    c.defaultValue  = 0;
+    return c;
 }
 
 }  // namespace
@@ -42,29 +38,6 @@ const std::vector<std::string>& EffectModule::delay_sync_names() {
         "1/4T", "1/8T", "1/16T",
         "1/4.", "1/8.", "1/16.",
     };
-    return names;
-}
-
-const std::vector<std::string>& EffectModule::delay_type_names() {
-    static const std::vector<std::string> names = [] {
-        std::vector<std::string> v;
-        for (int i = 0; i < kDelayPresetCount; ++i) v.emplace_back(kDelayPresets[i].name);
-        // "These cells are nobody's preset", at kDelayPresetUser — a label, never applied; TYPE
-        // reaches it only when a cell below is turned by hand.
-        v.emplace_back("USER");
-        return v;
-    }();
-    return names;
-}
-
-const std::vector<std::string>& EffectModule::reverb_type_names() {
-    static const std::vector<std::string> names = [] {
-        std::vector<std::string> v;
-        for (int i = 0; i < kReverbPresetCount; ++i) v.emplace_back(kReverbPresets[i].name);
-        // The same "these cells are nobody's preset" label the delay's TYPE has, at kReverbPresetUser.
-        v.emplace_back("USER");
-        return v;
-    }();
     return names;
 }
 
@@ -127,18 +100,37 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
         draw_eq_cell(c, lx + VALUE_GAP, ry, eq_slot, sel, t);
     };
 
+    /**
+     * A send's preset line: the name, SAVE, LOAD. `shown` empty = hand-set cells no built-in matches
+     * (`----`); `drifted` = named after a built-in the cells no longer are (`*`).
+     */
+    const auto preset_line = [&](int name_row, int save_row, int load_row, std::string shown,
+                                 bool drifted) {
+        const int  ry    = rowY(lay.rowLine[static_cast<size_t>(name_row)]);
+        const bool named = !shown.empty();
+        if (!named) shown = "----";
+        if (drifted) c.draw_text("*", x + LABEL_X[0], ry, t.textPlayhead, CHAR_SPACING, FONT_SCALE);
+        draw_cell(c, shown, x + LABEL_X[0] + (drifted ? CHAR_W : 0), ry,
+                  /*is_cursor=*/s.cursorRow == name_row, /*is_selected=*/false, /*is_empty=*/!named,
+                  t.textValue, t);
+        draw_cell(c, "SAVE", x + PRESET_SAVE_X, ry, /*is_cursor=*/s.cursorRow == save_row,
+                  /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
+        draw_cell(c, "LOAD", x + PRESET_LOAD_X, ry, /*is_cursor=*/s.cursorRow == load_row,
+                  /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
+    };
+
     // ── Master bus ───────────────────────────────────────────────────────────────────────────────
     header("MASTER FX", EffectsSection::MASTER);
     param("TYPE", ROW_MASTER_TYPE, p.masterBusFx == 0 ? "OTT" : "DUST");
 
     // ── Reverb ───────────────────────────────────────────────────────────────────────────────────
     header("REVERB", EffectsSection::REVERB);
-    // Which reverb reads the cells below. ⚠️ It writes none of them, so the numbers stay what the
-    // user typed and only the sound changes.
+    preset_line(ROW_REV_TYPE, ROW_REV_SAVE, ROW_REV_LOAD, reverb_preset_display_name(p),
+                reverb_preset_differs_from_its_name(p));
+
+    // Which reverb reads the cells below. ⚠️ Turning it by hand writes none of them, so the numbers
+    // stay what the user typed and only the sound changes.
     param("ALGO", ROW_REV_ALGO, reverb_algo_name(p.reverbAlgo));
-    // ⚠️ Read back from the cells rather than stored, so it says USER the moment any of them is
-    // turned by hand. TYPE is a starting place, not a mode — same as the delay's below.
-    param("TYPE", ROW_REV_TYPE, reverb_type_names()[static_cast<size_t>(reverb_preset_of(p))]);
     param("SIZE", ROW_REV_SIZE, hex2(p.reverbSize));
 
     param("PRE",  ROW_REV_PRE,  hex2(p.reverbPreDelay));
@@ -152,9 +144,8 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
 
     // ── Delay ────────────────────────────────────────────────────────────────────────────────────
     header("DELAY", EffectsSection::DELAY);
-    // ⚠️ The name is READ BACK from the three cells rather than stored, so it says USER the moment any
-    // of them is turned by hand. TYPE is a starting place, not a mode.
-    param("TYPE", ROW_DLY_TYPE, delay_type_names()[static_cast<size_t>(delay_preset_of(p))]);
+    preset_line(ROW_DLY_TYPE, ROW_DLY_SAVE, ROW_DLY_LOAD, delay_preset_display_name(p),
+                delay_preset_differs_from_its_name(p));
 
     param("PONG", ROW_DLY_PONG, p.delayPong ? "ON" : "OFF");
     // Synced, TIME is a note division rather than a raw byte — the same cell speaking a second
@@ -193,17 +184,21 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
             return c;
         }
 
-        case ROW_REV_TYPE: {
-            // A short named list: steps and wraps, no fast step, no delete (no empty preset).
-            // ⚠️ USER is in range only while the cells ARE nobody's preset — a place the cursor
-            // can leave, never one it can be sent to.
-            const int cur = reverb_preset_of(p);
-            return cc::index_cycle(cur, cur == kReverbPresetUser ? kReverbPresetCount + 1
-                                                                 : kReverbPresetCount);
-        }
+        case ROW_REV_TYPE:
+            return preset_name_context(reverb_bank_cycle_index(p), kReverbPresetCount);
+        case ROW_DLY_TYPE:
+            return preset_name_context(delay_bank_cycle_index(p), kDelayPresetCount);
+
+        // ⚠️ READ-ONLY rather than absent: they answer a bare A, and a `none()` context would also
+        // switch off the cursor box that says which of the line's three cells you are on.
+        case ROW_REV_SAVE:
+        case ROW_REV_LOAD:
+        case ROW_DLY_SAVE:
+        case ROW_DLY_LOAD:
+            return cc::read_only();
 
         case ROW_REV_ALGO:
-            // A short named list that steps and wraps. No USER entry: every value is a real reverb.
+            // A short named list that steps and wraps: every value is a real reverb.
             return cc::index_cycle(clamp(p.reverbAlgo, 0, kReverbAlgoCount - 1), kReverbAlgoCount);
 
         case ROW_REV_DECAY:
@@ -221,14 +216,6 @@ CursorContext EffectModule::cursor_context(const EffectState& s) const {
         case ROW_REV_EQ:
             return cc::hex_byte(p.reverbInputEq < 0 ? -1 : p.reverbInputEq, 0, 127,
                                 /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
-
-        case ROW_DLY_TYPE: {
-            // As the reverb's TYPE: steps and wraps, no fast step, no delete; USER is in range only
-            // while the cells are nobody's preset.
-            const int cur = delay_preset_of(p);
-            return cc::index_cycle(cur, cur == kDelayPresetUser ? kDelayPresetCount + 1
-                                                                : kDelayPresetCount);
-        }
 
         case ROW_DLY_PONG:
             return cc::toggle_binary(p.delayPong);
@@ -280,6 +267,10 @@ songcore::MapTarget EffectModule::map_target(const EffectState& s) const {
         case EffectsRow::DLY_PONG:
         case EffectsRow::REV_TYPE:
         case EffectsRow::REV_ALGO:
+        case EffectsRow::REV_SAVE:
+        case EffectsRow::REV_LOAD:
+        case EffectsRow::DLY_SAVE:
+        case EffectsRow::DLY_LOAD:
             break;
     }
     return {};
@@ -319,20 +310,13 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
             return {true};
 
         case ROW_REV_TYPE: {
-            // ⚠️ THE PRESET IS APPLIED AND THEN FORGOTTEN: it writes the cells and stores no name;
-            // USER writes nothing (it is the absence of a match).
-            // ⚠️⚠️ EVERY CELL `reverb_preset_match` READS MUST BE WRITTEN HERE, or TYPE can never
-            // leave USER — the unwritten cell still holds what the user typed and the match fails.
-            if (!isSet) break;
-            const int idx = clamp(action.value, 0, kReverbPresetCount);
-            if (idx >= kReverbPresetCount) return {false};
-            const ReverbPreset& r = kReverbPresets[idx];
-            p.reverbFeedback = r.decay;
-            p.reverbSize     = r.room;
-            p.reverbDamp     = r.damp;
-            p.reverbPreDelay = r.pre;
-            p.reverbWidth    = r.width;
-            p.reverbMod      = r.mod;
+            if (!isSet || action.value < 0 || action.value >= kReverbPresetCount) break;
+            // ⚠️ Compared before the write: landing back on the preset already shown must not bump the
+            // dirty counter (a phantom autosave and RECOVER WORK?).
+            if (reverb_bank_match(p) == action.value &&
+                (p.reverbPreset.empty() || p.reverbPreset == kReverbPresets[action.value].name))
+                break;
+            reverb_apply_bank(p, action.value);
             return {true};
         }
 
@@ -361,15 +345,12 @@ EffectInputResult EffectModule::handle_input(songcore::Project& p, int cursor_ro
             return {true};
 
         case ROW_DLY_TYPE: {
-            // ⚠️ THE PRESET IS APPLIED AND THEN FORGOTTEN: three cells written, no name; USER
-            // writes nothing.
-            if (!isSet) break;
-            const int idx = clamp(action.value, 0, kDelayPresetCount);
-            if (idx >= kDelayPresetCount) return {false};
-            const DelayPreset& d = kDelayPresets[idx];
-            p.delayPong   = d.pong;
-            p.delayTone   = d.tone;
-            p.delayWobble = d.wobble;
+            // As the reverb's, dirty counter included.
+            if (!isSet || action.value < 0 || action.value >= kDelayPresetCount) break;
+            if (delay_bank_match(p) == action.value &&
+                (p.delayPreset.empty() || p.delayPreset == kDelayPresets[action.value].name))
+                break;
+            delay_apply_bank(p, action.value);
             return {true};
         }
 

@@ -36,7 +36,9 @@ enum class QwertyContext {
     THEME_SAVE,       // write the live theme to `contextExtra`/<text>.ptt, and name it <text>
     RESAMPLE,         // render the SONG selection to `<Resampled>/<text>.wav`, then auto-instrument it
     SCALE_SAVE,       // write the SCALE screen's slot to `contextExtra`/<text>.pts, and name it <text>
-    GROOVE_SAVE       // write the GROOVE screen's slot to `contextExtra`/<text>.ptg, and name it <text>
+    GROOVE_SAVE,      // write the GROOVE screen's slot to `contextExtra`/<text>.ptg, and name it <text>
+    REVERB_SAVE,      // write EFFECTS' reverb cells to `contextExtra`/<text>.ptr, and name them <text>
+    DELAY_SAVE        // write EFFECTS' delay cells to `contextExtra`/<text>.ptd, and name them <text>
 };
 
 /** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */

@@ -331,6 +331,8 @@ inline Project parse_project(const json& j) {
     p.reverbMod       = get_int(j, "reverbMod", p.reverbMod);
     p.reverbSize      = get_int(j, "reverbSize", p.reverbSize);
     p.reverbAlgo      = get_int(j, "reverbAlgo", p.reverbAlgo);
+    p.reverbPreset    = get_str(j, "reverbPreset", p.reverbPreset);
+    p.delayPreset     = get_str(j, "delayPreset", p.delayPreset);
     p.delayTime       = get_int(j, "delayTime", p.delayTime);
     p.delaySync       = get_bool(j, "delaySync", p.delaySync);
     p.delayFeedback   = get_int(j, "delayFeedback", p.delayFeedback);
@@ -764,6 +766,8 @@ inline std::string serialize_project(const Project& p) {
     if (p.reverbMod != 0x10)      w.field_int("reverbMod", p.reverbMod);
     if (p.reverbSize != 0x60)     w.field_int("reverbSize", p.reverbSize);
     if (p.reverbAlgo != 0)        w.field_int("reverbAlgo", p.reverbAlgo);
+    if (!p.reverbPreset.empty())  w.field_string("reverbPreset", p.reverbPreset);
+    if (!p.delayPreset.empty())   w.field_string("delayPreset", p.delayPreset);
     if (p.delayTime != 0x40)      w.field_int("delayTime", p.delayTime);
     if (p.delaySync)              w.field_bool("delaySync", p.delaySync);
     if (p.delayFeedback != 0x60)  w.field_int("delayFeedback", p.delayFeedback);

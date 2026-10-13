@@ -134,6 +134,14 @@ void InputDispatcher::qwerty_apply() {
             save_groove_as(k.contextExtra, text);
             break;
 
+        case QwertyContext::REVERB_SAVE:
+            save_reverb_preset_as(k.contextExtra, text);
+            break;
+
+        case QwertyContext::DELAY_SAVE:
+            save_delay_preset_as(k.contextExtra, text);
+            break;
+
         case QwertyContext::SAMPLE_NAME: {
             // Renames BOTH the editor's sample and the INSTRUMENT holding it — one thing to the user. An
             // empty field keeps the current name.
