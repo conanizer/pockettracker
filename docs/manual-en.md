@@ -207,6 +207,7 @@ The navigation map always shows where you are.
 | SAMPLE EDITOR | INSTRUMENT screen → **TYPE** row → cursor on **EDIT >** → **A** |
 | EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ cell → **A**. Close with **B**. |
 | REVERB / DELAY | INSTRUMENT / INST.POOL / MIXER → cursor on a REV or DEL cell → **A**. The same cells as that section of EFFECTS. Close with **B**. |
+| TIMESTRETCH | SAMPLE EDITOR → EFFECT row set to SYNC → cursor on **TSTRETCH** → **A**. Close with **B**. |
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
@@ -871,13 +872,28 @@ sample cannot be.
 | RPITCH | Pitch-shifts the selection to align its length to a target beat count, without changing duration. |
 | TSTRETCH | Time-stretches the selection to a target beat duration without changing pitch. Uses SOLA (Synchronized Overlap-Add), Akai-cyclic mode — the same algorithm as the Akai S950/S1000. |
 
+With SYNC on the EFFECT row, **START** plays the sample as APPLY would leave it.
+
+**A** on TSTRETCH opens its settings. They stay as set after **B**, so APPLY on the EFFECT row uses
+them too. **A+B** on TSTRETCH puts them all back.
+
+| Cell | What it does |
+|---|---|
+| ORIG BPM | The sample's own tempo — the number in the header. |
+| DURATION | The editor's DURATION cell. |
+| NEW BPM | The tempo to fit to. Starts as the project's TEMPO; **A+B** puts it back. |
+| PITCH | The editor's PITCH cell. The stretch moves the pitch by it and still lands on DURATION. |
+| GRAIN | The length of each piece the sample is cut into, in milliseconds. `40` to begin with — shorter is grittier, longer is smoother. |
+| PREVIEW | Plays the stretched sample without changing it. **START** does the same. |
+| APPLY | Stretches the sample and closes the settings. |
+
 ### Offline FX
 
 Applied to the whole sample (or selection) offline — rendered immediately, with UNDO available.
 
 | FX | Description |
 |---|---|
-| EQ | Tap A on the slot cell to open the EQ EDITOR and dial it in; then APPLY bakes the EQ into the sample. |
+| EQ | Tap A on the slot cell to open the EQ EDITOR and dial it in; then APPLY bakes the EQ into the sample. `--` is no EQ. |
 | DUST | Lo-fi effect chain: shelf EQ → low-pass → tube saturation → FET compression → wow/drift → bitcrush → soft-clip. |
 | DRIVE | Soft-clipping overdrive. |
 | OTT | 3-band bidirectional compressor. |

@@ -497,16 +497,22 @@ inline bool send_editor_up(const AppState& s) {
  *  module's place underneath and would be covered. */
 inline bool send_editor_drawn(const AppState& s) { return send_editor_up(s) && !s.eq.isOpen; }
 
+/** Is the sample editor's TSTRETCH box up? */
+inline bool stretch_editor_up(const AppState& s) {
+    return s.currentScreen == ScreenType::SAMPLE_EDITOR && s.sampleEditor.stretchOpen;
+}
+
 /**
  * Is a modal up that paints the full-canvas MODAL_BACKDROP? The shell extends the dim into the
  * letterbox bars when it is.
  * ⚠️ Exactly those modals: qwerty, confirm, full help, render dialog, FX helper, map picker, send
- * editor. The EQ and theme editors REPLACE the module and leave the frame bright, so they are not here.
+ * editor, TSTRETCH box. The EQ and theme editors REPLACE the module and leave the frame bright, so
+ * they are not here.
  */
 inline bool modal_backdrop_active(const AppState& s) {
     // A load is not here: its strip dims nothing.
     return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.mapPicker.isOpen ||
-           s.helpFull || s.renderDialog.isOpen || send_editor_drawn(s);
+           s.helpFull || s.renderDialog.isOpen || send_editor_drawn(s) || stretch_editor_up(s);
 }
 
 /**

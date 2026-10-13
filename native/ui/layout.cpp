@@ -80,6 +80,8 @@ void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
         fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
     } else {
         sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
+        // The TSTRETCH box dims the frame, so the help panel is drawn after it or not seen at all.
+        if (s.project) draw_stretch_editor(c, s.sampleEditor, s.project->tempo, t);
         if (s.helpOpen)
             helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
                             SampleEditorModule::WAVEFORM_H);

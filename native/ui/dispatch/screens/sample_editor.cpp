@@ -78,6 +78,12 @@ GestureResult InputDispatcher::sample_editor_screen(Gesture g) {
                 reset_slice_marker();
                 return GestureResult::TAKEN;
             }
+            // The TSTRETCH cell: everything its box dials, back as a session opens.
+            if (se.cursorRow == 16 && se.cursorCol == 1 && se.fxType == SampleEditorModule::FX_SYNC &&
+                se.syncType == SampleEditorModule::SYNC_TSTRETCH) {
+                se.reset_stretch();
+                return GestureResult::TAKEN;
+            }
             return GestureResult::PASS;
 
         // ZOOM: `zoomLevel` 0 = 1× … 4 = 16×; the feed re-bins the waveform.
@@ -134,19 +140,24 @@ void InputDispatcher::sample_editor_audition() {
     samplePending_.previewRestoreInst = se.instrumentId;
 
     // The FX row is auditioned by APPLYING it for real and restoring the clean audio after — a
-    // destructive chain has no dry/wet path. (EQ always previews; the others need a nonzero amount.)
-    const bool hasFxPreview = (se.fxType == SampleEditorModule::FX_EQ) ||
-                              (se.fxType <= SampleEditorModule::FX_DRIVE && se.fxValue > 0);
+    // destructive chain has no dry/wet path.
     host_.restore_fx_preview_backup();
-    if (hasFxPreview) {
+    if (se.fx_armed()) {
         before_long_operation();
         host_.save_fx_preview_backup(se.instrumentId);
-        host_.apply_sample_fx(se.instrumentId, se.fxType, se.fxValue);
+        host_.apply_sample_fx(se.instrumentId, se.fxType, se.fx_param());
     }
+
+    // SYNC is auditioned from a copy, since it changes the length. It takes the pending PITCH with
+    // it — TSTRETCH bakes it in, RPITCH replaces it — so the note itself is not transposed.
+    const songcore::SampleSync sync = planned_sample_sync();
+    const bool synced = (sync.kind != songcore::SampleSync::Kind::NONE);
+    if (synced) before_long_operation();
+    const int pitch = synced ? 0 : se.pitchSemitones;
 
     host_.set_preview_track(-1);   // a waveform being edited is not in the arrangement
     host_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
-                                se.totalFrames, se.pitchSemitones);
+                                se.totalFrames, pitch, sync);
 }
 
 // ─── Opening and closing ─────────────────────────────────────────────────────────────────────────
@@ -535,16 +546,16 @@ void InputDispatcher::refresh_sample_view(bool reset_selection) {
 void InputDispatcher::sample_editor_confirm() {
     before_long_operation();
     SampleEditorState& se     = s_.sampleEditor;
+    // ⚠️ First: START auditions an effect by processing the sample itself, and every button here reads
+    // it — SAVE and COPY would otherwise take an effect that was never applied. Not row 11's tap, which
+    // reads no audio and must not stop the audition it is tapped against.
+    if (se.cursorRow != 11) host_.restore_fx_preview_backup();
     const int          instId = se.instrumentId;
     const int          startF = static_cast<int>(se.selectionStart);
     const int          endF   = static_cast<int>(se.selectionEnd);
 
-    // Every destructive op drops any un-applied FX preview (so it acts on the clean audio) and takes
-    // an undo backup.
-    auto begin_destructive = [&] {
-        host_.restore_fx_preview_backup();
-        host_.backup_sample(instId);
-    };
+    // Every destructive op takes an undo backup.
+    auto begin_destructive = [&] { host_.backup_sample(instId); };
     auto in_place = [&](auto&& op) {   // an op that does NOT change the length
         begin_destructive();
         op();
@@ -611,7 +622,6 @@ void InputDispatcher::sample_editor_confirm() {
                 case 4: in_place([&] { host_.reverse_sample(instId, startF, endF); }); break;
 
                 case 5: {   // UNDO — one level, and it may restore a DIFFERENT length
-                    host_.restore_fx_preview_backup();
                     host_.undo_sample(instId);
                     refresh_sample_view(/*reset_selection=*/true);
                     // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
@@ -627,65 +637,19 @@ void InputDispatcher::sample_editor_confirm() {
             if (se.cursorCol != 2) break;
 
             if (se.fxType <= SampleEditorModule::FX_EQ) {
-                // OTT / DUST / DRIVE need an AMOUNT; EQ's value is a slot, so it always applies.
-                const bool worth_doing =
-                    (se.fxValue > 0) || (se.fxType == SampleEditorModule::FX_EQ);
-                if (!worth_doing) break;
+                if (!se.fx_armed()) break;
 
                 begin_destructive();
-                host_.apply_sample_fx(instId, se.fxType, se.fxValue);
+                host_.apply_sample_fx(instId, se.fxType, se.fx_param());
                 refresh_sample_view(/*reset_selection=*/false);
                 se.isModified = true;
+                // Spent — left in the cell, START would audition it over its own result.
+                if (se.fxType == SampleEditorModule::FX_EQ) se.fxEqSlot = -1;
+                else                                        se.fxValue  = 0;
                 break;
             }
 
-            // ── SYNC: fit the sample to the project's grid ───────────────────────────────────────
-            //
-            // RPITCH resamples (faster is higher — for breakbeats); TSTRETCH holds the pitch (SOLA).
-            const int    bpm     = s_.project->tempo;
-            const double rawSecs = (se.sampleRate > 0)
-                                       ? static_cast<double>(se.totalFrames) / se.sampleRate
-                                       : 0.0;
-            if (rawSecs <= 0.0 || bpm <= 0) break;
-
-            const double targetSecs = SampleEditorModule::duration_beats(se.durationIndex) * 60.0 / bpm;
-            const int    oldLen     = se.totalFrames;
-
-            auto rescale_after = [&](bool clear_pitch) {
-                const int newLen = host_.sample_length(instId);
-                auto scale = [&](int64_t f) -> int64_t {
-                    if (oldLen <= 0) return 0;
-                    return std::clamp<int64_t>((f * newLen) / oldLen, 0, newLen);
-                };
-                se.slicePosition = scale(se.slicePosition);
-                if (clear_pitch) se.pitchSemitones = 0;
-                // ⚠️ Both resamplers drop RATE: the result is the new original, and a stale RATE would
-                // decimate it twice. BIT is kept — it is also the depth SAVE writes.
-                se.rateMode     = 0;
-                refresh_sample_view(/*reset_selection=*/true);
-                se.isModified = true;
-            };
-
-    // ⚠️ "Already on the grid" is asked in FRAMES by both branches; a ratio window of ±0.1 % is most of
-    // a tick on a 4-bar loop.
-            const double  ratio      = targetSecs / rawSecs;
-            const int64_t wantFrames = std::llround(static_cast<double>(se.totalFrames) * ratio);
-            if (ratio <= 0.001 || wantFrames == se.totalFrames) break;
-
-            if (se.syncType == 0) {   // RPITCH
-                // ⚠️ Fractional: rounding to whole semitones (a 5.9 % length step) can miss a 4-bar
-                // loop by ~230 ms.
-                const double exact     = 12.0 * std::log(rawSecs / targetSecs) / std::log(2.0);
-                const float  semitones = static_cast<float>(std::clamp(exact, -24.0, 24.0));
-                begin_destructive();
-                host_.pitch_shift_sample(instId, semitones);
-                // The shift is baked, so the pending one on row 2 is spent.
-                rescale_after(/*clear_pitch=*/true);
-            } else {                  // TSTRETCH
-                begin_destructive();
-                host_.time_stretch_sample(instId, static_cast<float>(ratio));
-                rescale_after(/*clear_pitch=*/false);   // a stretch does not change the pitch
-            }
+            apply_sample_sync();
             break;
         }
 
@@ -748,6 +712,74 @@ void InputDispatcher::sample_editor_confirm() {
         default:
             break;
     }
+}
+
+// ─── SYNC: fit the sample to the grid ────────────────────────────────────────────────────────────
+
+songcore::SampleSync InputDispatcher::planned_sample_sync() const {
+    const SampleEditorState& se = s_.sampleEditor;
+    if (se.fxType != SampleEditorModule::FX_SYNC) return {};
+
+    // RPITCH resamples (faster is higher — for breakbeats) to the song's tempo; TSTRETCH holds the
+    // pitch and fits to its box's BPM.
+    const bool   stretch = (se.syncType == SampleEditorModule::SYNC_TSTRETCH);
+    const int    bpm     = stretch ? se.stretch_bpm(s_.project->tempo) : s_.project->tempo;
+    const double rawSecs = (se.sampleRate > 0)
+                               ? static_cast<double>(se.totalFrames) / se.sampleRate
+                               : 0.0;
+    if (rawSecs <= 0.0 || bpm <= 0) return {};
+
+    const double targetSecs = SampleEditorModule::duration_beats(se.durationIndex) * 60.0 / bpm;
+
+    // ⚠️ "Already on the grid" is asked in FRAMES; a ratio window of ±0.1 % is most of a tick on a
+    // 4-bar loop.
+    const double  ratio      = targetSecs / rawSecs;
+    const int64_t wantFrames = std::llround(static_cast<double>(se.totalFrames) * ratio);
+    if (ratio <= 0.001 || wantFrames < 1) return {};
+    const bool fits = (wantFrames == se.totalFrames);
+
+    songcore::SampleSync sync;
+    if (stretch) {
+        // The pending PITCH is part of a stretch, so a sample that fits can still have work to do.
+        if (fits && se.pitchSemitones == 0) return {};
+        sync.kind      = songcore::SampleSync::Kind::STRETCH;
+        sync.frames    = static_cast<int>(wantFrames);
+        sync.semitones = static_cast<float>(se.pitchSemitones);
+        sync.grainMs   = static_cast<float>(se.stretchGrainMs);
+    } else {
+        if (fits) return {};
+        // ⚠️ Fractional: rounding to whole semitones (a 5.9 % length step) can miss a 4-bar loop by
+        // ~230 ms.
+        const double exact = 12.0 * std::log(rawSecs / targetSecs) / std::log(2.0);
+        sync.kind      = songcore::SampleSync::Kind::REPITCH;
+        sync.semitones = static_cast<float>(std::clamp(exact, -24.0, 24.0));
+    }
+    return sync;
+}
+
+void InputDispatcher::apply_sample_sync() {
+    SampleEditorState&         se   = s_.sampleEditor;
+    const songcore::SampleSync sync = planned_sample_sync();
+    if (sync.kind == songcore::SampleSync::Kind::NONE) return;
+
+    const int instId = se.instrumentId;
+    const int oldLen = se.totalFrames;
+
+    host_.restore_fx_preview_backup();   // act on the clean audio
+    host_.backup_sample(instId);
+    host_.sync_sample(instId, sync);
+    // Spent either way: TSTRETCH has baked the pending shift in, RPITCH has replaced it.
+    se.pitchSemitones = 0;
+
+    const int newLen = host_.sample_length(instId);
+    se.slicePosition = (oldLen > 0)
+                           ? std::clamp<int64_t>((se.slicePosition * newLen) / oldLen, 0, newLen)
+                           : 0;
+    // ⚠️ Both resamplers drop RATE: the result is the new original, and a stale RATE would decimate it
+    // twice. BIT is kept — it is also the depth SAVE writes.
+    se.rateMode = 0;
+    refresh_sample_view(/*reset_selection=*/true);
+    se.isModified = true;
 }
 
 // ─── The pending pitch shift ─────────────────────────────────────────────────────────────────────

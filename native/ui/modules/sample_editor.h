@@ -52,6 +52,11 @@ struct SliceMarker {
 };
 
 /**
+ * The TSTRETCH box's cells, in the order the cursor walks them. PREVIEW and APPLY share the last line.
+ */
+enum class StretchCell { DURATION, BPM, PITCH, GRAIN, PREVIEW, APPLY };
+
+/**
  * The editor's session state, kept in `AppState`: zoom, selection, transients and pending pitch are
  * facts about an editing session, not the project. The audio is in the ENGINE (only the 620 min/max
  * pairs are here); the name, path and slice markers reach the document only when saved.
@@ -154,8 +159,18 @@ struct SampleEditorState {
 
     // ── Row 16: the FX row ───────────────────────────────────────────────────────────────────────
     int fxType   = 0;   // 0 = OTT, 1 = DUST, 2 = DRIVE, 3 = EQ, 4 = SYNC
-    int fxValue  = 0;   // the amount — or, for EQ, the slot in the 128-preset bank
+    int fxValue  = 0;   // OTT / DUST / DRIVE: the amount. 0 = nothing to audition or apply
+    int fxEqSlot = -1;  // EQ: the slot in the 128-preset bank. −1 = none, drawn "--"
     int syncType = 0;   // when fxType == SYNC: 0 = RPITCH (resample), 1 = TSTRETCH (SOLA)
+
+    // ── The TSTRETCH box: SYNC's stretch settings, raised by A on the TSTRETCH cell ──────────────
+    //
+    // They belong to the session, so APPLY on the FX row stretches with them whether or not the box
+    // is up. Its DURATION and PITCH are row 2's own cells; a TSTRETCH bakes the pending pitch in.
+    bool        stretchOpen    = false;
+    StretchCell stretchCursor  = StretchCell::DURATION;
+    int         stretchBpm     = 0;    // the tempo to fit to. ⚠️ 0 = the song's, read when it is needed
+    int         stretchGrainMs = 40;   // the length of each piece, in milliseconds (sola-stretch.h)
 
     // ── Flags ────────────────────────────────────────────────────────────────────────────────────
     /** An unsaved destructive edit is in the engine's buffer. B asks before dropping it. */
@@ -231,12 +246,43 @@ struct SampleEditorState {
     std::string duration_display() const;
 
     /**
-     * "NNNBPM" — the tempo this sample IS if it holds exactly the DURATION row's bar count (the
-     * inverse of SYNC). ⚠️ Scaled by the pending PITCH, as `duration_display` is, so the two agree;
-     * SYNC's RPITCH discards that shift. "---BPM" with no sample or outside 1..999.
+     * The tempo this sample IS if it holds exactly the DURATION row's bar count (the inverse of SYNC),
+     * or 0 with no sample or outside 1..999. ⚠️ Scaled by the pending PITCH, as `duration_display` is,
+     * so the header's two readings agree.
      */
+    int source_bpm() const;
+
+    /** "NNNBPM" from `source_bpm()`, "---BPM" when it has none. */
     std::string bpm_display() const;
+
+    /** The tempo TSTRETCH fits to: the box's BPM, or the song's while that has not been moved. */
+    int stretch_bpm(int song_tempo) const { return stretchBpm > 0 ? stretchBpm : song_tempo; }
+
+    /** Everything the TSTRETCH box dials — DURATION, BPM, PITCH, GRAIN — back as a session opens. */
+    void reset_stretch();
+
+    /** OTT / DUST / DRIVE / EQ has something to audition or apply: an amount above 0, or an EQ slot. */
+    bool fx_armed() const;
+
+    /** The number the engine takes beside `fxType`: the amount, or the EQ's slot. */
+    int fx_param() const;
 };
+
+// ── The TSTRETCH box ─────────────────────────────────────────────────────────────────────────────
+//
+// A modal over the editor's lower half — the waveform stays in view above it. `song_tempo` is what
+// BPM reads while it has not been moved.
+
+/** The cell one step away: `d_row` walks the column, `d_col` crosses between PREVIEW and APPLY. */
+StretchCell stretch_step(StretchCell from, int d_row, int d_col);
+
+CursorContext stretch_cursor_context(const SampleEditorState& s, int song_tempo);
+
+/** Apply a resolved action to the cell under the box's cursor. */
+void stretch_handle_input(SampleEditorState& s, const InputAction& action, int song_tempo);
+
+/** Paint the box over the finished frame. No-op when it is not open. */
+void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, const Theme& t);
 
 /** What `handle_input` changed — enough for the dispatcher to know which engine calls to make. */
 struct SampleEditorInputResult {
@@ -289,8 +335,11 @@ public:
     static constexpr int FX_OTT   = 0;
     static constexpr int FX_DUST  = 1;
     static constexpr int FX_DRIVE = 2;
-    static constexpr int FX_EQ    = 3;   // fxValue is an EQ SLOT (0..127), not an amount
+    static constexpr int FX_EQ    = 3;   // reads `fxEqSlot`, not the amount
     static constexpr int FX_SYNC  = 4;   // fxValue is unused; syncType picks RPITCH vs TSTRETCH
+
+    static constexpr int SYNC_RPITCH   = 0;   // resample: faster is higher
+    static constexpr int SYNC_TSTRETCH = 1;   // the pitch held; A on the cell opens its box
 
     static constexpr int SLICE_TRANSIENT = 0;
     static constexpr int SLICE_DIVIDE    = 1;

@@ -121,7 +121,7 @@ void InputDispatcher::apply_caller_eq_slot_change(int new_slot) {
         case EqCallerContext::Kind::SAMPLE_EDITOR_FX:
             // No engine call: the sample editor's EQ is applied destructively on APPLY, reading the
             // bank then.
-            s_.sampleEditor.fxValue = new_slot;
+            s_.sampleEditor.fxEqSlot = new_slot;
             break;
     }
 

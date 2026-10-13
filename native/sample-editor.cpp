@@ -389,7 +389,8 @@ void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
     sampleClipboardLength = len;
 }
 
-// Prepare the sample editor's LEFT/RIGHT/MONO source preview as a slot→slot copy in native memory.
+// Copy a sample slot→slot in native memory for the sample editor's audition: one channel, the two
+// mixed, or (mode 2) the sample as it is.
 void AudioEngine::prepareSourcePreview(int dstId, int srcId, int mode) {
     if (dstId < 0 || dstId >= 256 || srcId < 0 || srcId >= 256 || dstId == srcId) return;
     // Stops voices reading the dst (scratch) slot and holds the edit mutex — which also
@@ -401,14 +402,19 @@ void AudioEngine::prepareSourcePreview(int dstId, int srcId, int mode) {
     const float* R = samplesRight[srcId] ? samplesRight[srcId] : L;
     float* out = new (std::nothrow) float[len];
     if (!out) return;
+    float* outR = nullptr;
     if (mode == 1) {
         std::memcpy(out, R, (size_t)len * sizeof(float));
     } else if (mode == 3) {
         for (int i = 0; i < len; i++) out[i] = (L[i] + R[i]) * 0.5f;
-    } else {  // 0 = LEFT (also the mono-source fallback: R aliases L then)
+    } else {  // 0 = LEFT (also the mono-source fallback: R aliases L then); 2 = STEREO, both channels
         std::memcpy(out, L, (size_t)len * sizeof(float));
+        if (mode == 2 && samplesRight[srcId]) {
+            outR = new (std::nothrow) float[len];
+            if (outR) std::memcpy(outR, R, (size_t)len * sizeof(float));
+        }
     }
-    setSampleBuffers(dstId, out, nullptr, len);
+    setSampleBuffers(dstId, out, outR, len);
 }
 
 void AudioEngine::pasteRegion(int id, int insertAt) {
@@ -619,7 +625,7 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
     setSampleBuffers(id, newL, newR, newLen);
 }
 
-void AudioEngine::timeStretchSample(int id, float ratio) {
+void AudioEngine::timeStretchSample(int id, float ratio, float grainMs, float sampleRate) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
     // ⚠️ The skip is measured in FRAMES, not as a ratio window. A "0.1% is inaudible" window is 8 ms
     // on an 8-second loop — most of a tick — and SYNC's whole job is to land on the tick.
@@ -632,7 +638,7 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
     freeRateCache(id);
 
     int oldLen = sampleLengths[id];
-    std::vector<float> outL = sola::stretch(samples[id], oldLen, ratio, 44100.0f);
+    std::vector<float> outL = sola::stretch(samples[id], oldLen, ratio, sampleRate, grainMs);
     int newLen = (int)outL.size();
     float* newL = new float[newLen];
     std::copy(outL.begin(), outL.end(), newL);
@@ -641,7 +647,7 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
     if (samplesRight[id]) {
         // Deterministic for the same oldLen/ratio, so outR.size() == newLen; clamp + zero-pad defensively
         // so the right buffer is always exactly newLen (keeps L/R in lockstep).
-        std::vector<float> outR = sola::stretch(samplesRight[id], oldLen, ratio, 44100.0f);
+        std::vector<float> outR = sola::stretch(samplesRight[id], oldLen, ratio, sampleRate, grainMs);
         newR = new float[newLen];
         int n = std::min((int)outR.size(), newLen);
         std::copy(outR.begin(), outR.begin() + n, newR);

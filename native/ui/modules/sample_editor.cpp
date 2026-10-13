@@ -271,16 +271,37 @@ std::string SampleEditorState::duration_display() const {
     return std::string(buf);
 }
 
-std::string SampleEditorState::bpm_display() const {
-    if (sampleRate <= 0 || totalFrames <= 0) return "---BPM";
+int SampleEditorState::source_bpm() const {
+    if (sampleRate <= 0 || totalFrames <= 0) return 0;
 
     const double ratio   = std::pow(2.0, pitchSemitones / 12.0);
     const double seconds = static_cast<double>(totalFrames) / (ratio * sampleRate);
-    if (seconds <= 0.0) return "---BPM";
+    if (seconds <= 0.0) return 0;
 
     const long bpm = std::lround(SampleEditorModule::duration_beats(durationIndex) * 60.0 / seconds);
-    if (bpm < 1 || bpm > 999) return "---BPM";
-    return std::to_string(bpm) + "BPM";
+    return (bpm < 1 || bpm > 999) ? 0 : static_cast<int>(bpm);
+}
+
+std::string SampleEditorState::bpm_display() const {
+    const int bpm = source_bpm();
+    return bpm > 0 ? std::to_string(bpm) + "BPM" : "---BPM";
+}
+
+void SampleEditorState::reset_stretch() {
+    const SampleEditorState fresh;
+    durationIndex  = fresh.durationIndex;
+    stretchBpm     = fresh.stretchBpm;
+    pitchSemitones = fresh.pitchSemitones;
+    stretchGrainMs = fresh.stretchGrainMs;
+}
+
+bool SampleEditorState::fx_armed() const {
+    if (fxType == SampleEditorModule::FX_EQ) return fxEqSlot >= 0;
+    return fxType <= SampleEditorModule::FX_DRIVE && fxValue > 0;
+}
+
+int SampleEditorState::fx_param() const {
+    return (fxType == SampleEditorModule::FX_EQ) ? fxEqSlot : fxValue;
 }
 
 // ─── The draw ────────────────────────────────────────────────────────────────────────────────────
@@ -420,7 +441,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const bool onVal = (cur && s.cursorCol == 1);
         if (s.fxType == FX_EQ) {
             // An EQ slot, drawn as every other EQ cell is: the number plus the ">" for its editor.
-            draw_eq_cell(c, x + 290, ty, s.fxValue, onVal, t);
+            draw_eq_cell(c, x + 290, ty, s.fxEqSlot, onVal, t);
         } else {
             const std::string val = (s.fxType == FX_SYNC) ? at(sync_types(), s.syncType)
                                                           : hex2(s.fxValue);
@@ -618,8 +639,9 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
         case 2:
             switch (s.cursorCol) {
                 // PITCH is ±24 semitones carried as 0..48 with a +24 bias (hex_byte steps an
-                // unsigned range); handle_input un-biases.
-                case 0: return cc::hex_byte(s.pitchSemitones + 24, 0, 48);
+                // unsigned range); handle_input un-biases. A+B takes it back to +0.
+                case 0: return cc::hex_byte(s.pitchSemitones + 24, 0, 48, -1, false, false, false,
+                                            /*def=*/24);
                 case 1: return cc::toggle_ternary(at(duration_values(), s.durationIndex), duration_values());
                 case 2: {
                     // An 8-bit sample has nowhere lower to go: the cell reads 8 and cannot move, as
@@ -661,7 +683,10 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
             switch (s.cursorCol) {
                 case 0: return cc::toggle_ternary(at(fx_types(), s.fxType), fx_types());
                 case 1:
-                    if (s.fxType == FX_EQ)   return cc::hex_byte(s.fxValue, 0, 127);   // an EQ SLOT
+                    // An EQ SLOT, as every EQ cell: "--" is empty, A+RIGHT takes slot 00, A+B clears.
+                    if (s.fxType == FX_EQ)
+                        return cc::hex_byte(s.fxEqSlot < 0 ? -1 : s.fxEqSlot, 0, 127,
+                                            /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
                     if (s.fxType == FX_SYNC) return cc::toggle_ternary(at(sync_types(), s.syncType), sync_types());
                     return cc::hex_byte(s.fxValue, 0, 255);                            // an AMOUNT
                 default: return cc::none();   // col 2 = APPLY, an action
@@ -680,7 +705,20 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
 SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
                                                          const InputAction& action) const {
     SampleEditorInputResult r;
-    if (action.type != ActionType::SET_VALUE) return r;   // every cell here is a SET_VALUE cell
+
+    // The EQ slot is the one cell here that DELETEs and INSERTs rather than only taking a value.
+    if (s.cursorRow == 16 && s.cursorCol == 1 && s.fxType == FX_EQ) {
+        switch (action.type) {
+            case ActionType::SET_VALUE:      s.fxEqSlot = std::clamp(action.value, 0, 127); break;
+            case ActionType::DELETE:         s.fxEqSlot = -1;                               break;
+            case ActionType::INSERT_DEFAULT: s.fxEqSlot = 0;                                break;
+            default: return r;
+        }
+        r.modified = true;
+        return r;
+    }
+
+    if (action.type != ActionType::SET_VALUE) return r;   // every other cell is a SET_VALUE cell
     const int v = action.value;
 
     switch (s.cursorRow) {
@@ -767,6 +805,146 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
     }
 
     return r;
+}
+
+// ─── The TSTRETCH box ────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Under the waveform, so the playhead of a preview runs in view above the box.
+constexpr int STRETCH_BOX_W   = 320;
+constexpr int STRETCH_BOX_X   = (DESIGN_W - STRETCH_BOX_W) / 2;
+constexpr int STRETCH_BOX_Y   = SampleEditorModule::WAVEFORM_Y + SampleEditorModule::WAVEFORM_H + 8;
+constexpr int STRETCH_PAD     = 8;
+constexpr int STRETCH_GAP     = 8;    // between the title and the lines
+constexpr int STRETCH_LABEL_X = STRETCH_BOX_X + 14;
+constexpr int STRETCH_VALUE_X = STRETCH_LABEL_X + 10 * CHAR_W;
+
+/** One line of the box: a label and the cell beside it. No cell = a reading, no label = a blank line. */
+struct StretchLine {
+    const char* label;
+    int         cell;   // a StretchCell, or −1
+};
+constexpr StretchLine STRETCH_LINES[] = {
+    {"ORIG BPM", -1},
+    {"DURATION", static_cast<int>(StretchCell::DURATION)},
+    {"NEW BPM",  static_cast<int>(StretchCell::BPM)},
+    {"PITCH",    static_cast<int>(StretchCell::PITCH)},
+    {nullptr,    -1},
+    {"GRAIN",    static_cast<int>(StretchCell::GRAIN)},
+    {nullptr,    -1},
+};
+constexpr int STRETCH_LINE_COUNT = static_cast<int>(sizeof(STRETCH_LINES) / sizeof(STRETCH_LINES[0]));
+
+// The title, air, the lines, then the PREVIEW / APPLY line.
+constexpr int STRETCH_BOX_H =
+    ROW_HEIGHT + STRETCH_GAP + (STRETCH_LINE_COUNT + 1) * ROW_HEIGHT + 2 * STRETCH_PAD;
+static_assert(STRETCH_BOX_Y + STRETCH_BOX_H + MODAL_BORDER - 1 <= DESIGN_H,
+              "the TSTRETCH box runs off the bottom of the screen");
+
+std::string pad3(int v) {
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "%03d", std::clamp(v, 0, 999));
+    return std::string(buf);
+}
+
+/** PITCH as row 2 shows it: "+0", "+7", "-12". */
+std::string signed_semitones(int v) { return (v >= 0 ? "+" : "") + std::to_string(v); }
+
+std::string stretch_value(const SampleEditorState& s, StretchCell cell, int song_tempo) {
+    switch (cell) {
+        case StretchCell::DURATION: return at(SampleEditorModule::duration_values(), s.durationIndex);
+        case StretchCell::BPM:      return pad3(s.stretch_bpm(song_tempo));
+        case StretchCell::PITCH:    return signed_semitones(s.pitchSemitones);
+        case StretchCell::GRAIN:    return hex2(s.stretchGrainMs);
+        default:                    return "";
+    }
+}
+
+}  // namespace
+
+StretchCell stretch_step(StretchCell from, int d_row, int d_col) {
+    const bool onButtons = (from == StretchCell::PREVIEW || from == StretchCell::APPLY);
+    if (d_col != 0 && onButtons) return (d_col > 0) ? StretchCell::APPLY : StretchCell::PREVIEW;
+    if (d_row == 0) return from;
+    if (onButtons) return (d_row < 0) ? StretchCell::GRAIN : from;
+    return static_cast<StretchCell>(std::clamp(static_cast<int>(from) + d_row,
+                                               static_cast<int>(StretchCell::DURATION),
+                                               static_cast<int>(StretchCell::PREVIEW)));
+}
+
+CursorContext stretch_cursor_context(const SampleEditorState& s, int song_tempo) {
+    using M = SampleEditorModule;
+    switch (s.stretchCursor) {
+        case StretchCell::DURATION:
+            return cc::toggle_ternary(at(M::duration_values(), s.durationIndex), M::duration_values());
+        case StretchCell::BPM: {
+            // The song TEMPO's own range and steps; A+B goes back to following it.
+            CursorContext c = cc::hex_byte(s.stretch_bpm(song_tempo), 20, 999, -1, false, false, false,
+                                           /*def=*/song_tempo);
+            c.largeStep = 10;
+            return c;
+        }
+        case StretchCell::PITCH:
+            // Row 2's own cell and bias; here A+B takes it back to +0.
+            return cc::hex_byte(s.pitchSemitones + 24, 0, 48, -1, false, false, false, /*def=*/24);
+        case StretchCell::GRAIN:
+            return cc::hex_byte(s.stretchGrainMs, 5, 255, -1, false, false, false, /*def=*/40);
+        default:
+            return cc::none();   // PREVIEW and APPLY are actions
+    }
+}
+
+void stretch_handle_input(SampleEditorState& s, const InputAction& action, int song_tempo) {
+    if (action.type != ActionType::SET_VALUE) return;
+    const int v = action.value;
+    switch (s.stretchCursor) {
+        case StretchCell::DURATION: s.durationIndex = v; break;
+        // ⚠️ The song's own tempo is stored as 0, so the cell follows the song rather than remembering it.
+        case StretchCell::BPM:      s.stretchBpm = (v == song_tempo) ? 0 : v; break;
+        case StretchCell::PITCH:    s.pitchSemitones = v - 24; break;
+        case StretchCell::GRAIN:    s.stretchGrainMs = v; break;
+        default: break;
+    }
+}
+
+void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, const Theme& t) {
+    if (!s.stretchOpen) return;
+
+    c.reset_clip();
+    draw_modal_backdrop(c);
+    draw_modal_box(c, STRETCH_BOX_X, STRETCH_BOX_Y, STRETCH_BOX_W, STRETCH_BOX_H, t);
+
+    const std::string title = "TIMESTRETCH";
+    int ty = STRETCH_BOX_Y + STRETCH_PAD + TEXT_PADDING;
+    c.draw_text(title, STRETCH_BOX_X + (STRETCH_BOX_W - static_cast<int>(title.size()) * CHAR_W) / 2,
+                ty, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    ty += ROW_HEIGHT + STRETCH_GAP;
+
+    auto on = [&](StretchCell cell) { return s.stretchCursor == cell; };
+
+    for (const StretchLine& line : STRETCH_LINES) {
+        if (line.label != nullptr) {
+            const bool        isCell = (line.cell >= 0);
+            const StretchCell cell   = static_cast<StretchCell>(std::max(line.cell, 0));
+            const bool        cur    = isCell && on(cell);
+            c.draw_text(line.label, STRETCH_LABEL_X, ty, cur ? cursor_mark_ink(t) : t.textParam,
+                        CHAR_SPACING, FONT_SCALE);
+            if (isCell) {
+                draw_cursor_cell(c, stretch_value(s, cell, song_tempo), STRETCH_VALUE_X, ty, cur,
+                                 t.textValue, t);
+            } else {
+                // The header's reading: the sample's tempo at this DURATION, the PITCH below counted in.
+                const int bpm = s.source_bpm();
+                c.draw_text(bpm > 0 ? pad3(bpm) : "---", STRETCH_VALUE_X, ty, t.textParam, CHAR_SPACING,
+                            FONT_SCALE);
+            }
+        }
+        ty += ROW_HEIGHT;
+    }
+
+    draw_cursor_cell(c, "PREVIEW", STRETCH_LABEL_X, ty, on(StretchCell::PREVIEW), t.textValue, t);
+    draw_cursor_cell(c, "APPLY",   STRETCH_VALUE_X, ty, on(StretchCell::APPLY),   t.textValue, t);
 }
 
 }  // namespace pt::ui

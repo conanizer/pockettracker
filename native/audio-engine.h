@@ -301,8 +301,8 @@ public:
     void deleteSampleRegion(int id, int startFrame, int endFrame);
     void copyRegion(int id, int startFrame, int endFrame);
     void pasteRegion(int id, int insertAt);
-    // Sample-editor LEFT/RIGHT/MONO source preview: copy the selected channel (or the L/R
-    // average) of srcId into dstId's slot, entirely in native memory. mode: 0=L, 1=R, 3=avg.
+    // The sample editor's audition copy: srcId into dstId's slot, entirely in native memory.
+    // mode: 0=L, 1=R, 2=both channels, 3=avg.
     void prepareSourcePreview(int dstId, int srcId, int mode);
     int  getClipboardLength();
     void downsampleSample(int id, int factor);
@@ -314,7 +314,8 @@ public:
     // Destructive pitch shift by semitones (applied to buffer in-place; clears original cache).
     void pitchShiftSample(int id, float semitones);
     // Destructive time-stretch: ratio > 1 = longer/slower, < 1 = shorter/faster. SOLA algorithm.
-    void timeStretchSample(int id, float ratio);
+    // `grainMs` is the chunk length; `sampleRate` is the buffer's own, so its milliseconds are milliseconds.
+    void timeStretchSample(int id, float ratio, float grainMs, float sampleRate);
     // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE, 3=EQ.
     // ⚠️ `fxValue` is 0-255 for the first three (the effect's amount) but an EQ PRESET SLOT for type 3
     // — a different quantity in the same parameter, which is why the type has to be read first.

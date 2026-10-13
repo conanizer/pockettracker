@@ -368,6 +368,11 @@ enum class HelpTopic {
     FX_REVERB_LOAD,
     FX_DELAY_SAVE,
     FX_DELAY_LOAD,
+    SE_STRETCH_BPM,
+    SE_STRETCH_PITCH,
+    SE_STRETCH_GRAIN,
+    SE_STRETCH_PREVIEW,
+    SE_STRETCH_APPLY,
 
     COUNT
 };
@@ -1877,9 +1882,11 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"Up or down, -24 to +24",
       "semitones. START plays it moved,",
       "and SAVE writes it into the",
-      "file."},
+      "file. So does a TSTRETCH, which",
+      "keeps the length it fits to."},
      {"A+←/→ steps a semitone",
-      "A+↑/↓ steps 16"}},
+      "A+↑/↓ steps 16",
+      "A+B goes back to +0"}},
     /* SE_DURATION */
     {"DURATION: the length to fit", "What SYNC on the EFFECT row", "stretches the sample to.",
      {"SYNC fits the sample to it, from",
@@ -2020,12 +2027,16 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "together, TSTRETCH only the",
       "length."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
-      "A on an EQ slot opens the editor"}},
+      "A on an EQ slot opens the editor",
+      "A+B on an EQ slot clears it",
+      "A on TSTRETCH opens its settings",
+      "A+B on TSTRETCH resets them"}},
     /* SE_FX_APPLY */
     {"APPLY: do it, for good", "Bakes the effect into the", "audio. SYNC fits the length.",
      {"Bakes the effect into the audio.",
       "SYNC fits the sample to DURATION",
-      "at the song TEMPO."},
+      "at the song TEMPO, or at the",
+      "NEW BPM set for TSTRETCH."},
      {"A applies, UNDO takes it back"}},
     /* SE_NAME */
     {"NAME: what to call it", "A opens the keyboard. SAVE", "uses this for the file name.",
@@ -2285,6 +2296,46 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "INP EQ."},
      {"A opens the file browser",
       "A there loads it, B goes back"}},
+    /* SE_STRETCH_BPM */
+    {"NEW BPM: the tempo to fit to", "Starts as the song TEMPO.", "A+B puts it back there.",
+     {"TSTRETCH fits the sample to",
+      "DURATION at this tempo. It",
+      "starts as the song TEMPO."},
+     {"A+←/→ steps 1, A+↑/↓ steps 10",
+      "A+B goes back to the song TEMPO"}},
+    /* SE_STRETCH_PITCH */
+    {"PITCH: stretch it at a new pitch", "In semitones. The length", "still fits DURATION.",
+     {"Up or down, -24 to +24",
+      "semitones. The stretch moves the",
+      "pitch and still fits DURATION at",
+      "NEW BPM above. It is the same",
+      "PITCH as on the editor."},
+     {"A+←/→ steps a semitone",
+      "A+↑/↓ steps 16",
+      "A+B goes back to +0"}},
+    /* SE_STRETCH_GRAIN */
+    {"GRAIN: the size of each piece", "In milliseconds. Short is", "gritty, long is smooth.",
+     {"The stretch cuts the sample into",
+      "pieces this long, in",
+      "milliseconds, and blends each",
+      "into the next. Short is gritty,",
+      "long is smoother but can echo."},
+     {"A+←/→ steps 1, A+↑/↓ steps 16",
+      "A+B goes back to 28"}},
+    /* SE_STRETCH_PREVIEW */
+    {"PREVIEW: hear it first", "Plays the stretched sample.", "Nothing is changed yet.",
+     {"Plays the sample as these",
+      "settings would stretch it.",
+      "Nothing is changed yet."},
+     {"A or START plays it",
+      "A or START again stops it"}},
+    /* SE_STRETCH_APPLY */
+    {"APPLY: stretch it for good", "Stretches the sample and", "closes the box.",
+     {"Stretches the sample and closes",
+      "the box. APPLY on the EFFECT row",
+      "does the same with these",
+      "settings."},
+     {"A applies, UNDO takes it back"}},
 };
 
 // ─── The compile-time check on the table ─────────────────────────────────────────────────────────
@@ -2803,6 +2854,19 @@ inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method)
     }
 }
 
+/** The sample editor's TSTRETCH box. DURATION is the editor's own cell, shown again. */
+inline HelpTopic stretch_cell_topic(StretchCell cell) {
+    switch (cell) {
+        case StretchCell::DURATION: return HelpTopic::SE_DURATION;
+        case StretchCell::BPM:      return HelpTopic::SE_STRETCH_BPM;
+        case StretchCell::PITCH:    return HelpTopic::SE_STRETCH_PITCH;
+        case StretchCell::GRAIN:    return HelpTopic::SE_STRETCH_GRAIN;
+        case StretchCell::PREVIEW:  return HelpTopic::SE_STRETCH_PREVIEW;
+        case StretchCell::APPLY:    return HelpTopic::SE_STRETCH_APPLY;
+    }
+    return HelpTopic::SCREEN_SAMPLE_EDITOR;
+}
+
 }  // namespace detail
 
 /**
@@ -2835,6 +2899,9 @@ inline HelpTopic help_topic(const AppState& s) {
         const HelpTopic fx = detail::effects_cell_topic(s.sendEditor.cursorRow);
         return (fx == HelpTopic::NONE) ? HelpTopic::SCREEN_EFFECTS : fx;
     }
+
+    // The TSTRETCH box covers the sample editor's own cells.
+    if (stretch_editor_up(s)) return detail::stretch_cell_topic(s.sampleEditor.stretchCursor);
 
     HelpTopic cell = HelpTopic::NONE;
 

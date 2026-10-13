@@ -1230,6 +1230,7 @@ class InputDispatcher {
     /**
      * START: TOGGLES the audition of the selection — the only audition that does. Long loops are
      * auditioned here, and "any button silences a preview" is exempt on this screen.
+     * It plays the sample with the FX row's effect on it, SYNC included.
      */
     void sample_editor_audition();
 
@@ -1295,6 +1296,24 @@ class InputDispatcher {
 
     /** A on rows 13/14/16/18/19 — the twelve ops, the FX apply, the name, and the save buttons. */
     void sample_editor_confirm();
+
+    /**
+     * What the FX row's SYNC would do to the sample now — NONE off SYNC, or when the sample already
+     * fits. APPLY and the audition both ask here, so START plays what APPLY will write.
+     */
+    songcore::SampleSync planned_sample_sync() const;
+
+    /** SYNC's APPLY: fit the sample to DURATION, by RPITCH or by TSTRETCH with its box's settings.
+     *  Either way the pending PITCH is spent. */
+    void apply_sample_sync();
+
+    // ── The TSTRETCH box (ui/dispatch/layers/stretch_editor.cpp) ─────────────────────────────────
+
+    bool stretch_editor_open() const { return stretch_editor_up(s_); }
+    GestureResult stretch_editor_layer(Gesture g);
+    void open_stretch_editor();
+    /** A+DPAD and A+B on the box's cursor. */
+    void stretch_editor_edit(InputAction (*fn)(const CursorContext&));
 
     /** Bake the PENDING pitch shift into the buffer and rescale everything in frames — all three saves
      *  call it, since a sample is saved as it SOUNDS. */

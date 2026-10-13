@@ -1,25 +1,11 @@
-// =============================================================================
-// sola-stretch.h
+// SOLA (Synchronized Overlap-Add) time-stretch: a different duration at the ORIGINAL pitch.
 //
-// SOLA (Synchronized Overlap-Add) time-stretching, Akai-cyclic flavor.
+// The input is cut into chunks ("grains"); material is repeated to slow down and skipped to speed up,
+// and every splice is an equal-power crossfade. The splices fall on a fixed grid ("cyclic"), which is
+// the gritty sound of an early hardware sampler and the reason this is not an FFT stretch.
 //
-// Given an input buffer and a stretch ratio (outputLength / inputLength),
-// produces audio of a different duration at the ORIGINAL pitch:
-//   ratio = 1.0 -> no change; 2.0 -> twice as long (half tempo); 0.5 -> half as long.
-//
-// WHY SOLA AND NOT FFT
-// --------------------
-// 1. No FFT library needed -> works anywhere, fits the Miyoo Flip CPU budget.
-// 2. The "cyclic" SOLA mode is literally what Akai S950/S1000 used. The
-//    characteristic gritty texture that defines jungle breakbeats IS the
-//    by-product of this algorithm. Modern, cleaner algorithms can't fake it.
-//
-// Core idea: cut the input into ~40 ms chunks; repeat material to slow down,
-// skip material to speed up; equal-power-crossfade every splice.
-//
-// Offline only: called from timeStretchSample (destructive APPLY FX), once per
-// channel for stereo — deterministic, so channels stay phase-aligned.
-// =============================================================================
+// Offline only: the sample editor's SYNC and its audition, once per channel — deterministic, so the
+// channels of a stereo sample stay phase-aligned.
 
 #pragma once
 
@@ -30,94 +16,29 @@
 
 namespace sola {
 
-// ----------------------------------------------------------------------------
-// Tuning constants. These are the "Akai feel" knobs.
-//
-// SEQUENCE_MS:  chunk length.
-//   - Smaller = grittier, choppier, more "1990s sampler" character.
-//   - Larger  = smoother but can introduce slap-back / phasing artifacts.
-//   - Akai S1000 hovered around 30-50 ms. 40 ms is a great default.
-//
-// OVERLAP_MS:   crossfade length between chunks.
-//   - Roughly 25-50% of SEQUENCE_MS is the sweet spot.
-//   - Too small -> audible clicks at every splice (the dreaded "tic-tic-tic").
-//   - Too large -> mushy, comb-filtered sound.
-//
-// SEEK_MS:      how far around the "ideal" splice point to search for a better
-//               one. 0 = pure cyclic Akai sound; ~10-15 ms = smoother
-//               "intelligent" mode.
-// ----------------------------------------------------------------------------
-static constexpr float SEQUENCE_MS = 40.0f;  // chunk length
-static constexpr float OVERLAP_MS  = 15.0f;  // crossfade length
-static constexpr float SEEK_MS     = 0.0f;   // 0 = pure cyclic / Akai mode
+/** The chunk length, in milliseconds: shorter is grittier, longer is smoother but can slap back. */
+static constexpr float DEFAULT_GRAIN_MS = 40.0f;
 
+/**
+ * How much of each chunk is crossfade. It scales with the chunk, so the chunk length is the one
+ * setting: a fixed fade would click under a long grain and swallow a short one.
+ */
+static constexpr float OVERLAP_OF_GRAIN = 0.375f;
 
-// Equal-power (cosine) crossfade of prevTail (fading out) into newHead (fading
-// in) over len samples. Equal-power rather than linear: perceived loudness
-// stays constant instead of dipping mid-fade.
-inline void crossfade(const float* prevTail,
-                      const float* newHead,
-                      float*       out,
-                      int          len)
-{
-    for (int i = 0; i < len; ++i)
-    {
-        float t = (float)i / (float)(len);
-        float fadeOut = cosf(t * 0.5f * (float)M_PI);
-        float fadeIn  = sinf(t * 0.5f * (float)M_PI);
-        out[i] = prevTail[i] * fadeOut + newHead[i] * fadeIn;
-    }
-}
-
-
-// "Intelligent" SOLA: search ±seekRange around targetPos for the splice point
-// whose samples best correlate with the tail of the previous output chunk.
-// Not called in cyclic mode (SEEK_MS == 0) — kept for the smoother mode.
-inline int findBestOverlap(const float* prevTail,    // end of previous output chunk
-                           const float* input,       // entire input buffer
-                           int          inputLen,
-                           int          targetPos,   // ideal splice position
-                           int          seekRange,   // ± samples to search
-                           int          overlapLen)  // crossfade length
-{
-    float bestCorr   = -1e30f;
-    int   bestOffset = 0;
-
-    // Limit the search so we never read past the end of the buffer.
-    int seekMin = -seekRange;
-    int seekMax =  seekRange;
-    if (targetPos + seekMin                 < 0)        seekMin = -targetPos;
-    if (targetPos + seekMax + overlapLen >= inputLen)   seekMax =  inputLen - targetPos - overlapLen - 1;
-
-    for (int offset = seekMin; offset <= seekMax; ++offset)
-    {
-        // Dot-product correlation: higher = more similar waveforms = smoother splice.
-        float corr = 0.0f;
-        for (int i = 0; i < overlapLen; ++i)
-        {
-            corr += prevTail[i] * input[targetPos + offset + i];
-        }
-        if (corr > bestCorr)
-        {
-            bestCorr   = corr;
-            bestOffset = offset;
-        }
-    }
-    return bestOffset;
-}
-
-
-// Time-stretch a mono buffer by `ratio` (outputLen / inputLen; >1 = slower/longer).
-// Offline: whole sample in, freshly allocated stretched sample out.
-//
-// ⚠️ INVARIANT: the returned length is EXACTLY lround(inputLen * ratio). The sample editor's SYNC
-// fits a loop to the project's grid by asking for a length, so an output quantized to the chunk
-// grid — or short by the tail chunk — puts the loop point in the wrong place, and a drum loop that
-// wraps a few ms early is the whole symptom. Length is a contract here, not an outcome.
+/**
+ * Time-stretch a mono buffer by `ratio` (outputLen / inputLen; >1 = slower/longer).
+ * Offline: whole sample in, freshly allocated stretched sample out.
+ *
+ * ⚠️ INVARIANT: the returned length is EXACTLY lround(inputLen * ratio). The sample editor's SYNC
+ * fits a loop to the project's grid by asking for a length, so an output quantized to the chunk
+ * grid — or short by the tail chunk — puts the loop point in the wrong place, and a drum loop that
+ * wraps a few ms early is the whole symptom. Length is a contract here, not an outcome.
+ */
 inline std::vector<float> stretch(const float* input,
                                   int          inputLen,
                                   float        ratio,
-                                  float        sampleRate)
+                                  float        sampleRate,
+                                  float        grainMs = DEFAULT_GRAIN_MS)
 {
     if (inputLen <= 0) return std::vector<float>();
 
@@ -137,14 +58,13 @@ inline std::vector<float> stretch(const float* input,
         return out;
     }
 
-    // ms -> samples.
-    int sequenceLen = (int)(SEQUENCE_MS * 0.001f * sampleRate); // ~1764 at 44.1k
-    int overlapLen  = (int)(OVERLAP_MS  * 0.001f * sampleRate); // ~661 at 44.1k
-    int seekRange   = (int)(SEEK_MS     * 0.001f * sampleRate); // 0 in cyclic mode
+    // ms -> frames. ⚠️ At least 2 frames of chunk, or the hop below is 0 and the loop never advances.
+    int sequenceLen = std::max(2, (int)(grainMs * 0.001f * sampleRate));
+    int overlapLen  = std::max(0, (int)(grainMs * OVERLAP_OF_GRAIN * 0.001f * sampleRate));
 
     // ⚠️ Half the chunk, not the whole chunk: the crossfade reads back `overlapLen` from `outputPos`,
     // whose smallest value is one outputHop, so an overlap past the halfway point indexes before the
-    // start of the buffer. Only reachable by retuning the constants above.
+    // start of the buffer.
     if (overlapLen > sequenceLen / 2) overlapLen = sequenceLen / 2;
 
     // Hop sizes — the heart of the stretch:
@@ -156,43 +76,32 @@ inline std::vector<float> stretch(const float* input,
     int   outputHop = sequenceLen - overlapLen;
     float inputHop  = (float)outputHop / ratio;
 
+    // Equal-power (cosine) rather than linear: perceived loudness stays constant instead of dipping
+    // mid-fade.
+    std::vector<float> fadeOut((size_t)overlapLen), fadeIn((size_t)overlapLen);
+    for (int i = 0; i < overlapLen; ++i)
+    {
+        float t = (float)i / (float)(overlapLen);
+        fadeOut[(size_t)i] = cosf(t * 0.5f * (float)M_PI);
+        fadeIn[(size_t)i]  = sinf(t * 0.5f * (float)M_PI);
+    }
+
     // One sequenceLen of headroom so the final chunk has room to write; trimmed to targetLen at the end.
     std::vector<float> output((size_t)targetLen + sequenceLen, 0.0f);
 
+    // First chunk: straight copy — there is nothing to crossfade with yet.
+    std::copy(input, input + std::min(sequenceLen, inputLen), output.begin());
+
     // inputPos is fractional (inputHop is a float): accumulating fractions and
     // flooring keeps the average tempo accurate for non-integer hops.
-    float inputPosFloat  = 0.0f;
-    int   outputPos      = 0;
-
-    // Scratch for the crossfade result — reused every iteration, no allocation
-    // in the loop.
-    std::vector<float> fadeBuffer(overlapLen, 0.0f);
-
-    // First chunk: straight copy — there is nothing to crossfade with yet.
-    {
-        int firstCopyLen = std::min(sequenceLen, inputLen);
-        for (int i = 0; i < firstCopyLen; ++i)
-        {
-            output[i] = input[i];
-        }
-        outputPos     = outputHop;
-        inputPosFloat = inputHop;
-    }
+    float inputPosFloat = inputHop;
+    int   outputPos     = outputHop;
 
     // Every subsequent chunk is crossfaded onto the tail of the previous one, until the output is
     // filled to targetLen — the OUTPUT drives the loop, because the output length is the contract.
     while (outputPos < targetLen)
     {
         int inputPos = (int)inputPosFloat;
-
-        // Intelligent mode only: nudge inputPos to the best-correlating splice.
-        if (seekRange > 0)
-        {
-            const float* prevTail = &output[outputPos - overlapLen];
-            int offset = findBestOverlap(prevTail, input, inputLen,
-                                         inputPos, seekRange, overlapLen);
-            inputPos += offset;
-        }
 
         // ⚠️ CLAMP to the last full chunk, never break on it. Stopping here instead leaves the final
         // sequenceLen of input unread and the output that much short — and for ratio > 1 the input
@@ -203,23 +112,15 @@ inline std::vector<float> stretch(const float* input,
         if (inputPos < 0)                              break;   // input shorter than one chunk
         if (outputPos + sequenceLen >= (int)output.size()) break;
 
-        // Crossfade the new chunk's head over the previous chunk's tail,
-        // then write the blend back over that tail.
-        const float* prevTail = &output[outputPos - overlapLen];
-        const float* newHead  = &input[inputPos];
+        float*       out     = &output[(size_t)outputPos];
+        float*       tail    = out - overlapLen;
+        const float* newHead = &input[inputPos];
 
-        crossfade(prevTail, newHead, fadeBuffer.data(), overlapLen);
-
+        // The new chunk's head over the previous chunk's tail, then the rest straight through.
         for (int i = 0; i < overlapLen; ++i)
-        {
-            output[outputPos - overlapLen + i] = fadeBuffer[i];
-        }
-
-        // Rest of the new chunk copies straight through (no fading).
+            tail[i] = tail[i] * fadeOut[(size_t)i] + newHead[i] * fadeIn[(size_t)i];
         for (int i = 0; i < sequenceLen - overlapLen; ++i)
-        {
-            output[outputPos + i] = input[inputPos + overlapLen + i];
-        }
+            out[i] = newHead[overlapLen + i];
 
         outputPos     += outputHop;     // constant step in the output buffer
         inputPosFloat += inputHop;      // tempo-dependent step in the input

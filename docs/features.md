@@ -101,6 +101,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 - Read the sample's own tempo off the header — the BPM it plays at for the bar count on the DURATION row
 - Pitch-shift to match a BPM target without changing length (repitch)
 - Time-stretch to match a BPM target without changing pitch — Akai SOLA algorithm (same "jungle chop" character as the S950/S1000)
+- Hear a repitch or a stretch before applying it; the stretch has its own target tempo, pitch and grain size
 - Auto-detect transients to place slice markers, or divide into equal slices
 - Place slices by hand — drag any boundary, delete one, or press START and tap A on every hit to chop by ear. A sample that already carries slices opens on them, ready to edit
 - Slice markers embedded in the WAV cue chunk — compatible with M8, Blackbox, Reaper, Logic

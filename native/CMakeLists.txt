@@ -476,6 +476,7 @@ add_library(pt-ui STATIC
         ui/dispatch/layers/qwerty.cpp
         ui/dispatch/layers/render_dialog.cpp
         ui/dispatch/layers/send_editor.cpp
+        ui/dispatch/layers/stretch_editor.cpp
         ui/dispatch/layers/theme.cpp
         ui/dispatch/midi.cpp
         ui/dispatch/project.cpp

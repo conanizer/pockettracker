@@ -477,12 +477,19 @@ void SongcoreHost::pitch_shift_sample(int id, float semitones) {
     songcore::pitch_shift_sample(engine_, rateCache_, id, semitones);
 }
 
-void SongcoreHost::time_stretch_sample(int id, float ratio) {
-    songcore::time_stretch_sample(engine_, rateCache_, id, ratio);
+void SongcoreHost::time_stretch_sample(int id, float ratio, float grainMs) {
+    songcore::time_stretch_sample(engine_, rateCache_, id, ratio, grainMs,
+                                  static_cast<float>(sample_rate_of(id)));
+}
+
+void SongcoreHost::sync_sample(int id, const SampleSync& sync) {
+    if (!engine_) return;
+    rateCache_.clear(id);   // the rewritten buffer is the new original, as for the two resamplers
+    run_sample_sync(*engine_, id, sync, static_cast<float>(sample_rate_of(id)));
 }
 
 void SongcoreHost::preview_sample_editor(int id, int sourceMode, int64_t selStart, int64_t selEnd,
-                                         int totalFrames, int pitchSemitones) {
+                                         int totalFrames, int pitchSemitones, const SampleSync& sync) {
     if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
     Instrument& ins = project_.instruments[static_cast<size_t>(id)];
 
@@ -491,17 +498,22 @@ void SongcoreHost::preview_sample_editor(int id, int sourceMode, int64_t selStar
     if (pitchSemitones != 0)
         ins.root = note_from_midi(std::clamp(note_to_midi(ins.root) + pitchSemitones, 0, 127));
 
-    const int slot = prepare_source_preview(*engine_, id, sourceMode);
+    const int slot = prepare_sync_preview(*engine_, id, sourceMode, sync,
+                                          static_cast<float>(sample_rate_of(id)));
 
     // A voice's window is keyed on the SLOT it plays from, so the params go to the scratch slot
     // when there is one.
     const int savedSampleId = ins.sampleId;
     if (slot != id) ins.sampleId = slot;
     push_instrument_playback_params(*engine_, ins);
-    // After the push, which clears any previous window. The scratch slot is a frame-for-frame
-    // copy, so the selection indexes both.
-    if (totalFrames > 0 && selEnd > selStart)
-        engine_->setInstrumentFrameWindow(slot, static_cast<int>(selStart), static_cast<int>(selEnd));
+    // After the push, which clears any previous window. A channel copy is frame-for-frame, so the
+    // selection indexes it as it is; a synced one is scaled onto its new length.
+    if (totalFrames > 0 && selEnd > selStart) {
+        const int64_t len = engine_->getSampleLength(slot);
+        const int64_t a   = std::clamp<int64_t>(selStart * len / totalFrames, 0, len);
+        const int64_t b   = std::clamp<int64_t>(selEnd * len / totalFrames, 0, len);
+        if (b > a) engine_->setInstrumentFrameWindow(slot, static_cast<int>(a), static_cast<int>(b));
+    }
     preview_instrument_dry(*engine_, ins, slot, routing_.sampleRateRatio[id]);
     if (slot != id) ins.sampleId = savedSampleId;
 

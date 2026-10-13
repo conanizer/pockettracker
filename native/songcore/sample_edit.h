@@ -9,7 +9,7 @@
 //
 //   • the RATE mode's ratio cache, so LOFI → HIGH restores the loaded ratio instead of compounding;
 //   • the SOURCE preview: LEFT / RIGHT / MONO plays from a scratch slot, pitched by the instrument's
-//     ratio;
+//     ratio — and so does SYNC's audition, built there from a copy;
 //   • the DRY audition: the raw waveform with EQ, sends and modulation off;
 //   • SAVE and CHOP: the edited PCM written back, with slice boundaries, as WAV (`wav_writer.h`).
 
@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "../effects/primitives/sola-stretch.h"   // DEFAULT_GRAIN_MS
 #include "engine_setup.h"   // SOURCE_PREVIEW_SLOT
 #include "model.h"
 #include "voice_derive.h"   // Routing, detune/root frequency math
@@ -99,10 +100,39 @@ void pitch_shift_sample(Engine* engine, RateCache& cache, int id, float semitone
 }
 
 template <typename Engine>
-void time_stretch_sample(Engine* engine, RateCache& cache, int id, float ratio) {
+void time_stretch_sample(Engine* engine, RateCache& cache, int id, float ratio, float grainMs,
+                         float sampleRate) {
     if (!engine) return;
     cache.clear(id);
-    engine->timeStretchSample(id, ratio);
+    engine->timeStretchSample(id, ratio, grainMs, sampleRate);
+}
+
+/**
+ * What the editor's SYNC does to a sample: nothing, a resample (RPITCH) or a stretch (TSTRETCH). One
+ * value for APPLY and for the audition of it, so what is heard is what APPLY writes.
+ */
+struct SampleSync {
+    enum class Kind { NONE, REPITCH, STRETCH };
+    Kind  kind      = Kind::NONE;
+    float semitones = 0.0f;   // REPITCH: the whole fit. STRETCH: a pitch shift baked in on the way.
+    int   frames    = 0;      // STRETCH: the length to land on
+    float grainMs   = sola::DEFAULT_GRAIN_MS;   // STRETCH: the chunk length
+};
+
+/**
+ * Run a SYNC on slot `id`. ⚠️ The pitch goes first: it is a resample and changes the length, and the
+ * stretch after it is what lands on `frames`.
+ */
+template <typename Engine>
+void run_sample_sync(Engine& engine, int id, const SampleSync& sync, float sampleRate) {
+    if (sync.kind == SampleSync::Kind::NONE) return;
+    if (sync.semitones != 0.0f) engine.pitchShiftSample(id, sync.semitones);
+    if (sync.kind != SampleSync::Kind::STRETCH) return;
+
+    const int len = engine.getSampleLength(id);
+    if (len <= 0) return;
+    engine.timeStretchSample(id, static_cast<float>(static_cast<double>(sync.frames) / len),
+                             sync.grainMs, sampleRate);
 }
 
 /**
@@ -114,6 +144,21 @@ template <typename Engine>
 int prepare_source_preview(Engine& engine, int id, int sourceMode) {
     if (!engine.hasStereoData(id) || sourceMode == 2 /*STEREO*/) return id;
     engine.prepareSourcePreview(SOURCE_PREVIEW_SLOT, id, sourceMode);
+    return SOURCE_PREVIEW_SLOT;
+}
+
+/**
+ * SYNC's audition: the sample as RPITCH or TSTRETCH would leave it, built in the scratch slot from a
+ * copy, so the buffer being edited is never touched. Returns the slot to play — `id` when there is
+ * nothing to do.
+ * ⚠️ The result is a different LENGTH: a frame window on it is the selection scaled by new / old.
+ */
+template <typename Engine>
+int prepare_sync_preview(Engine& engine, int id, int sourceMode, const SampleSync& sync,
+                         float sampleRate) {
+    if (sync.kind == SampleSync::Kind::NONE) return prepare_source_preview(engine, id, sourceMode);
+    engine.prepareSourcePreview(SOURCE_PREVIEW_SLOT, id, sourceMode);
+    run_sample_sync(engine, SOURCE_PREVIEW_SLOT, sync, sampleRate);
     return SOURCE_PREVIEW_SLOT;
 }
 

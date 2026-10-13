@@ -324,12 +324,11 @@ private:
         SampleEditorState& se = state.sampleEditor;
 
         // ── The playhead ─────────────────────────────────────────────────────────────────────────
-        // 0..1 while sounding, −1 when not. Follows the slot ACTUALLY playing: LEFT/RIGHT/MONO
-        // auditions come out of scratch slot 254.
-        const int voiceSlot = (se.hasStereoData && se.sourceMode != 2)
-                                  ? songcore::SOURCE_PREVIEW_SLOT
-                                  : se.instrumentId;
-        se.playbackPosition = host.sample_playback_position(voiceSlot);
+        // 0..1 while sounding, −1 when not. Follows the slot ACTUALLY playing: LEFT/RIGHT/MONO and
+        // SYNC auditions come out of scratch slot 254, and nothing but an audition ever does.
+        se.playbackPosition = host.sample_playback_position(songcore::SOURCE_PREVIEW_SLOT);
+        if (se.playbackPosition < 0.0f && !(se.hasStereoData && se.sourceMode != 2))
+            se.playbackPosition = host.sample_playback_position(se.instrumentId);
 
         // ── The HAND-PLACED markers ──────────────────────────────────────────────────────────────
         // Changing the SLICE method or its setting resets hand-placed positions — derived from the data:

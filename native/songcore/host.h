@@ -457,7 +457,9 @@ class SongcoreHost {
     // ── The three that change the rate ratio, so live in songcore (sample_edit.h) ────────────────
     void apply_rate_and_bits(int id, int factor, int bits);
     void pitch_shift_sample(int id, float semitones);
-    void time_stretch_sample(int id, float ratio);
+    void time_stretch_sample(int id, float ratio, float grainMs = sola::DEFAULT_GRAIN_MS);
+    /** The FX row's SYNC, for good: RPITCH, or TSTRETCH with its pitch (`SampleSync`). */
+    void sync_sample(int id, const SampleSync& sync);
 
     // ── The audition ─────────────────────────────────────────────────────────────────────────────
 
@@ -468,9 +470,11 @@ class SongcoreHost {
      * (8 ms steps on a 2 s sample) — the audition must be exactly what CROP will keep.
      * ⚠️ The frame window (and a swapped `sampleId`) is read when the note FIRES, 100 frames later, so
      * it outlives this call; `finish_sample_preview()` ends it on the dispatcher's deadline.
+     * `sync` is the FX row's SYNC, heard before it is applied — from a copy, with the selection scaled
+     * onto it.
      */
     void preview_sample_editor(int id, int sourceMode, int64_t selStart, int64_t selEnd,
-                               int totalFrames, int pitchSemitones);
+                               int totalFrames, int pitchSemitones, const SampleSync& sync = {});
 
     /**
      * Put the instrument back — window, EQ, sends, modulation. Runs on the dispatcher's 100 ms

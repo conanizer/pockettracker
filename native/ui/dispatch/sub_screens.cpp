@@ -1,4 +1,4 @@
-// What a cell opens: the cells whose A or B waits for the release, and the EQ and send editors.
+// What a cell opens: the cells whose A or B waits for the release, and the editors over a screen.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -148,16 +148,26 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             if (effects_release_action(s_.effectsCursorRow, peek)) return true;
             break;
 
-        case ScreenType::SAMPLE_EDITOR:
-            // Only the EQ SLOT cell (row 16, col 1, with the EQ effect selected). Column 2 is APPLY and
-            // keeps its own A; A+DPAD on column 1 still dials the slot.
-            if (s_.sampleEditor.cursorRow == 16 && s_.sampleEditor.cursorCol == 1 &&
-                s_.sampleEditor.fxType == 3) {
-                if (!peek) open_eq_editor(std::min(127, std::max(0, s_.sampleEditor.fxValue)),
-                                          EqCallerContext::sample_editor_fx());
+        case ScreenType::SAMPLE_EDITOR: {
+            // The FX row's VALUE cell (row 16, col 1): an EQ SLOT opens the EQ editor, TSTRETCH its box.
+            // Column 2 is APPLY and keeps its own A; A+DPAD on column 1 still dials the cell.
+            const SampleEditorState& se = s_.sampleEditor;
+            if (se.cursorRow != 16 || se.cursorCol != 1) break;
+            if (se.fxType == SampleEditorModule::FX_EQ) {
+                if (!peek) {
+                    // ⚠️ A "--" TAKES slot 00 as it opens, unlike the other EQ cells: START and APPLY
+                    // read the cell, so the curve dialled in the editor has to be the one it names.
+                    s_.sampleEditor.fxEqSlot = std::max(0, se.fxEqSlot);
+                    open_eq_editor(s_.sampleEditor.fxEqSlot, EqCallerContext::sample_editor_fx());
+                }
+                return true;
+            }
+            if (se.fxType == SampleEditorModule::FX_SYNC && se.syncType == SampleEditorModule::SYNC_TSTRETCH) {
+                if (!peek) open_stretch_editor();
                 return true;
             }
             break;
+        }
 
         default:
             break;
