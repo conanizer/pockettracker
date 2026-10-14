@@ -448,24 +448,6 @@ int AudioEngine::getClipboardLength() {
     return sampleClipboardLength;
 }
 
-void AudioEngine::downsampleSample(int id, int factor) {
-    if (id < 0 || id >= 256 || !samples[id] || factor <= 1) return;
-    auto editLock = beginSampleEdit(id);
-    int oldLen = sampleLengths[id];
-    int newLen = oldLen / factor;
-    if (newLen < 1) return;
-    float* newL = new float[newLen];
-    for (int i = 0; i < newLen; i++) newL[i] = samples[id][i * factor];
-    float* newR = nullptr;
-    if (samplesRight[id]) {
-        newR = new float[newLen];
-        for (int i = 0; i < newLen; i++) newR[i] = samplesRight[id][i * factor];
-    }
-    setSampleBuffers(id, newL, newR, newLen);
-    // Instrument start/end points (0-255 fraction) map to the same relative positions,
-    // so they remain valid after decimation without adjustment.
-}
-
 /**
  * The sample editor's BIT cell: round a sample to the nearest step of a `bits`-bit grid.
  *

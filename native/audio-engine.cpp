@@ -8,15 +8,12 @@
 #include "mods/modules/vibrato-module.h"
 #include <cstdint>
 #include <vector>
-// MSVC defines neither __SSE2__ nor __x86_64__ — it signals x86/x64 with _M_X64 / _M_IX86 — so the
-// host build would silently lose denormal protection without these arms. SSE2 is baseline on x64.
+// MSVC signals x86/x64 only through _M_X64 / _M_IX86; without those arms it loses denormal protection.
 #if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86) && _M_IX86_FP >= 2)
 #define PT_HAS_SSE_DENORMAL_CTRL 1
 #include <pmmintrin.h>  // FTZ/DAZ MXCSR macros for setFlushToZeroForCurrentThread
 #endif
 
-// Definition of the per-track soundfont voice array (extern declared in audio-engine.h):
-// song tracks 0-7 + the preview lane (track 8).
 SoundfontVoice sfVoices[SF_VOICE_COUNT];
 
 AudioEngine::AudioEngine() {
@@ -25,43 +22,19 @@ AudioEngine::AudioEngine() {
         samplesRight[i] = nullptr;
         sampleLengths[i] = 0;
         sampleGen[i] = 0;
-        sampleBackups[i] = nullptr;
-        sampleBackupsRight[i] = nullptr;
-        sampleBackupLengths[i] = 0;
-        originalSamples[i] = nullptr;
-        originalSamplesRight[i] = nullptr;
-        originalSamplesF[i] = nullptr;
-        originalSamplesRightF[i] = nullptr;
-        originalSampleLengths[i] = 0;
         sampleBitDepth[i] = 16;
-        sampleIsFloat[i]  = false;
     }
     resetTic00Cursors();
     globalFrameCounter.store(0, std::memory_order_relaxed);
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;  // vary RND/DRNK per app session
 
-    // Pre-size the per-block drain buffers: a block holds a handful of events, and 64 covers a dense
-    // AUS/AUF ramp across all eight tracks. ⚠️ A typical bound, not a hard one — `drainUntil` also
-    // takes anything overdue, so a stall can cross it and cost one `operator new` in the callback, once.
+    // 64 covers a dense AUS/AUF ramp on all eight tracks. ⚠️ Not a hard bound: after a stall the
+    // drain takes everything overdue and may allocate once in the callback.
     noteBatch.reserve(64);
     killBatch.reserve(64);
     paramBatch.reserve(64);
 
-    for (int i = 0; i < WAVEFORM_SIZE; i++) {
-        waveformBuffer[i] = 0.0f;
-    }
-    waveformIndex = 0;
-    waveformDownsampleCounter = 0;
-    for (int i = 0; i < SPECTRUM_SIZE; i++) {
-        spectrumBuffer[i] = 0.0f;
-        delaySpectrumBuffer[i] = 0.0f;
-        reverbSpectrumBuffer[i] = 0.0f;
-        instrSpectrumBuffer[i] = 0.0f;
-    }
-    spectrumWriteIdx = delaySpectrumWriteIdx = reverbSpectrumWriteIdx = instrSpectrumWriteIdx = 0;
-    // The buses need valid coefficients before any audio, and there is no device yet to ask — so they
-    // are built at the fallback rate and REBUILT by setDeviceSampleRate the moment the shell learns
-    // the real one. `effectsSampleRate` records which rate this was, so that call knows what is owed.
+    // Built at the fallback rate; setDeviceSampleRate rebuilds them at the device's.
     const float defaultRate = static_cast<float>(effectsSampleRate);
     reverbSend.reset(defaultRate);
     delaySend.reset(defaultRate);
@@ -73,19 +46,16 @@ void AudioEngine::setDeviceSampleRate(int sr) {
     deviceSampleRate.store(sr, std::memory_order_relaxed);
     if (sr == effectsSampleRate) return;
     effectsSampleRate = sr;
-    resetEffectState();     // reads getSampleRate(), i.e. the value just stored
-    // The buses are at factory defaults now; the next block puts the song's own values back.
-    prepareReverb();   // …and the reverb's engine, rebuilt at the new rate, is waiting for it
+    resetEffectState();     // reads the rate just stored; the buses are at factory defaults now
+    prepareReverb();
     busReplayRequested.store(true, std::memory_order_release);
 }
 
 AudioEngine::~AudioEngine() {
-    // ⚠️ FIRST. A background preset load holds a `this` capture, so nothing below may free anything
-    // while it is still running. It is at most one preset's decode.
+    // ⚠️ First: a background preset load captures `this`.
     discardSoundfontLoad();
 
-    // The platform backend owns and closes the output stream; the core frees its buffers. The owner
-    // destroys the backend first, so no callback can run during this teardown.
+    // The backend is destroyed before the engine, so no callback runs during this.
     for (int i = 0; i < 256; i++) {
         if (samples[i])              delete[] samples[i];
         if (samplesRight[i])         delete[] samplesRight[i];
@@ -105,12 +75,10 @@ void AudioEngine::stopAll() {
     for (int i = 0; i < MAX_VOICES; i++) {
         voices[i].stop();
     }
-    // Stop all soundfont notes on all tracks (incl. the preview lane)
     for (int t = 0; t < SF_VOICE_COUNT; t++) {
         sfVoices[t].hardStop();
     }
-    // Transport stop rewinds every TIC00 table, router or sounding: PLAY starts at row 0.
-    resetTic00Cursors();
+    resetTic00Cursors();   // PLAY starts every table at row 0
     LOGD("stopAll: voices and SF notes cleared, stream stays running");
 }
 
@@ -134,8 +102,7 @@ void AudioEngine::startStopRamp(int64_t blockStartFrame) {
         else                      sfVoices[t].hardStop();
     }
     resetTic00Cursors();   // as stopAll(): PLAY starts at row 0
-    // The deadline the audio thread reclaims the slots at — see processAudioBlock, which is also
-    // where it says why a fade counter alone does not get there.
+    // When the audio thread reclaims the slots (see processAudioBlock).
     stopRampEndFrame.store(blockStartFrame + KILL_FADE_SAMPLES, std::memory_order_relaxed);
 }
 
@@ -156,8 +123,7 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
         int t = view.sampler[v].trackId;
         if (t >= 0 && t < trackCount && out[t] == -1) out[t] = view.sampler[v].note;
     }
-    // ⚠️ THE SOUNDFONT POOL IS A SECOND VOICE POOL, AND THE MONITOR READS BOTH (`voices[]` holds
-    // samplers only). Sampler first: a sampler note supersedes an SF note still releasing on the track.
+    // Then the SoundFont pool; a sampler note wins over an SF note still releasing.
     for (int t = 0; t < SF_VOICE_COUNT && t < trackCount; t++) {
         if (out[t] == -1 && view.sf[t].active) {
             out[t] = view.sf[t].note;
@@ -166,14 +132,10 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
 }
 
 int AudioEngine::getSampleRate() {
-    // Cached from the backend at stream-open (setDeviceSampleRate); 44100 until then, matching
-    // every other fallback in the engine.
     return deviceSampleRate.load(std::memory_order_relaxed);
 }
 
-// Flush-to-Zero eliminates denormal CPU stalls (10-100x slowdowns in reverb/delay/EQ feedback
-// tails). See the declaration in audio-engine.h for why it is a member rather than a file-static:
-// the offline sample-editor paths run the same DSP on the UI thread and must arm it too.
+// Denormals in feedback tails cost 10-100× the CPU.
 void AudioEngine::setFlushToZeroForCurrentThread() {
     thread_local bool done = false;
     if (done) return;
@@ -189,7 +151,7 @@ void AudioEngine::setFlushToZeroForCurrentThread() {
     fpscr |= (1U << 24);  // FZ bit
     asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
 #elif defined(PT_HAS_SSE_DENORMAL_CTRL)
-    // x86/x86_64 (emulators, desktop hosts): FTZ (outputs) + DAZ (inputs) via MXCSR; SSE3+ is given.
+    // FTZ (outputs) + DAZ (inputs).
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
     _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 #endif
@@ -236,7 +198,7 @@ void AudioEngine::scheduleProgramNote(int64_t targetFrame, int trackId, int inst
     ScheduledNote note{};
     note.targetFrame  = targetFrame;
     note.trackId      = trackId;
-    note.instrumentId = instrumentId;   // >= 0 is what marks this note as still undecided
+    note.instrumentId = instrumentId;   // >= 0 marks the note as not yet resolved
     note.noteOn       = noteOn;
     note.tempo        = tempo;
     note.rootAudition = rootAudition;
@@ -244,8 +206,7 @@ void AudioEngine::scheduleProgramNote(int64_t targetFrame, int trackId, int inst
 }
 
 bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
-    // Follow any INS cells the hit passes through. With no INS anywhere this returns the instrument
-    // it was given and the table it would have used, so the ordinary note path is unchanged.
+    // With no INS on the way this returns the instrument and table it was given.
     int chainTableId = -1;
     const int sounding = resolveChain(note.trackId, note.instrumentId, note.noteOn.tableId,
                                       &chainTableId, &note.carry);
@@ -260,58 +221,51 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
                               getSampleLength(p.sampleId), note.rootAudition);
     if (!d.valid) return false;
 
+    // The fields both note kinds carry under the same name.
+    const auto common = [&](const auto& a) {
+        note.sampleId         = a.sampleId;
+        note.pan              = a.pan;
+        note.tableId          = a.tableId;
+        note.tableTicRate     = a.tableTicRate;
+        note.noteOctave       = a.noteOctave;
+        note.notePitch        = a.notePitch;
+        note.pslInitialOffset = a.pslInitialOffset;
+        note.pslDuration      = a.pslDuration;
+        note.pbnRate          = a.pbnRate;
+        note.vibratoSpeed     = a.vibratoSpeed;
+        note.vibratoDepth     = a.vibratoDepth;
+        note.tableStartRow    = a.tableStartRow;
+    };
     note.isSoundfont = d.isSoundfont;
     if (d.isSoundfont) {
         const songcore::SoundfontNoteArgs& a = d.soundfont;
+        common(a);
         note.sfSlot             = a.sfSlot;
         note.midiNote           = a.midiNote;
         note.midiVelocity       = a.midiVelocity;
         note.volume             = a.vol;
         note.phraseVolume       = a.phraseVol;
-        note.pan                = a.pan;
         note.sfBank             = a.bank;
         note.sfPreset           = a.preset;
-        note.sampleId           = a.sampleId;
         note.frequency          = 440.0f;
         note.baseFrequency      = 440.0f;
         note.startPointOverride = -1;
-        note.tableId            = a.tableId;
-        note.tableTicRate       = a.tableTicRate;
-        note.noteOctave         = a.noteOctave;
-        note.notePitch          = a.notePitch;
-        note.pslInitialOffset   = a.pslInitialOffset;
-        note.pslDuration        = a.pslDuration;
-        note.pbnRate            = a.pbnRate;
-        note.vibratoSpeed       = a.vibratoSpeed;
-        note.vibratoDepth       = a.vibratoDepth;
-        note.tableStartRow      = a.tableStartRow;
         note.detuneSemitones    = a.detuneSemitones;
     } else {
         const songcore::SamplerNoteArgs& a = d.sampler;
-        note.sampleId           = a.sampleId;
+        common(a);
         note.frequency          = a.frequency;
         note.baseFrequency      = a.baseFrequency;
         note.volume             = a.volume;
         note.phraseVolume       = a.phraseVolume;
-        note.pan                = a.pan;
         note.startPointOverride = a.startPointOverride;
         note.endPointOverride   = a.endPointOverride;
-        note.tableId            = a.tableId;
-        note.tableTicRate       = a.tableTicRate;
-        note.noteOctave         = a.noteOctave;
-        note.notePitch          = a.notePitch;
-        note.pslInitialOffset   = a.pslInitialOffset;
-        note.pslDuration        = a.pslDuration;
-        note.pbnRate            = a.pbnRate;
-        note.vibratoSpeed       = a.vibratoSpeed;
-        note.vibratoDepth       = a.vibratoDepth;
-        note.tableStartRow      = a.tableStartRow;
     }
     return true;
 }
 
-// Audio thread. The stored row's `sliceMarkers` is null — a self-pointer would not survive the
-// copy between the two sides — so it is re-pointed here, at this thread's own copy of the markers.
+// Audio thread. The stored `sliceMarkers` is null (a self-pointer would not survive the copy);
+// it is pointed at this side's markers here.
 songcore::Program AudioEngine::programView(int id) const {
     if (id < 0 || id >= songcore::PROGRAM_SLOTS) return songcore::Program{};
     songcore::Program p = programs[id].program;
@@ -319,7 +273,7 @@ songcore::Program AudioEngine::programView(int id) const {
     return p;
 }
 
-// Audio thread, once per block: take in every per-instrument record the control thread published.
+// Audio thread, once per block.
 void AudioEngine::syncInstrumentData() {
     instrumentParams.sync();
     instrumentModSlots.sync();
@@ -330,39 +284,23 @@ void AudioEngine::syncInstrumentData() {
 }
 
 void AudioEngine::scheduleKill(int64_t targetFrame, int trackId) {
-    ScheduledKill kill{};
-    kill.targetFrame = targetFrame;
-    kill.trackId     = trackId;
-    killQueue.schedule(kill);
+    killQueue.schedule({ targetFrame, trackId, KILL_HARD });
 }
 
 void AudioEngine::scheduleNoteOff(int64_t targetFrame, int trackId) {
-    ScheduledKill kill{};
-    kill.targetFrame = targetFrame;
-    kill.trackId     = trackId;
-    kill.mode        = KILL_SOFT;
-    killQueue.schedule(kill);
+    killQueue.schedule({ targetFrame, trackId, KILL_SOFT });
 }
 
 void AudioEngine::scheduleKeyRelease(int64_t targetFrame, int trackId) {
-    ScheduledKill kill{};
-    kill.targetFrame = targetFrame;
-    kill.trackId     = trackId;
-    kill.mode        = KILL_KEY_OFF;
-    killQueue.schedule(kill);
+    killQueue.schedule({ targetFrame, trackId, KILL_KEY_OFF });
 }
 
 void AudioEngine::scheduleCut(int64_t targetFrame, int trackId) {
-    ScheduledKill kill{};
-    kill.targetFrame = targetFrame;
-    kill.trackId     = trackId;
-    kill.mode        = KILL_CUT;
-    killQueue.schedule(kill);
+    killQueue.schedule({ targetFrame, trackId, KILL_CUT });
 }
 
 void AudioEngine::scheduleNoteOffAll(int64_t targetFrame) {
-    // Every lane, the preview one included — a render owns the whole engine, and a lane with nothing
-    // sounding on it costs one queue entry that finds no voice.
+    // Every lane, the preview one included.
     for (int t = 0; t < SF_VOICE_COUNT; ++t) scheduleNoteOff(targetFrame, t);
 }
 
@@ -379,7 +317,6 @@ void AudioEngine::clearScheduledNotesFrom(int64_t fromFrame, int trackId) {
 }
 
 void AudioEngine::scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row) {
-    // Enqueue; the audio thread applies it to voices[] in the drain loop (see processAudioBlock).
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, (float)row, PARAM_UPDATE_TABLE_ROW, 0.0f });
 }
 
@@ -387,8 +324,7 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
     paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
-// ── Live per-note / mixer FX — all onto the sample-accurate paramUpdateQueue, so the mutation happens
-// on the audio thread at the exact step frame and replays identically in an offline render. ──────
+// ── Live per-note and mixer FX: applied on the audio thread at the exact frame, live and offline ──
 
 void AudioEngine::scheduleVoiceCc(int64_t targetFrame, int trackId, int cc, float value) {
     paramUpdateQueue.schedule({ targetFrame, trackId, cc, value, PARAM_UPDATE_VOICE_CC, 0.0f });
@@ -415,9 +351,7 @@ void AudioEngine::scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& b
     paramUpdateQueue.schedule({ targetFrame, -1, 0, 0.0f, PARAM_UPDATE_MASTER_EQ_BANDS, 0.0f, bands });
 }
 
-// Convert one band from authored hex to the Hz/dB/Q the filters run on.
-// ⚠️ The three curves are setEqBand's and must have no second copy: a morph converting even slightly
-// differently would miss the preset it names at the ends of a fade. Change both together.
+// Authored hex → Hz/dB/Q. ⚠️ setEqBand's curves too: a morph must land exactly on its end presets.
 static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
     EqBandData b;
     b.type   = type;
@@ -427,8 +361,6 @@ static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
     return b;
 }
 
-// Apply a morph tick's bands to an EQ (a live voice's inline EQ, or the master chain's). Mirrors
-// applyEqPresetToModule, but the bands arrive as values rather than as a slot to look up.
 void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
     bool any = false;
     for (int i = 0; i < 3; i++) {
@@ -439,13 +371,8 @@ void AudioEngine::applyEqBandsToModule(EqModule& eq, const EqBandsHex& bands) {
     eq.active = any;
 }
 
-// Apply a global EQ preset (slot 0-127, <0 = bypass) to any EQ: a live voice's inline EQ (EQN), the
-// master bus (EQM), or either send's input EQ. The target was already sp_pareq_init'd by its owner's
-// reset, so only the band params are re-set here.
-//
-// `active` follows "some band is not type 0" rather than "the slot index is in range". The two are
-// audibly identical — a type-0 band sets its own `bypass` and returns the input untouched
-// (eq-module.h) — but the derived form skips three bypassed bands per sample on an all-off preset.
+// The module was initialised by its owner; only the band params are set. `active` means some band
+// is on, so an all-off preset costs nothing per sample.
 void AudioEngine::applyEqPresetToModule(EqModule& eq, int slot) {
     if (slot < 0 || slot >= 128) { eq.active = false; return; }
     const EqPresetBank& preset = eqPresets[slot];
@@ -460,11 +387,8 @@ void AudioEngine::applyEqPresetToModule(EqModule& eq, int slot) {
 
 static const int SPECTRUM_FFT_SIZE = 2048;
 
-// Shared FFT helper — takes FFT_SIZE samples already copied from the circular buffer by the caller
-// (under mutex), applies Hann window + FFT, maps to numBins log-spaced magnitude values [0,1].
-// ⚠️ The two tables below are FUNCTION-LOCAL STATICS WITH NO LOCK, like the FFT config: every caller
-// is the single UI poll thread (a second thread would need its own slot — the bin map is per call).
-// Cached because recomputing them cost more than the transform itself.
+// Hann window + FFT → numBins log-spaced magnitudes in [0,1].
+// ⚠️ The window, bin map and FFT config are unlocked statics: the UI poll thread is the only caller.
 
 static const float* spectrum_hann_window() {
     static float w[SPECTRUM_FFT_SIZE];
@@ -477,9 +401,7 @@ static const float* spectrum_hann_window() {
     return w;
 }
 
-// Which FFT bin each output bin reads. Depends only on (numBins, sampleRate), and the live consumers
-// ask for different counts — the EQ panel and the visualizer strip — so a single slot would thrash
-// between them and rebuild on every call. Four slots, replaced round-robin on a miss.
+// Which FFT bin each output bin reads. Four slots, since the EQ panel and the strip ask different counts.
 static const int* spectrum_bin_map(int numBins, float sampleRate) {
     struct Entry {
         int              numBins    = 0;
@@ -516,8 +438,7 @@ static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out, 
     const float* window = spectrum_hann_window();
     for (int i = 0; i < SPECTRUM_FFT_SIZE; i++) input[i] *= window[i];
 
-    // Cache the config across calls: kiss_fftr_alloc does a malloc + twiddle-table trig init
-    // every time. FFT size is constant, so the cfg lives for the process (never freed).
+    // Allocated once, never freed.
     static kiss_fftr_cfg cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, nullptr, nullptr);
     kiss_fft_cpx cpx_out[SPECTRUM_FFT_SIZE / 2 + 1];
     kiss_fftr(cfg, input, cpx_out);
@@ -536,7 +457,6 @@ static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out, 
     }
 }
 
-// Read SPECTRUM_FFT_SIZE contiguous samples from a circular buffer of size bufSize.
 static void readCircularBuffer(const float* buf, int writeIdx, int bufSize, kiss_fft_scalar* input) {
     for (int i = 0; i < SPECTRUM_FFT_SIZE; i++) {
         int idx = (writeIdx - SPECTRUM_FFT_SIZE + i + bufSize) % bufSize;
@@ -545,13 +465,7 @@ static void readCircularBuffer(const float* buf, int writeIdx, int bufSize, kiss
 }
 
 void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
-    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for the capture gate
-    kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
-    {
-        std::lock_guard<std::mutex> lock(spectrumMutex);
-        readCircularBuffer(spectrumBuffer, spectrumWriteIdx, SPECTRUM_SIZE, input);
-    }
-    computeSpectrumFFT(input, numBins, out, (float)getSampleRate());
+    getSpectrumMagnitudesForSource(0, -1, numBins, out);
 }
 
 void AudioEngine::getSpectrumMagnitudesForSource(int source, int instrId, int numBins, float* out) {
@@ -603,24 +517,10 @@ void AudioEngine::getSendPeaks(float* outBuffer) {
 
 void AudioEngine::decayPeaks() {
     std::lock_guard<std::mutex> lock(peakMutex);
-    const float MANUAL_DECAY = 0.92f;
-
-    for (int t = 0; t < 8; t++) {
-        trackPeaksL[t] *= MANUAL_DECAY;
-        trackPeaksR[t] *= MANUAL_DECAY;
-        if (trackPeaksL[t] < 0.001f) trackPeaksL[t] = 0.0f;
-        if (trackPeaksR[t] < 0.001f) trackPeaksR[t] = 0.0f;
-    }
-    masterPeakL *= MANUAL_DECAY;
-    masterPeakR *= MANUAL_DECAY;
-    if (masterPeakL < 0.001f) masterPeakL = 0.0f;
-    if (masterPeakR < 0.001f) masterPeakR = 0.0f;
-    sendPeakRevL *= MANUAL_DECAY; sendPeakRevR *= MANUAL_DECAY;
-    sendPeakDelL *= MANUAL_DECAY; sendPeakDelR *= MANUAL_DECAY;
-    if (sendPeakRevL < 0.001f) sendPeakRevL = 0.0f;
-    if (sendPeakRevR < 0.001f) sendPeakRevR = 0.0f;
-    if (sendPeakDelL < 0.001f) sendPeakDelL = 0.0f;
-    if (sendPeakDelR < 0.001f) sendPeakDelR = 0.0f;
+    const auto fall = [](float& p) { p *= 0.92f; if (p < 0.001f) p = 0.0f; };
+    for (int t = 0; t < 8; t++) { fall(trackPeaksL[t]); fall(trackPeaksR[t]); }
+    for (float* p : { &masterPeakL, &masterPeakR, &sendPeakRevL, &sendPeakRevR, &sendPeakDelL, &sendPeakDelR })
+        fall(*p);
 }
 
 void AudioEngine::decayWaveform() {
@@ -651,9 +551,7 @@ void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
     }
 }
 
-// ⚠️ THE apply* HELPERS EXIST BECAUSE VTR/VMV REACH THE SAME FADERS FROM THE AUDIO THREAD, where no
-// log call may run (audio-defs.h). The setters are the helpers plus a LOGD; the queue arms call the
-// helpers. Setting the value is all there is to do — both mix paths ramp to it every block.
+// The apply* forms carry no log line, so VTR/VMV can call them on the audio thread.
 void AudioEngine::applyTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
     trackVolumes[trackId].store(volume, std::memory_order_relaxed);
@@ -672,9 +570,7 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
 void AudioEngine::setTrackMuted(int trackId, bool muted) {
     if (trackId < 0 || trackId >= 8) return;
     trackMuted[trackId].store(muted, std::memory_order_relaxed);
-    // Nothing else is needed to silence what is ringing: the next block picks the new target up and
-    // both mix paths walk their gate to it over MUTE_GATE_SAMPLES, so a mute lands in ~5.8 ms rather
-    // than in one sample. Voices keep running underneath — a mute is a gate, never a stop.
+    // The mix ramps the gate over MUTE_GATE_SAMPLES; the voices keep running underneath.
     LOGD("🔇 Track %d %s", trackId, muted ? "muted" : "unmuted");
 }
 
@@ -693,8 +589,7 @@ void AudioEngine::setPreviewTrack(int trackId) {
     previewLaneTrack.store((trackId >= 0 && trackId < 8) ? trackId : -1, std::memory_order_relaxed);
 }
 
-// The sample-accurate faces of the same two faders — what a VTR / VMV effect schedules. VMV is global
-// and carries no track, so it borrows the queue's `trackId` field as -1 the way EQM does.
+// VTR / VMV. A global update carries trackId -1.
 void AudioEngine::scheduleTrackVolume(int64_t targetFrame, int trackId, float volume) {
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, volume, PARAM_UPDATE_TRACK_VOL, 0.0f });
 }
@@ -703,15 +598,13 @@ void AudioEngine::scheduleMasterVolume(int64_t targetFrame, float volume) {
     paramUpdateQueue.schedule({ targetFrame, -1, 0, volume, PARAM_UPDATE_MASTER_VOL, 0.0f });
 }
 
-// TIM. Global like VMV above, and carries no track for the same reason.
 void AudioEngine::scheduleDelayTime(int64_t targetFrame, float time) {
     paramUpdateQueue.schedule({ targetFrame, -1, 0, time, PARAM_UPDATE_DELAY_TIME, 0.0f });
 }
 
 void AudioEngine::refreshSoundingInstrument(int instrumentId) {
     if (instrumentId < 0 || instrumentId >= 256) return;
-    // ⚠️ NAMED RATHER THAN POSITIONAL: this is the one record that carries the instrument, and the
-    // field sits past `eqBands` at the end of the struct where nothing else initialises.
+    // Named fields: `instrId` sits past `eqBands`, beyond any positional initialiser.
     ScheduledParamUpdate update{};
     update.targetFrame = globalFrameCounter.load(std::memory_order_relaxed);
     update.trackId     = -1;
@@ -751,9 +644,8 @@ void AudioEngine::setLimiterPreGain(int depth) {
 }
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
-    // The track's CURRENT note, for mid-note param updates (PBN/PVB/PAN). A releasing SF voice or a
-    // fading (stolen) sampler voice is the previous note's tail, never the target — a naturally
-    // decayed SF note stays isActive, and would otherwise capture every later update.
+    // The current note, for mid-note updates. A releasing SF or fading sampler voice is the previous
+    // note's tail — and a decayed SF note stays isActive — so neither is a target.
     if (trackId >= 0 && trackId < SF_VOICE_COUNT &&
         sfVoices[trackId].isActive && !sfVoices[trackId].isReleasingOnly) {
         return &sfVoices[trackId];
@@ -767,8 +659,7 @@ IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
 }
 
 void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo) {
-    // Convert the per-step bend rate to per-frame here (sample-rate/tempo known on this thread),
-    // then enqueue the raw rate; the audio thread applies it to the active voice. 0 = stop.
+    // Per step → per frame. 0 = stop.
     float ratePerFrame = 0.0f;
     if (fabsf(semitonesPerStep) >= 0.0001f) {
         float sr = (float)getSampleRate();
@@ -779,7 +670,6 @@ void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semi
 }
 
 void AudioEngine::scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth) {
-    // Enqueue speed+depth; the audio thread applies setVibratoRaw in the drain loop. depth=0 stops.
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, speed, PARAM_UPDATE_VIBRATO, depth });
 }
 
@@ -826,17 +716,15 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
         dst.envValue = 0.0f;
         dst.stageCounter = 0;
 
-        // Per-slot RNG for the RND/DRNK LFO shapes, seeded per note (frame), per slot, and per
-        // session/render (noteSeedEntropy), so two renders differ.
+        // RND/DRNK seed: per note, per slot, per render.
         dst.lfoRngState  = (((uint32_t)(uint64_t)currentFrame) * 747796405u
                             ^ (uint32_t)(m + 1) * 2891336453u
                             ^ noteSeedEntropy) | 1u;
         dst.lfoRandValue = (src.type == 3 && src.oscShape >= 8)
                            ? xorshift32Bipolar(dst.lfoRngState) : 0.0f;
 
-        // LFO trigger mode: RETG/ONCE restart the cycle at note-on; FREE and HOLD align the
-        // phase to the global frame clock (a stateless free-running LFO). HOLD additionally
-        // freezes the clock-aligned value for the note's lifetime (tickLFO never advances it).
+        // RETG/ONCE restart the cycle at note-on; FREE and HOLD follow the global clock, and HOLD
+        // freezes that value for the note.
         dst.lfoPhase = 0.0f;
         if (src.type == 3 && (src.lfoTrigMode == 0 || src.lfoTrigMode == 2)) {
             double cycles = (double)currentFrame * (double)src.lfoHz / (double)sampleRate;
@@ -867,22 +755,13 @@ void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleR
 }
 
 float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
-    // modDestValues[PARAM_PITCH] accumulates: TABLE_PITCH + PITCH_SLIDE + VIBRATO + user mod slots.
-    // params.base[PARAM_PITCH] is FIN's fine tune — the same slot, its other half, cleared by every
-    // trigger. Read as a pair here so a fine tune and a table transpose add rather than replace.
-    // voice.playbackRate has no transpose baked in; arpeggio adjusts it via setMidiNote().
+    // Table pitch, slide, vibrato and mod slots, plus FIN in params.base — added, not replaced.
     float rateMod = powf(2.0f,
                          (voice.modDestValues[PARAM_PITCH] + voice.params.base[PARAM_PITCH]) / 12.0f);
     const float rate = voice.playbackRate * rateMod;
 
-    // ── OSCILLATOR loop mode: one trip round the loop is one cycle of the played note ───────────
-    //
-    // ⭐⭐ THE WHOLE MODE IS THIS ONE FACTOR, AND IT INHERITS EVERY PITCH SOURCE: `rate × baseFrequency`
-    // is what the voice sounds at now (transpose, FIN, slides, vibrato, arps); traversals per second
-    // are `rate × sampleRate / loopLength`, so scaling by `loopLength × baseFrequency / sampleRate`
-    // makes them equal. The factor is 1.0 when the loop is one cycle at the base pitch — the check.
-    // ⚠️ So here the loop LENGTH is TIMBRE, not pitch — which is why LPO (never changing the length)
-    // is the command this mode is played with.
+    // OSCILLATOR loop mode: one trip round the loop is one cycle of the played note, so every pitch
+    // source still applies. The loop's length is timbre here, not pitch — LPO is how it is played.
     if (voice.loopMode == LOOP_MODE_OSCILLATOR && voice.baseFrequency > 0.0f) {
         const int loopLength = voice.actualLoopEnd - voice.actualLoopStart;
         const float sr = (float)getSampleRate();
@@ -895,8 +774,7 @@ void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
     setFlushToZeroForCurrentThread();
     for (int i = 0; i < numFrames * 2; i++) output[i] = 0.0f;
 
-    // The same granularity live playback uses — the two must not drift apart, or the export stops
-    // matching what you heard. See PROCESS_SUBBLOCK.
+    // The live path's granularity, so the export matches what was heard.
     int rendered = 0;
     while (rendered < numFrames) {
         int chunk = std::min(PROCESS_SUBBLOCK, numFrames - rendered);
@@ -907,30 +785,26 @@ void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
 
 void AudioEngine::resetFrameCounter() {
     globalFrameCounter.store(0, std::memory_order_relaxed);
-    // Fresh randomness per render — see noteSeedEntropy in the header.
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;
 }
 
 void AudioEngine::resetEffectState() {
     const float sr = (float)getSampleRate();
-    reverbSend.reset(sr);   // zeroes the delay lines AND reseeds ReverbSc's random-lineseg LCG
-    delaySend.reset(sr);    // zeroes both delay lines
-    masterChain.reset(sr);  // OTT bands, DUST, limiter envelope, master EQ
-    // Everything above is at FACTORY DEFAULTS now. A render pushes the project next; a device reopen
-    // replays `busSettings`. Not replayed here: a render must be a function of the project alone.
+    reverbSend.reset(sr);   // also reseeds the reverb's LCG
+    delaySend.reset(sr);
+    masterChain.reset(sr);
+    // Not replayed here: a render must depend on the project alone.
     LOGD("🎬 Effect chains reset to clean state");
 }
 
-// Control thread: build the reverb's engine for what the record now says, BEFORE the record is
-// published — so the block that applies the new ALGO or SIZE finds the engine already waiting.
+// Control thread, before the record is published, so the block applying ALGO or SIZE finds it ready.
 void AudioEngine::prepareReverb() {
     const BusSettings& s = busSettings;
     reverbSend.dragonfly.prepare(s.reverbAlgo, s.reverbDecay, s.reverbSize, s.reverbDamp, s.reverbMod,
                                  static_cast<float>(getSampleRate()));
 }
 
-// Audio thread, top of the block: apply every bus group whose sequence number moved since this
-// thread last applied it — or every group, after setDeviceSampleRate rebuilt the buses.
+// Audio thread, top of the block: every group that changed, or all after a rate change.
 void AudioEngine::applyBusSettings() {
     busPublisher.read(busLive, busSeen);
     const bool all = busReplayRequested.exchange(false, std::memory_order_acquire) && busLive.pushed;
@@ -964,17 +838,13 @@ void AudioEngine::applyBusSettings() {
     if (due(BUS_LIMITER)) masterChain.setLimiterPreGain(1.0f + (s.limiterPreGain / 255.0f) * 3.0f);
 }
 
-int64_t AudioEngine::getFrameCounter() {
-    return globalFrameCounter.load(std::memory_order_relaxed);
-}
-
 void AudioEngine::setOfflineRendering(bool offline) {
     isOfflineRendering.store(offline);
     LOGD("🎬 Offline rendering: %s", offline ? "ON" : "OFF");
 }
 
 void AudioEngine::setTempo(int tempo) {
-    // Clamp to a sane musical range; the table-advance divides by this so it must be > 0.
+    // The table advance divides by it.
     currentTempo.store(std::max(1, tempo), std::memory_order_relaxed);
 }
 
@@ -1000,26 +870,22 @@ void AudioEngine::stopMetronome() {
 
 void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount, float sampleRate,
                                   int64_t blockStartFrame, bool offlineRender) {
-    // An export carries the SONG, never the click that was helping the user write it. Also drops the
-    // click in flight, so a render started mid-beat cannot leak its tail into the first block back.
+    // No click in an export; drop the one in flight too.
     if (offlineRender) { metroClickPos_ = -1; return; }
 
     const int64_t epoch = metronomeEpoch.load(std::memory_order_relaxed);
     const int64_t beat  = metronomeBeatFrames.load(std::memory_order_relaxed);
 
     if (epoch != metroEpoch_) {
-        // A new take. The grid is re-pinned to the transport's own start frame, which is what makes
-        // beat 0 the downbeat rather than "wherever the click happened to be".
+        // A new take: beat 0, the downbeat, is the transport's start.
         metroEpoch_      = epoch;
         metroBeatFrames_ = beat;
         metroIndex_      = 0;
         metroCount_      = 0;
         metroClickPos_   = -1;
     } else if (beat > 0 && beat != metroBeatFrames_) {
-        // TEMPO was turned mid-take. The epoch moves to where the NEXT beat was already going to
-        // fall and the index restarts, so that beat keeps its slot — no beat jumps, doubles or is
-        // lost — and every one after it takes the new spacing. songcore::MidiClock::rebase, same
-        // arithmetic and same reason.
+        // Tempo changed mid-take: rebase on the next beat, so it keeps its place and later ones
+        // take the new spacing (as songcore::MidiClock::rebase).
         metroEpoch_      = metroEpoch_ + metroIndex_ * metroBeatFrames_;
         metroIndex_      = 0;
         metroBeatFrames_ = beat;
@@ -1027,8 +893,7 @@ void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount
 
     if (metroEpoch_ < 0 || metroBeatFrames_ <= 0) return;   // nothing is playing
 
-    // ⚠️ The grid walks while the click is silent, so turning it on mid-take waits for the next beat
-    // instead of clicking at once for the one it passed while off.
+    // The grid walks while silent, so switching on mid-take waits for the next beat.
     const float gain = metronomeOn.load(std::memory_order_relaxed)
                      ? metronomeGain.load(std::memory_order_relaxed) : 0.0f;
     if (gain <= 0.0f) {
@@ -1042,10 +907,8 @@ void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount
         return;
     }
 
-    // ⚠️ The audio device can STALL AND RESUME — an Android suspend, a CFW power menu — and the frame
-    // counter then jumps by the whole stall at once. Walking the backlog one beat at a time would fire
-    // a click per block until it caught up; snap the grid to where the song actually is instead. The
-    // index still counts every beat the song passed, so the accent stays on the bar.
+    // ⚠️ After a device stall the frame counter jumps: snap the grid forward instead of clicking once
+    // per block to catch up. The count keeps every skipped beat, so the accent stays on the bar.
     const int64_t behind = blockStartFrame - (metroEpoch_ + metroIndex_ * metroBeatFrames_);
     if (behind > metroBeatFrames_) {
         const int64_t skipped = behind / metroBeatFrames_;
@@ -1056,9 +919,7 @@ void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount
     const int clickFrames = std::max(1, static_cast<int>(sampleRate * METRONOME_CLICK_SEC));
 
     for (int i = 0; i < numFrames; i++) {
-        // A beat always restarts the click, rather than being dropped while one is still sounding:
-        // at 999 BPM a beat is shorter than the click, and a metronome that skips beats when it is
-        // pushed is worse than one that cuts its own tail.
+        // A beat always restarts the click — at high tempos a beat is shorter than the click.
         if (blockStartFrame + i >= metroEpoch_ + metroIndex_ * metroBeatFrames_) {
             const bool accent = (metroCount_ % METRONOME_BEATS_PER_BAR) == 0;
             metroClickPhase_  = 0.0f;
@@ -1070,17 +931,14 @@ void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount
         }
         if (metroClickPos_ < 0) continue;
 
-        // A cubic decay from the first sample, which reaches exactly zero at the end of the window —
-        // an envelope that merely got small would step at the cut. The sine starts at phase 0, so
-        // there is no discontinuity at the onset either.
+        // A cubic decay that reaches exactly zero, on a sine from phase 0: no step at either end.
         const float t   = static_cast<float>(metroClickPos_) / static_cast<float>(clickFrames);
         const float env = (1.0f - t) * (1.0f - t) * (1.0f - t);
         const float s   = sinf(metroClickPhase_) * env * gain;
         metroClickPhase_ += metroClickStep_;
         if (++metroClickPos_ >= clickFrames) metroClickPos_ = -1;
 
-        // Clamped, because this is summed BELOW the limiter: a loud mix plus a click can ask for more
-        // than the DAC has, and a hard clip on a 30 ms transient is inaudible where the wrap is not.
+        // Clamped: this is summed after the limiter.
         for (int ch = 0; ch < channelCount; ch++) {
             float& out = output[i * channelCount + ch];
             out = fmaxf(-1.0f, fminf(1.0f, out + s));
