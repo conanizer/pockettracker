@@ -439,16 +439,8 @@ std::vector<float> SongcoreHost::sample_waveform(int id, int bins, int startFram
     const int  len   = engine_->getSampleLength(id);
     const bool whole = (startFrame <= 0) && (endFrame <= 0 || endFrame >= len);
 
-    if (engine_->hasStereoData(id)) {
-        // Stereo always uses the channel-aware entry point: the plain one averages, and
-        // SOURCE=LEFT must draw the left channel.
-        engine_->getSampleWaveformRangeSource(id, whole ? 0 : startFrame, whole ? len : endFrame,
-                                              out.data(), bins, channel);
-    } else if (whole) {
-        engine_->getSampleWaveform(id, out.data(), bins);
-    } else {
-        engine_->getSampleWaveformRange(id, startFrame, endFrame, out.data(), bins);
-    }
+    engine_->getSampleWaveformRangeSource(id, whole ? 0 : startFrame, whole ? len : endFrame,
+                                          out.data(), bins, channel);
     return out;
 }
 

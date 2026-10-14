@@ -2,40 +2,27 @@
 
 #include <cstdint>
 
-// ─── THE THREE PLAYHEADS OF ONE TABLE ────────────────────────────────────────────────────────────
-//
-// A table's columns do not advance together. Lane 0 carries `transpose`, `volume` and FX1; lane 1 is
-// FX2 alone and lane 2 is FX3 alone. Each owns a row cursor AND a rate, so `HOP 00` in FX2 loops FX2
-// while the rest of the table runs its sixteen rows, and a `TIC` in FX2 changes FX2's speed only.
-//
-// ⚠️ **THE LANE INDEX IS THE FX SLOT MINUS ONE**, everywhere — the row work, the ramps and the three
-// markers on the TABLE screen all key off that one identity. `TableRamp::paramSlot` is 1-3 and is
-// converted at exactly one place (`applyTableRamps`).
-//
-// ⚠️ ONE STRUCT FOR BOTH VOICE TYPES, because `processTableTick` is one template over them —
-// parallel arrays per voice type would drift in the reset paths.
+// ─── The three playheads of one table ───────────────────────────────────────────────────────────
+// Lane 0 runs transpose, volume and FX1; lanes 1 and 2 run FX2 and FX3. Each has its own row and rate.
+// ⚠️ The lane index is the FX slot minus one everywhere; `TableRamp::paramSlot` (1-3) is converted
+// only in `applyTableRamps`. One struct for both voice types.
 struct TableLane {
     int   row           =  0;   // the row this lane is standing on (0-15)
     int   lastProcessed = -1;   // the last row whose effects were applied; -1 = none yet
     int   ticRate       =  6;   // 01-FB musical tics per row; 00 trigger, FC octave, FE note, FF 200 Hz
     double frameAccum   =  0.0;    // frames into the row in force; negative until the note's onset
     int   hopRepeat     =  0;   // jumps left on an active `HOP XY` (X > 0)
-    uint16_t ausEaten   =  0;   // rows whose AUS in this column a CHA ate on their last pass — their ramp is off
+    uint16_t ausEaten   =  0;   // rows whose AUS a CHA ate on their last pass — ramp off
     int   hopTarget     = -1;   // its target row; -1 = no HOP counting
 
-    // ⚠️ `HOP FF` freezes THIS LANE, not the table. The voice's `tableId` only goes to -1 once all
-    // three are down — a stop typed in FX3 must not silence the note and volume columns.
+    // `HOP FF` stops this lane; `tableId` goes to -1 only once all three have stopped.
     bool  active        = true;
 };
 
 inline constexpr int TABLE_LANES = 3;
 
-/**
- * What a hit picked up on its way through the INS rows of the tables before the one it sounds with —
- * the transpose, volume and FX to the LEFT of each switch. Each composes the way it already does:
- * semitones add, volume multiplies, and an FX is a write that the sounding table's own rows can
- * overwrite. Steering (HOP, THO, TIC), KIL and the switch's own cells (INS, RNL, CHA) are not carried.
- */
+// What a hit picked up left of each INS switch on its way: semitones add, volume multiplies, an FX is
+// a write the sounding table can overwrite. Steering, KIL and the switch's own cells are not carried.
 inline constexpr int TABLE_CARRY_FX_MAX = 8;   // two slots left of an INS, on up to four routers
 struct TableCarry {
     float   semitones = 0.0f;
@@ -45,19 +32,12 @@ struct TableCarry {
     uint8_t fxValue[TABLE_CARRY_FX_MAX] = {};
 };
 
-// The "no table involved" arguments, so a trigger that passes no table still has trailing defaults.
+// The "no table" arguments.
 inline constexpr int TABLE_TICS_DEFAULT[TABLE_LANES] = {6, 6, 6};
 inline constexpr int TABLE_ROWS_TOP[TABLE_LANES]     = {0, 0, 0};
 
-/**
- * Place all three lanes for a note that is starting.
- *
- * ⚠️ BOTH VOICE TYPES CALL THIS AND NOTHING ELSE WRITES A LANE AT TRIGGER. A lane at TICFC or
- * TICFE is PLACED by the note (octave / note map); every other lane starts where the caller says.
- *
- * `startRows` is per lane so a TIC00 lane can resume where the track's previous note left it while
- * its neighbours start at 0 — see `AudioEngine::tic00Cursor`.
- */
+// Places the three lanes for a starting note — the only lane write at a trigger. TICFC/TICFE lanes
+// are placed by the note; the rest at `startRows` (a TIC00 lane resumes — see `tic00Cursor`).
 inline void reset_table_lanes(TableLane (&lanes)[TABLE_LANES], const int (&ticRates)[TABLE_LANES],
                               const int (&startRows)[TABLE_LANES], int octave, int pitch) {
     for (int l = 0; l < TABLE_LANES; ++l) {

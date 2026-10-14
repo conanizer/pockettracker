@@ -155,9 +155,7 @@ public:
     // SoundFont PCM). ⚠️ A new buffer must be counted here. Unlocked — fine for a readout only.
     int64_t audio_memory_bytes() const;
 
-    void  getSampleWaveform(int id, float* out, int numBins);
-    void  getSampleWaveformRange(int id, int startFrame, int endFrame, float* out, int numBins);
-    // channel: 0=left, 1=right, 2=averaged
+    // channel: 0=left, 1=right, 2=averaged; a mono sample always draws its one channel
     void  getSampleWaveformRangeSource(int id, int startFrame, int endFrame, float* out, int numBins, int channel);
     void  getSampleData(int id, float* out);       // left channel copy
     void  getSampleDataRight(int id, float* out);  // right channel copy
@@ -743,6 +741,7 @@ private:
     // Lock sampleEditMutex and end every voice on slot `id`. ⚠️ Every destructive edit holds this lock
     // while it changes or frees the buffers; the audio thread's try_lock then skips one block.
     std::unique_lock<std::mutex> beginSampleEdit(int id);
+    void fadeSample(int id, int startFrame, int endFrame, bool out);
     // An EQ preset slot (<0 = bypass) onto any EQ: a voice's, the master's, a send's input.
     void applyEqPresetToModule(EqModule& eq, int slot);
     // The same from band values — an AUS/AUF morph tick.

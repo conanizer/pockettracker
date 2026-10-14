@@ -1,8 +1,7 @@
-// oboe-audio-engine.cpp — Android (Oboe) audio backend. The only Oboe-coupled TU.
-// Owns the Oboe stream lifecycle and the audio callback; all DSP/scheduling lives in the portable core.
+// The Android (Oboe) audio backend: the stream's lifecycle and callback; the DSP is the core's.
 #include "oboe-audio-engine.h"
 #include "audio-engine.h"
-#include "audio-defs.h"  // LOGD/LOGE/LOG_TAG (platform log shim)
+#include "audio-defs.h"  // LOGD/LOGE
 
 #include <unistd.h>
 
@@ -18,8 +17,7 @@ OboeAudioEngine::~OboeAudioEngine() {
 void OboeAudioEngine::setPlatformDefaults(int sampleRate, int framesPerBurst) {
     platformRate_  = sampleRate;
     platformBurst_ = framesPerBurst;
-    // Oboe reads these globals when a builder leaves a value unspecified, which is how the numbers
-    // reach the OpenSL ES path — there is no per-builder way to say "the device's own".
+    // Globals Oboe reads for an unspecified value — the only way to reach the OpenSL ES path.
     if (sampleRate > 0)     oboe::DefaultStreamValues::SampleRate    = sampleRate;
     if (framesPerBurst > 0) oboe::DefaultStreamValues::FramesPerBurst = framesPerBurst;
 }
@@ -40,32 +38,24 @@ bool OboeAudioEngine::deviceLost() const {
 }
 
 bool OboeAudioEngine::openStream() {
-    // ⚠️ Cleared BEFORE the attempt, not after a successful one: a stream dying while this runs
-    // raises it again, and clearing on the way out would erase that second death.
+    // ⚠️ Cleared before the attempt, so a death during it is not erased.
     deviceLost_.store(false, std::memory_order_relaxed);
 
-    // Read once, so the open and what is remembered about it agree if the recording ends meanwhile.
+    // Read once, so the open and what is remembered agree.
     const bool captured = playbackCaptured_ && playbackCaptured_->load(std::memory_order_relaxed);
 
     oboe::AudioStreamBuilder builder;
     builder.setDataCallback(this);
-    builder.setErrorCallback(this);  // on the builder, so all four attempts below carry it
+    builder.setErrorCallback(this);  // carried by every attempt below
     builder.setFormat(oboe::AudioFormat::Float);
     builder.setChannelCount(oboe::ChannelCount::Stereo);
 
-    // ⚠️⚠️ **NO setSampleRate, AND THAT IS THE POINT OF THIS WHOLE PATH.** Naming 44100 on hardware
-    // that runs 48000 inserts a resampler, and a resampled stream commonly loses the fast mixer path
-    // whichever API is underneath — which costs far more than picking the rate ever bought. Left
-    // unspecified it opens at whatever `setPlatformDefaults` was told, and every consumer already
-    // reads the result back: the callback passes the stream's own rate per block, and
-    // `setDeviceSampleRate` below re-derives the send and master chains' coefficients from it.
+    // ⚠️ No setSampleRate: naming a rate the hardware does not run inserts a resampler and loses the
+    // fast path. Every consumer reads the negotiated rate back.
 
-    // ⚠️⚠️ **THE MODERN API FIRST, BEHIND A MARKER FILE.** It is the only route to the direct
-    // (MMAP) path, which cuts the output latency to about a third where the device has it. But one
-    // ROM (GammaCoreOS on the Miyoo Flip) was seen to stall startup for up to 35 s opening it. So the
-    // marker is written BEFORE the attempt and removed only once the stream has opened AND started
-    // quickly: a slow open, a hang, or the app killed mid-stall all leave it behind, and from then on
-    // this device goes straight to OpenSL ES. A bad ROM pays the stall once.
+    // ⚠️ The modern API first (the only way to the low-latency direct path), behind a marker file:
+    // one ROM stalls startup for up to 35 s opening it. The marker is removed only after a quick open
+    // AND start; left behind, the device goes straight to OpenSL ES from then on.
     const bool legacyOnly = !slowOpenMarker_.empty() && access(slowOpenMarker_.c_str(), F_OK) == 0;
     const auto t0 = std::chrono::steady_clock::now();
     oboe::Result result = oboe::Result::ErrorInternal;
@@ -73,13 +63,11 @@ bool OboeAudioEngine::openStream() {
         if (!slowOpenMarker_.empty()) {
             if (FILE* f = std::fopen(slowOpenMarker_.c_str(), "w")) std::fclose(f);
         }
-        // Unspecified, not AAudio: on Android 8.0 Oboe knows AAudio is unreliable and picks OpenSL ES.
-        // Exclusive is a request — a device without the direct path hands back a shared stream.
+        // Unspecified, so Oboe avoids AAudio on Android 8.0. Exclusive is only a request.
         builder.setAudioApi(oboe::AudioApi::Unspecified);
         builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
         builder.setSharingMode(oboe::SharingMode::Exclusive);
-        // ⚠️ Kept off the direct path BY HAND under a recording. Android refuses it too, but only
-        // once the recorder has attached, and the shell may hear of a recording sooner than that.
+        // ⚠️ Off the direct path by hand: Android refuses it only once the recorder has attached.
         const bool offDirect = captured && oboe::OboeExtensions::isMMapSupported();
         if (offDirect) oboe::OboeExtensions::setMMapEnabled(false);
         result = builder.openStream(stream);
@@ -88,7 +76,7 @@ bool OboeAudioEngine::openStream() {
         LOGD("openStream: a past open was slow (%s) - OpenSL ES only", slowOpenMarker_.c_str());
     }
 
-    // OpenSL ES, most capable first. It never takes the direct path, so it is the fallback now.
+    // OpenSL ES, most capable first.
     if (result != oboe::Result::OK) {
         if (!legacyOnly) {
             LOGD("openStream: modern API failed (%s), trying OpenSL ES", oboe::convertToText(result));
@@ -116,19 +104,16 @@ bool OboeAudioEngine::openStream() {
         return false;
     }
 
-    // One burst playing while the next is filled — the smallest buffer that is not starved, and the
-    // figure Oboe's own guidance starts from. ⚠️ **ASKED, NOT SET**: the stream may round it or refuse
-    // it outright (OpenSL ES largely fixes its queue at open), so the boot line below reads the result
-    // back rather than repeating the request. ⭐ If a device crackles, this multiplier is the dial.
+    // Two bursts — Oboe's own starting point; if a device crackles, this is the dial. ⚠️ Only asked:
+    // the boot line reads back what was granted.
     constexpr int kBurstsPerBuffer = 2;
     const int burst = stream->getFramesPerBurst();
     if (burst > 0) {
         stream->setBufferSizeInFrames(burst * kBurstsPerBuffer);
     }
 
-    // ⚠️ Each is false once a reopen has answered it, or the frame loop would reopen every tick. And
-    // only a stream that could have had the direct path is worth reopening after a recording:
-    // OpenSL ES never has it, and a device without it would reopen for nothing.
+    // ⚠️ Each clears once a reopen answered it, or the loop reopens every tick. Only a stream that
+    // could have the direct path reopens after a recording.
     const bool direct = oboe::OboeExtensions::isMMapUsed(stream.get());
     reopenOnRecording_    = direct && !captured;
     reopenAfterRecording_ = captured && !direct &&
@@ -146,10 +131,7 @@ bool OboeAudioEngine::openStream() {
          (int)direct, (int)captured,
          platformRate_, platformBurst_);
 
-    // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
-    // keep our own copy for AudioBackend::sampleRate() — see the header for why the shell is not
-    // allowed to reach into the stream object and ask. Same for the buffer, which outputLatency()
-    // falls back to.
+    // The negotiated rate to the core, and our own copies for sampleRate() and outputLatency().
     sampleRate_   = stream->getSampleRate();
     bufferFrames_ = stream->getBufferSizeInFrames();
     if (core) {
@@ -162,7 +144,7 @@ bool OboeAudioEngine::openStream() {
         return false;
     }
 
-    // Timed to here, not to the open: the stall was never pinned to one of the two calls.
+    // Timed across open AND start.
     constexpr long long kSlowOpenMs = 3000;
     const long long openMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0).count();
@@ -174,8 +156,7 @@ bool OboeAudioEngine::openStream() {
         }
     }
 
-    // AFTER the start, because a stream that has presented no frames has no timestamp to compute a
-    // real latency from — ask before this and every device on earth reports the floor.
+    // After the start: before any frame is presented there is no timestamp.
     const OutputLatency lat = outputLatency();
     LOGD("Stream started OK — output latency %d frames (%.1f ms), %s", lat.frames,
          sampleRate_ > 0 ? 1000.0 * lat.frames / sampleRate_ : 0.0,
@@ -184,22 +165,20 @@ bool OboeAudioEngine::openStream() {
 }
 
 AudioBackend::OutputLatency OboeAudioEngine::outputLatency() const {
-    // Asked live, not cached: the buffer Oboe hands out grows and shrinks under an underrun, so a
-    // figure taken once at boot would go stale on exactly the device that needed watching.
+    // Live: Oboe resizes the buffer under underruns.
     if (stream) {
         const oboe::ResultWithValue<double> ms = stream->calculateLatencyMillis();
         if (ms && sampleRate_ > 0) {
             return {int(ms.value() * sampleRate_ / 1000.0 + 0.5), true};
         }
-        // ⚠️ Expected on the shipping path, not a defect: openStream takes OpenSL ES first, and only
-        // AAudio implements this. The floor is then the same class of number SDL reports.
+        // Expected on OpenSL ES, which has no timestamp: the floor, as SDL reports.
         return {stream->getBufferSizeInFrames(), false};
     }
     return {bufferFrames_, false};
 }
 
 void OboeAudioEngine::closeStream() {
-    // No stream, no reason to ask for a reopen — a failed open or a backgrounded app must not loop.
+    // No stream: a failed open or a backgrounded app must not loop.
     reopenOnRecording_    = false;
     reopenAfterRecording_ = false;
     if (stream) {
@@ -219,22 +198,17 @@ void OboeAudioEngine::resumeStream() {
 void OboeAudioEngine::setPaused(bool paused) {
     if (!stream) return;
 
-    // ⚠️ stop(), not requestPause() — see the header: resumeStream() restarts a Paused stream, and
-    // the engine asks it to before every scheduled note. Blocking forms, so there is exactly one
-    // reader of the engine on the far side of this call.
+    // ⚠️ stop(), not requestPause() — see the header. Blocking, so the callback is out on return.
     const oboe::Result r = paused ? stream->stop() : stream->start();
     if (r != oboe::Result::OK) {
-        // Not fatal, and deliberately not silent. A render that proceeds against a stream which
-        // failed to stop is the race this method exists to prevent, and it would otherwise present
-        // as an intermittently corrupted WAV export with nothing in the log to explain it.
+        // Logged: rendering against a running stream would corrupt the export with no other trace.
         LOGE("setPaused(%d) failed: %s", (int)paused, oboe::convertToText(r));
     }
 }
 
 void OboeAudioEngine::onErrorAfterClose(oboe::AudioStream* /*audioStream*/, oboe::Result error) {
     deviceLost_.store(true, std::memory_order_relaxed);
-    // The repair is silent when it works, so a stream rebuilt in 10 ms and one that never died look
-    // the same in the log without this line.
+    // Otherwise a repaired stream leaves no trace in the log.
     LOGE("Stream lost (%s) - the frame loop will reopen it", oboe::convertToText(error));
 }
 
@@ -242,8 +216,7 @@ oboe::DataCallbackResult OboeAudioEngine::onAudioReady(
         oboe::AudioStream* audioStream,
         void* audioData,
         int32_t numFrames) {
-    // Pure Oboe glue: forward the device buffer to the portable core. All DSP, the offline-render
-    // gate, chunking to PROCESS_SUBBLOCK, and the visualizer/peak capture live in processLiveBlock.
+    // Everything else — the render gate, sub-blocks, meters — is processLiveBlock's.
     core->processLiveBlock(static_cast<float*>(audioData), numFrames,
                            audioStream->getChannelCount(),
                            (float)audioStream->getSampleRate());

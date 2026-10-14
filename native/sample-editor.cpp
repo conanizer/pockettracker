@@ -1,18 +1,10 @@
-// sample-editor.cpp — AudioEngine sample editor operations (non-realtime)
-// All methods here are called from the UI thread, never from the audio callback.
+// The sample editor's operations on a loaded sample. UI thread only.
 #include "audio-engine.h"
 #include "effects/primitives/sola-stretch.h"
 #include <cmath>
 
-// ============================================================
-// SAMPLE EDITOR OPERATIONS
-// ============================================================
-
-// The undo and RATE-HIGH caches are stored as int16 to halve their RAM: they only
-// ever restore the working buffer, never feed the mix loop. f32->i16 clamps to [-1,1] (so an
-// over-unity working sample — post-normalize/gain — restores at full scale rather than wrapping)
-// and rounds to nearest; i16->f32 uses /32768 to match the WAV decoder, making the round trip
-// bit-exact for 16-bit-sourced WAVs and an inaudible ~-96 dBFS requantization for the rest.
+// The undo and RATE caches are int16, half the RAM: they only restore the working buffer. Clamped
+// (an over-unity sample restores at full scale), /32768 as the WAV decoder — exact for 16-bit WAVs.
 static inline int16_t f32ToCacheI16(float f) {
     float c = std::min(1.0f, std::max(-1.0f, f));
     int   v = (int)std::lround(c * 32768.0f);
@@ -22,9 +14,8 @@ static inline int16_t f32ToCacheI16(float f) {
 }
 static inline float cacheI16ToF32(int16_t v) { return v / 32768.0f; }
 
-// Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
-// old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
-// read a stale or short right channel. Length-changing ops MUST go through this. Pass newR=nullptr for mono.
+// Replaces `id`'s buffers (newR null for mono) and frees the old, keeping left, right and length in
+// step. Every length change goes through this.
 void AudioEngine::setSampleBuffers(int id, float* newL, float* newR, int newLen) {
     delete[] samples[id];
     delete[] samplesRight[id];
@@ -34,11 +25,8 @@ void AudioEngine::setSampleBuffers(int id, float* newL, float* newR, int newLen)
     touchSample(id);   // after the stores: see sampleGen
 }
 
-// Acquire sampleEditMutex and end every voice playing slot `id`. Every destructive op
-// below must hold the returned lock while mutating/freeing the slot's buffers: the audio thread
-// try_locks this mutex in its mix loop, so it skips one block (~10 ms silence) instead of reading
-// freed or half-edited memory. Without it, editing a sample that is audible at that moment
-// (background playback, or preview-then-edit) is a use-after-free crash.
+// Takes the edit lock and ends every voice on slot `id`. ⚠️ Every destructive op holds it while it
+// changes the buffers: the mix try_locks it and skips a block rather than read freed memory.
 std::unique_lock<std::mutex> AudioEngine::beginSampleEdit(int id) {
     std::unique_lock<std::mutex> lock(sampleEditMutex);
     touchSample(id);
@@ -48,55 +36,6 @@ std::unique_lock<std::mutex> AudioEngine::beginSampleEdit(int id) {
 int AudioEngine::getSampleLength(int id) {
     if (id < 0 || id >= 256 || !samples[id]) return 0;
     return sampleLengths[id];
-}
-
-void AudioEngine::getSampleWaveform(int id, float* out, int numBins) {
-    if (id < 0 || id >= 256 || !samples[id] || numBins <= 0) {
-        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
-        return;
-    }
-    int len = sampleLengths[id];
-    float* buf = samples[id];
-    for (int bin = 0; bin < numBins; bin++) {
-        int start = (int)((long long)bin * len / numBins);
-        int end   = (int)((long long)(bin + 1) * len / numBins);
-        if (end > len) end = len;
-        float minV = 0.0f, maxV = 0.0f;
-        for (int i = start; i < end; i++) {
-            if (buf[i] < minV) minV = buf[i];
-            if (buf[i] > maxV) maxV = buf[i];
-        }
-        out[bin * 2]     = minV;
-        out[bin * 2 + 1] = maxV;
-    }
-}
-
-void AudioEngine::getSampleWaveformRange(int id, int startFrame, int endFrame, float* out, int numBins) {
-    if (id < 0 || id >= 256 || !samples[id] || numBins <= 0) {
-        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
-        return;
-    }
-    int len = sampleLengths[id];
-    startFrame = std::max(0, std::min(startFrame, len));
-    endFrame   = std::max(startFrame, std::min(endFrame, len));
-    int rangeLen = endFrame - startFrame;
-    if (rangeLen <= 0) {
-        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
-        return;
-    }
-    float* buf = samples[id];
-    for (int bin = 0; bin < numBins; bin++) {
-        int s = startFrame + (int)((long long)bin * rangeLen / numBins);
-        int e = startFrame + (int)((long long)(bin + 1) * rangeLen / numBins);
-        if (e > endFrame) e = endFrame;
-        float minV = 0.0f, maxV = 0.0f;
-        for (int i = s; i < e; i++) {
-            if (buf[i] < minV) minV = buf[i];
-            if (buf[i] > maxV) maxV = buf[i];
-        }
-        out[bin * 2]     = minV;
-        out[bin * 2 + 1] = maxV;
-    }
 }
 
 void AudioEngine::getSampleData(int id, float* out) {
@@ -124,7 +63,7 @@ void AudioEngine::getSampleWaveformRangeSource(int id, int startFrame, int endFr
     }
     float* bufL = samples[id];
     float* bufR = samplesRight[id];
-    // channel 1 (RIGHT) with no right buffer falls back to left
+    // RIGHT with no right buffer reads left
     if (channel == 1 && !bufR) channel = 0;
     for (int bin = 0; bin < numBins; bin++) {
         int s = startFrame + (int)((long long)bin * rangeLen / numBins);
@@ -136,7 +75,7 @@ void AudioEngine::getSampleWaveformRangeSource(int id, int startFrame, int endFr
             if (channel == 1) {
                 v = bufR[i];
             } else if (channel == 2 && bufR) {
-                v = (bufL[i] + bufR[i]) * 0.5f;  // averaged for STEREO/MONO view
+                v = (bufL[i] + bufR[i]) * 0.5f;  // STEREO/MONO view
             } else {
                 v = bufL[i];
             }
@@ -150,8 +89,7 @@ void AudioEngine::getSampleWaveformRangeSource(int id, int startFrame, int endFr
 
 float AudioEngine::getSamplePlaybackPosition(int id) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return -1.0f;
-    // By slot and generation, not by pointer: a voice left over from the previous buffer is not
-    // playing this one, and a new buffer can land at the old one's freed address.
+    // By slot and generation, not pointer: a new buffer can land at the old one's address.
     const uint32_t gen = sampleGen[id].load();
     const VoiceView& view = voiceView();
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -165,15 +103,13 @@ float AudioEngine::getSamplePlaybackPosition(int id) {
 
 void AudioEngine::normalizeSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
-    // In-place op: no buffer is freed, so no voice-stop needed — but hold the edit lock so the
-    // mix loop skips one block rather than playing a half-edited region. Same for the other
-    // in-place ops below (fade/silence/reverse).
+    // In place: no voice stop, but the lock, so no half-edited block plays. Same below.
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id].load(), endFrame);
     if (startFrame >= endFrame) return;
     float* bufR = samplesRight[id];
-    // Peak across BOTH channels so the same gain is applied to each — preserves the stereo image.
+    // One peak over both channels keeps the stereo image.
     float peak = 0.0f;
     for (int i = startFrame; i < endFrame; i++) {
         float v = std::abs(samples[id][i]);
@@ -188,22 +124,10 @@ void AudioEngine::normalizeSample(int id, int startFrame, int endFrame) {
     }
 }
 
-void AudioEngine::fadeInSample(int id, int startFrame, int endFrame) {
-    if (id < 0 || id >= 256 || !samples[id]) return;
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
-    startFrame = std::max(0, startFrame);
-    endFrame   = std::min(sampleLengths[id].load(), endFrame);
-    int count  = endFrame - startFrame;
-    if (count <= 0) return;
-    float* bufR = samplesRight[id];
-    for (int i = 0; i < count; i++) {
-        float g = (float)i / count;
-        samples[id][startFrame + i] *= g;
-        if (bufR) bufR[startFrame + i] *= g;
-    }
-}
+void AudioEngine::fadeInSample(int id, int startFrame, int endFrame)  { fadeSample(id, startFrame, endFrame, false); }
+void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) { fadeSample(id, startFrame, endFrame, true); }
 
-void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
+void AudioEngine::fadeSample(int id, int startFrame, int endFrame, bool out) {
     if (id < 0 || id >= 256 || !samples[id]) return;
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
@@ -212,7 +136,7 @@ void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
     if (count <= 0) return;
     float* bufR = samplesRight[id];
     for (int i = 0; i < count; i++) {
-        float g = 1.0f - (float)i / count;
+        float g = out ? 1.0f - (float)i / count : (float)i / count;
         samples[id][startFrame + i] *= g;
         if (bufR) bufR[startFrame + i] *= g;
     }
@@ -223,11 +147,8 @@ void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id].load(), endFrame);
-    // ⚠️ An INVERTED window is reachable: `sampleStart` and `sampleEnd` are two independent free
-    // 0-255 cells with nothing constraining one against the other, and the editor seeds its
-    // selection from them. `endFrame - startFrame` is int and `sizeof(float)` is size_t, so a
-    // negative length converts to ~2^64 and the memset walks off the buffer. The guard belongs here
-    // rather than at the call sites, as it does in the four siblings above.
+    // ⚠️ An inverted window is reachable (START and END are independent cells); a negative length
+    // would become ~2^64 in the memset.
     if (startFrame >= endFrame) return;
     std::memset(samples[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
     if (samplesRight[id])
@@ -239,8 +160,7 @@ void AudioEngine::reverseSample(int id, int startFrame, int endFrame) {
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id].load(), endFrame);
-    // ⚠️ Same inverted window as silenceRegion. `std::reverse(first, last)` with `first > last`
-    // never reaches `first == last`, so it swaps outward from both ends of the buffer.
+    // ⚠️ As silenceRegion: an inverted window would make std::reverse walk off both ends.
     if (startFrame >= endFrame) return;
     std::reverse(samples[id] + startFrame, samples[id] + endFrame);
     if (samplesRight[id])
@@ -264,8 +184,6 @@ void AudioEngine::backupSample(int id) {
 
 void AudioEngine::undoSample(int id) {
     if (id < 0 || id >= 256 || !sampleBackups[id]) return;
-    // Same "stop voices reading this buffer + lock" preamble as the other edits (beginSampleEdit keys
-    // off sampleData == samples[id], the buffer actually swapped below — more precise than instrId).
     auto editLock = beginSampleEdit(id);
     int len = sampleBackupLengths[id];
     float* newL = new float[len];
@@ -275,16 +193,12 @@ void AudioEngine::undoSample(int id) {
         newR = new float[len];
         for (int i = 0; i < len; i++) newR[i] = cacheI16ToF32(sampleBackupsRight[id][i]);
     }
-    setSampleBuffers(id, newL, newR, len);  // restores mono/stereo state of the backup
+    setSampleBuffers(id, newL, newR, len);  // the backup's mono/stereo too
 }
 
 void AudioEngine::freeSampleUndo(int id) {
     if (id < 0 || id >= 256) return;
-    // The undo backup is only ever read by undoSample (UI thread, inside the editor); the audio mix
-    // loop never touches it, so no sampleEditMutex is needed. Once the editor closes, undo is
-    // unreachable — free the backup so it doesn't linger in RAM.
-    // NOTE: originalSamples (the RATE-HIGH cache) is deliberately NOT freed here — it's null when at
-    // HIGH and required for lossless restore when at LOFI/NORM, so freeing it would only break RATE.
+    // The mix never reads the backup, so no lock. The RATE cache stays — RATE needs it to restore.
     delete[] sampleBackups[id];      sampleBackups[id] = nullptr;
     delete[] sampleBackupsRight[id]; sampleBackupsRight[id] = nullptr;
     sampleBackupLengths[id] = 0;
@@ -369,9 +283,8 @@ void AudioEngine::deleteSampleRegion(int id, int startFrame, int endFrame) {
 
 void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
-    // Read-only on the sample, but must still hold the edit mutex so no destructive op swaps
-    // the buffers out from under the memcpy. Deliberately NOT beginSampleEdit(): that would
-    // also stop voices playing this sample, and COPY must not cut an audible preview.
+    // The lock, so no edit swaps the buffers mid-copy — but not beginSampleEdit(): COPY must not cut
+    // a preview.
     std::unique_lock<std::mutex> editLock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id].load(), endFrame);
@@ -389,12 +302,10 @@ void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
     sampleClipboardLength = len;
 }
 
-// Copy a sample slot→slot in native memory for the sample editor's audition: one channel, the two
-// mixed, or (mode 2) the sample as it is.
+// Slot → slot for the editor's audition: one channel, the two mixed, or (mode 2) as is.
 void AudioEngine::prepareSourcePreview(int dstId, int srcId, int mode) {
     if (dstId < 0 || dstId >= 256 || srcId < 0 || srcId >= 256 || dstId == srcId) return;
-    // Stops voices reading the dst (scratch) slot and holds the edit mutex — which also
-    // keeps the SOURCE buffers steady for the copy (single global edit mutex).
+    // The one edit lock also holds the source steady.
     auto editLock = beginSampleEdit(dstId);
     if (!samples[srcId] || sampleLengths[srcId] <= 0) return;
     const int len  = sampleLengths[srcId];
@@ -407,7 +318,7 @@ void AudioEngine::prepareSourcePreview(int dstId, int srcId, int mode) {
         std::memcpy(out, R, (size_t)len * sizeof(float));
     } else if (mode == 3) {
         for (int i = 0; i < len; i++) out[i] = (L[i] + R[i]) * 0.5f;
-    } else {  // 0 = LEFT (also the mono-source fallback: R aliases L then); 2 = STEREO, both channels
+    } else {  // 0 = LEFT (a mono source's R aliases L); 2 = STEREO
         std::memcpy(out, L, (size_t)len * sizeof(float));
         if (mode == 2 && samplesRight[srcId]) {
             outR = new (std::nothrow) float[len];
@@ -430,8 +341,7 @@ void AudioEngine::pasteRegion(int id, int insertAt) {
     std::memcpy(newL + insertAt + clip, samples[id] + insertAt, (oldLen - insertAt) * sizeof(float));
     float* newR = nullptr;
     if (samplesRight[id]) {
-        // Right of the inserted block: stereo clip → its right channel; mono clip → duplicate the
-        // mono clip so the inserted audio is centred rather than silent on the right.
+        // A mono clip into a stereo sample goes on both sides.
         const float* clipR = sampleClipboardRight ? sampleClipboardRight : sampleClipboard;
         newR = new float[newLen];
         std::memcpy(newR,                   samplesRight[id],            insertAt * sizeof(float));
@@ -448,17 +358,8 @@ int AudioEngine::getClipboardLength() {
     return sampleClipboardLength;
 }
 
-/**
- * The sample editor's BIT cell: round a sample to the nearest step of a `bits`-bit grid.
- *
- * ⚠️ This is NOT the instrument's CRUSH. That one truncates (shift down, shift back) on every block;
- * this rounds to the NEAREST step — mid-tread, so silence stays silence — once, into the buffer, with no
- * dither. A dithered quantiser is cleaner and is not what someone asking for 8-bit wants.
- *
- * Exact in float for every source this app decodes: a 16- or 24-bit value is an integer over a power of
- * two, so scaling by another power of two, adding a half and flooring introduces no rounding of its own.
- * The top step is clamped — full scale rounds up to one step past what the grid can hold.
- */
+// The editor's BIT cell: round to the nearest step of a `bits`-bit grid, once, no dither — not CRUSH,
+// which truncates per block. Mid-tread, so silence stays silence; exact in float; the top step clamps.
 static inline float quantizeToBits(float v, int bits) {
     const float q   = static_cast<float>(1 << (bits - 1));
     const float top = (q - 1.0f) / q;
@@ -493,7 +394,7 @@ bool AudioEngine::isSampleFloat(int id) const {
 
 void AudioEngine::adoptSavedSampleFormat(int id, int bits, bool isFloat) {
     if (id < 0 || id >= 256 || !samples[id]) return;
-    std::lock_guard<std::mutex> lock(sampleEditMutex);   // the cache is freed under the same lock as a swap
+    std::lock_guard<std::mutex> lock(sampleEditMutex);   // the cache is freed under it
     setSampleSourceFormat(id, bits, isFloat);
 }
 
@@ -501,25 +402,21 @@ void AudioEngine::applyRateAndBits(int id, int factor, int bits) {
     if (id < 0 || id >= 256 || !samples[id]) return;
     if (factor < 1) factor = 1;
     const int source = sampleBitDepth[id];
-    bits = std::max(1, std::min(source, bits));   // BIT never goes above the depth the sample came in at
+    bits = std::max(1, std::min(source, bits));   // never above the source depth
 
-    // Stop voices reading this buffer, then hold the edit lock so the callback's try_lock fails
-    // during the swap — one silent period rather than a use-after-free crash.
     auto editLock = beginSampleEdit(id);
 
     const bool haveCache = originalSamples[id] || originalSamplesF[id];
-    // One reader over whichever pair the slot holds.
     const auto cached = [&](bool right, int i) -> float {
         if (originalSamplesF[id]) return (right ? originalSamplesRightF[id] : originalSamplesF[id])[i];
         return cacheI16ToF32((right ? originalSamplesRight[id] : originalSamples[id])[i]);
     };
-    // ⚠️ A FUNCTION, not a value read here: on the first departure the cache does not exist yet, and a
-    // stereo test taken now answers "mono" — the rebuild then drops the right channel.
+    // ⚠️ A function, not a value: before the first departure there is no cache, and a test now says mono.
     const auto stereoCache = [&] { return originalSamplesRightF[id] != nullptr || originalSamplesRight[id] != nullptr; };
 
     if (factor == 1 && bits == source) {
-        // Back to HIGH at the source depth: copy the original (both channels) back, then discard it.
-        if (!haveCache) return;   // already there, nothing to restore
+        // Back to HIGH at the source depth: restore the original and drop it.
+        if (!haveCache) return;
         int len = originalSampleLengths[id];
         float* newL = new float[len];
         for (int i = 0; i < len; i++) newL[i] = cached(false, i);
@@ -533,8 +430,7 @@ void AudioEngine::applyRateAndBits(int id, int factor, int bits) {
         return;
     }
 
-    // Store the original (both channels) on the first departure. ⚠️ In FLOAT when the sample is deeper
-    // than 16 bits, so returning to 24 or 32 gives back what was loaded; int16 otherwise, at half the RAM.
+    // The original, on the first departure: float when deeper than 16 bits, so 24/32 come back intact.
     if (!haveCache) {
         int len = sampleLengths[id];
         if (source > 16) {
@@ -555,7 +451,7 @@ void AudioEngine::applyRateAndBits(int id, int factor, int bits) {
         originalSampleLengths[id] = len;
     }
 
-    // Always derive from the cached original, so NORM→LOFI→NORM and 8→16→8 round-trip losslessly.
+    // Always from the original, so any round trip is lossless.
     const bool requantise = bits < source;
     int newLen = originalSampleLengths[id] / factor;
     if (newLen < 1) return;
@@ -579,16 +475,16 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
     if (id < 0 || id >= 256 || !samples[id] || semitones == 0.0f) return;
     setFlushToZeroForCurrentThread();
 
-    auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
+    auto editLock = beginSampleEdit(id);
 
-    // Pitch shift makes this buffer the new "original"; discard any RATE cache (both channels).
+    // The result is the new original: the RATE cache goes.
     freeRateCache(id);
 
     float ratio  = std::pow(2.0f, semitones / 12.0f);
     int   oldLen = sampleLengths[id];
     int   newLen = std::max(1, (int)std::round((float)oldLen / ratio));
 
-    // Linear-resample one channel of length oldLen into a fresh newLen buffer.
+    // Linear resample, oldLen → newLen.
     auto resample = [&](const float* src) -> float* {
         float* dst = new float[newLen];
         for (int i = 0; i < newLen; i++) {
@@ -609,14 +505,13 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
 
 void AudioEngine::timeStretchSample(int id, float ratio, float grainMs, float sampleRate) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
-    // ⚠️ The skip is measured in FRAMES, not as a ratio window. A "0.1% is inaudible" window is 8 ms
-    // on an 8-second loop — most of a tick — and SYNC's whole job is to land on the tick.
+    // ⚠️ In frames, not a ratio: 0.1 % of an 8 s loop is 8 ms, and SYNC must land on the tick.
     if ((int)std::lround((double)sampleLengths[id] * (double)ratio) == sampleLengths[id]) return;
     setFlushToZeroForCurrentThread();
 
-    auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
+    auto editLock = beginSampleEdit(id);
 
-    // Time-stretch makes this buffer the new "original"; discard any RATE cache (both channels).
+    // The result is the new original: the RATE cache goes.
     freeRateCache(id);
 
     int oldLen = sampleLengths[id];
@@ -627,8 +522,7 @@ void AudioEngine::timeStretchSample(int id, float ratio, float grainMs, float sa
 
     float* newR = nullptr;
     if (samplesRight[id]) {
-        // Deterministic for the same oldLen/ratio, so outR.size() == newLen; clamp + zero-pad defensively
-        // so the right buffer is always exactly newLen (keeps L/R in lockstep).
+        // Exactly newLen, whatever the stretch returned.
         std::vector<float> outR = sola::stretch(samplesRight[id], oldLen, ratio, sampleRate, grainMs);
         newR = new float[newLen];
         int n = std::min((int)outR.size(), newLen);
@@ -640,18 +534,14 @@ void AudioEngine::timeStretchSample(int id, float ratio, float grainMs, float sa
 
 void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
-    // ⚠️ The UI thread runs OTT, DUST, the EQ and the limiter's 0.00002-alpha peak tracker below —
-    // the same feedback-tail DSP the audio thread arms FTZ for. A fade-out decays into the denormal
-    // range and stays there for the rest of the buffer, at 10-100x per sample, with the screen frozen.
+    // ⚠️ Feedback DSP on the UI thread: without FTZ a fade-out sinks into denormals and freezes the screen.
     setFlushToZeroForCurrentThread();
 
-    auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
+    auto editLock = beginSampleEdit(id);
 
     int len = sampleLengths[id];
 
-    // Apply the selected destructive FX + limiter to one channel buffer in place. Each channel gets
-    // its own fresh module instances so left and right are processed independently (and identically),
-    // keeping a stereo sample's two channels in sync.
+    // The effect + limiter on one channel, in place; fresh modules per channel.
     auto applyToChannel = [&](float* buf) {
         constexpr int CHUNK = 512;
         float stereo[CHUNK * 2];
@@ -670,17 +560,11 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
                 for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
             }
         } else if (fxType == 1) { // DUST
-            // ⚠️ DUST delays its output by `latencySamples()` and nothing inside it compensates that.
-            // On the master bus the shift is constant and inaudible; HERE it is baked into the file,
-            // so an uncompensated apply would push the sound later, leave silence at the head and
-            // drop the tail — and a second apply would double it.
-            //
-            // So the chain is run over `len + latency` frames, fed silence once the sample ends, and
-            // output frame `j` is written back at `j - latency`. The sample keeps its start, its tail
-            // survives, and applying twice lands in the same place as applying once.
+            // ⚠️ DUST delays by `latencySamples()`; baked into a file that would shift the sound. So
+            // it runs `len + latency` frames (silence past the end) and writes frame j back at
+            // j - latency.
             const int latency = skdust::DustChain::latencySamples();
-            // Writes trail reads by exactly `latency`, so each chunk overwrites only samples it has
-            // already copied into `stereo` — true while the latency is shorter than one chunk.
+            // Safe in place while the latency is shorter than one chunk.
             static_assert(skdust::DustChain::latencySamples() < CHUNK,
                           "a latency of a chunk or more would overwrite unread input");
 
@@ -691,7 +575,7 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
                 int n = std::min(CHUNK, len + latency - pos);
                 for (int i = 0; i < n; i++) {
                     const int src = pos + i;
-                    const float s = (src < len) ? buf[src] : 0.0f;   // silence past the end
+                    const float s = (src < len) ? buf[src] : 0.0f;
                     stereo[i * 2]     = s;
                     stereo[i * 2 + 1] = s;
                 }
@@ -721,13 +605,10 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
             }
         }
 
-        // Limiter pass: clamp the result to ±1 using the same pre-gain as the master limiter.
-        // Prevents waveform from exceeding the visible area after saturation/compression effects.
+        // The master limiter's pre-gain, keeping the result within ±1.
         LimiterModule lim;
         lim.reset();
         lim.setPreGain(1.0f + (limiterPreGain / 255.0f) * 3.0f);
-        // One call over the whole channel: this buffer is de-interleaved mono, so the block API
-        // walks it directly (`process` goes frame by frame only because its buffer is interleaved).
         lim.limL.ProcessBlock(buf, static_cast<size_t>(len), lim.preGain);
     };
 
@@ -741,19 +622,11 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
     const float* R   = samplesRight[id];
     const int    len = sampleLengths[id];
 
-    // ⚠️ SOURCE NAMES THE SIGNAL THE SEAM WILL BE CUT IN, so it names the one to hunt a crossing in.
-    // (0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO — the sample editor's own numbering, passed straight
-    // through so there is no second vocabulary to keep in step.) A mono sample has one signal whatever
-    // the row says, and its right-channel pointer is null, so every mode collapses to LEFT there.
+    // SOURCE (0 LEFT, 1 RIGHT, 2 STEREO, 3 MONO) names the signal the cut lands in; a mono sample is LEFT.
     const int mode = R ? sourceMode : 0;
 
-    // ── STEREO: what counts as a candidate, and how good it is ───────────────────────────────────
-    //
-    // Real channels rarely cross on the same frame, so "both cross" would find nothing. The
-    // candidates are frames where EITHER channel crosses, and the winner has the quietest WORST
-    // channel (`max(|L|, |R|)` — the louder step is the click). A true double crossing scores ~0.
-    // ⚠️ On DUAL-MONO (L == R, every CHOP) the first left crossing scores 0 and wins, matching the
-    // left-only search.
+    // STEREO: a frame where EITHER channel crosses is a candidate; the best has the quietest louder
+    // channel. On dual-mono the first left crossing wins, as the left-only search.
     const bool stereo = (mode == 2);
 
     auto val = [&](int i) -> float {
@@ -769,7 +642,7 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
         return (val(i - 1) < 0.0f) != (val(i) < 0.0f);
     };
     auto score = [&](int i) -> float {
-        if (!stereo) return 0.0f;   // one signal: every candidate is equally good, so the nearest wins
+        if (!stereo) return 0.0f;   // one signal: the nearest wins
         return std::max(std::abs(L[i]), std::abs(R[i]));
     };
 
@@ -777,8 +650,7 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
     float bestScore = 0.0f;
     bool  found     = false;
 
-    // Returns true when the search can stop: the FIRST candidate for a single signal. Stereo keeps
-    // looking — a nearer candidate is not a better one.
+    // True when the search can stop: at the first candidate for one signal; stereo keeps looking.
     auto consider = [&](int i) {
         if (i < 1 || i >= len || !crosses(i)) return false;
         const float sc = score(i);
@@ -786,10 +658,8 @@ int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius, 
         return !stereo;
     };
 
-    // dir > 0: forward only; dir < 0: backward only; dir == 0: nearest (both ways).
-    // Directional search is seeded from the already-stepped `frame`, so the result is always at or
-    // past `frame` in the move direction — a marker can never snap back behind itself and stick.
-    // Walking outward in distance order breaks a stereo score tie toward the NEAREST candidate.
+    // dir > 0 forward, < 0 back, 0 nearest. Never behind `frame`, so a marker cannot snap back and
+    // stick; ties go to the nearest.
     for (int d = 0; d <= searchRadius; d++) {
         if (dir >= 0 && consider(frame + d)) break;
         if (dir <= 0 && consider(frame - d)) break;
@@ -804,8 +674,7 @@ void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainH
     b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
     b.gainDb = gainHex / 10.0f - 12.0f;   // gainHex 0..240 → −12.0..+12.0 dB (0.1 dB/step)
     b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
-    // The authored bytes, kept beside the conversion because a table morph interpolates THEM. This
-    // is the only writer of either array — see audio-engine.h.
+    // The authored bytes too — a table morph interpolates them. The only writer of either array.
     auto& h = eqPresetHex.edit(slot);
     h.type[band] = type;
     h.freq[band] = freqHex;
@@ -841,7 +710,7 @@ void AudioEngine::setProgram(int instrumentId, const songcore::Program& program,
     row.program = program;
     for (int i = 0; i < n; ++i) row.markers[i] = markers[i];
     row.program.sliceCount   = n;
-    row.program.sliceMarkers = nullptr;   // programView re-points it at the audio thread's own copy
+    row.program.sliceMarkers = nullptr;   // programView points it at the audio thread's copy
     programs.publish(instrumentId);
 }
 
@@ -865,8 +734,7 @@ void AudioEngine::setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMod
     setDelayFeedbackWet(feedbackHex, wetHex);
 }
 
-// The two halves on their own, because a take a TIM is driving owns the TIME and nothing else: a
-// globals push has to leave that alone while still carrying FDBK and WET through (engine_setup.h).
+// Separate halves: while a TIM drives the time, a globals push still sets FDBK and WET.
 void AudioEngine::setDelayTime(int timeOrSubdiv, bool syncMode, float bpm) {
     busSettings.delayTime = timeOrSubdiv; busSettings.delaySync = syncMode; busSettings.delayBpm = bpm;
     recordBus(BUS_DELAY_TIME);
@@ -931,10 +799,7 @@ void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool
     instrumentParams.edit(instrumentId).filterType = fType;
     instrumentParams.edit(instrumentId).filterCut = fCut;
     instrumentParams.edit(instrumentId).filterRes = fRes;
-    // ⚠️ A push of the instrument's own window ENDS any exact-frame window on this slot. That is what
-    // makes the sample editor's audition safe to arm: whatever else happens, the next ordinary push —
-    // the preview's own restore, an edit on the INSTRUMENT screen, a project load — takes it away, and
-    // no caller has to know it was ever there.
+    // Ends any exact-frame window, so the editor's audition never outlives the next ordinary push.
     instrumentParams.edit(instrumentId).startFrame = -1;
     instrumentParams.edit(instrumentId).endFrame   = -1;
     instrumentParams.publish(instrumentId);

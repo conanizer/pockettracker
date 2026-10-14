@@ -4,34 +4,23 @@
 #include "effects/instrument-chain.h"
 #include "table-lanes.h"
 
-// Forward declaration — tsf is defined in soundfont-voice.cpp (TSF_IMPLEMENTATION).
-// note-queue.h declares SoundfontEntry and extern soundfonts[].
+// tsf is defined in soundfont-voice.cpp; note-queue.h declares soundfonts[].
 
-// ===================================
-// SOUNDFONTVOICE — per-track state; rendering via shared soundfonts[sfSlot].handle
-// ===================================
-// Design: ONE tsf* instance per SoundfontEntry (per unique SF2 file).
-// Each of the 8 tracks maps to a MIDI channel (0–7) on that shared instance; the dedicated
-// preview lane (track 8) uses channel 8, so SF previews never steal a song track's channel.
-// One shared instance avoids a per-track tsf_load_memory() call that would otherwise stall the
-// audio callback for hundreds of ms and use 8× the SF2 file size in RAM.
-//
-// Thread safety: every method runs on the audio thread (or on a render while the device is paused),
-// and takes no lock — see SoundfontEntry for why the handle it loads cannot be closed under it.
+// A track's SoundFont state. One tsf handle per slot, shared: track N plays on MIDI channel N, the
+// preview lane on channel 8. Audio thread only (or a render with the device paused), no lock.
 struct SoundfontVoice : public IAudioVoice {
-    int   sfSlot      = -1;    // soundfonts[] index that owns this voice (-1 = unassigned)
-    uint32_t sfGen    = 0;     // soundfonts[sfSlot].gen when armed; the engine detaches a stale one
-    int   _trackId    = -1;    // Track index = MIDI channel on the shared tsf* handle
-    int   instrId     = -1;    // Instrument of the current note (-1 = preview); for the instrument spectrum
+    int   sfSlot      = -1;    // -1 = unassigned
+    uint32_t sfGen    = 0;     // the slot's gen when armed; a stale one is detached
+    int   _trackId    = -1;    // = the MIDI channel
+    int   instrId     = -1;    // -1 = preview; for the instrument spectrum
     bool  isActive    = false;
     int   activeNote  = -1;
-    float noteVolume  = 1.0f;  // Note-only volume (instrument × phrase × V-effect)
+    float noteVolume  = 1.0f;  // instrument × phrase × V
 
-    // Static per-instrument detune in semitones (fractional). Independent of PSL/PBN so it survives
-    // pitch slides; folded into pitchMod every block. Set at note trigger, NOT cleared by resetPitchState.
+    // The instrument's detune, semitones; set at the trigger, survives slides and resetPitchState.
     float detuneSemitones  = 0.0f;
 
-    // Pitch effect state (PSL/PBN/PVB/PVX) — advanced each block, applied via MIDI pitch wheel
+    // PSL/PBN/PVB/PVX, advanced each block and sent as the pitch wheel.
     float pitchOffset      = 0.0f;
     float pitchSlideTarget = 0.0f;
     float pitchSlideRate   = 0.0f;
@@ -42,80 +31,60 @@ struct SoundfontVoice : public IAudioVoice {
     bool  vibratoActive    = false;
     bool  needsPitchReset  = false;
 
-    // Table state — mirrors Voice table fields; set by the SoundFont trigger.
+    // Table state, as on Voice.
     int   tableId          = -1;
-    TableLane lanes[TABLE_LANES];   // one cursor and one rate per FX column — see table-lanes.h
-    float tableTranspose   = 0.0f;  // current semitones from table row (for debug)
-    float tableVolume      = 1.0f;  // current vol multiplier from table row (for debug)
-    // Picked up passing through INS rows (table-lanes.h); every table pitch/volume write adds/multiplies it.
+    TableLane lanes[TABLE_LANES];   // one per FX column
+    float tableTranspose   = 0.0f;  // for the debug log
+    float tableVolume      = 1.0f;  // for the debug log
+    // Picked up through INS rows; every table pitch/volume write adds/multiplies it.
     float carrySemitones   = 0.0f;
     float carryVolume      = 1.0f;
-    // A table PAN glides to its value over PAN_GLIDE_FRAMES rather than jumping (engine-voice-ops.h).
+    // A table PAN glides over PAN_GLIDE_FRAMES.
     float panNow           = 0.5f;
     float panGoal          = 0.5f;
     int   panGlideLeft     = 0;
-    // …and a table VOL steps the note's gain toward its new value over VOL_GLIDE_FRAMES.
-    float volRouteLast     = 0.0f;   // unused here — the gain ramp starts from `volGain` already
+    // A table VOL glides over VOL_GLIDE_FRAMES.
+    float volRouteLast     = 0.0f;   // unused: the ramp starts from `volGain`
     float volGlideFrom     = 0.0f;
     int   volGlideLeft     = 0;
-    int   noteOctave       = 4;     // note octave (for TICFC/TICFE special modes)
-    int   notePitch        = 0;     // note pitch  (for TICFE mode)
+    int   noteOctave       = 4;     // for TICFC
+    int   notePitch        = 0;     // for TICFE
 
-    // Release tail: true after noteOff() — keeps rendering while TSF decays to silence.
+    // After noteOff(): keep rendering while TSF decays.
     bool  isReleasingOnly  = false;
 
-    // The note's gain — VOL, table and phrase volume and the VOL mods — ramped per sample over each
-    // rendered piece. ⚠️ It must NOT go through tsf_channel_set_volume: that is one value per render,
-    // and a fast envelope becomes a staircase that clicks at every block boundary — which is why the
-    // track fader does not go through it either. `volGain` is where the last piece ended; From/To
-    // are this piece's.
+    // The note's gain, ramped per sample over each rendered piece. ⚠️ Never through
+    // tsf_channel_set_volume — one value per render clicks at every block. `volGain` is where the last
+    // piece ended; From/To are this piece's.
     float volGain     = 1.0f;
     float volGainFrom = 1.0f;
     float volGainTo   = 1.0f;
 
-    // ── The transport-stop ramp ─────────────────────────────────────────────────────────────────
-    // The counter the SF mix loop multiplies into the mute gate, so a stop takes the note down over
-    // KILL_FADE_SAMPLES instead of ending it where its waveform happened to be. Zero means no ramp.
-    //
-    // ⚠️ THE RAMP IS OURS, NOT TSF'S, for the reason the steal path already gives: TSF holds its
-    // amplitude envelope flat across 64-sample blocks, so asking it to release quickly buys a smaller
-    // step and not a smooth one. Riding the gate also puts the ramp ABOVE the send tap and BELOW the
-    // track's filter — a send that missed it would ring the click on for the length of the tail.
+    // The transport-stop ramp: counts down KILL_FADE_SAMPLES in the mute gate; 0 = none. Ours, not
+    // TSF's (it steps per 64 samples), and on the gate so the sends fade with it.
     int   stopFadeRemaining = 0;
     int   stopFadeTotal     = 0;
-    // The frame inside the current block the ramp starts at — the twin of Voice::fadeStartFrame.
-    // The gate loop holds the counter until it reaches this frame; the engine zeroes it after
-    // every block.
+    // The frame in this block the ramp starts at, as Voice::fadeStartFrame; zeroed after every block.
     int   stopFadeStartFrame = 0;
 
-    // A TSF note-off dispatched at frame `pendingTsfOffAt` of the current block. The render pass
-    // splits the channel's render there and sends it between the halves, so the release begins on
-    // that frame rather than the block's first one. -1 = nothing pending. Superseded by anything
-    // that ends the channel's voices outright (hardStop, an armed note firing).
+    // A TSF note-off due at this frame of the block: the render splits there. -1 = none.
     int   pendingTsfOffAt   = -1;
     int   pendingTsfOffNote = -1;
 
-    /**
-     * Begin the transport-stop ramp; the render pass finishes it and calls hardStop() at zero.
-     */
+    // The render pass runs the ramp and calls hardStop() at zero.
     void startStopFade(int fadeSamples, int atFrame = 0) {
         if (!isActive || stopFadeRemaining > 0) return;
         stopFadeStartFrame = atFrame;
-        // An armed note is discarded rather than fired into a voice that is on its way out — the same
-        // rule hardStop() states, and here it also stops a note_on landing mid-ramp.
+        // An armed note is discarded, as in hardStop().
         hasArmedNote     = false;
         stopFadeTotal    = (fadeSamples > 0) ? fadeSamples : 1;
         stopFadeRemaining = stopFadeTotal;
     }
 
-    // Intra-block onset offset (same contract as Voice::startDelayFrames): the SF render
-    // pass starts this channel's tsf render at this offset within the trigger block so a
-    // mid-block targetFrame doesn't sound at the block start, then zeroes it.
+    // The onset inside the trigger block, as Voice::startDelayFrames.
     int   startDelayFrames = 0;
 
-    // ── The armed note ──────────────────────────────────────────────────────────────────────────
-    // Everything a trigger needs, held from the dispatch pass until the RENDER pass fires it. See
-    // armNote() for why the note_on cannot happen where the note is scheduled.
+    // The armed note, held from the dispatch pass until the render pass fires it (see armNote()).
     struct ArmedNote {
         int   slot = -1, midiNote = 0, midiVelocity = 0, bank = 0, preset = 0;
         float noteVol = 1.0f, pan = 0.5f;
@@ -123,38 +92,32 @@ struct SoundfontVoice : public IAudioVoice {
     };
     bool      hasArmedNote = false;
     ArmedNote armed;
-    // A note on its way out keeps the track fader it had when a VTR on the next note's step changed
-    // it: the new note starts at the new level, the old one fades at its own. Advanced per block; the
-    // steal pass spends it on the old note.
+    // The fader a stolen note keeps when a VTR on the next step moves it.
     bool  faderHeld      = false;
     float faderHeldStart = 1.0f, faderHeldEnd = 1.0f;
-    // Set by a steal pass that has already put the fader on its piece, so chainTrackPiece skips it.
+    // The steal pass already applied the fader; chainTrackPiece skips it.
     bool  faderInBuf     = false;
 
-    // ── IAudioVoice ─────────────────────────────────────────────────────────
+    // ── IAudioVoice ──
     bool active()     const override { return isActive; }
     int  getTrackId() const override { return _trackId; }
 
     void hardStop() override;
 
-    // Soft note-off: tell TSF to start its internal release envelope, keep rendering until silence.
-    // isActive stays true so the audio block keeps calling tsf_render_float_channel.
-    // The render loop detects silence and calls hardStop() to clean up.
+    // Starts TSF's release; the render runs until silence, then calls hardStop().
     void noteOff() override;
-    // The same, at frame `atFrame` of the current block: the audio thread's dispatch loop passes
-    // the frame an OFF or key release was stamped for; a UI-thread caller uses noteOff().
+    // At frame `atFrame` of this block — the audio thread's form.
     void noteOffAt(int atFrame);
 
     void setVolume(float v) override;
 
     void setPan(float pan) override;
 
-    void retrigger(int /*startPoint*/) override {}  // not applicable to SF
+    void retrigger(int /*startPoint*/) override {}
 
     void setMidiNote(int midiNote) override;
 
-    // ── Pitch effect interface ───────────────────────────────────────────────
-    // All pitch setters only write state fields — no TSF calls.
+    // Pitch setters write state only — no TSF calls.
     void setPitchBendRaw(float ratePerFrame) override {
         if (fabsf(ratePerFrame) < 0.000001f) {
             pitchSliding   = false;
@@ -169,40 +132,26 @@ struct SoundfontVoice : public IAudioVoice {
         if (depth < 0.01f) { vibratoActive = false; vibratoDepth = 0.0f; }
         else { vibratoSpeed = speed; vibratoDepth = depth; vibratoActive = true; }
     }
-    // ── end IAudioVoice ─────────────────────────────────────────────────────
-
-    // render() is intentionally unused for SF voices.
-    // Rendering is done per-slot in processAudioBlock (one tsf_render_float per active slot).
+    // Unused: processAudioBlock renders SF channels itself.
     float render(float*, int) override { return 0.0f; }
 
-    // Per-track stereo effect chain, run on the rendered TSF buffer. Its live values are on the
-    // ParamBus, as the sampler's are; the engine writes them into the chain once per rendered piece.
+    // Run on the rendered buffer; its values come from the ParamBus once per piece.
     InstrumentChain chain;
 
-    // ── Audio-thread-only methods (no lock needed) ──────────────────────────
+    // ── Audio thread only ──
 
-    // Arm a new note. Called from processAudioBlock's dispatch pass (audio thread).
-    // noteVol = instrument × phrase volume. ⚠️ Neither it nor the track fader reaches the TSF
-    // channel: both ride the rendered buffer as per-sample ramps (see volGain above).
-    //
-    // ⚠️⚠️ IT ARMS; IT DOES NOT SOUND. The note_on happens in `fireArmedNote`, which the render pass
-    // calls at this note's exact intra-block frame after rendering the frames before it — sounding
-    // it here would cut the previous note dead at the block boundary (a crack).
-    //
-    // ⚠️ RETURNS FALSE WHEN THE SLOT'S HANDLE IS GONE, AND THE CALLER MUST HONOUR IT: only this, under
-    // the slot mutex, can answer. On false nothing has been written and the voice keeps sounding.
+    // Arms a note; noteVol = instrument × phrase. ⚠️ It does not sound: the render pass calls
+    // `fireArmedNote` at the note's frame, or the previous note would be cut dead at the block edge.
+    // ⚠️ False when the slot's handle is gone — nothing written; the caller must honour it.
     bool armNote(int slot, int midiNote, int midiVelocity,
                  float noteVol, float pan,
                  int bank, int preset, int trackId,
                  int envAtk, int envDec, int envSus, int envRel);
 
-    // Fire the armed note into `h`, the handle the render pass loaded for this block. Clears
-    // `hasArmedNote` either way.
+    // Fires into `h`, the handle loaded for this block; clears `hasArmedNote` either way.
     void fireArmedNote(tsf* h);
 
-    // Reset pitch state after a new note trigger.
-    // needsPitchReset=true so applyPitchMod() resets the TSF pitch wheel to center on the
-    // next audio block — required when a previous note left the wheel at an extreme value (PBN).
+    // Also re-centres TSF's wheel next block — a PBN can have left it at an extreme.
     void resetPitchState() {
         pitchOffset      = 0.0f;
         pitchSlideTarget = 0.0f;
@@ -213,7 +162,6 @@ struct SoundfontVoice : public IAudioVoice {
         needsPitchReset  = true;
     }
 
-    // Reset table state for a new note.
     void resetTableState(int tblId, const int (&ticRates)[TABLE_LANES], int octave, int pitch,
                          const int (&startRows)[TABLE_LANES]) {
         tableId          = tblId;
@@ -227,11 +175,10 @@ struct SoundfontVoice : public IAudioVoice {
         reset_table_lanes(lanes, ticRates, startRows, octave, pitch);
     }
 
-    // Advance pitch LFO/slide by `numFrames` and write MIDI pitch wheel to the shared handle.
-    // Called before each render of this channel. Audio thread only.
+    // Advances slide and vibrato by `numFrames` and writes the wheel; before each render.
     void applyPitchMod(float sampleRate, int numFrames);
 
-    // Reset voice state when the owning slot is unloaded.
+    // The owning slot was unloaded.
     void detach() {
         isActive       = false;
         activeNote     = -1;
@@ -242,24 +189,14 @@ struct SoundfontVoice : public IAudioVoice {
         tableId        = -1;
         startDelayFrames = 0;
         pendingTsfOffAt = -1;
-        hasArmedNote   = false;  // the slot it was armed against is the one being unloaded
+        hasArmedNote   = false;
     }
 };
 
-// Helper: get bank and preset_number for a preset at the given index.
-// Defined in soundfont-voice.cpp where TSF_IMPLEMENTATION is active (full tsf struct visible).
-// Returns true on success, false if f is null or index is out of range.
+// The bank and number of preset `index`; false when f is null or index out of range.
 bool tsf_get_preset_at(tsf* f, int index, int* bank, int* preset_number);
 
-// ─── Why the last soundfont load returned null ───────────────────────────────────────────────────
-//
-// `tsf_load` reports failure the same way whatever went wrong: a null return. A file that is not a
-// soundfont and one that is simply too big for the machine are indistinguishable to the caller, and
-// the two want opposite messages on screen — "this file is broken" against "this device cannot hold
-// it". The allocator guard (soundfont-voice.cpp) is the only thing that can tell them apart, because
-// it is what refused.
-//
-// Reset before a load, read after. ⚠️ Not thread-safe by design and does not need to be: soundfont
-// loads happen on one thread, and the flag is read immediately after the load that set it.
+// Whether the last null `tsf_load` was the memory guard refusing ("too big") rather than a broken
+// file. Reset before a load, read after; per thread.
 void sf_memory_guard_reset();
 bool sf_memory_guard_tripped();

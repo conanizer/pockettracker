@@ -20,9 +20,7 @@ template <typename V> static inline void filterFromBus(V& v, int type, float sam
                              paramWithMod(v, PARAM_FILTER_RES, 255), v.chain.filter.drive, sampleRate);
 }
 
-// CUT / RES, from an FX cell, an AUS/AUF ramp or a table row. ⚠️ Inert on a voice whose FILTER TYPE
-// is OFF: they move the filter the instrument declares, they do not switch one on.
-// Per-note: a note-on rebuilds the chain from the instrument, so nothing has to be restored.
+// CUT / RES. ⚠️ Inert while the filter type is OFF — they never switch one on. Per note.
 template <typename V>
 static inline void voiceSetFilter(V& v, int cut, int res, float sampleRate) {
     v.params.setBase(PARAM_FILTER_CUT, (float)cut);
@@ -44,20 +42,17 @@ template <typename V> static inline void voiceSetFilterMode(V& v, int type, int 
     filterFromBus(v, type, sr);
 }
 
-// LPO. ⚠️ It adds where every other setter here assigns: the byte is a signed step in sixteenths of
-// the loop's length and the voice keeps the total, so on a table row it walks a step per tic.
+// LPO. ⚠️ Adds where every other setter assigns — on a table row it walks a step per tic.
 static inline void voiceSlideLoop(Voice& v, int byteValue) {
     v.loopSlideSixteenths += loopSlideSixteenthsOf(byteValue);
 }
 static inline void voiceSlideLoop(SoundfontVoice&, int) {}
 
-// DRV / CRU. Every voice type re-derives both from `params.base` per piece, so the base write is
-// the command.
+// DRV / CRU: both are re-derived from `params.base` per piece.
 static inline void voiceSetDrive(IAudioVoice& v, int drive) {
     v.params.setBase(PARAM_DRIVE, (float)drive);
 }
-// ⚠️ The cell is two numbers, bits high and downsample low, kept apart on the bus: the sampler's
-// downsample is a quantized read, not the crush module's.
+// Bits high, downsample low, kept apart on the bus: the sampler's downsample is its read, not the module's.
 static inline void voiceSetCrush(IAudioVoice& v, int packed) {
     v.params.setBase(PARAM_CRUSH,      (float)crushBitsOf(packed));
     v.params.setBase(PARAM_DOWNSAMPLE, (float)crushDownsampleOf(packed));
@@ -81,14 +76,13 @@ static inline void voiceReloadInstrument(V& v, const InstrumentParams& ip, float
     voiceSetSends(v, ip.reverbSend, ip.delaySend);
 }
 
-// A table PAN glides: a jump is a step in both channels' gain, a click on a low note. The row sets
-// the goal and the per-piece pan update walks to it over PAN_GLIDE_FRAMES, the table tick cutting
-// the pieces to PAN_GLIDE_STEP meanwhile (a SoundFont pans per piece, so it moves in those stairs).
+// A table PAN glides over PAN_GLIDE_FRAMES — a jump clicks on a low note. (A SoundFont moves in
+// PAN_GLIDE_STEP stairs.)
 inline constexpr int PAN_GLIDE_FRAMES = 256;
 inline constexpr int PAN_GLIDE_STEP   = 64;
 
 template <typename V> static inline void voiceGlidePan(V& v, float pan) {
-    if (!v.chain.started) { v.setPan(pan); return; }   // the note's own set-up: no glide from anywhere
+    if (!v.chain.started) { v.setPan(pan); return; }   // the note's own set-up
     v.params.setBase(PARAM_PAN, pan);
     v.panGoal      = pan;
     v.panGlideLeft = PAN_GLIDE_FRAMES;
@@ -103,8 +97,7 @@ template <typename V> static inline bool voiceStepPanGlide(V& v, int frames) {
     return true;
 }
 
-// A table VOL on a sounding note arms the blend that hides the step. Before the first sample the
-// new volume is simply where the note starts.
+// A table VOL on a sounding note blends; before the first sample it is where the note starts.
 inline constexpr int VOL_GLIDE_FRAMES = 128;
 template <typename V> static inline void voiceGlideVol(V& v) {
     if (!v.chain.started) return;
@@ -112,13 +105,11 @@ template <typename V> static inline void voiceGlideVol(V& v) {
     v.volGlideLeft = VOL_GLIDE_FRAMES;
 }
 
-// A change of the sampler's downsample on a sounding note blends the old read into the new one over
-// this many samples.
+// A downsample change on a sounding note blends over this many samples.
 inline constexpr int DOWNSAMPLE_FADE_FRAMES = 128;
 
-// FIN writes PARAM_PITCH's base: zeroed at trigger, so per-note, while the mod half carries table
-// transpose, slides and vibrato. ⚠️ Both voice types must read it: the sampler in
-// getModulatedPlaybackRate, the SoundFont voice in its pitch wheel, which must count it as active pitch.
+// FIN writes PARAM_PITCH's base (zeroed at trigger); the mod half carries transpose, slides and
+// vibrato. ⚠️ Both voice types must read it — the SoundFont voice counts it as active pitch.
 template <typename V> static inline void voiceSetFineTune(V& v, int byteValue) {
     v.params.setBase(PARAM_PITCH, fineTuneSemitonesOf(byteValue));
 }
@@ -128,9 +119,8 @@ static inline int filterByteOf(float value) {
     return std::max(0, std::min(255, (int)(value * 255.0f + 0.5f)));
 }
 
-// One per-voice CC (songcore/event.h) onto one voice, from a phrase cell, an AUS/AUF ramp or a
-// mapped knob; `value` is 0-1. A new live parameter is a CC id and a case here. PAN is not here: it
-// reaches only the track's current note (applyParamUpdate).
+// One per-voice CC (songcore/event.h), `value` 0-1 — from a cell, a ramp or a mapped knob. A new live
+// parameter is a CC id and a case here. PAN reaches only the current note (applyParamUpdate).
 template <typename V>
 static inline void applyVoiceCc(V& v, int cc, float value, float sampleRate) {
     using namespace songcore;
@@ -161,11 +151,10 @@ static inline void voiceReverse(Voice& vo, bool rev, bool restart) {
 }
 static inline void voiceReverse(SoundfontVoice&, bool, bool) {}
 
-// What each way of ending a note does to one voice. A new voice type adds its overloads here: the
-// kill arms reach every pool through forEachVoiceOnTrack, so a missing one is a compile error.
+// Each way of ending a note, per voice type; a missing overload is a compile error.
 static inline void voiceKeyRelease(Voice& v, int frame) { v.keyRelease(frame); }
 static inline void voiceKeyRelease(SoundfontVoice& v, int frame) {
-    v.noteOffAt(frame);   // TSF owns its release; a one-shot with no envelope is a sampler-only shape
+    v.noteOffAt(frame);   // TSF owns its release
 }
 // A declicked fade and gone: no envelope or SoundFont release outlives it. Also a table's KIL.
 static inline void voiceCut(Voice& v, int frame)          { v.startFadeOut(KILL_FADE_SAMPLES, frame); }
@@ -175,9 +164,8 @@ static inline void voiceKill(SoundfontVoice& v, int frame) {
     v.noteOffAt(frame);   // soft, so TSF's own release envelope can play out
 }
 
-// The row a TIC00 retrigger continues from: the next one — ⚠️ unless the row the voice stands on has
-// not been applied yet (just triggered, a HOP target, a THO write), then that row again. Stepping
-// past it drops the row, and a dropped HOP lets the table walk on past its loop point.
+// The row a TIC00 retrigger continues from: the next — ⚠️ unless the current row was never applied
+// (just triggered, a HOP target, THO), then that one; skipping it drops a HOP's loop.
 static inline int tic00RowAfter(int tableRow, int lastProcessedRow) {
     return (lastProcessedRow != tableRow) ? tableRow : (tableRow + 1) % 16;
 }

@@ -9,26 +9,21 @@ namespace pt {
 namespace {
 
 // ─── the nine hydra tables, exactly as they sit in the file ──────────────────────────────────────
-//
-// Sizes are the record sizes RIFF declares, NOT sizeof() — every one of these is smaller on disk than
-// a compiler would lay it out (phdr is 38 bytes, not 40). Fields are read little-endian by hand so
-// the reader depends on no packing pragma and no host byte order.
+// Record sizes are the file's, not sizeof() (phdr is 38 bytes, not 40); fields are read little-endian
+// by hand.
 
 constexpr int PHDR_SIZE = 38, PBAG_SIZE = 4, PMOD_SIZE = 10, PGEN_SIZE = 4;
 constexpr int INST_SIZE = 22, SHDR_SIZE = 46;
 
-// A generator is a (u16 operator, u16 amount) pair. These are the two whose amount is an INDEX into
-// another table, so they are the two that have to be renumbered when the tables shrink.
+// The two generators whose amount indexes another table — renumbered when the tables shrink.
 constexpr uint16_t GEN_INSTRUMENT = 41;   // in a preset zone: indexes `inst`
 constexpr uint16_t GEN_SAMPLE_ID  = 53;   // in an instrument zone: indexes `shdr`
 
-// ⚠️ A sample header with either bit set holds a compressed (Ogg Vorbis) stream, and its start/end
-// are BYTE offsets into `smpl`. Without them they are FRAME offsets. Both kinds occur in one file,
-// which is why every offset below carries its unit in the name.
+// ⚠️ With either bit set a sample is an Ogg stream and its start/end are BYTE offsets; otherwise
+// FRAMES. One file can hold both, so every offset below names its unit.
 constexpr uint16_t SAMPLE_TYPE_COMPRESSED = 0x30;
 
-// The SF2 spec's gap between two uncompressed samples. Kept because a sample whose loop end runs past
-// its declared end reads into it, and because interpolation reads one frame beyond a region's end.
+// The spec's zero gap after an uncompressed sample — loops and the interpolator read into it.
 constexpr uint32_t PCM_GAP_FRAMES = 46;
 
 struct Phdr { char name[20]; uint16_t preset, bank, bagNdx; uint32_t library, genre, morphology; };
@@ -55,7 +50,7 @@ struct Hydra {
     std::vector<Gen>  igen;
     std::vector<Shdr> shdr;
 
-    // Where the sample audio sits in the file. `smplSize` is in bytes; zero means there was none.
+    // Where the sample data sits; `smplSize` in bytes, 0 = none.
     long     smplOffset = 0;
     uint32_t smplSize   = 0;
 };
@@ -85,13 +80,8 @@ bool fourcc_is(const uint8_t* p, const char* id) { return std::memcmp(p, id, 4) 
 
 // ─── reading the hydra ───────────────────────────────────────────────────────────────────────────
 
-/**
- * Walk the RIFF tree, parse every `pdta` sub-chunk, and note where `smpl` begins.
- *
- * ⚠️ RIFF pads an odd-sized chunk with a byte that is NOT counted in its declared size. Skipping that
- * byte is what keeps the walk aligned on a file whose sample chunk is odd — which an SF3's Ogg data
- * can be.
- */
+// Parses every `pdta` sub-chunk and finds `smpl`. ⚠️ An odd-sized chunk has an uncounted pad byte —
+// skipped, or the walk loses alignment (an SF3's Ogg data can be odd).
 bool read_hydra(FILE* f, Hydra& h) {
     uint8_t hdr[12];
     if (std::fread(hdr, 1, 12, f) != 12) return false;
@@ -117,7 +107,6 @@ bool read_hydra(FILE* f, Hydra& h) {
                 const uint32_t subSize = rd_u32(sub + 4);
                 const long     next    = std::ftell(f) + static_cast<long>(subSize + (subSize & 1));
 
-                // One reader per record SHAPE rather than nine copies of "read N records of M bytes".
                 std::vector<uint8_t> raw;
                 auto slurp = [&](int recSize) -> int {
                     if (recSize <= 0 || subSize % static_cast<uint32_t>(recSize) != 0) return 0;
@@ -125,64 +114,39 @@ bool read_hydra(FILE* f, Hydra& h) {
                     if (subSize && std::fread(raw.data(), 1, subSize, f) != subSize) return 0;
                     return static_cast<int>(subSize / static_cast<uint32_t>(recSize));
                 };
-                auto read_bags = [&](std::vector<Bag>& dst) {
-                    const int n = slurp(PBAG_SIZE);
+                // `dst` filled with the sub-chunk's `recSize`-byte records, one `parse` each.
+                auto read_table = [&](auto& dst, int recSize, auto parse) {
+                    const int n = slurp(recSize);
                     dst.resize(static_cast<size_t>(n));
-                    for (int i = 0; i < n; ++i) {
-                        const uint8_t* p = raw.data() + i * PBAG_SIZE;
-                        dst[static_cast<size_t>(i)] = { rd_u16(p), rd_u16(p + 2) };
-                    }
+                    for (int i = 0; i < n; ++i) parse(dst[static_cast<size_t>(i)], raw.data() + i * recSize);
                 };
-                auto read_mods = [&](std::vector<Mod>& dst) {
-                    const int n = slurp(PMOD_SIZE);
-                    dst.resize(static_cast<size_t>(n));
-                    for (int i = 0; i < n; ++i) {
-                        const uint8_t* p = raw.data() + i * PMOD_SIZE;
-                        dst[static_cast<size_t>(i)] = { rd_u16(p), rd_u16(p + 2),
-                                                       static_cast<int16_t>(rd_u16(p + 4)),
-                                                       rd_u16(p + 6), rd_u16(p + 8) };
-                    }
-                };
-                auto read_gens = [&](std::vector<Gen>& dst) {
-                    const int n = slurp(PGEN_SIZE);
-                    dst.resize(static_cast<size_t>(n));
-                    for (int i = 0; i < n; ++i) {
-                        const uint8_t* p = raw.data() + i * PGEN_SIZE;
-                        dst[static_cast<size_t>(i)] = { rd_u16(p), rd_u16(p + 2) };
-                    }
+                const auto bag = [](Bag& r, const uint8_t* p) { r = { rd_u16(p), rd_u16(p + 2) }; };
+                const auto gen = [](Gen& r, const uint8_t* p) { r = { rd_u16(p), rd_u16(p + 2) }; };
+                const auto mod = [](Mod& r, const uint8_t* p) {
+                    r = { rd_u16(p), rd_u16(p + 2), static_cast<int16_t>(rd_u16(p + 4)),
+                          rd_u16(p + 6), rd_u16(p + 8) };
                 };
 
                 if (fourcc_is(sub, "phdr")) {
-                    const int n = slurp(PHDR_SIZE);
-                    h.phdr.resize(static_cast<size_t>(n));
-                    for (int i = 0; i < n; ++i) {
-                        const uint8_t* p = raw.data() + i * PHDR_SIZE;
-                        Phdr& r = h.phdr[static_cast<size_t>(i)];
+                    read_table(h.phdr, PHDR_SIZE, [](Phdr& r, const uint8_t* p) {
                         std::memcpy(r.name, p, 20);
                         r.preset = rd_u16(p + 20); r.bank = rd_u16(p + 22); r.bagNdx = rd_u16(p + 24);
                         r.library = rd_u32(p + 26); r.genre = rd_u32(p + 30);
                         r.morphology = rd_u32(p + 34);
-                    }
-                } else if (fourcc_is(sub, "pbag")) { read_bags(h.pbag);
-                } else if (fourcc_is(sub, "ibag")) { read_bags(h.ibag);
-                } else if (fourcc_is(sub, "pmod")) { read_mods(h.pmod);
-                } else if (fourcc_is(sub, "imod")) { read_mods(h.imod);
-                } else if (fourcc_is(sub, "pgen")) { read_gens(h.pgen);
-                } else if (fourcc_is(sub, "igen")) { read_gens(h.igen);
+                    });
+                } else if (fourcc_is(sub, "pbag")) { read_table(h.pbag, PBAG_SIZE, bag);
+                } else if (fourcc_is(sub, "ibag")) { read_table(h.ibag, PBAG_SIZE, bag);
+                } else if (fourcc_is(sub, "pmod")) { read_table(h.pmod, PMOD_SIZE, mod);
+                } else if (fourcc_is(sub, "imod")) { read_table(h.imod, PMOD_SIZE, mod);
+                } else if (fourcc_is(sub, "pgen")) { read_table(h.pgen, PGEN_SIZE, gen);
+                } else if (fourcc_is(sub, "igen")) { read_table(h.igen, PGEN_SIZE, gen);
                 } else if (fourcc_is(sub, "inst")) {
-                    const int n = slurp(INST_SIZE);
-                    h.inst.resize(static_cast<size_t>(n));
-                    for (int i = 0; i < n; ++i) {
-                        const uint8_t* p = raw.data() + i * INST_SIZE;
-                        std::memcpy(h.inst[static_cast<size_t>(i)].name, p, 20);
-                        h.inst[static_cast<size_t>(i)].bagNdx = rd_u16(p + 20);
-                    }
+                    read_table(h.inst, INST_SIZE, [](Inst& r, const uint8_t* p) {
+                        std::memcpy(r.name, p, 20);
+                        r.bagNdx = rd_u16(p + 20);
+                    });
                 } else if (fourcc_is(sub, "shdr")) {
-                    const int n = slurp(SHDR_SIZE);
-                    h.shdr.resize(static_cast<size_t>(n));
-                    for (int i = 0; i < n; ++i) {
-                        const uint8_t* p = raw.data() + i * SHDR_SIZE;
-                        Shdr& r = h.shdr[static_cast<size_t>(i)];
+                    read_table(h.shdr, SHDR_SIZE, [](Shdr& r, const uint8_t* p) {
                         std::memcpy(r.name, p, 20);
                         r.start = rd_u32(p + 20); r.end = rd_u32(p + 24);
                         r.startLoop = rd_u32(p + 28); r.endLoop = rd_u32(p + 32);
@@ -190,7 +154,7 @@ bool read_hydra(FILE* f, Hydra& h) {
                         r.originalPitch   = p[40];
                         r.pitchCorrection = static_cast<int8_t>(p[41]);
                         r.sampleLink = rd_u16(p + 42); r.sampleType = rd_u16(p + 44);
-                    }
+                    });
                 }
                 if (std::fseek(f, next, SEEK_SET) != 0) break;
             }
@@ -199,9 +163,8 @@ bool read_hydra(FILE* f, Hydra& h) {
                 uint8_t sub[8];
                 if (std::fread(sub, 1, 8, f) != 8) break;
                 const uint32_t subSize = rd_u32(sub + 4);
-                // ⚠️ Only `smpl` is picked up. The `smpo` variant packs the WHOLE font into ONE Ogg
-                // stream, so it has no per-sample byte range to copy and cannot be trimmed at all;
-                // leaving smplSize at zero is what makes the caller fall back to a whole-bank load.
+                // `smpo` (the whole font as one Ogg stream) cannot be trimmed: smplSize stays 0 and
+                // the caller loads the whole bank.
                 if (fourcc_is(sub, "smpl")) {
                     h.smplOffset = std::ftell(f);
                     h.smplSize   = subSize;
@@ -211,24 +174,20 @@ bool read_hydra(FILE* f, Hydra& h) {
         }
         if (std::fseek(f, listEnd, SEEK_SET) != 0) break;
     }
-    // A hydra tsf would accept: all nine tables present, and phdr/inst/shdr carrying their terminal
-    // record on top of at least one real one.
+    // What tsf accepts: all nine tables, and phdr/inst/shdr with a real record plus the terminal.
     return h.phdr.size() >= 2 && h.inst.size() >= 2 && h.shdr.size() >= 2 &&
            !h.pbag.empty() && !h.pgen.empty() && !h.pmod.empty() &&
            !h.ibag.empty() && !h.igen.empty() && !h.imod.empty();
 }
 
-/** A hydra name field is 20 bytes and is not guaranteed to be terminated. */
+// A name field is 20 bytes, not always terminated.
 std::string name_of(const char* raw) {
     size_t n = 0;
     while (n < 20 && raw[n] != '\0') ++n;
     return std::string(raw, n);
 }
 
-/**
- * The presets in the order tsf reports them: by bank, then preset number, then position in the file.
- * Returns indices into `h.phdr`, excluding its terminal record.
- */
+// Indices into `h.phdr` (terminal excluded) in tsf's order: bank, preset number, file position.
 std::vector<int> sorted_preset_order(const Hydra& h) {
     const int real = static_cast<int>(h.phdr.size()) - 1;
     std::vector<int> order(static_cast<size_t>(real));
@@ -242,7 +201,7 @@ std::vector<int> sorted_preset_order(const Hydra& h) {
     return order;
 }
 
-/** Append one RIFF chunk, padding an odd payload up to the even boundary RIFF requires. */
+// Appends a chunk, padded to even length.
 void append_chunk(std::vector<uint8_t>& out, const char* id, const std::vector<uint8_t>& body) {
     wr_fourcc(out, id);
     wr_u32(out, static_cast<uint32_t>(body.size()));
@@ -277,8 +236,7 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
     Hydra h;
     if (!read_hydra(f, h) || h.smplSize == 0) { std::fclose(f); return false; }
 
-    // Locate the preset. Its zone range runs up to the NEXT phdr's, which is why the terminal record
-    // has to be there — and it is, because read_hydra required it.
+    // Its zones run to the next phdr's — read_hydra guaranteed the terminal.
     const int realPresets = static_cast<int>(h.phdr.size()) - 1;
     int target = -1;
     for (int i = 0; i < realPresets; ++i) {
@@ -324,10 +282,8 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
     }
     if (shdrUsed.empty()) { std::fclose(f); return false; }
 
-    // ⚠️⚠️ **WHETHER ANY SAMPLE IS COMPRESSED DECIDES THE WHOLE LAYOUT, SO IT IS ANSWERED FIRST.**
-    // tsf runs one decoder over both formats and switches behaviour the moment it meets its first
-    // compressed sample, which makes "is this font compressed at all" a property of the file rather
-    // than of the sample in hand. The two layouts are written out at the copy loop.
+    // ⚠️ Whether ANY sample is compressed decides the whole layout: tsf's decoder changes behaviour at
+    // its first Ogg sample. The two layouts are at the copy loop.
     bool anyCompressed = false;
     for (int si : shdrUsed)
         if ((h.shdr[static_cast<size_t>(si)].sampleType & SAMPLE_TYPE_COMPRESSED) != 0) {
@@ -335,13 +291,9 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             break;
         }
 
-    // Ascending by source offset, so the emitted chunk has a real file's shape. What must hold: every
-    // offset indexes the chunk emitted below, the terminal header exists, and a compressed sample's
-    // header order matches its bytes' order (one loop writes both).
-    //
-    // ⚠️⚠️ IN A COMPRESSED FONT THE COMPRESSED SAMPLES MUST COME FIRST: once tsf has decoded one Ogg
-    // stream it reads a PCM header from its OWN offset instead of the output cursor, so a PCM sample
-    // before the first Ogg one would land at the wrong index, silently.
+    // By source offset; header order must match byte order (one loop writes both).
+    // ⚠️ In a compressed font the Ogg samples go first: after one Ogg decode tsf reads a PCM header at
+    // its own offset, so a PCM sample before it lands at the wrong index.
     std::sort(shdrUsed.begin(), shdrUsed.end(), [&](int a, int b) {
         const Shdr& x = h.shdr[static_cast<size_t>(a)];
         const Shdr& y = h.shdr[static_cast<size_t>(b)];
@@ -352,32 +304,21 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
     });
 
     // ── copy the sample bytes, and rewrite the headers onto where they landed ──
-    //
-    // ⚠️⚠️ THE SILENT TAIL IS THE CORRECTNESS ARGUMENT. A region reads a little past its data (a loop
-    // end beyond the sample, `endAddrsOffset`, the interpolator's lookahead); with one preset there is
-    // no next sample, so that read must land on silence in the DECODED buffer.
-    //   all-PCM    — copied to floats straight through, so the 46 zero frames after each sample are there.
-    //   compressed — an Ogg stream cannot be padded inside, so a dummy UNCOMPRESSED header after each
-    //                one puts zeros exactly where the overrun reads (tsf appends in table order).
-    // ⭐ All pads share one 46-frame zero block (several headers may name the same `start`).
-    //
-    // ⚠️⚠️ THAT BLOCK GOES AT THE FRONT; AT THE BACK IT IS A SEGFAULT. After an Ogg decode tsf rebases
-    // later PCM headers by `resNum - shdr->start` in an UNSIGNED 32-bit local: an offset ahead of the
-    // decode cursor wraps to ~4.29e9 and the read lands 4 GB below the buffer. Ogg expands ~10× when
-    // decoded, so the front is always behind the cursor.
+    // ⚠️ A region reads a little past its data (loop end, `endAddrsOffset`, the interpolator), so every
+    // sample must be followed by silence in the DECODED buffer. All-PCM: the 46 zero frames are copied
+    // through. Compressed: a dummy uncompressed header after each Ogg sample, all sharing one zero block.
+    // ⚠️ That block goes at the FRONT: tsf rebases later PCM headers in an unsigned 32-bit local, and
+    // an offset ahead of the decode cursor wraps — a segfault.
     std::vector<uint8_t> smpl;
-    // Frame 0, by construction, for the reason above.
     const uint32_t padFrame = 0;
     if (anyCompressed) smpl.resize(PCM_GAP_FRAMES * 2, 0);
     std::vector<Shdr>    newShdr;
-    // ⚠️ PARALLEL TO `newShdr`, with -1 for a pad — the renumbering below maps position to position,
-    // and a pad present in one vector but not the other shifts every sample id after it, silently.
+    // ⚠️ Parallel to `newShdr`, -1 for a pad — a mismatch shifts every sample id after it.
     std::vector<int>     kept;
     newShdr.reserve(shdrUsed.size() * 2 + 1);
     kept.reserve(shdrUsed.size() * 2);
 
-    // Positions in `newShdr` that are pads. Their offsets are patched after the loop, because where
-    // the shared block sits is only known once every sample has been copied.
+    // Pads in `newShdr`; their offsets are patched after the loop.
     std::vector<size_t> padPositions;
 
     for (int si : shdrUsed) {
@@ -385,9 +326,7 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
         Shdr s = src;
 
         if ((src.sampleType & SAMPLE_TYPE_COMPRESSED) != 0) {
-            // ⚠️ BYTE offsets, not frames, and the range is one whole Ogg stream. It is copied
-            // opaquely — nothing here decodes Vorbis, which is what makes trimming a compressed bank
-            // cheap: the presets left out are never decoded at all, and decoding is the expensive half.
+            // Byte offsets; the Ogg stream is copied opaquely, never decoded here.
             if (src.start >= src.end || src.end > h.smplSize) continue;
             const size_t bytes = src.end - src.start;
             const size_t at    = smpl.size();
@@ -397,23 +336,18 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
 
             s.start = static_cast<uint32_t>(at);
             s.end   = static_cast<uint32_t>(at + bytes);
-            // ⚠️ `startLoop`/`endLoop` are left ALONE. On a compressed sample they are frame offsets
-            // RELATIVE to the sample and tsf rebases them itself (`shdr->startLoop += resNum`) — the
-            // one place the two formats disagree about what a loop point means.
+            // ⚠️ Loop points are left alone: on a compressed sample they are relative, and tsf rebases them.
         } else {
-            // Frame offsets. Copy through whichever of `end` and `endLoop` reaches further: a loop
-            // running past the declared end is legal, and tsf reads that far.
+            // Frames, through whichever of `end` and `endLoop` reaches further.
             const uint32_t totalFrames = h.smplSize / 2;
             const uint32_t reach       = std::max(src.end, src.endLoop);
             if (src.start >= reach || reach > totalFrames) continue;
             const uint32_t frames = reach - src.start;
-            // ⚠️ A frame index has to land on an even byte. In an all-PCM font it always does; after
-            // an Ogg stream of odd length it does not.
+            // A frame must start on an even byte — not given after an odd Ogg stream.
             if (smpl.size() & 1u) smpl.push_back(0);
             const size_t at    = smpl.size();
             const size_t bytes = static_cast<size_t>(frames) * 2;
-            // The in-chunk gap is the all-PCM layout's silent tail. A compressed font never reads it —
-            // its silence comes from the pad below — so it is not written there.
+            // The all-PCM layout's silent tail; a compressed font gets its silence from the pad.
             smpl.resize(at + bytes + (anyCompressed ? 0u : PCM_GAP_FRAMES * 2), 0);
             if (std::fseek(f, h.smplOffset + static_cast<long>(src.start) * 2, SEEK_SET) != 0 ||
                 std::fread(smpl.data() + at, 1, bytes, f) != bytes) { std::fclose(f); return false; }
@@ -434,9 +368,9 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             std::memcpy(pad.name, padName, 20);
             pad.sampleRate    = src.sampleRate;
             pad.originalPitch = 60;
-            pad.sampleType    = 1;      // monoSample, uncompressed — its offsets are frames
+            pad.sampleType    = 1;      // mono, uncompressed: frame offsets
             newShdr.push_back(pad);
-            kept.push_back(-1);         // referenced by nothing; it exists to be decoded, not played
+            kept.push_back(-1);         // decoded, never played
         }
     }
     std::fclose(f);
@@ -516,9 +450,7 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
     if (nInst.empty() || nPbag.empty()) return false;
 
     // ── terminal records ──
-    // Every table's last entry is a sentinel whose only job is to say where the previous entry's range
-    // ends. tsf reads `[i + 1]` on phdr, pbag, inst and ibag without a bounds check, so a missing
-    // terminal is a read past the end of the table rather than a parse failure.
+    // ⚠️ tsf reads `[i + 1]` on phdr, pbag, inst and ibag unchecked — a missing terminal reads past the end.
     nPbag.push_back({ static_cast<uint16_t>(nPgen.size()), static_cast<uint16_t>(nPmod.size()) });
     nPgen.push_back({ 0, 0 });
     nPmod.push_back({ 0, 0, 0, 0, 0 });
@@ -586,11 +518,9 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
             wr_u16(body, s.sampleLink); wr_u16(body, s.sampleType);
         };
         for (const Shdr& s : newShdr) put(s);
-        // ⚠️ The terminal header is not ceremony: tsf extends the LAST header to the end of the
-        // chunk, so without it the final real sample would swallow everything after it.
-        // ⚠️⚠️ In a COMPRESSED font it is marked compressed with an empty range, so the decoder zeroes
-        // it instead of appending the whole Ogg chunk reinterpreted as PCM. An all-PCM font must NOT:
-        // there the read-to-the-end is what copies the chunk straight through.
+        // ⚠️ tsf extends the last header to the chunk's end, so without this one the final sample
+        // swallows the rest. In a compressed font it is marked compressed and empty, or the whole Ogg
+        // chunk is appended as PCM; in an all-PCM font it must not be.
         Shdr eos{};
         const char eosName[20] = "EOS";
         std::memcpy(eos.name, eosName, 20);
@@ -599,16 +529,13 @@ bool sf_build_trimmed_font(const char* path, int bank, int preset, std::vector<u
         append_chunk(pdta, "shdr", body);
     }
 
-    // ⚠️⚠️ THE SAMPLE CHUNK MUST BE EVEN-SIZED: tsf's chunk walker advances by exactly `8 + size`,
-    // ignoring RIFF's pad byte, so an odd chunk leaves it on the pad, the next id starts with NUL, and
-    // `pdta` is never read. Only Ogg streams can be odd.
+    // ⚠️ The sample chunk must be even-sized: tsf ignores RIFF's pad byte, and would never find `pdta`.
     if (smpl.size() & 1u) smpl.push_back(0);
 
     std::vector<uint8_t> sdta;
     append_chunk(sdta, "smpl", smpl);
 
-    // No INFO list: tsf skips it, and the only field a trimmed font could carry honestly is the
-    // version, which nothing reads back.
+    // No INFO list: tsf skips it.
     const size_t riffSize = 4 /* "sfbk" */ + 12 + sdta.size() + 12 + pdta.size();
     out.reserve(riffSize + 8);
     wr_fourcc(out, "RIFF");

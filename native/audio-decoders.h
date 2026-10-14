@@ -2,23 +2,12 @@
 
 #include <cstdint>
 
-// Native compressed-audio decoders (dr_mp3 / dr_flac / stb_vorbis / opus / minimp4 + FAAD2). Each
-// decodes a whole file into deinterleaved float channels, for AudioEngine::loadSampleFromCompressed.
-//
-// Convention: out is normalized float [-1, 1]; the left channel is always filled, the right only for
-// >=2-channel sources (null for mono). For >2 channels, ch0→L and ch1→R, extras discarded.
-//
-// Returns true on success (non-empty output, sampleRate > 0); false on any open/decode failure.
+// Whole-file decoders into float channels in [-1, 1], for loadSampleFromCompressed. Right is null
+// for mono; past two channels, ch0/ch1 are kept. False on any failure.
 namespace ptdec {
 
-/**
- * Where a decoder puts its output: one plain buffer per channel, sized from the length the file
- * states and handed to the sample slot as it is — so a load holds the sample once, not twice.
- *
- * ⚠️ A stated length can be absent or wrong. `append` grows past it, holding the old and the new
- * buffer at once — the only moment a load holds more than its own size — and `finish` trims a large
- * overstatement.
- */
+// One buffer per channel, sized from the file's stated length and handed to the sample slot as is,
+// so a load holds the sample once. A wrong length is grown past (`append`) or trimmed (`finish`).
 class PcmSink {
 public:
     PcmSink() = default;
@@ -26,10 +15,9 @@ public:
     PcmSink& operator=(const PcmSink&) = delete;
     ~PcmSink() { clear(); }
 
-    // Size the buffers for `stated` frames (<= 0: the file did not say). Drops anything held before.
-    // False = no room, and `out_of_memory()` says so.
+    // For `stated` frames (<= 0 = unknown); drops what was held. False = no room.
     bool begin(int channels, int64_t stated);
-    // Append `n` frames of `stride`-channel interleaved audio. False = no room.
+    // `n` interleaved frames of `stride` channels. False = no room.
     bool append(const float* interleaved, int n, int stride);
     void finish();
     void clear();
@@ -40,7 +28,7 @@ public:
     const float* right()  const { return right_; }
     bool         out_of_memory() const { return outOfMemory_; }
 
-    // Hand both buffers over (`new[]`-allocated; the receiver `delete[]`s them). The sink is empty after.
+    // Hands both `new[]` buffers over; the sink is empty after.
     void release(float*& left, float*& right);
 
 private:
@@ -57,13 +45,11 @@ private:
 bool decodeMp3File (const char* path, PcmSink& out, int& sampleRate);
 bool decodeFlacFile(const char* path, PcmSink& out, int& sampleRate);
 bool decodeOggFile (const char* path, PcmSink& out, int& sampleRate);
-// Ogg Opus (via libopus/opusfile). Opus always decodes at 48 kHz, so sampleRate is set to 48000.
-// Handles both `.opus` files and Opus-in-`.ogg` (where decodeOggFile/Vorbis returns false first).
+// `.opus` and Opus-in-`.ogg`; always 48 kHz.
 bool decodeOpusFile(const char* path, PcmSink& out, int& sampleRate);
 
-// ISO-BMFF AAC: `.m4a` / `.mp4` / `.m4b` / `.mov` / `.3gp`, all the same box format. minimp4 demuxes
-// the first audio track, FAAD2 decodes it. sampleRate is the decoded stream's (post-SBR for HE-AAC,
-// so it can exceed the container's). Decoder priming samples are NOT trimmed.
+// AAC in `.m4a` / `.mp4` / `.m4b` / `.mov` / `.3gp`: the first audio track. The rate is the decoded
+// one (after SBR). Priming samples are not trimmed.
 bool decodeMp4File(const char* path, PcmSink& out, int& sampleRate);
 
 }  // namespace ptdec

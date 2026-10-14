@@ -419,12 +419,9 @@ void AudioEngine::walkMixerRamps(BlockMix& b) {
     b.offlineRender = isOfflineRendering.load(std::memory_order_relaxed);
     const bool offlineRender = b.offlineRender;
 
-    // ⚠️ A fader and a gate are each a PAIR, first frame and last: a jump at a block edge steps the
-    // waveform. The mute is its own ramp, not folded into the fader.
-    // ⚠️ Two read sites, both obligatory: the sampler's per-sample gain and the SoundFont buffer's
-    // post-chain multiply. `tsf_channel_set_volume` is once per block and cannot carry either.
-    // Both snap under an export: a render is the same samples every time, and a muted track starts
-    // silent instead of fading out.
+    // ⚠️ Each is a PAIR (first frame, last) — the mute its own ramp, not folded into the fader — read
+    // at two sites: the sampler's per-sample gain and the SoundFont buffer post-chain. Both snap under
+    // an export, so a muted track starts silent.
 
     // How far each may move in this block — per full swing, so a glide lasts the same time whatever
     // the block size. The fader's is also read by the VTR/VMV arms in applyParamUpdate.
@@ -520,10 +517,8 @@ void AudioEngine::takeQueuedWork(BlockMix& b) {
     if (stopRampRequested.exchange(false, std::memory_order_acquire)) startStopRamp(blockStartFrame);
     // Before the drain below, so the take's first note already meets the fresh state.
     if (ottRestartRequested.exchange(false, std::memory_order_acquire)) masterChain.ott.restart();
-    // ⚠️ The transport-stop ramp has a deadline, and the pool is eight slots: a voice run off its
-    // sample mixes one frame per block, so its fade would hold a slot for ~256 blocks and push the
-    // next take's allocator into the steals that click. Past the ramp's end, ending the fading
-    // voices is silent.
+    // ⚠️ Past the stop ramp's end the fading voices are ended: one run off its sample mixes a frame per
+    // block and would hold a slot for ~256 blocks, forcing the next take into clicking steals.
     {
         const int64_t rampEnd = stopRampEndFrame.load(std::memory_order_relaxed);
         if (rampEnd >= 0 && blockStartFrame >= rampEnd) {
@@ -551,12 +546,9 @@ void AudioEngine::takeQueuedWork(BlockMix& b) {
 void AudioEngine::dispatchEvents(BlockMix& b) {
     size_t paramIdx = 0, killIdx = 0, noteIdx = 0;
 
-    // ⚠️ The three batches are one timeline. A block that runs late (the first step of every take)
-    // finds a note at F and its params at F+1 due on the same frame index, and params-first would
-    // drop every per-voice param riding a frame behind its note (`voiceFxFrame`, scheduler.h). So
-    // each queue yields to the earlier of the ones after it; `<=` keeps params, kills, notes at
-    // equal frames, which a K00 on its step's frame relies on. A held-back record runs on the next
-    // frame index.
+    // ⚠️ One timeline: each queue yields to an earlier record in the ones after it, or a late block
+    // (every take's first step) would run a note's params, one frame behind it, before the note.
+    // At equal frames: params, kills, notes — a K00 on its own step relies on it.
     const auto dueKill = [&] { return killIdx < killBatch.size() ? killBatch[killIdx].targetFrame : INT64_MAX; };
     const auto dueNote = [&] { return noteIdx < noteBatch.size() ? noteBatch[noteIdx].targetFrame : INT64_MAX; };
 
@@ -851,10 +843,8 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));
         voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
 
-        // LPO slides the whole loop window. ⚠️ Both bounds by the same amount: moving one changes
-        // the loop's length, which is its pitch. The offset comes from the running COUNT of
-        // sixteenths, clamped so the window stops at the sample's ends — never accumulated samples.
-        // ⚠️ The playhead moves with the window, or a forward step would be heard a loop late.
+        // LPO moves both loop bounds alike (the length is the pitch), from the running count of
+        // sixteenths, clamped to the sample. ⚠️ The playhead moves too, or a step is heard a loop late.
         const int len = voice.actualLoopEnd - voice.actualLoopStart;
         int       off = 0;
         if (voice.loopSlideSixteenths != 0 && len > 0) {
@@ -1243,11 +1233,9 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
         }
         applyGainRamp(sfBuf + from * 2, to - from, sv.volGainFrom, sv.volGainTo);
     } else {
-        // ⚠️ A note that steals another is rendered in two passes. The first renders the replaced
-        // note up to `fadeEnd`, past the new onset, and fades it there: the old TSF voices are cut
-        // only once their last samples exist. The fade is ours, on the rendered samples — TSF
-        // holds its envelope flat per 64 samples, so its own quick release is still a step.
-        // `fadeEnd` is clamped to the piece, sliding the ramp earlier near its end.
+        // ⚠️ A steal renders in two passes: the old note up to `fadeEnd` (past the new onset), faded on
+        // the rendered samples — TSF's own release steps per 64 — and only then cut. `fadeEnd` is
+        // clamped to the piece.
         const int fadeEnd   = std::min(to, sfStart + DECLICK_SAMPLES);
         const int rampStart = std::max(from, fadeEnd - DECLICK_SAMPLES);
         const int rampLen   = fadeEnd - rampStart;
@@ -1395,10 +1383,8 @@ void AudioEngine::mixMaster(const BlockMix& b) {
     const int numFrames    = b.numFrames;
     const int channelCount = b.channelCount;
 
-    // The master fader: one ramped multiply over the summed bus, dry and returns. ⚠️ Here, not with
-    // the per-voice gains — that would leave the returns playing over a silent mix — and before
-    // masterChain, so the limiter sees a post-fader signal. The meters were filled pre-master and
-    // are scaled by the block's end value, the fader on screen.
+    // The master fader over dry and returns alike, before the limiter. The meters were filled
+    // pre-master and are scaled by the block's end value.
     if (b.masterVolStart != 1.0f || b.masterVolEnd != 1.0f) {
         applyGainRamp(output, numFrames, b.masterVolStart, b.masterVolEnd);
         for (int t = 0; t < 8; t++) {
@@ -1447,9 +1433,7 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         return;
     }
 
-    // ⚠️ Chunk at PROCESS_SUBBLOCK — AUDIBLY different from a device-sized block (see the constant):
-    // a device period (ALSA ~940 frames, Oboe 192-960) resolves note-ons too coarsely, and same-track
-    // retriggers sharing a block exhaust the pool. renderOffline chunks the same, so live = export.
+    // ⚠️ Chunked at PROCESS_SUBBLOCK, as renderOffline is: a device period resolves notes too coarsely.
     int processed = 0;
     while (processed < numFrames) {
         int chunk = std::min((int)numFrames - processed, PROCESS_SUBBLOCK);

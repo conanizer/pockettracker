@@ -1,23 +1,18 @@
 // The SoundFont bank: parsing a preset into a tsf handle (in the background or not), the slot cache
 // with its de-dup and LRU, the per-file preset index, and the per-instrument ADSR override.
 #include "audio-engine.h"
-#include "vendor/tsf/tsf.h"    // TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
-#include "common/byte_source.h"       // pt_fopen — the soundfont loader opens through it
-#include "common/platform_memory.h"   // load_budget_bytes — refuses a load the device cannot hold
-#include "common/load_progress.h"     // load_tick / load_cancelled — a slow load reports itself and can be stopped
+#include "vendor/tsf/tsf.h"    // declarations only
+#include "common/byte_source.h"       // pt_fopen
+#include "common/platform_memory.h"   // load_budget_bytes
+#include "common/load_progress.h"     // load_tick / load_cancelled
 #include <cstdio>
 #include <cstdint>
 #include <climits>   // INT_MAX — tsf_load_memory takes an int size
 #include <vector>
 
 namespace {
-// The `tsf_stream` pair loadSoundfont hands to tsf_load — the same one tsf builds inside
-// tsf_load_filename, which is unused here because the open must be pt_fopen's. `read` returns the
-// byte count, `skip` returns 1 on success and 0 on error, per tsf.h.
-//
-// Declared `void*` rather than `FILE*`: tsf's own pair takes FILE* and is cast into the struct at
-// the call site, which is a call through a mismatched function-pointer type. Taking void* and
-// casting inside costs nothing and is the same shape the dr_libs callbacks use.
+// tsf_load's stream over a pt_fopen'd FILE: `read` returns bytes, `skip` 1 or 0. Taking `void*`
+// keeps the function-pointer type exact.
 int sfStreamRead(void* f, void* ptr, unsigned int size) {
     return (int)std::fread(ptr, 1, size, (FILE*)f);
 }
@@ -33,14 +28,10 @@ void AudioEngine::setSoundfontEnvelopeOverride(int instrumentId, int atk, int de
     sfEnvOverrides.publish(instrumentId);
 }
 
-// ===================================
-// SOUNDFONT BANK
-// ===================================
 
 void AudioEngine::freeSoundfontSlot(int slot) {
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
-    // The voices on this slot are detached by the audio thread's next block (the generation), and
-    // the handle is closed only once the block that may have loaded it has ended.
+    // The next block detaches its voices (the generation); the handle closes once that block ends.
     tsf* h = soundfonts[slot].handle.exchange(nullptr);
     soundfonts[slot].gen.fetch_add(1);
     if (h) {
@@ -53,27 +44,19 @@ void AudioEngine::freeSoundfontSlot(int slot) {
     soundfonts[slot].preset = -1;
 }
 
-// ⚠️ Everything tsf would otherwise allocate on the AUDIO thread, done here: it grows its voice array
-// on a note that finds none free, and its channel array on the first call naming a new channel. So
-// both are sized now — a voice pool no preset here comes near, and a channel per SoundFont voice.
-// With a fixed pool tsf takes the voice furthest into its release instead of growing.
+// ⚠️ Sizes tsf's voice and channel arrays now — otherwise tsf grows them on the audio thread. With a
+// full pool it steals the voice furthest into its release.
 static void readyForAudio(tsf* h, int sampleRate) {
     tsf_set_output(h, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
     tsf_set_max_voices(h, 128);
-    tsf_channel_set_pan(h, SF_VOICE_COUNT - 1, 0.5f);   // creates channels 0..8, each at its default
+    tsf_channel_set_pan(h, SF_VOICE_COUNT - 1, 0.5f);   // creates channels 0..8
 }
 
-/**
- * Turn a file plus a bank/preset into a parsed tsf handle. No slot is touched and no member is
- * written; the failure comes back through `failure` — this runs on the background worker as often
- * as on the calling thread.
- */
+// File + bank/preset → a parsed handle. Touches no slot and no member — it runs on the worker too.
 tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFailure* failure) {
     *failure = LoadFailure::NONE;
 
-    // ⭐ THE PREFERRED PATH: cut the one preset out of the file and parse only that — a complete,
-    // ordinary SoundFont, typically under 1 % of the bank, so tsf never sees the rest. False means
-    // "cannot be cut apart", never "broken", and falls through to the whole-bank parse.
+    // First try the one preset cut out of the file; if it cannot be cut, the whole bank.
     {
         std::vector<uint8_t> trimmed;
         sf_memory_guard_reset();
@@ -84,23 +67,18 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
                 readyForAudio(small, getSampleRate());
                 return small;
             }
-            // ⚠️ Asked before anything else, for the reason the whole-bank path below states: a cancel
-            // and a parse failure unwind through the identical null, and falling through here would
-            // answer a cancelled load by starting the very load the user just stopped.
+            // ⚠️ First: a cancel returns the same null, and falling through would restart the load.
             if (pt::load_cancelled()) {
                 LOGD("🎹 Soundfont load cancelled: %s", path);
                 *failure = LoadFailure::CANCELLED;
                 return nullptr;
             }
-            // A trimmed font that will not parse is a bug here, not a property of the file — but the
-            // user's sound is worth more than the diagnosis, so fall through and load it whole.
+            // A trimmed font that will not parse is our bug; load it whole rather than fail.
             LOGE("❌ Trimmed soundfont failed to parse, loading whole bank: %s", path);
         }
     }
 
-    // Parse into a single master handle; all tracks share it via MIDI channels (per-track clones
-    // would cost 8× the file in RAM). `tsf_load` over pt_fopen's `FILE*` — sequential reads and
-    // forward skips, so the file streams and peak RAM is the parsed soundfont alone.
+    // Streamed through pt_fopen: peak RAM is the parsed font alone.
     FILE* sf = pt_fopen(path, "rb");
     if (!sf) {
         LOGE("❌ Cannot open soundfont: %s", path);
@@ -108,15 +86,12 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
         return nullptr;
     }
     tsf_stream sfStream = { sf, &sfStreamRead, &sfStreamSkip };
-    // ⭐ The guard that makes a too-large font a MESSAGE instead of a kill (soundfont-voice.cpp).
-    // Reset first: the flag separates "too big for this device" from "not a soundfont".
+    // The memory guard's flag (soundfont-voice.cpp) tells "too big" from "not a soundfont".
     sf_memory_guard_reset();
     tsf* loaded = tsf_load(&sfStream);
     std::fclose(sf);
     if (!loaded) {
-        // ⚠️ Asked FIRST, and before the guard: a cancel is not a failure and must not be reported as
-        // one. tsf unwinds through the identical null return either way (the abort reuses the decode
-        // failure's own cleanup), so the reason is only knowable out here.
+        // ⚠️ Before the guard: a cancel returns the same null and must not read as a failure.
         if (pt::load_cancelled()) {
             LOGD("🎹 Soundfont load cancelled: %s", path);
             *failure = LoadFailure::CANCELLED;
@@ -130,24 +105,17 @@ tsf* AudioEngine::parseSoundfont(const char* path, int bank, int preset, LoadFai
         }
         return nullptr;
     }
-    // Configured before publication, for the same reason the trimmed path is: a voice that sees the
-    // handle must see it ready. `tsf_set_output` is not a read the audio thread can be racing,
-    // because nothing else has the pointer yet.
+    // Configured before anyone else has the pointer.
     readyForAudio(loaded, getSampleRate());
     return loaded;
 }
 
-/**
- * Give a parsed handle a slot, evicting the least-recently-used one if every slot is taken.
- *
- * ⚠️ Slot-table work only, and only on the thread that owns it — never across a parse.
- */
+// A slot for a parsed handle, evicting the least recently used. ⚠️ Owner thread only, never across a parse.
 int AudioEngine::installSoundfont(tsf* handle, int instrumentId, const char* path, int bank,
                                   int preset) {
     if (!handle) return -1;
 
-    // Find a free slot; if none, evict the genuinely least-recently-used one (smallest use tick), not
-    // the smallest instrumentId — that could evict the SoundFont playing right now.
+    // A free slot, else the smallest use tick.
     int slot = -1;
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
         if (soundfonts[i].handle == nullptr) {
@@ -179,17 +147,11 @@ int AudioEngine::installSoundfont(tsf* handle, int instrumentId, const char* pat
 int AudioEngine::loadSoundfont(int instrumentId, const char* path, int bank, int preset) {
     if (!path) return -1;
 
-    // ⚠️ Only one tsf parse at a time — see parseSoundfont. A synchronous load takes precedence over
-    // a background one simply by waiting for it, which is at most one preset's worth of decode.
+    // ⚠️ One tsf parse at a time: wait for a background one (at most one preset's decode).
     waitForSoundfontLoad();
 
-    // De-dup: this exact SOUND already loaded reuses its slot instead of a second copy. Multiple
-    // instruments share one handle — they play on distinct MIDI channels (= tracks) and apply their
-    // ADSR override per-note in fireArmedNote, so per-instrument state stays isolated. Frees stay
-    // reference-guarded (setInstrumentType / clearAllSoundfonts).
-    //
-    // ⚠️ The bank and preset are part of the key, not just the path: a slot holds ONE preset cut out
-    // of the file, so two instruments on the same .sf2 at different sounds must not share one.
+    // The same sound already loaded shares its slot; each instrument applies its ADSR per note.
+    // ⚠️ Keyed by path, bank AND preset.
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
         if (soundfonts[i].handle != nullptr && soundfonts[i].filePath == path &&
             soundfonts[i].bank == bank && soundfonts[i].preset == preset) {
@@ -215,12 +177,10 @@ AudioEngine::SfRequest AudioEngine::requestSoundfontLoad(int instrumentId, const
     if (readySlot) *readySlot = -1;
     if (!path) return SfRequest::BUSY;
 
-    // A finished worker still holding its result blocks the next request. The caller polls, so it
-    // will collect it and come back — refusing is what keeps "one result waiting at a time" true.
+    // An uncollected result blocks the next request; the caller polls and comes back.
     if (sfLoadBusy.load(std::memory_order_acquire)) return SfRequest::BUSY;
 
-    // The same de-dup the synchronous path does, and for the same reason — but here it also spares a
-    // thread: walking back to a preset another instrument still holds costs nothing at all.
+    // The synchronous path's de-dup.
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
         if (soundfonts[i].handle != nullptr && soundfonts[i].filePath == path &&
             soundfonts[i].bank == bank && soundfonts[i].preset == preset) {
@@ -239,8 +199,8 @@ AudioEngine::SfRequest AudioEngine::requestSoundfontLoad(int instrumentId, const
     sfLoadDone.store(false, std::memory_order_relaxed);
     sfLoadBusy.store(true, std::memory_order_release);
 
-    // ⚠️ The worker reads the request fields and writes the result fields, and `sfLoadDone` is the
-    // fence between the two halves. Nothing else touches them while `sfLoadBusy` is set.
+    // ⚠️ While `sfLoadBusy` is set only the worker touches the request/result fields; `sfLoadDone`
+    // fences the two halves.
     sfLoadThread = std::thread([this]() {
         tsf* handle = parseSoundfont(sfLoadPath.c_str(), sfLoadBank, sfLoadPreset, &sfLoadFailure);
         sfLoadHandle = handle;
@@ -265,8 +225,7 @@ bool AudioEngine::collectSoundfontLoad(int* instrumentId, int* slot) {
     if (instrumentId) *instrumentId = sfLoadInstrument;
     if (slot) *slot = landed;
 
-    // Released LAST: it is what lets the next request start, and the result must be fully read out
-    // of the members before another one can overwrite them.
+    // Last: it lets the next request overwrite the result.
     sfLoadBusy.store(false, std::memory_order_release);
     return true;
 }
@@ -279,17 +238,14 @@ void AudioEngine::waitForSoundfontLoad() {
     if (!sfLoadBusy.load(std::memory_order_acquire)) return;
     if (sfLoadThread.joinable()) sfLoadThread.join();
 
-    // ⚠️⚠️ THE RESULT IS KEPT, NOT THROWN AWAY: only the PARSE must be alone. The caller was told
-    // the load was accepted and the PATCH row will not ask twice, so discarding it would leave the
-    // instrument on its old sound for good. `sfLoadBusy` stays set and the next poll collects it.
+    // ⚠️ The result is kept for the next poll — the PATCH row will not ask twice.
 }
 
 void AudioEngine::discardSoundfontLoad() {
     if (!sfLoadBusy.load(std::memory_order_acquire)) return;
     if (sfLoadThread.joinable()) sfLoadThread.join();
 
-    // ⚠️ Here the answer really is worthless: the project it was asked for is being torn down, so a
-    // slot given to it would belong to a document that no longer exists.
+    // Here the result is discarded: its project is being torn down.
     if (sfLoadHandle) {
         tsf_close(sfLoadHandle);
         sfLoadHandle = nullptr;
@@ -322,21 +278,16 @@ void AudioEngine::unloadSoundfont(int slot) {
 }
 
 void AudioEngine::clearAllSoundfonts() {
-    // ⚠️ A load still in flight belongs to the project being thrown away. Waited for and discarded,
-    // or it would land in a slot the new project has to clear all over again.
+    // A load in flight belongs to the old project: waited for and discarded.
     discardSoundfontLoad();
 
-    // Free EVERY slot on a project change (NEW / load); otherwise a slot is reclaimed only by LRU
-    // eviction, and a loaded font's samples would stay resident.
+    // Every slot, or the old project's fonts stay resident until evicted.
     for (int s = 0; s < MAX_SOUNDFONTS; s++) freeSoundfontSlot(s);
     LOGD("🎹 Cleared all soundfont slots");
 }
 
 // ─── the FILE's preset list ─────────────────────────────────────────────────────────────────────
-//
-// A loaded slot holds one preset, so it can no longer say what else the file contains. These read the
-// file's index instead — a few kilobytes even for a 200 MB bank, and no sample data at all, which is
-// what makes browsing a font that is far too large to load work exactly like browsing a small one.
+// Read from the file's index — a slot holds one preset, and a font too large to load can still be listed.
 
 int AudioEngine::soundfontFileIndexSlot(const char* path) {
     for (size_t i = 0; i < sfFileIndexCache.size(); ++i) {
@@ -345,8 +296,7 @@ int AudioEngine::soundfontFileIndexSlot(const char* path) {
     std::vector<pt::SfPreset> presets;
     if (!pt::sf_read_preset_list(path, presets)) return -1;
 
-    // Four files is more than the PATCH row can be walking at once; the oldest goes, and re-reading it
-    // costs one small read.
+    // Four files; the oldest goes.
     if (sfFileIndexCache.size() >= 4) sfFileIndexCache.erase(sfFileIndexCache.begin());
     sfFileIndexCache.push_back({ std::string(path), std::move(presets) });
     return static_cast<int>(sfFileIndexCache.size()) - 1;

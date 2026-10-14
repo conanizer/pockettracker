@@ -2,8 +2,7 @@
 
 #define LOG_TAG "NativeAudio"
 
-// Platform logging shim: <android/log.h> on Android, stderr elsewhere, so no engine translation unit
-// depends on the Android log API.
+// Logging: Android's log on Android, stderr elsewhere.
 #ifdef __ANDROID__
 #  include <android/log.h>
 #  define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -12,14 +11,8 @@
 #  include <cstdio>
 #  include <cstdlib>
 
-// ⚠️ OFF ANDROID THERE IS NO LOGCAT TO FILTER THESE: LOGD would go straight to the console behind
-// the tracker. So LOGD is OPT-IN off Android: POCKETTRACKER_LOG=1 (anything but unset/empty/"0",
-// as POCKETTRACKER_HOME is read).
-//
-// ⚠️ LOGE IS NOT GATED: an error is not spam, and a user can paste the console back when it breaks.
-//
-// ⚠️ A plain bool read once (an inline variable, initialised before main), not getenv() per call:
-// getenv is not real-time safe, and control-path logging is reachable from queue drains.
+// Off Android LOGD is opt-in (POCKETTRACKER_LOG set and not "0") — there is no logcat to filter it.
+// LOGE always prints. Read once before main: getenv is not real-time safe.
 namespace ptlog {
 inline const bool debug_enabled = [] {
     const char* v = std::getenv("POCKETTRACKER_LOG");
@@ -38,9 +31,7 @@ inline const bool debug_enabled = [] {
 #  define LOGE(...) do { fprintf(stderr, "[E/" LOG_TAG "] "); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
 #endif
 
-// LOGT — trace-level log for hot paths (note triggers, table processing, etc.).
-// Disabled by default to avoid flooding logcat during playback.
-// Flip to 1 to get per-note / per-table-row tracing when debugging audio logic.
+// LOGT: per-note / per-row tracing for hot paths; set to 1 when debugging.
 #define AUDIO_TRACE 0
 #if AUDIO_TRACE
 #  define LOGT(...) LOGD(__VA_ARGS__)
@@ -48,29 +39,19 @@ inline const bool debug_enabled = [] {
 #  define LOGT(...)
 #endif
 
-// One voice per track (8 tracks); stereo samples use one slot with sampleDataRight. There are 9
-// LOGICAL lanes (tracks 0-7 + the preview lane, PREVIEW_TRACK_ID = 8) but 8 voices: a preview
-// steals a fading voice when all 8 tracks sound (scheduleNoteBatch's voice search).
+// One voice per track. Nine lanes (8 = preview) but eight voices: a preview steals a fading one.
 const int MAX_VOICES = 8;
-const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz (note start, voice steal)
-// Deliberate kills (K00 / table KIL / preview stop) fade longer: 1.45 ms from a high-amplitude
-// point still lands as a small tick, ~5.8 ms is soft yet perceptually instant. Steals stay at
-// DECLICK_SAMPLES — their tail is masked by the new note, and short fades keep slots turning
-// over at phrase-boundary trigger bursts.
+const int DECLICK_SAMPLES = 64;  // ~1.45 ms: note start, voice steal
+// Deliberate kills (KIL, a preview stop) fade ~5.8 ms — 1.45 ms still ticks. A steal is masked by
+// the new note and stays short.
 const int KILL_FADE_SAMPLES = 256;
-// The MUTE/SOLO gate, for the same reason and at the same length: a track cut to zero at a
-// high-amplitude point is a click whatever cut it. ⚠️ It is a GATE, not a fade — it runs in both
-// directions, so unmuting rides back up to the fader over the same 5.8 ms rather than snapping.
+// The MUTE/SOLO gate ramps both ways, so an unmute rides back up too.
 const int MUTE_GATE_SAMPLES = 256;
-// A mixer fader (a hand, VTR, VMV) glides at most one full swing per this many samples, across as many
-// blocks as it takes. A VTR on a note's own step does not glide at all (engine-mix.cpp).
+// A fader (a hand, VTR, VMV) moves at most one full swing per this many samples. A VTR on a note's
+// own step does not glide (engine-mix.cpp).
 const int FADER_GLIDE_SAMPLES = 256;
 
-// ===================================
-// EFFECT TYPE CONSTANTS — ⚠️ must match native/songcore/effects.h, which is where an effect's code is
-// defined and where the UI, the file format and the scheduler all read it from. Only effects the C++
-// TABLE engine processes are listed here; the phrase-level ones (ARP/ARC/REP/…) are songcore's.
-// ===================================
+// ⚠️ Must match songcore/effects.h, where the codes are defined. Only what the table engine runs.
 const int FX_CHA    = 0x04;  // CHA xy - chance: x for its nearest filled neighbour on the LEFT, y on the RIGHT
 const int FX_RNL    = 0x11;  // RNL xx - add a random 0..xx to the value in the slot to its LEFT
 const int FX_RND    = 0x10;  // RND xx - re-fire the last command in this column with 0..xx added
@@ -95,56 +76,38 @@ const int FX_FIN    = 0x39;  // FIN xx - fine tune; 80 = in tune, one semitone e
 const int FX_INS    = 0x3C;  // INS xx - play this hit on instrument xx; on a table row it is a SWITCH
 const int FX_TIM    = 0x3D;  // TIM xx - the delay's echo time, free scale (00-FF = 0-2 s); GLOBAL
 
-// The highest value a random roll may push a table command to — songcore's effect_value_max for the
-// codes a table row acts on, and pinned to it in engine_consumer.h.
+// The most a random roll may push a table command to — songcore's effect_value_max, pinned in
+// engine_consumer.h.
 inline constexpr int tableFxCeiling(int fxType) {
     return (fxType == FX_EQN || fxType == FX_EQM || fxType == FX_INS) ? 127 : 255;
 }
-// ─── The loop modes, as the engine numbers them ─────────────────────────────────────────────────
-//
-// ⚠️ **OSCILLATOR IS A FORWARD LOOP WITH ITS SCAN RATE RETUNED**, not a fourth kind of traversal:
-// everything about how the position walks between the two loop points is mode 1's, and the only
-// difference is the factor `getModulatedPlaybackRate` applies. So every branch that asks "is this
-// looping forward?" must ask `isForwardLoopMode`, never `== LOOP_MODE_FORWARD` — a site that missed
-// the new mode would play the note ONCE and stop, with no error anywhere.
-//
-// ⚠️ The project file stores the mode as a NAME, not as this number, so the numbering is the
-// engine's alone and appending here renumbers nothing a user has saved.
+// ─── The loop modes, the engine's own numbers (the file stores names) ────────────────────────────
+// ⚠️ OSCILLATOR walks like FORWARD with a retuned rate: ask `isForwardLoopMode`, never
+// `== LOOP_MODE_FORWARD`, or an oscillator plays once and stops.
 const int LOOP_MODE_OFF        = 0;
 const int LOOP_MODE_FORWARD    = 1;
 const int LOOP_MODE_PINGPONG   = 2;
 const int LOOP_MODE_OSCILLATOR = 3;
 
-/** Does this mode loop FORWARD between the two loop points? */
 inline constexpr bool isForwardLoopMode(int mode) {
     return mode == LOOP_MODE_FORWARD || mode == LOOP_MODE_OSCILLATOR;
 }
 
-// ⚠️ 0x3A (TSX) is deliberately absent: it is resolved before a note is scheduled and the engine
-// never sees it, so mirroring it here would be a constant with no reader.
+// No 0x3A (TSX): resolved before scheduling, the engine never sees it.
 const int FX_LPO    = 0x3B;  // LPO xx - slide the loop window, signed sixteenths of its own length
 
-// LPO's byte as a signed count of sixteenths, the same decode songcore does. Both sides spell it
-// because the table engine reads the raw cell and the phrase path reads the resolved bundle.
+// LPO's byte as signed sixteenths — songcore decodes it the same way.
 inline constexpr int loopSlideSixteenthsOf(int value) {
     return (value & 0xFF) < 0x80 ? (value & 0xFF) : (value & 0xFF) - 256;
 }
 
-// FIN's byte as semitones: the cents between the whole semitones PIT steps in. 80 is unity, 00 is a
-// semitone flat and FF one step short of a semitone sharp, so one step is 1/128 of a semitone
-// (0.78 cents) and the two commands meet with no gap. Spelled here rather than in songcore because
-// the byte reaches the seam undivided and only the engine ever turns it into a pitch.
+// FIN's byte as semitones: 80 in tune, 00 a semitone flat, 1/128 per step — meeting PIT with no gap.
 inline constexpr float fineTuneSemitonesOf(int value) { return (value - 128) / 128.0f; }
 
-// ⚠️ The two claims here are the ones NOTHING ELSE CAN CATCH. A centre that is one step off detunes
-// every cell typed at 80 by 0.78 cents — under the ear, and under any render comparison that is not
-// looking for it. The endpoint is a second, independent claim: it fails for a wrong DIVISOR, which
-// the centre check passes either way.
+// Nothing else would catch a centre one step off (0.78 cents) or a wrong divisor.
 static_assert(fineTuneSemitonesOf(0x80) == 0.0f, "FIN's centre byte must be exactly in tune");
 static_assert(fineTuneSemitonesOf(0x00) == -1.0f, "FIN's low end must be exactly a semitone flat");
 
-// The two halves of a CRU byte. Spelled here because the engine does not see songcore/effects.h,
-// which spells them too; engine_consumer.h - the one file that sees both - asserts they agree over
-// every byte, exactly as it does for the effect codes above.
+// The two halves of a CRU byte; engine_consumer.h asserts they match songcore's.
 inline constexpr int crushBitsOf(int value)       { return (value >> 4) & 0x0F; }
 inline constexpr int crushDownsampleOf(int value) { return value & 0x0F; }
