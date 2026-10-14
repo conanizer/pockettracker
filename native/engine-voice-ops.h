@@ -157,20 +157,9 @@ template <typename V> static inline void voiceGlideVol(V& v) {
     v.volGlideLeft = VOL_GLIDE_FRAMES;
 }
 
-// The sampler's read at downsample `ds` — the mix loop's own fetch, for the read being faded OUT when
-// the downsample changes on a sounding note. `r` repeats `l` for a mono sample.
+// A change of the sampler's downsample on a sounding note blends the old read into the new one over
+// this many samples.
 inline constexpr int DOWNSAMPLE_FADE_FRAMES = 128;
-static inline void fetchDownsampled(const Voice& v, int idx, float frac, int ds, float& l, float& r) {
-    if (ds > 0) {
-        const int f  = 1 << ds;
-        const int qi = (idx / f) * f;
-        l = v.sampleData[qi];
-        r = v.sampleDataRight ? v.sampleDataRight[qi] : l;
-        return;
-    }
-    l = v.sampleData[idx] + (v.sampleData[idx + 1] - v.sampleData[idx]) * frac;
-    r = v.sampleDataRight ? v.sampleDataRight[idx] + (v.sampleDataRight[idx + 1] - v.sampleDataRight[idx]) * frac : l;
-}
 
 // FIN needs no field of its own: both voice types zero `PARAM_PITCH`'s BASE at trigger, while the MOD
 // half carries table transpose, slides and vibrato — so the base is per-note and collides with none.

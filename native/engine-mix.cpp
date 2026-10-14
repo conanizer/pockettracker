@@ -819,13 +819,9 @@ void AudioEngine::applyKill(const ScheduledKill& kill, int frame) {
     }
 }
 
-// ⚠️⚠️ **EACH SAMPLER VOICE RUNS TO THE END OF THE BLOCK BEFORE THE NEXT STARTS, IN PIECES CUT WHERE
-// ITS TABLE PLAYS A ROW.** The voice renders up to the row's frame, the row is applied, the voice's
-// modulation is derived again and it renders on — so a row starts on its own sample, not on a
-// block edge. A voice with no row due this block is one piece, the whole block.
-//
-// The sample-edit lock is a try_lock so applyRateAndBits can swap buffers safely; while it is held
-// the voices still advance and are not mixed — one block of silence instead of a crash.
+// ⚠️ Each sampler voice runs to the end of the block before the next starts, in pieces cut where
+// its table plays a row — so a row starts on its own sample, not on a block edge.
+// The edit lock is a try_lock: while a sample is being rewritten the voices advance unmixed.
 void AudioEngine::mixSamplerVoices(BlockMix& b) {
     const int numFrames = b.numFrames;
     std::unique_lock<std::mutex> editLock(sampleEditMutex, std::try_to_lock);
@@ -844,9 +840,8 @@ void AudioEngine::mixSamplerVoices(BlockMix& b) {
     }
 }
 
-// The ONE place a track's TIC00 cursor is written, below the row logic. Only the live (not fading)
-// voice owns it, or the value would depend on slot order. Written when ANY column is at TIC00,
-// storing all three; a retrigger re-checks each rate.
+// The one place a track's TIC00 cursor is written. Only the live (not fading) voice owns it, or
+// the value would depend on slot order.
 void AudioEngine::storeTic00Cursor(const Voice& voice) {
     bool anyTic00 = false;
     for (int l = 0; l < TABLE_LANES; ++l) anyTic00 |= (voice.lanes[l].ticRate == 0x00);
@@ -866,16 +861,14 @@ void AudioEngine::storeTic00Cursor(const Voice& voice) {
     }
 }
 
-// A sampler voice's modulation for the next `frames` of the block, then its pan and filter.
+// A sampler voice's modulation for the next `frames`, then its pan and filter. Each keeps the value
+// it had: the mix loop ramps from that to the new one.
 void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate) {
     updateVoicePitchMod(voice, frames, sampleRate);
 
-    // Snapshot envValues before advancing so the mix loop can interpolate
-    // per-sample (eliminates block-rate staircase artifacts on short envelopes).
     for (int m = 0; m < 4; m++) voice.voiceMods[m].prevEnvValue = voice.voiceMods[m].envValue;
     updateVoiceModulation(voice, frames, sampleRate);
 
-    // PAN modulation: snapshot before update so the mix loop can interpolate per-sample
     voice.prevPanLeft  = voice.panLeft;
     voice.prevPanRight = voice.panRight;
     if (voiceStepPanGlide(voice, frames)) {
@@ -890,7 +883,6 @@ void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate
         voice.panRight = sinf(panAngle);
     }
 
-    // FILTER modulation: snapshot then recompute coefficients when LFO/ADSR drives CUT or RES
     voice.chain.filter.snapshotCoeffs();
     if (voice.chain.filter.enabled() &&
             (fabsf(voice.params.mod[PARAM_FILTER_CUT]) > 0.5f ||
@@ -900,8 +892,7 @@ void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate
         voice.chain.filter.setParams(voice.chain.filter.type, modCut, modRes, voice.chain.filter.drive, sampleRate);
     }
 
-    // Auto-stop looping voice when volume envelope completes
-    // AHD/DRUM done at stage 4; ADSR/TRIG done at stage 5
+    // A looping voice ends when its volume envelopes have: AHD/DRUM at stage 4, ADSR/TRIG at 5.
     if (voice.loopMode != 0) {
         bool hasVolMod = false, allDone = true;
         for (int m = 0; m < 4; m++) {
@@ -933,7 +924,7 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
     int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
     int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
     voice.chain.drive.setDrive(effDrive);
-    voice.chain.crush.setParams(effCrush, 0);   // sampler: downsample=0, pre-interp handles it
+    voice.chain.crush.setParams(effCrush, 0);   // the sampler's downsample is in the read, below
     if (effDownsample != voice.dsLast) {
         if (voice.chain.started) {   // a change on the sounding note — before it, just where it starts
             voice.dsPrev     = voice.dsLast;
@@ -943,9 +934,8 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
     }
     {
         int sl = voice.sampleLength;
-        // START/END are re-derived every block so a mod route can move them while the note rings.
-        // ⚠️ An exact-frame window (note-queue.h) is carried on the voice instead, because the
-        // 0-255 pair cannot express it — re-deriving would widen the editor's audition to the file.
+        // Re-derived every piece so a mod route can move them while the note rings. ⚠️ Not an
+        // exact-frame window: the 0-255 pair cannot express it, so that one is carried on the voice.
         if (voice.windowStartFrame >= 0) {
             voice.actualStart = std::max(0, std::min(voice.windowStartFrame, sl - 2));
             voice.actualEnd   = std::max(voice.actualStart + 1, std::min(voice.windowEndFrame, sl - 1));
@@ -958,17 +948,10 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));
         voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
 
-        // ── LPO: slide the whole window, BOTH ends by the same amount ───────────────────────
-        //
-        // ⚠️⚠️ BOTH BOUNDS OR NOTHING: moving one changes the loop's LENGTH, which on a looped
-        // note is the pitch.
-        // ⭐ The offset derives from the RUNNING TOTAL of sixteenths, never accumulated samples,
-        // so sixteen steps of `01` land exactly where one step of `10` does on any length. The
-        // COUNT is clamped, so the window STOPS at the sample's ends and one step back moves it.
-        // ⚠️⚠️ THE PLAYHEAD MOVES WITH THE WINDOW: it keeps its position within the loop and hears
-        // the new material at once. Left behind, a forward step is heard a loop late and a
-        // backward one snaps to the loop start with a click. `loopSlideFrames` is the offset LAST
-        // APPLIED, so the shift is a difference of two derived values.
+        // LPO slides the whole loop window. ⚠️ Both bounds by the same amount: moving one changes
+        // the loop's length, which is its pitch. The offset comes from the running COUNT of
+        // sixteenths, clamped so the window stops at the sample's ends — never accumulated samples.
+        // ⚠️ The playhead moves with the window, or a forward step would be heard a loop late.
         const int len = voice.actualLoopEnd - voice.actualLoopStart;
         int       off = 0;
         if (voice.loopSlideSixteenths != 0 && len > 0) {
@@ -979,10 +962,8 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
             off = (int)(((int64_t)voice.loopSlideSixteenths * len) / 16);
         }
         if (off != voice.loopSlideFrames) {
-            // ⚠️ ONLY WHILE THE PLAYHEAD IS INSIDE THE LOOP. Before the first wrap it is still in
-            // the intro (start → loop start), and after a note-off on an ADSR voice it is running
-            // the release tail with the loop abandoned; neither is a position the window owns, and
-            // dragging it would walk a released note backwards into the loop it just left.
+            // ⚠️ Only while the playhead is inside the loop: the intro before the first wrap and
+            // a released note's tail are not positions the window owns.
             const int wasStart = voice.actualLoopStart + voice.loopSlideFrames;
             const int wasEnd   = voice.actualLoopEnd   + voice.loopSlideFrames;
             if (voice.position >= (double)wasStart && voice.position < (double)wasEnd)
@@ -993,14 +974,11 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         voice.actualLoopEnd   += off;
     }
 
-    // ⚠️ AFTER the loop bounds, not before: oscillator mode's rate is derived from the loop
-    // LENGTH, so reading it above would run a block behind every LPO slide and every loop edit.
+    // ⚠️ After the loop bounds: oscillator mode derives its rate from the loop's length.
     float modulatedRate = getModulatedPlaybackRate(voice);
 
-    // Honour the intra-block trigger offset: a note dispatched at blockStart+f must not sound
-    // before frame f. The fade has the same offset (fadeStartFrame, held in the loop below);
-    // params stay quantized to the piece — they are ramped across it, and the ramp is the
-    // anti-click. An onset beyond this piece waits for the piece that contains it.
+    // A note dispatched at frame f of the block does not sound before f; an onset beyond this
+    // piece waits for the piece that contains it.
     int startFrame = from;
     if (voice.startDelayFrames > 0) {
         if (voice.startDelayFrames >= to) return;
@@ -1008,152 +986,166 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         voice.startDelayFrames = 0;
     }
 
-    // ⚠️ TWO RAMPS, TWO CLOCKS. The voice's own params (pan, VOL routes, envelopes, filter) were
-    // derived for THIS piece and ramp across it; the mixer's fader and mute gate were derived
-    // for the whole block and must ramp across the block, or a cut piece would step them.
-    const int pieceFrames = to - from;
-    for (int i = startFrame; i < to; i++) {
-        int idx = (int)voice.position;
-        // frac computed in double THEN narrowed: (float)idx is inexact past 2^24, which
-        // would corrupt frac for exactly the long samples double position exists for.
-        float frac = (float)(voice.position - (double)idx);
+    // ⚠️ The loop below works on locals: its stores into the float buffers may alias any float of
+    // the voice, so a field read inside it is reloaded on every sample. What it advances is written
+    // back below it — leave it by `break`, never `return`.
+    Playhead   ph           = playheadOf(voice, modulatedRate);
+    const bool stereo       = ph.right != nullptr;
+    const int  lastReadable = voice.sampleLength - 1;   // the read needs idx + 1
 
-        // Bounds check - need idx+1 for interpolation
-        if (idx < 0 || idx >= voice.sampleLength - 1) {
-            if (idx < 0) {
-                voice.isActive = false;  // negative position: safety hard-stop
-            } else {
-                // At or past last interpolation point: fade out so SVF resonance decays
-                voice.position = (double)(voice.sampleLength - 2);
-                voice.startFadeOut();  // no-op if already fading
-            }
+    // ⚠️ Two ramps, two clocks: the voice's own params ramp across this PIECE (`t`), the mixer's
+    // fader and mute gate across the whole BLOCK (`tBlock`) — or a cut piece would step them.
+    const int   pieceFrames = to - from;
+    const float panLFrom = voice.prevPanLeft,  panLStep = voice.panLeft  - voice.prevPanLeft;
+    const float panRFrom = voice.prevPanRight, panRStep = voice.panRight - voice.prevPanRight;
+    const float volume   = voice.volume;
+    // The mods routed to VOL, in slot order: an LFO scales the level, an envelope adds to it.
+    struct VolMod { float from, step, amount; bool scales; };
+    VolMod volMods[4];
+    int    volModCount = 0;
+    for (int m = 0; m < 4; m++) {
+        const VoiceModSlot& mod = voice.voiceMods[m];
+        if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
+        volMods[volModCount++] = {mod.prevEnvValue, mod.envValue - mod.prevEnvValue, mod.effectiveAmt, mod.type == 3};
+    }
+    const float volRouteFrom = voice.prevModDestValues[PARAM_VOL];
+    const float volRouteStep = voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL];
+    const float volGlideFrom = voice.volGlideFrom;
+    int   volGlideLeft = voice.volGlideLeft;
+    float volRouteLast = voice.volRouteLast;
+
+    // ⚠️ SF_VOICE_COUNT, not 8: the preview lane carries a real fader. Off any track both are 1.
+    const int   trackId = voice.trackId;
+    const bool  onTrack = trackId >= 0 && trackId < SF_VOICE_COUNT;
+    const float faderFrom = !onTrack ? 1.0f : voice.faderHeld ? voice.faderHeldStart : b.trackVolStart[trackId];
+    const float faderTo   = !onTrack ? 1.0f : voice.faderHeld ? voice.faderHeldEnd   : b.trackVolEnd[trackId];
+    const float faderStep = faderTo - faderFrom;
+    const float gateFrom  = onTrack ? b.gateStart[trackId] : 1.0f;
+    const float gateStep  = onTrack ? b.gateEnd[trackId] - b.gateStart[trackId] : 0.0f;
+
+    const int dsPrev          = voice.dsPrev;
+    int       dsFadeLeft      = voice.dsFadeLeft;
+    int       fadeInRemaining = voice.fadeInRemaining;
+
+    InstrumentChain& chain = voice.chain;
+    const bool chainIdle   = chain.idle();
+    bool       chainRan    = false;
+
+    // A fade dispatched at frame f waits for f. Running out of sample starts one below the loop.
+    const int fadeStartFrame   = voice.fadeStartFrame;
+    const int fadeOutTotal     = voice.fadeOutTotal;
+    int       fadeOutRemaining = voice.fadeOutRemaining;
+    bool      isFadingOut      = voice.isFadingOut;
+    bool      isActive         = voice.isActive;
+    bool      ranOut           = false;
+
+    const bool   toSends    = stemsMode == 0 || stemsMode >= 9;
+    const float  revLevel   = voice.reverbSend, dlyLevel = voice.delaySend;
+    const bool   toReverb   = toSends && revLevel > 0.0f;
+    const bool   toDelay    = toSends && dlyLevel > 0.0f;
+    const bool   toOutput   = stemsMode == 0 || trackId == stemsMode - 1;
+    float* const revL = revSendBufL; float* const revR = revSendBufR;
+    float* const dlyL = dlySendBufL; float* const dlyR = dlySendBufR;
+
+    const bool metered = trackId >= 0 && trackId < 8;
+    float peakL = metered ? framePeaksPerTrackL[trackId] : 0.0f;
+    float peakR = metered ? framePeaksPerTrackR[trackId] : 0.0f;
+    // The OCTA scopes: tracks 0-7 and the preview lane, only while the screen is asking.
+    const bool   scoped    = b.octaWanted && trackId >= 0 && trackId < TRACK_WAVEFORM_COUNT;
+    float* const scopeL    = scoped ? trackWaveAccumL[trackId] : nullptr;
+    float* const scopeR    = scoped ? trackWaveAccumR[trackId] : nullptr;
+    bool         scopeLive = false;
+    const bool   monitored = b.monitoredInstrId >= 0 && voice.instrId == b.monitoredInstrId;
+    float* const spectrum  = instrSpectrumTempL;
+
+    for (int i = startFrame; i < to; i++) {
+        const int idx = (int)ph.position;
+        // In double, then narrowed: (float)idx is inexact past 2^24 frames.
+        const float frac = (float)(ph.position - (double)idx);
+
+        if (idx < 0) {   // safety hard-stop
+            isActive = false;
+            break;
+        }
+        if (idx >= lastReadable) {   // fade rather than stop, so a resonant filter decays
+            ph.position = (double)(lastReadable - 1);
+            ranOut = true;
             break;
         }
 
-        // STEP 4 scalars (shared by mono and stereo paths)
-        float t = (pieceFrames > 1) ? (float)(i - from + 1) / (float)pieceFrames : 1.0f;
-        const float tBlock = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
-        float panL = voice.prevPanLeft  + (voice.panLeft  - voice.prevPanLeft)  * t;
-        float panR = voice.prevPanRight + (voice.panRight - voice.prevPanRight) * t;
-        float finalVol = voice.volume;
-        for (int m = 0; m < 4; m++) {
-            const VoiceModSlot& mod = voice.voiceMods[m];
-            if (mod.type == 0 || mod.stage == 0) continue;
-            if (mod.dest == 1) {
-                if (mod.type == 3) {
-                    float envAtI = mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t;
-                    finalVol = fmaxf(0.0f, finalVol * (1.0f + envAtI * mod.effectiveAmt));
-                } else {
-                    float envAtI = mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t;
-                    finalVol = fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.effectiveAmt);
-                }
-            }
+        const float t      = (float)(i - from + 1) / (float)pieceFrames;   // both reach 1 on the last frame
+        const float tBlock = (float)(i + 1) / (float)numFrames;
+        const float panL   = panLFrom + panLStep * t;
+        const float panR   = panRFrom + panRStep * t;
+        float finalVol = volume;
+        for (int m = 0; m < volModCount; m++) {
+            const VolMod& mod    = volMods[m];
+            const float   envAtI = mod.from + mod.step * t;
+            finalVol = mod.scales ? fmaxf(0.0f, finalVol * (1.0f + envAtI * mod.amount))
+                                  : fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.amount);
         }
-        float volRoute = voice.prevModDestValues[PARAM_VOL]
-                       + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
-        if (voice.volGlideLeft > 0) {   // a table VOL on the sounding note: blend in, never step
-            const float k = static_cast<float>(voice.volGlideLeft) / VOL_GLIDE_FRAMES;
-            volRoute = voice.volGlideFrom * k + volRoute * (1.0f - k);
-            --voice.volGlideLeft;
+        float volRoute = volRouteFrom + volRouteStep * t;
+        if (volGlideLeft > 0) {   // a table VOL on the sounding note: blend in, never step
+            const float k = static_cast<float>(volGlideLeft) / VOL_GLIDE_FRAMES;
+            volRoute = volGlideFrom * k + volRoute * (1.0f - k);
+            --volGlideLeft;
         }
-        voice.volRouteLast = volRoute;
-        // ⚠️ SF_VOICE_COUNT, not 8: the preview lane (8) carries a real fader, as on the SF path.
-        // ⚠️ THE FADER AND THE MUTE GATE BOTH RIDE HERE, interpolated across the whole block on
-        // `tBlock`, never the piece's `t`.
-        const bool onTrack = voice.trackId >= 0 && voice.trackId < SF_VOICE_COUNT;
-        const float fStart = voice.faderHeld ? voice.faderHeldStart : onTrack ? b.trackVolStart[voice.trackId] : 1.0f;
-        const float fEnd   = voice.faderHeld ? voice.faderHeldEnd   : onTrack ? b.trackVolEnd[voice.trackId]   : 1.0f;
-        float trackVol = onTrack
-                       ? (fStart + (fEnd - fStart) * tBlock)
-                         * (b.gateStart[voice.trackId]
-                            + (b.gateEnd[voice.trackId] - b.gateStart[voice.trackId]) * tBlock)
-                       : 1.0f;
-        float antiClick = voice.antiClickFade();
+        volRouteLast = volRoute;
+        const float trackVol  = (faderFrom + faderStep * tBlock) * (gateFrom + gateStep * tBlock);
+        const float antiClick = antiClickGain(fadeInRemaining, ph);
 
-        // Sample fetch + per-voice chain is the only mono/stereo difference; a mono sample
-        // feeds the same value to both lanes.
-        float procL, procR;
-        if (voice.sampleDataRight) {
-            // ── STEREO FETCH ─────────────────────────────────────────────────
-            float s1L, s2L, s1R, s2R;
-            if (effDownsample > 0) {
-                int factor = 1 << effDownsample;
-                int qi = (idx / factor) * factor;
-                s1L = s2L = voice.sampleData[qi];
-                s1R = s2R = voice.sampleDataRight[qi];
+        float procL = Playhead::read(ph.left, idx, frac, effDownsample);
+        float procR = stereo ? Playhead::read(ph.right, idx, frac, effDownsample) : procL;
+        if (dsFadeLeft > 0) {   // the downsample changed mid-note: the old read fades out
+            const float k = static_cast<float>(dsFadeLeft--) / DOWNSAMPLE_FADE_FRAMES;
+            procL = Playhead::read(ph.left, idx, frac, dsPrev) * k + procL * (1.0f - k);
+            if (stereo) procR = Playhead::read(ph.right, idx, frac, dsPrev) * k + procR * (1.0f - k);
+        }
+        chainRan = true;
+        if (!chainIdle) {
+            chain.filter.setInterpolatedCoeffs(t);
+            if (stereo) {   // on copies: a local whose address is taken stays in memory all loop
+                float l = procL, r = procR;
+                chain.processStereo(l, r);
+                procL = l;
+                procR = r;
             } else {
-                s1L = voice.sampleData[idx];       s2L = voice.sampleData[idx + 1];
-                s1R = voice.sampleDataRight[idx];  s2R = voice.sampleDataRight[idx + 1];
+                procL = chain.processMono(procL);
             }
-            procL = s1L + (s2L - s1L) * frac;
-            procR = s1R + (s2R - s1R) * frac;
-            if (voice.dsFadeLeft > 0) {
-                float oldL, oldR;
-                fetchDownsampled(voice, idx, frac, voice.dsPrev, oldL, oldR);
-                const float k = static_cast<float>(voice.dsFadeLeft--) / DOWNSAMPLE_FADE_FRAMES;
-                procL = oldL * k + procL * (1.0f - k);
-                procR = oldR * k + procR * (1.0f - k);
-            }
-            voice.chain.filter.setInterpolatedCoeffs(t);
-            voice.chain.processStereo(procL, procR);
-        } else {
-            // ── MONO FETCH ───────────────────────────────────────────────────
-            float sample1 = voice.sampleData[idx];
-            float sample2 = voice.sampleData[idx + 1];
-            if (effDownsample > 0) {
-                int downsampleFactor = 1 << effDownsample;
-                int quantizedIdx = (idx / downsampleFactor) * downsampleFactor;
-                sample1 = voice.sampleData[quantizedIdx];
-                sample2 = voice.sampleData[quantizedIdx];
-            }
-            float processedSample = sample1 + (sample2 - sample1) * frac;
-            if (voice.dsFadeLeft > 0) {
-                float oldL, oldR;
-                fetchDownsampled(voice, idx, frac, voice.dsPrev, oldL, oldR);
-                const float k = static_cast<float>(voice.dsFadeLeft--) / DOWNSAMPLE_FADE_FRAMES;
-                processedSample = oldL * k + processedSample * (1.0f - k);
-            }
-            voice.chain.filter.setInterpolatedCoeffs(t);
-            procL = procR = voice.chain.processMono(processedSample);
         }
+        if (!stereo) procR = procL;   // a mono sample feeds both lanes
 
-        // ── SHARED TAIL: sends → global gain → fade-out → pan ────────────────
-        //
-        // The send tap sits ABOVE the track fader: sends are PRE-FADER for the mixer and post
-        // everything on the instrument (VOL, the phrase V, VOL mods), so pulling a track down
-        // leaves its tails at full level. ⚠️ The MASTER fader multiplies the summed bus in
-        // mixMaster, after the returns, so it carries the tails with it.
-        float scalar = finalVol * volRoute;
+        // Sends are tapped below everything on the instrument and ABOVE the track fader.
+        const float scalar = finalVol * volRoute;
         procL *= scalar;
         procR *= scalar;
 
-        // ⚠️⚠️ THE VOICE'S OWN FADES MUST REACH THE SENDS, AND THE TRACK FADER MUST NOT.
-        // `antiClick` and the KIL/steal fade-out are the voice's envelope — a send that missed
-        // them would get a waveform cut mid-cycle and ring the click on in the tails. `trackVol`
-        // stays below the tap (pre-fader sends). The fade is resolved once here and applied to the
-        // dry path in its original position below. A fade dispatched at frame f waits for f.
-        const bool fading = voice.isFadingOut && i >= voice.fadeStartFrame;
-        float voiceFade   = antiClick;
-        float fo          = 1.0f;
+        // ⚠️ The voice's own fades (anti-click, KIL/steal) must reach the sends too, or a send
+        // gets a waveform cut mid-cycle and rings the click on in its tail.
+        const bool fading    = isFadingOut && i >= fadeStartFrame;
+        float      voiceFade = antiClick;
+        float      fo        = 1.0f;
         if (fading) {
-            fo = (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
+            fo = (float)fadeOutRemaining / (float)fadeOutTotal;
             voiceFade *= fo;
-            if (--voice.fadeOutRemaining <= 0) {
-                voice.isFadingOut = false;
-                voice.isActive = false;
+            if (--fadeOutRemaining <= 0) {
+                isFadingOut = false;
+                isActive    = false;
             }
         }
 
-        if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
-            revSendBufL[i] += procL * voiceFade * panL * voice.reverbSend;
-            revSendBufR[i] += procR * voiceFade * panR * voice.reverbSend;
-        }
-        if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
-            dlySendBufL[i] += procL * voiceFade * panL * voice.delaySend;
-            dlySendBufR[i] += procR * voiceFade * panR * voice.delaySend;
+        if (toReverb || toDelay) {
+            if (toReverb) {
+                revL[i] += procL * voiceFade * panL * revLevel;
+                revR[i] += procR * voiceFade * panR * revLevel;
+            }
+            if (toDelay) {
+                dlyL[i] += procL * voiceFade * panL * dlyLevel;
+                dlyR[i] += procR * voiceFade * panR * dlyLevel;
+            }
         }
 
-        float globalMul = trackVol * antiClick;
+        const float globalMul = trackVol * antiClick;
         procL *= globalMul;
         procR *= globalMul;
 
@@ -1162,74 +1154,50 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
             procR *= fo;
         }
 
-        float sampleL = procL * panL;
-        float sampleR = procR * panR;
+        const float sampleL = procL * panL;
+        const float sampleR = procR * panR;
 
-        if (stemsMode == 0 || voice.trackId == stemsMode - 1) {
+        if (toOutput) {
             output[i * channelCount] += sampleL;
             output[i * channelCount + 1] += sampleR;
         }
 
-        if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
-            framePeaksPerTrackL[voice.trackId] = peak_hold(framePeaksPerTrackL[voice.trackId], sampleL);
-            framePeaksPerTrackR[voice.trackId] = peak_hold(framePeaksPerTrackR[voice.trackId], sampleR);
+        if (metered && !isFadingOut) {
+            peakL = peak_hold(peakL, sampleL);
+            peakR = peak_hold(peakR, sampleR);
         }
-        // OCTA per-track capture: tracks 0-7 plus the preview lane (PREVIEW_TRACK_ID == PREVIEW_LANE).
-        // Gated on octaWanted: the accumulators are only zeroed/read when OCTA is shown.
-        if (b.octaWanted && voice.trackId >= 0 && voice.trackId < TRACK_WAVEFORM_COUNT) {
-            if (!voice.isFadingOut) trackWasActive[voice.trackId] = true;
-            trackWaveAccumL[voice.trackId][i] += sampleL;
-            trackWaveAccumR[voice.trackId][i] += sampleR;
-        }
-        if (b.monitoredInstrId >= 0 && voice.instrId == b.monitoredInstrId) {
-            instrSpectrumTempL[i] += 0.5f * (sampleL + sampleR);
+        if (scoped || monitored) {
+            if (scoped) {
+                if (!isFadingOut) scopeLive = true;
+                scopeL[i] += sampleL;
+                scopeR[i] += sampleR;
+            }
+            if (monitored) spectrum[i] += 0.5f * (sampleL + sampleR);
         }
 
-        if (!voice.isActive) break;
-
-        // Active looping is bounded by LOOP END (region [loopStart, loopEnd]). Once loopReleasing
-        // is set (ADSR note-off on a looping voice) the loop is abandoned: every mode runs forward
-        // to actualEnd so the [loopEnd, end] tail plays out under the release envelope, then fades.
-        if (voice.loopMode == LOOP_MODE_PINGPONG && !voice.loopReleasing) {
-            if (voice.loopingBack) {
-                voice.position -= modulatedRate;
-                if (voice.position <= voice.actualLoopStart) {
-                    voice.loopingBack = false;
-                    voice.position = (double)voice.actualLoopStart;
-                }
-            } else {
-                voice.position += modulatedRate;
-                if (voice.position >= voice.actualLoopEnd) {
-                    voice.loopingBack = true;
-                    voice.position = (double)voice.actualLoopEnd;
-                }
-            }
-        } else if (voice.reverse && !voice.loopReleasing) {
-            voice.position -= modulatedRate;
-            if (voice.position <= voice.actualStart) {
-                if (isForwardLoopMode(voice.loopMode)) {
-                    voice.position = (double)voice.actualLoopStart;
-                } else {
-                    voice.position = (double)voice.actualStart;
-                    voice.startFadeOut();
-                    break;
-                }
-            }
-        } else {
-            voice.position += modulatedRate;
-            bool activeForwardLoop = (isForwardLoopMode(voice.loopMode) && !voice.loopReleasing);
-            double fwdBoundary = activeForwardLoop ? (double)voice.actualLoopEnd : (double)voice.actualEnd;
-            if (voice.position >= fwdBoundary) {
-                if (activeForwardLoop) {
-                    voice.position = (double)voice.actualLoopStart;
-                } else {
-                    voice.position = (double)(voice.actualEnd - 1);
-                    voice.startFadeOut();
-                    break;
-                }
-            }
+        if (!isActive) break;
+        if (!ph.advance()) {
+            ranOut = true;
+            break;
         }
-    } // for (int i = startFrame; i < to; i++)
+    }
+
+    voice.position         = ph.position;
+    voice.loopingBack      = ph.loopingBack;
+    voice.volGlideLeft     = volGlideLeft;
+    voice.volRouteLast     = volRouteLast;
+    voice.dsFadeLeft       = dsFadeLeft;
+    voice.fadeInRemaining  = fadeInRemaining;
+    voice.fadeOutRemaining = fadeOutRemaining;
+    voice.isFadingOut      = isFadingOut;
+    voice.isActive         = isActive;
+    if (ranOut) voice.startFadeOut();   // no-op if already fading
+    if (chainIdle && chainRan) chain.touch();
+    if (metered) {
+        framePeaksPerTrackL[trackId] = peakL;
+        framePeaksPerTrackR[trackId] = peakR;
+    }
+    if (scopeLive) trackWasActive[trackId] = true;
 }
 
 // ⚠️⚠️ **EACH SOUNDFONT VOICE IS RENDERED IN PIECES CUT WHERE ITS TABLE PLAYS A ROW**, as the sampler
