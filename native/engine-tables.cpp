@@ -466,7 +466,7 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
         switch (fxType) {
             case FX_KILL:
                 if (fxValue == 0x00) {
-                    tableKill(voice, atFrame);
+                    voiceCut(voice, atFrame);
                     LOGT("📋 Table effect: KILL track %d", voice.getTrackId());
                 }
                 break;

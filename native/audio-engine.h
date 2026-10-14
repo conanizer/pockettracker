@@ -732,7 +732,7 @@ public:
 
     // Unified per-voice table tick (tic advance + row FX processing) for sampler AND SF voices.
     // Duck-typed template over the identical table-state fields; the two per-type differences (KIL
-    // semantics, OFFSET) resolve at compile time via the tableKill/tableOffset overloads
+    // semantics, OFFSET) resolve at compile time via the voiceCut/tableOffset overloads
     // (engine-voice-ops.h). Defined in engine-tables.cpp and instantiated there for both voice types.
     //
     // Plays every row due at frame `from` of the block, then returns how many frames the caller may
