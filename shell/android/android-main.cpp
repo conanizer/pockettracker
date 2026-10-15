@@ -1,19 +1,10 @@
-// PocketTracker — the ANDROID entry point. Everything in this file is platform residue; `app.cpp`
-// boots, runs and tears down identically on both platforms. Side by side with `main.cpp`:
+// The Android entry point. `app.cpp` boots, runs and tears down as on desktop; what differs from
+// `main.cpp`: argv is the media root then `filesDir` (from SDLActivity), no signal handlers,
+// SDLActivity owns the surface, Oboe for audio, `SafFileSystem` (no storage permission), and
+// `PlatformCaps::converged`.
 //
-//   main.cpp (desktop/handheld)              android-main.cpp (this file)
-//   ─────────────────────────────────────    ──────────────────────────────────────────────────────
-//   argv: project, media dir, app root       argv: app root, then filesDir — both from SDLActivity
-//   SIGTERM/SIGINT → a flag the loop polls   nothing (see the terminate_requested note below)
-//   SDL_Init / SDL_Quit, here                SDL_Init here too; SDLActivity owns the surface, not this
-//   SdlAudioEngine                           OboeAudioEngine
-//   StdFileSystem over the app root          SafFileSystem — the app holds no storage permission
-//   default_app_root(), one root twice       two roots from Java: media tree + app-private files
-//   PlatformCaps::sdl(debug), console on     PlatformCaps::converged(...) — see where it is set below
-//
-// ⚠️ NO `SDL_MAIN_HANDLED` HERE, THE OPPOSITE OF `main.cpp`: on `__ANDROID__` SDL_main.h does
-// `#define main SDL_main`, the symbol `SDLActivity` looks up with `dlsym`. Define SDL_MAIN_HANDLED
-// and the app dies at start-up with a missing-entry-point message.
+// ⚠️ No `SDL_MAIN_HANDLED`, unlike `main.cpp`: SDL renames `main` to `SDL_main`, the symbol
+// SDLActivity looks up. Defined, the app dies at start-up with a missing entry point.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -27,6 +18,7 @@
 
 #include "app.h"
 #include "skin/button_feedback.h"
+#include "android/android-jni.h"
 #include "android/saf-filesystem.h"    // the ONLY ui::FileSystem here; Android-only by construction
 #include "android/midi-in-android.h"    // the MIDI INPUT port;    compiles to nothing elsewhere
 #include "android/midi-out-android.h"   // the EXTERNAL MIDI port; compiles to nothing elsewhere
@@ -50,25 +42,16 @@ namespace {
 
 constexpr const char* kLogTag = "PocketTrackerSDL";
 
-// ⚠️ THE APP ROOT COMES FROM JAVA: `ui::default_app_root()` walks POCKETTRACKER_HOME → XDG_DATA_HOME
-// → HOME, all of which miss on Android, falling through to a RELATIVE path beside the cwd. Only Java
-// knows where DIRECTORY_DOCUMENTS is, so the activity passes it through `getArguments()`. The fallback
-// keeps a bring-up going and SAYS SO in the log — a silently wrong root reads as "my projects are gone".
+// Only Java knows where Documents is; the activity passes it in `getArguments()`. The fallback keeps
+// a bring-up going, and says so in the log.
 constexpr const char* kFallbackAppRoot = "/storage/emulated/0/Documents/PocketTracker";
 
 // ─── stdout/stderr → logcat ───────────────────────────────────────────────────────────────────────
 //
-// The boot banner and status line are the bring-up instrument, and on Android stdout is /dev/null
-// unless `log.redirect-stdio` is set (root). A pipe-and-pump sends them to logcat, unbuffered.
-//
-// ⚠️ AND TO A FILE, because logcat needs a PC and developer mode; a user reporting a boot problem can
-// reach `pockettracker-log.txt` with any file manager. TRUNCATED at start and capped.
-//
-// ⚠️⚠️ WRITTEN TO TWO PLACES, BOTH REQUIRED: at the first line the only certainly writable directory
-// is `filesDir` (unreachable to the user); the granted tree (reachable) is known only later in boot.
-// So the log opens in `filesDir` and RELOCATES into the granted tree once there is one, replaying
-// what was written (`relocate_log_file`). `getExternalFilesDir()` is no answer: Android 11+ hides
-// `Android/data`.
+// On Android stdout goes nowhere, so a pipe and a pump send it to logcat — and to
+// `pockettracker-log.txt`, which a user can reach without a PC. Truncated at start, capped.
+// ⚠️ The file starts in `filesDir`, the only directory certainly writable at the first line, and
+// moves into the granted tree once boot knows it (`relocate_log_file`), carrying what was written.
 std::mutex  g_logMutex;           // g_logFile is swapped on the SDL thread and written on the pump's
 FILE*       g_logFile     = nullptr;   // null = logcat alone
 size_t      g_logFileSize = 0;
@@ -76,10 +59,9 @@ std::string g_logPath;            // what g_logFile is open on; "" = nothing ope
 constexpr size_t      kLogFileCap  = 512 * 1024;
 constexpr const char* kLogFileName = "pockettracker-log.txt";
 
-// Everything written so far, held so the relocation can carry it across. ⚠️ In memory, not re-read
-// off the first file: the lines printed just before the relocation are still in the pipe, and a
-// re-read would race the pump. Appended under the write's lock, so each line is carried or goes to
-// the new file — never neither, never both.
+// Everything written so far, for the relocation to carry across. ⚠️ Held in memory, not re-read
+// from the first file (that would race the pump); appended under the write's lock, so no line is
+// lost or doubled.
 std::string      g_logCarry;
 bool             g_logCarrying = true;
 constexpr size_t kLogCarryCap  = 64 * 1024;   // the boot is a few KB; this is slack, not a budget
@@ -92,10 +74,8 @@ void log_line(const char* s) {
         g_logCarry.push_back('\n');
     }
     if (!g_logFile || g_logFileSize >= kLogFileCap) return;
-    // ⚠️ Flushed per line, for main.cpp's `setvbuf` reason exactly: a buffer that dies with the
-    // process takes the boot with it, and the boot is what this file exists to record.
-    // ⚠️ `fprintf` returns NEGATIVE on error, and this counter is unsigned — adding it raw would wrap
-    // to a huge value and silently stop the log at the first hiccup (a full disk, a revoked grant).
+    // Flushed per line: a buffer that dies with the process takes the boot with it.
+    // ⚠️ `fprintf` returns negative on error; added raw to the unsigned size it would stop the log.
     const int written = std::fprintf(g_logFile, "%s\n", s);
     if (written > 0) g_logFileSize += static_cast<size_t>(written);
     std::fflush(g_logFile);
@@ -110,15 +90,9 @@ void log_carry_done() {
     std::string().swap(g_logCarry);
 }
 
-// Move the tee into `dir` (a granted `pt://` tree), carrying everything already written across.
-// Returns the path it is now writing to, or "" if it could not move — in which case the first
-// destination still stands and is still being written to.
-//
-// ⚠️ **Through `pt_fopen`, so it must run AFTER the hooks are installed** — `std::fopen` cannot see a
-// `pt://` string, and a silent failure here is precisely the failure this function exists to end.
-//
-// ⚠️ The `filesDir` copy is NOT deleted, and not truncated either. On the run where the relocation is
-// itself what went wrong it is the only copy there is, and it is bounded by the same cap.
+// Moves the tee into `dir` (a granted `pt://` tree) with everything written so far; returns the new
+// path, or "" if it could not (the first file then stands). ⚠️ Through `pt_fopen`: after the hooks.
+// The `filesDir` copy is kept — on the run where the move is what failed, it is the only one.
 std::string relocate_log_file(const std::string& dir) {
     const std::string path = dir + "/" + kLogFileName;
 
@@ -151,8 +125,7 @@ void* log_pump(void* arg) {
                 line.push_back(buf[i]);
             }
         }
-        // A status line that never ends in '\n' would otherwise accumulate forever. Flush long
-        // fragments rather than growing without bound.
+        // A line with no '\n' would grow for ever; flush long fragments.
         if (line.size() > 1024) {
             log_line(line.c_str());
             line.clear();
@@ -161,50 +134,42 @@ void* log_pump(void* arg) {
     return nullptr;
 }
 
+// The activity's method `name`, or null with a warning saying what its absence costs.
+jmethodID activity_method(const ptshell::Attached& a, const char* name, const char* sig,
+                          const char* otherwise) {
+    const jmethodID mid = a.method(name, sig);
+    if (!mid) __android_log_print(ANDROID_LOG_WARN, kLogTag, "%s%s not found - %s", name, sig, otherwise);
+    return mid;
+}
+
 // ─── button feedback → the thin Kotlin managers ──────────────────────────────────────────────────
 //
-// The shared touch layer decides WHEN a virtual button clicks (sdl-touch.cpp); this shim carries it
-// to Java, where SoundPool and the Vibrator live. Runs on the SDL thread; `SDL_AndroidGetJNIEnv`
-// attaches it. The method is looked up by NAME, so a mismatch degrades to silence with one log line.
+// The touch layer decides when a button clicks (sdl-touch.cpp); this carries it to Kotlin. Runs on
+// the SDL thread; looked up by name, so a mismatch is silence plus one log line.
 class AndroidButtonFeedback : public ptshell::ButtonFeedback {
 public:
     void play(pt::ui::Button button, bool down, const ptshell::ButtonFeedbackSettings& s) override {
-        // Nothing enabled → nothing worth a JNI round trip. The Kotlin side re-checks too; this is just
-        // the cheap early-out for the common "both off" case.
+        // Both off → no JNI round trip.
         if (!s.soundEnabled && !s.vibroEnabled) return;
 
-        JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-        if (!env) return;
-        jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());  // a LOCAL ref — delete below
-        if (!activity) return;
-
-        jmethodID mid = method_id(env, activity);
-        if (mid) {
-            env->CallVoidMethod(activity, mid, static_cast<jint>(button),
-                                static_cast<jboolean>(down),
-                                static_cast<jboolean>(s.soundEnabled), static_cast<jint>(s.soundVolume),
-                                static_cast<jboolean>(s.vibroEnabled), static_cast<jint>(s.vibroPower));
-            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        ptshell::Attached a;
+        if (!a.ok()) return;
+        if (const jmethodID mid = method_id(a)) {
+            a.env->CallVoidMethod(a.activity, mid, static_cast<jint>(button),
+                                  static_cast<jboolean>(down),
+                                  static_cast<jboolean>(s.soundEnabled), static_cast<jint>(s.soundVolume),
+                                  static_cast<jboolean>(s.vibroEnabled), static_cast<jint>(s.vibroPower));
+            a.failed();
         }
-        env->DeleteLocalRef(activity);
     }
 
 private:
-    // The method id, resolved once. Method ids stay valid for the class's lifetime and the activity's
-    // class is never unloaded, so the lookup is a one-time cost; `looked_up_` also stops a missing
-    // method from re-logging on every tap.
-    jmethodID method_id(JNIEnv* env, jobject activity) {
+    // Resolved once (the activity's class is never unloaded); also keeps a missing method from
+    // logging on every tap.
+    jmethodID method_id(const ptshell::Attached& a) {
         if (looked_up_) return mid_;
         looked_up_ = true;
-        jclass cls = env->GetObjectClass(activity);
-        mid_ = env->GetMethodID(cls, "onButtonFeedback", "(IZZIZI)V");
-        if (env->ExceptionCheck()) { env->ExceptionClear(); mid_ = nullptr; }
-        if (!mid_) {
-            __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                                "onButtonFeedback(IZZIZI)V not found on the activity - "
-                                "button feedback disabled");
-        }
-        env->DeleteLocalRef(cls);
+        mid_ = activity_method(a, "onButtonFeedback", "(IZZIZI)V", "button feedback disabled");
         return mid_;
     }
 
@@ -214,139 +179,80 @@ private:
 
 // ─── does a physical game controller exist? → SdlActivity ────────────────────────────────────────
 //
-// On Android SDL counts the emulator's keyboard as a controller (app.h `physicalGamepadPresent`);
-// only `InputDevice.getSources()` tells them apart, so this asks `SdlActivity.hasPhysicalGameButtons()`
-// (SOURCE_GAMEPAD/SOURCE_JOYSTICK). By name, null/exception-safe, degrading to "no pad" (the touch
-// UI). Asked only at boot and on a controller add/remove.
+// SDL counts the emulator's keyboard as a controller; Kotlin tells them apart. Asked at boot and on
+// a controller add/remove; a missing method means "no pad" (the touch UI).
 bool android_has_physical_gamepad() {
-    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-    if (!env) return false;
-    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());  // LOCAL ref — deleted below
-    if (!activity) return false;
-
-    bool      result = false;
-    jclass    cls    = env->GetObjectClass(activity);
-    jmethodID mid    = env->GetMethodID(cls, "hasPhysicalGameButtons", "()Z");
-    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
-    if (mid) {
-        result = env->CallBooleanMethod(activity, mid) == JNI_TRUE;
-        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); result = false; }
-    } else {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "hasPhysicalGameButtons()Z not found - assuming no pad (touch UI)");
-    }
-    env->DeleteLocalRef(cls);
-    env->DeleteLocalRef(activity);
-    return result;
+    ptshell::Attached a;
+    if (!a.ok()) return false;
+    const jmethodID mid = activity_method(a, "hasPhysicalGameButtons", "()Z", "assuming no pad (touch UI)");
+    if (!mid) return false;
+    const bool result = a.env->CallBooleanMethod(a.activity, mid) == JNI_TRUE;
+    return !a.failed() && result;
 }
 
 // ─── may the screen rotate into landscape? → SdlActivity ─────────────────────────────────────────
 //
 // The live half of the orientation lock: `SDL_HINT_ORIENTATIONS` is read once, so a pad unplugged
-// mid-session would leave the activity in landscape over the portrait skin. The layout gate calls
-// this on every change and Java sets `requestedOrientation`; Android re-orients when the current
-// one stops being allowed. A missing method logs and changes nothing.
+// mid-session would leave landscape over the portrait skin. Kotlin sets `requestedOrientation`.
 void android_set_landscape_allowed(bool allowed) {
-    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-    if (!env) return;
-    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
-    if (!activity) return;
-
-    jclass    cls = env->GetObjectClass(activity);
-    jmethodID mid = env->GetMethodID(cls, "setLandscapeAllowed", "(Z)V");
-    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
-    if (mid) {
-        env->CallVoidMethod(activity, mid, allowed ? JNI_TRUE : JNI_FALSE);
-        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
-        else std::printf("orient:  %s\n", allowed ? "landscape allowed (FULL layout)"
-                                                  : "portrait only (on-screen buttons in force)");
-        std::fflush(stdout);
-    } else {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "setLandscapeAllowed(Z)V not found - orientation stays as launched");
-    }
-    env->DeleteLocalRef(cls);
-    env->DeleteLocalRef(activity);
+    ptshell::Attached a;
+    if (!a.ok()) return;
+    const jmethodID mid = activity_method(a, "setLandscapeAllowed", "(Z)V", "orientation stays as launched");
+    if (!mid) return;
+    a.env->CallVoidMethod(a.activity, mid, allowed ? JNI_TRUE : JNI_FALSE);
+    if (!a.failed())
+        std::printf("orient:  %s\n", allowed ? "landscape allowed (FULL layout)"
+                                             : "portrait only (on-screen buttons in force)");
+    std::fflush(stdout);
 }
 
 // ─── PLAYING ON IN THE BACKGROUND ────────────────────────────────────────────────────────────────
 //
-// The three facts that cross between the frame loop and Java, as atomics: Java reads and writes them
-// on its UI thread, the loop on the native thread. The SERVICE is Java's — started in `onPause`, where
-// Android still allows it (MainActivity.kt) — and these only say what each side needs to know.
+// What crosses between the frame loop and Kotlin's UI thread. The service itself is Kotlin's,
+// started in `onPause` (MainActivity.kt).
 std::atomic<bool> g_bgPlaying{false};          // the transport, published by the loop every tick
 std::atomic<bool> g_bgServiceStarted{false};   // onPause brought the playback service up
 std::atomic<bool> g_bgStopRequested{false};    // the notification's STOP, waiting for the loop
 
-// A screen recording shows the app, so it may be taking its sound too (MainActivity.kt, Android 15+).
-// Read by the audio backend, which reopens its stream around one — OboeAudioEngine::setPlaybackCaptured.
+// A screen recording shows the app (Android 15+); the audio backend reopens its stream around one.
 std::atomic<bool> g_playbackCaptured{false};
 
-// The song stopped in the background (or never kept playing): Java takes the service down. Same
-// by-name, exception-safe shape as the hooks above.
+// The song stopped in the background (or never played on): Kotlin takes the service down.
 void android_stop_playback_service() {
     g_bgServiceStarted.store(false);
-    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-    if (!env) return;
-    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
-    if (!activity) return;
-    jclass    cls = env->GetObjectClass(activity);
-    jmethodID mid = env->GetMethodID(cls, "stopPlaybackService", "()V");
-    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
-    if (mid) {
-        env->CallVoidMethod(activity, mid);
-        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
-    } else {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag, "stopPlaybackService()V not found");
+    ptshell::Attached a;
+    if (!a.ok()) return;
+    if (const jmethodID mid = activity_method(a, "stopPlaybackService", "()V", "the service stays up")) {
+        a.env->CallVoidMethod(a.activity, mid);
+        a.failed();
     }
-    env->DeleteLocalRef(cls);
-    env->DeleteLocalRef(activity);
 }
 
 // ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
 //
-// ⚠️ THE ONE THING A LAYOUT BUG REPORT NEEDS: `useTouch` is `touchCapable && !physicalPad`, and
-// `hasPhysicalGameButtons()` logs only when it FINDS a pad. This prints the whole enumeration
-// through `printf`, so it reaches the log file (Kotlin's `Log.i` reaches logcat only).
+// ⚠️ What a layout bug report needs: `hasPhysicalGameButtons()` logs only a find. Through `printf`,
+// so it reaches the log file (Kotlin's `Log` reaches logcat only).
 void android_log_input_devices() {
-    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-    if (!env) { std::printf("input:   no JNI env - cannot enumerate\n"); return; }
-    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
-    if (!activity) { std::printf("input:   no activity - cannot enumerate\n"); return; }
+    ptshell::Attached a;
+    if (!a.env)      { std::printf("input:   no JNI env - cannot enumerate\n"); return; }
+    if (!a.activity) { std::printf("input:   no activity - cannot enumerate\n"); return; }
 
-    jclass    cls = env->GetObjectClass(activity);
-    jmethodID mid = env->GetMethodID(cls, "describeInputDevices", "()Ljava/lang/String;");
-    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
-    if (!mid) {
-        std::printf("input:   describeInputDevices() not found - R8 renamed it, or it is not built\n");
+    if (const jmethodID mid = a.method("describeInputDevices", "()Ljava/lang/String;")) {
+        jobject s = a.env->CallObjectMethod(a.activity, mid);
+        if (!a.failed() && s) std::printf("%s\n", a.take(s).c_str());
     } else {
-        jobject s = env->CallObjectMethod(activity, mid);
-        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); s = nullptr; }
-        if (s) {
-            const char* utf = env->GetStringUTFChars(static_cast<jstring>(s), nullptr);
-            if (utf) {
-                std::printf("%s\n", utf);
-                env->ReleaseStringUTFChars(static_cast<jstring>(s), utf);
-            }
-            env->DeleteLocalRef(s);
-        }
+        std::printf("input:   describeInputDevices() not found - R8 renamed it, or it is not built\n");
     }
     std::fflush(stdout);
-    env->DeleteLocalRef(cls);
-    env->DeleteLocalRef(activity);
 }
 
-// `privateRoot` is `context.filesDir` — the ONE directory this process can certainly write to before
-// any folder has been granted, which is why the tee starts there and moves later. Empty skips the file
-// entirely and leaves logcat as the only sink: a degraded bring-up, not a failure to launch.
+// `privateRoot` is `filesDir`, the one place certainly writable before any grant. Empty = logcat only.
 void redirect_stdio_to_logcat(const std::string& privateRoot) {
-    // Unbuffered for the same reason main.cpp is: a buffer that dies with the process takes the only
-    // record of the boot with it.
+    // Unbuffered, as on desktop: a buffer that dies with the process takes the boot with it.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
-    // Opened BEFORE the pump starts, so the very first banner line is already teed. A failure here
-    // leaves the pointer null and costs nothing.
+    // Opened before the pump starts, so the first line is teed. A failure costs nothing.
     if (!privateRoot.empty()) {
         const std::string path = privateRoot + "/" + kLogFileName;
         g_logFile     = std::fopen(path.c_str(), "w");
@@ -357,8 +263,8 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
     int pfd[2];
     if (pipe(pfd) != 0) return;  // No console is a degraded bring-up, not a failure to launch.
 
-    // ⚠️ KEEP THE ORIGINALS, so the redirect is UNDOABLE: with no pump, stdout is a pipe nobody
-    // reads, which fills its 64 KB in minutes and blocks the SDL thread's next `printf` forever.
+    // ⚠️ Keep the originals so the redirect can be undone: a pipe nobody reads fills in minutes and
+    // blocks the next `printf` for ever.
     const int savedOut = dup(STDOUT_FILENO);
     const int savedErr = dup(STDERR_FILENO);
 
@@ -374,8 +280,7 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
         return;
     }
 
-    // The pump never ran. Put the descriptors back and drop the pipe, so writing to stdout is
-    // harmless again — degraded to "no console", not to a deadlock.
+    // The pump never ran: put the descriptors back — no console, but no deadlock.
     if (savedOut >= 0) { dup2(savedOut, STDOUT_FILENO); close(savedOut); }
     if (savedErr >= 0) { dup2(savedErr, STDERR_FILENO); close(savedErr); }
     close(pfd[0]);
@@ -385,17 +290,8 @@ void redirect_stdio_to_logcat(const std::string& privateRoot) {
 
 // ─── What the speaker actually runs at ───────────────────────────────────────────────────────────
 
-/**
- * Read one `AudioManager` property as an int, or 0 if the platform will not say.
- *
- * ⚠️ **THE PROPERTY NAME IS READ OFF THE FRAMEWORK CLASS, NOT SPELLED OUT HERE.** Both constants are
- * public static Strings on `android.media.AudioManager`, so taking them from the field costs one JNI
- * lookup and cannot drift from the platform. Spelling the value in a literal would compile forever
- * and be wrong in silence.
- *
- * ⚠️ Every name below belongs to the FRAMEWORK, so R8 has nothing to rename and this needs no
- * `-keep` — unlike a callback that resolves into our own Kotlin, which does.
- */
+// One `AudioManager` property as an int, or 0 if the platform will not say. The property name is
+// read off the framework's constant, so it cannot drift; framework names need no `-keep`.
 int audio_manager_property(JNIEnv* env, jobject audioManager, jclass amClass,
                            const char* constantField) {
     const jfieldID fid = env->GetStaticFieldID(amClass, constantField, "Ljava/lang/String;");
@@ -419,22 +315,17 @@ int audio_manager_property(JNIEnv* env, jobject audioManager, jclass amClass,
     return out;
 }
 
-/**
- * The device's own output rate and burst size, for Oboe to open at instead of guessing.
- *
- * ⚠️ ONLY JAVA KNOWS THESE: `AudioManager` names the rate the HAL mixes at and the block size it
- * hands out; asking for anything else costs a resampler, which commonly loses the fast path. Both
- * 0 when the platform declines; the backend then leaves Oboe's defaults alone.
- */
+// The device's own output rate and burst, for Oboe to open at — anything else costs a resampler and
+// usually the fast path. Both 0 when the platform declines; Oboe keeps its defaults.
 void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
     sampleRate = framesPerBurst = 0;
 
-    JNIEnv* env      = (JNIEnv*)SDL_AndroidGetJNIEnv();
-    jobject activity = (jobject)SDL_AndroidGetActivity();   // ⚠️ a LOCAL ref SDL leaves us to release
-    if (env == nullptr || activity == nullptr) return;
+    ptshell::Attached a;
+    if (!a.ok()) return;
+    JNIEnv* env      = a.env;
+    jobject activity = a.activity;
 
-    // ⚠️ EVERY LOOKUP IS CLEARED THE MOMENT IT MISSES: a pending exception makes the next JNI call
-    // a programming error that CheckJNI aborts for.
+    // ⚠️ Every miss is cleared at once: under CheckJNI a pending exception aborts the next JNI call.
     jclass  actClass = env->GetObjectClass(activity);
     if (env->ExceptionCheck()) env->ExceptionClear();
     jclass  ctxClass = env->FindClass("android/content/Context");
@@ -468,7 +359,6 @@ void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
     if (actClass) env->DeleteLocalRef(actClass);
     if (ctxClass) env->DeleteLocalRef(ctxClass);
     if (amClass)  env->DeleteLocalRef(amClass);
-    env->DeleteLocalRef(activity);
 
     __android_log_print(ANDROID_LOG_INFO, kLogTag,
                         "device audio: rate=%d burst=%d%s", sampleRate, framesPerBurst,
@@ -500,9 +390,7 @@ Java_com_conanizer_pockettracker_MainActivity_nativeSetPlaybackCaptured(JNIEnv*,
 }
 
 int main(int argc, char** argv) {
-    // ⚠️ THE ROOTS FIRST, then the redirect: the pump tees into a file and must know where before
-    // the first line. The lines below use `__android_log_print` directly.
-    // argv[0] is the application name SDLActivity supplies; the root is the first real argument.
+    // The roots first: the log pump tees into a file and must know where. argv[0] is the app name.
     std::string appRoot = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : std::string();
     if (appRoot.empty()) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag,
@@ -512,53 +400,41 @@ int main(int argc, char** argv) {
         appRoot = kFallbackAppRoot;
     }
 
-    // ⚠️ argv[2] IS `context.filesDir`, NOT A SECOND COPY OF THE ROOT: settings.json, template.ptp
-    // and autosave.ptp are read during boot, before any grant, so they live in app-private storage —
-    // or the quit-time save would write defaults over unreadable settings. `config.json` stays in the
-    // media tree. Missing, this falls back to the media root, as on desktop.
+    // argv[2] is `filesDir`: settings, template and autosave are read at boot, before any grant.
+    // Missing, this falls back to the media root, as on desktop.
     const std::string privateRoot =
         (argc > 2 && argv[2] && argv[2][0]) ? std::string(argv[2]) : appRoot;
 
-    // ⚠️ THE PRIVATE ROOT, NOT THE MEDIA ROOT: the media tree is unwritable until a folder is
-    // granted, and the refusal shows only under MediaProvider's own logcat tag. `relocate_log_file`
-    // moves it later.
+    // The private root: the media tree is unwritable until a folder is granted.
     redirect_stdio_to_logcat(privateRoot);
 
-    // No environment on Android: `adb shell setprop debug.pockettracker.latency 1` turns the latency
-    // probe on. ⚠️ Before the first frame — the probe reads its switch once.
+    // `adb shell setprop debug.pockettracker.latency 1` turns the latency probe on (there is no
+    // environment here). Before the first frame: the probe reads its switch once.
     char latencyProp[PROP_VALUE_MAX] = {};
     if (__system_property_get("debug.pockettracker.latency", latencyProp) > 0 && latencyProp[0] == '1')
         setenv("POCKETTRACKER_LATENCY", "1", 1);
 
-    // ⚠️ THE BACK BUTTON, TRAPPED. Untrapped, back runs `SDLActivity.onBackPressed()` → `finish()`,
-    // closing the activity mid-edit. Trapped, the key reaches native as `SDLK_AC_BACK`, mapped to B
-    // (sdl-input.cpp). Java reads the hint when back is pressed; setting it before `SDL_Init` is
-    // belt-and-braces.
-    // ⚠️ It works only while `android:enableOnBackInvokedCallback` is unset (the targetSdk 34
-    // default): a targetSdk bump that opts into predictive back silently un-traps it.
+    // ⚠️ Trap the back button, or SDLActivity finishes the activity mid-edit; trapped, it arrives as
+    // `SDLK_AC_BACK`, mapped to B. Works only while `enableOnBackInvokedCallback` is unset — a
+    // targetSdk bump into predictive back silently un-traps it.
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 
-    // ⚠️ **THE NATIVE THREAD IS NOT FROZEN OFF THE SCREEN**, so a song left playing goes on being fed
-    // by the lookahead pump (app.cpp, on_app_event). Read ONCE, when the video device is created, so
-    // BEFORE `SDL_Init` — it cannot be switched per pause. The price is the loop's: it must draw nothing
-    // while backgrounded (SDL has backed up the GL context) and must wait long when nothing plays.
+    // ⚠️ The native thread keeps running off the screen, so a song left playing is still fed. Read
+    // once, before `SDL_Init`. The loop must then draw nothing while backgrounded, and sleep when idle.
     SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
 
-    // ⚠️ NO `SDL_INIT_AUDIO`: Oboe owns the device here, and two libraries must not share an output
-    // stream. `SdlAudioEngine::openStream` initialises the subsystem itself where it is used.
+    // No `SDL_INIT_AUDIO`: Oboe owns the output here.
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
 
-    // ⚠️ HEAP, not a local: AudioEngine's members blow a stack — and this runs on SDLActivity's
-    // thread, whose stack is smaller than a desktop main's.
+    // ⚠️ Heap: AudioEngine blows a stack, and SDLActivity's thread has a small one.
     auto engine = std::make_unique<AudioEngine>();
 
     OboeAudioEngine audio(engine.get());
 
-    // ⚠️ BEFORE openStream, not after: these are what the stream opens AT. Asked here because SDL is
-    // up by now and the query needs its JNI env and the activity.
+    // Before openStream: the stream opens at these. Needs SDL up, for the JNI env.
     int deviceRate = 0, deviceBurst = 0;
     query_device_audio_defaults(deviceRate, deviceBurst);
     audio.setPlatformDefaults(deviceRate, deviceBurst);
@@ -571,24 +447,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ⚠️ THE STORAGE ACCESS FRAMEWORK IS THE ONLY WAY TO USER FILES: the app declares no storage
-    // permission, so a `StdFileSystem` over the media tree would list nothing. It still OWNS a
-    // `StdFileSystem` over `privateRoot` for the boot-time files. Constructed here to outlive `run()`.
-    // ⚠️ The hooks go in before anything can open a file: un-installed, a render writes every byte
-    // and produces no file.
+    // The only way to user files (no storage permission); it owns a `StdFileSystem` over
+    // `privateRoot` for the boot files. ⚠️ Hooks in before anything opens a file, or a render
+    // produces no file.
     ptshell::SafFileSystem filesystem(privateRoot);
     filesystem.install_file_hooks();
 
-    // The COUNT, unconditionally: an empty browser under a grant and under none look alike. Zero is
-    // the fresh install — the browser opens on the roots directory's ADD FOLDER… row.
+    // Printed always: an empty browser looks the same with a grant and without.
     std::printf("saf:     %d granted folder(s)\n", filesystem.root_count());
 
-    // ⚠️ THE MEDIA ROOT IS THE GRANTED TREE, NOT `appRoot` (argv[1], unreadable to this process).
-    // `pt://roots` when nothing is granted, so paths built on it fail to open rather than resolve wrong.
+    // ⚠️ The media root is the granted tree, not argv[1] (unreadable here); `pt://roots` with no grant.
     const std::string mediaRoot = filesystem.home_root_path();
 
-    // ⚠️ The log moves NOW, not earlier: it goes through `pt_fopen`, which needs the hooks.
-    // Unconditional either way — a log with no reachable destination looks fine from inside the app.
+    // ⚠️ The log moves now, through `pt_fopen`, which needs the hooks. Where it went is always printed.
     {
         const std::string moved = filesystem.has_grant() ? relocate_log_file(mediaRoot) : std::string();
         if (moved.empty()) log_carry_done();   // it stays where it is; give the carry buffer back
@@ -608,49 +479,36 @@ int main(int argc, char** argv) {
     cfg.appRoot    = mediaRoot;
     cfg.filesystem = &filesystem;
 
-    // No command line: the app opens the blank NEW PROJECT document, and the browser reaches the
-    // songs. ⚠️ mediaBaseDir must be the tree the samples are actually in, or a portable project
-    // loads looking correct and plays silence.
+    // ⚠️ The tree the samples are in, or a portable project loads fine and plays silence.
     cfg.mediaBaseDir = mediaRoot;
 
-    // ⚠️ `converged()`, not `sdl()` or `android()` — the profile this app runs: the touch layouts,
-    // BTN SOUND/VIBRO and CRT overlay rows on, `sdl()`'s `appExit` and RESUME row kept
-    // (platform_caps.h::converged).
+    // `converged()`: the touch layouts, BTN SOUND/VIBRO and overlay rows, plus `sdl()`'s exit and
+    // RESUME row.
 #ifdef NDEBUG
     cfg.caps = ui::PlatformCaps::converged(/*debug_build=*/false);
 #else
     cfg.caps = ui::PlatformCaps::converged(/*debug_build=*/true);
 #endif
 
-    // On by default and worth it: with the pump above, the banner and the status line land in logcat,
-    // which is the only console this platform has.
+    // With the pump above, the banner and status line reach logcat.
     cfg.console = true;
 
-    // This is a phone: draw the on-screen gamepad when no physical controller is plugged and there
-    // is room (the shell decides both). Not `PlatformCaps::touchLayouts`, the row that picks one.
+    // A phone: the on-screen gamepad when no controller is plugged and there is room.
     cfg.touchCapable = true;
 
-    // ⚠️ "Is there a real pad?" is answered by Java, NOT SDL's joystick count, which counts the
-    // emulator's keyboard as a pad (app.h physicalGamepadPresent).
+    // ⚠️ Kotlin answers, not SDL's joystick count, which counts the emulator's keyboard.
     cfg.physicalGamepadPresent = android_has_physical_gamepad;
 
-    // The evidence behind the line above, written down once. See android_log_input_devices: the
-    // layout gate's inputs are otherwise unrecoverable from a user's report.
+    // The evidence behind that answer, once.
     android_log_input_devices();
 
-    // ⚠️ `cfg.windowed = true` IS AN ORIENTATION DECISION: it becomes `SDL_WINDOW_RESIZABLE`, which
-    // makes the activity FULL_USER (free to rotate) instead of SENSOR_LANDSCAPE. Held landscape the
-    // phone keeps its 2x window; held portrait it gets the PORTRAIT2 skin (app.cpp picks by aspect).
-    // ⚠️ It also makes a landscape-native handheld (the AYANEO) rotatable — landscape stays 2x (a
-    // function of the output size), but a deliberate rotate shows PORTRAIT2 there too.
+    // ⚠️ An orientation decision: a resizable window lets the activity rotate. Landscape keeps its 2×
+    // window; portrait gets the PORTRAIT2 skin — on a landscape handheld too, if rotated on purpose.
     cfg.windowed = true;
 
-    // ⚠️ A RELEASE BUILD ON A PHONE IS PINNED TO PORTRAIT, which makes the line above safe: FULL_USER
-    // would let the sensor reach the landscape touch panels, a layout SETTINGS cannot name or leave.
-    // DEBUG leaves the hint empty so those panels stay drivable. A device with a PHYSICAL pad (the
-    // AYANEO) takes the FULL layout and is not pinned.
-    // ⚠️ LAUNCH-TIME ONLY: the hint is read at window creation; `cfg.allowLandscape` below is the live
-    // half. "Portrait PortraitUpsideDown" → SENSOR_PORTRAIT with a resizable window.
+    // ⚠️ A release build on a phone is pinned to portrait, or the sensor could reach the landscape
+    // touch panels, which no SETTINGS row names. Debug leaves them reachable; a device with a pad
+    // takes FULL and is not pinned. Launch-time only — `cfg.allowLandscape` is the live half.
 #ifdef NDEBUG
     if (!android_has_physical_gamepad()) {
         SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait PortraitUpsideDown");
@@ -662,9 +520,8 @@ int main(int argc, char** argv) {
     std::printf("orient:  free (debug build)\n");
 #endif
 
-    // The live half of the same rule (app.h `allowLandscape`). ⚠️ UNCONDITIONAL, unlike the boot
-    // hint: the landscape panels reached by unplugging a pad are as confusing in debug as in release.
-    // They stay drivable on a desktop with POCKETTRACKER_TOUCH=1 and a wide window.
+    // The live half (app.h `allowLandscape`), in debug too: the landscape panels reached by
+    // unplugging a pad confuse there as well. On desktop: POCKETTRACKER_TOUCH=1 and a wide window.
     cfg.allowLandscape = [](bool allowed) { android_set_landscape_allowed(allowed); };
 
     cfg.background.publishPlaying  = [](bool playing) { g_bgPlaying.store(playing); };
@@ -672,28 +529,24 @@ int main(int argc, char** argv) {
     cfg.background.takeStopRequest = [] { return g_bgStopRequested.exchange(false); };
     cfg.background.end             = [] { android_stop_playback_service(); };
 
-    // ⚠️ NULL: off the screen the process is frozen or killed without notice (unless the playback
-    // service holds it), so a flag polled by this loop would never run. The autosave flushes in an
-    // `SDL_AddEventWatch` watcher on the Java activity thread instead.
+    // ⚠️ Null: off the screen the process is frozen or killed without notice, so a polled flag never
+    // runs. The autosave is an event watcher instead (app.cpp).
     cfg.terminate_requested = nullptr;
 
-    // The button-feedback sink, constructed here so it outlives `run()` (desktop leaves it null).
+    // Outlives `run()`.
     AndroidButtonFeedback buttonFeedback;
     cfg.buttonFeedback = &buttonFeedback;
 
     // ── EXTERNAL MIDI out ────────────────────────────────────────────────────────────────────────
     //
-    // Attached UNCONDITIONALLY — the MIDI screen needs the ENUMERATOR to tell "no devices" from "no
-    // backend". Constructed here so it outlives `run()`. No env-var block: the device pick comes from
-    // settings.json via `InputDispatcher::boot_midi_port()`, as for the OUTPUT row.
+    // Attached always — the MIDI screen tells "no devices" from "no backend" by it. The saved device
+    // is opened from settings.json at boot.
     ptshell::AndroidMidiOut midiOut;
     cfg.midiOut = &midiOut;
 
     // ── MIDI IN ──────────────────────────────────────────────────────────────────────────────────
     //
-    // Same terms: attached unconditionally, constructed here — ⚠️ it must outlive the `SongcoreHost`
-    // whose queue it delivers into, and `run()` closes it before returning — and opened from
-    // settings.json via `InputDispatcher::boot_midi_in_port()`. POLLED once a frame (midi-in-android.cpp).
+    // The same; ⚠️ it must outlive the `SongcoreHost` it delivers into (`run()` closes it). Polled.
     ptshell::AndroidMidiIn midiIn;
     cfg.midiIn = &midiIn;
 

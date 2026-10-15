@@ -1,5 +1,6 @@
 #include "android/saf-filesystem.h"
 
+#include "android/android-jni.h"
 #include "common/byte_source.h"
 
 #include <SDL.h>
@@ -21,9 +22,7 @@ constexpr const char* kScheme   = "pt://";
 constexpr size_t      kSchemeLen = 5;
 constexpr const char* kRootsPath = "pt://roots";
 
-// The ACTION row in the roots directory. ⭐ It cannot collide with a granted tree: the children of
-// `pt://roots` are `pt://<id>`, never `pt://roots/<anything>`, so this string names nothing else that
-// can exist.
+// The ACTION row in the roots directory. Cannot collide: the roots' children are `pt://<id>`.
 constexpr const char* kAddRootPath = "pt://roots/add";
 
 bool is_pt_path(const std::string& s) {
@@ -32,32 +31,12 @@ bool is_pt_path(const std::string& s) {
 
 // ─── the JNI seam ────────────────────────────────────────────────────────────────────────────────
 //
-// The same by-name, exception-safe shape `android-main.cpp` and both MIDI backends already use: a
-// missing method degrades to one log line and an empty answer rather than a crash, because the only
-// way it can go missing is R8 renaming it in a RELEASE build — the one build nobody is attached to.
+// By name and exception-safe, like `android-main.cpp`: a method R8 renamed in a release build costs
+// one log line and an empty answer, not a crash.
 
-struct Env {
-    JNIEnv* env      = nullptr;
-    jobject activity = nullptr;   // LOCAL ref
-    jclass  cls      = nullptr;   // LOCAL ref
-
-    Env() {
-        env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-        if (!env) return;
-        activity = static_cast<jobject>(SDL_AndroidGetActivity());
-        if (!activity) return;
-        cls = env->GetObjectClass(activity);
-    }
-    ~Env() {
-        if (!env) return;
-        if (cls) env->DeleteLocalRef(cls);
-        if (activity) env->DeleteLocalRef(activity);
-    }
-    bool ok() const { return env && activity && cls; }
-
-    jmethodID method(const char* name, const char* sig) {
-        jmethodID m = env->GetMethodID(cls, name, sig);
-        if (env->ExceptionCheck()) { env->ExceptionClear(); m = nullptr; }
+struct Env : Attached {
+    jmethodID method(const char* name, const char* sig) const {
+        const jmethodID m = Attached::method(name, sig);
         if (!m) {
             __android_log_print(ANDROID_LOG_WARN, kLogTag,
                                 "saf: %s%s not found on the activity - R8 renamed it, or it is not built",
@@ -66,24 +45,8 @@ struct Env {
         return m;
     }
 
-    /** A jstring that is deleted with the scope. */
-    jstring str(const std::string& s) { return env->NewStringUTF(s.c_str()); }
-
-    std::string take(jobject o) {
-        if (!o) return std::string();
-        const char* utf = env->GetStringUTFChars(static_cast<jstring>(o), nullptr);
-        std::string out = utf ? utf : "";
-        if (utf) env->ReleaseStringUTFChars(static_cast<jstring>(o), utf);
-        env->DeleteLocalRef(o);
-        return out;
-    }
-
-    bool threw() {
-        if (!env->ExceptionCheck()) return false;
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        return true;
-    }
+    // A jstring the caller deletes.
+    jstring str(const std::string& s) const { return env->NewStringUTF(s.c_str()); }
 };
 
 std::string call_string(const char* name, const char* sig, const std::string& a, const std::string* b) {
@@ -95,27 +58,22 @@ std::string call_string(const char* name, const char* sig, const std::string& a,
     jstring jb = b ? e.str(*b) : nullptr;
     jobject r  = b ? e.env->CallObjectMethod(e.activity, m, ja, jb)
                    : e.env->CallObjectMethod(e.activity, m, ja);
-    const bool bad = e.threw();
+    const bool bad = e.failed();
     e.env->DeleteLocalRef(ja);
     if (jb) e.env->DeleteLocalRef(jb);
     if (bad) { if (r) e.env->DeleteLocalRef(r); return std::string(); }
     return e.take(r);
 }
 
-/**
- * A NO-ARGUMENT String method.
- *
- * ⚠️ **Not `call_string` with an empty string.** That one always builds a jstring and passes it, and
- * handing an argument to a `()Ljava/lang/String;` signature is undefined behaviour, not an ignored
- * extra — the same class of mistake as reading a `Z` return through `CallObjectMethod`.
- */
+// A no-argument String method. ⚠️ Not `call_string` with "": passing an argument to a
+// `()Ljava/lang/String;` signature is undefined behaviour.
 std::string call_string0(const char* name) {
     Env e;
     if (!e.ok()) return std::string();
     jmethodID m = e.method(name, "()Ljava/lang/String;");
     if (!m) return std::string();
     jobject r = e.env->CallObjectMethod(e.activity, m);
-    if (e.threw()) { if (r) e.env->DeleteLocalRef(r); return std::string(); }
+    if (e.failed()) { if (r) e.env->DeleteLocalRef(r); return std::string(); }
     return e.take(r);
 }
 
@@ -123,9 +81,8 @@ std::string call_string0(const char* name) {
 
 // ─── construction, and the hooks ─────────────────────────────────────────────────────────────────
 
-// ⚠️ The hooks are bare function pointers with no user-data argument (byte_source.h), so the
-// instance has to be reachable from free functions. One per process is the only shape this app has
-// ever needed; a second construction is logged rather than left to steal the hooks silently.
+// ⚠️ The hooks take no user data, so the instance is reached through this pointer; a second
+// construction is logged.
 SafFileSystem* g_instance = nullptr;
 
 SafFileSystem::SafFileSystem(std::string private_root) : priv_(private_root, private_root) {}
@@ -175,7 +132,7 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
         if (e.ok()) {
             if (jmethodID m = e.method("safRootCount", "()I")) {
                 count = e.env->CallIntMethod(e.activity, m);
-                if (e.threw()) count = 0;
+                if (e.failed()) count = 0;
             }
         }
     }
@@ -186,13 +143,11 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
         jmethodID m = e.method("safRootInfo", "(I)Ljava/lang/String;");
         if (!m) break;
         jobject r = e.env->CallObjectMethod(e.activity, m, static_cast<jint>(i));
-        if (e.threw()) { if (r) e.env->DeleteLocalRef(r); continue; }
+        if (e.failed()) { if (r) e.env->DeleteLocalRef(r); continue; }
         const std::string info = e.take(r);
 
-        // `<id>\t<name>\t<docUri>\t<live>` — a row with a missing field is skipped rather than
-        // half-read. ⚠️ The liveness flag is the LAST field and its absence must not be read as "dead":
-        // an older shape would then declare every tree gone. A row that does not carry it is skipped
-        // like any other malformed one.
+        // `<id>\t<name>\t<docUri>\t<live>`; a row missing any field — the liveness flag included —
+        // is skipped, never read as "dead".
         const size_t t1 = info.find('\t');
         if (t1 == std::string::npos) continue;
         const size_t t2 = info.find('\t', t1 + 1);
@@ -203,9 +158,8 @@ const std::vector<SafFileSystem::Root>& SafFileSystem::roots(bool refresh) {
                               info.substr(t2 + 1, t3 - t2 - 1), info[t3 + 1] == '1'});
     }
 
-    // ⚠️ Asked ONCE per load rather than per `ensure_dir` call — the seven app folders ask for
-    // themselves on every browser open, and this is a JNI round trip plus a SharedPreferences read.
-    // Java also STAMPS its choice when it answers, so the question and the persistence are one act.
+    // ⚠️ Asked once per load, not per `ensure_dir`: it is a JNI round trip, and the app folders ask
+    // on every browser open. The Kotlin side stamps its choice as it answers.
     homeId_ = call_string0("safHomeRootId");
 
     return roots_;
@@ -217,21 +171,18 @@ int SafFileSystem::root_count() { return static_cast<int>(roots().size()); }
 
 std::string SafFileSystem::home_root_path() {
     const auto& r = roots();
-    // ⚠️ `pt://roots`, not "", when nothing is granted: "" would open the browser on an empty listing
-    // with no "..", a dead end. The roots directory opens on `ADD FOLDER…`. Writes still fail — every
-    // mutating method refuses the roots path.
+    // ⚠️ `pt://roots`, not "", when nothing is granted: "" opens an empty browser with no way out;
+    // the roots directory offers ADD FOLDER…. Every mutation refuses the roots path.
     if (r.empty()) return kRootsPath;
 
-    // The designated home, persisted on the Java side so a SECOND grant cannot move the app's
-    // folders. ⚠️ It must still be LIVE: a grant survives the deletion of its folder, and a dead home
-    // would make every accessor answer "" forever. Java applies the same test.
+    // The stored home, if still LIVE — a grant survives its folder, and a dead home would answer ""
+    // for ever.
     if (!homeId_.empty()) {
         for (const Root& root : r)
             if (root.id == homeId_ && root.live) return std::string(kScheme) + root.id;
     }
 
-    // The fallback is the lowest LIVE id — deterministic, and reached when Java answered "" for a
-    // non-empty grant list, or when the home it named has just gone.
+    // Else the lowest live id.
     for (const Root& root : r) {
         if (!root.live) continue;
         if (!homeId_.empty())
@@ -241,9 +192,8 @@ std::string SafFileSystem::home_root_path() {
         return std::string(kScheme) + root.id;
     }
 
-    // Granted, and not one of them resolves — a card pulled out, or every folder deleted. The roots
-    // directory is the honest answer: it says what IS granted and offers ADD FOLDER…, where "" would
-    // be a browser with no rows and no explanation.
+    // Granted, but none resolves (a card pulled, every folder deleted): the roots directory says what
+    // is granted and offers ADD FOLDER….
     __android_log_print(ANDROID_LOG_ERROR, kLogTag,
                         "saf: %d granted folder(s) and NONE of them resolve - the documents are gone",
                         static_cast<int>(r.size()));
@@ -257,8 +207,7 @@ std::string SafFileSystem::parent_path(const std::string& path) {
     if (path == kRootsPath) return std::string();          // the top; the browser's ".." stops here
 
     const size_t slash = path.rfind('/');
-    // "pt://<id>" — the last '/' is the scheme's own, so the parent is the roots directory, which is
-    // why the roots listing is a DIRECTORY: the browser needs no new state.
+    // "pt://<id>": the last '/' is the scheme's, so the parent is the roots directory.
     if (slash == std::string::npos || slash <= kSchemeLen) return kRootsPath;
     return path.substr(0, slash);
 }
@@ -283,8 +232,7 @@ std::string SafFileSystem::resolve(const std::string& path) {
         return std::string();
     }
 
-    // Anything deeper is found by listing its parent, which caches every sibling's URI on the way —
-    // so resolving 8 samples in one folder costs one query, not eight. Recurses to the root.
+    // Deeper: list the parent, which caches every sibling's URI — 8 samples in one folder, one query.
     listing(parent_path(path));
     cached = uriCache_.find(path);
     return cached != uriCache_.end() ? cached->second : std::string();
@@ -293,10 +241,9 @@ std::string SafFileSystem::resolve(const std::string& path) {
 const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& dirPath) {
     std::vector<pt::ui::FileInfo> out;
 
-    // ⚠️ THE ROOTS DIRECTORY IS NEVER CACHED, checked BEFORE the lookup: a grant arrives while running
-    // (`ADD FOLDER…`), and a cached listing would hide the new folder on the screen it was granted on.
-    // Every other directory is cached until `forget`/`invalidate` — and files arrive from outside too
-    // (a PC, a download), which is why the browser's refresh (`forget_listing`) also drops entries.
+    // ⚠️ The roots directory is never cached (checked before the lookup): ADD FOLDER… adds a grant
+    // while running. Others are cached until `forget`/`invalidate`; files from outside the app are
+    // why the browser's refresh drops entries.
     if (dirPath == kRootsPath) {
         for (const Root& r : roots(/*refresh=*/true)) {
             pt::ui::FileInfo fi;
@@ -304,8 +251,7 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
             fi.isDirectory = true;
             fi.isRoot      = true;   // ⚠️ not a folder: no rename, no delete, and SEL+A means SET HOME
 
-            // ⭐ The two things a user cannot otherwise find out, on the row itself: which tree holds
-            // the app's folders, and a grant whose folder has been deleted. The name is the only channel.
+            // Which tree is home, and which grant lost its folder: the name is the only place to say so.
             fi.name = r.name;
             if (!r.live)                 fi.name += " (MISSING)";
             else if (r.id == homeId_)    fi.name += " (HOME)";
@@ -314,8 +260,7 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
             uriCache_[fi.path] = r.docUri;
         }
 
-        // ⭐ The way OUT of the empty state is a row IN it: with nothing granted this is the only entry
-        // in the only directory the browser can be on.
+        // The way out of the empty state: with nothing granted this is the only row.
         pt::ui::FileInfo add;
         add.path     = kAddRootPath;
         add.name     = "ADD FOLDER...";   // the 5x5 font has no ellipsis glyph; three dots is the glyph
@@ -357,8 +302,7 @@ const std::vector<pt::ui::FileInfo>* SafFileSystem::listing(const std::string& d
         fi.size        = std::strtoll(line.c_str() + f[2] + 1, nullptr, 10);
         fi.lastModified = std::strtoll(line.c_str() + f[3] + 1, nullptr, 10);
         fi.path        = dirPath + "/" + fi.name;
-        // `File.extension` semantics, as `std_filesystem.h` insists: the browser FILTERS on this
-        // string, so the two implementations must answer identically.
+            // `File.extension` semantics, as `std_filesystem.h` — the browser filters on it.
         if (!fi.isDirectory) {
             const size_t dot = fi.name.rfind('.');
             if (dot != std::string::npos && dot + 1 < fi.name.size())
@@ -381,9 +325,7 @@ void SafFileSystem::invalidate(const std::string& dirPath) {
 
 std::string SafFileSystem::ensure_dir(const char* sub) {
     const std::string home = home_root_path();
-    // Nothing granted: the browser opens on the roots directory, which is the ADD FOLDER… row. There
-    // is no tree to create `Projects` in yet, and `resolve` refuses the roots path, so returning it
-    // unchanged is what makes every accessor answer "the place where you choose a place".
+    // Nothing granted: every accessor answers the roots directory, where a folder can be added.
     if (home == kRootsPath) return home;
 
     std::string cur = home;
@@ -432,20 +374,16 @@ bool SafFileSystem::activate(const std::string& path) {
     jmethodID m = e.method("safRequestRoot", "()Z");
     if (!m) return false;
     const bool launched = e.env->CallBooleanMethod(e.activity, m) == JNI_TRUE;
-    if (e.threw()) return false;
+    if (e.failed()) return false;
 
-    // ⚠️ **`launched` is "the picker is on screen", NOT "a folder was granted".** The grant lands in
-    // the activity's `onActivityResult`, which cannot run until this thread has gone back to its own
-    // loop and let the process be backgrounded. Nothing here waits for it; the browser re-lists on
-    // foreground and the roots listing is never cached, so the new tree is simply there.
+    // ⚠️ `launched` = the picker is on screen, not that a folder was granted. Nothing waits for the
+    // grant: the browser re-lists when the app comes back.
     std::printf("saf:     ADD FOLDER - picker %s\n", launched ? "launched" : "COULD NOT BE OPENED");
     return launched;
 }
 
 bool SafFileSystem::set_home_directory(const std::string& path) {
-    // Only a granted tree can be a home. `pt://roots` is not one, and neither is a folder inside a
-    // tree: the home is what the seven app folders are created directly under, and a grant is the unit
-    // Android hands out and the unit it can take away.
+    // Only a granted tree can be home: not the roots, not a folder inside a tree.
     if (!is_granted_tree(path)) return false;
 
     const std::string id = path.substr(kSchemeLen);
@@ -455,17 +393,15 @@ bool SafFileSystem::set_home_directory(const std::string& path) {
     if (!m) return false;
     jstring jid = e.str(id);
     const bool set = e.env->CallBooleanMethod(e.activity, m, jid) == JNI_TRUE;
-    const bool bad = e.threw();
+    const bool bad = e.failed();
     e.env->DeleteLocalRef(jid);
     if (bad || !set) return false;
 
-    // ⚠️ **`homeId_` is read once per roots load, so without this the seven accessors keep answering
-    // the OLD tree** — the choice would be persisted, correct on the next launch, and inert on this
-    // one. `refresh` also re-reads the grant list, which is cheap here (one gesture, not a frame).
+    // ⚠️ `homeId_` is read once per roots load; without this the accessors keep answering the old
+    // tree until relaunch.
     roots(/*refresh=*/true);
 
-    // ⚠️ And the roots listing itself is now wrong: it carries the "(HOME)" marker, which has just
-    // moved. It is the one listing served from the cache only until something says otherwise.
+    // The roots listing carries the "(HOME)" marker, which has just moved.
     invalidate(kRootsPath);
 
     std::printf("saf:     home folder is now %s\n", path.c_str());
@@ -482,13 +418,12 @@ bool SafFileSystem::revoke_access(const std::string& path) {
     if (!m) return false;
     jstring jid = e.str(id);
     const bool gone = e.env->CallBooleanMethod(e.activity, m, jid) == JNI_TRUE;
-    const bool bad  = e.threw();
+    const bool bad  = e.failed();
     e.env->DeleteLocalRef(jid);
     if (bad || !gone) return false;
 
-    // ⚠️ The tree's whole sub-tree of cached URIs is dead the moment the permission is: every one of
-    // them names a document this process may no longer open. `forget` also drops the roots listing,
-    // because `parent_path(pt://<id>)` IS the roots path.
+    // ⚠️ Every cached URI under the tree is dead with the permission. `forget` also drops the roots
+    // listing, since that is the tree's parent.
     forget(path);
     roots(/*refresh=*/true);   // re-read the grant list, and the home with it — Java may have cleared it
     invalidate(kRootsPath);
@@ -500,12 +435,8 @@ bool SafFileSystem::revoke_access(const std::string& path) {
 
 std::string SafFileSystem::config_path() {
     const std::string home = home_root_path();
-    // ⚠️ Empty when nothing is granted, and that is correct rather than a degradation:
-    // `load_folder_config` treats "no file" as its common case, so "no tree yet" reads exactly like
-    // "no config was ever written" — which is the argument that kept this file in the tree at all.
-    // ⚠️ The no-grant answer from `home_root_path` is the ROOTS path, not "": `pt://roots/config.json`
-    // is a document under a directory that does not exist, so the test has to be for the roots path
-    // rather than for emptiness.
+    // ⚠️ "" with nothing granted — `load_folder_config` reads that as "no config", its common case.
+    // Tested against the roots path, which is what `home_root_path` answers then.
     return home == kRootsPath ? std::string() : home + "/config.json";
 }
 
@@ -523,7 +454,7 @@ bool SafFileSystem::read_file(const std::string& path, std::string& out) {
     if (!m) return false;
     jstring ju = e.str(uri);
     jobject r  = e.env->CallObjectMethod(e.activity, m, ju);
-    const bool bad = e.threw();
+    const bool bad = e.failed();
     e.env->DeleteLocalRef(ju);
     if (bad || !r) { if (r) e.env->DeleteLocalRef(r); return false; }
 
@@ -602,15 +533,15 @@ std::string SafFileSystem::ensure_file(const std::string& path) {
 }
 
 bool SafFileSystem::delete_uri(const std::string& uri) {
-    // ⚠️ NOT `call_string`: `safDelete` returns a boolean, and reading a `Z` return through
-    // `CallObjectMethod` is undefined behaviour rather than a wrong answer.
+    // ⚠️ Not `call_string`: `safDelete` returns a boolean, and reading `Z` through `CallObjectMethod`
+    // is undefined behaviour.
     Env e;
     if (!e.ok()) return false;
     jmethodID m = e.method("safDelete", "(Ljava/lang/String;)Z");
     if (!m) return false;
     jstring    ju  = e.str(uri);
     const bool ok  = e.env->CallBooleanMethod(e.activity, m, ju) == JNI_TRUE;
-    const bool bad = e.threw();
+    const bool bad = e.failed();
     e.env->DeleteLocalRef(ju);
     return ok && !bad;
 }
@@ -623,25 +554,22 @@ int SafFileSystem::open_uri_fd(const std::string& uri, const char* mode) {
     jstring ju = e.str(uri);
     jstring jm = e.str(mode);
     const jint fd  = e.env->CallIntMethod(e.activity, m, ju, jm);
-    const bool bad = e.threw();
+    const bool bad = e.failed();
     e.env->DeleteLocalRef(ju);
     e.env->DeleteLocalRef(jm);
     return bad ? -1 : static_cast<int>(fd);
 }
 
 bool SafFileSystem::write_uri(const std::string& uri, const void* data, size_t len) {
-    // "wt" — write and TRUNCATE. Plain "w" leaves whatever was longer than the new content in place,
-    // so overwriting a big project with a small one would leave the tail of the big one behind and the
-    // file would still parse as far as the JSON goes.
+    // "wt" — write and TRUNCATE; plain "w" leaves the tail of a longer old file in place.
     const int fd = open_uri_fd(uri, "wt");
     if (fd < 0) return false;
 
     std::FILE* f = fdopen(fd, "wb");
     if (!f) { close(fd); return false; }
     const bool wrote = len == 0 || std::fwrite(data, 1, len, f) == len;
-    // ⚠️ `fclose` IS A WRITE and it is checked, for `std_filesystem.cpp`'s reason exactly: a payload
-    // smaller than the stdio buffer reaches the provider for the FIRST time in this flush, so a full
-    // disk arrives here and nowhere earlier. Unchecked, a truncated save returns true.
+    // ⚠️ `fclose` is a write: a small payload reaches the provider first here, so a full disk shows up
+    // only now. Unchecked, a truncated save returns true.
     const bool closed = std::fclose(f) == 0;
     return wrote && closed;
 }
@@ -654,23 +582,19 @@ int SafFileSystem::open_fd(const std::string& path, const char* mode) {
     const bool append = mode && std::strchr(mode, 'a');
     const bool write  = mode && (std::strchr(mode, 'w') || std::strchr(mode, '+'));
 
-    // ⚠️ APPEND is refused rather than emulated. `openFileDescriptor` has an "wa" mode, but nothing
-    // below the UI opens for append today, and a mode nobody exercises is a mode nobody would notice
-    // breaking. It says so out loud rather than returning a bare -1, which reads as "not found".
+    // ⚠️ Append is refused out loud: nothing opens for append, and a bare -1 reads as "not found".
     if (append) {
         __android_log_print(ANDROID_LOG_WARN, kLogTag,
                             "saf: open('%s','%s') - append is not implemented", path.c_str(), mode);
         return -1;
     }
 
-    // See the header: the create is derivable because a `pt://` path is composable. `ensure_file` is
-    // find-or-create, and the "t" below is what makes the found case an overwrite rather than a patch.
+    // `ensure_file` finds or creates; the "t" makes a found file an overwrite.
     const std::string uri = write ? ensure_file(path) : resolve(path);
     if (uri.empty()) return -1;
 
-    // ⚠️ "rwt", not "wt" — the "r" is load-bearing: `WavStreamWriter` SEEKS BACK TO ZERO to patch the
-    // RIFF header after streaming a render, and "rwt" is the mode that backward seek was verified on.
-    // `write_bytes` opens "wt" for a single forward pass.
+    // ⚠️ "rwt", not "wt": `WavStreamWriter` seeks back to patch the RIFF header, and that seek was
+    // verified on "rwt". `write_bytes` opens "wt" for one forward pass.
     return open_uri_fd(uri, write ? "rwt" : "r");
 }
 
@@ -685,8 +609,8 @@ int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
     // `pt_rename` refuses a mixed pair, so both ends are `pt://` by the time this is called.
     if (!is_pt_path(from) || !is_pt_path(to)) return -1;
 
-    // A different parent is a MOVE (`move_file`, with its fallback). Nothing below the UI renames
-    // across directories today — both writers publish `<path>.tmp` onto `<path>`.
+    // A different parent is a MOVE. Nothing below the UI does that — both writers publish
+    // `<path>.tmp` onto `<path>`.
     if (parent_path(from) != parent_path(to)) return move_file(from, to) ? 0 : -1;
 
     const std::string name = leaf_name(to);
@@ -695,8 +619,8 @@ int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
     const std::string uri = resolve(from);
     if (uri.empty()) return -1;
 
-    // ⚠️ The target must be gone: `renameDocument` onto a taken name de-duplicates. Both callers
-    // already `pt_remove` it first; this is the backstop, cheap off the invalidated listing.
+    // ⚠️ The target must be gone: a rename onto a taken name de-duplicates. Callers `pt_remove` it
+    // first; this is the backstop.
     const std::string targetUri = resolve(to);
     if (!targetUri.empty()) {
         delete_uri(targetUri);
@@ -725,9 +649,8 @@ bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_
     const std::string name = leaf_name(path);
     if (name.empty()) return false;
 
-    // ⚠️ Temp-then-rename: writing straight over the target with "wt" leaves a truncated project if
-    // the process dies mid-save. Here the window is between delete and rename, with the COMPLETE new
-    // content under `<name>.tmp` — recoverable by hand.
+    // ⚠️ Temp then rename: a death mid-save leaves the complete new content in `<name>.tmp`, never a
+    // truncated project.
     const std::string tmpPath = path + ".tmp";
     const std::string tmpUri  = ensure_file(tmpPath);
     if (tmpUri.empty()) return false;
@@ -738,8 +661,7 @@ bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_
         return false;
     }
 
-    // The target has to GO before the rename: `renameDocument` onto a taken name de-duplicates the
-    // way `createDocument` does, so skipping this leaves the old file plus a `song (1).ptp`.
+    // The target goes first, or the rename de-duplicates into `song (1).ptp`.
     const std::string targetUri = resolve(path);
     if (!targetUri.empty()) {
         delete_uri(targetUri);
@@ -763,9 +685,8 @@ bool SafFileSystem::is_granted_tree(const std::string& path) {
 bool SafFileSystem::delete_path(const std::string& path) {
     if (!is_pt_path(path)) return priv_.delete_path(path);
 
-    // ⚠️⚠️ A GRANTED TREE IS NOT THE APP'S TO DELETE: `pt://<id>` resolves to the tree's own root
-    // document, i.e. the user's whole folder. The browser refuses it a row earlier
-    // (`FileInfo::isRoot`); this is the same refusal below the UI.
+    // ⚠️ A granted tree is not the app's to delete: `pt://<id>` is the user's whole folder. The browser
+    // refuses it too (`FileInfo::isRoot`).
     if (is_granted_tree(path)) return false;
 
     const std::string uri = resolve(path);
@@ -779,8 +700,7 @@ bool SafFileSystem::rename_file(const std::string& path, const std::string& new_
     if (!is_pt_path(path)) return priv_.rename_file(path, new_base_name);
     if (is_granted_tree(path)) return false;   // see delete_path — the tree itself is the user's
 
-    // Byte-for-byte `StdFileSystem::rename_file`'s rule, through the shared `path_sanitize`: keep the
-    // extension unless the typed name already ends in it, and never clobber.
+    // `StdFileSystem::rename_file`'s rule via `path_sanitize`: keep the extension, never clobber.
     const bool        dir = is_directory(path);
     const std::string ext = dir ? std::string() : pt::ui::path_extension(path);
 
@@ -807,9 +727,8 @@ bool SafFileSystem::rename_file(const std::string& path, const std::string& new_
                                             uri, &finalName);
     if (renamed.empty()) return false;
 
-    // ⚠️ The document's URI may have CHANGED — `ExternalStorageProvider` encodes the display name into
-    // the id — so the OLD path and everything under it is forgotten and the NEW one takes the returned
-    // URI. Caching the old string against the new path is how a renamed folder's children go stale.
+    // ⚠️ The URI may change (the provider may encode the name in the id), so the old path and all
+    // under it are forgotten, and the new path takes the returned URI.
     forget(path);
     uriCache_[target] = renamed;
     invalidate(parent);
@@ -823,9 +742,7 @@ std::string SafFileSystem::create_folder(const std::string& parent, const std::s
     if (safe.empty()) return std::string();
 
     const std::string target = parent + "/" + safe;
-    // ⚠️ "" when it already exists, which is the interface's contract and NOT what `safCreateDir`
-    // does on its own — that one is find-or-create, because the seven app folders ask for themselves
-    // on every launch. The check belongs here, where the contract is.
+    // ⚠️ "" if it exists — the interface's contract; `safCreateDir` alone would find-or-create.
     if (!resolve(target).empty()) return std::string();
 
     const std::string parentUri = resolve(parent);
@@ -847,9 +764,7 @@ bool SafFileSystem::copy_tree(const std::string& from, const std::string& to) {
             if (!copy_tree(child.path, to + "/" + child.name)) return false;
         return true;
     }
-    // Whole-file, because that is what the seam is shaped for (`read_file` returns a string) and what
-    // the callers copy: projects, presets, themes and samples. The largest of them is a sample, and one
-    // already costs twice this much resident once it is loaded.
+    // Whole-file, as the seam is shaped (`read_file` returns a string); the largest is a sample.
     std::string blob;
     if (!read_file(from, blob)) return false;
     return write_bytes(to, blob.data(), blob.size());
@@ -859,10 +774,8 @@ bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
     if (!is_pt_path(from) && !is_pt_path(to)) return priv_.move_file(from, to);
     if (is_granted_tree(from)) return false;   // see delete_path — and a move ends in a delete
 
-    // Same tree, both ends SAF: ask the provider to move the document, which costs nothing and keeps
-    // the bytes where they are. "" means it will not — a missing FLAG_SUPPORTS_MOVE, or two different
-    // providers — and that is a fallback rather than a failure, exactly as a cross-filesystem
-    // `rename(2)` is for `StdFileSystem`.
+    // Both ends in one tree: the provider moves it for free. "" means it will not (no
+    // FLAG_SUPPORTS_MOVE, two providers) — then copy and delete, as `rename(2)` across filesystems.
     if (is_pt_path(from) && is_pt_path(to)) {
         const std::string srcUri       = resolve(from);
         const std::string fromParent   = resolve(parent_path(from));
@@ -875,7 +788,7 @@ bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
                         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")) {
                     jstring a = e.str(srcUri), b = e.str(fromParent), c = e.str(toParent);
                     jobject r = e.env->CallObjectMethod(e.activity, m, a, b, c);
-                    const bool bad = e.threw();
+                    const bool bad = e.failed();
                     e.env->DeleteLocalRef(a);
                     e.env->DeleteLocalRef(b);
                     e.env->DeleteLocalRef(c);
@@ -893,9 +806,8 @@ bool SafFileSystem::move_file(const std::string& from, const std::string& to) {
     }
 
     if (!copy_tree(from, to)) return false;
-    // ⚠️ The copy is what must not be lost, so a delete that fails leaves BOTH rather than neither and
-    // still reports success — a move that half-worked with the source gone is unrecoverable, one with
-    // the source still there is a duplicate the user can see and remove.
+    // ⚠️ A delete that fails leaves both and still reports success: a duplicate the user can remove
+    // beats a lost source.
     delete_path(from);
     return true;
 }

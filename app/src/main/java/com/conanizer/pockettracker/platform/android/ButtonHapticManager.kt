@@ -9,31 +9,17 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 
 /**
- * Short haptic pulses on virtual button press and release.
- *
- * Uses the best available haptic API in order of preference:
- *   1. API 30+: VibrationEffect.Composition (PRIMITIVE_CLICK / PRIMITIVE_TICK)
- *      — crispest feel, and POW scales it CONTINUOUSLY. Many custom ROMs (e.g. LineageOS) report
- *        arePrimitivesSupported = false even on capable actuators, so this often can't be used.
- *   2. API 29+: VibrationEffect.createPredefined, the EFFECT chosen BY POW (TICK light / CLICK strong)
- *      — a tuned click: the crisp HAPTIC feel, not a buzzy vibration. POW picks the strength (two
- *        discrete steps — see predefinedForPower). Preferred over the one-shot so it stays a HAPTIC.
- *   3. API 26+: VibrationEffect.createOneShot with explicit amplitude (hapticAmplitude)
- *      — honours [power] continuously but feels like a VIBRATION; last resort where predefined
- *        effects are unavailable (API 26–28).
- *   4. API <29: View.performHapticFeedback (VIRTUAL_KEY / VIRTUAL_KEY_RELEASE)
- *      — system-default feel, ignores [power]
- *
- * ⚠️ Without Composition primitives, crisp feel and continuous POW cannot both be had: the predefined
- * family keeps the crisp haptic and POW steps through it (an amplitude one-shot honours POW but
- * buzzes). Only touch layouts reach this.
- *
- * VIBRATE permission must be declared in AndroidManifest.xml.
+ * Short haptic pulses on on-screen button press and release, by the best API the device has:
+ *   1. API 30+ Composition primitives (CLICK / TICK) — crispest, POW scales them continuously; many
+ *      ROMs (LineageOS) report them unsupported even on capable actuators;
+ *   2. API 29+ a predefined effect picked by POW (TICK light, CLICK strong) — still a crisp click;
+ *   3. API 26+ an amplitude one-shot — honours POW but feels like a buzz;
+ *   4. else `View.performHapticFeedback`, ignoring POW.
  */
 class ButtonHapticManager(context: Context) {
 
     var enabled: Boolean = false
-    var power: Int = 255  // 1–255; maps to 0.0–1.0 amplitude scale (Composition API only)
+    var power: Int = 255  // 1–255
 
     private val vibrator: Vibrator? = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
@@ -45,7 +31,7 @@ class ButtonHapticManager(context: Context) {
         }
     }
 
-    // Lazily check device support for Composition primitives (API 30+)
+    // Composition primitive support, asked once (API 30+).
     private val supportsClickPrimitive: Boolean by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && vibrator != null) {
             vibrator.arePrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)[0]
@@ -61,10 +47,8 @@ class ButtonHapticManager(context: Context) {
         if (!enabled) return
         val scale = power.coerceIn(1, 255) / 255f
         if (hapticComposition(VibrationEffect.Composition.PRIMITIVE_CLICK, scale, supportsClickPrimitive)) return
-        // Predefined effect chosen BY POW: keeps the crisp HAPTIC feel (a tuned click) rather than the
-        // buzzy amplitude one-shot, while still letting POW change the pulse — light TICK / strong CLICK.
+        // A predefined click by POW, before the buzzier amplitude one-shot.
         if (hapticPredefined(predefinedForPower(power))) return
-        // Amplitude one-shot: last resort (API 26–28, no predefined effects). Feels like a vibration.
         if (hapticAmplitude(durationMs = 8, amplitude = power.coerceIn(1, 255))) return
         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
     }
@@ -74,8 +58,7 @@ class ButtonHapticManager(context: Context) {
         val releaseAmplitude = (power * 0.35f).toInt().coerceIn(1, 255)
         val scale = releaseAmplitude / 255f
         if (hapticComposition(VibrationEffect.Composition.PRIMITIVE_TICK, scale, supportsTickPrimitive)) return
-        // Predefined, chosen by the (already reduced) release power — a lighter tick, same crisp-haptic
-        // reasoning as onPress. The 0.35 scale keeps it in the TICK/CLICK range so the release stays soft.
+        // The release is 0.35 × POW, which keeps the predefined choice on the light TICK.
         if (hapticPredefined(predefinedForPower(releaseAmplitude))) return
         if (hapticAmplitude(durationMs = 5, amplitude = releaseAmplitude)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -83,12 +66,7 @@ class ButtonHapticManager(context: Context) {
         }
     }
 
-    fun hasHardware(): Boolean = vibrator?.hasVibrator() == true
-
-    /**
-     * Short pulse with explicit amplitude — feels like a click when [durationMs] is ≤ 10ms.
-     * Requires the device to support amplitude control. Returns true if vibration was triggered.
-     */
+    // A short one-shot at an explicit amplitude; needs amplitude control. True if it vibrated.
     private fun hapticAmplitude(durationMs: Long, amplitude: Int): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         if (vibrator == null || !vibrator.hasVibrator()) return false
@@ -108,11 +86,8 @@ class ButtonHapticManager(context: Context) {
         return true
     }
 
-    /**
-     * Map POW (1..255) onto a predefined "click": light below the midpoint, strong above it. Two
-     * steps: on the actuators tested only EFFECT_TICK and EFFECT_CLICK are distinct
-     * (EFFECT_HEAVY_CLICK collapses onto TICK). No Composition primitives there, so POW isn't continuous.
-     */
+    // POW onto a predefined click. Two steps: on the actuators tried only TICK and CLICK differ
+    // (HEAVY_CLICK sounds like TICK).
     private fun predefinedForPower(p: Int): Int =
         if (p < 128) VibrationEffect.EFFECT_TICK else VibrationEffect.EFFECT_CLICK
 

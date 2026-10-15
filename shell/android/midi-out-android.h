@@ -1,10 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_OUT_ANDROID_H
 #define POCKETTRACKER_SHELL_MIDI_OUT_ANDROID_H
 
-// The ANDROID songcore::IMidiOut — five JNI up-calls into MainActivity.
-// See midi-out-android.cpp for why the port lives in Kotlin at all, and for the direction gotcha
-// (to SEND you open the device's INPUT port) that is the single easiest thing to get backwards here.
-// Compiles to nothing off Android.
+// The Android songcore::IMidiOut — five JNI up-calls into MainActivity. Nothing off Android.
 
 #include "midi/midi-out-base.h"
 
@@ -39,14 +36,8 @@ class AndroidMidiOut : public MidiOutBase {
     Hooks& hooks(JNIEnv* env, jobject activity);
 
     Hooks hooks_;
-    /**
-     * Whether OUR last `open` succeeded — not a question asked of Java.
-     *
-     * ⚠️ `is_open()` is called from the frame loop (the OUTPUT row draws from it, and songcore's
-     * consumer checks it before every message), and a JNI round trip per frame to answer a question
-     * we already know the answer to would be absurd. The two can only disagree if the device is
-     * yanked, which surfaces as `send` failing — counted, and marked REJECTED in the MIDI trace.
-     */
+    // Whether our last `open` succeeded, so the frame loop never asks Java. A yanked device shows
+    // up as `send` failing — counted and marked in the MIDI trace.
     bool open_ = false;
 };
 

@@ -1,10 +1,8 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_IN_ANDROID_H
 #define POCKETTRACKER_SHELL_MIDI_IN_ANDROID_H
 
-// The ANDROID songcore::IMidiIn — `MidiManager`, reached by JNI.
-// See midi-in-android.cpp for the direction gotcha, and for why this backend is POLLED where the other
-// two push. Compiles to nothing off Android; android-main.cpp is the only thing that names it, exactly
-// as it is the only thing that names AndroidMidiOut.
+// The Android songcore::IMidiIn — `MidiManager` over JNI, polled once a frame (the .cpp says why).
+// Nothing off Android.
 
 #include "midi/midi-in-base.h"
 
@@ -45,7 +43,7 @@ class AndroidMidiIn : public MidiInBase {
 
     Hooks     hooks_{};
     bool      open_ = false;
-    /** The one reusable byte[] `midiInRead` fills. A GLOBAL ref — see the note in the .cpp. */
+    // The one reusable byte[] `midiInRead` fills; a global ref.
     jbyteArray buffer_ = nullptr;
 };
 

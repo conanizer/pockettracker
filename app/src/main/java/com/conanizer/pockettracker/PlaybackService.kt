@@ -12,14 +12,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
 /**
- * Keeps a song playing while the app is off the screen. While this service runs, Android does not
- * freeze the process, so the audio stream keeps being fed. Its notification carries STOP.
- *
- * Started by [MainActivity.onPause] only when a song is playing; stopped by [MainActivity.onResume],
- * and by the native loop once the song stops in the background ([MainActivity.stopPlaybackService]).
- *
- * ⚠️ STOP does not stop the service itself: it asks the native loop, which stops the transport, hands
- * the sound back and then takes this service down — one owner for the whole sequence.
+ * Keeps a song playing while the app is off the screen — Android does not freeze a process running
+ * one. Started by [MainActivity.onPause] when a song plays; stopped on resume, or by native once the
+ * song stops ([MainActivity.stopPlaybackService]).
+ * ⚠️ STOP asks the native loop, which stops the song, hands the sound back and then ends this service.
  */
 class PlaybackService : Service() {
 
@@ -35,8 +31,7 @@ class PlaybackService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0
         )
-        // ⚠️ NOT sticky: a song cannot survive the process, so a restarted service would only put
-        // up a notification for a song that is no longer playing.
+        // Not sticky: a song does not survive the process, so a restart would show a dead notification.
         return START_NOT_STICKY
     }
 
@@ -70,7 +65,7 @@ class PlaybackService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP     = "com.conanizer.pockettracker.STOP"
 
-        /** Native (shell/android/android-main.cpp): the loop stops the transport on its next tick. */
+        /** Native: the loop stops the transport on its next tick. */
         @JvmStatic external fun nativeRequestStop()
     }
 }

@@ -9,43 +9,25 @@ import android.util.Log
 import java.security.MessageDigest
 
 /**
- * The Storage Access Framework primitives, and nothing else.
+ * The Storage Access Framework primitives, and nothing else: `ContentResolver` and
+ * `DocumentsContract` are Java-only, so the C++ `SafFileSystem` calls through this. It knows nothing
+ * of `pt://` paths, the app folders or the home choice's meaning — that logic lives in C++.
  *
- * `ContentResolver` and `DocumentsContract` are Java-only APIs, so the C++ `SafFileSystem` cannot
- * reach them; this class is the platform residue it calls through. It is deliberately DUMB — it
- * queries, reads and creates single documents and knows nothing about `pt://` paths, the seven app
- * folders, or which tree is the app's home. All of that is derivation, and derivation lives in C++
- * where it is one implementation for every future host rather than a second one written in Kotlin.
- *
- * ⚠️ **Every public method here is resolved BY NAME over JNI** (through the wrappers on
- * `MainActivity`, which is the object native holds). They carry `@Keep` there and an explicit rule in
- * `proguard-rules.pro`, per the standing rule — a release-only rename is invisible until a release
- * build.
+ * ⚠️ Every public method is resolved by name over JNI (through `MainActivity`'s wrappers): `@Keep`
+ * there and a rule in `proguard-rules.pro`, or only a release build breaks.
  */
 class SafStorage(private val context: Context) {
 
     /**
-     * A granted tree: its derived id, what to call it on screen, the document URI of its root, the
-     * persisted TREE uri the id was derived from — which is the handle [homeRootId] stores, because it
-     * is the authoritative one and the id is only a function of it — and whether the folder behind the
-     * grant is still THERE.
-     *
-     * ⚠️⚠️ **A GRANT OUTLIVES ITS FOLDER.** Delete the directory, unmount the card, and
-     * `getPersistedUriPermissions()` still returns the grant forever — nothing revokes it but the user.
-     * Every id, name and URI below is still perfectly well-formed; only [live] says the document is
-     * gone. Without it a dead grant can be chosen as the home root and stay chosen, and then every app
-     * folder resolves to nothing with nothing anywhere saying why.
+     * A granted tree: its derived id, display name, root document URI, the persisted tree URI the id
+     * comes from (what [homeRootId] stores), and whether its folder is still there.
+     * ⚠️ A grant outlives its folder: delete the directory or unmount the card and the grant stays,
+     * well-formed. Only [live] tells; without it a dead tree could be chosen as home.
      */
     data class Root(val id: String, val displayName: String, val docUri: String, val treeUri: String,
                     val live: Boolean)
 
-    /**
-     * The granted trees, ordered by id.
-     *
-     * ⚠️ **The ORDER `getPersistedUriPermissions()` returns is not guaranteed**, which is exactly why
-     * the id cannot be an index into it. Sorting by the derived id makes this list stable across
-     * boots without storing anything.
-     */
+    // The granted trees, ordered by id — `persistedUriPermissions` has no guaranteed order.
     fun roots(): List<Root> {
         val out = ArrayList<Root>()
         for (p in context.contentResolver.persistedUriPermissions) {
@@ -58,9 +40,7 @@ class SafStorage(private val context: Context) {
         }
         out.sortBy { it.id }
 
-        // The impossible case, made observable rather than silently resolving to whichever tree came
-        // first. 48 bits against a 512-grant ceiling is ~5e-10, and "never" is not a reason to
-        // resolve a collision arbitrarily.
+        // A collision (48 bits over at most 512 grants) is logged rather than resolved arbitrarily.
         for (i in 1 until out.size) {
             if (out[i].id == out[i - 1].id) {
                 Log.e(TAG, "saf: ROOT ID COLLISION ${out[i].id} - " +
@@ -70,29 +50,15 @@ class SafStorage(private val context: Context) {
         return out
     }
 
-    /**
-     * The id of a granted tree: 12 hex characters of SHA-256 over the persisted tree URI.
-     *
-     * ⭐ Derived, never stored — so the id→tree mapping is re-derivable from the grant list on any
-     * boot, in any order, with no table to migrate or fall out of sync.
-     */
+    // 12 hex characters of SHA-256 over the tree URI: derived, never stored, so any boot re-derives it.
     private fun rootId(tree: Uri): String =
         MessageDigest.getInstance("SHA-256")
             .digest(tree.toString().toByteArray())
             .take(6)
             .joinToString("") { "%02x".format(it) }
 
-    /**
-     * Is the document behind this grant still there?
-     *
-     * ⚠️ **Asked about `COLUMN_DOCUMENT_ID`, NOT about the display name.** Every document has an id, so
-     * a missing row means the document is gone; a missing *name* means only that the provider does not
-     * offer one, which [displayNameOf] deliberately tolerates. Answering this from the name query would
-     * declare a perfectly good tree dead because its provider is terse.
-     *
-     * A provider that throws (`FileNotFoundException` is the usual one for a deleted document) is the
-     * same answer as an empty cursor, which is why both fall through `runCatching` to false.
-     */
+    // ⚠️ Asked by `COLUMN_DOCUMENT_ID`, not the name: every document has an id, while a provider may
+    // offer no name. A throw (a deleted document) reads as gone too.
     private fun isLive(docUri: Uri): Boolean =
         queryRow(docUri, DocumentsContract.Document.COLUMN_DOCUMENT_ID) != null
 
@@ -101,31 +67,23 @@ class SafStorage(private val context: Context) {
         queryRow(docUri, DocumentsContract.Document.COLUMN_DISPLAY_NAME)?.let {
             if (it.isNotEmpty()) return clean(it)
         }
-        // `primary:Documents/PocketTracker` → `PocketTracker`. A provider that answers neither is
-        // still listed, under something, rather than dropped from the browser.
+        // `primary:Documents/PocketTracker` → `PocketTracker`; never dropped for want of a name.
         return clean(docId.substringAfterLast('/').substringAfterLast(':').ifEmpty { "ROOT" })
     }
 
     fun rootCount(): Int = roots().size
 
     /**
-     * The id of the tree the app's seven folders live in — the HOME root — or "" if nothing is granted.
-     *
-     * ⚠️⚠️ The one piece of SAF state that is STORED rather than derived, and it has to be: any rule
-     * computed from the grant set would move the app's folders the day the user grants a second,
-     * unrelated folder.
-     *
-     * ⭐ The TREE URI is stored, not the id — the id is a function of the tree URI, not the reverse.
-     *
-     * First grant wins until it stops being usable: a home no longer in the list, or whose folder was
-     * DELETED under the grant, falls back to the lowest LIVE id and re-stamps. ⚠️ "Still in the grant
-     * list" is NOT liveness — a grant survives its folder.
+     * The tree the app's folders live in, or "" if none is live.
+     * ⚠️ The one piece of SAF state that is stored: a rule over the grants would move the app's
+     * folders the day the user grants an unrelated one. The tree URI is stored, not the id.
+     * First grant wins until it is gone or its folder deleted; then the lowest live id, re-stamped.
      */
     fun homeRootId(): String {
         val live = roots().filter { it.live }
         if (live.isEmpty()) return ""
 
-        val prefs  = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs  = prefs()
         val stored = prefs.getString(HOME_TREE_KEY, null)
         live.firstOrNull { it.treeUri == stored }?.let { return it.id }
 
@@ -137,12 +95,8 @@ class SafStorage(private val context: Context) {
     }
 
     /**
-     * Designate the granted tree `id` as the home root — the user's own choice, replacing whatever the
-     * first-grant rule picked. True iff it was stored.
-     *
-     * ⭐ **Stores the TREE URI, exactly as [homeRootId] reads it**, so the two cannot disagree about
-     * what a home is; the id is only how the UI names one. A dead tree is refused rather than stored,
-     * because storing it would put the app straight into the state the liveness test exists to leave.
+     * The user's own choice of home, stored exactly as [homeRootId] reads it. True iff stored; a dead
+     * tree is refused.
      */
     fun setHomeRoot(id: String): Boolean {
         val root = roots().firstOrNull { it.id == id } ?: return false
@@ -150,27 +104,19 @@ class SafStorage(private val context: Context) {
             Log.w(TAG, "saf: refusing pt://$id '${root.displayName}' as home - its folder is gone")
             return false
         }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(HOME_TREE_KEY, root.treeUri).apply()
+        prefs().edit().putString(HOME_TREE_KEY, root.treeUri).apply()
         Log.i(TAG, "saf: home root = pt://$id '${root.displayName}' (chosen by the user)")
         return true
     }
 
     /**
-     * Fire the system folder picker. True = it is on screen; the GRANT arrives later, in
-     * [takeGrant].
-     *
-     * ⚠️ **Must be called on the UI thread** — `startActivityForResult` is an Activity call and this
-     * one is reached from the SDL thread, so [MainActivity.safRequestRoot] posts it and waits only for
-     * the launch. See `ui::FileSystem::activate` for why it must not wait for the answer.
-     *
-     * ⚠️ Android forbids granting a volume root or `Download` itself, and the picker is a TOUCH flow
-     * in an otherwise D-pad app — both accepted costs of SAF.
+     * Opens the system folder picker. True = it is on screen; the grant arrives in [takeGrant].
+     * ⚠️ UI thread only — [MainActivity.safRequestRoot] posts it. Android forbids granting a volume
+     * root or `Download` itself.
      */
     fun requestRoot(activity: Activity, requestCode: Int): Boolean {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        // Open AT the app's own folder rather than at Recents, so the common answer is one tap.
-        // ⚠️ A HINT ONLY — a provider may ignore it, and it is API 29+. Nothing depends on it landing.
+        // Open at the app's folder rather than Recents. A hint only (API 29+); nothing relies on it.
         runCatching {
             DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE_AUTHORITY, "primary:Documents/PocketTracker")
         }.onSuccess { intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
@@ -179,19 +125,16 @@ class SafStorage(private val context: Context) {
             activity.startActivityForResult(intent, requestCode)
             true
         }.getOrElse {
-            // A device with no documents provider at all. The browser says so on its status line
-            // rather than looking like a button that does nothing.
+            // No documents provider at all; the browser says so on its status line.
             Log.e(TAG, "saf: no activity can handle ACTION_OPEN_DOCUMENT_TREE: $it")
             false
         }
     }
 
     /**
-     * Persist the grant the picker returned. False = the user cancelled, or it could not be taken.
-     *
-     * ⚠️ **Without `takePersistableUriPermission` the grant dies with the activity**, and the next
-     * launch finds nothing — which presents as "the browser is empty again", not as a permission
-     * error, so it is the one line here that must never be lost.
+     * Persists the grant the picker returned. False = cancelled, or it could not be taken.
+     * ⚠️ Without `takePersistableUriPermission` the grant dies with the activity and the browser is
+     * empty on the next launch.
      */
     fun takeGrant(tree: Uri?): Boolean {
         if (tree == null) return false
@@ -208,14 +151,8 @@ class SafStorage(private val context: Context) {
     }
 
     /**
-     * Release the grant on tree `id` — the user dropping a folder they added. True iff it was released.
-     *
-     * ⚠️ **Nothing is deleted; a permission is.** The folder and everything in it stay exactly where
-     * they are, and granting it again restores the same id (the id is a function of the tree URI).
-     *
-     * ⚠️ **The stored home is cleared when it was THIS tree**, and that is not tidiness: a stored home
-     * naming a grant that no longer exists is precisely the state [homeRootId]'s fallback has to guess
-     * its way out of. Clearing it makes the next call a clean first-grant choice instead.
+     * Releases the grant on tree [id]. Deletes nothing; granting it again restores the same id.
+     * Clears the stored home if it was this tree, so the next [homeRootId] is a clean first choice.
      */
     fun forgetRoot(id: String): Boolean {
         val root = roots().firstOrNull { it.id == id } ?: return false
@@ -224,7 +161,7 @@ class SafStorage(private val context: Context) {
                 Uri.parse(root.treeUri),
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val prefs = prefs()
             if (prefs.getString(HOME_TREE_KEY, null) == root.treeUri) {
                 prefs.edit().remove(HOME_TREE_KEY).apply()
             }
@@ -242,12 +179,8 @@ class SafStorage(private val context: Context) {
         return "${r.id}\t${r.displayName}\t${r.docUri}\t${if (r.live) 1 else 0}"
     }
 
-    /**
-     * Every child of a directory document, in ONE query.
-     *
-     * One record per line: `docUri \t name \t isDir(0|1) \t size \t lastModified` — one JNI string,
-     * because a call per child or per field makes a 200-entry folder feel slow.
-     */
+    // Every child in ONE query, one line each: `docUri \t name \t isDir(0|1) \t size \t lastModified`.
+    // One JNI string, because a call per child makes a 200-entry folder slow.
     fun listChildren(dirDocUri: String): String {
         val dir = Uri.parse(dirDocUri)
         val childrenUri = runCatching {
@@ -282,16 +215,12 @@ class SafStorage(private val context: Context) {
         return sb.toString()
     }
 
-    /**
-     * ⚠️ The record separators are structural, so a display name may not contain them.
-     * Android forbids `/` in a display name but says nothing about a tab; a name carrying one would
-     * shift every later field by a column. Replaced rather than rejected — a file with an odd name
-     * should still be listed.
-     */
+    // ⚠️ A tab or newline in a name would shift the record's fields, so they become spaces — Android
+    // forbids only `/`.
     private fun clean(s: String): String =
         if (s.indexOf('\t') < 0 && s.indexOf('\n') < 0) s else s.replace('\t', ' ').replace('\n', ' ')
 
-    /** Whole document → bytes, or null. The C++ side turns it into the `std::string` the seam wants. */
+    /** Whole document → bytes, or null. */
     fun readFile(docUri: String): ByteArray? = runCatching {
         context.contentResolver.openInputStream(Uri.parse(docUri))?.use { it.readBytes() }
     }.getOrElse {
@@ -300,12 +229,9 @@ class SafStorage(private val context: Context) {
     }
 
     /**
-     * An OS descriptor for a document, or -1. This is what `pt_fopen`'s hook returns.
-     *
-     * ⚠️ **`detachFd()`, never `getFd()`** — `byte_source.h` states that ownership transfers to the
-     * caller, which wraps it in a `FILE*` and `fclose`s it. Handing back a descriptor the
-     * `ParcelFileDescriptor` still tracks means it is closed twice, and the second close lands on
-     * whatever unrelated file has since been given that number.
+     * An OS descriptor for a document, or -1 — `pt_fopen`'s hook.
+     * ⚠️ `detachFd()`, never `getFd()`: the caller owns and closes it, and a descriptor the
+     * `ParcelFileDescriptor` still tracks would be closed twice — the second time someone else's.
      */
     fun openFd(docUri: String, mode: String): Int = runCatching {
         context.contentResolver.openFileDescriptor(Uri.parse(docUri), mode)?.detachFd() ?: -1
@@ -314,45 +240,26 @@ class SafStorage(private val context: Context) {
         -1
     }
 
-    /** Create a sub-directory document, returning its URI — or the EXISTING one if the name is taken. */
-    fun createDir(parentDocUri: String, name: String): String {
-        // ⚠️ `createDocument` with a name that exists does NOT fail — providers de-duplicate, so
-        // asking twice yields `Projects` and `Projects (1)`. The seven app folders are created on
-        // first use on every launch, so this path runs constantly and must find before it creates.
-        findChild(parentDocUri, name)?.let { return it }
-        return runCatching {
-            DocumentsContract.createDocument(
-                context.contentResolver, Uri.parse(parentDocUri),
-                DocumentsContract.Document.MIME_TYPE_DIR, name
-            )?.toString() ?: ""
-        }.getOrElse {
-            Log.w(TAG, "saf: createDir('$name') failed under $parentDocUri: $it")
-            ""
-        }
-    }
+    /** Creates a sub-directory, returning its URI — or the existing one if the name is taken. */
+    fun createDir(parentDocUri: String, name: String): String =
+        findOrCreate(parentDocUri, name, DocumentsContract.Document.MIME_TYPE_DIR, "createDir")
 
     /**
-     * Create a FILE document under `parentDocUri`, returning its URI — or the EXISTING one if the
-     * name is taken, exactly as [createDir] does for folders.
-     *
-     * ⚠️ **Find before create, for the same reason folders do**: `createDocument` de-duplicates rather
-     * than failing, so asking twice for `song.ptp` yields `song.ptp` and `song.ptp (1)` and the second
-     * save would land in a file the browser shows beside the first. The C++ side then opens the
-     * returned URI `"wt"`, which truncates — so create-or-find plus truncate is a whole overwrite.
-     *
-     * The MIME type is deliberately `application/octet-stream` for everything. A provider is free to
-     * infer a better one from the extension, and the app never reads it back: `list_files` decides
-     * "is this a directory?" from `MIME_TYPE_DIR` alone, and the browser's own filter is the
-     * extension. Guessing a type per suffix would be a second, worse copy of `path_extension`.
+     * Creates a file, or finds the existing one, as [createDir] does — the C++ side opens it `"wt"`,
+     * so this plus the truncate is an overwrite. Always `application/octet-stream`: the app reads
+     * only the extension.
      */
-    fun createFile(parentDocUri: String, name: String): String {
+    fun createFile(parentDocUri: String, name: String): String =
+        findOrCreate(parentDocUri, name, "application/octet-stream", "createFile")
+
+    // ⚠️ Find first: `createDocument` on a taken name de-duplicates (`Projects (1)`) instead of failing.
+    private fun findOrCreate(parentDocUri: String, name: String, mime: String, what: String): String {
         findChild(parentDocUri, name)?.let { return it }
         return runCatching {
-            DocumentsContract.createDocument(
-                context.contentResolver, Uri.parse(parentDocUri), "application/octet-stream", name
-            )?.toString() ?: ""
+            DocumentsContract.createDocument(context.contentResolver, Uri.parse(parentDocUri), mime, name)
+                ?.toString() ?: ""
         }.getOrElse {
-            Log.w(TAG, "saf: createFile('$name') failed under $parentDocUri: $it")
+            Log.w(TAG, "saf: $what('$name') failed under $parentDocUri: $it")
             ""
         }
     }
@@ -366,13 +273,9 @@ class SafStorage(private val context: Context) {
     }
 
     /**
-     * Rename a document, returning its URI afterwards — or "" on failure.
-     *
-     * ⚠️ **The URI may CHANGE**, because a provider is free to encode the display name into the
-     * document id (`ExternalStorageProvider` does exactly that: `primary:Documents/a.ptp`). The
-     * returned value is the authority on where the document now is; the old string is dead. A provider
-     * that renames in place returns null having succeeded, so null falls back to the original URI
-     * rather than being read as a failure — the two are told apart by the exception, not by the return.
+     * Renames a document, returning its URI afterwards, or "" on failure.
+     * ⚠️ The URI may change (a provider may encode the name in the id). A null return is a rename in
+     * place, so it keeps the old URI.
      */
     fun renameDoc(docUri: String, newName: String): String = runCatching {
         DocumentsContract.renameDocument(context.contentResolver, Uri.parse(docUri), newName)
@@ -383,14 +286,8 @@ class SafStorage(private val context: Context) {
     }
 
     /**
-     * Move a document between two directory documents, returning its new URI — or "" if the provider
-     * will not do it.
-     *
-     * ⚠️ "" is NOT necessarily an error: `moveDocument` requires the source to carry
-     * `FLAG_SUPPORTS_MOVE`, which a provider may simply not offer, and it throws where a document
-     * crosses providers. The C++ side treats "" as "fall back to copy + delete" rather than as a
-     * failed move — which is the same shape `StdFileSystem::move_file` already has for a `rename(2)`
-     * that fails across filesystems.
+     * Moves a document between two directories, returning its new URI. "" means the provider will not
+     * (no `FLAG_SUPPORTS_MOVE`, or across providers): the C++ side then copies and deletes.
      */
     fun moveDoc(docUri: String, fromParentDocUri: String, toParentDocUri: String): String = runCatching {
         DocumentsContract.moveDocument(
@@ -412,6 +309,8 @@ class SafStorage(private val context: Context) {
         return null
     }
 
+    private fun prefs() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     /** One column of a single document, or null. */
     private fun queryRow(docUri: Uri, column: String): String? = runCatching {
         context.contentResolver.query(docUri, arrayOf(column), null, null, null)?.use { c ->
@@ -420,14 +319,13 @@ class SafStorage(private val context: Context) {
     }.getOrNull()
 
     private companion object {
-        // The Kotlin half's log tag. ⚠️ The native side logs under `PocketTracker` — a logcat filter
-        // on the wrong one shows nothing.
+        // ⚠️ The native side logs under `PocketTracker`.
         const val TAG = "PocketTrackerSDL"
 
         /** `MainActivity`'s prefs file, shared. */
         const val PREFS = "pockettracker_ui"
 
-        /** The persisted TREE uri of the home root. See [homeRootId] for why it is the uri, not the id. */
+        /** The home root's persisted tree URI. */
         const val HOME_TREE_KEY = "saf_home_tree_uri"
 
         const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"

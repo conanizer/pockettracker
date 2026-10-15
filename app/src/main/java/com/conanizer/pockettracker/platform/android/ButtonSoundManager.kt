@@ -10,34 +10,18 @@ import com.conanizer.pockettracker.input.VirtualButton
 import java.util.concurrent.Executors
 
 /**
- * Plays short WAV click sounds on virtual button press/release.
+ * Short WAV clicks on on-screen button press and release, on their own audio path so they never
+ * take tracker voices. A release cuts that button's press sound only.
  *
- * A completely separate audio path from the Oboe tracker engine, so button
- * sounds never steal tracker voices.
+ * ⚠️ AudioTrack with the gain baked into the PCM, not SoundPool: a per-stream gain is applied after
+ * the screen-recording tap, so a recording would hear the click at full volume whatever BTN VOL says.
  *
- * ⚠️ AudioTrack with SOFTWARE gain, not SoundPool: a per-stream gain (SoundPool's, or
- * `AudioTrack.setVolume`) is applied downstream of the MediaProjection capture tap, so a screen
- * recording gets the click at unity whatever BTN VOL says. Baking the gain into the submitted PCM is
- * the only fix every capture path reflects.
+ * ⚠️ A pool of reused tracks: building an `AudioTrack` per tap is audibly late. Each buffer holds a
+ * whole clip so the write never blocks; when every voice is busy the oldest is stolen.
  *
- * ⚠️ A POOL of reused tracks, not one per press: building an `AudioTrack` per tap is audibly laggy.
- * The pool's streaming float tracks are reused (pause → flush → write → play); each buffer holds a
- * whole clip so the write never blocks. When every voice is busy the oldest is stolen (`POOL_MAX`).
- *
- * WAV files must be placed in app/src/main/res/raw/ with these names:
- *   ui_sq_press_1.wav, ui_sq_press_2.wav, ...       square button press variants
- *   ui_sq_release_1.wav, ui_sq_release_2.wav, ...   square button release variants
- *   ui_long_press_1.wav, ui_long_press_2.wav, ...   wide button press variants
- *   ui_long_release_1.wav, ui_long_release_2.wav, ... wide button release variants
- *
- * Adding more variants (just drop more files) is automatically picked up.
- * Up to 10 variants per event type are scanned. 16-, 24- and 32-bit-float PCM WAVs
- * (mono or stereo) are supported; the shipped clicks are 48 kHz / stereo / 16-bit. ⚠️ Bit depth is a
- * PACKAGING choice only — every format decodes to the same FloatArray, so a deeper one costs APK
- * bytes and saves no heap; channel and frame counts are what move the RAM.
- *
- * Button release cuts the in-progress press sound for that specific button,
- * while other simultaneously-held buttons are unaffected.
+ * The clips are `res/raw/ui_{sq,long}_{press,release}_N.wav`, up to 10 variants each, picked up by
+ * name. 16-, 24- or 32-bit float PCM, mono or stereo — all decode to the same floats, so a deeper
+ * format costs APK bytes, not RAM.
  */
 class ButtonSoundManager(context: Context) {
 
@@ -47,8 +31,8 @@ class ButtonSoundManager(context: Context) {
     /** One decoded clip: interleaved float samples in [-1, 1], plus its format. */
     private class Clip(val samples: FloatArray, val sampleRate: Int, val channels: Int)
 
-    /** A track currently sounding: its length (to tell when it finished) and whether it is a
-     *  pool-format track (reusable) or a one-off built for an odd clip format (released after). */
+    /** A sounding track: its length (to tell when it ends), and whether it returns to the pool or is
+     *  a one-off for an odd clip format. */
     private class Voice(val track: AudioTrack, val frames: Int, val pooled: Boolean)
 
     private val sqPress     = mutableListOf<Clip>()
@@ -61,8 +45,7 @@ class ButtonSoundManager(context: Context) {
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
-    // All track construction / playback / bookkeeping is confined to this single thread,
-    // so the collections below need no locking, and it stays off the SDL input thread.
+    // Every track operation runs on this one thread: no locks, and nothing on the SDL thread.
     private val exec = Executors.newSingleThreadExecutor()
 
     // The pool's fixed format (from the loaded clips) and per-track capacity in frames.
@@ -91,8 +74,7 @@ class ButtonSoundManager(context: Context) {
             loadClip(res, pkg, "ui_long_press_$i")   ?.let { longPress.add(it) }
             loadClip(res, pkg, "ui_long_release_$i") ?.let { longRelease.add(it) }
         }
-        // Fix the pool format/size from the loaded clips (the shipped set is uniform;
-        // if a stray clip has a longer or different-format buffer it plays one-off).
+        // The pool's format and size come from the clips; a clip that does not fit plays one-off.
         val all = sqPress + sqRelease + longPress + longRelease
         val ref = all.firstOrNull() ?: return
         poolSampleRate = ref.sampleRate
@@ -324,9 +306,9 @@ class ButtonSoundManager(context: Context) {
 
     private companion object {
         const val TAG = "ButtonSoundManager"
-        // ⚠️ Each pooled track is a FAST track, and a fast mixer has only 7 for every app on the output.
-        // A bigger pool can take the last one, and the tracker stream reopened after a route change
-        // then falls to the normal mixer (~130 ms instead of ~30) until relaunch.
+        // ⚠️ Each pooled track is a FAST track, and the output has only 7 for every app. A bigger pool
+        // can take the last one, and the tracker stream reopened after a route change then gets the
+        // slow mixer until relaunch.
         const val POOL_MAX = 3
     }
 }

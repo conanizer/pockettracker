@@ -30,57 +30,29 @@ import java.io.File
 import java.util.function.Consumer
 
 /**
- * PocketTracker's Android entry point: an `SDLActivity` subclass. The app is the shared C++ SDL shell
- * (`shell/`, `native/ui/`); this class does only what is genuinely Java's: point SDL at the native
- * libraries and the two roots, own the splash screen and the immersive / edge-to-edge window, serve
- * the Storage Access Framework (the folder picker and the [SafStorage] delegates), run the one-shot
- * SharedPreferences → settings.json import, and route button feedback, MIDI and background playback
- * over JNI hooks.
+ * The Android entry point. The app is the shared C++ SDL shell; this class does only what needs Java:
+ * the libraries and roots, the splash and immersive window, the folder picker and the [SafStorage]
+ * hooks, the old-settings import, and button feedback, MIDI and background playback over JNI.
  *
- * ⚠️ It asks for NO storage permission: storage is a folder the user grants from the system picker.
- * The only runtime ask is notifications, for the playback service's STOP.
- *
- * ⚠️ The system bars are Java's; the lifecycle is NOT — the autosave/settings flush is an
- * `SDL_AddEventWatch` watcher in `shell/app.cpp`, because `SDL_APP_WILLENTERBACKGROUND` fires on the
- * native thread inside the frame loop's own `SDL_PollEvent`. The back button is armed in
- * `shell/android/android-main.cpp` and mapped in `shell/sdl/sdl-input.cpp`.
+ * ⚠️ No storage permission is asked: storage is a folder the user grants in the system picker.
+ * The save on leaving is native (an event watcher in `shell/app.cpp`), not a lifecycle override here.
  */
 class MainActivity : SDLActivity() {
 
-    // ── Button feedback ──────────────────────────────────────────────────────────────────────────
-    //
-    // SoundPool clicks and Vibrator pulses are Android system services, reached by the shell through
-    // ONE JNI call (`onButtonFeedback`). Created before `super.onCreate()` starts the SDL thread, so
-    // the samples are loading before the first tap.
+    // Button clicks and vibration, reached by the shell through one JNI call (`onButtonFeedback`).
     private var buttonSound:  ButtonSoundManager?  = null
     private var buttonHaptic: ButtonHapticManager? = null
 
-    /**
-     * ⚠️ ORDER MATTERS AND THE LAST ONE IS SPECIAL. `SDLActivity.getMainSharedObject()` takes the
-     * LAST entry and `dlsym`s `SDL_main` out of `lib<that>.so` — so `pockettracker-sdl` must be
-     * last, and it is the library `shell/android/android-main.cpp` compiles into.
-     *
-     * `libpockettracker.so` (the engine) is deliberately absent: it is a NEEDED dependency of
-     * `libpockettracker-sdl.so`, so the dynamic linker loads it from the same directory without
-     * being told. Listing it here as well would load it twice by two different mechanisms for no
-     * benefit.
-     */
+    // ⚠️ SDL loads `SDL_main` from the LAST library, so `pockettracker-sdl` stays last. The engine
+    // (`libpockettracker.so`) is its NEEDED dependency and loads without being listed.
     override fun getLibraries(): Array<String> = arrayOf(
         "SDL2",
         "pockettracker-sdl"
     )
 
-    /**
-     * The two roots the shell is booted with.
-     *
-     * argv[1] — the media root. ⚠️ NOT where the user's files are: those live in the granted folder,
-     * over SAF, and this process cannot read `Documents/PocketTracker`. Resolved here because
-     * `ui::default_app_root()` finds nothing on Android and would fall through to a relative path.
-     *
-     * argv[2] — `filesDir`: settings.json, template.ptp and autosave.ptp are read during the native
-     * boot, before any picker can run, so they live in app-private storage. `config.json`
-     * (hand-edited) sits in the granted tree instead (`SafFileSystem::config_path`).
-     */
+    // argv[1]: the media root — not the user's files, which are in the granted folder, over SAF.
+    // argv[2]: `filesDir`, for settings.json, the template and the autosave: read at boot, before
+    // any folder can be picked.
     override fun getArguments(): Array<String> = arrayOf(appRoot(), privateRoot())
 
     private fun appRoot(): String =
@@ -91,15 +63,8 @@ class MainActivity : SDLActivity() {
 
     private fun privateRoot(): String = filesDir.absolutePath
 
-    /**
-     * Hide the status and navigation bars (immersive sticky) — NOT cosmetic.
-     *
-     * ⚠️⚠️ THE STATUS BAR COSTS A WHOLE SCALING FACTOR: visible, the window is 1280×904, and INTEGER
-     * scaling of the 640×480 design computes `min(2, 1)` = 1× — a quarter of the area. Hidden, 2× is
-     * pixel-exact. `dest_rect()` re-reads the output size every frame, so no resize handler is needed.
-     *
-     * ⚠️ `decorView.post`: API 30+ needs the DecorView ATTACHED before `insetsController` is non-null.
-     */
+    // Immersive sticky. ⚠️ Not cosmetic: with the status bar the window is 1280×904 and the integer
+    // scale of 640×480 drops from 2× to 1×. API 30+ needs the DecorView attached first, hence `post`.
     private fun hideSystemBars() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.decorView.post {
@@ -121,57 +86,40 @@ class MainActivity : SDLActivity() {
         }
     }
 
-    /** Re-apply immersive mode whenever the window regains focus — a swipe-down or the permission
-     *  screen returning otherwise leaves the bars up, and with them the 1× window. */
+    // A swipe-down or the permission screen leaves the bars up; hide them again on focus.
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // ── THE SPLASH SCREEN ────────────────────────────────────────────────────────────────────
-        //
-        // ⚠️ BOTH HALVES ARE REQUIRED: the manifest theme supplies the windowBackground the system
-        // draws before any code runs (API 31+), and this call hands over to `postSplashScreenTheme`
-        // and back-ports the splash below API 31. FIRST, ahead of `setDecorFitsSystemWindows`,
-        // because it swaps the activity's theme. `splash_bg` #0A0A0A equals the tracker's default
-        // background, so the handover has no seam.
+        // ⚠️ First: it swaps the activity's theme. The manifest theme draws the splash before any
+        // code runs; this call hands over from it (and back-ports it below API 31).
         installSplashScreen()
 
-        // ⚠️ NOTHING IS ASKED FOR, AND THE LINE SAYING SO IS UNCONDITIONAL: a browser on ADD FOLDER…
-        // alone is the correct fresh install, and from outside it looks like a permission failure;
-        // the count tells them apart. ⚠️ The COUNT, not `homeRootId()`, which stamps state.
+        // Logged always: a fresh install with no folder looks like a permission failure from outside.
+        // ⚠️ The count, not `homeRootId()`, which writes state.
         Log.i(TAG, "storage: SAF, ${safStorage.rootCount()} granted folder(s), " +
                    "privateRoot=${privateRoot()}")
 
-        // ⚠️⚠️ EDGE-TO-EDGE: `hideSystemBars()` alone leaves the window at 1280x904 — Android keeps
-        // reserving inset padding for a hidden bar unless the content may draw there (still 1×).
-        // ⚠️ BEFORE `super.onCreate()`, where SDLActivity builds its surface: afterwards the surface
-        // is created at the inset size and resized, and every consumer sees the wrong number first.
+        // ⚠️ Edge-to-edge, or Android keeps padding for the hidden bars (1× again). Before
+        // `super.onCreate()`, where SDL builds its surface at the size it sees then.
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        // Draw behind a punch-hole/notch too: in landscape the cutout is on a short edge, and
-        // without this the panel gives back less height — the same 2x-becomes-1x arithmetic.
+        // Draw behind a notch too, or landscape loses height — and 2× becomes 1× again.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
-        // ⚠️ BEFORE `super.onCreate()` for a harder reason than the two above: that call starts the
-        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. A settings file written
-        // after that point is one the app has already read past.
+        // ⚠️ All before `super.onCreate()`: it starts the SDL thread, which reads the settings,
+        // reopens the saved MIDI devices and calls back for button feedback at once.
         importLegacySettings()
 
-        // The feedback managers, before super.onCreate() starts the SDL thread that calls back into
-        // onButtonFeedback. Constructing the SoundPool early lets it load the click samples off the
-        // critical path, so the first tap is not silent while they decode.
         buttonSound  = ButtonSoundManager(this)
         buttonHaptic = ButtonHapticManager(this)
 
-        // The MIDI ports, before `super.onCreate()` too: the native boot re-opens the saved devices
-        // (`boot_midi_port()`). Only the system service is taken here.
         midiOut = MidiOutManager(this)
-        // …and the INPUT port (`boot_midi_in_port()`).
         midiIn = MidiInManager(this)
 
         super.onCreate(savedInstanceState)
@@ -179,11 +127,7 @@ class MainActivity : SDLActivity() {
         askForNotificationsOnce()
     }
 
-    /**
-     * Android 13+: the playback notification — and its STOP — is hidden without this permission, while
-     * the song itself still plays on. Asked once, on the first launch that can ask; Android stops
-     * offering the dialog after two refusals anyway.
-     */
+    // Android 13+ hides the playback notification (and its STOP) without this. Asked once.
     private fun askForNotificationsOnce() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
@@ -195,11 +139,9 @@ class MainActivity : SDLActivity() {
 
     // ── A song left playing keeps playing ────────────────────────────────────────────────────────
     //
-    // ⚠️ **STARTED HERE, BEFORE `super.onPause()`, AND THE ORDER IS THE FEATURE.** Android refuses a
-    // foreground service started from the background, and this is the last moment the activity still
-    // counts as in front. `super.onPause()` is what tells the native loop it is leaving, and the loop
-    // asks then whether the service came up — so the answer has to be stored first. If the start is
-    // refused, the loop stops the song and hands the sound back, as it always did.
+    // ⚠️ The service starts here, before `super.onPause()`: Android refuses one started from the
+    // background, and the native loop asks at `super.onPause()` whether it came up. If not, the
+    // song stops.
     override fun onPause() {
         var started = false
         try {
@@ -224,11 +166,8 @@ class MainActivity : SDLActivity() {
         stopPlaybackService()
     }
 
-    /**
-     * Takes the playback service down; harmless when it is not running. Also **called from native**
-     * (`shell/android/android-main.cpp`) once a song stops in the background — so `@Keep` and a
-     * `proguard-rules.pro` `-keep`, like every method resolved by name over JNI.
-     */
+    // Harmless when not running. Also called from native when a song stops in the background, so
+    // `@Keep` and a `-keep` in `proguard-rules.pro`, like every JNI method resolved by name.
     @Keep
     fun stopPlaybackService() {
         try { nativeSetServiceStarted(false) } catch (_: UnsatisfiedLinkError) {}
@@ -240,13 +179,10 @@ class MainActivity : SDLActivity() {
 
     // ── A screen recording hears the app ─────────────────────────────────────────────────────────
     //
-    // The fast audio path does not reach a recording, so native leaves it while one shows the app
-    // (`OboeAudioEngine::setPlaybackCaptured`). ⚠️ **ANDROID 15+ ONLY** — earlier versions tell an
-    // app nothing, and there a recording started over a running app is silent.
-    //
-    // ⚠️ Watched only while resumed, and `onResume` reads the state afresh: leaving the screen also
-    // reads as "no longer recorded", and a song playing on in the background must not have its sound
-    // reopened for that.
+    // The fast audio path does not reach a recording, so native leaves it while one shows the app.
+    // ⚠️ Android 15+ only: earlier versions tell the app nothing.
+    // ⚠️ Watched only while resumed: leaving the screen also reads as "not recorded", and a song
+    // playing on in the background must not have its sound reopened for that.
     private val recordingCallback = Consumer<Int> { state -> onScreenRecording(state) }
     private val recordingEnded = Runnable { setPlaybackCaptured(false) }
 
@@ -286,31 +222,21 @@ class MainActivity : SDLActivity() {
         buttonSound?.release()
         buttonSound  = null
         buttonHaptic = null
-        // ⚠️ The BACKSTOP, not the normal path. The shell's teardown panics and closes the port
-        // through `midiCloseDevice()` while the SDL thread is still alive; this catches the death it
-        // does not reach — a kill, a config change, a crash — where an open port would otherwise hold
-        // the last note on the hardware until the user power-cycles it. `close()` is idempotent.
+        // ⚠️ A backstop: the shell closes the port itself, but a kill or crash it does not reach
+        // would leave the last note hanging on the hardware. `close()` is idempotent.
         midiOut?.close()
         midiOut      = null
-        // ⚠️ The same backstop for the input port: an open MidiOutputPort holds the DEVICE, so no
-        // other app could use the keyboard until this process dies.
+        // ⚠️ Same for input: an open port keeps the device from every other app.
         midiIn?.close()
         midiIn       = null
         super.onDestroy()
     }
 
     /**
-     * Called from native (`shell/android/android-main.cpp`, on the SDL thread) on every virtual-button press
-     * and release. The touch layer decides to fire and passes the live BTN SOUND / BTN VIBRO scalars;
-     * this routes them to the two managers. ⚠️ Resolved by name over JNI: `@Keep` plus a `-keep` in
-     * `proguard-rules.pro`, or release gets an `UnsatisfiedLinkError`.
-     *
-     * @param button ordinal of the virtual button — `VirtualButton`'s order, which is
-     *               `pt::ui::Button`'s (native/ui/buttons.h).
-     * @param down   true = press feel, false = release (a lift or a slide-off).
-     *
-     * ⚠️ The haptic is posted to the UI thread (the bottom fallback is `View.performHapticFeedback`);
-     * the sound plays straight from here, lowest latency.
+     * Every on-screen button press and release, from native on the SDL thread, with the live
+     * BTN SOUND / BTN VIBRO settings. [button] is in `VirtualButton`'s order (= `pt::ui::Button`'s).
+     * The sound plays from here; the haptic is posted to the UI thread.
+     * ⚠️ Resolved by name over JNI: `@Keep` plus a `-keep`, or release cannot find it.
      */
     @Keep
     fun onButtonFeedback(
@@ -318,8 +244,7 @@ class MainActivity : SDLActivity() {
         soundOn: Boolean, soundVolume: Int,
         vibroOn: Boolean, vibroPower: Int
     ) {
-        // `entries`, not `values()`: this runs on every press AND every release, and values() hands
-        // back a fresh defensive copy of the array each call.
+        // `entries`, not `values()`: this runs on every press, and `values()` copies the array.
         val vb = VirtualButton.entries.getOrNull(button) ?: return
 
         buttonSound?.let { s ->
@@ -339,13 +264,9 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * **Called from native (`shell/android/android-main.cpp`) to decide the touch vs FULL layout.** True iff a
-     * real game controller is attached; the shared shell draws the on-screen gamepad + PORTRAIT2 skin
-     * only when this is false and the hardware is a touchscreen.
-     *
-     * ⚠️ SDL counts the emulator's keyboard as a game controller (a bare DPAD source), so
-     * `SdlInput::controller_count()` reads 1 with no pad; the tests that tell a pad from an impostor
-     * are Java-only and live in [PadClassifier]. Called by name over JNI: `@Keep` plus a `-keep`.
+     * Called from native to choose the touch or FULL layout: true iff a real game controller is
+     * attached. ⚠️ SDL counts the emulator's keyboard as a controller; the tests that tell a pad
+     * from an impostor live in [PadClassifier]. JNI by name: `@Keep` + `-keep`.
      */
     @Keep
     fun hasPhysicalGameButtons(): Boolean {
@@ -361,16 +282,10 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * May the screen rotate into LANDSCAPE right now? Called by the shell's layout gate whenever the
-     * answer changes: true only while the FULL layout is in force — a controller is driving and there
-     * are no on-screen buttons.
-     *
-     * ⚠️ A LAUNCH-TIME `SDL_HINT_ORIENTATIONS` CANNOT TAKE THE PERMISSION BACK: a phone launched with
-     * a controller would stay free to sit in landscape after it is switched off, drawing a layout no
-     * SETTINGS row names. [requestedOrientation] makes Android re-orient the running activity.
-     * `SENSOR_PORTRAIT` keeps both ways up; `FULL_USER` hands rotation back as at launch.
-     *
-     * ⚠️ On the UI thread (this arrives on the SDL thread). Called by name over JNI: `@Keep` + `-keep`.
+     * May the screen turn to landscape now? True only while the FULL layout is in force; the shell's
+     * layout gate calls this whenever the answer changes.
+     * ⚠️ A launch-time `SDL_HINT_ORIENTATIONS` cannot take the permission back; [requestedOrientation]
+     * re-orients the running activity. Arrives on the SDL thread, runs on the UI thread. JNI by name.
      */
     @Keep
     fun setLandscapeAllowed(allowed: Boolean) {
@@ -385,14 +300,10 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * ⚠️⚠️ A DEVICE THAT IGNORES THE PORTRAIT REQUEST LEAVES THE APP UNABLE TO WAKE UP, so the request
-     * is checked and handed back when it did not take. A landscape-only panel (or a ROM ignoring
-     * orientation requests) stays landscape; at the NEXT resume `SDLSurface.surfaceChanged` refuses
-     * the mismatched surface, `nativeResume` is never called, and the screen stays black until
-     * relaunch. So if the configuration is still landscape once a rotation would have finished,
-     * rotation goes back to `FULL_USER`. The on-screen buttons are the layout gate's, unaffected.
-     *
-     * ⚠️ `Log.w`, not `Log.i`: release strips `v`/`d`/`i` (proguard-rules.pro).
+     * ⚠️ A device that ignores the portrait request would leave the app unable to wake: at the next
+     * resume SDL refuses the landscape surface and the screen stays black. So if it is still
+     * landscape once a rotation would have finished, rotation is handed back.
+     * `Log.w`: release strips `v`/`d`/`i`.
      */
     private val portraitCheck = Runnable {
         if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT &&
@@ -404,15 +315,9 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * Everything [hasPhysicalGameButtons] looked at, as text, plus the device identity — the payload
-     * of a "it opened without the on-screen buttons" report.
-     *
-     * ⚠️ UNCONDITIONAL: [hasPhysicalGameButtons] logs only when it FINDS a pad, so the state needing
-     * explanation leaves no record otherwise. Every device is listed with its raw `sources` and the
-     * reason [PadClassifier] gave — the same call as the verdict, so they cannot drift.
-     *
-     * ⚠️ Returned as a STRING so native `printf`s it into `pockettracker-log.txt` (Kotlin's `Log.i`
-     * reaches logcat only). Called by name over JNI: `@Keep` + `-keep`.
+     * Every input device and the verdict on it, plus the device identity — for an "it opened without
+     * the on-screen buttons" report ([hasPhysicalGameButtons] logs only a find). Returned as text so
+     * native writes it to `pockettracker-log.txt`; `Log` reaches logcat only. JNI by name.
      */
     @Keep
     fun describeInputDevices(): String {
@@ -445,10 +350,8 @@ class MainActivity : SDLActivity() {
 
     // ── EXTERNAL MIDI out ────────────────────────────────────────────────────────────────────────
     //
-    // Five by-name JNI hooks forwarding to `MidiOutManager` (which explains why MidiManager is
-    // unavoidable, and that to SEND you open the device's INPUT port).
-    // ⚠️ All `@Keep` AND listed in `proguard-rules.pro`: a renamed member kills MIDI in release only.
-    // `shell/android/midi-out-android.cpp` logs at resolve time whether it found them.
+    // By-name JNI hooks forwarding to [MidiOutManager]. ⚠️ Each `@Keep` AND in `proguard-rules.pro`:
+    // a renamed one kills MIDI in release only.
 
     private var midiOut: MidiOutManager? = null
 
@@ -460,11 +363,7 @@ class MainActivity : SDLActivity() {
     @Keep
     fun midiDeviceName(index: Int): String = midiOut?.deviceName(index).orEmpty()
 
-    /**
-     * Open device [index] for sending. ⚠️ BLOCKS the calling (SDL) thread for up to ~3 s while
-     * `MidiManager.openDevice` completes — see `MidiOutManager.open` for why waiting is the right
-     * answer and an optimistic `true` is not.
-     */
+    /** Open device [index] for sending. ⚠️ Blocks the SDL thread up to ~3 s (`MidiOutManager.open`). */
     @Keep
     fun midiOpenDevice(index: Int): Boolean = midiOut?.open(index) ?: false
 
@@ -481,10 +380,8 @@ class MainActivity : SDLActivity() {
 
     // ── MIDI IN ──────────────────────────────────────────────────────────────────────────────────
     //
-    // Five more, mirroring the block above except: the list is `outputPortCount > 0` (to RECEIVE
-    // you open the device's OUTPUT port), and the last hook is a READ — native POLLS this port once
-    // a frame (midi-in-android.cpp says why). ⚠️ `@Keep` AND `proguard-rules.pro`, and that file's
-    // hook count must be updated with any new hook.
+    // The same hooks for input: the list is the devices with an OUTPUT port (to receive, you open
+    // that), and native polls [midiInRead] once a frame. ⚠️ `@Keep` AND `proguard-rules.pro`.
 
     private var midiIn: MidiInManager? = null
 
@@ -496,10 +393,7 @@ class MainActivity : SDLActivity() {
     @Keep
     fun midiInDeviceName(index: Int): String = midiIn?.deviceName(index).orEmpty()
 
-    /**
-     * Open input device [index]. ⚠️ BLOCKS the calling (SDL) thread for up to ~3 s, for
-     * [midiOpenDevice]'s reason: the MIDI screen's rows show what is OPEN, not what was wanted.
-     */
+    /** Open input device [index]. ⚠️ Blocks the SDL thread up to ~3 s, as [midiOpenDevice] does. */
     @Keep
     fun midiInOpenDevice(index: Int): Boolean = midiIn?.open(index) ?: false
 
@@ -511,9 +405,8 @@ class MainActivity : SDLActivity() {
 
     // ── Storage Access Framework ─────────────────────────────────────────────────────────────────
     //
-    // `shell/android/saf-filesystem.cpp` reaches `ContentResolver` / `DocumentsContract` through these
-    // one-line delegates to [SafStorage]. ⚠️ `@Keep` AND a `proguard-rules.pro` rule each — CI reads
-    // the count from that file.
+    // `saf-filesystem.cpp` reaches `ContentResolver` / `DocumentsContract` through these delegates
+    // to [SafStorage]. ⚠️ `@Keep` AND a `proguard-rules.pro` rule each.
 
     private val safStorage: SafStorage by lazy { SafStorage(this) }
 
@@ -538,15 +431,10 @@ class MainActivity : SDLActivity() {
     fun safForgetRoot(id: String): Boolean = safStorage.forgetRoot(id)
 
     /**
-     * **ADD FOLDER… — open the system folder picker.** True = it is on screen, NOT that a folder was
-     * granted; the grant lands in [onActivityResult] and the native side never waits for it.
-     *
-     * ⚠️⚠️ CALLED FROM THE SDL THREAD, and `startActivityForResult` is the UI thread's: posted, and
-     * waited for only until the LAUNCH. Waiting for the ANSWER would park the SDL thread, so the
-     * autosave and settings flush (`SDL_APP_WILLENTERBACKGROUND`, delivered inside its
-     * `SDL_PollEvent`) could not run while the picker is up — exactly when Android may kill us.
-     * ⚠️ BOUNDED: SDLActivity blocks the UI thread on the SDL thread in `surfaceDestroyed`, so a
-     * rotation could aim the two at each other; two seconds turns that into a `false`.
+     * ADD FOLDER…: opens the system folder picker. True = it is on screen, not that a folder was
+     * granted; the grant arrives in [onActivityResult].
+     * ⚠️ Waits for the launch only: waiting for the answer would park the SDL thread, which runs the
+     * save on leaving. Bounded at 2 s, since SDLActivity can block the UI thread on the SDL thread.
      */
     @Keep
     fun safRequestRoot(): Boolean {
@@ -556,8 +444,7 @@ class MainActivity : SDLActivity() {
             try {
                 launched.set(safStorage.requestRoot(this, REQ_ADD_ROOT))
             } finally {
-                // ⚠️ In a `finally`: a throw on the UI thread that never counted down would park the
-                // SDL thread for the full timeout on every press.
+                // ⚠️ In `finally`, or a throw parks the SDL thread for the full timeout.
                 done.countDown()
             }
         }
@@ -567,14 +454,8 @@ class MainActivity : SDLActivity() {
     }
 
     /**
-     * The picker's answer.
-     *
-     * ⚠️ `super` first and unconditionally: `SDLActivity` has its own result handling, and swallowing
-     * a result that was never ours is the kind of break that shows up as an unrelated feature dying.
-     *
-     * Nothing is pushed to native here. The grant is persisted, and the browser picks it up when the
-     * app returns to the foreground — the roots directory is never cached, so re-listing IS the
-     * refresh (`shell/android/saf-filesystem.cpp`).
+     * The picker's answer. ⚠️ `super` first: SDLActivity has results of its own.
+     * Nothing is pushed to native: the browser re-lists the granted folders when the app returns.
      */
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -623,33 +504,19 @@ class MainActivity : SDLActivity() {
         safStorage.moveDoc(docUri, fromParentDocUri, toParentDocUri)
 
     /**
-     * Move whatever has arrived since the last frame into [out]; returns how many bytes.
-     *
-     * ⚠️ The array is allocated ONCE on the native side and reused — no allocation per frame on the one
-     * thread that must not stutter. Anything this does not take stays in `MidiInManager`'s ring.
+     * Moves what arrived since the last frame into [out]; returns the byte count. [out] is allocated
+     * once natively and reused; what does not fit stays in `MidiInManager`'s ring.
      */
     @Keep
     fun midiInRead(out: ByteArray): Int = midiIn?.read(out) ?: 0
 
     /**
-     * The one-time SharedPreferences → settings.json migration, for users upgrading from the app's
-     * earlier releases, which kept settings in SharedPreferences. In Kotlin because SharedPreferences
-     * is Android's format: reading it with the old defaults is a fact; parsing its XML from C++ would
-     * be a guess.
-     *
-     * ⚠️⚠️ VERSIONED, NOT KEYED OFF "settings.json IS ABSENT": that guard gets one chance and makes
-     * any later pass unreachable. v2 added the SKIN and OVERLAY selections to the fresh-install write.
-     * An existing settings.json still WINS (below).
-     *
-     * ⚠️ THE DEFAULTS BELOW ARE THE OLD APP'S, NOT `SettingsValues`'s, on purpose: what must survive
-     * is what the user EXPERIENCED (button sound/vibro on, sound volume 0x80); the C++ defaults would
-     * silently switch button sound off for everyone who left it alone.
-     *
-     * ⚠️ `app_theme` is passed through VERBATIM: `serialize_theme` emits the same bytes as the old
-     * serializer, with identical colour defaults (both omit fields at their default) — checked field
-     * by field, so re-serialising would only add a second format.
-     *
-     * ⚠️ Debug and release do NOT share SharedPreferences (`applicationIdSuffix = ".debug"`).
+     * One-time import of the old app's SharedPreferences into settings.json — Android's format, so
+     * read here rather than parsed in C++.
+     * ⚠️ Versioned, not keyed off "settings.json is absent", so a later version can still run.
+     * ⚠️ The defaults below are the OLD app's, not the C++ ones: what survives is what the user had
+     * (button sound on, volume 0x80). `app_theme` passes through as is — the C++ writes the same bytes.
+     * Debug and release do not share preferences (the `.debug` suffix).
      */
     private fun importLegacySettings() {
         val prefs = getSharedPreferences("pockettracker_ui", MODE_PRIVATE)
@@ -659,21 +526,17 @@ class MainActivity : SDLActivity() {
             return
         }
 
-        // ⚠️ `filesDir`, and it is the same place `SafFileSystem::settings_path` reads from: this must
-        // write the file the native side will OPEN. A migration whose output nothing opens is a
-        // migration that silently did not happen.
+        // ⚠️ The file `SafFileSystem::settings_path` reads, or the import goes nowhere.
         val target = File(filesDir, "settings.json")
 
-        // ⚠️ An existing settings.json WINS, and the version is still stamped: its values were chosen
-        // in this UI, and re-importing older prefs over them would be a regression.
+        // An existing settings.json wins — its values were chosen in this app. Still stamped.
         if (target.exists()) {
             prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
             Log.i(TAG, "settings import: ${target.name} already exists - keeping it, marked v$SETTINGS_IMPORT_VERSION")
             return
         }
 
-        // Nothing to migrate FROM is not a failure: it is a fresh install, and the C++ defaults are
-        // the right answer. Stamp it so this never runs again.
+        // Nothing to migrate is a fresh install: the C++ defaults are right. Stamped.
         if (prefs.all.isEmpty()) {
             prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
             Log.i(TAG, "settings import: no prefs to migrate (fresh install), marked v$SETTINGS_IMPORT_VERSION")
@@ -691,8 +554,7 @@ class MainActivity : SDLActivity() {
             json.put("notePreview",        prefs.getBoolean("note_preview", true))
             json.put("autosaveResumeAuto", prefs.getBoolean("autosave_resume_auto", false))
 
-            // ⚠️ `trace` and `engine_cpp_v2` are NOT imported: a developer switch, and a choice of a
-            // Kotlin sequencer that no longer exists — a stored value that was never the user's.
+            // `trace` and `engine_cpp_v2` are not imported: developer switches, never the user's.
 
             // ── The device rows that are plain scalars ───────────────────────────────────────────
             json.put("buttonSound",       prefs.getBoolean("button_sound", true))
@@ -701,24 +563,19 @@ class MainActivity : SDLActivity() {
             json.put("vibroPower",        prefs.getInt("vibro_power", 255))
             json.put("overlayStrength",   prefs.getInt("overlay_strength", 128))
 
-            // ── The device-row SELECTIONS, as STABLE STRINGS (v2) ────────────────────────────────
-            // SKIN and OVERLAY resolve against `device_skin.h` / `shell/skin/overlay.h`, so their stored ids
-            // move across (`portrait_skin` / `overlay_name`). ⚠️ LAYOUT (`layout_mode`) is not: the
-            // shell picks the layout by orientation and controller, so it has nothing to resolve to.
+            // ── SKIN and OVERLAY, by id (v2) ─────────────────────────────────────────────────────
+            // LAYOUT is not imported: the shell picks it by orientation and controller.
             json.put("portrait_skin", prefs.getString("portrait_skin", DEFAULT_SKIN_ID))
             json.put("overlay_name",  prefs.getString("overlay_name", "OFF"))
 
             // ── The theme ────────────────────────────────────────────────────────────────────────
-            // The palette is the most visible thing here. Both `appTheme` (what the reader prefers)
-            // and `theme` (the name, for an older build) are written, as `serialize_settings` emits.
+            // Both `appTheme` and `theme` (the name, for an older build), as `serialize_settings` writes.
             val storedTheme = prefs.getString("app_theme", null)
             if (storedTheme != null) {
                 val parsed = JSONObject(storedTheme)
                 json.put("appTheme", parsed)
                 json.put("theme", parsed.optString("name", "CLASSIC"))
-                // The visualizer is the theme's FIELD but the user's CHOICE — settings.json carries it
-                // as a top-level int, so it is translated out of the theme object here exactly as
-                // `load_settings` expects to find it.
+                // The visualizer is a top-level int in settings.json, not a theme field.
                 json.put("visualizer", visualizerIndex(parsed.optString("visualizerType", "SCOPE")))
             }
 
@@ -728,44 +585,28 @@ class MainActivity : SDLActivity() {
             Log.i(TAG, "settings import: wrote ${target.absolutePath} " +
                        "(${json.length()} keys, theme=${json.optString("theme", "-")}), marked v$SETTINGS_IMPORT_VERSION")
         } catch (e: Exception) {
-            // ⚠️ NOT stamped on failure, so the next launch tries again. And deliberately not fatal:
-            // losing a migration costs the user their settings, and crashing on the way in costs them
-            // the app. The log line is the only thing that says which happened.
+            // ⚠️ Not stamped, so the next launch retries; not fatal — a crash would cost the app.
             Log.e(TAG, "settings import FAILED - settings will fall back to defaults: ${e.message}", e)
         }
     }
 
-    /** `VisualizerType`'s ordinal, which settings.json stores — the order of `theme.h` and
-     *  `settings_store.cpp`'s VISUALIZER_COUNT. */
-    private fun visualizerIndex(name: String): Int = when (name) {
-        "SCOPE"          -> 0
-        "FLAT"           -> 1
-        "OCTA"           -> 2
-        "OCTA_FULL"      -> 3
-        "SPECTRUM"       -> 4
-        "SPECTRUM_PEAKS" -> 5
-        else             -> 0
-    }
+    /** `VisualizerType`'s ordinal, the order in `theme.h`. */
+    private fun visualizerIndex(name: String): Int =
+        listOf("SCOPE", "FLAT", "OCTA", "OCTA_FULL", "SPECTRUM", "SPECTRUM_PEAKS").indexOf(name).coerceAtLeast(0)
 
     private companion object {
         const val TAG = "PocketTrackerSDL"
 
-        /** How long a rotation the device DID accept has to complete, before [portraitCheck] reads
-         *  the configuration back and concludes it was refused. */
+        /** How long an accepted rotation takes, before [portraitCheck] concludes it was refused. */
         const val ORIENTATION_SETTLE_MS = 2000L
 
         const val RECORDING_END_SETTLE_MS = 1000L
 
-        /**
-         * Bump this when there are new keys to migrate, and add an arm for them.
-         * v1 — the every-platform rows, RESUME, the button-feedback scalars, overlay STRENGTH, theme.
-         * v2 — the SKIN and OVERLAY selections (`portrait_skin` / `overlay_name`). LAYOUT stays out.
-         */
+        /** Bump with new keys to migrate. v1: the plain rows and theme; v2: SKIN and OVERLAY. */
         const val SETTINGS_IMPORT_VERSION = 2
         const val IMPORT_VERSION_KEY = "settings_import_version"
 
-        /** The old app's default skin id, read when the user never chose one — also the shell's
-         *  fallback for an unknown id (device_skin.h). */
+        /** The old app's default skin — also the shell's fallback for an unknown id. */
         const val DEFAULT_SKIN_ID = "amiga-2"
 
         /** [safRequestRoot]'s `startActivityForResult` code, matched in [onActivityResult]. */

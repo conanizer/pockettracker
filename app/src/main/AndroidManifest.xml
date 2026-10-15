@@ -2,54 +2,36 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-        ⚠️ **NO STORAGE PERMISSION OF ANY KIND, AND THAT IS THE DESIGN.** The app reaches the user's
-        projects and samples through the Storage Access Framework: the user grants a folder from the
-        system picker (ADD FOLDER… in the browser's roots directory), the grant is persisted with
-        `takePersistableUriPermission`, and `shell/android/saf-filesystem.cpp` is the whole of the access.
-        A granted tree needs no `uses-permission` line, which is precisely the property SAF is for.
-
-        Its own three files (`settings.json`, `template.ptp`, `autosave.ptp`) are read during the
-        native boot, before any picker can have run, and live in `filesDir` — app-private, permission
-        -free and unrevokable.
-
-        ⚠️ Adding any of the four back (READ_/WRITE_EXTERNAL_STORAGE, READ_MEDIA_AUDIO,
-        MANAGE_EXTERNAL_STORAGE) would not make anything work: nothing in the tree calls MediaStore,
-        and nothing constructs a media-tree `StdFileSystem` any more. It would only re-open the
-        F-Droid review finding this migration answers.
+        ⚠️ No storage permission, by design: the user grants a folder in the system picker (Storage
+        Access Framework, `shell/android/saf-filesystem.cpp`), which needs no `uses-permission`. The
+        app's own files live in `filesDir`. Adding one back would make nothing work and re-open the
+        F-Droid review finding.
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--
-        A song left playing when the app leaves the screen keeps playing, under a foreground service
-        (PlaybackService) — without one Android freezes the process and the audio stream dies under it.
-        POST_NOTIFICATIONS (Android 13+) only decides whether its notification, and STOP, is shown.
+        A song left playing off the screen keeps playing under a foreground service (PlaybackService).
+        POST_NOTIFICATIONS (Android 13+) only decides whether its notification, and STOP, shows.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
-        Android 15+: lets the app hear that a screen recording has started, which is when it leaves
-        the fast audio path — that path does not reach a recording (MainActivity.kt). Granted at
-        install, never asked for; it reveals that a recording runs and nothing about it.
+        Android 15+: tells the app a screen recording started, so it leaves the fast audio path, which
+        a recording does not hear. Granted at install, never asked for.
     -->
     <uses-permission android:name="android.permission.DETECT_SCREEN_RECORDING" />
 
     <!--
-        EXTERNAL MIDI out (MIDI plan phase B2b). No PERMISSION is needed: USB and virtual (app-to-app)
-        MIDI through MidiManager are unguarded — only BLE MIDI would want BLUETOOTH_SCAN, and the plan
-        defers BLE (§9). ⚠️ required="false" is load-bearing: `true` would hide the app on the Play
-        Store from every device without a MIDI stack, which is most phones, to gate one optional
-        instrument type. `MidiOutManager` already answers "0 devices" when the service is absent, and
-        the MIDI screen's OUTPUT row already draws that as `OFF  NO PORTS`.
+        MIDI needs no permission over USB or app-to-app (only BLE would). ⚠️ required="false": `true`
+        would hide the app from every device without a MIDI stack.
     -->
     <uses-feature android:name="android.software.midi" android:required="false" />
 
     <!--
-      No android:largeHeap. It raises the ART heap ceiling, and this app barely uses one: the whole
-      Java heap is the 32 UI click clips (3.5 MB) plus a 78 KB dex, while a loaded project with eight
-      tracks of samples is ~99 MB of NATIVE heap — the engine, the decoders and tsf — which largeHeap
-      cannot raise by a byte. Measured on the release build rather than assumed.
+      No largeHeap: the Java heap is the click clips (3.5 MB); a project's samples live in the native
+      heap, which largeHeap does not raise.
     -->
     <application
         android:allowBackup="true"
@@ -60,9 +42,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Pockettracker">
-        <!-- MainActivity is now an SDLActivity subclass (convergence Phase E). launchMode=singleTask
-             is SDL's recommendation: it stops a relaunch from spawning a second native SDL instance,
-             and configChanges keeps a rotation from restarting the native thread mid-session. -->
+        <!-- singleTask, as SDL recommends: a relaunch must not start a second native SDL instance;
+             configChanges keeps a rotation from restarting the native thread. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
