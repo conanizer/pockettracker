@@ -4,26 +4,17 @@
 #include "modules/dust-chain.h"
 #include "modules/eq-module.h"
 
-// ===========================================================================
-// MasterChain — final stereo output bus effect chain.
-//
-// Signal flow: mixed output → masterEq → [OttModule | DustChain] → LimiterModule → output.
-// Only one bus effect runs at a time; masterFx selects which (0=OTT, 1=DUST).
-// OttModule is bypassed when ott.enabled == false (depth = 0).
-// DustChain is bypassed when dustDepth == 0.
-// masterEq is bypassed when masterEq.active == false (slot = -1).
-// ===========================================================================
+// The master bus: EQ → OTT or DUST (`masterFx` 0 / 1, skipped at depth 0) → limiter.
 struct MasterChain {
     OttModule         ott;
     skdust::DustChain dust;
     LimiterModule     limiter;
-    EqModule          masterEq;  // Master 3-band parametric EQ (slot -1 = bypass)
+    EqModule          masterEq;
 
     int   masterFx  = 0;
     float dustDepth = 0.f;
 
-    // ⚠️ No default rate: every module bakes it into its coefficients, so a reset callable without
-    // one could be silently wrong.
+    // No default rate: every module bakes it in.
     void reset(float sampleRate) {
         ott.reset(sampleRate);
         dust.prepare(sampleRate, 512, 2);
@@ -32,8 +23,7 @@ struct MasterChain {
         masterEq.reset(sampleRate);
     }
 
-    // ⚠️ IDEMPOTENT ON PURPOSE: `push_mixer` re-sends this on every mute, solo and fader nudge, and a
-    // reset mid-signal clears DUST's filters, delay line and compressor envelope — a click per gesture.
+    // ⚠️ Idempotent: it is re-sent on every mixer gesture, and resetting DUST mid-signal clicks.
     void setMasterFx(int fx) {
         if (fx == masterFx) return;
         masterFx = fx;
@@ -56,9 +46,8 @@ struct MasterChain {
 
     void setLimiterPreGain(float g) { limiter.setPreGain(g); }
 
-    // Process interleaved stereo buffer in-place. buf layout: [L0, R0, L1, R1, ...]
+    // Interleaved stereo, in place.
     void process(float* buf, int numFrames, int channelCount) {
-        // Master EQ (before bus FX)
         if (masterEq.active) {
             for (int i = 0; i < numFrames; i++) {
                 float L = buf[i * channelCount];

@@ -6,28 +6,26 @@
 
 // The per-voice effect chain, per sample: Crush → Drive → Filter → EQ.
 //
-// ⚠️ A sampler voice passes downsample 0 to the crush: its downsample is a quantized read address in
-// the mix loop, a different sound. A SoundFont voice hands the chain both.
-// A new module is a member, a line in reset() and a line in each process*() — and in idle() / touch().
+// ⚠️ A sampler voice passes downsample 0: it downsamples its read address in the mix loop instead.
+// A new module also needs a line in reset(), each process*(), idle() and touch().
 struct InstrumentChain {
     BitcrushModule crush;
     DriveModule    drive;
     FilterModule   filter;
-    EqModule       eq;    // 3-band parametric EQ (loShelf / bell / hiShelf)
+    EqModule       eq;
 
-    // False until the note's first sample has gone through: a write before it lands at once, one
-    // after it glides. See the modules' `fresh`.
+    // False until the note's first sample: a write before it lands at once, after it glides.
     bool started = false;
 
-    // ⚠️ `keepToneState` leaves the crush, filter and EQ memory alone: a SoundFont chain belongs to
-    // the TRACK, and the stolen note is still flowing through it — zeroing it steps the output.
+    // ⚠️ `keepToneState` keeps the crush, filter and EQ memory: a SoundFont chain belongs to the track,
+    // and zeroing it under the stolen note steps the output.
     void reset(float sampleRate = 44100.0f, bool keepToneState = false) {
         started = false;
         drive.reset();
         if (keepToneState) {
-            // Off, as reset() would leave them, until the caller sets them again.
+            // Off until the caller sets them; the new note's settings land at once.
             filter.type = 0;
-            filter.fresh = true;   // the new note's own filter lands at once, not as a glide
+            filter.fresh = true;
             crush.fresh = true;
             eq.active   = false;
         } else {
@@ -37,14 +35,13 @@ struct InstrumentChain {
         }
     }
 
-    // Nothing is on and nothing is fading off: a sample through the chain is `touch()` and no more.
-    // Holds until the next parameter write, so a caller may ask once per piece.
+    // Nothing on or fading: a sample through is just `touch()`. Holds until the next write.
     bool idle() const {
         return !crush.enabled() && crush.fadeLeft == 0 && !drive.enabled() && drive.fadeLeft == 0 &&
                !filter.enabled() && filter.typeFadeLeft == 0 && !eq.active;
     }
 
-    // What a sample through an idle chain leaves behind: the note has started.
+    // What a sample through an idle chain leaves behind.
     void touch() {
         started = true;
         crush.fresh = drive.fresh = filter.fresh = false;

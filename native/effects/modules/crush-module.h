@@ -1,31 +1,12 @@
 #pragma once
 #include "../primitives/daisysp/decimator.h"
 
-// ===========================================================================
-// BitcrushModule — bit-depth reduction + sample-rate reduction via
-// DaisySP Decimator (MIT).
-//
-// Decimator applies sample-and-hold downsampling first, then reduces bit
-// depth via integer bit-shifting. Both steps are combined in one Process()
-// call. Two Decimator instances are needed (decL / decR) because the
-// sample-hold counter is per-channel state.
-//
-// param crush:     0–15 (0 = bypass, 1 = 15-bit, 15 = 1-bit)
-//   Maps to SetBitsToCrush(crush). 0 drops no bits → pass-through.
-//
-// param downsample: 0–15 (0 = bypass → full sample rate)
-//   Maps to SetDownsampleFactor(downsample / 15.0f).
-//   For sampler voices always pass 0 — pre-interpolation address
-//   quantization stays inline in the sampler mix loop (different effect).
-//   For SF voices pass the downsample so the chain handles it.
-//
-// Call setParams() once per block (or at trigger) when params change.
-// ===========================================================================
+// Bit and sample-rate reduction (DaisySP Decimator), one per channel.
+// crush 0-15: bits dropped (0 = off, 15 = 1-bit). downsample 0-15: 0 = off.
 struct BitcrushModule {
-    // A change on a sounding note crossfades from the old setting over CHANGE_FRAMES samples. Two
-    // decimators per channel take turns: the new setting starts in the idle pair while the old pair
-    // plays out the fade (a Decimator holds a counter and a held sample, and cannot be copied).
-    // Anything set before the note's first sample is instant.
+    // A change on a sounding note crossfades over CHANGE_FRAMES: the new setting starts in the idle
+    // pair while the old pair plays out (a Decimator has state and cannot be copied). Anything set
+    // before the note's first sample is instant.
     static constexpr int CHANGE_FRAMES = 128;
 
     int crush      = 0;
@@ -39,7 +20,7 @@ struct BitcrushModule {
 
     static void bypass(daisysp::Decimator& d) {
         d.Init();
-        // Decimator::Init() defaults downsample_factor=1 (active) — force bypass.
+        // Init leaves downsampling on.
         d.SetDownsampleFactor(0.0f);
         d.SetBitsToCrush(0);
     }
@@ -56,7 +37,6 @@ struct BitcrushModule {
 
     bool enabled() const { return crush > 0 || downsample > 0; }
 
-    // Call once per block (or at trigger) when params change.
     void setParams(int crushParam, int downsampleParam) {
         if (!fresh && (crushParam != crush || downsampleParam != downsample)) {
             prevEnabled = enabled();

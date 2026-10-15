@@ -118,10 +118,23 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
     const int nc = std::min(channelCount, (int)chans.size());
     if (n == 0 || nc == 0) return;
 
-    // -------------------------------------------------------------------------
-    // Stage 1: Low-shelf
-    // -------------------------------------------------------------------------
-    if (enables.lowShelf) {
+    // Stages 2 and 8 share one cutoff.
+    const float lpCutoff = kLPCutoffMax * std::pow(kLPCutoffMin / kLPCutoffMax, dustAmount);
+    const float lpCoef   = 1.0f - std::exp(-kTwoPi * lpCutoff / (float)sampleRate);
+    auto lowPass = [&](std::vector<float>& state) {
+        for (int ch = 0; ch < nc; ++ch) {
+            float s = state[(size_t)ch];
+            for (int i = 0; i < n; ++i) {
+                float& x = buf[i * channelCount + ch];
+                s += lpCoef * (x - s);
+                x = s;
+            }
+            state[(size_t)ch] = s;
+        }
+    };
+
+    // 1. Low-shelf
+    {
         for (int ch = 0; ch < nc; ++ch) {
             auto& cs = chans[(size_t)ch];
             for (int i = 0; i < n; ++i) {
@@ -133,32 +146,11 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Stage 2: Lowpass — 1-pole, cutoff tracks knob (10 kHz at 0%, 5 kHz at 100%).
-    // Log interpolation so equal knob travel gives equal perceived frequency change.
-    // -------------------------------------------------------------------------
-    {
-        const float lpCutoff = kLPCutoffMax * std::pow(kLPCutoffMin / kLPCutoffMax, dustAmount);
-        const float lpCoef   = 1.0f - std::exp(-kTwoPi * lpCutoff / (float)sampleRate);
-        if (enables.lp) {
-            for (int ch = 0; ch < nc; ++ch) {
-                float s = lpState[(size_t)ch];
-                for (int i = 0; i < n; ++i) {
-                    float& x = buf[i * channelCount + ch];
-                    s += lpCoef * (x - s);
-                    x = s;
-                }
-                lpState[(size_t)ch] = s;
-            }
-        }
-    }
+    // 2. Low-pass
+    lowPass(lpState);
 
-    // -------------------------------------------------------------------------
-    // Stage 3: Tube saturation (Airwindows Tube2 derivative)
-    // Simplified from the original at Tube=1.0 / InputPad=0.5.
-    // At 2x+ sample rates, two averaging passes reduce aliasing.
-    // -------------------------------------------------------------------------
-    if (enables.tube) {
+    // 3. Tube (Airwindows Tube2 at Tube 1.0, InputPad 0.5). At 2× rates, averaging cuts aliasing.
+    {
         const bool highSR = tubeHighSR;
         for (int ch = 0; ch < nc; ++ch) {
             auto& s = chans[(size_t)ch];
@@ -200,14 +192,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Stage 4: FET compressor (APComp algorithm — see attribution above)
-    //
-    // Channel link = 1.0: both channels see the louder channel's GR.
-    // Feedback     = 0.0: pure feed-forward detector.
-    // Ceiling      = 1.0: tanh soft-clip at 0 dBFS.
-    // -------------------------------------------------------------------------
-    if (enables.fet && nc > 0)
+    // 4. FET compressor (APComp): fully linked, feed-forward, tanh ceiling at 0 dBFS.
     {
         const double thresholdDb      = (double)(dustAmount * kCompThresholdMin);
         const double ratioVal         = kCompRatio;
@@ -215,7 +200,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         const double inertiaCoef      = kCompInertia;
         const double inertiaDecayCoef = 0.99 + kCompInertiaDecay * 0.01;
 
-        // APComp time constants approach 1.0 (held), so exp(-1/(sr·sec)) rather than 1−exp(…).
+        // These approach 1 (held), so exp(…) rather than 1 − exp(…).
         const double attackCoeff  = std::exp(-1.0 / ((double)sampleRate * kCompAttackSec));
         const double releaseCoeff = std::exp(-1.0 / ((double)sampleRate * kCompReleaseSec));
 
@@ -226,10 +211,10 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         for (int sample = 0; sample < n; ++sample)
         {
             float  inputSample[2] = { 0.0f, 0.0f };
-            double inAbsDb[2]     = { 0.0,  0.0  };   // the input's level, taken once for both uses below
+            double inAbsDb[2]     = { 0.0,  0.0  };
             double grDb[2]        = { 0.0,  0.0  };
 
-            // Per-channel: envelope detection → gain computation → inertia.
+            // Envelope → gain reduction → inertia.
             for (int ch = 0; ch < ncp; ++ch)
             {
                 ChannelState& cs = (ch == 0) ? sL : sR;
@@ -257,7 +242,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
                 }
                 cs.slewedSignal = std::clamp(cs.slewedSignal, -200.0, 1000.0);
 
-                // Inertia: velocity overshoot gives the FET-76 snap character.
+                // Inertia: the velocity overshoot is the FET snap.
                 double grLinear = dbToGain(cs.gainReductionDb);
                 cs.inertiaVelocity += inertiaCoef * grLinear * -0.001;
                 cs.inertiaVelocity *= inertiaDecayCoef;
@@ -269,13 +254,13 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
                 grDb[ch] = cs.gainReductionDb;
             }
 
-            // Channel link = 1.0: both channels use the louder channel's GR.
+            // Linked: both take the louder channel's reduction.
             if (ncp > 1) {
                 const double maxGr = std::max(grDb[0], grDb[1]);
                 grDb[0] = grDb[1] = maxGr;
             }
 
-            // Apply GR + tanh soft-clip (ceiling = 1.0 → straight tanh).
+
             float preMakeup[2] = { 0.0f, 0.0f };
             for (int ch = 0; ch < ncp; ++ch) {
                 const double outDb   = inAbsDb[ch] - grDb[ch];
@@ -286,8 +271,7 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
                 preMakeup[ch] = outLin;
             }
 
-            // RMS auto-makeup: track input/pre-makeup energies as peak-followers,
-            // apply makeup = sqrt(inEnvSq / outEnvSq).
+            // Auto-makeup.
             float inEn = 0.0f, outEn = 0.0f;
             for (int ch = 0; ch < ncp; ++ch) {
                 inEn  += inputSample[ch] * inputSample[ch];
@@ -308,13 +292,8 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Stage 5: Wow & drift
-    // HF/LF split via 1-pole crossover. LF: fixed-delay buffer (kWowCenterDelay).
-    // HF: longer buffer with modulated read position (sine LFO + random walk).
-    // Both re-sum at output. LFO shared across channels for stereo coherence.
-    // Rate and depth interpolate linearly with the knob.
-    // -------------------------------------------------------------------------
+    // 5. Wow and drift: the HF band's read position moves (sine + random walk), the LF band is only
+    // delayed by the centre, and the two re-sum.
     {
         const float wowFreq   = kWowFreqMin  + dustAmount * (kWowFreqMax  - kWowFreqMin);
         const float wowAmp    = kWowAmpMin   + dustAmount * (kWowAmpMax   - kWowAmpMin);
@@ -335,15 +314,15 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
             driftLpZ += dCoef * (noise - driftLpZ);
             const float driftOff = std::tanh(driftLpZ * dScale) * driftAmp;
 
-            // Delay buffers always run regardless of enables.wow — keeps PDC latency constant.
-            const float modOff = enables.wow ? (wowOff + driftOff) : 0.0f;
+
+            const float modOff = wowOff + driftOff;
 
             for (int ch = 0; ch < nc; ++ch)
             {
                 ChannelState& cs = chans[(size_t)ch];
                 float& samp = buf[sample * channelCount + ch];
 
-                // Read delayed values before writing (implements centerDelay correctly).
+                // Read before writing, so the LF delay is exactly the centre.
                 const float lfDelayed = cs.wowLfBuf[cs.wowLfWriteIdx];
 
                 const float readPosF = (float)cs.wowHfWriteIdx - (float)kWowCenterDelay - modOff;
@@ -370,12 +349,8 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Stage 6: Bitcrush
-    // Placed after the comp so quantization noise is added to a level-locked
-    // signal — hiss stays steady rather than pumping with the makeup gain.
-    // -------------------------------------------------------------------------
-    if (enables.bitcrush) {
+    // 6. Bitcrush, after the compressor so the hiss does not pump with the makeup.
+    {
         constexpr float scale = (float)(1 << kBitcrushBits) * 0.5f;
         const     float invSc = 1.0f / scale;
         for (int ch = 0; ch < nc; ++ch) {
@@ -386,11 +361,8 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Stage 7: Soft-clipper
-    // Linear below ±kClipKnee; tanh curve above, asymptotes to ±1.
-    // -------------------------------------------------------------------------
-    if (enables.clipper) {
+    // 7. Soft-clip: linear below the knee, tanh above.
+    {
         constexpr float knee   = kClipKnee;
         constexpr float rem    = 1.0f - kClipKnee;
         constexpr float invRem = 1.0f / rem;
@@ -406,23 +378,8 @@ void DustChain::process(float* buf, int numFrames, int channelCount)
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Stage 8: Output lowpass — same cutoff as stage 2.
-    // Together the two 1-pole stages give -12 dB/oct; disable this for -6 dB/oct.
-    // -------------------------------------------------------------------------
-    if (enables.lp2) {
-        const float lpCutoff = kLPCutoffMax * std::pow(kLPCutoffMin / kLPCutoffMax, dustAmount);
-        const float lpCoef   = 1.0f - std::exp(-kTwoPi * lpCutoff / (float)sampleRate);
-        for (int ch = 0; ch < nc; ++ch) {
-            float s = lpState2[(size_t)ch];
-            for (int i = 0; i < n; ++i) {
-                float& x = buf[i * channelCount + ch];
-                s += lpCoef * (x - s);
-                x = s;
-            }
-            lpState2[(size_t)ch] = s;
-        }
-    }
+    // 8. Low-pass again at stage 2's cutoff — together −12 dB/oct.
+    lowPass(lpState2);
 }
 
 } // namespace skdust

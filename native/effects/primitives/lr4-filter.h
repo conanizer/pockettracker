@@ -4,11 +4,7 @@
 static constexpr float kLR4Pi    = 3.14159265358979f;
 static constexpr float kLR4Sqrt2 = 1.41421356237f;
 
-// ===========================================================================
-// LR4Biquad — 2nd-order Butterworth biquad (Transposed Direct Form II).
-// Bilinear transform, coefficients computed at runtime for any fc/sr.
-// LP and HP share the same feedback (a1/a2), differ only in feedforward (b).
-// ===========================================================================
+// A 2nd-order Butterworth biquad, low- or high-pass (transposed direct form II).
 struct LR4Biquad {
     float b0 = 0.f, b1 = 0.f, b2 = 0.f;
     float a1 = 0.f, a2 = 0.f;
@@ -37,10 +33,7 @@ struct LR4Biquad {
     }
 };
 
-// ===========================================================================
-// LR4Filter — two cascaded LR4Biquad = 4th-order Linkwitz-Riley.
-// LP + HP outputs sum to flat amplitude+phase response (LR4 property).
-// ===========================================================================
+// Two cascaded biquads: a 4th-order Linkwitz-Riley split whose halves sum flat.
 struct LR4Filter {
     LR4Biquad lp1, lp2;
     LR4Biquad hp1, hp2;

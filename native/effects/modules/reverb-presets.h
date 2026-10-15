@@ -1,35 +1,12 @@
 #pragma once
 
-// ───────────────────────────────────────────────────────────────────────────
-// The reverb's built-in PRESETS — four names for four sets of cell values — and the names of the
-// algorithms that read those cells.
-//
-// ⚠️⚠️ **A PRESET'S NAME IS NOT AN ARGUMENT TO THE DSP.** A project holds ALGO, DCAY, SIZE, DAMP, PRE,
-// WIDE and MOD; the preset cell writes all seven at once and the project keeps the name only as a
-// label (ui/fx_preset_bank.h). A preset is a starting place, not a mode. Same shape as
-// delay-presets.h, on purpose.
-//
-// ⚠️⚠️ **`NORMAL`'S ROW IS THE STRUCT DEFAULT** (model.h): ALGO OLD, DCAY 60, SIZE 60, DAMP 80, PRE 00,
-// WIDE 80, MOD 10 — and a project written before these cells existed loads without them and lands on
-// that row, so the row and the struct must be changed TOGETHER or a brand-new project reads as
-// nobody's preset. It is the one row whose values are not free.
-//
-// ⚠️⚠️ **ONLY PRE AND WIDE ARE GATED OUT AT THEIR DEFAULTS**, which is what keeps an old project's
-// pre-delay and stereo image exactly as they were. **DCAY, DAMP and MOD are not, and cannot be.**
-// DCAY and DAMP spend the whole of 00–FF on tail lengths and brightnesses a musician would actually
-// choose; MOD's default is low because a wander sized for a long tail is audible as detuning on a
-// short one. SIZE is neutral at 60 by construction rather than by a gate: the room scale is exactly
-// 1 there, so the lines are the lengths they always were.
-//
-// ⚠️ A preset row may be RE-TUNED freely — it is only a set of values a user can then edit.
-//
-// ⏸️ **PLATE IS DELIBERATELY ABSENT.** What makes a plate a plate is the DENSITY of its build-up, and
-// this reverb's is eight delay lines: a "PLATE" here could only be a bright hall, and a preset list
-// is a promise about what its names mean.
-//
-// ⚠️ This header pulls in `<cmath>` and NOTHING ELSE: the UI reads it (for the names and the match)
-// and so does the DSP, and pulling in the reverb module would drag `EqModule` into every UI
-// translation unit, where `pt::ui::EqModule` already lives.
+// The reverb's built-in presets (names for sets of cell values) and its algorithm list. The DSP
+// never sees a preset's name.
+// ⚠️ NORMAL's row is the struct default (model.h) — change both together, or a new project matches
+// no preset. The other rows may be re-tuned freely.
+// ⚠️ Only PRE and WIDE are gated out at their defaults; SIZE is neutral at 60 by construction (scale
+// exactly 1). DCAY, DAMP and MOD have no neutral value.
+// Only <cmath>: the UI reads this too, and the reverb module would clash with its EqModule.
 #include <cmath>
 
 struct ReverbPreset {
@@ -43,38 +20,23 @@ struct ReverbPreset {
     int         mod;      // 00-FF, 40 = the wander the algorithm has always had; 00 = none
 };
 
-// ⚠️ **THE WANDER RISES WITH THE TAIL AND ONLY WITH IT.** A short tail is over before movement in it
-// could be heard as anything but detuning, so ROOM has none at all; a 12-second one sits still and
-// turns metallic without some, so CAVE has the most. It is the length that decides how much a row
-// can carry, not how grand the name sounds.
-//
-// ⚠️ **SIZE follows the name, and the wander's SPEED follows SIZE** (`reverb_mod_rate`), so the bigger
-// rows also drift more slowly without a column of their own for it.
-//
-// ⚠️ Every row is voiced on the original algorithm (0), so every row names it.
+// The wander (MOD) rises with the tail's length: a short tail heard moving is just detuned, a long
+// still one turns metallic. Its speed follows SIZE (`reverb_mod_rate`).
 inline constexpr ReverbPreset kReverbPresets[] = {
-    // 1.9 s in the room the reverb has always had, and bright enough to sit under anything.
+    // 1.9 s, bright.
     {"NORMAL", 0, 0x60, 0x60, 0x80, 0x00, 0x80, 0x10},
-    // Tight, bright and close in: 0.6 s in a smaller room, almost no gap before it, a narrower image
-    // than the others because a small room does not arrive from the sides, and a tail held still.
+    // 0.6 s in a small room, narrow, no wander.
     {"ROOM",   0, 0x18, 0x20, 0xA0, 0x04, 0x70, 0x00},
-    // The gap is what makes it a hall — 30 ms of clear air before the tail, so the source stays in
-    // front of it — and 3.6 s of darker, wider tail in a room half as large again.
+    // 30 ms pre-delay, then 3.6 s of darker, wider tail.
     {"HALL",   0, 0x88, 0xB0, 0x60, 0x33, 0xC0, 0x20},
-    // 12 s, the darkest of the four, in nearly the largest room, with the widest image and the
-    // deepest wander. FF is the freeze, and a preset is a starting place, not a held chord.
+    // 12 s, darkest and widest (DCAY FF would be the freeze).
     {"CAVE",   0, 0xD0, 0xF0, 0x20, 0x55, 0xFF, 0x40},
 };
 inline constexpr int kReverbPresetCount = 4;
 
-// ───────────────────────────────────────────────────────────────────────────
-// ALGO — which reverb reads the cells. The project's `reverbAlgo`.
-//
-// ⚠️⚠️ **A NUMBER HERE IS WHAT A PROJECT STORES. Append, never insert** — and 0 must go on meaning the
-// reverb that shipped, because a project written before the cell existed loads as 0.
-//
-// ⚠️ Choosing an algorithm writes no other cell: each reads the same DCAY/SIZE/DAMP/MOD its own way
-// (dragonfly/dragonfly-reverb.cpp), so switching back returns exactly the sound that was there.
+// ALGO, the project's `reverbAlgo`. ⚠️ The number is what a project stores: append, never insert;
+// 0 is the original reverb, which an older project loads as. Each algorithm reads the same cells its
+// own way (dragonfly-reverb.cpp).
 inline constexpr int kReverbAlgoOld   = 0;   // ReverbSc — every cell
 inline constexpr int kReverbAlgoHall  = 1;   // Dragonfly Hall — every cell
 inline constexpr int kReverbAlgoRoom  = 2;   // Dragonfly Room — every cell
@@ -82,7 +44,7 @@ inline constexpr int kReverbAlgoPlate = 3;   // Dragonfly Plate, "Nested" — SI
 inline constexpr int kReverbAlgoFoil  = 4;   // Dragonfly Plate, "Simple" — SIZE and MOD read nothing
 inline constexpr int kReverbAlgoCount = 5;
 
-/** False for the two plates: they have no room to size and nothing that moves. */
+// False for the two plates: no room to size, nothing that moves.
 inline constexpr bool reverb_algo_reads_size_and_mod(int algo) {
     return algo != kReverbAlgoPlate && algo != kReverbAlgoFoil;
 }
@@ -92,7 +54,7 @@ inline const char* reverb_algo_name(int algo) {
     return (algo >= 0 && algo < kReverbAlgoCount) ? kNames[algo] : kNames[0];
 }
 
-/** Which built-in preset these cells are, or −1 when they are nobody's. */
+// Which built-in preset these cells match, or −1.
 inline int reverb_preset_match(int algo, int decay, int room, int damp, int pre, int width, int mod) {
     for (int i = 0; i < kReverbPresetCount; ++i) {
         const ReverbPreset& r = kReverbPresets[i];
@@ -103,87 +65,45 @@ inline int reverb_preset_match(int algo, int decay, int room, int damp, int pre,
     return -1;
 }
 
-/**
- * MOD's cell → ReverbSc's `SetPitchMod`. ⚠️ THE DIVISOR IS 64 SO THAT 0x40 IS EXACTLY 1.0 — the
- * algorithm's native wander. FF reaches just under four, the ceiling the delay lines are sized for.
- */
+// MOD → ReverbSc's `SetPitchMod`: 0x40 is exactly 1.0, the native wander; FF just under 4, the most
+// the lines are sized for.
 inline float reverb_mod_scale(int modHex) { return modHex / 64.0f; }
 
-// ───────────────────────────────────────────────────────────────────────────
-// SIZE — the room's dimensions, and the wander's speed that follows them.
-
-/**
- * SIZE 00-FF → how much every delay line is stretched, geometrically: 0.6× at 00, exactly 1 at 60,
- * about 2.33× at FF. ⚠️ **60 IS EXACTLY 1** — the exponent is zero there — so the default room is
- * the one the reverb always had, bit for bit. ⚠️ FF must stay under `DSY_REVERBSC_MAX_ROOM`, which the
- * lines are sized for; above it `SetRoom` clamps silently.
- *
- * The floor is where the eight lines, 24–52 ms at 00, still read as a room rather than a comb: much
- * shorter and the tail rings at the lines' own pitches.
- */
+// SIZE → how much every delay line stretches: 0.6× at 00, exactly 1 at 60, ~2.33× at FF.
+// ⚠️ FF must stay under `DSY_REVERBSC_MAX_ROOM`; above it `SetRoom` clamps silently.
 inline float reverb_room_scale(int sizeHex) { return powf(0.6f, (0x60 - sizeHex) / 96.0f); }
 
-/**
- * SIZE 00-FF → how fast the wander moves, as a multiple of the speed the algorithm was built with
- * (each line picks a new target 0.9–4 times a second).
- *
- * ⚠️⚠️ **IT ONLY EVER SLOWS DOWN.** Up to 60 it is exactly 1 — a small room is not given a faster
- * wander, because a fast wander on a short tail is heard as a warble rather than as air. Above 60 it
- * falls geometrically to a third at FF. The depth grows with the room at the same time (`SetRoom`
- * scales it), so the amount of pitch drift stays about the same and only its speed changes.
- */
+// SIZE → the wander's speed: 1 up to 60, falling to a third at FF. It only ever slows — a fast
+// wander on a short tail warbles. `SetRoom` deepens it as the room grows.
 inline constexpr float kReverbSlowestModRate = 1.0f / 3.0f;
 inline float reverb_mod_rate(int sizeHex) {
     if (sizeHex <= 0x60) return 1.0f;
     return powf(kReverbSlowestModRate, (sizeHex - 0x60) / 159.0f);
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// DCAY and DAMP — the cell is a MUSICAL quantity, and the algorithm's number is derived from it.
-//
-// ⚠️⚠️ **NEITHER CELL MAY BE SENT TO THE ALGORITHM RAW.** `SetFeedback` takes a loop gain and
-// `SetLpFreq` takes a corner, and both are logarithmic in what the ear hears: a cell wired straight
-// to either spends most of its range on one end of the effect.
+// DCAY and DAMP are musical quantities, mapped onto the algorithm's numbers.
+// ⚠️ Never send either raw: feedback and the corner are logarithmic to the ear.
 
-/** How long the eight delay lines take to be traversed once, on average, in the default room.
- *  ⚠️ **MEASURED AGAINST THE ALGORITHM'S OWN DECAY, NOT SUMMED OFF `kReverbParams`** — the lines are
- *  coupled by the scattering junction, so no single line's length predicts the rate the tail
- *  actually dies at. It is the one constant that turns a loop gain into a time and back. */
+// The tail's average loop time in the default room — fitted to the algorithm's measured decay, since
+// the coupled lines' lengths do not predict it.
 inline constexpr float kReverbLoopSeconds = 0.058f;
 
-/** DCAY 00-FF → the tail's -60 dB time, geometrically: 0.4 s at 00, ~25 s at FE. */
+// DCAY → the tail's −60 dB time: 0.4 s at 00, ~25 s at FE.
 inline float reverb_decay_seconds(int decayHex) { return 0.4f * powf(62.5f, decayHex / 255.0f); }
 
-/**
- * DCAY and SIZE → ReverbSc's feedback.
- *
- * ⚠️⚠️ **IT TAKES THE ROOM TOO, AND THAT IS WHAT KEEPS THE TWO CELLS INDEPENDENT.** A loop gain is a
- * loss PER PASS, and a bigger room makes each pass longer — so the same gain in a room twice the size
- * rings twice as long. The loop time is scaled with the room before the gain is derived from it.
- *
- * ⚠️ **FF IS FOREVER AND IS THE ONE VALUE NOT ON THE CURVE** — a gain of exactly 1 is a tail that
- * never ends, whatever the room, and no finite decay time names it. FE is the longest one that does.
- */
+// DCAY and SIZE → ReverbSc's feedback. The room scales the loop time, so DCAY's length holds in any
+// room. FF is exactly 1, a tail that never ends.
 inline float reverb_decay_feedback(int decayHex, int sizeHex = 0x60) {
     if (decayHex >= 0xFF) return 1.0f;
     return powf(10.0f, -3.0f * kReverbLoopSeconds * reverb_room_scale(sizeHex) /
                            reverb_decay_seconds(decayHex));
 }
 
-/** DAMP 00-FF → the corner of the low-pass inside the tail, 1.2 kHz to 20 kHz. ⚠️ The floor is
- *  1.2 kHz rather than the algorithm's own 0 because below about a kilohertz the filter stops
- *  changing the tail's COLOUR and only changes its LEVEL — the tail is already that dark. */
+// DAMP → the tail's low-pass corner, 1.2 kHz to 20 kHz; below ~1 kHz it changes only the level.
 inline float reverb_damp_freq(int dampHex) { return 1200.0f * powf(16.667f, dampHex / 255.0f); }
 
-/**
- * The wet gain that DCAY must not set. ⚠️⚠️ THE OUTPUT IS BUILT ONLY FROM THE DELAY LINES' STATE,
- * so its LEVEL is proportional to the feedback — a short tail would be ~19 dB quieter. This divides
- * that back out against the default cells' level, so DCAY sets how LONG and the REV fader how loud.
- *
- * ⚠️ The exponent is a FIT to the measured onset level (`g·(1-g²)^-0.32` — the damping takes a
- * share the gain alone does not predict). Read off the GAIN, so a bigger room is compensated too.
- * `g` is capped first: at FF `(1-g²)` is zero.
- */
+// Wet gain that undoes DCAY's effect on level (the output scales with the feedback), so DCAY sets
+// the length and the REV fader the loudness. The exponent is a fit; `g` is capped because FF zeroes it.
 inline float reverb_decay_gain(int decayHex, int sizeHex = 0x60) {
     auto level = [](float g) {
         if (g > 0.99f) g = 0.99f;

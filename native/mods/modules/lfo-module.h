@@ -4,19 +4,9 @@
 #include "../primitives/lfo-oscillator.h"
 #include "../../rng.h"
 
-// tickLFO — advance one audio block for an LFO mod slot (type 3).
-//   sr    : sample rate in Hz (for Hz → radians/frame conversion).
-//   rMult : rate multiplier from mod-to-mod routing (1.0 = no mod).
-// Updates mod.lfoPhase and mod.envValue in place.
-//
-// Trigger modes (lfoTrigMode): 0=FREE and 1=RETG differ only in the phase set at note
-// trigger (FREE aligns to the global frame clock, RETG resets to 0 — both handled in the
-// dispatch copy loop). 2=HOLD freezes the value sampled at trigger. 3=ONCE runs exactly
-// one cycle, then parks at stage 4 holding the shape's end-of-cycle value (mod-runner
-// still writes a stage-4 LFO's envValue to the source array each block).
-//
-// SCALAR (type=6): constant output equal to mod.amount, a degenerate LFO handled in mod-runner.h.
-// Making it a ModSourceId instead would renumber a stored type — a format decision.
+// One block of an LFO slot. `rMult` is the mod-to-mod rate (1 = none).
+// Trigger modes: 0 FREE and 1 RETG differ only in the phase set at trigger; 2 HOLD freezes the
+// value taken at trigger; 3 ONCE runs one cycle and holds its end value (stage 4).
 inline void tickLFO(VoiceModSlot& mod, int numFrames, float sr, float rMult) {
     if (mod.lfoTrigMode == 2 || mod.stage == 4) return;  // HOLD / finished ONCE: value frozen
 
@@ -27,11 +17,9 @@ inline void tickLFO(VoiceModSlot& mod, int numFrames, float sr, float rMult) {
     while (mod.lfoPhase >= 2.0f * (float)M_PI) { mod.lfoPhase -= 2.0f * (float)M_PI; wrapped = true; }
 
     if (mod.oscShape == 8 || mod.oscShape == 9) {
-        // RND = sample & hold (new random level each cycle), DRNK = clamped random walk.
-        // Stateful — can't live in the pure lfoShape() map. RNG state is per-slot,
-        // seeded at note trigger; ONCE keeps its trigger-time level for the whole note.
+        // RND: a new level each cycle. DRNK: a clamped random walk. ONCE keeps its trigger level.
         if (wrapped && mod.lfoTrigMode != 3) {
-            if (mod.lfoRngState == 0) mod.lfoRngState = 0x9E3779B9u;  // xorshift dead-state guard
+            if (mod.lfoRngState == 0) mod.lfoRngState = 0x9E3779B9u;  // xorshift sticks at 0
             float r = xorshift32Bipolar(mod.lfoRngState);
             if (mod.oscShape == 8) {
                 mod.lfoRandValue = r;
@@ -43,12 +31,12 @@ inline void tickLFO(VoiceModSlot& mod, int numFrames, float sr, float rMult) {
         }
         mod.envValue = mod.lfoRandValue;
     } else {
-        // A completing ONCE holds the end-of-cycle value, not the post-wrap value.
+        // A finishing ONCE holds the cycle's end, not the wrapped start.
         float phase = (wrapped && mod.lfoTrigMode == 3)
             ? 2.0f * (float)M_PI - 1e-4f
             : mod.lfoPhase;
         mod.envValue = lfoShape(phase, mod.oscShape);
     }
 
-    if (wrapped && mod.lfoTrigMode == 3) mod.stage = 4;  // ONCE: one cycle done — freeze
+    if (wrapped && mod.lfoTrigMode == 3) mod.stage = 4;
 }

@@ -3,26 +3,12 @@
 #include "../soundpipe/soundpipe.h"
 #include "../primitives/daisysp/svf.h"
 
-// ===========================================================================
-// EqModule — 3-band parametric EQ.
-//
-// Band types (the number is stored in the project file — append, never insert):
-//   0 = off      (bypass)
-//   1 = loShelf  (sp_pareq mode 1)
-//   2 = lowcut   (highpass biquad — sp_pareq cannot do HP/LP)
-//   3 = bell     (sp_pareq mode 0, peaking)
-//   4 = hiShelf  (sp_pareq mode 2)
-//   5 = hicut    (lowpass biquad)
-//
-// Parameters:
-//   freqHz  — centre/corner frequency, 20–20000 Hz
-//   gainDb  — gain in dB, −12..+12 (ignored for lowcut/hicut)
-//   q       — bandwidth/Q, 0.1–10.0
-// ===========================================================================
+// The 3-band parametric EQ. Band types — the number is stored in projects, append only:
+// 0 off, 1 low shelf, 2 low cut, 3 bell, 4 high shelf, 5 high cut.
+// Frequency 20 Hz–20 kHz, gain ±12 dB (not for the cuts), Q 0.1–10.
 
-// One sample through a shelf/bell band. `sp_pareq_compute` derives the coefficients on the first
-// sample after fc, v or q change (`derive`); from then on the same biquad runs here, with no call
-// out of the mix loop per sample per band.
+// One sample through a shelf/bell band: `sp_pareq_compute` derives the coefficients once after a
+// change, then the same biquad runs inline.
 inline float pareq_tick(sp_data& sp, sp_pareq& p, bool& derive, float in) {
     if (derive) {
         derive = false;
@@ -38,18 +24,15 @@ inline float pareq_tick(sp_data& sp, sp_pareq& p, bool& derive, float in) {
     return yn;
 }
 
-// One EQ band: sp_pareq for shelf/bell, DaisySP SVF for HP/LP.
-// SVF is double-sampled so it stays stable near Nyquist.
-// Q → SVF resonance: damp = 1/Q in SVF terms, res = 1 − 1/(2Q), clamped to [0, 1).
+// One band: sp_pareq for shelves and bell, DaisySP's SVF for the cuts.
 struct EqBandModule {
     sp_pareq pL, pR;
     sp_data  sp;
-    // Each side's coefficients are owed. Set wherever fc, v or q are written — `reset` and
-    // `setParams`, the only two places — and one per side, since a mono voice never runs pR.
+    // Coefficients owed, per side (a mono voice never runs pR). Set wherever fc, v or q change.
     bool deriveL = true, deriveR = true;
     bool bypass   = true;
-    bool useHpLp  = false;  // true for type 2 (lowcut) and 5 (hicut)
-    int  hpLpType = 0;      // 2=HP 5=LP, used in processMono/processStereo
+    bool useHpLp  = false;  // types 2 and 5
+    int  hpLpType = 0;      // 2 = HP, 5 = LP
     daisysp::Svf svfL, svfR;
 
     void reset(float sr) {
@@ -71,14 +54,12 @@ struct EqBandModule {
 
         if (useHpLp) {
             float hz  = fminf(freqHz, sp.sr * 0.45f);
-            // damp = 1/Q in SVF internals; DaisySP maps res → damp = 2*(1-res)
-            // → res = 1 - 1/(2Q), clamped so damp stays positive
+            // damp = 1/Q, and DaisySP's damp is 2(1 − res).
             float res = fmaxf(0.0f, fminf(0.99f, 1.0f - 1.0f / (2.0f * q)));
             svfL.SetFreq(hz); svfL.SetRes(res); svfL.SetDrive(0.0f);
             svfR.SetFreq(hz); svfR.SetRes(res); svfR.SetDrive(0.0f);
         } else {
-            // sp_pareq: mode 0=bell, 1=loShelf, 2=hiShelf
-            int pareqMode = (type == 1) ? 1 : (type == 4) ? 2 : 0;
+            int pareqMode = (type == 1) ? 1 : (type == 4) ? 2 : 0;   // 0 bell, 1 low shelf, 2 high shelf
             float v    = powf(10.0f, gainDb / 20.0f);
             float mode = (float)pareqMode;
             pL.fc = freqHz; pL.v = v; pL.q = q; pL.mode = mode;
@@ -112,7 +93,6 @@ struct EqBandModule {
     }
 };
 
-// Three-band parametric EQ.
 struct EqModule {
     EqBandModule bands[3];
     bool active = false;

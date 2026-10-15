@@ -1,32 +1,15 @@
 #pragma once
 #include "../primitives/daisysp/overdrive.h"
 
-// ===========================================================================
-// DriveModule — overdrive / soft saturation via DaisySP Overdrive.
-//
-// DaisySP Overdrive by Emilie Gillet, ported by Ben Sergentanis (MIT).
-// Uses SoftClip (Padé rational approximant) with drive-dependent gain
-// staging: blends linear pre-gain (low drive) with hypercubic pre-gain
-// (high drive) and compensates output volume automatically so level stays
-// consistent across the drive range.
-//
-// param drive: 0–255 (0 = bypass, 255 = heavy overdrive)
-//   Maps to SetDrive(0.30..0.60). drive=1 ≈ gentle warmth (+2 dB, light saturation).
-//   DaisySP Overdrive below SetDrive(~0.3) attenuates severely: post_gain
-//   compensation assumes real saturation but pre_gain is sub-unity there.
-//   The 1-255 → 0.30-0.60 mapping keeps the effect in the musically usable zone.
-//
-// Call setDrive() once per block when the param changes (not per sample).
-// Process() is a pure function — one od instance is safe for both channels.
-// ===========================================================================
+// Overdrive (DaisySP), level-compensated. drive 0-255 (0 = off) → SetDrive 0.30..0.60 — below 0.3
+// the DaisySP stage only attenuates. Stateless, so one instance serves both channels.
 struct DriveModule {
-    // A change on a sounding note crossfades from the old setting's output over CHANGE_FRAMES samples —
-    // a jump in drive is a jump in the waveform. Anything set before the note's first sample is instant.
+    // A change on a sounding note crossfades over CHANGE_FRAMES; before its first sample it is instant.
     static constexpr int CHANGE_FRAMES = 128;
 
     int drive = 0;
     daisysp::Overdrive od;
-    daisysp::Overdrive odPrev;   // the setting being faded out (the shaper is stateless, so a copy is it)
+    daisysp::Overdrive odPrev;   // the setting fading out
     int  prevDrive = 0;
     int  fadeLeft  = 0;
     bool fresh     = true;
@@ -40,7 +23,6 @@ struct DriveModule {
 
     bool enabled() const { return drive > 0; }
 
-    // Call once per block (or at trigger) when drive changes.
     void setDrive(int d) {
         if (!fresh && d != drive) {
             odPrev    = od;

@@ -1,15 +1,11 @@
 #pragma once
 #include <cmath>
 
-// A send bus's idle gate. Once the module's input AND output have both stayed under FLOOR for
-// `quietSpan` frames it stops running and returns silence, until a block's input rises above
-// FLOOR again; its state is left where it was, not cleared.
-//
-// ⚠️ THE SPAN MUST COVER THE LONGEST A SOUND CAN SIT INSIDE THE MODULE UNHEARD. A delay line holds
-// an echo for its whole length while its output reads silence, so a span shorter than the line
-// would put a stored echo to sleep. Quiet for a whole line means everything in it is quiet.
+// A send bus's idle gate: after input and output stay under FLOOR for `quietSpan` frames the module
+// stops running until the input rises again. Its state is kept, not cleared.
+// ⚠️ The span must cover the longest a sound can sit in the module unheard — a whole delay line.
 struct BusSleep {
-    // -90 dBFS — the level the offline render already treats as the end of a tail.
+    // −90 dBFS, where the offline render ends a tail.
     static constexpr float FLOOR = 3.1623e-5f;
 
     int  quietFrames = 0;
@@ -30,8 +26,7 @@ struct BusSleep {
         return p;
     }
 
-    // Called first in `process`: true = skip the block, the caller writes silence. A loud input
-    // wakes the module and this block runs.
+    // First in `process`: true = skip, the caller writes silence. A loud input wakes it.
     bool skip(const float* inL, const float* inR, int n) {
         if (!asleep) return false;
         if (peak(inL, inR, n) < FLOOR) return true;

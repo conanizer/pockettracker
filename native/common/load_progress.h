@@ -2,56 +2,30 @@
 
 #include <functional>
 
-// ─── A LOAD REPORTING ITSELF, AND THE WAY A USER STOPS ONE ───────────────────────────────────────
-//
-// Opening a file can take longer than a frame when it means DECODING: an .sf3's Vorbis samples, or
-// a compressed sample in proportion to its length. The frame loop stops for as long as it takes.
-//
-// ⭐ An ambient sink, not a parameter, because `tsf_load` is a vendored single-header library that
-// takes no callback. The soundfont memory guard (soundfont-voice.cpp) has the same shape.
-//
-// ⚠️ NOTHING IS INSTALLED BY DEFAULT: `load_tick` is a null check returning "keep going" in tools,
-// offline renders and boot. Only the shell installs a sink, while it has a window to draw into.
+// A long load (decoding an .sf3 or a compressed sample) reports progress and can be cancelled.
+// A global sink rather than a parameter, because the vendored `tsf_load` takes no callback.
+// Only the shell installs one; elsewhere `load_tick` just says "keep going".
 namespace pt {
 
-/**
- * The report. `fraction` is 0..1 where a total is knowable and **< 0 where it is not** (an mp3 with
- * no Xing header states no length; nothing in an SF3 header states its decoded size until the
- * `shdr` count is reached). Return **false to CANCEL** — the load then unwinds through the failure
- * path it already has.
- */
+// `fraction` is 0..1, or < 0 when the total is unknown. Return false to cancel; the load unwinds
+// through its normal failure path.
 using LoadTick = std::function<bool(float fraction)>;
 
-/** Install / remove the sink. The shell owns this; nothing else may call it. */
+// The shell's alone.
 void set_load_tick(LoadTick fn);
 
-/**
- * Open a load. Clears the cancel flag and resets the span, so a cancelled load cannot poison the
- * next one. ⚠️ Every load must be opened and closed in pairs — `LoadSpan` below is what makes the
- * project loop's nesting exception-safe and typo-safe.
- */
+// Opened and closed in pairs; opening clears the cancel flag and the span.
 void begin_load();
 void end_load();
 
-/**
- * Report progress from inside a load. **False means the user cancelled and the caller must stop.**
- *
- * ⚠️ It reuses the memory guard's unwind path (`appendBlock` false, `tsf_load` null, LOAD FAILED);
- * `load_cancelled()` tells a cancel from out-of-memory when the message is chosen.
- */
+// Progress from inside a load. False: the user cancelled, stop.
 bool load_tick(float fraction);
 
-/** True once a tick has been refused. Stays true until the next `begin_load()`. */
+// True once a tick was refused, until the next `begin_load()` — tells a cancel from out-of-memory.
 bool load_cancelled();
 
-/**
- * The slice of the WHOLE job that the ticks until the next call belong to — how a project load of
- * twelve instruments turns twelve inner 0..1 reports into one bar that only moves forward.
- *
- * ⚠️ An inner report of "unknown" inside a narrowed span is NOT unknown overall: the bar sits at the
- * start of that item's slice, which is a true statement about the job even when the item cannot say
- * how far into itself it is.
- */
+// The slice of the whole job the next ticks belong to, so twelve instruments make one bar that
+// only moves forward. Spans nest.
 struct LoadSpan {
     LoadSpan(float lo, float hi);
     ~LoadSpan();

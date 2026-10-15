@@ -6,28 +6,23 @@
 #include "modules/adsr-module.h"
 #include "modules/lfo-module.h"
 
-// runModMatrix — full modulation block update for one voice (AudioEngine::updateVoiceModulation).
-//
-// Call order within processAudioBlock must not change:
-//   1. tickPitchSlide + tickVibrato  (write PITCH_SLIDE + VIBRATO into modSourceValues[])
-//   2. runModMatrix                  (reads all sources, advances ENV/LFO, calls processRoutes)
+// One voice's modulation for one block. ⚠️ Runs after tickPitchSlide and tickVibrato, which write
+// their sources first.
 inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
-    // Step 1: Snapshot previous dest values for sub-block interpolation.
+    // LFO and SCALAR slots feed the LFO sources, envelopes the ENV ones.
+    auto sourceOf = [](const VoiceModSlot& mod, int m) {
+        return (ModSourceId)((mod.type == 3 || mod.type == 6) ? MOD_SRC_LFO0 + m : MOD_SRC_ENV0 + m);
+    };
     memcpy(voice.prevModDestValues, voice.modDestValues, sizeof(float) * PARAM_COUNT);
 
-    // Step 2: Clear dynamic source slots (ENV0-3, LFO0-3) before each block.
-    // Static sources (VELOCITY/KEYTRACK/RANDOM) keep their note-on values.
-    // Sequencer sources (TABLE_VOL/PITCH/PITCH_SLIDE/VIBRATO) are written by their
-    // state machines earlier in processAudioBlock and must NOT be cleared here.
+    // Only the envelope and LFO sources are cleared; the others were written before this.
     for (int m = 0; m < 4; m++) {
         voice.modSourceValues[MOD_SRC_ENV0 + m] = 0.0f;
         voice.modSourceValues[MOD_SRC_LFO0 + m] = 0.0f;
     }
-    voice.modSourceValues[MOD_SRC_NONE] = 0.0f;  // Always 0 — required for via=NONE paths.
+    voice.modSourceValues[MOD_SRC_NONE] = 0.0f;
 
-    // Step 3: Mod-to-mod routing — compute effectiveAmt / effectiveRateMult per slot.
-    // AMT is additive: modulator contributes +norm*src.amount to the target's base amount.
-    // RATE is multiplicative (frequency scaling is naturally exponential).
+    // Mod-to-mod: a slot aimed at MOD_AMT adds to the next slot's amount, MOD_RATE multiplies its rate.
     {
         float amtOffset[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -50,7 +45,6 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
         }
     }
 
-    // Step 4: Tick each active mod slot and write envValue to the source array.
     for (int m = 0; m < 4; m++) {
         VoiceModSlot& mod = voice.voiceMods[m];
         if (mod.type == 0 || mod.stage == 0) continue;
@@ -64,37 +58,24 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
         } else if (mod.type == 3) {
             tickLFO(mod, numFrames, sr, rMult);
         } else if (mod.type == 6) {
-            // SCALAR: constant output — no state advance.
-            // mod.amount is the fixed value set at note-on; stage=1 keeps this branch active.
-            mod.envValue = mod.amount;
+            mod.envValue = mod.amount;   // SCALAR: a constant
         }
 
-        // Step 5: Write envValue to the source array.
-        // VOL (dest=1) is handled per-sample in the mix loop via prevEnvValue.
-        // MOD_* (dest≥7) are handled by the mod-to-mod system above.
-        // SCALAR (type=6) reuses the LFO slot — degenerate LFO that never oscillates.
-        ModSourceId srcId = (mod.type == 3 || mod.type == 6)
-            ? (ModSourceId)(MOD_SRC_LFO0 + m)
-            : (ModSourceId)(MOD_SRC_ENV0 + m);
-        voice.modSourceValues[srcId] = mod.envValue;
+        voice.modSourceValues[sourceOf(mod, m)] = mod.envValue;
     }
 
-    // Step 6: Build routes array (user routes + 4 fixed sequencer routes).
-    // Capacity: 4 user routes + 4 fixed sequencer routes = 8 total.
-    // User routes are rebuilt each block because effectiveAmt changes with mod-to-mod.
-    // VOL (dest=1) and MOD_* (dest≥7) are excluded from user routes.
+    // Up to 4 slot routes, rebuilt every block (mod-to-mod moves the amounts), plus 4 fixed ones.
+    // VOL is applied per sample in the mix loop; dest ≥ 7 is mod-to-mod.
     ModRoute routes[8];
     int routeCount = 0;
 
     for (int m = 0; m < 4; m++) {
         const VoiceModSlot& mod = voice.voiceMods[m];
         if (mod.type == 0) continue;
-        if (mod.dest == 0 || mod.dest == 1) continue;  // NONE or VOL (per-sample path)
-        if (mod.dest >= 7) continue;                    // STA / MOD_AMT / MOD_RATE / MOD_BOTH
+        if (mod.dest == 0 || mod.dest == 1) continue;
+        if (mod.dest >= 7) continue;
 
-        ModSourceId srcId = (mod.type == 3 || mod.type == 6)
-            ? (ModSourceId)(MOD_SRC_LFO0 + m)
-            : (ModSourceId)(MOD_SRC_ENV0 + m);
+        const ModSourceId srcId = sourceOf(mod, m);
         ParamId destId;
         float   scale;
         switch (mod.dest) {
@@ -108,20 +89,17 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
         routes[routeCount++] = { srcId, destId, scale, MOD_SRC_NONE, 0.0f };
     }
 
-    // Fixed routes: always-on connections from sequencer sources.
-    // TABLE_PITCH and PITCH_SLIDE add semitones; VIBRATO adds ±depth semitones.
-    // TABLE_VOL × PHRASE_VOL × instrVol via-based multiplication (Surge XT pattern).
+    // The fixed routes. Volume = table × phrase (the via) × instrument (the depth).
     routes[routeCount++] = { MOD_SRC_TABLE_PITCH, PARAM_PITCH, 1.0f, MOD_SRC_NONE,        0.0f };
     routes[routeCount++] = { MOD_SRC_PITCH_SLIDE, PARAM_PITCH, 1.0f, MOD_SRC_NONE,        0.0f };
     routes[routeCount++] = { MOD_SRC_VIBRATO,     PARAM_PITCH, 1.0f, MOD_SRC_NONE,        0.0f };
     routes[routeCount++] = { MOD_SRC_TABLE_VOL,   PARAM_VOL,
-                              voice.params.base[PARAM_VOL],   // depth = instrVol
-                              MOD_SRC_PHRASE_VOL, 1.0f };     // via = phraseVol (full multiplication)
+                              voice.params.base[PARAM_VOL],
+                              MOD_SRC_PHRASE_VOL, 1.0f };
 
-    // Step 7: Run the routing matrix.
     processRoutes(voice.modSourceValues, voice.modDestValues, routes, routeCount);
 
-    // Step 8: Bridge — copy modDestValues into params.mod[], which the mix loop reads via params.get().
+    // The mix loop reads params.get().
     for (int p = 0; p < PARAM_COUNT; p++) {
         voice.params.mod[p] = voice.modDestValues[p];
     }

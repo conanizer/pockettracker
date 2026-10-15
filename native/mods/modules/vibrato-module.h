@@ -4,9 +4,7 @@
 #include "../../sampler-voice.h"
 #include "../primitives/lfo-oscillator.h"
 
-// advanceVibratoPhase — the ONE vibrato LFO phase advance (PVB / PVX), shared by the
-// sampler path (tickVibrato below) and SoundfontVoice::applyPitchMod. Duck-typed template
-// over the identical vibratoActive/vibratoSpeed/vibratoPhase fields on both voice types.
+// PVB / PVX's phase, one block, for both voice types (same field names).
 template <typename V>
 inline void advanceVibratoPhase(V& voice, int numFrames, float sr) {
     if (!voice.vibratoActive) return;
@@ -17,10 +15,7 @@ inline void advanceVibratoPhase(V& voice, int numFrames, float sr) {
     }
 }
 
-// tickVibrato — sampler-path block advance: shared phase advance + write MOD_SRC_VIBRATO
-// into modSourceValues[]. Uses lfoShape() so all oscillator shapes are available (currently
-// shape=1/SIN only, but the primitive is in place if shape selection is added later).
-// Must be called before runModMatrix so the source value is ready when routes are processed.
+// The sampler's: the advance plus its mod source (a sine). Before runModMatrix.
 inline void tickVibrato(Voice& voice, int numFrames, float sr) {
     advanceVibratoPhase(voice, numFrames, sr);
     voice.modSourceValues[MOD_SRC_VIBRATO] = voice.vibratoActive

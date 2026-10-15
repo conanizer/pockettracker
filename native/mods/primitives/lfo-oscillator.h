@@ -1,13 +1,8 @@
 #pragma once
 #include <cmath>
 
-// lfoShape(phase, shape) — maps LFO phase to output value.
-//   phase : 0.0 to 2π
-//   shape : 0=TRI  1=SIN  2=RMP+  3=RMP-  4=EXP+  5=EXP-  6=SQU+  7=SQU-
-// Returns −1.0 to +1.0 (all shapes are bipolar).
-// TRI ranges −1..+1 across the full cycle.
-// Shapes 8 (RND, sample & hold) and 9 (DRNK, random walk) are stateful and live in
-// tickLFO (lfo-module.h) — they never reach this function.
+// An LFO shape at `phase` (0..2π), −1..+1. Shape 0 TRI, 1 SIN, 2 RMP+, 3 RMP-, 4 EXP+, 5 EXP-,
+// 6 SQU+, 7 SQU-. The stateful 8 RND and 9 DRNK live in tickLFO.
 inline float lfoShape(float phase, int shape) {
     float norm = phase / (2.0f * (float)M_PI);
     switch (shape) {
@@ -17,13 +12,13 @@ inline float lfoShape(float phase, int shape) {
             else                   return (norm - 1.0f) * 4.0f;
         case 1: // SIN
             return sinf(phase);
-        case 2: // RMP+ (sawtooth rising)
+        case 2: // RMP+
             return norm * 2.0f - 1.0f;
-        case 3: // RMP- (sawtooth falling)
+        case 3: // RMP-
             return 1.0f - norm * 2.0f;
-        case 4: // EXP+ (squared ramp: slow rise, fast finish)
+        case 4: // EXP+
             return norm * norm * 2.0f - 1.0f;
-        case 5: // EXP- (squared falling ramp: fast drop, slow tail)
+        case 5: // EXP-
             return (1.0f - norm) * (1.0f - norm) * 2.0f - 1.0f;
         case 6: // SQU+
             return (norm < 0.5f) ? 1.0f : -1.0f;

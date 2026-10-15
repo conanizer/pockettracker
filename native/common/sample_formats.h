@@ -2,13 +2,9 @@
 
 #include <cstring>
 
-// ─── THE SAMPLE FORMATS ──────────────────────────────────────────────────────────────────────────
-//
-// The one list of file extensions a SAMPLER instrument loads, each with the decoder that reads it.
-// The browser offers exactly these, songcore routes a load by them, and the engine picks the decoder
-// from them — a new format is a row here plus its arm in `loadSampleFromCompressed`.
-//
-// Raw `.aac` (ADTS) stays out: a bare stream, not a container the MP4 demuxer can open.
+// The file extensions a sampler instrument loads, and their decoders — the browser, songcore and the
+// engine all read this. A new format is a row here plus its arm in `loadSampleFromCompressed`.
+// Raw `.aac` is out: the MP4 demuxer cannot open a bare stream.
 
 namespace pt {
 
@@ -32,7 +28,7 @@ inline constexpr SampleFormat SAMPLE_FORMATS[] = {
     {"3gp",  SampleDecoder::MP4},
 };
 
-/** The decoder for a LOWERCASE extension (no dot), or NONE. */
+// The decoder for a lowercase extension (no dot), or NONE.
 inline SampleDecoder sample_decoder_for(const char* ext) {
     for (const SampleFormat& f : SAMPLE_FORMATS)
         if (std::strcmp(f.ext, ext) == 0) return f.decoder;

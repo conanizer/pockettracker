@@ -2,25 +2,11 @@
 #include <cmath>
 #include "daisysp/dsp.h"
 
-// ===========================================================================
-// UpwardCompressor — boosts signals below threshold toward the threshold.
-// Modeled on DaisySP Compressor (LGPL-2.1) with inverted gain curve.
-//
-// DaisySP downward:  gain_rec += ratioMul × max(envDb − thresh, 0)  → reduces
-// Upward (this):     gain_rec += ratioMul × max(thresh − envDb, 0)  → boosts
-//
-// API matches DaisySP: Process(key) updates gain, Apply(in) applies it.
-// Use linked stereo: call Process(max(|L|,|R|)), then Apply(L) and Apply(R).
-//
-// Gain is computed every GAIN_PERIOD samples (pow10f is expensive), then smoothed per sample by a
-// first-order IIR (GAIN_SMOOTH), so a block-rate jump while slopeRec's attack ramp settles is no pop.
-//
-// ⚠️ THE BOOST WORKS IN A WINDOW BELOW THE THRESHOLD, NOT ALL THE WAY DOWN. The dB-domain
-// accumulator is unbounded — the deeper the input, the more gain — so a decaying reverb tail would
-// wind it past +60 dB, and a note starting inside the ~5 ms envelope reaction would reach the limiter
-// as a 70× spike. RANGE_DB/TAPER_DB bound it: full boost down to RANGE_DB under, faded to nothing by
-// RANGE_DB+TAPER_DB, so the noise floor and a tail's end are not lifted (as reference OTTs bound it).
-// ===========================================================================
+// Lifts signal below the threshold toward it: DaisySP's compressor with the gain curve inverted.
+// Same API — Process(key) updates the gain, Apply(in) applies it. The gain is computed every
+// GAIN_PERIOD samples and smoothed per sample.
+// ⚠️ The boost works only in a window below the threshold (RANGE_DB, tapering over TAPER_DB).
+// Unbounded, a fading tail winds it past +60 dB and the next note hits the limiter as a spike.
 struct UpwardCompressor {
     float slopeRec   = 0.f;
     float gainRec    = 0.f;
@@ -33,12 +19,8 @@ struct UpwardCompressor {
     float ratioMul   = 0.f;
 
     static constexpr int   GAIN_PERIOD = 8;
-    // ~7 ms smoothing at 44.1 kHz — spreads the block-rate gain jump (see above).
-    static constexpr float GAIN_SMOOTH = 0.970f;
-    // dB below the threshold: full boost down to RANGE_DB, tapering to none by
-    // RANGE_DB + TAPER_DB. With the OTT's -30 dB threshold that is full boost to
-    // -60 dBFS and nothing below -75 dBFS, just above the -80 dBFS floor
-    // OttModule treats as silence. Caps the boost at (1 - 1/ratio) x RANGE_DB.
+    static constexpr float GAIN_SMOOTH = 0.970f;   // ~7 ms at 44.1 kHz
+    // dB under the threshold: full boost down to RANGE_DB, none past RANGE_DB + TAPER_DB.
     static constexpr float RANGE_DB    = 30.f;
     static constexpr float TAPER_DB    = 15.f;
     int gainCounter = 0;
@@ -61,9 +43,7 @@ struct UpwardCompressor {
         slopeRec = slopeRec * curSlo + (1.0f - curSlo) * inAbs;
 
         if (slopeRec < 1e-6f) {
-            // True silence: reset gainRec so stale accumulated boost can't spike on
-            // the next note onset (old gainRec × atkSlo2 would fire before slopeRec
-            // exits the silence gate, applying large upward gain to the first sample).
+            // Silence: drop the stored boost, or it spikes on the next note's first sample.
             gainRec = 0.f;
             gainCounter = 0;
             gain_ = gain_ * GAIN_SMOOTH + 1.0f * (1.0f - GAIN_SMOOTH);
@@ -84,7 +64,6 @@ struct UpwardCompressor {
             targetGain  = daisysp::pow10f(0.05f * gainRec);
             gainCounter = 0;
         }
-        // Smooth every sample to eliminate the block-rate onset pop.
         gain_ = gain_ * GAIN_SMOOTH + targetGain * (1.0f - GAIN_SMOOTH);
     }
 

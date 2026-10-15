@@ -2,12 +2,11 @@
 //
 // The set-up calls and the signal flow inside each engine are Dragonfly's (`plugins/*/DSP.cpp`,
 // Copyright (c) 2018-2019 Michael Willis, Rob van den Berg, GPL-3.0-or-later — LICENSE-dragonfly),
-// and the fixed values are the plugin preset named beside each engine. What is NOT Dragonfly's is
-// `apply`: which cell drives which setter, and over what range.
+// and the fixed values are the plugin preset named beside each engine. Ours is `apply`: which cell
+// drives which setter, over what range.
 //
-// ⚠️ PRE, WIDE and INP EQ never reach this file. They are applied around it by ReverbModule, the same
-// way for every algorithm, so each engine's own pre-delay is pinned at the 0.1 ms floor the plugins
-// use (freeverb mishandles zero) and its width at the preset's.
+// PRE, WIDE and INP EQ are applied around this by ReverbModule, so each engine's own pre-delay sits
+// at the plugins' 0.1 ms floor (freeverb mishandles zero) and its width at the preset's.
 
 #include "dragonfly-reverb.h"
 
@@ -250,12 +249,8 @@ struct RoomEngine final : Engine {
 // PLATE / FOIL — input filters into one of the Plate plugin's models. Fixed values: "Clear Plate"
 // (low cut 100 Hz).
 //   DCAY RT60 · DAMP the input high cut · SIZE and MOD read nothing
-//
-// ⚠️⚠️ **DRAGONFLY'S OWN DAMPEN KNOB DOES NOTHING ON ITS "SIMPLE" AND "NESTED" MODELS.** The plugin
-// overrides a `processloop2` that this copy of freeverb's `nrev` never calls — `processreplace` runs
-// its own loop inline — so the damping filters it sets are never in the signal path, and "Nested"
-// runs the "Simple" loop too. What those two DO respond to is the INPUT high cut, so that is what DAMP
-// drives.
+// ⚠️ The plugin's own dampen does nothing on these two models (freeverb's `nrev` never calls the
+// overridden loop), so DAMP drives the input high cut.
 template <class Model>
 struct PlateEngine final : Engine {
     fv3::iir_1st_f lpf[2], hpf[2];
@@ -303,12 +298,8 @@ struct PlateEngine final : Engine {
     }
 };
 
-/**
- * The level each algorithm is trimmed by, so that choosing one changes the character and not the
- * loudness. Indexed by algorithm; 0 is unused.
- * ⚠️ Measured on noise at the default cells against the shipping reverb's wet level — a DCAY or SIZE
- * away from the defaults moves these engines' level, which nothing here compensates.
- */
+// Per-algorithm trim so switching changes character, not loudness. Matched at the default cells
+// only; other DCAY/SIZE values are not compensated.
 //                                           OLD   HALL   ROOM   PLATE  FOIL
 constexpr float kTrim[kReverbAlgoCount] = {1.0f, 2.22f, 4.62f, 3.63f, 2.26f};
 
@@ -337,8 +328,7 @@ struct DragonflyReverb::Impl {
     static constexpr int  kRetired = 8;
     std::atomic<Engine*>  retired[kRetired] = {};
 
-    // The control thread's own record of what it last handed over for each algorithm — everything
-    // an engine has to be REBUILT for. The other cells are applied to a running engine.
+    // The control thread's record of what each handed-over engine was built for.
     struct Key {
         int   size = -1;
         float rate = 0.0f;
@@ -381,8 +371,7 @@ void DragonflyReverb::prepare(int algo, int decayHex, int sizeHex, int dampHex, 
                       std::clamp(dampHex, 0, 255), std::clamp(modHex, 0, 255)};
     e->apply(cells);
     e->applied = cells;
-    // A handover the audio thread never took is thrown away here, and its algorithm forgotten, so
-    // selecting that algorithm again builds it again.
+    // A handover never taken is dropped and forgotten, so choosing that algorithm builds it again.
     if (Engine* untaken = m.pending.exchange(e.release(), std::memory_order_acq_rel)) {
         m.built[untaken->algo] = Impl::Key{};
         delete untaken;
@@ -394,8 +383,7 @@ void DragonflyReverb::process(int algo, bool switched, const float* inL, const f
                               float* outL, float* outR, int numFrames) {
     Impl& m = *impl;
 
-    // Take a handed-over engine — only when there is a slot to park the one it replaces in, since
-    // that one is freed by the control thread and never here.
+    // Take a handed-over engine only when there is a slot to park the replaced one for freeing.
     if (Engine* p = m.pending.load(std::memory_order_acquire)) {
         int park = -1;
         for (int i = 0; i < Impl::kRetired && park < 0; ++i)
@@ -408,8 +396,7 @@ void DragonflyReverb::process(int algo, bool switched, const float* inL, const f
     }
 
     if (algo <= 0 || algo >= kReverbAlgoCount || !m.engines[algo]) {
-        // Nothing built for it yet: the control thread builds an engine when its algorithm is chosen,
-        // and nothing is allocated here.
+        // Not built yet; never allocated here.
         std::memset(outL, 0, sizeof(float) * numFrames);
         std::memset(outR, 0, sizeof(float) * numFrames);
         return;
@@ -419,8 +406,7 @@ void DragonflyReverb::process(int algo, bool switched, const float* inL, const f
     const bool clear = m.clearRequested.exchange(false, std::memory_order_relaxed);
     if (switched || clear) e.mute();
 
-    // The cells a running engine can take without allocating. SIZE is left as the engine was built:
-    // a change to it arrives as a new engine from `prepare`.
+    // The cells a running engine takes without allocating; a new SIZE comes as a new engine.
     const Cells want{m.decay.load(std::memory_order_relaxed), e.applied.size,
                      m.damp.load(std::memory_order_relaxed), m.mod.load(std::memory_order_relaxed)};
     if (want.decay != e.applied.decay || want.damp != e.applied.damp || want.mod != e.applied.mod) {

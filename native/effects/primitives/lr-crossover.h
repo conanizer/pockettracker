@@ -1,12 +1,7 @@
 #pragma once
 #include "lr4-filter.h"
 
-// ===========================================================================
-// LRCrossover — stereo 3-band Linkwitz-Riley crossover.
-// Filter 1 splits at freq1 (default 120 Hz): low band + remainder.
-// Filter 2 splits remainder at freq2 (default 2500 Hz): mid + high.
-// Low + Mid + High reconstructs the original signal (flat amplitude + phase).
-// ===========================================================================
+// Stereo 3-band Linkwitz-Riley crossover; the three bands sum back flat.
 struct LRCrossover {
     LR4Filter filt1L, filt1R;
     LR4Filter filt2L, filt2R;

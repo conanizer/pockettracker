@@ -10,10 +10,7 @@
 
 namespace {
 
-// ⚠️ Read on the audio thread's behalf but never from it — a sample load runs on the caller's
-// thread while the audio callback is already running, so these are plain pointers, written once at
-// boot before any file is opened. Making them atomic would suggest an install is allowed to race an
-// open, which it is not.
+// Written once at boot, before any file is opened; never read from the audio thread.
 PtFileHooks g_hooks;
 
 FILE* fdopen_portable(int fd, const char* mode) {
@@ -61,8 +58,7 @@ FILE* pt_fopen(const char* path, const char* mode) {
     if (fd < 0) return nullptr;
 
     FILE* f = fdopen_portable(fd, mode);
-    // fdopen failing leaves the descriptor open and owned by nobody — the hook has already let go
-    // of it, so this is the only place left that can close it.
+    // The hook has let go of the descriptor, so a failed fdopen must close it here.
     if (!f) close_portable(fd);
     return f;
 }
@@ -76,9 +72,8 @@ bool pt_read_file(const char* path, std::string& out) {
     size_t got;
     while ((got = std::fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, got);
 
-    // ⚠️ A short read and a finished file are the same `fread` return, so the verdict is ferror,
-    // not the byte count: nothing here knows the length up front, and a truncated project that
-    // silently parses as far as it got is the failure this rules out.
+    // ⚠️ `ferror`, not the byte count: a short read and the end look alike, and a truncated project
+    // must not parse as far as it got.
     const bool ok = std::ferror(f) == 0;
     std::fclose(f);
     if (!ok) out.clear();
@@ -99,10 +94,7 @@ int pt_rename(const char* from, const char* to) {
     const bool toUri   = pt_path_is_uri(to);
     if (!fromUri && !toUri) return std::rename(from, to);
 
-    // ⚠️ Mixed ends are refused here rather than passed down, so a hook never has to answer a
-    // question it has no vocabulary for. Both callers rename `<path>.tmp` onto `<path>`, so the two
-    // ends are the same kind of string by construction — a mixed pair means one of them was built
-    // somewhere else, and quietly turning the rename into a whole-file copy would hide that.
+    // Both callers rename `<path>.tmp` onto `<path>`; a mixed pair is a bug somewhere, not a copy.
     if (fromUri != toUri) return -1;
     if (!g_hooks.rename) return -1;
     return g_hooks.rename(from, to);
