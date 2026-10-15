@@ -191,7 +191,7 @@ class MidiOutManager(context: Context) {
             p.send(scratch, 0, len)
             true
         } catch (e: Exception) {
-            // Counted on the native side and surfaced by error_count(). Not logged per message: a
+            // Counted on the native side and marked in the MIDI trace. Not logged per message: a
             // yanked cable would otherwise write a line per note for as long as the song plays.
             false
         }

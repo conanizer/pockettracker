@@ -1,11 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_OUT_WINMM_H
 #define POCKETTRACKER_SHELL_MIDI_OUT_WINMM_H
 
-// The Windows songcore::IMidiOut. See midi-out-winmm.cpp for why winmm and why this backend first.
-// Compiles to nothing off Windows, so main.cpp can name the header unconditionally.
-//
-// Only the platform half is here: the device list, the spec resolver, the TEST note, the trace and
-// the counters are `MidiOutBase` and are shared with every other backend.
+// Windows MIDI output (see the .cpp). Compiles to nothing elsewhere, so main.cpp can include it.
 
 #include "midi/midi-out-base.h"
 
@@ -13,9 +9,8 @@
 
 #include <string>
 
-// <windows.h> before <mmsystem.h>, and NOMINMAX/WIN32_LEAN_AND_MEAN because this header is included
-// by main.cpp, which also includes the standard library: windows.h's `min`/`max` macros break
-// <algorithm> at every use site, and the failure reads as an error inside the STL.
+// NOMINMAX and LEAN before <windows.h>: its min/max macros break <algorithm> with errors that look
+// like they come from inside the STL.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif

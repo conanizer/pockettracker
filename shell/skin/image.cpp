@@ -1,22 +1,14 @@
-// ─── shell/skin/image.cpp — the ONE stb_image implementation TU ───────────────────────────────────────
-//
-// ⚠️ This is the only translation unit in the whole tree that pulls in the stb_image implementation.
-// The header is vendored under native/vendor/ so the licence guard (build-portmaster.sh) can see it,
-// but it is SHELL-ONLY by inclusion: nothing in native/ (the engine) or native/ui/ (pt-ui) includes
-// it, so the canvas keeps its four primitives and pt-ui stays image-free by construction. See
-// native/vendor/stb_image/PT-VENDORING.md.
+// The only stb_image implementation TU. The header is vendored under native/vendor/ for the licence
+// guard, but only the shell includes it — pt-ui stays image-free. See native/vendor/stb_image/PT-VENDORING.md.
 
 #include "skin/image.h"
 
-// PNG only: every asset this shell decodes is a PNG, so STBI_ONLY_PNG compiles that path alone. Add
-// a format the day an asset needs it.
+// Every asset is a PNG.
 #define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
-// Resolves via the PUBLIC native/ include root the engine exports (inherited through pt-ui). No
-// include line is restated here — the same reasoning as audio-decoders.cpp reaching stb_vorbis.
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"   // vendored, not ours to fix
+#pragma GCC diagnostic ignored "-Wunused-function"   // vendored
 #elif defined(_MSC_VER)
 #pragma warning(push, 0)
 #endif
@@ -30,12 +22,10 @@
 namespace ptshell {
 namespace {
 
-// stb_image with req_comp = 4 hands back a tight RGBA byte stream (R,G,B,A per pixel, top-left
-// origin). Pack it into the shell's 0xAARRGGBB. A 3-channel source arrives here already expanded to
-// RGBA with A = 0xFF, so the output is uniform regardless of the PNG's colour type.
+// stb_image's tight RGBA bytes (req_comp = 4; RGB arrives with A = 0xFF) → 0xAARRGGBB.
 Image pack_rgba(unsigned char* rgba, int w, int h) {
     Image img;
-    if (rgba == nullptr || w <= 0 || h <= 0) return img;  // stays !ok()
+    if (rgba == nullptr || w <= 0 || h <= 0) return img;
     img.width  = w;
     img.height = h;
     img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));

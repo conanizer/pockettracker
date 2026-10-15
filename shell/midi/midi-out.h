@@ -1,14 +1,8 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_OUT_H
 #define POCKETTRACKER_SHELL_MIDI_OUT_H
 
-// Which `songcore::IMidiOut` this build gets — the one #ifdef, so main.cpp has none.
-//
-// Every backend derives from `MidiOutBase`, so the console block in main.cpp (device list, env-var
-// override, TEST note, trace) is written once against that base and is identical on every platform.
-// Adding a backend means adding a header and an arm here, and touching nothing else.
-//
-// Android is absent on purpose: it does not come through main.cpp at all — android-main.cpp builds
-// its own, because the port lives on the Java side (see midi-out-android.h).
+// Which `IMidiOut` this build gets — the one #ifdef, so main.cpp has none. Every backend derives from
+// `MidiOutBase`. Android builds its own in android-main.cpp (the port is on the Java side).
 
 #include "linux/midi-out-alsa.h"    // compiles to nothing off Linux
 #include "windows/midi-out-winmm.h"   // compiles to nothing off Windows

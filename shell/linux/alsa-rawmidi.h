@@ -1,14 +1,9 @@
 #ifndef POCKETTRACKER_SHELL_ALSA_RAWMIDI_H
 #define POCKETTRACKER_SHELL_ALSA_RAWMIDI_H
 
-// alsa-rawmidi.{h,cpp} — the ONE libasound loader and the ONE rawmidi enumerator on Linux, shared by
-// `AlsaMidiOut` and `AlsaMidiIn`: the two directions differ by one integer, so two copies could
-// only disagree about which devices exist.
-//
-// ⚠️ THE PROTOTYPES BELOW ARE HAND-COPIED, AND A NORMAL BUILD CHECKS NOTHING. dlopen rather than
-// `-lasound` (midi-out-alsa.cpp says why), so a mis-copied signature compiles, links, and corrupts
-// the stack at runtime on someone else's device. Check every field against <alsa/asoundlib.h>
-// after touching the list.
+// The one libasound loader and rawmidi enumerator, shared by `AlsaMidiOut` and `AlsaMidiIn` (they
+// differ by one integer). ⚠️ The prototypes are hand-copied for dlopen, so nothing checks them at build
+// time: a wrong signature corrupts the stack at runtime. Check against <alsa/asoundlib.h> after an edit.
 
 #include <cstddef>
 #include <string>
@@ -19,12 +14,8 @@
 namespace ptshell {
 namespace alsa_detail {
 
-/**
- * The libasound entry points the two rawmidi backends use, between them.
- *
- * The opaque handles (snd_ctl_t*, snd_rawmidi_t*, snd_rawmidi_info_t*) are all pointer-to-incomplete
- * in ALSA's own headers, so `void*` here is the same ABI and keeps this header dependency-free.
- */
+// The libasound entry points both backends use. ALSA's handles are pointers to incomplete types, so
+// `void*` is the same ABI.
 struct AlsaApi {
     int         (*card_next)(int* card);
     int         (*ctl_open)(void** ctl, const char* name, int mode);
@@ -45,38 +36,24 @@ struct AlsaApi {
     const char* (*strerror_fn)(int errnum);
 };
 
-/** alsa/rawmidi.h's `snd_rawmidi_stream_t`. OUTPUT is 0, INPUT is 1 — see the note in scan(). */
+// alsa/rawmidi.h's `snd_rawmidi_stream_t`.
 constexpr int STREAM_OUTPUT = 0;
 constexpr int STREAM_INPUT  = 1;
-/** alsa/rawmidi.h's SND_RAWMIDI_NONBLOCK. OUT opens BLOCKING (mode 0); IN opens with this. */
+// SND_RAWMIDI_NONBLOCK. OUT opens blocking (mode 0); IN with this.
 constexpr int NONBLOCK = 0x0002;
 
-/** One enumerated rawmidi port, in whichever direction was asked for. */
 struct RawmidiDevice {
-    std::string name;   // what the MIDI screen shows, and what settings.json stores
-    std::string hw;     // "hw:C,D" — the thing to open. NOT stable across a replug; the name is.
+    std::string name;   // shown on the MIDI screen and stored in settings.json
+    std::string hw;     // "hw:C,D" to open — not stable across a replug; the name is
 };
 
-/**
- * dlopen libasound.so.2 and resolve every field of `api`. Returns the library handle, or nullptr when
- * the library is absent or a symbol is missing — in which case MIDI in that direction is simply
- * unavailable and the screen's row draws `OFF  NO PORTS`, which is a state it already has a design for.
- *
- * `who` is "OUT" or "IN". ⚠️ IT PRINTS ONE LINE UNCONDITIONALLY ON SUCCESS: a successful dlopen is
- * silent, and "loaded, no devices" must be distinguishable from "not in this binary" — on a
- * handheld, no devices is also what a bad cable looks like.
- *
- * ⚠️ Never `dlclose`d: SDL's own ALSA audio backend holds the same library (dlopen refcounts).
- */
+// dlopen libasound.so.2 and resolve `api`; null when absent or a symbol is missing (the row then shows
+// `OFF  NO PORTS`). `who` is "OUT" or "IN". Always prints one line on success — "loaded, no devices"
+// must differ from "not in this binary". ⚠️ Never dlclose'd: SDL's ALSA backend holds the same library.
 void* load_alsa(AlsaApi& api, const char* who);
 
-/**
- * Every rawmidi device on every card that has a stream in direction `stream`.
- *
- * ⚠️ `stream` IS THE FILTER AND THE ONLY PER-DIRECTION FACT: `snd_ctl_rawmidi_info` answers -ENXIO
- * for a device with no stream in that direction. Wrong, it would hide every port — which looks like
- * "no MIDI devices", not a bug.
- */
+// Every rawmidi device with a stream in direction `stream`. ⚠️ The direction is the filter (a device
+// without that stream answers -ENXIO); wrong, it hides every port and looks like "no devices".
 void scan_rawmidi(const AlsaApi& api, int stream, std::vector<RawmidiDevice>& out);
 
 }  // namespace alsa_detail

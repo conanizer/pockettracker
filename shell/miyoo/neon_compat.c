@@ -1,27 +1,13 @@
 /*
- * libneonarmmiyoo.so — PocketTracker's own build of the 25 symbols the bundled SDL2 fork
- * resolves at load time.
+ * libneonarmmiyoo.so — our own build of the 25 symbols the bundled SDL2 fork (XK9274/sdl2_miyoo)
+ * needs at load time: it carries `DT_NEEDED libneonarmmiyoo.so`, so the file name is fixed and
+ * every symbol must exist or the app does not start. ⚠️ Nothing from XK9274/neon-arm-library-miyoo
+ * is in it — that repository has no licence and no known author, so nothing built on it can ship.
  *
- * ⚠️ THE FILE NAME IS FIXED BY THE BINARY WE SHIP. `libSDL2-2.0.so.0` from XK9274/sdl2_miyoo
- * carries `DT_NEEDED libneonarmmiyoo.so` and 25 undefined symbols — `neon_memcpy` plus 24
- * integer scalers — so the loader stops the app dead if a file of that name does not define
- * every one of them. This is not the upstream library of that name: nothing from
- * XK9274/neon-arm-library-miyoo is in it. That repository carries no licence and its README
- * says the maintainer did not write the source and does not know its origin, so a package
- * built on it cannot be published.
- *
- * ⚠️ Plain C, no NEON, and that costs nothing here. `neon_memcpy` forwards to libc, whose
- * armhf `memcpy` is already the unrolled `vld1.8/vst1.8` ladder. The scalers are dead weight
- * on this app: the fork only calls them from MMIYOO_TryIntegerScaleCopy, which returns early
- * when the source and destination rectangles are the same size, and PocketTracker draws one
- * 640x480 texture onto a 640x480 panel. They are implemented rather than stubbed so that a
- * future window size that is not 1:1 scales instead of drawing nothing.
- *
- * The scaler contract, read off the fork's call site in src/render/mmiyoo/SDL_render_mmiyoo.c:
- * replicate each source pixel `xmul` across and `ymul` down into `dst`; `sw`/`sh` are the
- * source size in pixels, `sp`/`dp` the two strides in BYTES, and a stride of 0 means "tightly
- * packed". The destination gets sw*xmul by sh*ymul pixels; whatever padding `dp` leaves at the
- * end of a row is not written.
+ * Plain C: libc's armhf memcpy is already NEON. The scalers run only when source and destination
+ * sizes differ (never, at 640x480 on a 640x480 panel), but are real so a future size still draws.
+ * Contract, from the fork's SDL_render_mmiyoo.c: replicate each pixel `xmul` across and `ymul` down;
+ * `sw`/`sh` in pixels, `sp`/`dp` strides in bytes (0 = tightly packed); row padding is not written.
  */
 #include <stdint.h>
 #include <string.h>
@@ -94,9 +80,8 @@ static void scale_32(const uint8_t *src, uint8_t *dst,
 }
 
 /*
- * The 24 exported names. Generated, so a grep for `scale2x2_n16` lands here and nowhere else —
- * the guard against a name going missing is check 9 in shell/build-miyoo.sh, which reads the
- * required list out of the shipped libSDL2 rather than out of this file.
+ * The 24 exported names. shell/build-miyoo.sh's check 9 reads the required list from the shipped
+ * libSDL2, so a missing name fails the build.
  */
 #define PT_SCALER(XMUL, YMUL)                                                          \
     void scale##XMUL##x##YMUL##_n16(void *src, void *dst, uint32_t sw, uint32_t sh,    \

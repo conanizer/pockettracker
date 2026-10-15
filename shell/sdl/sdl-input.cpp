@@ -10,18 +10,15 @@ using pt::ui::ButtonBindings;
 
 namespace {
 
-/**
- * The built-in keyboard map. A TABLE because it has a second reader: the config.json starter
- * template is generated from it (`default_keyboard_bindings`), so what the file tells the user is
- * what the app dispatches. Each button's primary key comes first: `"A": ["K", "Return"]`.
- */
+// The built-in keyboard map. A table because config.json's template is generated from it, so the file
+// tells the user what the app dispatches. Each button's primary key first.
 struct KeyDefault {
     SDL_Keycode key;
     Button      button;
 };
 
 constexpr KeyDefault KEY_DEFAULTS[] = {
-    // D-pad: WASD (the PC-gamer cluster) and the arrow keys
+    // D-pad: WASD and the arrow keys
     {SDLK_w, Button::DPAD_UP},    {SDLK_UP,    Button::DPAD_UP},
     {SDLK_s, Button::DPAD_DOWN},  {SDLK_DOWN,  Button::DPAD_DOWN},
     {SDLK_a, Button::DPAD_LEFT},  {SDLK_LEFT,  Button::DPAD_LEFT},
@@ -40,8 +37,8 @@ constexpr KeyDefault KEY_DEFAULTS[] = {
     {SDLK_SPACE,  Button::START},
 };
 
-/** The built-in pad map, by PRINTED name (the ABXY swap is applied before lookup). A table for the same
- *  reason as `KEY_DEFAULTS`: the config.json template is generated from it. */
+// The built-in pad map by printed name (the ABXY swap is applied before lookup); a table for the same
+// reason as `KEY_DEFAULTS`.
 struct PadDefault {
     SDL_GameControllerButton pad;
     Button                   button;
@@ -53,8 +50,8 @@ constexpr PadDefault PAD_DEFAULTS[] = {
     {SDL_CONTROLLER_BUTTON_DPAD_LEFT,  Button::DPAD_LEFT},
     {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, Button::DPAD_RIGHT},
 
-    // X and Y are aliased onto A and B on purpose: face-button layouts differ across handhelds, and a
-    // four-button app listening to two is one bad SDL mapping from unusable.
+    // X and Y alias A and B: face-button layouts differ across handhelds, and listening to two of four
+    // is one bad SDL mapping from unusable.
     {SDL_CONTROLLER_BUTTON_A, Button::A}, {SDL_CONTROLLER_BUTTON_X, Button::A},
     {SDL_CONTROLLER_BUTTON_B, Button::B}, {SDL_CONTROLLER_BUTTON_Y, Button::B},
 
@@ -63,16 +60,13 @@ constexpr PadDefault PAD_DEFAULTS[] = {
     {SDL_CONTROLLER_BUTTON_BACK,          Button::SELECT},
     {SDL_CONTROLLER_BUTTON_START,         Button::START},
 
-    // ⚠️ No default for the L2/R2 triggers (bindable in config.json as lefttrigger/righttrigger) or
-    // the analog stick: both are axes that differ per CFW and need a real device to verify.
+    // ⚠️ No default for L2/R2 (bindable as lefttrigger/righttrigger) or the stick: axes that differ
+    // per CFW.
 };
 
-/**
- * Apply one config section to a live map. A listed button loses its own entries, then takes each
- * input it lists from whichever button holds it. Buttons go in enum order, so when the FILE lists one
- * input under two buttons the later one wins — reported, since only one of the two lines can work.
- * Returns how many buttons the section listed.
- */
+// One config section onto a live map: a listed button loses its own entries, then takes each input it
+// lists from whoever holds it. One input listed under two buttons goes to the later in enum order, and
+// is reported. Returns how many buttons the section listed.
 template <typename Code, typename Resolve>
 int apply_bindings(std::vector<std::pair<Code, Button>>& map, const ButtonBindings& cfg,
                    const char* section, const char* what, Resolve resolve, int& skipped) {
@@ -88,7 +82,6 @@ int apply_bindings(std::vector<std::pair<Code, Button>>& map, const ButtonBindin
         for (const std::string& name : *cfg[b]) {
             Code c{};
             if (!resolve(name, c)) {
-                // ⚠️ Reported, never silently skipped — see the header.
                 std::printf("config:   %s.%s: \"%s\" is not an SDL %s name - skipped\n", section,
                             button_name(b), name.c_str(), what);
                 ++skipped;
@@ -116,8 +109,7 @@ int apply_bindings(std::vector<std::pair<Code, Button>>& map, const ButtonBindin
     return listed;
 }
 
-// The two triggers, bindable like buttons. SDL reports them as AXES, so they get codes past its last
-// button; `pad_from_name` and the axis handler are the only places that know.
+// The triggers are axes in SDL, so they get codes past its last button.
 const auto PAD_LEFT_TRIGGER  = static_cast<SDL_GameControllerButton>(SDL_CONTROLLER_BUTTON_MAX);
 const auto PAD_RIGHT_TRIGGER = static_cast<SDL_GameControllerButton>(SDL_CONTROLLER_BUTTON_MAX + 1);
 
@@ -129,11 +121,8 @@ bool pad_from_name(const std::string& name, SDL_GameControllerButton& out) {
     return out != SDL_CONTROLLER_BUTTON_INVALID;
 }
 
-/** SDL returns NULL for an enum it does not recognise, and "%s" with NULL is UB. Never trust it. */
+// SDL returns NULL for an enum it does not know; "%s" with NULL is UB.
 const char* or_unknown(const char* s) { return s ? s : "?"; }
-
-// The always-repeatable buttons are the D-pad; `is_dpad` lives beside the enum in ui/buttons.h.
-// B joins them only under `set_b_repeatable` — see press().
 
 }  // namespace
 
@@ -175,14 +164,11 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
         std::printf("config:   controller abxy = %s\n", pt::ui::abxy_name(abxy_));
     }
 
-    // ⚠️ ONE SUMMARY LINE PER SECTION, NOT ONE PER BUTTON: the seeded template lists all ten at
-    // their defaults, so per-button lines would claim a change on every launch of an untouched
-    // install. Which input gave which button is the input trace's job (`set_trace`).
-    // ⚠️ THE MIYOO MINI'S BUTTONS ARRIVE AS A PAD, NEVER AS KEYS: its SDL posts keys only while no
-    // controller subsystem is up (SDL_MMIYOO_INPUT_MODE), and ours is. Its keyboard mode is no answer —
-    // there SELECT fires only as a tap on release, and SELECT is a held modifier here. Its config files
-    // name the buttons in `keyboard`, so on the Mini that section is applied to the PAD; `gamepad`
-    // wins for a button both list.
+    // One summary line per section: the seeded template lists all ten buttons, so per-button lines
+    // would claim a change on every launch.
+    // ⚠️ The Miyoo Mini's buttons arrive as a pad, never as keys (its SDL posts keys only with no
+    // controller subsystem up, and there SELECT fires only on release). Its config names them under
+    // `keyboard`, so on the Mini that section is applied to the pad; `gamepad` wins for a button both list.
     ButtonBindings pad      = cfg.gamepad;
     const bool     miyoo    = on_miyoo_mini();
     if (miyoo) {
@@ -226,11 +212,8 @@ void SdlInput::apply_input_config(const pt::ui::InputConfig& cfg) {
 }
 
 bool SdlInput::key_to_button(SDL_Keycode k, Button& out) const {
-    // ⚠️ ANDROID'S BACK BUTTON — WITHOUT THIS LINE IT CLOSES THE APP MID-EDIT. It arrives as a key once
-    // `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` is armed (android-main.cpp). B, because B is already the
-    // universal cancel; the app is still leavable by Home and PROJECT > EXIT.
-    // ⚠️ HARD-WIRED, AHEAD OF THE CONFIGURABLE MAP and absent from `KEY_DEFAULTS`: rebinding B on a
-    // desktop must not take away the only way back on Android. No desktop keyboard produces AC_BACK.
+    // ⚠️ Android's Back would close the app mid-edit; once trapped (android-main.cpp) it is B, the
+    // universal cancel. Hard-wired ahead of the map, so rebinding B on a desktop cannot take it away.
     if (k == SDLK_AC_BACK) { out = Button::B; return true; }
 
     for (const std::pair<SDL_Keycode, Button>& e : keyMap_) {
@@ -240,9 +223,8 @@ bool SdlInput::key_to_button(SDL_Keycode k, Button& out) const {
 }
 
 bool SdlInput::pad_to_button(Uint8 b, Button& out) const {
-    // Which face-button pair means A (ui/input_config.h): with NINTENDO the pad's labels run the
-    // other way, so the raw button is turned into its PRINTED name first. ⚠️ BOTH PAIRS SWAP
-    // TOGETHER, or a config line naming "x" would mean the wrong button.
+    // NINTENDO: turn the raw button into its printed name first. ⚠️ Both pairs swap together, or a
+    // config line naming "x" would mean the wrong button.
     auto pad = static_cast<SDL_GameControllerButton>(b);
     if (abxy_ == AbxyLayout::NINTENDO) {
         switch (pad) {
@@ -288,9 +270,8 @@ ButtonMods SdlInput::mods_now() const {
 void SdlInput::press(Button b, uint64_t now_ms) {
     const size_t i = static_cast<size_t>(b);
     if (held_[i]) {
-        // ⚠️ A press for a button already down is dropped (the OS auto-repeat is ignored), but on a
-        // handheld, where one button makes exactly one press, it means SOMETHING ELSE is pressing too
-        // — an injected second copy (gptokeyb) is absorbed silently here wherever the paths agree.
+        // ⚠️ Dropped (OS auto-repeat too). On a handheld it means a second source is pressing — an
+        // injected copy (gptokeyb) is absorbed silently here.
         if (trace_) {
             std::printf("input:              ^ ABSORBED: %s was already held - a SECOND source pressed it\n",
                         button_name(b));
@@ -298,12 +279,10 @@ void SdlInput::press(Button b, uint64_t now_ms) {
         return;
     }
     held_[i] = true;
-    // AFTER the flag is set, so a press of A itself reports A as held — modifier state is updated
-    // before the combo is resolved.
+    // After the flag, so a press of A reports A as held.
     queue_.push_back({b, ButtonAction::PRESSED, mods_now()});
 
-    // B joins the D-pad only while `set_b_repeatable` says so — the qwerty overlay, where B is a
-    // backspace. Everywhere else B is COPY / BACK / CANCEL and must fire exactly once per press.
+    // B repeats only while `set_b_repeatable` (the qwerty backspace); elsewhere it fires once.
     if (is_dpad(b) || (b == Button::B && bRepeatable_)) {
         repeatActive_  = true;
         repeatButton_  = b;
@@ -318,8 +297,7 @@ void SdlInput::release(Button b) {
     held_[i] = false;
     queue_.push_back({b, ButtonAction::RELEASED, mods_now()});
 
-    // Cancel the repeat when the repeating DPAD is let go — or when A or B is, because those are the
-    // modifiers that gave it its meaning.
+    // Releasing the repeating button, or A or B (the modifiers that gave it its meaning), cancels it.
     if (repeatActive_ && (b == repeatButton_ || b == Button::A || b == Button::B)) {
         repeatActive_ = false;
     }
@@ -327,9 +305,8 @@ void SdlInput::release(Button b) {
 
 void SdlInput::trace(const char* source, const char* what, bool mapped, Button b) const {
     if (!trace_) return;
-    // ⚠️ The UNMAPPED line is the load-bearing one, not the mapped one. It is what turns "the stick
-    // does nothing" from an absence into a measurement — and the mapped lines beside it are the
-    // positive control that proves the trace is alive at all.
+    // ⚠️ The unmapped line matters most: it turns "the stick does nothing" from an absence into a
+    // reading, and the mapped lines beside it prove the trace is alive.
     std::printf("input:   %-10s %-24s -> %s\n", source, what,
                 mapped ? button_name(b) : "(ignored: not mapped)");
 }
@@ -339,13 +316,11 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
 
     switch (e.type) {
         case SDL_KEYDOWN:
-            // e.key.repeat: the OS repeat, deliberately dropped — the app's repeat must be the same
-            // on a keyboard and on a D-pad with no OS repeat.
+            // The OS repeat is dropped: the app's repeat must match a D-pad's.
             if (e.key.repeat != 0) break;
             {
                 const bool mapped = key_to_button(e.key.keysym.sym, b);
-                // ⚠️ A handheld should produce NO keyboard events. One here means some layer (gptokeyb
-                // in the launch script, a CFW hotkey daemon) injects phantom input — this line names it.
+                // ⚠️ A handheld should produce no key events; one here names a layer injecting them.
                 trace("KEYDOWN", or_unknown(SDL_GetKeyName(e.key.keysym.sym)), mapped, b);
                 if (mapped) press(b, now);
             }
@@ -355,29 +330,23 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
             if (key_to_button(e.key.keysym.sym, b)) release(b);
             break;
 
-        case SDL_CONTROLLERBUTTONDOWN: {
-            const bool mapped = pad_to_button(e.cbutton.button, b);
-            trace("PAD DOWN",
-                  or_unknown(SDL_GameControllerGetStringForButton(
-                      static_cast<SDL_GameControllerButton>(e.cbutton.button))),
-                  mapped, b);
-            if (mapped) press(b, now);
-            break;
-        }
-
+        case SDL_CONTROLLERBUTTONDOWN:
         case SDL_CONTROLLERBUTTONUP: {
+            const bool down   = e.type == SDL_CONTROLLERBUTTONDOWN;
             const bool mapped = pad_to_button(e.cbutton.button, b);
-            trace("PAD UP",
+            trace(down ? "PAD DOWN" : "PAD UP",
                   or_unknown(SDL_GameControllerGetStringForButton(
                       static_cast<SDL_GameControllerButton>(e.cbutton.button))),
                   mapped, b);
-            if (mapped) release(b);
+            if (mapped) {
+                if (down) press(b, now);
+                else release(b);
+            }
             break;
         }
 
         case SDL_CONTROLLERAXISMOTION: {
-            // A trigger is a button here, pressed past half-way. The lower release line keeps an
-            // analog trigger resting near the edge from chattering.
+            // A trigger is a button past half-way; the lower release line stops it chattering.
             if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ||
                 e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
                 const bool left = e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT;
@@ -393,8 +362,7 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
                 }
                 break;
             }
-            // Sticks are dropped. This only adds VISIBILITY, so "they are inert" is not an absence
-            // (ignored? never sent? wedged?). A flood of these means a stick drifting hard.
+            // Sticks are dropped; the trace line makes "inert" a reading, not an absence.
             if (!trace_) break;
             char what[64];
             std::snprintf(what, sizeof(what), "%s value=%d",
@@ -412,12 +380,9 @@ void SdlInput::handle_event(const SDL_Event& e, uint64_t now) {
             break;
 
         case SDL_CONTROLLERDEVICEREMOVED: {
-            // ⚠️ A REMOVED PAD SENDS NO BUTTON-UPS, so its held buttons stay held — and `mods_now()`
-            // reads A, B, L, R and SELECT from `held_` (a pad asleep with L down turns every D-pad
-            // press into a screen change). `reset()` releases them, as for focus loss.
-            // ⚠️ The handle must be CLOSED and dropped: `controller_count()` decides whether the
-            // on-screen controls come back, and replugging would leak handles.
-            // `e.cdevice.which` is an INSTANCE id on removal (an index only on ADDED).
+            // ⚠️ A removed pad sends no button-ups, so `reset()` releases what it held (a sleeping pad
+            // with L down turns every D-pad press into a screen change). The handle is closed so
+            // `controller_count()` is right. `which` is an instance id on removal, an index on ADDED.
             for (auto it = controllers_.begin(); it != controllers_.end(); ++it) {
                 SDL_Joystick* js = SDL_GameControllerGetJoystick(*it);
                 if (js && SDL_JoystickInstanceID(js) == e.cdevice.which) {
@@ -449,9 +414,8 @@ uint64_t SdlInput::repeat_interval(uint64_t repeating_ms) const {
 void SdlInput::tick(uint64_t now_ms) {
     if (!repeatActive_ || now_ms < repeatNextMs_) return;
 
-    // ONE repeat per tick, the next deadline measured from NOW: a catch-up loop would flush several
-    // queued repeats after a stall and jump a held A+UP by five. The repeat carries the modifiers as
-    // they stand NOW, so pressing A while UP repeats switches from moving to editing.
+    // One repeat per tick, the next deadline from now — a catch-up loop would jump a held A+UP by
+    // several after a stall. Modifiers as they stand now: pressing A mid-repeat switches to editing.
     queue_.push_back({repeatButton_, ButtonAction::PRESSED, mods_now()});
     repeatNextMs_ = now_ms + repeat_interval(now_ms > repeatTrainMs_ ? now_ms - repeatTrainMs_ : 0);
 }
@@ -464,11 +428,9 @@ bool SdlInput::poll(ButtonEvent& out) {
 }
 
 void SdlInput::reset() {
-    // ⚠️ A HELD BUTTON IS RELEASED, NOT MERELY FORGOTTEN: consumers act on releases — the FX-helper
-    // overlay's ONLY close is `on_a_released()`, and the mapper's deferred latches discharge on one.
-    // Emitted HERE, through `release()`, so a synthesised release is indistinguishable from the lost
-    // key-up and later consumers get it for free.
-    queue_.clear();   // this frame's presses belong to a window that no longer has focus
+    // ⚠️ Held buttons are released, not forgotten: consumers act on releases (the FX helper closes on
+    // A's). Through `release()`, so it looks exactly like the lost key-up.
+    queue_.clear();   // presses for a window that no longer has focus
     for (size_t i = 0; i < static_cast<size_t>(Button::COUNT); ++i)
         if (held_[i]) release(static_cast<Button>(i));
     repeatActive_   = false;

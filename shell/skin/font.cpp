@@ -11,9 +11,7 @@ namespace ptshell {
 
 namespace {
 
-// Minimal UTF-8 → codepoint step. The labels are ASCII today, but decoding properly costs nothing and
-// means a future accented label is not mangled. Returns bytes consumed; a malformed lead byte is passed
-// through as Latin-1 (1 byte) rather than aborting the string.
+// One UTF-8 step; returns bytes consumed. A malformed lead byte passes through as Latin-1.
 int utf8_next(const char* s, const char* end, std::uint32_t& cp) {
     const auto b0 = static_cast<unsigned char>(*s);
     if (b0 < 0x80) { cp = b0; return 1; }
@@ -36,15 +34,12 @@ int utf8_next(const char* s, const char* end, std::uint32_t& cp) {
     return 1;
 }
 
-// Coverage → white-with-alpha ARGB, the same 0xAARRGGBB packing skin.cpp uploads (byte-for-byte
-// ARGB8888 on a little-endian target). White so SDL_SetTextureColorMod can tint it any label colour.
+// Coverage → white with alpha (ARGB8888), so a colour mod tints it to any label colour.
 inline std::uint32_t cov_to_argb(std::uint8_t cov) {
     return (static_cast<std::uint32_t>(cov) << 24) | 0x00FFFFFFu;
 }
 
-// Distance from point (px,py) to the segment (ax,ay)–(bx,by). The t-clamp gives round caps, which is
-// what makes the shaft/arrowhead join and the stroke ends read with the slightly rounded weight the
-// system font's arrows have.
+// Point to segment distance; the clamp gives round caps.
 inline float dist_to_seg(float px, float py, float ax, float ay, float bx, float by) {
     const float vx = bx - ax, vy = by - ay;
     const float len2 = vx * vx + vy * vy;
@@ -54,20 +49,17 @@ inline float dist_to_seg(float px, float py, float ax, float ay, float bx, float
     return std::sqrt(dx * dx + dy * dy);
 }
 
-// Fill an N×N coverage cell with an anti-aliased THIN-LINE arrow for one D-pad direction — a stroked
-// shaft plus an open two-stroke head, not a solid triangle, matching the line-drawn system arrows.
-// Coverage is a 1px AA ramp around the nearest of the three strokes; at N=128 with linear filtering
-// it stays smooth at any button size.
+// An N×N anti-aliased thin-line arrow: a shaft plus an open two-stroke head, with a 1 px coverage ramp.
 void make_arrow_coverage(Arrow dir, int N, std::vector<std::uint8_t>& out) {
     out.assign(static_cast<std::size_t>(N) * N, 0);
-    const float m    = N * 0.14f;              // margin so the arrow does not touch the cell edge
+    const float m    = N * 0.14f;              // margin from the cell edge
     const float lo   = m;
     const float hi   = N - m;
     const float mid  = N * 0.5f;
-    const float half = N * 0.052f;             // half the stroke thickness (~10% of the cell across)
-    const float wing = (N * 0.5f - m) * 0.60f; // arrowhead wing reach, along each axis from the apex
+    const float half = N * 0.052f;             // half the stroke thickness
+    const float wing = (N * 0.5f - m) * 0.60f; // wing reach along each axis from the apex
 
-    // Three strokes: the shaft (tail → apex) and the two arrowhead wings, both starting at the apex.
+    // The shaft (tail → apex) and two wings from the apex.
     float sx[3], sy[3], ex[3], ey[3];
     switch (dir) {
         case Arrow::Up:
@@ -99,7 +91,7 @@ void make_arrow_coverage(Arrow dir, int N, std::vector<std::uint8_t>& out) {
             float d = static_cast<float>(N) * 2.0f;
             for (int i = 0; i < 3; ++i)
                 d = std::min(d, dist_to_seg(px, py, sx[i], sy[i], ex[i], ey[i]));
-            const float cov = std::clamp(half + 0.5f - d, 0.0f, 1.0f);   // 1px AA edge around the stroke
+            const float cov = std::clamp(half + 0.5f - d, 0.0f, 1.0f);
             out[static_cast<std::size_t>(y) * N + x] = static_cast<std::uint8_t>(cov * 255.0f + 0.5f);
         }
     }
@@ -140,7 +132,7 @@ std::uint64_t Font::glyph_key(std::uint32_t codepoint, float px) {
 }
 
 std::uint64_t Font::arrow_key(Arrow dir) {
-    // Well above any glyph key ((codepoint ≤ 0x10FFFF) << 12 < 2^33), so arrows never collide.
+    // Above any glyph key (codepoint ≤ 0x10FFFF, shifted by 12 < 2^33).
     return (static_cast<std::uint64_t>(1) << 40) | static_cast<std::uint64_t>(dir);
 }
 
@@ -150,7 +142,7 @@ SDL_Texture* Font::make_texture(int w, int h, const std::uint32_t* argb) const {
     if (tex == nullptr) return nullptr;
     SDL_UpdateTexture(tex, nullptr, argb, w * static_cast<int>(sizeof(std::uint32_t)));
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    // LINEAR, like the skin (skin.cpp): a label scaled to the button must smooth, not stair-step.
+    // Linear, like the skin: a label scaled to the button must smooth.
     SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
     return tex;
 }
@@ -180,7 +172,7 @@ const Font::GlyphTex& Font::arrow_tex(Arrow dir) {
     auto                it = cache_.find(k);
     if (it != cache_.end()) return it->second;
 
-    // A hi-res sprite generated once per direction; linear filtering down to the button keeps it smooth.
+    // Generated once per direction at 128 px; linear filtering keeps it smooth when scaled down.
     const int                 N = 128;
     std::vector<std::uint8_t> cov;
     make_arrow_coverage(dir, N, cov);

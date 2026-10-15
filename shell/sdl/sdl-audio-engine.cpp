@@ -26,57 +26,24 @@
 
 namespace {
 
-/**
- * A monotonic nanosecond stamp, for the profiler in audioCallback.
- *
- * ⚠️ SDL's high-resolution counter, not `clock_gettime` (MSVC has none) and not SDL_GetTicks64
- * (milliseconds, where the work measured runs in tens of microseconds). Split around the division:
- * `counter * 1e9` overflows uint64 after a few weeks' uptime.
- */
-uint64_t now_ns() {
-    static const Uint64 freq = SDL_GetPerformanceFrequency();
-    const Uint64        c    = SDL_GetPerformanceCounter();
-    return (c / freq) * 1000000000ull + ((c % freq) * 1000000000ull) / freq;
-}
-
-// Frames per callback. 512 @ 48 kHz ≈ 10.7 ms. It is ABOVE the engine's PROCESS_SUBBLOCK and that is
-// fine: processLiveBlock chunks to it, so this number is a latency choice and never a correctness one.
-//
-// ⚠️ **IT IS A REQUEST.** WASAPI hands back its own 10 ms period (480 frames at 48 kHz) for anything
-// from 64 to 2048, and an ALSA dmix its own configured period (1024 on the Flip's default). Only the
-// size read back in openStream is the one the callback actually runs at.
+// Frames per callback, 512 @ 48 kHz ≈ 10.7 ms — a latency choice; the engine chunks to its sub-block.
+// ⚠️ A request: WASAPI and an ALSA dmix answer with their own period; only the size read back counts.
 constexpr int FRAMES_PER_CALLBACK = 512;
 
-// Asked instead where the route is known to honour a small buffer (`choose_linux_route`); 256 holds
-// with headroom straight to a handheld's chip, where 128 and 64 do not.
+// Asked where the route honours a small buffer (`choose_linux_route`); 256 holds on a handheld's chip,
+// 128 and 64 do not.
 constexpr int SMALL_FRAMES = 256;
 
-// The rate to ask for when the platform cannot be asked what it actually runs. ⚠️ A REQUEST, never an
-// assumption: `SDL_AUDIO_ALLOW_FREQUENCY_CHANGE` is set, so hardware that really runs 44.1 answers
-// 44.1 — on the backends that report it.
-//
-// ⚠️⚠️ 48000 BECAUSE 44100 BOUGHT A SILENT CONVERSION: ALSA's plug accepts any rate, so the app was
-// told 44100 while a 48 kHz dmix mixed. ⚠️ It removes a conversion, NOT latency.
-//
-// ⚠️⚠️ **ON WINDOWS THIS IS A FALLBACK AND NOTHING MORE** — `windows_endpoint_rate()` below. A desktop
-// commonly has several outputs at different rates, and which one is in charge changes the moment a
-// headset connects, so any fixed request there is right only by luck.
+// The fallback rate, asked with SDL_AUDIO_ALLOW_FREQUENCY_CHANGE. 48000, not 44100: ALSA's plug
+// accepts any rate, so 44100 bought a silent conversion into a 48 kHz dmix. On Windows the endpoint's
+// own rate is asked first (`windows_endpoint_rate`).
 constexpr int PREFERRED_RATE = 48000;
 
 #ifdef _WIN32
-/**
- * What the DEFAULT output endpoint actually runs at, or 0 if Windows cannot be asked.
- *
- * ⚠️⚠️ SDL CANNOT ANSWER THIS AND NEVER REPORTS THE MISMATCH: on a differing rate `SDL_wasapi.c` sets
- * `AUTOCONVERTPCM` and overwrites the format with the request, so the boot line reports the request
- * as the hardware while a resampler runs.
- *
- * ⚠️ `eConsole` is by definition the endpoint SDL opens for a null device name — NOT enumeration
- * index 0. A device switched before `SDL_OpenAudioDevice` costs one converted session.
- */
+// The default output endpoint's rate, or 0. ⚠️ SDL cannot answer this and hides a mismatch behind its
+// own resampler. `eConsole` is the endpoint SDL opens for a null device name.
 int windows_endpoint_rate() {
-    // RPC_E_CHANGED_MODE means COM is already up on this thread in the other apartment — usable, but
-    // not ours to shut down. Only a call that SUCCEEDED gets a matching CoUninitialize.
+    // RPC_E_CHANGED_MODE: COM is up in the other apartment — usable, not ours to shut down.
     const HRESULT co            = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool    weInitialised = SUCCEEDED(co);
 
@@ -107,7 +74,7 @@ int windows_endpoint_rate() {
 }
 #endif
 
-/** Where the requested rate came from — printed on the boot line, so a reading stays attributable. */
+// Printed on the boot line, so a reading stays attributable.
 enum class RateSource { DEVICE, FALLBACK, ENV, PINNED };
 
 const char* rate_source_text(RateSource s) {
@@ -120,11 +87,8 @@ const char* rate_source_text(RateSource s) {
     return "fallback";
 }
 
-/**
- * The size to ask for — `POCKETTRACKER_AUDIO_FRAMES` overrides the default (a sweep aid, not a user
- * setting) and `choose_linux_route`. Rounded DOWN to a power of two (SDL's contract) and clamped to
- * 32..8192; a bad value is refused on stderr, since garbage looks like a device that ignored it.
- */
+// POCKETTRACKER_AUDIO_FRAMES (a sweep aid) or the default, rounded down to a power of two in
+// 32..8192. A bad value is refused on stderr — garbage looks like a device that ignored it.
 int requested_frames() {
     const char* v = std::getenv("POCKETTRACKER_AUDIO_FRAMES");
     if (v == nullptr || *v == '\0') return FRAMES_PER_CALLBACK;
@@ -140,15 +104,8 @@ int requested_frames() {
     return pow2;
 }
 
-/**
- * The rate to ask the device for, and where that number came from.
- *
- * Three sources, in order. `POCKETTRACKER_AUDIO_RATE` wins — it is the diagnostic that forces a
- * conversion on purpose, which is the only way to measure what one costs. Then the platform's own
- * answer, where a platform has one. Then the fallback constant.
- *
- * ⚠️ ONLY WINDOWS CAN BE ASKED: SDL's ALSA backend stores a null device spec, so a probe reports zeros.
- */
+// The rate to ask for: POCKETTRACKER_AUDIO_RATE (forces a conversion on purpose, to measure it), then
+// the platform's answer (only Windows can be asked — SDL's ALSA backend reports zeros), then 48000.
 int requested_rate(RateSource& source) {
     if (const char* v = std::getenv("POCKETTRACKER_AUDIO_RATE"); v != nullptr && *v != '\0') {
         const long n = std::strtol(v, nullptr, 10);
@@ -171,13 +128,9 @@ int requested_rate(RateSource& source) {
 }
 
 #if defined(__linux__) && !defined(__ANDROID__)
-/**
- * Pick the device and buffer size from what stands between the app and the chip (alsa-route.h).
- *
- * A sound server takes the small size and keeps volume and Bluetooth. A plain ALSA mixer chain is
- * opened at its chip directly — on a handheld build only, since that open is exclusive. Anything else
- * is left exactly as it was. An explicit AUDIODEV or POCKETTRACKER_AUDIO_FRAMES wins over all of it.
- */
+// Device and buffer size from what stands between the app and the chip (alsa-route.h): a sound server
+// gets the small size; a plain ALSA mixer chain is opened at its chip directly, on a handheld build
+// only (that open is exclusive); anything else is left alone. AUDIODEV or AUDIO_FRAMES win.
 void choose_linux_route(int& frames) {
     const bool framesPinned = std::getenv("POCKETTRACKER_AUDIO_FRAMES") != nullptr;
     if (const char* dev = std::getenv("AUDIODEV")) {
@@ -218,15 +171,10 @@ void choose_linux_route(int& frames) {
 #endif
 
 #if defined(__linux__) && defined(PT_HANDHELD)
-/**
- * Put the calling (audio) thread on SCHED_FIFO, so a busy UI or system thread cannot hold its wake-up
- * back — with 2 × 256 frames that costs the whole margin in ~5 ms.
- *
- * ⚠️ NOT SDL's `SDL_THREAD_FORCE_REALTIME_TIME_CRITICAL`: that goes through rtkit over D-Bus, which a
- * handheld CFW does not run, and when it fails SDL leaves the thread at nice 0 — WORSE than the −20
- * it sets without the hint. A port runs as root, so the kernel is asked directly. Priority 10: above
- * every ordinary thread, below the kernel's interrupt threads (50), which must run to wake this one.
- */
+// SCHED_FIFO for the audio thread, so a busy thread cannot delay its wake-up (with 2 × 256 frames
+// ~5 ms is the whole margin). ⚠️ Not SDL's realtime hint: it goes through rtkit, which a handheld CFW
+// lacks, and on failure leaves the thread worse off. A port runs as root. Priority 10: above ordinary
+// threads, below the kernel's interrupt threads (50), which must run to wake this one.
 void raise_audio_thread_priority() {
     sched_param p{};
     p.sched_priority = 10;
@@ -254,21 +202,14 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
     }
 #endif
 
-    // SDL hands us a byte length; the engine wants frames.
     const int numFrames = lenBytes / int(sizeof(float)) / self->channels_;
 
-    // ⚠️ `numFrames` and not the constant we asked for: this is the size the DEVICE chose, which through
-    // a dmix is its own period whatever was requested. Relaxed atomics only — nothing here may block.
-    // Off unless POCKETTRACKER_LATENCY=1, and one cached bool when it is.
+    // ⚠️ `numFrames`, the size the device chose. Relaxed atomics only; off unless POCKETTRACKER_LATENCY=1.
     latency::audio_callback(numFrames, self->sampleRate_);
 
-    // Pure SDL glue, the mirror of OboeAudioEngine::onAudioReady: processLiveBlock sets flush-to-zero,
-    // CLEARS the buffer (SDL's is not zeroed), silences during an offline render, chunks, and
-    // captures the scopes.
-    //
-    // ── DIAGNOSTIC (POCKETTRACKER_AUDIO_PROFILE=1): the work against the callback budget and the gap
-    //    between callbacks. block > budget = compute underrun; a big gap with a fast block = preempted.
-    //    One rate-limited printf a second; off by default.
+    // processLiveBlock clears the buffer (SDL's is not zeroed), sets flush-to-zero and chunks.
+    // POCKETTRACKER_AUDIO_PROFILE=1: block time against the budget and the gap between callbacks, once
+    // a second (block > budget = compute underrun; a big gap with a fast block = preempted).
     static const bool prof = (std::getenv("POCKETTRACKER_AUDIO_PROFILE") != nullptr);
     if (!prof) {
         self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
@@ -276,14 +217,14 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
         return;
     }
     static uint64_t lastNs = 0, printNs = 0, maxBlk = 0, maxGap = 0, sumBlk = 0, cnt = 0, over = 0;
-    uint64_t t0 = now_ns();
+    uint64_t t0 = latency::now_ns();
     if (lastNs != 0) { uint64_t g = t0 - lastNs; if (g > maxGap) maxGap = g; }
     lastNs = t0;
 
     self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
                                   float(self->sampleRate_));
 
-    uint64_t t1 = now_ns();
+    uint64_t t1 = latency::now_ns();
     uint64_t blk = t1 - t0;
     if (blk > maxBlk) maxBlk = blk;
     sumBlk += blk; ++cnt;
@@ -324,17 +265,14 @@ bool SdlAudioEngine::openStream() {
 
     SDL_AudioSpec got{};
 
-    // The device may pick its own RATE and buffer size, and the engine is told what it got.
-    // FORMAT and CHANNELS are NOT negotiable: SDL would silently insert a format shim (or resampler)
-    // under the DSP, and processAudioBlock's contract is stereo float. A pinned rate is not either —
-    // SDL converts rather than hand back another.
+    // The device may pick the rate and buffer size. Format and channels are not negotiable — SDL would
+    // slip a converter under the DSP — nor is a pinned rate.
     const int allow = (pinnedRate_ > 0 ? 0 : SDL_AUDIO_ALLOW_FREQUENCY_CHANGE) | SDL_AUDIO_ALLOW_SAMPLES_CHANGE;
     device_ = SDL_OpenAudioDevice(nullptr, 0, &want, &got, allow);
 
 #ifndef _WIN32
-    // AUDIODEV points ALSA at one device (`choose_linux_route`, or the user). An `hw:` open is
-    // exclusive, so if anything else holds the chip, play through the default device instead of not
-    // at all. SDL reads AUDIODEV at open time, so unsetting it is enough.
+    // An `hw:` AUDIODEV is exclusive: if something else holds the chip, play through the default
+    // device instead. SDL reads AUDIODEV at open time.
     if (device_ == 0 && std::getenv("AUDIODEV") != nullptr) {
         std::fprintf(stderr, "audio:   AUDIODEV=%s failed (%s), trying the default device\n",
                      std::getenv("AUDIODEV"), SDL_GetError());
@@ -354,20 +292,17 @@ bool SdlAudioEngine::openStream() {
         return false;
     }
 
-    // Set BEFORE the device is unpaused: SDL_OpenAudioDevice opens it paused, so the callback
-    // cannot fire until the SDL_PauseAudioDevice below — no race on these three fields.
+    // Before the unpause: the device opens paused, so no race on these fields.
     sampleRate_   = got.freq;
     channels_     = got.channels;
-    bufferFrames_ = got.samples;  // ⚠️ the SIZE THE DEVICE CHOSE, not the one asked
+    bufferFrames_ = got.samples;  // ⚠️ the size the device chose
 
-    // Hand the negotiated rate to the core (getSampleRate(), all pitch/tic math).
     if (core_) core_->setDeviceSampleRate(sampleRate_);
 
     SDL_PauseAudioDevice(device_, 0);
 
-    // Printed from the stored fields, so the line and `outputLatency()` cannot disagree. What was
-    // ASKED is printed beside what was negotiated — the only way to tell a device that rounded the
-    // request from one that ignored it. ⚠️ Neither half is a reading of the HARDWARE (PREFERRED_RATE).
+    // From the stored fields, so this and `outputLatency()` agree. Asked beside got: a device that
+    // rounded the request vs one that ignored it.
     const char* audiodev = std::getenv("AUDIODEV");
     std::printf("audio:   %d Hz, %d ch, %d frames/callback (%.1f ms at least), asked %d Hz (%s) / %d "
                 "frames, driver=%s, device=%s\n",
@@ -389,8 +324,6 @@ void SdlAudioEngine::resumeStream() {
 }
 
 void SdlAudioEngine::setPaused(bool paused) {
-    // SDL_PauseAudioDevice(dev, 1) does not return until any callback in flight has finished, so on
-    // the far side of this call the engine has exactly one reader: us. See the header for why an
-    // offline render needs that to be a guarantee rather than a coincidence.
+    // Pausing waits for a callback in flight, so afterwards the engine has one reader: us (see header).
     if (device_ != 0) SDL_PauseAudioDevice(device_, paused ? 1 : 0);
 }

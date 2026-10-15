@@ -1,11 +1,7 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_IN_WINMM_H
 #define POCKETTRACKER_SHELL_MIDI_IN_WINMM_H
 
-// The Windows songcore::IMidiIn. See midi-in-winmm.cpp for what winmm hands over and why the callback
-// is allowed to do so little. Compiles to nothing off Windows, so main.cpp can name the header
-// unconditionally.
-//
-// Only the platform half is here: the device list, spec resolver, sink and counters are `MidiInBase`.
+// Windows MIDI input (see the .cpp). Compiles to nothing elsewhere, so main.cpp can include it.
 
 #include "midi/midi-in-base.h"
 
@@ -13,9 +9,8 @@
 
 #include <string>
 
-// <windows.h> before <mmsystem.h>, and NOMINMAX/WIN32_LEAN_AND_MEAN for midi-out-winmm.h's reason:
-// this header is reached from main.cpp, and windows.h's `min`/`max` macros break <algorithm> at every
-// use site with an error that reads as though it were inside the STL.
+// NOMINMAX and LEAN before <windows.h>: its min/max macros break <algorithm> with errors that look
+// like they come from inside the STL.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -38,8 +33,8 @@ class WinmmMidiIn : public MidiInBase {
     bool        is_open() const override { return handle_ != nullptr; }
 
   private:
-    // ⚠️ `CALLBACK` matters: winmm calls this with the platform's calling convention and a mismatch
-    // corrupts the stack on the first message rather than failing to link.
+    // ⚠️ `CALLBACK`: a calling-convention mismatch corrupts the stack on the first message, it does not
+    // fail to link.
     static void CALLBACK midi_in_proc(HMIDIIN in, UINT msg, DWORD_PTR user, DWORD_PTR p1, DWORD_PTR p2);
 
     HMIDIIN handle_ = nullptr;

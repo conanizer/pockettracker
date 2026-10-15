@@ -8,22 +8,18 @@
 namespace ptshell {
 namespace {
 
-// One bit per art set, derived from the enumerator so the table below and `SkinArt` cannot drift apart.
+// One bit per art set, derived from the enum so the two cannot drift.
 constexpr uint8_t art_bit(SkinArt a) { return static_cast<uint8_t>(1u << static_cast<int>(a)); }
 
 constexpr uint8_t kC = art_bit(SkinArt::Chrome);
 constexpr uint8_t kT = art_bit(SkinArt::Transparent);
 
-// SkinPiece → its filename and which art SETS want it, in enumerator order. Kept beside the enum so
-// adding a piece is one line in each; a static_assert below makes a mismatched count a compile error
-// rather than an off-by-one at run time.
-//
-// Membership is a MASK, not one set per file: the four generic button shapes are wanted by both Chrome
-// and Transparent, which ship the same shapes in different colours under the same names, in their own
-// folders. Keeping it as data means adding a set is a column of bits here and nothing else.
+// SkinPiece → filename and the art sets that want it, in enum order (the static_assert catches a count
+// mismatch). A mask: Chrome and Transparent ship the same button shapes under the same names, each in
+// its own folder.
 struct SkinFile {
     const char* name;
-    uint8_t     sets;  // OR of art_bit(...) — which art sets look for this file
+    uint8_t     sets;
 };
 
 constexpr SkinFile kFiles[] = {
@@ -59,8 +55,7 @@ int Skin::load(SDL_Renderer* renderer, const std::string& theme, bool log, SkinA
 
     const std::string dir = "themes/" + theme + "/";
     for (int i = 0; i < static_cast<int>(SkinPiece::COUNT); ++i) {
-        // Only the files this theme's art set wants — another set's are not missing, they were never
-        // part of this skin, and reporting them as MISS would bury a real miss in noise.
+        // Only this art set's files — another set's are not missing, and a MISS line must be real.
         if ((kFiles[i].sets & want) == 0) continue;
         ++wanted;
 
@@ -79,10 +74,7 @@ int Skin::load(SDL_Renderer* renderer, const std::string& theme, bool log, SkinA
             continue;
         }
 
-        // ARGB8888 is Image's 0xAARRGGBB packing byte-for-byte on a little-endian target (every target
-        // here is), so the upload is a straight row copy with no channel shuffle — the same reasoning
-        // sdl-video.cpp's create_texture() states for the framebuffer. STATIC, not STREAMING: a skin
-        // texture is uploaded once and never touched again.
+        // ARGB8888 matches Image's packing on little-endian targets; STATIC, uploaded once.
         SDL_Texture* tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                              SDL_TEXTUREACCESS_STATIC, img.width, img.height);
         if (tex == nullptr) {
@@ -90,13 +82,9 @@ int Skin::load(SDL_Renderer* renderer, const std::string& theme, bool log, SkinA
             continue;
         }
         SDL_UpdateTexture(tex, nullptr, img.pixels.data(), img.width * static_cast<int>(sizeof(uint32_t)));
-        // The skin composites OVER the frame and the letterbox bars, so its alpha must blend rather
-        // than overwrite — the bezel and branding art have transparent regions by design, and the
-        // transparent art is all alpha.
+        // Blended: the art has transparent regions and composites over the frame.
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        // LINEAR filtering, not SDL's default NEAREST: the skin is chrome scaled to fit its band, so
-        // its diagonals, curves and branding must smooth. NEAREST is right only for the pixel-art
-        // framebuffer (sdl-video.cpp); on the chrome it is visible stair-stepping.
+        // Linear, not SDL's default nearest: chrome scaled to its band must smooth.
         SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
 
         pieces_[i] = SkinTexture{tex, img.width, img.height};
@@ -129,8 +117,7 @@ void Skin::draw_tinted(SDL_Renderer* renderer, SkinPiece p, const SDL_Rect& dst,
     SDL_SetTextureColorMod(t.tex, static_cast<Uint8>((rgb >> 16) & 0xFF),
                            static_cast<Uint8>((rgb >> 8) & 0xFF), static_cast<Uint8>(rgb & 0xFF));
     SDL_RenderCopy(renderer, t.tex, nullptr, &dst);
-    // Back to white: the mod is texture state, not draw state, so leaving it set would tint every
-    // later blit of this piece — including one a caller made through plain `draw`.
+    // Back to white: the mod is texture state and would tint every later blit of this piece.
     SDL_SetTextureColorMod(t.tex, 255, 255, 255);
 }
 

@@ -1,14 +1,9 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_OUT_BASE_H
 #define POCKETTRACKER_SHELL_MIDI_OUT_BASE_H
 
-// midi-out-base.{h,cpp} — the part of a `songcore::IMidiOut` backend that is NOT per-platform.
-//
-// `IMidiOut` is five methods (songcore/midi_out.h); a usable backend also needs a console device
-// list, a spec resolver for the env-var override, a test note, a byte trace and a rejected-message
-// counter — none of it platform-specific, so written once here for every backend.
-//
-// ⚠️ The counters are load-bearing: `IMidiOut::send` returns void, so a silently failing send is
-// otherwise indistinguishable from one that works. Every console line prints the count.
+// What every MIDI output backend shares: the device list, the env-var spec resolver, the test note,
+// the byte trace and the counters. ⚠️ `IMidiOut::send` returns void, so the counters are the only way
+// to tell a failing send from a working one.
 
 #include <cstdint>
 #include <string>
@@ -19,49 +14,27 @@ namespace ptshell {
 
 class MidiOutBase : public songcore::IMidiOut {
   public:
-    /**
-     * Resolve `spec` — an index, a case-insensitive name fragment, or empty/"list" — and open it.
-     *
-     * Always prints the device list first: otherwise "nothing happened" is indistinguishable from
-     * "there was no device".
-     */
+    // An index, a case-insensitive name fragment, or empty/"list" → open it. Prints the device list
+    // first, so "nothing happened" differs from "no device".
     bool open_by_spec(const std::string& spec);
 
-    /**
-     * One C-4 on channel 1, held for `holdMs`, then released — the TEST row, reachable from the
-     * console before a frame is drawn. It bypasses the bus, so a failure here means the PORT, not
-     * songcore.
-     */
+    // One C-4 on channel 1 for `holdMs` — the TEST row. It bypasses the bus, so a failure is the port.
     void test_note(int holdMs);
 
-    /** Print every message as it leaves (POCKETTRACKER_MIDI_TRACE=1). */
+    // POCKETTRACKER_MIDI_TRACE=1: print every message as it leaves.
     void set_trace(bool on) { trace_ = on; }
 
-    int error_count() const { return errors_; }
-    int sent_count() const { return sent_; }
     int open_index() const { return openIndex_; }
 
   protected:
-    /**
-     * All-notes-off (CC 123) on all 16 channels — what EVERY backend must send before it closes.
-     *
-     * ⚠️ Closing a port with notes sounding leaves the DEVICE holding them for good. songcore's panic
-     * covers the channels it knows; this covers the rest. Windows gets it from `midiOutReset`; ALSA
-     * and Android write these bytes, once, here.
-     */
+    // CC 123 on all 16 channels, before every close. ⚠️ A port closed with notes sounding leaves the
+    // device holding them; songcore's panic covers only its own channels. Windows has `midiOutReset`.
     void panic_all_channels();
 
-    /**
-     * The console monitor, called by every backend's `send` after it has written the bytes.
-     *
-     * The bring-up instrument for a machine with no MIDI monitor attached: without it, "the synth is
-     * silent" cannot be told from "nothing was sent", and those two have completely different causes
-     * in completely different files.
-     */
+    // The console monitor, after every send: "the synth is silent" vs "nothing was sent".
     void trace_message(const uint8_t* data, int len, bool rejected) const;
 
     int  openIndex_ = -1;
-    int  sent_      = 0;
     int  errors_    = 0;
     bool trace_     = false;
 };

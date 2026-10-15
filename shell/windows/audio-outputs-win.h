@@ -1,7 +1,5 @@
-// audio-outputs-win.{h,cpp} — SETTINGS > AUDIO OUT on Windows: the system output or an ASIO driver.
-//
-// One AudioBackend to the app, delegating to whichever output is playing. Windows only; an empty TU
-// elsewhere.
+// SETTINGS > AUDIO OUT on Windows: one AudioBackend delegating to the system output or an ASIO driver.
+// An empty TU elsewhere.
 #ifndef POCKETTRACKER_AUDIO_OUTPUTS_WIN_H
 #define POCKETTRACKER_AUDIO_OUTPUTS_WIN_H
 
@@ -21,7 +19,7 @@ namespace ptshell {
 
 class WindowsAudioOutputs : public AudioBackend, public AudioOutputSelector {
   public:
-    /** `system` must already be open. The ASIO drivers are listed once, here. */
+    // `system` must already be open. The ASIO drivers are listed once, here.
     WindowsAudioOutputs(AudioEngine* core, SdlAudioEngine& system);
 
     const std::vector<std::string>& names() const override { return names_; }

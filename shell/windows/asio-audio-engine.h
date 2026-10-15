@@ -1,10 +1,7 @@
-// asio-audio-engine.{h,cpp} — the ASIO audio backend (Windows only; an empty TU elsewhere).
-//
-// The same glue as SdlAudioEngine: each driver buffer goes straight to AudioEngine::processLiveBlock,
-// then is converted into the driver's sample format for the first two output channels.
-//
-// ⚠️ ASIO has ONE driver per process and its callbacks carry no user pointer, so only one instance may
-// be open at a time. The driver's buffer size is the one set in its own control panel.
+// The ASIO audio backend (Windows; an empty TU elsewhere): each driver buffer goes to
+// processLiveBlock, then into the driver's sample format on the first two outputs. ⚠️ One driver per
+// process and no user pointer in the callbacks — one open instance at a time. The buffer size is the
+// driver's own control-panel setting.
 #ifndef POCKETTRACKER_ASIO_AUDIO_ENGINE_H
 #define POCKETTRACKER_ASIO_AUDIO_ENGINE_H
 
@@ -24,14 +21,13 @@ class AsioAudioEngine : public AudioBackend {
     explicit AsioAudioEngine(AudioEngine* core);
     ~AsioAudioEngine() override;
 
-    /** The installed ASIO drivers, by the name each registered under. */
+    // The installed drivers, by registered name.
     static std::vector<std::string> driver_names();
 
-    /** Which driver `openStream` loads. */
     void set_driver(const std::string& name) { driver_ = name; }
-    /** The rate the driver must run at — the engine's, since loaded samples are pitched for it. */
+    // The engine's rate — loaded samples are pitched for it.
     void set_rate(int hz) { wantRate_ = hz; }
-    /** Why the last `openStream` failed, in a few words for the status line. */
+    // Why the last `openStream` failed, in a few words for the status line.
     const std::string& last_error() const { return error_; }
 
     bool openStream() override;
@@ -39,17 +35,12 @@ class AsioAudioEngine : public AudioBackend {
     void resumeStream() override {}
     void setPaused(bool paused) override;
     int  sampleRate() const override { return rate_; }
-    /** The driver's own output latency figure, which includes its buffer. */
+    // The driver's own figure, buffer included.
     OutputLatency outputLatency() const override { return {latencyFrames_, latencyFrames_ > 0}; }
-    /**
-     * The driver asked to be reset (its buffer size or rate changed in its panel, or it failed), or it
-     * has stopped calling back while running.
-     *
-     * ⚠️ The second half is not optional: a driver whose interface is unplugged can simply go quiet
-     * without asking for anything, and then nothing else would ever notice.
-     */
+    // The driver asked for a reset (panel change, failure) or went quiet while running. ⚠️ The second
+    // half matters: an unplugged interface can go silent without asking for anything.
     bool deviceLost() const override;
-    /** The last close found the driver silent rather than asking to be reset — its hardware is gone. */
+    // The last close found the driver silent rather than asking — its hardware is gone.
     bool closed_silent() const { return closedSilent_; }
 
   private:
@@ -71,7 +62,7 @@ class AsioAudioEngine : public AudioBackend {
     int                latencyFrames_ = 0;
     long               sampleType_    = 0;
     bool               postOutput_    = false;
-    bool               loaded_        = false;   // driver loaded + ASIOInit succeeded
+    bool               loaded_        = false;   // loaded and ASIOInit succeeded
     bool               buffersMade_   = false;
     bool               running_       = false;
     bool               closedSilent_  = false;

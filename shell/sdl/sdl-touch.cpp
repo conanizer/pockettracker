@@ -2,7 +2,7 @@
 
 #include "sdl/sdl-input.h"
 
-#include "skin/button_glyphs.h"  // label_of / draw_label — shared with the PORTRAIT2 cluster (portrait2.cpp)
+#include "skin/button_glyphs.h"  // shared with the portrait cluster
 
 #include <cstdio>
 
@@ -10,13 +10,12 @@ namespace tl = pt::ui::touch_layout;
 
 namespace {
 
-// The panels only appear where the letterbox bar is at least this wide — narrower is not finger-sized.
+// Narrower bars are not finger-sized.
 constexpr int MIN_PANEL_PX = 150;
 
-// The three fixed panel colours: the button in its two states, and the panel ground. Always opaque.
 constexpr uint32_t BTN_NORMAL  = 0x3D5A80;
 constexpr uint32_t BTN_PRESSED = 0x98C1D9;
-constexpr uint32_t PANEL_BG    = 0x1A1A1A;  // the Column background
+constexpr uint32_t PANEL_BG    = 0x1A1A1A;
 
 void fill(SDL_Renderer* r, const SDL_Rect& rc, uint32_t rgb) {
     SDL_SetRenderDrawColor(r, static_cast<Uint8>((rgb >> 16) & 0xFF),
@@ -29,14 +28,12 @@ void fill(SDL_Renderer* r, const SDL_Rect& rc, uint32_t rgb) {
 void SdlTouch::layout(const SDL_Rect& frame, int outW, int outH) {
     outW_ = outW;
     outH_ = outH;
-    portrait_ = false;   // landscape path: hit-test the letterbox bars, not the PORTRAIT2 cluster
+    portrait_ = false;
 
-    // The two letterbox bars either side of the centred frame. In landscape they are what the touch
-    // boxes live in; in a layout with no side bars (a frame that fills the width) they are zero-wide
-    // and `active_` goes false.
-    const int leftW  = frame.x;                 // bar to the LEFT of the frame
+    // The bars either side of the centred frame; none wide enough → inactive.
+    const int leftW  = frame.x;
     const int rightX = frame.x + frame.w;
-    const int rightW = outW - rightX;           // bar to the RIGHT
+    const int rightW = outW - rightX;
 
     active_ = enabled_ && outH > 0 && leftW >= MIN_PANEL_PX && rightW >= MIN_PANEL_PX;
     if (!active_) {
@@ -57,14 +54,12 @@ void SdlTouch::layout_portrait2(const SDL_Rect& cluster, const tl::BoxRects& rec
     portrait_        = true;
     portraitCluster_ = cluster;
     portrait_rects_  = rects;
-    // Active whenever there is a cluster to press — the same `enabled_` gate the landscape bars use (a
-    // touchscreen with no physical pad). PortraitSkin only fills rects when the output is truly portrait,
-    // so a count of 0 means there is nothing to press and handle_finger stays a no-op.
+    // PortraitSkin fills rects only on a portrait output, so count 0 means nothing to press.
     active_ = enabled_ && rects.count > 0;
 }
 
 bool SdlTouch::hit_window(int px, int py, Button& out) const {
-    // PORTRAIT2: one skinned cluster; its rects are local to the band origin — no left/right bar split.
+    // Portrait: one cluster, rects local to its origin.
     if (portrait_) {
         return tl::hit(portrait_rects_, px - portraitCluster_.x, py - portraitCluster_.y, out);
     }
@@ -80,8 +75,7 @@ bool SdlTouch::hit_window(int px, int py, Button& out) const {
 void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_ms) {
     if (!active_) return;
 
-    // SDL normalises finger coordinates to [0,1] over the window; the renderer output is that same
-    // space in pixels on Android (no HiDPI point/pixel split there), which is what the layout uses.
+    // SDL normalises fingers to [0,1] over the window — the output's pixel space on Android.
     const SDL_TouchFingerEvent& t  = e.tfinger;
     const int                   px = static_cast<int>(t.x * outW_);
     const int                   py = static_cast<int>(t.y * outH_);
@@ -94,8 +88,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
             finger_[t.fingerId] = b;
             if (trace_) std::printf("input:   TOUCH DOWN  %4d,%-4d       -> %s\n", px, py, pt::ui::button_name(b));
         } else if (trace_) {
-            // ⚠️ The load-bearing trace line: a tap that hits nothing says so, so "the buttons don't
-            // work" can be told from "the tap landed in a gap" from "no touch event arrived at all".
+            // ⚠️ A tap that hits nothing says so: a gap, vs no event at all.
             std::printf("input:   TOUCH DOWN  %4d,%-4d       -> (no button)\n", px, py);
         }
     } else if (e.type == SDL_FINGERUP) {
@@ -107,8 +100,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
             finger_.erase(it);
         }
     } else if (e.type == SDL_FINGERMOTION) {
-        // Sliding off the button a finger went down on RELEASES it; sliding back in does not
-        // re-press — the gesture is over.
+        // Sliding off releases; sliding back in does not re-press.
         auto it = finger_.find(t.fingerId);
         if (it != finger_.end()) {
             Button b{};
@@ -126,7 +118,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
 }
 
 void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input) const {
-    if (!active_ || portrait_) return;   // PORTRAIT2's cluster is drawn by PortraitSkin, not here
+    if (!active_ || portrait_) return;   // the portrait cluster is PortraitSkin's
 
     fill(r, leftBox_, PANEL_BG);
     fill(r, rightBox_, PANEL_BG);
@@ -152,8 +144,7 @@ uint64_t SdlTouch::signature(const SdlInput& input) const {
     for (int i = 0; i < right_.count; ++i)
         if (input.is_held(right_.r[i].button)) bits |= (1ull << static_cast<int>(right_.r[i].button));
 
-    // Geometry too, so a rotate/resize that moves the panels forces a repaint even with the same
-    // buttons held. The top bit marks "active", so the value is never 0 while panels are on screen.
+    // Geometry too, so a resize repaints; bit 63 keeps it non-zero while active.
     return bits | (static_cast<uint64_t>(outW_ & 0xFFFF) << 16) |
            (static_cast<uint64_t>(outH_ & 0xFFFF) << 32) | (1ull << 63);
 }

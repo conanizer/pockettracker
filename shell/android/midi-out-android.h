@@ -45,7 +45,7 @@ class AndroidMidiOut : public MidiOutBase {
      * ⚠️ `is_open()` is called from the frame loop (the OUTPUT row draws from it, and songcore's
      * consumer checks it before every message), and a JNI round trip per frame to answer a question
      * we already know the answer to would be absurd. The two can only disagree if the device is
-     * yanked, which surfaces as `send` failing — counted, and visible in `error_count()`.
+     * yanked, which surfaces as `send` failing — counted, and marked REJECTED in the MIDI trace.
      */
     bool open_ = false;
 };

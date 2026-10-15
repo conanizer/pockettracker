@@ -12,7 +12,7 @@ bool ScreenOverlay::load(SDL_Renderer* renderer, int index, bool log) {
 
     if (index <= 0 || index > kScreenOverlayCount) {
         if (log) std::printf("overlay: OFF (no overlay)\n");
-        return false;  // OFF — nothing to draw, and not an error
+        return false;  // OFF — not an error
     }
 
     const ScreenOverlayDef& def = kScreenOverlays[index - 1];
@@ -29,8 +29,7 @@ bool ScreenOverlay::load(SDL_Renderer* renderer, int index, bool log) {
         return false;
     }
 
-    // ARGB8888 is Image's 0xAARRGGBB packing byte-for-byte on a little-endian target — a straight row
-    // copy, exactly as skin.cpp/sdl-video.cpp state. STATIC: uploaded once, never touched again.
+    // ARGB8888 matches Image's packing on little-endian targets; STATIC, uploaded once.
     SDL_Texture* tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                          SDL_TEXTUREACCESS_STATIC, img.width, img.height);
     if (tex == nullptr) {
@@ -39,8 +38,7 @@ bool ScreenOverlay::load(SDL_Renderer* renderer, int index, bool log) {
     }
     SDL_UpdateTexture(tex, nullptr, img.pixels.data(), img.width * static_cast<int>(sizeof(uint32_t)));
 
-    // Blended over the frame, alpha per draw from STRENGTH. LINEAR filtering like the skin: the PNG
-    // is stretched to the frame rect. NEAREST is only for the pixel-art framebuffer (sdl-video.cpp).
+    // Blended, alpha per draw from STRENGTH; linear, since the PNG is stretched to the frame.
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
     SDL_SetTextureScaleMode(tex, SDL_ScaleModeLinear);
 

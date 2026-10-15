@@ -1,4 +1,3 @@
-// audio-outputs-win.cpp — see the header.
 
 #include "windows/audio-outputs-win.h"
 
@@ -28,8 +27,8 @@ const AudioBackend& WindowsAudioOutputs::current() const {
     return active_ == 0 ? static_cast<const AudioBackend&>(system_) : asio_;
 }
 
-// ⚠️ Always at the rate already in force. Loaded samples are pitched for it, so an output that cannot
-// run at it is refused rather than allowed to move it.
+// ⚠️ Always at the rate in force (loaded samples are pitched for it); an output that cannot run it is
+// refused.
 bool WindowsAudioOutputs::open(int index, int rate) {
     if (index == 0) {
         system_.pin_rate(rate);
@@ -61,11 +60,9 @@ bool WindowsAudioOutputs::select(int index, std::string& error) {
     return false;
 }
 
-// The app's reopen after `deviceLost`. A driver that asked to be reset is reopened; one that went
-// silent, or will not come back, leaves the system output playing rather than silence.
-//
-// ⚠️ A silent driver is NOT tried again: one whose interface is unplugged can still open and then
-// never call back, which would be a second of silence and a reopen, for ever.
+// The reopen after `deviceLost`: a driver that asked for a reset is reopened; one that went silent or
+// will not come back leaves the system output playing. ⚠️ A silent driver is not retried — an
+// unplugged interface can open and never call back, a reopen every second for ever.
 bool WindowsAudioOutputs::openStream() {
     const int rate = core_->getSampleRate();
     if (!(active_ != 0 && asio_.closed_silent()) && open(active_, rate)) return true;

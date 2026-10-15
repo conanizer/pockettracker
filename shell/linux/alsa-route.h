@@ -1,11 +1,8 @@
 #ifndef POCKETTRACKER_SHELL_ALSA_ROUTE_H
 #define POCKETTRACKER_SHELL_ALSA_ROUTE_H
 
-// alsa-route.{h,cpp} — what stands between ALSA's "default" and the sound chip, read from ALSA's own
-// configuration. No device is opened.
-//
-// ⚠️ THE PROTOTYPES BELOW ARE HAND-COPIED (dlopen, as in alsa-rawmidi.h) — check them against the
-// real header after touching the list.
+// What stands between ALSA's "default" and the sound chip, read from ALSA's own configuration; no
+// device is opened. ⚠️ Hand-copied dlopen prototypes, as in alsa-rawmidi.h — check after an edit.
 
 #include <string>
 
@@ -15,7 +12,7 @@ namespace ptshell {
 
 namespace alsa_detail {
 
-/** The libasound config entry points the route walk uses. Opaque handles are `void*`, same ABI. */
+// The libasound config entry points the route walk uses; opaque handles as `void*`.
 struct AlsaConfigApi {
     int  (*config_update_ref)(void** top);
     void (*config_unref)(void* top);
@@ -28,7 +25,7 @@ struct AlsaConfigApi {
     int  (*card_get_index)(const char* name);
 };
 
-/** alsa/conf.h's SND_CONFIG_TYPE_STRING and SND_CONFIG_TYPE_COMPOUND. */
+// alsa/conf.h's SND_CONFIG_TYPE_STRING and SND_CONFIG_TYPE_COMPOUND.
 constexpr int CONFIG_TYPE_STRING   = 3;
 constexpr int CONFIG_TYPE_COMPOUND = 1024;
 
@@ -42,18 +39,14 @@ enum class AlsaRoute {
 
 struct DefaultRoute {
     AlsaRoute   route = AlsaRoute::LEAVE;
-    std::string chain;   // the plugin types walked, "plug > dmix > hw", for the boot line
+    std::string chain;   // the plugin types walked, "plug > dmix > hw"
     std::string hw;      // "hw:C,D" when DIRECT
 };
 
-/**
- * Follow `pcm.default` down to the chip, as `snd_pcm_open` would resolve it.
- *
- * ⚠️ **A WHITELIST, AND IT FAILS CLOSED.** Only `plug`, `dmix`, `empty`, `asym` (its playback side)
- * and `hw` count as DIRECT: none of them can hold a volume, a route or a device switch. A `softvol`,
- * `route`, `hooks` (they set the codec's output path on open), `bluealsa` or anything unrecognised
- * is LEAVE — going around it could mean full volume or the wrong speaker.
- */
+// Follow `pcm.default` to the chip as `snd_pcm_open` would. ⚠️ A whitelist that fails closed: only
+// `plug`, `dmix`, `empty`, `asym` (playback side) and `hw` are DIRECT — none can hold a volume, a route
+// or a device switch. Anything else (softvol, route, hooks, bluealsa, unknown) is LEAVE: going around
+// it could mean full volume or the wrong speaker.
 DefaultRoute inspect_default_route();
 
 }  // namespace ptshell

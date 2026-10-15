@@ -9,7 +9,7 @@
 namespace ptshell {
 
 namespace {
-/** Lower-cased copy, for the "open the device whose name contains this" match. */
+// Lower-cased copy, for the name-fragment match.
 std::string lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
@@ -42,8 +42,7 @@ void MidiOutBase::test_note(int holdMs) {
     const uint8_t on[3]  = {0x90, 60, 100};   // channel 1, C-4, velocity 100
     const uint8_t off[3] = {0x80, 60, 0};
     send(on, 3);
-    // std::this_thread rather than Sleep/usleep: this file is the platform-free half, and the hold is
-    // the one thing in it that would otherwise need an #ifdef.
+    // std::this_thread: the one thing in this platform-free file that would otherwise need an #ifdef.
     std::this_thread::sleep_for(std::chrono::milliseconds(holdMs < 0 ? 0 : holdMs));
     send(off, 3);
     std::printf("midi:    TEST C-4 ch1 for %d ms - %d messages sent, %d rejected by the driver\n",

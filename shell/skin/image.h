@@ -1,12 +1,5 @@
-// ─── shell/skin/image.h — PNG decode, SHELL-SIDE ONLY ─────────────────────────────────────────────────
-//
-// The touch skin, the CRT overlays and the theme PNGs are decoded here and composited as SDL
-// textures around the 640×480 frame in sdl-video's present(). The canvas never sees a pixel: pt-ui
-// keeps its four primitives, and image decoding is a SHELL facility.
-//
-// SDL-free and engine-free (stb_image in the .cpp), so the decoder is testable without a window.
-// Two entry points for the asset seam (assets.h): decode_png(bytes) for APK assets read through
-// SDL_RWFromFile, decode_png_file(path) for desktop files beside the exe.
+// PNG decode for the shell (skins, overlays): SDL-free, stb_image in the .cpp. The canvas never sees a
+// decoded image. decode_png for asset bytes, decode_png_file for a file on disk.
 
 #pragma once
 
@@ -17,13 +10,11 @@
 
 namespace ptshell {
 
-// A decoded image in the shell's pixel convention: 0xAARRGGBB per pixel, row-major, top-left origin
-// — the canvas's packing, so it uploads straight to an SDL_PIXELFORMAT_ARGB8888 texture. Always four
-// channels: a source with no alpha decodes fully opaque.
+// 0xAARRGGBB, row-major, top-left origin — uploads straight to ARGB8888. Always four channels.
 struct Image {
     int                   width  = 0;
     int                   height = 0;
-    std::vector<uint32_t> pixels;  // width*height entries when ok(); empty on failure
+    std::vector<uint32_t> pixels;  // width*height when ok(), else empty
 
     bool ok() const {
         return width > 0 && height > 0 &&
@@ -31,11 +22,10 @@ struct Image {
     }
 };
 
-// Decode a PNG held in memory. Returns an Image with ok()==false on any failure (not a PNG, corrupt,
-// out of memory) — never throws, never partially fills.
+// ok() false on any failure; never throws, never partially fills.
 Image decode_png(const std::uint8_t* data, std::size_t len);
 
-// Decode a PNG from a file on disk. Same contract; a missing or unreadable file yields ok()==false.
+// Same contract, from a file.
 Image decode_png_file(const std::string& path);
 
 }  // namespace ptshell

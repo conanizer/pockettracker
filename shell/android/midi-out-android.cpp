@@ -146,7 +146,6 @@ void AndroidMidiOut::send(const uint8_t* data, int len) {
 
     // Three ints rather than a byte[]: allocation-free, a trivial signature. The Kotlin side's one
     // reusable buffer is `@Synchronized` — two threads reach this.
-    ++sent_;
     const jboolean ok =
             a.env->CallBooleanMethod(a.activity, h.send, static_cast<jint>(len >= 1 ? data[0] : 0),
                                      static_cast<jint>(len >= 2 ? data[1] : 0),

@@ -1,10 +1,8 @@
 #ifndef POCKETTRACKER_SHELL_MIDI_IN_ALSA_H
 #define POCKETTRACKER_SHELL_MIDI_IN_ALSA_H
 
-// The LINUX songcore::IMidiIn — ALSA rawmidi, reached through dlopen.
-// See midi-in-alsa.cpp for the reader thread, and alsa-rawmidi.h for the loader and the device walk
-// it shares with the OUTPUT backend. Compiles to nothing off desktop/handheld Linux, so midi-in.h can
-// name the header unconditionally.
+// Linux MIDI input over ALSA rawmidi (see the .cpp). Compiles to nothing elsewhere, so midi-in.h can
+// include it unconditionally.
 
 #include "linux/alsa-rawmidi.h"
 #include "midi/midi-in-base.h"
@@ -30,16 +28,16 @@ class AlsaMidiIn : public MidiInBase {
     bool        is_open() const override { return in_ != nullptr; }
     bool        broken() const override { return dead_.load(std::memory_order_relaxed); }
 
-    /** False when libasound.so.2 is absent or a symbol is missing — the INPUT row then draws NO PORTS. */
+    // False without libasound.so.2 — the INPUT row draws NO PORTS.
     bool available() const { return lib_ != nullptr; }
 
-    /** Reads that came back with something other than data or -EAGAIN. Nonzero = a wire/driver fault. */
+    // Reads that returned neither data nor -EAGAIN — a wire or driver fault.
     uint64_t read_errors() const { return readErrors_.load(std::memory_order_relaxed); }
-    /** True once a read failed fatally (a cable pulled): the thread has stopped and no byte can arrive. */
+    // A read failed fatally (a cable pulled): the thread has stopped.
     bool     stopped_early() const { return dead_.load(std::memory_order_relaxed); }
 
   private:
-    /** The reader thread's body. The ONLY thing that ever calls `deliver`. */
+    // The reader thread; the only caller of `deliver`.
     void reader();
 
     void*                                   lib_ = nullptr;
@@ -47,8 +45,7 @@ class AlsaMidiIn : public MidiInBase {
     std::vector<alsa_detail::RawmidiDevice> devices_;
     void*                                   in_ = nullptr;   // snd_rawmidi_t*
 
-    // ⚠️ `thread_` is joined by `close()` BEFORE `in_` is closed, and `quit_` is what lets it be. See
-    // the ordering note in the .cpp: the two are one operation and nothing may put anything between.
+    // ⚠️ `close()` joins `thread_` (signalled by `quit_`) before closing `in_` — one operation.
     std::thread           thread_;
     std::atomic<bool>     quit_{false};
     std::atomic<bool>     dead_{false};

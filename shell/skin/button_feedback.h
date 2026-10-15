@@ -1,18 +1,6 @@
-// button_feedback.h — the click + haptic a VIRTUAL button gives back (Android-only).
-//
-// Everything a phone user feels on tapping the on-screen gamepad — the SoundPool click and the
-// Vibrator pulse — is Java's (Android system services); what is portable is the DECISION to fire,
-// which lives in `sdl-touch.cpp` beside the press it emits.
-//
-// ⚠️ WHY AN INTERFACE AND NOT AN `#ifdef` IN sdl-touch.cpp. The same reason `AudioBackend` is one:
-// sdl-touch.cpp is SHARED, compiled on desktop and on Android both, and it must not learn the word
-// `jni`. The platform's `main` constructs the concrete feedback (Android → a JNI shim; desktop → none
-// at all, the pointer stays null) and hands it down through `AppConfig`, exactly as it hands down the
-// audio backend and the filesystem. A build with no touchscreen constructs nothing and pays nothing.
-//
-// ⚠️ PURELY UI FEEDBACK: the click sounds on the raw finger down/up — not on a held D-pad's synthetic
-// repeats, not on physical buttons — so the trigger sits in the TOUCH layer (`handle_finger`), not in
-// `SdlInput` or the dispatcher.
+// The click and haptic of a virtual button (Android). An interface, not an #ifdef, so the shared
+// sdl-touch.cpp never learns the word `jni`: Android's `main` hands in a JNI shim, elsewhere it is null.
+// Fired on the raw finger down/up only — not repeats, not physical buttons.
 
 #ifndef POCKETTRACKER_BUTTON_FEEDBACK_H
 #define POCKETTRACKER_BUTTON_FEEDBACK_H
@@ -21,28 +9,18 @@
 
 namespace ptshell {
 
-/**
- * The user's four BTN SOUND / BTN VIBRO scalars, snapshotted from `SettingsValues`. Passed on every
- * event rather than pushed on change: a finger event is human-paced (a few a second), so re-reading
- * four ints costs nothing and there is no observer to keep in step — the SETTINGS screen can move any
- * of them live and the next tap already has the new value.
- */
+// BTN SOUND / BTN VIBRO, passed with every event (a few a second) so a SETTINGS edit applies on the
+// next tap with nothing to keep in step.
 struct ButtonFeedbackSettings {
     bool soundEnabled = false;
-    int  soundVolume  = 255;  // 0..255, as the SETTINGS hex byte; the impl scales to 0..1
+    int  soundVolume  = 255;  // 0..255, the SETTINGS byte
     bool vibroEnabled = false;
     int  vibroPower   = 255;  // 0..255
 };
 
-/**
- * Play the click and/or the haptic for one virtual-button transition.
- *
- * @param button the virtual button — its ordinal matches Kotlin's `VirtualButton` exactly (buttons.h),
- *               which is what lets the JNI shim pass it straight through as an int.
- * @param down   true on FINGERDOWN (press feel), false on release (a lift OR a slide-off).
- * @param s      the live settings; an implementation still checks the enable flags itself, so a
- *               disabled feature is a cheap early return rather than a reason not to call.
- */
+// One virtual-button transition. `button`'s ordinal matches Kotlin's `VirtualButton` (passed through
+// JNI as an int); `down` is the press, false a lift or slide-off. The implementation checks the
+// enable flags itself.
 class ButtonFeedback {
 public:
     virtual ~ButtonFeedback() = default;

@@ -7,7 +7,7 @@
 namespace ptshell {
 
 namespace {
-/** Lower-cased copy, for the "the device whose name contains this" match. */
+// Lower-cased copy, for the name-fragment match.
 std::string lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
@@ -18,8 +18,7 @@ void MidiInBase::deliver(const uint8_t* data, int len) {
     if (!data || len <= 0) return;
     callbacks_.fetch_add(1, std::memory_order_relaxed);
     bytes_.fetch_add(static_cast<uint64_t>(len), std::memory_order_relaxed);
-    // ⚠️ Loaded ONCE into a local. Re-reading the atomic between the null test and the call is a window
-    // in which `set_sink(nullptr)` lands and we call through a pointer we already checked.
+    // ⚠️ Loaded once: re-reading between the null test and the call lets `set_sink(nullptr)` slip in.
     songcore::IMidiInSink* sink = sink_.load(std::memory_order_acquire);
     if (sink) sink->on_bytes(data, len);
 }
@@ -48,9 +47,8 @@ std::string MidiInBase::resolve_spec(const std::string& spec) {
                     spec.c_str());
         return std::string();
     }
-    // The NAME, never the index — the setting this feeds is a name for the same reason the OUTPUT one
-    // is: a port list reorders on every replug, so an index resolved today names another device
-    // tomorrow. The open happens later, in the one place that also wires the sink.
+    // The NAME, never the index — a port list reorders on every replug. Opened later, where the sink
+    // is wired.
     const std::string name = device_name(index);
     std::printf("midi:    IN override -> [%d] %s\n", index, name.c_str());
     return name;

@@ -1,11 +1,10 @@
-// asio-audio-engine.cpp — see the header.
 
 #include "windows/asio-audio-engine.h"
 
 #ifdef _WIN32
 
-// Before anything can pull in <windows.h>: audio-engine.h uses std::min / std::max. Not
-// WIN32_LEAN_AND_MEAN — the SDK needs the COM headers it leaves out.
+// Before anything pulls in <windows.h> (audio-engine.h uses std::min/max). Not WIN32_LEAN_AND_MEAN:
+// the SDK needs the COM headers it drops.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -32,18 +31,13 @@ bool loadAsioDriver(char* name);
 
 namespace {
 
-// The instance whose driver is calling back. The callbacks carry no user pointer.
+// The instance being called back — the callbacks carry no user pointer.
 AsioAudioEngine* g_open = nullptr;
-// Handed to ASIOCreateBuffers, which keeps the pointer.
+// ASIOCreateBuffers keeps the pointer.
 ASIOCallbacks g_callbacks{};
 
-/**
- * The SDK's driver list, created once and never destroyed.
- *
- * ⚠️ Never destroyed ON PURPOSE: its destructor calls CoUninitialize, which would take COM away from
- * SDL on this thread. COM is started here in the apartment ASIO drivers expect; if SDL already put the
- * thread in the other one, that is kept (RPC_E_CHANGED_MODE) and the drivers still load.
- */
+// The SDK's driver list, created once. ⚠️ Never destroyed: its destructor's CoUninitialize would take
+// COM away from SDL. If SDL already chose the other apartment (RPC_E_CHANGED_MODE), drivers still load.
 AsioDrivers& drivers() {
     static const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     (void)co;
@@ -51,7 +45,7 @@ AsioDrivers& drivers() {
     return *asioDrivers;
 }
 
-/** The app's window — some drivers need it as the parent of their dialogs. */
+// Some drivers parent their dialogs to the app's window.
 void* main_window() {
     for (Uint32 id = 1; id < 32; ++id) {
         SDL_Window* w = SDL_GetWindowFromID(id);
@@ -90,13 +84,12 @@ const char* type_name(long type) {
     }
 }
 
-// How long a running driver may go without a buffer before it counts as gone. Far above any buffer
-// size, so only a driver that has really stopped trips it.
+// A running driver silent this long has stopped — far above any buffer size.
 constexpr ULONGLONG kSilentMs = 1000;
 
 inline double clamp1(float x) { return x > 1.0f ? 1.0 : (x < -1.0f ? -1.0 : double(x)); }
 
-/** Channel `ch` of the interleaved stereo `src` into one driver buffer, in the driver's format. */
+// Channel `ch` of interleaved stereo `src` into one driver buffer, in its format.
 void write_channel(long type, const float* src, int ch, int frames, void* dst) {
     const auto to_int32 = [&](double scale) {
         auto* d = static_cast<int32_t*>(dst);
@@ -146,14 +139,14 @@ int bytes_per_sample(long type) {
     }
 }
 
-/** Counts the callback in and out, so a stop can wait until it has left. */
+// Counts callbacks in and out, so a stop can wait until one has left.
 struct InCallback {
     std::atomic<int>& n;
     explicit InCallback(std::atomic<int>& c) : n(c) { ++n; }
     ~InCallback() { --n; }
 };
 
-/** Until no callback is running, bounded — a driver that never returns must not hang the app. */
+// Bounded: a driver that never returns must not hang the app.
 void wait_idle(const std::atomic<int>& n) {
     const ULONGLONG deadline = GetTickCount64() + 500;
     while (n.load() > 0 && GetTickCount64() < deadline) Sleep(1);
@@ -198,7 +191,7 @@ bool AsioAudioEngine::openStream() {
     info.asioVersion = 2;
     info.sysRef      = main_window();
     if (ASIOInit(&info) != ASE_OK) {
-        // ASIOInit forgets a driver that failed, so ASIOExit would not release it.
+        // ASIOInit forgets a failed driver, so ASIOExit would not release it.
         asioDrivers->removeCurrentDriver();
         std::fprintf(stderr, "audio:   ASIO %s: init failed: %s\n", driver_.c_str(), info.errorMessage);
         return fail("DRIVER BUSY OR UNPLUGGED");
@@ -259,7 +252,7 @@ bool AsioAudioEngine::openStream() {
     long inLatency = 0, outLatency = 0;
     latencyFrames_ = (ASIOGetLatencies(&inLatency, &outLatency) == ASE_OK) ? int(outLatency) : 0;
 
-    // Only differs when no rate was asked for; loaded samples are pitched for the old one.
+    // Differs only when no rate was asked; loaded samples are pitched for the old one.
     if (core_ && core_->getSampleRate() != rate_) core_->setDeviceSampleRate(rate_);
 
     paused_ = false;
@@ -351,7 +344,7 @@ long AsioAudioEngine::on_message(long selector, long value, void* /*message*/, d
                     value == kAsioResyncRequest || value == kAsioLatenciesChanged ||
                     value == kAsioSupportsTimeInfo || value == kAsioSupportsTimeCode)
                        ? 1 : 0;
-        // A reset cannot happen on the driver's thread: flag it, and the app reopens from its loop.
+        // Not on the driver's thread: flag it, the loop reopens.
         case kAsioResetRequest:
             if (g_open) g_open->resetRequested_ = true;
             return 1;

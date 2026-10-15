@@ -9,12 +9,10 @@ namespace ptshell {
 namespace alsa_detail {
 
 void* load_alsa(AlsaApi& api, const char* who) {
-    // ".so.2" and not ".so": the unversioned symlink is in libasound2-dev, which no user has; the
-    // SONAME is what is present at runtime everywhere.
+    // The SONAME: the unversioned symlink is only in libasound2-dev.
     void* lib = ::dlopen("libasound.so.2", RTLD_NOW | RTLD_LOCAL);
     if (!lib) {
-        // ⚠️ ONE call to dlerror(), into a variable: it CONSUMES the error, so a second call returns
-        // null.
+        // ⚠️ dlerror() consumes the error: call it once.
         const char* why = ::dlerror();
         std::printf("midi:    libasound.so.2 not available (%s) - MIDI %s disabled\n",
                     why ? why : "no error reported", who);
@@ -28,7 +26,7 @@ void* load_alsa(AlsaApi& api, const char* who) {
         return p;
     };
 
-    // ⚠️ The casts are the unchecked part — see the header.
+    // ⚠️ The unchecked part — see the header.
     api.card_next   = reinterpret_cast<int (*)(int*)>(sym("snd_card_next"));
     api.ctl_open    = reinterpret_cast<int (*)(void**, const char*, int)>(sym("snd_ctl_open"));
     api.ctl_close   = reinterpret_cast<int (*)(void*)>(sym("snd_ctl_close"));
@@ -56,14 +54,13 @@ void* load_alsa(AlsaApi& api, const char* who) {
     api.strerror_fn   = reinterpret_cast<const char* (*)(int)>(sym("snd_strerror"));
 
     if (missing) {
-        // A partial libasound is not a thing that happens, but a TYPO in a symbol name above is, and
-        // it would otherwise show up as a null call through a function pointer at the first note.
+        // A typo in a name above would otherwise be a null call at the first note.
         std::printf("midi:    libasound.so.2 is missing '%s' - MIDI %s disabled\n", missing, who);
         ::dlclose(lib);
         return nullptr;
     }
 
-    // ⚠️ UNCONDITIONAL — the "I woke up" line. See the header for why it is not chattiness.
+    // ⚠️ Always printed — see the header.
     std::printf("midi:    ALSA rawmidi backend ready for %s (libasound.so.2, %d entry points)\n", who,
                 static_cast<int>(sizeof(AlsaApi) / sizeof(void (*)())));
     return lib;
@@ -78,7 +75,7 @@ void scan_rawmidi(const AlsaApi& api, int stream, std::vector<RawmidiDevice>& ou
         std::snprintf(ctlName, sizeof ctlName, "hw:%d", card);
 
         void* ctl = nullptr;
-        if (api.ctl_open(&ctl, ctlName, 0) < 0) continue;   // a card we cannot read is not an error
+        if (api.ctl_open(&ctl, ctlName, 0) < 0) continue;   // an unreadable card is not an error
 
         int device = -1;
         while (api.ctl_rawmidi_next_device(ctl, &device) == 0 && device >= 0) {
@@ -89,15 +86,14 @@ void scan_rawmidi(const AlsaApi& api, int stream, std::vector<RawmidiDevice>& ou
             api.rawmidi_info_set_subdevice(info, 0);
             api.rawmidi_info_set_stream(info, stream);
 
-            // -ENXIO here means "this rawmidi device has no stream in that direction" — a port of the
-            // other kind, correctly skipped. This is the filter; see the note on `stream` in the header.
+            // -ENXIO: no stream in this direction — the filter (see the header).
             if (api.ctl_rawmidi_info(ctl, info) == 0) {
                 const char*   n = api.rawmidi_info_get_name(info);
                 RawmidiDevice d;
                 d.name = (n && *n) ? n : ctlName;
 
-                // Identical USB interfaces get a numeric suffix: the settings store a NAME, so an
-                // un-suffixed duplicate would be unselectable. (Which one a replug gives is undecidable.)
+                // Identical interfaces get " #2": settings store a name, and a duplicate would be
+                // unselectable. Which one a replug gives is undecidable.
                 int               dup  = 1;
                 const std::string base = d.name;
                 for (const RawmidiDevice& e : out)

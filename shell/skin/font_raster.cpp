@@ -1,14 +1,9 @@
-// ─── shell/skin/font_raster.cpp — the ONE stb_truetype implementation TU ──────────────────────────────
-//
-// ⚠️ This is the only translation unit in the whole tree that pulls in the stb_truetype implementation,
-// exactly as shell/skin/image.cpp is the only one that pulls in stb_image. Nothing in native/ (the engine)
-// or native/ui/ (pt-ui) includes it: text is drawn shell-side onto the device skin, never in the
-// canvas (pt-ui keeps its four primitives). See native/vendor/stb_truetype/PT-VENDORING.md.
+// The only stb_truetype implementation TU (see native/vendor/stb_truetype/PT-VENDORING.md); text is
+// drawn shell-side, never in the canvas.
 
 #include <cmath>
 
-// stb_truetype's implementation, its single dependency block. No STBTT_STATIC: the symbols are internal
-// to this TU already (it is the only includer), and the tools that link it want ordinary linkage.
+// No STBTT_STATIC: this is the only includer, and the tools that link it want ordinary linkage.
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "vendor/stb_truetype/stb_truetype.h"
 
@@ -32,8 +27,7 @@ bool FontRasterizer::init(const std::uint8_t* data, std::size_t len) {
 
     data_.assign(data, data + len);
 
-    // Font 0 of the file (a plain .otf/.ttf has exactly one; a .ttc collection has several — we take
-    // the first, which is all a single-family button font ever holds).
+    // Font 0 — a single-family button font holds no more.
     const int offset = stbtt_GetFontOffsetForIndex(data_.data(), 0);
     if (offset < 0) {
         data_.clear();
@@ -59,14 +53,6 @@ int FontRasterizer::ascent_px(float px) const {
     return iround(static_cast<float>(ascent) * scale);
 }
 
-int FontRasterizer::descent_px(float px) const {
-    if (!ready_) return 0;
-    const float scale = stbtt_ScaleForMappingEmToPixels(info_, px);
-    int ascent = 0, descent = 0, lineGap = 0;
-    stbtt_GetFontVMetrics(info_, &ascent, &descent, &lineGap);
-    return iround(static_cast<float>(descent) * scale);  // descent is negative in font units
-}
-
 int FontRasterizer::line_height_px(float px) const {
     if (!ready_) return 0;
     const float scale = stbtt_ScaleForMappingEmToPixels(info_, px);
@@ -81,8 +67,7 @@ RasterGlyph FontRasterizer::glyph(std::uint32_t codepoint, float px) const {
 
     const float scale = stbtt_ScaleForMappingEmToPixels(info_, px);
 
-    // Glyph INDEX, not the codepoint API, so a missing glyph is observable: index 0 is .notdef. A caller
-    // can then fall back (the 5×5 arrows) rather than blit a tofu box.
+    // The glyph index, so a missing glyph shows: index 0 is .notdef.
     const int gi = stbtt_FindGlyphIndex(info_, static_cast<int>(codepoint));
     out.has_glyph = (gi != 0);
 
@@ -96,8 +81,7 @@ RasterGlyph FontRasterizer::glyph(std::uint32_t codepoint, float px) const {
     const int h = y1 - y0;
     if (w > 0 && h > 0) {
         out.coverage.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
-        // Rasterize into OUR buffer (stride = w). This is the non-allocating variant — the malloc
-        // variant would hand back a buffer we would only copy and free.
+        // Into our own buffer (stride = w) — the non-allocating variant.
         stbtt_MakeGlyphBitmap(info_, out.coverage.data(), w, h, /*stride=*/w, scale, scale, gi);
         out.w    = w;
         out.h    = h;

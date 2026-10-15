@@ -1,8 +1,5 @@
-// ─── shell/skin/button_glyphs.h — one virtual-button label renderer, shared by the touch layouts ───────
-//
-// A label in the shared 5×5 font: arrow glyphs for the D-pad, short words ("SEL", "STA", …) for the
-// rest. Both the landscape gamepad (sdl-touch.cpp) and the PORTRAIT2 cluster (portrait2.cpp) draw
-// it, so it lives here once. Inline: a few dozen `SDL_RenderFillRect` calls, no state.
+// A virtual button's label in the shared 5×5 font (arrows for the D-pad, short words for the rest),
+// used by both touch layouts.
 
 #ifndef POCKETTRACKER_BUTTON_GLYPHS_H
 #define POCKETTRACKER_BUTTON_GLYPHS_H
@@ -40,15 +37,10 @@ inline ButtonLabel label_of(pt::ui::Button b) {
     }
 }
 
-/**
- * Draw a button's label centred in `rc`, at the largest 5×5 scale that leaves a margin. One filled
- * rect per lit glyph pixel — a few dozen per label, and only on frames that actually present.
- *
- * `rgb` is the label colour, 0xRRGGBB — white by default, the label colour of the skins that use it.
- */
+// Centred in `rc` at the largest 5×5 scale that leaves a margin; one filled rect per lit pixel.
 inline void draw_label(SDL_Renderer* r, pt::ui::Button b, const SDL_Rect& rc, uint32_t rgb = 0xFFFFFF) {
     const ButtonLabel lab = label_of(b);
-    // The run is (6n − 1) px wide at scale 1: 5 px per glyph plus a 1 px gap, minus the trailing gap.
+    // (6n − 1) px wide at scale 1: 5 px glyphs, 1 px gaps.
     const int denom = 6 * lab.n - 1;
     const int scale = std::max(1, std::min((rc.w * 7 / 10) / denom, (rc.h * 6 / 10) / 5));
     const int runW  = denom * scale;
