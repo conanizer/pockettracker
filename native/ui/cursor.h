@@ -123,6 +123,17 @@ inline CursorContext hex_byte(int current, int min = 0, int max = 255, int empty
     return c;
 }
 
+// A plain 00..FF byte with an A+B reset value.
+inline CursorContext plain_byte(int current, int def) {
+    return hex_byte(current, 0, 255, -1, false, false, false, def);
+}
+
+// An EQ slot, −1 = none: A inserts slot 0, A+B clears.
+inline CursorContext eq_slot(int slot) {
+    return hex_byte(slot < 0 ? -1 : slot, 0, 127, /*empty_value=*/-1, /*can_delete=*/true,
+                    /*can_insert=*/true);
+}
+
 // Phrase reference (-1 = empty); an empty cell cycles from 0.
 inline CursorContext phrase_ref(int current, bool can_create = true) {
     CursorContext c = hex_byte(current == -1 ? 0 : current, 0, 255, /*empty_value=*/-1,
@@ -373,6 +384,17 @@ struct InputAction {
     static InputAction set_value(int v) { return InputAction{ActionType::SET_VALUE, v}; }
     static InputAction of(ActionType t) { return InputAction{t, 0}; }
 };
+
+// A byte that can be −1: SET writes it (clamped to 0..max), DELETE clears it, INSERT lands on 0.
+// False for any other action.
+inline bool apply_optional_byte(int& field, int max, const InputAction& a) {
+    switch (a.type) {
+        case ActionType::SET_VALUE:      field = a.value < 0 ? 0 : (a.value > max ? max : a.value); return true;
+        case ActionType::DELETE:         field = -1; return true;
+        case ActionType::INSERT_DEFAULT: field = 0;  return true;
+        default:                         return false;
+    }
+}
 
 // ─── Stepping ────────────────────────────────────────────────────────────────────────────────────
 

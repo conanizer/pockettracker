@@ -14,7 +14,7 @@ constexpr int CONTENT_PAD = 8;
 
 // The title, a gap, then the four rows.
 constexpr int TITLE_GAP = 8;
-// ⚠️ The width is set by the percentage readout, not the longest label — see the static_assert below.
+// ⚠️ The percentage readout sets the width (static_assert below).
 constexpr int BOX_W     = 420;
 constexpr int BOX_H     = 2 * CONTENT_PAD + ROW_HEIGHT + TITLE_GAP + ROWS * ROW_HEIGHT;
 constexpr int BOX_X     = (DESIGN_W - BOX_W) / 2;
@@ -22,15 +22,15 @@ constexpr int BOX_Y     = (DESIGN_H - BOX_H) / 2;
 
 constexpr int PAD_X   = 14;
 constexpr int LABEL_X = BOX_X + PAD_X;
-// "SONG START" is the longest label, plus one space; derived so a longer label moves the values.
+// "SONG START", the longest label, plus a space.
 constexpr int VALUE_X = LABEL_X + 11 * CHAR_W;
 
-// The percentage sits one space past the widest value on the panel ("RENDER" itself, 6 characters).
+// One space past the widest value ("RENDER").
 constexpr int PROGRESS_X = VALUE_X + 7 * CHAR_W;
 
 static_assert(BOX_H + 2 * (MODAL_BORDER - 1) <= DESIGN_H, "the render dialog is taller than the screen");
 
-// ⚠️ The readout appears only while a render runs, so an overflow would go unseen. "100%" is widest.
+// ⚠️ The readout shows only while rendering, so an overflow would go unseen.
 static_assert(PROGRESS_X - BOX_X + 4 * CHAR_W + PAD_X <= BOX_W,
               "the render percentage draws past the panel's right edge");
 
@@ -47,7 +47,7 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
                         bool isRendering, float progress, const Theme& t) {
     if (!s.isOpen) return;
 
-    // Modal: it must not be clipped by whatever screen was drawing when it opened.
+    // Modal: not clipped by the screen beneath.
     c.reset_clip();
     draw_modal_backdrop(c);
     draw_modal_box(c, BOX_X, BOX_Y, BOX_W, BOX_H, t);
@@ -83,8 +83,7 @@ void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::P
     label(RenderRow::REPEAT, "REPEAT");
     value(RenderRow::REPEAT, s.repeat > 1 ? ("x" + std::to_string(s.repeat)) : std::string("OFF"));
 
-    // The RENDER row is a button, and carries the percentage while rendering — the only place the
-    // progress is visible, since the panel covers PROJECT's readout.
+    // The RENDER button carries the percentage — the panel covers PROJECT's readout.
     value(RenderRow::RENDER, "RENDER");
     if (isRendering) {
         const int pct = static_cast<int>(progress * 100.0f + 0.5f);

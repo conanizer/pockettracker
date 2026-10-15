@@ -30,6 +30,9 @@ using songcore::effect_name;
 using songcore::effect_value_max;
 using songcore::hex2;
 
+// `v` into lo..hi. Unlike std::clamp, defined when hi < lo (an empty list's `count - 1`).
+inline int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 // Uppercase hex, zero-padded to `digits` — never truncated, so a longer value prints in full.
 inline std::string hex_padded(int64_t v, size_t digits) {
     static const char* H = "0123456789ABCDEF";

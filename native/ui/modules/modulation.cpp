@@ -17,9 +17,8 @@ constexpr int VAL_X1  = 80;   // left slot: values
 constexpr int NAME_X2 = 320;  // right slot
 constexpr int VAL_X2  = 390;
 
-int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-/** A list entry, or "???" if the stored index is out of range. */
+// "???" if the stored index is out of range.
 std::string at_or_unknown(const std::vector<std::string>& list, int index) {
     if (index < 0 || index >= static_cast<int>(list.size())) return "???";
     return list[static_cast<size_t>(index)];
@@ -53,9 +52,7 @@ std::string mod_row_value(const ModSlot& slot, int row_index, int slot_index) {
             return songcore::mod_type_display_name(slot.type);
 
         case 1: {
-            // A slot whose destination is ANOTHER slot names its target: "→M3 AMT". The target is
-            // circular from this slot's own position, so MOD4 modulates MOD1 — every slot has one, and
-            // no slot can point at itself.
+            // A slot routed to another slot names it: "→M3 AMT", circular, so MOD4 modulates MOD1.
             const bool modTarget = slot.dest == ModDest::MOD_AMT || slot.dest == ModDest::MOD_RATE ||
                                    slot.dest == ModDest::MOD_BOTH;
             if (slot_index >= 0 && modTarget) {
@@ -70,8 +67,7 @@ std::string mod_row_value(const ModSlot& slot, int row_index, int slot_index) {
 
         case 2: return hex2(slot.amount);
 
-        // From here down the row's MEANING depends on the type — the LFO has an oscillator where an
-        // envelope has an attack, and an AHD has a hold where an ADSR has a decay.
+        // From here down the row's meaning depends on the type.
         case 3:
             return (slot.type == ModType::LFO) ? at_or_unknown(osc_shapes(), slot.oscShape)
                                                : hex2(slot.attack);
@@ -101,8 +97,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
     c.draw_text("MOD " + hex2(ins.id), x + NAME_X1, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,
                 FONT_SCALE);
 
-    // The pairs stack, and the second one starts wherever the first one ENDED — a pair with two ADSRs
-    // in it is 7 rows tall where a pair of NONEs is 1, so this cannot be a fixed offset.
+    // The second pair starts where the first ended: its depth depends on the types.
     int pairTopY = y + TEXT_PADDING + ROW_HEIGHT + 6;
 
     for (int pair = 0; pair < 2; ++pair) {
@@ -113,8 +108,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
         const int rightRows = songcore::mod_slot_row_count(right);
         const int pairRows  = leftRows > rightRows ? leftRows : rightRows;
 
-        // The pair's headers dim when the cursor is in the other pair — the only cue that says which
-        // half of the screen your keypresses are going to.
+        // The pair's headers dim when the cursor is in the other pair.
         const Argb headerColor = (pair == s.cursorPair) ? t.textParam : t.textEmpty;
         c.draw_text("MOD" + std::to_string(pair * 2 + 1), x + NAME_X1, pairTopY, headerColor,
                     CHAR_SPACING, FONT_SCALE);
@@ -130,16 +124,14 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
             const bool activePair = (pair == s.cursorPair);
 
             const auto draw_side = [&](const ModSlot& slot, int rows, int side, int nameX, int valX) {
-                if (rowIdx >= rows) return;   // this slot is shallower than the pair — nothing here
+                if (rowIdx >= rows) return;   // this slot is shallower than the pair
                 const std::vector<std::string>& labels = mod_row_labels(slot.type);
                 const std::string label = (rowIdx < static_cast<int>(labels.size()))
                                               ? labels[static_cast<size_t>(rowIdx)]
                                               : std::string();
                 const std::string value = mod_row_value(slot, rowIdx, pair * 2 + side);
 
-                // The cursor is the VALUE cell alone. Two slots sit side by side on one row, so the
-                // label beside it is what says both which row and which of the two — a highlight
-                // across the row could only ever have said the first.
+                // The cursor is the value cell alone; the label says which row and which slot.
                 const bool onCell = isCursorRow && activePair && (s.cursorSide == side);
 
                 c.draw_text(label, x + nameX, textY, onCell ? cursor_mark_ink(t) : t.textParam,
@@ -151,7 +143,7 @@ void ModulationModule::draw(Canvas& c, int x, int y, const ModulationState& s) c
             draw_side(right, rightRows, 1, NAME_X2, VAL_X2);
         }
 
-        // Past this pair's header, its rows, and a blank row before the next.
+        // Past the header, the rows and a blank row.
         pairTopY += ROW_HEIGHT + pairRows * ROW_HEIGHT + ROW_HEIGHT;
     }
 }
@@ -168,46 +160,44 @@ CursorContext ModulationModule::cursor_context(const ModulationState& s) const {
             const std::vector<ModType>& types = user_mod_types();
             for (size_t i = 0; i < types.size(); ++i)
                 if (types[i] == slot.type) { index = static_cast<int>(i); break; }
-            // A slot holding a HIDDEN type (SCALAR / TRACKING, from an older project) finds no match
-            // and reads as index 0 — so stepping it moves to NONE rather than staying stuck.
+            // A hidden type (from an older project) reads as index 0, so stepping moves to NONE.
             return cc::index_cycle(index, static_cast<int>(types.size()));
         }
 
-        case 1:  // DEST — nothing to route until there is a type to route
+        case 1:  // DEST — nothing to route without a type
             if (slot.type == ModType::NONE) return cc::read_only();
             return cc::index_cycle(static_cast<int>(slot.dest), songcore::MOD_DEST_COUNT);
 
         case 2:  // AMT
             if (slot.type == ModType::NONE) return cc::read_only();
-            return cc::hex_byte(slot.amount, 0, 255, -1, false, false, false, /*def=*/0xFF);
+            return cc::plain_byte(slot.amount, 0xFF);
 
-        // Rows 3..6 exist only if the type is deep enough; `rows` also bounds the cursor, so this
-        // read_only() is a backstop for a cell it cannot reach.
+        // Rows 3..6 exist only for deep types; `rows` bounds the cursor, so this is a backstop.
         case 3:
             if (rows < 4) return cc::read_only();
             if (slot.type == ModType::LFO)
                 return cc::index_cycle(slot.oscShape, static_cast<int>(osc_shapes().size()));
-            return cc::hex_byte(slot.attack, 0, 255, -1, false, false, false, /*def=*/0x00);
+            return cc::plain_byte(slot.attack, 0x00);
 
         case 4:
             if (rows < 5) return cc::read_only();
             if (slot.type == ModType::LFO)
                 return cc::index_cycle(slot.lfoTrigMode, static_cast<int>(trig_modes().size()));
             if (is_ahd_shaped(slot.type))
-                return cc::hex_byte(slot.hold, 0, 255, -1, false, false, false, /*def=*/0x00);
-            return cc::hex_byte(slot.decay, 0, 255, -1, false, false, false, /*def=*/0x00);
+                return cc::plain_byte(slot.hold, 0x00);
+            return cc::plain_byte(slot.decay, 0x00);
 
         case 5:
             if (rows < 6) return cc::read_only();
             if (slot.type == ModType::LFO)
-                return cc::hex_byte(slot.lfoFreq, 0, 255, -1, false, false, false, /*def=*/0x40);
+                return cc::plain_byte(slot.lfoFreq, 0x40);
             if (is_ahd_shaped(slot.type))
-                return cc::hex_byte(slot.decay, 0, 255, -1, false, false, false, /*def=*/0x00);
-            return cc::hex_byte(slot.sustain, 0, 255, -1, false, false, false, /*def=*/0x80);
+                return cc::plain_byte(slot.decay, 0x00);
+            return cc::plain_byte(slot.sustain, 0x80);
 
         case 6:
             if (rows < 7) return cc::read_only();
-            return cc::hex_byte(slot.release, 0, 255, -1, false, false, false, /*def=*/0x00);
+            return cc::plain_byte(slot.release, 0x00);
 
         default:
             return cc::read_only();
@@ -224,9 +214,8 @@ ModulationInputResult ModulationModule::handle_input(Instrument& ins, int slot_i
     ModSlot& slot = ins.modSlots[static_cast<size_t>(slot_index)];
 
     if (action.type == ActionType::DELETE) {
-        // ⚠️ UNREACHABLE TODAY: no MODS context sets `canDelete` (TYPE/DEST are bare cycles, every
-        // parameter row has a default, and `on_a_b` prefers a default), so A+B resets one field or
-        // does nothing. Kept so a context that declares canDelete gets the whole-slot reset.
+        // ⚠️ Unreachable today: no MODS context sets `canDelete`. Kept so one that does gets the
+        // whole-slot reset.
         slot = ModSlot{};
         r.modified = true;
         return r;

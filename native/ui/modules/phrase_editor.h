@@ -1,14 +1,8 @@
 #pragma once
 
-// ─── PHRASE EDITOR ───────────────────────────────────────────────────────────────────────────────
-//
-// Every module has the same trio:
-//   draw()               paint the module at (x, y) on the canvas
-//   cursor_context()     "what is under the cursor, and what can be done to it"
-//   handle_input()       apply an InputAction to the data
-//
-// 16 steps × columns: Step | Note | Vol | Inst | FX1 | FX2 | FX3.  510×392 px. Coordinates are
-// design pixels: the canvas is the 640×480 design and the shell scales the frame (canvas.h).
+// The phrase editor: 16 steps of Note | Vol | Inst | FX1 | FX2 | FX3. Like every module: draw(),
+// cursor_context() (what is under the cursor and what can be done to it), handle_input(). Coordinates
+// are 640×480 design pixels; the shell scales the frame.
 
 #include <functional>
 
@@ -26,36 +20,31 @@ struct PhraseEditorState {
     int                     cursorRow    = 0;
     int                     cursorColumn = 1;
 
-    // The chain row and song cell this phrase is being looked at THROUGH — `C20/01 S01 T3` beside the
-    // title. −1 on any of them means "no cell", which is what NAV = POOL always answers. See
-    // ChainEditorState for why this is not decoration.
+    // The chain row and song cell this phrase is seen through (`C20/01 S01 T3`); −1 = none, as
+    // always under NAV = POOL.
     int                     viaChain     = -1;
     int                     viaChainRow  = -1;
     int                     songRow      = -1;
     int                     songTrack    = -1;
-    // ONE screen, EIGHT possible playheads: the same phrase placed on three tracks is being played
-    // by three of them, at three different steps. A marker is drawn where `phraseId` matches the
-    // phrase on display, so auditioning a phrase marks this screen and nothing upstream of it.
+    // Up to eight playheads (one phrase on three tracks plays at three steps); a marker is drawn
+    // where `phraseId` is the phrase on display.
     TrackPlayhead           playheads[8] = {};
     bool                    selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme                   theme = theme_classic();
 
-    /** How far up songcore::EFFECT_TYPES an FX-type cell may be stepped — see cc::effect_type. */
+    // How far up EFFECT_TYPES an FX-type cell may step (cc::effect_type).
     int effectTypeCount = songcore::EFFECT_TYPE_COUNT;
 
-    // The project this phrase belongs to, for AUS/AUF alone. A ramp may run from one phrase into a
-    // later one of the same chain, so whether an AUS/AUF cell is doing anything is a question about
-    // the CHAIN WALKS the phrase appears in, not about the phrase in front of you — and the phrase's
-    // own id is what finds them (`find_ramp_cells`). Without it the editor pairs within the phrase.
+    // For AUS/AUF only: a ramp can run into a later phrase of the chain, so whether a cell acts depends
+    // on the chain walks this phrase is in (`find_ramp_cells`). Null pairs within the phrase.
     const songcore::Project* project = nullptr;
 
-    // The instrument an EMPTY note cell will be given when A types into it — the NOTE cell's scale
-    // depends on it (a sliced or TSP-off instrument is typed chromatically). A filled cell uses its own.
+    // The instrument an empty note cell gets when typed into; its scale depends on it.
     int insertInstrument = -1;
 };
 
-/** What `handle_input` did — the edits the caller must echo to the engine (note preview, etc.). */
+// The edits the caller echoes to the engine (note preview, etc.).
 struct PhraseInputResult {
     bool modified = false;
     bool hasNote  = false;
@@ -75,7 +64,7 @@ public:
 
     CursorContext cursor_context(const PhraseEditorState& s) const;
 
-    /** What the action edited comes back in the result, for the caller to store and preview. */
+    // What was edited comes back in the result, for the caller to store and preview.
     PhraseInputResult handle_input(songcore::Phrase& phrase, int cursor_row, int cursor_column,
                                    const InputAction& action) const;
 

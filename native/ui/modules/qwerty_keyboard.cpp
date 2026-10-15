@@ -6,11 +6,8 @@
 
 namespace pt::ui {
 
-// ─── The layouts ─────────────────────────────────────────────────────────────────────────────────
-//
-// Three rows of TEN in both layouts, so UP/DOWN stays in one column. The space bar is a fourth row
-// (sharing it with the layout key, both special-cased in the nav); the ABORT/APPLY row is virtual
-// and not in this table.
+// ─── The layouts: three rows of ten, so UP/DOWN stays in one column ──────────────────────────────
+// The space bar row (SPACE + the layout key) and the virtual ABORT/APPLY row are not in the table.
 
 const std::vector<std::vector<char>>& qwerty_rows(int layout) {
     static const std::vector<std::vector<char>> letters = {
@@ -57,9 +54,7 @@ void clamp_col(QwertyKeyboardState& s) {
 
 namespace {
 
-// The SPACE row's two keys are wider than a key column, so crossing it maps the column by what is
-// drawn above and below: columns 0-7 meet SPACE, 8-9 the layout key, and the layout key leads back
-// up to the last column.
+// Crossing the SPACE row maps the column by what is drawn: 0-7 meet SPACE, 8-9 the layout key.
 void move_key_cursor_to_row(QwertyKeyboardState& s, int row) {
     const int  spaceRow  = s.space_row_index();
     const bool fromKeys  = s.keyCursorRow < spaceRow;
@@ -97,8 +92,7 @@ void insert_current_key(QwertyKeyboardState& s) {
 
     const char ch = s.current_key();
     const int  len = static_cast<int>(s.text.size());
-    // insertBefore: at the cursor. Otherwise: one past it — and the cursor lands after the new
-    // character either way, which is what makes both modes feel like typing.
+    // insertBefore: at the cursor, else one past it; either way the cursor lands after the new char.
     const int insertAt = s.insertBefore ? std::min(std::max(s.textCursor, 0), len)
                                         : std::min(s.textCursor + 1, len);
     s.text.insert(static_cast<size_t>(insertAt), 1, ch);
@@ -138,14 +132,14 @@ QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols)
     textCursor = std::min(std::max(textCursor, 0), textLen);
 
     QwertyTextWindow w;
-    // The phantom end-cursor slot (one past the last char) is content too, so the tail stays reachable.
+    // The phantom end-cursor slot counts, so the tail stays reachable.
     const int content = textLen + 1;
     if (content <= windowCols) {
         w.cols = content;  // everything fits: no scroll, no markers
         return w;
     }
 
-    // Place the window so the cursor sits at the centre, clamped to the ends.
+    // Cursor at the centre, clamped to the ends.
     auto place = [&](int cols) {
         const int maxFirst = content - cols;
         int       f        = textCursor - cols / 2;
@@ -153,19 +147,17 @@ QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols)
         if (f > maxFirst) f = maxFirst;
         return f;
     };
-    constexpr int MARK = 1;  // the ellipsis marker (…) is ONE column wide
+    constexpr int MARK = 1;  // the "…" is one column wide
 
-    // Iterate to a FIXED POINT: the reserved marker columns must equal the markers the final
-    // placement needs. One pass is not enough — reserving a marker shrinks the window, which can
-    // reveal a clip on the near side (`content == windowCols + 1`, cursor centred), and an unreserved
-    // "…" pokes past the box. Markers only grow (0→1→2), so this settles fast; the bound is a guard.
+    // Iterate to a fixed point: reserving a marker shrinks the window, which can reveal a clip on
+    // the near side. Markers only grow (0→1→2); the bound is a guard.
     int  cols = windowCols;
     int  f    = place(cols);
     bool cl   = f > 0;
     bool cr   = f + cols < content;
     for (int guard = 0; guard < windowCols; ++guard) {
         const int next = std::max(1, windowCols - (cl ? MARK : 0) - (cr ? MARK : 0));
-        if (next == cols) break;   // reserved columns already match the markers: stable
+        if (next == cols) break;
         cols = next;
         f    = place(cols);
         cl   = f > 0;
@@ -186,19 +178,17 @@ std::string trimmed_text(const QwertyKeyboardState& s) {
 }
 
 // ─── Drawing ─────────────────────────────────────────────────────────────────────────────────────
-//
-// A 470×228 box, centred. The keys are on a fixed 10-column grid, as the layout tables are.
+// A 470×228 box, centred; the keys on a fixed 10-column grid.
 
 void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const Theme& t) const {
-    constexpr int FS    = 4;                  // 20×20px keys — this is the one place the font goes big
+    constexpr int FS    = 4;                  // 20×20px keys, the one place the font goes big
     constexpr int CS    = 3;
     constexpr int CHARW = 5 * FS + CS;        // 23px per char slot
     constexpr int CELLH = 26;
     constexpr int CELLW = 46;                 // innerW 460 / 10 keys
     constexpr int ROWGAP = 4;
 
-    // 470×228. The border grows outward from it (helpers.h), so these are the fill, not the outside
-    // edge, and the keys keep their own 10-column grid inside untouched.
+    // The fill: the border grows outward from it (helpers.h).
     constexpr int BOXW = 470;
     constexpr int BOXH = 228;
     constexpr int BOXX = (DESIGN_W - BOXW) / 2;
@@ -206,12 +196,11 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     constexpr int INNERX = BOXX + 5;
     constexpr int INNERW = BOXW - 10;
 
-    // The backdrop dims everything behind the modal; the shell paints the same dim in the letterbox.
+    // The backdrop dims everything behind; the shell dims the letterbox alike.
     draw_modal_backdrop(c);
     draw_modal_box(c, BOXX, BOXY, BOXW, BOXH, t);
 
-    // Label, text and key rows sit at FIXED offsets from one another; only where the stack starts is
-    // derived, by centring it. ⚠️ A hand-typed top pad would not stay centred as the box or rows change.
+    // The stack's rows sit at fixed offsets; only its start is derived, by centring.
     constexpr int TEXTROW_OFF = 30;   // the edited text, below the field label
     constexpr int KEYROWS_OFF = 66;   // the first key row, below the edited text
     const int contentH = KEYROWS_OFF + (s.total_rows() - 1) * (CELLH + ROWGAP) + CELLH;
@@ -222,17 +211,16 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     c.draw_text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, contentY + 3, t.textParam, CS, FS);
 
     // ── The text row: a scroll window that keeps the cursor visible ─────────────────────────────
-    // Short text is centred; once it overflows, the window left-aligns and scrolls under the cursor,
-    // with a "…" on whichever side hides characters.
+    // Short text is centred; overflowing, it left-aligns and scrolls with a "…" on the hidden side.
     const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
     const int              textRowY   = contentY + TEXTROW_OFF;
     const int              textLen    = static_cast<int>(s.text.size());
     const int              windowCols = INNERW / CHARW;   // whole character columns the box holds
     const QwertyTextWindow win        = qwerty_text_window(textLen, s.textCursor, windowCols);
 
-    const bool fits    = (win.cols == textLen + 1);   // only the fit branch returns the full content
-    const int  leftPad = win.clipLeft ? 1 : 0;        // the "…" marker eats ONE column on a clipped side
-    // Centre only when the text fits, then clamp so the phantom end-cursor never pokes past the box.
+    const bool fits    = (win.cols == textLen + 1);
+    const int  leftPad = win.clipLeft ? 1 : 0;
+    // Centre only when it fits, then clamp so the phantom end-cursor stays inside.
     const int  contentRight = textLen * CHARW + 5 * FS;   // right edge of the phantom cursor from startX
     int        startX       = fits ? BOXX + BOXW / 2 - (textLen * CHARW) / 2 : INNERX;
     if (startX + contentRight > INNERX + INNERW) startX = INNERX + INNERW - contentRight;
@@ -245,7 +233,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     for (int k = 0; k < win.cols; ++k) {
         const int  idx      = win.first + k;
         const int  px       = textX + k * CHARW;
-        const bool isCursor = (idx == s.textCursor);   // idx can be textLen: the phantom end position
+        const bool isCursor = (idx == s.textCursor);   // idx can be textLen: the phantom end
         if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, t.rowCursor);
         if (idx < textLen) {
             c.draw_text(std::string(1, s.text[static_cast<size_t>(idx)]), px, textRowY + 3,
@@ -264,7 +252,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
         const int rowY = rowBaseY + r * (CELLH + ROWGAP);
 
         if (r == lastRow) {
-            // Two wide keys on the key grid: SPACE, then the layout key naming the layout it switches to.
+            // SPACE, then the layout key naming the layout it switches to.
             const std::string labels[QWERTY_SPACE_ROW_COLS] = {"SPACE", qwerty_layout_label(1 - s.layout)};
             const int         spans[QWERTY_SPACE_ROW_COLS]  = {QWERTY_SPACE_KEY_COLS,
                                                                10 - QWERTY_SPACE_KEY_COLS};
@@ -296,8 +284,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     }
 
     // ── ABORT / APPLY ───────────────────────────────────────────────────────────────────────────
-    // A virtual row: reachable with the D-pad and pressable with A, and ALSO bound to the physical
-    // SELECT and START. The labels say so, because a chord nobody can see is a chord nobody uses.
+    // A virtual row, also bound to SELECT and START — the labels say so.
     const int actionRow  = s.action_row_index();
     const int actionRowY = rowBaseY + actionRow * (CELLH + ROWGAP);
     constexpr int AFS    = 3;

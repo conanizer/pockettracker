@@ -1,6 +1,6 @@
 #include "ui/modules/oscilloscope.h"
 
-#include <algorithm>  // std::max — MSVC pulls it in transitively, libstdc++ does not
+#include <algorithm>  // std::max — libstdc++ does not pull it in
 
 #include "ui/helpers.h"
 
@@ -13,9 +13,8 @@ inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi 
 void OscilloscopeModule::draw(Canvas& c, int x, int y, const OscilloscopeState& s) {
     const Theme& t = s.theme;
 
-    // The ProTracker look: OCTA fills the strip with `background` so the gaps BETWEEN lanes read as
-    // background, then paints each lane's own `vizBackground` panel. Every other mode fills the whole
-    // strip with `vizBackground`.
+    // OCTA fills the strip with `background`, so the gaps between lanes read as it, then paints each
+    // lane's `vizBackground`; every other mode fills with `vizBackground`.
     const bool isOcta =
         (t.visualizerType == VisualizerType::OCTA || t.visualizerType == VisualizerType::OCTA_FULL);
     c.fill_rect(x, y, WIDTH, HEIGHT, isOcta ? t.background : t.vizBackground);
@@ -51,23 +50,21 @@ void OscilloscopeModule::draw_scope(Canvas& c, int x, int y, const float* wave,
 
 void OscilloscopeModule::draw_wave_dots(Canvas& c, int scope_x, int scope_w, const float* wave,
                                         int center_y, int max_amplitude, Argb color) const {
-    // Time zoom: sample only the centred WAVEFORM_SIZE/Z slice, stretched across the strip width.
+    // Time zoom: the centred WAVEFORM_SIZE/Z samples across the strip.
     constexpr int N          = SCOPE_PIXEL_BLOCK;
     const int     windowSize = WAVEFORM_SIZE / SCOPE_TIME_ZOOM;
     const int     windowBase = (WAVEFORM_SIZE - windowSize) / 2;
 
-    // Coarser pixels: one N-wide column-block, snapped to an N-px grid, one dot per block.
+    // One dot per N-wide block on an N-px grid.
     for (int bx = 0; bx < scope_w; bx += N) {
         const int blockW = (bx + N <= scope_w) ? N : (scope_w - bx);
-        // Sample the centre of this pixel block, mapped into the zoomed sub-window.
         const int col    = bx + blockW / 2;
         const int srcIdx = windowBase + static_cast<int>((static_cast<long long>(col) * windowSize) /
                                                          scope_w);
-        // A null buffer is silence — every block lands on the centre line, which is exactly what the
-        // app draws when nothing is playing.
+        // A null buffer is silence: every block on the centre line.
         const float sample = wave ? clampf(wave[srcIdx] * WAVEFORM_GAIN, -1.0f, 1.0f) : 0.0f;
         int         dotY   = center_y + static_cast<int>(sample * static_cast<float>(max_amplitude));
-        // Coarser amplitude: snap the block to an N-px vertical grid aligned on the centre line.
+        // Snap the block to an N-px grid aligned on the centre line.
         dotY = center_y + ((dotY - center_y) / N) * N;
         c.fill_rect(scope_x + bx, dotY, blockW, N, color);
     }
@@ -83,14 +80,14 @@ void OscilloscopeModule::draw_octa(Canvas& c, int x, int y, const float* tracks,
     const int maxAmplitude = (HEIGHT / 2) - 4;
 
     if (!tracks || mask == 0) {
-        // Nothing scheduled: one full-width panel and a centre line (the strip itself is background).
+        // Nothing scheduled: one panel and a centre line.
         c.fill_rect(x, y, WIDTH, HEIGHT, t.vizBackground);
         c.fill_rect(x, centerY, WIDTH, 1, t.vizCenterLine);
         return;
     }
 
-    // Lanes 0-7 are the song tracks; lane 8 is the preview (set only when stopped). OCTA_FULL forces
-    // all eight on regardless of what is scheduled, so the layout never reflows mid-song.
+    // Lane 8 is the preview (set only when stopped). OCTA_FULL forces all eight on, so the layout
+    // never reflows mid-song.
     int activeTracks[TRACK_WAVEFORM_COUNT];
     int count = 0;
     for (int i = 0; i < TRACK_WAVEFORM_COUNT; ++i) {
@@ -114,21 +111,21 @@ void OscilloscopeModule::draw_octa(Canvas& c, int x, int y, const float* tracks,
 void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amps, const Theme& t,
                                        bool peak_mode) {
     const int   barBottom = y + HEIGHT - 2;   // 2px bottom margin
-    const float maxAmp    = BAR_AMP_MAX;      // 2px top + 2px bottom
+    const float maxAmp    = BAR_AMP_MAX;
 
     for (int i = 0; i < NUM_BARS; ++i) {
         const int barX = x + BAR_START_OFFSET + i * (BAR_W + BAR_GAP);
-        // Under one LED cell reads as silence: it draws the same and lets `bars_at_rest` settle.
+        // Under one LED cell reads as silence.
         const float rawIn = amps ? amps[i] : 0.0f;
         const float raw   = (rawIn * maxAmp >= static_cast<float>(SEGMENT_H)) ? rawIn : 0.0f;
 
-        // Instant attack, exponential decay — a bar that fell as fast as the audio would strobe.
+        // Instant attack, exponential decay; a bar as fast as the audio would strobe.
         if (raw > barSmoothed_[i]) {
             barSmoothed_[i] = raw;
         } else {
             barSmoothed_[i] *= BAR_DECAY;
-            // ⚠️ Snapped to zero under one LED cell (it draws nothing already), or the ×0.90 decay takes
-            // ~1000 frames to reach 0 and `bars_at_rest` holds the screen at 60 Hz long after a stop.
+            // ⚠️ Snapped to zero under one LED cell, or the decay holds `bars_at_rest` (and 60 Hz
+            // redraws) for ~1000 frames.
             if (barSmoothed_[i] * maxAmp < static_cast<float>(SEGMENT_H)) barSmoothed_[i] = 0.0f;
         }
 
@@ -139,8 +136,7 @@ void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amp
         }
 
         if (!peak_mode) {
-            // SPECTRUM draws no dot, so it holds no dot: values left behind by a SPECT P theme would
-            // answer `bars_at_rest` with a picture this mode is not drawing.
+            // SPECTRUM draws no dot, so it keeps none (a SPECT P theme's would hold `bars_at_rest`).
             peakValues_[i]        = 0.0f;
             peakDecayCounters_[i] = 0;
             continue;
@@ -157,7 +153,7 @@ void OscilloscopeModule::draw_bar_amps(Canvas& c, int x, int y, const float* amp
             }
         }
 
-        // Snap the dot to a segment boundary, and only draw it once it has cleared the bar itself.
+        // Snapped to a segment boundary, drawn once it clears the bar.
         const int peakH  = static_cast<int>(peakValues_[i] * maxAmp);
         const int peakDy = (peakH / SEG_STEP) * SEG_STEP;
         if (peakDy > barH) {

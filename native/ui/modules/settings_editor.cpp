@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include "ui/helpers.h"
-#include "ui/input_config.h"   // abxy_name - the ABXY row and config.json speak one vocabulary
+#include "ui/input_config.h"   // abxy_name
 
 namespace pt::ui {
 
@@ -14,7 +14,6 @@ constexpr int VAL1_X     = 190;  // the primary value
 constexpr int SUBLABEL_X = 355;  // the secondary column's own label (STR / VOL / POW)
 constexpr int VAL2_X     = 408;  // the secondary value
 
-int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 }  // namespace
 
@@ -39,7 +38,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const int val2X  = x + VAL2_X;
 
     c.draw_text("SETTINGS", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
-    // The running build, right-aligned on the title line — what a bug report is asked for.
+    // The running build, right-aligned: what a bug report asks for.
     if (!s.appVersion.empty()) {
         const std::string version = "V" + s.appVersion;
         c.draw_text(version, x + WIDTH - NAME_X - Canvas::text_width(version, CHAR_SPACING, FONT_SCALE),
@@ -49,8 +48,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
 
     // ── Scroll ───────────────────────────────────────────────────────────────────────────────────
-    // The rows scroll to keep the cursor visible when they overflow (debug builds); in release they
-    // fit and `maxScroll` is 0. Derived from the cursor row each frame — no stored scroll.
+    // ── Scroll: only debug builds overflow; derived from the cursor row each frame ───────────────
     const int viewportH = HEIGHT - (firstRowY - y);
     const int contentH  = settings_content_height(s.caps, ROW_HEIGHT);
     const int maxScroll = std::max(0, contentH - viewportH);
@@ -66,7 +64,6 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         return on_row(row) && s.cursorColumn == column;
     };
 
-    /** A row with one value. */
     const auto param_row = [&](SettingsRow row, const char* name, const std::string& value) {
         if (!settings_row_visible(row, s.caps)) return;
         const int ry = rowY(row);
@@ -75,7 +72,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         draw_cursor_cell(c, value, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
-    /** A row with two values, the second behind its own little label (STR / VOL / POW). */
+    // The second value behind its own little label (STR / VOL / POW).
     const auto dual_row = [&](SettingsRow row, const char* name, const std::string& value1,
                               const char* sublabel, const std::string& value2) {
         if (!settings_row_visible(row, s.caps)) return;
@@ -83,18 +80,16 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         c.draw_text(name, labelX, ry + TEXT_PADDING,
                     on_row(row) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value1, val1X, ry + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
-        // The sublabel is textParam whether or not the cursor is on the row.
         c.draw_text(sublabel, subX, ry + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
         draw_cursor_cell(c, value2, val2X, ry + TEXT_PADDING, on_cell(row, 2), t.textValue, t);
     };
 
     const auto on_off = [](bool b) { return std::string(b ? "ON" : "OFF"); };
 
-    // Every row below is drawn through `rowY` (which subtracts `scrollY`); clip them to the viewport so a
-    // scrolled row cannot overdraw the title above or spill past the panel edge. RAII, restored at return.
+    // Every row is drawn through `rowY`; clipped to the viewport.
     const Canvas::ClipScope rowsClip(c, x, firstRowY, WIDTH, viewportH);
 
-    // ── LAYOUT — and its skin column, when the layout is a skinned one ───────────────────────────
+    // ── LAYOUT, and its skin column when the layout is skinned ───────────────────────────────────
     if (v.skinCount > 0) {
         dual_row(SettingsRow::LAYOUT, "LAYOUT", s.layoutText, "", s.skinText);
     } else {
@@ -105,19 +100,17 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     dual_row(SettingsRow::OVERLAY, "OVERLAY", s.overlayText, "STR", hex2(v.overlayStrength));
 
-    // A driver's name is the OS's and may not fit: 18 characters to the panel edge.
+    // An OS driver name: 18 characters to the panel edge.
     param_row(SettingsRow::AUDIO_OUT, "AUDIO OUT",
               Canvas::clip_text(s.audioOutText, (WIDTH - VAL1_X - NAME_X) / CHAR_W));
 
     dual_row(SettingsRow::BTN_SOUND, "BTN SOUND", on_off(v.buttonSoundEnabled),
              "VOL", hex2(v.buttonSoundVolume));
-    // POW is LO/HI, not 00-FF: the target ROMs have no Composition primitives, only EFFECT_TICK and
-    // EFFECT_CLICK. LO stores <128 (TICK), HI ≥128 (CLICK).
+    // POW is LO/HI: the target ROMs have only EFFECT_TICK and EFFECT_CLICK (LO < 128 ≤ HI).
     dual_row(SettingsRow::BTN_VIBRO, "BTN VIBRO", on_off(v.buttonVibroEnabled),
              "POW", std::string(v.vibroPower >= 128 ? "HI" : "LO"));
 
-    // The face-button swap. Its names come from input_config.h, which is also what parses the same
-    // three words out of config.json - one vocabulary, not two.
+    // The face-button swap; input_config.h names it, as config.json does.
     param_row(SettingsRow::ABXY, "ABXY",
               abxy_name(static_cast<AbxyLayout>(clamp(v.abxyIndex, 0, 2))));
 
@@ -141,16 +134,15 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
         param_row(SettingsRow::HELP, "HELP", HELP_NAMES[clamp(v.helpMode, 0, 2)]);
     }
 
-    // THEME shows the name and a ">": A opens the theme editor (theme_editor.cpp).
-    // ⚠️ The name is clipped two glyphs short of the column so the ">" — the only sign this row
-    // opens a screen — cannot be pushed out by a long user-typed name.
+    // THEME: the name and a ">" (A opens the editor). ⚠️ The name is clipped two glyphs short so a
+    // long name cannot push the ">" out.
     {
         constexpr int VALUE_COLS = (WIDTH - 10 - VAL1_X) / CHAR_W;
         param_row(SettingsRow::THEME, "THEME",
                   Canvas::clip_text(s.themeName, VALUE_COLS - 2) + " >");
     }
 
-    // TEMPLATE is a BUTTON row, like PROJECT's — two options, no value.
+    // TEMPLATE: a button row, two options, no value.
     if (settings_row_visible(SettingsRow::TEMPLATE, s.caps)) {
         const SettingsRow row = SettingsRow::TEMPLATE;
         const int ry = rowY(row);
@@ -167,8 +159,7 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     param_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled));
 
-    // FOLDER = REMEMBER / REFRESH. It positions itself by its own offset_y, so drawing it last is
-    // source order only.
+    // FOLDER = REMEMBER / REFRESH, placed by its own offset.
     param_row(SettingsRow::FOLDER, "FOLDER", v.rememberFolder ? "REMEMBER" : "REFRESH");
 }
 
@@ -243,102 +234,68 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
                                                  int cursor_row, int cursor_column,
                                                  const InputAction& action) const {
     const SettingsRow row = static_cast<SettingsRow>(cursor_row);
-    const bool        set = (action.type == ActionType::SET_VALUE);
-
     if (!settings_row_visible(row, caps)) return SettingsInputResult{false};
+    const SettingsInputResult done{action.type != ActionType::NONE};
+    if (action.type != ActionType::SET_VALUE) return done;
+
+    const int  value = action.value;
+    const bool on    = value > 0;
+    // An index the cycle could not produce falls back to the first (OFF, AUTO, …).
+    const auto index_in = [value](int count) { return (value >= 0 && value < count) ? value : 0; };
 
     switch (row) {
         case SettingsRow::LAYOUT:
-            if (set) {
-                if (cursor_column == 2) {
-                    if (v.skinCount > 0) v.skinIndex = clamp(action.value, 0, v.skinCount - 1);
-                } else {
-                    // An index the cycle could not produce falls back to the FIRST mode.
-                    v.layoutIndex = (action.value >= 0 && action.value < v.layoutCount)
-                                        ? action.value : 0;
-                }
-            }
-            break;
-
-        case SettingsRow::SCALING:
-            if (set) v.scalingBilinear = action.value > 0;
+            if (cursor_column != 2)  v.layoutIndex = index_in(v.layoutCount);
+            else if (v.skinCount > 0) v.skinIndex  = clamp(value, 0, v.skinCount - 1);
             break;
 
         case SettingsRow::OVERLAY:
-            if (set) {
-                if (cursor_column == 1) {
-                    // Out of range means OFF, which is index 0.
-                    v.overlayIndex = (action.value >= 0 && action.value < v.overlayCount)
-                                         ? action.value : 0;
-                } else if (cursor_column == 2) {
-                    v.overlayStrength = clamp(action.value, 0, 255);
-                }
-            }
+            if (cursor_column == 1)      v.overlayIndex    = index_in(v.overlayCount);
+            else if (cursor_column == 2) v.overlayStrength = clamp(value, 0, 255);
             break;
 
         case SettingsRow::BTN_SOUND:
-            if (set) {
-                if (cursor_column == 1)      v.buttonSoundEnabled = action.value > 0;
-                else if (cursor_column == 2) v.buttonSoundVolume  = clamp(action.value, 0, 255);
-            }
+            if (cursor_column == 1)      v.buttonSoundEnabled = on;
+            else if (cursor_column == 2) v.buttonSoundVolume  = clamp(value, 0, 255);
             break;
 
         case SettingsRow::BTN_VIBRO:
-            if (set) {
-                if (cursor_column == 1)      v.buttonVibroEnabled = action.value > 0;
-                // LO/HI switch: store 64 (→EFFECT_TICK) or 255 (→EFFECT_CLICK). See the draw note.
-                else if (cursor_column == 2) v.vibroPower         = (action.value > 0) ? 255 : 64;
-            }
+            if (cursor_column == 1)      v.buttonVibroEnabled = on;
+            // Store 64 (EFFECT_TICK) or 255 (EFFECT_CLICK).
+            else if (cursor_column == 2) v.vibroPower         = on ? 255 : 64;
             break;
 
         case SettingsRow::METRONOME:
-            if (set) {
-                if (cursor_column == 1)      v.metronomeEnabled = action.value > 0;
-                else if (cursor_column == 2) v.metronomeVolume  = clamp(action.value, 0, 255);
-            }
+            if (cursor_column == 1)      v.metronomeEnabled = on;
+            else if (cursor_column == 2) v.metronomeVolume  = clamp(value, 0, 255);
             break;
 
-        // Out of range falls back to AUTO - index 0, the same shape LAYOUT and OVERLAY use.
-        case SettingsRow::ABXY:
-            if (set) v.abxyIndex = (action.value >= 0 && action.value < 3) ? action.value : 0;
-            break;
+        case SettingsRow::ABXY: v.abxyIndex = index_in(3); break;
         // The shell opens the output and writes the NAME once it plays.
-        case SettingsRow::AUDIO_OUT:
-            if (set) v.audioOutIndex = (action.value >= 0 && action.value < v.audioOutCount) ? action.value : 0;
-            break;
-        case SettingsRow::KB_INSERT: if (set) v.insertBefore       = action.value > 0; break;
-        case SettingsRow::CURSOR:    if (set) v.cursorRemember     = action.value > 0; break;
-        case SettingsRow::NOTE_PREV: if (set) v.notePreviewEnabled = action.value > 0; break;
-        case SettingsRow::FOLDER:    if (set) v.rememberFolder     = action.value > 0; break;
-        case SettingsRow::NAV:       if (set) v.navSongRelative    = action.value > 0; break;
+        case SettingsRow::AUDIO_OUT: v.audioOutIndex = index_in(v.audioOutCount); break;
+
+        case SettingsRow::SCALING:   v.scalingBilinear    = on; break;
+        case SettingsRow::KB_INSERT: v.insertBefore       = on; break;
+        case SettingsRow::CURSOR:    v.cursorRemember     = on; break;
+        case SettingsRow::NOTE_PREV: v.notePreviewEnabled = on; break;
+        case SettingsRow::FOLDER:    v.rememberFolder     = on; break;
+        case SettingsRow::NAV:       v.navSongRelative    = on; break;
+        case SettingsRow::RESUME:    v.autosaveResumeAuto = on; break;
+        case SettingsRow::TRACE:     v.traceEnabled       = on; break;
 
         case SettingsRow::VISUALIZER:
-            if (set) {
-                const int count = static_cast<int>(visualizer_names().size());
-                const int index = (action.value >= 0 && action.value < count) ? action.value : 0;
-                theme.visualizerType = static_cast<VisualizerType>(index);
-            }
+            theme.visualizerType =
+                static_cast<VisualizerType>(index_in(static_cast<int>(visualizer_names().size())));
             break;
 
-        case SettingsRow::HELP:
-            if (set) v.helpMode = clamp(action.value, 0, 2);
-            break;
+        case SettingsRow::HELP: v.helpMode = clamp(value, 0, 2); break;
 
-        // A-only rows. Nothing to set — the dispatcher owns what A does.
+        // A-only rows: the dispatcher's.
         case SettingsRow::THEME:
         case SettingsRow::TEMPLATE:
             break;
-
-        case SettingsRow::RESUME:
-            if (set) v.autosaveResumeAuto = action.value > 0;
-            break;
-
-        case SettingsRow::TRACE:
-            if (set) v.traceEnabled = action.value > 0;
-            break;
     }
-
-    return SettingsInputResult{action.type != ActionType::NONE};
+    return done;
 }
 
 }  // namespace pt::ui

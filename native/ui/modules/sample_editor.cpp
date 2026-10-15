@@ -12,10 +12,7 @@ namespace pt::ui {
 
 namespace {
 
-/**
- * A bounds-safe `list[i]`. Every index comes from a cycle sized to the list, but a clamp keeps a
- * future slip a visible wrong label rather than a read past the end.
- */
+// A bounds-safe `list[i]`: a slip shows a wrong label rather than reading past the end.
 const std::string& at(const std::vector<std::string>& v, int i) {
     static const std::string kEmpty;
     if (v.empty()) return kEmpty;
@@ -128,21 +125,18 @@ int SampleEditorState::manual_key_param() const {
 }
 
 bool SampleEditorState::manual_markers_live() const {
-    // ⚠️ The STAMP alone, not "and the list is not empty": an EMPTY live list (MANUAL with every
-    // boundary deleted) must keep overriding the file's cue points. No method is −1, so the stamp
-    // is the whole test.
+    // ⚠️ The stamp alone: an empty live list (MANUAL, every boundary deleted) must still override
+    // the file's cue points.
     return manualKeyMethod == sliceMethod && manualKeyParam == manual_key_param();
 }
 
 const std::vector<int>& SampleEditorState::method_markers() const {
-    // For a method that computes rather than stores: one function-local empty list, nothing to
-    // write into.
+    // Methods that compute rather than store read this empty list.
     static const std::vector<int> computed;
 
     switch (sliceMethod) {
         case SampleEditorModule::SLICE_TRANSIENT: return transientMarkers;
-        // ⭐ OFF and MANUAL both answer with the FILE's cue points — so MANUAL edits the slicing a
-        // sample already carries. No `cue ` chunk: an empty list, a from-scratch session.
+        // OFF and MANUAL both answer with the file's cue points, so MANUAL edits what it carries.
         case SampleEditorModule::SLICE_OFF:
         case SampleEditorModule::SLICE_MANUAL:    return fileMarkers;
         // DIVIDE derives its boundaries from `sliceDivisions` on every read, so there is no list.
@@ -170,11 +164,9 @@ int SampleEditorState::slice_marker_index() const {
 int SampleEditorState::slice_index_ceiling() const {
     const int markers = marker_count();
     switch (sliceMethod) {
-        // N markers make N + 1 slices, so the top slice number is N …
+        // N markers make N + 1 slices …
         case SampleEditorModule::SLICE_TRANSIENT: return markers;
-        // … and MANUAL reaches ONE FURTHER, onto a slice that does not exist yet; it is born when
-        // dragged off the boundary to its left. ⭐ So the list's length IS the rule — no
-        // unlocked-count, no duplicate check.
+        // … and MANUAL reaches one further, a slice born when dragged off its left neighbour.
         case SampleEditorModule::SLICE_MANUAL:    return markers + 1;
         case SampleEditorModule::SLICE_DIVIDE:
             return markers > 0 ? markers : std::max(sliceDivisions - 1, 0);
@@ -190,13 +182,11 @@ void SampleEditorState::slice_bounds(int idx, int64_t& start, int64_t& end) cons
         return;
     }
 
-    // Marker `idx − 1` is slice `idx`'s left edge, marker `idx` its right. A nudged DIVIDE answers
-    // with a list too: div − 1 interior markers are div slices.
+    // Marker `idx − 1` is slice `idx`'s left edge, marker `idx` its right.
     const int n = marker_count();
     if (n > 0) {
-        // ⚠️ `marker_position` clamps past the end on purpose: MANUAL's free slot is one slice past the
-        // last real one, and the boundary it is born on is the last in the list. The RIGHT edge does
-        // not clamp — past the last boundary the slice runs to the end of the sample.
+        // `marker_position` clamps past the end (MANUAL's free slot); the right edge does not —
+        // past the last boundary the slice runs to the end.
         start = (idx == 0) ? 0 : marker_position(idx - 1);
         end   = (idx < n) ? marker_position(idx) : total;
         return;
@@ -229,7 +219,7 @@ int64_t SampleEditorState::view_start() const {
         return std::clamp<int64_t>(center - visible / 2, 0, std::max<int64_t>(total - visible, 0));
     };
 
-    // Where the window sits when nothing is sounding: on whichever marker the cursor is pointing at.
+    // With nothing sounding, centre on the marker the cursor points at.
     int64_t center;
     if (cursorRow == 8 && cursorCol == 1) {
         center = selectionEnd;
@@ -240,8 +230,8 @@ int64_t SampleEditorState::view_start() const {
     }
     const int64_t anchored = window_for(center);
 
-    // A running playhead pulls the window along only when the selection is too wide to fit;
-    // otherwise re-centring every frame would shake a view with nothing to reveal (worst under LOOP).
+    // A playhead pulls the window only when the selection does not fit; otherwise the view would
+    // shake with nothing to reveal.
     if (playbackPosition >= 0.0f &&
         !(selectionStart >= anchored && selectionEnd <= anchored + visible)) {
         return window_for(static_cast<int64_t>(playbackPosition * static_cast<float>(total)));
@@ -259,8 +249,7 @@ int64_t SampleEditorState::view_end() const {
 std::string SampleEditorState::duration_display() const {
     if (sampleRate <= 0 || totalFrames <= 0) return "--:--.--";
 
-    // The PENDING pitch shift is previewed here: pitching up shortens the sample, and DURATION should
-    // say what SAVE is about to bake rather than what the buffer holds now.
+    // The pending pitch is counted in: DURATION says what SAVE will bake.
     const double  ratio      = std::pow(2.0, pitchSemitones / 12.0);
     const int64_t effFrames  = std::max<int64_t>(static_cast<int64_t>(totalFrames / ratio), 1);
     const int64_t ms         = (effFrames * 1000) / sampleRate;
@@ -308,10 +297,10 @@ int SampleEditorState::fx_param() const {
 
 namespace {
 
-// ⚠️ NO ROW BACKGROUND ANYWHERE ON THIS SCREEN. The cursor is the CELL it is on, as it is on every
-// grid; the label beside a cell is what says which row, and it takes `cursor_mark_ink` with it.
+// ⚠️ No row background on this screen: the cursor is the cell, and the label beside it takes
+// `cursor_mark_ink`.
 
-/** Three label/value pairs across one row — rows 1 and 2 are both built from this. */
+// Three label/value pairs across one row (rows 1 and 2).
 void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, const Theme& t,
                      const std::string& l1, const std::string& v1, int c1,
                      const std::string& l2, const std::string& v2, int c2,
@@ -327,7 +316,7 @@ void draw_label_3val(Canvas& c, int x, int ty, bool is_cur_row, int cur_col, con
     draw_cursor_cell(c, v3, x + 535, ty, on(c3), t.textValue, t);
 }
 
-/** One of the two op rows: six evenly-spaced buttons, the one under the cursor lit. */
+// One op row: six buttons, the one under the cursor lit.
 void draw_ops_row(Canvas& c, int x, int y, const std::vector<std::string>& ops, bool is_cur,
                   int cur_col, const Theme& t) {
     const int ty   = y + TEXT_PADDING;
@@ -344,12 +333,11 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
                               const Theme& t) const {
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // ── Rows 0/1/2: a 5px gap, then three 21px rows, then another gap, then the waveform ─────────
+    // ── Header, then rows 1 and 2, then the waveform ─────────────────────────────────────────────
     {
         const int ty = y + 5 + TEXT_PADDING;
         c.draw_text("SAMPLE EDITOR", x + 10, ty, t.textTitle, CHAR_SPACING, FONT_SCALE);
-        // BPM sits in the gap the title leaves, left of the two facts it is derived from: the rate
-        // and the length. Six columns is what fits there, which is what caps the reading at 999.
+        // BPM sits left of the rate and length it is derived from; six columns cap it at 999.
         c.draw_text(s.bpm_display(), x + 245, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(std::to_string(s.sampleRate) + "Hz", x + 360, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         c.draw_text(s.duration_display(), x + 492, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
@@ -358,8 +346,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
     {   // Row 1 — ZOOM / SOURCE / RATE
         const int  ry  = y + 26;
         const bool cur = (s.cursorRow == 1);
-        // SOURCE reads MONO on a mono sample whatever the mode says — there is no second channel to
-        // pick from, and the cell is read-only there (see cursor_context).
+        // A mono sample reads MONO whatever the mode (the cell is read-only there).
         const std::string source = s.hasStereoData ? at(source_values(), s.sourceMode) : "MONO";
         draw_label_3val(c, x, ry + TEXT_PADDING, cur, s.cursorCol, t,
                         "ZOOM",   std::to_string(1 << s.zoomLevel) + "X",  0,
@@ -413,13 +400,10 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const bool cur = (s.cursorRow == 11);
         const int ty = ry + TEXT_PADDING;
 
-        // The index sits under row 10's METHOD value, the position under its SENS/BY label; `/total`
-        // follows the index directly. ⚠️ The row has no label, so the cursor's fill is the only sign
-        // the cursor is here.
+        // ⚠️ The row has no label, so the cursor's fill is the only sign the cursor is here.
         draw_cursor_cell(c, hex2(s.sliceIndex), x + 175, ty, cur && s.cursorCol == 0, t.textValue, t);
         if (s.sliceMethod == SLICE_TRANSIENT || s.sliceMethod == SLICE_MANUAL) {
-            // How many the index can reach, which is one more than its ceiling. DIVIDE draws none: its
-            // count is the BY cell directly above, and saying it twice invites the two to disagree.
+            // How many the index can reach. DIVIDE draws none: its BY cell above says it.
             const int total = s.slice_index_ceiling() + 1;
             c.draw_text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         }
@@ -478,10 +462,8 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
                                        const Theme& t) const {
     const int wfLeft  = x + 10;
     const int wfRight = wfLeft + WAVEFORM_W;
-    /**
-     * The last column INSIDE the panel; `wfRight` is one past it. Marks test against the EDGE (the
-     * default selection puts E exactly there) and draw at `wfLast`, so an end-of-view mark shows.
-     */
+    // The last column inside the panel. Marks test against the edge and draw here, so an
+    // end-of-view mark shows.
     const int wfLast  = wfRight - 1;
     const int midY    = y + WAVEFORM_H / 2;
 
@@ -492,7 +474,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     const int64_t viewLen   = std::max<int64_t>(s.view_end() - viewStart, 1);
     const float   viewLenF  = static_cast<float>(viewLen);
 
-    // Frame → pixel, the one mapping every mark on this panel goes through.
+    // Frame → pixel, for every mark on the panel.
     auto frame_x = [&](float frame) {
         return static_cast<float>(wfLeft) +
                ((frame - static_cast<float>(viewStart)) / viewLenF) * static_cast<float>(WAVEFORM_W);
@@ -512,8 +494,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
             const int top = midY - static_cast<int>(maxVal * halfH);
             const int bot = midY - static_cast<int>(minVal * halfH);
 
-            // Bins inside the selection are drawn lit; the rest are dim. That IS the selection —
-            // the S/E rules below only mark its edges.
+            // Bins inside the selection are lit: that is the selection; S/E only mark its edges.
             const int64_t binFrame = viewStart + (static_cast<int64_t>(i) * viewLen) / bins;
             const bool    inSel    = (binFrame >= s.selectionStart && binFrame < s.selectionEnd);
             v_line(c, cx, top, bot - top, inSel ? t.textValue : t.textEmpty);
@@ -528,8 +509,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
     {
         const float sXf = frame_x(static_cast<float>(s.selectionStart));
         const float eXf = frame_x(static_cast<float>(s.selectionEnd));
-        // Test the UNCLAMPED position, draw the clamped one: an edge scrolled out of the window must
-        // vanish, not pile up against the panel's border pretending to be there.
+        // Test the unclamped position, draw the clamped one: an edge scrolled out must vanish.
         if (sXf >= static_cast<float>(wfLeft) && sXf <= static_cast<float>(wfRight)) {
             const int sX = std::clamp(static_cast<int>(sXf), wfLeft, wfLast);
             v_line(c, sX, y, WAVEFORM_H, t.textTitle);
@@ -544,17 +524,14 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
 
     const bool onSliceRow = (s.cursorRow == 11);
 
-    /** The band behind the slice under the cursor — 10% of the cursor colour, so the wave shows through. */
+    // The band behind the slice under the cursor, faint so the wave shows through.
     auto highlight_slice = [&](int64_t start, int64_t end) {
         const int sX = std::clamp(static_cast<int>(frame_x(static_cast<float>(start))), wfLeft, wfRight);
         const int eX = std::clamp(static_cast<int>(frame_x(static_cast<float>(end))),   wfLeft, wfRight);
         if (eX > sX) c.fill_rect(sX, y, eX - sX, WAVEFORM_H, with_alpha(t.rowCursor, 0.1f));
     };
 
-    /**
-     * A slice boundary. ⚠️ The two bounding the CURRENT slice draw DIMMER (`textEmpty`) than the
-     * rest — it reads backwards, but it is the established look; swapping it is a UX change.
-     */
+    // A slice boundary. The two bounding the current slice draw dimmer — the established look.
     auto boundary = [&](int64_t frame, bool active) {
         const float mXf = frame_x(static_cast<float>(frame));
         if (mXf < static_cast<float>(wfLeft) || mXf > static_cast<float>(wfRight)) return;
@@ -562,10 +539,7 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
                active ? t.textEmpty : t.textParam);
     };
 
-    // ── The slice boundaries ─────────────────────────────────────────────────────────────────────
-    //
-    // Whichever list the method answers with: the detector's under TRANSIENT, the file's `cue `
-    // chunk read-only under OFF (why a chopped file looks chopped when reopened). DIVIDE computes below.
+    // ── The slice boundaries: the detector's (TRANSIENT) or the file's (OFF) ─────────────────────
     const int markerCount = s.marker_count();
     if (markerCount > 0) {
         if (onSliceRow) {
@@ -574,15 +548,13 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
             highlight_slice(start, end);
         }
         for (int idx = 0; idx < markerCount; ++idx) {
-            // Marker `idx` is the RIGHT edge of slice `idx` and the LEFT edge of slice `idx + 1`, so
-            // the two bounding the current slice are `sliceIndex − 1` and `sliceIndex`.
+            // Marker `idx` is the right edge of slice `idx` and the left of `idx + 1`.
             const bool active = onSliceRow && (idx == s.sliceIndex - 1 || idx == s.sliceIndex);
             boundary(s.marker_position(idx), active);
         }
     }
 
-    // ⚠️ Only while DIVIDE is still arithmetic. Once a marker has been nudged the list above IS the
-    // boundaries, and computing them a second time would draw the originals over the moved ones.
+    // ⚠️ Only while DIVIDE is arithmetic: once a marker is nudged the list above is the boundaries.
     if (s.sliceMethod == SLICE_DIVIDE && s.sliceDivisions > 0 && markerCount == 0) {
         const int64_t div   = s.sliceDivisions;
         const int64_t total = static_cast<int64_t>(s.totalFrames);
@@ -607,18 +579,16 @@ void SampleEditorModule::draw_waveform(Canvas& c, int x, int y, const SampleEdit
 }
 
 void SampleEditorModule::draw_confirm_dialog(Canvas& c, int x, int y, const Theme& t) const {
-    // It covers the editor completely. ⚠️ That cover is why it is not in `modal_backdrop_active`: it
-    // does not dim, so the shell must not dim the bars either.
+    // Covers the editor. ⚠️ So it is not in `modal_backdrop_active`: the bars must not dim either.
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // THE app's confirm box, asking this screen's question.
     draw_confirm_box(c, "ARE YOU SURE?", t);
 }
 
 // ─── The cursor ──────────────────────────────────────────────────────────────────────────────────
 
 CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) const {
-    // The confirm dialog owns every button while it is up. Nothing under it is editable.
+    // The confirm dialog owns every button while it is up.
     if (s.showConfirmClose) return cc::none();
 
     switch (s.cursorRow) {
@@ -627,8 +597,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
         case 1:
             switch (s.cursorCol) {
                 case 0: return cc::hex_byte(s.zoomLevel, 0, 4);
-                // A mono sample has no channel to choose. The cell still EXISTS (it reads "MONO") —
-                // it just cannot be changed, which is what read_only means and none() would not.
+                // A mono sample: the cell reads MONO and cannot change (read_only, not none).
                 case 1: return s.hasStereoData
                                    ? cc::toggle_ternary(at(source_values(), s.sourceMode), source_values())
                                    : cc::read_only();
@@ -638,14 +607,12 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
 
         case 2:
             switch (s.cursorCol) {
-                // PITCH is ±24 semitones carried as 0..48 with a +24 bias (hex_byte steps an
-                // unsigned range); handle_input un-biases. A+B takes it back to +0.
+                // PITCH ±24 carried as 0..48; handle_input un-biases. A+B = +0.
                 case 0: return cc::hex_byte(s.pitchSemitones + 24, 0, 48, -1, false, false, false,
                                             /*def=*/24);
                 case 1: return cc::toggle_ternary(at(duration_values(), s.durationIndex), duration_values());
                 case 2: {
-                    // An 8-bit sample has nowhere lower to go: the cell reads 8 and cannot move, as
-                    // SOURCE on a mono sample cannot.
+                    // An 8-bit sample has nowhere lower to go.
                     const std::vector<std::string> choices = bit_depth_choices(s.sourceBitDepth);
                     if (choices.size() < 2) return cc::read_only();
                     return cc::toggle_ternary(std::to_string(s.bitDepth), choices);
@@ -653,8 +620,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 default: return cc::none();
             }
 
-        // Rows 3..8 are the WAVEFORM and SELECTION: A+DPAD DRAGS an edge (zoom-scaled, snapped),
-        // which no CursorContext can express — the dispatcher's nudge_selection_edge.
+        // Rows 3..8: A+DPAD drags a selection edge — the dispatcher's nudge_selection_edge.
         case 3: case 4: case 5: case 6: case 7: case 8:
             return cc::none();
 
@@ -669,9 +635,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
             }
 
         case 11:
-            // The ceiling is the method's own — see slice_index_ceiling(), which is where the three
-            // ways of counting live. Col 1 is the POSITION, and it has no cell to step: A+DPAD DRAGS
-            // the marker, exactly as it drags a selection edge on row 8 (nudge_slice_marker).
+            // Col 1, the position, has no cell: A+DPAD drags the marker (nudge_slice_marker).
             if (s.cursorCol == 0 && s.sliceMethod != SLICE_OFF)
                 return cc::hex_byte(s.sliceIndex, 0, s.slice_index_ceiling());
             return cc::none();
@@ -685,8 +649,7 @@ CursorContext SampleEditorModule::cursor_context(const SampleEditorState& s) con
                 case 1:
                     // An EQ SLOT, as every EQ cell: "--" is empty, A+RIGHT takes slot 00, A+B clears.
                     if (s.fxType == FX_EQ)
-                        return cc::hex_byte(s.fxEqSlot < 0 ? -1 : s.fxEqSlot, 0, 127,
-                                            /*empty_value=*/-1, /*can_delete=*/true, /*can_insert=*/true);
+                        return cc::eq_slot(s.fxEqSlot);
                     if (s.fxType == FX_SYNC) return cc::toggle_ternary(at(sync_types(), s.syncType), sync_types());
                     return cc::hex_byte(s.fxValue, 0, 255);                            // an AMOUNT
                 default: return cc::none();   // col 2 = APPLY, an action
@@ -706,15 +669,9 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
                                                          const InputAction& action) const {
     SampleEditorInputResult r;
 
-    // The EQ slot is the one cell here that DELETEs and INSERTs rather than only taking a value.
+    // The EQ slot is the one cell here that deletes and inserts.
     if (s.cursorRow == 16 && s.cursorCol == 1 && s.fxType == FX_EQ) {
-        switch (action.type) {
-            case ActionType::SET_VALUE:      s.fxEqSlot = std::clamp(action.value, 0, 127); break;
-            case ActionType::DELETE:         s.fxEqSlot = -1;                               break;
-            case ActionType::INSERT_DEFAULT: s.fxEqSlot = 0;                                break;
-            default: return r;
-        }
-        r.modified = true;
+        r.modified = apply_optional_byte(s.fxEqSlot, 127, action);
         return r;
     }
 
@@ -727,8 +684,7 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
                 case 0: s.zoomLevel  = std::clamp(v, 0, 4); r.modified = true; break;
                 case 1: s.sourceMode = v;                   r.modified = true; break;
                 case 2:
-                    // The one row on this screen whose edit is DESTRUCTIVE — it re-decimates the audio.
-                    // The module records the transition; the dispatcher makes the engine calls.
+                    // Destructive: the module reports it, the dispatcher makes the engine calls.
                     if (v != s.rateMode) r.rateModeChanged = true;
                     s.rateMode = v;
                     r.modified = true;
@@ -742,7 +698,7 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
                 case 0: s.pitchSemitones = v - 24;  r.modified = true; break;   // un-bias (see cursor_context)
                 case 1: s.durationIndex  = v;       r.modified = true; break;
                 case 2: {
-                    // RATE's twin: destructive, so the dispatcher rebuilds the buffer (applyRateAndBits).
+                    // Destructive like RATE.
                     const int bits = std::atoi(at(bit_depth_choices(s.sourceBitDepth), v).c_str());
                     if (bits != s.bitDepth) r.bitDepthChanged = true;
                     s.bitDepth = bits;
@@ -757,8 +713,7 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
             switch (s.cursorCol) {
                 case 0:
                     s.sliceMethod = v;
-                    // Switching TO transient clears the detector's list, which makes the feed re-run
-                    // it. DIVIDE and OFF do not read it, so it is kept for the way back.
+                    // Clearing the detector's list makes the feed re-run it.
                     if (v == SLICE_TRANSIENT) s.transientMarkers.clear();
                     r.modified = true;
                     break;
@@ -776,8 +731,7 @@ SampleEditorInputResult SampleEditorModule::handle_input(SampleEditorState& s,
             break;
 
         case 11:
-            // Stepping the slice index SELECTS that slice — which is the whole gesture: dial through the
-            // slices and the selection follows, so CROP/CHOP/preview all act on the one you are looking at.
+            // Stepping the index selects that slice, so CROP/CHOP/preview act on the one in view.
             if (s.cursorCol == 0 && s.sliceMethod != SLICE_OFF) {
                 int64_t start = 0, end = 0;
                 s.slice_bounds(v, start, end);

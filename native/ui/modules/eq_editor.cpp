@@ -13,19 +13,14 @@ namespace {
 
 constexpr float kPi         = 3.14159265358979323846f;
 constexpr double kPiD       = 3.14159265358979323846;
-// The fallback rate when none is given. ⚠️ Only a fallback: the curve must use the rate the ENGINE's
-// bands were built at — bilinear warping is worst near Nyquist and the axis runs to 20 kHz.
+// ⚠️ Only a fallback: the curve must use the rate the engine's bands were built at.
 constexpr float kDefaultSampleRate = 44100.0f;
 
-/**
- * ⚠️ THE CANVAS HAS NO LINE PRIMITIVE (canvas.h). The curve is one sample per pixel column, so each
- * column is a vertical SPAN from this sample to the next — a `fill_rect`. Joining column i to i+1
- * matters: a steep filter skirt drawn as dots would read as a dotted staircase.
- */
+// The canvas has no line primitive, so each column is a vertical span to the next sample — a steep
+// skirt drawn as dots would read as a staircase.
 void stroke_column_curve(Canvas& c, int x0, int y_top, const int* y, int n, Argb color,
                          int thickness, int panel_h) {
-    // ⚠️ A stroke grows DOWNWARD from its sample, so a curve on the floor would hang below the panel
-    // under the separator. Lifting the sample keeps it full width, sitting on the floor.
+    // ⚠️ A stroke grows downward, so a sample on the floor is lifted to stay inside the panel.
     const int floorY = panel_h - thickness;
     for (int i = 0; i < n; ++i) {
         const int y0 = std::min(y[i], floorY);
@@ -36,7 +31,7 @@ void stroke_column_curve(Canvas& c, int x0, int y_top, const int* y, int n, Argb
     }
 }
 
-/** The area between a per-column curve and the panel's floor. */
+// The area between a per-column curve and the floor.
 void fill_under_curve(Canvas& c, int x0, int y_top, const int* y, int n, int bottom, Argb color) {
     for (int i = 0; i < n; ++i) {
         const int top = y[i];
@@ -44,11 +39,8 @@ void fill_under_curve(Canvas& c, int x0, int y_top, const int* y, int n, int bot
     }
 }
 
-/**
- * The Z-domain transfer function of the DaisySP double-pass Chamberlin SVF. LOWCUT and HICUT are
- * the SVF in this engine, not biquads, and the curve must plot what the audio does. `Process()`
- * runs two passes over the same input and averages them — hence not the textbook expression.
- */
+// The transfer function of DaisySP's double-pass Chamberlin SVF, which is what LOWCUT and HICUT
+// are here — two passes averaged, hence not the textbook expression.
 double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rate) {
     const float  fcC = std::min(fc, sample_rate * 0.45f);
     const double f   = 2.0 * std::sin(kPiD * std::min(0.25, static_cast<double>(fcC) /
@@ -109,13 +101,13 @@ double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rat
                     std::max(-static_cast<double>(EqModule::VIS_DB), db));
 }
 
-/** One band's gain in dB at one frequency. Type 0 (OFF) contributes nothing. */
+// Type 0 (OFF) contributes nothing.
 float band_gain_db(const songcore::EqBand& band, float freq, float sample_rate) {
     const float fc     = 20.0f * std::pow(1000.0f, static_cast<float>(band.freq) / 255.0f);
     const float gainDb = static_cast<float>(band.gain) / 10.0f - 12.0f;
     const float q      = 0.1f * std::pow(100.0f, static_cast<float>(band.q) / 255.0f);
 
-    // LOWCUT / HICUT run through the SVF, not a biquad — see svf_gain_db.
+    // LOWCUT / HICUT run through the SVF.
     if (band.type == 2 || band.type == 5)
         return static_cast<float>(svf_gain_db(band.type, fc, q, freq, sample_rate));
 
@@ -173,7 +165,7 @@ float band_gain_db(const songcore::EqBand& band, float freq, float sample_rate) 
     return 10.0f * std::log10(magSq + 1e-30f);
 }
 
-/** The cache key: an EqBand is mutated in place, so only its CONTENTS can say the curve is stale. */
+// An EqBand is edited in place, so only its contents can say the curve is stale.
 long long bands_content_hash(const std::vector<songcore::EqBand>& bands) {
     long long h = 1;
     for (const songcore::EqBand& b : bands) {
@@ -204,8 +196,8 @@ std::string EqModule::format_freq_hz(float hz) {
     if (rounded < 1000) {
         std::snprintf(buf, sizeof(buf), "%dHz", rounded);
     } else if (rounded < 10000) {
-        // ⚠️ Divided in FLOAT, then widened: double rounds differently at the fourth decimal and can
-        // cross a display boundary — and this string is what `step_freq_display_aware` stops on.
+        // ⚠️ Divided in float, then widened: double can round across a display boundary, and this
+        // string is what `step_freq_display_aware` stops on.
         std::snprintf(buf, sizeof(buf), "%.1fkHz", static_cast<double>(hz / 1000.0f));
     } else {
         std::snprintf(buf, sizeof(buf), "%dkHz", static_cast<int>(hz / 1000.0f + 0.5f));
@@ -287,17 +279,13 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     const int    vy     = y + HEADER_H + ROW_H;
     const int    bottom = VIS_H;  // panel-relative
 
-    // `eqBg`, not `background`: the panel has its own ground so a generated palette can choose; it
-    // derives from `vizBackground`.
+    // `eqBg`, the panel's own ground (derived from `vizBackground`).
     c.fill_rect(x, vy, WIDTH, VIS_H, t.eqBg);
 
-    // ── The spectrum, one sample per pixel column ────────────────────────────────────────────────
-    // Log-mapped bins come from the engine, so bin → pixel is a straight rescale. Fewer than two
-    // bins, or null, is silence.
+    // ── The spectrum, one sample per column; fewer than two bins is silence ──────────────────────
     int  specY[WIDTH];
     bool haveSpectrum = (s.spectrum != nullptr && s.spectrumCount >= 2);
-    // What the idle gate reads back, set from the heights actually drawn — a sub-pixel bar counts as
-    // none, so the answer can reach true.
+    // What the idle gate reads back; a sub-pixel bar counts as none.
     spectrumAtRest_ = true;
     if (haveSpectrum) {
         const int n = s.spectrumCount;
@@ -311,16 +299,13 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
             specY[xi]       = VIS_H - h;
             if (h > 0) spectrumAtRest_ = false;
         }
-        // ⚠️ Fill AND outline go down before the grid, so the grid renders over the whole spectrum
-        // rather than splitting one shape across it.
+        // Fill and outline go down before the grid, which renders over the whole spectrum.
         fill_under_curve(c, x, vy, specY, WIDTH, bottom, t.eqFill);
         stroke_column_curve(c, x, vy, specY, WIDTH, t.eqBorder, 1, VIS_H);
     }
 
     // ── The dB grid ─────────────────────────────────────────────────────────────────────────────
-    // Axis-aligned, so a "line" is a 1px (2px at 0 dB) rect.
-    // ⚠️ 0 dB takes the spectrum outline's colour on purpose: both are reference marks, and the
-    // response curve — the reading — must never be mistaken for one.
+    // ⚠️ 0 dB takes the spectrum outline's colour: both are reference marks, never the reading.
     const int dbLevels[] = {-12, -6, 0, 6, 12};
     for (int db : dbLevels) {
         const int  lineY = db_to_pixel(static_cast<float>(db));
@@ -334,26 +319,23 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
         {20.0f, "20"},    {100.0f, "100"},  {200.0f, "200"},   {500.0f, "500"}, {1000.0f, "1K"},
         {2000.0f, "2K"},  {5000.0f, "5K"},  {10000.0f, "10K"}, {20000.0f, "20K"},
     };
-    // ⚠️ A label sits to the LEFT of its own grid line, because the panel's right edge runs under the
-    // side bar and a right-hand "20K" is covered by it. 20 Hz is the exception, and the reason the
-    // rule cannot be blanket: its line IS the left edge, so its label goes right or off the panel.
+    // ⚠️ A label sits left of its line — the panel's right edge runs under the side bar. Except
+    // 20 Hz, whose line is the left edge.
     constexpr int LABEL_GAP = 2;
     for (const Marker& m : markers) {
         const int fx = freq_to_pixel(m.hz);
-        // A grid line is meant to be a hair off the panel (as ROW 4TH is off BACKGROUND): a guide,
-        // not an ink, so it is not held to a contrast floor.
+        // A guide, not ink: not held to a contrast floor.
         c.fill_rect(x + fx, vy, 1, VIS_H, t.rowEvery4th);
         const int w  = Canvas::text_width(m.label, CHAR_SPACING, 2);
         const int tx = (fx <= 0) ? x + fx + LABEL_GAP : x + fx - LABEL_GAP - w;
         c.draw_text(m.label, tx, vy + 3, t.eqTxt, CHAR_SPACING, 2);
     }
 
-    // ── The response curve — the point of the whole screen ───────────────────────────────────────
+    // ── The response curve ───────────────────────────────────────────────────────────────────────
     if (s.slotIndex >= 0 && s.slotIndex < static_cast<int>(s.project.eqPresets.size())) {
         const songcore::EqPreset& preset = s.project.eqPresets[static_cast<size_t>(s.slotIndex)];
 
-        // The cache is keyed on slot and band content only — not on the sample rate — because the
-        // audio device opens exactly once, so `s.sampleRate` cannot change under a cached curve.
+        // Not keyed on the rate: the audio device opens once, so it cannot change under a cache.
         const long long hash = bands_content_hash(preset.bands);
         if (curveCacheSlot_ != s.slotIndex || curveCacheHash_ != hash) {
             for (int xi = 0; xi < WIDTH; ++xi) {
@@ -367,9 +349,8 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
 
         int curveY[WIDTH];
         for (int xi = 0; xi < WIDTH; ++xi) curveY[xi] = db_to_pixel(curveCacheDb_[xi]);
-        // ⚠️ THE PALETTE'S ACCENT, AND THICKER THAN EVERY REFERENCE MARK ON THE PANEL. It is the one
-        // thing on this screen the user is editing, and it crosses the 0 dB line and the spectrum
-        // outline constantly — both of which it has to stay legible ON TOP OF, not merely beside.
+        // ⚠️ The accent, thicker than every reference mark: the one thing being edited, legible on
+        // top of the 0 dB line and the spectrum outline.
         stroke_column_curve(c, x, vy, curveY, WIDTH, t.rowCursor, 3, VIS_H);
     }
 
@@ -388,7 +369,7 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
     const int bandX[3] = {x + LABEL_COL_W, x + LABEL_COL_W + BAND_COL_W,
                           x + LABEL_COL_W + 2 * BAND_COL_W};
 
-    // The band headers: the one under the cursor is a title, the other two are empty-toned.
+    // The band under the cursor heads as a title, the others empty-toned.
     for (int bi = 0; bi < 3; ++bi) {
         const Argb col = (bi == curBand) ? t.textTitle : t.textEmpty;
         c.draw_text("BAND " + std::to_string(bi + 1), bandX[bi] + 6, edY + 3, col, CHAR_SPACING,
@@ -401,14 +382,13 @@ void EqModule::draw_editor(Canvas& c, int x, int y, const EqState& s) const {
         const int  rowY     = edY + ROW_H + pi * ROW_H;
         const bool isParSel = (pi == curParam);
 
-        // The cursor is one cell: the parameter label says which row, the band header which column.
-        // The other bands print `textEmpty`; the cursor row's label prints `cursor_mark_ink`.
+        // The parameter label says the row, the band header the column.
         c.draw_text(kParamLabels[pi], x + 6, rowY + 3, isParSel ? cursor_mark_ink(t) : t.textEmpty,
                     CHAR_SPACING, FONT_SCALE);
 
         for (int bi = 0; bi < 3; ++bi) {
             const bool isCursor = (bi == curBand && isParSel);
-            // The cursor's own cell is not a case: the painter inverts its ink against the bar.
+            // The painter inverts the cursor cell's ink itself.
             const Argb col      = (bi == curBand) ? t.textValue : t.textEmpty;
 
             std::string text = "--";
@@ -446,9 +426,7 @@ CursorContext EqModule::cursor_context(const EqState& s) const {
 
     switch (s.cursorRow % 4) {
         case 0: {
-            // ⚠️ NOT `cc::hex_byte`: largeStep 1 (six types; a fast step of 16 means nothing) and
-            // the struct's own 0xFF empty value. Behaviour is nearly identical, but folding them
-            // together changes the context.
+            // ⚠️ Not `cc::hex_byte`: largeStep 1 (six types) and the struct's 0xFF empty value.
             CursorContext c;
             c.valueType                     = CursorValueType::HEX_BYTE;
             c.capabilities.canIncrement     = true;
@@ -464,7 +442,7 @@ CursorContext EqModule::cursor_context(const EqState& s) const {
         }
         case 1: return cc::freq(band.freq, 0x80);
         case 2: return cc::gain_db(band.gain, 120);  // 0..240 = −12.0..+12.0 dB
-        case 3: return cc::hex_byte(band.q, 0, 255, -1, false, false, false, 0x80);
+        case 3: return cc::plain_byte(band.q, 0x80);
         default: return cc::none();
     }
 }

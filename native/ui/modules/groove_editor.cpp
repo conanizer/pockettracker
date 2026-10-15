@@ -8,13 +8,7 @@ namespace pt::ui {
 
 namespace {
 
-// ── The panel's columns ──────────────────────────────────────────────────────────────────────────
-//
-// The tick grid ends at x+84 (a two-glyph cell starting at x+50), so the panel starts clear of it
-// with a gap wide enough to read as a separate thing rather than a third column of the grid.
-//
-// The name runs to the right edge (21 columns; the bank's longest is 10), but a loaded `.ptg` can be
-// named anything, so the draw truncates.
+// ── The panel's columns, clear of the tick grid; a loaded `.ptg` name is truncated ───────────────
 constexpr int GROOVE_PANEL_X = 140;
 constexpr int GROOVE_STAR_X  = 140;  // the name shifts one glyph right when the marker is up
 constexpr int GROOVE_VALUE_X = 140 + 4 * CHAR_W;  // past "QNT " / "SWG "
@@ -39,8 +33,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
 
     // ── Header ───────────────────────────────────────────────────────────────────────────────────
     const int headerY = y + TEXT_PADDING;
-    // The active length is the sequencer's own answer (timing.h) — never re-derived here, or the
-    // picture can disagree with what you hear.
+    // The sequencer's own active length (timing.h), never re-derived here.
     const int activeLen = songcore::groove_active_length(groove);
 
     c.draw_text("GROOVE " + hex2(groove.id), x + 10, headerY, t.textTitle, CHAR_SPACING, FONT_SCALE);
@@ -50,7 +43,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     c.draw_text("LEN:" + lenText, x + WIDTH - 130, headerY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
     // ── Column header ────────────────────────────────────────────────────────────────────────────
-    // It lights for the column the cursor is in, as the other grids' headers do.
+    // Lit for the cursor's column.
     c.draw_text("TIC", tickX, y + ROW_HEIGHT + 14 + TEXT_PADDING,
                 header_color(s.cursorColumn, GROOVE_COL_TICK, GROOVE_COL_TICK, t), CHAR_SPACING,
                 FONT_SCALE);
@@ -66,11 +59,9 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
         const bool isEndMarker = (tickValue == -1);
         const bool isPastEnd   = (index >= activeLen);  // past the first −1: inactive, drawn dim
 
-        // The cursor is a background under ONE cell, as on every other grid; the row number lights
-        // across the cursor row to say which row, the header to say which column.
-        draw_cell(c, hex1(index), stepX, rowY, /*is_cursor=*/false,
-                  /*is_selected=*/false, /*is_empty=*/false,
-                  isCursor ? cursor_mark_ink(t) : t.textEmpty, t);
+        // The cursor is one cell; the row number and header say which row and column.
+        draw_cursor_cell(c, hex1(index), stepX, rowY, /*is_cursor=*/false,
+                         isCursor ? cursor_mark_ink(t) : t.textEmpty, t);
 
         draw_cell(c, isEndMarker ? "--" : hex2(tickValue), tickX, rowY, isCursor && onGrid,
                   /*is_selected=*/false, /*is_empty=*/isEndMarker || isPastEnd, t.textValue, t);
@@ -83,8 +74,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
         return onPanel && s.panelRow == row && s.panelColumn == column;
     };
 
-    // NAME. Derived first and stored second — see groove_display_name. `----` is a groove built by
-    // hand that the bank has no word for; the `*` is one that has drifted from the name it carries.
+    // NAME (groove_display_name). `----` = a hand-built groove; `*` = drifted from its name.
     std::string shown = songcore::groove_display_name(groove);
     const bool  named = !shown.empty();
     if (!named) shown = "----";
@@ -100,10 +90,9 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
               here(GROOVE_PANEL_NAME, 0), /*is_selected=*/false, /*is_empty=*/!named, t.textValue, t);
 
     // SAVE · LOAD
-    draw_cell(c, "SAVE", x + GROOVE_PANEL_X, panelY(GROOVE_PANEL_FILE), here(GROOVE_PANEL_FILE, 0),
-              /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
-    draw_cell(c, "LOAD", x + GROOVE_LOAD_X, panelY(GROOVE_PANEL_FILE), here(GROOVE_PANEL_FILE, 1),
-              /*is_selected=*/false, /*is_empty=*/false, t.textParam, t);
+    const int fileY = panelY(GROOVE_PANEL_FILE);
+    draw_cursor_cell(c, "SAVE", x + GROOVE_PANEL_X, fileY, here(GROOVE_PANEL_FILE, 0), t.textParam, t);
+    draw_cursor_cell(c, "LOAD", x + GROOVE_LOAD_X, fileY, here(GROOVE_PANEL_FILE, 1), t.textParam, t);
 
     // QNT — the editing aid, not a stored setting.
     const int qntY = panelY(GROOVE_PANEL_QNT);
@@ -113,7 +102,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     draw_cursor_cell(c, groove_quantize_label(s.quantize), x + GROOVE_VALUE_X, qntY,
                      here(GROOVE_PANEL_QNT, 0), t.textValue, t);
 
-    // SWG — read-only, and it reports on the group the TICK cursor is in, not the panel cursor.
+    // SWG — read-only, for the tick cursor's group.
     const int swgY = panelY(GROOVE_PANEL_SWG);
     c.draw_text("SWG", x + GROOVE_PANEL_X, swgY,
                 here(GROOVE_PANEL_SWG, 0) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
@@ -121,7 +110,7 @@ void GrooveModule::draw(Canvas& c, int x, int y, const GrooveState& s) const {
     draw_cursor_cell(c, swing_text(groove_swing_tenths(groove, s.cursorRow, s.quantize)),
                      x + GROOVE_VALUE_X, swgY, here(GROOVE_PANEL_SWG, 0), t.textParam, t);
 
-    // PPQ — the ruler: how many of the tick column's tics make a quarter note.
+    // PPQ — tick column tics per quarter note.
     const int ppqY = panelY(GROOVE_PANEL_PPQ);
     c.draw_text("PPQ", x + GROOVE_PANEL_X, ppqY,
                 here(GROOVE_PANEL_PPQ, 0) ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
@@ -134,32 +123,29 @@ CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
     if (s.cursorColumn == GROOVE_COL_PANEL) {
         switch (s.panelRow) {
             case GROOVE_PANEL_NAME: {
-                // The factory list, cycled the way SCALE's name row cycles the scale bank.
+                // The factory list, cycled as SCALE's name row.
                 CursorContext c = cc::index_cycle(songcore::groove_bank_cycle_index(s.groove),
                                                   static_cast<int>(songcore::groove_bank().size()));
-                c.defaultValue = 0;  // A+B: back to STRAIGHT, which is also a new groove's own steps
+                c.defaultValue = 0;  // A+B: STRAIGHT, a new groove's own steps
                 return c;
             }
             case GROOVE_PANEL_QNT:
                 return cc::index_cycle(s.quantize, GROOVE_QUANTIZE_COUNT);
             case GROOVE_PANEL_PPQ: {
-                // ⚠️ A nibble, because a nibble CLAMPS: a list cell wraps, and 96 wrapping round to
-                // 24 would quarter every step in one press.
+                // ⚠️ A nibble, because it clamps: 96 wrapping to 24 would quarter every step.
                 CursorContext c = cc::hex_nibble(groove_ruler_index(s.groove), /*def=*/1);
                 c.maxValue  = songcore::GROOVE_RULER_COUNT - 1;
                 c.largeStep = c.smallStep;
                 return c;
             }
             default:
-                // ⚠️ SAVE and LOAD are READ-ONLY rather than absent: they answer a bare A, and a
-                // `none()` would also switch off the cursor box that says which one you are on. SWG
-                // is a readout and takes the same context for the same reason.
+                // ⚠️ Read-only, not absent: SAVE/LOAD answer a bare A, and `none()` would hide the
+                // cursor box. SWG, a readout, likewise.
                 return cc::read_only();
         }
     }
 
-    // Column 0 is the row-number gutter. Unreachable in the app — no sideways move stops there — but
-    // it must still answer, and what it answers is "not a cell".
+    // Column 0, the gutter: unreachable, but it must answer "not a cell".
     if (s.cursorColumn != GROOVE_COL_TICK) return cc::read_only();
 
     const int tickValue = s.groove.steps[static_cast<size_t>(s.cursorRow)];
@@ -170,9 +156,8 @@ CursorContext GrooveModule::cursor_context(const GrooveState& s) const {
                                    /*can_delete=*/tickValue != -1,
                                    /*can_insert=*/tickValue == -1);
 
-    // ⚠️ ARMED, AN EMPTY CELL STILL REPORTS EMPTY, so a bare A lays a step down at the neutral length
-    // as everywhere else. A blank partner is filled in by the edit, which fills the whole group.
-    // Armed, both A axes move the pair by one tick (one named swing rung); raw ±16 is what OFF is for.
+    // ⚠️ Armed, an empty cell still reports empty, so A lays down a neutral step (the edit fills
+    // the group). Armed, both A axes move the pair one tick; raw ±16 is what OFF is for.
     if (s.quantize != 0) c.largeStep = c.smallStep;
     return c;
 }
@@ -205,10 +190,8 @@ GrooveInputResult GrooveModule::handle_input(songcore::Groove& groove, const Gro
     switch (action.type) {
         case ActionType::SET_VALUE:
             if (s.quantize != 0) {
-                // ⚠️ THE DELTA IS DERIVED, NOT PASSED. The generic step already wrapped FF→00 for us,
-                // so the difference is taken the short way round the byte; the paired rule then
-                // refuses anything that would leave 0..255 rather than letting a wrap through.
-                // `step` is never the end marker here: an empty cell answers A with an INSERT.
+                // ⚠️ The delta is derived the short way round the byte (the generic step already
+                // wrapped FF→00); the paired rule refuses anything outside 0..255.
                 const int delta = ((action.value - step + 128) & 0xFF) - 128;
                 r.modified      = groove_apply_paired(groove, s.cursorRow, delta, s.quantize);
                 return r;

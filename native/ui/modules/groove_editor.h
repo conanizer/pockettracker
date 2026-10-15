@@ -1,24 +1,12 @@
 #pragma once
 
-// ─── GROOVE EDITOR ───────────────────────────────────────────────────────────────────────────────
-//
-// A 16-step pattern of tick counts: how long each phrase step lasts, which is how swing and shuffle
-// are written.
-//
-//   −1    end of pattern ("--") — the groove loops back to step 0 from here
-//   0x00  skip: the phrase row is not triggered and takes no time
-//   0x01+ that step lasts this many ticks (0x0C = 12 = one plain step, in the default ruler)
-//
-// The tick rows own the left of the screen. A PANEL sits to their right, on the first five data rows:
-// the preset name, SAVE/LOAD, the quantize pointer, the swing percentage and the ruler (PPQ). It is
-// a table the cursor walks — see `groove_panel_cell_count`.
-//
-// ⚠️ TWO ROW CURSORS, AND THE SECOND ONE IS NOT REDUNDANT. `cursorRow` is the tick row and
-// `panelRow` is the panel row, both live at once. The swing percentage reports on the group the TICK
-// cursor is in, so walking into the panel to change QNT must not move the number QNT governs.
-//
-// No playback marker and no selection, so no row background. Rows are laid out from a
-// `dataStartY` that already includes TEXT_PADDING, so `draw_cell` gets the y unadjusted.
+// The groove editor: 16 steps of tick counts — how long each phrase step lasts (swing, shuffle).
+//   −1    end of pattern ("--"): loops back to step 0
+//   0x00  skip: the row is not triggered and takes no time
+//   0x01+ the step lasts this many ticks (0x0C = one plain step in the default ruler)
+// A panel right of the ticks holds name, SAVE/LOAD, QNT, swing and PPQ.
+// ⚠️ Two row cursors, both live: the swing readout reports the tick cursor's group, so walking into
+// the panel to change QNT must not move it.
 
 #include <string>
 
@@ -30,11 +18,10 @@
 
 namespace pt::ui {
 
-/** The two cursor columns: the tick grid, and the panel beside it. Column 0 is the row number. */
+// Column 0 is the row number.
 inline constexpr int GROOVE_COL_TICK  = 1;
 inline constexpr int GROOVE_COL_PANEL = 2;
 
-/** The panel's rows. */
 inline constexpr int GROOVE_PANEL_NAME = 0;
 inline constexpr int GROOVE_PANEL_FILE = 1;  // SAVE · LOAD
 inline constexpr int GROOVE_PANEL_QNT  = 2;
@@ -42,7 +29,7 @@ inline constexpr int GROOVE_PANEL_SWG  = 3;
 inline constexpr int GROOVE_PANEL_PPQ  = 4;  // the ruler the tick column is written in
 inline constexpr int GROOVE_PANEL_ROWS = 5;
 
-/** The PPQ cell's cycle: 24 · 48 · 96 to the quarter note, in `songcore::GROOVE_RULERS` order. */
+// The PPQ cycle (24 · 48 · 96), in `songcore::GROOVE_RULERS` order.
 inline int groove_ruler_index(const songcore::Groove& g) {
     const int ruler = songcore::groove_ticks_per_step(g);
     for (int i = 0; i < songcore::GROOVE_RULER_COUNT; ++i)
@@ -50,12 +37,12 @@ inline int groove_ruler_index(const songcore::Groove& g) {
     return 1;
 }
 
-/** How many cells a panel row holds. The FILE row is the only one with two. */
+// Only the FILE row has two cells.
 inline int groove_panel_cell_count(int panel_row) {
     return panel_row == GROOVE_PANEL_FILE ? 2 : 1;
 }
 
-/** What a bare A does in the panel. The dispatcher's arm, so the geometry stays in one file. */
+// What a bare A does in the panel; the geometry stays in this file.
 enum class GrooveFileAction { NONE, SAVE, LOAD };
 
 inline GrooveFileAction groove_file_action(int panel_row, int panel_column) {
@@ -64,13 +51,8 @@ inline GrooveFileAction groove_file_action(int panel_row, int panel_column) {
 }
 
 // ─── The quantize pointer ────────────────────────────────────────────────────────────────────────
-//
-// NOT a setting: it tells A+DPAD how to edit a step, and resets to OFF on app start and on loading a
-// project. Nothing about it is written to the song or to settings.
-//
-// ⚠️ OFF IS IN THE LIST BECAUSE RAW EDITING HAS TO STAY REACHABLE. Armed, every edit moves a PAIR, so
-// without OFF no step could be lengthened on its own and `00` (skip this row) would be unreachable —
-// its partner would have to absorb twelve ticks in one press.
+// Not a setting: how A+DPAD edits a step; OFF on start and on load. Armed, every edit moves a pair.
+// ⚠️ OFF keeps raw editing reachable — without it no step could change alone, and `00` could not be set.
 
 inline constexpr int GROOVE_QUANTIZE_COUNT = 5;  // OFF · 1/16 · 1/8 · 1/4 · 1/2
 
@@ -84,13 +66,8 @@ inline const char* groove_quantize_label(int quantize) {
     }
 }
 
-/**
- * The partner distance N: how far apart the two steps of an edit are. The group is 2N steps.
- *
- * ⚠️ OFF ANSWERS 1, NOT 0. Nothing pairs when OFF — the caller checks that separately — but the swing
- * percentage still has to report on something, and reading as 1/16 is the useful answer whether or
- * not the editing aid is armed.
- */
+// The partner distance N; the group is 2N steps. ⚠️ OFF answers 1: the swing readout still needs a
+// group.
 inline int groove_partner_distance(int quantize) {
     switch (quantize) {
         case 2:  return 2;   // 1/8
@@ -100,7 +77,7 @@ inline int groove_partner_distance(int quantize) {
     }
 }
 
-/** The step a paired edit moves the other way: N along, wrapped inside this step's own group. */
+// The step a paired edit moves the other way: N along, wrapped in the group.
 inline int groove_partner_step(int step, int quantize) {
     const int n     = groove_partner_distance(quantize);
     const int group = 2 * n;
@@ -108,16 +85,8 @@ inline int groove_partner_step(int step, int quantize) {
     return start + ((step - start + n) % group);
 }
 
-/**
- * The swing percentage for the group `step` sits in — the first half's share of the whole group — in
- * TENTHS of a percent. Straight is 500; classic triplet swing is 667.
- *
- * ⚠️ The tenth stops the readout contradicting the preset name beside it: the named rungs round both
- * ways (66 down, 71 up), so a whole-number 67 beside "16TH 66" would read as a bug.
- *
- * A blank step reads as the neutral length, so an empty groove reports 500 rather than dividing by
- * zero.
- */
+// The group's first-half share, in tenths of a percent (straight 500, triplet 667). Tenths, so it
+// does not contradict the preset names, which round both ways. Blanks read as the neutral length.
 inline int groove_swing_tenths(const songcore::Groove& g, int step, int quantize) {
     const int n     = groove_partner_distance(quantize);
     const int group = 2 * n;
@@ -135,17 +104,9 @@ inline int groove_swing_tenths(const songcore::Groove& g, int step, int quantize
     return (first * 2000 + total) / (total * 2);  // round(1000 × first / total), integer-only
 }
 
-/**
- * Move `step` by `delta` ticks and its partner the other way, so the group's total — and therefore
- * the bar line at the end of it — does not move. Every blank step in the group is materialized to the
- * neutral length first, which can extend the groove's active length to the end of the group.
- *
- * ⚠️ REFUSED WHOLE IF EITHER SIDE WOULD LEAVE 0..255, and nothing is materialized either. A
- * half-applied edit breaks the group's total, which is the one invariant this gesture exists to hold.
- * `0` is a real value here (skip the row), so the floor is a floor and not a sentinel.
- *
- * Returns false when it refused.
- */
+// Move `step` by `delta` and its partner the other way, so the group's total (the bar line) holds.
+// Blanks in the group are materialized first. ⚠️ Refused whole (false, nothing changed) if either
+// side would leave 0..255 — a half edit breaks the total.
 inline bool groove_apply_paired(songcore::Groove& g, int step, int delta, int quantize) {
     const int partner = groove_partner_step(step, quantize);
     if (partner == step) return false;
@@ -197,10 +158,7 @@ public:
 
     CursorContext cursor_context(const GrooveState& s) const;
 
-    /**
-     * ⚠️ `groove` and `s.groove` are the SAME object — the state carries it const for drawing and the
-     * edit needs it mutable. Handing both in keeps the module a pure function of what is on screen.
-     */
+    // ⚠️ `groove` and `s.groove` are the same object: const for the draw, mutable for the edit.
     GrooveInputResult handle_input(songcore::Groove& groove, const GrooveState& s,
                                    const InputAction& action) const;
 };

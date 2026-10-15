@@ -8,7 +8,7 @@ using songcore::Track;
 
 namespace {
 
-/** How much of the project name the title row shows, in columns; the "SONG: " prefix is extra. */
+// Columns of the project name in the title; "SONG: " is extra.
 constexpr int TITLE_MAX_CHARS = 20;
 
 }  // namespace
@@ -18,8 +18,7 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // 56 px per track: a marker column ahead of each of eight cells. Track 7 ends at 490, inside the
-    // editor clip at 499. The step gutter takes the same pitch so track 0's marker clears the row number.
+    // 56 px per track: a marker column ahead of each cell. The step gutter takes the same pitch.
     constexpr int TRACK_PITCH = 30 + 26;
     int       colX  = x + 10;
     const int stepX = colX; colX += TRACK_PITCH;
@@ -27,15 +26,12 @@ void SongEditorModule::draw(Canvas& c, int x, int y, const SongEditorState& s) c
     for (int i = 0; i < 8; ++i) { trackColumns[i] = colX; colX += TRACK_PITCH; }
 
     int rowY = y + TEXT_PADDING;
-    // The status overlay (SAVED / LOADED / …) is drawn by the layout, not here.
-    // The title carries the transport mode: LIVE changes what START means here, and a hidden mode
-    // surprises you mid-performance. Both words are four glyphs, so the name never shifts.
+    // The title carries the transport mode — LIVE changes what START does. Both words are four glyphs.
     c.draw_text(std::string(s.liveMode ? "LIVE: " : "SONG: ") +
                     Canvas::clip_text(s.project.name, TITLE_MAX_CHARS),
                 x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // The track number lights for the cursor's track; `cursorTrack` is 1-based, so it IS the header's
-    // column index.
+    // `cursorTrack` is 1-based, so it is the header's column index.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     for (int trackId = 0; trackId < 8; ++trackId) {
         c.draw_text(std::to_string(trackId + 1), trackColumns[trackId], rowY,
@@ -59,12 +55,10 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
 
     const int textY = dataRowY + TEXT_PADDING;
 
-    // The eight track cells, left to right — RowCells joins a selected run into one block across
-    // the gutters, and it can only do that if the cells arrive in the order they are laid out.
+    // Left to right: RowCells joins a selected run across the gutters only in layout order.
     RowCells cells(c, textY, t);
 
-    // No cell background: column 0 is a gutter the cursor cannot reach (cursorTrack starts at 1). It
-    // still lights on the cursor row — the row number is what says which of 256 rows is being edited.
+    // Column 0 is a gutter the cursor cannot reach; its number still lights on the cursor row.
     c.draw_text(hex2(absolute_row), stepX, textY,
                 (absolute_row == s.cursorRow) ? cursor_mark_ink(t)
                 : (absolute_row % 4 == 0)     ? t.textParam
@@ -73,7 +67,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
 
     for (int trackId = 0; trackId < 8; ++trackId) {
         const Track& track = s.project.tracks[static_cast<size_t>(trackId)];
-        // chainRefs grows on demand; a row past its end is empty, not out of bounds.
+        // chainRefs grows on demand; a row past its end is empty.
         const int chainId = (absolute_row < static_cast<int>(track.chainRefs.size()))
                                 ? track.chainRefs[static_cast<size_t>(absolute_row)]
                                 : -1;
@@ -81,20 +75,15 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const bool isCursor   = (absolute_row == s.cursorRow) && (trackId == s.cursorTrack - 1);
         const bool isSelected = s.selectionMode && s.isCellSelected(absolute_row, trackId + 1);
 
-        // A track making no sound draws its chain numbers dim, so the grid reads as what you hear. The
-        // predicate is audibility, not `mute`, so SOLO dims the other seven for free. Cursor and
-        // selection colours still win inside the painter.
+        // A track making no sound draws dim, so SOLO dims the other seven for free.
         const Argb value_color = track_audible(s.project, trackId) ? t.textValue : t.textEmpty;
 
         cells.cell(chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], isCursor, isSelected,
                    /*is_empty=*/chainId == -1, value_color);
 
-        // This track's own marker: a stopped track (or one only lending its number to an auditioned
-        // PHRASE) answers −1 and gets none.
-        // ⚠️ ONE GLYPH IN ONE COLUMN, chosen before drawing — `draw_text` does not erase, so `_` over
-        // `>` reads as neither.
-        // ⚠️ A LAUNCH is drawn on the row it will jump to; a STOP has no target row, so it is drawn
-        // where the channel is now, in place of the `>` it is about to end.
+        // This track's marker; a stopped track answers −1. ⚠️ One glyph chosen before drawing —
+        // `draw_text` does not erase. A LAUNCH draws on the row it will jump to; a STOP where the
+        // channel is now.
         const int  markerX     = trackColumns[trackId] - CHAR_W;
         const bool playingHere = s.playheads[trackId].songRow == absolute_row;
         const LiveQueue& q     = s.liveQueue[trackId];
@@ -126,13 +115,12 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
 
     Track& track = project.tracks[static_cast<size_t>(trackIndex)];
 
-    // The list only grows to reach the row being written — an edit at row 200 does not materialise
-    // rows 0..199 as data, it materialises them as the empties they already were.
+    // The list grows only to the row written; the rows before it stay the empties they were.
     const auto grow_to_cursor = [&] {
         while (static_cast<int>(track.chainRefs.size()) <= cursor_row) track.chainRefs.push_back(-1);
     };
 
-    // A row past the end of the list reads as empty, which is what it is.
+    // Past the end reads as empty.
     const auto ref_at_cursor = [&] {
         return cursor_row < static_cast<int>(track.chainRefs.size())
                    ? track.chainRefs[static_cast<size_t>(cursor_row)]
@@ -149,7 +137,7 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
             break;
 
         case ActionType::DELETE:
-            // Only touches a row the list actually has.
+            // Only touches a row the list has.
             if (cursor_row < static_cast<int>(track.chainRefs.size()))
                 track.chainRefs[static_cast<size_t>(cursor_row)] = -1;
             break;
@@ -165,9 +153,8 @@ SongInputResult SongEditorModule::handle_input(songcore::Project& project, int c
             break;
     }
 
-    // ⚠️ `modified` IS A BEFORE/AFTER ANSWER, NOT "AN ACTION WAS DISPATCHED". An empty chain-ref cell
-    // still reports `canDelete` (`cc::chain_ref` hands `hex_byte` a 0 for the −1), so A+B on it writes
-    // −1 over −1; counting that as an edit means a phantom unsaved-work prompt and RECOVER WORK?.
+    // ⚠️ `modified` compares before and after: A+B on an empty ref writes −1 over −1, and counting
+    // that is a phantom unsaved-work prompt.
     r.modified = (ref_at_cursor() != before);
     return r;
 }

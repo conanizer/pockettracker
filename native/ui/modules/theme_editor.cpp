@@ -10,10 +10,8 @@ namespace pt::ui {
 
 namespace {
 
-/** The title line's height plus 14px of air under it, from the panel's top. */
 constexpr int ROW_AREA_TOP = TEXT_PADDING + ROW_HEIGHT + 14;   // 3 + 21 + 14 = 38
 
-/** THEME and RANDOMIZE on top; the rest are colours. */
 int total_rows() { return THEME_FIRST_COLOR_ROW + static_cast<int>(theme_color_rows().size()); }
 
 }  // namespace
@@ -37,9 +35,8 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
 
     c.draw_text("THEME EDIT", x + NAME_COL_X, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // ⚠️ The message takes the accent, never red: red here means something is about to be destroyed.
-    // A failed roll outranks the cursor's own reading until something else happens.
-    // ⚠️ Seventeen characters: "BLENDS " + `MTR BORDER` (the longest label) is exactly the budget.
+    // ⚠️ The accent, never red (red means destruction). A failed roll outranks the cursor's reading.
+    // Seventeen characters: "BLENDS " + `MTR BORDER` exactly.
     constexpr int MSG_X    = NAME_COL_X + 11 * CHAR_W;   // past "THEME EDIT" and a space
     constexpr int MSG_COLS = (WIDTH - 10 - MSG_X) / CHAR_W;
 
@@ -53,8 +50,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
                     cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
     }
 
-    // The colour list is taller than the panel, so the rows below the title scroll to keep the cursor
-    // in view — the same idea as the song screen and the file browser.
+    // The rows below the title scroll to keep the cursor in view.
     const int visible = visible_row_count();
     const int scroll  = scroll_offset(es.cursorRow);
 
@@ -65,8 +61,8 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         return y + ROW_AREA_TOP + (logical - scroll) * ROW_HEIGHT;
     };
 
-    // The cursor row's other channels are `textValue` (readable while dialling), other rows
-    // `textParam`. ⚠️ The cursor's own channel is a cell, inked by the painter.
+    // The cursor row's other channels are `textValue`, other rows `textParam`; the cursor's own
+    // channel is inked by the painter.
     const auto value_color = [&](bool on_row, int /*channel*/) {
         return on_row ? t.textValue : t.textParam;
     };
@@ -83,8 +79,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         c.draw_text("THEME", x + NAME_COL_X, ty,
                     on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-        // ⚠️ Clipped to the gap before SAVE (derived from the two X constants): a user-typed name
-        // would otherwise paint over the cells this screen is exited through.
+        // ⚠️ Clipped before SAVE, so a typed name cannot cover the cells.
         constexpr int NAME_COLS = (SAVE_LABEL_X - THEME_NAME_X) / CHAR_W;
         draw_cursor_cell(c, Canvas::clip_text(t.name, NAME_COLS), x + THEME_NAME_X, ty,
                          on_cell(on_row, 0), value_color(on_row, 0), t);
@@ -103,8 +98,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         c.draw_text("RANDOMIZE", x + NAME_COL_X, ty,
                     on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-        // ⭐ The scheme is a CELL rather than a hidden mode so that the row says, before anything is
-        // rolled, which relationship the hues will have.
+        // The scheme is a cell, so the row says which hue relationship a roll will give.
         draw_cursor_cell(c, theme_scheme_label(es.scheme), x + SCHEME_LABEL_X, ty,
                          on_cell(on_row, 0), value_color(on_row, 0), t);
         draw_cursor_cell(c, "ROLL", x + ROLL_LABEL_X, ty, on_cell(on_row, 1),
@@ -114,10 +108,9 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
     // ── The colour rows ──────────────────────────────────────────────────────────────────────────
     const auto& rows = theme_color_rows();
 
-    // ⚠️ One validator pass for the whole panel, not one per row every frame.
-    // ⚠️⚠️ A CONTRAST MISS MARKS THE INK, NEVER THE GROUND: one dim text role lands on BACKGROUND,
-    // ROW 4TH, VIZ BG and MTR BG alike, and none of those is what anyone would change. The ground is
-    // named in the message instead. A separation or distinctness miss is symmetric and marks both.
+    // One validator pass for the whole panel. ⚠️ A contrast miss marks the ink, never the ground (one
+    // text role sits on four grounds); the ground is named in the message. A separation or
+    // distinctness miss marks both.
     std::vector<bool> clash(rows.size(), false);
     for (const ThemeViolation& v : theme_violations(t, /*generator=*/false)) {
         const bool symmetric = (v.rule->kind != RuleKind::Contrast);
@@ -140,8 +133,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         c.draw_text(row.label, x + NAME_COL_X, ty,
                     on_row ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING, FONT_SCALE);
 
-        // ⚠️ One character, two facts, and the lock wins: a locked row is a colour the user chose to
-        // keep, so its clash is not flagged.
+        // One character, two facts; the lock wins — a locked colour's clash is not flagged.
         if (es.locks.locked(static_cast<int>(i))) {
             c.draw_text("*", x + WARN_COL_X, ty, cursor_mark_ink(t), CHAR_SPACING, FONT_SCALE);
         } else if (clash[i]) {
@@ -156,7 +148,7 @@ void ThemeEditorModule::draw(Canvas& c, int x, int y, const ThemeState& s) const
         draw_cursor_cell(c, hex2(g), x + G_COL_X, ty, on_cell(on_row, 1), value_color(on_row, 1), t);
         draw_cursor_cell(c, hex2(b), x + B_COL_X, ty, on_cell(on_row, 2), value_color(on_row, 2), t);
 
-        // The swatch, drawn in the colour itself — the R/G/B columns are unusable without it.
+        // The swatch, in the colour itself.
         c.fill_rect(x + SWATCH_X, ry, SWATCH_W, ROW_HEIGHT, color);
     }
 }

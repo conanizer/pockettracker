@@ -1,18 +1,9 @@
 #pragma once
 
-// ─── EFFECTS ─────────────────────────────────────────────────────────────────────────────────────
-//
-// The master-bus FX selector, the reverb's and the delay's controls, and the two input EQ slots.
-// With MIXER (which owns the send levels into these buses) it is the project's global audio state.
-//
-// A FORM, like INSTRUMENT: the cursor walks EDITABLE cells, the screen draws those plus headers and
-// blank lines, and `effects_row_layout.h` maps one onto the other — so a header can be inserted
-// without renumbering cursor rows, and the highlight and a cell's column both come from that table.
-//
-// TIME reads as a hex byte or a note division ("1/8T") depending on `delaySync`; A toggles which.
-//
-// Each send opens with a PRESET line — its name, SAVE, LOAD — laid out like the SCALE screen's name row
-// (ui/fx_preset_bank.h for the name, ui/fx_preset_io.h for the file).
+// EFFECTS: the master FX type, the reverb and delay, and their input EQ slots (MIXER owns the send
+// levels). A form: the cursor walks editable cells and `effects_row_layout.h` places them among the
+// headers. TIME reads as a byte or a note division per `delaySync`. Each send opens with a preset line
+// (name, SAVE, LOAD), laid out like SCALE's name row.
 
 #include <string>
 #include <vector>
@@ -32,14 +23,11 @@ struct EffectState {
     Theme theme     = theme_classic();
 };
 
-/**
- * THE SEND EDITOR: the reverb's or the delay's section in a box over INSTRUMENT, INST.POOL or MIXER,
- * raised from a REV or DEL cell, so a send is dialled without leaving the sound that feeds it.
- * ⚠️ A modal — `currentScreen` still names the screen underneath.
- */
+// The send editor: one send's section in a box over INSTRUMENT, INST.POOL or MIXER, raised from a
+// REV or DEL cell. ⚠️ A modal — `currentScreen` still names the screen underneath.
 struct SendEditorState {
     bool isOpen    = false;
-    int  cursorRow = 0;   // an EffectsRow; its section is the one drawn, and the cursor never leaves it
+    int  cursorRow = 0;   // an EffectsRow, never leaving the section drawn
 };
 
 struct EffectInputResult {
@@ -51,7 +39,7 @@ public:
     static constexpr int WIDTH  = 620;
     static constexpr int HEIGHT = 392;
 
-    // The editable rows, named. ⚠️ The values live in effects_row_layout.h: append, never renumber.
+    // ⚠️ The values live in effects_row_layout.h: append, never renumber.
     static constexpr int ROW_MASTER_TYPE = static_cast<int>(EffectsRow::MASTER_TYPE);  // OTT / DUST
     static constexpr int ROW_REV_DECAY   = static_cast<int>(EffectsRow::REV_DECAY);    // the tail's length
     static constexpr int ROW_REV_DAMP    = static_cast<int>(EffectsRow::REV_DAMP);
@@ -76,26 +64,21 @@ public:
     static constexpr int ROW_DLY_LOAD    = static_cast<int>(EffectsRow::DLY_LOAD);
     static constexpr int MAX_CURSOR_ROW  = EFFECTS_ROW_COUNT - 1;
 
-    /** The sync subdivisions, in the order kDelaySyncBeats[] has them in delay-module.h. */
+    // In delay-module.h's kDelaySyncBeats[] order.
     static const std::vector<std::string>& delay_sync_names();
 
     void draw(Canvas& c, int x, int y, const EffectState& s) const;
 
     CursorContext cursor_context(const EffectState& s) const;
 
-    /**
-     * What the row under the cursor is CALLED, for MIDI learn. The rows that pick a PRESET or a MODE
-     * — the master FX type, the two EQ slots, the two preset lines, ALGO, PONG — decline: a knob
-     * sweeping a list of reverb algorithms is not a parameter, it is a page turn.
-     */
+    // For MIDI learn. Preset and mode rows decline: a knob turning pages is not a parameter.
     songcore::MapTarget map_target(const EffectState& s) const;
 
     EffectInputResult handle_input(songcore::Project& project, int cursor_row,
                                    const InputAction& action) const;
 };
 
-/** Paint the send editor's box over the finished frame: the section's name, then its cells as EFFECTS
- *  draws them. No-op when it is not open. */
+// The send editor's box over the finished frame; no-op when closed.
 void draw_send_editor(Canvas& c, const SendEditorState& s, const songcore::Project& project,
                       const Theme& t);
 

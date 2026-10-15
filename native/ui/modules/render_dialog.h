@@ -1,21 +1,13 @@
 #pragma once
 
-// ─── The RENDER dialog ───────────────────────────────────────────────────────────────────────────
-//
-// PROJECT → EXPORT → MIX or STEMS raises this instead of rendering on the spot: four rows that say
-// WHICH rows of the song go into the file, and how many times over.
-//
-//   SONG START  the first song row of the render
-//   SONG END    the last, or AUTO — follow SONG START's section to its end
-//   REPEAT      how many times the range is played into the file, or OFF (once)
-//   RENDER      A fires it; the row carries the percentage while it runs
-//
-// ⚠️ It exists because a block of song rows LOOPS FOR EVER (scheduler.h `song_cell_plays`): a project
-// can hold several unrelated sketches, and the range is what makes one of them exportable at all.
-//
-// The output is not a row: which EXPORT button opened the dialog picks stereo WAV or stems.
-//
-// A modal with the confirm dialog's full-canvas dim; a render takes the machine over while it runs.
+// The RENDER dialog, raised by EXPORT → MIX or STEMS: which song rows go into the file, and how
+// many times.
+//   SONG START  the first song row
+//   SONG END    the last, or AUTO — to the end of SONG START's section
+//   REPEAT      times the range plays, or OFF (once)
+//   RENDER      A fires it; the row shows the percentage
+// A block of song rows loops for ever, so the range is what makes one sketch exportable. A modal
+// with the confirm dialog's dim.
 
 #include <string>
 
@@ -25,7 +17,7 @@
 
 namespace pt::ui {
 
-/** The four rows, top to bottom. ⚠️ A row's number is its identity — append, never insert. */
+// ⚠️ A row's number is its identity — append, never insert.
 enum class RenderRow {
     SONG_START = 0,
     SONG_END   = 1,
@@ -34,7 +26,7 @@ enum class RenderRow {
     COUNT      = 4,
 };
 
-/** OFF, then 2..16. ⚠️ There is no "1": that IS off, and two names for it is two ways to read it. */
+// OFF, then 2..16. No "1": that is OFF.
 inline constexpr int RENDER_REPEAT_MAX = 16;
 
 struct RenderDialogState {
@@ -45,29 +37,21 @@ struct RenderDialogState {
 
     int cursorRow = 0;   // RenderRow
 
-    /** The first song row of the render. Set from the SONG cursor's section each time it opens. */
+    // Set from the SONG cursor's section each time it opens.
     int startRow = 0;
 
-    /**
-     * The last song row, or **−1 = AUTO**: resolve to the end of the section `startRow` is in, every
-     * time the render fires.
-     *
-     * ⚠️ AUTO IS A RULE, NOT A REMEMBERED NUMBER — a stored number would go stale when a row is added
-     * to the part, and the export would stop short of what is on screen.
-     */
+    // The last song row, or −1 = AUTO. ⚠️ AUTO is a rule resolved at each render, never a stored
+    // number — that would go stale when the part grows.
     int endRow = -1;
 
-    /** How many times the range is played into the file. 1 = OFF. */
+    // 1 = OFF.
     int repeat = 1;
 
     bool is_on(RenderRow row) const { return cursorRow == static_cast<int>(row); }
 };
 
-/**
- * The row range this dialog will hand the renderer — AUTO resolved against the project as it stands.
- * ⭐ Asked here by the draw, by the fire and by SONG END's own editing clamp, so none of them can
- * disagree about what AUTO means.
- */
+// The range handed to the renderer, AUTO resolved. The draw, the fire and SONG END's clamp all ask
+// here, so they agree.
 int render_dialog_end_row(const RenderDialogState& s, const songcore::Project& project);
 
 void draw_render_dialog(Canvas& c, const RenderDialogState& s, const songcore::Project& project,

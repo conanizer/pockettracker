@@ -1,32 +1,13 @@
 #pragma once
 
-// ─── THE SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────
+// The sample editor: trim, slice, normalise, pitch to the grid, chop into one-shots. Full-screen
+// (640×480): a waveform needs the width. All DSP is in the engine (`native/sample-editor.cpp`); this
+// draws and walks the cursor.
 //
-// Where a sample becomes an instrument: trim it, slice it, normalise it, pitch it to the grid, chop
-// it into a folder of one-shots.
-//
-// ── NO DSP HERE ──────────────────────────────────────────────────────────────────────────────────
-//
-// Every operation (crop … undo, the FX row, pitch, stretch, transient detection) lives in the
-// engine: `native/sample-editor.cpp` and `native/transient-detector.cpp`. This module draws the
-// waveform and walks the cursor; the dispatcher turns a button into one of those calls.
-//
-// ── FULL-SCREEN, like the file browser ──────────────────────────────────────────────────────────
-//
-// 640×480 with no oscilloscope strip and no right bar: a waveform needs the width.
-//
-// ── THE ROW MAP IS SPARSE, and the gaps are the layout ──────────────────────────────────────────
-//
-// The cursor does not walk 0..19. It walks 1, 2, 8, 10, 11, 13, 14, 16, 18, 19 — rows 3–7 are the
-// WAVEFORM (which the cursor enters as a unit, not as five rows), and 9/12/15/17 are spacers that
-// exist only to give the sections air. Which is why `row_above`/`row_below` are a lookup table rather
-// than `row ± 1`, and why they take the SLICE METHOD: with slicing OFF, row 11 (the slice detail) is
-// not drawn and must not be reachable, so DOWN from 10 skips straight to 13.
-//
-// ⚠️ **Rows 3..8 are the SELECTION, and their D-pad does not move the cursor — it drags an edge.**
-// A+UP/DOWN nudges the selection edge coarsely (±totalFrames/16), A+LEFT/RIGHT finely (±/256), both
-// scaled by the zoom and snapped to a zero crossing (`snapEnabled`). That is why `cursor_context()`
-// answers `none()` for the whole range: there is no cell there to increment. The dispatcher handles it.
+// The row map is sparse: the cursor walks 1, 2, 8, 10, 11, 13, 14, 16, 18, 19 — rows 3–7 are the
+// waveform, 9/12/15/17 spacers. Row 11 is unreachable with slicing OFF.
+// ⚠️ On rows 3..8 the D-pad drags a selection edge (the dispatcher does it), so `cursor_context()`
+// answers `none()` there.
 
 #include <cstdint>
 #include <string>
@@ -39,28 +20,19 @@
 
 namespace pt::ui {
 
-/**
- * A slice boundary the user has moved or made: where it is, and where its METHOD had put it.
- *
- * ⚠️ `originFrame` is the boundary's IDENTITY: the list is sorted by `frame`, so an index is a
- * place on screen that changes as a boundary is dragged past its neighbours. A+B puts it back where
- * this says; −1 means MADE BY HAND — no computed position, so A+B removes it.
- */
+// A slice boundary the user has moved or made.
+// ⚠️ `originFrame` is its identity (the list is sorted by `frame`, so an index moves): A+B puts it
+// back there; −1 = made by hand, so A+B removes it.
 struct SliceMarker {
     int frame       = 0;
     int originFrame = -1;
 };
 
-/**
- * The TSTRETCH box's cells, in the order the cursor walks them. PREVIEW and APPLY share the last line.
- */
+// The TSTRETCH box's cells in cursor order. PREVIEW and APPLY share the last line.
 enum class StretchCell { DURATION, BPM, PITCH, GRAIN, PREVIEW, APPLY };
 
-/**
- * The editor's session state, kept in `AppState`: zoom, selection, transients and pending pitch are
- * facts about an editing session, not the project. The audio is in the ENGINE (only the 620 min/max
- * pairs are here); the name, path and slice markers reach the document only when saved.
- */
+// The editor's session state. The audio is in the engine (only the waveform's min/max pairs are
+// here); name, path and slice markers reach the document only when saved.
 struct SampleEditorState {
     int sampleId     = 0;
     int instrumentId = 0;
@@ -74,28 +46,26 @@ struct SampleEditorState {
     int         sampleRate  = 44100; // the FILE's rate, not the device's
     int         totalFrames = 0;
 
-    /** 620 (min, max) pairs — one per waveform pixel column. Refilled by the feed on zoom/scroll. */
+    // 620 (min, max) pairs, one per pixel column. Refilled by the feed on zoom/scroll.
     std::vector<float> waveformData;
 
     // ── Row 1: the view ──────────────────────────────────────────────────────────────────────────
     int  zoomLevel     = 0;      // 0 = 1×, 1 = 2×, … 4 = 16×
-    // 0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO. A session opens on STEREO whenever there IS a right
-    // channel — `init_sample_editor_state` sets it, because only that mode saves both (sample_edit.h).
+    // 0 = LEFT, 1 = RIGHT, 2 = STEREO, 3 = MONO. Opens on STEREO when there is a right channel —
+    // only that mode saves both.
     int  sourceMode    = 0;
     int  rateMode      = 0;      // 0 = HIGH, 1 = NORM, 2 = LOFI  (a DESTRUCTIVE decimation)
     bool hasStereoData = false;  // the loaded sample has a right channel
 
     // ── Row 2: the edit controls ─────────────────────────────────────────────────────────────────
-    /** A PENDING shift, in semitones — nothing is resampled until SAVE bakes it (`bake_pending_pitch`). */
+    // A pending shift in semitones; SAVE bakes it.
     int  pitchSemitones = 0;
     int  durationIndex  = 2;     // "1 BAR" — the target SYNC stretches/pitches to
-    // BIT: the depth the sample came in at (8/16/24/32), and the depth it is at now — never above it.
-    // A DESTRUCTIVE requantise derived with RATE from one cached original, and the depth SAVE writes.
-    // ⚠️ Not the instrument's CRUSH: this rounds once into the buffer (`applyRateAndBits`).
+    // BIT: the depth the sample came in at, and the depth now (never above it). A destructive
+    // requantise, and the depth SAVE writes. ⚠️ Not the instrument's CRUSH.
     int  sourceBitDepth = 16;
     int  bitDepth       = 16;
-    // Snap a dragged selection edge to the nearest zero crossing. ⚠️ It has NO CELL at the moment — BIT
-    // took its place on row 2 — so it stays at this default for every session.
+    // Snap a dragged edge to a zero crossing. ⚠️ Has no cell (BIT took its place), so always on.
     bool snapEnabled    = true;
 
     // ── The selection, in FRAMES (not the 0..255 the instrument stores) ──────────────────────────
@@ -106,54 +76,26 @@ struct SampleEditorState {
     int sliceMethod      = 2;   // 0 = TRANSIENT, 1 = DIVIDE, 2 = OFF, 3 = MANUAL
     int sliceSensitivity = 64;  // TRANSIENT: the detector's threshold
     int sliceDivisions   = 8;   // DIVIDE: cut into N equal parts
-    /**
-     * Row 11's cell: which SLICE, under every method. ⚠️ Slice 00's left edge is the sample's own
-     * start rather than a marker, so the boundary the cursor is on is the one BEFORE it —
-     * `slice_marker_index()`. Under MANUAL the index reaches one slice past the last real one; that
-     * slot is where the next boundary is made.
-     */
+    // Row 11: which slice, under every method. ⚠️ Slice 00's left edge is the sample start, not a
+    // marker (`slice_marker_index()`). Under MANUAL it reaches one past the last slice: the next one.
     int sliceIndex       = 0;
 
-    /**
-     * ⚠️ Kept for UNDO and the two SYNC ops, which clamp or rescale it; the slice rows read
-     * `effective_slice_position()` instead. Dropping it would change what UNDO restores.
-     */
+    // ⚠️ Kept for UNDO and the two SYNC ops; the slice rows read `effective_slice_position()`.
     int64_t slicePosition = 0;
 
-    /**
-     * The markers the FILE carries (its `cue ` chunk), snapshotted at open and CLEARED by a
-     * length-changing op (`refresh_sample_view`).
-     *
-     * ⚠️ This is what SLICE = OFF means, and what a save under OFF writes back — kept apart from
-     * the detector's output. ⭐ It is also where MANUAL starts.
-     *
-     * ⚠️ SORTED, UNIQUE and strictly inside the sample — `init_sample_editor_state` makes it so.
-     */
+    // The file's own markers (its `cue ` chunk), cleared by a length-changing op. What SLICE = OFF
+    // shows and saves back, and where MANUAL starts. Sorted, unique, strictly inside the sample.
     std::vector<int> fileMarkers;
 
-    /**
-     * The DETECTOR's output, TRANSIENT only: N markers → N+1 slices.
-     *
-     * ⚠️ EMPTY IS THE TRIGGER — the feed re-runs the detector whenever it finds TRANSIENT with no
-     * markers, which is the state a method or sensitivity change leaves behind (engine_feed.h), and a
-     * length-changing op too: emptied there, the detector comes back with the cuts in the NEW audio.
-     * DIVIDE carries no list at all; it computes its boundaries from `sliceDivisions` on every read.
-     */
+    // The detector's output, TRANSIENT only: N markers → N+1 slices.
+    // ⚠️ Empty is the trigger: the feed re-runs the detector when it finds TRANSIENT with none.
     std::vector<int> transientMarkers;
 
-    /**
-     * The boundaries the USER has placed or moved, sorted and strictly increasing. Starts as a copy
-     * of what the method shows (detected, arithmetic, or the file's own under MANUAL) and overrides
-     * it. ⚠️ A MANUAL entry's origin is −1, so A+B DELETES it rather than restoring.
-     *
-     * ⚠️ Live only while the stamp below matches (`manual_markers_live()`); EMPTY is a live value.
-     */
+    // The boundaries the user placed or moved, sorted, strictly increasing; they override the
+    // method's. ⚠️ Live only while the stamp below matches (`manual_markers_live()`); empty is live.
     std::vector<SliceMarker> manualMarkers;
 
-    /**
-     * The (method, parameter) `manualMarkers` was made under, so a method or setting change resets
-     * them by derivation; the feed clears a stale list once per frame, above every reader.
-     */
+    // The (method, parameter) `manualMarkers` was made under; a change makes them stale.
     int manualKeyMethod = -1;
     int manualKeyParam  = -1;
 
@@ -163,136 +105,97 @@ struct SampleEditorState {
     int fxEqSlot = -1;  // EQ: the slot in the 128-preset bank. −1 = none, drawn "--"
     int syncType = 0;   // when fxType == SYNC: 0 = RPITCH (resample), 1 = TSTRETCH (SOLA)
 
-    // ── The TSTRETCH box: SYNC's stretch settings, raised by A on the TSTRETCH cell ──────────────
-    //
-    // They belong to the session, so APPLY on the FX row stretches with them whether or not the box
-    // is up. Its DURATION and PITCH are row 2's own cells; a TSTRETCH bakes the pending pitch in.
+    // ── The TSTRETCH box (A on the TSTRETCH cell) ────────────────────────────────────────────────
+    // Session settings: APPLY on the FX row uses them whether or not the box is up.
     bool        stretchOpen    = false;
     StretchCell stretchCursor  = StretchCell::DURATION;
     int         stretchBpm     = 0;    // the tempo to fit to. ⚠️ 0 = the song's, read when it is needed
     int         stretchGrainMs = 40;   // the length of each piece, in milliseconds (sola-stretch.h)
 
     // ── Flags ────────────────────────────────────────────────────────────────────────────────────
-    /** An unsaved destructive edit is in the engine's buffer. B asks before dropping it. */
+    // An unsaved destructive edit is in the engine's buffer. B asks before dropping it.
     bool isModified       = false;
     bool showConfirmClose = false;
 
-    /** 0..1 while the sample is sounding, −1 when it is not. The playhead line over the waveform. */
+    // 0..1 while the sample sounds, −1 when not: the playhead line.
     float playbackPosition = -1.0f;
 
     // ── Derived ──────────────────────────────────────────────────────────────────────────────────
 
-    /** The parameter `manualMarkers` is keyed to: SENS under TRANSIENT, BY under DIVIDE, none else. */
+    // The parameter `manualMarkers` is keyed to: SENS under TRANSIENT, BY under DIVIDE.
     int manual_key_param() const;
 
-    /**
-     * True while the hand-placed markers still belong to the method and parameter now on screen.
-     * ⚠️ The stamp alone — an EMPTY `manualMarkers` can be live, and has to be.
-     */
+    // The hand-placed markers still belong to what is on screen. ⚠️ The stamp alone: empty can be live.
     bool manual_markers_live() const;
 
-    /**
-     * What the METHOD alone says: the file's markers under OFF and MANUAL, the detector's under
-     * TRANSIENT, nothing under DIVIDE (arithmetic). ⚠️ Read `marker_count()` / `marker_position()`
-     * instead — they are where a live hand-placed set overrides this.
-     */
+    // The method's own markers: the file's under OFF/MANUAL, the detector's under TRANSIENT, none
+    // under DIVIDE. ⚠️ Read through `marker_count()`/`marker_position()`, where hand-placed ones win.
     const std::vector<int>& method_markers() const;
 
-    /** How many boundaries are in force. ⚠️ **Every reader counts through here.** */
+    // How many boundaries are in force. ⚠️ Every reader counts through here.
     int marker_count() const;
 
-    /**
-     * Boundary `k`'s frame — its own once it has been placed, and otherwise the boundary it was BORN
-     * on: its predecessor's frame, or frame 0 below the first. ⚠️ Not clamped to the end of the sample;
-     * an unplaced boundary sits on the one to its left, which is what makes it a place to step away from.
-     */
+    // Boundary `k`'s frame; an unplaced one sits on its predecessor (or frame 0). Not clamped.
     int64_t marker_position(int k) const;
 
-    /**
-     * Which boundary the row-11 cursor is on: the marker at the LEFT edge of slice `sliceIndex`.
-     *
-     * ⚠️ −1 on slice 00, whose left edge is the sample's own start — there is no marker there and
-     * nothing to drag. ⚠️ And one PAST the end of the list on MANUAL's free slot, where the boundary
-     * has not been made yet; `marker_position` answers for that one with the boundary it would be born
-     * on, which is the place it is dragged away from.
-     */
+    // The marker at the left edge of slice `sliceIndex`. −1 on slice 00; one past the list on
+    // MANUAL's free slot.
     int slice_marker_index() const;
 
-    /**
-     * Row 11's top index: N markers make N + 1 slices, so N — except MANUAL reaches one further,
-     * the next boundary, which exists once moved off its left neighbour.
-     */
+    // Row 11's top index: N markers → N, MANUAL one further.
     int slice_index_ceiling() const;
 
-    /** (start, end) of slice `idx` under the current method. OFF = the whole sample. */
+    // (start, end) of slice `idx`. OFF = the whole sample.
     void slice_bounds(int idx, int64_t& start, int64_t& end) const;
 
-    /** What row 11's position column reads: the START of the slice under the cursor. */
+    // Row 11's position: the start of the slice under the cursor.
     int64_t effective_slice_position() const;
 
-    /**
-     * The visible frame window. At zoom 0 it is the whole sample; above that it is a window of
-     * `totalFrames >> zoom` frames CENTRED on whatever the cursor is pointing at — the selection edge
-     * under the cursor, or the active slice.
-     *
-     * A running playhead overrides that centre, so a zoomed-in view scrolls with the audio rather than
-     * sitting still while it leaves the window — but ONLY while the selection is too wide to fit. Once
-     * both edges are inside the window there is nothing off-screen to follow, and the view holds still.
-     */
+    // The visible frame window: the whole sample at zoom 0, else `totalFrames >> zoom` centred on
+    // what the cursor points at. A playhead takes the centre only while the selection does not fit.
     int64_t view_start() const;
     int64_t view_end() const;
 
-    /** "MM:SS.CC", scaled by the PENDING pitch shift — so DURATION previews what SAVE will bake. */
+    // "MM:SS.CC", scaled by the pending pitch — what SAVE will bake.
     std::string duration_display() const;
 
-    /**
-     * The tempo this sample IS if it holds exactly the DURATION row's bar count (the inverse of SYNC),
-     * or 0 with no sample or outside 1..999. ⚠️ Scaled by the pending PITCH, as `duration_display` is,
-     * so the header's two readings agree.
-     */
+    // The tempo the sample is if it holds DURATION's bar count; 0 outside 1..999. Scaled by the
+    // pending pitch, as `duration_display` is.
     int source_bpm() const;
 
-    /** "NNNBPM" from `source_bpm()`, "---BPM" when it has none. */
+    // "NNNBPM", "---BPM" when none.
     std::string bpm_display() const;
 
-    /** The tempo TSTRETCH fits to: the box's BPM, or the song's while that has not been moved. */
+    // TSTRETCH's tempo: the box's BPM, or the song's while unmoved.
     int stretch_bpm(int song_tempo) const { return stretchBpm > 0 ? stretchBpm : song_tempo; }
 
-    /** Everything the TSTRETCH box dials — DURATION, BPM, PITCH, GRAIN — back as a session opens. */
+    // DURATION, BPM, PITCH, GRAIN back to their opening values.
     void reset_stretch();
 
-    /** OTT / DUST / DRIVE / EQ has something to audition or apply: an amount above 0, or an EQ slot. */
+    // OTT / DUST / DRIVE has an amount, or EQ has a slot.
     bool fx_armed() const;
 
-    /** The number the engine takes beside `fxType`: the amount, or the EQ's slot. */
+    // What the engine takes beside `fxType`: the amount, or the EQ slot.
     int fx_param() const;
 };
 
-// ── The TSTRETCH box ─────────────────────────────────────────────────────────────────────────────
-//
-// A modal over the editor's lower half — the waveform stays in view above it. `song_tempo` is what
-// BPM reads while it has not been moved.
+// ── The TSTRETCH box: a modal over the lower half ───────────────────────────────────────────────
 
-/** The cell one step away: `d_row` walks the column, `d_col` crosses between PREVIEW and APPLY. */
+// `d_row` walks the column, `d_col` crosses between PREVIEW and APPLY.
 StretchCell stretch_step(StretchCell from, int d_row, int d_col);
 
 CursorContext stretch_cursor_context(const SampleEditorState& s, int song_tempo);
 
-/** Apply a resolved action to the cell under the box's cursor. */
 void stretch_handle_input(SampleEditorState& s, const InputAction& action, int song_tempo);
 
-/** Paint the box over the finished frame. No-op when it is not open. */
+// No-op when the box is not open.
 void draw_stretch_editor(Canvas& c, const SampleEditorState& s, int song_tempo, const Theme& t);
 
-/** What `handle_input` changed — enough for the dispatcher to know which engine calls to make. */
+// What `handle_input` changed, so the dispatcher knows which engine calls to make.
 struct SampleEditorInputResult {
     bool modified = false;
-    /**
-     * RATE is DESTRUCTIVE: it re-decimates the audio, changing length and rate ratio. The engine
-     * calls are the dispatcher's, so the module reports the change.
-     */
+    // RATE and BIT are destructive: the dispatcher rebuilds the audio from the cached original.
     bool rateModeChanged = false;
-    /** BIT is RATE's twin: the same rebuild, from the same cached original. */
     bool bitDepthChanged = false;
 };
 
@@ -301,29 +204,21 @@ public:
     static constexpr int WIDTH  = 640;
     static constexpr int HEIGHT = 480;   // full-screen: no top strip, no right bar
 
-    // The waveform panel: a 5px gap under the three header rows, 155px tall, 620 wide at x + 10.
+    // The waveform panel, under the three header rows.
     static constexpr int WAVEFORM_Y = 73;
     static constexpr int WAVEFORM_H = 155;
     static constexpr int WAVEFORM_W = 620;
 
-    /** Rows 8..19 sit under the waveform: `(row − 8) * ROW_HEIGHT + 228`. */
+    // Rows 8..19 sit under the waveform.
     static int content_y(int row);
 
-    // ── The vocabularies ─────────────────────────────────────────────────────────────────────────
     static const std::vector<std::string>& source_values();    // LEFT / RIGHT / STEREO / MONO
     static const std::vector<std::string>& rate_values();      // HIGH / NORM / LOFI
-    /**
-     * BIT's choices for a sample that came in at `source_bits`: that depth and every standard one below
-     * it, highest first — a 24-bit file offers 24 / 16 / 8, a 16-bit one 16 / 8. There is no 12: WAV
-     * has no 12-bit format, and a BIT the file cannot say would be a lie on a PC.
-     */
+    // That depth and every standard one below it, highest first. No 12: WAV has none.
     static std::vector<std::string> bit_depth_choices(int source_bits);
     static const std::vector<std::string>& duration_values();  // 4 BAR … 1/32
 
-    /**
-     * Beats per DURATION index — "1 BAR" is 4, halving each step, so `16 >> index` rather than a
-     * second table. SYNC fits the sample to it; `bpm_display` runs it backwards.
-     */
+    // Beats per DURATION index: "1 BAR" = 4, halving each step.
     static double duration_beats(int duration_index);
     static const std::vector<std::string>& fx_types();         // OTT / DUST / DRIVE / EQ / SYNC
     static const std::vector<std::string>& sync_types();       // RPITCH / TSTRETCH
@@ -331,7 +226,7 @@ public:
     static const std::vector<std::string>& ops_row1();         // CROP COPY CUT DUPL PASTE DEL
     static const std::vector<std::string>& ops_row2();         // NORM FADE+ FADE- SLNC REV UNDO
 
-    /** The FX row's type indices, named — `fxValue` means a different thing under each. */
+    // `fxValue` means something different under each.
     static constexpr int FX_OTT   = 0;
     static constexpr int FX_DUST  = 1;
     static constexpr int FX_DRIVE = 2;
@@ -344,41 +239,31 @@ public:
     static constexpr int SLICE_TRANSIENT = 0;
     static constexpr int SLICE_DIVIDE    = 1;
     static constexpr int SLICE_OFF       = 2;
-    // ⚠️ APPENDED after OFF, never inserted: `sliceMethod` survives a session and SLICE_OFF (2) is
-    // compared in a dozen places.
+    // ⚠️ Appended after OFF: `sliceMethod` survives a session.
     static constexpr int SLICE_MANUAL    = 3;
 
-    /** Row 10's second cell: TRANSIENT has SENS and DIVIDE has BY. OFF and MANUAL have neither. */
+    // Row 10's second cell: SENS (TRANSIENT) or BY (DIVIDE).
     static constexpr bool slice_has_parameter(int slice_method) {
         return slice_method == SLICE_TRANSIENT || slice_method == SLICE_DIVIDE;
     }
 
-    // ── The sparse row map ───────────────────────────────────────────────────────────────────────
-    //
-    // Rows 3–7 are the waveform and 9/12/15/17 are spacers, so neither is a step of one. `slice_method`
-    // is a parameter because row 11 does not exist with slicing OFF — DOWN from 10 must reach 13.
-
-    /** The next navigable row ABOVE `row`. Row 1 wraps to 19. */
+    // Rows 3–7 and the spacers are skipped, and row 11 too with slicing OFF; row 1 and 19 wrap.
     static int row_above(int row, int slice_method = -1);
-    /** The next navigable row BELOW `row`. Row 19 wraps to 1. */
     static int row_below(int row, int slice_method = -1);
-    /** The rightmost column of `row` — 5 on the two op rows, 0 on NAME, 2 or 3 on SAVE. */
     static int max_col_for_row(int row, int slice_method = SLICE_OFF);
 
-    // ── The three questions every module answers ─────────────────────────────────────────────────
 
     void draw(Canvas& c, int x, int y, const SampleEditorState& s, const Theme& t) const;
 
     CursorContext cursor_context(const SampleEditorState& s) const;
 
-    /** Apply a resolved action to the editor state, in place. */
     SampleEditorInputResult handle_input(SampleEditorState& s, const InputAction& action) const;
 
 private:
-    /** The 620×155 panel: the wave, the S/E edges, the slice boundaries, and the playhead. */
+    // The wave, the S/E edges, slice boundaries and the playhead.
     void draw_waveform(Canvas& c, int x, int y, const SampleEditorState& s, const Theme& t) const;
 
-    /** "ARE YOU SURE?" — B on a modified sample. Covers the editor, then draws THE confirm box. */
+    // B on a modified sample.
     void draw_confirm_dialog(Canvas& c, int x, int y, const Theme& t) const;
 };
 

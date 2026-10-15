@@ -13,7 +13,6 @@ namespace {
 constexpr int NAME_X   = 10;                       // the label column
 constexpr int OPTION_W = 80;   // the stride between the buttons on a multi-button row
 
-int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /** `tempo` as three digits, zero-padded. */
 std::string pad3(int v) {
@@ -59,8 +58,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     const bool hasMidi = s.caps.midi;
     const int  lastRow = static_cast<int>(project_last_row(s.caps));
 
-    // The cursor is the cell it is on; the row's own label takes `cursor_mark_ink` while the cursor
-    // is anywhere along the row.
+    // The cursor is the cell; the row's label takes `cursor_mark_ink` while the cursor is on the row.
     const auto on_row = [&](ProjectRow row) { return s.cursorRow == static_cast<int>(row); };
     const auto on_cell = [&](ProjectRow row, int column) {
         return on_row(row) && s.cursorColumn == column;
@@ -78,8 +76,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     };
 
     // ── A DOOR row: MIDI, EXIT — the button alone, no label ──────────────────────────────────────
-    // The button names where it goes, so no label. It sits in the value column, where the cursor
-    // lands (column 1) as on a labelled row.
+    // The button names where it goes; it sits in the value column, where the cursor lands.
     const auto door_row = [&](ProjectRow row, const char* button) {
         draw_cursor_cell(c, button, valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
@@ -100,21 +97,15 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     param_row(ProjectRow::TEMPO,     "TEMPO",     pad3(p.tempo));
 
-    // ── TAP — the TEMPO row's second CELL ────────────────────────────────────────────────────────
-    //
-    // RIGHT from the value lands here; A on it taps the tempo by feel (the dispatcher owns the
-    // arithmetic). It is drawn like the buttons on the rows below, because that is what it is.
-    //
-    // ⚠️ A CELL, NOT A GESTURE ON THE VALUE: A is also the modifier of A+DPAD and fires on its own
-    // press before the direction arrives, so a tap read off the value cell counted every A+UP nudge.
+    // ── TAP — the TEMPO row's second cell; A taps the tempo (the dispatcher's arithmetic) ────────
+    // ⚠️ A cell, not a gesture on the value: A is also A+DPAD's modifier and fires first, so a tap
+    // read off the value counted every A+UP nudge.
     draw_cursor_cell(c, "TAP", valueX + 80, rowY(ProjectRow::TEMPO) + TEXT_PADDING,
                      on_cell(ProjectRow::TEMPO, 2), t.textValue, t);
 
     param_row(ProjectRow::TRANSPOSE, "TRANSPOSE", hex2(p.transpose));
 
-    // ── NAME — 20 characters, one per cursor column, in a 17-column window ───────────────────────
-    //
-    // The field scrolls under the cursor: the row shows `NAME_VISIBLE_CHARS` before the editor clip.
+    // ── NAME — 20 characters, one per cursor column, scrolling in a 17-column window ─────────────
     {
         const ProjectRow row = ProjectRow::NAME;
         label(row, "NAME");
@@ -122,9 +113,8 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
         const std::string name =
             p.name.substr(0, std::min<size_t>(p.name.size(), PROJECT_NAME_MAX_CHARS));
 
-        // ⚠️ The window's content is the name or the cursor, whichever reaches further — not all 20
-        // cells: a "…" beside blanks would claim hidden text. The helper adds its own phantom column
-        // for an end-of-text cursor, so it is handed one less.
+        // ⚠️ The window spans the name or the cursor, whichever reaches further — a "…" beside blanks
+        // would claim hidden text. The helper adds a column for an end-of-text cursor: hand it one less.
         const int cursorChar = on_row(row) ? s.cursorColumn - 1 : 0;
         const int content    = std::max(static_cast<int>(name.size()), cursorChar + 1);
         const QwertyTextWindow win =
@@ -143,8 +133,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
             const int  charX      = textX + k * CHAR_W;
             const bool onThisChar = on_cell(row, i + 1);
 
-            // A space stands in past the end of the name: it draws nothing but gives the cursor a
-            // cell's width there, which is how a name gets longer.
+            // A space past the end gives the cursor a cell there, which is how a name grows.
             const std::string ch = (i < static_cast<int>(name.size()))
                                        ? std::string(1, name[static_cast<size_t>(i)])
                                        : std::string(" ");
@@ -156,7 +145,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
                         CHAR_SPACING, FONT_SCALE);
     }
 
-    // ⚠️ SAVE is column 1, LOAD column 2, NEW column 3 — the order the cursor columns are numbered in.
+    // SAVE, LOAD, NEW are cursor columns 1, 2, 3.
     button_row(ProjectRow::PROJECT, "PROJECT", {"SAVE", "LOAD", "NEW"});
 
     // ── EXPORT — MIX / STEMS, plus a live percentage while a render runs ─────────────────────────
@@ -172,19 +161,15 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     param_row(ProjectRow::SYSTEM, "SYSTEM", "SETTINGS >");
 
     // ── MIDI — the door to the MIDI screen ───────────────────────────────────────────────────────
-    // Gated on the build, not a device capability (a machine with no port just enumerates none):
-    // this row is the only way to the MIDI screen.
+    // Gated on the build, not the device: this row is the only way to the MIDI screen.
     if (hasMidi) door_row(ProjectRow::MIDI, "MIDI >");
 
     // ── EXIT — the shell only ────────────────────────────────────────────────────────────────────
-    // A handheld launcher needs the process back; Android apps never exit. No '>': this one leaves
-    // the app rather than opening a screen.
+    // A handheld launcher needs the process back; Android apps never exit. No '>': it leaves the app.
     if (hasExit) door_row(ProjectRow::EXIT, "EXIT");
 
-    // ── USED / FREE RAM — read-only info lines, NOT cursor rows ──────────────────────────────────
-    // ⚠️ DEVELOPER BUILDS ONLY: a user can do nothing with the pair — FREE is the machine's, USED the
-    // engine's audio, and they sum to nothing. INST.POOL's total is gated the same way, and
-    // `poll_sample_ram` stops sampling both when this is off.
+    // ── USED / FREE RAM — info lines, not cursor rows; developer builds only ─────────────────────
+    // A user can do nothing with them; `poll_sample_ram` stops sampling when this is off.
     if (s.caps.debug) {
         const int ramY = firstRowY +
                          project_row_offset_y(static_cast<ProjectRow>(lastRow), s.caps, ROW_HEIGHT) +
@@ -193,8 +178,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
         c.draw_text(megabytes_str(s.sampleRamBytes),
                     valueX, ramY + TEXT_PADDING, t.textValue, CHAR_SPACING, FONT_SCALE);
 
-        // FREE RAM beneath it, in the same unit. Skipped when the platform cannot answer — "0.0 MB"
-        // would say the opposite of "unknown".
+        // Skipped when the platform cannot answer: "0.0 MB" would say the opposite of unknown.
         if (s.freeRamBytes > 0) {
             const int freeY = ramY + ROW_HEIGHT;
             c.draw_text("FREE RAM", labelX, freeY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
@@ -203,8 +187,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
         }
     }
 
-    // The status line (SAVED / EXPORTED! / SEQ CLEANED) is NOT drawn here. It is a global overlay on
-    // the visualizer header, so that every screen can report — see TrackerLayout::draw.
+    // The status line is the global overlay's (TrackerLayout::draw).
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────────────────────────
@@ -212,23 +195,21 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
     const songcore::Project& p = s.project;
 
-    // Column 0 is the label on every row. Unreachable (see the header), and read-only if reached.
+    // Column 0 is the label: unreachable, read-only if reached.
     if (s.cursorColumn == 0) return cc::read_only();
 
     switch (static_cast<ProjectRow>(s.cursorRow)) {
         case ProjectRow::TEMPO: {
-            // Column 2 is TAP, a button: read-only; plain A is its behaviour (the dispatcher's).
-            // Columns 3..20 are unreachable (`project_row_max_column` stops at 2).
+            // Column 2 is TAP, a button (the dispatcher's); `project_row_max_column` stops at 2.
             if (s.cursorColumn == 2) return cc::read_only();
-            // Decimal, not hex — but a HEX_BYTE context, because the type only decides how the value
-            // STEPS and 20..999 steps the same way either way. A+UP/DOWN jumps by 10.
+            // Decimal, but HEX_BYTE steps 20..999 the same. A+UP/DOWN jumps by 10.
             CursorContext c = cc::hex_byte(p.tempo, 20, 999);
             c.largeStep = 10;
             return c;
         }
 
         case ProjectRow::TRANSPOSE: {
-            // Same signed encoding as the chain transpose. A+UP/DOWN = an octave.
+            // Signed, as the chain transpose. A+UP/DOWN = an octave.
             CursorContext c = cc::hex_byte(p.transpose, 0, 255);
             c.largeStep = 12;
             return c;
@@ -237,23 +218,21 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
         case ProjectRow::NAME: {
             const int charIndex = s.cursorColumn - 1;
             if (charIndex >= PROJECT_NAME_MAX_CHARS) return cc::none();
-            // Past the end of the name is a SPACE, not an empty cell — a character always has a value.
+            // Past the end is a space: a character always has a value.
             const char ch = (charIndex < static_cast<int>(p.name.size()))
                                 ? p.name[static_cast<size_t>(charIndex)]
                                 : ' ';
             return cc::character(ch);
         }
 
-        // Everything below is a BUTTON. Read-only to the generic edit path; plain A is the whole of
-        // its behaviour, and the dispatcher owns that.
+        // Everything below is a button: plain A is the dispatcher's.
         case ProjectRow::PROJECT:
         case ProjectRow::EXPORT:
         case ProjectRow::COMPACT:
         case ProjectRow::SYSTEM:
             return cc::read_only();
 
-        // The two conditional rows answer `none()` where this build does not draw them — a cursor
-        // that cannot get there still has a context taken of it by anything that asks blind.
+        // The conditional rows answer `none()` where this build does not draw them.
         case ProjectRow::MIDI:
             return s.caps.midi ? cc::read_only() : cc::none();
 
@@ -269,8 +248,7 @@ ProjectInputResult ProjectModule::handle_input(songcore::Project& project, int c
                                                int cursor_column, const InputAction& action) const {
     switch (static_cast<ProjectRow>(cursor_row)) {
         case ProjectRow::TEMPO:
-            // ⚠️ Guarded on the column: column 2 is TAP, and a button never writes the cell to its
-            // left. `cursor_context` already answers read_only there; this is the second lock.
+            // ⚠️ Guarded on the column: TAP (column 2) never writes the cell to its left.
             if (cursor_column != 2 && action.type == ActionType::SET_VALUE)
                 project.tempo = clamp(action.value, 20, 999);
             break;
@@ -292,7 +270,7 @@ ProjectInputResult ProjectModule::handle_input(songcore::Project& project, int c
                 project.name = trim_end(name);
 
             } else if (action.type == ActionType::DELETE) {
-                // ⚠️ Guarded on the current length: deleting beyond the end does nothing.
+                // ⚠️ Deleting past the end does nothing.
                 if (charIndex < static_cast<int>(project.name.size())) {
                     std::string name = project.name;
                     if (name.size() < PROJECT_NAME_MAX_CHARS) name.resize(PROJECT_NAME_MAX_CHARS, ' ');

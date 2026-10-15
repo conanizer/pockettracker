@@ -1,11 +1,7 @@
 #pragma once
 
-// ─── CHAIN EDITOR ────────────────────────────────────────────────────────────────────────────────
-//
-// 16 phrase slots, each with a transpose. The cell shows the raw byte: 00 = no change, 80 = −128,
-// FF = +127 (two's complement, `byte_to_signed_semitones` in songcore/timing.h).
-//
-// The TSP cell is empty because the PHRASE slot is empty, not because the transpose is 0.
+// The chain editor: 16 phrase slots, each with a transpose shown as the raw byte (00 = none, 80 = −128,
+// FF = +127). The TSP cell is empty because the phrase slot is, not because the transpose is 0.
 
 #include "songcore/model.h"
 #include "ui/canvas.h"
@@ -22,13 +18,11 @@ struct ChainEditorState {
     int  cursorRow     = 0;
     int  cursorColumn  = 1;
 
-    // The song cell this chain is seen THROUGH, drawn as `S01 T3`; −1 = none (always under NAV = POOL).
-    // ⭐ Under NAV = SONG it decides where the next B+D-pad goes, and the header is the only thing on
-    // screen that shows a move between two cells of the same chain.
+    // The song cell this chain is seen through (`S01 T3`); −1 = none. Under NAV = SONG it decides
+    // where the next B+D-pad goes.
     int  songRow = -1;
     int  songTrack = -1;
-    // Eight possible playheads: two tracks can be in this chain at different rows. A marker is drawn
-    // only where `chainId` matches the chain on display (ui/playhead.h).
+    // Two tracks can be in this chain at different rows; a marker where `chainId` matches.
     TrackPlayhead playheads[8] = {};
     bool selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };

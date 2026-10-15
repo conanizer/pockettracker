@@ -1,12 +1,7 @@
 #pragma once
 
-// ─── NAVIGATION MAP ──────────────────────────────────────────────────────────────────────────────
-//
-// The 5×5 grid in the bottom-right corner: where you are and what R+DPAD can reach — drawn from the
-// `SCREEN_GRID` that `ui/navigation.h` moves through. Only the main row (S C P I T) and the CURRENT
-// column are drawn; other columns' screens are not reachable from here.
-//
-// 115×105 px — five 23px cells across, five 21px rows down.
+// The 5×5 navigation map, bottom right: where you are and what R+DPAD reaches (`SCREEN_GRID`). Only
+// the main row and the current column are drawn.
 
 #include "ui/canvas.h"
 #include "ui/screen.h"
@@ -16,7 +11,7 @@ namespace pt::ui {
 
 struct NavigationMapState {
     ScreenType currentScreen = ScreenType::PHRASE;
-    /** Which column a shared screen (PROJECT / MIXER / EFFECTS) was entered from. */
+    // The column a shared screen was entered from.
     int  sourceColumn       = 2;
     bool instrumentFromPool = false;  // on INSTRUMENT, entered via the pool's R+RIGHT
     Theme theme = theme_classic();

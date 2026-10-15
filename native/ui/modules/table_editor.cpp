@@ -7,17 +7,16 @@ namespace pt::ui {
 
 using songcore::TableRow;
 
-// ─── Where FX2's and FX3's playback markers stand, and so how wide the gap before them is ───────
-// ⚠️ One definition, read by both the column layout and the marker draw. A cell paints its
-// background CHAR_SPACING past its text, so the marker needs MARKER_CLEAR either side or the
-// cursor's fill on the value to its left touches the `>`.
+// ─── The gap before FX2/FX3, where their playback markers stand ──────────────────────────────────
+// ⚠️ One definition for the layout and the marker: a cell's fill runs CHAR_SPACING past its text,
+// so the marker needs MARKER_CLEAR either side.
 constexpr int MARKER_CLEAR = 4;
 constexpr int GLYPH_W      = CHAR_W - CHAR_SPACING;
 
-/** The gap an FX value cell's x must leave before the NEXT FX column's name x. */
+// The gap a value cell leaves before the next FX column's name.
 constexpr int marker_gap() { return 2 * CHAR_SPACING + 2 * MARKER_CLEAR + GLYPH_W; }
 
-/** …and where in that gap the marker itself goes, given the name x on its right. */
+// Where the marker goes in that gap.
 constexpr int marker_x(int name_x) { return name_x - CHAR_SPACING - MARKER_CLEAR - GLYPH_W; }
 
 void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
@@ -25,8 +24,7 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // ⚠️ The gap before each FX column is wider: that is where the playback markers stand (see
-    // marker_gap). The extra comes out of the slack at the right edge.
+    // The gap before each FX column is wider, for the markers; it comes out of the right-edge slack.
     int       colX       = x + 10;
     const int stepX      = colX; colX += 30 + 10;
     const int transposeX = colX; colX += 45 + 15;
@@ -40,12 +38,10 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
 
     int rowY = y + TEXT_PADDING;
     c.draw_text("TABLE " + hex2(s.table.id), x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
-    // The tic rate belongs to the INSTRUMENT, not the table — a table run by two instruments runs at
-    // two speeds. It is shown here because this is where you feel it.
+    // The tic rate is the instrument's, not the table's; shown here because this is where it is felt.
     c.draw_text(hex2(s.ticRate) + " TIC", x + WIDTH - 120, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
 
-    // The header lights for the cursor's column (an FX header covers its name and value cell); the
-    // row number lights for its row.
+    // The header lights for the cursor's column, the row number for its row.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const int cc = s.cursorColumn;
     c.draw_text("N",   transposeX, rowY, header_color(cc, 1, 1, t), CHAR_SPACING, FONT_SCALE);
@@ -54,8 +50,7 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     c.draw_text("FX2", fx2NameX,   rowY, header_color(cc, 5, 6, t), CHAR_SPACING, FONT_SCALE);
     c.draw_text("FX3", fx3NameX,   rowY, header_color(cc, 7, 8, t), CHAR_SPACING, FONT_SCALE);
 
-    // Asked once per draw: an AUS/AUF cell no ramp uses draws dimmed — the same pairing walk the
-    // engine runs over the same three FX slots, so the grid agrees with what plays.
+    // An AUS/AUF cell no ramp uses draws dimmed — the engine's own pairing walk, asked once per draw.
     const table_automation::TableRampCells rampCells =
             table_automation::find_table_ramp_cells(s.table.rows.data(),
                                                     static_cast<int>(s.table.rows.size()));
@@ -79,28 +74,25 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
 
     const int textY = dataRowY + TEXT_PADDING;
 
-    // Left to right, column by column — RowCells joins a selected run into one block across the
-    // gutters, and it can only do that if the cells arrive in the order they are laid out.
+    // Left to right: RowCells joins a selected run across the gutters only in layout order.
     RowCells cells(c, textY, t);
 
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
-    // No every-4th accent: a table row is a tic. The number lights on the cursor row and goes through
-    // the painter, since column 0 is a real cursor position.
+    // No every-4th accent: a table row is a tic. Column 0 is a real cursor position.
     cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false,
                (index == s.cursorRow) ? cursor_mark_ink(t) : t.textEmpty);
 
-    // Transpose is always shown — 0x00 is "no transpose", drawn dim, but it is still a value.
+    // 0x00 = no transpose: drawn dim, still a value.
     cells.cell(hex2(row.transpose), transposeX, cur(1), sel(1),
                /*is_empty=*/row.transpose == 0x00, t.textValue);
 
-    // Volume −1 IS empty: "leave the note's own volume alone".
+    // −1 = leave the note's own volume alone.
     cells.cell(row.volume == -1 ? "--" : hex2(row.volume), volX, cur(2), sel(2),
                /*is_empty=*/row.volume == -1, t.textValue);
 
-    // Both FX cells are textValue here (see the header). FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8. An FX
-    // pair dims when unset, and an AUS/AUF cell when no ramp uses it.
+    // FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8. A pair dims when unset, an AUS/AUF when no ramp uses it.
     const auto fxDim = [&](int type, int slot) {
         return type == 0x00 || !rampCells.active(type, index, slot);
     };
@@ -115,10 +107,9 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
     cells.cell(effect_name(row.fx3Type), fx3NameX,  cur(7), sel(7), fx3Empty, t.textValue);
     cells.cell(hex2(row.fx3Value),       fx3ValueX, cur(8), sel(8), fx3Empty, t.textValue);
 
-    // Three playheads, four markers: lanes 1 and 2 one each, ahead of their FX column; lane 0 two —
-    // beside the row number (it drives note and volume too) and ahead of FX1, so all three FX columns
-    // read alike. A stopped lane reads −1 and has none.
-    // ⚠️ Drawn AFTER the cells: a selection spanning a gutter fills it and would erase the marker.
+    // Lanes 1 and 2 get a marker ahead of their FX column; lane 0 two, beside the row number and
+    // ahead of FX1. A stopped lane (−1) has none.
+    // ⚠️ After the cells: a selection across a gutter would erase the marker.
     if (s.playbackRows[0] == index) {
         draw_playhead(c, stepX + CHAR_W, textY, t);
         draw_playhead(c, marker_x(fx1NameX), textY, t);
@@ -129,7 +120,7 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
 
 CursorContext TableModule::cursor_context(const TableState& s) const {
     const songcore::TableRow& row = s.table.rows[static_cast<size_t>(s.cursorRow)];
-    // An FX value is never empty: A+B puts it back to 00.
+    // Never empty: A+B puts it back to 00.
     const auto fx_value = [](int value, int type) {
         return cc::hex_byte(value, 0, effect_value_max(type), /*empty_value=*/-1, /*can_delete=*/false,
                             /*can_insert=*/false, /*can_create=*/false, /*def=*/0);
@@ -138,9 +129,9 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
         case 0: return cc::read_only();
 
         case 1: {
-            // The same semitone context as the chain's TSP, so A+UP/DOWN is ±1 octave on both.
+            // The chain's TSP context: A+UP/DOWN is ±1 octave on both.
             CursorContext ctx            = cc::transpose(row.transpose);
-            ctx.capabilities.canDelete   = (row.transpose != 0x00);  // deletable back to 00 = no transpose
+            ctx.capabilities.canDelete   = (row.transpose != 0x00);
             return ctx;
         }
 
@@ -171,7 +162,7 @@ TableInputResult TableModule::handle_input(songcore::Table& table, int cursor_ro
             switch (cursor_column) {
                 case 1: row.transpose = clamp255(action.value); break;
                 case 2: row.volume    = clamp255(action.value); break;
-                // The FX type columns store an INDEX into EFFECT_TYPES; convert back to the code.
+                // The type columns store an index into EFFECT_TYPES; the code is what the row keeps.
                 case 3: row.fx1Type  = songcore::effect_type_at(action.value); break;
                 case 4: row.fx1Value = clamp255(action.value); break;
                 case 5: row.fx2Type  = songcore::effect_type_at(action.value); break;

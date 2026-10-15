@@ -13,7 +13,7 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // Column x positions, spelled `30 + 10` = a 2-char cell, then a 10px gutter.
+    // Column x: a 2-char cell, then a 10px gutter.
     int       colX      = x + 10;
     const int stepX     = colX; colX += 30 + 10;
     const int noteX     = colX; colX += 45 + 20;
@@ -28,7 +28,7 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
 
     int rowY = y + TEXT_PADDING;
     c.draw_text("PHRASE " + hex2(s.phrase.id), x + 10, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
-    // The chain row and the song cell it hangs off — see PhraseEditorState.
+    // The chain row and its song cell (PhraseEditorState).
     if (s.viaChain >= 0 && s.viaChainRow >= 0) {
         std::string via = "C" + hex2(s.viaChain) + "/" + hex1(s.viaChainRow);
         if (s.songRow >= 0 && s.songTrack >= 0)
@@ -36,8 +36,7 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
         c.draw_text(via, x + 190, rowY, t.textParam, CHAR_SPACING, FONT_SCALE);
     }
 
-    // The header lights for the cursor's column (an FX header covers its name and value cell); the
-    // row number lights for its row.
+    // The header lights for the cursor's column, the row number for its row.
     rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING;
     const int cc = s.cursorColumn;
     c.draw_text("N",   noteX,    rowY, header_color(cc, 1, 1, t), CHAR_SPACING, FONT_SCALE);
@@ -47,14 +46,13 @@ void PhraseEditorModule::draw(Canvas& c, int x, int y, const PhraseEditorState& 
     c.draw_text("FX2", fx2NameX, rowY, header_color(cc, 6, 7, t), CHAR_SPACING, FONT_SCALE);
     c.draw_text("FX3", fx3NameX, rowY, header_color(cc, 8, 9, t), CHAR_SPACING, FONT_SCALE);
 
-    // Asked once per draw: an AUS/AUF cell no ramp uses draws dimmed. It is the same pairing the
-    // emitter runs over every chain row that plays this phrase, so the grid agrees with playback —
-    // including an AUS whose AUF is phrases further down the chain.
+    // An AUS/AUF cell no ramp uses draws dimmed — the emitter's own pairing over every chain row that
+    // plays this phrase, asked once per draw.
     songcore::RampCells rampCells;
     if (s.project) rampCells = songcore::find_ramp_cells(*s.project, s.phrase.id);
     else           rampCells.mark(songcore::find_ramps(s.phrase));
 
-    // Rows a certain HOP cuts off draw dimmed: they are in the phrase and do not play.
+    // Rows a certain HOP cuts off draw dimmed.
     const int hopRow = songcore::phrase_certain_hop_row(s.phrase);
 
     for (int i = 0; i < static_cast<int>(s.phrase.steps.size()); ++i) {
@@ -70,7 +68,7 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
                                   int fx2NameX, int fx2ValueX, int fx3NameX, int fx3ValueX) const {
     const Theme& t = s.theme;
 
-    // The HOP's own row plays nothing either, but the HOP cell itself is what acts, so it stays lit.
+    // The HOP's own row plays nothing, but its HOP cell acts, so it stays lit.
     const bool cutOff = hopRow >= 0 && index >= hopRow;
 
     const int dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT);
@@ -79,35 +77,31 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
 
     const int textY = dataRowY + TEXT_PADDING;
 
-    // Left to right, column by column — RowCells joins a selected run into one block across the
-    // gutters, and it can only do that if the cells arrive in the order they are laid out.
+    // Left to right: RowCells joins a selected run across the gutters only in layout order.
     RowCells cells(c, textY, t);
 
-    // Every value cell shares the painter's colour priority (cursor > selection > empty > per-column
-    // colour); note-emptiness dims NOTE/VOL/INST, fx-emptiness dims its own name/value pair.
+    // Note-emptiness dims NOTE/VOL/INST; fx-emptiness its own pair.
     const auto cur = [&](int col) { return index == s.cursorRow && s.cursorColumn == col; };
     const auto sel = [&](int col) { return s.selectionMode && s.isCellSelected(index, col); };
 
-    // Every 4th row number is brighter (a beat); the cursor row's number lights whatever the column.
-    // Column 0 is a real cursor position, so the number goes through the painter like any cell.
+    // Every 4th row number is brighter (a beat). Column 0 is a real cursor position.
     const Argb stepColor = (index == s.cursorRow) ? cursor_mark_ink(t)
                            : (index % 4 == 0 && !cutOff) ? t.textParam
                                                          : t.textEmpty;
     cells.cell(hex1(index), stepX, cur(0), /*is_selected=*/false, /*is_empty=*/false, stepColor);
 
-    // The playhead marker sits beside the one-character row number, in the existing gutter.
+    // The playhead marker, in the gutter beside the row number.
     for (const TrackPlayhead& ph : s.playheads)
         if (ph.phraseId == s.phrase.id && ph.step == index) draw_playhead(c, stepX + CHAR_W, textY, t);
 
-    // An OFF is drawn bright, but it plays nothing: its V and I dim as on an empty step.
+    // An OFF plays nothing: its V and I dim.
     const bool noteEmpty = cutOff || (step.note == Note::EMPTY());
     const bool noNote    = cutOff || !songcore::step_has_note(step);
     cells.cell(note_name(step.note),  noteX, cur(1), sel(1), noteEmpty, t.textValue);
     cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noNote, t.textParam);
     cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
 
-    // An FX pair dims when unset, and an AUS/AUF cell when no ramp uses it — an inert cell does what
-    // an unset one does.
+    // A pair dims when unset, an AUS/AUF when no ramp uses it.
     const auto fxDim = [&](int type, int slot) {
         if (cutOff && !(index == hopRow && type == songcore::FX_HOP)) return true;
         return type == 0x00 || !rampCells.active(type, index, slot);
@@ -129,7 +123,7 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
     switch (s.cursorColumn) {
         case 0: return cc::read_only();
         case 1: {
-            // An OFF has no pitch to step: A+B clears it, nothing else answers.
+            // An OFF has no pitch: A+B clears it, nothing else.
             if (songcore::note_is_off(step.note)) {
                 CursorContext off = cc::note(0);
                 off.capabilities           = {};
@@ -137,11 +131,9 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
                 return off;
             }
             const bool isEmpty = (step.note == Note::EMPTY());
-            // ⚠️ THIS QUANTIZES TYPING, NOT THE SONG. `step.note` is never rewritten; the playback
-            // quantizer (scheduler.h) moves notes, and the cell never shows that.
-            // The scale is the one the phrase's own SCA/SCG puts this row in — a walk of the AUTHORED
-            // cells above the cursor, never the sequencer's live scale (see `phrase_scale_at_row`).
-            // An exempt instrument (sliced, or TSP off) must be offered every note.
+            // ⚠️ This quantizes typing, not the song: `step.note` is never rewritten. The scale is
+            // the one the phrase's own SCA/SCG cells above put this row in. An exempt instrument
+            // (sliced, or TSP off) is offered every note.
             unsigned mask = 0x0FFFu;
             int      key  = 0;
             if (s.project != nullptr) {
@@ -190,7 +182,7 @@ PhraseInputResult PhraseEditorModule::handle_input(songcore::Phrase& phrase, int
                     r.hasInstrument        = true;
                     r.lastEditedInstrument = action.value;
                     break;
-                // The FX type columns store an INDEX into EFFECT_TYPES; convert back to the code.
+                // The type columns store an index into EFFECT_TYPES; the code is what the step keeps.
                 case 4: step.fx1Type  = songcore::effect_type_at(action.value); break;
                 case 5: step.fx1Value = action.value; break;
                 case 6: step.fx2Type  = songcore::effect_type_at(action.value); break;

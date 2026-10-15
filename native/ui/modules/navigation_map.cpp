@@ -10,7 +10,7 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
 
     c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
 
-    // Which column are we in? A shared screen has none of its own, so it uses the one we came from.
+    // A shared screen uses the column it was entered from.
     const int screenCol  = screen_column(s.currentScreen);
     const int currentCol = (screenCol == -1) ? s.sourceColumn : screenCol;
 
@@ -21,15 +21,15 @@ void NavigationMapModule::draw(Canvas& c, int x, int y, const NavigationMapState
         grid[NAV_MAIN_ROW][gcol] = SCREEN_GRID[NAV_MAIN_ROW][gcol];
     for (int row = 0; row < NAV_ROWS; ++row) grid[row][col] = SCREEN_GRID[row][col];
 
-    // The pool's fast-jump INSTRUMENT cell at row 0 / col 4, right of the pool. On an INSTRUMENT reached
-    // from the pool, THAT cell is the current position (same ScreenType, so position disambiguates).
+    // The pool's INSTRUMENT cell (row 0 / col 4); on an INSTRUMENT reached from the pool it is the
+    // current position.
     const bool onPoolInstrument = (s.currentScreen == ScreenType::INSTRUMENT && s.instrumentFromPool);
     if (s.currentScreen == ScreenType::INST_POOL || onPoolInstrument)
         grid[0][4] = ScreenType::INSTRUMENT;
 
     for (int row = 0; row < NAV_ROWS; ++row) {
         for (int gcol = 0; gcol < NAV_COLUMNS; ++gcol) {
-            if (!grid[row][gcol]) continue;  // empty cells are just background
+            if (!grid[row][gcol]) continue;
 
             const ScreenType screen = *grid[row][gcol];
             const int        cellX  = x + (gcol * CELL_WIDTH);

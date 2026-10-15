@@ -1,15 +1,7 @@
 #pragma once
 
-// ─── The confirm dialog ──────────────────────────────────────────────────────────────────────────
-//
-// A 261×57 box on a dimmed screen: a question and "A=YES  B=NO" — the thing standing between the
-// user and every destructive action in the app.
-//
-// ⚠️ ONE STATE, NOT A FLAG PER QUESTION: every handler that must not fire under a modal tests
-// `is_open()`, and adding a question does not change that. A modal one handler forgets is a button
-// that misfires once and reads as a mis-press.
-//
-// It has no cursor: the dialog draws a fixed "A=YES  B=NO" and the buttons ARE the answer.
+// The confirm dialog: a question and "A=YES  B=NO" on a dimmed screen. No cursor — the buttons are
+// the answer. ⚠️ One state, not a flag per question: every handler tests `is_open()`.
 
 #include <string>
 
@@ -23,28 +15,18 @@ struct ConfirmDialogState {
         NONE,
         CLEAN_SEQ,     // PROJECT → COMPACT → SEQ
         CLEAN_INST,    // PROJECT → COMPACT → INST
-        NEW_PROJECT,   // PROJECT → NEW, and only when the project is DIRTY
+        NEW_PROJECT,   // PROJECT → NEW, when DIRTY
         CHANGE_TYPE,   // INSTRUMENT → TYPE, when the slot already has a source loaded
-        EXIT,          // PROJECT → EXIT, and only when the project is DIRTY (the shell only)
+        EXIT,          // PROJECT → EXIT, when DIRTY (the shell only)
 
-        /**
-         * RECOVER WORK? — raised at boot when an autosave survived to launch; the only question the
-         * user did not ask for.
-         *
-         * ⚠️ AND THE ONLY ONE WHOSE `B` DOES REAL WORK: it discards the unsaved work and must DELETE
-         * the autosave, or the same question returns every launch. Every other Kind's B is a pure
-         * cancel, so `confirm_cancel()` is not one.
-         */
+        // RECOVER WORK? at boot, after an autosave survived. ⚠️ The only B that does work: it must
+        // delete the autosave, or the question returns every launch.
         RECOVER,
     };
 
     Kind kind = Kind::NONE;
 
-    /**
-     * What the pending answer needs that its Kind does not — today only CHANGE_TYPE's direction
-     * (+1 for A+RIGHT, −1 for A+LEFT). With three types the direction must survive the round trip
-     * through the box. Reset on `close()`.
-     */
+    // What the answer needs beyond its Kind: CHANGE_TYPE's direction (±1). Reset on `close()`.
     int arg = 0;
 
     bool is_open() const     { return kind != Kind::NONE; }
@@ -52,15 +34,10 @@ struct ConfirmDialogState {
     void close()             { kind = Kind::NONE; arg = 0; }
 };
 
-/** "CLEAN SEQ?" / "NEW PROJECT?" / … — the question the box asks. */
 std::string confirm_dialog_title(ConfirmDialogState::Kind kind);
 
-/**
- * THE confirm box — geometry, frame and the "A=YES  B=NO" line — asking `title`.
- * Separate from `draw_confirm_dialog` so the SAMPLE EDITOR can ask its own "ARE YOU SURE?" in the
- * same box. ⚠️ It does not dim the screen: `draw_confirm_dialog` does that; the sample editor covers
- * its own surface instead.
- */
+// The box itself, asking `title`; the sample editor uses it alone. ⚠️ It does not dim the screen —
+// `draw_confirm_dialog` does.
 void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t);
 
 void draw_confirm_dialog(Canvas& c, const ConfirmDialogState& s, const Theme& t);

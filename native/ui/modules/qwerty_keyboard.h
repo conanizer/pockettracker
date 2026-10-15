@@ -1,17 +1,12 @@
 #pragma once
 
-// ─── THE QWERTY KEYBOARD ─────────────────────────────────────────────────────────────────────────
-//
-// A modal on-screen keyboard: how every piece of TEXT in the app is typed on a device with eight
-// buttons. An OVERLAY drawn over whatever is behind it, owning every button while open.
-//
-//   DPAD          move the key cursor (3 key rows, then SPACE and the layout key, then ABORT/APPLY)
-//   A             type the key under the cursor — or switch layout, or cancel / confirm
-//   B             delete (backspace or forward-delete, per the INSERT MODE setting)
-//   R+DOWN / UP   switch layout: letters ↔ numbers+symbols — the layout key, as a chord
-//   R+LEFT/RIGHT  move the TEXT cursor (not the key cursor)
-//   SELECT        cancel      — the ABORT button, as a chord
-//   START         apply       — the APPLY button, as a chord
+// The on-screen keyboard, a modal that owns every button while open: how all text is typed.
+//   DPAD          move the key cursor (3 key rows, SPACE + the layout key, then ABORT/APPLY)
+//   A             type the key — or switch layout, cancel, confirm
+//   B             delete (backspace or forward-delete, per INSERT MODE)
+//   R+DOWN / UP   switch layout (letters ↔ numbers+symbols)
+//   R+LEFT/RIGHT  move the text cursor
+//   SELECT        cancel · START apply
 
 #include "ui/canvas.h"
 #include "ui/theme.h"
@@ -21,10 +16,7 @@
 
 namespace pt::ui {
 
-/**
- * What APPLY does with the text. The keyboard collects a string and hands it back; the dispatcher
- * acts on the purpose it opened the keyboard WITH. Appended to, never reordered.
- */
+// What APPLY does with the text; the dispatcher acts on it. Append, never reorder.
 enum class QwertyContext {
     FILE_RENAME,      // rename `contextExtra` (an absolute path), keeping its extension
     FOLDER_CREATE,    // create a folder named `text` inside `contextExtra` (a directory)
@@ -41,17 +33,17 @@ enum class QwertyContext {
     DELAY_SAVE        // write EFFECTS' delay cells to `contextExtra`/<text>.ptd, and name them <text>
 };
 
-/** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */
+// 3 key rows of 10, then the space bar. The ABORT/APPLY row is virtual.
 const std::vector<std::vector<char>>& qwerty_rows(int layout);
 
-/** "ABC" / "123" — a layout's name. The layout key shows the one it switches TO. */
+// The layout key shows the one it switches to.
 inline const char* qwerty_layout_label(int layout) { return layout == 0 ? "ABC" : "123"; }
 
-/** The SPACE row holds two keys: SPACE under key columns 0-7, the layout key under 8-9. */
+// SPACE under key columns 0-7, the layout key under 8-9.
 inline constexpr int QWERTY_SPACE_ROW_COLS = 2;
 inline constexpr int QWERTY_SPACE_KEY_COLS = 8;
 
-/** The virtual action row has exactly two buttons: col 0 = ABORT, col 1 = APPLY. */
+// Col 0 = ABORT, col 1 = APPLY.
 inline constexpr int QWERTY_ACTION_COLS = 2;
 
 struct QwertyKeyboardState {
@@ -59,7 +51,7 @@ struct QwertyKeyboardState {
     std::string text;
     int         maxLength = 20;
 
-    /** The INSERTION POINT in `text` — 0 is before the first char, text.size() is after the last. */
+    // The insertion point: 0 is before the first char, text.size() after the last.
     int textCursor = 0;
 
     int keyCursorRow = 0;
@@ -68,22 +60,16 @@ struct QwertyKeyboardState {
 
     std::string fieldLabel = "NAME:";
 
-    /**
-     * INSERT MODE. True: A inserts BEFORE the cursor and B backspaces (terminal-style). False: A
-     * inserts AFTER it and B forward-deletes. One flag flips both buttons.
-     */
+    // INSERT MODE. True: A inserts before the cursor, B backspaces. False: after, and B deletes forward.
     bool insertBefore = true;
 
-    /** True: the FIRST B clears the whole field instead of deleting one character. A "SAVE AS" that
-     *  suggests a name wants this — the user is renaming, not editing. Consumed on that first press. */
+    // The first B clears the whole field (a suggested SAVE AS name). Consumed on that press.
     bool clearOnFirstB = false;
 
     QwertyContext context      = QwertyContext::FILE_RENAME;
     std::string   contextExtra;   // a path or a directory, per `context`
 
-    // ── Geometry of the cursor ──────────────────────────────────────────────────────────────────
-
-    /** One past the last key row — the virtual ABORT/APPLY row, which has no characters on it. */
+    // ── Cursor geometry. The action row is one past the last key row ─────────────────────────────
     int action_row_index() const { return static_cast<int>(qwerty_rows(layout).size()); }
     bool is_on_action_row() const { return keyCursorRow == action_row_index(); }
     int  space_row_index() const { return action_row_index() - 1; }
@@ -91,15 +77,14 @@ struct QwertyKeyboardState {
     int  total_rows() const { return action_row_index() + 1; }
     int  current_row_cols() const;
 
-    /** The character under the key cursor. ' ' on the action row (A is special-cased there). */
+    // ' ' on the action row.
     char current_key() const;
 };
 
-// ─── The verbs ───────────────────────────────────────────────────────────────────────────────────
-//
-// Free functions over the state, so they can be driven with nothing but a state struct.
+// ─── The verbs, free functions over the state ────────────────────────────────────────────────────
 
-/** Keep `keyCursorCol` inside the row `keyCursorRow` points at. Called after any row change. */
+// Keep `keyCursorCol` inside its row; after any row change.
+
 void clamp_col(QwertyKeyboardState& s);
 
 void move_key_cursor_up(QwertyKeyboardState& s);    // wraps row 0 → the action row
@@ -107,24 +92,17 @@ void move_key_cursor_down(QwertyKeyboardState& s);  // wraps the action row → 
 void move_key_cursor_left(QwertyKeyboardState& s);  // wraps within the row
 void move_key_cursor_right(QwertyKeyboardState& s);
 
-/** Type the key under the cursor. A no-op on the action row, the layout key and at `maxLength`. */
+// A no-op on the action row, the layout key and at `maxLength`.
 void insert_current_key(QwertyKeyboardState& s);
 
-/** Backspace or forward-delete, per `insertBefore` — or clear the field, per `clearOnFirstB`. */
+// Backspace or forward-delete per `insertBefore`, or clear the field per `clearOnFirstB`.
 void delete_char(QwertyKeyboardState& s);
 
 void move_text_cursor_left(QwertyKeyboardState& s);
 void move_text_cursor_right(QwertyKeyboardState& s);
 
-/**
- * A horizontal scroll window over `text` that keeps `textCursor` visible; either end can be
- * clipped, marked by a "…".
- *   • text fits             → all of it, no markers.
- *   • cursor near the end   → pin right: the tail, "…" on the left.
- *   • cursor near the start → pin left: the head, "…" on the right.
- *   • cursor in the middle  → the cursor sits at the box centre, "…" both sides.
- * A "…" takes ONE column from its side; `first` and `cols` describe the character region only.
- */
+// A scroll window over `text` that keeps `textCursor` visible; a clipped end is marked "…" and the
+// "…" takes one column. Pinned right near the end, left near the start, centred in between.
 struct QwertyTextWindow {
     int  first     = 0;      // first visible character index
     int  cols      = 0;      // character columns available (chars + the phantom end-cursor slot)
@@ -133,7 +111,7 @@ struct QwertyTextWindow {
 };
 QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols);
 
-/** `text` with trailing whitespace dropped — what APPLY hands back. */
+// What APPLY hands back: trailing whitespace dropped.
 std::string trimmed_text(const QwertyKeyboardState& s);
 
 // ─── The overlay ─────────────────────────────────────────────────────────────────────────────────

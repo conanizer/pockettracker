@@ -1,15 +1,8 @@
 #pragma once
 
-// ─── INSTRUMENT POOL ─────────────────────────────────────────────────────────────────────────────
-// An overview of all 128 instrument slots with the mixer values worth comparing across them (volume,
-// the two sends, the EQ slot). R+UP from INSTRUMENT; R+RIGHT jumps back into it.
-//
-// ⚠️ ITS CURSOR ROW IS NOT ITS OWN: the selected row IS `currentInstrument`, the field INSTRUMENT
-// edits and TABLE follows. Only the column lives here (AppState::poolCursorColumn); moving up and
-// down changes the project's selected instrument (cursor_move.h, `move_pool_selection`).
-//
-// Columns: 0 NAME · 1 V (volume) · 2 RV (reverb send) · 3 DE (delay send) · 4 EQ. Column 0 is
-// selection-only: A on an empty slot loads a source (the dispatcher's job), A+B clears it.
+// The instrument pool: all 128 slots with volume, sends and EQ side by side. R+UP from INSTRUMENT,
+// R+RIGHT back. ⚠️ Its cursor row is `currentInstrument` itself (`move_pool_selection`); only the
+// column lives here. Columns: 0 NAME · 1 V · 2 RV · 3 DE · 4 EQ. On NAME, A loads, A+B clears.
 
 #include <cstdint>
 
@@ -23,8 +16,8 @@ namespace pt::ui {
 
 struct InstrumentPoolState {
     const songcore::Project& project;
-    int   selectedInstrument = 0;   // …which IS the cursor row
-    int64_t sampleRamBytes   = 0;   // the RAM total in the header — `caps.debug` builds only
+    int   selectedInstrument = 0;   // the cursor row
+    int64_t sampleRamBytes   = 0;   // the header's RAM total, debug builds only
     int   cursorColumn       = 0;
     PlatformCaps caps{};
     Theme theme              = theme_classic();
@@ -35,8 +28,7 @@ public:
     static constexpr int WIDTH  = 620;
     static constexpr int HEIGHT = 392;
 
-    // The RAM readout's offsets from the module's left edge. Public so layout.h can assert the widest
-    // total still lands left of the right bar — unconditionally, though the readout is debug-only.
+    // Public so layout.h can assert the widest total clears the right bar.
     static constexpr int RAM_LABEL_X   = 280;
     static constexpr int RAM_VALUE_X   = 348;
     static constexpr int RAM_MAX_CHARS = 9;   // "1234.5 MB" — four digits before the point
@@ -45,7 +37,7 @@ public:
 
     CursorContext cursor_context(const InstrumentPoolState& s) const;
 
-    /** True if the action changed anything. `instrument` is the selected slot. */
+    // True if anything changed. `instrument` is the selected slot.
     bool handle_input(songcore::Instrument& instrument, int cursor_column,
                       const InputAction& action) const;
 

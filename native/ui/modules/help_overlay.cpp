@@ -8,15 +8,15 @@ using namespace help_overlay_geometry;
 
 namespace {
 
-/** The large sprite as horizontal runs of lit pixels — see `help_panel.cpp`. */
+// The large sprite as horizontal runs (see help_panel.cpp).
 void draw_large_mascot(Canvas& c, int x, int y, const MascotInk& ink) {
-    // The compact panel's rule (`help_panel.cpp`): one fill for the patch, before the runs.
+    // One fill for the patch, before the runs.
     if (ink.inverted) c.fill_rect(x, y, MASCOT_LARGE_W, MASCOT_LARGE_H, ink.backdrop);
     const Argb color = ink.figure;
 
     for (int row = 0; row < MASCOT_LARGE_H; ++row) {
         int runStart = -1;
-        // ⚠️ MASCOT_LARGE_W inclusive, so the last column closes a run that reaches the right edge.
+        // ⚠️ Inclusive, so a run reaching the right edge closes.
         for (int col = 0; col <= MASCOT_LARGE_W; ++col) {
             const bool lit = (col < MASCOT_LARGE_W) && mascot_large_pixel(col, row);
             if (lit && runStart < 0) {
