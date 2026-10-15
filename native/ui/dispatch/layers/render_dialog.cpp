@@ -8,8 +8,7 @@ namespace pt::ui {
 
 namespace {
 
-/** A+UP/DOWN's step: a page of song rows, or ONE repetition — REPEAT runs OFF..×16, so a page would
- *  cross the whole range. */
+/** A+UP/DOWN: a page of song rows, or one repetition (REPEAT's whole range is OFF..×16). */
 int coarse_step(const RenderDialogState& rd) { return rd.is_on(RenderRow::REPEAT) ? 1 : 16; }
 
 }  // namespace
@@ -33,8 +32,7 @@ GestureResult InputDispatcher::render_dialog_layer(Gesture g) {
             if (s_.renderDialog.is_on(RenderRow::RENDER)) render_dialog_fire();
             break;
 
-        // B closes, writing nothing. During a render the loop is inside it, so no press arrives until
-        // it has closed itself.
+        // B closes, writing nothing. During a render no press arrives.
         case Gesture::B: s_.renderDialog.isOpen = false; break;
 
         default: break;
@@ -56,7 +54,7 @@ void InputDispatcher::open_render_dialog(RenderDialogState::Output output) {
 
 void InputDispatcher::render_dialog_move_cursor(int delta) {
     const int last = static_cast<int>(RenderRow::COUNT) - 1;
-    s_.renderDialog.cursorRow = std::max(0, std::min(last, s_.renderDialog.cursorRow + delta));
+    s_.renderDialog.cursorRow = std::clamp(s_.renderDialog.cursorRow + delta, 0, last);
 }
 
 void InputDispatcher::render_dialog_edit(int delta) {
@@ -65,14 +63,13 @@ void InputDispatcher::render_dialog_edit(int delta) {
 
     switch (static_cast<RenderRow>(rd.cursorRow)) {
         case RenderRow::SONG_START: {
-            rd.startRow = std::max(0, std::min(255, rd.startRow + delta));
+            rd.startRow = std::clamp(rd.startRow + delta, 0, 255);
             // A start past a hand-typed end drags the end with it, so the range never runs backwards.
             if (rd.endRow >= 0 && rd.endRow < rd.startRow) rd.endRow = rd.startRow;
             break;
         }
         case RenderRow::SONG_END: {
-            // ⚠️ AUTO sits below the smallest end, SONG START. Stepping UP off AUTO lands on the row
-            // AUTO was resolving to, so dialling starts from the number already shown.
+            // ⚠️ AUTO sits below SONG START. UP off AUTO lands on the row it resolved to.
             if (rd.endRow < 0) {
                 if (delta > 0) rd.endRow = render_dialog_end_row(rd, host_.project());
                 break;

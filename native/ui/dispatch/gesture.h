@@ -19,13 +19,9 @@ enum class Gesture {
     STOP_PREVIEW,   // any plain press: silence the audition
 };
 
-/**
- * What a layer or a screen did with a gesture.
- * • A LAYER: ⚠️ TAKEN is also the answer for a gesture it ignores — a button under a dialog must never
- *   reach the screen behind. PASS is the deliberate exception (START under the theme and EQ editors, so
- *   the song plays while you dial).
- * • A SCREEN: PASS is the usual answer — the gesture's generic path runs, as on a screen with no handler.
- */
+// What a layer or screen did with a gesture. ⚠️ A layer answers TAKEN even for one it ignores, so nothing
+// reaches the screen behind; PASS lets one through (START under the theme and EQ editors). For a screen
+// PASS is the usual answer: the gesture's generic path runs.
 enum class GestureResult { TAKEN, PASS };
 
 }  // namespace pt::ui

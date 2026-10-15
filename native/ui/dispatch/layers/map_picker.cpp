@@ -1,7 +1,5 @@
-// The MAP PICKER: the destination list raised by A+UP/DOWN on a mapping's GROUP or PARAMETER cell. It
-// lives only while A is held — A+DPAD walks the list and releasing A points the mapping at the
-// highlighted destination and closes.
-// ⚠️ `currentScreen` and the cursor still name the mapping row underneath; the commit writes through them.
+// The MAP PICKER: the destination list A+UP/DOWN raises on a mapping's GROUP or PARAMETER cell, up while
+// A is held; the release commits. ⚠️ The cursor underneath still names the row the commit writes.
 
 #include "ui/dispatch/dispatch_common.h"
 

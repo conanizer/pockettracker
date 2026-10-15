@@ -13,8 +13,7 @@ namespace pt::ui {
 
 namespace {
 
-/** Put another instrument on INSTRUMENT and MODS. It may be another type, whose layout has no cell
- *  where the cursor was. */
+/** Show another instrument; its layout may have no cell where the cursor was. */
 void show_instrument(AppState& s, int id) {
     s.currentInstrument    = id;
     s.lastEditedInstrument = id;
@@ -26,8 +25,7 @@ void cycle_instrument(AppState& s, int delta) {
     show_instrument(s, step_wrapping(s.currentInstrument, delta, songcore::POOL_INSTRUMENTS));
 }
 
-/** B+UP/DOWN: 16 instruments on or back, stopping at 00 and 7F. UP raises the number, as A+UP raises
- *  a value. */
+/** B+UP/DOWN: 16 on or back, stopping at 00 and 7F; UP raises the number. */
 void page_instrument(AppState& s, int direction) {
     show_instrument(s, page_clamping(s.currentInstrument, direction, songcore::POOL_INSTRUMENTS));
 }
@@ -73,17 +71,15 @@ GestureResult InputDispatcher::pool_screen(Gesture g) {
             return (open_sub_screen_at_cursor(/*peek=*/false) || pool_load_into_empty_slot(/*peek=*/false))
                        ? GestureResult::TAKEN : GestureResult::PASS;
 
-        // The NAME column: A+B CLEARS the slot, freeing its sample (and the .sf2, if this was its last
-        // user) — a host verb, not a field write. The TYPE survives.
+        // NAME column: A+B clears the slot through the host (freeing its sample or .sf2); TYPE survives.
         case Gesture::A_B:
             if (s_.poolCursorColumn != 0) return GestureResult::PASS;
             host_.clear_instrument(s_.currentInstrument);
             mark_modified();
             return GestureResult::TAKEN;
 
-        // Pages by 16 but CLAMPS at the ends, where a single D-pad step wraps 00↔7F. UP is toward 00:
-        // this is a list, and the cursor moves up it. No B+LEFT/RIGHT: here the D-pad already selects
-        // the instrument.
+        // Pages by 16, clamping where a step wraps; UP is toward 00 (a list). No B+LEFT/RIGHT: the
+        // D-pad already selects.
         case Gesture::B_UP:
         case Gesture::B_DOWN:
             s_.currentInstrument    = page_clamping(s_.currentInstrument, (g == Gesture::B_UP) ? -1 : +1,
@@ -107,9 +103,8 @@ GestureResult InputDispatcher::mods_screen(Gesture g) {
     }
 }
 
-// A+START auditions the instrument at its root on the preview lane, ringing until the next plain press
-// — over a running song too (a ninth voice; it steals nothing). The lane borrows the fader of the song
-// cell you came through, so a pad heard mostly through its sends auditions where it really sits.
+// A+START auditions at the root on the preview lane until the next plain press, over a running song too.
+// The lane borrows the fader of the song cell you came through.
 GestureResult InputDispatcher::instrument_audition(Gesture g) {
     switch (g) {
         case Gesture::A_START:
@@ -170,8 +165,7 @@ bool InputDispatcher::pool_load_into_empty_slot(bool peek) {
     if (s_.poolCursorColumn != 0) return false;
     const Instrument& ins  = host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
     const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
-    // ⚠️ An EXTERNAL slot has no source: without this it would open the SAMPLES browser, and a load
-    // would flip the slot's type back.
+    // ⚠️ EXTERNAL has no source: it would open SAMPLES, and a load would flip its type.
     if (!instrument_has_source_row(ins.instrumentType)) return false;
     if (isSF ? ins.soundfontPath.has_value() : !songcore::instrument_is_free(ins)) return false;
     if (peek) return true;
@@ -191,10 +185,7 @@ bool InputDispatcher::on_instrument_type_cell() const {
            InstrumentCell::TYPE;
 }
 
-/**
- * Switching type frees the slot's source, so a loaded slot goes through the confirm dialog; only an
- * empty one switches outright. ⚠️ Do not add a path around it.
- */
+/** A loaded slot goes through the confirm (a switch frees the source). ⚠️ Do not add a path around it. */
 void InputDispatcher::request_instrument_type_toggle(int delta) {
     const Instrument& ins =
         host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
@@ -206,10 +197,8 @@ void InputDispatcher::request_instrument_type_toggle(int delta) {
     toggle_instrument_type(delta);   // an empty slot has nothing to lose — switch it outright
 }
 
-/**
- * Step the TYPE cell by `delta`, wrapping through the types this build offers. ⚠️ EXTERNAL is the
- * last type, so a build that hides MIDI simply stops one short; an instrument already EXTERNAL keeps it.
- */
+/** Step TYPE, wrapping through this build's types. ⚠️ EXTERNAL is last, so a build hiding MIDI stops
+ *  one short. */
 void InputDispatcher::toggle_instrument_type(int delta) {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
@@ -218,13 +207,11 @@ void InputDispatcher::toggle_instrument_type(int delta) {
                                    : songcore::INSTRUMENT_TYPE_COUNT - 1;
     const int cur   = static_cast<int>(ins.instrumentType);
     const int step  = delta < 0 ? -1 : +1;
-    // An EXTERNAL instrument in a build that hides the type is outside the cycle; step from the last
-    // reachable type.
+    // An EXTERNAL slot in such a build steps from the last reachable type.
     const int from  = (cur >= count) ? count - 1 : cur;
     const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
 
-    // The name the slot adopted from the source it is about to lose (see the adopt rule in
-    // screens/file_browser.cpp).
+    // The name it adopted from the source it is about to lose.
     const std::string previousAutoName = instrument_auto_name(host_.project(), s_.currentInstrument);
 
     host_.set_instrument_type(s_.currentInstrument, next);
@@ -234,10 +221,8 @@ void InputDispatcher::toggle_instrument_type(int delta) {
     if (!previousAutoName.empty() && ins.name == previousAutoName)
         ins.name = songcore::default_instrument_name(ins.id);
 
-    // Row 0 exists in all three layouts and the cursor is on its TYPE cell, so nothing to clamp; the
-    // feed re-reads the SF preset next frame.
-    s_.statusMessage = std::string("TYPE: ") + songcore::instrument_type_name(next);
-    s_.statusSuccess = true;
+    // Row 0's TYPE cell exists in every layout: nothing to clamp.
+    set_status(s_, std::string("TYPE: ") + songcore::instrument_type_name(next), true);
 }
 
 // ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────
@@ -261,8 +246,7 @@ bool InputDispatcher::instrument_edit(const InputAction& action) {
         p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursorRow,
         s_.instrumentCursorColumn, action);
 
-    // The PRESET row: the bank+preset behind an index live in the SF2's list, which only the
-    // engine has opened — resolved here so the module stays a pure function of the Project.
+    // The PRESET row: only the engine knows the SF2's list, so the index is resolved here.
     if (r.presetIndexChanged) host_.set_sf_preset_by_index(s_.currentInstrument, r.presetIndex);
     return r.modified;
 }

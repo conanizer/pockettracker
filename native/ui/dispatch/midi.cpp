@@ -12,8 +12,7 @@ namespace pt::ui {
 // ─── MIDI OUT ────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::boot_midi_port() {
-    // The OFFSET and SYNC first and unconditionally: both live in settings.json and are drawn on screen,
-    // so leaving them unapplied would show ON and send nothing.
+    // OFFSET and SYNC first and unconditionally: they are on screen, and must not read ON and send nothing.
     host_.set_midi_offset_ms(midi_offset_in_force(s_.settings, s_.midiAutoOffsetMs));
     host_.set_midi_sync_out(s_.settings.midiSyncOut);
 
@@ -63,6 +62,12 @@ static void forget_unlisted(std::vector<std::string>& refused, const std::vector
                   refused.end());
 }
 
+// The drawn list: OFF, AUTO, then every port the backend reports.
+template <class Port> static void list_ports(std::vector<std::string>& names, Port* port) {
+    names.assign({MIDI_PORT_OFF, MIDI_PORT_AUTO});   // the module never handles "no device"
+    for (int i = 0, n = port ? port->device_count() : 0; i < n; ++i) names.push_back(port->device_name(i));
+}
+
 static std::string port_status(const std::string& choice, bool opened, bool anyRefused,
                                const char* off, const char* opened_text, const char* busy) {
     if (choice == MIDI_PORT_OFF) return off;
@@ -71,19 +76,12 @@ static std::string port_status(const std::string& choice, bool opened, bool anyR
 }
 
 void InputDispatcher::refresh_midi_devices() {
-    s_.midiDeviceNames.assign({MIDI_PORT_OFF, MIDI_PORT_AUTO});   // the module never handles "no device"
-
-    if (s_.midiOut) {
-        const int n = s_.midiOut->device_count();
-        for (int i = 0; i < n; ++i) s_.midiDeviceNames.push_back(s_.midiOut->device_name(i));
-    }
-
+    list_ports(s_.midiDeviceNames, s_.midiOut);
     s_.midiDeviceIndex = resolve_port_index(s_.midiDeviceNames, s_.settings.midiOutDevice);
 }
 
 void InputDispatcher::close_midi_out() {
-    // ⚠️ Panic here: `set_out` panics only on a pointer change, and only the device behind it is
-    // changing. Skip this and notes on the closing port hang until the hardware is power-cycled.
+    // ⚠️ Panic first: set_out panics only on a pointer change, so notes on this port would hang.
     host_.midi_out().panic();
     s_.midiOut->close();
     s_.midiOutOpenName.clear();
@@ -110,16 +108,14 @@ void InputDispatcher::apply_midi_device() {
     s_.midiStatusText = port_status(s_.settings.midiOutDevice, opened, !midiOutRefused_.empty(),
                                     "OUTPUT OFF", "PORT OPENED", "PORT BUSY");
 
-    // ⭐ One call below every arm: the loopback check depends on which port is OPEN, and each arm
-    // (including OUTPUT OFF, which turns thru back on) leaves that different.
+    // One call below every arm: the loopback check depends on which port is open.
     update_midi_thru();
 }
 
 // ─── MIDI IN ─────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::boot_midi_in_port() {
-    // ⚠️ At boot, not only when the row is touched: a session that never opens the MIDI screen must
-    // still have its knobs reaching their mappings.
+    // ⚠️ At boot, so knobs reach their mappings without a visit to the MIDI screen.
     host_.set_midi_control_channel(s_.settings.midiControlChannel);
     refresh_midi_in_devices();
     if (s_.midiInDeviceIndex != 0) apply_midi_in_device();
@@ -130,13 +126,7 @@ void InputDispatcher::boot_midi_in_port() {
 }
 
 void InputDispatcher::refresh_midi_in_devices() {
-    s_.midiInDeviceNames.assign({MIDI_PORT_OFF, MIDI_PORT_AUTO});
-
-    if (s_.midiIn) {
-        const int n = s_.midiIn->device_count();
-        for (int i = 0; i < n; ++i) s_.midiInDeviceNames.push_back(s_.midiIn->device_name(i));
-    }
-
+    list_ports(s_.midiInDeviceNames, s_.midiIn);
     s_.midiInDeviceIndex = resolve_port_index(s_.midiInDeviceNames, s_.settings.midiInDevice);
 }
 
@@ -180,9 +170,8 @@ void InputDispatcher::apply_midi_in_device() {
 // ─── Hot-plug ────────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::run_midi_hotplug() {
-    // Once a second, rescan both lists: a device that has gone is closed, and one the choice names
-    // (under AUTO, the first plugged in) is opened. Settings are never overwritten. Polled, because
-    // winmm has no notification.
+    // Once a second (winmm has no notification): close what has gone, open what the choice names.
+    // Settings are never overwritten.
     if (now_ms_ < midiScanDueMs_) return;
     midiScanDueMs_ = now_ms_ + MIDI_SCAN_MS;
 
@@ -195,13 +184,11 @@ void InputDispatcher::run_midi_hotplug() {
         if (!was.empty() &&
             (s_.midiOut->broken() || !s_.midiOut->is_open() || !listed(s_.midiDeviceNames, was))) {
             close_midi_out();
-            s_.statusMessage = "MIDI OUT UNPLUGGED";
-            s_.statusSuccess = false;
+            set_status(s_, "MIDI OUT UNPLUGGED", false);
             changed = true;
         }
         if (s_.midiOutOpenName.empty() && open_midi_out()) {
-            s_.statusMessage = "MIDI OUT: " + s_.midiOutOpenName;
-            s_.statusSuccess = true;
+            set_status(s_, "MIDI OUT: " + s_.midiOutOpenName, true);
             changed = true;
         }
     }
@@ -213,13 +200,11 @@ void InputDispatcher::run_midi_hotplug() {
         if (!was.empty() &&
             (s_.midiIn->broken() || !s_.midiIn->is_open() || !listed(s_.midiInDeviceNames, was))) {
             close_midi_in();
-            s_.statusMessage = "MIDI IN UNPLUGGED";
-            s_.statusSuccess = false;
+            set_status(s_, "MIDI IN UNPLUGGED", false);
             changed = true;
         }
         if (s_.midiInOpenName.empty() && open_midi_in()) {
-            s_.statusMessage = "MIDI IN: " + s_.midiInOpenName;
-            s_.statusSuccess = true;
+            set_status(s_, "MIDI IN: " + s_.midiInOpenName, true);
             changed = true;
         }
     }
@@ -234,8 +219,7 @@ void InputDispatcher::update_midi_thru() {
 
     host_.set_midi_in_thru(!loopback);
 
-    // ⚠️ Said on screen, over "INPUT OPENED": a silent suppression looks like an EXTERNAL instrument
-    // that ignores the keyboard.
+    // ⚠️ On screen: a silent suppression looks like an EXTERNAL instrument ignoring the keyboard.
     if (loopback) s_.midiStatusText = "THRU OFF: LOOP";
 }
 

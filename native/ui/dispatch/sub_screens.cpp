@@ -9,10 +9,8 @@
 
 namespace pt::ui {
 
-// The one place the FX list's length is decided — the picker and the FX column both read it.
-//
-// ⚠️ Two trims off one tail, so they nest: `LPO` sits directly below the MIDI six and can only be
-// dropped once they are (songcore/effects.h). A build showing MIDI shows LPO.
+// The FX list's length, read by the picker and the FX column. ⚠️ LPO sits just below the MIDI six and
+// drops only with them: a build showing MIDI shows LPO.
 int InputDispatcher::visible_effect_type_count() const {
     if (s_.caps.midi)       return songcore::EFFECT_TYPE_COUNT;
     if (s_.caps.loopWindow) return songcore::EFFECT_TYPE_COUNT_NO_MIDI;
@@ -22,16 +20,15 @@ int InputDispatcher::visible_effect_type_count() const {
 bool InputDispatcher::defer_a_to_release() const {
     InputDispatcher& self = const_cast<InputDispatcher&>(*this);
 
-    // ⚠️ No cell opens a sub-screen while a layer is up. The cursor under the EQ editor sits on the EQ
-    // cell that raised it, so without this every A inside the editor would be deferred for nothing.
-    // The send editor's INP EQ and TIME cells are the exception: a layer's own cells with a plain A.
+    // ⚠️ No cell opens a sub-screen under a layer (else every A in the EQ editor is deferred), except the
+    // send editor's own INP EQ and TIME.
     if (top_layer()) {
         return send_editor_on_top() &&
                self.effects_release_action(s_.sendEditor.cursorRow, /*peek=*/true);
     }
 
-    // ⚠️ Opens nothing, but deferred too: on row 11 under MANUAL a plain A cuts a boundary at the
-    // playhead, and the same A is held for the slice step, the drag and the delete.
+    // ⚠️ Opens nothing, but deferred too: row 11's A under MANUAL is held for the tap, the drag and the
+    // delete.
     if (on_slice_tap_cell()) return true;
 
     switch (s_.currentScreen) {
@@ -55,10 +52,8 @@ bool InputDispatcher::defer_b_to_release() const {
     // The EQ editor: B is both CLOSE and the slot-cycle modifier, and only the release says which.
     if (eq_open()) return true;
 
-    // ⚠️ And wherever R+B is a MUTE: two buttons never arrive on the same frame, so a B landing a frame
-    // ahead of its R would COPY and close the selection, and the R+B would then mute one channel
-    // instead of the eight highlighted. Holding B until release lets R claim it either way round, and
-    // stops B+UP/DOWN paging a selection away.
+    // ⚠️ And wherever R+B is a MUTE: a B landing a frame before its R would copy and close the
+    // selection, and the chord would mute one channel instead of eight.
     return mute_solo_chord_live();
 }
 
@@ -69,8 +64,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
 
     switch (s_.currentScreen) {
         case ScreenType::PROJECT:
-            // The NAME row: each character is an in-place cell, so A opens the keyboard, A+RIGHT steps
-            // the character and A+B blanks it — the sharpest case for deferring A.
+            // The NAME row's characters are in-place cells, so A opens the keyboard on the release.
             if (s_.projectCursorRow == static_cast<int>(ProjectRow::NAME) &&
                 s_.projectCursorColumn >= 1) {
                 if (!peek) open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name,
@@ -149,14 +143,12 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             break;
 
         case ScreenType::SAMPLE_EDITOR: {
-            // The FX row's VALUE cell (row 16, col 1): an EQ SLOT opens the EQ editor, TSTRETCH its box.
-            // Column 2 is APPLY and keeps its own A; A+DPAD on column 1 still dials the cell.
+            // The FX row's VALUE cell: an EQ slot opens the EQ editor, TSTRETCH its box.
             const SampleEditorState& se = s_.sampleEditor;
             if (se.cursorRow != 16 || se.cursorCol != 1) break;
             if (se.fxType == SampleEditorModule::FX_EQ) {
                 if (!peek) {
-                    // ⚠️ A "--" TAKES slot 00 as it opens, unlike the other EQ cells: START and APPLY
-                    // read the cell, so the curve dialled in the editor has to be the one it names.
+                    // ⚠️ "--" takes slot 00 on open: START and APPLY read the cell.
                     s_.sampleEditor.fxEqSlot = std::max(0, se.fxEqSlot);
                     open_eq_editor(s_.sampleEditor.fxEqSlot, EqCallerContext::sample_editor_fx());
                 }

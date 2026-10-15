@@ -40,16 +40,14 @@ GestureResult InputDispatcher::midi_map_screen(Gesture g) {
 void InputDispatcher::midi_action() {
     switch (static_cast<MidiRow>(s_.midiCursorRow)) {
         case MidiRow::PANIC:
-            // Every note-off owed, through the consumer (it knows what is sounding) — the same panic
-            // SongcoreHost::stop() sends.
+            // Every owed note-off, through the consumer — the panic STOP sends.
             host_.midi_out().panic();
             s_.midiStatusText = port_open() ? "PANIC SENT" : "NO PORT";
             break;
 
         case MidiRow::TEST: {
-            // ⚠️ TEST writes to the port directly, bypassing the sequencer on purpose: a silent TEST
-            // must mean "no cable", not "something, somewhere". The note-off follows at once, so this
-            // screen cannot leave a note hanging.
+            // ⚠️ Straight to the port, past the sequencer: a silent TEST must mean "no cable". The
+            // note-off follows at once.
             if (!port_open()) { s_.midiStatusText = "NO PORT"; break; }
             const uint8_t on[3]  = {0x90, 60, 100};   // C-4, channel 1, mf
             const uint8_t off[3] = {0x80, 60, 0};
@@ -63,10 +61,7 @@ void InputDispatcher::midi_action() {
         case MidiRow::MAPPING: {
             clamp_midi_map_cursor();
             s_.midiMapReturnScreen = s_.currentScreen;
-            NavResult nav;
-            nav.screen = ScreenType::MIDI_MAP;
-            nav.column = s_.previousColumn;
-            go_to_screen(s_, nav);
+            go_to_screen(s_, {ScreenType::MIDI_MAP, s_.previousColumn});
             break;
         }
 
@@ -89,8 +84,7 @@ void InputDispatcher::midi_map_action() {
     if (s_.midiMapCursorRow != static_cast<int>(p.midiMappings.size())) return;
     if (static_cast<int>(p.midiMappings.size()) >= songcore::MIDI_MAP_MAX) return;
 
-    // A new row starts on the catalogue's first destination (track 1's fader, which every project
-    // has) across its whole range, so it points at something real from the first frame.
+    // A new row points at the first destination (track 1's fader) over its whole range.
     songcore::MidiMapping m;
     m.controller = 0;
     m.dest       = static_cast<uint8_t>(songcore::MAP_DESTS[0].id);

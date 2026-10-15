@@ -18,8 +18,7 @@ GestureResult InputDispatcher::theme_layer(Gesture g) {
         case Gesture::DPAD_LEFT:  theme_move_cursor(0, -1); break;
         case Gesture::DPAD_RIGHT: theme_move_cursor(0, +1); break;
 
-        // A+LEFT / A+RIGHT: the THEME row steps the built-in palettes; a colour channel moves by 0x01.
-        // A+UP   / A+DOWN:  the palettes too; a colour channel moves by 0x10.
+        // A+LEFT/RIGHT step the THEME row's palettes, or a channel by 0x01; A+UP/DOWN the same, by 0x10.
         case Gesture::A_UP:    theme_dpad_edit(+1, +0x10); break;
         case Gesture::A_DOWN:  theme_dpad_edit(-1, -0x10); break;
         case Gesture::A_LEFT:  theme_dpad_edit(-1, -0x01); break;
@@ -30,8 +29,7 @@ GestureResult InputDispatcher::theme_layer(Gesture g) {
             if (theme_color_index(es.cursorRow) < 0) theme_row_action();
             break;
 
-        // ⚠️ B closes with no "are you sure": the live theme IS the applied theme, and it survives the
-        // close and the quit.
+        // ⚠️ No "are you sure": the live theme is the applied theme.
         case Gesture::B: close_theme_editor(); break;
 
         // On a colour row: L+A locks it against a roll, R+A re-rolls it alone.
@@ -53,7 +51,6 @@ GestureResult InputDispatcher::theme_layer(Gesture g) {
     return GestureResult::TAKEN;
 }
 void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
-    // Both axes wrap: a list of colours is a ring. The panel scrolls to follow the row.
     if (d_row != 0) {
         const int row = s_.themeEditor.cursorRow;
         const int max = ThemeEditorModule::max_row();
@@ -72,10 +69,8 @@ void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
     theme_refresh_message();
 }
 
-/**
- * A+DPAD in the theme editor, which means three different things depending on the cell. Written once
- * and called from all four directions, so no edge can forget that channel 1 is the style.
- */
+/** A+DPAD in the theme editor, written once for all four directions so none forgets channel 1 is the
+ *  style. */
 void InputDispatcher::theme_dpad_edit(int cycleDelta, int nudge) {
     ThemeEditorState& es = s_.themeEditor;
 
@@ -127,21 +122,6 @@ void InputDispatcher::theme_roll_palette(bool rowOnly) {
     theme_refresh_message();
 }
 
-/**
- * A theme name as a FILENAME: anything outside [A-Za-z0-9_] becomes `_`. ⚠️ An empty name stays empty —
- * both callers apply the "THEME" fallback, since `.ptt` would be a dotfile the browser skips.
- */
-static std::string sanitize_theme_filename(const std::string& name) {
-    std::string out;
-    out.reserve(name.size());
-    for (const char c : name) {
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                        (c >= '0' && c <= '9') || c == '_';
-        out += ok ? c : '_';
-    }
-    return out;
-}
-
 void InputDispatcher::theme_row_action() {
     if (s_.themeEditor.cursorRow == THEME_ROW_RANDOM) {
         // ROLL — a whole palette, in the scheme the cell beside it is showing.
@@ -150,16 +130,15 @@ void InputDispatcher::theme_row_action() {
     }
     switch (s_.themeEditor.cursorChannel) {
         case 1: {   // SAVE — name it, then write it
-            // ⚠️ The keyboard opens WITHOUT closing the editor, hence QWERTY above THEME in the layer
-            // stack. Seeded with the sanitized name — what the file will be called.
-            const std::string seed = sanitize_theme_filename(s_.theme.name);
+            // ⚠️ Opens without closing the editor (QWERTY is above THEME). Seeded with the sanitized name.
+            const std::string seed = safe_file_name(s_.theme.name);
             open_qwerty(QwertyContext::THEME_SAVE, seed.empty() ? "THEME" : seed, "SAVE THEME:",
                         fs_.themes_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
             break;
         }
         case 2: {   // LOAD — browse the Themes folder for a .ptt
-            // ⚠️ LOAD closes the editor first: the browser is a SCREEN, and a modal left on top would
-            // swallow its D-pad. `browser_confirm` re-opens the editor when a theme lands.
+            // ⚠️ Closes the editor first: the browser is a screen, and a modal on top would swallow its
+            // D-pad. browser_confirm re-opens it.
             close_theme_editor();
             open_file_browser(AppState::BrowserPurpose::LOAD_THEME, browser_dir(BrowserDir::THEMES),
                               {"ptt"});
@@ -171,23 +150,19 @@ void InputDispatcher::theme_row_action() {
 }
 
 void InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {
-    // ⚠️ Two names from one typed string: the FILENAME is sanitized ("My Theme!" → My_Theme_.ptt, so it
-    // survives FAT32); the name IN the file stays raw. An empty field keeps the current name and falls
-    // back to "THEME" for the file — never `.ptt`, a dotfile the browser hides.
-    const std::string safe = sanitize_theme_filename(typed_text);
+    // Sanitized filename (empty → THEME.ptt), raw name inside.
+    const std::string safe = safe_file_name(typed_text);
     const std::string file = (safe.empty() ? std::string("THEME") : safe) + ".ptt";
     const std::string path = dir + "/" + file;
 
     Theme to_save = s_.theme;
     if (!typed_text.empty()) to_save.name = typed_text;
 
-    // ⚠️ The live theme does NOT adopt the saved name: the built-in cycle keys off the name, and a
-    // custom one would change where A+RIGHT lands. Loading the file back does set it.
+    // ⚠️ The live theme keeps its name: the built-in cycle keys off it. Loading the file sets it.
     const bool ok = save_theme_file(fs_, path, to_save);
 
-    // ⚠️ A failed save must say so — a full card or read-only mount would otherwise report success.
-    s_.statusMessage = ok ? "THEME SAVED" : "SAVE FAILED";
-    s_.statusSuccess = ok;
+    // ⚠️ A full card or a read-only mount must not report success.
+    set_status(s_, ok ? "THEME SAVED" : "SAVE FAILED", ok);
 
     open_theme_editor();
 }

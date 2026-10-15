@@ -5,15 +5,9 @@
 
 namespace pt::ui {
 
-// ⚠️ The ORDER is the stack — the first open entry is the top. The pairs that can be open together:
-//   • LOADING above everything, the confirm included: a load can start behind another modal (the sample
-//     editor's LOAD from its confirm), and only finishing or cancelling ends it. `running`, not
-//     `shown` — a load owns the buttons from its first moment.
-//   • RENDER is up while a render runs; a load inside it ranks above.
-//   • the full HELP opens over the two in-place editors, never over a confirm, the keyboard or the FX
-//     picker.
-//   • QWERTY above THEME: the theme editor's SAVE raises the keyboard without closing.
-//   • QWERTY and EQ above the SEND editor: its SAVE and its INP EQ cell raise them without closing.
+// ⚠️ The order is the stack: the first open entry is on top. LOADING is above everything, the confirm
+// included, from the load's first moment. The full HELP opens over the in-place editors only. QWERTY is
+// above THEME and SEND, and EQ above SEND: their SAVE and INP EQ raise them without closing.
 const InputDispatcher::Layer InputDispatcher::LAYERS[] = {
     {&InputDispatcher::load_running,       &InputDispatcher::loading_layer},
     {&InputDispatcher::confirm_open,       &InputDispatcher::confirm_layer},
@@ -41,8 +35,8 @@ constexpr GridCursor CHAIN_GRID{&AppState::cursorRow, &AppState::cursorColumn, 1
 constexpr GridCursor PHRASE_GRID{&AppState::cursorRow, &AppState::cursorColumn, 15, 9};
 constexpr GridCursor TABLE_GRID{&AppState::tableCursorRow, &AppState::tableCursorColumn, 15, 8};
 
-// Every screen: a gesture its handler passes on runs the gesture's generic path, which asks the same
-// row for the cell under the cursor and for the edit.
+// A gesture a screen's handler passes runs the generic path, which asks the same row for the cell under
+// the cursor and for the edit.
 using D = InputDispatcher;
 const D::ScreenHandler D::SCREENS[] = {
     {ScreenType::SAMPLE_EDITOR, &D::sample_editor_screen, &D::sample_editor_context, &D::sample_editor_edit, nullptr, nullptr},

@@ -153,8 +153,7 @@ bool InputDispatcher::recover_from_autosave() {
     const LoadScope recoverScope(*this, now_ms_, "RECOVERED WORK");
 
     if (!autosave_load(host_, fs_, mediaBaseDir_)) {
-        s_.statusMessage = "RECOVER FAILED";
-        s_.statusSuccess = false;
+        set_status(s_, "RECOVER FAILED", false);
         return false;
     }
 
@@ -169,8 +168,7 @@ bool InputDispatcher::recover_from_autosave() {
         s_.projectVersion      = 0;
         s_.savedProjectVersion = 0;
         s_.projectPath.clear();
-        s_.statusMessage = "RECOVER CANCELLED";
-        s_.statusSuccess = true;
+        set_status(s_, "RECOVER CANCELLED", true);
         return true;
     }
 
@@ -180,8 +178,7 @@ bool InputDispatcher::recover_from_autosave() {
     s_.savedProjectVersion = 0;
     s_.projectPath.clear();
 
-    s_.statusMessage = "RECOVERED";
-    s_.statusSuccess = true;
+    set_status(s_, "RECOVERED", true);
     return true;
 }
 
@@ -283,23 +280,20 @@ void InputDispatcher::run_midi_learn() {
 
     // The knob is on a channel CTL CH does not cover (it is OFF by default): say which.
     if (!songcore::ctl_ch_covers(host_.midi_control_channel(), host_.midi_learn_channel())) {
-        s_.statusMessage = "KNOB ON CH " + dec2(host_.midi_learn_channel() + 1) + " - SET CTL CH";
-        s_.statusSuccess = false;
+        set_status(s_, "KNOB ON CH " + dec2(host_.midi_learn_channel() + 1) + " - SET CTL CH", false);
         return;
     }
 
     const songcore::MapTarget target = map_target();
     if (!target.named()) {
-        s_.statusMessage = "NOTHING HERE TO MAP";   // or it looks like a knob not plugged in
-        s_.statusSuccess = false;
+        set_status(s_, "NOTHING HERE TO MAP", false);   // or it looks like a knob not plugged in
         return;
     }
 
     const int cc  = host_.midi_learn_controller();
     const int row = songcore::learn_mapping(*s_.project, target, cc);
     if (row < 0) {
-        s_.statusMessage = "MAPPING LIST FULL";
-        s_.statusSuccess = false;
+        set_status(s_, "MAPPING LIST FULL", false);
         return;
     }
 
@@ -310,8 +304,7 @@ void InputDispatcher::run_midi_learn() {
         where += " " + std::to_string(target.scope + 1);
     else if (d && d->scope == songcore::MapScope::INSTRUMENT)
         where += " " + songcore::hex2(target.scope);
-    s_.statusMessage = "MAPPED " + songcore::hex2(cc) + " > " + where;
-    s_.statusSuccess = true;
+    set_status(s_, "MAPPED " + songcore::hex2(cc) + " > " + where, true);
 
     mark_dirty_and_arm_autosave();   // nothing to push: a mapping moves nothing until a knob turns
 }

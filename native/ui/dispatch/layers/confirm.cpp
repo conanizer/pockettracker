@@ -29,39 +29,32 @@ void InputDispatcher::confirm_accept() {
         case ConfirmDialogState::Kind::CLEAN_SEQ:
             host_.clean_seq();
             mark_modified();
-            s_.statusMessage = "SEQ CLEANED";
-            s_.statusSuccess = true;
+            set_status(s_, "SEQ CLEANED", true);
             break;
 
-        case ConfirmDialogState::Kind::CLEAN_INST:
-            // ⚠️ `clean_inst` also reloads the media: the emptied slots' buffers are still in the
-            // engine, and without the reload the RAM would not drop until the next save and open.
+        case ConfirmDialogState::Kind::CLEAN_INST: {
+            // clean_inst also reloads the media, so the freed RAM drops now, not at the next open — and
+            // the reload can fail like a project load.
             host_.clean_inst(fs_.samples_directory());
             mark_modified();
-            {
-                // The reload can fail like a project load — see load_project_done.
-                const int failed = host_.last_media_load().failed;
-                s_.statusMessage =
-                    failed > 0 ? "CLEANED: " + std::to_string(failed) + " MISSING" : "INST CLEANED";
-                s_.statusSuccess = (failed == 0);
-            }
+            const int failed = host_.last_media_load().failed;
+            set_status(s_, failed > 0 ? "CLEANED: " + std::to_string(failed) + " MISSING" : "INST CLEANED",
+                       failed == 0);
             break;
+        }
 
         case ConfirmDialogState::Kind::NEW_PROJECT:
             start_new_project();
             break;
 
         case ConfirmDialogState::Kind::CHANGE_TYPE:
-            // Switching type frees a loaded source, hence the dialog. ⚠️ The direction comes back out
-            // of the dialog (`arg`), so A+LEFT still steps backwards after a yes.
+            // The direction comes back out of the dialog, so A+LEFT still steps backwards after a yes.
             toggle_instrument_type(argv);
             break;
 
         case ConfirmDialogState::Kind::EXIT:
-            // ⚠️ A confirmed EXIT is the app's one clean death, so it leaves nothing to recover. That
-            // is also why EXIT still asks despite the autosave: it is the only way to deliberately
-            // discard a session. Every unclean death (SIGTERM, flat battery, crash, F10) keeps the work
-            // via `flush_autosave()`.
+            // ⚠️ A confirmed EXIT is the one clean death and the only deliberate discard, so it leaves
+            // nothing to recover; every unclean death keeps the work via flush_autosave().
             autosave_clear(fs_);
             s_.shouldQuit = true;
             break;
@@ -80,8 +73,8 @@ void InputDispatcher::confirm_cancel() {
     const ConfirmDialogState::Kind kind = s_.confirm.kind;
     s_.confirm.close();
 
-    // ⚠️ The one question whose NO is an action: discard the unsaved work. Leaving the file would bring
-    // the prompt back every launch, teaching people to dismiss it unread.
+    // ⚠️ The one NO that acts: it discards the work, or the prompt returns every launch and is
+    // dismissed unread.
     if (kind == ConfirmDialogState::Kind::RECOVER) autosave_clear(fs_);
 }
 

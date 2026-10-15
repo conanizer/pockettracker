@@ -17,8 +17,7 @@ GestureResult InputDispatcher::project_screen(Gesture g) {
             if (!open_sub_screen_at_cursor(/*peek=*/false)) project_action();
             return GestureResult::TAKEN;
 
-        // ⚠️ Tap tempo: a second A inside 300 ms (= 200 BPM) arrives here, not as A. Without this every
-        // other fast tap would be lost to the double-tap path and the tempo would halve.
+        // ⚠️ Tap tempo: a second A within 300 ms arrives as A_A; without this every other fast tap is lost.
         case Gesture::A_A:
             if (s_.projectCursorRow != static_cast<int>(ProjectRow::TEMPO) ||
                 s_.projectCursorColumn != 2)
@@ -39,15 +38,12 @@ GestureResult InputDispatcher::settings_screen(Gesture g) {
     }
 }
 
-// SETTINGS, MIDI and the mapping list are not on the nav grid's main row, so B takes you back to the
-// screen stored on the way in. ⚠️ Without leaving the selection: B in one copies, and these screens have
-// no clipboard.
+// SETTINGS, MIDI and the mapping list are off the nav grid: B returns to the screen stored on entry.
+// ⚠️ The selection goes first: B in one copies, and these screens have no clipboard.
 void InputDispatcher::leave_to(ScreenType back) {
     s_.selection.exit();
-    NavResult nav;
-    nav.screen = back;
-    nav.column = s_.previousColumn;   // these screens own no column — keep the one they came in with
-    go_to_screen(s_, nav);            // not a bare assignment: cursors are saved/restored here
+    // These screens own no column: keep the one they came in with.
+    go_to_screen(s_, {back, s_.previousColumn});
 }
 
 // ─── What A does ─────────────────────────────────────────────────────────────────────────────────
@@ -55,8 +51,7 @@ void InputDispatcher::leave_to(ScreenType back) {
 void InputDispatcher::project_action() {
     switch (static_cast<ProjectRow>(s_.projectCursorRow)) {
         case ProjectRow::NAME:
-            // ⚠️ Empty on purpose: NAME is a deferred cell, already handled by
-            // `open_sub_screen_at_cursor`. A silent `default:` would invite a second opener.
+            // ⚠️ Empty on purpose: NAME is deferred, handled by open_sub_screen_at_cursor.
             break;
 
         case ProjectRow::PROJECT:
@@ -64,8 +59,7 @@ void InputDispatcher::project_action() {
                 case 1: {   // SAVE
                     before_save();
                     const ActionResult r = save_project(host_, fs_, s_);
-                    s_.statusMessage = r.message;
-                    s_.statusSuccess = r.ok;
+                    set_status(s_, r.message, r.ok);
                     break;
                 }
                 case 2:     // LOAD
@@ -82,8 +76,7 @@ void InputDispatcher::project_action() {
             break;
 
         case ProjectRow::EXPORT:
-            // Neither button renders directly: both open the RENDER panel, and which was pressed
-            // picks stereo WAV or stems.
+            // Both open the RENDER panel; the button picks MIX or STEMS.
             if (s_.projectCursorColumn == 1)      open_render_dialog(RenderDialogState::Output::MIX);
             else if (s_.projectCursorColumn == 2) open_render_dialog(RenderDialogState::Output::STEMS);
             break;
@@ -95,47 +88,34 @@ void InputDispatcher::project_action() {
                 s_.confirm.open(ConfirmDialogState::Kind::CLEAN_INST);
             break;
 
-        case ProjectRow::SYSTEM: {
-            // A shortcut into SETTINGS, which owns no column, so R+UP later returns to the main-row
-            // screen you were on. B's way out is captured separately (see AppState::settingsReturnScreen).
+        case ProjectRow::SYSTEM:
+            // Into SETTINGS, which owns no column, so R+UP later returns to the main-row screen.
             s_.settingsReturnScreen = s_.currentScreen;
-            NavResult nav;
-            nav.screen = ScreenType::SETTINGS;
-            nav.column = s_.previousColumn;
-            go_to_screen(s_, nav);
+            go_to_screen(s_, {ScreenType::SETTINGS, s_.previousColumn});
             break;
-        }
 
         case ProjectRow::MIDI: {
-            // ⚠️ The row is hidden where the build hides MIDI, and PROJECT is the MIDI screen's only
-            // door — so this guard is the real gate, turning back a stale cursor or a future caller.
+            // ⚠️ The real gate: the row is hidden without MIDI, and PROJECT is the screen's only door.
             if (!s_.caps.midi) break;
 
-            // Like SYSTEM above, minus the nav grid; B is the only way back. ⚠️ Both port lists are
-            // enumerated here, on the way in — a port list is only true at the moment it is read.
+            // ⚠️ Both port lists are read on the way in — a list is only true when read.
             refresh_midi_devices();
             refresh_midi_in_devices();
             s_.midiStatusText.clear();   // last visit's "TEST SENT" is not this visit's news
             s_.midiReturnScreen = s_.currentScreen;
-            NavResult nav;
-            nav.screen = ScreenType::MIDI;
-            nav.column = s_.previousColumn;
-            go_to_screen(s_, nav);
+            go_to_screen(s_, {ScreenType::MIDI, s_.previousColumn});
             break;
         }
 
         case ProjectRow::EXIT:
-            // ⚠️ Only where the platform can exit, and it still asks like NEW: the dialog is the app's
-            // one deliberate way to discard a session, and its YES the one clean death.
+            // ⚠️ Asks like NEW: its YES is the app's one deliberate discard.
             if (!s_.caps.appExit) break;
             if (s_.project_dirty()) s_.confirm.open(ConfirmDialogState::Kind::EXIT);
             else                    s_.shouldQuit = true;
             break;
 
-        // TAP — the TEMPO row's second cell, and A on it alone.
-        //
-        // ⚠️⚠️ The column guard is the feature: the mapper fires plain A on A's own press, so every
-        // A+UP used to nudge the BPM was also counted as a tap.
+        // TAP: the TEMPO row's second cell. ⚠️ The column guard is the feature: plain A also fires on
+        // the press of every A+UP.
         case ProjectRow::TEMPO:
             if (s_.projectCursorColumn == 2) tap_tempo();
             break;
@@ -175,7 +155,7 @@ void InputDispatcher::tap_tempo() {
     const int bpm = static_cast<int>((60000 + meanMs / 2) / meanMs);
 
     Project& p = host_.edit_project();
-    const int clamped = std::min(999, std::max(20, bpm));
+    const int clamped = std::clamp(bpm, 20, 999);
     if (p.tempo == clamped) return;   // no edit, so no dirty bump
     p.tempo = clamped;
     mark_modified();
@@ -184,7 +164,6 @@ void InputDispatcher::tap_tempo() {
 void InputDispatcher::settings_action() {
     switch (static_cast<SettingsRow>(s_.settingsCursorRow)) {
         case SettingsRow::THEME:
-            // A opens the theme editor.
             open_theme_editor();
             break;
 
@@ -192,8 +171,7 @@ void InputDispatcher::settings_action() {
             if (s_.settingsCursorColumn != 1 && s_.settingsCursorColumn != 2) break;
             const ActionResult r = (s_.settingsCursorColumn == 1) ? save_template(host_, fs_)
                                                                   : clear_template(fs_);
-            s_.statusMessage = r.message;
-            s_.statusSuccess = r.ok;
+            set_status(s_, r.message, r.ok);
             break;
         }
 
@@ -230,14 +208,12 @@ CursorContext InputDispatcher::settings_context() const {
     return settings_.cursor_context(ss);
 }
 
-// ⚠️ SETTINGS edits the SETTINGS, not the project — `false`, so no mark_modified(): a visualizer
-// change must not make a song dirty or prompt at NEW / EXIT. The shell writes settings.json.
+// ⚠️ SETTINGS edits settings.json, not the song: false, so a change never dirties it.
 bool InputDispatcher::settings_edit(const InputAction& action) {
     const bool navBefore = s_.settings.navSongRelative;
     settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
                            s_.settingsCursorColumn, action);
-    // ⚠️ Turning NAV on must land the pointer on a real cell, or the first R+RIGHT is refused
-    // silently.
+    // ⚠️ NAV on must land the pointer on a real cell, or the first R+RIGHT is refused silently.
     if (!navBefore && s_.settings.navSongRelative) clamp_song_pointer(s_);
     return false;
 }

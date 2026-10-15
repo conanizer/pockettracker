@@ -15,6 +15,17 @@
 
 namespace pt::ui {
 
+namespace {
+
+std::string file_count(size_t n) { return std::to_string(n) + (n == 1 ? " FILE" : " FILES"); }
+
+void end_selection(FileBrowserState& b) {
+    b.selectionMode   = false;
+    b.selectionAnchor = -1;
+}
+
+}  // namespace
+
 // ─── The buttons ─────────────────────────────────────────────────────────────────────────────────
 
 GestureResult InputDispatcher::file_browser_screen(Gesture g) {
@@ -30,24 +41,20 @@ GestureResult InputDispatcher::file_browser_screen(Gesture g) {
         case Gesture::B:     browser_back(); break;
         case Gesture::START: browser_audition(); break;
 
-        // ⚠️ An audition here rings until stopped, and scrolling a folder of kicks would stack them.
+        // An audition rings until stopped; scrolling must not stack them.
         case Gesture::STOP_PREVIEW: host_.stop_preview(); break;
 
         // Help is the shared path's, which knows the panel has no room here.
         case Gesture::SELECT: return GestureResult::PASS;
 
-        // ⚠️ R+DPAD is not navigation here: the browser is not a cell in the screen grid. No R+RIGHT —
-        // going down a directory is A on a folder.
+        // ⚠️ Not navigation: the browser is not a grid cell. Down a directory is A on a folder.
         case Gesture::R_UP:   browser_cycle_sort(+1); break;
         case Gesture::R_DOWN: browser_cycle_sort(-1); break;
         case Gesture::R_LEFT: navigate_to_parent(fb, fs_); break;
 
         case Gesture::L_B: browser_select(); break;
         case Gesture::L_A: browser_cut_or_paste(); break;
-        case Gesture::L_R:
-            fb.selectionMode   = false;
-            fb.selectionAnchor = -1;
-            break;
+        case Gesture::L_R: end_selection(fb); break;
 
         case Gesture::SELECT_A: browser_rename(); break;
         case Gesture::SELECT_B: browser_arm_delete(); break;
@@ -61,8 +68,7 @@ GestureResult InputDispatcher::file_browser_screen(Gesture g) {
 void InputDispatcher::browser_back() {
     FileBrowserState& fb = s_.fileBrowser;
 
-    // B is the NO: it disarms whatever is armed rather than leaving, so SELECT+A/B pressed by accident
-    // are harmless. Written against the MODE, so a new mode has a way out.
+    // B is the NO: it disarms any mode rather than leaving, so an accidental SELECT+A/B is harmless.
     if (fb.mode != BrowserMode::NORMAL) { fb.mode = BrowserMode::NORMAL; return; }
 
     // Inside a file selection, B COPIES it — as over a grid.
@@ -72,11 +78,9 @@ void InputDispatcher::browser_back() {
             const size_t n = files.size();
             fb.fileClipboard      = std::move(files);
             fb.fileClipboardIsCut = false;
-            fb.statusMessage = "CPY " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
-            fb.statusSuccess = true;
+            set_status(fb, "CPY " + file_count(n), true);
         }
-        fb.selectionMode   = false;
-        fb.selectionAnchor = -1;
+        end_selection(fb);
         return;
     }
 
@@ -84,8 +88,7 @@ void InputDispatcher::browser_back() {
 }
 
 void InputDispatcher::browser_audition() {
-    // ⚠️ Decoded into slot 255 on the preview lane (songcore::preview_sample_file — no instrument to
-    // derive from). Every audible extension, from every browser context.
+    // Decoded into slot 255 on the preview lane; every audible extension, from every context.
     const BrowserItem* item = s_.fileBrowser.current();
     if (!item || item->kind != BrowserItem::Kind::FILE) return;
 
@@ -94,22 +97,20 @@ void InputDispatcher::browser_audition() {
                          sample_extensions().end();
     if (!audible) return;   // a .pti or an .sf2 has no waveform
 
-    // A file has no song cell behind it: neutral gain, never a channel a previous audition used.
+    // No song cell behind a file: neutral gain.
     host_.set_preview_track(-1);
-    // ⚠️ An audition is a full DECODE — a four-minute mp3 costs a real load. Same strip, same B.
+    // ⚠️ A full decode (a long mp3 is a real load), so the loading strip and B.
     const LoadScope previewScope(*this, now_ms_, item->displayName);
     if (!host_.preview_file(item->path)) {
         if (host_.last_load_cancelled()) return;   // stopped on purpose
-        s_.fileBrowser.statusMessage = "PREVIEW FAILED";
-        s_.fileBrowser.statusSuccess = false;
+        set_status(s_.fileBrowser, "PREVIEW FAILED", false);
     }
 }
 
 // ─── Opening and closing the browser ─────────────────────────────────────────────────────────────
 
 std::string InputDispatcher::browser_dir(BrowserDir cat) {
-    // A config.json override per category, else the built-in default — created on first use, so always
-    // a real directory to fall back on.
+    // The config.json override per category, else the built-in default.
     const std::optional<std::string>* ov = nullptr;
     std::string                       def;
     switch (cat) {
@@ -119,8 +120,7 @@ std::string InputDispatcher::browser_dir(BrowserDir cat) {
         case BrowserDir::PROJECTS:    ov = &s_.folderConfig.projects;    def = fs_.projects_directory();    break;
         case BrowserDir::THEMES:      ov = &s_.folderConfig.themes;      def = fs_.themes_directory();      break;
     }
-    // ⚠️ The whole rule is `resolve_browse_dir` (root-relative unless absolute, re-rooting, the fallback);
-    // inlining any of it here would let the config and project sample paths disagree.
+    // ⚠️ The whole rule is resolve_browse_dir; inline none of it, or config and sample paths disagree.
     return ov ? resolve_browse_dir(fs_, *ov, def) : def;
 }
 
@@ -132,9 +132,7 @@ void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const 
     s_.fileBrowser.fileExtensions = extensions;
     s_.fileBrowser.mode           = BrowserMode::NORMAL;
 
-    // FOLDER = REMEMBER: a SAMPLE load starts in the folder the last sample came from. Keyed off the start
-    // being the samples dir, which is exactly the two sample-load purposes. A remembered folder that is
-    // gone falls back to `directory`.
+    // FOLDER = REMEMBER: a sample load starts in the last sample's folder, if it still exists.
     std::string start = directory;
     if (s_.settings.rememberFolder && directory == browser_dir(BrowserDir::SAMPLES) &&
         !s_.settings.lastSampleFolder.empty() && fs_.is_directory(s_.settings.lastSampleFolder)) {
@@ -148,38 +146,33 @@ void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const 
 void InputDispatcher::close_file_browser() {
     // The audition is over; a preview left resident is PCM nothing will play again.
     host_.clear_previews();
-    s_.fileBrowser.selectionMode   = false;
-    s_.fileBrowser.selectionAnchor = -1;
+    end_selection(s_.fileBrowser);
     s_.currentScreen = s_.previousScreen;
 }
 
 void InputDispatcher::refresh_browser() {
     FileBrowserState& b = s_.fileBrowser;
 
-    // ⚠️ A re-list is not a re-read unless the filesystem forgets: `SafFileSystem` caches and drops the
-    // cache only on this app's writes, so a file from a PC or download would stay invisible. Here, below
-    // every call site. A no-op where nothing is cached.
+    // ⚠️ SafFileSystem caches listings and drops them only on this app's writes; forget it here, or files
+    // added from outside stay invisible.
     fs_.forget_listing(b.currentDirectory);
 
-    // Re-list in place and KEEP THE CURSOR — a refresh is not a navigation — CLAMPED, since the list may
-    // have got shorter.
+    // Re-list keeping the cursor (a refresh is not a navigation), clamped to the shorter list.
     rebuild_items(b, fs_);
 
     const int last = static_cast<int>(b.items.size()) - 1;
-    b.cursor = std::min(std::max(b.cursor, 0), std::max(last, 0));
+    b.cursor = std::clamp(b.cursor, 0, std::max(last, 0));
 
     if (b.cursor < b.scroll) b.scroll = b.cursor;
     if (b.cursor >= b.scroll + BROWSER_VISIBLE_ROWS) b.scroll = b.cursor - BROWSER_VISIBLE_ROWS + 1;
-    b.scroll = std::max(0, std::min(b.scroll, std::max(0, last - BROWSER_VISIBLE_ROWS + 1)));
+    b.scroll = std::clamp(b.scroll, 0, std::max(0, last - BROWSER_VISIBLE_ROWS + 1));
 }
 
 void InputDispatcher::refresh_browser_on_foreground() {
-    // ⚠️ Guarded on the SCREEN: `fileBrowser` keeps its state after closing, and re-listing on every
-    // return to the app would query a directory nobody is looking at.
+    // ⚠️ Only on the browser: its state outlives the screen.
     if (s_.currentScreen != ScreenType::FILE_BROWSER) return;
 
-    // ⚠️ NOT while a modal is up: a refresh can move what is under the cursor, leaving "DELETE X?" on
-    // screen with A deleting Y. A stale listing is cosmetic; a mislabelled confirm is not.
+    // ⚠️ Not under a modal: a refresh can move the cursor, leaving "DELETE X?" with A deleting Y.
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
     refresh_browser();
@@ -192,10 +185,9 @@ void InputDispatcher::browser_move_cursor(int delta, bool page) {
     const int         total = static_cast<int>(b.items.size());
     if (total == 0) return;
 
-    // ⚠️ UP/DOWN WRAP; the LEFT/RIGHT page jump CLAMPS — a wrapping page would fling you from the top of a
-    // 400-file directory to the bottom.
+    // ⚠️ UP/DOWN wrap; a page clamps (wrapping would fling you across a 400-file folder).
     if (page) {
-        b.cursor = std::min(std::max(b.cursor + delta, 0), total - 1);
+        b.cursor = std::clamp(b.cursor + delta, 0, total - 1);
     } else {
         // ⚠️ Modulo TWICE: a page step can exceed the list length.
         b.cursor = ((b.cursor + delta) % total + total) % total;
@@ -214,8 +206,7 @@ void InputDispatcher::browser_move_cursor(int delta, bool page) {
 void InputDispatcher::browser_confirm() {
     FileBrowserState& b = s_.fileBrowser;
 
-    // DELETE mode: A is the YES. The only place the browser removes anything — SELECT+B to arm, A to
-    // confirm. Deletes what the question on screen named: the selection, or the entry under the cursor.
+    // DELETE mode: A is the YES, on what the question named — the selection, or the cursor's entry.
     if (b.mode == BrowserMode::DELETE) {
         b.mode = BrowserMode::NORMAL;
         // Copied out first: the refresh below rebuilds the list the targets point into.
@@ -229,65 +220,37 @@ void InputDispatcher::browser_confirm() {
         for (const std::string& path : paths) {
             if (fs_.delete_path(path)) ++done; else ++failed;
         }
-        b.selectionMode   = false;
-        b.selectionAnchor = -1;
+        end_selection(b);
         if (done > 0) refresh_browser();
 
         if (paths.size() == 1)
-            b.statusMessage = done ? "DELETED: " + name : std::string("DELETE FAILED");
+            set_status(b, done ? "DELETED: " + name : "DELETE FAILED", failed == 0);
         else
-            b.statusMessage = "DELETED " + std::to_string(done) + (done == 1 ? " FILE" : " FILES") +
-                              (failed ? ", FAILED " + std::to_string(failed) : std::string());
-        b.statusSuccess = (failed == 0);
+            set_status(b, "DELETED " + file_count(static_cast<size_t>(done)) +
+                              (failed ? ", FAILED " + std::to_string(failed) : ""), failed == 0);
         return;
     }
 
-    // SET_HOME mode: A is the YES, armed by SELECT+A on a granted tree.
-    if (b.mode == BrowserMode::SET_HOME) {
+    // SET_HOME / FORGET_ROOT: A is the YES, armed by SELECT+A / SELECT+B on a granted tree.
+    if (b.mode == BrowserMode::SET_HOME || b.mode == BrowserMode::FORGET_ROOT) {
+        const bool         home = (b.mode == BrowserMode::SET_HOME);
         const BrowserItem* item = b.current();
         b.mode = BrowserMode::NORMAL;
         if (!item || !item->isRoot) return;
 
         const std::string name = item->displayName;
-        if (fs_.set_home_directory(item->path)) {
-            // ⚠️ The two derived roots (`AppConfig::mediaBaseDir`, `SongcoreHost::set_app_root`) were read
-            // at boot and must move WITH the home, or media resolves against the old tree. Derived from an
-            // accessor, so pt-ui never learns what a root string looks like.
-            const std::string root = fs_.parent_path(fs_.samples_directory());
-            set_media_base_dir(root);
-            host_.set_app_root(root);
-
-            refresh_browser();
-            b.statusMessage = "HOME FOLDER: " + name;
-            b.statusSuccess = true;
-        } else {
-            b.statusMessage = "COULD NOT SET HOME FOLDER";
-            b.statusSuccess = false;
+        if (!(home ? fs_.set_home_directory(item->path) : fs_.revoke_access(item->path))) {
+            set_status(b, home ? "COULD NOT SET HOME FOLDER" : "COULD NOT FORGET IT", false);
+            return;
         }
-        return;
-    }
+        // ⚠️ The derived roots were read at boot and must follow the home (a forgotten tree may have been
+        // it), or media resolves against the old tree.
+        const std::string root = fs_.parent_path(fs_.samples_directory());
+        set_media_base_dir(root);
+        host_.set_app_root(root);
 
-    // FORGET_ROOT mode: A is the YES, armed by SELECT+B on a granted tree.
-    if (b.mode == BrowserMode::FORGET_ROOT) {
-        const BrowserItem* item = b.current();
-        b.mode = BrowserMode::NORMAL;
-        if (!item || !item->isRoot) return;
-
-        const std::string name = item->displayName;
-        if (fs_.revoke_access(item->path)) {
-            // ⚠️ The home may have been this tree, and the filesystem has picked another — re-ask the
-            // derived roots exactly as after a home change.
-            const std::string root = fs_.parent_path(fs_.samples_directory());
-            set_media_base_dir(root);
-            host_.set_app_root(root);
-
-            refresh_browser();
-            b.statusMessage = "FORGOT: " + name;
-            b.statusSuccess = true;
-        } else {
-            b.statusMessage = "COULD NOT FORGET IT";
-            b.statusSuccess = false;
-        }
+        refresh_browser();
+        set_status(b, (home ? "HOME FOLDER: " : "FORGOT: ") + name, true);
         return;
     }
 
@@ -296,14 +259,12 @@ void InputDispatcher::browser_confirm() {
 
     if (item->is_parent()) { navigate_to_parent(b, fs_); return; }
 
-    // An ACTION is a thing to do; the filesystem owns what it means.
-    // ⚠️ No refresh afterwards: `activate` does not wait (Android's folder picker), so the world has not
-    // changed yet. `refresh_browser_on_foreground()` catches up when the app returns.
+    // An ACTION is the filesystem's to perform. ⚠️ No refresh: activate does not wait (Android's picker);
+    // refresh_browser_on_foreground catches up.
     if (item->kind == BrowserItem::Kind::ACTION) {
         const std::string label = item->displayName;
         if (!fs_.activate(item->path)) {
-            b.statusMessage = label + " FAILED";
-            b.statusSuccess = false;
+            set_status(b, label + " FAILED", false);
         }
         return;
     }
@@ -320,12 +281,10 @@ void InputDispatcher::browser_confirm() {
     const int sourceId = (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR)
                              ? s_.sampleEditor.instrumentId
                              : id;
-    // The name the slot is about to stop deserving — read before the load replaces its source (see the
-    // adopt rule below).
+    // The name the slot is about to stop deserving, read before the load.
     const std::string previousAutoName = instrument_auto_name(host_.project(), sourceId);
 
-    // ⚠️ EVERY arm: slowness is a fact about the FILE and DEVICE, not the menu item. Below the delay
-    // nothing is drawn, so a fast load costs nothing.
+    // ⚠️ Every arm: slowness is the file's and the device's. A fast load draws nothing.
     const LoadScope loadScope(*this, now_ms_, stem);
 
     bool ok = false;
@@ -335,9 +294,8 @@ void InputDispatcher::browser_confirm() {
             break;
 
         case AppState::BrowserPurpose::LOAD_SOURCE:
-            // The extension decides, not the slot's type: picking an .sf2 from a sampler slot TURNS it
-            // into a SoundFont slot — the filter is not a guarantee, the user can navigate anywhere.
-            // `.sf3` is on the same footing as `.sf2` (and cheaper in peak memory, audio-engine.h).
+            // The extension decides, not the slot's type: an .sf2/.sf3 turns a sampler slot into a
+            // SoundFont.
             if (is_soundfont_extension(ext)) {
                 ok = host_.load_soundfont(id, path);
             } else {
@@ -351,59 +309,49 @@ void InputDispatcher::browser_confirm() {
             break;
 
         case AppState::BrowserPurpose::LOAD_PROJECT:
-            // ⚠️ The WHOLE DOCUMENT, returning early — nothing below applies. `load_project_file` is parse →
-            // push → load_media → push_params in one call, so none can be skipped.
+            // ⚠️ The whole document, returning early: load_project_file is parse, push, media and params.
             if (!host_.load_project_file(path, fs_.samples_directory())) {
-                b.statusMessage = "LOAD FAILED";
-                b.statusSuccess = false;
+                set_status(b, "LOAD FAILED", false);
                 return;
             }
-            // ⚠️⚠️ A cancelled PROJECT load cannot stay where it stopped: the document is already swapped
-            // in, and instruments past the stop would look loaded and play silence. The honest state is
+            // ⚠️ A cancelled project load cannot stay half-done (later instruments would play silence):
             // NEW PROJECT's blank document, and the message says so.
             if (pt::load_cancelled()) {
                 host_.new_project();
                 host_.push_params();
-                // `load_project_done`'s settling: no source path, and the autosave cleared — its work
-                // belonged to the project just left.
+                // No source path, and the autosave cleared.
                 load_project_done("");
-                s_.statusMessage = "LOAD CANCELLED";
-                s_.statusSuccess = true;
+                set_status(s_, "LOAD CANCELLED", true);
                 return;
             }
             load_project_done(path);
             return;
 
         case AppState::BrowserPurpose::LOAD_THEME:
-            // ⚠️ A theme is pixels — no engine, sample or slot — so this returns early too.
-            // ⚠️ The extension is re-checked: the filter is not a guarantee (the D-pad walks out of the
-            // Themes folder), and a failed parse must not blank the palette.
+            // ⚠️ Pixels only, returning early. The extension is re-checked (the D-pad leaves the folder),
+            // and a failed parse must not blank the palette.
             if (ext != "ptt" || !load_theme_file(fs_, path, s_.theme)) {
-                b.statusMessage = "LOAD FAILED";
-                b.statusSuccess = false;
+                set_status(b, "LOAD FAILED", false);
                 return;
             }
             // Back to the editor that raised the browser (`theme_row_action` closed it on the way out).
             close_file_browser();
             open_theme_editor();
-            s_.statusMessage = "THEME LOADED";
-            s_.statusSuccess = true;
+            set_status(s_, "THEME LOADED", true);
             return;
 
         case AppState::BrowserPurpose::LOAD_SCALE: {
-            // ⚠️ Loaded into a COPY, committed only once it parses — no half-overwritten slot — and the copy
-            // keeps the slot's `id`. The extension is re-checked: the D-pad walks out of the Scales folder.
+            // ⚠️ Into a copy that keeps the slot's id, committed only once it parses. The extension is
+            // re-checked: the D-pad walks out of the folder.
             songcore::Scale loaded = host_.project().scales[static_cast<size_t>(s_.currentScale)];
             if (ext != SCALE_FILE_EXT || !load_scale_file(fs_, path, loaded)) {
-                b.statusMessage = "LOAD FAILED";
-                b.statusSuccess = false;
+                set_status(b, "LOAD FAILED", false);
                 return;
             }
             host_.edit_project().scales[static_cast<size_t>(s_.currentScale)] = loaded;
             mark_modified();
             close_file_browser();
-            s_.statusMessage = "SCALE LOADED";
-            s_.statusSuccess = true;
+            set_status(s_, "SCALE LOADED", true);
             return;
         }
 
@@ -411,15 +359,13 @@ void InputDispatcher::browser_confirm() {
             // The scale load's two guards, for the same reasons (the slot's `id` is what `GRV` names).
             songcore::Groove loaded = host_.project().grooves[static_cast<size_t>(s_.currentGroove)];
             if (ext != GROOVE_FILE_EXT || !load_groove_file(fs_, path, loaded)) {
-                b.statusMessage = "LOAD FAILED";
-                b.statusSuccess = false;
+                set_status(b, "LOAD FAILED", false);
                 return;
             }
             host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)] = loaded;
             mark_modified();
             close_file_browser();
-            s_.statusMessage = "GROOVE LOADED";
-            s_.statusSuccess = true;
+            set_status(s_, "GROOVE LOADED", true);
             return;
         }
 
@@ -427,17 +373,14 @@ void InputDispatcher::browser_confirm() {
             // Read into a COPY of the cells, committed only once the file parses.
             ReverbCells cells = reverb_cells_of(host_.project());
             if (ext != REVERB_FILE_EXT || !load_reverb_file(fs_, path, cells)) {
-                b.statusMessage = "LOAD FAILED";
-                b.statusSuccess = false;
+                set_status(b, "LOAD FAILED", false);
                 return;
             }
             apply_reverb_cells(host_.edit_project(), cells);
-            // ⚠️ Closed FIRST: `mark_modified` pushes to the engine only from EFFECTS, and until the
-            // browser closes this is not EFFECTS — the preset would show and not be heard.
+            // ⚠️ Closed first: mark_modified pushes only from EFFECTS, so the preset would show and not sound.
             close_file_browser();
             mark_modified();
-            s_.statusMessage = "REVERB LOADED";
-            s_.statusSuccess = true;
+            set_status(s_, "REVERB LOADED", true);
             return;
         }
 
@@ -445,39 +388,30 @@ void InputDispatcher::browser_confirm() {
             // As the reverb's, including the order of the last two calls.
             DelayCells cells = delay_cells_of(host_.project());
             if (ext != DELAY_FILE_EXT || !load_delay_file(fs_, path, cells)) {
-                b.statusMessage = "LOAD FAILED";
-                b.statusSuccess = false;
+                set_status(b, "LOAD FAILED", false);
                 return;
             }
             apply_delay_cells(host_.edit_project(), cells);
             close_file_browser();
             mark_modified();
-            s_.statusMessage = "DELAY LOADED";
-            s_.statusSuccess = true;
+            set_status(s_, "DELAY LOADED", true);
             return;
         }
     }
 
     if (!ok) {
-        // ⚠️ A CANCEL is not a failure and gets no red line — "LOAD FAILED" would claim something about
-        // the file nobody knows.
+        // ⚠️ A cancel is not a failure: no red line.
         if (host_.last_load_cancelled()) {
-            b.statusMessage = "CANCELLED";
-            b.statusSuccess = true;
+            set_status(b, "CANCELLED", true);
             return;
         }
-        // ⚠️ "LOAD FAILED" for a file the DEVICE cannot hold sends the user hunting a corruption that is not
-        // there. The file is sound; pick a smaller one.
-        b.statusMessage = host_.last_load_ran_out_of_memory() ? "FILE TOO BIG" : "LOAD FAILED";
-        b.statusSuccess = false;
+        // ⚠️ A file too big for the device is not corrupt; say so.
+        set_status(b, host_.last_load_ran_out_of_memory() ? "FILE TOO BIG" : "LOAD FAILED", false);
         return;
     }
 
-    // The slot adopts the file's name — unless the user TYPED the one it has. Not typed: the default
-    // ("INST07"), or the name it took from the source being replaced (`previousAutoName`, captured
-    // before the load) — otherwise a slot keeps reading RHODES C4 after a different sample lands.
-    // Both source loads apply it, or a name set through one door could never be corrected through the
-    // other.
+    // The slot adopts the file's name unless the user TYPED its current one (not the default, not the
+    // name it took from the replaced source). Both source loads apply it.
     if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
          s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
         sourceId >= 0 && static_cast<size_t>(sourceId) < host_.project().instruments.size()) {
@@ -490,8 +424,7 @@ void InputDispatcher::browser_confirm() {
 
     mark_modified();
 
-    // FOLDER = REMEMBER: `b.currentDirectory` is the folder this SAMPLE came from. Sample loads only, not
-    // an SF picked from a sampler slot. Persisted on exit (save_settings_if_changed).
+    // FOLDER = REMEMBER: sample loads only (not an SF from a sampler slot); saved on exit.
     if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
          s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
         !is_soundfont_extension(ext)) {
@@ -499,11 +432,8 @@ void InputDispatcher::browser_confirm() {
     }
 
     if (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) {
-        // Re-enter the EDITOR on the new audio (not `previousScreen`, still INSTRUMENT, the editor's own
-        // return target). The old session's state is rebuilt, not patched.
-        host_.clear_previews();
-        s_.fileBrowser.selectionMode   = false;
-        s_.fileBrowser.selectionAnchor = -1;
+        // Back into the editor on the new audio (previousScreen is the editor's return target), rebuilt.
+        close_file_browser();
         s_.currentScreen = ScreenType::SAMPLE_EDITOR;
         init_sample_editor_state();
         return;
@@ -515,8 +445,7 @@ void InputDispatcher::browser_confirm() {
 // ─── The multi-select and the file clipboard ─────────────────────────────────────────────────────
 
 void InputDispatcher::browser_select() {
-    // ⚠️ A plain anchor..cursor range over a list (a second tap inside the window selects all) — a
-    // different machine from the grid editors' CELL→ROW→SCREEN widener.
+    // ⚠️ A plain anchor..cursor range (a second tap within 500 ms selects all) — not the grids' widener.
     FileBrowserState& b = s_.fileBrowser;
     if (b.mode != BrowserMode::NORMAL) return;
 
@@ -549,10 +478,8 @@ void InputDispatcher::browser_cut_or_paste() {
 
         b.fileClipboard      = std::move(files);
         b.fileClipboardIsCut = true;
-        b.selectionMode      = false;
-        b.selectionAnchor    = -1;
-        b.statusMessage = "CUT " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
-        b.statusSuccess = true;
+        end_selection(b);
+        set_status(b, "CUT " + file_count(n), true);
     } else if (!b.fileClipboard.empty()) {
         browser_paste();
     }
@@ -607,12 +534,11 @@ void InputDispatcher::browser_paste() {
     if (cut) b.fileClipboard.clear();
 
     refresh_browser();
-    b.statusMessage = failed == 0
-                          ? std::string(verb) + " " + std::to_string(done) +
-                                (done == 1 ? " FILE" : " FILES")
-                          : std::string(verb) + " " + std::to_string(done) + ", FAILED " +
-                                std::to_string(failed);
-    b.statusSuccess = (failed == 0);
+    set_status(b,
+               std::string(verb) + " " +
+                   (failed == 0 ? file_count(static_cast<size_t>(done))
+                                : std::to_string(done) + ", FAILED " + std::to_string(failed)),
+               failed == 0);
 }
 
 // ─── SELECT + A / B / R — the browser's file-management chords ───────────────────────────────────
@@ -622,12 +548,10 @@ void InputDispatcher::browser_rename() {
 
     const BrowserItem* item = s_.fileBrowser.current();
 
-    // ⭐ On a granted TREE the file chords mean nothing, so SELECT+A offers the one thing it can: make this
-    // the folder the app keeps its directories in. Armed — A confirms, B cancels.
+    // On a granted tree SELECT+A offers to make it the home folder. Armed: A confirms, B cancels.
     if (item && item->isRoot) {
         s_.fileBrowser.mode = BrowserMode::SET_HOME;
-        s_.fileBrowser.statusMessage.clear();
-        s_.fileBrowser.statusSuccess = true;
+        set_status(s_.fileBrowser, "", true);
         return;
     }
 
@@ -650,13 +574,11 @@ void InputDispatcher::browser_arm_delete() {
 
     const BrowserItem* item = s_.fileBrowser.current();
 
-    // ⚠️ On a granted TREE this is FORGET, not DELETE: `delete_path("pt://<id>")` would remove the user's
-    // whole PocketTracker directory. Handing back the PERMISSION removes the row and touches no file — the
-    // only way to clear a grant whose folder was deleted.
+    // ⚠️ On a granted tree this is FORGET: deleting "pt://<id>" would remove the whole directory. Handing
+    // back the permission touches no file.
     if (!s_.fileBrowser.selectionMode && item && item->isRoot) {
         s_.fileBrowser.mode = BrowserMode::FORGET_ROOT;
-        s_.fileBrowser.statusMessage.clear();
-        s_.fileBrowser.statusSuccess = true;
+        set_status(s_.fileBrowser, "", true);
         return;
     }
 
@@ -664,8 +586,7 @@ void InputDispatcher::browser_arm_delete() {
 
     // ARM the confirm; never delete on this press ("DELETE <name>? A=YES B=NO", or "DELETE 3 FILES?").
     s_.fileBrowser.mode          = BrowserMode::DELETE;
-    s_.fileBrowser.statusMessage.clear();
-    s_.fileBrowser.statusSuccess = true;
+    set_status(s_.fileBrowser, "", true);
 }
 
 void InputDispatcher::browser_new_folder() {
@@ -687,8 +608,7 @@ void InputDispatcher::browser_cycle_sort(int delta) {
     rebuild_items(b, fs_);
 
     // The cursor stays put, so the row under it now holds a different file — the list is re-ordered.
-    b.statusMessage = file_sort_label(b.sortMode);
-    b.statusSuccess = true;
+    set_status(b, file_sort_label(b.sortMode), true);
 }
 
 }  // namespace pt::ui

@@ -13,8 +13,8 @@
 namespace pt::ui {
 
 /**
- * The editing context, back to zero. Shared by NEW and LOAD: otherwise INSTRUMENT would sit on a slot
- * the user never chose, and A,A on SONG would insert a chain number from the previous song.
+ * Back to zero on NEW and LOAD, or INSTRUMENT sits on a slot never chosen and A,A on SONG inserts a
+ * chain number from the previous song.
  */
 void InputDispatcher::reset_editing_context() {
     s_.currentPhrase = s_.currentChain = s_.currentInstrument = 0;
@@ -28,8 +28,7 @@ void InputDispatcher::reset_editing_context() {
     s_.cursorRow = 0; s_.cursorColumn = 1;
     s_.songScrollPosition = 0;
     s_.instrumentCursorRow = 0; s_.instrumentCursorColumn = 1;
-    // ⚠️ Both halves of the mixer cursor: a column reset alone can leave a master-strip-only row
-    // over a track column, and the mixer shows no cursor.
+    // ⚠️ Both halves, or a master-only row over a track column shows no cursor.
     s_.mixerCursorColumn = 0;
     s_.mixerMasterRow    = 0;
     s_.effectsCursorRow  = 0;
@@ -49,36 +48,30 @@ void InputDispatcher::reset_editing_context() {
     // ⚠️ Not the SETTINGS cursor and not poolCursorColumn: both persist on purpose.
     s_.selection = Selection{};
 
-    // ⚠️ Under NAV = SONG the REMEMBER slots above ARE the pointer, and song row 0 / track 1 may be
-    // empty, which would trap the user on SONG. So it is derived from the arrangement here.
+    // ⚠️ Under NAV = SONG those slots are the pointer, and row 0 / track 1 may be empty.
     clamp_song_pointer(s_);
 }
 
 void InputDispatcher::start_new_project() {
     host_.new_project();
 
-    // Blank document: nothing unsaved and no path — without the version reset the next NEW or EXIT
-    // would ask about unsaved work.
+    // A blank document: clean and pathless, or the next NEW or EXIT asks about unsaved work.
     s_.projectVersion      = 0;
     s_.savedProjectVersion = 0;
     s_.projectPath.clear();
 
-    // …and nothing to recover: a clean transition DELETES the autosave, or the next launch offers to
-    // restore a song the user started over from. The pending deadline goes too, or it writes the blank
-    // document back out in three seconds.
+    // …and nothing to recover: the autosave and its pending deadline go too.
     autosavePending_ = false;
     autosave_clear(fs_);
 
     reset_editing_context();
 
-    s_.statusMessage = "NEW PROJECT";
-    s_.statusSuccess = true;
+    set_status(s_, "NEW PROJECT", true);
 }
 
 /** A .ptp just replaced the document. Leave the browser, and forget everything about the last one. */
 void InputDispatcher::load_project_done(const std::string& path) {
-    // A freshly loaded project is clean and has nothing to recover. ⚠️ Autosave recovery is the one
-    // load that does neither — see recover_from_autosave.
+    // Clean, with nothing to recover. ⚠️ Autosave recovery is the one load that is neither.
     s_.projectVersion      = 0;
     s_.savedProjectVersion = 0;
     s_.projectPath         = path;
@@ -90,11 +83,9 @@ void InputDispatcher::load_project_done(const std::string& path) {
 
     close_file_browser();
 
-    // ⚠️ A sample that did not load leaves its instrument silent; the target platforms have no console,
-    // so this is the only report — including an out-of-memory sample on a small device.
+    // ⚠️ The only report of a sample that did not load (no console on the devices), out of memory too.
     const int failed = host_.last_media_load().failed;
-    s_.statusMessage = failed > 0 ? "LOADED: " + std::to_string(failed) + " MISSING" : "LOADED";
-    s_.statusSuccess = (failed == 0);
+    set_status(s_, failed > 0 ? "LOADED: " + std::to_string(failed) + " MISSING" : "LOADED", (failed == 0));
 }
 
 // ─── EXPORT ──────────────────────────────────────────────────────────────────────────────────────
@@ -107,8 +98,7 @@ void InputDispatcher::export_song(bool stems) {
 
     s_.isRendering    = true;
     s_.renderProgress = 0.0f;
-    s_.statusMessage  = stems ? "RENDERING STEMS..." : "RENDERING...";
-    s_.statusSuccess  = true;
+    set_status(s_, stems ? "RENDERING STEMS..." : "RENDERING...", true);
     if (render_.repaint) render_.repaint();          // …so the message is on screen before we block
 
     const auto progress = [this](float p) {
@@ -127,8 +117,7 @@ void InputDispatcher::export_song(bool stems) {
 
     s_.isRendering    = false;
     s_.renderProgress = 0.0f;
-    s_.statusMessage  = r.message;
-    s_.statusSuccess  = r.ok;
+    set_status(s_, r.message, r.ok);
 
     if (render_.suspend_audio) render_.suspend_audio(false);
 }
@@ -144,15 +133,13 @@ void InputDispatcher::resample_selection(const std::string& customBaseName) {
         if (c >= 0 && c <= 7) tracks.insert(c);
     if (tracks.empty()) return;
 
-    // The same synchronous shape as export_song: stop the session, hand the device to the render, and
-    // put the "RESAMPLING..." line on screen before we block.
+    // export_song's shape.
     host_.stop();
     if (render_.suspend_audio) render_.suspend_audio(true);
 
     s_.isRendering    = true;
     s_.renderProgress = 0.0f;
-    s_.statusMessage  = "RESAMPLING...";
-    s_.statusSuccess  = true;
+    set_status(s_, "RESAMPLING...", true);
     if (render_.repaint) render_.repaint();
 
     const auto progress = [this](float p) {
@@ -173,17 +160,14 @@ void InputDispatcher::resample_selection(const std::string& customBaseName) {
             char msg[40];
             // ASCII arrow: the 5×5 font has no →.
             std::snprintf(msg, sizeof(msg), "RESAMPLED -> INST %02X", instId);
-            s_.statusMessage = msg;
-            s_.statusSuccess = true;
+            set_status(s_, msg, true);
             mark_modified();   // a new instrument is unsaved work
         } else {
             // The WAV rendered but no slot could take it (pool full, or the file will not reload).
-            s_.statusMessage = "NO FREE INSTRUMENT";
-            s_.statusSuccess = false;
+            set_status(s_, "NO FREE INSTRUMENT", false);
         }
     } else {
-        s_.statusMessage = r.message;   // "RESAMPLE FAILED"
-        s_.statusSuccess = false;
+        set_status(s_, r.message, false);   // "RESAMPLE FAILED"
     }
 
     if (render_.suspend_audio) render_.suspend_audio(false);

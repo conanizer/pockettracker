@@ -29,10 +29,8 @@ bool chain_is_blank(const Chain& c) {
     return true;
 }
 
-/**
- * Search forward from `start`, wrapping once; −1 when the pool is full. Starting after the last edited
- * item hands you a free one near it, not slot 0 every time.
- */
+/** Search forward from `start`, wrapping once; −1 when the pool is full. Starting past the last edited
+ *  item finds a free one near it. */
 template <typename Pred>
 int first_from_wrapping(int start, int count, Pred pred) {
     for (int i = start; i < count; ++i)
@@ -72,8 +70,7 @@ GestureResult InputDispatcher::song_screen(Gesture g) {
             return GestureResult::TAKEN;
 
         case Gesture::A_A:
-            // ⚠️ RESAMPLE goes before the double-tap gate: under a selection the first A copied rather
-            // than inserting, so the gate would turn it away.
+            // ⚠️ RESAMPLE before the double-tap gate: under a selection the first A copied, not inserted.
             if (s_.selection.active) {
                 open_qwerty(QwertyContext::RESAMPLE, resample_base_name(fs_), "SAMPLE NAME:", "",
                             /*max_length=*/20, /*clear_on_first_b=*/true);
@@ -82,7 +79,7 @@ GestureResult InputDispatcher::song_screen(Gesture g) {
             if (take_double_tap()) song_insert_next();
             return GestureResult::TAKEN;
 
-        // ⭐ B+LEFT/RIGHT toggles the transport mode; both directions toggle, since there are two modes.
+        // B+LEFT/RIGHT toggles LIVE mode.
         case Gesture::B_LEFT:
         case Gesture::B_RIGHT:
             host_.set_live_mode(!host_.live_mode());
@@ -230,8 +227,7 @@ GestureResult InputDispatcher::table_screen(Gesture g) {
             s_.lastEditedTable = s_.currentTable;
             return GestureResult::TAKEN;
 
-        // A+START auditions on the preview lane THROUGH the table on screen (instrument N owns table
-        // N), or you would hear the instrument's own table instead.
+        // A+START auditions through the table on screen (instrument N owns table N).
         case Gesture::A_START:
             host_.set_preview_track(audition_track());
             host_.preview_instrument(s_.currentTable, /*tableIdOverride=*/s_.currentTable);
@@ -545,10 +541,8 @@ void InputDispatcher::song_clone_chain() {
         return usedChains.count(i) == 0 && chain_is_blank(p.chains[static_cast<size_t>(i)]);
     });
 
-    // A DEEP clone: every phrase the chain references gets its own free slot, so the copy is fully
-    // independent. `reserved` stops two source phrases claiming the same destination; duplicate refs
-    // inside the chain map to the SAME clone, which is what keeps a chain that plays phrase 5 twice
-    // still playing one phrase twice.
+    // A deep clone: each referenced phrase gets its own free slot. Duplicate refs map to the same
+    // clone, so a chain playing phrase 5 twice still plays one phrase twice.
     std::vector<int> srcPhraseIds;
     for (const int ref : src.phraseRefs)
         if (ref != -1 && std::find(srcPhraseIds.begin(), srcPhraseIds.end(), ref) == srcPhraseIds.end())
@@ -567,16 +561,13 @@ void InputDispatcher::song_clone_chain() {
         phraseMap[pid] = slot;
     }
 
-    // Capacity is checked in FULL before anything is written. Abort, never half-clone: a partial clone
-    // leaves a chain pointing at phrases that were never copied.
+    // Capacity is checked in full first: never half-clone.
     if (dstChainId < 0) {
-        s_.statusMessage = "NO FREE CHAINS";
-        s_.statusSuccess = false;
+        set_status(s_, "NO FREE CHAINS", false);
         return;
     }
     if (!enoughPhrases) {
-        s_.statusMessage = "NO FREE PHRASES";
-        s_.statusSuccess = false;
+        set_status(s_, "NO FREE PHRASES", false);
         return;
     }
 
@@ -592,8 +583,7 @@ void InputDispatcher::song_clone_chain() {
 
     track.chainRefs[static_cast<size_t>(s_.cursorRow)] = dstChainId;
     s_.lastEditedChain = dstChainId;
-    s_.statusMessage   = "CHAIN CLONED";
-    s_.statusSuccess   = true;
+    set_status(s_, "CHAIN CLONED", true);
     mark_modified();
 }
 
@@ -632,9 +622,8 @@ void InputDispatcher::phrase_clone() {
 
 // ─── B+DPAD under NAV = SONG ─────────────────────────────────────────────────────────────────────
 
-// CHAIN steps to the nearest filled cell either side; PHRASE to the nearest whose chain also holds a
-// phrase at this chain row (songcore/traversal.h). Both clamp. `chainRow` is not reset — the
-// CHAIN→PHRASE gate already refuses an empty row.
+// CHAIN steps to the nearest filled cell either side; PHRASE to the nearest whose chain has a phrase at
+// this chain row. Both clamp.
 bool InputDispatcher::song_relative_b_horizontal(int delta) {
     if (!s_.settings.navSongRelative) return false;
     const int requireRow = (s_.currentScreen == ScreenType::PHRASE) ? pointer_chain_row(s_) : -1;
@@ -674,9 +663,8 @@ void InputDispatcher::live_launch_cell() {
         host_.play_song_live(s_.cursorRow, 1 << track);
         return;
     }
-    // ⭐ The two-press launch: the first press queues for the end of the playing chain, a second on the
-    // SAME cell promotes it to the next phrase boundary — the slot says which press this is.
-    // ⚠️ Only while still ARMED: promoting a committed launch would cut short a chain still being heard.
+    // The two-press launch: the first press queues for the chain's end, a second on the same cell for the
+    // next phrase boundary. ⚠️ Only while armed, or it cuts short a chain being heard.
     const songcore::LiveSlot q = host_.live_queue(track);
     const bool               immediate = q.armed() && !q.stop && q.targetRow == s_.cursorRow;
     host_.queue_live(track, s_.cursorRow, immediate);
@@ -759,8 +747,7 @@ CursorContext InputDispatcher::phrase_context() const {
     ps.cursorRow        = s_.cursorRow;
     ps.cursorColumn     = s_.cursorColumn;
     ps.effectTypeCount  = visible_effect_type_count();
-    // ⚠️ The CURSOR needs the project too: the NOTE cell's scale comes from it, and null reads as
-    // chromatic with no error. `layout.cpp` sets its own, separate PhraseEditorState.
+    // ⚠️ The NOTE cell's scale comes from the project; null reads as chromatic, silently.
     ps.project          = &p;
     ps.insertInstrument = s_.lastEditedInstrument;
     return phrase_.cursor_context(ps);

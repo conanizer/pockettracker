@@ -1,7 +1,5 @@
-// The SEND EDITOR: the reverb's or the delay's cells in a box, raised from a REV or DEL cell on
-// INSTRUMENT, INST.POOL or MIXER. It owns the buttons while it is up, but lets START and the audition
-// through (a send is dialled against a sounding note) and SELECT (its cells have help).
-// ⚠️ `currentScreen` still names the screen underneath, so nothing here may read the screen's cursor.
+// The SEND EDITOR: the reverb's or the delay's cells in a box, raised from a REV or DEL cell. Lets START,
+// the audition and SELECT through. ⚠️ currentScreen still names the screen underneath: never read its cursor.
 
 #include "ui/dispatch/dispatch_common.h"
 
@@ -22,16 +20,14 @@ GestureResult InputDispatcher::send_editor_layer(Gesture g) {
         case Gesture::A_RIGHT: send_editor_edit(pt::ui::increment); break;
         case Gesture::A_B:     send_editor_edit(pt::ui::on_a_b); break;
 
-        // The preset line's SAVE and LOAD. On the release: INP EQ opens the EQ editor over this one,
-        // TIME switches its sync.
+        // The preset line's SAVE and LOAD; INP EQ and TIME answer on the release.
         case Gesture::A:
             if (!effects_preset_action(row)) effects_release_action(row, /*peek=*/false);
             break;
 
         case Gesture::B: close_send_editor(); break;
 
-        // The transport and the audition are how an edit is heard while it is dialled; the screen
-        // underneath stops its own audition.
+        // Heard while dialled; the screen underneath stops its own audition.
         case Gesture::START:
         case Gesture::A_START:
         case Gesture::STOP_PREVIEW:

@@ -13,14 +13,8 @@ namespace pt::ui {
 
 // ─── A + D-pad ───────────────────────────────────────────────────────────────────────────────────
 
-// ⚠️ `pt::ui::on_a_b` must stay qualified: inside a member, unqualified lookup finds the member of the
-// same name first. The other handlers are qualified to match.
-//
-// ⚠️ The HORIZONTAL axis is the small step (±1), the VERTICAL the large one (±`largeStep`) — the
-// split handheld-tracker users already have in their fingers. The screen handlers keep it too.
-
-// A+DPAD is taken by the keyboard and by the browser's own handler, so an A held over either never
-// edits a cell.
+// ⚠️ `pt::ui::on_a_b` must stay qualified: unqualified, a member's lookup finds the member. The others
+// match. The horizontal axis is the small step, the vertical the large one.
 
 void InputDispatcher::on_a_up() {
     if (route(Gesture::A_UP)) return;
@@ -43,8 +37,7 @@ void InputDispatcher::on_a_right() {
 }
 
 void InputDispatcher::on_a_released() {
-    // Ahead of the overlay test: nothing else can start a preview while A is down, so this silences
-    // the one A began.
+    // Nothing else starts a preview while A is down, so this silences the one A began.
     if (heldNotePreview_) {
         heldNotePreview_ = false;
         host_.stop_preview(/*cut=*/true);
@@ -79,38 +72,31 @@ void InputDispatcher::on_b_down()  { route(Gesture::B_DOWN); }
 
 // ─── R + D-pad: move between screens — except on the modals ──────────────────────────────────────
 //
-// ⚠️ On the modals R+DPAD is not navigation. The FILE BROWSER and SAMPLE EDITOR answer it in their own
-// handlers (sort / zoom, up a directory / swallowed). EQ EDITOR: all four swallowed. None may fall through to `navigate_*` — a popup is not a cell in the screen grid, and
-// the user would land on a screen with the popup's state still live.
+// ⚠️ The modals (browser, sample editor, EQ) answer R+DPAD themselves: a popup is not a grid cell, and
+// falling through would leave its state live on another screen.
 
 void InputDispatcher::on_r_up() {
     if (route(Gesture::R_UP)) return;
-    const NavState ns = nav_state_of(s_);
-    go_to_screen(s_, navigate_up(ns));
+    go_to_screen(s_, navigate_up(nav_state_of(s_)));
     s_.selection.exit();   // a selection belongs to the screen it was made on
 }
 
 void InputDispatcher::on_r_down() {
     if (route(Gesture::R_DOWN)) return;
-    const NavState ns = nav_state_of(s_);
-    go_to_screen(s_, navigate_down(ns));
+    go_to_screen(s_, navigate_down(nav_state_of(s_)));
     s_.selection.exit();
 }
 
 // ─── R+LEFT/R+RIGHT: carry the edited item across screens ────────────────────────────────────────
 //
-// What makes SONG-over-chain-04 → R+RIGHT land ON chain 04. CAPTURE: the ref under the departing
-// screen's cursor becomes the lastEdited memory (PHRASE asks whether the CELL is empty; CHAIN and SONG
-// guard on `ref >= 0`). APPLY: the arriving screen jumps to the matching lastEdited item.
-//
-// ⚠️ Horizontal moves only, and only when the screen actually changes — R+UP/DOWN must not sync.
+// SONG over chain 04 → R+RIGHT lands on chain 04: the departing cursor's ref becomes lastEdited and the
+// arriving screen jumps to it. ⚠️ Horizontal moves only, and only when the screen changes.
 void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenType to) {
     const Project& p = *s_.project;
 
     switch (from) {
         case ScreenType::PHRASE:
-            // `currentScreen` is still the departing PHRASE, so cursor_context() describes its cell.
-            // No `>= 0` guard on the instrument — the clamp on arrival makes -1 safe.
+            // currentScreen is still PHRASE, so cursor_context() is its cell. A -1 is clamped on arrival.
             if (!cursor_context().capabilities.isEmpty) {
                 s_.lastEditedInstrument = p.phrases[static_cast<size_t>(s_.currentPhrase)]
                                               .steps[static_cast<size_t>(s_.cursorRow)]
@@ -156,8 +142,7 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
 
 void InputDispatcher::on_r_left() {
     if (route(Gesture::R_LEFT)) return;
-    const NavState ns = nav_state_of(s_);
-    const NavResult r = navigate_left(ns);
+    const NavResult r = navigate_left(nav_state_of(s_));
     if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
     go_to_screen(s_, r);
     s_.selection.exit();
@@ -165,10 +150,8 @@ void InputDispatcher::on_r_left() {
 
 void InputDispatcher::on_r_right() {
     if (route(Gesture::R_RIGHT)) return;
-    const NavState ns = nav_state_of(s_);
-    const NavResult r = navigate_right(ns);
-    // ⚠️ The NAV = SONG entry gate sits above the sync: a refused press must leave nothing behind, and
-    // the sync writes the lastEdited memory. R+RIGHT is the only gated direction (ui/song_pointer.h).
+    const NavResult r = navigate_right(nav_state_of(s_));
+    // ⚠️ The NAV = SONG gate before the sync: a refused press must leave nothing behind.
     if (!song_relative_entry_allowed(s_, r.screen)) return;
     if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
     go_to_screen(s_, r);
@@ -204,8 +187,8 @@ void InputDispatcher::mute_solo_targets(int (&out)[8], int& count) const {
             return;
         }
         case ScreenType::MIXER:
-            // ⚠️ The row is part of the address: row 1 puts the REV and DEL returns under the columns
-            // of tracks 1-2. The master strip has no mute — a no-op. The selection is not consulted.
+            // ⚠️ The row is part of the address (row 1 holds the REV and DEL returns); the master
+            // has no mute.
             switch (mixer_cell_at(s_.mixerMasterRow, s_.mixerCursorColumn)) {
                 case MixerCell::TRACK_VOL: out[count++] = s_.mixerCursorColumn;      break;
                 case MixerCell::REV_WET:   out[count++] = songcore::MIX_CH_REVERB;   break;
@@ -233,8 +216,7 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 
     Project& p = host_.edit_project();
 
-    // ⚠️ Snapshot all ten pairs, on the FIRST toggle of a chord only, so a revert undoes everything the
-    // chord did, not just the last press.
+    // ⚠️ Snapshot on the chord's FIRST toggle only, so a revert undoes the whole chord.
     if (!mixSnapshot_.live) {
         for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
             const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
@@ -254,9 +236,7 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 
     s_.lastClearable = AppState::Clearable::MUTE;
 
-    // ⚠️ No mark_dirty_and_arm_autosave(): muting is a performance action, not an edit. It must not
-    // arm the autosave or make the song dirty. push_globals() sweeps all eight tracks because a solo
-    // changes the other seven too.
+    // ⚠️ Not an edit: no dirty, no autosave. All eight tracks are pushed — a solo changes the others.
     host_.push_globals();
 }
 
@@ -330,10 +310,8 @@ void InputDispatcher::run_selection_recency() {
 void InputDispatcher::on_l_r() {
     if (route(Gesture::L_R)) return;
 
-    // One press undoes one thing, most recent first (`s_.lastClearable`): the mix (any channel muted
-    // or soloed) or the selection with its buffer. ⚠️ A rung with nothing to clear falls through to
-    // the other, or L+R reads as a dead button. The mix check covers all MIX_CHANNELS, so the REV and
-    // DEL returns count.
+    // One press clears one thing, newest first: the mix, or the selection with its buffer. ⚠️ A rung
+    // with nothing to clear falls through to the other, or L+R reads as dead.
     const bool mix_touched = [&] {
         Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
         for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
@@ -348,19 +326,16 @@ void InputDispatcher::on_l_r() {
         return;
     }
 
-    // Inside a selection: leave it, but keep the copy buffer. Outside one: clear the buffer — the only
-    // way to dismiss the clipboard readout on the top strip.
+    // Inside a selection: leave it, keep the buffer. Outside: clear the buffer (the top strip's readout).
     if (s_.selection.active) {
         s_.selection.exit();   // buffer untouched
         return;
     }
 
-    // The readout is drawn on every screen, so the clear works everywhere.
     const bool had_buffer = !clip_.info().empty();
     clip_.clear();
 
-    // Nothing on the selection rung to clear, but the mix has something: take it rather than leave
-    // the press doing nothing at all.
+    // Nothing to clear here, but the mix has something: take it.
     if (!had_buffer && mix_touched) restore_full_playback();
 }
 
@@ -374,8 +349,7 @@ void InputDispatcher::on_select_r() { route(Gesture::SELECT_R); }
 
 void InputDispatcher::on_l_b_a() {
     if (route(Gesture::L_B_A)) return;
-    // Below the sites, so every screen does it: the chord ends a selection — after SONG, CHAIN or
-    // PHRASE has cloned.
+    // Below the sites: on every screen the chord ends the selection, after any clone.
     s_.selection.exit();
 }
 

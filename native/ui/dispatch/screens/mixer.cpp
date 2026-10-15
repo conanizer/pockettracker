@@ -39,9 +39,8 @@ GestureResult InputDispatcher::effects_screen(Gesture g) {
 bool InputDispatcher::effects_preset_action(int row) {
     const songcore::Project& p = host_.project();
 
-    // SAVE is seeded with the sanitized name the row SHOWS (a built-in that was never cycled to stores
-    // none), so what you see is what the file will be called. LOAD starts at the built-in folder:
-    // config.json's `folders` has no key for either.
+    // SAVE is seeded with the sanitized name the row shows. LOAD starts at the built-in folder (config.json
+    // has no key for either).
     switch (row) {
         case EffectModule::ROW_REV_SAVE: {
             const std::string seed = safe_file_name(reverb_preset_display_name(p));
@@ -70,8 +69,7 @@ bool InputDispatcher::effects_preset_action(int row) {
 
 bool InputDispatcher::effects_release_action(int row, bool peek) {
     const songcore::Project& p = host_.project();
-    // TIME: a free time ↔ a note length. The value means different things on either side (0x40 a
-    // length; 4 a 1/16 note), so it is re-clamped into the 12 note lengths on the way IN.
+    // TIME toggles free ↔ synced; the value is re-clamped into the 12 note lengths on the way in.
     if (row == EffectModule::ROW_DLY_TIME) {
         if (!peek) {
             songcore::Project& e = host_.edit_project();
@@ -94,8 +92,8 @@ bool InputDispatcher::effects_release_action(int row, bool peek) {
 }
 
 void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::string& typed_text) {
-    // Sanitized FILENAME (survives FAT32), raw name in the file and on the row. An empty field keeps
-    // the shown name and falls back to "REVERB" — never the dotfile `.ptr`.
+    // Sanitized filename, raw name in the file and on the row; empty falls back to the shown name, then
+    // "REVERB" (never the dotfile .ptr).
     const std::string shown = reverb_preset_display_name(host_.project());
     const std::string want  = !typed_text.empty() ? typed_text : !shown.empty() ? shown : "REVERB";
     const std::string safe  = safe_file_name(want);
@@ -107,8 +105,7 @@ void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::s
     }
 
     const bool ok = save_reverb_file(fs_, dir + "/" + safe + ".ptr", reverb_cells_of(host_.project()));
-    s_.statusMessage = ok ? "REVERB SAVED" : "SAVE FAILED";
-    s_.statusSuccess = ok;
+    set_status(s_, ok ? "REVERB SAVED" : "SAVE FAILED", ok);
 }
 
 void InputDispatcher::save_delay_preset_as(const std::string& dir, const std::string& typed_text) {
@@ -123,8 +120,7 @@ void InputDispatcher::save_delay_preset_as(const std::string& dir, const std::st
     }
 
     const bool ok = save_delay_file(fs_, dir + "/" + safe + ".ptd", delay_cells_of(host_.project()));
-    s_.statusMessage = ok ? "DELAY SAVED" : "SAVE FAILED";
-    s_.statusSuccess = ok;
+    set_status(s_, ok ? "DELAY SAVED" : "SAVE FAILED", ok);
 }
 
 // ─── The cursor and the edit ─────────────────────────────────────────────────────────────────────

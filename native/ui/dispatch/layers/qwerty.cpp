@@ -1,11 +1,9 @@
-// The QWERTY keyboard: renaming and naming files, instruments, the project, themes, scales, grooves
-// and samples. It sits over whatever screen raised it; the theme editor's SAVE raises it over the editor.
+// The QWERTY keyboard, over whatever raised it (the theme editor's SAVE raises it over the editor).
 
 #include "ui/dispatch/dispatch_common.h"
 
 #include "ui/std_filesystem.h"   // path_stem
 
-#include <cstdio>
 #include <string>
 
 namespace pt::ui {
@@ -18,8 +16,7 @@ GestureResult InputDispatcher::qwerty_layer(Gesture g) {
         case Gesture::DPAD_LEFT:  move_key_cursor_left(k);  break;
         case Gesture::DPAD_RIGHT: move_key_cursor_right(k); break;
 
-        // A types the key under the cursor — except on the layout key, and on the action row: ABORT
-        // (col 0) and APPLY (col 1).
+        // A types the key — except the layout key and the action row (ABORT col 0, APPLY col 1).
         case Gesture::A:
             if (k.is_on_layout_key())         k.layout = 1 - k.layout;
             else if (!k.is_on_action_row())   insert_current_key(k);
@@ -55,8 +52,8 @@ void InputDispatcher::open_qwerty(QwertyContext context, const std::string& init
     k.contextExtra  = context_extra;
     k.context       = context;
     k.clearOnFirstB = clear_on_first_b;
-    k.insertBefore  = s_.settings.insertBefore;   // read at OPEN, so flipping the setting cannot change
-    s_.qwerty       = k;                 // what the buttons mean mid-word
+    k.insertBefore  = s_.settings.insertBefore;   // read at open, so it cannot change mid-word
+    s_.qwerty       = k;
 }
 
 void InputDispatcher::qwerty_apply() {
@@ -70,11 +67,9 @@ void InputDispatcher::qwerty_apply() {
             const std::string name = text.empty() ? path_stem(k.contextExtra) : text;
             if (fs_.rename_file(k.contextExtra, name)) {
                 refresh_browser();
-                s_.fileBrowser.statusMessage = "RENAMED";
-                s_.fileBrowser.statusSuccess = true;
+                set_status(s_.fileBrowser, "RENAMED", true);
             } else {
-                s_.fileBrowser.statusMessage = "RENAME FAILED";
-                s_.fileBrowser.statusSuccess = false;
+                set_status(s_.fileBrowser, "RENAME FAILED", false);
             }
             break;
         }
@@ -83,11 +78,9 @@ void InputDispatcher::qwerty_apply() {
             const std::string name = text.empty() ? "NewFolder" : text;
             if (!fs_.create_folder(k.contextExtra, name).empty()) {
                 refresh_browser();
-                s_.fileBrowser.statusMessage = "CREATED";
-                s_.fileBrowser.statusSuccess = true;
+                set_status(s_.fileBrowser, "CREATED", true);
             } else {
-                s_.fileBrowser.statusMessage = "CREATE FAILED";
-                s_.fileBrowser.statusSuccess = false;
+                set_status(s_.fileBrowser, "CREATE FAILED", false);
             }
             break;
         }
@@ -110,23 +103,19 @@ void InputDispatcher::qwerty_apply() {
             const std::string name = text.empty() ? "PRESET" : text;
             const std::string path = k.contextExtra + "/" + name + ".pti";
             if (save_instrument_preset(host_, fs_, s_.currentInstrument, path)) {
-                s_.statusMessage = "SAVED: " + name;
-                s_.statusSuccess = true;
+                set_status(s_, "SAVED: " + name, true);
             } else {
-                s_.statusMessage = "SAVE FAILED";
-                s_.statusSuccess = false;
+                set_status(s_, "SAVE FAILED", false);
             }
             break;
         }
 
         case QwertyContext::THEME_SAVE:
-            // See `save_theme_as`. ⚠️ `k.contextExtra`, not `s_.qwerty.contextExtra`: the live keyboard was
-            // cleared at the top of this function.
+            // ⚠️ k.contextExtra, not s_.qwerty's: the live keyboard is already cleared.
             save_theme_as(k.contextExtra, text);
             break;
 
         case QwertyContext::SCALE_SAVE:
-            // ⚠️ `k.contextExtra` — the live keyboard is already cleared.
             save_scale_as(k.contextExtra, text);
             break;
 
@@ -143,8 +132,7 @@ void InputDispatcher::qwerty_apply() {
             break;
 
         case QwertyContext::SAMPLE_NAME: {
-            // Renames BOTH the editor's sample and the INSTRUMENT holding it — one thing to the user. An
-            // empty field keeps the current name.
+            // Renames the editor's sample and its instrument — one thing to the user. Empty keeps the name.
             SampleEditorState& se = s_.sampleEditor;
             const std::string  name = text.empty() ? se.sampleName : text;
             se.sampleName = name;
@@ -154,22 +142,14 @@ void InputDispatcher::qwerty_apply() {
         }
 
         case QwertyContext::SAMPLE_SAVE: {
-            // SAVE-AS DE-DUPLICATES (`SNARE.wav`, `SNARE_0001.wav`, …) — OVERWRITE is its own button, and a
-            // silent replace would be a destructive act with no confirm.
-            const std::string base = text.empty() ? "SAMPLE" : text;
-            std::string       path = k.contextExtra + "/" + base + ".wav";
-            for (int n = 1; fs_.file_exists(path); ++n) {
-                char suffix[16];   // "_%04d" of an int can be 12 bytes (-Wformat-truncation)
-                std::snprintf(suffix, sizeof(suffix), "_%04d", n);
-                path = k.contextExtra + "/" + base + suffix + ".wav";
-            }
-            save_sample_to(path, /*adopt_name=*/true);
+            // SAVE-AS never replaces (SNARE, SNARE_0001, …): OVERWRITE is its own button.
+            const std::string stem = free_wav_stem(fs_, k.contextExtra, text.empty() ? "SAMPLE" : text);
+            save_sample_to(k.contextExtra + "/" + stem + ".wav", /*adopt_name=*/true);
             break;
         }
 
         case QwertyContext::RESAMPLE:
-            // Empty → auto Resample_NNNN; anything typed is the base name. The selection is still live
-            // (the keyboard never touched it).
+            // Empty → auto Resample_NNNN. The selection is still live.
             resample_selection(text);
             break;
     }
