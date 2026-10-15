@@ -10,7 +10,7 @@ namespace {
 
 using nlohmann::json;
 
-/** A key that is absent, non-string or empty leaves the override unset (→ the default). */
+// Absent, non-string or empty: unset.
 std::optional<std::string> get_folder(const json& folders, const char* key) {
     const auto it = folders.find(key);
     if (it == folders.end() || !it->is_string()) return std::nullopt;
@@ -19,10 +19,7 @@ std::optional<std::string> get_folder(const json& folders, const char* key) {
     return v;
 }
 
-/**
- * The relative tail of `path` under `root`, or `path` unchanged when it is not under it. Derived from
- * the accessor, not hard-coded, so a seeded value stays true on any platform's layout.
- */
+// `path` relative to `root`, or unchanged when it is not under it.
 std::string strip_root(const std::string& path, const std::string& root) {
     if (root.empty() || path.size() <= root.size() + 1) return path;
     if (path.compare(0, root.size(), root) != 0 || path[root.size()] != '/') return path;
@@ -33,7 +30,6 @@ std::string strip_root(const std::string& path, const std::string& root) {
 
 std::string resolve_folder_override(const std::string& value, const std::string& media_root) {
     if (value.empty() || media_root.empty()) return value;
-    // The same absolute test as `resolve_media_path`, through the same function.
     if (songcore::path_is_absolute(value)) return value;
     return media_root + "/" + value;
 }
@@ -42,19 +38,15 @@ std::string resolve_browse_dir(FileSystem& fs, const std::optional<std::string>&
                                const std::string& def) {
     if (!value || value->empty()) return def;
 
-    // The root is derived from this category's default, so pt-ui never learns whether it is a path or
-    // a granted-tree id.
     const std::string root = fs.parent_path(def);
     const std::string dir  = resolve_folder_override(*value, root);
 
-    // ⚠️⚠️ A path of the WRONG KIND is unreachable whatever `is_directory` says: under SAF a plain path
-    // can be stat()ed but not listed (a user's whole project library once opened as empty). Plain
-    // paths are unreadable through a granted tree and `pt://` through libc, so the kinds must match.
+    // ⚠️ A path of the wrong kind is unreachable whatever `is_directory` says: on Android a plain path
+    // can be stat()ed but not listed.
     const bool same_kind = pt_path_is_uri(dir.c_str()) == pt_path_is_uri(root.c_str());
     if (same_kind && fs.is_directory(dir)) return dir;
 
-    // Authored under ANOTHER install's root: re-rooted through the same function as a project's sample
-    // paths, so a config and its samples agree. Empty tail = outside the app tree: keep the default.
+    // Written under another install's root: re-rooted as a project's sample paths are.
     const std::string tail = songcore::app_root_relative_tail(dir);
     if (!tail.empty()) {
         const std::string rerooted = root + "/" + tail;
@@ -68,7 +60,7 @@ bool load_folder_config(FileSystem& fs, FolderConfig& out) {
     if (!fs.read_file(fs.config_path(), blob)) return false;   // no file: the common case
 
     json j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
-    // The input loader reports what was wrong; this one reads the file the same way, silently.
+    // The input loader reports what was wrong; this one reads it silently.
     if (!j.is_object() && straighten_typographic_punctuation(blob))
         j = json::parse(blob, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
@@ -87,12 +79,10 @@ bool load_folder_config(FileSystem& fs, FolderConfig& out) {
 
 namespace {
 
-/** The starter file and the example share this text, so the two cannot drift apart. */
+// The starter file's and the example's text.
 std::string config_template_text(FileSystem& fs, const ButtonBindings& keyboardDefaults,
                                  const ButtonBindings& gamepadDefaults) {
-    // Every key pre-filled with what the app is doing now, so the user sees the schema with real values.
-    // The `..._directory()` calls create those folders on first use (harmless). "_README" keys are for
-    // the human; load ignores them.
+    // Every key filled with what the app does now. "_README" keys are for the human.
     json j;
     j["_README"] =
         "PocketTracker configuration. config.json is YOURS: the app reads it at startup and never "
@@ -100,8 +90,7 @@ std::string config_template_text(FileSystem& fs, const ButtonBindings& keyboardD
         "rewritten by the app, so a newer version's settings show up there — copy the lines you want "
         "into config.json. Every key is optional — delete a line to use the built-in default.";
 
-    // ⭐ Seeded ROOT-RELATIVE ("Samples"), so the file is portable and typable — on Android the absolute
-    // form is a granted-tree id that changes with the home folder.
+    // Root-relative ("Samples"), so the file is portable — on Android the absolute form is a tree id.
     const std::string mediaRoot = fs.parent_path(fs.samples_directory());
 
     j["_README_folders"] =
@@ -137,7 +126,7 @@ std::string config_template_text(FileSystem& fs, const ButtonBindings& keyboardD
         "\"Up\"/\"Down\"/\"Left\"/\"Right\"). An unrecognised name is reported in the app's log and that "
         "one entry is skipped.";
 
-    // From the shell's live table, never restated — the template's job is to be true.
+    // From the shell's live table, never restated.
     json keyboard = json::object();
     for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
         const Button b = static_cast<Button>(i);
@@ -171,8 +160,7 @@ std::string config_template_text(FileSystem& fs, const ButtonBindings& keyboardD
 bool seed_config_template(FileSystem& fs, const ButtonBindings& keyboardDefaults,
                           const ButtonBindings& gamepadDefaults) {
     const std::string path = fs.config_path();
-    // ⚠️ Empty: Android with nothing granted yet — nowhere to seed into.
-    if (path.empty()) return false;
+    if (path.empty()) return false;   // Android with nothing granted yet
     if (fs.file_exists(path)) return false;   // the user's file — never rewritten
     return fs.write_file(path, config_template_text(fs, keyboardDefaults, gamepadDefaults));
 }

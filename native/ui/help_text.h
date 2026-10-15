@@ -1,21 +1,15 @@
 #pragma once
 
-// ─── HELP ON SELECT — the text, and what the cursor is standing on ───────────────────────────────
+// Help on SELECT: a topic for every cell, its text, and the cursor → topic lookup. No drawing.
 //
-// Tap SELECT and the visualizer strip explains the cell under the cursor. This is the WRITING half: a
-// topic for every explainable place, its lines, and the cursor → topic lookup. PURE (no drawing), so
-// the text can be checked without a renderer.
-//
-// The rules the text obeys:
-//  1. The first line NAMES the thing — "VOL: how loud this step is"; the rest say what it does.
-//  2. ⚠️ At most HELP_MAX_CHARS per line, or it runs off the right edge silently.
-//  3. ⚠️ No apostrophe or semicolon: `font5x5.h` draws them BLANK ("SAMPLE S PITCH"). Use letters,
-//     digits, `: = - ( ) . / , +` and the four arrows ← ↑ → ↓ (one column each).
-//  4. Say what the cell DOES, not why it is shaped that way.
-// Rules 2 and 3 are a `static_assert` over the table (`help_table_ok`); 1 and 4 need a reader.
-//
-// A cell with no entry falls back to its SCREEN_* topic, so no screen is ever silent.
-// ⚠️ Nothing is persisted, but the enum is APPENDED to: HELP_ENTRIES is indexed by its value.
+// The text's rules:
+//  1. The first line names the thing — "VOL: how loud this step is"; the rest say what it does.
+//  2. At most HELP_MAX_CHARS per line.
+//  3. No apostrophe or semicolon (`font5x5.h` draws them blank). Letters, digits, `: = - ( ) . / , +`
+//     and the four arrows ← ↑ → ↓.
+//  4. Say what the cell does, not why.
+// 2 and 3 are a `static_assert` over the table; 1 and 4 need a reader.
+// A cell with no entry falls back to its SCREEN_* topic. ⚠️ Append to the enum: it indexes HELP_ENTRIES.
 
 #include <cstddef>
 
@@ -33,32 +27,19 @@
 
 namespace pt::ui {
 
-/**
- * Characters that fit on one line beside the mascot: 620 (strip) − 3 (margin) − 64 (mascot) − 7
- * (gutter) = 546 px at CHAR_W = 17. ⚠️ The same numbers `modules/help_panel.cpp` lays out with.
- */
+// Characters beside the mascot: (620 − 3 − 64 − 7) px at CHAR_W = 17. ⚠️ `modules/help_panel.cpp`
+// lays out with the same numbers.
 inline constexpr int HELP_MAX_CHARS = 32;
 
-/**
- * Characters of TITLE that fit beside the large mascot in the full overlay. The title is `line1` up to
- * its colon — see `help_title_length`. Derived in `modules/help_overlay.h`, which pins it.
- */
+// Title characters beside the large mascot in the full overlay (pinned in `modules/help_overlay.h`).
 inline constexpr int HELP_TITLE_MAX_CHARS = 26;
 
-/** Lines of body the full overlay has room for. */
-inline constexpr int HELP_BODY_LINES = 8;
+inline constexpr int HELP_BODY_LINES = 8;   // the full overlay's room for body…
+inline constexpr int HELP_KEY_LINES = 9;    // …and for controls, one gesture per line
 
-/** Lines of controls the full overlay has room for, one gesture per line. */
-inline constexpr int HELP_KEY_LINES = 9;
-
-/**
- * Three summary lines, then an optional body and an optional list of controls ("" = not drawn). The
- * compact panel shows only the summary; the full overlay shows the TITLE, the body (or `line2`/`line3`
- * when there is none), then the controls.
- * ⚠️ The body REPLACES `line2`/`line3` in the overlay — a summary is often the same gesture as a
- * control, and shown twice it reads as a mistake.
- * A null line in either list is a blank row. Both obey the summary's rules and HELP_MAX_CHARS.
- */
+// Three summary lines, then an optional body and controls. The compact panel shows the summary; the
+// full overlay the title, the body (or `line2`/`line3` without one), then the controls.
+// The body replaces `line2`/`line3` there, so a gesture is not shown twice. A null line is a blank row.
 struct HelpEntry {
     const char* line1 = "";
     const char* line2 = "";
@@ -67,15 +48,11 @@ struct HelpEntry {
     const char* keys[HELP_KEY_LINES]  = {};
 };
 
-/**
- * ⚠️ APPEND ONLY — the value indexes HELP_ENTRIES.
- *
- * SCREEN_* is the fallback for a cell with no entry of its own; everything after them is a cell.
- */
+// ⚠️ Append only — the value indexes HELP_ENTRIES.
 enum class HelpTopic {
     NONE = 0,
 
-    // One per screen — the fallback, and what a screen with no per-cell text yet shows everywhere.
+    // One per screen — the fallback for a cell with no entry of its own.
     SCREEN_SONG,
     SCREEN_CHAIN,
     SCREEN_PHRASE,
@@ -197,7 +174,7 @@ enum class HelpTopic {
     MOD_TRIG,
     MOD_FREQ,
 
-    // INST.POOL — its four value columns ARE the instrument's own, so they reuse the INST_* entries
+    // INST.POOL — its value columns reuse the INST_* entries
     POOL_SLOT,
 
     // MIXER
@@ -262,9 +239,7 @@ enum class HelpTopic {
     MAP_SCOPE,
     MAP_ADD,
 
-    // ── The two IN-PLACE OVERLAYS ────────────────────────────────────────────────────────────────
-    // Neither is a `ScreenType`: they stand in the editor's place and leave `currentScreen` alone,
-    // which is why their screen-level topics sit here rather than beside the sixteen above.
+    // ── The two in-place overlays (not a `ScreenType`, so their screen topics sit here) ──────────
     SCREEN_EQ,
     EQ_TYPE,
     EQ_FREQ,
@@ -277,9 +252,8 @@ enum class HelpTopic {
     THEME_LOAD,
     THEME_SCHEME,
     THEME_ROLL,
-    // ⚠️ THE NINETEEN COLOUR ROWS ARE IN `theme_color_rows()` ORDER (ui/theme.h) and are looked up
-    // BY POSITION — see THEME_COLOR_TOPICS below. Append here and there together, or a new colour row
-    // falls back to the screen text, which is the harmless direction and the only one reachable.
+    // ⚠️ The colour rows are in `theme_color_rows()` order and looked up by position
+    // (THEME_COLOR_TOPICS). Append here and there together.
     THEME_BACKGROUND,
     THEME_ROW_4TH,
     THEME_ROW_CURSOR,
@@ -300,11 +274,7 @@ enum class HelpTopic {
     THEME_EQ_BORDER,
     THEME_EQ_TXT,
 
-    // ── The SAMPLE EDITOR ────────────────────────────────────────────────────────────────────────
-    // The one full-screen module that shows help: its waveform panel is the same 620 wide as the
-    // strip, and no cell lives there (help_panel.h). Its rows are sparse — 1, 2, 8, 10, 11, 13, 14,
-    // 16, 18, 19 — and the twelve OP BUTTONS get an entry each because a six-letter verb on a button
-    // is exactly the label that explains nothing.
+    // ── The sample editor — the one full-screen module with help (its waveform panel is the strip) ──
     SE_ZOOM,
     SE_SOURCE,
     SE_RATE,
@@ -377,7 +347,7 @@ enum class HelpTopic {
     COUNT
 };
 
-/** Indexed by HelpTopic. ⚠️ One entry per member, in the enum order — `help_table_ok` says so. */
+// Indexed by HelpTopic: one entry per member, in the enum order (asserted below).
 inline constexpr HelpEntry HELP_ENTRIES[] = {
     /* NONE */ {"", "", ""},
 
@@ -2338,27 +2308,19 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A applies, UNDO takes it back"}},
 };
 
-// ─── The compile-time check on the table ─────────────────────────────────────────────────────────
-//
-// ⚠️ Rules 2 and 3 fail silently at runtime (text off the edge, a blank glyph), so they are compile
-// errors here.
+// ─── Rules 2 and 3, as compile errors — at runtime they fail silently ────────────────────────────
 
 namespace detail {
 
-/** Drawable by `font5x5.h` in a help line. ⚠️ `'` and `;` are deliberately absent — they draw blank. */
+// Drawable by `font5x5.h`; `'` and `;` draw blank.
 constexpr bool help_char_ok(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ' ' ||
            c == ':' || c == '=' || c == '-' || c == '(' || c == ')' || c == '.' || c == '/' ||
            c == ',' || c == '+';
 }
 
-/**
- * One of the four arrows, at `s`? They are the only non-ASCII text a help line may hold: `font5x5.h`
- * maps U+2190..U+2193 and nothing else above 127, and every other code point draws BLANK.
- *
- * ⚠️ Read one byte at a time so a truncated sequence at the end of the string stops at the
- * terminator rather than reading past it.
- */
+// One of the four arrows (U+2190..U+2193) at `s` — the only non-ASCII the font draws. Read a byte at
+// a time, so a truncated sequence stops at the terminator.
 constexpr bool help_arrow_at(const char* s) {
     if (static_cast<unsigned char>(s[0]) != 0xE2) return false;
     if (static_cast<unsigned char>(s[1]) != 0x86) return false;
@@ -2366,8 +2328,7 @@ constexpr bool help_arrow_at(const char* s) {
     return tail >= 0x90 && tail <= 0x93;
 }
 
-// ⚠️ The budget is CODE POINTS, not bytes: `Canvas::draw_text` advances one column per code point,
-// so a three-byte arrow costs ONE of the HELP_MAX_CHARS.
+// The budget is code points, not bytes: an arrow is one column.
 constexpr bool help_line_ok(const char* s) {
     if (s == nullptr) return true;   // an unwritten body line
     int n = 0;
@@ -2392,14 +2353,8 @@ constexpr bool help_table_ok() {
 
 }  // namespace detail
 
-/**
- * How many characters of `line1` the full overlay shows as the TITLE: up to its first colon, or the
- * whole line when it has none ("FILE BROWSER"). So "VOL: how loud this step is" is titled VOL, and a
- * title is never written twice.
- *
- * ⚠️ Counted in BYTES, which is safe only because a title never holds an arrow — `help_titles_ok`
- * holds that too.
- */
+// The title: `line1` up to its first colon, or all of it ("VOL: how loud…" → VOL).
+// Counted in bytes, safe because a title never holds an arrow (`help_titles_ok`).
 constexpr int help_title_length(const char* line1) {
     int n = 0;
     while (line1[n] != '\0' && line1[n] != ':') ++n;
@@ -2429,7 +2384,7 @@ static_assert(detail::help_table_ok(),
 static_assert(detail::help_titles_ok(),
               "a help title (line1 up to its colon) is over HELP_TITLE_MAX_CHARS, or holds an arrow");
 
-/** The three lines for `topic`. Out of range gives the empty entry rather than reading past the end. */
+// Out of range gives the empty entry.
 inline const HelpEntry& help_entry(HelpTopic topic) {
     const size_t i = static_cast<size_t>(topic);
     if (i >= static_cast<size_t>(HelpTopic::COUNT)) return HELP_ENTRIES[0];
@@ -2438,7 +2393,7 @@ inline const HelpEntry& help_entry(HelpTopic topic) {
 
 // ─── The lookup ──────────────────────────────────────────────────────────────────────────────────
 
-/** The screen-level fallback — what a cell with nothing written for it shows. */
+// The screen-level fallback.
 inline HelpTopic help_screen_topic(ScreenType screen) {
     switch (screen) {
         case ScreenType::SONG:          return HelpTopic::SCREEN_SONG;
@@ -2464,20 +2419,19 @@ inline HelpTopic help_screen_topic(ScreenType screen) {
 
 namespace detail {
 
-/** PHRASE columns 1..9. Column 0 is the step number and `cursor_left_limit` never lets the cursor on it. */
+// PHRASE columns 1..9 (column 0, the step number, is unreachable).
 inline HelpTopic phrase_cell_topic(int column) {
     switch (column) {
         case 1:  return HelpTopic::PHRASE_NOTE;
         case 2:  return HelpTopic::PHRASE_VOLUME;
         case 3:  return HelpTopic::PHRASE_INSTRUMENT;
-        // The three FX slots are the same two cells three times over — a type and its value.
         case 4: case 6: case 8: return HelpTopic::PHRASE_FX_TYPE;
         case 5: case 7: case 9: return HelpTopic::PHRASE_FX_VALUE;
         default: return HelpTopic::NONE;
     }
 }
 
-/** TABLE columns 1..8 — one fewer than PHRASE, because a table row has no instrument cell. */
+// TABLE columns 1..8 — no instrument cell.
 inline HelpTopic table_cell_topic(int column) {
     switch (column) {
         case 1:  return HelpTopic::TABLE_TRANSPOSE;
@@ -2488,7 +2442,7 @@ inline HelpTopic table_cell_topic(int column) {
     }
 }
 
-/** INSTRUMENT, all three types: the topic of the cell the type's table puts at (row, column). */
+// INSTRUMENT, every type: the cell the type's table puts at (row, column).
 inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int column) {
     using Cell = InstrumentCell;
     switch (instrument_cell_at(type, row, column)) {
@@ -2532,21 +2486,15 @@ inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int co
     return HelpTopic::NONE;
 }
 
-/**
- * PROJECT — two values, a name, and then rows that are BUTTONS.
- *
- * ⚠️ The button rows are read by COLUMN, and the column numbers are the DRAW order, not the reading
- * order: on the PROJECT row column 1 is SAVE and column 2 is LOAD, which is the order the row itself
- * lists them in (`project_editor.cpp`).
- */
+// PROJECT: two values, a name, then rows of buttons, read by column in the draw order
+// (`project_editor.cpp`).
 inline HelpTopic project_cell_topic(int row, int column) {
     if (row < 0 || row >= PROJECT_ROW_COUNT) return HelpTopic::NONE;
     switch (static_cast<ProjectRow>(row)) {
         case ProjectRow::TEMPO:
             return column == 2 ? HelpTopic::PROJECT_TAP : HelpTopic::PROJECT_TEMPO;
         case ProjectRow::TRANSPOSE: return HelpTopic::PROJECT_TRANSPOSE;
-        // Every character of the name is its own cursor column, and they all say the same thing.
-        case ProjectRow::NAME:      return HelpTopic::PROJECT_NAME;
+        case ProjectRow::NAME:      return HelpTopic::PROJECT_NAME;   // every character column
         case ProjectRow::PROJECT:
             return column == 1   ? HelpTopic::PROJECT_SAVE
                    : column == 2 ? HelpTopic::PROJECT_LOAD
@@ -2562,7 +2510,7 @@ inline HelpTopic project_cell_topic(int row, int column) {
     return HelpTopic::NONE;
 }
 
-/** GROOVE — the tick column is one cell repeated sixteen times; the panel beside it is five rows. */
+// GROOVE: the tick column, and the panel beside it.
 inline HelpTopic groove_cell_topic(int column, int panel_row, int panel_column) {
     if (column != GROOVE_COL_PANEL) return HelpTopic::GROOVE_TIC;
     switch (panel_row) {
@@ -2576,7 +2524,7 @@ inline HelpTopic groove_cell_topic(int column, int panel_row, int panel_column) 
     }
 }
 
-/** SCALE — the NAME row is the only one with more than one cell; the twelve below it are degrees. */
+// SCALE: the NAME row has three cells; the rows below are degrees.
 inline HelpTopic scale_cell_topic(int row, int column) {
     if (row == SCALE_NAME_ROW) {
         if (column == SCALE_NAME_COL_SAVE) return HelpTopic::SCALE_SAVE;
@@ -2587,13 +2535,8 @@ inline HelpTopic scale_cell_topic(int row, int column) {
     return (scale_row_degree(row) >= 0) ? HelpTopic::SCALE_DEGREE : HelpTopic::NONE;
 }
 
-/**
- * MODS — the row's MEANING follows the slot's type, so this asks the same three questions the module
- * asks (`modulation.cpp`): LFO first, then the AHD-shaped pair, then ADSR.
- *
- * ⚠️ Row 4 is HOLD on an AHD, DEC on an ADSR and TRIG on an LFO. There is no "the row 4 parameter",
- * which is why this cannot be a plain table the way PHRASE's columns are.
- */
+// MODS: a row's meaning follows the slot's type (row 4 is HOLD, DEC or TRIG), asked in the module's
+// order (`modulation.cpp`): LFO, then the AHD-shaped pair, then ADSR.
 inline HelpTopic mod_cell_topic(songcore::ModType type, int row) {
     const bool lfo = (type == songcore::ModType::LFO);
     switch (row) {
@@ -2612,11 +2555,8 @@ inline HelpTopic mod_cell_topic(songcore::ModType type, int row) {
     }
 }
 
-/**
- * INST.POOL — its four value columns ARE the instrument's own fields, so they take the INSTRUMENT
- * screen's entries rather than a second set that could drift from them. Only the name column, whose
- * A and A+B belong to the pool alone, has text of its own.
- */
+// INST.POOL: the value columns are the instrument's own fields and take INSTRUMENT's entries; only the
+// name column has text of its own.
 inline HelpTopic pool_cell_topic(int column) {
     switch (column) {
         case 1:  return HelpTopic::INST_VOLUME;
@@ -2627,7 +2567,7 @@ inline HelpTopic pool_cell_topic(int column) {
     }
 }
 
-/** MIXER — not a grid: rows 2 and 3 exist only on the master strip (column 8). See `mixer.h`. */
+// MIXER: rows 2 and 3 exist only on the master strip (column 8).
 inline HelpTopic mixer_cell_topic(int master_row, int column) {
     switch (mixer_cell_at(master_row, column)) {
         case MixerCell::TRACK_VOL:  return HelpTopic::MIXER_TRACK_VOL;
@@ -2642,7 +2582,7 @@ inline HelpTopic mixer_cell_topic(int master_row, int column) {
     return HelpTopic::NONE;
 }
 
-/** EFFECTS — the editable rows, named by the module so the two cannot disagree about which is which. */
+// EFFECTS: the editable rows, by the module's own names.
 inline HelpTopic effects_cell_topic(int row) {
     switch (row) {
         case EffectModule::ROW_MASTER_TYPE: return HelpTopic::FX_MASTER_TYPE;
@@ -2671,10 +2611,8 @@ inline HelpTopic effects_cell_topic(int row) {
     }
 }
 
-/**
- * SETTINGS — column 2 is the row's SECOND cell where it has one (the skin, STR, VOL, POW), and
- * on TEMPLATE it is the second BUTTON. Column 0 is the label and is unreachable, as on PROJECT.
- */
+// SETTINGS: column 2 is the row's second cell where it has one (the skin, STR, VOL, POW, TEMPLATE's
+// second button).
 inline HelpTopic settings_cell_topic(int row, int column) {
     if (row < 0 || row >= SETTINGS_ROW_COUNT) return HelpTopic::NONE;
     const bool second = (column == 2);
@@ -2707,7 +2645,7 @@ inline HelpTopic settings_cell_topic(int row, int column) {
     return HelpTopic::NONE;
 }
 
-/** MIDI — one topic per row. */
+// MIDI: one topic per row.
 inline HelpTopic midi_cell_topic(int row) {
     if (row < 0 || row >= MIDI_ROW_COUNT) return HelpTopic::NONE;
     switch (static_cast<MidiRow>(row)) {
@@ -2726,10 +2664,7 @@ inline HelpTopic midi_cell_topic(int row) {
     return HelpTopic::NONE;
 }
 
-/**
- * A mapping row's columns. ⚠️ The ADD row has no columns at all, so the CALLER decides which of the
- * two questions this is — see `help_topic`.
- */
+// A mapping row's columns. The ADD row has none; `help_topic` asks about it first.
 inline HelpTopic midi_map_cell_topic(int column) {
     switch (static_cast<MapCol>(column)) {
         case MapCol::CC:    return HelpTopic::MAP_CC;
@@ -2742,7 +2677,7 @@ inline HelpTopic midi_map_cell_topic(int column) {
     return HelpTopic::NONE;
 }
 
-/** The EQ editor's cursor is one int over a 3×4 grid: band = row / 4, parameter = row % 4. */
+// The EQ editor's cursor is one int over 3×4: band = row / 4, parameter = row % 4.
 inline HelpTopic eq_cell_topic(int cursor_row) {
     if (cursor_row < 0) return HelpTopic::NONE;
     switch (cursor_row % 4) {
@@ -2753,14 +2688,8 @@ inline HelpTopic eq_cell_topic(int cursor_row) {
     }
 }
 
-/**
- * The theme editor's colour rows, IN `theme_color_rows()` ORDER (ui/theme.h) — its row N is this
- * array's entry N.
- *
- * ⚠️ A colour row added there and not here falls off the end and shows the screen text instead. That
- * is the same fallback every unwritten cell in this file gets, and it is the only direction the
- * mismatch can go: the lookup bounds itself on THIS array, so it can never read past either list.
- */
+// The theme editor's colour rows, in `theme_color_rows()` order (ui/theme.h). A row added there and
+// not here shows the screen text; the lookup is bounded by this array.
 inline constexpr HelpTopic THEME_COLOR_TOPICS[] = {
     HelpTopic::THEME_BACKGROUND, HelpTopic::THEME_ROW_4TH,     HelpTopic::THEME_ROW_CURSOR,
     HelpTopic::THEME_ROW_SELECT, HelpTopic::THEME_TXT_TITLE,   HelpTopic::THEME_TXT_PARAM,
@@ -2771,10 +2700,7 @@ inline constexpr HelpTopic THEME_COLOR_TOPICS[] = {
     HelpTopic::THEME_EQ_TXT,
 };
 
-/**
- * The theme editor. Two header rows — THEME (the name, SAVE, LOAD) and RANDOMIZE (the scheme and
- * ROLL) — and every row below them is one colour, whose three channels all say the same thing.
- */
+// The theme editor: THEME (name, SAVE, LOAD), RANDOMIZE (scheme, ROLL), then one row per colour.
 inline HelpTopic theme_cell_topic(int row, int channel) {
     if (row == THEME_ROW_THEME) {
         if (channel == 1) return HelpTopic::THEME_SAVE;
@@ -2790,18 +2716,9 @@ inline HelpTopic theme_cell_topic(int row, int channel) {
 }
 
 
-/**
- * The sample editor. Its rows are SPARSE — 1, 2, 8, 10, 11, 13, 14, 16, 18, 19 — and two of the cells
- * change meaning under a mode, so both modes are asked for here rather than guessed:
- *
- *  · row 10 column 1 is SENS under TRANSIENT and BY under DIVIDE, and does not exist under the other
- *    two methods (`slice_has_parameter`);
- *  · row 19 column 3 is CHOP, which only exists when there are slices to chop.
- *
- * ⚠️ The two OP ROWS are indexed straight off the column, so the order here IS `ops_row1()` and
- * `ops_row2()` in sample_editor.cpp. Reorder a button there and the wrong text comes up under it —
- * which is why they are named in the same left-to-right order and nowhere else.
- */
+// The sample editor. Row 10 column 1 is SENS or BY by slice method; row 19 column 3 (CHOP) exists only
+// with slices.
+// ⚠️ OPS_1/OPS_2 are indexed by column: keep them in `ops_row1()`/`ops_row2()` order (sample_editor.cpp).
 inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method) {
     static constexpr HelpTopic OPS_1[] = {HelpTopic::SE_OP_CROP,  HelpTopic::SE_OP_COPY,
                                           HelpTopic::SE_OP_CUT,   HelpTopic::SE_OP_DUPL,
@@ -2821,8 +2738,7 @@ inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method)
             if (column == 1) return HelpTopic::SE_DURATION;
             return (column == 2) ? HelpTopic::SE_BIT : HelpTopic::NONE;
 
-        // Rows 3..8 are all the SELECTION: the cursor only ever rests on 8, but the D-pad drags an
-        // edge from any of them, and column is which edge.
+        // Rows 3..8 are the selection; the column is which edge.
         case 3: case 4: case 5: case 6: case 7: case 8:
             return (column == 1) ? HelpTopic::SE_SEL_END : HelpTopic::SE_SEL_START;
 
@@ -2854,7 +2770,7 @@ inline HelpTopic sample_editor_cell_topic(int row, int column, int slice_method)
     }
 }
 
-/** The sample editor's TSTRETCH box. DURATION is the editor's own cell, shown again. */
+// The TSTRETCH box. DURATION is the editor's own cell, shown again.
 inline HelpTopic stretch_cell_topic(StretchCell cell) {
     switch (cell) {
         case StretchCell::DURATION: return HelpTopic::SE_DURATION;
@@ -2869,22 +2785,11 @@ inline HelpTopic stretch_cell_topic(StretchCell cell) {
 
 }  // namespace detail
 
-/**
- * What the cursor is standing on, right now.
- *
- * ⚠️ **Never NONE.** A cell with no entry of its own falls back to its screen, so the panel always
- * has something to draw and a screen is never blank merely because its cells are unwritten.
- *
- * ⚠️ The per-screen arms read the SAME cursor fields the module's `cursor_context()` does — the
- * grid screens share `cursorRow`/`cursorColumn`, TABLE and INSTRUMENT carry their own. A screen with
- * no arm here falls through to its screen topic, which is what makes an unfinished table harmless.
- */
+// What the cursor is on. Never NONE: a cell with no entry falls back to its screen.
+// The arms read the same cursor fields each module's `cursor_context()` does.
 inline HelpTopic help_topic(const AppState& s) {
-    // ⚠️ THE TWO IN-PLACE OVERLAYS ARE ASKED FIRST, and they have to be: neither changes
-    // `currentScreen`, so the screen underneath is still the answer to every question about where the
-    // cursor is — and it is not on the canvas. Asking it would explain a cell nobody can see.
-    // ⚠️ The EQ editor outranks the theme editor because it is the one that can be up over the SAMPLE
-    // EDITOR (which is where it brings the strip back at all); the two can never be open together.
+    // ⚠️ The overlays first: neither changes `currentScreen`, and the screen under them is not on the
+    // canvas. The EQ editor first of those — it can be up over the sample editor.
     if (s.eq.isOpen) {
         const HelpTopic eq = detail::eq_cell_topic(s.eq.cursorRow);
         return (eq == HelpTopic::NONE) ? HelpTopic::SCREEN_EQ : eq;
@@ -2907,8 +2812,7 @@ inline HelpTopic help_topic(const AppState& s) {
 
     switch (s.currentScreen) {
         case ScreenType::SONG:
-            // Column 0 is the row-number gutter and the cursor never lands on it, so every reachable
-            // column here is a track cell.
+            // Every reachable column is a track cell.
             cell = HelpTopic::SONG_CELL;
             break;
         case ScreenType::CHAIN:
@@ -2921,8 +2825,7 @@ inline HelpTopic help_topic(const AppState& s) {
             cell = detail::table_cell_topic(s.tableCursorColumn);
             break;
         case ScreenType::INSTRUMENT:
-            // ⚠️ Guarded, unlike the modules: `ptshot` and the tools build an AppState with no
-            // project at all, and help is asked for on every frame it is up.
+            // ⚠️ Guarded: the tools build an AppState with no project.
             if (s.project != nullptr) {
                 const songcore::Instrument& ins =
                     s.project->instruments[static_cast<size_t>(s.currentInstrument)];
@@ -2941,12 +2844,11 @@ inline HelpTopic help_topic(const AppState& s) {
             cell = detail::scale_cell_topic(s.scaleCursorRow, s.scaleCursorColumn);
             break;
         case ScreenType::MODS:
-            // Guarded like INSTRUMENT above, and for the same reason: the tools build an AppState
-            // with no project at all.
+            // Guarded like INSTRUMENT.
             if (s.project != nullptr) {
                 const songcore::Instrument& ins =
                     s.project->instruments[static_cast<size_t>(s.currentInstrument)];
-                // The cursor is (pair, side, row) here — the slot is which HALF of which pair.
+                // The cursor is (pair, side, row); the slot is which half of which pair.
                 const size_t slot = static_cast<size_t>(s.modCursorPair * 2 + s.modCursorSide);
                 if (slot < ins.modSlots.size())
                     cell = detail::mod_cell_topic(ins.modSlots[slot].type, s.modCursorRow);
@@ -2973,8 +2875,7 @@ inline HelpTopic help_topic(const AppState& s) {
             cell = detail::midi_cell_topic(s.midiCursorRow);
             break;
 
-        // ⚠️ The ADD row is the one past the end of the list, and it has its own topic rather than a
-        // column's — it is a button, and the columns above it do not exist on it.
+        // The ADD row, one past the end of the list, is a button with its own topic.
         case ScreenType::MIDI_MAP:
             cell = (s.project && s.midiMapCursorRow >=
                                      static_cast<int>(s.project->midiMappings.size()))

@@ -1,17 +1,9 @@
 #pragma once
 
-// ─── The mascot sprite ───────────────────────────────────────────────────────────────────────────
-//
-// A 64×64 one-bit image of the robot ant, compiled in as 512 bytes.
-// ⚠️ A bitmask because `canvas.h` has no image blit and never will (four primitives, permanently): a
-// picture reaches the screen as `fill_rect`s. The source art is pure black and white (1464 lit pixels,
-// no grey), so the mask IS the artwork. It carries no colour and is TINTED at the draw site (TXT
-// TITLE), so it follows the palette.
-// ⚠️ MSB LEFTMOST, one byte per eight columns — `font5x5.h`'s bit order. Row `y` starts at byte `y * 8`.
-// ⚠️ Authored at exactly 64 × 64 with hard edges: the shell upscales the finished frame, and
-// anti-aliasing would not survive one bit anyway.
-// To regenerate from the PNG: test each pixel's red channel against 127 and set bit `7 - x % 8` of
-// byte `y * 8 + x / 8`. The POPULATION COUNT (1464) must match the PNG's white pixels.
+// The 64×64 one-bit robot ant, tinted at the draw site (the canvas has no image blit). MSB leftmost,
+// eight bytes a row.
+// To regenerate from the PNG: red channel > 127 sets bit `7 - x % 8` of byte `y * 8 + x / 8`; the
+// popcount (1464) must match the PNG's white pixels.
 
 #include <cstdint>
 
@@ -20,7 +12,6 @@ namespace pt::ui {
 inline constexpr int MASCOT_W = 64;
 inline constexpr int MASCOT_H = 64;
 
-/** MASCOT_H rows of MASCOT_W/8 bytes, MSB = leftmost column. 1 = lit. */
 inline constexpr uint8_t MASCOT_NEUTRAL[MASCOT_H * (MASCOT_W / 8)] = {
     0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00,
     0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00,
@@ -88,7 +79,7 @@ inline constexpr uint8_t MASCOT_NEUTRAL[MASCOT_H * (MASCOT_W / 8)] = {
     0x0F, 0xCF, 0xC0, 0xFF, 0xFF, 0xF0, 0xFC, 0x00,
 };
 
-/** Is (x, y) lit? Out-of-range is unlit, so a caller may walk a larger box without guarding. */
+// Out of range is unlit.
 inline constexpr bool mascot_pixel(const uint8_t* sprite, int x, int y) {
     if (x < 0 || y < 0 || x >= MASCOT_W || y >= MASCOT_H) return false;
     return (sprite[y * (MASCOT_W / 8) + (x >> 3)] & (0x80u >> (x & 7))) != 0;

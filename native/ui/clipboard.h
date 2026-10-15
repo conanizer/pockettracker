@@ -1,15 +1,8 @@
 #pragma once
 
-// ─── The clipboard ───────────────────────────────────────────────────────────────────────────────
-//
-// Copy / cut / paste / delete over a rectangular selection on PHRASE, CHAIN, SONG and TABLE.
-//
-// It holds a FLAT LIST of items, not a rectangle: each carries its (row, column) and exactly ONE field.
-// Paste re-anchors by column OFFSET from the leftmost copied, so an FX type+value pair pasted on
-// column 6 lands type on 6 and value on 7. An absent field is SKIPPED on paste, not written as zero —
-// pasting note-column cells leaves velocity, instrument and FX untouched.
-// ⚠️ Cut is copy-then-delete, delegating to `delete_*`, because the "empty" values differ per field
-// and must live in one place.
+// Copy / cut / paste / delete over a selection on PHRASE, CHAIN, SONG and TABLE. A flat list of items,
+// each one cell (row, column, one field); paste re-anchors by column offset and skips absent fields.
+// Cut is copy then `delete_*`, where each field's empty value lives.
 
 #include <optional>
 #include <string>
@@ -22,10 +15,10 @@ namespace pt::ui {
 
 enum class ClipboardType { PHRASE_STEPS, CHAIN_ROWS, SONG_CELLS, TABLE_ROWS };
 
-/** One copied phrase cell. Columns: 1=note 2=velocity 3=instrument 4/6/8=FX type 5/7/9=FX value. */
+// Columns: 1 note, 2 velocity, 3 instrument, 4/6/8 FX type, 5/7/9 FX value.
 struct PhraseStepClipItem {
-    int row    = 0;  // row WITHIN the selection (0-based), not within the phrase
-    int column = 0;  // the source column, kept so paste can re-anchor by offset
+    int row    = 0;  // within the selection
+    int column = 0;  // the source column
     std::optional<songcore::Note> note;
     std::optional<int> volume;
     std::optional<int> instrument;
@@ -33,7 +26,7 @@ struct PhraseStepClipItem {
     std::optional<int> fxValue;
 };
 
-/** One copied chain cell. Columns: 1=phraseRef 2=transpose. */
+// Columns: 1 phrase, 2 transpose.
 struct ChainRowClipItem {
     int row    = 0;
     int column = 0;
@@ -41,14 +34,14 @@ struct ChainRowClipItem {
     std::optional<int> transpose;
 };
 
-/** One copied song cell. Column IS the track number, 1-based (1..8). */
+// The column is the track, 1..8.
 struct SongCellClipItem {
     int row      = 0;
     int column   = 0;
-    int chainRef = -1;  // not optional: a song cell is only ever a chain ref, −1 for empty
+    int chainRef = -1;
 };
 
-/** One copied table cell. Columns: 1=transpose 2=volume 3/5/7=FX type 4/6/8=FX value. */
+// Columns: 1 transpose, 2 volume, 3/5/7 FX type, 4/6/8 FX value.
 struct TableRowClipItem {
     int row    = 0;
     int column = 0;
@@ -60,15 +53,15 @@ struct TableRowClipItem {
 
 struct PasteResult {
     enum class Kind {
-        NO_CLIPBOARD,  // nothing has been copied yet
+        NO_CLIPBOARD,
         SUCCESS,
-        WRONG_SCREEN   // e.g. PHRASE data onto CHAIN
+        WRONG_SCREEN   // PHRASE data onto CHAIN, say
     };
     Kind kind        = Kind::NO_CLIPBOARD;
     int  itemsPasted = 0;
 };
 
-/** One instance lives in the dispatcher. Only the vector named by `type_` is ever non-empty. */
+// Only the vector named by `type_` is ever non-empty.
 class Clipboard {
   public:
     // ── Copy ─────────────────────────────────────────────────────────────────────────────────────
@@ -81,15 +74,11 @@ class Clipboard {
     void copy_table_rows(const songcore::Project& p, int tableId, int startRow, int startColumn,
                          int endRow, int endColumn);
 
-    /**
-     * Paste at the cursor. `target_id` is the phrase/chain/table being edited (ignored for SONG).
-     * The type must match the screen — there is no meaningful conversion, and inventing one would
-     * destroy data (WRONG_SCREEN).
-     */
+    // Paste at the cursor into item `targetId` (ignored on SONG). The type must match the screen.
     PasteResult paste(songcore::Project& p, ScreenType target, int targetId, int cursorRow,
                       int cursorColumn);
 
-    // ── Cut (copy + delete) — returns the number of cells cleared ─────────────────────────────────
+    // ── Cut: copy + delete; returns the cells cleared ────────────────────────────────────────────
     int cut_phrase_steps(songcore::Project& p, int phraseId, int startRow, int startColumn,
                          int endRow, int endColumn);
     int cut_chain_rows(songcore::Project& p, int chainId, int startRow, int startColumn, int endRow,
@@ -99,7 +88,7 @@ class Clipboard {
     int cut_table_rows(songcore::Project& p, int tableId, int startRow, int startColumn, int endRow,
                        int endColumn);
 
-    // ── Delete (clear, without touching the clipboard) — A+B over a selection ─────────────────────
+    // ── Delete: A+B over a selection; the clipboard untouched ────────────────────────────────────
     int delete_phrase_steps(songcore::Project& p, int phraseId, int startRow, int startColumn,
                             int endRow, int endColumn);
     int delete_chain_rows(songcore::Project& p, int chainId, int startRow, int startColumn,
@@ -113,7 +102,7 @@ class Clipboard {
     void clear();
     bool has_data() const { return hasData_; }
 
-    /** The top-strip readout: "PHR:2x3". "" when empty. */
+    // "PHR:2x3", or "" when empty.
     std::string info() const;
 
     ClipboardType type() const { return type_; }
@@ -130,6 +119,9 @@ class Clipboard {
     std::vector<ChainRowClipItem>   chainItems_;
     std::vector<SongCellClipItem>   songItems_;
     std::vector<TableRowClipItem>   tableItems_;
+
+    // Empty every list and take on `type` and its size; the copy then fills its own list.
+    void begin_copy(ClipboardType type, int width, int height);
 
     PasteResult paste_phrase_steps(songcore::Project& p, int phraseId, int cursorRow,
                                    int cursorColumn);

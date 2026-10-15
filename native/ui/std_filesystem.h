@@ -1,11 +1,8 @@
 #pragma once
 
-// ─── FileSystem, on <filesystem> ─────────────────────────────────────────────────────────────────
-//
-// The portable implementation of ui/filesystem.h, used by the desktop/handheld shells and every host
-// tool. The root is handed in (a handheld has no Documents; a test wants a temp directory).
-// ⚠️ The seven folder names under it are the same on every platform, so a `PocketTracker/` folder
-// copied off a phone onto an SD card is found where the app looks.
+// ui/filesystem.h on <filesystem>: the desktop and handheld shells, and every tool.
+// ⚠️ The folder names under the root are the same on every platform, so a copied `PocketTracker/`
+// folder is found where the app looks.
 
 #include "ui/filesystem.h"
 
@@ -16,19 +13,11 @@ namespace pt::ui {
 
 class StdFileSystem : public FileSystem {
   public:
-    /** `root` holds the seven app folders (`<root>/Projects`, `<root>/Samples`, …), created on first use.
-     *  The shell picks it (`default_app_root()`); a tool uses a temp directory. */
+    // `root` holds the app folders, created on first use.
     explicit StdFileSystem(std::string root) : StdFileSystem(root, root) {}
 
-    /**
-     * The two-root form: `root` is the user's media tree, `private_root` where `settings.json`,
-     * `template.ptp` and `autosave.ptp` live.
-     * ⚠️ They differ only on Android, where the media tree may be unreadable at boot (nothing granted
-     * yet): a settings file unreadable at boot is overwritten with defaults at quit. Android passes
-     * `context.filesDir` — app-private, no permission needed.
-     * ⚠️ `config.json` stays under `root`: the user hand-edits it, and app-private storage is reachable
-     * only over adb.
-     */
+    // `private_root` holds settings.json, template.ptp and autosave.ptp. They differ on Android only,
+    // where the media tree may be unreadable at boot. config.json stays under `root`: the user edits it.
     StdFileSystem(std::string root, std::string private_root)
         : root_(std::move(root)), privateRoot_(std::move(private_root)) {}
 
@@ -48,12 +37,7 @@ class StdFileSystem : public FileSystem {
     std::string reverbs_directory() override     { return ensure_dir("Reverbs"); }
     std::string delays_directory() override      { return ensure_dir("Delays"); }
 
-    // ── The app's own files ─────────────────────────────────────────────────────────────────────
-    //
-    // Not in a sub-directory: they are the app's, and the six folders above are what a user sees in a
-    // card reader. (A PortMaster launch script points both roots at CONFDIR, so they survive updates.)
-    // ⚠️ Especially the autosave: inside `Projects/` it would be listed, loadable and deletable
-    // (FileSystem::autosave_file_path).
+    // ── The app's own files, beside the folders — never inside one the browser lists ─────────────
     std::string template_project_path() override { return privateRoot_ + "/template.ptp"; }
     std::string settings_path() override         { return privateRoot_ + "/settings.json"; }
     std::string config_path() override           { return root_ + "/config.json"; }
@@ -78,45 +62,25 @@ class StdFileSystem : public FileSystem {
   private:
     std::string ensure_dir(const char* sub);
 
-    std::string root_;         // the user's media tree: the seven folders, and config.json
-    std::string privateRoot_;  // the app's own three files; equal to root_ except on Android
+    std::string root_;         // the user's media tree and config.json
+    std::string privateRoot_;  // the app's own files
 };
 
 // ─── Path helpers ────────────────────────────────────────────────────────────────────────────────
-//
-// ⚠️ NOT `std::filesystem::path::extension()`: here `.bashrc` has the extension "bashrc" (everything
-// after the last dot), where <filesystem> answers "". The browser FILTERS on this string.
+// ⚠️ Not `path::extension()`: here `.bashrc` has the extension "bashrc". The browser filters on it.
 
-/** The last path segment: "/a/b/c.wav" → "c.wav". */
-std::string path_name(const std::string& path);
+std::string path_name(const std::string& path);        // "/a/b/c.wav" → "c.wav"
+std::string path_extension(const std::string& path);   // "c.wav" → "wav", "README" → ""
+std::string path_stem(const std::string& path);        // "/a/b/c.wav" → "c"
 
-/** "c.wav" → "wav", "README" → "". Case as it appears on disk. */
-std::string path_extension(const std::string& path);
-
-/** "/a/b/c.wav" → "c". */
-std::string path_stem(const std::string& path);
-
-/**
- * `[^a-zA-Z0-9_-.]` → '_' (`FileSystem::rename_file`'s rule). `allow_dot` false is `create_folder`'s rule
- * — a folder named "a.b" would read as a file. Public because `SafFileSystem` sanitises the same names.
- */
+// `[^a-zA-Z0-9_-.]` → '_'. A folder name takes no dot (`allow_dot` false): "a.b" reads as a file.
 std::string path_sanitize(const std::string& name, bool allow_dot);
 
-/** Lowercased, for the case-insensitive comparisons (the extension filter, the NAME sort). */
 std::string to_lower(std::string s);
 
-/**
- * Where the app's folder goes when the shell does not say. `$POCKETTRACKER_HOME` wins everywhere (a
- * PortMaster launch script points it at the SD card). Otherwise:
- *
- *   Windows   `Documents\PocketTracker`, Documents as Explorer resolves it (OneDrive's if that is what
- *             the machine uses), falling back to `%USERPROFILE%\Documents`
- *   macOS     `$HOME/Documents/PocketTracker`
- *   Linux     `$XDG_DATA_HOME/PocketTracker`, then `$HOME/.local/share/PocketTracker`
- *
- * and finally `./PocketTracker`. Desktops use Documents (a file manager reaches it); a handheld has none
- * and is reached over the SD card.
- */
+// The app's folder when the shell does not say: `$POCKETTRACKER_HOME`, else Documents\PocketTracker
+// (Windows, as Explorer resolves it), $HOME/Documents/PocketTracker (macOS),
+// $XDG_DATA_HOME or ~/.local/share/PocketTracker (Linux), else ./PocketTracker.
 std::string default_app_root();
 
 }  // namespace pt::ui

@@ -4,27 +4,20 @@
 #include <string>
 #include <vector>
 
-#include "songcore/project_io.h"   // serialize_project — so a save can go through the FileSystem
+#include "songcore/project_io.h"
 #include "songcore/render.h"
-#include "ui/lifecycle.h"          // autosave_clear — a save leaves nothing to recover
+#include "ui/lifecycle.h"
 
 namespace pt::ui {
 
 namespace {
 
-/**
- * ⚠️ Every file a user would miss — `.ptp`, autosave, template, `.pti` — is written through
- * `FileSystem::write_file` (temp, checked close, rename), so power loss or a pulled SD card mid-save
- * leaves the old file whole. A truncating `ofstream` destroys the old file on open, and its `good()`
- * is read before the flush, so a small payload can vanish while returning true. songcore cannot depend
- * on `ui::FileSystem` (it compiles for the NDK), which is why writes live up here.
- * No check in the tools cuts power mid-write or fills the card — this is the guard.
- */
+// ⚠️ Every file a user would miss goes through `FileSystem::write_file` (temp, rename), so a pulled
+// card mid-save leaves the old file whole — never a truncating `ofstream`.
 bool write_project(const songcore::SongcoreHost& host, FileSystem& fs, const std::string& path) {
     return fs.write_file(path, songcore::serialize_project(host.project()));
 }
 
-/** `0001`, `0002`, … */
 std::string pad4(int v) {
     std::string s = std::to_string(v);
     while (s.size() < 4) s.insert(s.begin(), '0');
@@ -38,16 +31,13 @@ std::string unique_render_path(FileSystem& fs, const std::string& dir, const std
         const std::string path = dir + "/" + safeName + "_" + pad4(index) + ".wav";
         if (!fs.file_exists(path)) return path;
     }
-    // Ten thousand renders of one song: give up and overwrite the last name.
     return dir + "/" + safeName + "_9999.wav";
 }
 
 // ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
 
 ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState& s) {
-    // ⚠️ The empty-name fallback matters: an unnamed project would save to "<Projects>/.ptp", a dotfile
-    // the browser never lists — SAVED, and invisible for ever. An empty name is reachable (A+B every
-    // character on NAME).
+    // ⚠️ An unnamed project would save as ".ptp", a dotfile the browser never lists.
     std::string safeName = songcore::safe_project_name(host.project().name);
     if (safeName.empty()) safeName = "UNTITLED";
 
@@ -55,14 +45,9 @@ ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState
 
     if (!write_project(host, fs, path)) return ActionResult{false, "SAVE FAILED"};
 
-    // On disk exactly as it stands: no longer dirty, so NEW and EXIT stop asking.
+    // Clean, and the autosave goes with it (its pending deadline re-checks the dirty flag).
     s.savedProjectVersion = s.projectVersion;
     s.projectPath         = path;
-
-    // …and the crash-recovery autosave goes with it — one fact ("this document is stored"), kept with the
-    // version alignment so no caller gets one without the other.
-    // ⚠️ The dispatcher's pending 3 s deadline is not cancelled: it re-checks `project_dirty()`, which the
-    // line above made false (InputDispatcher::run_due_autosave).
     autosave_clear(fs);
 
     return ActionResult{true, "SAVED"};
@@ -96,7 +81,7 @@ ActionResult render_mix(songcore::SongcoreHost& host, FileSystem& fs, AppState& 
     const std::string safeName = songcore::safe_project_name(host.project().name);
     const std::string path     = unique_render_path(fs, fs.renders_directory(), safeName);
 
-    // Master bus and all; the file runs past the last row until the tails decay (songcore/render.h).
+    // With the master bus; the file runs on until the tails decay.
     songcore::RenderOptions opts;
     opts.stemsMode      = 0;
     opts.applyMasterBus = true;
@@ -115,8 +100,7 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
                           const RenderRange& range, const std::function<void(float)>& progress) {
     (void)s;
 
-    // ⚠️ Resolved ONCE above the pass loop: every stem must cover the same rows or they will not line up
-    // in a DAW.
+    // Once, so every stem covers the same rows.
     const songcore::SongBounds bounds = resolve_range(host.project(), range);
     if (bounds.empty()) return ActionResult{false, "SONG IS EMPTY"};
 
@@ -124,8 +108,7 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
         songcore::stems_plan(host.project(), bounds.startRow, bounds.endRow);
     if (passes.empty()) return ActionResult{false, "NO ACTIVE TRACKS"};
 
-    // Renders/<name>/, one folder per project. Falls back to "project" — an empty folder name would put
-    // the stems straight into Renders/.
+    // Renders/<name>/; an empty name would put them straight into Renders/.
     std::string safeName = songcore::safe_project_name(host.project().name);
     if (safeName.empty()) safeName = "project";
 
@@ -142,13 +125,11 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
     for (const songcore::StemPass& pass : passes) {
         songcore::RenderOptions opts;
         opts.stemsMode = pass.stemsMode;
-        // ⚠️ Stems BYPASS the master bus by design — re-mixed in a DAW, it would be applied twice.
-        opts.applyMasterBus = false;
+        opts.applyMasterBus = false;   // re-mixed in a DAW, it would be applied twice
 
         const std::string path = stemDir + "/" + safeName + pass.suffix + ".wav";
 
-        // ⚠️ One prepare per PASS (via `render_song_range_to_wav`, the mix's own call): each stem must not
-        // begin inside the previous one's reverb tail.
+        // One prepare per pass, so no stem begins inside the last one's reverb tail.
         const int   from = done;
         const auto slice = [&progress, from, total](float p) {
             if (progress) progress((static_cast<float>(from) + p) / static_cast<float>(total));
@@ -159,8 +140,7 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
                                           progress ? slice : std::function<void(float)>(),
                                           range.repeat);
 
-        // ⚠️ Stop at the first failed pass and say how many landed: stems are the largest write the app
-        // makes, so a failure is almost always a full card, and later passes would only fill it more.
+        // Stop at the first failure (most likely a full card) and say how many landed.
         if (!stats.ok || stats.totalFrames <= 0)
             return ActionResult{false, done == 0 ? "STEMS FAILED"
                                                  : "STEMS: " + std::to_string(done) + " OF " +
@@ -180,7 +160,6 @@ std::string resample_base_name(FileSystem& fs) {
         const std::string base = "Resample_" + pad4(index);
         if (!fs.file_exists(dir + "/" + base + ".wav")) return base;
     }
-    // Ten thousand resamples with none freed: give up, return the last name.
     return "Resample_9999";
 }
 
@@ -190,14 +169,12 @@ ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
                              const std::function<void(float)>& progress) {
     const std::string dir = fs.resampled_directory();
 
-    // A typed name is used verbatim (and OVERWRITES); an empty one auto-names and de-duplicates. The
-    // keyboard opens pre-filled with resample_base_name(), already the first free slot.
+    // A typed name is used as is and overwrites; an empty one is numbered.
     const std::string path = customBaseName.empty()
                                  ? unique_render_path(fs, dir, "Resample")
                                  : dir + "/" + songcore::safe_project_name(customBaseName) + ".wav";
 
-    // prepare → schedule(range, filter) → render → finish. finish_render MUST run even when nothing was
-    // scheduled: prepare_render silenced the live stream and reset the chains.
+    // ⚠️ finish_render runs even when nothing was scheduled: prepare silenced the live stream.
     host.prepare_render(startRow, endRow);
     const int64_t songFrames = host.schedule_song_range(startRow, endRow, &trackFilter);
     if (songFrames <= 0) {
@@ -205,7 +182,7 @@ ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
         return ActionResult{false, "RESAMPLE FAILED"};
     }
 
-    // stemsMode 0 + master bus ON — a resample is a MIX of the selected tracks.
+    // A mix of the selected tracks, with the master bus.
     const songcore::RenderStats stats =
         host.render_to_wav(path, songFrames, /*stemsMode=*/0, /*applyMasterBus=*/true, progress);
     host.finish_render();
@@ -225,12 +202,9 @@ int create_resampled_instrument(songcore::SongcoreHost& host, const std::string&
     }
     if (slot < 0) return -1;
 
-    // Decode into the slot, learn its rate ratio, push its playback params. On failure the slot stays
-    // untouched and free.
-    if (!host.load_sample(slot, wavPath)) return -1;
+    if (!host.load_sample(slot, wavPath)) return -1;   // the slot stays free on failure
 
-    // The slot was free (clean SAMPLER at defaults), but type/SF/root/vol/pan are set anyway so it can
-    // never be a hybrid — then re-pushed.
+    // Set anyway, so it can never be a hybrid.
     songcore::Instrument& ins = p.instruments[static_cast<size_t>(slot)];
     ins.instrumentType = songcore::InstrumentType::SAMPLER;
     ins.soundfontPath.reset();
@@ -244,7 +218,7 @@ int create_resampled_instrument(songcore::SongcoreHost& host, const std::string&
     return slot;
 }
 
-// ─── The song TEMPLATE ───────────────────────────────────────────────────────────────────────────
+// ─── The instrument preset and the song template ─────────────────────────────────────────────────
 
 bool save_instrument_preset(const songcore::SongcoreHost& host, FileSystem& fs, int id,
                             const std::string& path) {
@@ -260,7 +234,6 @@ ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs) {
 
 ActionResult clear_template(FileSystem& fs) {
     const std::string path = fs.template_project_path();
-    // Clearing an absent template is not a failure.
     if (!fs.file_exists(path)) return ActionResult{true, "TEMPLATE CLEARED"};
     if (!fs.delete_path(path)) return ActionResult{false, "CLEAR FAILED"};
     return ActionResult{true, "TEMPLATE CLEARED"};

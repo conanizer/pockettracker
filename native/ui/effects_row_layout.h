@@ -1,57 +1,26 @@
 #pragma once
 
-// ─── The EFFECTS screen's row geometry ───────────────────────────────────────────────────────────
-//
-// The ONE table the cursor walks and the module draws: a row's PLACE on screen and its NUMBER differ.
-// ⚠️ A row's NUMBER is its identity — the recorded EFFECTS input cases address rows by number — so rows
-// are APPENDED, never inserted. EFFECTS_DISPLAY_LINES is the only place position is stated.
-// ⚠️ Both sections draw in TWO COLUMNS, so a drawn LINE is not a row; everything is addressed by line,
-// and the cursor needs a sideways step. No row is conditional.
-// ⚠️ A send's PRESET line is three cells — the name, SAVE, LOAD — and each is a row of its own: the
-// screen has no cursor column, so the row is the only thing that can say which cell it is.
+// The EFFECTS screen's rows: the one table the cursor walks and the module draws. A row's place on
+// screen (EFFECTS_DISPLAY_LINES) and its number differ.
+// ⚠️ A row's number is its identity in the recorded input cases: append, never insert.
+// Lines hold up to three cells, each a row of its own: the screen has no cursor column.
 
 namespace pt::ui {
 
-/**
- * The rows, by identity.
- *
- * 0  TYPE    the master bus effect, OTT or DUST
- * 1  DCAY    reverb, the tail's length
- * 2  DAMP    reverb
- * 3  INP EQ  reverb
- * 4  TIME    delay
- * 5  FDBK    delay
- * 6  REV     delay → reverb
- * 7  INP EQ  delay
- * 8  (name)  delay preset      — APPENDED, draws first in the delay section
- * 9  TONE    delay
- * 10 WOBL    delay
- * 11 PONG    delay
- * 12 (name)  reverb preset     — APPENDED, draws first in the reverb section
- * 13 PRE     reverb
- * 14 WIDE    reverb
- * 15 MOD     reverb
- * 16 SIZE    reverb room       — APPENDED
- * 17 ALGO    reverb algorithm  — APPENDED, sits beside SIZE under the preset line
- * 18 SAVE    reverb preset → a file   — APPENDED, on the preset line
- * 19 LOAD    reverb preset ← a file
- * 20 SAVE    delay preset → a file    — APPENDED, on the preset line
- * 21 LOAD    delay preset ← a file
- */
 enum class EffectsRow {
-    MASTER_TYPE = 0,
+    MASTER_TYPE = 0,   // OTT or DUST
     REV_DECAY   = 1,
     REV_DAMP    = 2,
     REV_EQ      = 3,
     DLY_TIME    = 4,
     DLY_FDBK    = 5,
-    DLY_REV     = 6,
+    DLY_REV     = 6,   // delay → reverb
     DLY_EQ      = 7,
-    DLY_TYPE    = 8,
+    DLY_TYPE    = 8,   // the preset's name
     DLY_TONE    = 9,
     DLY_WOBBLE  = 10,
     DLY_PONG    = 11,
-    REV_TYPE    = 12,
+    REV_TYPE    = 12,  // the preset's name
     REV_PRE     = 13,
     REV_WIDE    = 14,
     REV_MOD     = 15,
@@ -65,7 +34,7 @@ enum class EffectsRow {
 
 inline constexpr int EFFECTS_ROW_COUNT = 22;
 
-/** The three sections, in the order they are drawn. Each gets a blank line and a header above it. */
+// In drawn order; each gets a blank line and a header.
 enum class EffectsSection { MASTER = 0, REVERB = 1, DELAY = 2 };
 inline constexpr int EFFECTS_SECTION_COUNT = 3;
 
@@ -87,11 +56,8 @@ constexpr EffectsSection effects_row_section(EffectsRow row) {
     }
 }
 
-/**
- * One DRAWN line: one cell, two side by side, or a preset line's three.
- * The unused slots repeat the LAST cell, which keeps both walkers branchless: coming down the right
- * column onto a single cell lands on it, and onto a preset line lands on SAVE, the cell drawn there.
- */
+// One drawn line: one cell, a pair, or a preset line's name, SAVE, LOAD. Unused slots repeat the last
+// cell, so coming down the right column lands on what is drawn there.
 struct EffectsDisplayLine {
     EffectsRow cell[3];
     int        count;
@@ -105,15 +71,9 @@ struct EffectsDisplayLine {
 
 inline constexpr int EFFECTS_LINE_COUNT = 11;
 
-/**
- * The order rows are DRAWN and the D-pad walks, independent of the enum VALUE (the identity).
- * Each send is its preset line (which writes the cells under it), then a pair of columns: character on
- * the LEFT, size and colour on the RIGHT.
- * ⚠️ Exception: the reverb's last line puts INP EQ on the LEFT so both sends' EQ cells — which open a
- * screen rather than hold a value — line up at the foot.
- * ⚠️ The panel holds ten lines and this is eleven, so the screen scrolls by one (title pinned). A new
- * row is cheapest beside a cell that is alone (the delay's INP EQ).
- */
+// The drawn order. Each send: its preset line, then character on the left, size and colour on the
+// right — except the reverb's INP EQ, on the left to line up with the delay's.
+// The panel holds ten lines and this is eleven, so the screen scrolls by one.
 inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = {
     {EffectsRow::MASTER_TYPE},
 
@@ -132,10 +92,7 @@ inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = 
 
 namespace detail {
 
-/**
- * Checked off the table itself: every row drawn exactly once, and a line's cells all in the same
- * section (headers read the section off the LEFT cell).
- */
+// Every row drawn once, and a line's cells in one section.
 constexpr bool effects_lines_are_well_formed() {
     int seen[EFFECTS_ROW_COUNT] = {};
     for (int i = 0; i < EFFECTS_LINE_COUNT; ++i) {
@@ -155,7 +112,7 @@ constexpr bool effects_lines_are_well_formed() {
 static_assert(detail::effects_lines_are_well_formed(),
               "EFFECTS_DISPLAY_LINES must draw every row exactly once, and group only within a section");
 
-/** Where a row sits on screen: which drawn line, and which of that line's cells (0 = leftmost). */
+// Where a row sits: its drawn line, and which cell of it.
 struct EffectsCellPos {
     int line;
     int column;
@@ -170,12 +127,8 @@ inline EffectsCellPos effects_cell_pos(int row) {
     return {0, 0};
 }
 
-/**
- * Where every row and header lands, in LINES from the title: per section a blank line, a header, then
- * its lines. A paired line's two rows share one line number.
- * `only` lays out ONE section by itself (the send editor's box): its name is the title, so its lines
- * start straight under it. ⚠️ The other sections' rows then have no line — do not draw them.
- */
+// Every row's and header's line, counted from the title. `only` lays out one section alone (the send
+// editor's box): the other sections' rows then have no line.
 struct EffectsLayout {
     int rowLine[EFFECTS_ROW_COUNT];
     int sectionHeaderLine[EFFECTS_SECTION_COUNT];
@@ -202,17 +155,15 @@ inline EffectsLayout effects_layout(int only = -1) {
     return out;
 }
 
-/** The row one line up or down (+1 down, −1 up), keeping its side: a preset line's SAVE and LOAD both
- *  count as the right column. ⚠️ CLAMPS — the recorded EFFECTS cases expect it, unlike SETTINGS and
- *  PROJECT, which wrap. */
+// The row one line up or down, keeping its side; SAVE and LOAD count as the right. Clamps.
 inline int effects_next_row(int from, int delta) {
     const EffectsCellPos at   = effects_cell_pos(from);
     const int            line = at.line + delta;
-    if (line < 0 || line >= EFFECTS_LINE_COUNT) return from;   // the clamp
+    if (line < 0 || line >= EFFECTS_LINE_COUNT) return from;
     return static_cast<int>(EFFECTS_DISPLAY_LINES[line].cell[at.column > 0 ? 1 : 0]);
 }
 
-/** The same step, stopping at the ends of the row's own SECTION — the send editor shows only one. */
+// The same, kept inside the row's section (the send editor).
 inline int effects_next_row_in_section(int from, int delta) {
     const int to = effects_next_row(from, delta);
     return effects_row_section(static_cast<EffectsRow>(to)) ==
@@ -221,7 +172,7 @@ inline int effects_next_row_in_section(int from, int delta) {
                : from;
 }
 
-/** A section's top-left cell — where a cursor entering it starts. */
+// A section's top-left cell.
 inline int effects_section_first_row(EffectsSection section) {
     for (int i = 0; i < EFFECTS_LINE_COUNT; ++i)
         if (effects_row_section(EFFECTS_DISPLAY_LINES[i].cell[0]) == section)
@@ -229,7 +180,7 @@ inline int effects_section_first_row(EffectsSection section) {
     return 0;
 }
 
-/** The row one cell left or right on its line. Stops at the line's ends. */
+// One cell left or right on the line; stops at its ends.
 inline int effects_step_column(int from, int delta) {
     const EffectsCellPos      at = effects_cell_pos(from);
     const EffectsDisplayLine& l  = EFFECTS_DISPLAY_LINES[at.line];

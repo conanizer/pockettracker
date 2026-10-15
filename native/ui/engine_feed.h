@@ -1,12 +1,8 @@
 #pragma once
 
-// ─── The engine feed ─────────────────────────────────────────────────────────────────────────────
-//
-// Everything the UI reads back OUT of the audio engine, once per frame: the oscilloscope, the note
-// monitor, the TABLE screen's playing rows, meters, spectra, RAM.
-// UI code, not shell code: it is the policy of which buffers each visualizer mode needs.
-// ⚠️ The ONE place in `pt-ui` that includes the engine. Modules must not — the headless screenshots draw every screen
-// with no engine; a shell constructs a feed, a tool does not.
+// What the UI reads back from the engine once a frame: scopes, the note monitor, TABLE's playing rows,
+// meters, spectra, RAM.
+// ⚠️ The one place in `pt-ui` that includes the engine; modules must not (the screenshots have none).
 
 #include <algorithm>
 #include <cmath>
@@ -21,13 +17,7 @@ namespace pt::ui {
 
 class EngineFeed {
 public:
-    /**
-     * One frame's reads, into `state`.
-     * ⚠️ Call AFTER the transport fields (`isPlaying`, playheads) are set from the host — the waveform
-     * decay depends on `isPlaying`.
-     * `now_ms` is handed in (the meters run on their own 60 ms cadence): time is an argument, never
-     * read here.
-     */
+    // ⚠️ Call after `isPlaying` and the playheads are set — the waveform decay depends on them.
     void poll(AudioEngine& engine, songcore::SongcoreHost& host, AppState& state, long long now_ms) {
         poll_engine(engine, state);
         poll_soundfont_presets(host, state);
@@ -39,15 +29,8 @@ public:
     }
 
 private:
-    /**
-     * The EQ editor's spectrum, polled only while that screen is up.
-     * ⚠️ The SOURCE is whoever opened the editor: a send's EQ filters the send's INPUT, an instrument's
-     * its voices, the master EQ the bus. A curve over the wrong signal is worse than none — it looks right.
-     * ⚠️ Every frame, because the oscilloscope keeps drawing beside it from the same ring; a slower poll
-     * shows the same audio at two ages. (Over silence this still polls — the loop stops drawing, not
-     * polling. Small, but the first suspect if this screen ever runs warm.)
-     * The buffer is a member: `AppState::eqSpectrum` points at it during the draw.
-     */
+    // The EQ editor's spectrum, while it is up — of the signal the EQ filters: a send's input, an
+    // instrument's voices, or the master bus. Every frame, so it matches the scope drawn beside it.
     void poll_eq_spectrum(songcore::SongcoreHost& host, AppState& state, long long now_ms) {
         if (!state.eq.isOpen) {
             state.eqSpectrum      = nullptr;
@@ -58,7 +41,6 @@ private:
         state.eqSampleRate = host.sample_rate();
 
         // 0 master bus · 1 the delay's input · 2 the reverb's input · 3 one instrument's voices.
-        // The sample editor's FX EQ is applied destructively on APPLY, so it watches the master.
         int source  = 0;
         int instrId = -1;
         switch (state.eq.caller.kind) {
@@ -78,13 +60,8 @@ private:
         }
     }
 
-    /**
-     * Analyser ballistics over the raw bins: fast up, slow down, one pole per bin. One FFT frame is a
-     * noisy estimate (two windows of a steady tone differ by dB), so raw it twitches.
-     * A function of ELAPSED TIME, not frames; the gap clamp keeps one stalled frame from collapsing the
-     * smoothing into a jump. State is per SOURCE: switching signal snaps rather than gliding between
-     * two signals.
-     */
+    // Analyser ballistics: fast up, slow down, one pole per bin, by elapsed time (a stalled frame is
+    // clamped). A new source snaps instead of gliding.
     void smooth_eq_spectrum(int source, int instrId, long long now_ms) {
         if (!eqSmoothValid_ || source != eqSmoothSource_ || instrId != eqSmoothInstr_) {
             std::copy(eqSpectrumRaw_, eqSpectrumRaw_ + EQ_SPECTRUM_BINS, eqSpectrum_);
@@ -111,28 +88,19 @@ private:
         }
     }
 
-    /**
-     * The USED RAM readout on PROJECT and INST.POOL — the engine is asked how much audio it holds.
-     * ⚠️ DEVELOPER BUILDS ONLY, like the two draw sites (`project_editor.cpp`, `instrument_pool.cpp`):
-     * `sampleRamBytes` and `freeRamBytes` stay 0 in release, so a new consumer must carry the same gate.
-     * Only on those two screens.
-     */
+    // USED and FREE RAM on PROJECT and INST.POOL. ⚠️ Debug builds only: both stay 0 in release.
     void poll_sample_ram(AudioEngine& engine, AppState& state) {
         if (!state.caps.debug) return;
         if (state.currentScreen != ScreenType::PROJECT &&
             state.currentScreen != ScreenType::INST_POOL) return;
         state.sampleRamBytes = engine.audio_memory_bytes();
 
-        // ⚠️ Not the same kind of number: USED is the engine's walk of its own buffers (no allocator
-        // overhead, transient copies or leaks); FREE is the kernel's and is what decides whether the
-        // next load survives. They are not meant to sum.
-        // ⚠️ FREE shown is `available_memory_bytes()`, NOT the deliberately generous `load_budget_bytes()`.
+        // The kernel's number, not the engine's walk — the two do not sum. Not `load_budget_bytes()`.
         state.freeRamBytes = pt::available_memory_bytes();
     }
 
     void poll_engine(AudioEngine& engine, AppState& state) {
-        // ── The visualizer ───────────────────────────────────────────────────────────────────────
-        // Stopped, the capture ring is never refilled; without the decay the scope freezes mid-wave.
+        // Stopped, nothing refills the capture ring; without the decay the scope freezes mid-wave.
         if (!state.isPlaying) engine.decayWaveform();
         engine.getWaveform(waveform_, WAVEFORM_SIZE);
         state.waveform = waveform_;
@@ -141,8 +109,7 @@ private:
         const bool octa     = (vt == VisualizerType::OCTA || vt == VisualizerType::OCTA_FULL);
         const bool spectrum = (vt == VisualizerType::SPECTRUM || vt == VisualizerType::SPECTRUM_PEAKS);
 
-        // Demand-driven: the engine does the per-track accumulation and spectrum writes only while
-        // somebody reads them — asking for a buffer no mode draws costs the audio callback every block.
+        // Ask only for what the mode draws: the engine fills these only while they are read.
         if (octa) {
             engine.getTrackWaveforms(trackWaveforms_, activeFlags_);
             state.trackWaveforms    = trackWaveforms_;
@@ -159,9 +126,7 @@ private:
             state.spectrum = nullptr;
         }
 
-        // ── The note monitor ─────────────────────────────────────────────────────────────────────
-        // From the VOICE POOL, not the sequencer: a long sample sustains past its chain, and the monitor
-        // shows what you can still hear.
+        // The note monitor, from the voices: a long sample still shows past its chain.
         if (state.isPlaying) {
             int encoded[8];
             engine.getTrackActiveNotes(encoded, 8);
@@ -174,10 +139,7 @@ private:
             for (int i = 0; i < 8; ++i) state.trackNotes[i] = songcore::Note::EMPTY();
         }
 
-        // ── The TABLE screen's playing rows, one per FX column ───────────────────────────────────
-        // Resolved here at 60 Hz, not in the draw pass (which also runs on every cursor move).
-        // ⚠️ The FIRST track standing in this table answers for all three columns; another track
-        // playing the same table has cursors this screen has no room to show.
+        // TABLE's playing rows, one per FX column. The first track in this table answers for all three.
         for (int l = 0; l < TABLE_LANES; ++l) state.tablePlaybackRows[l] = -1;
         if (state.currentScreen == ScreenType::TABLE && state.isPlaying) {
             for (int trackId = 0; trackId < 8; ++trackId) {
@@ -192,18 +154,12 @@ private:
         }
     }
 
-    /**
-     * The MIXER's meters: eight stereo track pairs, the master pair, the two send returns.
-     * ⚠️ Only on the MIXER: `getTrackPeaks` takes a mutex the AUDIO CALLBACK takes.
-     * ⚠️ Every 60 ms, which is a CONTRACT: `MixerModule::PEAK_HOLD_FRAMES = 45` counts polls, so the hold
-     * is 45 × 60 ms ≈ 2.7 s. `peaksVersion` tells the module a poll happened (its draw runs at 60 Hz).
-     * Stopped, nothing decays the peaks, so this decays them by hand (as `decayWaveform`).
-     * ⚠️ One step per poll SLOT that has passed, not per poll: otherwise a fall caught by leaving the
-     * screen would resume, frozen, on return. Replaying missed slots costs nothing while away.
-     */
+    // The MIXER's meters, only on MIXER (the read takes a mutex the audio callback takes).
+    // ⚠️ Every 60 ms is a contract: the module's peak hold counts polls via `peaksVersion`.
+    // Stopped, this decays the peaks by hand — one step per 60 ms slot passed, so a fall interrupted by
+    // leaving the screen is finished on return.
     void poll_peaks(AudioEngine& engine, AppState& state, long long now_ms) {
-        // Stamped on EVERY screen, before the gate: while playing, the callback writes peaks itself,
-        // so a spell of playback elsewhere must not replay as decay.
+        // On every screen: playback elsewhere wrote the peaks itself and must not replay as decay.
         if (state.isPlaying) peaksLiveMs_ = now_ms;
 
         if (state.currentScreen != ScreenType::MIXER) return;
@@ -211,8 +167,7 @@ private:
         const bool first = (peaksPolledMs_ == 0);
         if (!first && now_ms - peaksPolledMs_ < PEAK_POLL_MS) return;
 
-        // How long the meters have stood still: since the last poll or the transport's last write,
-        // whichever is later.
+        // How long the meters have stood still.
         const long long stale = now_ms - std::max(peaksPolledMs_, peaksLiveMs_);
         peaksPolledMs_        = now_ms;
 
@@ -229,11 +184,7 @@ private:
         state.peaksVersion += static_cast<unsigned>(steps);
     }
 
-    /**
-     * The PRESET row's count, index and name — only the engine has opened the .sf2. MEMOISED: finding
-     * the index walks the preset list, hundreds long in a big bank; the key is everything the answer
-     * depends on.
-     */
+    // The PRESET row's count, index and name. Memoised — finding the index walks the preset list.
     void poll_soundfont_presets(songcore::SongcoreHost& host, AppState& state) {
         if (state.currentScreen != ScreenType::INSTRUMENT || !state.project) return;
 
@@ -241,13 +192,11 @@ private:
         const songcore::Instrument& ins = state.project->instruments[static_cast<size_t>(id)];
         const bool sf = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
 
-        // The PATH is in the key (another .sf2 at the same bank/preset changes every field), and so is
-        // the TYPE: the "---" of a non-SoundFont slot is a cached answer too, and keyed without the type
-        // a return to the SoundFont would HIT and keep the placeholder.
+        // The type is in the key: a non-SoundFont slot's "---" is a cached answer too.
         const std::string& path = ins.soundfontPath.value_or(std::string());
         if (id == sfCachedId_ && sf == sfCachedIsSf_ && ins.sfBank == sfCachedBank_ &&
             ins.sfPreset == sfCachedPreset_ && path == sfCachedPath_) {
-            return;   // nothing the answer depends on has moved
+            return;
         }
         sfCachedId_     = id;
         sfCachedIsSf_   = sf;
@@ -267,18 +216,12 @@ private:
         state.sfPresetName  = host.sf_preset_name(id);
     }
 
-    /**
-     * Load the sound the PATCH row names, once the row has stopped moving — each preset is a parse,
-     * fine for a 2 MB sound, not for a 50 MB one.
-     * ⚠️ The load runs on a worker; this only decides WHEN to ask. `poll_sf_load` installs results every
-     * frame; a request refused (engine busy) leaves the flag up and asks again next frame.
-     * ⚠️ Not gated on the INSTRUMENT screen: leaving within the settle window must not strand the
-     * instrument on its old sound (and a `.pti` moves presets too). A pending load for an instrument the
-     * cursor leaves is flushed, not dropped.
-     */
+    // Load the sound the PATCH row names once the row stops moving. The load runs on a worker; this
+    // decides when to ask, and asks again while refused.
+    // ⚠️ Not gated on INSTRUMENT: leaving within the settle window must not strand the old sound. A
+    // pending load for an instrument the cursor leaves is flushed, not dropped.
     void poll_soundfont_reload(songcore::SongcoreHost& host, AppState& state, long long now_ms) {
-        // ⚠️ Unconditional and above every early return: a load started on INSTRUMENT must still be
-        // installed after the user leaves.
+        // ⚠️ Above every early return: a load started on INSTRUMENT is installed after leaving it.
         host.poll_sf_load();
 
         if (!state.project) return;
@@ -294,8 +237,7 @@ private:
         const std::string& path = *ins.soundfontPath;
         if (id != sfReloadId_ || ins.sfBank != sfReloadBank_ || ins.sfPreset != sfReloadPreset_ ||
             path != sfReloadPath_) {
-            // ⚠️ The flush stays SYNCHRONOUS: nothing will ask again for an instrument being left, and a
-            // refused request would strand it. Costs a frame, only in that window.
+            // ⚠️ Synchronous: nothing asks again for an instrument being left.
             if (sfReloadPending_ && sfReloadId_ != id) host.sync_sf_preset(sfReloadId_);
             sfReloadId_      = id;
             sfReloadBank_    = ins.sfBank;
@@ -305,17 +247,14 @@ private:
             sfReloadPending_ = true;
             return;
         }
-        // ⚠️ Cleared only when ACCEPTED; refused means the engine is still decoding.
+        // Cleared only when accepted; refused means the engine is still decoding.
         if (sfReloadPending_ && now_ms >= sfReloadDueMs_ && host.request_sf_preset(id)) {
             sfReloadPending_ = false;
         }
     }
 
-    /**
-     * The SAMPLE EDITOR's live reads. The waveform and the transient detector are EDGE-TRIGGERED on
-     * remembered keys — each is too expensive for every frame on a handheld. The playhead has no key
-     * but time, so it polls (one float off the voice).
-     */
+    // The sample editor's live reads. The waveform and the transients are recomputed only when their
+    // inputs change; the playhead is read every frame.
     void poll_sample_editor(songcore::SongcoreHost& host, AppState& state) {
         if (state.currentScreen != ScreenType::SAMPLE_EDITOR) {
             wfKeyValid_ = false;   // the next entry must rebuild
@@ -323,43 +262,32 @@ private:
         }
         SampleEditorState& se = state.sampleEditor;
 
-        // ── The playhead ─────────────────────────────────────────────────────────────────────────
-        // 0..1 while sounding, −1 when not. Follows the slot ACTUALLY playing: LEFT/RIGHT/MONO and
-        // SYNC auditions come out of scratch slot 254, and nothing but an audition ever does.
+        // 0..1 while sounding, −1 when not, from the slot actually playing (the preview slot for
+        // LEFT/RIGHT/MONO and SYNC auditions).
         se.playbackPosition = host.sample_playback_position(songcore::SOURCE_PREVIEW_SLOT);
         if (se.playbackPosition < 0.0f && !(se.hasStereoData && se.sourceMode != 2))
             se.playbackPosition = host.sample_playback_position(se.instrumentId);
 
-        // ── The HAND-PLACED markers ──────────────────────────────────────────────────────────────
-        // Changing the SLICE method or its setting resets hand-placed positions — derived from the data:
-        // the list carries the (method, parameter) it was made under. ⚠️ One site, above every reader:
-        // five writes to those fields would each have to remember.
-        // ⚠️ CLEARED, not just ignored, or BY 08 → BY 09 → BY 08 would bring them back.
-        // ⚠️ The STAMP says there is something to clear, not the list: a manual session with every
-        // boundary deleted is an empty list that is still meant.
+        // Hand-placed markers carry the (method, parameter) they were made under; a change clears them
+        // here, once, above every reader. ⚠️ Cleared, not ignored, or BY 08 → 09 → 08 brings them back.
+        // The stamp, not the list, says they are live: an empty manual list is still meant.
         if (se.manualKeyMethod >= 0 && !se.manual_markers_live()) {
             se.manualMarkers.clear();
             se.manualKeyMethod = -1;
             se.manualKeyParam  = -1;
         }
 
-        // ── The TRANSIENTS ───────────────────────────────────────────────────────────────────────
-        // Detect when the method is TRANSIENT and there are no markers — the state `handle_input` leaves
-        // when entering transient mode or changing sensitivity. "Empty" is the trigger.
+        // Transients: an empty list under TRANSIENT is the trigger (entering the mode or a new SENS empties it).
         if (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT && se.totalFrames > 0 &&
             se.transientMarkers.empty()) {
             se.transientMarkers = host.detect_transients(se.instrumentId, se.sliceSensitivity);
-            // ⚠️ The INDEX resets (the new set may be shorter); the SELECTION is not touched — detecting
-            // is not choosing, and a selection moved here would outlive turning slicing off.
-            se.sliceIndex = 0;
+            se.sliceIndex = 0;   // the selection is not touched: detecting is not choosing
         }
 
-        // Any change of marker set can leave the index above the ceiling; clamped once here.
+        // A new marker set can leave the index above the ceiling.
         se.sliceIndex = std::clamp(se.sliceIndex, 0, se.slice_index_ceiling());
 
-        // ── The WAVEFORM ─────────────────────────────────────────────────────────────────────────
-        // Re-binned when the window (`view_start`/`view_end`, which fold in zoom and scrolling) or the
-        // drawn CHANNEL changes.
+        // The waveform, re-binned when the window (zoom, scroll) or the channel changes.
         const int64_t vs = se.view_start();
         const int64_t ve = se.view_end();
         if (!wfKeyValid_ || vs != wfStart_ || ve != wfEnd_ || se.sourceMode != wfSource_ ||
@@ -382,7 +310,7 @@ private:
     bool  activeFlags_[TRACK_WAVEFORM_COUNT]                  = {};
     float spectrum_[OscilloscopeModule::NUM_BARS]             = {};
 
-    // The sample editor's waveform key — what the bins on screen were computed FROM.
+    // What the sample editor's bins were computed from.
     bool    wfKeyValid_ = false;
     int64_t wfStart_ = 0, wfEnd_ = 0;
     int     wfSource_ = -1, wfTotal_ = -1, wfInst_ = -1;
@@ -391,35 +319,27 @@ private:
     bool        sfCachedIsSf_ = false;
     std::string sfCachedPath_{};
 
-    /** How still the PATCH row must be before its sound loads: holding a direction loads nothing on
-     *  the way past; a deliberate step is heard as soon as the finger lifts. */
+    // How still the PATCH row must be before its sound loads — a held direction loads nothing on the way.
     static constexpr long long SF_RELOAD_SETTLE_MS = 150;
     int         sfReloadId_ = -1, sfReloadBank_ = -1, sfReloadPreset_ = -1;
     std::string sfReloadPath_{};
     long long   sfReloadDueMs_   = 0;
     bool        sfReloadPending_ = false;
 
-    /** Between peak reads — a contract with the peak-hold, not a throttle (poll_peaks). */
-    static constexpr long long PEAK_POLL_MS = 60;
+    static constexpr long long PEAK_POLL_MS = 60;   // a contract with the peak hold, not a throttle
     long long                  peaksPolledMs_ = 0;
 
-    /** The most slots one catch-up replays (6 s) — by then both halves of any fall have reached zero
-     *  (peaks scale 0.92 a slot; a marker holds 45 slots, then falls 5 px a slot down 200 px). */
+    // The most slots one catch-up replays (6 s) — by then any fall has reached zero.
     static constexpr long long PEAK_CATCHUP_SLOTS = 100;
 
-    /** When the transport last wrote the peaks itself. Stamped on every screen. */
-    long long peaksLiveMs_ = 0;
+    long long peaksLiveMs_ = 0;   // when playback last wrote the peaks itself
 
-    /**
-     * The EQ spectrum's bins: 620, not the module's 495 pixels — the module rescales, taking the MAX of
-     * each pixel's two straddling bins so a narrow peak cannot fall between columns.
-     */
+    // More bins than the module's pixels: it takes the max of each pixel's two, so a narrow peak shows.
     static constexpr int        EQ_SPECTRUM_BINS = 620;
     float                       eqSpectrum_[EQ_SPECTRUM_BINS]    = {};   // what the module draws
     float                       eqSpectrumRaw_[EQ_SPECTRUM_BINS] = {};   // this frame's transform
 
-    /** Analyser time constants, ms to 63% of a step: rise keeps a hit's edge, fall lets a steady
-     *  sound hold a readable shape. */
+    // Time constants, ms to 63 % of a step.
     static constexpr float     EQ_RISE_MS       = 25.0f;
     static constexpr float     EQ_FALL_MS       = 250.0f;
     static constexpr long long EQ_SMOOTH_GAP_MS = 100;

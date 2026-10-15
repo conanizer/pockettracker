@@ -1,69 +1,44 @@
 #pragma once
-/**
- * native/ui/platform_caps.h — what THIS platform can do: which SETTINGS rows and PROJECT actions exist.
- * Half of SETTINGS is about the DEVICE (touch layouts, a skinned D-pad, button clicks and haptics, a
- * way to QUIT), and devices differ.
- *
- * ⚠️ THE CAPS ARE A VALUE, NOT AN #ifdef. The same code answers every profile:
- *   • `android(debug)` reproduces the recorded golden's row map exactly, hidden rows and all, so
- *     the input tests drive it row for row;
- *   • `sdl(debug)` is what the desktop and handheld shells run;
- *   • `converged(debug)` is what the Android app runs.
- * `debug` is a field rather than `#ifdef NDEBUG` for the same reason.
- */
+// What this platform can do: which SETTINGS rows and PROJECT actions exist. A value, not an #ifdef, so
+// one build can answer every profile — `android()` is the tests' fixed one, `sdl()` the desktop and
+// handhelds, `converged()` the Android app.
 
 namespace pt::ui {
 
 struct PlatformCaps {
-    /** A developer build. Gates OVERLAY, TRACE and the RAM readouts on PROJECT and INST.POOL — which
-     *  `engine_feed.h` then stops sampling, so both byte counts read 0. */
+    // A developer build: OVERLAY, TRACE and the RAM readouts.
     bool debug = false;
 
-    /** LAYOUT: FULLSCREEN / LANDSCAPE / PORTRAIT, and the skin column the portrait layout gains. */
+    // LAYOUT, and the portrait layout's skin column.
     bool touchLayouts = false;
 
-    /** A physical controller is attached RIGHT NOW — the face-button-swap row's gate (it configures a
-     *  pad, so with none plugged in it would configure nothing). Runtime, since pads are hot-pluggable. */
+    // A pad is attached right now — the ABXY row's gate.
     bool padAttached = false;
 
-    /** OVERLAY: a PNG laid over the virtual button skin, with a strength. Debug-gated on top. */
+    // OVERLAY: a PNG over the button skin (debug only on top).
     bool skinOverlay = false;
 
-    /** BTN SOUND + BTN VIBRO: the click and the haptic a VIRTUAL button gives back. */
+    // BTN SOUND + BTN VIBRO for the on-screen buttons.
     bool buttonFeedback = false;
 
-    /**
-     * RESUME (ASK / AUTO) for a crash-recovery autosave at launch. Both are right on different
-     * hardware: ASK where the OS keeps the app warm, AUTO where the launcher kills it at every menu.
-     */
+    // RESUME: ASK where the OS keeps the app warm, AUTO where a launcher kills it at every menu.
     bool autosave = false;
 
-    /** PROJECT gains an EXIT row: a handheld launcher needs the process back. */
+    // PROJECT's EXIT row: a handheld launcher needs the process back.
     bool appExit = false;
 
-    /**
-     * The MIDI AUTHORING surfaces: PROJECT > MIDI (and the MIDI screen), EXTERNAL in the instrument TYPE
-     * cycle, and the six MIDI commands at the end of songcore::EFFECT_TYPES.
-     * ⚠️ AUTHORING ONLY — display is unconditional. A .ptp can carry EXTERNAL instruments and MIDI
-     * effect codes; hiding their display would draw a silently dead track as a sampler. So a build
-     * with this off cannot CREATE MIDI data, and shows what it finds truthfully.
-     * On in every shell profile; `android()` keeps it debug-only, as the golden recorded.
-     */
+    // Creating MIDI data: PROJECT > MIDI, EXTERNAL in TYPE, the MIDI commands at EFFECT_TYPES' end.
+    // ⚠️ Authoring only: what a file already holds is always shown truthfully.
     bool midi = false;
 
-    /**
-     * The LOOP-WINDOW pair, held back while their behaviour is decided: the `LPO` command (last of the
-     * non-MIDI effects) and `osc` in the LOOP cycle.
-     * ⚠️ AUTHORING ONLY, as `midi`: existing `LPO` / `osc` keep drawing and playing.
-     * ⚠️ It hides `LPO` only while `midi` is off — both are trimmed from the same tail
-     * (songcore/effects.h). With MIDI shown (every shipping profile) it hides `osc` alone.
-     */
+    // `LPO` and LOOP's `osc`, held back while their behaviour is decided; authoring only, as `midi`.
+    // ⚠️ It hides `LPO` only while `midi` is off (both are trimmed from the same tail).
     bool loopWindow = false;
 
-    /** AUDIO OUT: the platform can switch its sound output while running (Windows: ASIO). */
+    // AUDIO OUT: the output can be switched while running (Windows: ASIO).
     bool audioOutputs = false;
 
-    /** The recorded golden's row map: every device row, no exit. */
+    // The tests' row map: every device row, no exit.
     static PlatformCaps android(bool debug_build) {
         PlatformCaps c;
         c.debug          = debug_build;
@@ -77,11 +52,7 @@ struct PlatformCaps {
         return c;
     }
 
-    /**
-     * The desktop and handheld shells: physical buttons and a way out.
-     * (Not named `linux`: that is a predefined MACRO under gcc's gnu++ dialects — `linux()` would
-     * expand to `1()`.)
-     */
+    // The desktop and handheld shells. (Not `linux`: gcc predefines it as a macro.)
     static PlatformCaps sdl(bool debug_build) {
         PlatformCaps c;
         c.debug          = debug_build;
@@ -95,19 +66,13 @@ struct PlatformCaps {
         return c;
     }
 
-    /**
-     * What the Android app RUNS (`android-main.cpp`): `sdl()` plus the three rows a touch UI brings —
-     * not `sdl()` edited in place (those rows would appear on devices with no touch screen) and not
-     * `android()` (the tests' fixed profile: no EXIT, MIDI only in debug). Written as `sdl()` plus
-     * flips so the shared fields cannot drift.
-     * ⚠️ The LAYOUT row is additionally gated at RUNTIME on a touch screen and no pad (`app.cpp`'s
-     * `useTouch`); this is the static half.
-     */
+    // The Android app: `sdl()` plus the touch rows. LAYOUT is also gated at runtime on a touch screen
+    // and no pad (`app.cpp`).
     static PlatformCaps converged(bool debug_build) {
         PlatformCaps c   = sdl(debug_build);
-        c.touchLayouts   = true;   // the LAYOUT / skin-picker row
-        c.buttonFeedback = true;   // BTN SOUND + BTN VIBRO
-        c.skinOverlay    = true;   // the CRT screen overlay
+        c.touchLayouts   = true;
+        c.buttonFeedback = true;
+        c.skinOverlay    = true;
         return c;
     }
 };

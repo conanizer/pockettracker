@@ -14,7 +14,7 @@ void warn(std::vector<InputConfigWarning>& out, std::string text) {
     out.push_back(InputConfigWarning{std::move(text)});
 }
 
-/** The `controller` object. Absent or malformed leaves `cfg.abxy` at its default. */
+// Absent or malformed leaves the default.
 void read_controller(const json& j, InputConfig& cfg, std::vector<InputConfigWarning>& warnings) {
     const auto it = j.find("controller");
     if (it == j.end()) return;
@@ -33,7 +33,6 @@ void read_controller(const json& j, InputConfig& cfg, std::vector<InputConfigWar
     const std::string value = ait->get<std::string>();
     AbxyLayout        layout{};
     if (!abxy_from_name(value, layout)) {
-        // Name the accepted values, or the next edit is another guess.
         warn(warnings, "config.json: \"controller.abxy\" = \"" + value +
                            "\" is not one of auto/xbox/nintendo — using auto");
         return;
@@ -41,7 +40,7 @@ void read_controller(const json& j, InputConfig& cfg, std::vector<InputConfigWar
     cfg.abxy = layout;
 }
 
-/** A `keyboard`- or `gamepad`-shaped object. Each entry replaces that button's default inputs. */
+// A `keyboard` or `gamepad` object; each entry replaces that button's defaults.
 void read_bindings(const json& j, const char* section, ButtonBindings& out,
                    std::vector<InputConfigWarning>& warnings) {
     const auto it = j.find(section);
@@ -59,8 +58,7 @@ void read_bindings(const json& j, const char* section, ButtonBindings& out,
             warn(warnings, where + "." + entry.key() + "\" is not a button name — ignored");
             continue;
         }
-        // "START" and "Start" are one button. ⚠️ The parser sorts keys, so which line comes "later" is
-        // not the file's order: say which one was used, or the other looks applied.
+        // "START" and "Start" are one button. The parser sorts keys, so say which one was used.
         std::string& seen = listedAs[static_cast<size_t>(button)];
         if (!seen.empty()) {
             warn(warnings, where + "\": \"" + seen + "\" and \"" + entry.key() +
@@ -72,8 +70,7 @@ void read_bindings(const json& j, const char* section, ButtonBindings& out,
             continue;
         }
 
-        // A listed button REPLACES its defaults, so `[]` unbinds — and one whose every entry was
-        // rejected ends up UNBOUND, not back on its defaults, matching what the file says.
+        // `[]` unbinds, and so does a list whose every entry was rejected.
         std::vector<std::string> names;
         for (const json& k : *entry) {
             if (!k.is_string()) {
@@ -89,7 +86,7 @@ void read_bindings(const json& j, const char* section, ButtonBindings& out,
     }
 }
 
-/** One `repeat` value: a whole number of ms, clamped into [lo, hi]. */
+// A whole number of ms, clamped into [lo, hi].
 void read_repeat_ms(const json& r, const char* key, int lo, int hi, int& out,
                     std::vector<InputConfigWarning>& warnings) {
     const auto it = r.find(key);
@@ -124,11 +121,7 @@ void read_repeat(const json& j, RepeatConfig& out, std::vector<InputConfigWarnin
                    out.interval, warnings);
 }
 
-/** What each Miyoo Mini button sends, as SDL key names. */
-/**
- * One Miyoo Mini button: its printed name, the key its SDL sends for it in keyboard mode (what older
- * config files name), and the controller button(s) it arrives as.
- */
+// One Miyoo Mini button: its printed name, its keyboard-mode key, and the pad button(s) it arrives as.
 struct MiyooButton {
     const char* name;
     const char* key;
@@ -148,7 +141,7 @@ constexpr MiyooButton MIYOO_MINI_BUTTONS[] = {
     {"R", nullptr, {"rightshoulder", "righttrigger"}},
 };
 
-/** Parse; on failure `error` names where (", line 11 column 9"), else is empty. */
+// On failure `error` names where (", line 11 column 9").
 json parse_reporting_position(const std::string& text, std::string& error) {
     error.clear();
     try {
@@ -240,7 +233,6 @@ bool load_input_config(FileSystem& fs, InputConfig& out, std::vector<InputConfig
         }
     }
     if (!j.is_object()) {
-        // The line number is the whole help: on a handheld this log is the only feedback there is.
         warn(warnings, "config.json: not valid JSON" + error + " — the whole file is ignored");
         return false;
     }

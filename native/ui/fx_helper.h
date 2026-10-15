@@ -1,28 +1,14 @@
 #pragma once
 
-// ─── The FX helper overlay ───────────────────────────────────────────────────────────────────────
+// The FX picker: A+UP/DOWN over an FX type column opens it, A+DPAD moves, releasing A commits.
+// Effects sit in six-wide blocks under group headings, the highlighted one's text above. No drawing
+// here (ui/modules/fx_helper_overlay.h).
 //
-// The picker that opens on A+UP / A+DOWN over an FX *type* column (PHRASE cols 4/6/8, TABLE cols
-// 3/5/7): the effects in six-column blocks under group headings, with the highlighted one's
-// documentation above. Hold A and read to find an effect; release A to pick it.
-//
-//   A + DPAD    move
-//   release A   commit the highlighted effect and close  (dispatcher's `on_a_released`)
-//
-// ─── The accordion ───────────────────────────────────────────────────────────────────────────────
-//
-// One group is expanded at a time, and THE OPEN GROUP IS THE GROUP THE CURSOR IS IN — no second state
-// to disagree. Off the bottom of a group opens the next, off the top the previous; the list is a ring.
-//
-// ⚠️ A cell holds an effect CODE, not an index into songcore::EFFECT_TYPES: the reading order differs,
-// and some effects sit in TWO groups (`AUS`/`AUF`, `KIL`). Opening on a doubled effect lands in the
-// first group listing it.
-// ⚠️ Which effects a build shows is decided by the TAIL of `EFFECT_TYPES`, exactly as the column's
-// A+RIGHT cycle does (`fx_layout_for(count)` keeps a code only while its index is below `count`), or
-// a build gets a cell the picker cannot name. The MIDI group empties that way and is dropped.
-//
-// PURE — no canvas, no theme (drawing is ui/modules/fx_helper_overlay.h), so the tests check the
-// navigation without a renderer.
+// One group is expanded at a time: the one the cursor is in. Off either end of a group opens the
+// next; the list is a ring.
+// ⚠️ A cell holds an effect code, not an index — some effects sit in two groups (`AUS`/`AUF`, `KIL`).
+// ⚠️ A build hides the tail of `EFFECT_TYPES` exactly as the column's A+RIGHT cycle does; the MIDI
+// group empties that way and is dropped.
 
 #include <algorithm>
 #include <string>
@@ -35,27 +21,18 @@ namespace pt::ui {
 
 inline constexpr int FX_GRID_COLS = 6;
 
-// ─── The groups ──────────────────────────────────────────────────────────────────────────────────
-//
-// By what a command REACHES: the sequence (the step ladder, before a note exists), the instrument (the
-// note being played), the whole song. MIDI is a group so a build without MIDI can drop it entire.
-// Order inside a group is reading order only — the one FX list that may be reordered at will.
-// ⚠️ An effect in no group cannot be picked; the coverage is a static_assert, so appending to
-// `EFFECT_TYPES` without a line here fails the build.
-// ⚠️⚠️ The empty slot `---` is in NONE of these lists, and must not be: `fx_layout_for` gives each group
-// one as its first cell AFTER dropping groups with no real effects. Listed as a member, `---` (visible
-// in every build) would stop the MIDI group ever emptying.
+// ─── The groups — by what a command reaches: the sequence, the note, the whole song; and MIDI ────
+// Order inside a group is free. Every effect must be in one (asserted below).
+// ⚠️ `---` is in none: `fx_layout_for` adds it to each group after dropping the empty ones, so listed
+// here it would stop the MIDI group ever emptying.
 
 inline constexpr int FX_SEQUENCE_CODES[] = {
-    // ⚠️ `KIL` is here AND in INSTRUMENT: silencing a step is how a pattern is written, and it is also
-    // a thing done to the note. First, because that is where it is reached for.
-    songcore::FX_KILL,
+    songcore::FX_KILL,   // also in INSTRUMENT
     songcore::FX_HOP, songcore::FX_THO, songcore::FX_TBL, songcore::FX_TIC,
     songcore::FX_GRV, songcore::FX_LAT, songcore::FX_CHA, songcore::FX_NTH, songcore::FX_RND, songcore::FX_RNL,
-    songcore::FX_INS,   // beside RND/RNL, which it is made to be driven by
+    songcore::FX_INS,   // beside RND/RNL, which drive it
     songcore::FX_ARC, songcore::FX_ARPEGGIO,
-    // The TRACK scale. Its global twin is in GLOBAL, where it moves all eight tracks at once.
-    songcore::FX_SCA,
+    songcore::FX_SCA,   // the track scale; SCG is in GLOBAL
 };
 
 inline constexpr int FX_INSTRUMENT_CODES[] = {
@@ -67,9 +44,7 @@ inline constexpr int FX_INSTRUMENT_CODES[] = {
     songcore::FX_DRV, songcore::FX_CRU,
     songcore::FX_RSEND, songcore::FX_DSEND, songcore::FX_EQN,
     songcore::FX_LPO,
-    // The ramp pair is also in GLOBAL. Last here, so hiding LPO (directly above) shortens the group
-    // without reflowing the rows above.
-    songcore::FX_AUS, songcore::FX_AUF,
+    songcore::FX_AUS, songcore::FX_AUF,   // also in GLOBAL
 };
 
 inline constexpr int FX_GLOBAL_CODES[] = {
@@ -90,8 +65,7 @@ struct FxGroupDef {
     int         count;
 };
 
-// ⚠️ MIDI STAYS LAST: it can empty completely, and a heading present on one build and absent mid-list on
-// another makes "the group below" mean two things.
+// ⚠️ MIDI stays last: it can empty, and a heading missing mid-list would reorder the rest.
 inline constexpr FxGroupDef FX_GROUP_DEFS[] = {
     {"SEQUENCE",   FX_SEQUENCE_CODES,   static_cast<int>(sizeof(FX_SEQUENCE_CODES) / sizeof(int))},
     {"INSTRUMENT", FX_INSTRUMENT_CODES, static_cast<int>(sizeof(FX_INSTRUMENT_CODES) / sizeof(int))},
@@ -107,7 +81,7 @@ constexpr bool fx_code_is_grouped(int code) {
     return false;
 }
 
-/** Every effect sits in at least one group (`---` is asserted separately: every group's first cell). */
+// Every effect sits in at least one group.
 constexpr bool fx_groups_cover_every_effect() {
     for (int i = 0; i < songcore::EFFECT_TYPE_COUNT; ++i)
         if (songcore::EFFECT_TYPES[i] != songcore::FX_NONE &&
@@ -119,8 +93,7 @@ static_assert(fx_groups_cover_every_effect(),
               "every effect must appear in an FX picker group — one that appears in none is an "
               "effect the picker cannot reach");
 
-/** …no group names a non-effect, a duplicate, or `---` — a group listing `---` could never empty, and
- *  the MIDI-hiding build relies on emptying one. */
+// …and no group names a non-effect, a duplicate, or `---`.
 constexpr bool fx_groups_hold_real_effects_once() {
     for (const FxGroupDef& g : FX_GROUP_DEFS) {
         for (int i = 0; i < g.count; ++i) {
@@ -139,7 +112,7 @@ static_assert(fx_groups_hold_real_effects_once(),
               "an FX picker group holds an unknown effect code, the same one twice, or the empty "
               "slot — which every group is given as its first cell instead");
 
-/** Rows of cells the biggest group needs, its leading `---` included. */
+// Rows the biggest group needs, its leading `---` included.
 constexpr int fx_max_group_rows() {
     int most = 0;
     for (const FxGroupDef& g : FX_GROUP_DEFS) {
@@ -149,11 +122,9 @@ constexpr int fx_max_group_rows() {
     return most;
 }
 
-/** The tallest the overlay can ever be: a heading per group, plus the biggest group expanded. */
+// The tallest the overlay gets: a heading per group plus the biggest group (its fit is asserted in
+// modules/fx_helper_overlay.cpp).
 inline constexpr int FX_MAX_LAYOUT_ROWS = FX_GROUP_COUNT + fx_max_group_rows();
-
-// The overlay box is sized from a row count; its ceiling is asserted where height and screen are both
-// in scope — `box_h` in modules/fx_helper_overlay.cpp — never as a number copied here.
 
 // ─── One build's picker ──────────────────────────────────────────────────────────────────────────
 
@@ -164,8 +135,7 @@ struct FxGroup {
     int size() const { return static_cast<int>(codes.size()); }
     int rows() const { return (size() + FX_GRID_COLS - 1) / FX_GRID_COLS; }
 
-    /** Cells on `row`. A short last row's missing cells cannot be landed on — every move is clamped
-     *  (fx_clamp_cursor), or a release would commit whatever code the arithmetic named. */
+    // Cells on `row`; every move clamps to it, so a short last row's gaps cannot be landed on.
     int row_width(int row) const {
         const int left = size() - row * FX_GRID_COLS;
         if (left <= 0) return 0;
@@ -189,18 +159,12 @@ struct FxLayout {
         return most;
     }
 
-    /**
-     * The rows the BOX is sized for: one heading per group plus the TALLEST group's cells. ⚠️ Not the
-     * open group's — the modal is centred, so the text and grid would jump at every heading crossed.
-     */
+    // The box is sized for the tallest group, not the open one, so the centred modal does not jump.
     int total_rows() const { return count() + max_group_rows(); }
 };
 
-/**
- * The picker for a build showing the first `visible_effect_count` entries of EFFECT_TYPES.
- * ⚠️ Order matters: groups left with no REAL effects are dropped first (how MIDI vanishes), and only
- * then does each survivor get its leading `---`. Prepend first and nothing ever empties.
- */
+// The picker for a build showing the first `visible_effect_count` of EFFECT_TYPES.
+// ⚠️ Empty groups are dropped before each survivor gets its `---`; the other order empties nothing.
 inline FxLayout fx_layout_for(int visible_effect_count) {
     FxLayout out;
     for (const FxGroupDef& def : FX_GROUP_DEFS) {
@@ -219,7 +183,7 @@ inline FxLayout fx_layout_for(int visible_effect_count) {
     return out;
 }
 
-/** Every effect, MIDI included. */
+// Every effect, MIDI included.
 inline const FxLayout& fx_layout_full() {
     static const FxLayout full = fx_layout_for(songcore::EFFECT_TYPE_COUNT);
     return full;
@@ -237,14 +201,14 @@ struct FxHelperState {
         return &layout.groups[static_cast<size_t>(group)];
     }
 
-    /** The effect CODE under the cursor — what a release of A commits. */
+    // The code a release of A commits.
     int selected_effect_code() const {
         const FxGroup* g = open_group();
         return g == nullptr ? songcore::FX_NONE : g->code_at(cursorRow, cursorCol);
     }
 };
 
-/** Pull the cursor back onto a cell that exists — the row it arrives on may be a short one. */
+// Back onto a cell that exists — the row may be a short one.
 inline void fx_clamp_cursor(FxHelperState& s) {
     const FxGroup* g = s.open_group();
     if (g == nullptr || g->rows() == 0) { s.cursorRow = 0; s.cursorCol = 0; return; }
@@ -255,7 +219,7 @@ inline void fx_clamp_cursor(FxHelperState& s) {
     if (s.cursorCol >= width) s.cursorCol = width - 1;
 }
 
-/** Open with the cursor on `effect_code`, in the first group that carries it. */
+// Open on `effect_code`, in the first group that carries it.
 inline FxHelperState fx_helper_opened_at(int effect_code, FxLayout layout) {
     FxHelperState s;
     s.layout = std::move(layout);
@@ -270,19 +234,14 @@ inline FxHelperState fx_helper_opened_at(int effect_code, FxLayout layout) {
             return s;
         }
     }
-    // A code this build does not show (read off disk): the column keeps drawing it; the picker opens at
-    // the top.
-    return s;
+    return s;   // a code this build hides: open at the top
 }
 
 inline FxHelperState fx_helper_opened_at(int effect_code) {
     return fx_helper_opened_at(effect_code, fx_layout_full());
 }
 
-// ─── Navigation ──────────────────────────────────────────────────────────────────────────────────
-//
-// LEFT/RIGHT cycle the cursor's row (six wide, except a group's last). UP/DOWN walk rows; off either
-// end of a group moves into — and so opens — the next.
+// ─── Navigation: LEFT/RIGHT cycle within the row; UP/DOWN off a group's end open the next ────────
 
 inline void fx_move_up(FxHelperState& s) {
     if (s.open_group() == nullptr) return;
@@ -321,14 +280,8 @@ inline void fx_move_right(FxHelperState& s) {
     if (width > 0) s.cursorCol = (s.cursorCol + 1) % width;
 }
 
-// ─── The documentation ───────────────────────────────────────────────────────────────────────────
-//
-// Indexed to match songcore::EFFECT_TYPES. 2–4 lines each:
-//   [0] "SHORT: what it is"   [1] what the value (or first nibble) does
-//   [2] the second nibble (optional)   [3] table-specific behaviour (optional)
-// At most ~31 chars a line (580 px at font scale 3).
-// ⚠️ No apostrophe or semicolon: the font has neither and draws a BLANK ("instrument's" → "INSTRUMENT
-// S"), silently. Use letters, digits and `: = - ( ) . /`.
+// ─── The text, indexed like EFFECT_TYPES: "CODE: what it is", then 1–3 lines on the value ────────
+// At most ~31 characters a line. ⚠️ No apostrophe or semicolon — the font draws them blank.
 
 inline const std::vector<std::vector<std::string>>& effect_descriptions() {
     static const std::vector<std::vector<std::string>> d = {
@@ -338,8 +291,6 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
                      "0=never F=always 8=about half"},
         /* 3 LAT */ {"LAT: Latency (delay trigger)", "xx=ticks before note fires"},
         /* 4 GRV */ {"GRV: Groove assign", "xx=groove ID (00=disable)"},
-        // "y=target row" alone reads as a row in THIS phrase; the phrase ENDS here and the next starts
-        // at y.
         /* 5 HOP */ {"HOP: Jump to the next phrase", "This row does not play at all",
                      "y=row it starts on (x unused)", "FF=stop track for this chain"},
         /* 6 TIC */ {"TIC: Table tick rate", "01-FB=ticks per row", "FC-FF=special modes"},
@@ -395,11 +346,7 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
     return d;
 }
 
-/**
- * The lines for the highlighted effect, or a placeholder off the table. Looked up through
- * `effect_type_index` (a cell holds a CODE) — a description out of order describes the wrong effect,
- * and nothing else would say so. Returned by reference into the static: redrawn every frame.
- */
+// The highlighted effect's lines (a cell holds a code, so through `effect_type_index`).
 inline const std::vector<std::string>& fx_description_lines(const FxHelperState& s) {
     static const std::vector<std::string> kNone{"---", "No effect"};
     const auto& all = effect_descriptions();

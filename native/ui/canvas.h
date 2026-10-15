@@ -1,12 +1,7 @@
 #pragma once
 
-// ─── The canvas ──────────────────────────────────────────────────────────────────────────────────
-//
-// A 640×480 software framebuffer and the four primitives the whole UI is drawn with: a filled rect, a
-// stroked rect, bitmap text, and a clip rectangle. ⚠️ Four, permanently.
-//
-// There is no `scale` parameter: the canvas IS the 640×480 design, and the shell scales the finished
-// frame onto the display. A "1px" border is one design pixel.
+// A 640×480 software framebuffer and the primitives the whole UI is drawn with: filled and stroked
+// rects, bitmap text, a clip. The shell scales the finished frame onto the display.
 
 #include <cstdint>
 #include <string>
@@ -17,13 +12,10 @@
 
 namespace pt::ui {
 
-// The design resolution — 640×480 4:3, the PortMaster floor (RG35xx class). Anything larger
-// integer-scales or letterboxes.
 inline constexpr int DESIGN_W = 640;
 inline constexpr int DESIGN_H = 480;
 
-// The dim scrim every modal paints over the whole canvas. The one source of it: the shell blends the
-// SAME value over the letterbox bars, so the dim is seamless across the 4:3 edge.
+// The modal dim; the shell blends the same value over the letterbox bars.
 inline constexpr Argb MODAL_BACKDROP = 0xCC000000;
 
 class Canvas {
@@ -32,59 +24,44 @@ public:
 
     // ── The frame ────────────────────────────────────────────────────────────────────────────────
 
-    /** Fill the whole canvas, clip ignored. */
+    // The whole canvas, clip ignored.
     void clear(Argb color = 0xFF000000);
 
-    /** Raw ARGB (0xAARRGGBB) pixels, DESIGN_W × DESIGN_H, row-major. What the shell uploads. */
+    // ARGB, row-major — what the shell uploads.
     const uint32_t* pixels() const { return px_.data(); }
     int             pitch_bytes() const { return DESIGN_W * 4; }
 
     // ── Primitives ───────────────────────────────────────────────────────────────────────────────
 
-    /** Filled rect. Blends src-over when `color` has alpha < 255 (the dialog backdrops rely on it). */
+    // Blends src-over when `color` has alpha < 255.
     void fill_rect(int x, int y, int w, int h, Argb color);
 
-    /** Outline drawn inside the given bounds. */
+    // An outline inside the bounds.
     void stroke_rect(int x, int y, int w, int h, Argb color, int thickness = 1);
 
-    /** One glyph. `font_scale` is the 5×5 cell's pixel multiplier (3 → the standard 15×15 text). */
+    // `font_scale` multiplies the 5×5 cell (3 → the standard 15×15 text).
     void draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale);
-    void draw_char(char c, int x, int y, Argb color, int font_scale);
 
-    /**
-     * A run of text, left to right. `spacing` is the gap between 5×5 cells, so each character advances
-     * `5 * font_scale + spacing`.
-     * ⚠️ `text` is UTF-8 and the advance is per CODE POINT (MODS draws "→M2 AMT").
-     */
+    // UTF-8; each code point advances `5 * font_scale + spacing`.
     void draw_text(const std::string& text, int x, int y, Argb color, int spacing, int font_scale);
 
-    /** Width of `text` as drawn — `n * (5 * font_scale + spacing) - spacing` (no trailing gap). */
+    // No trailing gap.
     static int text_width(const std::string& text, int spacing, int font_scale);
 
-    /** Glyphs (code points) in `text`. */
-    static int glyph_count(const std::string& text);
+    static int glyph_count(const std::string& text);   // code points
 
-    /**
-     * Clip `text` to at most `max_glyphs` columns, marking a cut with U+2026 (`…`).
-     * ⚠️ The marker is INSIDE the budget (`max_glyphs - 1` glyphs + `…`), so the result is never wider
-     * than the column; a string that fits comes back untouched. Counted in code points, so a cut never
-     * splits a UTF-8 sequence.
-     */
+    // At most `max_glyphs` columns, a cut marked with `…` inside the budget. Never splits a code point.
     static std::string clip_text(const std::string& text, int max_glyphs);
 
-    /** `clip_text`'s mirror: keep the END and mark the cut at the FRONT — for paths, whose last
-     *  component is the part that means something. */
+    // The same, keeping the end — for paths.
     static std::string clip_text_head(const std::string& text, int max_glyphs);
 
     // ── Clipping ─────────────────────────────────────────────────────────────────────────────────
-    //
-    // The layout clips the editor area left of the right-hand bar, so wide row highlights cannot bleed
-    // into the BPM readout and note monitor.
 
     void set_clip(int x, int y, int w, int h);
     void reset_clip();
 
-    /** RAII clip, so an early `return` inside a module cannot leak a clip into the next one. */
+    // So an early `return` inside a module cannot leak a clip into the next one.
     class ClipScope {
     public:
         ClipScope(Canvas& c, int x, int y, int w, int h)
@@ -101,8 +78,6 @@ public:
     };
 
 private:
-    void blend_px(int x, int y, Argb color);
-
     std::vector<uint32_t> px_;
     int                   clipX_ = 0, clipY_ = 0, clipW_ = DESIGN_W, clipH_ = DESIGN_H;
 };

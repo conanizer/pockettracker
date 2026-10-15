@@ -1,23 +1,11 @@
 #pragma once
 
-// ─── config.json — the user-editable configuration file ──────────────────────────────────────────
-//
-// This header owns the FILE — its schema and the starter template every platform seeds — plus the
-// `folders` section. `controller` and `keyboard` are `ui/input_config.h`, read by the shell (only it
-// knows an `SDL_Keycode`). Ships and behaves identically on every platform.
-//
-// The opposite of settings.json: written BY THE USER and never rewritten by the app. `folders` maps a
-// load category to where the file browser STARTS for that kind of load. It does NOT redirect saves.
-//
+// config.json: the file, its starter template, and its `folders` section (the input sections are
+// ui/input_config.h). Written by the user, never rewritten by the app.
 //   { "folders": { "samples": "...", "soundfonts": "...", "instruments": "...",
 //                  "projects": "...", "themes": "..." } }
-//
-// Every key is optional; absent, empty, non-string, missing section or unparseable file → defaults. A
-// value naming no readable directory is ignored AT USE (`resolve_browse_dir`), costing one category's
-// convenience, never a browser that opens on nothing.
-// ⚠️ A value is ROOT-RELATIVE unless absolute (`resolve_folder_override`), on every platform:
-// "Samples" can be typed and carried between devices; Android's real root (`pt://a1b2c3d4e5f6/…`)
-// cannot.
+// Where a load browser starts per category; saves are not redirected. Everything optional, and a
+// folder that cannot be read is ignored at use. A value is root-relative unless absolute.
 
 #include "ui/filesystem.h"
 #include "ui/input_config.h"
@@ -27,7 +15,7 @@
 
 namespace pt::ui {
 
-/** The five LOAD-browse categories' overrides. `std::nullopt` = "use the built-in default". */
+// nullopt: the built-in default.
 struct FolderConfig {
     std::optional<std::string> samples;
     std::optional<std::string> soundfonts;
@@ -36,49 +24,27 @@ struct FolderConfig {
     std::optional<std::string> themes;
 };
 
-/**
- * Read config.json into `out`. False when there is no file (the common case) or it does not parse; `out`
- * is then untouched. A valid file fills only the keys it carries.
- */
+// False with no file or one that does not parse (`out` untouched); else fills what it carries.
 bool load_folder_config(FileSystem& fs, FolderConfig& out);
 
-/**
- * A `folders` value → the path it names. Absolute (`/mnt/sd/Packs`, `C:\Music`, `\\server\x`) or a URI
- * (`pt://<id>/Samples`) is taken verbatim; anything else joins onto `media_root` (empty ⇒ unchanged).
- * ⚠️ The STRING half only — `resolve_browse_dir` is the whole rule, and the browser must call that.
- */
+// A `folders` value → the path it names: absolute or a URI verbatim, else joined onto `media_root`.
+// ⚠️ The string half only; the browser calls `resolve_browse_dir`.
 std::string resolve_folder_override(const std::string& value, const std::string& media_root);
 
-/**
- * The directory a LOAD browse STARTS in for one category: the override if this filesystem can reach
- * it, the same value RE-ROOTED if authored under another install, else `def` (created on first use).
- * ⚠️⚠️ `is_directory` alone is not the test: on Android a plain path can be stat()ed but not listed. The
- * path's kind (URI vs plain) must match the root's first.
- * The re-rooting is `resolve_media_path`'s (`app_root_relative_tail`), so a project's samples and a
- * config's folders cannot disagree.
- */
+// Where a load browser starts: the override if reachable, re-rooted if written under another install,
+// else `def`. ⚠️ On Android a plain path can be stat()ed but not listed: the path's kind must match
+// the root's first.
 std::string resolve_browse_dir(FileSystem& fs, const std::optional<std::string>& value,
                                const std::string& def);
 
-/**
- * Write a STARTER config.json when none exists, so the feature can be found: every section
- * pre-filled with what the app does now plus a note on changing it — the schema as a no-op config.
- * The two binding maps are the shell's built-in ones, spelled as SDL names them so an edited line
- * round-trips; never a second copy.
- * ⚠️ NEVER CLOBBERS an existing file. True iff a new file was written.
- */
+// Write a starter config.json when none exists: every section filled with what the app does now, so
+// it changes nothing until edited. Never overwrites. True if written.
 bool seed_config_template(FileSystem& fs, const ButtonBindings& keyboardDefaults,
                           const ButtonBindings& gamepadDefaults);
 
-/**
- * Keep `config.example.json` beside config.json: the same text as the starter file, so a user whose
- * config.json predates a setting can still find it. The app's file, rewritten whenever the text
- * changes. True iff it was written.
- */
+// Keep `config.example.json` beside it, the starter text, rewritten when it changes. True if written.
 bool write_config_example(FileSystem& fs, const ButtonBindings& keyboardDefaults,
                           const ButtonBindings& gamepadDefaults);
-
-/** Where that example lives: config.json's folder. "" when there is no config.json path. */
 std::string config_example_path(FileSystem& fs);
 
 }  // namespace pt::ui

@@ -1,22 +1,10 @@
 #pragma once
 
-// ─── .ptt — a theme, as a file ───────────────────────────────────────────────────────────────────
-//
-// nlohmann parses (tolerantly); a hand-rolled emitter writes pretty-printed bytes that must match the
-// recorded THEMEPTT goldens exactly — byte-exactness is the only claim a golden can check,
-// and `.ptt` files move between devices with no conversion. (`JsonLayout::Pretty` is asked for
-// explicitly: that enum has no default.)
-//
-// The format, reproduced exactly:
-//   * Every field equal to its DECLARED default (`Theme{}` = CLASSIC) is OMITTED, so an unmodified
-//     CLASSIC named "CLASSIC" is `{}` and reads back as CLASSIC.
-//   * 4-space indent; `"key": value`; members separated by ",\n"; no trailing newline.
-//   * Keys in DECLARATION order, not alphabetical.
-//   * A colour is a plain decimal: 0xFF0A0A0A is `4278518794`, not `"#0A0A0A"`.
-//   * `visualizerType` is its SERIAL NAME, a string.
-// ⚠️ The serial name is NOT the settings screen's label ("OCTA.F", "SPECT", "SPCT.P" vs OCTA_FULL,
-// SPECTRUM, SPECTRUM_PEAKS): a label in a file reads back silently as SCOPE. The serial names live
-// here and nowhere else.
+// `.ptt`, a theme as a file. Parsed tolerantly; written byte-exact (a golden pins it):
+//   * a field equal to `Theme{}`'s (CLASSIC) is omitted, so an unmodified CLASSIC is `{}`;
+//   * 4-space indent, keys in declaration order, no trailing newline;
+//   * a colour is a plain decimal (0xFF0A0A0A is `4278518794`);
+//   * `visualizerType` is its serial name — not the settings label, which would read back as SCOPE.
 
 #include <cstdint>
 #include <string>
@@ -28,7 +16,6 @@
 
 namespace pt::ui {
 
-/** The enum's SERIAL name — what a `.ptt` holds. NOT the settings screen's label. */
 inline const char* visualizer_serial_name(VisualizerType v) {
     switch (v) {
         case VisualizerType::SCOPE:          return "SCOPE";
@@ -41,7 +28,7 @@ inline const char* visualizer_serial_name(VisualizerType v) {
     return "SCOPE";
 }
 
-/** The inverse. An unknown name reads as the field default. */
+// An unknown name reads as the default.
 inline VisualizerType visualizer_from_serial_name(const std::string& s) {
     if (s == "FLAT")           return VisualizerType::FLAT;
     if (s == "OCTA")           return VisualizerType::OCTA;
@@ -51,8 +38,6 @@ inline VisualizerType visualizer_from_serial_name(const std::string& s) {
     return VisualizerType::SCOPE;   // incl. "SCOPE", and any value another build might write
 }
 
-/** A theme → `.ptt` bytes. Each field is compared against `Theme{}` — the DECLARED default — and
- *  omitted when equal; the yardstick is never the theme being written. */
 inline std::string serialize_theme(const Theme& t) {
     const Theme d{};   // the field defaults — the omission yardstick
     songcore::JsonWriter w{songcore::JsonLayout::Pretty};
@@ -60,8 +45,7 @@ inline std::string serialize_theme(const Theme& t) {
 
     if (t.name != d.name) w.field_string("name", t.name);
 
-    // ⚠️ Spelled out, NOT driven off `theme_color_rows()`: this ORDER IS THE FILE FORMAT (pinned by the
-    // golden), while the row table is a UI list someone may regroup — and it lacks `meterBorder`.
+    // ⚠️ Spelled out, not from `theme_color_rows()`: this order is the file format.
     auto color = [&](const char* key, Argb v, Argb dv) {
         if (v != dv) w.field_int(key, static_cast<long long>(v));
     };
@@ -85,9 +69,7 @@ inline std::string serialize_theme(const Theme& t) {
     color("meterHigh",       t.meterHigh,       d.meterHigh);
     color("meterBorder",     t.meterBorder,     d.meterBorder);   // no editor row; still a field
 
-    // ⚠️ The six borrowed keys use a different yardstick — `derive_borrowed_colors` on THIS theme — so
-    // omission and `parse_theme`'s fill-in are a round trip, and a theme nobody dialled these on keeps
-    // its bytes.
+    // The six borrowed keys are omitted when they equal what `derive_borrowed_colors` gives this theme.
     Theme e = t;
     derive_borrowed_colors(e);
     color("eqBg",     t.eqBg,     e.eqBg);
@@ -95,7 +77,6 @@ inline std::string serialize_theme(const Theme& t) {
     color("eqBorder", t.eqBorder, e.eqBorder);
     color("eqTxt",    t.eqTxt,    e.eqTxt);
 
-    // ⚠️ LAST, after the EQ four: appending keeps every existing byte in place.
     color("textSelection", t.textSelection, e.textSelection);
     color("textPlayhead",  t.textPlayhead,  e.textPlayhead);
 
@@ -106,11 +87,7 @@ inline std::string serialize_theme(const Theme& t) {
     return std::move(w.out);
 }
 
-/**
- * `.ptt` bytes → a theme, tolerantly: unknown keys ignored (a newer build's theme loads); a missing,
- * wrong-typed or unknown-enum key keeps the field default (`out` starts as a fresh CLASSIC). False only
- * when the text is not a JSON object — reported as "LOAD FAILED".
- */
+// Tolerant: unknown keys are ignored, a bad key keeps the default. False only when it is not a JSON object.
 inline bool parse_theme(const std::string& text, Theme& out) {
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (!j.is_object()) return false;
@@ -123,7 +100,6 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     auto color = [&](const char* key, Argb& field) {
         const auto it = j.find(key);
         if (it == j.end() || !it->is_number_integer()) return;
-        // A colour is read as int64 and keeps the low 32 bits (a hand-edited out-of-range value).
         field = static_cast<Argb>(static_cast<uint64_t>(it->get<int64_t>()) & 0xFFFFFFFFu);
     };
 
@@ -146,8 +122,7 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     color("meterHigh",       t.meterHigh);
     color("meterBorder",     t.meterBorder);
 
-    // ⚠️ The six borrowed keys are DERIVED from the fields just read, then overwritten by whatever the
-    // file names — so an older theme keeps its EQ screen and selection colour exactly.
+    // Derived from what was read, then overwritten by whatever the file names.
     derive_borrowed_colors(t);
     color("eqBg",     t.eqBg);
     color("eqFill",   t.eqFill);
@@ -163,17 +138,11 @@ inline bool parse_theme(const std::string& text, Theme& out) {
     return true;
 }
 
-/** Write `theme` to `path` (see serialize_theme). */
 inline bool save_theme_file(FileSystem& fs, const std::string& path, const Theme& theme) {
     return fs.write_file(path, serialize_theme(theme));
 }
 
-/**
- * Read a theme from `path`.
- * ⚠️ The VISUALIZER is not taken from the file: the palette belongs to the theme, the visualizer to the
- * user (loading a friend's palette must not switch your scope). It is still WRITTEN, so a `.ptt`
- * carries a visualizer nothing reads back — harmless, and part of the shared format.
- */
+// The visualizer is not taken from the file: it is the user's, not the theme's.
 inline bool load_theme_file(FileSystem& fs, const std::string& path, Theme& out) {
     std::string text;
     if (!fs.read_file(path, text)) return false;

@@ -3,27 +3,22 @@
 #include <algorithm>
 #include <string>
 
-#include "songcore/scales.h"   // scale_mod12 — the SCALE screen's sounding-pitch mask
+#include "songcore/scales.h"
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
 #include "ui/modules/map_picker_overlay.h"
 #include "ui/modules/render_dialog.h"
-#include "ui/song_pointer.h"   // NAV = SONG — the cell the CHAIN/PHRASE headers read out
+#include "ui/song_pointer.h"
 
 namespace pt::ui {
 
 namespace {
 
-/** The status strip's budget, in columns — it is one line high and shares it with nothing. */
-constexpr int STATUS_MAX_CHARS = 34;
+constexpr int STATUS_MAX_CHARS = 34;   // one line
 
-/**
- * Is an overlay standing in the editor's place (so `currentScreen`'s module is NOT drawn)? Overlays do
- * not change `currentScreen`, so a module that ages its picture in its own draw stops ageing under one
- * — `has_falling_meters` must ask, or it holds the idle gate open forever.
- * ⚠️ Mirrors `draw_editor`'s ifs: a new overlay there goes here too.
- */
+// Is an overlay drawn in the editor's place? ⚠️ Mirrors `draw_editor`'s ifs: a new overlay there goes
+// here too, or `has_falling_meters` holds the redraw open for ever.
 bool editor_overlay_up(const AppState& s) {
     return s.eq.isOpen || s.themeEditor.isOpen;
 }
@@ -32,19 +27,15 @@ bool editor_overlay_up(const AppState& s) {
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
     draw_frame(c, s);
 
-    // The full help overlay, on every screen — here rather than with the other modals because the FILE
-    // BROWSER returns early from `draw_frame`, and it has no other help.
+    // These two are outside `draw_frame`, which the full-screen modules return from early.
     if (s.helpFull && s.project) helpOverlay_.draw(c, help_topic(s), s.theme);
-
-    // ⚠️⚠️ OUTSIDE `draw_frame`: the file browser and the sample editor return from its middle, and every
-    // load starts on those screens. One draw site after everything, reachable from every screen.
     draw_loading_strip(c, s.loading, s.theme);
 }
 
 void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     c.fill_rect(0, 0, DESIGN_W, DESIGN_H, s.theme.background);
 
-    if (!s.project) return;  // no document: the background alone
+    if (!s.project) return;
 
     if (full_screen_module(s)) {
         draw_full_screen(c, s);
@@ -54,11 +45,9 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     draw_scope_strip(c, s);
     draw_editor(c, s);
 
-    // Hidden on SETTINGS: no playhead or notes to monitor there.
     if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
 
-    // Over the scope strip so every screen can report: status top-LEFT, selection + clipboard
-    // top-RIGHT. Both stand down while HELP is up — help IS the strip.
+    // Over the scope strip, unless help has it.
     if (!s.helpOpen) {
         draw_status_line(c, s);
         draw_selection_clipboard(c, s);
@@ -67,20 +56,15 @@ void TrackerLayout::draw_frame(Canvas& c, const AppState& s) {
     draw_overlays(c, s);
 }
 
-// ─── The FILE BROWSER and SAMPLE EDITOR are FULL-SCREEN ──────────────────────────────────────────
-//
-// No furniture (scope strip, right bar, nav map): the browser needs the width for nineteen rows of
-// filenames, a waveform every pixel of it. The QWERTY keyboard still draws on top (rename; A on the
-// NAME row).
-// The sample editor's HELP goes in the waveform's place: same left edge and width as the strip, 85 px
-// taller. Never over its "ARE YOU SURE?" — its layer takes SELECT while that is up.
+// ─── The file browser and sample editor: full screen, no furniture ───────────────────────────────
+// The sample editor's help goes in the waveform's place.
 void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
     if (s.currentScreen == ScreenType::FILE_BROWSER) {
         fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
     } else {
         sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
-        // The TSTRETCH box dims the frame, so the help panel is drawn after it or not seen at all.
+        // The TSTRETCH box dims the frame, so help is drawn after it.
         if (s.project) draw_stretch_editor(c, s.sampleEditor, s.project->tempo, t);
         if (s.helpOpen)
             helpPanel_.draw(c, SIDE_SPACER, SampleEditorModule::WAVEFORM_Y, help_topic(s), t,
@@ -89,10 +73,7 @@ void TrackerLayout::draw_full_screen(Canvas& c, const AppState& s) {
     if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
 }
 
-// ─── The oscilloscope strip — or the HELP PANEL standing in for it ───────────────────────────────
-//
-// Help takes the whole strip (three 21 px lines = 63 of its 70), so the scope, status line and
-// selection readout are not drawn under it.
+// ─── The oscilloscope strip, or the help panel in its place ──────────────────────────────────────
 void TrackerLayout::draw_scope_strip(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
     if (s.helpOpen) {
@@ -108,8 +89,7 @@ void TrackerLayout::draw_scope_strip(Canvas& c, const AppState& s) {
     const bool isOcta     = (t.visualizerType == VisualizerType::OCTA);
     if (isOcta || isOctaFull) os.trackWaveforms = s.trackWaveforms;
 
-    // OCTA_FULL forces all 8 lanes on, so the strip never reflows mid-song. OCTA shows the tracks that
-    // have played — plus the preview lane, only while stopped.
+    // OCTA_FULL shows all eight lanes; OCTA the tracks that have played, plus the preview lane when stopped.
     if (isOctaFull) {
         os.activeTrackMask = 0xFF;
     } else if (isOcta) {
@@ -142,11 +122,8 @@ PhraseEditorState phrase_state(const AppState& s) {
     ps.selectionMode  = s.selection_mode();
     ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
     ps.theme          = s.theme;
-    // Whether an AUS/AUF cell is live depends on every chain walk this phrase appears in; the editor
-    // finds them from the phrase's id.
-    ps.project        = &p;
-    // Under NAV = SONG the phrase is seen THROUGH a chain row and a song cell, which decide where the
-    // next B+D-pad press goes. −1 under POOL (ui/song_pointer.h).
+    ps.project        = &p;   // whether an AUS/AUF cell is live depends on every walk
+    // Under NAV = SONG, the chain row and song cell the phrase is seen through; −1 under POOL.
     if (s.settings.navSongRelative) {
         ps.viaChain    = s.currentChain;
         ps.viaChainRow = pointer_chain_row(s);
@@ -164,7 +141,7 @@ ChainEditorState chain_state(const AppState& s) {
     cs.selectionMode  = s.selection_mode();
     cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
     cs.theme          = s.theme;
-    if (s.settings.navSongRelative) {   // see phrase_state
+    if (s.settings.navSongRelative) {
         cs.songRow   = pointer_song_row(s);
         cs.songTrack = pointer_track(s);
     }
@@ -174,7 +151,7 @@ ChainEditorState chain_state(const AppState& s) {
 SongEditorState song_state(const AppState& s) {
     SongEditorState ss{*s.project};
     ss.cursorRow      = s.cursorRow;
-    ss.cursorTrack    = s.cursorColumn;  // on SONG the column IS the track (1..8)
+    ss.cursorTrack    = s.cursorColumn;
     ss.scrollPosition = s.songScrollPosition;
     std::copy(std::begin(s.playheads), std::end(s.playheads), std::begin(ss.playheads));
     ss.liveMode       = s.liveMode;
@@ -191,8 +168,7 @@ TableState table_state(const AppState& s) {
     ts.cursorRow    = s.tableCursorRow;
     ts.cursorColumn = s.tableCursorColumn;
     for (int l = 0; l < TABLE_LANES; ++l) ts.playbackRows[l] = s.tablePlaybackRows[l];
-    // The tic rate is the INSTRUMENT's, not the table's — one table run by two instruments runs at two
-    // speeds; this shows the one you are looking through.
+    // The instrument's tic rate: one table can run at two speeds under two instruments.
     ts.ticRate        = current_instrument(s).tableTicRate;
     ts.selectionMode  = s.selection_mode();
     ts.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
@@ -216,8 +192,7 @@ ScaleState scale_state(const AppState& s) {
     cs.key          = s.project->scaleKey;
     cs.cursorRow    = s.scaleCursorRow;
     cs.cursorColumn = s.scaleCursorColumn;
-    // The pitch classes coming out of the speaker, from the voice readback the note monitor uses —
-    // ⚠️ NOT the sequencer, which runs ahead. All eight tracks fold into one mask.
+    // The pitch classes sounding now, from the voices (the sequencer runs ahead), all tracks in one mask.
     for (int i = 0; i < 8; ++i) {
         const songcore::Note n = s.trackNotes[i];
         if (n == songcore::Note::EMPTY()) continue;
@@ -232,8 +207,6 @@ InstrumentEditorState instrument_state(const AppState& s) {
     InstrumentEditorState is{current_instrument(s)};
     is.cursorRow     = s.instrumentCursorRow;
     is.cursorColumn  = s.instrumentCursorColumn;
-    // The SF2's preset list as the engine last answered (engine_feed.h); zeroes and "---" with no
-    // engine, which a headless screenshot draws.
     is.sfPresetName  = s.sfPresetName;
     is.sfPresetCount = s.sfPresetCount;
     is.sfPresetIndex = s.sfPresetIndex;
@@ -264,7 +237,6 @@ MixerState mixer_state(const AppState& s) {
     MixerState xs{*s.project};
     xs.cursorColumn   = s.mixerCursorColumn;
     xs.mixerMasterRow = s.mixerMasterRow;
-    // The engine's meters as last read (ui/engine_feed.h); zeroes with no engine.
     xs.trackPeaks     = s.trackPeaks;
     xs.masterPeaks    = s.masterPeaks;
     xs.reverbPeaks    = &s.sendPeaks[0];
@@ -298,8 +270,6 @@ SettingsState settings_state(const AppState& s) {
     SettingsState ss{s.settings};
     ss.cursorRow    = s.settingsCursorRow;
     ss.cursorColumn = s.settingsCursorColumn;
-    // The DEVICE rows' text — only the platform can name what an index means. Empty on the shell,
-    // which does not draw them.
     ss.layoutText   = s.layoutText;
     ss.skinText     = s.skinText;
     ss.overlayText  = s.overlayText;
@@ -312,7 +282,6 @@ SettingsState settings_state(const AppState& s) {
 }
 
 MidiState midi_state(const AppState& s) {
-    // The port lists as the dispatcher enumerated them — text the module paints but does not own.
     MidiState ms{*s.project, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
     ms.lastCcChannel = s.midiInCcChannel;
     ms.cursorRow     = s.midiCursorRow;
@@ -358,12 +327,8 @@ ThemeState theme_state(const AppState& s) {
 
 }  // namespace
 
-// ─── The editor, clipped to the left of the right bar ────────────────────────────────────────────
-//
-// The EQ and THEME editors replace the screen's module and leave the furniture alone: an EQ is dialled
-// while a note rings and the note monitor shows that it still is; VIZ BG / LINE / WAVE are the scope
-// strip, dialled against a moving waveform. (SETTINGS hides the right bar, so the meter colours cannot
-// be previewed in situ.)
+// ─── The editor, left of the right bar ───────────────────────────────────────────────────────────
+// The EQ and theme editors replace the module but leave the furniture: the scope keeps moving under them.
 void TrackerLayout::draw_editor(Canvas& c, const AppState& s) {
     Canvas::ClipScope clip(c, 0, 0, EDITOR_CLIP_RIGHT, DESIGN_H);
     const int         x = SIDE_SPACER;
@@ -398,14 +363,14 @@ void TrackerLayout::draw_editor(Canvas& c, const AppState& s) {
     }
 }
 
-// LAST, over everything including the right bar — a modal's backdrop dims the whole frame.
+// Last, over everything — a modal's backdrop dims the whole frame.
 void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
     const Theme& t = s.theme;
     draw_fx_helper(c, s.fxHelper, t);
     draw_map_picker(c, s.mapPicker, t);
     if (send_editor_drawn(s)) {
         draw_send_editor(c, s.sendEditor, *s.project, t);
-        // Its cells have help, and the compact panel sits in the strip the backdrop just dimmed.
+        // Its cells have help; the panel goes over the strip the backdrop just dimmed.
         if (s.helpOpen) helpPanel_.draw(c, SIDE_SPACER, SCREEN_SPACER, help_topic(s), t);
     }
     draw_render_dialog(c, s.renderDialog, *s.project, s.isRendering, s.renderProgress, t);
@@ -414,58 +379,43 @@ void TrackerLayout::draw_overlays(Canvas& c, const AppState& s) {
 }
 
 bool TrackerLayout::has_falling_meters(const AppState& s) const {
-    if (!s.project) return false;   // `draw` stops at the background: nothing of ours on screen
+    if (!s.project) return false;
 
-    // The EQ editor's spectrum panel: nothing ages in it (the feed re-polls every frame and the values
-    // fall to zero with the audio) — what hangs is the last frame DRAWN, so the module is asked what
-    // it last drew. Gated on the panel being up, and asked first: the EQ replaces the editor anywhere.
+    // The EQ editor's panel, asked what it last drew.
     if (s.eq.isOpen && !eq_.spectrum_at_rest()) return true;
 
-    // ⚠️ MIXER: gated on the mixer being DRAWN, not merely selected — under an overlay a marker caught
-    // mid-fall never ages and would pin the loop at 60 Hz.
+    // ⚠️ Only when the mixer is drawn: under an overlay a falling marker never ages and the loop pins
+    // at 60 Hz.
     if (s.currentScreen == ScreenType::MIXER && !editor_overlay_up(s) && !mixer_.peaks_at_rest())
         return true;
 
-    // The SPECTRUM bars, on the same terms: they fall inside the draw. Off the strip (full-screen
-    // modules, other visualizer modes, ⚠️ help up) nothing would ever bring this back to false.
+    // The SPECTRUM bars, likewise only while drawn.
     const VisualizerType vt = s.theme.visualizerType;
     if (vt != VisualizerType::SPECTRUM && vt != VisualizerType::SPECTRUM_PEAKS) return false;
     return !full_screen_module(s) && !s.helpOpen && !oscilloscope_.bars_at_rest();
 }
 
-// ─── The global status line ──────────────────────────────────────────────────────────────────────
-//
-// "SAVED" · "EXPORTED!" · "SEQ CLEANED" · "NO FREE PHRASES" — over the scope strip's top-left, so an
-// action on ANY screen can report (SAVE, EXPORT and COMPACT have no other feedback). The full-screen
-// editors keep their own status lines and return before this.
+// ─── The status line, top-left of the scope strip ────────────────────────────────────────────────
 void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
     if (s.statusMessage.empty()) return;
 
-    // A longer message is cut with a marker, not wrapped: one line high.
     const std::string text = Canvas::clip_text(s.statusMessage, STATUS_MAX_CHARS);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
     c.draw_text(text, SIDE_SPACER + 10, SCREEN_SPACER + 10, color, CHAR_SPACING, FONT_SCALE);
 }
 
-// ─── The selection scope and the clipboard, top-right of the scope strip ───────────────────────────
-//
-// Two stacked lines: the live selection scope ("SEL:CELL" / "SEL:ROW" / "SEL:ALL", in vizWave) and
-// below it the clipboard ("PHR:2x3", in textTitle), 150 px in from the strip's right edge.
-// The clipboard is reached through AppState's pointer, null with no dispatcher (headless screenshots): then only the
-// selection half appears.
+// ─── The selection scope ("SEL:ROW") over the clipboard ("PHR:2x3"), top-right of the strip ──────
 void TrackerLayout::draw_selection_clipboard(Canvas& c, const AppState& s) const {
     const std::string sel  = s.selection.info();
     const std::string clip = s.clipboard ? s.clipboard->info() : std::string();
     if (sel.empty() && clip.empty()) return;
 
-    // 150 px in from the scope strip's right edge.
     const int x = SIDE_SPACER + OscilloscopeModule::WIDTH - 150;
     const int y = SCREEN_SPACER + 10;
 
     if (!sel.empty())
         c.draw_text(sel, x, y, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
     if (!clip.empty())
-        // Below the selection line when both are up, else in its place.
         c.draw_text(clip, x, sel.empty() ? y : y + 21, s.theme.textTitle, CHAR_SPACING, FONT_SCALE);
 }
 
@@ -473,8 +423,7 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
     const Theme&             t = s.theme;
     const songcore::Project& p = *s.project;
 
-    // The BPM row lines up with every editor's COLUMN HEADER row (title 21 px + 14 px spacer), derived
-    // so it cannot drift.
+    // On the editors' column header row.
     const int bpmRowY  = EDITOR_Y + ROW_HEIGHT + 14;  // 117
     const int bpmTextY = bpmRowY + TEXT_PADDING;      // 120
 
@@ -482,8 +431,7 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
     c.draw_text(std::to_string(p.tempo), RIGHT_BAR_X + 2 + 34, bpmTextY, t.textValue, CHAR_SPACING,
                 FONT_SCALE);
 
-    // The note monitor: a blank row below the BPM, then the 8 tracks — "1  C-4", the number dim, the
-    // note bright while it sounds.
+    // The note monitor: a blank row, then "1  C-4" per track.
     const int trackRowsStartY = bpmRowY + ROW_HEIGHT + ROW_HEIGHT;  // 159
     for (int i = 0; i < 8; ++i) {
         const int            textY = trackRowsStartY + (i * ROW_HEIGHT) + TEXT_PADDING;
@@ -506,7 +454,6 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
 
 void TrackerLayout::draw_placeholder(Canvas& c, int x, int y, ScreenType screen,
                                      const Theme& t) const {
-    // 620 wide, wider than the clip, so "COMING SOON" sits slightly left of the visible centre.
     c.fill_rect(x, y, OscilloscopeModule::WIDTH, 392, t.background);
 
     c.draw_text(screen_label(screen), x + 20, y + TEXT_PADDING, t.textTitle, CHAR_SPACING,

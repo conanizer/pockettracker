@@ -6,8 +6,7 @@ namespace pt::ui {
 
 namespace {
 
-// src-over, 8-bit, integer. The dialog/overlay backdrop (0xCC000000) is the one translucent fill; a
-// canvas ignoring alpha would draw it opaque and hide the screen behind.
+// Src-over, 8-bit integer.
 inline uint32_t blend(uint32_t dst, uint32_t src) {
     const uint32_t sa = (src >> 24) & 0xFF;
     if (sa == 0xFF) return src;
@@ -15,19 +14,14 @@ inline uint32_t blend(uint32_t dst, uint32_t src) {
     const uint32_t ia = 255 - sa;
     const uint32_t sr = (src >> 16) & 0xFF, sg = (src >> 8) & 0xFF, sb = src & 0xFF;
     const uint32_t dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF, db = dst & 0xFF;
-    // +127 rounds to nearest: a truncating blend darkens the full-screen backdrop visibly if it is
-    // ever composited twice.
+    // Rounded, not truncated.
     const uint32_t r = (sr * sa + dr * ia + 127) / 255;
     const uint32_t g = (sg * sa + dg * ia + 127) / 255;
     const uint32_t b = (sb * sa + db * ia + 127) / 255;
     return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
-/**
- * Decode one UTF-8 code point at `i`, advancing past it. Malformed input consumes one byte and yields
- * U+FFFD (drawn blank) — never loop or run off the end. Needed for MODS' "→M2 AMT": byte-wise, the
- * arrow would draw as three blanks and shift the label.
- */
+// One UTF-8 code point at `i`, advancing past it. A malformed byte is consumed as U+FFFD (blank).
 inline uint32_t next_codepoint(const std::string& s, size_t& i) {
     const auto b0 = static_cast<unsigned char>(s[i]);
     const size_t n = s.size();
@@ -74,16 +68,9 @@ void Canvas::reset_clip() {
     clipH_ = DESIGN_H;
 }
 
-void Canvas::blend_px(int x, int y, Argb color) {
-    if (x < clipX_ || y < clipY_ || x >= clipX_ + clipW_ || y >= clipY_ + clipH_) return;
-    uint32_t& d = px_[static_cast<size_t>(y) * DESIGN_W + x];
-    d           = blend(d, color);
-}
-
 void Canvas::fill_rect(int x, int y, int w, int h, Argb color) {
     if (w <= 0 || h <= 0) return;
 
-    // Clamp to the clip once, then run the rows — no per-pixel clip test.
     const int x0 = std::max(x, clipX_);
     const int y0 = std::max(y, clipY_);
     const int x1 = std::min(x + w, clipX_ + clipW_);
@@ -110,11 +97,8 @@ void Canvas::stroke_rect(int x, int y, int w, int h, Argb color, int thickness) 
     fill_rect(x + w - t, y + t, t, h - 2 * t, color);  // right
 }
 
-// One source pixel becomes a font_scale × font_scale block (nearest-neighbour, hard-edged).
-// ⚠️ Emitted as RECTANGLES, not one per lit pixel: text is most of a frame's cost, and it goes into
-// `fill_rect`'s clip clamp, so identical adjacent rows merge into bands and each band's runs into one
-// rect. The rects tile the same union with no overlap, so a translucent colour blends each pixel once,
-// exactly as before — the screenshot goldens hold this, since every pixel comes through here.
+// Each source pixel a font_scale square. Drawn as runs and bands rather than per pixel (text is most
+// of a frame's cost); the rects never overlap, so a translucent colour blends each pixel once.
 void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale) {
     if (font_scale <= 0) return;
     for (int row = 0; row < 5;) {
@@ -135,10 +119,6 @@ void Canvas::draw_glyph(const Glyph& g, int x, int y, Argb color, int font_scale
         }
         row = last;
     }
-}
-
-void Canvas::draw_char(char c, int x, int y, Argb color, int font_scale) {
-    draw_glyph(glyph_for(c), x, y, color, font_scale);
 }
 
 void Canvas::draw_text(const std::string& text, int x, int y, Argb color, int spacing,
@@ -173,8 +153,6 @@ std::string Canvas::clip_text(const std::string& text, int max_glyphs) {
     while (i < text.size()) {
         if (n == max_glyphs - 1) cut = i;
         next_codepoint(text, i);
-        // Only a glyph BEYOND the budget means something was cut; at exactly `max_glyphs` the string
-        // fits and comes back whole.
         if (++n > max_glyphs) return text.substr(0, cut) + "\xE2\x80\xA6";
     }
     return text;
@@ -185,8 +163,7 @@ std::string Canvas::clip_text_head(const std::string& text, int max_glyphs) {
     const int total = glyph_count(text);
     if (total <= max_glyphs) return text;
 
-    // Walk from the front: only that lands on a code-point boundary.
-    size_t i = 0;
+    size_t i = 0;   // from the front: only that lands on a code-point boundary
     for (int skip = total - (max_glyphs - 1); skip > 0; --skip) next_codepoint(text, i);
     return "\xE2\x80\xA6" + text.substr(i);
 }

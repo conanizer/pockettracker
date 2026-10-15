@@ -10,8 +10,7 @@
 #include <system_error>
 
 #if defined(_WIN32)
-// The ONLY platform header in pt-ui: "where is Documents" has no portable answer. NOMINMAX because
-// <windows.h> defines `min`/`max` as macros.
+// The only platform header in pt-ui: "where is Documents" has no portable answer.
 #define NOMINMAX
 #include <windows.h>
 #include <shlobj.h>
@@ -23,11 +22,7 @@ namespace pt::ui {
 
 namespace {
 
-/**
- * `file_time_type` → milliseconds since the Unix epoch. C++17 cannot name that clock's epoch, so the
- * offset between the two clocks is measured now — exact to nanoseconds, plenty for a sort key and a
- * `dd-MM-yy` label.
- */
+// `file_time_type` → Unix ms. C++17 cannot name that clock's epoch, so the offset is measured now.
 int64_t to_unix_millis(fs::file_time_type t) {
     using namespace std::chrono;
     const auto shifted = time_point_cast<system_clock::duration>(
@@ -35,7 +30,7 @@ int64_t to_unix_millis(fs::file_time_type t) {
     return duration_cast<milliseconds>(shifted.time_since_epoch()).count();
 }
 
-/** Forward slashes always — the browser DRAWS the path. */
+// Forward slashes always — the browser draws the path.
 std::string generic(const fs::path& p) { return p.generic_string(); }
 
 const char* env_or_null(const char* key) {
@@ -45,27 +40,18 @@ const char* env_or_null(const char* key) {
 
 #if defined(_WIN32)
 
-/**
- * UTF-16 → the Windows NARROW encoding.
- * ⚠️ `CP_ACP`, NOT `CP_UTF8`: everything downstream (`fs::path(std::string)`, `std::ifstream`) decodes
- * narrow strings with the ACTIVE code page on MSVC, and UTF-8 bytes on a legacy-ACP machine make "José"'s
- * paths silently not exist. An `ActiveCodePage=UTF-8` app manifest makes the ACP UTF-8 and this line
- * follows — that manifest is the real fix for names the legacy ACP cannot represent.
- */
+// UTF-16 → the narrow encoding. ⚠️ `CP_ACP`, not `CP_UTF8`: MSVC decodes narrow paths with the active
+// code page, and UTF-8 bytes there make non-ASCII paths silently not exist.
 std::string narrow(const wchar_t* wide) {
     if (!wide || !*wide) return {};
     const int n = ::WideCharToMultiByte(CP_ACP, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-    if (n <= 1) return {};                       // 1 == the terminator alone: nothing converted
+    if (n <= 1) return {};                       // the terminator alone
     std::string out(static_cast<size_t>(n - 1), '\0');
     ::WideCharToMultiByte(CP_ACP, 0, wide, -1, out.data(), n, nullptr, nullptr);
     return out;
 }
 
-/**
- * `Documents` as EXPLORER resolves it; empty if Windows will not say.
- * ⚠️ Not `%USERPROFILE%\Documents`: with OneDrive folder backup (the consumer default) Explorer's
- * Documents is `…\OneDrive\Documents`, and the other is an empty leftover the user never opens.
- */
+// Documents as Explorer resolves it — under OneDrive backup that is not `%USERPROFILE%\Documents`.
 std::string documents_directory() {
     PWSTR         wide = nullptr;
     const HRESULT hr   = ::SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_CREATE, nullptr, &wide);
@@ -116,20 +102,15 @@ std::string to_lower(std::string s) {
 }
 
 std::string default_app_root() {
-    // An explicit override wins everywhere — a PortMaster launch script points it at the SD card.
     if (const char* home = env_or_null("POCKETTRACKER_HOME")) return home;
 
 #if defined(_WIN32)
-    // ⚠️ BEFORE the XDG/HOME chain: MSYS2, Git Bash and Cygwin export HOME on Windows, and the same
-    // binary must find one root however it was started.
-    // Documents, not %APPDATA%: projects, samples and renders are the USER's documents, findable from
-    // Explorer.
+    // Before any HOME lookup: MSYS2 and Git Bash export HOME on Windows too.
     if (const std::string docs = documents_directory(); !docs.empty())
         return generic(fs::path(docs) / "PocketTracker");
     if (const char* profile = env_or_null("USERPROFILE"))
         return generic(fs::path(profile) / "Documents" / "PocketTracker");
 #elif defined(__APPLE__)
-    // The same argument as Windows: ~/Documents.
     if (const char* home = env_or_null("HOME")) return std::string(home) + "/Documents/PocketTracker";
 #else
     if (const char* xdg = env_or_null("XDG_DATA_HOME")) return std::string(xdg) + "/PocketTracker";
@@ -137,9 +118,7 @@ std::string default_app_root() {
         return std::string(home) + "/.local/share/PocketTracker";
 #endif
 
-    // Every branch missed (no HOME, no Documents). Relative to the CWD is a poor root — it scatters an
-    // app tree wherever the binary ran — but a WRITABLE one; the alternative cannot save at all.
-    return "PocketTracker";
+    return "PocketTracker";   // a poor root, but a writable one
 }
 
 // ─── StdFileSystem ───────────────────────────────────────────────────────────────────────────────
@@ -147,8 +126,8 @@ std::string default_app_root() {
 std::string StdFileSystem::ensure_dir(const char* sub) {
     const fs::path dir = fs::path(root_) / sub;
     std::error_code ec;
-    fs::create_directories(dir, ec);   // already-exists is not an error; a failure leaves it absent
-    return generic(dir);               // …and the browser then shows an empty listing, which is true
+    fs::create_directories(dir, ec);   // a failure shows as an empty listing
+    return generic(dir);
 }
 
 bool StdFileSystem::read_file(const std::string& path, std::string& out) {
@@ -162,8 +141,7 @@ std::vector<FileInfo> StdFileSystem::list_files(const std::string& directory) {
     std::vector<FileInfo> out;
     std::error_code ec;
 
-    // The non-throwing overloads throughout: an unreadable directory or an entry vanishing mid-walk (an
-    // SD card pulled while browsing) yields a short listing, never an exception across a UI frame.
+    // Non-throwing throughout: a card pulled mid-walk gives a short listing, never an exception.
     fs::directory_iterator it(directory, ec);
     if (ec) return out;
 
@@ -200,7 +178,7 @@ bool StdFileSystem::is_directory(const std::string& path) {
 std::string StdFileSystem::parent_path(const std::string& path) {
     const fs::path p      = fs::path(path);
     const fs::path parent = p.parent_path();
-    // A filesystem root is its own parent — report "no parent" rather than loop ".." onto itself.
+    // A filesystem root is its own parent.
     if (parent.empty() || parent == p) return "";
     return generic(parent);
 }
@@ -211,20 +189,17 @@ bool StdFileSystem::write_file(const std::string& path, const std::string& conte
 
 bool StdFileSystem::write_bytes(const std::string& path, const void* data, size_t len) {
     std::error_code ec;
-    fs::create_directories(fs::path(path).parent_path(), ec);   // a save into a folder that is not there
+    fs::create_directories(fs::path(path).parent_path(), ec);
 
-    // Write `<path>.tmp` and rename over the target: a handheld switched off mid-save must not lose the
-    // whole project to a half-written one.
+    // Through `<path>.tmp` and a rename, so power loss mid-save leaves the old file whole.
     const std::string tmp = path + ".tmp";
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f) return false;
         if (len > 0) f.write(static_cast<const char*>(data), static_cast<std::streamsize>(len));
 
-        // ⚠️ CLOSED HERE AND CHECKED — never left to the destructor. A small payload first reaches the disk
-        // in this flush, so a FULL DISK (ENOSPC) surfaces here; `~ofstream` would swallow it, and the
-        // rename would put an empty file where the project was while returning true. Dropping the temp
-        // also frees space for the next attempt.
+        // ⚠️ Closed and checked here: a full disk shows up in this flush, and the destructor would
+        // swallow it — then the rename would put an empty file where the project was.
         f.close();
         if (!f) {
             std::error_code ignored;
@@ -247,7 +222,6 @@ bool StdFileSystem::write_bytes(const std::string& path, const void* data, size_
 
 bool StdFileSystem::delete_path(const std::string& path) {
     std::error_code ec;
-    // remove_all covers a file and a whole tree.
     return fs::remove_all(path, ec) > 0 && !ec;
 }
 
@@ -269,7 +243,7 @@ bool StdFileSystem::rename_file(const std::string& path, const std::string& new_
     }
 
     const fs::path target = fs::path(path).parent_path() / final_name;
-    if (fs::exists(target, ec)) return false;   // never clobber — the browser reports the failure
+    if (fs::exists(target, ec)) return false;   // never overwrite
 
     ec.clear();
     fs::rename(path, target, ec);
@@ -297,7 +271,7 @@ bool StdFileSystem::move_file(const std::string& from, const std::string& to) {
     fs::rename(from, to, ec);
     if (!ec) return true;
 
-    // Cross-filesystem (SD card → internal): copy the whole thing, then drop the source.
+    // Across filesystems: copy, then drop the source.
     ec.clear();
     fs::copy(from, to, fs::copy_options::recursive, ec);
     if (ec) return false;
@@ -312,8 +286,7 @@ bool StdFileSystem::copy_file(const std::string& from, const std::string& to) {
     fs::create_directories(fs::path(to).parent_path(), ec);
 
     ec.clear();
-    // `recursive` with no overwrite: a folder copies as a folder, and an existing target FAILS rather
-    // than merging. The caller has de-duplicated the name (`_2`, `_3`, …).
+    // An existing target fails rather than merges.
     fs::copy(from, to, fs::copy_options::recursive, ec);
     return !ec;
 }

@@ -1,15 +1,9 @@
 #pragma once
 
-// ─── Filling rows of a phrase ────────────────────────────────────────────────────────────────────
-//
-// L + a direction on PHRASE. The range's top row is the source: repeat it every N rows, spread N copies
-// of it evenly, ramp a column between the range's two ends, scatter it over random rows, or roll fresh
-// values into the cells that hold one. Pure functions over a Phrase — the dispatcher keeps the phrase from before the first
-// press, which is the undo.
-//
-// A fill adds and never erases: a blank source cell contributes nothing, and rows a fill does not land
-// on are left as they were.
-// Columns as on screen: 1 NOTE · 2 VOL · 3 INST · 4/5, 6/7, 8/9 the three FX command/value pairs.
+// L + a direction on PHRASE: from the range's top row — repeat it every N rows, spread N copies evenly,
+// ramp a column between the two ends, scatter it, or roll fresh values. The dispatcher keeps the
+// phrase from before the first press as the undo.
+// A fill adds and never erases. Columns as on screen: 1 NOTE · 2 VOL · 3 INST · 4–9 the FX pairs.
 
 #include <algorithm>
 #include <cmath>
@@ -28,7 +22,7 @@ struct FillRange {
     int top = 0, bottom = 15;
     int firstColumn = 1, lastColumn = 1;
     // No selection: the cursor's cell travels as its whole unit (note + volume + instrument, or
-    // command + value), and nothing ramps — the range ends where the phrase does, not where the user said.
+    // command + value), and nothing ramps.
     bool wholeUnit = false;
 
     bool has(int column) const { return column >= firstColumn && column <= lastColumn; }
@@ -49,11 +43,8 @@ inline constexpr bool fill_is_fx_type(int column)  { return column >= 4 && colum
 inline constexpr bool fill_is_fx_value(int column) { return column >= 5 && column % 2 == 1; }
 inline constexpr int  fill_fx_slot(int column)     { return (column - 2) / 2; }
 
-/**
- * Does this cell hold something a fill can use?
- * ⚠️ Volume and instrument are numbers with no empty state, so they count only beside a note — or an
- * empty top row would stamp its 7F / 00 over every real note in the range.
- */
+// Does this cell hold something a fill can use? ⚠️ Volume and instrument count only beside a note, or
+// an empty top row would stamp 7F / 00 over every note in the range.
 inline bool fill_cell_holds(const songcore::PhraseStep& s, int column) {
     if (column == 1) return s.note != songcore::Note::EMPTY();
     if (column == 2 || column == 3) return songcore::step_has_note(s);
@@ -93,12 +84,8 @@ inline bool fill_source_holds(const songcore::PhraseStep& src, const FillRange& 
     return false;
 }
 
-/**
- * Lay the source row's cells onto `dst`, inside the range's columns.
- * A cell landing where its companions were blank brings them: a note onto a row with no note brings
- * volume and instrument, a command onto an empty slot brings its value, a value onto an empty slot its
- * command. ⚠️ A value never lands on a DIFFERENT command — it would mean something else there.
- */
+// Lay the source row's cells onto `dst`, within the range's columns. A cell landing beside blanks
+// brings its companions; ⚠️ a value never lands on a different command.
 inline void fill_place(songcore::PhraseStep& dst, const songcore::PhraseStep& src, const FillRange& r) {
     const bool srcNote = songcore::step_has_note(src);
     if (r.has(1) && src.note != songcore::Note::EMPTY()) {
@@ -137,11 +124,8 @@ inline songcore::Phrase fill_every(const songcore::Phrase& base, const FillRange
     return out;
 }
 
-/**
- * `count` hits over `rows` rows, as evenly as they go: 'x' on a hit, '.' off it. Row 0 is always a
- * hit and no two gaps differ by more than a row. A count that shares a factor with the rows is the
- * smaller pattern repeated — 6 over 16 is 3 over 8, twice.
- */
+// `count` hits over `rows` rows as evenly as they go ('x' hit, '.' not); row 0 is a hit and no two gaps
+// differ by more than a row.
 inline std::string fill_even_pattern(int count, int rows) {
     if (count >= rows) return std::string(static_cast<size_t>(std::max(rows, 0)), 'x');
     const int reps = std::gcd(count, rows);
@@ -247,10 +231,7 @@ inline songcore::Phrase fill_at_stop(const songcore::Phrase& base, const FillRan
     return stop == FILL_RAMP ? fill_ramp(base, r, p) : fill_every(base, r, stop);
 }
 
-/**
- * The line L+LEFT walks for this range: so many notes, spread evenly. A count is left off when it
- * does not leave a row free, or when it lands on the very rows a spacing of the other line does.
- */
+// The line L+LEFT walks: counts spread evenly, minus those filling every row or matching a spacing.
 inline std::vector<int> fill_spread_stops(const songcore::Phrase& base, const FillRange& r) {
     std::vector<int> stops{FILL_AS_IT_WAS};
     if (!fill_source_holds(base.steps[static_cast<size_t>(r.top)], r)) return stops;
@@ -288,12 +269,9 @@ inline songcore::Phrase fill_scatter(const songcore::Phrase& base, const FillRan
     return out;
 }
 
-/**
- * A fresh random value in every cell of the range that already holds one — a command is never rolled,
- * only its value. Each column draws between the lowest and the highest value it holds in the range;
- * where they are all the same, a note gets the octave above it, a volume or an FX value its whole
- * range, and an instrument is left alone. A note lands in its row's scale.
- */
+// A fresh value in every cell that holds one (a command's value, never the command), between the
+// column's lowest and highest in the range. All alike: a note gets the octave above, a volume or FX
+// value its whole range, an instrument stays. A note lands in its row's scale.
 inline songcore::Phrase fill_randomize(const songcore::Phrase& placed, FillRange r,
                                        const songcore::Project& p, songcore::Rng& rng) {
     songcore::Phrase out = placed;

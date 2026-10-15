@@ -68,7 +68,7 @@ void InputDispatcher::scale_row_action() {
         case ScaleNameAction::SAVE: {
             // Seeded with the sanitized DISPLAY name (a slot that stores none still shows one), so
             // what you see is what the file will be called.
-            const std::string seed = sanitize_scale_filename(songcore::scale_display_name(scale));
+            const std::string seed = safe_file_name(songcore::scale_display_name(scale));
             open_qwerty(QwertyContext::SCALE_SAVE, seed.empty() ? "SCALE" : seed, "SAVE SCALE:",
                         fs_.scales_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
             break;
@@ -88,7 +88,7 @@ void InputDispatcher::scale_row_action() {
 void InputDispatcher::save_scale_as(const std::string& dir, const std::string& typed_text) {
     // Sanitized FILENAME (survives FAT32), raw name in the file. An empty field keeps the shown name and
     // falls back to "SCALE" — never the dotfile `.pts`.
-    const std::string safe = sanitize_scale_filename(typed_text);
+    const std::string safe = safe_file_name(typed_text);
     const std::string file = (safe.empty() ? std::string("SCALE") : safe) + ".pts";
 
     songcore::Scale& slot = host_.edit_project().scales[static_cast<size_t>(s_.currentScale)];
@@ -118,7 +118,7 @@ void InputDispatcher::groove_row_action() {
         case GrooveFileAction::SAVE: {
             // Seeded with the sanitized DISPLAY name (a slot that stores none still shows one), so
             // what you see is what the file will be called.
-            const std::string seed = sanitize_groove_filename(songcore::groove_display_name(groove));
+            const std::string seed = safe_file_name(songcore::groove_display_name(groove));
             open_qwerty(QwertyContext::GROOVE_SAVE, seed.empty() ? "GROOVE" : seed, "SAVE GROOVE:",
                         fs_.grooves_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
             break;
@@ -137,7 +137,7 @@ void InputDispatcher::groove_row_action() {
 void InputDispatcher::save_groove_as(const std::string& dir, const std::string& typed_text) {
     // As for scales: sanitized FILENAME, raw name in the file; an empty field keeps the shown name and
     // falls back to "GROOVE" (never the dotfile `.ptg`).
-    const std::string safe = sanitize_groove_filename(typed_text);
+    const std::string safe = safe_file_name(typed_text);
     const std::string file = (safe.empty() ? std::string("GROOVE") : safe) + ".ptg";
 
     songcore::Groove& slot = host_.edit_project().grooves[static_cast<size_t>(s_.currentGroove)];

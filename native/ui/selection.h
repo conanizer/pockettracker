@@ -1,23 +1,15 @@
 #pragma once
 
-// ─── The selection machinery ─────────────────────────────────────────────────────────────────────
-//
-// What a RANGE of cells needs (ui/cursor.h is the single cell): the L+B multi-tap that grows a
-// selection CELL → ROW → SCREEN, the D-pad that drags its edge, and "is this cell selected?".
-// ⚠️ It never reads the clock: `now_ms` is a parameter, so a test can drive the 500 ms window with a
-// fake clock.
-// Columns are 1-based from 1: column 0 is the read-only step-number gutter, which neither the cursor
-// nor a selection may cover.
+// A selection: L+B taps grow it CELL → ROW → SCREEN, the D-pad drags its edge. Column 0 (the gutter)
+// is never covered. The clock is a parameter.
 
 #include <algorithm>
 #include <string>
 
 namespace pt::ui {
 
-/** How much the selection covers. Grows CELL → ROW → SCREEN on each tap inside the window. */
 enum class SelectionScope { NONE, CELL, ROW, SCREEN };
 
-/** A D-pad direction. Named so the hottest input path compares an int, not four strings. */
 enum class NavDir { UP, DOWN, LEFT, RIGHT };
 
 struct CursorPosition {
@@ -42,22 +34,18 @@ struct SelectionBounds {
     }
 };
 
-/** The tap window, in ms. Two L+B presses closer than this cycle the scope; further apart, exit. */
+// Two L+B taps closer than this widen the scope; further apart, the second leaves.
 inline constexpr long long MULTI_TAP_WINDOW = 500;
 
-/** The selection state. `active` gates every read, so the two positions are plain values. */
+// `active` gates every read.
 struct Selection {
     SelectionScope scope  = SelectionScope::NONE;
     bool           active = false;
     CursorPosition start{};
     CursorPosition end{};
 
-    /**
-     * L+B. The first tap selects the CELL; each tap inside the 500 ms window widens it (CELL → ROW →
-     * SCREEN → CELL); a tap after the window exits.
-     * ⚠️ `lastTapMs` is updated on EVERY path, exit included, so a slow double-tap re-opens on CELL
-     * rather than jumping to ROW.
-     */
+    // L+B: select the cell, widen within the window (CELL → ROW → SCREEN → CELL), leave after it.
+    // `lastTapMs` is stamped on every path, so a slow double-tap re-opens on CELL.
     void handle_select_b(long long now_ms, int cursorRow, int cursorColumn, int maxColumn,
                          int maxRow = 15) {
         if (scope == SelectionScope::NONE) {
@@ -77,7 +65,7 @@ struct Selection {
         lastTapMs = now_ms;
     }
 
-    /** D-pad while a selection is up: drag its active edge, clamped. The anchor never moves. */
+    // Drag the active edge, clamped; the anchor never moves.
     void expand(NavDir direction, int maxRow, int maxColumn) {
         if (!active) return;
         switch (direction) {
@@ -88,7 +76,7 @@ struct Selection {
         }
     }
 
-    /** The rectangle, normalised — the edge may be above/left of the anchor. */
+    // Normalised: the edge may be above or left of the anchor.
     SelectionBounds bounds() const {
         return SelectionBounds{std::min(start.row, end.row), std::min(start.column, end.column),
                                std::max(start.row, end.row), std::max(start.column, end.column)};
@@ -105,7 +93,7 @@ struct Selection {
         end    = CursorPosition{};
     }
 
-    /** The top-strip readout. "" when there is no selection. */
+    // The top-strip readout; "" with no selection.
     std::string info() const {
         if (!active) return "";
         switch (scope) {
@@ -130,7 +118,6 @@ struct Selection {
                 end   = CursorPosition{cursorRow, maxColumn};
                 break;
             case SelectionScope::SCREEN:
-                // The WHOLE screen — on SONG all 256 rows, hence `maxRow` as a parameter.
                 start = CursorPosition{0, 1};
                 end   = CursorPosition{maxRow, maxColumn};
                 break;

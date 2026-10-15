@@ -1,21 +1,12 @@
 #pragma once
 
-// ─── The INSTRUMENT screen's rows and cells ──────────────────────────────────────────────────────
-//
-// One table per instrument type says what every row is and which parameter sits in each of its
-// columns. The cursor walks it, the module draws it, and editing, MIDI mapping, help and the buttons
-// all switch on the CELL it names — with no `default`, so a new cell is a compile warning at every one
-// of them. A new instrument type is a new table.
-//
+// The INSTRUMENT screen: one table per instrument type of what each row is and which cell sits in
+// each column. The cursor walks it, the module draws it, and everything else switches on the cell —
+// with no `default`, so a new cell warns at every switch.
 //   NAME   — columns 1 / 2 / 3: TYPE, then the source LOAD and EDIT where the type has them.
-//   TRIPLE — columns 1 / 3 / 5, LEFT/RIGHT step by 2.
-//   DUAL   — columns 1 / 3, LEFT/RIGHT jump between them.
-//   SOURCE — SAVE + LOAD of the .pti preset, columns 2 / 3; the cursor SNAPS to 2 on entry. Every type.
-//   SINGLE — column 1 only.
-//   SPACER — not selectable; vertical movement steps over it.
-//
-// ⚠️ A row's NUMBER is still what the cursor stores, so a row inserted mid-table moves every cursor
-// and MIDI-learn position below it — append where you can.
+//   TRIPLE — columns 1 / 3 / 5.   DUAL — columns 1 / 3.   SINGLE — column 1.
+//   SOURCE — the .pti preset's SAVE + LOAD, columns 2 / 3.   SPACER — skipped.
+// ⚠️ The cursor stores a row's number: a row inserted mid-table moves every cursor below it.
 
 #include <cstddef>
 #include <iterator>
@@ -74,7 +65,7 @@ inline constexpr InstrumentRow SAMPLER[] = {
     {K::DUAL, C::LOOP_END, C::REVERSE},                  // 15
 };
 
-/** No EDIT (no single waveform) and no sample window; PATCH picks a patch inside the SF2. */
+// No EDIT and no sample window; PATCH picks a patch inside the SF2.
 inline constexpr InstrumentRow SOUNDFONT[] = {
     {K::NAME, C::TYPE, C::SOURCE_LOAD},                  //  0
     {K::SINGLE, C::NAME},                                //  1
@@ -93,10 +84,7 @@ inline constexpr InstrumentRow SOUNDFONT[] = {
     {K::SINGLE, C::EQ},                                  // 14
 };
 
-/**
- * No source file and no voice: every cell is a byte the device is sent. ⚠️ Every row is a DUAL
- * because BANK is 14-bit and prints four hex digits — too wide for a TRIPLE's third column.
- */
+// Every cell is a byte the device is sent. DUALs, because BANK prints four hex digits.
 inline constexpr InstrumentRow EXTERNAL[] = {
     {K::NAME, C::TYPE},                                  //  0
     {K::SINGLE, C::NAME},                                //  1
@@ -114,7 +102,6 @@ inline constexpr InstrumentRow EXTERNAL[] = {
 };
 }  // namespace instrument_rows
 
-/** How many rows the screen has for this instrument type. */
 inline int instrument_row_count(songcore::InstrumentType type) {
     switch (type) {
         case songcore::InstrumentType::SOUNDFONT: return static_cast<int>(std::size(instrument_rows::SOUNDFONT));
@@ -124,7 +111,7 @@ inline int instrument_row_count(songcore::InstrumentType type) {
     return static_cast<int>(std::size(instrument_rows::SAMPLER));
 }
 
-/** Row `row` of this type's table; out of range reads as an empty SINGLE. */
+// Out of range reads as an empty SINGLE.
 inline InstrumentRow instrument_row(songcore::InstrumentType type, int row) {
     if (row < 0 || row >= instrument_row_count(type)) return InstrumentRow{InstrumentRowKind::SINGLE};
     const size_t r = static_cast<size_t>(row);
@@ -140,7 +127,7 @@ inline InstrumentRowKind instrument_row_kind(songcore::InstrumentType type, int 
     return instrument_row(type, row).kind;
 }
 
-/** The cursor column of each of a row's cells, by kind; 0 past the last. */
+// The cursor column of each of a row's cells; 0 past the last.
 inline int instrument_row_column(InstrumentRowKind kind, int index) {
     static constexpr int NAME[] = {1, 2, 3}, TRIPLE[] = {1, 3, 5}, DUAL[] = {1, 3, 0},
                          SOURCE[] = {2, 3, 0}, SINGLE[] = {1, 0, 0};
@@ -157,7 +144,7 @@ inline int instrument_row_column(InstrumentRowKind kind, int index) {
     return 0;
 }
 
-/** The cell at (row, column); NONE where nothing is drawn. */
+// NONE where nothing is drawn.
 inline InstrumentCell instrument_cell_at(songcore::InstrumentType type, int row, int column) {
     const InstrumentRow r = instrument_row(type, row);
     for (int i = 0; i < 3; ++i)
@@ -165,7 +152,7 @@ inline InstrumentCell instrument_cell_at(songcore::InstrumentType type, int row,
     return InstrumentCell::NONE;
 }
 
-/** The rightmost cursor column on row 0 — read off the table, so it caps at the last button drawn. */
+// The rightmost cursor column on row 0.
 inline int instrument_name_row_max_column(songcore::InstrumentType type) {
     const InstrumentRow r = instrument_row(type, 0);
     int last = 1;
@@ -179,10 +166,8 @@ struct InstrumentCursor {
     int column;
 };
 
-/**
- * Where a cursor carried over from another type's layout lands: unchanged if it is on a cell, else
- * the row below a spacer (the last row past the end) and the nearest column at or left of its own.
- */
+// Where a cursor from another type's layout lands: unchanged on a cell, else the row below a spacer
+// and the nearest column at or left of its own.
 inline InstrumentCursor instrument_nearest_cell(songcore::InstrumentType type, int row, int column) {
     const int count = instrument_row_count(type);
     int       r     = row < 0 ? 0 : (row >= count ? count - 1 : row);
@@ -199,7 +184,7 @@ inline InstrumentCursor instrument_nearest_cell(songcore::InstrumentType type, i
     return {r, best != 0 ? best : first};
 }
 
-/** Does row 0 carry a source LOAD? EXTERNAL has no source. */
+// EXTERNAL has no source.
 inline bool instrument_has_source_row(songcore::InstrumentType type) {
     return instrument_cell_at(type, 0, 2) == InstrumentCell::SOURCE_LOAD;
 }

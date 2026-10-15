@@ -1,17 +1,10 @@
 #pragma once
 
-// ─── The MIXER screen's cells ────────────────────────────────────────────────────────────────────
-//
-// The cursor is two ints, (row, column), over a grid that is not rectangular:
-//
-//   row 0: columns 0..7 = track volumes, column 8 = master volume
-//   row 1: column 0 = REV return, column 1 = DEL return, column 8 = master EQ slot
-//   row 2: column 8 = OTT|DUST depth
-//   row 3: column 8 = LIM pre-gain
-//
-// `mixer_cell_at` is the ONE place that says which pair is which cell. Editing, MIDI mapping, help,
-// mute and the EQ shortcut all switch on its answer — with no `default`, so a new cell is a compile
-// warning at every one of them. Only the cursor's moves (`cursor_move.h`) are written out by hand.
+// The MIXER's cells — the cursor is (row, column) over a grid that is not rectangular:
+//   row 0: columns 0..7 track volumes, 8 master volume
+//   row 1: 0 REV return, 1 DEL return, 8 master EQ slot
+//   row 2: 8 OTT|DUST depth        row 3: 8 LIM pre-gain
+// Everything switches on `mixer_cell_at`, with no `default`, so a new cell warns at every switch.
 
 namespace pt::ui {
 
@@ -40,7 +33,7 @@ inline MixerCell mixer_cell_at(int row, int column) {
     }
 }
 
-/** Anything that writes one of the two ints alone can land between cells, where the cursor vanishes. */
+// Writing one of the two ints alone can land between cells, where the cursor vanishes.
 inline bool mixer_cell_exists(int row, int column) {
     return mixer_cell_at(row, column) != MixerCell::NONE;
 }

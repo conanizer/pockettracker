@@ -1,12 +1,7 @@
 #pragma once
 
-// ─── The large mascot sprite ─────────────────────────────────────────────────────────────────────
-//
-// A 128×128 one-bit image of the robot ant (2048 bytes), for the FULL help overlay.
-// ⚠️ Its own artwork, not the small sprite at 2× — encoded and checked separately. Otherwise the small
-// sprite's reasoning applies (ui/mascot_sprite.h). MSB leftmost, sixteen bytes per row.
-// To regenerate: test each pixel's red channel against 127 and set bit `7 - x % 8` of byte
-// `y * 16 + x / 8`. The POPULATION COUNT (6092) must match the PNG's white pixels.
+// The 128×128 robot ant for the full help overlay — its own artwork, not the small one at 2×. As
+// ui/mascot_sprite.h, sixteen bytes a row: byte `y * 16 + x / 8`; popcount 6092.
 
 #include <cstdint>
 
@@ -15,7 +10,6 @@ namespace pt::ui {
 inline constexpr int MASCOT_LARGE_W = 128;
 inline constexpr int MASCOT_LARGE_H = 128;
 
-/** MASCOT_LARGE_H rows of MASCOT_LARGE_W/8 bytes, MSB = leftmost column. 1 = lit. */
 inline constexpr uint8_t MASCOT_LARGE_NEUTRAL[MASCOT_LARGE_H * (MASCOT_LARGE_W / 8)] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -147,7 +141,6 @@ inline constexpr uint8_t MASCOT_LARGE_NEUTRAL[MASCOT_LARGE_H * (MASCOT_LARGE_W /
     0x00, 0xFF, 0xC3, 0xFF, 0xF0, 0x0C, 0xCC, 0xFF, 0xFF, 0xFF, 0xF3, 0x03, 0xFF, 0xC0, 0x00, 0x00,
 };
 
-/** Is (x, y) lit? Out-of-range is unlit, so a caller may walk a larger box without guarding. */
 inline constexpr bool mascot_large_pixel(int x, int y) {
     if (x < 0 || y < 0 || x >= MASCOT_LARGE_W || y >= MASCOT_LARGE_H) return false;
     return (MASCOT_LARGE_NEUTRAL[y * (MASCOT_LARGE_W / 8) + (x >> 3)] & (0x80u >> (x & 7))) != 0;

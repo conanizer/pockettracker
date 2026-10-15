@@ -1,26 +1,11 @@
 #pragma once
 
-// ─── THE TOUCH LAYOUT — SIZE AND POSITION ARITHMETIC ─────────────────────────────────────────────
+// The on-screen touch layouts (LEFT, RIGHT, the PORTRAIT split, the 135-unit PORTRAIT2 grid): button
+// sizes and spacing from a box size and density, and where each button lands. Drawing is the shell's.
+// Sizes are pinned by a golden; positions (`*_rects`) by a hand-written oracle and a device.
 //
-// The on-screen touch layouts (the LEFT box, the RIGHT box, the two-box PORTRAIT split, the 135-unit
-// PORTRAIT2 grid): given a box size in pixels and the display density, how big each button is, how
-// much space sits between them, and where each lands. Only `<cstdint>`, `<cmath>`, `<algorithm>` and
-// `buttons.h`, so its test links nothing else. The hit-rect layout is portable arithmetic and
-// lives here; the RENDERING (casing, bezel, button PNGs) is the shell's (`sdl-video.cpp`) — nothing
-// image-shaped reaches `pt-ui`.
-//
-// Two computations, checked differently:
-//   SIZES     — "each arrow is X px square, spacers 0.2X": `left`/`right`/`portrait`/`portrait2`, pinned
-//               byte for byte by the touch-layout golden.
-//   POSITIONS — "UP lands at x=253, y=305 in its box": the `*_rects` functions, checked by a
-//               HAND-WRITTEN ORACLE plus eyes on a device — no golden exists.
-//               PORTRAIT's two-box split has no `*_rects` yet.
-//
-// ⚠️ IEEE-EXACTNESS IS REQUIRED: the golden records font sizes and every Portrait2 field as raw binary32
-// bits. Literals are `f`-suffixed (no promotion to double), multiply/divide order is fixed, and
-// Its test is built with `pt_ieee_exact()` (no fma contraction).
-// The one fork, `pattern_unit`'s `boxRatio < patternRatio`, is strict: the exact tie takes the HEIGHT
-// arm (golden case 340×510).
+// ⚠️ Bit-exact float: the golden stores binary32 bits. Keep literals `f`-suffixed and the operation
+// order as written; the test builds without fma contraction. `pattern_unit`'s tie takes the height arm.
 
 #include <algorithm>
 #include <cmath>
@@ -30,21 +15,16 @@
 
 namespace pt::ui::touch_layout {
 
-// Pattern: 3.4w × 5.1h for each side box; Portrait2's grid is 135 units on its shorter axis.
+// Each side box is 3.4 × 5.1 units; PORTRAIT2's grid is 135 units on its shorter axis.
 inline constexpr float PATTERN_WIDTH  = 3.4f;
 inline constexpr float PATTERN_HEIGHT = 5.1f;
 inline constexpr float GRID_UNITS     = 135.0f;
 
-// The tracker design in pixels (= canvas.h's DESIGN_W/H), restated so this header need not include
-// canvas.h.
+// canvas.h's DESIGN_W/H, restated to keep this header a leaf.
 inline constexpr int DESIGN_FRAME_W = 640;
 inline constexpr int DESIGN_FRAME_H = 480;
 
-/**
- * The base unit X for the 3.4×5.1 pattern: the largest whole pixel size at which the pattern fits in
- * (w, h). Shared by LEFT, RIGHT and the PORTRAIT split. The truncation applies to the floored result of
- * either branch.
- */
+// The unit X: the largest whole pixel size at which 3.4×5.1 fits the box. Shared by LEFT, RIGHT, PORTRAIT.
 inline int pattern_unit(int available_width, int available_height) {
     const float box_ratio     = static_cast<float>(available_width) / static_cast<float>(available_height);
     const float pattern_ratio = PATTERN_WIDTH / PATTERN_HEIGHT;
@@ -54,7 +34,7 @@ inline int pattern_unit(int available_width, int available_height) {
     return static_cast<int>(v);
 }
 
-/** LEFT box: L trigger, D-pad, SELECT. */
+// LEFT box: L, D-pad, SELECT.
 struct Left {
     int   x;
     int   button_size;
@@ -70,8 +50,7 @@ struct Left {
     float small_font_sp;
 };
 
-/** RIGHT box: R trigger, A, B, START. Not a mirror of LEFT — see `medium_spacer` (0.7X vs LEFT's
- *  1.0X) and the left/right spacers RIGHT alone carries. */
+// RIGHT box: R, A, B, START. Not a mirror of LEFT (its own spacers).
 struct Right {
     int   x;
     int   button_size;
@@ -89,16 +68,14 @@ struct Right {
     float small_font_sp;
 };
 
-/** The two-box PORTRAIT split. Each box gets HALF the width, and the box size it computes is handed
- *  down to `left()`/`right()` as their own available size — so an error here moves every button. */
+// The two-box PORTRAIT split: each box gets half the width, handed down to `left()`/`right()`.
 struct Portrait {
     int x;
     int box_width;
     int box_height;
 };
 
-/** PORTRAIT2: the 135-unit grid. `x` is a FLOAT (flooring would leave sub-unit edge gaps at sizes not a
- *  multiple of 135), floored at 1.0. */
+// PORTRAIT2's 135-unit grid. `x` stays a float (flooring would leave edge gaps), at least 1.0.
 struct Portrait2 {
     float x;
     float cell_dp;
@@ -139,8 +116,7 @@ inline Right right(int available_width, int available_height, float density) {
     m.start_width     = static_cast<int>(std::floor(x * 1.2f));
     m.start_height    = static_cast<int>(std::floor(x * 0.6f));
     m.small_spacer    = static_cast<int>(std::floor(x * 0.2f));
-    // ⚠️ 0.7f here where LEFT's medium_spacer_width is 1.0f; the two boxes are not mirror images.
-    m.medium_spacer   = static_cast<int>(std::floor(x * 0.7f));
+    m.medium_spacer   = static_cast<int>(std::floor(x * 0.7f));   // LEFT's is 1.0
     m.large_spacer    = static_cast<int>(std::floor(x * 2.0f));
     m.left_spacer     = static_cast<int>(std::floor(x * 1.7f));
     m.right_spacer    = static_cast<int>(std::floor(x * 0.7f));
@@ -179,19 +155,10 @@ inline Portrait2 portrait2(int available_width, int available_height, float dens
     return m;
 }
 
-// ─── POSITIONS — where each button LANDS inside its box ──────────────────────────────────────────
-//
-// ⚠️ NOT golden-backed: checked by the hand-written oracle and a device.
-//
-// No `density` argument: children are sized `px / density` dp and measured back as `dp * density`, so
-// density cancels and positions are integer-pixel arithmetic over the size structs' ints (density
-// only affects font size).
-//
-// The arrangement: a Column, vertically centred, children horizontally centred. A Row wraps its
-// content, so its children pack left to right with no slack; a width-only Spacer shifts neighbours
-// without adding a row. Coordinates are BOX-LOCAL (origin top-left); the shell adds the box origin.
+// ─── Positions: where each button lands, in box-local pixels ─────────────────────────────────────
+// Density cancels out of positions (it only sizes fonts). A column, vertically centred; each row
+// centred, its children packed left to right.
 
-/** One laid-out button and where it sits inside its box (box-local pixels). */
 struct ButtonRect {
     Button button;
     int    x, y, w, h;
@@ -200,20 +167,17 @@ struct ButtonRect {
     bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 
-/** A laid-out box: fixed storage (LEFT fills 6, RIGHT 4, PORTRAIT2 all 10), no allocation. Iterate
- *  `r[0..count)` in draw order. */
+// A laid-out box, in draw order (LEFT fills 6, RIGHT 4, PORTRAIT2 10).
 struct BoxRects {
     ButtonRect r[10];
     int        count = 0;
 };
 
-/** LEFT box: L on top, the D-pad cross (UP / LEFT·RIGHT / DOWN), SELECT below — 6 rects, draw order. */
+// LEFT: L on top, the D-pad cross, SELECT below.
 inline BoxRects left_rects(int available_width, int available_height) {
-    const Left m = left(available_width, available_height, 1.0f);  // density irrelevant to the ints
+    const Left m = left(available_width, available_height, 1.0f);
     const int  W = available_width;
 
-    // The Column's content height, then the centring offset. A row's height is its tallest child: the
-    // D-pad row is button_size, the SELECT row select_height.
     const int content_h =
         4 * m.small_spacer + m.l_button_height + 3 * m.button_size + m.select_height;
     int y = (available_height - content_h) / 2;
@@ -245,8 +209,7 @@ inline BoxRects left_rects(int available_width, int available_height) {
     return box;
 }
 
-/** RIGHT box: R on top, A and B on a diagonal (A upper-right, B lower-left), START below — 4 rects in
- *  draw order. A/B are NOT a mirror pair (see the spacers). */
+// RIGHT: R on top, A upper-right and B lower-left, START below.
 inline BoxRects right_rects(int available_width, int available_height) {
     const Right m = right(available_width, available_height, 1.0f);
     const int   W = available_width;
@@ -281,23 +244,15 @@ inline BoxRects right_rects(int available_width, int available_height) {
     return box;
 }
 
-// ─── PORTRAIT2: the skinned 4-row grid ───────────────────────────────────────────────────────────
-//
-// Column widths come from an equal-WEIGHT split, not the size arithmetic. The cluster box holds a
-// column inset by `pad = round(1.5X)`, of four rows each `round(33X)` tall; each row splits its content
-// width (available_width − 2·pad) into equal slots — two in row 0, four in rows 1–3 — with leftover
-// pixels handed out one per slot, left to right. Some slots are empty (holes).
+// ─── PORTRAIT2: four rows, inset by round(1.5X), each round(33X) tall, split into equal slots ─────
 //
 //   Row 0:  [ L Shift ][ R Shift ]     (2 wide slots)
 //   Row 1:  [    ][ ↑ ][ B ][ A ]      (4 slots; slot 0 empty)
 //   Row 2:  [ ← ][ ↓ ][ → ][    ]      (4 slots; slot 3 empty)
 //   Row 3:  [    ][Sel][Sta][    ]     (4 slots; slots 0 and 3 empty)
 
-/**
- * Split width `W` into `n` equal-weight slots: each gets `round(W/n)`, then the leftover
- * `W − n·round(W/n)` (possibly negative) is distributed one per slot, in order, until spent. The widths
- * sum to exactly `W`. `round` is `floor(v + 0.5)` in binary32, so a half lands consistently.
- */
+// Split `W` into `n` slots of round(W/n), handing the leftover (maybe negative) out one per slot from
+// the left, so the widths sum to exactly `W`.
 inline void weight_split(int W, int n, int xs[], int ws[]) {
     const float unit = static_cast<float>(W) / static_cast<float>(n);  // each weight = 1
     const int   base = static_cast<int>(std::floor(unit + 0.5f));      // round(W/n)
@@ -312,8 +267,7 @@ inline void weight_split(int W, int n, int xs[], int ws[]) {
     }
 }
 
-/** PORTRAIT2 grid: all ten buttons, box-local, row-major draw order. Empty slots get no rect — a tap
- *  there hits nothing (the oracle asserts it). */
+// All ten buttons, row by row. An empty slot gets no rect, so a tap there hits nothing.
 inline BoxRects portrait2_rects(int available_width, int available_height) {
     const Portrait2 m = portrait2(available_width, available_height, 1.0f);  // density irrelevant
     const int pad    = static_cast<int>(std::floor(m.x * 1.5f + 0.5f));   // round(1.5X) — the inset
@@ -344,64 +298,53 @@ inline BoxRects portrait2_rects(int available_width, int available_height) {
     return box;
 }
 
-// ─── PORTRAIT2: the DEVICE-SKIN band geometry ────────────────────────────────────────────────────
-//
-// Outside the cluster: where the cluster, the tracker frame and three chrome bands land on the whole
-// screen — a 135X × 300X (20:9) skin of four bands, top to bottom:
-//
-//     ┌───────────────┐  band 1  top vent panel   (bg_top_panel.png)      — height varies, may be 0
-//     │               │  band 2  screen bezel      (bg_screen_bezel.png)   — the 640×480 frame sits INSIDE
-//     ├───────────────┤  band 3  branding strip    (bg_branding_panel.png) — FULL device width
-//     └───────────────┘  band 4  button cluster    (bg_button_backing.png) — portrait2_rects fills it
-//
-// ⚠️ The frame is NOT centred in the window (unlike landscape, `sdl-video.cpp`'s `dest_rect`): it sits in
-// band 2, integer-scaled and centred inside the bezel's padding, high on a tall screen.
-// Checked by the hand-written oracle and a device. X has three cases — A: the full skin fits; B: the top
-// panel shrinks to absorb a height deficit; C: height-constrained, so the skin is NARROWER than the
-// device and the casing fills the sides — which is why branding spans the DEVICE width, sized by
-// `xFromWidth`, not `X`.
+// ─── PORTRAIT2's device skin: four bands on a 135X × 300X screen, top to bottom ──────────────────
+//   1 top vent panel (may be 0) · 2 screen bezel, the frame inside · 3 branding, full device width ·
+//   4 the button cluster.
+// ⚠️ The frame sits in the bezel, not centred in the window — high on a tall screen.
 
-/** A plain rectangle in device-output pixels — no `Button`, unlike `ButtonRect`. `empty()` (h/w ≤ 0)
- *  marks a band that is absent, e.g. the top panel in case C. */
+// Device pixels; `empty()` marks an absent band.
 struct LayoutRect {
     int  x = 0, y = 0, w = 0, h = 0;
     bool empty() const { return w <= 0 || h <= 0; }
 };
 
-/** The full PORTRAIT2 skin on a `deviceW × deviceH` screen. The four bands composite their textures;
- *  `frame` is where the 640×480 tracker blits (in the bezel, NOT centred); `buttons` is the cluster that
- *  `portrait2_rects(buttons.w, max(buttons.h,100))` fills, offset by `buttons.{x,y}`. */
+// The 640×480 frame at the largest integer scale that fits `area` (at least 1×), centred in it.
+inline LayoutRect integer_fit(const LayoutRect& area) {
+    const int scale = std::max(std::min((area.w + 1) / DESIGN_FRAME_W,    // `+1`: a rounding allowance
+                                        (area.h + 1) / DESIGN_FRAME_H), 1);
+    const int w = DESIGN_FRAME_W * scale, h = DESIGN_FRAME_H * scale;
+    return {area.x + std::max(0, (area.w - w) / 2), area.y + std::max(0, (area.h - h) / 2), w, h};
+}
+
 struct Portrait2Skin {
-    LayoutRect topPanel;    // band 1 — bg_top_panel.png       (empty in case C)
-    LayoutRect bezel;       // band 2 — bg_screen_bezel.png
-    LayoutRect branding;    // band 3 — bg_branding_panel.png  (FULL device width)
-    LayoutRect buttons;     // band 4 — bg_button_backing.png + the button grid
-    LayoutRect frame;       // the 640×480 tracker frame, integer-scaled, centred in the bezel's inner area
-    LayoutRect innerBezel;  // the bezel's padded inner (black) area — a FIT-mode frame the shell fits here itself
-    float      x = 0.0f;    // the skin unit X (135X == skin width in px)
+    LayoutRect topPanel;    // band 1 (empty in case C)
+    LayoutRect bezel;       // band 2
+    LayoutRect branding;    // band 3, full device width
+    LayoutRect buttons;     // band 4 — what `portrait2_rects` fills
+    LayoutRect frame;       // the 640×480 frame, integer-scaled, centred in the bezel's inner area
+    LayoutRect innerBezel;  // the bezel's padded inner area (a FIT-mode frame fits here)
+    float      x = 0.0f;    // the skin unit (135X = skin width)
 };
 
-/**
- * Lay out the PORTRAIT2 skin on a `deviceW × deviceH` output. `bezelThicknessX > 0` is the bezel border
- * in skin X units (a skin with a bezel PNG); otherwise `bezelThicknessDp * density` (a solid-colour
- * bezel). `density` is used ONLY there.
- */
+// The bezel border is `bezelThicknessX` skin units if > 0 (a bezel image), else
+// `bezelThicknessDp * density` (a solid bezel). Three cases: A the skin fits; B the top panel shrinks;
+// C height-bound, the skin narrower than the device.
 inline Portrait2Skin portrait2_skin(int deviceW, int deviceH, float density,
                                     float bezelThicknessDp, float bezelThicknessX) {
-    // ── X and the top-panel height: the three aspect cases ──
     const float xFromWidth = static_cast<float>(deviceW) / 135.0f;
-    // Branding spans the full DEVICE width, so its height follows xFromWidth, not X (smaller in case C).
+    // Branding spans the device width, so it follows xFromWidth, not X.
     const int brandingH = static_cast<int>(xFromWidth * 22.5f);
 
     float X;
     int   topPanelH;
-    if (xFromWidth * 300.0f <= static_cast<float>(deviceH)) {          // Case A: full skin fits vertically
+    if (xFromWidth * 300.0f <= static_cast<float>(deviceH)) {          // A
         X         = xFromWidth;
         topPanelH = std::min(static_cast<int>(deviceH - X * 267.0f), static_cast<int>(X * 33.0f));
-    } else if (xFromWidth * 267.0f <= static_cast<float>(deviceH)) {   // Case B: top panel shrinks to absorb deficit
+    } else if (xFromWidth * 267.0f <= static_cast<float>(deviceH)) {   // B
         X         = xFromWidth;
         topPanelH = std::max(static_cast<int>(deviceH - X * 267.0f), 0);
-    } else {                                                           // Case C: height-constrained, skin < device wide
+    } else {                                                           // C
         topPanelH = 0;
         X         = static_cast<float>(deviceH - brandingH) / (102.75f + 141.75f);
     }
@@ -409,12 +352,11 @@ inline Portrait2Skin portrait2_skin(int deviceW, int deviceH, float density,
     const int contentW    = static_cast<int>(X * 135.0f);
     const int bezelH      = static_cast<int>(X * 102.75f);
     const int buttonAreaH = static_cast<int>(X * 141.75f);
-    const int contentX    = (deviceW - contentW) / 2;                 // the column is centred
+    const int contentX    = (deviceW - contentW) / 2;
 
     Portrait2Skin s;
     s.x = X;
 
-    // ── The four bands, stacked top to bottom; branding is device-wide. ──
     int y = 0;
     if (topPanelH > 0) s.topPanel = {contentX, y, contentW, topPanelH};
     y += topPanelH;
@@ -424,7 +366,6 @@ inline Portrait2Skin portrait2_skin(int deviceW, int deviceH, float density,
     y += brandingH;
     s.buttons  = {contentX, y, contentW, buttonAreaH};
 
-    // ── The bezel's padded inner area, and the 640×480 frame integer-scaled and centred in it. ──
     const float bezelThickPx = (bezelThicknessX > 0.0f) ? (X * bezelThicknessX)
                                                         : (bezelThicknessDp * density);
     const int   innerX = contentX + static_cast<int>(bezelThickPx);
@@ -432,37 +373,14 @@ inline Portrait2Skin portrait2_skin(int deviceW, int deviceH, float density,
     const int   innerW = static_cast<int>(static_cast<float>(contentW) - 2.0f * bezelThickPx);
     const int   innerH = static_cast<int>(static_cast<float>(bezelH)   - 2.0f * bezelThickPx);
     s.innerBezel = {innerX, innerY, innerW, innerH};
-
-    // The tracker picks its own integer scale from the inner bezel area (`+1` a rounding fudge) and
-    // centres; its black background hides the letterbox. Integer centring, like `dest_rect`.
-    const int scaleX  = (innerW + 1) / DESIGN_FRAME_W;
-    const int scaleY  = (innerH + 1) / DESIGN_FRAME_H;
-    const int scale   = std::max(std::min(scaleX, scaleY), 1);
-    const int renderW = DESIGN_FRAME_W * scale;
-    const int renderH = DESIGN_FRAME_H * scale;
-    const int offX    = std::max(0, (innerW - renderW) / 2);
-    const int offY    = std::max(0, (innerH - renderH) / 2);
-    s.frame = {innerX + offX, innerY + offY, renderW, renderH};
-
+    s.frame      = integer_fit(s.innerBezel);
     return s;
 }
 
-// ─── PORTRAIT2 BARE: the same cluster, no chrome, and the screen gets the rest ────────────────────
-//
-// For a skin with BUTTON ART ONLY — no vent panel, branding, backing or bezel. Two bands:
-//
-//     ┌───────────────┐  the SCREEN area — FULL DEVICE WIDTH, no border, the frame centred in it
-//     │               │
-//     ├───────────────┤
-//     │  [buttons...]  │  the cluster — `portrait2_rects` fills it, as in the skinned layout
-//     └───────────────┘
-//
-// The point is WIDTH: with no bezel to inset by, the frame grows to the device width. The cluster's own
-// arithmetic is unchanged (same 141.75X band), so both layouts share one hit-test.
+// ─── PORTRAIT2 bare: button art only — the screen takes the full width above the same cluster ────
 inline Portrait2Skin portrait2_skin_bare(int deviceW, int deviceH) {
-    // The cluster wants the FULL device width (X = deviceW/135), fixing its height at 141.75X. When that
-    // leaves too little screen for a full-width 4:3 frame, the CLUSTER gives way — this layout exists to
-    // make the tracker bigger.
+    // The cluster wants the full width; when that leaves too little screen for a full-width 4:3
+    // frame, the cluster shrinks instead.
     const float wantScreenH = static_cast<float>(deviceW) * DESIGN_FRAME_H / DESIGN_FRAME_W;
 
     float X = static_cast<float>(deviceW) / GRID_UNITS;
@@ -470,37 +388,24 @@ inline Portrait2Skin portrait2_skin_bare(int deviceW, int deviceH) {
         X = (static_cast<float>(deviceH) - wantScreenH) / 141.75f;
     X = std::max(X, 1.0f);   // never a zero-width cluster
 
-    // The band height is derived from the FLOORED X, so cluster height and button sizes agree; capped
-    // at the screen so odd inputs cannot push the cluster off the bottom.
+    // Capped at the screen, so odd inputs cannot push the cluster off the bottom.
     const int buttonAreaH = std::min(static_cast<int>(X * 141.75f), std::max(deviceH, 0));
     const int screenH     = deviceH - buttonAreaH;
     const int contentW    = static_cast<int>(X * GRID_UNITS);
-    const int contentX    = (deviceW - contentW) / 2;   // centred
+    const int contentX    = (deviceW - contentW) / 2;
 
     Portrait2Skin s;
     s.x = X;
 
-    // topPanel and branding stay EMPTY. `bezel` is the screen area itself (full width, no border, so the
-    // inner area is the same rect) — `PortraitSkin::screen_rect` and the modal scrim read it in both
-    // layouts.
+    // No top panel or branding; `bezel` is the screen area itself (the shell reads it in both layouts).
     s.bezel      = {0, 0, deviceW, screenH};
     s.innerBezel = s.bezel;
     s.buttons    = {contentX, screenH, contentW, buttonAreaH};
-
-    // The frame: the skinned layout's integer scale-and-centre, over the whole width.
-    const int scaleX  = (deviceW + 1) / DESIGN_FRAME_W;
-    const int scaleY  = (screenH + 1) / DESIGN_FRAME_H;
-    const int scale   = std::max(std::min(scaleX, scaleY), 1);
-    const int renderW = DESIGN_FRAME_W * scale;
-    const int renderH = DESIGN_FRAME_H * scale;
-    s.frame = {std::max(0, (deviceW - renderW) / 2), std::max(0, (screenH - renderH) / 2),
-               renderW, renderH};
-
+    s.frame      = integer_fit(s.bezel);
     return s;
 }
 
-/** Which button in `box` contains the box-local point. The oracle asserts the rects never overlap, so
- *  the first hit is the only one. */
+// The button under a box-local point (the rects never overlap).
 inline bool hit(const BoxRects& box, int px, int py, Button& out) {
     for (int i = 0; i < box.count; ++i) {
         if (box.r[i].contains(px, py)) {

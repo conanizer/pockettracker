@@ -44,7 +44,7 @@ bool InputDispatcher::effects_preset_action(int row) {
     // config.json's `folders` has no key for either.
     switch (row) {
         case EffectModule::ROW_REV_SAVE: {
-            const std::string seed = sanitize_fx_preset_filename(reverb_preset_display_name(p));
+            const std::string seed = safe_file_name(reverb_preset_display_name(p));
             open_qwerty(QwertyContext::REVERB_SAVE, seed.empty() ? "REVERB" : seed, "SAVE REVERB:",
                         fs_.reverbs_directory(), FX_PRESET_NAME_MAX, /*clear_on_first_b=*/true);
             return true;
@@ -54,7 +54,7 @@ bool InputDispatcher::effects_preset_action(int row) {
                               {REVERB_FILE_EXT});
             return true;
         case EffectModule::ROW_DLY_SAVE: {
-            const std::string seed = sanitize_fx_preset_filename(delay_preset_display_name(p));
+            const std::string seed = safe_file_name(delay_preset_display_name(p));
             open_qwerty(QwertyContext::DELAY_SAVE, seed.empty() ? "DELAY" : seed, "SAVE DELAY:",
                         fs_.delays_directory(), FX_PRESET_NAME_MAX, /*clear_on_first_b=*/true);
             return true;
@@ -98,7 +98,7 @@ void InputDispatcher::save_reverb_preset_as(const std::string& dir, const std::s
     // the shown name and falls back to "REVERB" — never the dotfile `.ptr`.
     const std::string shown = reverb_preset_display_name(host_.project());
     const std::string want  = !typed_text.empty() ? typed_text : !shown.empty() ? shown : "REVERB";
-    const std::string safe  = sanitize_fx_preset_filename(want);
+    const std::string safe  = safe_file_name(want);
 
     // The row adopts the name it was saved under — the only thing on screen naming the file.
     if (host_.project().reverbPreset != want) {
@@ -115,7 +115,7 @@ void InputDispatcher::save_delay_preset_as(const std::string& dir, const std::st
     // As the reverb's.
     const std::string shown = delay_preset_display_name(host_.project());
     const std::string want  = !typed_text.empty() ? typed_text : !shown.empty() ? shown : "DELAY";
-    const std::string safe  = sanitize_fx_preset_filename(want);
+    const std::string safe  = safe_file_name(want);
 
     if (host_.project().delayPreset != want) {
         host_.edit_project().delayPreset = want;

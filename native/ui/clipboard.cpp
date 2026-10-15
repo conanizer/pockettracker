@@ -9,16 +9,12 @@ using songcore::Project;
 
 namespace {
 
-/** Clamp a table id into the pool. */
 int clamp_table_id(const Project& p, int tableId) {
     const int last = static_cast<int>(p.tables.size()) - 1;
     return std::max(0, std::min(tableId, last));
 }
 
-/**
- * The selection rectangle with its corners sorted — either corner may be the smaller on either axis,
- * and every copy and delete walks `[minRow..maxRow] × [minCol..maxCol]`.
- */
+// The selection rectangle with its corners sorted.
 struct Bounds {
     int minRow, maxRow, minCol, maxCol;
 };
@@ -28,7 +24,7 @@ Bounds normalise(int startRow, int startColumn, int endRow, int endColumn) {
             std::min(startColumn, endColumn), std::max(startColumn, endColumn)};
 }
 
-/** The smallest `column` across the copied items — the anchor a paste re-offsets from. */
+// The leftmost copied column — what a paste re-offsets from.
 template <typename Item>
 int min_source_column(const std::vector<Item>& items) {
     int m = items.front().column;
@@ -46,8 +42,7 @@ void Clipboard::copy_phrase_steps(const Project& p, int phraseId, int startRow, 
 
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-
-    phraseItems_.clear();
+    begin_copy(ClipboardType::PHRASE_STEPS, maxCol - minCol + 1, maxRow - minRow + 1);
     for (int row = minRow; row <= maxRow; ++row) {
         const songcore::PhraseStep& step = phrase.steps[static_cast<size_t>(row)];
         for (int col = minCol; col <= maxCol; ++col) {
@@ -70,13 +65,6 @@ void Clipboard::copy_phrase_steps(const Project& p, int phraseId, int startRow, 
         }
     }
 
-    chainItems_.clear();
-    songItems_.clear();
-    tableItems_.clear();
-    type_    = ClipboardType::PHRASE_STEPS;
-    width_   = maxCol - minCol + 1;
-    height_  = maxRow - minRow + 1;
-    hasData_ = true;
 }
 
 void Clipboard::copy_chain_rows(const Project& p, int chainId, int startRow, int startColumn,
@@ -85,8 +73,7 @@ void Clipboard::copy_chain_rows(const Project& p, int chainId, int startRow, int
 
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-
-    chainItems_.clear();
+    begin_copy(ClipboardType::CHAIN_ROWS, maxCol - minCol + 1, maxRow - minRow + 1);
     for (int row = minRow; row <= maxRow; ++row) {
         for (int col = minCol; col <= maxCol; ++col) {
             ChainRowClipItem item;
@@ -101,21 +88,13 @@ void Clipboard::copy_chain_rows(const Project& p, int chainId, int startRow, int
         }
     }
 
-    phraseItems_.clear();
-    songItems_.clear();
-    tableItems_.clear();
-    type_    = ClipboardType::CHAIN_ROWS;
-    width_   = maxCol - minCol + 1;
-    height_  = maxRow - minRow + 1;
-    hasData_ = true;
 }
 
 void Clipboard::copy_song_cells(const Project& p, int startRow, int startColumn, int endRow,
                                 int endColumn) {
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-
-    songItems_.clear();
+    begin_copy(ClipboardType::SONG_CELLS, maxCol - minCol + 1, maxRow - minRow + 1);
     for (int row = minRow; row <= maxRow; ++row) {
         for (int col = minCol; col <= maxCol; ++col) {
             const int trackIndex = col - 1;  // the column IS the track number, 1-based
@@ -135,13 +114,6 @@ void Clipboard::copy_song_cells(const Project& p, int startRow, int startColumn,
         }
     }
 
-    phraseItems_.clear();
-    chainItems_.clear();
-    tableItems_.clear();
-    type_    = ClipboardType::SONG_CELLS;
-    width_   = maxCol - minCol + 1;
-    height_  = maxRow - minRow + 1;
-    hasData_ = true;
 }
 
 void Clipboard::copy_table_rows(const Project& p, int tableId, int startRow, int startColumn,
@@ -150,8 +122,7 @@ void Clipboard::copy_table_rows(const Project& p, int tableId, int startRow, int
 
     const auto [minRow, maxRow, minCol, maxCol] =
         normalise(startRow, startColumn, endRow, endColumn);
-
-    tableItems_.clear();
+    begin_copy(ClipboardType::TABLE_ROWS, maxCol - minCol + 1, maxRow - minRow + 1);
     for (int row = minRow; row <= maxRow; ++row) {
         const songcore::TableRow& tr = table.rows[static_cast<size_t>(row)];
         for (int col = minCol; col <= maxCol; ++col) {
@@ -173,13 +144,6 @@ void Clipboard::copy_table_rows(const Project& p, int tableId, int startRow, int
         }
     }
 
-    phraseItems_.clear();
-    chainItems_.clear();
-    songItems_.clear();
-    type_    = ClipboardType::TABLE_ROWS;
-    width_   = maxCol - minCol + 1;
-    height_  = maxRow - minRow + 1;
-    hasData_ = true;
 }
 
 // ─── Paste ───────────────────────────────────────────────────────────────────────────────────────
@@ -229,8 +193,7 @@ PasteResult Clipboard::paste_phrase_steps(Project& p, int phraseId, int cursorRo
 
         songcore::PhraseStep& step = phrase.steps[static_cast<size_t>(targetRow)];
 
-        // Each arm asks for the field the TARGET column holds; an item without it (an FX value onto an
-        // FX-type column) writes and counts nothing.
+        // Each arm asks for the target column's field; an item without it writes nothing.
         switch (targetCol) {
             case 1: if (item.note)       { step.note       = *item.note;       ++itemsPasted; } break;
             case 2: if (item.volume)     { step.volume     = *item.volume;     ++itemsPasted; } break;
@@ -295,7 +258,7 @@ PasteResult Clipboard::paste_song_cells(Project& p, int cursorRow, int cursorCol
 
         songcore::Track& track = p.tracks[static_cast<size_t>(targetCol - 1)];
 
-        // GROW the track to reach the row (copy reads past the end as empty; paste must materialise).
+        // Grow the track to reach the row.
         while (static_cast<int>(track.chainRefs.size()) <= targetRow) track.chainRefs.push_back(-1);
 
         track.chainRefs[static_cast<size_t>(targetRow)] = item.chainRef;
@@ -361,10 +324,7 @@ int Clipboard::cut_table_rows(Project& p, int tableId, int startRow, int startCo
     return delete_table_rows(p, tableId, startRow, startColumn, endRow, endColumn);
 }
 
-// ─── Delete ──────────────────────────────────────────────────────────────────────────────────────
-//
-// The four "empty"s, in one place, and they differ: a cleared velocity is 0x7F (the V column has no
-// empty state), a cleared table volume −1, a cleared chain ref −1, a cleared transpose 0x00.
+// ─── Delete: a cleared velocity is 0x7F, a table volume −1, a chain ref −1, a transpose 0x00 ─────
 
 int Clipboard::delete_phrase_steps(Project& p, int phraseId, int startRow, int startColumn,
                                    int endRow, int endColumn) {
@@ -432,7 +392,7 @@ int Clipboard::delete_song_cells(Project& p, int startRow, int startColumn, int 
             if (trackIndex < 0 || trackIndex >= 8) continue;
 
             songcore::Track& track = p.tracks[static_cast<size_t>(trackIndex)];
-            // Only rows the track HAS: delete does not grow it, and must not count past its end.
+            // Only rows the track has: delete does not grow it.
             if (row < static_cast<int>(track.chainRefs.size())) {
                 track.chainRefs[static_cast<size_t>(row)] = -1;
                 ++itemsDeleted;
@@ -479,6 +439,14 @@ void Clipboard::clear() {
     chainItems_.clear();
     songItems_.clear();
     tableItems_.clear();
+}
+
+void Clipboard::begin_copy(ClipboardType type, int width, int height) {
+    clear();
+    type_    = type;
+    width_   = width;
+    height_  = height;
+    hasData_ = true;
 }
 
 std::string Clipboard::info() const {

@@ -136,7 +136,7 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
         // CHAN is stored 0-15 and shown 1-16 — the MIDI convention; only the drawing adds the 1.
         case Cell::MIDI_CHANNEL: return dec2(clamp(ins.midiChannel, 0, 15) + 1);
         // 14-bit, so FOUR hex digits — why EXTERNAL's rows are DUALs.
-        case Cell::MIDI_BANK:    return ins.midiBank < 0 ? "----" : hex4(ins.midiBank);
+        case Cell::MIDI_BANK:    return ins.midiBank < 0 ? "----" : hex_padded(ins.midiBank, 4);
         case Cell::MIDI_PROGRAM: return midi_opt(ins.midiProgram);
         case Cell::MIDI_LENGTH:  return hex2(ins.midiLen);
         case Cell::CC_NUMBER: {

@@ -385,9 +385,9 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
         const int ty = ry + TEXT_PADDING;
         c.draw_text("SELECTION", x + 10, ty, cur ? cursor_mark_ink(t) : t.textParam, CHAR_SPACING,
                     FONT_SCALE);
-        draw_cursor_cell(c, hex8(s.selectionStart), x + 180, ty, cur && s.cursorCol == 0,
+        draw_cursor_cell(c, hex_padded(s.selectionStart, 8), x + 180, ty, cur && s.cursorCol == 0,
                          t.textValue, t);
-        draw_cursor_cell(c, hex8(s.selectionEnd), x + 335, ty, cur && s.cursorCol == 1,
+        draw_cursor_cell(c, hex_padded(s.selectionEnd, 8), x + 335, ty, cur && s.cursorCol == 1,
                          t.textValue, t);
     }
 
@@ -423,7 +423,7 @@ void SampleEditorModule::draw(Canvas& c, int x, int y, const SampleEditorState& 
             const int total = s.slice_index_ceiling() + 1;
             c.draw_text("/" + hex2(total), x + 175 + 2 * CHAR_W, ty, t.textParam, CHAR_SPACING, FONT_SCALE);
         }
-        draw_cursor_cell(c, hex8(s.effective_slice_position()), x + 335, ty, cur && s.cursorCol == 1,
+        draw_cursor_cell(c, hex_padded(s.effective_slice_position(), 8), x + 335, ty, cur && s.cursorCol == 1,
                          t.textValue, t);
     }
 

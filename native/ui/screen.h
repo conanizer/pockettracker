@@ -1,9 +1,6 @@
 #pragma once
 
-// ─── Screens ─────────────────────────────────────────────────────────────────────────────────────
-//
-// The labels are drawn (screen headers, the navigation map), so they are part of the UI's contract.
-// Grid positions are in ui/navigation.h.
+// The screens and their drawn labels. Grid positions are in ui/navigation.h.
 
 #include <string>
 
@@ -31,7 +28,7 @@ enum class ScreenType {
     SETTINGS,
     SAMPLE_EDITOR,
 
-    // The order is free (screens are named, not numbered, everywhere) and new ones are appended.
+    // Appended; screens are named, never numbered.
     MIDI,       // reached from PROJECT > MIDI; not on the R+DPAD grid
     MIDI_MAP    // …and from MIDI > MAPPING. Not on the grid either
 };
@@ -59,10 +56,7 @@ inline const char* screen_label(ScreenType s) {
     return "";
 }
 
-/**
- * The navigation map's cell label. Deliberately NOT unique (SCALE and SONG are both "S"): the map draws
- * a screen only in its own column, which disambiguates. One char, to fit the 23 px cell.
- */
+// The navigation map's one-letter label. Not unique (SCALE and SONG are both "S"): the column tells.
 inline const char* screen_short_label(ScreenType s) {
     switch (s) {
         case ScreenType::SONG:          return "S";
