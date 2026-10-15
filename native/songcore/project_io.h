@@ -1,26 +1,12 @@
 #ifndef POCKETTRACKER_SONGCORE_PROJECT_IO_H
 #define POCKETTRACKER_SONGCORE_PROJECT_IO_H
 
-// ─── .ptp / .pti reader + writer + migrate/normalize ────────────────────────────────────────────
-//
-// Reads with nlohmann/json (tolerant of unknown keys and whitespace); writes with a hand-rolled
-// MINIFIED emitter — autosave rewrites the whole file every 3 s, and layout was 82 % of it (flash
-// wear). Every reader sees the same keys, order and omission rules either way.
-//
-// ⚠️ The golden .ptp files the tests load are pretty-printed by the ORIGINAL implementation and must
-// stay that way: regenerating them from this emitter would certify whatever it does. ptroundtrip
-// compares parsed DOMs key by key, in order.
-//
-// The output contract:
-//   * `{"key":value,...}`, no whitespace; "{}" / "[]" when empty; no trailing newline.
-//   * Keys in DECLARATION order (model.h). Unknown keys are ignored on read.
-//   * Defaults are omitted:
-//       - scalar / string / enum / Note / SFOverrides / list : omitted when == the FIELD default
-//         (a list's default is empty);
-//       - fixed-size arrays : ALWAYS emitted;
-//       - nullable fields : omitted when null;
-//       - fields with no default (ids, Note.pitch/octave, InstrumentPreset.instrument) : always.
-//   * Enums by entry NAME; every number an integer.
+// .ptp / .pti: read with nlohmann/json (unknown keys ignored), written by a hand-rolled MINIFIED
+// emitter — autosave rewrites the whole file every 3 s.
+// ⚠️ The golden .ptp files are pretty-printed by the ORIGINAL implementation; never regenerate them
+// from this emitter.
+// Output: keys in declaration order (model.h); a field equal to its default is omitted, except
+// fixed-size arrays and fields with no default; nulls omitted; enums by NAME; integers only.
 
 #include "midi_map.h"
 #include "model.h"
@@ -44,10 +30,7 @@ inline int get_int(const json& j, const char* k, int def) {
     auto it = j.find(k);
     return (it != j.end() && it->is_number()) ? it->get<int>() : def;
 }
-inline int64_t get_i64(const json& j, const char* k, int64_t def) {
-    auto it = j.find(k);
-    return (it != j.end() && it->is_number()) ? it->get<int64_t>() : def;
-}
+
 inline bool get_bool(const json& j, const char* k, bool def) {
     auto it = j.find(k);
     return (it != j.end() && it->is_boolean()) ? it->get<bool>() : def;
@@ -105,9 +88,7 @@ inline Chain parse_chain(const json& j, int index) {
     Chain c(get_int(j, "id", index));
     c.phraseRefs      = parse_int_array(j, "phraseRefs",      c.phraseRefs);
     c.transposeValues = parse_int_array(j, "transposeValues", c.transposeValues);
-    // ⚠️ The CHAIN editor indexes both arrays by cursor row, and a hand-edited or half-written file
-    // can hold a shorter array (normalize_project fixes pool sizes, not arrays inside a Chain), so
-    // they are brought to CHAIN_ROWS here. `chain_phrase_ref` bounds itself independently.
+    // ⚠️ The CHAIN editor indexes these by cursor row, and a hand-edited file can hold short ones.
     c.phraseRefs.resize(CHAIN_ROWS, -1);
     c.transposeValues.resize(CHAIN_ROWS, 0);
     return c;
@@ -273,11 +254,8 @@ inline Instrument parse_instrument(const json& j, int index) {
     return i;
 }
 
-/**
- * ⚠️ A destination this build does not know is KEPT (greyed on screen), so a downgrade never deletes
- * a user's mapping. The controller is clamped to seven bits and each range end to the destination's
- * units separately, so an inverted range survives.
- */
+// ⚠️ A destination this build does not know is KEPT (greyed), so a downgrade deletes no mapping.
+// Each range end is clamped separately, so an inverted range survives.
 inline MidiMapping parse_midi_mapping(const json& j) {
     MidiMapping m;
     m.controller = (uint8_t)std::clamp(get_int(j, "controller", m.controller), 0, 127);
@@ -382,10 +360,7 @@ inline InstrumentPreset parse_instrument_preset(const json& j) {
     return ip;
 }
 
-// ─── migrate + normalize ────────────────────────────────────────────────────────────────────────
-//
-// Repair, don't reject: truncate over-long pools, pad short ones from a default Project. Returns true
-// if anything changed.
+// Repair, don't reject: truncate over-long pools, pad short ones. True if anything changed.
 inline bool normalize_project(Project& p) {
     if ((int)p.phrases.size() == POOL_PHRASES && (int)p.chains.size() == POOL_CHAINS &&
         (int)p.tracks.size() == POOL_TRACKS && (int)p.instruments.size() == POOL_INSTRUMENTS &&
@@ -429,11 +404,7 @@ inline void normalize_and_migrate(Project& p) {
 
 // ─── writer ─────────────────────────────────────────────────────────────────────────────────────
 
-/**
- * How a document is laid out — the schema is identical either way and both forms load everywhere.
- * ⚠️ No default: MINIFIED for .ptp/.pti (autosaved every 3 s, nobody reads it), PRETTY for .ptt themes
- * (~400 bytes, hand-editable, and its golden is pretty — see theme_io.h). A new writer picks a side.
- */
+// Same schema either way. No default: MINIFIED for .ptp/.pti, PRETTY for hand-editable .ptt themes.
 enum class JsonLayout { Minified, Pretty };
 
 class JsonWriter {
@@ -710,9 +681,7 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
         for (int64_t v : i.sliceMarkers) { w.element(); w.value_int(v); }
         w.end_array();
     }
-    // ── EXTERNAL — every field default-guarded ───────────────────────────────────────────────────
-    // A non-EXTERNAL instrument emits no new byte. `midiCC` is whole-or-nothing (unlike modSlots) so
-    // ordinary instruments do not each grow four "{}".
+    // EXTERNAL: every field default-guarded; `midiCC` whole-or-nothing, so others grow no "{}".
     if (i.midiChannel != 0)  w.field_int("midiChannel", i.midiChannel);
     if (i.midiBank != -1)    w.field_int("midiBank", i.midiBank);
     if (i.midiProgram != -1) w.field_int("midiProgram", i.midiProgram);

@@ -1,12 +1,8 @@
 #ifndef POCKETTRACKER_SONGCORE_PROGRAM_H
 #define POCKETTRACKER_SONGCORE_PROGRAM_H
 
-// ─── An instrument as a NUMBER: the flat facts a note is derived from ────────────────────────────
-//
-// `Program` is what the note derivations read off an `Instrument`, as plain scalars — so they can run
-// on the audio thread, which must not touch a string, vector or optional.
-// ⚠️ Keep this header dependency-light (POD and arithmetic only). Pulling in model.h or the sequencer
-// puts the derivation back out of the engine's reach.
+// An instrument as plain scalars (`Program`), so notes can be derived on the audio thread.
+// ⚠️ Keep this header POD and arithmetic only — model.h here would put it out of the engine's reach.
 
 #include <algorithm>
 #include <cstdint>
@@ -24,17 +20,13 @@ constexpr int TICS_PER_STEP = 12;
 inline int   clampi(int v, int lo, int hi)        { return v < lo ? lo : (v > hi ? hi : v); }
 inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi ? hi : v); }
 
-// Reference C-4 for slice mode, which strips ROOT back out of the base frequency.
-// ⚠️ Not note_hz(60) (261.6256): the literal 261.63 is what the goldens were rendered with; swapping
-// them moves every rendered byte.
+// Reference C-4 for slice mode. ⚠️ Not note_hz(60): the goldens were rendered with 261.63.
 constexpr float C4_HZ = 261.63f;
 
 // Instrument kinds as numbers, in InstrumentType's order. ⚠️ A number is an identity: append only.
 enum ProgramType : int8_t { PROGRAM_SAMPLER = 0, PROGRAM_SOUNDFONT = 1, PROGRAM_EXTERNAL = 2 };
 
-// ─── Program ─────────────────────────────────────────────────────────────────────────────────────
-// One instrument, flattened by make_program() (voice_derive.h) with the two facts only the loaders
-// know: the sample-rate ratio and the SoundFont slot.
+// One instrument, flattened by make_program() (voice_derive.h) with the loaders' rate ratio and slot.
 // ⚠️ `sliceMarkers` is a VIEW into caller-owned memory that must outlive the Program.
 struct Program {
     int8_t  type           = PROGRAM_SAMPLER;
@@ -54,10 +46,7 @@ struct Program {
     int32_t        sliceCount   = 0;
 };
 
-// ─── ProgramTable — the engine's own copy, one row per instrument ────────────────────────────────
-//
-// The audio thread cannot read the project (strings and vectors the UI may reallocate). Written from
-// the UI thread when an instrument changes, read at note trigger.
+// ─── ProgramTable: the engine's own copy, written by the UI thread, read at note trigger ─────────
 
 constexpr int PROGRAM_SLOTS = 128;   // instrument ids; static_asserted against POOL_INSTRUMENTS
 
@@ -80,10 +69,7 @@ struct ProgramTable {
         programs[id].sliceMarkers = nullptr;   // view() re-points it
     }
 
-    /**
-     * Instrument `id` as a usable Program. ⚠️ The stored row's `sliceMarkers` is null (a self-pointer
-     * would dangle on copy); it is re-pointed here, valid only while this table lives.
-     */
+    // ⚠️ The stored row's `sliceMarkers` is null (it would dangle on copy); re-pointed here.
     Program view(int id) const {
         if (id < 0 || id >= PROGRAM_SLOTS) return Program{};
         Program p = programs[id];
@@ -92,10 +78,7 @@ struct ProgramTable {
     }
 };
 
-/**
- * Does a note on this program select a slice rather than a pitch? `sliceOverride` is the step's SLI
- * (-1 none). ⚠️ Must agree with model.h's note_selects_slice(), which the scale quantizer asks.
- */
+// ⚠️ Must agree with model.h's note_selects_slice(), which the scale quantizer asks.
 inline bool program_selects_slice(const Program& p, int sliceOverride) {
     return (p.slicingMode != 0 || sliceOverride >= 0) && p.sliceCount > 0;
 }
@@ -154,9 +137,7 @@ struct SoundfontNoteArgs {
     bool  valid = false;        // false = dropped (no soundfontPath, or the SF2 never loaded)
 };
 
-// ─── small derivations ───────────────────────────────────────────────────────────────────────────
-// ⚠️ Keep each operation order: these feed the pitch math, and a 1-ULP drift changes every rendered
-// byte.
+// ⚠️ Keep each operation order: a 1-ULP drift in the pitch math changes every rendered byte.
 
 // (d>>4) + (d&0xF)/16 − 8.
 inline float detune_semitones(int detune) {
@@ -186,9 +167,7 @@ inline void shift_note(int& pitch, int& octave, int semitones) {
     octave = midi / 12 - 1;
 }
 
-// ─── the sampler note ────────────────────────────────────────────────────────────────────────────
-// `sampleLength` is the engine's length for p.sampleId (slice windows need it); the caller asks the
-// engine so this stays pure.
+// `sampleLength` is the engine's, asked by the caller so this stays pure.
 inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame, int trackId,
                                            int instrumentId, const Program& p,
                                            int tempo, int sampleRate, int64_t sampleLength) {
@@ -281,14 +260,10 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     const int noteOctave = n.note / 12 - 1;
 
     const int baseMidi = n.note + n.arp;
-    // ROOT acts as a transpose, as on the sampler: a ROOT below C-4 raises pitch.
-    // ⚠️ `rootAudition` (the INSTRUMENT screen's root preview) plays note == root, which this transpose
-    // would turn into C-4 for every ROOT. The sequencer never sets it.
+    // ROOT acts as a transpose. ⚠️ Not for a root audition, which plays note == root.
     const int transpose = rootAudition ? 0 : 60 - p.rootMidi;
 
-    // The velocity IS the MIDI velocity and TSF applies its own curve, so the note's own gain stays
-    // 1.0 and instrument vol/Vxx arrives via phraseVol. ⚠️ A retrigger must land on the same velocity
-    // as the note it repeats — hence the shared derivation, and no velGain on top of it.
+    // TSF applies its own velocity curve, so the note's gain stays 1.0 and VOL arrives via phraseVol.
     const int   velocity  = clampi(static_cast<int>(note_velocity_unit(n) * 127.0f + 0.5f), 1, 127);
     const float sfNoteVol = 1.0f;
 
@@ -325,9 +300,7 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     return a;
 }
 
-// ─── one note, either kind ───────────────────────────────────────────────────────────────────────
-// The PROGRAM decides which derivation a note takes, so the sequencer and the audio thread run the
-// same fork and cannot disagree.
+// One note, either kind — the Program decides, so the sequencer and the audio thread agree.
 struct DerivedNote {
     bool isSoundfont = false;
     SamplerNoteArgs   sampler;

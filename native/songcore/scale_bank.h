@@ -1,16 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_SCALE_BANK_H
 #define POCKETTRACKER_SONGCORE_SCALE_BANK_H
 
-// ─── The factory scale bank ───────────────────────────────────────────────────────────────────────
-//
-// The shapes A+LEFT/RIGHT cycles on the SCALE screen's top row, also written to `<card>/Scales/` as
-// `.pts` files when that folder is empty. Compiled in, so the cycle works on a fresh or emptied card;
-// the files are a shareable copy, not the source.
-// A display order, not an identity: slots and `.pts` files store twelve bits, never an index, so rows
-// may be reordered (they are grouped for musicians).
-// A mask counts FROM THE KEY: bit k = k semitones above the key, so bit 0 is set in every row.
-// Chromatic is index 0, and is exactly what a default slot holds — "reset" and "load Chromatic" are the
-// same gesture.
+// The factory scales the SCALE screen's top row cycles, also written to `<card>/Scales/` when it is
+// empty. A display order, not an identity (files store twelve bits). Bit k = k semitones above the key.
+// Chromatic is index 0 — what a default slot holds.
 
 #include <string>
 #include <vector>
@@ -26,10 +19,7 @@ struct ScaleBankEntry {
     unsigned    mask;
 };
 
-/**
- * The bank: 38 shapes, every mask distinct (a duplicate could not be told apart by the cycle).
- * TODI is the real thaat (♭2 ♯4 ♭6 ♮7); HALF WHOLE is here because "Diminished" names two scales.
- */
+// Every mask distinct, or the cycle could not tell them apart.
 inline const std::vector<ScaleBankEntry>& scale_bank() {
     static const std::vector<ScaleBankEntry> kBank = {
         {"Chromatic",         0x0FFFu},   // 0 1 2 3 4 5 6 7 8 9 10 11
@@ -103,11 +93,8 @@ inline void scale_apply_bank(Scale& s, int index) {
     s.name = bank[static_cast<size_t>(index)].name;
 }
 
-/**
- * The name to SHOW for a slot: its stored name, else the bank name its intervals match (a fresh slot
- * reads Chromatic), else empty for a hand-built shape.
- * ⚠️ Never written back: the scale pool is omitted from an untouched .ptp, and must stay that way.
- */
+// The name to show: stored, else the bank name it matches, else empty.
+// ⚠️ Never written back: an untouched scale pool is omitted from the .ptp.
 inline std::string scale_display_name(const Scale& s) {
     if (!s.name.empty()) return s.name;
     const int idx = scale_bank_index_by_mask(scale_mask(s));
@@ -121,10 +108,7 @@ inline bool scale_differs_from_its_name(const Scale& s) {
     return idx >= 0 && scale_bank()[static_cast<size_t>(idx)].mask != scale_mask(s);
 }
 
-/**
- * The bank row the cycle steps FROM: the entry the name claims, else the one the intervals match,
- * else 0 — so A+LEFT and A+RIGHT are exact inverses even from a shape the bank lacks.
- */
+// The bank row the cycle steps from: by name, else by intervals, else 0.
 inline int scale_bank_cycle_index(const Scale& s) {
     int idx = scale_bank_index_by_name(s.name);
     if (idx < 0) idx = scale_bank_index_by_mask(scale_mask(s));

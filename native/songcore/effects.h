@@ -1,11 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_EFFECTS_H
 #define POCKETTRACKER_SONGCORE_EFFECTS_H
 
-// ─── Effect resolution ────────────────────────────────────────────────────────────────────────────
-//
 // The FX_* codes and `resolve_step_params`, which folds a step's three FX slots into one bundle,
-// last-wins from slot 1 to 3. Stateless. ARP / CHA / RND / RNL / TIC resolve to nothing here: CHA,
-// RND and RNL rewrite the step before resolution (scheduler), ARP and TIC come from track state.
+// last-wins from slot 1 to 3. CHA/RND/RNL rewrite the step before it (scheduler); ARP and TIC are
+// track state.
 
 #include <cstdint>
 #include <optional>
@@ -46,12 +44,8 @@ constexpr int FX_EQN      = 0x23;  // EQN  per-note EQ preset slot
 constexpr int FX_EQM      = 0x24;  // EQM  master/mixer EQ preset slot
 
 // ─── The MIDI commands ────────────────────────────────────────────────────────────────────────────
-//
-// Router events like any other: `CCA` on a SAMPLER moves the mapped engine parameter, on an EXTERNAL
-// instrument it sends a controller.
-// A CC slot is named by letter; the controller number lives in the instrument, so a re-patched
-// instrument is followed. The consumer resolves it (event.h `CC_SLOT_A`) because an FX-only step's
-// instrument column is 0x00, not the sounding instrument.
+// A CC slot is named by letter; the consumer resolves it to the instrument's controller (event.h
+// `CC_SLOT_A`), since an FX-only step's instrument column is not the sounding instrument.
 constexpr int FX_MPG      = 0x25;  // MPG  MIDI program change (00-7F)
 constexpr int FX_MPB      = 0x26;  // MPB  MIDI pitch bend, absolute (00-FF, 80 = centre)
 constexpr int FX_CCA      = 0x27;  // CCA  instrument CC slot A
@@ -60,44 +54,29 @@ constexpr int FX_CCC      = 0x29;  // CCC  instrument CC slot C
 constexpr int FX_CCD      = 0x2A;  // CCD  instrument CC slot D
 
 // ─── The mixer faders, as effects ─────────────────────────────────────────────────────────────────
-//
-// ⚠️ VTR REPLACES the track's fader rather than scaling it; the MIXER screen keeps showing the
-// authored value. Nothing later puts the engine back, so `SongcoreHost::stop()` restores it
-// (`Sequencer::mixer_vol_active()` is the flag) — otherwise the next PLAY starts at the faded level.
+// ⚠️ VTR REPLACES the fader (the screen keeps the authored value); `SongcoreHost::stop()` restores it.
 constexpr int FX_VTR      = 0x2B;  // VTR  this track's mixer fader (00-FF)
 constexpr int FX_VMV      = 0x2C;  // VMV  the master fader (00-FF), global
 
-// ─── The automation pair ──────────────────────────────────────────────────────────────────────────
-//
-// AUS opens a ramp on the effect to its LEFT and carries the curve; AUF, later, carries the
-// destination (automation.h). Neither is resolved below: resolution discards slot position, and AUS
-// means "the slot to my left". Pairing reads the slots directly.
+// ─── The automation pair (automation.h) ───────────────────────────────────────────────────────────
+// AUS ramps the effect to its LEFT; AUF carries the destination. Not resolved below — resolution
+// discards slot position.
 constexpr int FX_AUS      = 0x2D;  // AUS  automation start: xx = curve (00 ease-in, 80 linear, FF ease-out)
 constexpr int FX_AUF      = 0x2E;  // AUF  automation finish: xx = destination value
 
 // ─── The instrument filter, per note ──────────────────────────────────────────────────────────────
-//
-// They move the filter the instrument declares and never turn one on: with FILTER TYPE = OFF they
-// are inert. Same 00-FF byte as the INSTRUMENT screen's FREQ/RES. Gone at the next note-on, which
-// reloads the chain from the instrument.
+// They move the instrument's filter and never turn one on. Gone at the next note-on.
 constexpr int FX_CUT      = 0x2F;  // CUT  filter cutoff  (00-FF)
 constexpr int FX_RES      = 0x30;  // RES  filter resonance (00-FF)
 
 // ─── The scale commands ───────────────────────────────────────────────────────────────────────────
-//
-// High nibble = key (0 = C … 11 = B), low nibble = slot in the 16-scale pool; capped at 0xBF.
-// The scale a track is in lives on `TrackState`, like the groove: rewound with LIVE, gone at STOP,
-// never saved. SCG is SCA on all eight tracks — the way back for a track SCA moved.
+// High nibble = key (0 = C … 11 = B), low = scale slot; capped at 0xBF. Track state, never saved.
 constexpr int FX_SCA      = 0x31;  // SCA  this track's scale: x = key, y = slot
 constexpr int FX_SCG      = 0x32;  // SCG  every track's scale, same byte layout
 
-// ─── The filter, switched ON from a cell ──────────────────────────────────────────────────────────
-//
-// Each sets the type AND the cutoff, so a fresh instrument (FILTER TYPE OFF) can get a filter from the
-// FX column. CUT still moves the cutoff without touching the type.
-// ⚠️ Type and cutoff ride ONE bus record (CC id = type, value = cutoff): split, the filter would open
-// a block before it changes shape — a click at the head of every sweep.
-// Notch and peak are deliberately not here; they belong in the INSTRUMENT screen's type list.
+// ─── The filter, switched ON from a cell: type AND cutoff ─────────────────────────────────────────
+// ⚠️ Both ride ONE bus record (CC id = type, value = cutoff): split, they could land a block apart and
+// click at the head of every sweep.
 constexpr int FX_LPF      = 0x33;  // LPF  low-pass ON at this cutoff  (00-FF)
 constexpr int FX_HPF      = 0x34;  // HPF  high-pass ON at this cutoff (00-FF)
 constexpr int FX_BPF      = 0x35;  // BPF  band-pass ON at this cutoff (00-FF)
@@ -107,11 +86,8 @@ inline constexpr int fx_filter_mode(int code) {
     return code == FX_LPF ? 1 : code == FX_HPF ? 2 : code == FX_BPF ? 3 : 0;
 }
 
-// ─── The two dirt commands ────────────────────────────────────────────────────────────────────────
-//
-// Read by the sampler's per-block recompute, so they act on the sounding note; reset at the next
-// note-on, like CUT/RES.
-// ⚠️ 0x36 is retired (a sample-end command that never shipped) and must never be reused.
+// ─── The two dirt commands: on the sounding note, reset at the next ───────────────────────────────
+// ⚠️ 0x36 is retired and must never be reused.
 constexpr int FX_DRV      = 0x37;  // DRV  overdrive amount (00 = clean, FF = heavy)
 
 // One cell, two 4-bit values: left digit crushes bits, right one downsamples.
@@ -122,30 +98,16 @@ constexpr int FX_CRU      = 0x38;  // CRU  xy: x = bits crushed (0-F), y = downs
 inline constexpr int crush_cmd_bits(int value)       { return (value >> 4) & 0x0F; }
 inline constexpr int crush_cmd_downsample(int value) { return value & 0x0F; }
 
-// ─── The cents between the semitones ─────────────────────────────────────────────────────────────
-//
-// One semitone either way in 256 steps, filling the gap PIT leaves. Retunes the SOUNDING note, so a
-// ramp is a pitch bend. On a note step it lands one frame after the trigger (`voiceFxFrame`), like
-// CUT/RES and the sends. Reset at the next note.
+// ─── Fine tune: a semitone either way in 256 steps, on the sounding note ─────────────────────────
 constexpr int FX_FIN      = 0x39;  // FIN  fine tune (00 = a semitone flat, 80 = in tune, FF = sharp)
 
-// ─── How far a step follows the transposes ───────────────────────────────────────────────────────
-//
-// A signed multiplier: 01 normal, 02 double, 00 immune, FF mirrored, FE mirrored double. Whole
-// semitones only, so no rounding rule.
-// It scales the chain TSP column and the project transpose together — the one quantity the instrument's
-// TRANSP. switch silences. Phrase only: by the time a table row runs, the transpose is folded into the
-// pitch.
+// ─── How far a step follows the chain and project transposes ──────────────────────────────────────
+// A signed multiplier: 01 normal, 02 double, 00 immune, FF mirrored. Phrase only.
 constexpr int FX_TSX      = 0x3A;  // TSX  transpose multiplier (00 immune, 01 normal, FF mirrored)
 
-// ─── The loop window, slid ───────────────────────────────────────────────────────────────────────
-//
-// Moves both ends of the loop together, so the loop length — and the pitch of a looped note — stays.
-// The unit is signed sixteenths of the loop's own length: `10` is one loop, `F0` one loop back.
-// ⚠️ Cumulative, and the engine keeps the running total in SIXTEENTHS and derives samples from it each
-// block: summing rounded per-step offsets would drift off a wave boundary on a loop not divisible
-// by 16.
-// The window stops at the sample's ends (no wrap) and the count resets on every new note.
+// ─── The loop window, slid by signed sixteenths of its own length (`10` = one loop) ──────────────
+// ⚠️ Cumulative; the engine keeps the total in SIXTEENTHS, since summing rounded offsets would drift.
+// Stops at the sample's ends; resets on every new note.
 constexpr int FX_LPO      = 0x3B;  // LPO  slide the loop window, signed sixteenths of its own length
 
 /** A LPO byte to signed sixteenths of a loop length: 00-7F forward, 80-FF back. */
@@ -156,20 +118,12 @@ inline constexpr int loop_slide_sixteenths(int value) { return (value & 0xFF) < 
 // so they can pick the instrument. Phrase only, and only on a step with a note.
 constexpr int FX_INS      = 0x3C;  // INS  play this note on instrument xx
 
-// ─── The delay's echo time, from a cell ──────────────────────────────────────────────────────────
-//
-// Always the free 0-2 s scale, even when the DELAY screen is in sync mode: a ramp needs a continuous
-// range, and a cell must not change meaning with a screen setting.
-// ⚠️ Replaces the screen's TIME until STOP, like VTR/VMV and EQM: `MixerHeld` (engine_setup.h) keeps a
-// mid-take globals push from wiping it, and `SongcoreHost::stop()` restores the project's time.
-// The head glides to the new time (delay-module.h), so it is heard as a tape-style bend.
+// ─── The delay's echo time, always on the free 0-2 s scale ───────────────────────────────────────
+// ⚠️ Replaces the screen's TIME until STOP, like VTR (`MixerHeld`, `SongcoreHost::stop()`).
 constexpr int FX_TIM      = 0x3D;  // TIM  delay echo time, free scale (00-FF = 0-2 s), global
 
-/** The instrument an INS cell on this step names, or -1. Rightmost wins, as in the scheduler. */
 // ─── A row for some passes only ───────────────────────────────────────────────────────────────────
-// NTH xy: the row plays on pass x of every y passes of its phrase, and is an empty row on the others.
-// y = 0: on pass x and never again. 00 holds nothing back. A pass is one entry of the phrase on its
-// track, counted from 1 since playback started.
+// NTH xy: the row plays on pass x of every y entries of its phrase (y = 0: on pass x only); 00 always.
 constexpr int FX_NTH      = 0x3E;
 
 inline constexpr bool nth_plays(int value, int pass) {
@@ -188,6 +142,7 @@ inline bool step_plays_on_pass(const PhraseStep& s, int pass) {
     return true;
 }
 
+// The instrument an INS cell on this step names, or -1. Rightmost wins.
 inline int step_ins_instrument(const PhraseStep& s) {
     if (s.fx3Type == FX_INS) return s.fx3Value & 0xFF;
     if (s.fx2Type == FX_INS) return s.fx2Value & 0xFF;
@@ -227,9 +182,7 @@ inline std::string effect_name(int code) {
     }
 }
 
-// Max parameter byte for an effect. Pool refs (table, groove, EQ preset) and MPG — a 7-bit program
-// number — cap at 0x7F; SCA/SCG at 0xBF (twelve keys); the rest at 0xFF. MPB is the 14-bit value's
-// top byte, so 0xFF.
+// Max parameter byte: pool refs and MPG 0x7F, SCA/SCG 0xBF, the rest 0xFF.
 inline constexpr int effect_value_max(int effect_type) {
     if (effect_type == FX_SCA || effect_type == FX_SCG) return 0xBF;
     return (effect_type == FX_TBL || effect_type == FX_GRV ||
@@ -242,10 +195,8 @@ inline constexpr int effect_value_max(int effect_type) {
 inline constexpr int scale_cmd_key(int value) { return ((value >> 4) & 0x0F) > 11 ? 11 : ((value >> 4) & 0x0F); }
 inline constexpr int scale_cmd_slot(int value) { return value & 0x0F; }
 
-// The FX-type column's cycle order and the FX picker grid's reading order. An effect missing here
-// cannot be typed. A `.ptp` stores the effect CODE and the index is only a live cursor value, so
-// re-ordering does not change saved cells — but it does move the picker grid, the recorded input tests, and
-// the hidden tails below.
+// The FX column's cycle order and the picker's reading order. A `.ptp` stores the CODE, so re-ordering
+// changes no saved cell — but it moves the picker, the input tests and the hidden tails below.
 inline constexpr int EFFECT_TYPES[] = {
     FX_NONE, FX_ARC, FX_CHA, FX_LAT, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
     FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
@@ -287,9 +238,8 @@ static_assert(EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 0] == FX_MPG &&
               "the MIDI commands must stay the LAST six entries of EFFECT_TYPES — a build that hides "
               "them shortens the list, so anything after them would be hidden too");
 
-// ⚠️ LPO is hidden from release builds the same way (platform_caps.h `loopWindow`) and must sit
-// directly below the MIDI six. Nothing can be dropped from the MIDDLE of this list, so hiding LPO
-// also hides MIDI: the trims nest.
+// ⚠️ LPO is hidden from release builds the same way and must sit directly below the MIDI six: the
+// trims nest.
 inline constexpr int PREVIEW_EFFECT_COUNT     = 1;   // FX_LPO
 inline constexpr int EFFECT_TYPE_COUNT_STABLE = EFFECT_TYPE_COUNT_NO_MIDI - PREVIEW_EFFECT_COUNT;
 
@@ -309,11 +259,8 @@ inline int effect_type_at(int index) {
     return (index >= 0 && index < EFFECT_TYPE_COUNT) ? EFFECT_TYPES[index] : FX_NONE;
 }
 
-// ─── Where a phrase is certain to end ─────────────────────────────────────────────────────────────
-// The first row carrying a HOP that fires on every pass, or -1. An NTH on the row holds the HOP back
-// with it, and a CHA beside the HOP gates it (the nearest filled slot either side, as the scheduler
-// rolls it, which looks past an NTH), so only an always-pass nibble (F) leaves it certain.
-// ⚠️ A hint for the editor: the phrase before can still HOP in below this row.
+// The first row with a HOP that fires on every pass (no NTH, no CHA that could gate it), or -1.
+// A hint for the editor only: the phrase before can still HOP in below this row.
 inline int phrase_certain_hop_row(const Phrase& phrase) {
     const auto unused = [](int type) { return type == FX_NONE || type == FX_NTH; };
     for (int row = 0; row < static_cast<int>(phrase.steps.size()); ++row) {
@@ -463,14 +410,8 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
     return p;
 }
 
-/**
- * How many semitones the chain TSP column and the project transpose move THIS step, after the
- * instrument's TRANSP. switch (off wins over any TSX) and the step's TSX.
- * One function because the note, a REPEAT retrigger and the arpeggio all need the same figure.
- * ⚠️ Sliced instruments are deliberately not a case: slice SELECTION already ignores the transpose
- * (voice_derive.h), while the pitch follows it — that is what lets a transposed chain move a break up.
- * `instrumentId` is the raw column; an out-of-range or empty one just transposes.
- */
+// The semitones the chain and project transposes move THIS step, after TRANSP. (off wins) and TSX.
+// Sliced instruments are not a case: slice selection already ignores the transpose (voice_derive.h).
 inline int effective_transpose_semitones(int transposeSemitones, const Project& project,
                                          int instrumentId,
                                          const std::optional<int>& tsxMultiplier) {

@@ -1,21 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_RENDER_H
 #define POCKETTRACKER_SONGCORE_RENDER_H
 
-// ─── The offline render ──────────────────────────────────────────────────────────────────────────
-//
-// Ready the engine, render the scheduled span in chunks, let the tail ring out, stream it to a WAV,
-// put the engine back. The scheduler is not part of this: prepare → (caller schedules) → render.
-//
-// A render is a pure function of the project:
-//   • The START inherits nothing: prepare_render resets every effect chain (reverb tail, delay buffer,
-//     OTT/limiter envelopes, the reverb's LCG) and re-pushes the project (engine_setup.h).
-//   • The END keeps its tail: rendering continues until the output decays below −90 dBFS, capped so
-//     runaway feedback cannot render forever.
-//   • The range running out KILs every track at the last row's end frame, so looping samples and
-//     held SoundFont notes release instead of ringing until the cap.
-//
-// Live playback is unaffected; the only other caller of resetEffectState() is the engine itself on a
-// device rate change, which restores the bus settings (AudioEngine::setDeviceSampleRate).
+// The offline render: prepare → (caller schedules) → render to WAV → finish. A render is a pure
+// function of the project: it starts from reset effect chains, ends every note at the range's end,
+// and keeps the tail until it decays below −90 dBFS (capped).
 
 #include <algorithm>
 #include <cmath>
@@ -58,9 +46,7 @@ struct RenderOptions {
     bool applyMasterBus = true;
 };
 
-// ─── prepare ─────────────────────────────────────────────────────────────────────────────────────
-// ⚠️ Wipe the chains FIRST, re-push the project SECOND: resetEffectState() leaves every module at
-// factory defaults, and without the re-push the render uses default reverb and delay.
+// ⚠️ Wipe the chains FIRST, re-push the project SECOND — the reset leaves factory defaults.
 template <typename Engine>
 void prepare_render(Engine& engine, const Project& project, const Routing& routing,
                     int startRow, int endRow) {
@@ -73,9 +59,7 @@ void prepare_render(Engine& engine, const Project& project, const Routing& routi
     push_project_params(engine, project, routing, startRow, endRow);
 }
 
-// ─── render ──────────────────────────────────────────────────────────────────────────────────────
-// `songFrames` is the scheduler's span (0 to the last step's boundary); the file is that plus however
-// long the audio takes to die away. `progress` reports 0..1 over the song, then 1.0 once for the tail.
+// `songFrames` is the scheduled span; the file is that plus the tail. `progress` 0..1 over the song.
 template <typename Engine>
 RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFrames,
                           const std::string& path,
@@ -96,9 +80,7 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
 
     std::vector<float> buf(static_cast<size_t>(RENDER_CHUNK_FRAMES) * 2);
 
-    // ── the range ends, so the notes do ──
-    // A KIL at the frame the last row ends on, queued on the sample-accurate timeline. What follows in
-    // the file is the TAILS alone — releases, reverb, delay — not the rest of each track's bar.
+    // The range ends, so the notes do; what follows is the tails alone.
     engine.scheduleNoteOffAll(songFrames);
 
     // ── the song ──
@@ -112,12 +94,9 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
     }
     stats.songFrames = songFrames;
 
-    // ── the tail ──
-    // Render past the end until a whole chunk peaks below −90 dBFS; that chunk is not written, so the
-    // file ends where the music does with no cut through a ringing waveform.
-    // This drains the note queue too: a DEL / arp / retrig on the final step can sound past
-    // `songFrames`. ⚠️ Such a note starts after the release above; if it loops, it rings until the cap
-    // (releasing again would cut those notes at birth).
+    // The tail: render until a whole chunk peaks below −90 dBFS, and drop that chunk.
+    // ⚠️ A late note (a DEL or retrig on the final step) starts after the release; if it loops it
+    // rings until the cap.
     if (progress) progress(1.0f);
     const int64_t maxTail = static_cast<int64_t>(TAIL_MAX_SECONDS) * sampleRate;
     int64_t tail = 0;
@@ -142,9 +121,7 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
     return stats;
 }
 
-// ─── finish ──────────────────────────────────────────────────────────────────────────────────────
-// Back to live playback. The master EQ returns to the project's slot — a song's EQM changes the
-// global master EQ.
+// Back to live playback; the master EQ returns to the project's slot (an EQM may have moved it).
 template <typename Engine>
 void finish_render(Engine& engine, const Project& project) {
     engine.setStemsMode(0);
@@ -182,13 +159,9 @@ inline SongBounds find_song_bounds(const Project& project) {
     return b;
 }
 
-// ─── SECTIONS: the run of rows a render range defaults to ────────────────────────────────────────
-//
-// A run of consecutive song rows with content, bounded by rows blank on EVERY track — the default for
-// SONG START / SONG END. ⚠️ Not the scheduler's block (one track's run, `song_cell_plays`): a render
-// picks rows for all eight tracks, and a section contains every track's block.
+// ─── Sections: runs of song rows bounded by rows blank on EVERY track — the render range default ─
+// Not the scheduler's block, which is one track's run.
 
-/** Does any track have a chain on this row? A row where none does is a section boundary. */
 inline bool song_row_filled(const Project& project, int row) {
     if (row < 0 || row >= 256) return false;
     for (const Track& track : project.tracks) {
@@ -200,11 +173,7 @@ inline bool song_row_filled(const Project& project, int row) {
     return false;
 }
 
-/**
- * The first row of the section `row` sits in.
- * ⚠️ A blank row belongs to the section BELOW it: a cursor in a gap is usually heading to the next
- * part. With nothing below, the nearest part above; on an empty song, row 0.
- */
+// The first row of `row`'s section. A blank row belongs to the section BELOW (else above; else 0).
 inline int song_section_start(const Project& project, int row) {
     if (row < 0) row = 0;
     int at = -1;
@@ -223,10 +192,7 @@ inline int song_section_end(const Project& project, int startRow) {
     return at;
 }
 
-/**
- * The start of the section before or after the one `row` is in — R+UP/DOWN in the render dialog.
- * Returns `row`'s own section when there is none that way, so the gesture clamps rather than wrapping.
- */
+// The start of the section before or after `row`'s; clamps rather than wrapping.
 inline int adjacent_section_start(const Project& project, int row, int delta) {
     const int here = song_section_start(project, row);
     if (delta > 0) {
@@ -239,12 +205,9 @@ inline int adjacent_section_start(const Project& project, int row, int delta) {
     return here;
 }
 
-// ─── the STEMS plan ──────────────────────────────────────────────────────────────────────────────
-//
-// WHICH stems a project has, not where they are written: paths need a filesystem, which songcore
-// lacks. The file half is ui/project_actions.h.
+// ─── Stems: which ones a project has (the files are ui/project_actions.h) ───────────────────────
 
-/** The project name made safe for a filename: `[^a-zA-Z0-9_\-]` → `_`, at most 32 chars. */
+// The project name made safe for a filename: `[^a-zA-Z0-9_\-]` → `_`, at most 32 chars.
 inline std::string safe_project_name(const std::string& name) {
     std::string out;
     for (char ch : name) {
@@ -263,12 +226,8 @@ struct StemPass {
     std::string label;    // the progress line
 };
 
-/**
- * The passes a stems render makes over `startRow..endRow` (−1, −1 = the whole song).
- * A track earns a stem when NOT MUTED with a chain reference IN THE RANGE; a send return when an
- * instrument the range uses feeds it. Track stems are numbered SEQUENTIALLY (_1.._N), not by index.
- * ⚠️ The RANGE decides: exporting one part must not write silent files for tracks playing elsewhere.
- */
+// The passes over `startRow..endRow` (−1, −1 = all): a stem per unmuted track with a chain IN THE
+// RANGE, numbered _1.._N, and per send return an instrument in the range feeds.
 inline std::vector<StemPass> stems_plan(const Project& project, int startRow = -1, int endRow = -1) {
     std::vector<StemPass> passes;
 

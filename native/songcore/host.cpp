@@ -67,9 +67,7 @@ int64_t SongcoreHost::play_phrase(int phraseId, int trackId) {
 }
 
 void SongcoreHost::stop() {
-    // ⚠️ Two sources arm this restore: a phrase EQM (the scheduler knows) and a TABLE row's EQM
-    // (applied inside the engine). Read the engine's latch UNCONDITIONALLY, or it leaks into the
-    // next take.
+    // ⚠️ A phrase EQM or a TABLE's arms this; read the engine's latch UNCONDITIONALLY, or it leaks.
     const bool table_eqm = engine_ && engine_->takeTableMasterEqTouched();
     if (engine_ && (seq_.eqm_active() || table_eqm) && seq_.has_live_project()) {
         engine_->setMasterEqSlot(project_.masterEqSlot);
@@ -340,10 +338,7 @@ bool SongcoreHost::load_project_file(const std::string& path, const std::string&
     std::string blob;
     if (!pt_read_file(path.c_str(), blob)) return false;
 
-    // ⚠️ The transport stops BEFORE the document is replaced. Left running, the scheduler walks
-    // the old song's position through the new data, falls behind the clock, and the new song
-    // starts late and without its first row. A parse failure therefore leaves the transport
-    // stopped with the previous project intact — there is no position to resume to.
+    // ⚠️ Stop BEFORE the document is replaced, or the walk runs the old position through new data.
     const bool wasPlaying = seq_.is_playing();
     stop();
 
@@ -353,9 +348,7 @@ bool SongcoreHost::load_project_file(const std::string& path, const std::string&
     load_media(baseDir);
     push_params();
 
-    // Loading while playing SWITCHES SONGS: a hard cut (the media decode blocks), then the new song
-    // from row 0 — an old CHAIN or PHRASE id means nothing in the new document. `play_song`
-    // re-reads the clock after the disk work. Nothing starts that was not already playing.
+    // Loading while playing switches songs: the new one from row 0.
     if (wasPlaying) play_song(0);
     return true;
 }
@@ -561,10 +554,8 @@ void SongcoreHost::preview_note(int instrumentId, const Note& note, int64_t dura
 
     NoteOnPayload& n = ev.noteOn;
     n.note        = static_cast<uint8_t>(note_to_midi(note));
-    // ⚠️ The velocity fields are wired differently per destination. The sampler takes VOL as
-    // `velGain` (the crossed wiring, see event.h). The cable and the SoundFont read velocity −1
-    // as "derive from velGain = (V/127)²" and take a square root, which would boost a raw VOL. So
-    // they get full velocity, with VOL in the field that scales by VOL — as a played note has it.
+    // ⚠️ The sampler takes VOL as `velGain`; the cable and the SoundFont would square-root it, so
+    // they get full velocity and VOL where a played note has it.
     const bool fullVelocity = external || ins.instrumentType == InstrumentType::SOUNDFONT;
     n.velocity    = fullVelocity ? 127 : -1;
     n.velGainBits = f32_bits(fullVelocity ? 1.0f : hex_to_float(ins.volume));   // seam arg `volume`
@@ -574,9 +565,7 @@ void SongcoreHost::preview_note(int instrumentId, const Note& note, int64_t dura
     n.transpose = 0; n.pit = 0; n.arp = 0;
     n.pslOffBits = n.pslDurBits = n.pbnRateBits = n.vibSpdBits = n.vibDepBits = f32_bits(0.0f);
 
-    // ⚠️ Unconditionally, whichever way this instrument routes: a note-on for an internal
-    // instrument on a lane last used by an EXTERNAL one ends the note the cable still holds.
-    // START is exempt from `on_stop_preview`, so nothing else would.
+    // ⚠️ Whatever the routing: on a lane last used by an EXTERNAL instrument this ends the cable's note.
     external_.consume(ev);
 
     if (external) {
@@ -609,9 +598,7 @@ void SongcoreHost::stop_preview(bool cut) {
     if (cut) engine_->scheduleCut(now, AudioEngine::PREVIEW_LANE);
     else     engine_->scheduleKill(now, AudioEngine::PREVIEW_LANE);
     preview_note_off(now);
-    // ⚠️ An auditioned TABLE can carry an EQM, and no transport stop follows an audition — so the
-    // master EQ is restored here. Only while IDLE: playing, the latch belongs to stop() and the
-    // song's own table rows.
+    // ⚠️ An auditioned TABLE can carry an EQM and no stop follows, so restore here — only while idle.
     if (!seq_.is_playing() && seq_.has_live_project() && engine_->takeTableMasterEqTouched())
         engine_->setMasterEqSlot(project_.masterEqSlot);
 }

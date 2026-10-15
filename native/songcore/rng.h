@@ -1,23 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_RNG_H
 #define POCKETTRACKER_SONGCORE_RNG_H
 
-// ─── The scheduler's random source ────────────────────────────────────────────────────────────────
-//
-// For the four random FX: CHA (chance gate), RND and RNL (randomize an FX value, or note +
-// instrument), and ARP mode 3 (RANDOM).
-//
-// Not golden-compared: the sequence is seeded from the platform, so no draw-for-draw truth exists.
-// What the tests check is the DISTRIBUTION — the exact SUPPORT (where off-by-one bugs show, with no
-// statistics) and a uniform shape:
-//
-//     next_int(bound)         CHA roll: next_int(15) → 0..14
-//     next_int(from, until)   RND/RNL: the amount added, 0..XY
-//     next_int(3) as index    ARP RANDOM
-//
-// ⚠️ Half-open at the top: RND/RNL draw next_int(0, range + 1) so `range` itself can come out. Get it
-// wrong and the FX silently never reaches its top value.
-// Two runs of the same song differ, so a render with random FX is never reproducible.
-// seed() is for the tests only. Real-time safe once constructed.
+// The random source for CHA, RND/RNL and ARP RANDOM; seeded from the platform, so a render with them
+// is never reproducible (seed() is for tests). Real-time safe once constructed.
+// ⚠️ Half-open at the top: RND/RNL draw next_int(0, range + 1), or `range` itself never comes out.
 
 #include <chrono>
 #include <cstdint>
@@ -62,9 +48,7 @@ class Rng {
     }
 
   private:
-    /// Uniform over [0, bound), bound >= 1. Rejection-sampled, not `% bound`, which would bias the low
-    /// values whenever bound does not divide 2^32. For the bounds in use it retries with probability
-    /// under 6e-8.
+    /// Uniform over [0, bound), bound >= 1. Rejection-sampled: `% bound` would bias the low values.
     uint32_t bounded(uint32_t bound) {
         uint32_t limit = (0xFFFFFFFFu / bound) * bound;   // largest exact multiple of bound
         uint32_t r;
@@ -72,8 +56,7 @@ class Rng {
         return r % bound;
     }
 
-    /// Seeded from the platform, mixed: a clock read is too coarse for two Sequencers built in one
-    /// tick, so it is folded with an address (ASLR) through splitmix64's finalizer.
+    /// A clock read folded with an address through splitmix64.
     /// ⚠️ Not std::random_device — it is deterministic on some MinGW toolchains.
     static uint64_t platform_entropy() {
         uint64_t x = static_cast<uint64_t>(

@@ -1,12 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_TIMING_H
 #define POCKETTRACKER_SONGCORE_TIMING_H
 
-// ─── Timing, groove, and transpose math ───────────────────────────────────────────────────────────
-//
-// The stateless arithmetic the scheduler calls; no per-track state here.
-// framesPerStep is binary64 truncated to an integer, in a fixed evaluation order
-// (60000.0 / tempo / 4.0 * sr / 1000.0, left to right) — ⚠️ change the order and the frame counts,
-// and every golden, change. A test checks it against a recorded golden.
+// Timing, groove and transpose math for the scheduler.
+// ⚠️ framesPerStep is binary64 truncated, evaluated `60000.0 / tempo / 4.0 * sr / 1000.0` left to
+// right — change the order and every golden changes.
 
 #include <cstdint>
 #include "model.h"
@@ -72,9 +69,8 @@ inline int groove_ticks_for_step(const Groove& g, int groove_step) {
     return g.steps[groove_step % len];
 }
 
-// Rewrite a groove's steps in another ruler, so it plays the same. Doubling is exact; halving rounds
-// to the nearest tic. ⚠️ A step never rounds to 0 — 0 skips its row, which is a different groove.
-// Refused whole (false, nothing changed) when a step would pass 255.
+// A groove's steps in another ruler, playing the same; halving rounds. ⚠️ A step never rounds to 0
+// (that skips its row). False, unchanged, when a step would pass 255.
 inline bool groove_set_ruler(Groove& g, int ticks_per_step) {
     const int from = groove_ticks_per_step(g);
     std::vector<int> out = g.steps;
@@ -89,15 +85,9 @@ inline bool groove_set_ruler(Groove& g, int ticks_per_step) {
     return true;
 }
 
-// Per-step duration in frames. An active groove scales the step by its tic count — 0 skips the row;
-// no active groove is one plain step.
-//
-// ⚠️ MULTIPLY THEN DIVIDE. The scheduler ACCUMULATES these durations; dividing first loses up to
-// TICS_PER_STEP−1 frames per step, and a grooved track drifts fast against an ungrooved one (a whole
-// step in 33 bars at 140 BPM). This deliberately differs from the recorded golden, which the test
-// accounts for as an exact offset.
-// `frames_per_tic` is still the unit an EFFECT positions itself in within a step — just not what a
-// step's length is built from, and not the groove's ruler either.
+// A step's length in frames: scaled by an active groove's tics (0 skips the row).
+// ⚠️ MULTIPLY THEN DIVIDE: the scheduler accumulates these, and dividing first drifts a grooved track
+// against an ungrooved one. (`frames_per_tic` is an effect's unit inside a step, not this.)
 inline int64_t groove_step_duration(const Groove& g, int groove_step,
                                     int64_t frames_per_step_value) {
     if (groove_active_length(g) == 0) return frames_per_step_value;

@@ -1,15 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_ROUTER_H
 #define POCKETTRACKER_SONGCORE_ROUTER_H
 
-// ─── The MIDI event bus / router ─────────────────────────────────────────────────────────────────
-//
-// The scheduler talks to the engine through this: one method per kind of engine call, each building
-// one songcore::Event (event.h) and handing it to every attached IMidiConsumer. The trace text
-// (trace_writer.h) is just one consumer.
-//
-// Nothing here derives audio: seam arguments are copied verbatim (floats as raw binary32 bits). The
-// SF velocity curve, slice window and baseFreq stay consumer-side, never on the bus.
-// Transport (t_play / t_stop) is not an Event; it passes straight to on_play / on_stop.
+// The event bus: one method per kind of engine call, each building an Event (event.h) for every
+// consumer — the engine, the cable, the trace writer. Arguments are copied verbatim; nothing here
+// derives audio. Transport is not an Event: it goes to on_play / on_stop.
 
 #include <cstdint>
 #include <cstring>
@@ -18,9 +12,7 @@
 
 namespace songcore {
 
-// ─── NoteOn seam arguments ────────────────────────────────────────────────────────────────────────
-// The engine's scheduleNote arguments, with defaults, so call sites read like named-argument calls.
-// The router folds pitch/octave into the MIDI number, (octave+1)*12+pitch.
+// A note-on's arguments, with defaults, so call sites read like named arguments.
 struct NoteArgs {
     int64_t frame        = 0;
     int     track        = 0;
@@ -55,13 +47,8 @@ struct IMidiConsumer {
     virtual void on_stop() = 0;
 };
 
-// ─── Which instrument is a track's events for? ───────────────────────────────────────────────────
-//
-// ⚠️ Only NoteOn carries an instrument; NoteOff, CC and EXT events are TRACK-SCOPED (`INSTRUMENT_NONE`).
-// With two consumers routing per instrument, "is this note-off mine?" needs an answer, so it is
-// derived once here: the last NoteOn on a track names the instrument of what follows. Both consumers
-// keep one, so they reach the same verdict — or a note plays twice or by nobody.
-// ⚠️ Assumes per-track events arrive in non-decreasing frame order, which the scheduler guarantees.
+// Which instrument a track's events are for: only NoteOn carries one, so the last NoteOn on a track
+// names what follows. ⚠️ Both consumers keep one, so they agree — or a note plays twice or never.
 struct TrackInstruments {
     // 0-7 sequencer + TRACK_PREVIEW (8). TRACK_GLOBAL never resolves to an instrument.
     static constexpr int LANES = TRACK_PREVIEW + 1;
@@ -86,10 +73,7 @@ struct TrackInstruments {
                             INSTRUMENT_NONE};
 };
 
-// ─── The router ─────────────────────────────────────────────────────────────────────────────────
-// Fans each record out to every consumer — the engine consumer, the cable, and the trace writer when
-// tracing — in the same order, so a trace is a faithful witness of what was scheduled. Consumers are
-// owned by the host; attach/detach happens on the transport thread, never mid-dispatch.
+// Fans each record out to every consumer in the same order. Attach/detach never mid-dispatch.
 struct MidiRouter {
     static constexpr int MAX_CONSUMERS = 4;
 
@@ -108,7 +92,6 @@ struct MidiRouter {
             return;
         }
     }
-    void clear_consumers() { count_ = 0; }
 
     // ── transport ──
     void t_play(const std::string& kind, const std::string& detail,

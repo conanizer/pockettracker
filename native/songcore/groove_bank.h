@@ -1,25 +1,11 @@
 #ifndef POCKETTRACKER_SONGCORE_GROOVE_BANK_H
 #define POCKETTRACKER_SONGCORE_GROOVE_BANK_H
 
-// ─── The factory groove bank ──────────────────────────────────────────────────────────────────────
-//
-// The shapes A+LEFT/RIGHT cycles on the GROOVE screen's name cell, also written to
-// `<card>/Grooves/` as `.ptg` files when that folder is empty. Compiled in so the cycle works on an
-// empty card; a display order, not an identity, so rows may be reordered.
-//
-// A pair of sixteenths is 24 tics, and the classic swing amounts (50 · 54 · 58 · 62 · 66 · 71 · 75 %)
-// are exactly its integer splits — one tic per rung.
-// `0D 0D 0B 0B` swings the eighths; `0D 0C 0B 0C` looks similar but is a 52 % sixteenth pattern.
-// The last four are not swing: they are for `GRV`, turning rows into triplets or half/double time.
-//
-// ⚠️ A cycle must fill `rows × 12` tics, or the phrase runs a different length from every ungrooved
-// track. A `0` step skips its row at no time cost — that is how triplets fit:
-//
-//   TRIPLET 8   16+16+16 = 48 tics over 4 rows  ✓
-//   TRIPLET 4   32+32+32 = 96 tics over 8 rows  ✓
-//
-// No sixteenth-triplet row is possible: three would need to fit in two rows, and a `0` can only add
-// a row, never remove one.
+// The factory grooves the GROOVE screen's name cell cycles, also written to `<card>/Grooves/` when it
+// is empty. A display order, not an identity. A pair of sixteenths is 24 tics, so each swing rung is
+// one tic.
+// ⚠️ A cycle must fill `rows × 12` tics, or the phrase runs a different length from ungrooved tracks.
+// A `0` step skips its row at no cost — how triplets fit (16+16+16 over 4 rows).
 
 #include <string>
 #include <vector>
@@ -94,11 +80,7 @@ inline int groove_bank_index_by_name(const std::string& name) {
     return -1;
 }
 
-/**
- * Replace a slot's steps with a factory groove's, and take its name. Everything past them is blank.
- * The slot keeps its ruler when the groove can be written in it exactly; otherwise it takes the
- * bank's (an odd tic count has no half).
- */
+// A factory groove into a slot, name and all; the slot keeps its ruler if the groove fits it exactly.
 inline void groove_apply_bank(Groove& g, int index) {
     const std::vector<GrooveBankEntry>& bank = groove_bank();
     if (index < 0 || index >= static_cast<int>(bank.size())) return;
@@ -115,10 +97,7 @@ inline void groove_apply_bank(Groove& g, int index) {
     g = (groove_set_ruler(kept, ruler) && groove_matches_bank(kept, e)) ? kept : filled;
 }
 
-/**
- * The name to SHOW for a slot: its stored name, else the bank name its steps match (so a new groove
- * reads STRAIGHT), else empty. Never written back.
- */
+// The name to show: the stored one, else the bank name its steps match, else empty.
 inline std::string groove_display_name(const Groove& g) {
     if (!g.name.empty()) return g.name;
     const int idx = groove_bank_index_by_steps(g);
@@ -132,10 +111,7 @@ inline bool groove_differs_from_its_name(const Groove& g) {
     return idx >= 0 && !groove_matches_bank(g, groove_bank()[static_cast<size_t>(idx)]);
 }
 
-/**
- * The bank row the cycle steps FROM: the entry the name claims, else the one the steps match, else 0
- * — so A+LEFT and A+RIGHT are inverses even from a groove the bank lacks.
- */
+// The bank row the cycle steps from: by name, else by steps, else 0.
 inline int groove_bank_cycle_index(const Groove& g) {
     int idx = groove_bank_index_by_name(g.name);
     if (idx < 0) idx = groove_bank_index_by_steps(g);

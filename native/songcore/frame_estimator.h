@@ -1,20 +1,11 @@
 #ifndef POCKETTRACKER_SONGCORE_FRAME_ESTIMATOR_H
 #define POCKETTRACKER_SONGCORE_FRAME_ESTIMATOR_H
 
-// ─── Where is the audio device RIGHT NOW? ────────────────────────────────────────────────────────
-//
-// `AudioEngine::getCurrentFrame()` is a staircase, updated once per audio block (~11.6 ms at
-// 512/44.1 kHz). This turns it into a line for MIDI timing: the last observed step is an anchor, plus
-// the wall time since. Wall microseconds arrive as an argument — songcore owns no clock, so tests
-// can feed a synthetic one.
-//
-//   1. LEAD CAP — audio is the clock, not the wall. If the device stalls (backgrounding, an xrun
-//      storm), MIDI freezes with it instead of running ahead for good. Queued note-offs wait too;
-//      `SongcoreHost::stop()`'s panic is the backstop.
-//   2. MONOTONIC between anchors: a LEN gate compares against this clock, and jitter going backwards
-//      could close a gate twice.
-//   3. A NEW ANCHOR resets the floor, even backwards: `resetFrameCounter()` zeroes the counter at each
-//      offline render, and a floor kept across that would release every later message instantly.
+// Where the audio device is RIGHT NOW, for MIDI timing: the engine's per-block frame staircase as a
+// line — the last step seen, plus the wall time since (passed in).
+//  1. A lead cap: if the device stalls, MIDI freezes with it rather than running ahead.
+//  2. Monotonic between anchors, or a LEN gate could close twice.
+//  3. A new anchor resets the floor, even backwards (a render zeroes the counter).
 
 #include <cstdint>
 
@@ -23,18 +14,12 @@ namespace songcore {
 /** A smooth frame position from a block-quantised counter plus a wall clock. One owner thread. */
 class FrameEstimator {
   public:
-    /**
-     * `maxLeadUs` is rule 1's cap. It must exceed one audio block, or the estimate freezes near the
-     * end of every block; and stay small enough that a stall cannot drift MIDI from the audio.
-     */
+    // `maxLeadUs` must exceed one audio block, or the estimate freezes near the end of every block.
     explicit FrameEstimator(int sampleRate, int64_t maxLeadUs = 30000)
         : sampleRate_(sampleRate > 0 ? sampleRate : 44100), maxLeadUs_(maxLeadUs > 0 ? maxLeadUs : 1) {}
 
-    /**
-     * `engineFrame` is `getCurrentFrame()` now; `wallUs` a monotonic clock in µs.
-     * ⚠️ The anchor time is when the step was NOTICED, so the estimate runs late by up to one call
-     * interval — a constant bias (the MIDI screen's OFFSET absorbs it). Calling often keeps it small.
-     */
+    // `wallUs` is a monotonic clock in µs. The estimate runs late by up to one call interval (the step
+    // is anchored when noticed); calling often keeps it small.
     int64_t estimate(int64_t engineFrame, int64_t wallUs) {
         if (engineFrame != anchorFrame_ || !started_) {
             // Any counter change is a new anchor, forwards or backwards (rule 3).

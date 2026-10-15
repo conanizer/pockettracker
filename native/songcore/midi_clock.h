@@ -1,29 +1,12 @@
 #ifndef POCKETTRACKER_SONGCORE_MIDI_CLOCK_H
 #define POCKETTRACKER_SONGCORE_MIDI_CLOCK_H
 
-// ─── SYNC OUT — the 24 PPQN clock and the transport ──────────────────────────────────────────────
-//
-// Start/stop/continue, song position and 24 clock ticks per quarter note, so external gear follows
-// our tempo and transport. Owns no time source: frames arrive as arguments, so a test can drive it
-// with a synthetic clock.
-//
-// The clock follows TEMPO, which is global. It cannot follow GROOVE: groove is per track
-// (`TrackState`), and MIDI has one clock stream. A grooved track swings against a steady clock, as
-// against a metronome.
-//
-// ⚠️ A tick's frame is a RATIO from a fixed epoch — `epoch + k * framesPerQuarter / PPQN` — never
-// `next += period`. A tick is a fractional number of frames (861.17 at 128 BPM / 44.1 kHz); an
-// integer period drifts ~11 ms a minute. The ratio is exact for every k. Overflow: an hour is ~184k
-// ticks × ~20k frames, far below int64.
-//
-// The epoch is the transport's start frame, so tick 6k is step k — the scheduler's grid. A TEMPO
-// change moves the epoch to the next tick's frame under the old tempo and restarts the index: no tick
-// lost, doubled or moved backwards.
-//
-// ⚠️ Burst cap: after an audio stall `now` jumps, and "every tick due" would be hundreds of clock bytes
-// — a tempo spike at the device. Past `MAX_BURST_TICKS` the backlog is skipped (the index still
-// advances, so the grid stays locked) and counted in `dropped_ticks()`. (`FrameEstimator`'s lead cap
-// guards the opposite case: the wall running ahead of stalled audio.)
+// SYNC OUT: the 24 PPQN clock, song position and start/stop/continue. Frames arrive as arguments.
+// It follows TEMPO, not groove (one clock stream; groove is per track).
+// ⚠️ A tick's frame is a RATIO from the epoch — `epoch + k * framesPerQuarter / PPQN` — never
+// `next += period`: a tick is a fractional number of frames, and an integer period drifts.
+// The epoch is the transport's start, so tick 6k is step k; a TEMPO change rebases it at the next tick.
+// ⚠️ After an audio stall, a backlog past `MAX_BURST_TICKS` is skipped (and counted), not burst out.
 
 #include <algorithm>
 #include <cstdint>
@@ -34,11 +17,7 @@ namespace songcore {
 
 // ─── The wire ───────────────────────────────────────────────────────────────────────────────────
 
-/**
- * System real-time and system common status bytes. Real-time bytes are single, channel-less and
- * may be interleaved inside other messages. Song Position Pointer is three bytes and legal only while
- * stopped.
- */
+// System real-time and common status bytes. SPP is legal only while stopped.
 constexpr uint8_t MIDI_SPP        = 0xF2,   // + LSB, MSB: 14-bit position in MIDI beats (16th notes)
                   MIDI_RT_CLOCK   = 0xF8,
                   MIDI_RT_START   = 0xFA,
@@ -53,13 +32,8 @@ constexpr int MIDI_SPP_MAX = 16383;
 
 // ─── Where in the song does a mid-song start LAND? ──────────────────────────────────────────────
 
-/**
- * The SPP value for a start at song row `startRow`: the 16th notes (phrase steps) before it.
- * ⚠️ Uses the scheduler's own row-length rule (`maxChainLength` over `chain_is_empty`), so the
- * position agrees with where rows really end.
- * ⚠️ NOMINAL: groove or a HOP makes a row's real length differ from 16 steps per chain row, and the
- * truth would need the whole song simulated before the first byte. Exact in the ordinary case.
- */
+// The SPP for a start at song row `startRow`: the phrase steps before it, by the scheduler's row-length
+// rule. Nominal — a groove or HOP makes rows differ, which only simulating the song could tell.
 inline int nominal_spp_beats(const Project& p, int startRow) {
     int64_t steps = 0;
     for (int row = 0; row < startRow; ++row) {
@@ -82,12 +56,8 @@ inline int nominal_spp_beats(const Project& p, int startRow) {
 
 // ─── The generator ──────────────────────────────────────────────────────────────────────────────
 
-/**
- * The tick grid and the transport messages that frame it.
- * Lives inside `ExternalConsumer` under its `mu_`; owns no lock of its own.
- * Every emission goes through a caller-supplied SINK (`sink(dueFrame, bytes, len)`), so the port,
- * queue and OFFSET stay in `ExternalConsumer` and a test can read the ticks without a port.
- */
+// The tick grid and its transport messages, under `ExternalConsumer`'s lock. Every byte goes to a
+// caller's sink, so the port and OFFSET stay there.
 class MidiClock {
   public:
     /** Ticks one `pump` may release before the backlog is skipped instead. One quarter: longer than
@@ -96,11 +66,7 @@ class MidiClock {
 
     // ── the switch ───────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Turn sync out on or off. Returns TRUE if the caller must now send a Stop — this object cannot
-     * send bytes, and a device left running would run forever.
-     * Off by default: ~51 messages a second, and a synth set to external sync sits silent without it.
-     */
+    // True if the caller must now send a Stop (a device left running would run for ever).
     bool set_enabled(bool e) {
         enabled_ = e;
         if (e || !running_) return false;
@@ -113,13 +79,8 @@ class MidiClock {
 
     // ── the transport ────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Arm the clock for a transport starting at `startFrame`.
-     * `sppBeats == 0` sends **Start** ("rewind and play"); otherwise **SPP then Continue** — Start
-     * after an SPP would rewind the device to 0.
-     * Nothing is emitted here: the bytes share tick 0's due frame and go out on the first `pump`, so
-     * OFFSET applies to them and Start always precedes the first clock.
-     */
+    // Arm for a transport at `startFrame`: Start, or SPP then Continue (Start would rewind to 0). The
+    // bytes go out on the first `pump`, at tick 0's frame.
     void start(int64_t startFrame, int64_t framesPerQuarter, int sppBeats) {
         pending_ = 0;
         if (!enabled_) { running_ = false; return; }
@@ -140,10 +101,7 @@ class MidiClock {
         }
     }
 
-    /**
-     * The transport ended. Returns TRUE if a Stop is owed, i.e. the clock was running. Derived here
-     * because `ExternalConsumer::panic_locked` is reached from five sites, only some with a clock.
-     */
+    // The transport ended; true if a Stop is owed.
     bool stop() {
         pending_ = 0;
         if (!running_) return false;
@@ -153,11 +111,7 @@ class MidiClock {
 
     // ── the ticks ────────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Release the transport bytes and every tick due at or before `dueFrame`.
-     * `framesPerQuarter` comes on every call because TEMPO is live; a change rebases the grid.
-     * `sink(int64_t dueFrame, const uint8_t* bytes, int len)`.
-     */
+    // Release the transport bytes and every tick due by `dueFrame`. A new `framesPerQuarter` rebases.
     template <class Sink>
     void pump(int64_t dueFrame, int64_t framesPerQuarter, Sink&& sink) {
         if (!running_) return;
@@ -171,8 +125,7 @@ class MidiClock {
 
         if (framesPerQuarter > 0 && framesPerQuarter != framesPerQuarter_) rebase(framesPerQuarter);
 
-        // ⚠️ Counted in closed form, never by walking the grid: a caller may pump "past the end of
-        // time" (the tests use INT64_MAX / 4), and counting first is what recognises a backlog.
+        // Counted in closed form, never by walking the grid (a caller may pump far ahead):
         // `floor(k·fpq / PPQN) <= D` ⟺ `k <= (PPQN·(D+1) − 1) / fpq`. D is clamped against overflow.
         int64_t D = dueFrame - epochFrame_;
         if (D < 0) return;
@@ -227,11 +180,7 @@ class MidiClock {
         return epochFrame_ + k * framesPerQuarter_ / MIDI_PPQN;
     }
 
-    /**
-     * A new tempo from the next tick: the epoch moves to where that tick would fall under the old
-     * tempo and the index restarts. The scheduler reads `project.tempo` on every pass, so both
-     * rebase on the same change.
-     */
+    // A new tempo from the next tick: the epoch moves there and the index restarts.
     void rebase(int64_t framesPerQuarter) {
         epochFrame_       = tick_frame(index_);
         index_            = 0;

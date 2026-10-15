@@ -5,7 +5,6 @@
 
 namespace songcore {
 
-// Version 2 added the two EQ-morph tags; no existing event line changed.
 static_assert(SCHEMA_VERSION == 2, "schema bump requires regenerated goldens + doc update");
 
 static_assert(EV_EXT_PITCH_RATE == 0x01 && EV_EXT_VIBRATO == 0x02 && EV_EXT_TABLE_ROW == 0x03 &&

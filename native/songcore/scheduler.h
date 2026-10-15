@@ -1,20 +1,10 @@
 #ifndef POCKETTRACKER_SONGCORE_SCHEDULER_H
 #define POCKETTRACKER_SONGCORE_SCHEDULER_H
 
-// ─── The sequencer spine ─────────────────────────────────────────────────────────────────────────
-//
-// Walks the project by transport position — grooves, HOP, RPT/ARP grids, LAT, KIL, pitch mods,
-// per-note and mixer FX — and emits events through the MidiRouter (router.h). The tests byte-compare
-// the stream against the golden traces, so the wiring is exact: floats are binary32 in a fixed
-// operation order, the velGain/volGain names are crossed (event.h), and grooves round as recorded.
-//
-// Kept alongside the walk, carrying no bus event (and so no golden):
-//   * getPlaybackPosition() and its frame maps — the UI's playheads;
-//   * the checkpoint ring — the LIVE rewind, so a launch lands on the boundary it was aimed at;
-//   * eqm_active() / mixer_vol_active() / delay_time_active() — EQM, VTR/VMV and TIM REPLACE engine
-//     state, and the host restores it on stop().
-// Random FX (CHA/RND/RNL/ARP-RANDOM) are not in the goldens; a test checks their distributions
-// (rng.h).
+// The sequencer: walks the project by transport position and emits events through the router.
+// ⚠️ The stream is byte-compared against golden traces: floats are binary32 in a fixed operation order.
+// Beside the walk, with no event (and so no golden): the playheads, the LIVE rewind's checkpoints and
+// the flags the host reads to restore what EQM, VTR/VMV and TIM replaced.
 
 #include <algorithm>
 #include <array>
@@ -37,18 +27,12 @@
 
 namespace songcore {
 
-// Note arithmetic, hex_to_float and the step-slot helpers live in model.h; clampi/clampf in
-// program.h — layers below the sequencer need them.
 
 enum class PlaybackMode { STOPPED, PHRASE, CHAIN, SONG };
 
-// ─── UI cursor feedback (never goldened) ─────────────────────────────────────────────────────────
-//
-// Where ONE track is; the eight song cursors run independently.
-// ⚠️ Every field is −1 when there is no answer, and −1 is NOT row 0: a phrase auditioned alone is in
-// no chain or song. A consumer that draws a marker on 0 shows a frozen playhead.
-// ⚠️ The ids are part of the position — two tracks can be in one chain at different rows, and a third
-// in a chain the screen is not showing. `row` doubles as the phrase step in every mode.
+// Where ONE track is, for the playheads. `row` is the phrase step in every mode.
+// ⚠️ −1 means "no answer", not row 0 (a phrase auditioned alone is in no chain or song).
+// ⚠️ The ids are part of the position: two tracks can sit in one chain at different rows.
 struct PlaybackPosition {
     int row = -1;
     int chainRow = -1;
@@ -65,50 +49,38 @@ struct SongPos {
     int chainRow = 0;
 };
 
-// Which ROW of a phrase one track is on, stamped by the walk as it passes each row's real start frame.
-// ⚠️ Never arithmetic off the phrase start: HOP, grooves and `00` groove steps make rows anything but
-// sixteen equal steps.
+// The phrase row one track is on, stamped at each row's real start frame.
+// ⚠️ Never computed off the phrase start: HOP and grooves make rows unequal.
 struct StepPos {
     int track = 0;
     int step  = 0;
 };
 
-// What a LIVE rewind asks the host to drop: per track, the frame its lookahead rolled back to, or −1
-// for nothing queued past now. One frame cannot express this with eight independent cursors.
+// What a LIVE rewind asks the host to drop: per track, the frame it rolled back to, or −1.
 struct RollbackPlan {
     int64_t frames[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 };
 
-// ─── LIVE mode: what one channel is waiting to do ───────────────────────────────────────────────
-//
-// LIVE is a MODIFIER ON SONG, not a fifth PlaybackMode: only what happens at a track's boundary
-// changes, so nothing that switches on `playbackMode_` (playheads, rollback, traces) needs a new arm,
-// and a project that never enters LIVE schedules identically.
-// `targetRow < 0 && !stop` is the empty slot.
-// ⚠️ A slot is SCHEDULED before it is HEARD (the lookahead). `firesAt` is the frame it lands on: the
-// scheduler treats it as spent once set, the display keeps showing it until the transport gets there.
+// What one LIVE channel is waiting to do. LIVE is a modifier on SONG, not a fifth PlaybackMode: only
+// a track's boundary changes. `targetRow < 0 && !stop` is the empty slot.
+// ⚠️ Scheduled before it is heard: once `firesAt` is set the scheduler treats it as spent, while the
+// screen keeps showing it until the transport gets there.
 struct LiveSlot {
     int     targetRow = -1;      // the song row to launch on this channel
     bool    stop      = false;   // …or silence it instead
     bool    immediate = false;   // at the next PHRASE boundary rather than the next CHAIN boundary
     int64_t firesAt   = -1;      // the frame it was scheduled to land on; −1 = still waiting
-    // No "not before frame X" field: a rewind only lands on a boundary PAST the press
-    // (rewind_song_track), so a launch can never land early — and a second copy keyed on the lap
-    // origin put launches a full lap late.
 
-    /** Something is queued here — the question a MARKER asks. */
+    // Something is queued — the marker's question.
     bool pending() const { return targetRow >= 0 || stop; }
-    /** …and the walk has not spent it yet — the question the SCHEDULER asks. */
+    // …and not yet spent — the scheduler's question.
     bool armed() const { return pending() && firesAt < 0; }
 };
 
-// ─── What the sounding note is playing with (NoteCarry) ─────────────────────────────────────────
-//
-// ⚠️ An ARP or RPT retrigger is a NEW VOICE, and a new voice starts from the instrument — so a VOL,
-// PAN, CUT … on an empty step, or a fade, would be undone by the next retrigger unless handed on.
-// This carries it: set from the note's own step, moved by later commands and fade ticks, reset by the
-// next real note. ⚠️ A new per-voice command must be added here.
-// One slot per controller, in re-apply order. LPF/HPF/BPF share a slot (each sets type AND cutoff).
+// What the sounding note is playing with, handed to each ARP/RPT retrigger — a retrigger is a new
+// voice, and would otherwise undo a VOL, PAN, CUT… on an empty step, or a fade. Reset by the next note.
+// ⚠️ A new per-voice command must be added here.
+// One slot per controller, in re-apply order; LPF/HPF/BPF share one (each sets type AND cutoff).
 constexpr int CARRY_CC_SLOTS = 8;
 inline constexpr int carry_cc_slot(int ccId) {
     switch (ccId) {
@@ -155,10 +127,8 @@ struct RampLastValue {
     ExtEqMorphPayload eq{};
 };
 
-// ─── A phrase part-way through being scheduled ──────────────────────────────────────────────────
-//
-// The walk schedules a phrase ROW BY ROW and resumes here. It lives in TrackState, so the checkpoint
-// (taken before a phrase begins) and every reset leave it inactive — no rewind has to remember it.
+// A phrase part-way through being scheduled, row by row. In TrackState, so a checkpoint (taken before
+// a phrase begins) and every reset leave it inactive.
 struct PhraseWalk {
     bool    active     = false;
     int     phraseId   = 0;
@@ -171,7 +141,7 @@ struct PhraseWalk {
     int64_t frameOffset = 0;      // frames scheduled so far, from `startFrame`
     int     rowsScheduled = 0;
     int     pass = 1;             // which entry of this phrase on this track this is (NTH), from 1
-    // The ramps the phrase declares, paired when it began (automation.h), and where each has got to.
+    // The phrase's ramps, paired when it began (automation.h), and where each has got to.
     std::vector<RampSpec>      ramps;
     std::vector<RampLastValue> rampLast;
 };
@@ -190,8 +160,7 @@ struct TrackState {
     int   repeatVolRamp = 0;
     int64_t repeatStartFrame = 0;
     int   repeatRetrigCount = 0;
-    // The ramp runs on velocity × the VOL channel; `repeatBasePhraseVol` is the channel it was taken
-    // at, so a later VOL scales the hits.
+    // The ramp runs on velocity × the VOL channel as taken at arming, so a later VOL scales the hits.
     float repeatBaseVolume = 1.0f;
     float repeatBasePhraseVol = 1.0f;
 
@@ -203,17 +172,12 @@ struct TrackState {
 
     int   hopTargetRow = -1;
     bool  trackStopped = false;
-    /**
-     * Consecutive phrases that scheduled NOTHING because their entry row hopped.
-     * ⚠️ A HOP row costs no time, so a ring of them (`HOP 00` on row 0 of a phrase played alone)
-     * schedules zero frames for ever and the track goes silent invisibly. The count bounds the ring
-     * and stops the track, as `HOP FF` would. Not a cycle detector: one hop entry is legitimate (how a
-     * chain steps over a phrase); any row that plays resets it.
-     */
+    // Consecutive phrases that scheduled nothing because their entry row hopped.
+    // ⚠️ A HOP row costs no time, so a ring of them (`HOP 00` on row 0) would spin for ever; past
+    // MAX_EMPTY_HOPS the track stops as on `HOP FF`. Any row that plays resets it.
     int   emptyHops = 0;
 
-    // How many times this track has entered each phrase since playback started — what NTH counts.
-    // In here so a LIVE rewind takes the count back with the phrases it un-plays.
+    // Entries into each phrase since PLAY — what NTH counts. Here so a LIVE rewind takes it back too.
     std::array<uint32_t, 256> phrasePasses{};
 
     bool  pitchBendActive = false;
@@ -226,17 +190,15 @@ struct TrackState {
     int   grooveId = 0;
     int   grooveStep = 0;
 
-    // Where SCA / SCG put this track. `scaleKey = -1` means "the project's KEY", so a default
-    // TrackState is the song's own scale — STOP, render and rollback land there with no extra code.
+    // Where SCA / SCG put this track; `scaleKey = -1` is the project's KEY, so a reset lands there.
     int   scaleSlot = 0;
     int   scaleKey  = -1;
 
     int   lastColFxType[4] = {0, 0, 0, 0};   // 1-indexed: [1]=FX1 …
     int   lastColFxValue[4] = {0, 0, 0, 0};
 
-    // AUS cells a CHA ate on their last pass, so the phrases their span crosses stay silent too. Keyed
-    // on the AUS position (`RampSpec::originAbs/originSlot` + chain); rewritten every time the AUS
-    // step plays.
+    // AUS cells a CHA ate on their last pass, so the phrases their span crosses stay silent too.
+    // Keyed on the AUS position; rewritten every time the AUS step plays.
     struct EatenAus { int chain = -1; int abs = -1; int slot = 0; };
     static constexpr int EATEN_AUS_SLOTS = 4;
     EatenAus eatenAus[EATEN_AUS_SLOTS];
@@ -269,90 +231,76 @@ struct TrackState {
     void clearPitchMod() { pitchBendActive = false; vibratoActive = false; }
 };
 
-// ─── The sequencer ───────────────────────────────────────────────────────────────────────────────
 class Sequencer {
   public:
     Sequencer(MidiRouter& router, const Project& project, int sample_rate);
 
-    // The transport clock: the host copies the engine's frame counter in and polls
-    // updatePlaybackBuffer(); the tools drive a synthetic one.
+    // The transport clock: the host copies the engine's frame counter in; the tools drive their own.
     void set_clock(int64_t f) { currentFrame_ = f; }
     int64_t clock() const { return currentFrame_; }
 
     // Re-set by the host on every verb — a device change can alter the rate mid-session.
     void set_sample_rate(int sr) { if (sr > 0) sampleRate_ = sr; }
 
-    // Pin the random FX to a known stream (for the tests; the app never calls it).
-    // Eight streams, one per track; track 0 gets `s` unchanged. The offset is the 64-bit golden
-    // ratio, so no two tracks walk the same sequence shifted.
+    // Pin the random FX to a known stream (tests only). One stream per track; track 0 gets `s`.
     void seed_rng(uint64_t s);
     int  sample_rate() const { return sampleRate_; }
 
-    // PHRASE/CHAIN: walk the phrase in progress to its end now, whatever the clock (for the tests,
-    // which count one whole pass; the app never calls it).
+    // PHRASE/CHAIN: walk the phrase in progress to its end now (tests only).
     void finish_phrase_now();
 
-    // The frame the current session latched at T PLAY — the trace's session base.
+    // The frame latched at PLAY — the trace's session base.
     int64_t playback_start_frame() const { return playbackStartFrame_; }
 
-    // How far past the clock the walk keeps scheduled, so an edit is heard from the next row not yet
-    // walked. ⚠️ It must outlast the longest gap between two polls; an operation that holds the UI
-    // thread longer fills to LONG_OPERATION_MS first.
+    // How far past the clock the walk keeps scheduled; an edit is heard from the next row not walked.
+    // ⚠️ It must outlast the longest gap between two polls; a longer UI hold fills to
+    // LONG_OPERATION_MS first.
     static constexpr int64_t HORIZON_MS = 250;
     static constexpr int64_t LONG_OPERATION_MS = 2000;
-    // Units one fill may take, per phrase of depth — a unit is one phrase ROW: 8 tracks × 16 rows of
-    // real work, plus headroom for units that cost no frames (which could otherwise spin).
+    // Units (phrase rows) one fill may take per phrase of depth: 8 × 16 plus headroom for free units.
     static constexpr int STEPS_PER_PHRASE_OF_DEPTH = 512;
 
     bool is_playing() const { return isPlaying_; }
     PlaybackMode playback_mode() const { return playbackMode_; }
 
-    // ── UI cursor feedback (side-records, no bus events) ──
+    // ── playheads ──
 
-    // `trackId < 0` means "whichever track's marker is oldest" — only meaningful in PHRASE mode, where
-    // one track plays; the tools use it, the app does not.
+    // The oldest marker of any track — PHRASE mode only (tools).
     PlaybackPosition getPlaybackPosition() { return getPlaybackPosition(-1); }
 
-    // Where ONE track is. In PHRASE and CHAIN mode every other track answers −1 throughout — a phrase
-    // auditioned alone is in no chain or song, so those screens draw no marker.
+    // Where ONE track is. In PHRASE and CHAIN mode every other track answers −1.
     PlaybackPosition getPlaybackPosition(int trackId);
 
-    /**
-     * The scale one track is scheduling against — where its last SCA (or SCG) left it.
-     * ⚠️ The SCHEDULER's clock, ahead of what is heard by the lookahead. The note cursor asks
-     * `songcore::track_scale` instead (scales.h).
-     */
+    // The scale one track is scheduling against.
+    // ⚠️ On the scheduler's clock, ahead of what is heard; the note cursor asks `track_scale` (scales.h).
     int track_scale_slot(int trackId) const { return trackStates_[clampi(trackId, 0, 7)].scaleSlot; }
     int track_scale_key(int trackId) const;
 
-    // True once an EQM overrode the master EQ this session. The host reads it BEFORE stop() (which
-    // clears it) and restores project.masterEqSlot — not on the render path, which restores its own.
+    // ── what the take replaced: the host reads these BEFORE stop() clears them, and restores ──
+
+    // An EQM overrode the master EQ (the render path restores its own).
     bool eqm_active() const { return eqmActive_; }
 
-    // True once a VTR or VMV moved a fader this session; read on the same before-stop() edge. Derived
-    // from the two below, not latched separately.
+    // A VTR or VMV moved a fader.
     bool mixer_vol_active() const { return mixerVolTracks_ != 0 || masterVolActive_; }
 
-    // …and WHICH faders, so a mid-take push of the authored mixer restores everything else
-    // (engine_setup.h `MixerHeld`). Bit N = track N's fader belongs to the song now.
+    // …and which: bit N = track N's fader belongs to the song now (engine_setup.h `MixerHeld`).
     int  mixer_vol_tracks() const { return mixerVolTracks_; }
     bool master_vol_active() const { return masterVolActive_; }
 
-    // ⚠️ The hand takes a fader back: a mapped knob is a press, and the flags above would make the next
-    // ordinary push skip that fader. The next VTR claims it again.
+    // ⚠️ The hand takes a fader back (a mapped knob); otherwise the next push would skip it.
     void release_mixer_vol_track(int track);
     void release_master_vol() { masterVolActive_ = false; }
     void release_delay_time() { delayTimeActive_ = false; }
 
-    // True once a TIM took over the delay time this session — same edge, same reason: it REPLACES the
-    // DELAY screen's time and nothing later restores it.
+    // A TIM took over the delay time.
     bool delay_time_active() const { return delayTimeActive_; }
 
     bool has_live_project() const { return currentProject_ != nullptr; }
 
     // ── transport starts ──
 
-    // `trackId` defaults to 0, which every tool caller (and so every trace golden) relies on.
+    // Every trace golden relies on `trackId` defaulting to 0.
     void playPhrase(int phraseId, int trackId = 0);
 
     void playChain(int chainId, int trackId = 0);
@@ -361,133 +309,96 @@ class Sequencer {
 
     void stop();
 
-    // The track PHRASE/CHAIN mode plays through — the mixer fader, mute and meter it uses.
-    int playback_track() const { return playbackTrack_; }
 
-    // ── LIVE mode ────────────────────────────────────────────────────────────────────────────────
-    //
-    // Queue-and-launch: the song grid becomes a scene launcher. A launched cell REPEATS on its channel
-    // until something else is queued, so a LIVE track never walks down or runs out of its column.
+    // ── LIVE mode: the song grid as a scene launcher; a launched cell repeats until something else is
+    // queued ──
 
     bool     live_mode() const               { return liveMode_; }
-    bool     live_silent(int trackId) const  { return liveSilent_[clamp_track(trackId)]; }
 
-    /**
-     * What this channel is still waiting to do — the SCREEN's question. A slot the walk has spent is
-     * still reported until the transport reaches its frame: until then, nobody has heard the launch.
-     */
+
+    // What this channel is still waiting to do, for the screen — a spent slot is reported until the
+    // transport reaches its frame.
     LiveSlot live_queue(int trackId) const;
 
-    /**
-     * Start in LIVE mode from stopped. `mask` bit N launches track N at `songRow`; the rest start
-     * SILENT, so one press on one cell starts one channel.
-     */
+    // Start LIVE from stopped: `mask` bit N launches track N at `songRow`, the rest start silent.
     void playSongLive(int songRow, int mask);
 
-    /**
-     * Toggle the mode under a running transport: every track keeps its place and repeats (or, leaving
-     * LIVE, resumes walking from) the row it is on. Nothing jumps or goes silent.
-     * ⚠️ It REWINDS: a chain end inside the lookahead has already been committed as
-     * "advance", and without the rewind the change would land a lap late.
-     */
+    // Toggle LIVE under a running transport; every track keeps the row it is on.
+    // ⚠️ It rewinds: a chain end in the lookahead is already committed, and the change would land a
+    // lap late.
     RollbackPlan set_live_mode(bool on, int64_t currentFrame);
 
-    /** Queue one channel to launch `songRow`. `immediate` = the next phrase boundary, else the next chain end. */
+    // Queue one channel to launch `songRow` at the next phrase boundary (`immediate`) or chain end.
     RollbackPlan queue_live(int trackId, int songRow, bool immediate, int64_t currentFrame);
 
-    /** Queue one channel to fall silent. The other seven keep playing — stopping everything is what stop() is. */
+    // Queue one channel to fall silent; the other seven keep playing.
     RollbackPlan queue_live_stop(int trackId, bool immediate, int64_t currentFrame);
 
-    /**
-     * Queue a whole row as one scene. ⚠️ An EMPTY cell queues a STOP: a row is what the user sees, and
-     * a blank must sound as it looks. (Mid-column, SONG mode plays an empty cell as a rest.)
-     */
+    // Queue a whole row as one scene. ⚠️ An empty cell queues a STOP — a blank sounds as it looks.
     RollbackPlan queue_live_row(int songRow, bool immediate, int64_t currentFrame);
 
     // ── the polling scheduler (live modes) ──
 
-    // The first frame not yet scheduled. ⚠️ SONG has eight lookaheads, so it is the track FURTHEST
-    // BEHIND; PHRASE and CHAIN keep the one shared cursor. With every track finished it is pinned to
-    // the clock rather than +∞, so a fill still runs.
+    // The first frame not yet scheduled — in SONG the track furthest behind. With every track
+    // finished it is pinned to the clock, so a fill still runs.
     int64_t buffer_head() const;
 
-    // Fill until every track is `aheadMs` past the clock, a row at a time. Work-conserving: it returns
-    // at once while the buffer is deep enough.
+    // Fill a row at a time until every track is `aheadMs` past the clock; returns at once if it is.
     void updatePlaybackBuffer(int64_t aheadMs = HORIZON_MS);
 
-    // ── the render-path scheduler ──
-    // trackFilter == nullptr schedules all tracks; inaudible ones (muted, or unsoloed while another is
-    // soloed) are always skipped.
-    // `repeat` plays the range that many times END TO END IN ONE PASS, so reverb, delay, releases and
-    // table positions cross each seam as they do live; concatenated files would cut at every join.
+    // ── the render path ──
+    // nullptr `trackFilter` = all tracks; inaudible ones are always skipped. `repeat` plays the range
+    // end to end in one pass, so tails and table positions cross each seam as they do live.
     int64_t scheduleSongRowRange(int startRow, int endRow, const std::set<int>* trackFilter = nullptr,
                                  int repeat = 1);
 
   private:
-    /** One play-through of `startRow..endRow`, beginning at `passStart`. Returns the frame it ends on. */
+    // One play-through of `startRow..endRow` from `passStart`; returns the frame it ends on.
     int64_t schedule_range_pass(const Project& project, int startRow, int endRow,
                                 const std::set<int>* trackFilter, int64_t passStart,
                                 int64_t framesPerStep, int64_t framesPerPhrase);
 
     static int clamp_track(int trackId) { return (trackId >= 0 && trackId < 8) ? trackId : 0; }
 
-    /**
-     * Rewind ONE song-mode track to its earliest boundary past `currentFrame`; returns the frame to
-     * drop queued notes from (−1 = nothing queued past now). A LIVE launch or toggle lands on that
-     * boundary rather than after the lookahead. An edit never rewinds: it is heard from the next row
-     * the walk reaches.
-     * ⚠️ TrackState and the RNG come back with it (see Checkpoint).
-     */
+    // Rewind ONE SONG track to its earliest boundary past `currentFrame`, so a LIVE launch lands there
+    // rather than after the lookahead. Returns the frame to drop queued notes from, or −1.
+    // ⚠️ TrackState and the RNG come back with it (Checkpoint).
     int64_t rewind_song_track(int trackId, int64_t currentFrame);
 
-    /** Rewind all eight SONG cursors — eight independent rewinds; each track loops its own block. */
     RollbackPlan rewind_all_song_tracks(int64_t currentFrame);
 
-    /**
-     * Queue one slot and rewind its track so the launch lands on the boundary it was aimed at.
-     * ⚠️ The chain-boundary queue needs the rewind too: that chain end may already be committed as
-     * "loop the row again" inside the lookahead, and the launch would land a lap late.
-     */
+    // Queue one slot and rewind its track.
+    // ⚠️ A chain-boundary queue needs the rewind too: that chain end may already be committed as
+    // "loop again", and the launch would land a lap late.
     RollbackPlan arm_live_slot(int trackId, LiveSlot slot, int64_t currentFrame);
 
-    /**
-     * Take the queued slot if this boundary is the one it waits for; say whether it fired. `chainEnd`
-     * is true on the unit that begins a lap: an immediate queue fires at either, a chain-boundary
-     * queue only there — one code path, two trigger points.
-     * The slot is STAMPED rather than cleared (LiveSlot); `armed()` keeps it from firing twice.
-     */
+    // Take the queued slot if this boundary is the one it waits for; `chainEnd` = this unit begins a
+    // lap. The slot is stamped, not cleared (LiveSlot).
     bool consume_live_queue(int trackId, bool chainEnd);
 
     struct ScheduleStepResult {
         bool noteScheduled = false;
         bool hopTriggered = false;
-        // The frame of this step's note-on, or -1. A ramp tick landing ON a note-on would reach the
-        // voice the note REPLACES, and the ramp cannot see the LAT that moved the note.
+        // This step's note-on, or -1 — a ramp tick on that frame would reach the voice it replaces.
         int64_t noteFrame = -1;
-        // The frame this step's own live FX writes landed on (`voiceFxFrame`, LAT and the note-on
-        // offset included). A ramp crossing a step that writes the same parameter yields that tic.
+        // The frame this step's own FX writes landed on; a crossing ramp on the same parameter yields it.
         int64_t fxFrame = -1;
-        // The step AFTER CHA/RND/RNL — what was really written, which decides whether a crossing ramp
-        // must yield. ⚠️ Pairing reads the AUTHORED step (automation.h): whether a fade exists must not
-        // depend on dice; whether a frame inside it is taken does.
+        // The step after CHA/RND/RNL, which decides whether a crossing ramp yields.
+        // ⚠️ Pairing reads the AUTHORED step: whether a fade exists must not depend on dice.
         PhraseStep effectiveStep;
     };
 
-    // Snapshot taken just BEFORE a SONG-mode unit, so a LIVE rewind can return to the earliest future
-    // phrase boundary.
-    // ⚠️ The walk CONSUMES STATE — the groove step, the pending HOP, the track's RNG stream. A
-    // rollback restoring only the frame replays the phrase against a track that has moved on: a groove
-    // whose length does not divide 16 re-times the track, and the dice roll again. This is the state.
+    // Snapshot taken before a SONG unit, so a LIVE rewind can return to that boundary.
+    // ⚠️ The walk consumes state (groove step, pending HOP, RNG); restoring only the frame replays the
+    // phrase against a track that has moved on.
     struct Checkpoint {
         int64_t frame = 0;
         int songRow = 0;
         int songChainRow = 0;
-        // ⚠️ Filled by save_checkpoint(), never by the call sites, so none can forget.
-        // ONE track's state: with eight lookaheads, each track has its own ring and boundary.
+        // ⚠️ Filled by save_checkpoint(), never by the call sites. One track's state.
         TrackState trackState{};
         Rng        rng{};
-        // ⚠️ LIVE's lap origin, for the same reason: left behind, a future frame beside a past cursor
-        // makes the starvation guard rest a bar and the launch land a bar late.
+        // ⚠️ LIVE's lap origin too — left behind, the launch lands a bar late.
         int64_t liveLoopFrame = 0;
     };
 
@@ -496,28 +407,19 @@ class Sequencer {
     // ⚠️ By value; the state is captured HERE, below the call sites.
     void save_checkpoint(int trackId, Checkpoint cp);
 
-    // APPEND, never overwrite. A song shorter than the lookahead comes back round to a
-    // (songRow, chainRow) it already queued; overwriting would replace the frame of the row SOUNDING
-    // NOW with its next occurrence and freeze the playhead. Duplicates cannot pile up: prune_past runs
-    // on every read and the lookahead is bounded. The entry names the TRACK — eight cursors, eight
-    // places.
+    // ⚠️ Append, never overwrite: a song shorter than the lookahead revisits a row it already queued,
+    // and overwriting would freeze the playhead. prune_past keeps it bounded.
     void put_song_position(int trackId, int songRow, int chainRow, int64_t frame);
 
-    /**
-     * Stamp the row the walk is standing on — once per row that PLAYS (a groove `00` skips the row, so
-     * the marker must too).
-     * ⚠️ The one place that knows a row's real start frame (groove and HOP folded in); never derive it
-     * a second time.
-     * ⚠️ Capped: a render schedules a whole song through here and nobody reads (and so prunes) it
-     * offline. The cap is far above any live lookahead; past it, the oldest half goes.
-     */
+    // Stamp the row the walk is on — once per row that plays.
+    // ⚠️ The one place that knows a row's real start frame; never derive it a second time.
+    // ⚠️ Capped: a render writes a whole song and nobody prunes it; past the cap the oldest half goes.
     void put_phrase_step_position(int trackId, int step, int64_t frame);
 
-    /** The row `trackId` is on at `currentFrame`: the latest one stamped at or before it, else −1. */
+    // The latest row stamped at or before `currentFrame`, else −1.
     int step_in_force(int trackId, int64_t currentFrame) const;
 
-    // Drop entries more than `framesPerPhrase` in the past; run on every position read so the scan
-    // stays bounded.
+    // Drop entries more than a phrase in the past; run on every read.
     template <typename C>
     static void prune_past(C& c, int64_t currentFrame, int64_t framesPerPhrase) {
         c.erase(std::remove_if(c.begin(), c.end(),
@@ -527,13 +429,8 @@ class Sequencer {
                 c.end());
     }
 
-    /**
-     * Drop the position entries a rollback invalidated — everything this cursor recorded at or past
-     * the frame it was rewound to. `match` picks the cursor's own entries.
-     * ⚠️ Dropping the queued notes cannot do this: a marker is not an event. Left behind, a stale entry
-     * from the discarded schedule can win the lookup, and the marker sits on the row a LIVE launch left
-     * for as many bars as were buffered.
-     */
+    // Drop this cursor's position entries at or past the frame a rollback rewound to.
+    // ⚠️ Dropping the queued notes does not do this — a marker is not an event.
     template <typename C, typename Match>
     static void drop_positions_from(C& c, int64_t frame, Match match) {
         c.erase(std::remove_if(c.begin(), c.end(),
@@ -544,88 +441,61 @@ class Sequencer {
     }
 
     // The next row at or after `startRow` holding a phrase, wrapping; -1 if the chain is empty.
-    // `startRow` is normalised HERE (playChain passes CHAIN_ROWS for a chain starting on its last
-    // row), so no caller can get the wrap wrong.
+    // `startRow` is normalised here (playChain may pass CHAIN_ROWS).
     int findNextNonEmptyChainRow(int startRow, const Chain& chain);
 
-    // ─── the per-track SONG walk ─────────────────────────────────────────────────────────────────
-    //
-    // Each track owns a frame, a song row and a chain row.
+    // ── the per-track SONG walk: each track owns a frame, a song row and a chain row ──
 
-    // The chain a track has on one song row, or −1 for a blank cell (an out-of-range id is blank too).
+    // The chain on one song cell, or −1 for a blank (an out-of-range id is blank too).
     static int song_cell_chain(const Project& project, int trackId, int songRow);
 
-    /**
-     * Can the walk ENTER this song cell? The one definition of a block boundary.
-     * ⚠️ A cell the walk cannot enter ENDS A BLOCK — it is not a rest. A track reaching one loops back to
-     * the top of its block, for ever, so unrelated sketches can share a project.
-     * Unequal blocks drift apart; a track that should rest a few bars needs a chain of empty phrases.
-     * ⚠️ A chain whose FIRST row is empty is a boundary too. Later holes are walked over
-     * (`next_chain_row_no_wrap`).
-     */
+    // Can the walk enter this cell? The one definition of a block boundary.
+    // ⚠️ A cell it cannot enter ENDS A BLOCK, it is not a rest: the track loops back to its block's top.
+    // A chain whose first row is empty is a boundary too; later holes are walked over.
     static bool song_cell_plays(const Project& project, int trackId, int songRow);
 
-    /** The first row of the block `songRow` sits in — the row a track loops back to. */
+    // The first row of the block `songRow` sits in — where a track loops back to.
     static int block_start_row(const Project& project, int trackId, int songRow);
 
-    // The next row at or after `startRow` holding a phrase, or −1 when the chain has no more.
-    // ⚠️ NO WRAP: inside a song, running out is what moves the track to its next row.
+    // The next row at or after `startRow` holding a phrase, or −1.
+    // ⚠️ No wrap: inside a song, running out moves the track to its next row.
     static int next_chain_row_no_wrap(const Chain& chain, int startRow);
 
-    /**
-     * One song row finished for this track: step down the column, or LOOP BACK to its block's top.
-     * ⚠️ A RENDER ENDS the track where playback would loop (`lastSongRow` ≥ 0 only there) — a forever
-     * loop has no length. Repetition in a file is the render's own count.
-     */
+    // One song row finished: step down the column, or loop back to the block's top.
+    // ⚠️ A render (`lastSongRow` ≥ 0) ENDS the track where playback would loop.
     void advance_track_song_row(const Project& project, int trackId, int lastSongRow);
 
-    // The snapshot every unit of work takes before it commits — a phrase, a bar of rest, a bar sat
-    // out after HOP FF. ⚠️ A unit with no checkpoint is one a LIVE launch cannot rewind past.
+    // The snapshot each unit takes before it commits.
+    // ⚠️ A unit with no checkpoint is one a LIVE launch cannot rewind past.
     void checkpoint_track(int trackId, int songRow, int rowUnit, bool take);
 
-    // Advance ONE track by one unit: a phrase row, a bar sat out, or the end of its block (in SONG, a
-    // loop — see advance_track_song_row).
-    // `lastSongRow` bounds the RENDER path's walk (−1 = the column's own end); it takes no checkpoints.
+    // Advance ONE track by one unit: a phrase row, a bar sat out, or its block's end.
+    // `lastSongRow` bounds the render path's walk (−1 = the column's end); a render takes no checkpoints.
     void schedule_track_unit(const Project& project, int trackId, int64_t framesPerStep,
                              int64_t framesPerPhrase, int lastSongRow = -1,
                              bool takeCheckpoint = true);
 
-    // ─── LIVE mode's unit of work ────────────────────────────────────────────────────────────────
-    //
-    // The launched song row REPEATS: a spent chain re-enters the SAME row, so a LIVE track never moves
-    // down or runs out of its column. Separate from its SONG twin so SONG's path gains no branch.
+    // LIVE's unit: a spent chain re-enters the SAME row. Separate so SONG's path gains no branch.
     void schedule_live_unit(const Project& project, int trackId, int64_t framesPerStep,
                             int64_t framesPerPhrase, bool takeCheckpoint);
 
     // The rest of the phrase in progress, in one call. Returns the frames it took.
     int64_t finish_walk(int trackId, int64_t framesPerStep);
 
-    /**
-     * Start walking a phrase on `trackId` from `startFrame`; `walk_phrase_row` then schedules it.
-     * `chain`/`chainRow` locate the phrase in the chain being played, for AUS/AUF: a fade may span
-     * into a later phrase. PHRASE mode passes nullptr and pairs within the phrase.
-     * Returns false, and walks nothing, on a track HOP FF stopped.
-     */
+    // Start walking a phrase; `walk_phrase_row` schedules it. `chain`/`chainRow` let an AUS/AUF span
+    // into later phrases (PHRASE mode passes nullptr). False on a track HOP FF stopped.
     bool begin_phrase(int phraseId, int64_t startFrame, int trackId, int transposeSemitones, int startRow,
                       const Chain* chain = nullptr, int chainRow = 0);
 
-    /**
-     * Schedule the walk's next row that takes time — rows a groove gives no length are passed on the
-     * way. Returns the frames it took. The walk goes inactive when the phrase ends or HOPs; a HOP row
-     * takes no time, so that call returns 0.
-     */
+    // Schedule the next row that takes time, passing rows a groove gives no length. Returns the
+    // frames it took — 0 for a HOP. The walk goes inactive when the phrase ends or HOPs.
     int64_t walk_phrase_row(int trackId, int64_t framesPerStep);
 
-    // The phrase ran to its last row.
     static void finish_phrase(TrackState& trackState);
 
-    // ─── AUS / AUF — a declared span, emitted as the walk crosses it ────────────────────────────────
-    //
-    // One CC per tic at the byte the curve holds there, sent as `byte / 255` like the per-step effect
-    // — every value is one the goldens already contain.
-    // `t` is measured in STEPS, not frames: `(stepsSoFar + tic/12) / span`, so a fade covers an exact
-    // fraction at every step boundary whatever the groove does, with no look-ahead.
-    // A tic is `stepDuration / TICS_PER_STEP` — the same warped grid LAT and KIL use.
+    // ── AUS / AUF: one CC per tic at the byte the curve holds, sent as `byte / 255` ──
+    // `t` counts STEPS, not frames (`(stepsSoFar + tic/12) / span`), so a fade lands on an exact
+    // fraction at every step whatever the groove does. A tic is `stepDuration / TICS_PER_STEP`.
 
     void emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<RampLastValue>& lastValue,
                          int chainId, const PhraseStep& effectiveStep, int stepIndex, int64_t targetFrame,
@@ -635,15 +505,12 @@ class Sequencer {
     // EQM rides TRACK_GLOBAL and EQN the track's lane, like the per-step pair.
     void emit_eq_morph(int64_t frame, const RampSpec& r, int trackId, const ExtEqMorphPayload& m);
 
-    // CHA gate + RND/RNL randomize, before effect resolution. With no CHA/RND/RNL slot the step comes
-    // back unchanged — why the goldens can be byte-compared at all. A test checks the draws.
+    // CHA gate, then RND/RNL. Without those the step comes back unchanged.
     PhraseStep applyChanceAndRandomize(const PhraseStep& step, TrackState& trackState, bool& skipNote);
 
-    // ─── One phrase step ────────────────────────────────────────────────────────────────────────────
-    //
-    // `scheduleStepWithEffects` runs the stages below in a fixed order; `StepPlay` is what they share.
-    // ⚠️ The order is the event order — and CHA/RND/RNL and a RANDOM arpeggio draw from one generator,
-    // so moving a stage that draws reshuffles every later roll.
+    // ── one phrase step: `scheduleStepWithEffects` runs the stages below, sharing `StepPlay` ──
+    // ⚠️ The order is the event order, and the random stages share one generator — moving a stage
+    // that draws reshuffles every later roll.
 
     struct StepPlay {
         const PhraseStep& step;      // as authored
@@ -678,7 +545,6 @@ class Sequencer {
         bool triggers() const { return hasNote && !skipNote; }
     };
 
-    // `stepIndex` is unused; named only in a comment so the compiler does not warn.
     ScheduleStepResult scheduleStepWithEffects(const PhraseStep& step, int64_t targetFrame, int64_t stepDuration,
                                                int trackId, int transposeSemitones, TrackState& trackState,
                                                int /*stepIndex*/);
@@ -691,22 +557,18 @@ class Sequencer {
     // PVB / PVX: X is the speed, Y the depth. PVX runs twice as fast and four times as deep.
     static void vibrato_from(int v, bool wide, int tempo, float& speed, float& depth);
 
-    // STEP 1: a KIL or a new note ends a running REPEAT / ARPEGGIO, and so does any command in the
-    // column that started it.
+    // STEP 1: a KIL, a new note or any command in its column ends a running REPEAT / ARPEGGIO.
     static void end_repeat_and_arpeggio(StepPlay& s);
 
     // STEP 2: CHA/RND/RNL, then the step's resolved parameters.
     void resolve_step(StepPlay& s);
 
-    // ⚠️ A ROW THAT HOPS IS NEVER HEARD — as on a TABLE's steering row (`processTableRow`). The jump
-    // is the whole row: no note, no effects, NO TIME, so a four-row loop lasts four rows. A note
-    // beside a HOP does not sound; put it on the row above.
-    // ⚠️ Decided on the RESOLVED step: a `CHA` can gate the HOP away, and then the row plays.
-    // A running REPEAT or ARPEGGIO still ends here (STEP 1 has run) — leaving the phrase ends them.
+    // ⚠️ A row that HOPs is never heard: no note, no effects, no time (as on a table's steering row).
+    // Decided on the resolved step, so a CHA can gate the HOP away and the row plays.
     static ScheduleStepResult take_hop(StepPlay& s);
 
-    // TSX and TRANSP. folded in by reassignment, so no later site (note, REPEAT retrigger, arpeggio)
-    // can reach the unscaled value; then STEP 2.1, DEL (LAT), moves the step's frame.
+    // TSX and TRANSP. folded in by reassignment, so no later site can reach the unscaled value; then
+    // STEP 2.1, LAT, moves the step's frame.
     void place_step(StepPlay& s) const;
 
     // STEP 2.2: TBL / THO, GRV, SCA / SCG — state the step's own note already plays under.
@@ -718,11 +580,10 @@ class Sequencer {
     // The step's own note, with its PSL / PBN / PVB / PVX, on a freshly reset carry.
     void schedule_step_note(StepPlay& s);
 
-    // An OFF in the note column: the sounding note goes to its release, on the step's own frame (so a
-    // CHA can skip it and a LAT moves it, as they would a note).
+    // An OFF: the sounding note goes to its release on the step's frame (CHA and LAT apply as to a note).
     void schedule_note_off(StepPlay& s);
 
-    // KIL: cuts the note at the sample-accurate kill frame (with LAT + KIL-offset latency) — no release.
+    // KIL: cuts the note at its kill frame (LAT and the KIL offset included) — no release.
     void schedule_kill(StepPlay& s);
 
     // STEP 2.3: live per-note / mixer FX (PAN / REV / DEL / BCK / CUT / RES / EQN / EQM).
@@ -751,75 +612,50 @@ class Sequencer {
     static constexpr unsigned CARRY_REVERSE = 1u << (CARRY_CC_SLOTS + 1);
     static constexpr unsigned CARRY_ALL     = ~0u;
 
-    /** The per-voice commands of one step, into the carry — everything except VOL, PAN and the
-     *  vibrato, which each have a value only their own emit site knows. */
+    // One step's per-voice commands into the carry — all but VOL, PAN and vibrato, which their own
+    // emit sites record.
     static void record_voice_commands(NoteCarry& c, const ResolvedStepParams& p);
 
-    /** Where emit_ramp_ticks puts tic `k` of the step being scheduled. */
+    // Where emit_ramp_ticks puts tic `k` of the step being scheduled.
     int64_t fade_tic_frame(int k) const;
 
-    /**
-     * How far fade `r` has moved the voice by frame `f` of the step being scheduled — its curve
-     * position, 1.0 once arrived — or −1 where it is not moving it (outside its span, or while the
-     * step's own write of the parameter holds).
-     * ⚠️ Must follow emit_ramp_ticks tic for tic: a retrigger re-applies this value on a frame a tic
-     * may also land on, and two updates on one frame are ordered arbitrarily — they must agree.
-     */
+    // How far fade `r` has moved the voice by frame `f` (1.0 once arrived), or −1 where it is not
+    // moving it. ⚠️ Must agree with emit_ramp_ticks tic for tic: both can land on one frame.
     double fade_t_at(const RampSpec& r, int64_t f) const;
 
-    /**
-     * What a note-on at `frame` starts from: the carry — as it stood before this step's own commands
-     * when the note lands ahead of them (LAT) — with every fade moving the voice laid over it.
-     * `faded` gets a `reapply_voice` mask of what the fades set.
-     */
+    // What a note-on at `frame` starts from: the carry (as before this step's commands, if a LAT puts
+    // the note ahead of them) with every moving fade laid over it. `faded` = a reapply_voice mask.
     NoteCarry voice_at(const TrackState& ts, int64_t frame, unsigned* faded = nullptr) const;
 
-    /** What a note-on cannot carry itself, one frame behind the note at `frame` — on its own frame
-     *  it would reach the voice the note replaces. `only` picks the parts. */
+    // What a note-on cannot carry, one frame behind it (on its own frame it would reach the voice the
+    // note replaces). `only` picks the parts.
     void reapply_voice(int64_t frame, int trackId, const NoteCarry& v, unsigned only = CARRY_ALL);
 
-    /**
-     * An ARP or RPT retrigger. It is a new voice, so it is handed what the note it repeats is playing
-     * with at its own frame: the VOL channel, pan, PIT, slice and vibrato in the note-on, everything
-     * else straight behind it. `velGain` < 0 takes the note's own velocity.
-     *
-     * ⚠️ PBN, PSL and LPO are NOT handed on: each is a movement from where the voice started, and a
-     * new voice starts from nowhere — carrying them needs the engine to start a voice mid-movement.
-     */
+    // An ARP or RPT retrigger, handed what the note it repeats is playing with. `velGain` < 0 = the
+    // note's own velocity.
+    // ⚠️ PBN, PSL and LPO are NOT handed on: each is a movement, and a new voice starts from nowhere.
     void emit_retrigger(NoteArgs a, const Note& note, int trackId, const TrackState& ts, float velGain = -1.0f);
 
-    /** A fade tick, into the carry, so a retrigger after the fade has passed still starts there. */
+    // A fade tick into the carry, so a later retrigger starts where the fade left it.
     static void carry_fade(NoteCarry& c, const RampSpec& r, int byte);
 
     void emit_note(NoteArgs a, const Note& note);
 
-    /**
-     * Pull a scheduled note onto its track's scale — the playback half of SCA / SCG.
-     * The transposes are already folded in and PIT/ARP sit beside it, so quantizing `note + pit + arp`
-     * covers all of them in one place.
-     * ⚠️ The correction goes back to the BASE NOTE: `pit` and `arp` are re-applied below the seam, and
-     * `transpose` is subtracted back out by slice selection.
-     * ⚠️ The SCHEDULER's scale, on the scheduler's clock, because this note is one of the future notes
-     * it is scheduling; nothing below the seam may re-ask.
-     * Left alone: a chromatic scale; an instrument with TRANSP. off; ⚠️ a note SELECTING A SLICE
-     * (quantizing a kit plays a different drum); a pitch outside 0..127 before or after (an authored
-     * B-9 stays 131, and an inexpressible correction is skipped, not clamped).
-     */
+    // Pull a scheduled note onto its track's scale (SCA / SCG), quantizing `note + pit + arp`.
+    // ⚠️ The correction goes back to the BASE NOTE; pit, arp and transpose are re-applied below.
+    // Left alone: a chromatic scale, TRANSP. off, a note selecting a slice, a pitch outside 0..127
+    // before or after (skipped, not clamped).
     void apply_track_scale(NoteArgs& a) const;
 
-    // The random draws for CHA / RND / RNL / ARP-RANDOM. `rng_range(a, b)` is half-open at the top;
-    // negative `lo` is allowed (rng.h).
-    // The stream is chosen by `schedulingTrack_`, set on entry to `walk_phrase_row` — the one place a
-    // draw can be reached from.
+    // The random draws, from the stream of `schedulingTrack_` (set in `walk_phrase_row`).
+    // `rng_range` is half-open at the top (rng.h).
     int rng_int(int bound) { return rngs_[schedulingTrack_].next_int(bound); }
     int rng_range(int lo, int hi) { return rngs_[schedulingTrack_].next_int(lo, hi); }
 
-    // One stream per track, because the LIVE rewind is per track: a shared stream could not be rewound
-    // for one track without un-drawing another's dice.
+    // One stream per track, so a LIVE rewind of one track does not un-draw another's dice.
     Rng rngs_[8];
     int schedulingTrack_ = 0;
-    // The step being scheduled, for `voice_at`. `stepRamps_` is set by walk_phrase_row for one step
-    // and null otherwise.
+    // The step being scheduled, for `voice_at`; `stepRamps_` is null between steps.
     const std::vector<RampSpec>* stepRamps_ = nullptr;
     int     stepIndex_     = 0;
     int64_t stepTarget_    = 0;
@@ -832,8 +668,7 @@ class Sequencer {
     int64_t   stepCarryFrom_ = 0;
     MidiRouter& router_;
     const Project* project_ = nullptr;
-    // Set only by the live transport starts, null on the render path — the STEP 2.4 empty-step tempo
-    // fallback depends on it.
+    // Null on the render path — STEP 2.4's tempo fallback depends on it.
     const Project* currentProject_ = nullptr;
     int sampleRate_ = 44100;
 
@@ -843,31 +678,25 @@ class Sequencer {
     int64_t nextFrameToSchedule_ = 0;
     int nextChainRowToSchedule_ = 0;
 
-    // ─── SONG's eight cursors ────────────────────────────────────────────────────────────────────
-    // One per track, so a track whose chain runs short moves on alone. `trackDone_` = nothing to play:
-    // set only when PLAY lands on a cell this column leaves blank (silent until STOP), or by a RENDER
-    // at the range end.
+    // SONG's eight cursors. `trackDone_` = nothing to play: PLAY landed on a blank cell (silent until
+    // STOP), or a render reached its range end.
     int64_t trackNextFrame_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     int  trackSongRow_[8]  = {0, 0, 0, 0, 0, 0, 0, 0};
     int  trackChainRow_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     bool trackDone_[8]     = {false, false, false, false, false, false, false, false};
 
-    // ─── LIVE mode ───────────────────────────────────────────────────────────────────────────────
-    // The row a channel loops is `trackSongRow_` itself — in LIVE the cursor never moves on its own, so
-    // a second field would be one fact in two places.
+    // LIVE: the row a channel loops is `trackSongRow_` itself.
     // `liveSilent_`: stopped, or launched on an empty cell. ⚠️ Not `trackDone_` — a silent channel still
     // spends its bar, so its clock stays on the grid.
-    // ⚠️ `liveLoopFrame_` is the frame the current lap began at — the starvation guard. A lap costing
-    // ZERO frames (empty chain rows, an all-zero groove) would keep this track furthest behind for
-    // ever and starve the other seven; measuring in frames catches every way of costing none.
+    // ⚠️ `liveLoopFrame_` is where the current lap began — the guard against a lap costing zero frames,
+    // which would stay furthest behind for ever and starve the other seven.
     bool     liveMode_ = false;
     LiveSlot liveQueue_[8];
     bool     liveSilent_[8] = {false, false, false, false, false, false, false, false};
     int64_t  liveLoopFrame_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     int currentPhraseId_ = 0;
     int currentChainId_ = 0;
-    // The mixer track PHRASE/CHAIN mode plays through. Unused in SONG and render, which carry the track
-    // per scheduled row.
+    // The mixer track PHRASE/CHAIN mode plays through.
     int playbackTrack_ = 0;
     int64_t playbackStartFrame_ = 0;
     PlaybackMode playbackMode_ = PlaybackMode::STOPPED;
@@ -875,8 +704,7 @@ class Sequencer {
 
     // ── side-records: playheads, the LIVE rewind, the restore flags ──
     std::deque<Checkpoint> checkpoints_[8];                                // ring of 4, per track
-    // The ring bound for TrackState::emptyHops. Sixteen is a full chain of pass-through phrases
-    // (legitimate); past 32 nothing is going to play.
+    // TrackState::emptyHops' bound: 16 is a full chain of pass-through phrases, past 32 nothing plays.
     static constexpr int MAX_EMPTY_HOPS = 32;
     std::deque<std::pair<int, int64_t>> chainRowStartFrames_;              // (chainRow, startFrame)
     std::vector<std::pair<SongPos, int64_t>>

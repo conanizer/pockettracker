@@ -1,11 +1,6 @@
 #pragma once
-/**
- * native/songcore/project_ops.h — NEW, and the two COMPACT operations (the PROJECT screen).
- *
- * PURE: each takes a `Project&` and nothing else. Telling the engine afterwards (reload samples, drop
- * the table cache, re-push params) is the host's job (SongcoreHost::new_project / clean_inst), which
- * lets the tests drive a COMPACT with no audio device.
- */
+// The PROJECT screen's NEW and the two COMPACTs, on the document alone; telling the engine is the
+// host's job (SongcoreHost::new_project / clean_inst).
 
 #include <cstddef>
 #include <deque>
@@ -70,12 +65,8 @@ inline void clean_unused_seq(Project& project) {
         if (used.phrases.count(i) == 0) project.phrases[static_cast<size_t>(i)] = Phrase(i);
 }
 
-/**
- * COMPACT → INST. Every instrument, table and groove the song does not reach goes back to factory.
- * A table is reachable four ways: a phrase's TBL, the implicit instrument i → table i, an explicit
- * `tableId`, and ⚠️ from INSIDE another table (any effect is allowed in a table's FX columns). So the
- * walk is TRANSITIVE.
- */
+// COMPACT → INST: every instrument, table and groove the song does not reach back to factory.
+// ⚠️ Tables reach tables (any effect is allowed in a table's FX), so the walk is TRANSITIVE.
 inline void clean_unused_inst(Project& project) {
     const UsedRefs used = collect_used_refs(project);
 
@@ -125,9 +116,8 @@ inline void clean_unused_inst(Project& project) {
         }
     }
 
-    // ⚠️ `Instrument(i)` leaves the FIELD default `sampleId = -1`, while a fresh project has
-    // `sampleId = i` (model.h) — so a compacted slot and a new slot differ on disk. Kept deliberately;
-    // ptroundtrip would flag a "tidy-up" here.
+    // ⚠️ `Instrument(i)` keeps `sampleId = -1` where a fresh project has `i` — they differ on disk, and
+    // the round-trip tests pin it.
     for (int i = 0; i < static_cast<int>(project.instruments.size()); ++i)
         if (used.instruments.count(i) == 0) project.instruments[static_cast<size_t>(i)] = Instrument(i);
 
@@ -138,11 +128,7 @@ inline void clean_unused_inst(Project& project) {
         if (usedGrooves.count(i) == 0) project.grooves[static_cast<size_t>(i)] = Groove(i);
 }
 
-/**
- * NEW. A fresh document at the CURRENT file-format version.
- * ⚠️ `version = 1`, not the struct's 0: 0 means "pre-versioning", and since `version` is only written
- * when non-zero, a new song would load as a legacy file and be migrated.
- */
+// NEW: a fresh document. ⚠️ `version = 1`, not the struct's 0 — a 0 would load as a legacy file.
 inline void new_project(Project& project) {
     project         = make_default_project();
     project.version = 1;

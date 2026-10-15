@@ -1,19 +1,13 @@
 #ifndef POCKETTRACKER_SONGCORE_TRACE_WRITER_H
 #define POCKETTRACKER_SONGCORE_TRACE_WRITER_H
 
-// ─── Conformance-trace writer ───────────────────────────────────────────────────────────────────
-//
-// A bus consumer that serializes the router's records into the frozen trace text (event.h). Its
-// output must equal the goldens byte for byte, after the comparator's canonical sort:
-//   * frames session-relative — the base latches at T PLAY;
-//   * every payload field, always, in struct order;
-//   * ints decimal, floats "0x" + 8 uppercase hex digits of the binary32 bits, bools 0/1, instrument
-//     2-hex or -1; '\n' endings; no wall clock anywhere;
-//   * events outside a PLAY..STOP session are dropped; T STOP with no session is a no-op.
+// The bus consumer that writes the trace text (format in event.h); byte-compared against the goldens.
+// Events outside a PLAY..STOP session are dropped.
 
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include "event.h"
 #include "router.h"
 
@@ -118,24 +112,17 @@ class TraceWriter : public IMidiConsumer {
                 break;
             // Every payload field, always all of them, in struct order — twelve here.
             case EV_EXT_EQ_MORPH:
-            case EV_EXT_MASTER_EQ_MORPH:
-                for (int i = 0; i < 3; ++i) {
-                    s += " type"; s += std::to_string(i);
-                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.type[i]));
-                }
-                for (int i = 0; i < 3; ++i) {
-                    s += " freq"; s += std::to_string(i);
-                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.freq[i]));
-                }
-                for (int i = 0; i < 3; ++i) {
-                    s += " gain"; s += std::to_string(i);
-                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.gain[i]));
-                }
-                for (int i = 0; i < 3; ++i) {
-                    s += " q"; s += std::to_string(i);
-                    s += "="; s += std::to_string(static_cast<int>(ev.extEqMorph.q[i]));
-                }
+            case EV_EXT_MASTER_EQ_MORPH: {
+                const ExtEqMorphPayload& m = ev.extEqMorph;
+                const std::pair<const char*, const uint8_t*> fields[] = {
+                    {" type", m.type}, {" freq", m.freq}, {" gain", m.gain}, {" q", m.q}};
+                for (const auto& f : fields)
+                    for (int i = 0; i < 3; ++i) {
+                        s += f.first; s += std::to_string(i);
+                        s += "="; s += std::to_string(static_cast<int>(f.second[i]));
+                    }
                 break;
+            }
             default: break;  // schema-complete: no other emitters exist
         }
         s += '\n';

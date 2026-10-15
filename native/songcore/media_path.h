@@ -1,13 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_MEDIA_PATH_H
 #define POCKETTRACKER_SONGCORE_MEDIA_PATH_H
 
-// ─── Making a stored path mean something on THIS device ──────────────────────────────────────────
-//
-// A path in a project or config.json may be RELATIVE to the project, ABSOLUTE under another
-// install's app root, or differ in CASE from a case-sensitive disk. All three are handled here.
-// ⚠️ `resolve_media_path` (samples, SF2s) and `pt::ui::resolve_browse_dir` (config.json folders) must
-// both re-root through `app_root_relative_tail`, or a project's samples end up in a folder the
-// browser will not open.
+// A stored path made to mean something on THIS device: relative to the project, absolute under
+// another install's root, or differing in case from a case-sensitive disk.
+// ⚠️ Media paths and config.json folders must both re-root through `app_root_relative_tail`.
 
 #include <filesystem>   // resolve_case_insensitive only
 #include <cstdio>
@@ -18,10 +14,7 @@
 
 namespace songcore {
 
-// A cheap "is this file here?" — an open probe, not <filesystem>. Used only to decide whether an
-// absolute path needs relocating.
-// ⚠️ Must go through pt_fopen: a wrong "no" here re-roots a correct path, and the instrument loads
-// empty with no error anywhere.
+// An open probe. ⚠️ Through pt_fopen: a wrong "no" re-roots a correct path, and the load fails silently.
 inline bool path_exists(const std::string& path) {
     if (path.empty()) return false;
     FILE* f = pt_fopen(path.c_str(), "rb");
@@ -30,12 +23,8 @@ inline bool path_exists(const std::string& path) {
     return true;
 }
 
-// The app-root-relative tail ("Samples/Pads/kick.wav") of an absolute path authored under ANOTHER
-// install, or empty when it lies under no recognisable app sub-tree.
-// A `pt://<root-id>/…` URI is deliberately included: re-granting the folder changes the id, and
-// such paths re-root like any other. Only ever run on a path that has already failed to open.
-// ⚠️ Anchor 2 lists the MEDIA sub-trees only, so a browse folder under a foreign root not named
-// PocketTracker falls back to its category default rather than a wrong guess.
+// The app-root-relative tail ("Samples/Pads/kick.wav") of a path from ANOTHER install, or empty.
+// Run only on a path that failed to open; a `pt://` URI is included (re-granting changes its id).
 inline std::string app_root_relative_tail(const std::string& path) {
     // 1) Everything after the LAST "/PocketTracker/" (the phone's root). rfind, so a user sub-folder
     //    with that name loses to the real root above it.
@@ -59,12 +48,8 @@ inline std::string to_lower_ascii(std::string s) {
     return s;
 }
 
-// Resolve a path whose stored CASE may not match the disk (Android storage is case-insensitive; a
-// Linux SD card is not). Walks from the longest existing prefix, taking a case-insensitive match
-// where the exact child is missing. Returns the ORIGINAL path when no chain exists, so the failure
-// names what the project asked for. Returns at once when the exact path exists, so only a real miss
-// ever lists a directory.
-// A URI is returned untouched: case drift is a disk property, and a provider resolves its own names.
+// A path whose stored CASE may not match the disk: the longest existing prefix, then case-insensitive
+// matches. The ORIGINAL path when none, so the failure names it. A URI is returned untouched.
 inline std::string resolve_case_insensitive(const std::string& path) {
     if (path.empty() || pt_path_is_uri(path.c_str())) return path;
     namespace fs = std::filesystem;
@@ -118,14 +103,8 @@ inline bool path_is_absolute(const std::string& path) {
            pt_path_is_uri(path.c_str());
 }
 
-// Absolute wins; relative resolves against base_dir (portable projects and the test data store
-// relative paths). No <filesystem>: it needs a separate link library on some toolchains.
-//
-// ⚠️ A project MOVED between installs holds absolute paths under the authoring install's root. When
-// such a path does not exist here, its app-root-relative tail is re-rooted onto `app_root`. A sample
-// kept outside the app tree is left as written, so the failure names the real path. The stored string
-// is never rewritten, so a re-save stays portable.
-// `app_root` empty skips the re-rooting entirely — the host tools' default.
+// Absolute wins; relative resolves against base_dir. A missing absolute path from another install is
+// re-rooted onto `app_root` (empty: never). The stored string is never rewritten.
 inline std::string resolve_media_path(const std::string& path, const std::string& base_dir,
                                       const std::string& app_root) {
     if (path.empty()) return path;

@@ -1,24 +1,11 @@
 #ifndef POCKETTRACKER_SONGCORE_MIDI_OUT_H
 #define POCKETTRACKER_SONGCORE_MIDI_OUT_H
 
-// ─── The EXTERNAL consumer — bus events become MIDI bytes ────────────────────────────────────────
-//
-// The mirror of engine_consumer.h: the same bus record, turned into bytes on a cable. Platform-free;
-// `IMidiOut` is the seam (ALSA rawmidi, winmm, Android MidiManager behind it).
-//
-// Kept in ONE place on purpose:
-//   • the 0–255/0–1 → 0–127 scaling (`to7bit`), so internal and external behaviour cannot drift;
-//   • the routing verdict (`instrument_routes_external` + `TrackInstruments`), shared with the engine
-//     consumer;
-//   • the note lifecycle: one active note per track, ended by a LEN gate, the next note, a KIL or the
-//     transport stopping. External gear has no voice allocator — an unanswered note-on sounds until
-//     the power is cut;
-//   • the route to the wire: this serializer and `MidiClock` share `emit`, the OFFSET, the port and
-//     the send observer.
-//
-// Events arrive at LOOKAHEAD time (ahead of the clock), are queued by target frame and released by
-// `pump(now)` — from a ~1 kHz sender thread (`shell/midi/midi-sender.h`) driven by `FrameEstimator`, or
-// from `SongcoreHost::poll` when no such thread owns the job. Two threads, hence `mu_`.
+// The EXTERNAL consumer: bus events become MIDI bytes on a cable — the mirror of engine_consumer.h.
+// `IMidiOut` is the platform seam. One active note per track, ended by a LEN gate, the next note, a
+// KIL or the transport stopping. ⚠️ Gear has no voice allocator: an unanswered note-on sounds for ever.
+// Events arrive ahead of the clock, are queued by frame and released by `pump(now)` — from the sender
+// thread (`shell/midi/midi-sender.h`) or `SongcoreHost::poll`. Two threads, hence `mu_`.
 
 #include <algorithm>
 #include <cmath>
@@ -37,18 +24,13 @@
 
 namespace songcore {
 
-// ─── The platform seam ──────────────────────────────────────────────────────────────────────────
-
-/**
- * A MIDI output port, implemented once per platform. `send` gets a complete message (2 or 3 bytes)
- * and must not block for long — it runs on whichever thread pumps the queue.
- */
+// A MIDI output port, one per platform. `send` gets a complete message and must not block for long —
+// it runs on whichever thread pumps the queue.
 struct IMidiOut {
     virtual ~IMidiOut() = default;
 
-    /** How many output devices exist right now. Re-enumerated on demand; hot-plug changes it. */
+    // Re-enumerated on each call; hot-plug changes it.
     virtual int device_count() = 0;
-    /** Display name of device `index`, for the MIDI screen's OUTPUT row. */
     virtual std::string device_name(int index) = 0;
 
     virtual bool open(int index) = 0;
@@ -57,46 +39,37 @@ struct IMidiOut {
 
     virtual void send(const uint8_t* data, int len) = 0;
 
-    /** True once the open port has failed in a way only a reopen can cure (the cable was pulled). */
+    // The open port failed in a way only a reopen cures (the cable was pulled).
     virtual bool broken() const { return false; }
 
-    /** A synth built into the OS rather than a device someone plugged in — AUTO passes over it. */
+    // A synth built into the OS — AUTO passes over it.
     virtual bool is_builtin_synth(int /*index*/) { return false; }
 };
 
-// ─── Scaling — the ONE place a wide internal value becomes a 7-bit one ───────────────────────────
-
-/** A 0..1 gain (pan, sends, volume — every float on the bus) to a 0–127 controller value. */
+// A 0..1 bus value to 0–127 — the one place, so internal and external cannot drift.
 inline int to7bit(float v01) {
     if (!(v01 > 0.0f)) return 0;      // also catches NaN
     if (v01 >= 1.0f) return 127;
     return static_cast<int>(v01 * 127.0f + 0.5f);
 }
 
-/** An authored 0x00–0xFF byte to a 0–127 controller value. */
+// An authored 0x00–0xFF byte to 0–127.
 inline int byte_to_7bit(int b) {
     if (b <= 0) return 0;
     if (b >= 255) return 127;
     return (b * 127 + 127) / 255;
 }
 
-/** MIDI status bytes. */
 constexpr uint8_t MIDI_NOTE_OFF = 0x80, MIDI_NOTE_ON = 0x90, MIDI_CC = 0xB0,
                   MIDI_PROGRAM  = 0xC0, MIDI_PITCH_BEND = 0xE0;
 
-/** Controller numbers this file sends by name. */
 constexpr uint8_t MIDI_CC_BANK_MSB = 0, MIDI_CC_BANK_LSB = 32, MIDI_CC_ALL_NOTES_OFF = 123;
 
-/** No bend — the 14-bit value a channel rests at, and what a panic restores it to. */
+// No bend — where a channel rests, and what a panic restores.
 constexpr int MIDI_BEND_CENTRE = 0x2000;
 
-/**
- * One message, stamped with the frame it is due on.
- * `seq` makes the order TOTAL: messages due on the same frame leave in production order (bank →
- * program → CC → note-on), which a sort on frame alone could swap.
- * `frame == UNSCHEDULED` marks a panic message sent past the clock (`send_now`); a lateness observer
- * must skip it.
- */
+// One message and the frame it is due on. `seq` keeps same-frame messages in production order
+// (bank → program → CC → note-on). `UNSCHEDULED` = a panic message; a lateness observer skips it.
 struct MidiMessage {
     static constexpr int64_t UNSCHEDULED = INT64_MIN;
 
@@ -106,41 +79,24 @@ struct MidiMessage {
     uint8_t  len   = 0;
 };
 
-/**
- * Told about every message as it is released — the only way to measure how close to its due frame
- * a message leaves (`shell/midi/midi-sender.h` fits its own wall clock against `dueFrame`).
- * ⚠️ Called under the lock, from whichever thread released the message: be quick, and never call back
- * into `ExternalConsumer`.
- * Called even with no port open (`sent` says so), so timing can be measured with no hardware.
- */
+// Told about every message as it is released — how lateness is measured; called with no port open too.
+// ⚠️ Called under the lock: be quick, and never call back into `ExternalConsumer`.
 struct IMidiSendObserver {
     virtual ~IMidiSendObserver() = default;
     virtual void on_released(const MidiMessage& m, int64_t nowFrame, bool sent) = 0;
 };
-
-// ─── The consumer ───────────────────────────────────────────────────────────────────────────────
 
 class ExternalConsumer : public IMidiConsumer {
   public:
     explicit ExternalConsumer(const Project* project) : project_(project) { forget_channel_state(); }
     ~ExternalConsumer() override { panic(); }
 
-    // ── ⚠️ THREADING ─────────────────────────────────────────────────────────────────────────────
-    //
-    //   • the FRAME LOOP produces (`consume`, `on_play`, previews) and PANICS (stop, port swap,
-    //     teardown);
-    //   • the SENDER THREAD only calls `pump`.
-    //
-    // Every public method takes `mu_`; every private helper assumes it is held (hence `panic_locked()`
-    // inside `on_play` / `set_out`). `std::mutex` is not recursive.
-    // ⚠️ The port write happens under the lock on purpose: `IMidiOut::send` need not be thread-safe
-    // (ALSA rawmidi's is not). A blocking write stalls the producer, bounded by the 4 KB rawmidi buffer
-    // — far better than a dropped note-off.
+    // ⚠️ Threads: the frame loop produces and panics, the sender thread only calls `pump`. Every public
+    // method takes `mu_`, every private helper assumes it held (not recursive).
+    // The port write is under the lock on purpose: `IMidiOut::send` need not be thread-safe.
 
-    /**
-     * Attach (or detach, with nullptr) the port.
-     * ⚠️ Panics FIRST: after a swap, the owed note-offs can no longer reach the device holding the notes.
-     */
+    // Attach (or detach, with nullptr) the port.
+    // ⚠️ Panics FIRST: after a swap the owed note-offs could not reach the device holding the notes.
     void set_out(IMidiOut* out) {
         std::lock_guard<std::mutex> lk(mu_);
         if (out == out_) return;
@@ -152,26 +108,18 @@ class ExternalConsumer : public IMidiConsumer {
         return out_;
     }
 
-    /**
-     * The bus's track→instrument state, read-only, for MIDI in's router — never a third opinion.
-     * ⚠️ Not locked: `tracks_` is written in `consume` and read here, both on the frame-loop thread; the
-     * sender thread never touches it. A second writer would invalidate this.
-     */
+    // The track→instrument state, for MIDI in's router.
+    // ⚠️ Not locked: written and read only on the frame-loop thread.
     const TrackInstruments& track_instruments() const { return tracks_; }
 
-    /** The send-timing observer, or nullptr. Set once at boot, before the sender thread starts. */
+    // Set once at boot, before the sender thread starts.
     void set_send_observer(IMidiSendObserver* obs) {
         std::lock_guard<std::mutex> lk(mu_);
         observer_ = obs;
     }
 
-    /**
-     * SYNC OUT — the 24 PPQN clock and the transport bytes (midi_clock.h).
-     * ⚠️ Turning it OFF mid-take sends the owed Stop; a synth left on external sync would otherwise wait
-     * forever, looking like a crash.
-     * Turning it ON mid-take takes effect at the next start: the grid's epoch is the take's start frame,
-     * and a mid-take clock would have to invent one.
-     */
+    // SYNC OUT — the 24 PPQN clock and transport bytes (midi_clock.h). On takes effect at the next start.
+    // ⚠️ Off mid-take sends the owed Stop, or a synth on external sync waits for ever.
     void set_sync_out(bool on) {
         std::lock_guard<std::mutex> lk(mu_);
         if (clock_.set_enabled(on)) send_now_1(MIDI_RT_STOP);
@@ -181,8 +129,7 @@ class ExternalConsumer : public IMidiConsumer {
         return clock_.enabled();
     }
 
-    /** Alignment between speaker audio and the cable, in ms (positive = MIDI later), applied as frames
-     *  at send time. */
+    // Speaker-to-cable alignment in ms (positive = MIDI later), applied at send time.
     void set_offset_ms(int ms) {
         std::lock_guard<std::mutex> lk(mu_);
         offsetMs_ = ms;
@@ -192,55 +139,39 @@ class ExternalConsumer : public IMidiConsumer {
         return offsetMs_;
     }
 
-    // ── IMidiConsumer ────────────────────────────────────────────────────────────────────────────
+    // ── IMidiConsumer ──
 
-    /**
-     * `on_play` IS the transport starting (unlike `on_stop`): `t_play` comes once per take. The render
-     * pass never reaches this consumer — the host detaches the cable.
-     * ⚠️ The `panic()` is what makes `tracks_.reset()` safe: reset with notes still active, their lanes
-     * no longer resolve as external and the owed note-offs are never sent — fatal on the PREVIEW lane,
-     * which has no next note-on.
-     */
+    // The transport starting (`t_play` comes once per take; a render never reaches this consumer).
+    // ⚠️ The panic makes `tracks_.reset()` safe: reset with notes active, their note-offs are never sent.
     void on_play(const std::string& kind, const std::string& detail, int64_t startFrame,
                  int tempo, int sample_rate) override {
         std::lock_guard<std::mutex> lk(mu_);
         if (tempo > 0) tempo_ = tempo;
         if (sample_rate > 0) sampleRate_ = sample_rate;
-        // A fresh take is a fresh device state: what each channel was last told may no longer be
-        // true. (`panic_locked` ends notes, drops the queue, sends an owed Stop and forgets channel
-        // state.)
+        // A fresh take is a fresh device state.
         panic_locked();
         tracks_.reset();
 
-        // ── arm the clock, and say WHERE the take starts ─────────────────────────────────────────
-        //
-        // The start row is read from `detail`, data already flowing on exactly this event — rather
-        // than three play verbs each remembering to set it. Only SONG carries a row (`row=`); CHAIN
-        // and PHRASE start the device at 0.
+        // Arm the clock at the take's start; only SONG carries a row (`row=` in `detail`).
         const int startRow = kind == "SONG" ? hex_after(detail, "row=") : 0;
         const int spp      = (startRow > 0 && project_) ? nominal_spp_beats(*project_, startRow) : 0;
         clock_.start(startFrame, frames_per_quarter(), spp);
     }
 
-    /**
-     * ⚠️ Deliberately empty — `t_stop` is NOT "the transport stopped". It closes a PLAY..STOP trace
-     * segment and ends EVERY scheduling pass, including a whole-song pass; panicking here would discard
-     * the take the moment it was queued. The real stop is `SongcoreHost::stop()` → `panic()`.
-     */
+    // ⚠️ Deliberately empty: `t_stop` ends every scheduling pass, not the transport — a panic here would
+    // discard the take as it was queued. The real stop is `SongcoreHost::stop()` → `panic()`.
     void on_stop() override {}
 
     void consume(const Event& ev) override {
         std::lock_guard<std::mutex> lk(mu_);
         if (!project_) return;
 
-        // Learn the track→instrument map from EVERY note-on, internal ones included, or a track that
-        // goes SAMPLER → EXTERNAL would resolve to the old instrument.
+        // Learn from EVERY note-on, internal ones too, or a track going EXTERNAL keeps its old instrument.
         const int16_t prev  = tracks_.current(ev.track);
         const int16_t instr = tracks_.observe(ev);
 
         if (!routes_external(instr)) {
-            // ⚠️ A track leaving EXTERNAL owes the device a note-off; no later event on it will reach
-            // this consumer to deliver one. (The mirror of EngineConsumer's flip kill.)
+            // ⚠️ A track leaving EXTERNAL owes the device a note-off; nothing later would deliver it.
             if (ev.type == EV_NOTE_ON && routes_external(prev)) end_note(ev.track, ev.frame);
             return;
         }
@@ -252,26 +183,17 @@ class ExternalConsumer : public IMidiConsumer {
             case EV_CC:        cc_event(ev, ins); break;
             case EV_PROGRAM: program_event(ev, ins); break;
             case EV_PITCH_BEND: pitch_bend_event(ev, ins); break;
-            default:
-                // EV_EXT_* have no MIDI 1.0 form; an EXT event is internal by definition.
+            default:   // EV_EXT_* have no MIDI form
                 break;
         }
     }
 
-    // ── The clock side ───────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Release everything due at or before `nowFrame` and close expired LEN gates. Late, never early,
-     * so the caller's cadence is the precision (shell/midi/midi-sender.h).
-     */
+    // Release everything due at or before `nowFrame` and close expired LEN gates — late, never early.
     void pump(int64_t nowFrame) {
         std::lock_guard<std::mutex> lk(mu_);
-        // ONE timeline: `due` is "now" in EVENT frames, so LEN gates and the queue share the OFFSET.
+        // "Now" in event frames: the clock, LEN gates and the queue all share the OFFSET.
         const int64_t due = nowFrame - offset_frames();
-        // ── The clock first ──────────────────────────────────────────────────────────────────────
-        // Transport bytes ride tick 0's frame and Start must precede the take. Real-time bytes may be
-        // interleaved anywhere, so clock-before-notes costs nothing. It uses the OFFSET-corrected
-        // `due` too, or OFFSET would mean two things on one cable.
+        // The clock first: Start must precede the take.
         clock_.pump(due, frames_per_quarter(), [&](int64_t at, const uint8_t* bytes, int len) {
             emit_bytes(at, bytes, len, nowFrame);
         });
@@ -288,43 +210,25 @@ class ExternalConsumer : public IMidiConsumer {
         if (i > 0) pending_.erase(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(i));
     }
 
-    /**
-     * All notes off, now, on every channel touched — and the pending queue dropped.
-     * Per-note offs end what we know about; CC 123 is the backstop for what our bookkeeping lost. The
-     * queue holds note-ons for a take that no longer exists.
-     */
+    // All notes off now on every channel touched (per note, then CC 123), and the queue dropped.
     void panic() {
         std::lock_guard<std::mutex> lk(mu_);
         panic_locked();
     }
 
-    /** Pending messages not yet released — the tools' window into the queue. */
+
     size_t pending_count() const {
         std::lock_guard<std::mutex> lk(mu_);
         return pending_.size();
     }
 
-    /**
-     * Does this consumer owe anything SOON? The sender thread's busy/idle test, derived from the
-     * deadlines: a running clock owes a tick, a non-empty queue a message.
-     * ⚠️ The clock queues nothing, so `pending_count() > 0` alone would idle the thread during pure
-     * sync out — 20% of a tick in jitter. LEN gates are deliberately excluded (4 ms idle bound is
-     * inaudible; shell/midi/midi-sender.cpp).
-     */
+    // The sender thread's busy/idle test. ⚠️ The clock queues nothing, so the queue alone would idle the
+    // thread during pure sync out. LEN gates are left out (the 4 ms idle bound is inaudible).
     bool needs_fast_pump() const {
         std::lock_guard<std::mutex> lk(mu_);
         return !pending_.empty() || clock_.running();
     }
 
-    /** The clock's counters, for tools and diagnostics. Never for a decision. */
-    int64_t clock_tick_index() const {
-        std::lock_guard<std::mutex> lk(mu_);
-        return clock_.tick_index();
-    }
-    int clock_dropped_ticks() const {
-        std::lock_guard<std::mutex> lk(mu_);
-        return clock_.dropped_ticks();
-    }
 
   private:
     void panic_locked() {
@@ -339,8 +243,7 @@ class ExternalConsumer : public IMidiConsumer {
             if (!channelUsed_[c]) continue;
             send_now(MIDI_CC | static_cast<uint8_t>(c), MIDI_CC_ALL_NOTES_OFF, 0);
         }
-        // A bent channel is silent and still wrong (see pitch_bend_event). Independent of
-        // channelUsed_: an MPB with no note still bent the device.
+        // Centre bent channels — an MPB with no note still bent the device.
         for (int c = 0; c < 16; ++c) {
             if (!bent_[c]) continue;
             send_now(MIDI_PITCH_BEND | static_cast<uint8_t>(c),
@@ -357,18 +260,16 @@ class ExternalConsumer : public IMidiConsumer {
         int64_t offFrame = INT64_MAX;   // INT64_MAX = gate-to-next (midiLen 0): no timed off
     };
 
-    /** The routing verdict, asked of the model (model.h) so both consumers cannot disagree. */
+    // The routing verdict, from the model so both consumers agree.
     bool routes_external(int16_t instrument) const {
         if (instrument < 0 || !project_) return false;
         if (static_cast<size_t>(instrument) >= project_->instruments.size()) return false;
         return instrument_routes_external(project_->instruments[static_cast<size_t>(instrument)]);
     }
 
-    // ── note lifecycle ───────────────────────────────────────────────────────────────────────────
-
     void note_on(const Event& ev, const Instrument& ins) {
         const uint8_t ch = chan(ins);
-        // The track's previous note ends where this one begins — the only end when midiLen is 0.
+        // The previous note ends here — its only end when midiLen is 0.
         end_note(ev.track, ev.frame);
 
         if (project_->midiSendProgramChange) send_program(ev.frame, ch, ins);
@@ -389,8 +290,7 @@ class ExternalConsumer : public IMidiConsumer {
         a.on = true;
         a.channel = ch;
         a.note = static_cast<uint8_t>(note);
-        // ⚠️ Tempo from the live project, not `on_play`'s argument (the render path passes a fallback
-        // there) — a LEN gate must not change length between play and render.
+        // ⚠️ The project's tempo, not `on_play`'s fallback, so a LEN gate is the same in play and render.
         const int tempo = project_->tempo > 0 ? project_->tempo : tempo_;
         a.offFrame = ins.midiLen > 0
                          ? ev.frame + ins.midiLen * frames_per_tic(frames_per_step(tempo, sampleRate_))
@@ -398,12 +298,8 @@ class ExternalConsumer : public IMidiConsumer {
         channelUsed_[ch] = true;
     }
 
-    /**
-     * End the track's active note at `frame` or at its own LEN gate, whichever is FIRST.
-     * ⚠️ The `min` is what makes LEN work: events arrive at lookahead time, so the NEXT note is usually
-     * consumed before the gate is due, and without the `min` it would cancel the gate. A KIL before
-     * the gate still wins — `min` cuts short, never extends.
-     */
+    // End the track's note at `frame` or its LEN gate, whichever is FIRST.
+    // ⚠️ The `min` is what makes LEN work: the next note usually arrives before the gate is due.
     void end_note(uint8_t track, int64_t frame) {
         if (track >= TrackInstruments::LANES) return;
         ActiveNote& a = active_[track];
@@ -413,35 +309,21 @@ class ExternalConsumer : public IMidiConsumer {
         a.offFrame = INT64_MAX;
     }
 
-    // ── the note's two numbers ───────────────────────────────────────────────────────────────────
-
-    /**
-     * The three transpose fields, separate on the bus, folded into one note number here. Clamped:
-     * B-9 = 131 is a legal phrase note but not legal MIDI.
-     */
+    // The transpose fields folded in, clamped: B-9 = 131 is a legal phrase note but not MIDI.
     static int midi_note(const NoteOnPayload& n) {
         const int v = static_cast<int>(n.note) + n.transpose + n.pit + n.arp;
         return v < 0 ? 0 : (v > 127 ? 127 : v);
     }
 
-    /**
-     * Velocity, derived in one place. `velocity` (the V column) wins when present; −1 means derive from
-     * `velGain` = (V/127)², hence the square root. Then `volGain` (VOL or Vxx) scales it — the only
-     * volume control an external instrument has.
-     * Clamped to ≥ 1: velocity 0 IS a note-off.
-     */
+    // Velocity scaled by the VOL channel — an external instrument's only volume. At least 1: velocity 0
+    // IS a note-off.
     static int midi_velocity(const NoteOnPayload& n) {
         const float unit = note_velocity_unit(n) * f32_from_bits(n.volGainBits);
         const int v = to7bit(unit);
         return v < 1 ? 1 : v;
     }
 
-    // ── the patch bytes that ride a note-on ──────────────────────────────────────────────────────
-
-    /**
-     * Bank + program, when set and when the channel is not already on them. The `forget_channel_state()`
-     * at each transport start makes this safe: a take's first note always states its patch.
-     */
+    // Bank + program, when set and the channel is not already on them (forgotten at each start).
     void send_program(int64_t frame, uint8_t ch, const Instrument& ins) {
         if (ins.midiProgram < 0 && ins.midiBank < 0) return;
         if (lastBank_[ch] == ins.midiBank && lastProgram_[ch] == ins.midiProgram) return;
@@ -455,10 +337,7 @@ class ExternalConsumer : public IMidiConsumer {
         lastProgram_[ch] = ins.midiProgram;
     }
 
-    /**
-     * The instrument's CC slots, re-sent with EVERY note-on — not de-duplicated. They are the patch's
-     * starting values; a `CCA` or a knob on the gear moves them between notes.
-     */
+    // The instrument's CC slots, re-sent with EVERY note-on: a CCA or a knob may have moved them.
     void send_cc_defaults(int64_t frame, uint8_t ch, const Instrument& ins) {
         for (const MidiCcSlot& s : ins.midiCC) {
             if (s.cc < 0 || s.value < 0) continue;
@@ -467,11 +346,8 @@ class ExternalConsumer : public IMidiConsumer {
         }
     }
 
-    /**
-     * A bus CC onto the wire — a literal controller or a symbolic slot id.
-     * ⚠️ A slot id (128-131) must never reach the `& 0x7F`: 128 masks to BANK SELECT. `resolve_cc_param`
-     * (model.h) translates it, shared with the engine consumer.
-     */
+    // A bus CC onto the wire. ⚠️ A slot id (128-131) must never reach the `& 0x7F` — 128 masks to BANK
+    // SELECT; `resolve_cc_param` translates it.
     void cc_event(const Event& ev, const Instrument& ins) {
         const int param = resolve_cc_param(ins, ev.cc.param);
         if (param < 0) return;    // an unassigned slot: nothing to move
@@ -481,12 +357,8 @@ class ExternalConsumer : public IMidiConsumer {
         if (param == CC_PAN) lastPan_[ch] = v7;   // keep the note-on de-dup honest
     }
 
-    /**
-     * MPG — an explicit program change on the track's channel.
-     * ⚠️ It must update `lastProgram_`, or `send_program`'s de-dup would leave the instrument's next
-     * note on the MPG's program. The bank becomes "unknown": a program change selects within whatever
-     * bank the device is on.
-     */
+    // MPG. ⚠️ Updates `lastProgram_`, or the next note would stay on the MPG's program; the bank
+    // becomes unknown.
     void program_event(const Event& ev, const Instrument& ins) {
         const uint8_t ch = chan(ins);
         const int prog = ev.program.program & 0x7F;
@@ -495,12 +367,8 @@ class ExternalConsumer : public IMidiConsumer {
         lastBank_[ch] = -2;
     }
 
-    /**
-     * MPB — an absolute 14-bit bend on the track's channel.
-     * ⚠️ A bent channel is hanging state: every later note on that device plays detuned. Bent channels
-     * are tracked and `panic_locked` centres them — only those, so we never touch another app's
-     * channels.
-     */
+    // MPB, an absolute 14-bit bend. ⚠️ A bent channel detunes every later note; `panic_locked` centres
+    // the ones we bent, and only those.
     void pitch_bend_event(const Event& ev, const Instrument& ins) {
         const uint8_t ch = chan(ins);
         const int v14 = ev.pitchBend.value14 & 0x3FFF;
@@ -508,8 +376,6 @@ class ExternalConsumer : public IMidiConsumer {
                 static_cast<uint8_t>(v14 & 0x7F), static_cast<uint8_t>((v14 >> 7) & 0x7F));
         bent_[ch] = (v14 != MIDI_BEND_CENTRE);
     }
-
-    // ── the queue ────────────────────────────────────────────────────────────────────────────────
 
     uint8_t chan(const Instrument& ins) const {
         const int c = ins.midiChannel;
@@ -529,8 +395,7 @@ class ExternalConsumer : public IMidiConsumer {
         m.seq = seq_++;
         m.bytes[0] = status; m.bytes[1] = d1; m.bytes[2] = d2;
         m.len = len;
-        // Sorted insert: the scheduler emits forward in time, so this is usually one comparison.
-        // Ties keep arrival order (upper_bound on (frame, seq)).
+        // Sorted insert on (frame, seq); usually at the end.
         auto pos = std::upper_bound(pending_.begin(), pending_.end(), m,
                                     [](const MidiMessage& a, const MidiMessage& b) {
                                         return a.frame != b.frame ? a.frame < b.frame : a.seq < b.seq;
@@ -538,7 +403,7 @@ class ExternalConsumer : public IMidiConsumer {
         pending_.insert(pos, m);
     }
 
-    /** Bypass the queue — panic only. Nothing else may skip the clock. */
+    // Bypass the queue — panic only.
     void send_now(uint8_t status, uint8_t d1, uint8_t d2) {
         MidiMessage m;
         m.frame = MidiMessage::UNSCHEDULED;   // never had a due time
@@ -547,7 +412,7 @@ class ExternalConsumer : public IMidiConsumer {
         emit(m, MidiMessage::UNSCHEDULED);
     }
 
-    /** The one-byte form — the real-time Stop only. */
+    // The one-byte form, for Stop.
     void send_now_1(uint8_t status) {
         MidiMessage m;
         m.frame = MidiMessage::UNSCHEDULED;
@@ -556,10 +421,7 @@ class ExternalConsumer : public IMidiConsumer {
         emit(m, MidiMessage::UNSCHEDULED);
     }
 
-    /**
-     * A message the CLOCK produced, already due: straight out, not through `pending_`. It keeps its
-     * real `frame` so clock lateness stays measurable.
-     */
+    // A clock message, already due: straight out, keeping its frame so lateness is measurable.
     void emit_bytes(int64_t frame, const uint8_t* bytes, int len, int64_t nowFrame) {
         MidiMessage m;
         m.frame = frame;
@@ -569,16 +431,13 @@ class ExternalConsumer : public IMidiConsumer {
         emit(m, nowFrame);
     }
 
-    /**
-     * Frames per quarter at the live tempo, read fresh every pump (project tempo, as in `note_on`).
-     * ⚠️ Built from the truncated `frames_per_step`, so the clock stays on the scheduler's grid.
-     */
+    // ⚠️ Built from the truncated `frames_per_step`, so the clock stays on the scheduler's grid.
     int64_t frames_per_quarter() const {
         const int tempo = (project_ && project_->tempo > 0) ? project_->tempo : tempo_;
         return frames_per_step(tempo, sampleRate_) * 4;
     }
 
-    /** The hex number following `key` in a `t_play` detail string ("row=0A" → 10); −1 if absent. */
+    // The hex number after `key` in a `t_play` detail ("row=0A" → 10); −1 if absent.
     static int hex_after(const std::string& detail, const std::string& key) {
         const size_t p = detail.find(key);
         if (p == std::string::npos) return -1;
@@ -600,8 +459,7 @@ class ExternalConsumer : public IMidiConsumer {
     void emit(const MidiMessage& m, int64_t nowFrame) {
         const bool sent = out_ && out_->is_open();
         if (sent) out_->send(m.bytes, m.len);
-        // ⚠️ Outside the `sent` test: timing is measurable with no cable, and "released with no port"
-        // differs from "never released".
+        // Outside the `sent` test, so timing is measurable with no cable.
         if (observer_) observer_->on_released(m, nowFrame, sent);
     }
 
@@ -615,7 +473,6 @@ class ExternalConsumer : public IMidiConsumer {
         }
     }
 
-    // `mutable` so the const readers can lock: a value another thread writes.
     mutable std::mutex mu_;
 
     const Project*     project_  = nullptr;

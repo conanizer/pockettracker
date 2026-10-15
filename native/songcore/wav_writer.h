@@ -1,22 +1,10 @@
 #ifndef POCKETTRACKER_SONGCORE_WAV_WRITER_H
 #define POCKETTRACKER_SONGCORE_WAV_WRITER_H
 
-// ─── PCM WAV: the writers, the cue chunk, and the reader ─────────────────────────────────────────
-//
-// Two writers for two jobs:
-//   • `WavStreamWriter` — the RENDER, written chunk by chunk so peak memory is one chunk, always 16-bit.
-//   • `write_wav()` — the SAMPLE EDITOR: a whole in-RAM buffer at the BIT cell's depth (8/16/24/32),
-//     plus CUE POINTS, one per slice boundary.
-// float→int16 is: clamp to ±1, × 32767, TRUNCATE toward zero — ⚠️ not rounding; existing renders must
-// not move by an LSB.
-//
-// `read_cue_points` is the other half: a chopped WAV loaded into another slot or project carries its
-// slices only in the file.
-//
-// Both writers write "<path>.tmp" and rename on success, so a failed or cancelled write leaves no
-// half-written .wav. ⚠️ All three steps — open, drop the old target, rename — go through
-// `byte_source.h` (`pt_fopen`, `pt_remove`, `pt_rename`); `std::remove` cannot see URI-addressed
-// storage.
+// PCM WAV: `WavStreamWriter` for the render (chunk by chunk, 16-bit), `write_wav` for the sample editor
+// (any depth, with slice cue points), and `read_cue_points`.
+// Both write "<path>.tmp" and rename on success. ⚠️ Open, remove and rename all go through
+// byte_source.h — `std::remove` cannot see URI-addressed storage.
 
 #include <cmath>
 #include <cstdint>
@@ -29,10 +17,7 @@
 
 namespace songcore {
 
-// ─── float → int16, the conversion both writers share ───────────────────────────────────────────
-//
-// Clamp to ±1, × 32767, TRUNCATE toward zero. ⚠️ Rounding would shift half the samples of every
-// existing file by one LSB.
+// Clamp, × 32767, TRUNCATE. ⚠️ Rounding would move half the samples of every existing render an LSB.
 inline int16_t float_to_int16(float v) {
     if (v < -1.0f) v = -1.0f;
     else if (v > 1.0f) v = 1.0f;
@@ -70,9 +55,7 @@ class WavStreamWriter {
             buf_[static_cast<size_t>(i) * 2 + 0] = static_cast<uint8_t>(u & 0xFF);
             buf_[static_cast<size_t>(i) * 2 + 1] = static_cast<uint8_t>((u >> 8) & 0xFF);
         }
-        // ⚠️ Checked, and the failure is STICKY: this returns void, and a card filling up mid-render
-        // lands here. Otherwise finish() would publish a short file as a finished render.
-        // `frames_written()` counts frames actually on disk.
+        // ⚠️ Sticky: a card filling mid-render lands here, and finish() must not publish a short file.
         if (std::fwrite(buf_.data(), 1, buf_.size(), file_) != buf_.size()) {
             writeFailed_ = true;
             return;
@@ -126,7 +109,6 @@ class WavStreamWriter {
         close_and_remove();
     }
 
-    int64_t frames_written() const { return framesWritten_; }
 
   private:
     int bytes_per_frame() const { return channels_ * 2; }   // 16-bit
@@ -200,11 +182,8 @@ inline void wav_put_tag(std::vector<uint8_t>& b, const char* tag) {
     b.insert(b.end(), tag, tag + 4);
 }
 
-/**
- * One sample at the file's depth. 16 goes through `float_to_int16` so 16-bit saves stay byte-identical.
- * Others ROUND to their full scale (2^(bits−1)), which the loader divides by, so a buffer already on an
- * 8- or 24-bit grid round-trips exactly. 8-bit WAV is UNSIGNED, centred on 128.
- */
+// One sample at the file's depth. 16 goes through `float_to_int16`; others ROUND to 2^(bits−1), so an
+// 8- or 24-bit buffer round-trips exactly. 8-bit WAV is unsigned, centred on 128.
 inline void wav_put_sample(std::vector<uint8_t>& b, float v, int bits, bool isFloat) {
     if (bits == 32 && isFloat) {
         uint32_t u = 0;
@@ -240,9 +219,7 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
     std::FILE* f = pt_fopen(tmp.c_str(), "wb");
     if (!f) return false;
     const size_t written = bytes.empty() ? 0 : std::fwrite(bytes.data(), 1, bytes.size(), f);
-    // ⚠️ Both checked, and `fclose` first, unconditionally: a small sample reaches the disk only in
-    // this flush, so a full card surfaces here or nowhere. On its own line so a short write cannot
-    // short-circuit past it and leak the handle.
+    // ⚠️ `fclose` checked, and on its own line: a full card surfaces in this flush or nowhere.
     const bool   flushed = (std::fclose(f) == 0);
     const bool   ok      = (written == bytes.size()) && flushed;
     if (!ok) {
@@ -259,13 +236,8 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
 
 }  // namespace detail
 
-/**
- * Write a PCM WAV at `bits` (8, 16, 24 or 32 — 32 as IEEE float when `isFloat`; anything else writes
- * 16), optionally with a `cue ` chunk of slice boundaries.
- * `channels` is 1 (`left` only) or 2 (interleaved) — the caller knows the SOURCE mode.
- * ⚠️ `right` is read, and length-checked, only when `channels == 2`; a mono caller passes it empty.
- * Chunk order RIFF / fmt / data / cue is pinned by a byte-compared golden.
- */
+// A PCM WAV at 8/16/24/32 bits (32 float with `isFloat`; other values write 16), with an optional
+// `cue ` chunk. `right` is read only when `channels == 2`. Chunk order is pinned by a golden.
 inline bool write_wav(const std::string& path, const std::vector<float>& left,
                       const std::vector<float>& right, int sampleRate,
                       const std::vector<int>& cuePoints = {}, int channels = 2, int bits = 16,
@@ -333,21 +305,14 @@ inline bool write_wav(const std::string& path, const std::vector<float>& left,
     return detail::wav_write_atomic(path, b);
 }
 
-/**
- * ⚠️ Writes a STEREO file with the mono data in both channels — the format every chop has always had.
- * Kept deliberately; SAVE passes `channels` explicitly and writes true mono.
- */
+// ⚠️ A STEREO file with the data in both channels — the format every chop has always had.
 inline bool write_wav_mono(const std::string& path, const std::vector<float>& samples, int sampleRate,
                            const std::vector<int>& cuePoints = {}, int bits = 16, bool isFloat = false) {
     return write_wav(path, samples, samples, sampleRate, cuePoints, /*channels=*/2, bits, isFloat);
 }
 
-/**
- * The frame positions in a WAV's `cue ` chunk; empty if none or unreadable. Frame 0 is EXCLUDED —
- * it is the sample's start, not a boundary, and would make a zero-length slice 0.
- * Chunk headers are walked with seeks, so only the small cue chunk is read: this runs on every
- * sample load.
- */
+// The frames in a WAV's `cue ` chunk, frame 0 excluded (it would make an empty slice 0). Seeks past
+// the other chunks — it runs on every sample load.
 inline std::vector<int> read_cue_points(const std::string& path) {
     std::vector<int> frames;
 

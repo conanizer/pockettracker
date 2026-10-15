@@ -1,10 +1,7 @@
 #ifndef POCKETTRACKER_SONGCORE_SHA1_H
 #define POCKETTRACKER_SONGCORE_SHA1_H
 
-// ─── SHA-1 — the trace header's project= id ──────────────────────────────────────────────────────
-//
-// The trace names its project by the SHA-1 of the .ptp bytes. Vendored so the same bytes hash the
-// same on every platform. A project id, not a security primitive.
+// SHA-1 of the .ptp bytes — the trace header's project id, not a security primitive.
 
 #include <cstdint>
 #include <cstdio>

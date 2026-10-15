@@ -1,11 +1,8 @@
 #ifndef POCKETTRACKER_SONGCORE_TRAVERSAL_H
 #define POCKETTRACKER_SONGCORE_TRAVERSAL_H
 
-// ─── Static song traversal ────────────────────────────────────────────────────────────────────────
-//
-// The shared song → chain → phrase → step walk for STATIC analysis ("which instruments does this row
-// range use?"), with the bounds guards in one place. Not the live scheduler's walk (playback position,
-// HOP, checkpoints), and not COMPACT's collector (which counts muted tracks and more ref kinds).
+// The song → chain → phrase → step walk for STATIC analysis ("which instruments does this range use?"),
+// bounds guards in one place. Not the scheduler's walk.
 
 #include <algorithm>
 #include <functional>
@@ -18,10 +15,8 @@ namespace songcore {
 // True when a step's note cell is blank. ⚠️ An OFF is not blank, though it plays nothing.
 inline bool step_is_empty(const PhraseStep& step) { return step.note == Note::EMPTY(); }
 
-// Visit every phrase step in song rows [start_row, end_row] across all 8 tracks. Rows past a track's
-// end and empty chain/phrase slots are skipped; inaudible tracks too, unless include_inaudible.
-// ⚠️ RENDER-SIDE ONLY — live playback pushes every instrument and never consults audibility (mute is a
-// mixer gate there).
+// Every phrase step in song rows [start_row, end_row]; inaudible tracks skipped unless asked.
+// Render-side only: live playback never consults audibility.
 template <typename Action>
 inline void for_each_step_in_song_range(const Project& project, int start_row, int end_row,
                                         bool include_inaudible, Action action) {
@@ -63,13 +58,9 @@ inline std::set<int> collect_used_instruments(const Project& project, int start_
 }
 
 
-// ─── Which mixer track a chain or a phrase belongs to ────────────────────────────────────────────
-//
-// The arrangement answers, not a remembered cursor — a chain reached from the pool was never entered
-// from a song cell. `preferred` only breaks a tie among tracks that really hold the chain. A chain in
-// no track answers 0.
+// ─── Which mixer track a chain or phrase belongs to — the arrangement answers, not a cursor ──────
 
-/** The track holding `chainId`; `preferred` wins if it is one of them, else the lowest, else 0. */
+// The track holding `chainId`; `preferred` wins if it is one of them, else the lowest, else 0.
 inline int track_of_chain(const Project& project, int chainId, int preferred = -1) {
     if (chainId < 0) return 0;
     int lowest = -1;
@@ -83,11 +74,7 @@ inline int track_of_chain(const Project& project, int chainId, int preferred = -
     return lowest >= 0 ? lowest : 0;
 }
 
-/**
- * The track holding `phraseId`, asked through the chain on screen first — the same phrase may sit in
- * several chains, and only the one you are inside reflects a gesture. Otherwise the first place in
- * the arrangement that reaches it, in (track, song row, chain row) order.
- */
+// The track holding `phraseId`, through the chain on screen first, else the first place that reaches it.
 inline int track_of_phrase(const Project& project, int phraseId, int currentChainId,
                            int preferred = -1) {
     if (phraseId < 0) return 0;
@@ -110,13 +97,9 @@ inline int track_of_phrase(const Project& project, int phraseId, int currentChai
     return 0;
 }
 
-// ─── Walking the song grid ───────────────────────────────────────────────────────────────────────
-//
-// The pure half of song-relative navigation (SETTINGS → NAV = SONG): B+DPAD walks the ARRANGEMENT,
-// not the 00..FF pool. They all CLAMP — nothing that way returns the index unchanged ("the press did
-// nothing"). The one exception is `wrap` on `next_chain_row`, for the plain UP/DOWN spill.
+// ─── Song-relative navigation: B+DPAD walks the ARRANGEMENT, clamping (nothing that way = unchanged)
 
-/** The chain in song cell (track, row), or −1. ⚠️ A track's chainRefs may be SHORTER than the song. */
+// The chain in song cell (track, row), or −1. ⚠️ A track's chainRefs may be SHORTER than the song.
 inline int chain_at(const Project& project, int track, int songRow) {
     if (track < 0 || track >= static_cast<int>(project.tracks.size()) || songRow < 0) return -1;
     const std::vector<int>& refs = project.tracks[static_cast<size_t>(track)].chainRefs;
@@ -131,11 +114,8 @@ inline int phrase_at(const Project& project, int chainId, int chainRow) {
     return chain_phrase_ref(project.chains[static_cast<size_t>(chainId)], chainRow);
 }
 
-/**
- * The nearest track to the side of `track` whose song cell in `songRow` holds a chain — and, when
- * `requirePhraseAtRow >= 0`, whose chain holds a phrase at that row. One predicate for both reasons
- * the PHRASE screen skips a track.
- */
+// The nearest track sideways whose cell in `songRow` holds a chain (with a phrase at
+// `requirePhraseAtRow`, if ≥ 0).
 inline int next_song_cell_h(const Project& project, int songRow, int track, int delta,
                             int requirePhraseAtRow = -1) {
     const int trackCount = static_cast<int>(project.tracks.size());
@@ -148,10 +128,7 @@ inline int next_song_cell_h(const Project& project, int songRow, int track, int 
     return track;
 }
 
-/**
- * The nearest song row above/below `songRow` whose cell in `track` holds a chain; gaps are skipped.
- * Bounded by the track's own chainRefs length — past it every cell is empty.
- */
+// The nearest song row above/below whose cell in `track` holds a chain.
 inline int next_song_cell_v(const Project& project, int songRow, int track, int delta) {
     if (track < 0 || track >= static_cast<int>(project.tracks.size())) return songRow;
     const int last =
@@ -161,10 +138,7 @@ inline int next_song_cell_v(const Project& project, int songRow, int track, int 
     return songRow;
 }
 
-/**
- * The nearest row of `chainId` above/below `fromRow` holding a phrase. B+UP/DOWN CLAMPS; the plain
- * UP/DOWN spill off step 00 or 0F WRAPS (`wrap`). Returns `fromRow` when nothing else is filled.
- */
+// The nearest row of `chainId` above/below holding a phrase; clamps, or wraps for the plain UP/DOWN spill.
 inline int next_chain_row(const Project& project, int chainId, int fromRow, int delta,
                           bool wrap = false) {
     if (chainId < 0 || chainId >= static_cast<int>(project.chains.size())) return fromRow;

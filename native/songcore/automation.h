@@ -1,18 +1,10 @@
 #ifndef POCKETTRACKER_SONGCORE_AUTOMATION_H
 #define POCKETTRACKER_SONGCORE_AUTOMATION_H
 
-// ─── AUS / AUF — what can be automated, and how a pair is found ──────────────────────────────────
-//
-// AUS beside a parameter starts a ramp from that value with a curve; an AUF on a later step sets
-// the value it arrives at:
-//
-//     step 00   VOL 00  AUS 80        ← start at 0, linear
-//     step 08   AUF FF                ← arrive at 255 eight steps later
-//
-// This header is the pure half: which parameters can ramp, and how AUS/AUF pair up, in STEP indices.
-// The scheduler turns a span into events.
-// ⚠️ Keep pairing in step space. A pre-scan for frame positions would double-advance the groove
-// step; the emitter already knows each step's real duration as it walks.
+// AUS / AUF: AUS beside a parameter starts a ramp from its value with a curve, a later AUF sets where
+// it arrives (`VOL 00 AUS 80` … `AUF FF`). Here: which parameters ramp, and how pairs are found, in
+// STEP indices; the scheduler emits them.
+// ⚠️ Keep pairing in step space — a pre-scan for frames would double-advance the groove step.
 
 #include <cstdint>
 #include <vector>
@@ -24,16 +16,10 @@
 
 namespace songcore {
 
-// ─── The registry — which parameters a ramp can move ─────────────────────────────────────────────
-//
-// A ramp is the parameter's own CC, emitted more often. To add one: give it a CC id, an arm in
+// ─── The registry: which parameters a ramp can move ───────────────────────────────────────────────
+// A ramp is the parameter's own CC, emitted more often. To add one: a CC id, an arm in
 // `EngineConsumer::consume`, a queued apply on the audio thread, and a row here.
-//
-// What the endpoints mean is the one thing that differs per row:
-//  • `BYTE` — they are values, and the ramp interpolates the byte.
-//  • `EQ_PRESET` — they are indices into `Project::eqPresets`; interpolating the index would step
-//    through unrelated presets, so the twelve band numbers the two presets hold are what moves
-//    (`ExtEqMorphPayload`).
+// BYTE endpoints are values; EQ_PRESET endpoints are preset slots, and the bands between them move.
 enum class RampKind { BYTE, EQ_PRESET };
 
 struct AutomatableParam {
@@ -67,20 +53,17 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     // TIM: the delay head glides and shifts pitch — the ramp is the point of the command. Global,
     // with the same restore-on-stop debt as VMV.
     { FX_TIM,    CC_DELAY_TIME,  true,  RampKind::BYTE },
-    // ── The EQ presets: these emit a band set, not a controller value ─────────────────────────────
-    //
-    // ⚠️ EQN is per VOICE: a note-on resets the voice's EQ from its instrument, so the morph re-asserts
-    // one tic after each retrigger and does nothing over a silent track. EQM is the global sweep.
+    // ── The EQ presets emit a band set, not a controller value ──
+    // ⚠️ EQN is per VOICE: a note-on resets it, so the morph re-asserts a tic after each retrigger.
     { FX_EQN,    0,              false, RampKind::EQ_PRESET },
-    // ⚠️ EQM replaces the master EQ and holds, so the host restores it on stop(). The scheduler sets
-    // `eqmActive_` from the ramp as well as from the per-step effect.
+    // ⚠️ EQM replaces the master EQ and holds; the host restores it on stop().
     { FX_EQM,    0,              true,  RampKind::EQ_PRESET },
 };
 
 inline constexpr int AUTOMATABLE_PARAM_COUNT =
     static_cast<int>(sizeof(AUTOMATABLE_PARAMS) / sizeof(AutomatableParam));
 
-/** The registry row for an effect code, or nullptr when that effect cannot be automated. */
+// The registry row for an effect code, or nullptr.
 inline constexpr const AutomatableParam* automatable_param(int fxCode) {
     for (int i = 0; i < AUTOMATABLE_PARAM_COUNT; ++i)
         if (AUTOMATABLE_PARAMS[i].fxCode == fxCode) return &AUTOMATABLE_PARAMS[i];
@@ -110,10 +93,8 @@ static_assert(automatable_preset_params_are_slot_range(),
               "an EQ_PRESET parameter's cell must cap at the last preset slot — its endpoints are "
               "indices into Project::eqPresets, and the pairing has no other range check");
 
-// ─── The EQ morph — what an EQ_PRESET ramp holds at position `t` ──────────────────────────────────
-//
-// The per-band rule is `automation_eq_band_at` (shared with the table path); this is only the lookup.
-// Slots are clamped because a hand-edited project file can hold an out-of-range one.
+// What an EQ_PRESET ramp holds at `t` (the band rule is `automation_eq_band_at`). Slots are clamped:
+// a hand-edited file can hold an out-of-range one.
 inline ExtEqMorphPayload eq_morph_at(const Project& project, int startSlot, int destSlot,
                                      int curveByte, double t) {
     ExtEqMorphPayload m{};
@@ -154,12 +135,8 @@ inline constexpr bool is_eq_preset_slot(int value) {
 
 // ─── The pairing ─────────────────────────────────────────────────────────────────────────────────
 
-/**
- * One ramp, as seen from ONE phrase of the walk.
- *
- * `span` and `stepOffset` describe the whole ramp (what the curve is evaluated against);
- * `ausStep`/`aufStep` and the slots are about this phrase and are −1/0 when that end is elsewhere.
- */
+// One ramp as seen from ONE phrase: `span` and `stepOffset` are the whole ramp's; `ausStep`/`aufStep`
+// and the slots are this phrase's, −1/0 when that end is elsewhere.
 struct RampSpec {
     int      fxCode   = FX_NONE;
     uint8_t  ccId     = 0;
@@ -208,20 +185,9 @@ inline bool phrase_has_ramp_cell(const Phrase& phrase) {
     return false;
 }
 
-/**
- * Every ramp `phrase` declares, in the order they open, walking from `startRow`.
- *
- *  • AUS looks LEFT on its own step for the nearest automatable effect; its value is the start.
- *    With nothing automatable to its left the AUS is inert and leaves any open ramp alone.
- *  • The first AUF on a LATER step closes. One on the AUS's own step is inert — slot order is not
- *    time order.
- *  • An EQ_PRESET endpoint that is not a slot is inert at either end; the AUS stays open, so a later
- *    legal AUF still closes it. Unused AUS/AUF cells draw dim.
- *  • The last AUS wins; ramps do not nest.
- *  • An AUS still open at the end of the phrase produces nothing.
- *
- * Reads the AUTHORED step, before CHA/RND/RNL, so a ramp is always reproducible.
- */
+// Every ramp `phrase` declares, walking from `startRow`. AUS takes the nearest automatable effect to
+// its LEFT (none: inert); the first AUF on a LATER step closes it; the last AUS wins (no nesting); an
+// AUS open at the phrase end produces nothing. Reads the AUTHORED step, before CHA/RND/RNL.
 inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) {
     std::vector<RampSpec> out;
     RampSpec              open;
@@ -275,23 +241,13 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
     return out;
 }
 
-// ─── Pairing across a chain ──────────────────────────────────────────────────────────────────────
-//
-// The AUF may sit in a later phrase of the SAME chain, so a fade can span up to 256 steps.
-// ⚠️ The chain is the boundary: a span past it would have to survive song moves, a chain played from
-// two rows, and CHAIN-mode wraps.
-// ⚠️ Re-derived from (chain, chainRow) on every call — never carried in `TrackState`. A chain can be
-// re-entered and a LIVE rewind schedules a phrase twice; carried state would be wrong in both.
+// ─── Pairing across a chain: the AUF may sit in a later phrase of the SAME chain ─────────────────
+// ⚠️ The chain is the boundary, and pairs are re-derived from (chain, chainRow) on every call, never
+// carried — a chain can be re-entered and a LIVE rewind schedules a phrase twice.
 
-/**
- * Every ramp playing over the phrase at `chainRow`, whether it opened there or earlier.
- *
- * `startRow` (the HOP entry) applies only to ramps opening in THIS phrase. Empty chain rows add no
- * steps, matching the traversal.
- * ⚠️ The walk counts authored steps. A HOP inside the span plays fewer, so the middle of the fade
- * runs slightly ahead; both endpoints stay exact. The real walk is unknowable in advance (the HOP can
- * be CHA-gated).
- */
+// Every ramp playing over the phrase at `chainRow`, opened there or earlier. `startRow` (a HOP entry)
+// applies only to ramps opening here. Steps are authored ones: a HOP inside the span runs the middle
+// of the fade slightly ahead; both ends stay exact.
 inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const Chain& chain,
                                                  int chainRow, int startRow = 0) {
     std::vector<RampSpec> out;
@@ -376,13 +332,9 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
     return out;
 }
 
-// ─── Which cells of ONE phrase a ramp uses — the question the editor asks ────────────────────────
-//
-// A phrase can play in many chain contexts, and a ramp belongs to a chain walk. A cell draws live if
-// ANY context uses it — dimming means "inert", and a cell live somewhere is not.
+// ─── Which cells of ONE phrase a ramp uses, for the editor: live if ANY chain context uses it ─────
 
-/** The AUS/AUF cells of one phrase that a ramp uses, `[step][slot]` with slots 1-3. Ends in another
- *  phrase are −1 in the spec and skipped, so marking from several rows is a union. */
+// `[step][slot]`, slots 1-3. Ends in another phrase are skipped, so marking several rows is a union.
 struct RampCells {
     bool used[16][4] = {};
 
@@ -403,11 +355,8 @@ struct RampCells {
     }
 };
 
-/**
- * Every AUS/AUF cell of phrase `phraseId` that a ramp uses, over every chain row that plays it. A
- * phrase no chain references pairs within itself.
- * Asks `find_ramps_in_chain`, so the editor cannot show a fade the emitter will not play.
- */
+// Every AUS/AUF cell of the phrase a ramp uses, over every chain row that plays it — through
+// `find_ramps_in_chain`, so the editor cannot show a fade that will not play.
 inline RampCells find_ramp_cells(const Project& project, int phraseId) {
     RampCells cells;
     if (phraseId < 0 || phraseId >= static_cast<int>(project.phrases.size())) return cells;

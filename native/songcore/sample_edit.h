@@ -1,17 +1,9 @@
 #ifndef POCKETTRACKER_SONGCORE_SAMPLE_EDIT_H
 #define POCKETTRACKER_SONGCORE_SAMPLE_EDIT_H
 
-// ─── The sample editor, below the seam ───────────────────────────────────────────────────────────
-//
-// The editor's operations and DSP live in the engine (`native/sample-editor.cpp`,
-// `transient-detector.cpp`); `SongcoreHost` forwards to them. This file holds only what needs the
-// ROUTING (a sample's rate ratio) or the PROJECT (the instrument auditioned):
-//
-//   • the RATE mode's ratio cache, so LOFI → HIGH restores the loaded ratio instead of compounding;
-//   • the SOURCE preview: LEFT / RIGHT / MONO plays from a scratch slot, pitched by the instrument's
-//     ratio — and so does SYNC's audition, built there from a copy;
-//   • the DRY audition: the raw waveform with EQ, sends and modulation off;
-//   • SAVE and CHOP: the edited PCM written back, with slice boundaries, as WAV (`wav_writer.h`).
+// The sample editor's parts that need the Routing (a sample's rate ratio) or the Project: RATE's ratio
+// cache, the SOURCE and SYNC previews, the dry audition, SAVE and CHOP. The DSP itself is the engine's
+// (sample-editor.cpp).
 
 #include <algorithm>
 #include <cmath>
@@ -29,10 +21,8 @@
 
 namespace songcore {
 
-/**
- * The ratio each slot was LOADED with, remembered only while the RATE row has moved it off HIGH —
- * otherwise LOFI → NORM would decimate an already-decimated ratio. 0 = absent (a ratio is never 0).
- */
+// The ratio each slot was LOADED with, kept while RATE is off HIGH so LOFI → NORM does not compound.
+// 0 = absent.
 struct RateCache {
     float orig[POOL_INSTRUMENTS];
 
@@ -46,12 +36,7 @@ struct RateCache {
     static bool in_range(int id) { return id >= 0 && id < POOL_INSTRUMENTS; }
 };
 
-/**
- * The FILE's sample rate, `deviceRate / ratio` — for the editor header, `applySampleFx`, SYNC, and SAVE
- * (a 22 kHz file edited on a 48 kHz device is saved as 22 kHz).
- * ⚠️ 44100 for an EMPTY slot: `Routing` initialises every ratio to 1.0, which would report the device
- * rate in an empty editor's header.
- */
+// The FILE's sample rate, `deviceRate / ratio`. 44100 for an empty slot (whose ratio is 1.0).
 template <typename Engine>
 int original_sample_rate(Engine* engine, const Routing& routing, int id) {
     if (!engine || !RateCache::in_range(id)) return 44100;
@@ -62,12 +47,8 @@ int original_sample_rate(Engine* engine, const Routing& routing, int id) {
     return std::max(static_cast<int>(static_cast<float>(engine->getSampleRate()) / ratio), 8000);
 }
 
-/**
- * RATE: HIGH (1×) / NORM (2×) / LOFI (4×) — a DESTRUCTIVE decimation of the buffer.
- * The ratio is always set RELATIVE TO THE ORIGINAL, so NORM → LOFI → NORM lands back on NORM.
- * `bits` (the BIT cell: 32 / 24 / 16 / 8) travels along because the engine rebuilds both from one
- * cached original; a RATE change unaware of it would restore full depth.
- */
+// RATE: HIGH (1×) / NORM (2×) / LOFI (4×), a destructive decimation relative to the ORIGINAL. `bits`
+// travels along: the engine rebuilds both from one cached original.
 template <typename Engine>
 void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int id, int factor,
                          int bits) {
@@ -88,10 +69,7 @@ void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int
     engine->applyRateAndBits(id, factor, bits);
 }
 
-/**
- * Both destructive resamplers. The rewritten buffer becomes the new "original", so the cache entry is
- * dropped — a stale one would make the next HIGH restore a ratio that no longer fits the audio.
- */
+// The destructive resamplers. The result is the new original, so the cache entry is dropped.
 template <typename Engine>
 void pitch_shift_sample(Engine* engine, RateCache& cache, int id, float semitones) {
     if (!engine) return;
@@ -107,10 +85,8 @@ void time_stretch_sample(Engine* engine, RateCache& cache, int id, float ratio, 
     engine->timeStretchSample(id, ratio, grainMs, sampleRate);
 }
 
-/**
- * What the editor's SYNC does to a sample: nothing, a resample (RPITCH) or a stretch (TSTRETCH). One
- * value for APPLY and for the audition of it, so what is heard is what APPLY writes.
- */
+// What SYNC does: nothing, a resample (RPITCH) or a stretch (TSTRETCH) — one value for APPLY and the
+// audition alike.
 struct SampleSync {
     enum class Kind { NONE, REPITCH, STRETCH };
     Kind  kind      = Kind::NONE;
@@ -119,10 +95,7 @@ struct SampleSync {
     float grainMs   = sola::DEFAULT_GRAIN_MS;   // STRETCH: the chunk length
 };
 
-/**
- * Run a SYNC on slot `id`. ⚠️ The pitch goes first: it is a resample and changes the length, and the
- * stretch after it is what lands on `frames`.
- */
+// ⚠️ The pitch goes first (it changes the length); the stretch after it lands on `frames`.
 template <typename Engine>
 void run_sample_sync(Engine& engine, int id, const SampleSync& sync, float sampleRate) {
     if (sync.kind == SampleSync::Kind::NONE) return;
@@ -135,11 +108,8 @@ void run_sample_sync(Engine& engine, int id, const SampleSync& sync, float sampl
                              sync.grainMs, sampleRate);
 }
 
-/**
- * Which SLOT the audition comes out of for the SOURCE mode. A mono sample or STEREO mode plays from
- * the instrument's own slot; LEFT, RIGHT or MONO on a stereo sample is extracted slot → slot into the
- * scratch slot 254 (never through big intermediate arrays).
- */
+// The slot the audition plays from: the instrument's own, or for LEFT/RIGHT/MONO on a stereo sample,
+// the scratch slot 254.
 template <typename Engine>
 int prepare_source_preview(Engine& engine, int id, int sourceMode) {
     if (!engine.hasStereoData(id) || sourceMode == 2 /*STEREO*/) return id;
@@ -147,12 +117,8 @@ int prepare_source_preview(Engine& engine, int id, int sourceMode) {
     return SOURCE_PREVIEW_SLOT;
 }
 
-/**
- * SYNC's audition: the sample as RPITCH or TSTRETCH would leave it, built in the scratch slot from a
- * copy, so the buffer being edited is never touched. Returns the slot to play — `id` when there is
- * nothing to do.
- * ⚠️ The result is a different LENGTH: a frame window on it is the selection scaled by new / old.
- */
+// SYNC's audition, built from a copy in the scratch slot; returns the slot to play.
+// ⚠️ A different LENGTH: a frame window on it is the selection scaled by new / old.
 template <typename Engine>
 int prepare_sync_preview(Engine& engine, int id, int sourceMode, const SampleSync& sync,
                          float sampleRate) {
@@ -162,13 +128,8 @@ int prepare_sync_preview(Engine& engine, int id, int sourceMode, const SampleSyn
     return SOURCE_PREVIEW_SLOT;
 }
 
-/**
- * The editor's audition: the sample at its ROOT, DRY.
- * ⚠️ Deliberately not `plan_note_on`, which brings the instrument's EQ, sends and modulation — you
- * cannot find a zero crossing under a reverb tail. Drive, crush, filter and the window still apply
- * (the caller pushed playback params with the SELECTION as the window).
- * `sampleRateRatio` is the INSTRUMENT's even from scratch slot 254, which holds a copy of its audio.
- */
+// The editor's audition: the sample at its root, DRY.
+// ⚠️ Not `plan_note_on`: its EQ, sends and modulation would hide a zero crossing under a tail.
 template <typename Engine>
 void preview_instrument_dry(Engine& engine, const Instrument& ins, int slotId, float sampleRateRatio) {
     if (ins.instrumentType == InstrumentType::SOUNDFONT) return;   // no waveform to edit
@@ -193,21 +154,14 @@ void preview_instrument_dry(Engine& engine, const Instrument& ins, int slotId, f
 
 // ─── SAVE and CHOP ───────────────────────────────────────────────────────────────────────────────
 
-/**
- * The channel buffers a save will write, and how many the WAV gets.
- * ⚠️ `right` is EMPTY unless `channels == 2` — `write_wav` reads it only for a stereo file, and a copy
- * would double a sample-length buffer for nothing.
- */
+// What a save writes. `right` is empty unless `channels == 2`.
 struct SaveChannels {
     std::vector<float> left;
     std::vector<float> right;
     int                channels = 1;
 };
 
-/**
- * Pull the edited PCM out of the engine per SOURCE mode: STEREO on a stereo sample writes two
- * channels; LEFT and RIGHT write one channel as mono; MONO downmixes. A mono sample ignores the mode.
- */
+// The edited PCM per SOURCE mode: STEREO two channels, LEFT/RIGHT one, MONO a downmix.
 template <typename Engine>
 SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool hasStereo) {
     SaveChannels out;
@@ -256,15 +210,13 @@ SaveChannels resolve_save_channels(Engine& engine, int id, int sourceMode, bool 
     return out;
 }
 
-/**
- * Write the edited sample to `path`, slices in the `cue ` chunk, at the file's OWN rate (an edit is
- * not a resample) and at `bits` — or, for 0, the loaded depth. 32 stays float only if the source was.
- */
 template <typename Engine>
 int resolve_save_bits(Engine& engine, int id, int bits) {
     return (bits > 0) ? bits : engine.getSampleBitDepth(id);
 }
 
+// The edited sample as a WAV at the file's own rate, slices in the `cue ` chunk. `bits` 0 = the
+// loaded depth; 32 is float only if the source was.
 template <typename Engine>
 bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::string& path,
                      const std::vector<int>& cuePoints, int sourceMode, bool hasStereo, int bits = 0) {
@@ -275,12 +227,8 @@ bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::
                      ch.channels, depth, depth == 32 && engine.isSampleFloat(id));
 }
 
-/**
- * CHOP: every slice to its own WAV in `dir`, `<base>_00.wav`, `<base>_01.wav`, … Returns how many.
- * The PCM is pulled once and sliced in memory.
- * ⚠️ Writes the LEFT channel only, through `write_wav_mono` — a two-channel file with that channel in
- * both (wav_writer.h; a shipped format).
- */
+// CHOP: every slice to `<base>_NN.wav` in `dir`; returns how many.
+// ⚠️ The LEFT channel only, through `write_wav_mono` (both channels hold it — a shipped format).
 template <typename Engine>
 int chop_sample(Engine& engine, const Routing& routing, int id, const std::string& dir,
                 const std::string& base_name, const std::vector<std::pair<int64_t, int64_t>>& slices,

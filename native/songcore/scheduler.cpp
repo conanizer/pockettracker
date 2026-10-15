@@ -6,9 +6,7 @@ namespace songcore {
 
 Sequencer::Sequencer(MidiRouter& router, const Project& project, int sample_rate)
     : router_(router), project_(&project), sampleRate_(sample_rate) {
-    // ⚠️ Default Rng seeding folds a clock read with a static's address, so eight built in a row
-    // can be eight copies of ONE stream (every chance gate in lockstep). Re-derive all eight from
-    // track 0's draw.
+    // ⚠️ Eight Rngs built in a row can share ONE stream; re-derive all eight from track 0's draw.
     uint64_t hi = rngs_[0].next_u32();   // ⚠️ separate statements: the evaluation order of two
     uint64_t lo = rngs_[0].next_u32();   //    calls in one expression is unspecified
     seed_rng((hi << 32) ^ lo);
@@ -34,10 +32,8 @@ PlaybackPosition Sequencer::getPlaybackPosition(int trackId) {
     int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
     if (framesPerStep <= 0) return pos;   // unreachable for a legal tempo; never divide by zero
 
-    // ⚠️ The entry in force is the LATEST one at or before now — never "first inside a nominal
-    // phrase window", which a HOP-shortened phrase would keep winning. Future (lookahead) entries
-    // are excluded by the `<=`.
-    // The prune horizon is generous: a HALFTIME phrase is twice the nominal length.
+    // ⚠️ The entry in force is the LATEST at or before now, never "first in a nominal phrase window"
+    // (a HOP-shortened phrase would keep winning). The horizon allows a HALFTIME phrase.
     const int64_t framesPerPhrase   = framesPerStep * 16;
     const int64_t positionHorizon   = framesPerPhrase * 4;
 
@@ -227,9 +223,8 @@ RollbackPlan Sequencer::set_live_mode(bool on, int64_t currentFrame) {
     }
 
     if (on) {
-        // ⚠️ A column that had run out becomes a SILENT channel that can be launched. Its clock
-        // stopped when it finished, so it rejoins the bar grid of the channel FURTHEST BEHIND (so
-        // it cannot outrun the buffer fill) — not a frame from minutes ago.
+        // ⚠️ A finished column becomes a silent, launchable channel; its stopped clock rejoins the
+        // grid of the channel furthest behind, not a frame from minutes ago.
         int64_t inStep = -1;
         for (int t = 0; t < 8; ++t)
             if (!trackDone_[t]) inStep = (inStep < 0) ? trackNextFrame_[t]
@@ -345,11 +340,7 @@ void Sequencer::updatePlaybackBuffer(int64_t aheadMs) {
                 songLength = std::max(songLength, static_cast<int>(project.tracks[t].chainRefs.size()));
             if (songLength == 0) { stop(); break; }
 
-            // ─── EIGHT INDEPENDENT CURSORS ───────────────────────────────────────────────────
-            //
-            // Fill whichever track is furthest behind, a row at a time, until each is deep
-            // enough — so a two-row chain moves on while a sixteen-row one beside it runs. The
-            // per-track walk is schedule_track_unit().
+            // Eight cursors: fill whichever track is furthest behind, a row at a time.
             for (int step = 0; step < stepCap; ++step) {
                 int nextTrack = -1;
                 int64_t earliest = 0;
@@ -379,10 +370,8 @@ int64_t Sequencer::scheduleSongRowRange(int startRow, int endRow, const std::set
     const int64_t framesPerPhrase = framesPerStep * 16;
     router_.t_play("RENDER", "rows=" + hex2(startRow) + "-" + hex2(endRow), 0, project.tempo, sampleRate_);
 
-    // ⚠️ Repetitions restart TOGETHER at the longest track's end, not at each track's own end:
-    // unequal blocks drift within a pass, and restarting per track would compound it every time.
-    // ⚠️ A pass that schedules nothing ends the loop, so an empty range cannot be walked `repeat`
-    // times for no frames.
+    // ⚠️ Repetitions restart TOGETHER at the longest track's end, or unequal blocks drift further each
+    // pass. A pass that schedules nothing ends the loop.
     if (repeat < 1) repeat = 1;
     int64_t passStart = 0;
     for (int pass = 0; pass < repeat; ++pass) {
@@ -405,18 +394,14 @@ int64_t Sequencer::schedule_range_pass(const Project& project, int startRow, int
         trackNextFrame_[trackId] = passStart;
         trackSongRow_[trackId]   = startRow;
         trackChainRow_[trackId]  = 0;
-        // ⚠️ The render SKIPS an inaudible track; live playback does not — deliberately. A muted
-        // track is left out of a file; live, mute is a mixer gate and the sequence must keep
-        // running under it so unmuting reveals the sequence, not a stale voice. The audio agrees
-        // either way; the difference is only global FX (EQM/VMV) authored on a muted track.
-        // With per-track clocks this can only shorten a file that ended on a muted track's chain.
+        // ⚠️ The render SKIPS an inaudible track; live playback does not (there mute is a mixer gate).
+        // They differ only in global FX (EQM/VMV) on a muted track.
         trackDone_[trackId] = (trackFilter && trackFilter->find(trackId) == trackFilter->end())
                               || !track_audible(project, trackId);
     }
 
-    // The SAME per-track walk the live arm takes — a render must not disagree with playback. It
-    // does not loop and takes no checkpoints (an export has no LIVE launch). Every unit ends a
-    // track or advances a cursor, so it terminates without a step cap.
+    // The SAME per-track walk as playback, minus the loop and the checkpoints. Every unit ends a track
+    // or advances a cursor, so no step cap is needed.
     for (;;) {
         int nextTrack = -1;
         int64_t earliest = 0;
@@ -608,10 +593,8 @@ void Sequencer::schedule_track_unit(const Project& project, int trackId, int64_t
     }
     const int songRow = trackSongRow_[trackId];
 
-    // ⚠️ A cell the walk cannot enter SILENCES this track until STOP — it does not search upward.
-    // Pressing PLAY on a row this column leaves blank must not start a block from elsewhere in the
-    // arrangement; silence is what isolating a sketch means.
-    // ⚠️ Re-derived per unit, never latched at PLAY: the project is edited under a running transport.
+    // ⚠️ A cell the walk cannot enter SILENCES the track until STOP; it never searches for a block.
+    // Re-derived per unit, never latched at PLAY — the project is edited while it plays.
     if ((lastSongRow >= 0 && songRow > lastSongRow) ||
         !song_cell_plays(project, trackId, songRow)) {
         trackDone_[trackId] = true;
@@ -636,9 +619,7 @@ void Sequencer::schedule_track_unit(const Project& project, int trackId, int64_t
 
     checkpoint_track(trackId, songRow, chainRow, takeCheckpoint);
 
-    // ⚠️ NO AUDIBILITY TEST — mute is a MIXER gate, never a sequencer one. A muted track is scheduled
-    // like any other and the engine zeroes it (`setTrackMuted`), so unmuting mid-phrase lands in
-    // the sequence where it really is.
+    // ⚠️ No audibility test: mute is a MIXER gate, so unmuting lands where the sequence really is.
     const int transposeSemitones = chain_transpose_semitones(chain, chainRow)
                                    + project_transpose_semitones(project);
     const int hopStartRow = trackState.consumeHopTarget();
@@ -660,12 +641,9 @@ void Sequencer::schedule_live_unit(const Project& project, int trackId, int64_t 
         return;
     }
 
-    // Every unit begins on a phrase boundary, so an IMMEDIATE queue lands here; a chain-boundary
-    // one lands here too, on the unit that BEGINS A LAP.
-    // ⚠️ Asks "is the cursor at a lap start", NOT "did the chain just run out": after a rewind into
-    // the last bar of a chain, the lookahead has already passed the end, and the second question
-    // would land the launch one whole repeat late.
-    // A silent channel's cursor never leaves 0, so it is always at a lap start — no extra term.
+    // Every unit begins on a phrase boundary; a lap starts where the chain row is 0.
+    // ⚠️ "At a lap start", NOT "did the chain just run out" — after a rewind into a chain's last bar
+    // the lookahead is already past the end, and the launch would land a lap late.
     consume_live_queue(trackId, /*chainEnd=*/trackChainRow_[trackId] == 0);
 
     const std::vector<int>& refs = project.tracks[static_cast<size_t>(trackId)].chainRefs;
@@ -756,18 +734,11 @@ bool Sequencer::begin_phrase(int phraseId, int64_t startFrame, int trackId, int 
     w.rowsScheduled   = 0;
     w.pass            = static_cast<int>(++trackState.phrasePasses[static_cast<size_t>(w.phraseId)]);
 
-    // ─── The ramps this phrase declares (AUS/AUF — automation.h) ─────────────────────────────
-    //
-    // Pairing gives spans in step indices; the walk emits them using each step's real duration —
-    // so grooves cost nothing and a HOP truncates a fade by ending the walk. A phrase entered below
-    // its AUS runs no ramp. With a chain, spans can cross phrases (`find_ramps_in_chain`,
-    // re-derived for every phrase).
+    // The phrase's AUS/AUF spans, in step indices (automation.h); in a chain they may cross phrases.
     w.ramps = chain ? find_ramps_in_chain(project, *chain, chainRow, w.row)
                     : find_ramps(project.phrases[w.phraseId], w.row);
-    // The last value each ramp emitted, for de-duplication (an ease curve holds one byte for many
-    // ticks). Seeded with the curve's value one tic BEFORE this phrase: where the AUS is here that
-    // clamps to the start byte the start effect already sent; in a crossed phrase it is where the
-    // previous phrase left off. An EQ morph seeds the same way against its start preset.
+    // The last value each ramp emitted, for de-duplication — seeded with the curve one tic BEFORE this
+    // phrase, so a crossed phrase continues where the previous one left off.
     w.rampLast.clear();
     w.rampLast.reserve(w.ramps.size());
     for (const RampSpec& r : w.ramps) {
@@ -830,9 +801,7 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
                                                                 w.transpose, trackState, stepIndex);
         stepRamps_ = nullptr;
 
-        // ⚠️ A HOP row costs NOTHING — no time, no marker, no ramp tic; it IS the jump. So the walk
-        // leaves before `frameOffset`, the playhead or a fade moves. `localGrooveStep` stays too,
-        // or the next phrase enters on the wrong tic.
+        // ⚠️ A HOP row costs nothing — no time, marker or ramp tic; the groove step carries over.
         if (stepResult.hopTriggered) {
             if (w.anyGrooveActive) trackState.grooveStep = w.localGrooveStep;
             // A hop leaving with nothing played may be part of a ring (TrackState::emptyHops).
@@ -879,9 +848,7 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
                                 int64_t noteFrame, int64_t fxFrame) {
     const int64_t framesPerTic = stepDuration / TICS_PER_STEP;
 
-    // A parameter on a note's own frame would reach the voice that note REPLACES (why STEP 2.3 is
-    // one frame late). A coinciding tic takes the same +1. `noteFrame`, because LAT may have moved
-    // the note within the step.
+    // A tic on the note's own frame would reach the voice it REPLACES, so it moves a frame later.
     auto place = [noteFrame](int64_t frame) { return frame == noteFrame ? frame + 1 : frame; };
 
     for (size_t i = 0; i < ramps.size(); ++i) {
@@ -900,28 +867,22 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
 
         const int lane = r.global ? TRACK_GLOBAL : trackId;
 
-        // ⚠️ VTR/VMV/TIM replace engine state and the host restores it on stop() when these flags
-        // say so. Set here too, keyed on the CC the ramp SENDS: a CHA zeroing the start slot would
-        // otherwise leave a fade nothing restores.
+        // ⚠️ The restore flags are set here too, keyed on the CC the ramp SENDS — a CHA can eat the
+        // start slot.
         if (r.ccId == CC_TRACK_VOL)  mixerVolTracks_ |= 1 << clampi(trackId, 0, 7);
         if (r.ccId == CC_MASTER_VOL) masterVolActive_ = true;
         if (r.ccId == CC_DELAY_TIME) delayTimeActive_ = true;
         // ⚠️ EQM: same debt, keyed the same way.
         if (r.kind == RampKind::EQ_PRESET && r.global) eqmActive_ = true;
 
-        // ⚠️ A step that writes this parameter itself OWNS its frame: the ramp yields and resumes
-        // after it. Two updates due on one frame are ordered by the heap, not by emission
-        // (note-queue.h), so the author could not tell which they would hear.
-        // It yields to where the write ACTUALLY LANDED (`fxFrame` — LAT, unclamped, plus a frame
-        // after a note-on), never to a re-derivation.
-        // Read off the EFFECTIVE step: a `RND` that became a VOL takes its frame; a `CHA` that ate one
-        // gives it back (the de-dup then drops the redundant start byte).
+        // ⚠️ A step that writes this parameter OWNS its frame: the ramp yields and resumes after it
+        // (two updates on one frame are ordered arbitrarily). It yields to where the write actually
+        // landed (`fxFrame`), read off the EFFECTIVE step.
         const bool ownsStep = step_has_fx(effectiveStep, r.fxCode);
         const bool perVoice = ramp_moves_voice(r);
 
-        // ⚠️ A new note inside the fade starts from the instrument, and an ease curve's next tic may
-        // not move — so the fade is re-asserted one frame after the note, whatever it holds. VOL and
-        // PAN need not: the note-on carries the fade's value (`voice_at`), as do ARP/RPT retriggers.
+        // ⚠️ A new note inside the fade starts from the instrument, so the fade is re-asserted a frame
+        // after it — except VOL and PAN, which the note-on carries.
         int64_t reassertAt = (noteFrame >= 0 && perVoice && !ramp_rides_note_on(r) && !ownsStep)
                            ? noteFrame + 1 : -1;
         auto emit_byte = [&](int64_t frame, int b, bool force) {
@@ -942,12 +903,8 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
             reassertAt = -1;
         };
 
-        // The arrival sends the destination byte as typed, on the AUF's own step (so a fade across
-        // eight steps lands WITH the note on the eighth) — a frame after the step's own write of
-        // the parameter, if it has one.
-        // ⚠️ An EQ morph arrives at t=1, which equals the destination preset only when the band types
-        // agree (the start preset's types hold throughout). Snapping to the destination would undo
-        // the fade; landing on it is one visible cell, `EQM xx` on the next step.
+        // The arrival sends the destination byte on the AUF's own step (after the step's own write).
+        // An EQ morph arrives at t=1, which is the destination preset only if the band types agree.
         if (stepIndex == r.aufStep) {
             const int64_t arriveFrame = place(ownsStep ? fxFrame + 1 : targetFrame);
             const bool force = arriveFrame == reassertAt;
@@ -996,9 +953,8 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
     // they would reach without it.
     for (int slot = 1; slot <= 3; ++slot)
         if (step_fx_type(effectiveStep, slot) == FX_NTH) step_set_fx(effectiveStep, slot, FX_NONE, 0x00);
-    // CHA XY: X is the chance of the nearest filled FX column on the LEFT (or the note, if none),
-    // Y of the one on the RIGHT (nothing, if none); 0 never, F always (a roll is 0-14). A CHA an
-    // earlier one cleared gates nothing.
+    // CHA XY: X gates the nearest filled column on the LEFT (or the note), Y the one on the RIGHT;
+    // 0 never, F always. A CHA an earlier one cleared gates nothing.
     for (int slot = 1; slot <= 3; ++slot) {
         if (step_fx_type(effectiveStep, slot) != FX_CHA) continue;
         const int value = step_fx_value(effectiveStep, slot);
@@ -1011,9 +967,8 @@ PhraseStep Sequencer::applyChanceAndRandomize(const PhraseStep& step, TrackState
         }
         if (right <= 3 && rng_int(15) >= (value & 0x0F)) step_set_fx(effectiveStep, right, 0x00, 0x00);
     }
-    // RND/RNL ADD a random 0..XY to the value already there, capped at the effect's ceiling.
-    // 00 adds and draws nothing. In FX1, RNL adds 0..X to the note and 0..Y to the
-    // instrument instead.
+    // RND/RNL add a random 0..XY, capped at the effect's ceiling (00 draws nothing). RNL in FX1 adds
+    // 0..X to the note and 0..Y to the instrument.
     const int lastInstrument = (project_ && !project_->instruments.empty())
                              ? static_cast<int>(project_->instruments.size()) - 1 : 127;
     int instOffset = 0;
@@ -1334,16 +1289,9 @@ void Sequencer::emit_step_fx(StepPlay& s) {
         eqmActive_ = true;
     }
 
-    // ── MPG / MPB / CCA-CCD ──────────────────────────────────────────────────────────────
-    //
-    // ⚠️ They must come AFTER the step's note-on in BOTH orders that exist:
-    //  • ARRIVAL (records are consumed as emitted): both consumers resolve the instrument from
-    //    the last note-on, so a command on a step that changes instrument must follow it.
-    //  • QUEUE (released by due frame): a note-on carries the instrument's CC-slot DEFAULTS
-    //    (midi_out.h); the step's command must be released after them, or every CCA in the song
-    //    is quietly undone. `voiceFxFrame` (+1 on a note step) does both, and keeps the engine's
-    //    param off the old voice.
-    // On an empty step `voiceFxFrame` is the step frame: the command acts on the sounding note.
+    // MPG / MPB / CCA-CCD. ⚠️ AFTER the note-on, both in emission order (the consumers take the
+    // instrument from the last note-on) and in frame (the note-on carries the CC defaults, which would
+    // undo the CCA) — `voiceFxFrame` does both.
     if (params.midiProgram.has_value())
         router_.program(voiceFxFrame, trackId, *params.midiProgram);
     if (params.midiBend.has_value())
@@ -1434,9 +1382,7 @@ void Sequencer::schedule_repeat(StepPlay& s) {
         if (triggerFrame >= targetFrame && triggerFrame != s.scheduledNoteFrame) {
             ts.repeatRetrigCount++;
             float retrigVolume = clampf(ts.repeatBaseVolume + ts.repeatRetrigCount * rampDelta, 0.0f, 1.0f);
-            // The ramp's product with the VOL channel it was taken at divided out;
-            // `emit_retrigger` multiplies in the channel as it stands NOW. A base taken at
-            // VOL 00 has nothing to divide, and ramps the velocity alone.
+            // Divide out the VOL channel the ramp was taken at; `emit_retrigger` multiplies in today's.
             const float retrigVelGain = ts.repeatBasePhraseVol > 0.0f
                 ? retrigVolume / ts.repeatBasePhraseVol
                 : clampf(ts.carry.velGain + ts.repeatRetrigCount * rampDelta, 0.0f, 1.0f);

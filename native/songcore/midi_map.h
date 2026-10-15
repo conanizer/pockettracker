@@ -1,17 +1,10 @@
 #ifndef POCKETTRACKER_SONGCORE_MIDI_MAP_H
 #define POCKETTRACKER_SONGCORE_MIDI_MAP_H
 
-// midi_map.h — a controller's knob moves a parameter in the song.
-//
-// A mapping must name a PARAMETER, not a cursor position: the same row index is a different knob on a
-// sampler and a SoundFont instrument. This catalogue is where parameters get names.
-//
-// ⚠️ An entry's id is written into the .ptp: APPEND, never insert, reuse or renumber. A removed
-// parameter leaves its id dead. Lookup is by id, so the array's order is free.
-// ⚠️ `scope` (which track, which instrument) is resolved when the mapping is LEARNED and stored —
-// "instrument 3's cutoff", never "the selected instrument's".
-// ⚠️ Ranges are in the destination's own units (volume 0..255, crush 0..15); `scale_cc` is the one
-// place a 0..127 controller value becomes one of them.
+// A controller's knob moves a parameter in the song. A mapping names a PARAMETER, not a cursor row.
+// ⚠️ An entry's id is written into the .ptp: APPEND, never reuse or renumber. Lookup is by id.
+// ⚠️ The scope ("instrument 3") is fixed at LEARN, never "the selected instrument".
+// Ranges are in the destination's own units; `scale_cc` converts from 0..127.
 
 #include <algorithm>
 #include <cstdint>
@@ -28,10 +21,7 @@ enum class MapScope : uint8_t {
     INSTRUMENT,  // 0-127
 };
 
-/**
- * Which cluster a destination belongs to, for picking one. Not derivable from `MapScope` (MASTER,
- * REVERB and DELAY all have none). A reading aid, never stored, so regrouping is free.
- */
+// The cluster a destination is picked from; never stored, so regrouping is free.
 enum class MapGroup : uint8_t {
     TRACK,
     MASTER,
@@ -54,10 +44,7 @@ inline const char* map_group_name(MapGroup g) {
     return "---";
 }
 
-/**
- * ⚠️ APPEND ONLY — a number here is a number in someone's saved song. A parameter is listed only if
- * it is worth turning while the song plays.
- */
+// ⚠️ APPEND ONLY — a number here is a number in someone's saved song.
 enum class MapDestId : uint8_t {
     NONE = 0,
 
@@ -104,10 +91,7 @@ struct MapDest {
     int         min;    // the destination's own range, and the bound on a mapping's own
     int         max;
     MapGroup    group;
-    /**
-     * The list row's name, group word dropped (the group is in the next cell).
-     * ⚠️ Five characters at most: the row's columns fill the panel's 28, and a sixth is clipped.
-     */
+    // The list row's name without the group word. ⚠️ Five characters at most, or it is clipped.
     const char* cell;
 };
 
@@ -161,12 +145,8 @@ inline const MapDest* map_dest(MapDestId id) {
 
 inline const MapDest* map_dest(uint8_t id) { return map_dest(static_cast<MapDestId>(id)); }
 
-// ─── Picking one out of twenty-eight ─────────────────────────────────────────────────────────────
-//
-// A destination is TWO cells — a group and a parameter within it — each cycled like any other cell.
-// These walk MAP_DESTS in array order, the order the parameters are dialled in.
+// ─── Picking one: a group cell and a parameter cell, walking MAP_DESTS in array order ────────────
 
-/** How many destinations `g` holds. */
 inline int map_group_size(MapGroup g) {
     int n = 0;
     for (const MapDest& d : MAP_DESTS)
@@ -195,32 +175,19 @@ inline int map_index_in_group(MapDestId id) {
     return 0;
 }
 
-/**
- * `Project::midiMappings` is a growing list (count plus entries), never a fixed 128 slots — a song
- * with no mappings carries none.
- * One destination takes one mapping; one controller may drive many (a macro knob).
- */
+// One destination takes one mapping; one controller may drive many.
 inline constexpr int MIDI_MAP_MAX = 128;
 
-/**
- * The control channel's "any channel" value, and the default: most people do not know their knob's
- * channel. ⚠️ Safe only because a CC is CLAIMED, not reserved: a CC that drives a mapping is consumed,
- * any other routes to its track as before.
- */
+// "Any channel", the default. Safe because a CC is CLAIMED, not reserved: unmapped CCs still reach
+// their track.
 inline constexpr int MIDI_CTL_CH_ALL = 16;
 
-/**
- * Does the control-channel setting let a knob on `channel` drive a mapping? The ONE reading of the
- * setting, shared by the MIDI drain and the learn gesture.
- */
+// May a knob on `channel` drive a mapping? Shared by the MIDI drain and LEARN.
 inline bool ctl_ch_covers(int setting, int channel) {
     return setting == MIDI_CTL_CH_ALL || (setting >= 0 && setting == channel);
 }
 
-/**
- * A 0-127 controller value into the destination's units — the one place this conversion happens.
- * `lo > hi` is an inverted mapping, and works.
- */
+// A 0-127 value into the destination's units; `lo > hi` inverts.
 inline int scale_cc(int cc, int lo, int hi) {
     const int c = cc < 0 ? 0 : (cc > 127 ? 127 : cc);
     const int span = hi - lo;
@@ -229,11 +196,8 @@ inline int scale_cc(int cc, int lo, int hi) {
     return lo + static_cast<int>((static_cast<long long>(span) * c + half) / 127);
 }
 
-/**
- * Does this mapping still point at something? ⚠️ A "no" must not delete the row — the screen greys it.
- * The slot test is `instrument_is_free`, not a path test: an EXTERNAL instrument has no file, yet its
- * VOL and PAN are real.
- */
+// Does the mapping still point at something? ⚠️ A "no" must not delete the row — the screen greys it.
+// `instrument_is_free`, not a path test: an EXTERNAL instrument has no file.
 inline bool map_dest_present(const Project& p, const MidiMapping& m) {
     const MapDest* d = map_dest(m.dest);
     if (!d) return false;
@@ -247,11 +211,8 @@ inline bool map_dest_present(const Project& p, const MidiMapping& m) {
     return false;
 }
 
-/**
- * Write `value` (in the destination's units) into the song; false if the destination is gone.
- * ⚠️ It only writes. Hearing it is `push_mapped_dest` (engine_setup.h); marking the song modified is
- * the dispatcher's. Kept apart because a knob moves ~30 times a second.
- */
+// Write `value` into the song; false if the destination is gone. Only writes: hearing it is
+// `push_mapped_dest`, marking the song modified the dispatcher's.
 inline bool write_mapped(Project& p, const MidiMapping& m, int value) {
     const MapDest* d = map_dest(m.dest);
     if (!d || !map_dest_present(p, m)) return false;
@@ -346,10 +307,7 @@ inline int read_mapped(const Project& p, const MidiMapping& m) {
 
 // ─── Learning one ────────────────────────────────────────────────────────────────────────────────
 
-/**
- * What the cell under the cursor names — beside `cursor_context()` (what KIND of value), this says
- * what it is CALLED. `NONE` when the screen cannot name it. The scope is resolved here and stored.
- */
+// The parameter the cell under the cursor names, scope resolved; `NONE` when it names none.
 struct MapTarget {
     MapDestId id    = MapDestId::NONE;
     uint8_t   scope = 0;
@@ -357,11 +315,7 @@ struct MapTarget {
     bool named() const { return id != MapDestId::NONE; }
 };
 
-/**
- * Point an existing mapping at `d`; false when it already pointed there.
- * ⚠️ The range and scope reset with the destination: 00..FF carried onto a crush (0..F) is unreachable.
- * Shared by the group cell, the parameter cell and the picker.
- */
+// Point a mapping at `d`; false when it already did. ⚠️ Range and scope reset with it.
 inline bool take_dest(MidiMapping& m, const MapDest& d) {
     if (m.dest == static_cast<uint8_t>(d.id)) return false;
     m.dest       = static_cast<uint8_t>(d.id);
@@ -371,11 +325,8 @@ inline bool take_dest(MidiMapping& m, const MapDest& d) {
     return true;
 }
 
-/**
- * Point `controller` at `target`. Returns the row, or −1 when the list is full.
- * One destination takes one mapping, so learning an already-mapped destination RE-POINTS its row and
- * keeps its range (the user's work); a new row gets the destination's full range.
- */
+// Point `controller` at `target`; returns the row, or −1 when full. An already-mapped destination
+// keeps its row and range; a new row gets the full range.
 inline int learn_mapping(Project& p, const MapTarget& target, int controller) {
     const MapDest* d = map_dest(target.id);
     if (!d) return -1;

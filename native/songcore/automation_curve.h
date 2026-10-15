@@ -1,21 +1,15 @@
 #ifndef POCKETTRACKER_SONGCORE_AUTOMATION_CURVE_H
 #define POCKETTRACKER_SONGCORE_AUTOMATION_CURVE_H
 
-// ─── The shape of a ramp ─────────────────────────────────────────────────────────────────────────
-//
-// AUS/AUF's curve and the EQ-morph band rule. Split from `automation.h` because the table path in
-// `AudioEngine`, below the songcore seam, uses it too and must not see `model.h`.
-// ⚠️ `<cstdint>` only, ever — one implementation keeps phrase and table morphs identical.
+// The ramp's curve and the EQ-morph band rule, shared by phrases and the engine's tables.
+// ⚠️ `<cstdint>` only, ever — the engine must not see model.h.
 
 #include <cstdint>
 
 namespace songcore {
 
-// ─── The curve ───────────────────────────────────────────────────────────────────────────────────
-//
 // AUS's byte picks a shape between three anchors.
-// ⚠️ Polynomial only (`+ − ×`, never `pow`/`exp`): the emitted values must be bit-identical on every
-// platform.
+// ⚠️ Polynomial only, never `pow`/`exp`: the values must be bit-identical on every platform.
 constexpr int AUS_CURVE_EASE_IN  = 0x00;  // slow to leave, fast to arrive — cubic up
 constexpr int AUS_CURVE_LINEAR   = 0x80;
 constexpr int AUS_CURVE_EASE_OUT = 0xFF;  // fast to leave, slow to arrive
@@ -41,9 +35,7 @@ inline int automation_value_byte(int startByte, int destByte, int curveByte, dou
     return b < 0 ? 0 : (b > 255 ? 255 : b);
 }
 
-// ─── One EQ band, morphed ────────────────────────────────────────────────────────────────────────
-//
-// The band in authored hex — the domain both paths interpolate in (log-frequency is linear in hex).
+// One EQ band in authored hex — the domain both paths interpolate in.
 struct AutomationEqBand {
     int type = 0;     // 0 OFF | 1 LOSHELF | 2 LOWCUT | 3 BELL | 4 HISHELF | 5 HICUT
     int freq = 128;   // 00-FF → 20-20000 Hz, log
@@ -51,15 +43,8 @@ struct AutomationEqBand {
     int q    = 128;   // 00-FF → 0.1-10.0, log
 };
 
-/**
- * One band of an EQ-preset morph at position `t`.
- *
- * ⚠️ The START preset's band type holds for the whole span, arrival included — types cannot be
- * interpolated. When both ends agree the arrival is exactly the destination; when they differ, the
- * ramp rests on a setting no preset holds (write `EQM xx` after the AUF to land on it).
- * A band OFF at the start stays off, so `chain.eq.active` cannot change mid-sweep. Fade a band by
- * ramping its gain to 0 dB (0x78).
- */
+// One band of an EQ morph at `t`. ⚠️ The START preset's band type holds for the whole span, arrival
+// included; a band OFF at the start stays off.
 inline AutomationEqBand automation_eq_band_at(const AutomationEqBand& from, const AutomationEqBand& to,
                                               int curveByte, double t) {
     AutomationEqBand m;

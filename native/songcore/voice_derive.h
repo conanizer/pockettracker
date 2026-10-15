@@ -1,14 +1,8 @@
 #ifndef POCKETTRACKER_SONGCORE_VOICE_DERIVE_H
 #define POCKETTRACKER_SONGCORE_VOICE_DERIVE_H
 
-// ─── Below-seam derivation — the PURE half of the consumer ───────────────────────────────────────
-//
-// Everything between "a NoteOn happened" and "call the engine": frequency, base frequency, slice
-// window, SoundFont slot/velocity/root transpose, tick→frame, modulation pushes. Free functions over
-// plain values so they can be tested — the event traces stop at the router, above all of this.
-// Floats are compared as raw bits, so "close enough" cannot pass.
-// note→Hz and detune come from note_tables.h; every other expression keeps its operation order, since
-// a 1-ULP drift changes every rendered byte.
+// Everything between "a NoteOn happened" and "call the engine", as pure functions so it can be tested.
+// ⚠️ Keep each expression's operation order: a 1-ULP drift changes every rendered byte.
 
 #include <algorithm>
 #include <cstdint>
@@ -38,13 +32,8 @@ struct Routing {
     }
 };
 
-// ─── Instrument → Program ────────────────────────────────────────────────────────────────────────
-/**
- * Flatten one instrument into the scalars a note is derived from.
- *
- * ⚠️ The returned Program's `sliceMarkers` points INTO `ins` — it is valid only while `ins` is, so
- * derive from it and let it go. A table that outlives the instrument needs its own array.
- */
+// Flatten one instrument into the scalars a note is derived from.
+// ⚠️ `sliceMarkers` points INTO `ins`: valid only while it is.
 inline Program make_program(const Instrument& ins, float sampleRateRatio, int sfSlot) {
     Program p;
     p.type            = (ins.instrumentType == InstrumentType::SOUNDFONT) ? PROGRAM_SOUNDFONT
@@ -130,9 +119,8 @@ inline int filter_type_code(const std::string& type) {
     return 0;
 }
 
-// ─── The instrument's modulation push ────────────────────────────────────────────────────────────
-// The 0.5f / 4.0f / 0 defaults for sustainLevel / lfoHz / oscShape are written out: anything else
-// changes how a non-LFO slot behaves.
+// The modulation push. The sustainLevel / lfoHz / oscShape defaults are deliberate: they shape a
+// non-LFO slot.
 inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleRate) {
     ModPushes out;
     const float framesPerTic = frames_per_tic_f(tempo, sampleRate);
@@ -197,9 +185,7 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
     return out;
 }
 
-// The two pushes that must reach the engine BEFORE a voice triggers: the modulation slots and the
-// EQ/send routing. Shared by the note path and engine_setup.h; templated so a test can check the
-// calls.
+// What must reach the engine BEFORE a voice triggers: the modulation slots and the EQ/send routing.
 template <typename Engine>
 void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tempo, int sampleRate) {
     const ModPushes m = derive_mod_pushes(ins, tempo, sampleRate);
@@ -246,12 +232,8 @@ void push_table(Engine& engine, const Project& project, int tableId) {
     engine.loadTable(tableId, rowData);
 }
 
-// ─── The NoteOn plan ─────────────────────────────────────────────────────────────────────────────
-// The exact sequence of engine calls a NoteOn produces — a template, so a test can substitute a
-// recorder and check which calls happen, in what order, and when a note is dropped.
-// `tableLoaded` is the caller's POOL_TABLES-sized cache.
-// `rootAudition` is preview-only and a parameter, not an Event field: a preview never reaches the
-// bus. See derive_soundfont_note.
+// The engine calls a NoteOn makes, in order. `tableLoaded` is the caller's cache; `rootAudition` is
+// preview-only (a preview never reaches the bus).
 template <typename Engine>
 void plan_note_on(Engine& engine, const Event& ev, const Project& project, const Routing& routing,
                   bool* tableLoaded, bool rootAudition = false) {
@@ -270,11 +252,8 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     // Modulation / EQ / sends must reach the engine BEFORE the note triggers.
     auto push_instrument_state = [&]() { push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate); };
 
-    // Lazy table push from songcore's own project copy.
-    // ⚠️ And every table the hit can be handed on to: an `INS` cell sends it to another instrument and
-    // its table, and the engine walks that chain at the TRIGGER from its own copies — an unsent or
-    // stale link routes on data no longer on screen. The cache doubles as the visited set, so each
-    // table is sent at most once per invalidation.
+    // Lazy table push — ⚠️ and every table an `INS` cell can hand the hit to, since the engine follows
+    // them from its own copies. The cache doubles as the visited set.
     auto ensure_table_loaded = [&](int rootTableId) {
         int  pending[POOL_TABLES];
         bool queued[POOL_TABLES] = {false};
@@ -310,19 +289,15 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     // stale.
     engine.setProgram(instrumentId, program, program.sliceMarkers, program.sliceCount);
 
-    // ⚠️ The note is queued BY NUMBER and resolved at the hit (AudioEngine::scheduleProgramNote), so
-    // nothing below derives a sound — only what must be in the engine before the voice starts.
-    // The empty-slot gate stays here: a note on an empty slot must make NO engine calls at all.
+    // The note is queued BY NUMBER and resolved at the hit; below is only what must be in the engine
+    // first. A note on an empty slot makes no engine call at all.
     const int tableId = (n.tableId >= 0) ? n.tableId : instrumentId;
 
     if (ins.instrumentType == InstrumentType::SOUNDFONT) {
         if (!program.hasSoundfont || program.sfSlot < 0) return;   // never loaded — dropped
 
         push_instrument_state();
-        // Every trigger: the TSF preset must carry the user's ATK/DEC/SUS/REL (or a KIL uses the SF2's
-        // own, often instant, release), and instrumentParams[sfId] is reset to drive 0 + the right
-        // filter (or stale sampler values bleed into the SF voice). Keyed by instrument id: two
-        // instruments sharing one SF2 handle must stay isolated.
+        // Every trigger: the user's ATK/DEC/SUS/REL, keyed by instrument so two sharing one SF2 stay apart.
         const SFOverrides& ov = ins.sfOverrides;
         engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
         push_instrument_playback_params(engine, ins);

@@ -1,18 +1,13 @@
 #ifndef POCKETTRACKER_SONGCORE_EVENT_H
 #define POCKETTRACKER_SONGCORE_EVENT_H
 
-// ─── The event schema, as code ──────────────────────────────────────────────────────────────────
+// The bus record MidiRouter hands every consumer, and its trace line.
+// ⚠️ Changing a tag, a payload field, field ORDER or a float derivation is a SCHEMA_VERSION bump and
+// regenerated goldens.
+// Analog values are binary32 carried as raw bits, so traces compare exactly; emitters use only +−×÷
+// on authored bytes, built without fast-math and with -ffp-contract=off.
 //
-// One POD record: the bus record MidiRouter hands to every IMidiConsumer, and the conformance-trace
-// line below. ⚠️ Changing a tag, a payload field, field ORDER or a float derivation is a
-// SCHEMA_VERSION bump and regenerated goldens.
-//
-// Everything is an integer; analog values are IEEE-754 binary32 carried as raw bits, so traces
-// compare exactly. Emitters use only +−×÷ on authored bytes — note→Hz and anything transcendental
-// lives below the seam — and the scheduling TUs build without fast-math and with -ffp-contract=off.
-//
-// ─── Trace text form ────────────────────────────────────────────────────────────────────────────
-//
+// Trace text form:
 //   # schema=1 sr=44100 tempo=128 mode=render project=<sha1>
 //   T PLAY RENDER 00-03            (render: song-row range, hex2)
 //   T PLAY SONG 00                 (live: SONG start row / CHAIN id / PHRASE id, hex2)
@@ -37,11 +32,7 @@ namespace songcore {
 
 constexpr int SCHEMA_VERSION = 2;
 
-/**
- * An analog value as the raw bits of its binary32. memcpy, not a reinterpret_cast: type-punning
- * through a pointer is UB. Public because `SongcoreHost::preview_note` also builds a NoteOn by hand.
- * The decoder, `f32_from_bits`, is in the generated note_tables.h.
- */
+// An analog value as its binary32 bits (memcpy: pointer punning is UB). Decoder: `f32_from_bits`.
 inline uint32_t f32_bits(float f) {
     uint32_t b;
     std::memcpy(&b, &f, sizeof b);
@@ -93,11 +84,8 @@ constexpr int sortRank(uint8_t type) {
 // NoteOff modes
 constexpr uint8_t NOTE_OFF_RELEASE = 0;  // scheduleNoteOff — an OFF note: the release, or a fade where there is none
 constexpr uint8_t NOTE_OFF_CUT     = 1;  // scheduleCut — KIL: a declick fade and gone, whatever release there is
-// ⚠️ A key release is not an OFF. An OFF ends the note (a declick fade on a one-shot); letting go of a
-// KEY lets a drum hit play out. `SamplerVoice::keyRelease` holds the rule (ADSR/TRIG → release,
-// looping → soft kill, one-shot → ignore).
-// Only MIDI input emits mode 2, and it does not ride `MidiRouter`, so no trace holds one. The day the
-// sequencer emits it, the schema rule at the top applies.
+// ⚠️ A key release is not an OFF: letting go of a key lets a drum hit play out
+// (`SamplerVoice::keyRelease`). Only MIDI in emits it, off the router, so no trace holds one.
 constexpr uint8_t NOTE_OFF_KEY     = 2;  // scheduleKeyRelease — a live key let go of (MIDI in)
 
 // CC ids carried by EV_CC
@@ -111,24 +99,15 @@ constexpr uint8_t CC_DELAY_SEND  = 93;  // scheduleVoiceDelaySend  (authored byt
 constexpr uint8_t CC_FILTER_CUT  = 74;  // scheduleVoiceFilterCut (authored byte /255)
 constexpr uint8_t CC_FILTER_RES  = 71;  // scheduleVoiceFilterRes (authored byte /255)
 
-// ─── Symbolic CC ids — the instrument's four CC slots ────────────────────────────────────────────
-//
-// A MIDI controller is seven bits, so 128-255 can never come off the wire. 128-131 mean "slot A-D of
-// the instrument this track is playing", resolved by each consumer against `Instrument::midiCC`.
-// ⚠️ Never resolved by the scheduler: on an FX-only step `PhraseStep::instrument` is 0x00 whatever is
-// sounding. Consumers use `TrackInstruments` (router.h), the same answer the routing gate uses.
-// ⚠️ A slot id must never reach a `& 0x7F`: 128 would become CC 0, BANK SELECT.
+// ─── 128-131: CC slot A-D of the instrument the track is playing ─────────────────────────────────
+// Resolved by each consumer via `TrackInstruments`, never by the scheduler (an FX-only step's
+// instrument is 0x00). ⚠️ A slot id must never reach a `& 0x7F`: 128 would become BANK SELECT.
 constexpr uint8_t CC_SLOT_A = 128, CC_SLOT_B = 129, CC_SLOT_C = 130, CC_SLOT_D = 131;
 
-// ─── Engine-only CC ids ──────────────────────────────────────────────────────────────────────────
+// ─── Engine-only CC ids: MIDI out drops them, the engine matches them as literals ────────────────
+// ⚠️ None may reach a `& 0x7F`: each would alias a real controller (132 → CC 4, …).
 //
-// Ids above 127 that are not slots have no MIDI controller. `resolve_cc_param` (model.h) maps them to
-// −1, so `midi_out.h` drops them, while `engine_consumer.h` matches them as literals.
-// ⚠️ None may ever reach a `& 0x7F`: each would alias a real controller (132 → CC 4, 135 → CC 7, …).
-//
-// The mixer faders (VTR / VMV).
-// ⚠️ CC_MASTER_VOL rides TRACK_GLOBAL: track-scoped, the EXTERNAL-routing gate would swallow it on a
-// MIDI track. CC_TRACK_VOL is genuinely track-scoped and IS gated.
+// The mixer faders. ⚠️ CC_MASTER_VOL rides TRACK_GLOBAL, or the EXTERNAL gate would swallow it.
 constexpr uint8_t CC_TRACK_VOL  = 132;  // scheduleTrackVolume  (authored byte /255)
 constexpr uint8_t CC_MASTER_VOL = 133;  // scheduleMasterVolume (authored byte /255), TRACK_GLOBAL
 
@@ -143,18 +122,14 @@ constexpr int cc_filter_mode(int param) {
     return param == CC_FILTER_LP ? 1 : param == CC_FILTER_HP ? 2 : param == CC_FILTER_BP ? 3 : 0;
 }
 
-// The dirt commands.
-// ⚠️ 137 is retired with the command that used it and stays unused.
-// ⚠️ CC_CRUSH's value is two 4-bit numbers, not a quantity: never interpolate it.
+// The dirt commands. ⚠️ 137 is retired and stays unused; CC_CRUSH is two nibbles — never interpolate.
 constexpr uint8_t CC_DRIVE      = 138;  // scheduleVoiceDrive     (authored byte /255)
 constexpr uint8_t CC_CRUSH      = 139;  // scheduleVoiceCrush     (authored byte /255, two nibbles)
 
 // Fine tune (FIN). MIDI's fine tune is RPN 1 and retunes the whole channel, so nothing goes on the wire.
 constexpr uint8_t CC_FINE_TUNE  = 140;  // scheduleVoiceFineTune  (authored byte /255)
 
-// The loop-window slide (LPO).
-// ⚠️ The value is a STEP, not a position: two LPO records slide twice, so a lost record loses a
-// movement, not just a value.
+// LPO. ⚠️ The value is a STEP, not a position: two records slide twice.
 constexpr uint8_t CC_LOOP_SLIDE = 141;  // scheduleVoiceLoopSlide (authored byte /255)
 
 // The delay's echo time (TIM). ⚠️ Rides TRACK_GLOBAL like CC_MASTER_VOL: the delay is a shared send.
@@ -165,17 +140,13 @@ constexpr int cc_slot_index(uint8_t param) {
     return (param >= CC_SLOT_A && param <= CC_SLOT_D) ? param - CC_SLOT_A : -1;
 }
 
-// The full NoteOn trigger bundle, tapped at the engine's scheduleNote entry. NoteOns for an invalid
-// instrument or an empty slot ARE events; consumers drop them.
-//  * note = the MIDI number, (octave+1)*12 + pitch, so octave −1 from transpose stays non-negative.
-//    Authored top-octave notes can exceed 127 (B-9 = 131); consumers clamp, traces record verbatim.
+// A note-on. One for an empty instrument is still an event; consumers drop it.
+//  * note can exceed 127 (B-9 = 131); consumers clamp, traces record it verbatim.
 //  * velocity −1 = derive from velGain (retrig/arp).
-//  * ⚠️ velGain rides the engine arg NAMED `volume` and volGain rides `phraseVol` — the names are
-//    crossed (note-queue.h); copy the wiring, not the names.
-//  * start = the authored OFF byte. The slice window and table tic rate are derived below the seam.
-//  * transpose (chain+song), pit and arp are separate fields: slice selection needs the chain
-//    transpose alone. MIDI out folds all three into data1.
-//  * pslDur is in TICKS, pbnRate the raw FX byte /16, vibSpd Hz already tempo-scaled, vibDep semitones.
+//  * ⚠️ velGain rides the engine arg NAMED `volume` and volGain `phraseVol` — copy the wiring, not
+//    the names.
+//  * transpose, pit and arp stay apart: slice selection needs the transpose alone.
+//  * pslDur in tics, pbnRate the FX byte /16, vibSpd Hz (tempo-scaled), vibDep semitones.
 struct NoteOnPayload {
     uint8_t  note;        // note      MIDI number (octave+1)*12+pitch, 0-131 practical
     int8_t   velocity;    // vel       -1 | 0-127 (phrase V column)
@@ -196,9 +167,7 @@ struct NoteOnPayload {
     uint32_t vibDepBits;  // vibDep    f32ᵇ semitones
 };
 
-/** The note's velocity, 0..1 — the V column, or for velocity −1 the root of the squared velGain.
- *  ⚠️ Every consumer that turns a note into a velocity reads it here: a retrigger carries only
- *  velGain, and a consumer that read it differently would hear the note and its repeats apart. */
+// The note's velocity, 0..1. ⚠️ Every consumer reads it here, or a note and its retriggers differ.
 inline float note_velocity_unit(const NoteOnPayload& n) {
     if (n.velocity >= 0) return static_cast<float>(n.velocity) / 127.0f;
     float g;
@@ -219,9 +188,8 @@ struct ExtReversePayload   { uint8_t reverse, restart; };          // reverse re
 struct ExtEqSlotPayload    { int16_t slot; };                      // slot      -1 bypass | 0-127
 struct ExtMasterEqPayload  { int16_t slot; };                      // slot      -1 bypass | 0-127
 
-// One EQ setting as three bands of AUTHORED hex, not Hz/dB/Q: interpolating hex is linear in
-// log-frequency, and it keeps morph values in the integer domain the goldens hold.
-// ⚠️ `type` is not interpolated — the start preset's type holds for the whole span (automation_curve.h).
+// One EQ setting as three bands of authored hex (linear in log-frequency, and integer for the goldens).
+// ⚠️ `type` is not interpolated — the start preset's holds for the whole span.
 struct ExtEqMorphPayload {                                         // type0..2 freq0..2 gain0..2 q0..2
     uint8_t type[3];   // 0 OFF | 1 LOSHELF | 2 LOWCUT | 3 BELL | 4 HISHELF | 5 HICUT (eq-module.h)
     uint8_t freq[3];   // 00-FF → 20-20000 Hz, log

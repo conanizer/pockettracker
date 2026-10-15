@@ -1,48 +1,20 @@
 #ifndef POCKETTRACKER_TABLE_AUTOMATION_H
 #define POCKETTRACKER_TABLE_AUTOMATION_H
 
-// ─── AUS / AUF on a TABLE row ────────────────────────────────────────────────────────────────────
-//
-// The same feature as phrase automation and a different mechanism, because a table is a different
-// machine. `songcore/automation.h` pairs AUS with AUF in STEP space over a phrase, and the SCHEDULER
-// emits the span's tics as bus events. A table has neither: it runs inside `AudioEngine`, per voice,
-// on the audio thread, off `voice.tableRow`, over 16 rows, with a HOP that can jump backwards.
-//
-// ⭐⭐ **THE RAMP'S POSITION FOLLOWS THE ROW, and nothing about it is stored.** Progress is re-derived
-// every audio block from the row the voice is standing on and the table's own cells, so a HOP back to
-// the AUS row restarts the ramp, a HOP into the middle of the span resumes there, and a HOP past the
-// AUF ends it. Every alternative needs a ramp origin in per-voice state, which a backwards HOP
-// desyncs — the same argument that keeps a phrase ramp out of `TrackState`.
-//
-// ⚠️ **A SPAN NEVER WRAPS.** `ausRow < aufRow`, always. A table wraps to row 0 and a phrase does not,
-// so a ramp from row 14 to an AUF at row 02 would have to mean something different depending on where
-// the voice entered the table — which is precisely the stored state the rule above exists to avoid.
-//
-// ⚠️ **ONE IMPLEMENTATION, TWO CALLERS ON OPPOSITE SIDES OF THE SONGCORE SEAM** — `AudioEngine`, which
-// runs the ramp, and the TABLE editor, which dims a cell no ramp uses. They hold different row types
-// (`::TableRow`, 8 packed bytes; `songcore::TableRow`, six ints), so the walk is a template over the
-// three FX slots and nothing else. Two implementations would let the grid dim a fade the engine
-// plays, which is the one lie `find_ramp_cells` was built to prevent on the phrase screen.
-//
-// So this header includes NOTHING but the curve, which is dependency-free for the same reason.
+// AUS / AUF on a TABLE row. A table runs per voice on the audio thread, with a HOP that can jump
+// backwards, so it pairs here rather than in automation.h.
+// ⚠️ The ramp's position FOLLOWS THE ROW and nothing is stored: re-derived every block from the row
+// the voice is on, so a HOP back restarts it and a HOP past the AUF ends it.
+// ⚠️ A span never wraps: `ausRow < aufRow`.
+// ⚠️ One implementation for the engine and the TABLE editor, which hold different row types — a
+// template over the three FX slots, including nothing but the curve.
 
 #include "automation_curve.h"
 
 namespace table_automation {
 
-// ─── The vocabulary ──────────────────────────────────────────────────────────────────────────────
-//
-// ⚠️ **THE CODES ARE LITERALS HERE, AND THEY ARE PINNED FROM BOTH SIDES.** This header is included by
-// the engine (which may not see `songcore/effects.h`) and by the editor (which may not see
-// `audio-defs.h`), so it can name neither side's constants. `songcore/engine_consumer.h` is the one
-// file that sees all three lists, and it asserts every row of this table against both of them —
-// including the two flags, which are NOT a judgement call:
-//
-//   • `rampable` must equal "songcore's AUTOMATABLE_PARAMS admits this effect";
-//   • `eqPreset`  must equal "…and its endpoints are preset SLOTS rather than values".
-//
-// So the set a table AUS may ramp is the INTERSECTION of the arms `AudioEngine::processEffect` has
-// and the automation registry — derived, not written down.
+// ⚠️ The codes are literals (this header sees neither side's constants); `engine_consumer.h` asserts
+// every row, flags included, against both the engine's arms and the automation registry.
 struct Arm {
     int  code;
     bool rampable;   // the registry admits it → a table AUS to its right can ramp it
@@ -103,13 +75,7 @@ struct TableRamp {
     bool eqPreset  = false;
 };
 
-/**
- * Every ramp one table declares.
- *
- * A fixed array, not a vector: this is read on the audio thread, once per voice per block. Sixteen
- * rows can hold at most eight spans, because a span needs a row for each end — so the capacity is
- * the shape of the data rather than a limit anyone can reach.
- */
+// Every ramp one table declares — a fixed array for the audio thread; 16 rows hold at most 8 spans.
 struct TableRampSet {
     static constexpr int CAPACITY = 8;
     TableRamp items[CAPACITY];
@@ -129,25 +95,9 @@ template <typename RowT> inline int fx_value(const RowT& r, int slot) {
                      : static_cast<int>(r.fx3Value);
 }
 
-/**
- * Every ramp `rows` declares, in the order they open.
- *
- * The pairing rules come over from `songcore::find_ramps` unchanged — a table row has exactly three
- * FX slots, same as a phrase step, so the POSITIONAL rule ports literally:
- *
- *  • **AUS looks LEFT on its own row** for the nearest ramp-able effect. That effect's type is the
- *    parameter and its value is the start byte, so the number the ramp begins at is a number visible
- *    in the grid — and the cell still applies on its own tic, so the authored start and the ramp's
- *    first value agree by construction rather than by arithmetic.
- *  • **An AUS with nothing ramp-able to its left is INERT** — it does not open, and does not close or
- *    replace a ramp already open. A curve on its own names no parameter.
- *  • **AUF must be on a LATER row**, and the FIRST one closes. An AUF sharing a row with its AUS is
- *    inert and leaves the ramp open: slot order inside a row is not a time order.
- *  • **An EQ-preset endpoint that is not a slot is INERT at either end**, and leaves the AUS open for
- *    a later, legal AUF.
- *  • **The last AUS wins** — a second AUS before any AUF replaces the open ramp rather than nesting.
- *  • **An unclosed AUS produces nothing**, and row 15 is the end: see the no-wrap rule above.
- */
+// Every ramp `rows` declares, by `songcore::find_ramps`' rules: AUS takes the nearest ramp-able effect
+// to its LEFT (none: inert), the first AUF on a LATER row closes, the last AUS wins, an unclosed AUS
+// produces nothing.
 template <typename RowT>
 inline TableRampSet find_table_ramps(const RowT* rows, int rowCount) {
     TableRampSet out;
@@ -195,18 +145,9 @@ inline TableRampSet find_table_ramps(const RowT* rows, int rowCount) {
 
 // ─── Where in a ramp a voice is ──────────────────────────────────────────────────────────────────
 
-/**
- * The ramp's position for a voice standing on `row`, `rowFraction` of the way through it, or −1 when
- * this ramp does not cover that row.
- *
- * ⚠️ **THE TIME BASE IS ROWS, sub-interpolated on the row's own tics.** The span is `aufRow − ausRow`;
- * the fraction inside a row is how far the voice has got through it, so a slow morph is smooth rather
- * than sixteen stair steps. A `TIC` change mid-span stretches the ramp exactly as it stretches
- * everything else in the table — the rate is the TABLE's, not the ramp's, and nothing here has to
- * know it changed. In the three non-advancing TIC modes (`TIC00` trigger, `TICFC` octave map,
- * `TICFE` note map) the fraction is 0 and the ramp holds its value at that row, which is the only
- * thing "the position follows the row" can mean when the row does not move.
- */
+// The ramp's position for a voice `rowFraction` through `row`, or −1 outside it. The time base is
+// ROWS, sub-interpolated within one, so a TIC change stretches the ramp like the rest of the table;
+// in a non-advancing TIC mode the fraction is 0 and the ramp holds.
 inline double table_ramp_position(const TableRamp& r, int row, double rowFraction) {
     if (row < r.ausRow || row > r.aufRow) return -1.0;
     const int span = r.aufRow - r.ausRow;
@@ -217,12 +158,7 @@ inline double table_ramp_position(const TableRamp& r, int row, double rowFractio
 
 // ─── Which cells a ramp uses — the question the editor asks ──────────────────────────────────────
 
-/**
- * The AUS/AUF cells of a table that a ramp really uses, indexed `[row][slot]` with slots 1-3.
- *
- * Unlike a phrase, a table has exactly one context: it is not placed in a chain, and its rows pair
- * among themselves. So this answer is exact rather than a union over contexts.
- */
+// The AUS/AUF cells a ramp really uses, `[row][slot]` with slots 1-3 (a table has one context).
 struct TableRampCells {
     bool used[16][4] = {};
 
@@ -236,12 +172,7 @@ struct TableRampCells {
         }
     }
 
-    /**
-     * Does this FX cell take part in a ramp?
-     *
-     * Only AUS and AUF can answer no — every other effect stands on its own. The ways to write an
-     * inert AUS or AUF all reduce to the same thing: the pairing did not use this cell.
-     */
+    // Does this FX cell take part? Only AUS and AUF can answer no.
     bool active(int fxType, int row, int slot) const {
         if (fxType != FX_AUS_CODE && fxType != FX_AUF_CODE) return true;
         if (row < 0 || row >= 16 || slot < 1 || slot > 3) return false;

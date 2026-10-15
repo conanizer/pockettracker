@@ -1,11 +1,7 @@
 #ifndef POCKETTRACKER_SONGCORE_ENGINE_CONSUMER_H
 #define POCKETTRACKER_SONGCORE_ENGINE_CONSUMER_H
 
-// ─── The engine consumer — bus events become audio ───────────────────────────────────────────────
-//
-// Everything below the event seam, for every platform. Deliberately thin: the derivation (frequency,
-// slice window, SF slot/velocity, tick→frame, modulation pushes) is pure functions in voice_derive.h,
-// where it can be tested without an engine. What is left here is look up, derive, call.
+// The engine consumer: bus events become engine calls. Thin — the derivation is voice_derive.h.
 
 #include <cstdint>
 
@@ -20,9 +16,8 @@
 
 namespace songcore {
 
-// ⚠️ The table engine keeps its own copy of the effect codes it processes (`native/audio-defs.h`),
-// because it sits below this seam. This is the one place both lists are visible, so they are made to
-// agree here — a drifted code would draw by its right name and do something else.
+// ⚠️ The table engine keeps its own copy of the effect codes (`audio-defs.h`); this is the one place
+// both lists are visible, so they are made to agree here.
 static_assert(::FX_HOP    == FX_HOP,    "audio-defs.h FX_HOP has drifted from effects.h");
 static_assert(::FX_TIC    == FX_TIC,    "audio-defs.h FX_TIC has drifted from effects.h");
 static_assert(::FX_KILL   == FX_KILL,   "audio-defs.h FX_KILL has drifted from effects.h");
@@ -61,10 +56,7 @@ constexpr bool crush_split_matches_the_engine() {
 static_assert(crush_split_matches_the_engine(),
               "audio-defs.h's CRU nibble split has drifted from effects.h's");
 
-// ─── …and the third list: what a TABLE row's AUS may ramp ────────────────────────────────────────
-//
-// `table_automation.h` serves both the engine and the table editor, so it spells its codes as
-// literals. Checked here, in both directions, so neither list can grow an entry the other lacks.
+// …and table_automation.h's literals, in both directions.
 static_assert(table_automation::FX_AUS_CODE == FX_AUS,
               "table_automation.h AUS has drifted from effects.h");
 static_assert(table_automation::FX_AUF_CODE == FX_AUF,
@@ -133,11 +125,7 @@ class EngineConsumer : public IMidiConsumer {
     int  track_mask() const { return trackMask_; }
     void clear_track_mask() { trackMask_ = 0; }
 
-    /**
-     * Every table the engine does not hold yet, pushed now. The note path pushes lazily; a live key is
-     * scheduled by the audio thread with nothing pushed ahead of it, so the host calls this from its
-     * poll. Both share the cache.
-     */
+    // Every table the engine lacks, pushed now — for a live key, which no note path pushes ahead of.
     void push_tables(const Project& project) {
         if (!engine_) return;
         const int count = static_cast<int>(project.tables.size());
@@ -174,17 +162,12 @@ class EngineConsumer : public IMidiConsumer {
             case CC_LOOP_SLIDE:
                 engine.scheduleVoiceCc(frame, track, param, v);
                 break;
-            // The mixer faders. Engine-only: `midi_out.h` drops both.
-            // ⚠️ VTR is subject to the EXTERNAL gate and VMV is not, deliberately: an EXTERNAL track
-            // makes no audio here, while the master carries every other track. VMV rides
-            // TRACK_GLOBAL, which the gate never claims.
+            // The mixer faders. VTR is subject to the EXTERNAL gate; VMV rides TRACK_GLOBAL, which is not.
             case CC_TRACK_VOL:   engine.scheduleTrackVolume(frame, track, v);    break;
             case CC_MASTER_VOL:  engine.scheduleMasterVolume(frame, v);          break;
             // TIM: global like the master fader, ungated for the same reason.
             case CC_DELAY_TIME:  engine.scheduleDelayTime(frame, v);             break;
-            // Every other CC id is dropped here — a gap, not a decision. Attack/release and the GP
-            // drive/crush are instrument-static in this engine; wiring one needs a ParamUpdateQueue
-            // entry and a per-voice override. Until then a `CCA` on 72 moves external gear only.
+            // Any other CC moves external gear only.
             default: break;
         }
     }
@@ -192,12 +175,8 @@ class EngineConsumer : public IMidiConsumer {
     void consume(const Event& ev) override {
         if (!engine_ || !project_) return;
 
-        // ── The routing gate ─────────────────────────────────────────────────────────────────────
-        //
-        // An EXTERNAL instrument belongs to ExternalConsumer (midi_out.h) and raises no voice here,
-        // even with no cable attached.
-        // ⚠️ Both consumers decide through `instrument_routes_external` and `TrackInstruments`: an
-        // event both claim plays twice, one neither claims is silence.
+        // The routing gate: an EXTERNAL instrument raises no voice here, cable or not.
+        // ⚠️ Both consumers decide through the same two functions, or an event plays twice or never.
         const int16_t prev  = tracks_.current(ev.track);
         const int16_t instr = tracks_.observe(ev);
         if (is_external(instr)) {
@@ -213,9 +192,7 @@ class EngineConsumer : public IMidiConsumer {
                 note_on(ev);
                 break;
 
-            // ⚠️ Three modes. NOTE_OFF_KEY is a live key let go: a one-shot without a release
-            // envelope ignores it and plays out, where an OFF fades it (`SamplerVoice::keyRelease`).
-            // An unknown mode must not silently become a KIL.
+            // ⚠️ Three modes; an unknown one must not silently become a KIL.
             case EV_NOTE_OFF:
                 switch (ev.noteOff.mode) {
                     case NOTE_OFF_CUT: engine_->scheduleCut(ev.frame, ev.track);        break;
@@ -231,10 +208,7 @@ class EngineConsumer : public IMidiConsumer {
                          f32_from_bits(ev.cc.valueBits));
                 break;
 
-            // No engine path for either:
-            //   • MPG: no notion of a program here; a per-track SF preset override does not exist.
-            //   • MPB: `schedulePitchBend` is PBN, a RATE; an absolute bend has no param to hold it.
-            // Both reach external gear (midi_out.h); on a sampler they are silent.
+            // MPG and MPB have no engine form; they reach external gear only.
             case EV_PROGRAM:
             case EV_PITCH_BEND:
                 break;
@@ -297,9 +271,8 @@ class EngineConsumer : public IMidiConsumer {
     /** The controller number for this event, via `resolve_cc_param`, so `CCA` means the same here as on
      *  the wire. −1 (unknown instrument, unassigned slot) matches no case and is a no-op. */
     int resolve_cc(int16_t instrument, uint8_t param) const {
-        // ⚠️ A literal id returns before the instrument is looked up. PAN/REV/DEL on an FX-only step
-        // before the track's first note resolve to INSTRUMENT_NONE and must still apply; only a slot
-        // letter needs an instrument to translate it.
+        // ⚠️ A literal id returns before the instrument lookup: PAN on an FX-only step before the
+        // track's first note has none, and must still apply.
         if (cc_slot_index(param) < 0) return param;
         if (instrument < 0 || static_cast<size_t>(instrument) >= project_->instruments.size()) return -1;
         return resolve_cc_param(project_->instruments[static_cast<size_t>(instrument)], param);

@@ -1,30 +1,12 @@
 #ifndef POCKETTRACKER_SONGCORE_MIDI_IN_H
 #define POCKETTRACKER_SONGCORE_MIDI_IN_H
 
-// ─── MIDI IN — bytes from a cable become bus events ──────────────────────────────────────────────
-//
-// The mirror of midi_out.h: `IMidiIn` is the platform seam, everything above it is platform-free.
-// Four objects, each answering a different question:
-//
-//   • `MidiInQueue`  — the THREAD boundary. Backends deliver on threads they choose, so bytes are
-//     parked in one lock-free ring, written once above the seam.
-//   • `MidiParser`   — the PROTOCOL only: running status, real-time bytes mid-message, SysEx, orphan
-//     data bytes. It reports the wire faithfully and decides nothing — even note-on velocity 0 is a
-//     `MidiInMessage` predicate, not a rewrite.
-//   • `MidiInputRouter` — the POLICY: which track a channel drives and with which instrument. Reads a
-//     flat `MidiRoute` snapshot, never the project.
-//   • `MidiInPipeline` — the DRAIN: queue → parser → knob gate → router, plus the ring that carries
-//     what it saw back to the UI thread.
-//
-// ⚠️ The drain runs on the AUDIO thread, at the top of every block, so everything it touches is
-// real-time safe; anything needing the project (mappings, thru, screen counters) happens on the UI
-// thread one poll later. A host with no engine runs the same `run` from its poll.
-// Nothing here touches a clock or a port: frames are arguments and records go into the caller's
-// array, so the protocol is testable with no device.
-//
-// Not here: SYNC IN (real-time bytes are parsed, then dropped and counted by the router); the
-// key-release rule, which is `SamplerVoice::keyRelease` (a release emits `NOTE_OFF_KEY`); recording
-// into phrases.
+// MIDI in: bytes from a cable become bus events. `IMidiIn` is the platform seam. Above it:
+// `MidiInQueue` (the thread boundary), `MidiParser` (the protocol, no policy), `MidiInputRouter`
+// (which track and instrument a key plays) and `MidiInPipeline` (the drain that runs them in turn).
+// ⚠️ The drain runs on the AUDIO thread, so everything it touches is real-time safe; whatever needs
+// the project happens on the UI thread one poll later. Frames are arguments — testable with no device.
+// SYNC IN is not built: real-time bytes are parsed, counted and dropped.
 
 #include <atomic>
 #include <cstdint>
@@ -40,58 +22,42 @@
 
 namespace songcore {
 
-// ─── The platform seam ──────────────────────────────────────────────────────────────────────────
-
-/**
- * Where a backend puts received bytes.
- * ⚠️ Called from a thread you do not own (winmm callback, ALSA reader, Android binder). Be quick,
- * never block, never call back into the backend.
- */
+// Where a backend puts received bytes.
+// ⚠️ Called from a thread you do not own: be quick, never block, never call back into the backend.
 struct IMidiInSink {
     virtual ~IMidiInSink() = default;
     virtual void on_bytes(const uint8_t* data, int len) = 0;
 };
 
-/**
- * A MIDI input port, implemented once per platform. The same list/open/close shape as `IMidiOut`.
- * ⚠️ `set_sink(nullptr)` must be safe at any moment and honoured before `close()` returns, or a backend
- * thread outlives the object it writes into.
- */
+// A MIDI input port, one per platform, shaped like `IMidiOut`.
+// ⚠️ `set_sink(nullptr)` must be safe at any moment and honoured before `close()` returns, or a backend
+// thread outlives the object it writes into.
 struct IMidiIn {
     virtual ~IMidiIn() = default;
 
-    /** How many input devices exist right now. Re-enumerated on demand; hot-plug changes it. */
+    // Re-enumerated on each call; hot-plug changes it.
     virtual int device_count() = 0;
-    /** Display name of device `index`, for the MIDI screen's INPUT row. */
     virtual std::string device_name(int index) = 0;
 
     virtual bool open(int index) = 0;
     virtual void close() = 0;
     virtual bool is_open() const = 0;
-    /** True once the open port has failed in a way only a reopen can cure (the cable was pulled). */
+    // The open port failed in a way only a reopen cures (the cable was pulled).
     virtual bool broken() const { return false; }
 
-    /** Where received bytes go. Set BEFORE `open`, cleared before the sink dies. */
+    // Set BEFORE `open`, cleared before the sink dies.
     virtual void set_sink(IMidiInSink* sink) = 0;
 };
 
-// ─── The queue — the one thread boundary ────────────────────────────────────────────────────────
-
-/**
- * A bounded byte ring between the backend's thread and the drain.
- * Bytes, not messages: a backend has no parser (an ALSA `read` can split a message), and the parser
- * resyncs at the next status byte.
- * ⚠️ One producer, one consumer, no lock — the consumer is the audio thread. Each side owns one index
- * and only reads the other's; `clear()` belongs to the consumer.
- * Overflow is counted (`dropped()`), never silent.
- */
+// A byte ring between the backend's thread and the drain — bytes, since a backend read can split a
+// message. ⚠️ One producer, one consumer (the audio thread), no lock; each side owns one index.
+// Overflow is counted, never silent.
 class MidiInQueue : public IMidiInSink {
   public:
     // ~341 three-byte messages, drained every few ms; a flat-out cable sends ~1 040 a second.
     static constexpr int CAPACITY = 1024;   // a power of two: the slot is `index & MASK`
 
-    /** The producer's side. Drops the NEWEST bytes when full: dropping the oldest would lose
-     *  note-ons whose note-offs are still coming. */
+    // When full, drops the NEWEST bytes — dropping the oldest would orphan note-offs still coming.
     void on_bytes(const uint8_t* data, int len) override {
         if (!data || len <= 0) return;
         const uint32_t head = head_.load(std::memory_order_acquire);
@@ -107,7 +73,7 @@ class MidiInQueue : public IMidiInSink {
         tail_.store(tail, std::memory_order_release);
     }
 
-    /** The consumer's side: move up to `max` bytes into `out`. Returns how many. */
+    // Move up to `max` bytes into `out`; returns how many.
     int drain(uint8_t* out, int max) {
         if (!out || max <= 0) return 0;
         const uint32_t tail = tail_.load(std::memory_order_acquire);
@@ -118,20 +84,20 @@ class MidiInQueue : public IMidiInSink {
         return n;
     }
 
-    /** Bytes lost to a full ring, ever. Nonzero means the drain is not keeping up. */
+    // Bytes lost to a full ring, ever.
     uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
 
     int pending() const {
         return static_cast<int>(tail_.load(std::memory_order_acquire) - head_.load(std::memory_order_acquire));
     }
 
-    /** ⚠️ The CONSUMER's call — it moves the consumer's index. */
+    // ⚠️ The consumer's call — it moves the consumer's index.
     void clear() { head_.store(tail_.load(std::memory_order_acquire), std::memory_order_release); }
 
-    /** Where the producer has written up to, as a mark for `discard_up_to`. Any thread. */
+    // A mark for `discard_up_to`. Any thread.
     uint32_t written() const { return tail_.load(std::memory_order_acquire); }
 
-    /** The CONSUMER's: drop everything written before `mark`, keep what came after it. */
+    // The consumer's: drop everything written before `mark`.
     void discard_up_to(uint32_t mark) {
         const uint32_t head = head_.load(std::memory_order_relaxed);
         if (static_cast<int32_t>(mark - head) > 0) head_.store(mark, std::memory_order_release);
@@ -147,14 +113,9 @@ class MidiInQueue : public IMidiInSink {
     std::atomic<uint64_t> dropped_{0};
 };
 
-// ─── The protocol's one arithmetic fact ─────────────────────────────────────────────────────────
-
-/**
- * How many bytes a message with this status byte occupies — 1, 2 or 3.
- * ⚠️ Backends need it too: winmm packs a short message into a DWORD without saying its length, and
- * assuming three turns a program change into two (the pad byte becomes a second PC under running
- * status).
- */
+// How many bytes a message with this status byte occupies — 1, 2 or 3.
+// ⚠️ Backends need it too: winmm packs a message into a DWORD without its length, and assuming three
+// turns a program change into two.
 inline int midi_message_length(uint8_t status) {
     if (status >= 0xF8) return 1;
     if (status < 0xF0) {
@@ -169,12 +130,7 @@ inline int midi_message_length(uint8_t status) {
     }
 }
 
-// ─── The parser ─────────────────────────────────────────────────────────────────────────────────
-
-/**
- * One complete MIDI 1.0 message. `status` is the nibble (0x80-0xE0, channel split out) for a channel
- * message and the whole byte for a system one, so a consumer can switch on `status` alone.
- */
+// One complete message. `status` is the nibble for a channel message, the whole byte for a system one.
 struct MidiInMessage {
     uint8_t status  = 0;   // 0x80-0xE0 channel (nibble) | 0xF1-0xFF system (whole byte)
     uint8_t channel = 0;   // 0-15; meaningless for system messages
@@ -185,27 +141,17 @@ struct MidiInMessage {
     bool is_channel()  const { return status >= 0x80 && status <= 0xE0; }
     bool is_realtime() const { return status >= 0xF8; }
 
-    /**
-     * ⚠️ A note-on with velocity 0 IS a note-off (running-status keyboards send it constantly), and an
-     * unanswered note-on on external gear sounds forever. Asked through these predicates, never by
-     * switching on `status`. The parser does not rewrite the wire.
-     */
+    // ⚠️ A note-on with velocity 0 IS a note-off. Ask these, never `status`.
     bool is_note_on()  const { return status == EV_NOTE_ON  && data2 > 0; }
     bool is_note_off() const { return status == EV_NOTE_OFF || (status == EV_NOTE_ON && data2 == 0); }
 };
 
-/**
- * A streaming MIDI 1.0 parser: zero allocation, zero policy. Handles what a real cable does:
- *   • running status — `90 3C 40 3E 40 40 40` is three note-ons;
- *   • real-time bytes (0xF8-0xFF) mid-message change NOTHING — resetting on them would eat notes,
- *     and only while a clock runs;
- *   • System Common (0xF1-0xF6) cancels running status;
- *   • SysEx is skipped to its 0xF7, cancelling running status;
- *   • an orphan data byte is dropped and COUNTED — a few mean a mid-message join, all of them a bug.
- */
+// A streaming parser: running status; real-time bytes mid-message change NOTHING (resetting would eat
+// notes while a clock runs); System Common and SysEx cancel running status; orphan data bytes are
+// dropped and counted.
 class MidiParser {
   public:
-    /** Feed one byte. Returns true when `message()` holds a newly completed message. */
+    // Feed one byte; true when `message()` holds a newly completed message.
     bool feed(uint8_t b) {
         // ── real time: complete in one byte, and interrupts NOTHING ──
         if (b >= 0xF8) {
@@ -249,10 +195,10 @@ class MidiParser {
 
     const MidiInMessage& message() const { return msg_; }
 
-    /** Data bytes with no status byte to belong to: a resync, or — if many — a bug. */
+    // Data bytes with no status to belong to: a resync, or — if many — a bug.
     uint64_t orphan_bytes() const { return orphans_.load(std::memory_order_relaxed); }
 
-    /** Forget everything mid-flight; called when a port closes. */
+    // Forget everything mid-flight, when a port closes.
     void reset() {
         status_ = 0;
         expect_ = pendingCount_ = 0;
@@ -261,7 +207,6 @@ class MidiParser {
     }
 
   private:
-    // Derived from `midi_message_length`, the one copy backends share.
     static int data_bytes_for(uint8_t status) { return midi_message_length(status) - 1; }
 
     void emit() {
@@ -286,21 +231,16 @@ class MidiParser {
     std::atomic<uint64_t> orphans_{0};   // read by the UI's counters, written by the drain
 };
 
-// ─── The route — the routing facts, flat, for a thread that cannot read the project ──────────────
+// ─── The route: the routing facts, flat, for a thread that cannot read the project ───────────────
 
-/** What the router needs to know about one instrument. */
 struct MidiRouteInstrument {
     float   volume   = 1.0f;   // hex_to_float(ins.volume), baked into a note-on as the sequencer does
     float   pan      = 0.5f;
     uint8_t external = 0;      // routes to the cable, not to a voice
 };
 
-/**
- * The routing facts as one POD block: which instrument a key plays, which tracks it may take, what
- * each instrument bakes into a note, and which CCs the mappings claim.
- * ⚠️ The ONLY view of the project the drain sees: built on the UI thread (`build_midi_route`) and
- * published whole. A new routing rule's facts go in here, never a pointer to the project.
- */
+// ⚠️ The ONLY view of the project the drain sees, published whole from the UI thread. A new routing
+// rule's facts go in here, never a pointer to the project.
 struct MidiRoute {
     int16_t  instrument;                   // what a key plays: the instrument the UI is on; -1 = none
     int8_t   baseTrack;                    // the track the SONG cursor is on — the first voice
@@ -317,11 +257,8 @@ struct MidiRoute {
     }
 };
 
-/**
- * Build the route from the live project (UI thread). `claimed` uses the same predicate as
- * `apply_mapped_cc`; a mapping whose destination is gone claims nothing, so its knob falls through
- * to the tracks.
- */
+// Build the route on the UI thread. A mapping whose destination is gone claims nothing, so its knob
+// falls through to the tracks.
 inline MidiRoute build_midi_route(const Project& p, int instrument, int baseTrack, int voices,
                                   int controlChannel, bool learnArmed, bool velocity = true) {
     MidiRoute r{};
@@ -347,37 +284,25 @@ inline MidiRoute build_midi_route(const Project& p, int instrument, int baseTrac
     return r;
 }
 
-/** The route, published by the UI thread and copied out by the drain without waiting. */
 using MidiRoutePublisher = SeqPublisher<MidiRoute>;
 
-// ─── The router — a key to a track, a message to bus records ─────────────────────────────────────
-
-/**
- * Turns a parsed message into bus records. Every channel is heard.
- *
- * A key plays the instrument the UI is on, on the SONG cursor's track. A chord needs several tracks:
- * the window is `voices` tracks from the cursor's, clipped at the last.
- * ⚠️ Each note takes the LOWEST free track in the window (a chord uses as few as possible); a track
- * still ringing its release can be retaken. With all held, the oldest note is stolen.
- * ⚠️ A note-off follows the KEY across every track — the cursor may have moved. A release for a
- * stolen key finds no owner and is dropped.
- * ⚠️ CC, program change and pitch bend reach every track in the window: they are channel-wide.
- * Runs on the drain's thread; the counters are atomics for the UI.
- */
+// A parsed message into bus records; every channel is heard. A key plays the UI's instrument on a
+// window of `voices` tracks from the SONG cursor's, taking the LOWEST free one (all held: the oldest
+// is stolen). ⚠️ A note-off follows the KEY across every track — the cursor may have moved.
+// CC, program change and pitch bend reach the whole window.
 class MidiInputRouter {
   public:
     static constexpr int MAX_EVENTS = POOL_TRACKS;   // at most one record per track
 
     MidiInputRouter() { release_all_keys(); }
 
-    /** The routing facts. The pointer must stay valid between calls; the drain owns the copy. */
+    // The pointer must stay valid between calls; the drain owns the copy.
     void set_route(const MidiRoute* r) { route_ = r; }
 
-    /** Route one message at `frame` (the drain's block start). Returns records written to `out`. */
+    // Route one message at `frame`; returns records written to `out`.
     int route(const MidiInMessage& msg, int64_t frame, Event* out, int maxOut) {
         if (!route_ || !out || maxOut <= 0) return 0;
 
-        // Real time and System Common: no consumer (SYNC IN is not built).
         if (!msg.is_channel()) { bump(nonChannel_); return 0; }
 
         int n = 0;
@@ -406,7 +331,6 @@ class MidiInputRouter {
             return n;
         }
 
-        // CC, program change, pitch bend: channel-wide, so every track in the window gets one.
         for (int t = window_begin(); t < window_end() && n < maxOut; ++t) {
             if (build(msg, frame, static_cast<uint8_t>(t), instrument, out[n])) { ++n; bump(routed_); }
             else                                                               bump(unsupported_);
@@ -414,32 +338,18 @@ class MidiInputRouter {
         return n;
     }
 
-    /** Release every held key. ⚠️ Call wherever the notes are silenced (panic, stop, load), or the
-     *  allocator believes tracks are busy and steals from the first note. */
+    // ⚠️ Call wherever the notes are silenced, or the allocator thinks tracks are busy and steals.
     void release_all_keys() {
         for (int t = 0; t < POOL_TRACKS; ++t) { held_[t] = -1; heldCh_[t] = 0; heldIns_[t] = INSTRUMENT_NONE; }
     }
 
-    /** The instrument a track-scoped record on `track` is for: the key it holds, else what a key
-     *  would play now. `INSTRUMENT_NONE` when nothing answers. */
-    int16_t instrument_of(uint8_t track) const {
-        if (track >= POOL_TRACKS) return INSTRUMENT_NONE;
-        if (held_[track] >= 0 && heldIns_[track] >= 0) return heldIns_[track];
-        const int id = play_instrument();
-        return id < 0 ? INSTRUMENT_NONE : static_cast<int16_t>(id);
-    }
 
-    // ── counters: every path that produces no event says which ───────────────────────────────────
-    // nonChannel → SYNC would read it; noInstrument → pick one; unsupported → aftertouch, no engine form.
+    // Every path that produces no event counts why (unsupported = aftertouch).
     uint64_t routed() const { return routed_.load(std::memory_order_relaxed); }
     uint64_t nonChannel() const { return nonChannel_.load(std::memory_order_relaxed); }
     uint64_t noInstrument() const { return noInstrument_.load(std::memory_order_relaxed); }
     uint64_t unsupported() const { return unsupported_.load(std::memory_order_relaxed); }
 
-    void reset_counters() {
-        for (std::atomic<uint64_t>* c : {&routed_, &nonChannel_, &noInstrument_, &unsupported_})
-            c->store(0, std::memory_order_relaxed);
-    }
 
   private:
     static void bump(std::atomic<uint64_t>& c) { c.fetch_add(1, std::memory_order_relaxed); }
@@ -455,7 +365,7 @@ class MidiInputRouter {
         return end > POOL_TRACKS ? POOL_TRACKS : end;
     }
 
-    /** The lowest free track in the window, else the one holding the oldest key. */
+
     int take_track() const {
         int oldest = -1;
         for (int t = window_begin(); t < window_end(); ++t) {
@@ -465,19 +375,17 @@ class MidiInputRouter {
         return oldest;
     }
 
-    /** Fill one record. False = this message has no bus form (aftertouch), so nothing is written. */
+    // False = no bus form (aftertouch).
     bool build(const MidiInMessage& msg, int64_t frame, uint8_t track, int instrument, Event& ev) const {
         ev = Event{};
         ev.frame = frame;
         ev.track = track;
 
-        // ⚠️ The note-off test first: a velocity-0 note-on reaching the note-on arm would raise a voice
-        // nothing ever answers.
+        // ⚠️ The note-off test first, for velocity-0 note-ons.
         if (msg.is_note_off()) {
             ev.instrument   = INSTRUMENT_NONE;      // track-scoped, like every note-off
             ev.type         = EV_NOTE_OFF;
-            // A released key is NOTE_OFF_KEY (`SamplerVoice::keyRelease` decides); only MIDI in emits it.
-            ev.noteOff.mode = NOTE_OFF_KEY;
+            ev.noteOff.mode = NOTE_OFF_KEY;         // only MIDI in emits it
             return true;
         }
 
@@ -489,17 +397,14 @@ class MidiInputRouter {
 
             NoteOnPayload& n = ev.noteOn;
             n.note = msg.data1;
-            // ⚠️ The scheduler's wiring, copied (scheduler.h emit_note): velocity = the byte,
-            // velGain = (v/127)², volGain = instrument volume. `midi_velocity` then reproduces the
-            // keyboard's byte scaled by volume.
+            // ⚠️ The scheduler's wiring (emit_note): velGain = (v/127)², volGain = instrument volume.
             const uint8_t vel  = route_->velocity ? msg.data2 : 127;
             const float   unit = static_cast<float>(vel) / 127.0f;
             n.velocity    = static_cast<int8_t>(vel);
             n.velGainBits = f32_bits(unit * unit);
             n.volGainBits = f32_bits(ins.volume);
             n.panBits     = f32_bits(ins.pan);
-            // No phrase behind this note: no FX, no slice, the instrument's own table. Transpose is 0
-            // on purpose — a key plays the pitch pressed.
+            // No phrase behind it: no FX, no slice, its own table, no transpose.
             n.start = -1; n.slice = -1; n.tableId = -1; n.tableRow = -1;
             n.transpose = 0; n.pit = 0; n.arp = 0;
             n.pslOffBits = n.pslDurBits = n.pbnRateBits = n.vibSpdBits = n.vibDepBits = f32_bits(0.0f);
@@ -510,8 +415,7 @@ class MidiInputRouter {
 
         if (msg.status == EV_CC) {
             ev.type = EV_CC;
-            // A literal controller, unchanged by `resolve_cc_param`: CC 10 pans a sampler or rides the
-            // cable, as `CCA` does. Widened 0-127 → 0-1 here, narrowed back by `to7bit`.
+            // A literal controller, as `CCA` sends; 0-127 → 0-1, narrowed back by `to7bit`.
             ev.cc.param     = msg.data1;
             ev.cc.valueBits = f32_bits(static_cast<float>(msg.data2) / 127.0f);
             return true;
@@ -525,20 +429,17 @@ class MidiInputRouter {
 
         if (msg.status == EV_PITCH_BEND) {
             ev.type = EV_PITCH_BEND;
-            // LSB first, 14 bits, centre 0x2000 — exactly what `pitch_bend_event` re-splits.
             ev.pitchBend.value14 =
                 static_cast<uint16_t>((static_cast<int>(msg.data2) << 7) | static_cast<int>(msg.data1));
             return true;
         }
 
-        // 0xA0 / 0xD0 pressure: no bus form, no engine use. Explicit rather than a `default:`.
-        return false;
+        return false;   // 0xA0 / 0xD0 pressure
     }
 
     const MidiRoute* route_ = nullptr;
 
-    // The allocator: per TRACK, the key held (−1 none), its channel, the instrument it was taken
-    // for, and when. Per track because the window and instrument can change while a key is down.
+    // Per track: the key held (−1 none), its channel, its instrument, and when it was taken.
     int      held_[POOL_TRACKS];
     uint8_t  heldCh_[POOL_TRACKS];
     int16_t  heldIns_[POOL_TRACKS];
@@ -550,17 +451,13 @@ class MidiInputRouter {
 
 // ─── What the drain saw, carried back to the UI thread ───────────────────────────────────────────
 
-/**
- * Told about every handled message with the records it produced — on the UI thread, one poll after
- * routing, so an implementation may print or allocate. `count` may be 0: a message that routed
- * nowhere still ARRIVED, which tells "dead cable" from "no track listening".
- */
+// Told about every handled message, on the UI thread (it may print or allocate). `count` may be 0:
+// the message still arrived.
 struct IMidiInObserver {
     virtual ~IMidiInObserver() = default;
     virtual void on_midi_in(const MidiInMessage& msg, const Event* events, int count) = 0;
 };
 
-/** One handled message, as the drain hands it back. */
 struct MidiInSeen {
     enum Kind : uint8_t {
         ROUTED = 0,   // `events[0..count)` went to the engine; the UI owes thru and bookkeeping
@@ -573,46 +470,35 @@ struct MidiInSeen {
     Event         events[MidiInputRouter::MAX_EVENTS];
 };
 
-/**
- * Queue → parser → knob gate → router. `run(frame, apply)` is called by the ring's consumer — the
- * engine each live block, or an engine-less host from its poll; `apply` queues a record (nullptr
- * without an engine). Everything else returns to the UI thread through `pop_seen`.
- *
- * ⚠️ Real-time safe by construction: SPSC lock-free rings, the route a POD copy under a sequence lock,
- * relaxed counters, and reset / release-all as REQUESTS honoured at the next run (the parser and
- * allocator are the drain's alone).
- * ⚠️ The knob gate lives here: a CC that drives a mapping must not also reach the track, and only the
- * drain can withhold it. The mapping is applied on the UI thread.
- */
+// Queue → parser → knob gate → router. `run` is called by the engine each block (or an engine-less
+// host from its poll); what it handled goes back to the UI thread through `pop_seen`.
+// ⚠️ Real-time safe: lock-free rings, the route copied under a sequence lock, and reset / release as
+// REQUESTS honoured at the next run. A CC a mapping claims is withheld from the tracks here.
 class MidiInPipeline {
   public:
     struct Apply {
         virtual ~Apply() = default;
-        /** One bus record from a live key, at the drain's frame. `external` is the note-on's
-         *  instrument routing to the cable; a voice must not be raised for it. */
+        // One record from a live key. `external` = the note-on goes to the cable, not a voice.
         virtual void apply(const Event& ev, bool external) = 0;
     };
 
     static constexpr int SEEN_CAPACITY = 128;   // messages between two UI polls; a power of two
 
-    // ── the producer's side (the backend's thread) ───────────────────────────────────────────────
+    // The backend's thread.
     MidiInQueue& sink() { return queue_; }
 
-    // ── the UI thread ────────────────────────────────────────────────────────────────────────────
+    // ── the UI thread ──
     void publish_route(const MidiRoute& r) { publisher_.publish(r); }
 
-    /**
-     * Forget everything mid-flight — parked bytes, the half message, held keys — at the next run.
-     * ⚠️ "So far" is a MARK taken now, so a newly opened port's first bytes are kept.
-     */
+    // Forget parked bytes, the half message and held keys at the next run — up to a mark taken now,
+    // so a newly opened port's first bytes are kept.
     void request_reset() {
         resetMark_.store(queue_.written(), std::memory_order_relaxed);
         requests_.fetch_or(REQ_RESET, std::memory_order_release);
     }
-    /** Every held key released — the tracks are free again. Honoured at the drain's next run. */
     void request_release_keys() { requests_.fetch_or(REQ_RELEASE, std::memory_order_release); }
 
-    /** The next handled message, oldest first. False when there is none. */
+    // The next handled message, oldest first.
     bool pop_seen(MidiInSeen& out) {
         const uint32_t tail = seenTail_.load(std::memory_order_acquire);
         const uint32_t head = seenHead_.load(std::memory_order_relaxed);
@@ -621,16 +507,11 @@ class MidiInPipeline {
         seenHead_.store(head + 1, std::memory_order_release);
         return true;
     }
-    bool has_seen() const {
-        return seenHead_.load(std::memory_order_acquire) != seenTail_.load(std::memory_order_acquire);
-    }
 
-    // ── the consumer ─────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Drain → parse → gate → route → `apply`, every record stamped `frame`. Returns records produced.
-     * `apply` may be null: records are still routed, counted and handed back.
-     */
+    // ── the consumer ──
+
+    // Drain → parse → gate → route → `apply`, every record at `frame`. `apply` may be null.
     int run(int64_t frame, Apply* apply) {
         service_requests();
         if (publisher_.read(route_, routeSeen_)) router_.set_route(&route_);
@@ -651,9 +532,8 @@ class MidiInPipeline {
             MidiInSeen seen{};
             seen.msg = m;
 
-            // ⚠️ A CC is offered to the mappings FIRST and consumed if claimed; unclaimed CCs fall
-            // through unchanged, which is why `ALL` can be the default. While learn is armed the knob
-            // only names — it must not also drive what it already drives.
+            // A CC goes to the mappings FIRST and is consumed if claimed; while learn is armed it only
+            // names.
             if (m.status == EV_CC && ctl_ch_covers(route_.controlChannel, static_cast<int>(m.channel))) {
                 if (route_.learnArmed)        { seen.kind = MidiInSeen::LEARN;  push_seen(seen); continue; }
                 if (route_.claims(m.data1))   { seen.kind = MidiInSeen::MAPPED; push_seen(seen); continue; }
@@ -676,8 +556,7 @@ class MidiInPipeline {
         return total;
     }
 
-    /** While the engine is not live (an export): bytes are dropped and counted, not saved up for a
-     *  burst. */
+    // While the engine is not live (an export): bytes are dropped and counted, not saved for a burst.
     void discard() {
         service_requests();
         const int n = queue_.pending();
@@ -687,7 +566,7 @@ class MidiInPipeline {
         }
     }
 
-    /** Honour pending requests now — what an engine-less host does as the consumer. */
+
     void service_requests() {
         const uint32_t r = requests_.exchange(0, std::memory_order_acquire);
         if (r & REQ_RESET) {
@@ -698,14 +577,12 @@ class MidiInPipeline {
         if (r & REQ_RELEASE) { router_.release_all_keys(); }
     }
 
-    // ── counters: any thread, relaxed ────────────────────────────────────────────────────────────
+    // ── counters, any thread ──
     uint64_t bytes() const { return bytes_.load(std::memory_order_relaxed); }
     uint64_t messages() const { return messages_.load(std::memory_order_relaxed); }
-    /** Records handed to `apply` (or routed, with none). */
     uint64_t injected() const { return injected_.load(std::memory_order_relaxed); }
-    /** Bytes thrown away while the engine was not live. */
     uint64_t discarded() const { return discarded_.load(std::memory_order_relaxed); }
-    /** Handled messages the UI ring had no room for: thru and counters missed them; the sound did not. */
+    // Handled messages the UI ring had no room for (thru missed them; the sound did not).
     uint64_t seen_dropped() const { return seenDropped_.load(std::memory_order_relaxed); }
 
     const MidiInputRouter& router() const { return router_; }

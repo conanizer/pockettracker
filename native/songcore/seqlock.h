@@ -5,14 +5,8 @@
 #include <cstring>
 #include <type_traits>
 
-/**
- * One writer publishes a `T`, one reader copies it out without ever waiting.
- *
- * A sequence lock: the writer bumps `seq_` to odd, writes, bumps to even; the reader copies and
- * keeps the copy only if `seq_` was even and unchanged across it. The words are atomics so the
- * overlap is defined; a reader that lands on a write in progress keeps the copy it already had and
- * sees the new one next time.
- */
+// One writer publishes a `T`, one reader copies it out without waiting (a sequence lock). A reader
+// that lands on a write keeps its old copy and sees the new one next time.
 template <typename T>
 class SeqPublisher {
     static_assert(std::is_trivially_copyable<T>::value, "published as raw words");
@@ -54,16 +48,9 @@ class SeqPublisher {
     std::atomic<uint64_t> words_[WORDS] = {};
 };
 
-/**
- * N records the control thread edits and the audio thread reads, neither waiting on the other.
- *
- * Each side has its own copy. The control thread changes an entry with `edit` and then `publish`es
- * it; the audio thread pulls every published entry into ITS copy at one point in its block (`sync`)
- * and reads only that copy (`[]`), so a record never changes under it halfway through a note. An
- * entry the pull finds mid-write stays marked and is taken on the next block.
- *
- * ⚠️ `publish` after EVERY edit. An edit that is not published is simply never heard.
- */
+// N records the control thread edits and the audio thread reads, each in its own copy: `edit` then
+// `publish`; the audio thread `sync`s once per block, so a record never changes mid-note.
+// ⚠️ `publish` after EVERY edit, or it is never heard.
 template <typename T, int N>
 class StagedTable {
     static_assert(std::is_trivially_copyable<T>::value, "published as raw words");

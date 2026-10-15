@@ -1,12 +1,8 @@
 #ifndef POCKETTRACKER_SONGCORE_NOTE_TABLES_H
 #define POCKETTRACKER_SONGCORE_NOTE_TABLES_H
 
-// ─── Frozen pitch tables — do not edit ──────────────────────────────────────────────────────────
-//
-// Note → Hz and detune → multiplier, precomputed as raw binary32 bits. Both are a pow(), and libm
-// implementations (glibc, bionic, MSVC) need not agree to the last bit; a 1-ULP frequency error
-// changes the resampling rate and every rendered byte. The domains are small (132 notes, 256 detune
-// bytes), so there is no runtime pow at all. ⚠️ Every golden render depends on these exact bits.
+// Frozen pitch tables — do not edit. Note → Hz and detune → multiplier as binary32 bits, since libm
+// pow() differs between platforms in the last bit. ⚠️ Every golden render depends on these bits.
 
 #include <cstdint>
 #include <cstring>
