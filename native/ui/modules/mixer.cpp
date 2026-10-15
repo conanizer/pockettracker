@@ -287,7 +287,6 @@ CursorContext MixerModule::cursor_context(const MixerState& s) const {
             return cc::plain_byte(p.delayWet, 0x80);
 
         case MixerCell::MASTER_EQ:
-            // ⚠️ The −1 is passed through, so an unassigned master EQ is empty and A inserts slot 0.
             return cc::eq_slot(p.masterEqSlot);
         case MixerCell::MASTER_FX:
             return cc::plain_byte(p.masterBusFx == 0 ? p.ottDepth : p.dustDepth, 0x00);

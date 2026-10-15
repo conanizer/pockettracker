@@ -96,9 +96,7 @@ CursorContext InstrumentPoolModule::cursor_context(const InstrumentPoolState& s)
         case 1: return cc::plain_byte(ins.volume, 0xFF);
         case 2: return cc::plain_byte(ins.reverbSend, 0x00);
         case 3: return cc::plain_byte(ins.delaySend, 0x00);
-        case 4: return cc::hex_byte(ins.eqSlot < 0 ? 0 : ins.eqSlot, /*min=*/0, /*max=*/127,
-                                    /*empty_value=*/-1, /*can_delete=*/ins.eqSlot >= 0,
-                                    /*can_insert=*/ins.eqSlot < 0);
+        case 4: return cc::eq_slot(ins.eqSlot);
         // NAME: A loads a source, A+B clears — the dispatcher's. read_only() keeps the generic edits off.
         default: return cc::read_only();
     }

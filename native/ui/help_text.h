@@ -2123,7 +2123,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "and metallic. PLATE and FOIL",
       "ignore it."},
      {"A+←/→ steps 1, A+↑/↓ steps 16",
-      "A+B sets it back to 40"}},
+      "A+B sets it back to 10"}},
     /* FX_REVERB_DECAY */
     {"DCAY: how long it rings", "Higher rings longer. On OLD,", "FF never stops.",
      {"Higher rings longer, and the",

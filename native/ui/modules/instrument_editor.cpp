@@ -328,12 +328,7 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
         case Cell::REV:        return cc::plain_byte(ins.reverbSend, 0x00);
         case Cell::DEL:        return cc::plain_byte(ins.delaySend, 0x00);
 
-        // −1 is "no EQ"; A+B clears back to it. ⚠️ `can_insert` is inert (−1 becomes 0 before the
-        // emptiness test), so A on an unassigned EQ lands on slot 1 and INSERT_DEFAULT never arrives.
-        case Cell::EQ:
-            return cc::hex_byte(ins.eqSlot < 0 ? 0 : ins.eqSlot, /*min=*/0, /*max=*/127,
-                                /*empty_value=*/-1, /*can_delete=*/ins.eqSlot >= 0,
-                                /*can_insert=*/ins.eqSlot < 0);
+        case Cell::EQ:         return cc::eq_slot(ins.eqSlot);
 
         case Cell::SLICE:
             return cc::toggle_ternary(slice_modes()[static_cast<size_t>(clamp(ins.slicingMode, 0, 2))],

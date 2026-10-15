@@ -33,7 +33,7 @@ constexpr ByteCell BYTE_CELLS[] = {
     {EffectModule::ROW_REV_DAMP,   &songcore::Project::reverbDamp,      0x80},
     {EffectModule::ROW_REV_PRE,    &songcore::Project::reverbPreDelay,  0x00},
     {EffectModule::ROW_REV_WIDE,   &songcore::Project::reverbWidth,     0x80},
-    {EffectModule::ROW_REV_MOD,    &songcore::Project::reverbMod,       0x40},
+    {EffectModule::ROW_REV_MOD,    &songcore::Project::reverbMod,       0x10},
     {EffectModule::ROW_DLY_TONE,   &songcore::Project::delayTone,       0xFF},
     {EffectModule::ROW_DLY_WOBBLE, &songcore::Project::delayWobble,     0x00},
     {EffectModule::ROW_DLY_FDBK,   &songcore::Project::delayFeedback,   0x60},
