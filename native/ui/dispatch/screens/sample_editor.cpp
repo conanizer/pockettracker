@@ -843,13 +843,8 @@ void InputDispatcher::sample_editor_chop() {
     const std::vector<std::pair<int64_t, int64_t>> slices = current_slices();
     if (slices.empty()) return;
 
-    // A slice becomes a FILE NAME, so anything a filesystem would choke on goes.
-    std::string base = se.sampleName.empty() ? "SAMPLE" : se.sampleName;
-    for (char& c : base) {
-        const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                          (c >= '0' && c <= '9') || c == '_' || c == '-';
-        if (!safe) c = '_';
-    }
+    // A slice becomes a file name, sanitized like every other the app writes.
+    const std::string base = safe_file_name(se.sampleName.empty() ? "SAMPLE" : se.sampleName);
 
     // Samples/Chops/<base>/ — its own folder, so a 32-slice break does not bury the sample directory.
     const std::string samples = fs_.samples_directory();
