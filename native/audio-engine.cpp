@@ -673,6 +673,10 @@ void AudioEngine::scheduleVibrato(int64_t targetFrame, int trackId, float speed,
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, speed, PARAM_UPDATE_VIBRATO, depth });
 }
 
+void AudioEngine::scheduleVoiceWheel(int64_t targetFrame, int trackId, float semitones) {
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, semitones, PARAM_UPDATE_WHEEL, 0.0f });
+}
+
 void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
                                           int type, int dest, float amount,
                                           int attackSamples, int holdSamples, int decaySamples,
@@ -755,9 +759,9 @@ void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleR
 }
 
 float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
-    // Table pitch, slide, vibrato and mod slots, plus FIN in params.base — added, not replaced.
-    float rateMod = powf(2.0f,
-                         (voice.modDestValues[PARAM_PITCH] + voice.params.base[PARAM_PITCH]) / 12.0f);
+    // Table pitch, slide, vibrato and mod slots, plus FIN in params.base and the MIDI wheel — added.
+    float rateMod = powf(2.0f, (voice.modDestValues[PARAM_PITCH] + voice.params.base[PARAM_PITCH] +
+                                voice.midiWheel) / 12.0f);
     const float rate = voice.playbackRate * rateMod;
 
     // OSCILLATOR loop mode: one trip round the loop is one cycle of the played note, so every pitch

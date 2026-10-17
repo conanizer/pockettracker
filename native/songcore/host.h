@@ -455,6 +455,9 @@ class SongcoreHost {
         void discardLiveInput() override { pipeline->discard(); }
 
         void apply(const Event& ev, bool external) override;
+        void wheel(int64_t frame, uint8_t track, float semitones) override {
+            engine->scheduleVoiceWheel(frame, track, semitones);
+        }
     };
 
     // Give the drain its route and everything it can play; published only when it changed.

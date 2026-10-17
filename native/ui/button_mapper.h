@@ -38,6 +38,8 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
 
     // R's state for MIDI learn ("hold R, turn a knob"). ⚠️ Above every early return, or R could stay held.
     if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
+    // A press with R held is a combo (R+DPAD switches screens): that hold never learns.
+    else if (e.action == ButtonAction::PRESSED && m.r) d.on_r_combo_press();
 
     // ── Release ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {

@@ -1713,8 +1713,8 @@ the next note on its track, after the instrument's LEN, at a `KIL` or an `OFF`, 
 | In the phrase | What is sent |
 |---|---|
 | A note | Note on, on the instrument's channel. Chain and project transpose, `PIT` and `ARP` move the note number |
-| The V column, the instrument's VOL, `VOL` beside the note | The note's velocity |
-| `VOL` on a later step | Controller 7 (volume) |
+| The V column, the instrument's VOL | The note's velocity |
+| `VOL`, beside the note or on a later step | Controller 7 (volume) — ahead of the note it is written with |
 | `PAN`, the instrument's PAN | Controller 10 (pan) |
 | `CUT` · `RES` | Controllers 74 (cutoff) and 71 (resonance) |
 | `REV` · `DEL` | Controllers 91 and 93 |
@@ -1730,19 +1730,26 @@ Commands that shape the app's own sound — the filter switches, drive, crush, s
 
 With a keyboard on INPUT, its keys play the instrument you are working on: on the PHRASE screen, the
 instrument of the note under the cursor; anywhere else, the one you last typed or picked. They sound on
-the track the SONG cursor is on.
+the track the SONG cursor is on. A program change picks the instrument for its own channel instead —
+program `05` plays instrument `05` — until you choose an instrument yourself.
 
 **KEYS** sets how many can sound together. **MONO** is one note at a time, on that track. **POLY 2–8**
 lets a chord spread over that many tracks, counted rightwards from the cursor's track; each key takes
 the lowest one that is free, and when all are busy the oldest key gives way.
+
+The pitch wheel bends the notes by up to 2 semitones, or as far as the sender says — another
+PocketTracker sends its BEND. Controllers 7, 10, 74, 71, 91 and 93 (volume, pan, cutoff, resonance,
+reverb and delay) move the notes of their own channel, and that channel's next notes start where they
+were left.
 
 Keys are played, not recorded: nothing is written into the phrase.
 
 ### Mapping knobs
 
 A knob or fader on a controller can move a value in the project. The quick way is to learn it: put the
-cursor on the value — on MIXER, EFFECTS or INSTRUMENT — hold **R** and turn the knob. The status line
-names what the knob moves from now on.
+cursor on the value — on MIXER, EFFECTS or INSTRUMENT — hold **R** on its own for half a second and turn
+the knob. The status line names what the knob moves from now on. R held with another button, as when
+R+D-pad switches screens, learns nothing.
 
 | Group | What can be mapped |
 |---|---|

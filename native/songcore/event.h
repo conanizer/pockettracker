@@ -181,6 +181,8 @@ struct ProgramPayload  { uint8_t program; };                       // program   
 // value14: the MPB byte `<< 6`, so 0x80 lands exactly on centre 0x2000. 0xFF reaches 16320 of 16383;
 // an exact centre matters more, since a bend that does not rest at zero detunes every note.
 struct PitchBendPayload{ uint16_t value14; };                      // value     centre 0x2000
+// No bend — where a wheel rests, and what a panic restores.
+constexpr int MIDI_BEND_CENTRE = 0x2000;
 struct ExtPitchRatePayload { uint32_t rateBits; uint16_t tempo; }; // rate tempo (rate: raw byte /16)
 struct ExtVibratoPayload   { uint32_t speedBits, depthBits; };     // speed depth
 struct ExtTableRowPayload  { uint8_t row; };                       // row       0-15

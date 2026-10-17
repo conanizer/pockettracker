@@ -150,6 +150,8 @@ class InputDispatcher {
     void on_r_a();
     // R down or up — the arming half of MIDI learn ("hold R, turn a knob").
     void on_r_held(bool down);
+    // Another button went down while R is held: a combo, so this hold never learns.
+    void on_r_combo_press();
 
     // R came up first: the chord's changes stand.
     void on_r_combo_commit();
@@ -370,6 +372,10 @@ class InputDispatcher {
     // A knob turned while R was held: point the cell under the cursor at it. The last controller wins.
     void     run_midi_learn();
     uint64_t learnSeen_ = 0;
+    // MIDI learn arms once R has been held ALONE this long. A sequencer's controllers stream in while
+    // R+DPAD switches screens, and the moment between the two presses would learn one.
+    static constexpr long long MIDI_LEARN_HOLD_MS = 500;
+    long long rAloneSinceMs_ = -1;   // when R went down with nothing pressed since; −1 = not armable
 
     // What a knob would map on the cell under the cursor; `NONE` where nothing can be swept.
     songcore::MapTarget map_target() const;

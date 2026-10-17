@@ -38,6 +38,8 @@ void InputDispatcher::set_now(long long now_ms) {
     keysInstrument = std::min(static_cast<int>(s_.project->instruments.size()) - 1, std::max(0, keysInstrument));
     host_.set_midi_in_play(keysInstrument, pointer_track(s_), s_.settings.midiInVoices,
                            s_.settings.midiVelocity);
+    if (rAloneSinceMs_ >= 0 && now_ms_ - rAloneSinceMs_ >= MIDI_LEARN_HOLD_MS)
+        host_.set_midi_learn_armed(true);
     run_midi_learn();
     s_.midiInCcChannel = host_.last_cc_channel();
     const AudioEngine::BlockTiming bt = host_.block_timing();
@@ -256,7 +258,15 @@ void InputDispatcher::run_mapped_cc_dirty() {
 
 // ─── MIDI learn — hold R, turn a knob ────────────────────────────────────────────────────────────
 
-void InputDispatcher::on_r_held(bool down) { host_.set_midi_learn_armed(down); }
+void InputDispatcher::on_r_held(bool down) {
+    rAloneSinceMs_ = down ? now_ms_ : -1;
+    if (!down) host_.set_midi_learn_armed(false);   // at once; arming waits for `set_now`
+}
+
+void InputDispatcher::on_r_combo_press() {
+    rAloneSinceMs_ = -1;
+    host_.set_midi_learn_armed(false);
+}
 
 songcore::MapTarget InputDispatcher::map_target() const {
     // ⚠️ Under a modal the cursor underneath is not the target — a knob bypasses the mapper. The send

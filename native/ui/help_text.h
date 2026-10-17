@@ -1562,8 +1562,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "",
       "Or stand on any value on MIXER,",
       "EFFECTS or INSTRUMENT, hold R",
-      "and turn a knob. Needs a device",
-      "on the INPUT row."},
+      "alone, then turn a knob. Needs",
+      "a device on the INPUT row."},
      {"A opens the list"}},
 
     // ── The MIDI mapping list ────────────────────────────────────────────────────────────────────

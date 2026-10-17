@@ -147,6 +147,9 @@ public:
     float reverbSend = 0.0f;
     float delaySend  = 0.0f;
 
+    // A MIDI-in pitch wheel, semitones: zeroed at every trigger, then set by the channel's bend.
+    float midiWheel = 0.0f;
+
     virtual bool active() const = 0;   // sounding, or fading out
     virtual void hardStop() = 0;       // silent now, slot free
     virtual void noteOff() = 0;        // release, or a hard stop with no release envelope

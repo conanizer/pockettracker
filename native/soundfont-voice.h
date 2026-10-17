@@ -153,6 +153,7 @@ struct SoundfontVoice : public IAudioVoice {
 
     // Also re-centres TSF's wheel next block — a PBN can have left it at an extreme.
     void resetPitchState() {
+        midiWheel        = 0.0f;
         pitchOffset      = 0.0f;
         pitchSlideTarget = 0.0f;
         pitchSlideRate   = 0.0f;

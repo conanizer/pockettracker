@@ -419,6 +419,9 @@ public:
     // PVB/PVX on an empty step; depth 0 stops it.
     void scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth);
 
+    // A MIDI-in pitch wheel on the track's voices, in semitones; the next trigger starts from 0.
+    void scheduleVoiceWheel(int64_t targetFrame, int trackId, float semitones);
+
     void setInstrumentModulation(int sampleId, int slotIndex,
                                  int type, int dest, float amount,
                                  int attackSamples, int holdSamples, int decaySamples,

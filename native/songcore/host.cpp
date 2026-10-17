@@ -693,7 +693,7 @@ void SongcoreHost::LiveInput::apply(const Event& ev, bool external) {
             EngineConsumer::apply_cc(*engine, ev.frame, ev.track, ev.cc.param, f32_from_bits(ev.cc.valueBits));
             return;
         default:
-            return;   // program change and pitch bend have no engine form (engine_consumer.h)
+            return;   // a bend arrives through `wheel`; a program change stays in the router
     }
 }
 
@@ -744,7 +744,7 @@ void SongcoreHost::drain_midi_in() {
             const bool external = record_is_external(ev);
             consumer_.observe_live(ev);
             if (midiInThru_) {
-                external_.consume(ev);
+                external_.consume_live(ev);
                 if (external) ++midiInThruSent_;
             } else if (external) {
                 ++midiInThruSuppressed_;

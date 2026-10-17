@@ -340,10 +340,10 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     }
 
     // The wheel persists in TSF, so with no pitch source at all it is re-centred explicitly. Detune, a
-    // held slide offset and FIN (params.base[PARAM_PITCH]) count as sources.
+    // held slide offset, FIN (params.base[PARAM_PITCH]) and the MIDI wheel count as sources.
     if (!pitchSliding && !vibratoActive && pitchOffset == 0.0f &&
         modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f &&
-        params.base[PARAM_PITCH] == 0.0f) {
+        params.base[PARAM_PITCH] == 0.0f && midiWheel == 0.0f) {
         tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
         tsf_channel_set_pitchwheel(h, _trackId, 8192);
         return;
@@ -353,9 +353,9 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     advancePitchSlide(*this, numFrames);
     advanceVibratoPhase(*this, numFrames, sampleRate);
 
-    // Detune + slide + mod routes + FIN (cleared by every trigger), in semitones.
+    // Detune + slide + mod routes + FIN + the MIDI wheel (the last two cleared by every trigger).
     float pitchMod = detuneSemitones + pitchOffset + modDestValues[PARAM_PITCH]
-                   + params.base[PARAM_PITCH];
+                   + params.base[PARAM_PITCH] + midiWheel;
     if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 
     float clamped    = fmaxf(-PITCH_RANGE, fminf(PITCH_RANGE, pitchMod));

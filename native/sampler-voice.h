@@ -311,7 +311,8 @@ struct Voice : public IAudioVoice {
         carryVolume    = 1.0f;
         // The lanes themselves are placed below, once the note they may be mapped from is known.
 
-        // A new note clears PSL, PBN, PVB, PVX.
+        // A new note clears PSL, PBN, PVB, PVX and the MIDI wheel.
+        midiWheel = 0.0f;
         pitchOffset = 0.0f;
         pitchSlideTarget = 0.0f;
         pitchSlideRate = 0.0f;

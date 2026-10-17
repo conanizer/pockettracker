@@ -593,6 +593,10 @@ void AudioEngine::applyParamUpdate(const ScheduledParamUpdate& upd, BlockMix& b)
             if (IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId)) pv->setVibratoRaw(upd.value, upd.value2);
             break;
         }
+        case PARAM_UPDATE_WHEEL: {                // a MIDI-in bend: releasing notes bend too, as on a synth
+            forEachVoiceOnTrack(upd.trackId, [&](auto& v) { v.midiWheel = upd.value; });
+            break;
+        }
         case PARAM_UPDATE_TABLE_ROW: {            // THO on empty step
             // ⚠️ All three columns: a THO written in a phrase belongs to none. One inside the table
             // steers the column it is typed in (processTableRow).

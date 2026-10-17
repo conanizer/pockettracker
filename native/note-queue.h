@@ -225,6 +225,7 @@ enum ParamUpdateAction {
     // ⚠️ Per instrument (`instrId`), no value: a voice copies its instrument's filter, drive, crush and
     // sends at the trigger, so an edit reaches sounding voices only through this.
     PARAM_UPDATE_INSTRUMENT,      // every sounding voice of `instrId` re-reads that instrument
+    PARAM_UPDATE_WHEEL,           // the track's voices, fading ones too: midiWheel = value   [MIDI in]
 };
 
 // One EQ setting in the file's hex, not Hz/dB/Q: interpolating hex keeps a sweep linear in

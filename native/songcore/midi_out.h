@@ -68,9 +68,6 @@ constexpr uint8_t MIDI_NOTE_OFF = 0x80, MIDI_NOTE_ON = 0x90, MIDI_CC = 0xB0,
 
 constexpr uint8_t MIDI_CC_BANK_MSB = 0, MIDI_CC_BANK_LSB = 32, MIDI_CC_ALL_NOTES_OFF = 123;
 
-// No bend — where a channel rests, and what a panic restores.
-constexpr int MIDI_BEND_CENTRE = 0x2000;
-
 // RPN 0, the bend range: the RPN's number goes to 101/100, its value to 6/38.
 constexpr uint8_t MIDI_CC_RPN_MSB = 101, MIDI_CC_RPN_LSB = 100, MIDI_CC_DATA_MSB = 6, MIDI_CC_DATA_LSB = 38;
 
@@ -178,38 +175,15 @@ class ExternalConsumer : public IMidiConsumer {
 
     void consume(const Event& ev) override {
         std::lock_guard<std::mutex> lk(mu_);
-        if (!project_) return;
-        remember(ev);
-        producer_ = ev.track;
+        consume_locked(ev);
+    }
 
-        // Learn from EVERY note-on, internal ones too, or a track going EXTERNAL keeps its old instrument.
-        const int16_t prev  = tracks_.current(ev.track);
-        const int16_t instr = tracks_.observe(ev);
-
-        if (!routes_external(instr)) {
-            // ⚠️ A track leaving EXTERNAL owes the device a note-off; nothing later would deliver it.
-            if (ev.type == EV_NOTE_ON && routes_external(prev)) {
-                end_note(ev.track, ev.frame);
-                wheel_[ev.track].next = INT64_MAX;
-            }
-            return;
-        }
-        const Instrument& ins = project_->instruments[static_cast<size_t>(instr)];
-
-        // The wheel's motion up to this event goes out before the event changes it.
-        run_wheel(ev.track, ev.frame);
-
-        switch (ev.type) {
-            case EV_NOTE_ON:   note_on(ev, ins);  break;
-            case EV_NOTE_OFF:  end_note(ev.track, ev.frame); break;   // KIL and ADSR release alike
-            case EV_CC:        cc_event(ev, ins); break;
-            case EV_PROGRAM: program_event(ev, ins); break;
-            case EV_PITCH_BEND: pitch_bend_event(ev, ins); break;
-            case EV_EXT_PITCH_RATE: wheel_rate(ev, ins);    break;
-            case EV_EXT_VIBRATO:    wheel_vibrato(ev, ins); break;
-            default:   // the other EV_EXT_* have no MIDI form
-                break;
-        }
+    // A live key's record, sent thru: its CC 7 is the player's channel volume, which no note undoes.
+    void consume_live(const Event& ev) {
+        std::lock_guard<std::mutex> lk(mu_);
+        live_ = true;
+        consume_locked(ev);
+        live_ = false;
     }
 
     // Release everything due at or before `nowFrame` and close expired LEN gates — late, never early.
@@ -289,6 +263,42 @@ class ExternalConsumer : public IMidiConsumer {
 
 
   private:
+    // ⚠️ `mu_` held. `live_` says whether the record is a live key's.
+    void consume_locked(const Event& ev) {
+        if (!project_) return;
+        remember(ev);
+        producer_ = ev.track;
+
+        // Learn from EVERY note-on, internal ones too, or a track going EXTERNAL keeps its old instrument.
+        const int16_t prev  = tracks_.current(ev.track);
+        const int16_t instr = tracks_.observe(ev);
+
+        if (!routes_external(instr)) {
+            // ⚠️ A track leaving EXTERNAL owes the device a note-off; nothing later would deliver it.
+            if (ev.type == EV_NOTE_ON && routes_external(prev)) {
+                end_note(ev.track, ev.frame);
+                wheel_[ev.track].next = INT64_MAX;
+            }
+            return;
+        }
+        const Instrument& ins = project_->instruments[static_cast<size_t>(instr)];
+
+        // The wheel's motion up to this event goes out before the event changes it.
+        run_wheel(ev.track, ev.frame);
+
+        switch (ev.type) {
+            case EV_NOTE_ON:   note_on(ev, ins);  break;
+            case EV_NOTE_OFF:  end_note(ev.track, ev.frame); break;   // KIL and ADSR release alike
+            case EV_CC:        cc_event(ev, ins); break;
+            case EV_PROGRAM: program_event(ev, ins); break;
+            case EV_PITCH_BEND: pitch_bend_event(ev, ins); break;
+            case EV_EXT_PITCH_RATE: wheel_rate(ev, ins);    break;
+            case EV_EXT_VIBRATO:    wheel_vibrato(ev, ins); break;
+            default:   // the other EV_EXT_* have no MIDI form
+                break;
+        }
+    }
+
     void panic_locked() {
         // ⚠️ The Stop first: it stops the device's own sequencer at the same instant we end our notes.
         if (clock_.stop()) send_now_1(MIDI_RT_STOP);
@@ -304,12 +314,15 @@ class ExternalConsumer : public IMidiConsumer {
             if (!channelUsed_[c]) continue;
             send_now(MIDI_CC | static_cast<uint8_t>(c), MIDI_CC_ALL_NOTES_OFF, 0);
         }
-        // Centre bent channels — a bend outlives its note.
+        // Centre bent channels — a bend outlives its note — and turn a VOL's channel back up.
         for (int c = 0; c < 16; ++c) {
             if (wheelOut_[c] == MIDI_BEND_CENTRE) continue;
             send_now(MIDI_PITCH_BEND | static_cast<uint8_t>(c),
                      MIDI_BEND_CENTRE & 0x7F, (MIDI_BEND_CENTRE >> 7) & 0x7F);
         }
+        for (int c = 0; c < 16; ++c)
+            if (volOut_[c] != VOL_UNTOUCHED && volOut_[c] != 127)
+                send_now(MIDI_CC | static_cast<uint8_t>(c), CC_VOLUME, 127);
         pending_.clear();
         for (Wheel& w : wheel_) w = Wheel{};
         for (std::vector<TrackSnap>& h : history_) h.clear();
@@ -337,6 +350,7 @@ class ExternalConsumer : public IMidiConsumer {
             lastProgram_[ch] = -2;
         }
         if (kind == MIDI_CC && m.bytes[1] == CC_PAN) lastPan_[ch] = -1;
+        if (kind == MIDI_CC && m.bytes[1] == CC_VOLUME) volOut_[ch] = VOL_UNKNOWN;
     }
 
     struct ActiveNote {
@@ -359,6 +373,12 @@ class ExternalConsumer : public IMidiConsumer {
         end_note(ev.track, ev.frame);
 
         if (project_->midiSendProgramChange) send_program(ev.frame, ch, ins);
+        // The instrument's VOL rides the velocity, so instruments sharing a channel keep their balance.
+        // A VOL command or fade replaces it, as in the app's own sound, and goes out as CC 7 ahead of
+        // the note — so the note starts at it whatever the device does with velocity.
+        const float vol    = f32_from_bits(ev.noteOn.volGainBits);
+        const bool  volCmd = vol != hex_to_float(ins.volume);
+        state_volume(ev.frame, ch, volCmd ? to7bit(vol) : 127);
         send_cc_defaults(ev.frame, ch, ins);
 
         // PAN rides CC 10, sent only when it changes.
@@ -372,7 +392,7 @@ class ExternalConsumer : public IMidiConsumer {
         start_wheel(ev, ins);
 
         const int note = midi_note(ev.noteOn);
-        const int vel  = midi_velocity(ev.noteOn);
+        const int vel  = midi_velocity(ev.noteOn, volCmd ? 1.0f : vol);
         send_at(ev.frame, MIDI_NOTE_ON | ch, static_cast<uint8_t>(note), static_cast<uint8_t>(vel));
 
         ActiveNote& a = active_[ev.track];
@@ -404,12 +424,18 @@ class ExternalConsumer : public IMidiConsumer {
         return v < 0 ? 0 : (v > 127 ? 127 : v);
     }
 
-    // Velocity scaled by the VOL channel — an external instrument's only volume. At least 1: velocity 0
-    // IS a note-off.
-    static int midi_velocity(const NoteOnPayload& n) {
-        const float unit = note_velocity_unit(n) * f32_from_bits(n.volGainBits);
-        const int v = to7bit(unit);
+    // The V column, scaled by the instrument's VOL. At least 1: velocity 0 IS a note-off.
+    static int midi_velocity(const NoteOnPayload& n, float volume) {
+        const int v = to7bit(note_velocity_unit(n) * volume);
         return v < 1 ? 1 : v;
+    }
+
+    // CC 7 as the note needs it. A channel no VOL has touched counts as full, so a song without VOL
+    // puts no CC 7 on the wire.
+    void state_volume(int64_t frame, uint8_t ch, int v7) {
+        if (volOut_[ch] == v7 || (volOut_[ch] == VOL_UNTOUCHED && v7 == 127)) return;
+        send_at(frame, MIDI_CC | ch, CC_VOLUME, static_cast<uint8_t>(v7));
+        volOut_[ch] = v7;
     }
 
     // Bank + program, when set and the channel is not already on them (forgotten at each start).
@@ -448,6 +474,7 @@ class ExternalConsumer : public IMidiConsumer {
         const int v7 = to7bit(f32_from_bits(ev.cc.valueBits));
         send_at(ev.frame, MIDI_CC | ch, static_cast<uint8_t>(param & 0x7F), static_cast<uint8_t>(v7));
         if (param == CC_PAN) lastPan_[ch] = v7;   // keep the note-on de-dup honest
+        if (ev.cc.param == CC_VOLUME) volOut_[ch] = live_ ? VOL_UNTOUCHED : v7;
     }
 
     // MPG. ⚠️ Updates `lastProgram_`, or the next note would stay on the MPG's program; the bank
@@ -780,6 +807,7 @@ class ExternalConsumer : public IMidiConsumer {
             channelUsed_[c] = false;
             wheelOut_[c] = MIDI_BEND_CENTRE;
             rangeOut_[c] = 0;       // unknown: the next bend states it
+            volOut_[c]   = VOL_UNTOUCHED;
         }
     }
 
@@ -801,6 +829,9 @@ class ExternalConsumer : public IMidiConsumer {
     int  lastBank_[16] = {0}, lastProgram_[16] = {0}, lastPan_[16] = {0};
     bool channelUsed_[16] = {false};
     int  wheelOut_[16] = {0};   // the bend each channel last received
+    // The CC 7 each channel holds from a VOL: a value, or one of these two.
+    static constexpr int VOL_UNTOUCHED = -1, VOL_UNKNOWN = -2;
+    int  volOut_[16] = {0};
     int  rangeOut_[16] = {0};   // the BEND it was last told, 0 = not yet this take
     std::bitset<128> soundingOut_[16];   // the notes each channel holds — what a panic ends
 
@@ -818,6 +849,7 @@ class ExternalConsumer : public IMidiConsumer {
     static constexpr size_t HISTORY_CAP = 1024;
     std::vector<TrackSnap> history_[POOL_TRACKS];   // per track, in frame order
     uint8_t producer_ = 0xFF;   // the track whose event or gate is queuing now — stamped on each message
+    bool    live_     = false;  // the record being consumed is a live key's (`consume_live`)
 };
 
 }  // namespace songcore
