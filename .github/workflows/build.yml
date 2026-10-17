@@ -345,11 +345,11 @@ jobs:
   # clock_gettime, which MSVC does not have — broken for as long as it had existed, with nothing
   # watching.
   #
-  # The two runners also cover BOTH branches of shell/CMakeLists.txt's SDL2 lookup, which is worth
+  # The runners also cover BOTH branches of shell/CMakeLists.txt's SDL2 lookup, which is worth
   # more than doubling the platform count: ubuntu apt-installs libsdl2-dev, so find_package(SDL2)
   # succeeds and the link is against the SYSTEM SDL — the model every PortMaster CFW requires. Windows
   # has no system SDL, so it falls through to FetchContent and builds SDL from source, which is the
-  # model the desktop package (A3) ships. Neither path can rot unnoticed now.
+  # model the desktop package (A3) ships; macOS always takes it too. Neither path can rot unnoticed now.
   shell:
     name: SDL shell (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -359,6 +359,8 @@ jobs:
         include:
           - { os: ubuntu-latest,  name: linux-x64 }
           - { os: windows-latest, name: windows-x64 }
+          # One universal app for Apple Silicon and Intel Macs.
+          - { os: macos-latest,   name: macos, cmake_args: '"-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"' }
 
     steps:
       - uses: actions/checkout@v7
@@ -373,10 +375,10 @@ jobs:
       # keep up with a real-time audio callback, and the usual "default it if empty" guard does not
       # fire on MSVC.
       - name: Configure
-        run: cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DPT_WERROR=ON
+        run: cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release -DPT_WERROR=ON ${{ matrix.cmake_args }}
 
       - name: Build
-        run: cmake --build shell/build --config Release
+        run: cmake --build shell/build --config Release --parallel
 
       # `error` rather than `warn` on no match — a shell that silently stopped being produced is
       # exactly the failure this job exists to catch, and a green job with an empty artifact would
@@ -416,6 +418,20 @@ jobs:
         with:
           name: pockettracker-windows-x64
           path: build/windows/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      # Checks the bundle (both architectures, no non-system libraries), signs it ad hoc, zips it.
+      - name: Package the macOS app
+        if: runner.os == 'macOS'
+        run: bash shell/build-macos.sh
+
+      - name: Upload the macOS package
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pockettracker-macos
+          path: build/macos/*.zip
           if-no-files-found: error
           retention-days: 7
 

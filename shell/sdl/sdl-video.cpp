@@ -20,6 +20,11 @@ using pt::ui::DESIGN_W;
 bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen, bool resizable) {
     Uint32 flags = SDL_WINDOW_SHOWN;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+#ifdef __APPLE__
+    // Full Retina resolution, or the frame is drawn at half size and scaled up blurry. The drawing
+    // already sizes itself from the renderer's output, which is then in pixels.
+    flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
 
     // A windowed host opens at the largest integer scale that fits 90 % of the display (room for a
     // title bar). ⚠️ Derived, because desktop Linux and PortMaster are the same build: a hardcoded
