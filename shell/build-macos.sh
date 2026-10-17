@@ -57,7 +57,8 @@ done
 echo
 echo "libraries it loads:"
 otool -L "$BIN"
-FOREIGN=$(otool -L "$BIN" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/System/Library/|/usr/lib/)' || true)
+# Library lines are the indented ones; a universal binary prints a header per architecture.
+FOREIGN=$(otool -L "$BIN" | grep -E '^[[:space:]]' | awk '{print $1}' | grep -v -E '^(/System/Library/|/usr/lib/)' || true)
 if [ -n "$FOREIGN" ]; then
     echo "FAIL: the binary loads libraries a stranger's Mac does not have:"
     echo "$FOREIGN"
