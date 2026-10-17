@@ -707,6 +707,7 @@ OUTPUT row ([section 22](#22-midi-screen)). Choose it with A + D-pad on TYPE.
 | TSP | ON / OFF | As on a WAV instrument. |
 | TIC | 00–FF | How fast this instrument's table runs, in ticks per table row. |
 | CC A – CC D | `--` / 00–7F | Four controller slots, each a controller number and the **VAL** to send to it. A filled slot is sent with every note; `CCA`–`CCD` move it from a phrase (section 23). |
+| BEND | 01–48 | How many semitones the device bends at full wheel. The pitch commands are scaled to it, and the device is told it before the first bend. A device that does not take that message needs the same number set on it. |
 
 ### Volume chain
 
@@ -1717,10 +1718,13 @@ the next note on its track, after the instrument's LEN, at a `KIL` or an `OFF`, 
 | `PAN`, the instrument's PAN | Controller 10 (pan) |
 | `CUT` · `RES` | Controllers 74 (cutoff) and 71 (resonance) |
 | `REV` · `DEL` | Controllers 91 and 93 |
+| `PSL` · `PBN` · `PVB` · `PVX` · `FIN` | Pitch bend, moving as the command moves the note, scaled to the instrument's BEND |
 | `MPG` · `MPB` · `CCA`–`CCD` | A program change, a pitch bend, and the instrument's four controller slots — see [section 23](#23-effects-reference) |
 
-Commands that shape the app's own sound — the filter switches, drive, crush, pitch slides, slices —
-send nothing.
+Commands that shape the app's own sound — the filter switches, drive, crush, slices — send nothing.
+
+> [!NOTE]
+> A pitch bend moves every note on its channel. Give each track that bends its own channel.
 
 ### Playing from a keyboard
 
@@ -2441,7 +2445,7 @@ with its next note, so leave the instrument's PROG at `--` when the phrase is ch
 ### MPB `XX` — MIDI Pitch Bend
 
 Sends a pitch bend to the EXTERNAL instrument's channel: `00` is fully down, `80` is centre, `FF` is
-fully up. How far that bends the note is set on the receiving device.
+fully up — down or up by the instrument's BEND. Slides, bends and vibrato on the track move from there.
 
 It is a position, not a movement — the bend stays where you put it until the next `MPB`. Stopping
 playback returns it to centre.

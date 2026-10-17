@@ -101,6 +101,9 @@ inline constexpr int crush_cmd_downsample(int value) { return value & 0x0F; }
 // ─── Fine tune: a semitone either way in 256 steps, on the sounding note ─────────────────────────
 constexpr int FX_FIN      = 0x39;  // FIN  fine tune (00 = a semitone flat, 80 = in tune, FF = sharp)
 
+/** A FIN byte in semitones. The engine has its own copy; engine_consumer.h holds them equal. */
+inline constexpr float fine_tune_semitones(int value) { return (value - 128) / 128.0f; }
+
 // ─── How far a step follows the chain and project transposes ──────────────────────────────────────
 // A signed multiplier: 01 normal, 02 double, 00 immune, FF mirrored. Phrase only.
 constexpr int FX_TSX      = 0x3A;  // TSX  transpose multiplier (00 immune, 01 normal, FF mirrored)

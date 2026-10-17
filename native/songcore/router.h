@@ -67,6 +67,11 @@ struct TrackInstruments {
         return lane_[ev.track];
     }
 
+    /** Put a track back on an instrument — a LIVE launch taking back what it re-schedules. */
+    void set(uint8_t track, int16_t instrument) {
+        if (track < LANES) lane_[track] = instrument;
+    }
+
   private:
     int16_t lane_[LANES] = {INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE,
                             INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE,

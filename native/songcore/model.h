@@ -336,6 +336,9 @@ struct MidiCcSlot {
 
 constexpr int MIDI_CC_SLOTS = 4;
 
+// An EXTERNAL instrument's BEND: the semitones its device bends at full wheel.
+constexpr int MIDI_BEND_RANGE_MIN = 1, MIDI_BEND_RANGE_MAX = 48, MIDI_BEND_RANGE_DEFAULT = 12;
+
 // One knob pointed at one parameter (midi_map.h). ⚠️ `dest` is a saved `MapDestId` (append-only).
 // The range is in the destination's units and may be inverted.
 struct MidiMapping {
@@ -388,6 +391,8 @@ struct Instrument {
     int midiProgram = -1;   // -1 = send nothing; else the program sent with the first note-on
     // Gate length in tics; 0 holds the note until the next note or KIL.
     int midiLen = 0;
+    // The pitch commands are scaled to it, and it is sent (RPN 0) before a take's first bend.
+    int midiBendRange = MIDI_BEND_RANGE_DEFAULT;
     std::vector<MidiCcSlot> midiCC = std::vector<MidiCcSlot>(MIDI_CC_SLOTS);
 
     Instrument() = default;

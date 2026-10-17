@@ -343,6 +343,7 @@ enum class HelpTopic {
     SE_STRETCH_GRAIN,
     SE_STRETCH_PREVIEW,
     SE_STRETCH_APPLY,
+    INST_MIDI_BEND,
 
     COUNT
 };
@@ -2306,6 +2307,15 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "does the same with these",
       "settings."},
      {"A applies, UNDO takes it back"}},
+    /* INST_MIDI_BEND */
+    {"BEND: the far device bend range", "Semitones at full wheel, 01 to", "48. Set the device to match.",
+     {"PSL, PBN, PVB, PVX, FIN and MPB",
+      "reach the device as pitch bend,",
+      "scaled to this. The device is",
+      "told it before the first bend -",
+      "set it by hand if it ignores it."},
+     {"A+←/→ steps 1, A+↑/↓ steps 12",
+      "A+B sets it back to 12"}},
 };
 
 // ─── Rules 2 and 3, as compile errors — at runtime they fail silently ────────────────────────────
@@ -2482,6 +2492,7 @@ inline HelpTopic instrument_topic(songcore::InstrumentType type, int row, int co
         case Cell::MIDI_LENGTH:  return HelpTopic::INST_MIDI_LENGTH;
         case Cell::CC_NUMBER:    return HelpTopic::INST_MIDI_CC_NUMBER;
         case Cell::CC_VALUE:     return HelpTopic::INST_MIDI_CC_VALUE;
+        case Cell::MIDI_BEND:    return HelpTopic::INST_MIDI_BEND;
     }
     return HelpTopic::NONE;
 }

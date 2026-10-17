@@ -636,9 +636,11 @@ void SongcoreHost::release_song_hold(MapDestId id, int scopeIndex) {
 }
 
 void SongcoreHost::apply_rollback(const songcore::RollbackPlan& plan) {
-    if (!engine_) return;
-    for (int t = 0; t < 8; ++t)
-        if (plan.frames[t] >= 0) engine_->clearScheduledNotesFrom(plan.frames[t], t);
+    for (int t = 0; t < 8; ++t) {
+        if (plan.frames[t] < 0) continue;
+        external_.rollback(t, plan.frames[t]);   // the cable's lookahead too, engine or not
+        if (engine_) engine_->clearScheduledNotesFrom(plan.frames[t], t);
+    }
 }
 
 void SongcoreHost::sync_clock() {

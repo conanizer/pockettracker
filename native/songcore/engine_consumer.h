@@ -56,6 +56,15 @@ constexpr bool crush_split_matches_the_engine() {
 static_assert(crush_split_matches_the_engine(),
               "audio-defs.h's CRU nibble split has drifted from effects.h's");
 
+// …and FIN's semitones, which MIDI out bends by.
+constexpr bool fine_tune_matches_the_engine() {
+    for (int v = 0; v <= 255; ++v)
+        if (::fineTuneSemitonesOf(v) != fine_tune_semitones(v)) return false;
+    return true;
+}
+static_assert(fine_tune_matches_the_engine(),
+              "audio-defs.h's FIN semitones have drifted from effects.h's");
+
 // …and table_automation.h's literals, in both directions.
 static_assert(table_automation::FX_AUS_CODE == FX_AUS,
               "table_automation.h AUS has drifted from effects.h");

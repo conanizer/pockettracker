@@ -28,7 +28,7 @@ enum class InstrumentCell {
     // sampler
     SLICE, LOOP, START, LOOP_START, END, LOOP_END, REVERSE,
     // EXTERNAL
-    MIDI_CHANNEL, MIDI_BANK, MIDI_PROGRAM, MIDI_LENGTH, CC_NUMBER, CC_VALUE,
+    MIDI_CHANNEL, MIDI_BANK, MIDI_PROGRAM, MIDI_LENGTH, CC_NUMBER, CC_VALUE, MIDI_BEND,
 };
 
 struct InstrumentRow {
@@ -99,6 +99,8 @@ inline constexpr InstrumentRow EXTERNAL[] = {
     {K::DUAL, C::CC_NUMBER, C::CC_VALUE, C::NONE, 1},    // 10
     {K::DUAL, C::CC_NUMBER, C::CC_VALUE, C::NONE, 2},    // 11
     {K::DUAL, C::CC_NUMBER, C::CC_VALUE, C::NONE, 3},    // 12
+    {K::SPACER},                                         // 13
+    {K::SINGLE, C::MIDI_BEND},                           // 14
 };
 }  // namespace instrument_rows
 

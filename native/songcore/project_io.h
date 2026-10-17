@@ -240,6 +240,8 @@ inline Instrument parse_instrument(const json& j, int index) {
     i.midiBank    = get_int(j, "midiBank", i.midiBank);
     i.midiProgram = get_int(j, "midiProgram", i.midiProgram);
     i.midiLen     = get_int(j, "midiLen", i.midiLen);
+    i.midiBendRange = std::clamp(get_int(j, "midiBendRange", i.midiBendRange),
+                                 MIDI_BEND_RANGE_MIN, MIDI_BEND_RANGE_MAX);
     { auto it = j.find("midiCC");
       if (it != j.end() && it->is_array()) {
           // Re-sized, never appended: the slot count is a UI constant, and a newer build's file must
@@ -686,6 +688,7 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
     if (i.midiBank != -1)    w.field_int("midiBank", i.midiBank);
     if (i.midiProgram != -1) w.field_int("midiProgram", i.midiProgram);
     if (i.midiLen != 0)      w.field_int("midiLen", i.midiLen);
+    if (i.midiBendRange != MIDI_BEND_RANGE_DEFAULT) w.field_int("midiBendRange", i.midiBendRange);
     if (i.midiCC != std::vector<MidiCcSlot>(MIDI_CC_SLOTS)) {
         w.key("midiCC");
         w.begin_array();

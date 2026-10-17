@@ -75,6 +75,7 @@ const char* cell_label(Cell cell, int cc_slot_index) {
         case Cell::MIDI_LENGTH:  return "LEN";
         case Cell::CC_NUMBER:    return CC_LABELS[clamp(cc_slot_index, 0, 3)];
         case Cell::CC_VALUE:     return "VAL";
+        case Cell::MIDI_BEND:    return "BEND";
         // drawn by their own rows
         case Cell::NONE:
         case Cell::TYPE:
@@ -129,6 +130,8 @@ std::string cell_text(Cell cell, int cc_slot_index, const InstrumentEditorState&
         case Cell::MIDI_BANK:    return ins.midiBank < 0 ? "----" : hex_padded(ins.midiBank, 4);
         case Cell::MIDI_PROGRAM: return midi_opt(ins.midiProgram);
         case Cell::MIDI_LENGTH:  return hex2(ins.midiLen);
+        // Semitones, in decimal like the device's own menu, so the two can be set alike.
+        case Cell::MIDI_BEND:    return dec2(ins.midiBendRange);
         case Cell::CC_NUMBER: {
             const auto* slot = cc_slot(ins, cc_slot_index);
             return slot ? midi_opt(slot->cc) : "";
@@ -361,6 +364,13 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
         case Cell::MIDI_PROGRAM: return midi_opt_context(ins.midiProgram, 127);
         // LEN 00 is gate-to-next, a mode, not empty: A+B resets to it.
         case Cell::MIDI_LENGTH:  return cc::plain_byte(ins.midiLen, 0x00);
+        case Cell::MIDI_BEND: {
+            CursorContext c = cc::hex_byte(ins.midiBendRange, songcore::MIDI_BEND_RANGE_MIN,
+                                           songcore::MIDI_BEND_RANGE_MAX, -1, false, false, false,
+                                           songcore::MIDI_BEND_RANGE_DEFAULT);
+            c.largeStep = 12;   // an octave
+            return c;
+        }
         case Cell::CC_NUMBER: {
             const auto* slot = cc_slot(ins, r.ccSlot);
             return slot ? midi_opt_context(slot->cc, 127) : cc::none();
@@ -415,6 +425,7 @@ songcore::MapTarget InstrumentEditorModule::map_target(const InstrumentEditorSta
         case Cell::MIDI_BANK:
         case Cell::MIDI_PROGRAM:
         case Cell::MIDI_LENGTH:
+        case Cell::MIDI_BEND:
         case Cell::CC_NUMBER:
         case Cell::CC_VALUE:
             return {};
@@ -482,6 +493,9 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
         case Cell::MIDI_BANK:    optional(ins.midiBank, 16383);   break;
         case Cell::MIDI_PROGRAM: optional(ins.midiProgram, 127);  break;
         case Cell::MIDI_LENGTH:  b255(ins.midiLen);               break;
+        case Cell::MIDI_BEND:
+            if (isSet) ins.midiBendRange = clamp(v, songcore::MIDI_BEND_RANGE_MIN, songcore::MIDI_BEND_RANGE_MAX);
+            break;
         case Cell::CC_NUMBER:
             if (auto* slot = cc_slot(ins, ccSlot)) optional(slot->cc, 127);
             break;

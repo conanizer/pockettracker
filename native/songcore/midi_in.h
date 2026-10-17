@@ -286,6 +286,9 @@ inline MidiRoute build_midi_route(const Project& p, int instrument, int baseTrac
 
 using MidiRoutePublisher = SeqPublisher<MidiRoute>;
 
+// The channel-mode controllers that silence a channel.
+constexpr uint8_t CC_ALL_SOUND_OFF = 120, CC_ALL_NOTES_OFF = 123;
+
 // A parsed message into bus records; every channel is heard. A key plays the UI's instrument on a
 // window of `voices` tracks from the SONG cursor's, taking the LOWEST free one (all held: the oldest
 // is stolen). ⚠️ A note-off follows the KEY across every track — the cursor may have moved.
@@ -313,6 +316,23 @@ class MidiInputRouter {
                 if (held_[t] != static_cast<int>(msg.data1) || heldCh_[t] != msg.channel) continue;
                 held_[t] = -1;
                 if (build(msg, frame, static_cast<uint8_t>(t), INSTRUMENT_NONE, out[n])) { ++n; bump(routed_); }
+            }
+            return n;
+        }
+
+        // All notes off / all sound off: every key held from that channel is released, as a synth does.
+        if (msg.status == EV_CC && (msg.data1 == CC_ALL_NOTES_OFF || msg.data1 == CC_ALL_SOUND_OFF)) {
+            for (int t = 0; t < POOL_TRACKS && n < maxOut; ++t) {
+                if (held_[t] < 0 || heldCh_[t] != msg.channel) continue;
+                held_[t] = -1;
+                out[n] = Event{};
+                out[n].frame        = frame;
+                out[n].track        = static_cast<uint8_t>(t);
+                out[n].instrument   = INSTRUMENT_NONE;
+                out[n].type         = EV_NOTE_OFF;
+                out[n].noteOff.mode = NOTE_OFF_KEY;
+                ++n;
+                bump(routed_);
             }
             return n;
         }
@@ -511,7 +531,9 @@ class MidiInPipeline {
 
     // ── the consumer ──
 
-    // Drain → parse → gate → route → `apply`, every record at `frame`. `apply` may be null.
+    // Drain → parse → gate → route → `apply`, from `frame` on. `apply` may be null.
+    // ⚠️ Each message a frame after the one before: at one frame the engine runs kills before notes,
+    // so a short note's on and off in the same drain would release nothing and then sound for ever.
     int run(int64_t frame, Apply* apply) {
         service_requests();
         if (publisher_.read(route_, routeSeen_)) router_.set_route(&route_);
@@ -523,7 +545,8 @@ class MidiInPipeline {
         if (n <= 0) return 0;
         bytes_.fetch_add(static_cast<uint64_t>(n), std::memory_order_relaxed);
 
-        int total = 0;
+        int     total = 0;
+        int64_t at    = frame;
         for (int i = 0; i < n; ++i) {
             if (!parser_.feed(buf[i])) continue;
             messages_.fetch_add(1, std::memory_order_relaxed);
@@ -539,7 +562,7 @@ class MidiInPipeline {
                 if (route_.claims(m.data1))   { seen.kind = MidiInSeen::MAPPED; push_seen(seen); continue; }
             }
 
-            const int k = router_.route(m, frame, seen.events, MidiInputRouter::MAX_EVENTS);
+            const int k = router_.route(m, at++, seen.events, MidiInputRouter::MAX_EVENTS);
             seen.count = static_cast<uint8_t>(k);
             total += k;
             injected_.fetch_add(static_cast<uint64_t>(k), std::memory_order_relaxed);
