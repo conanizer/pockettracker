@@ -755,7 +755,7 @@ bool Sequencer::begin_phrase(int phraseId, int64_t startFrame, int trackId, int 
         if (r.kind == RampKind::EQ_PRESET)
             seed.eq = eq_morph_at(project, r.startByte, r.destByte, r.curveByte, seedT);
         else
-            seed.byte = automation_value_byte(r.startByte, r.destByte, r.curveByte, seedT);
+            seed.byte = ramp_value(r, seedT);
         w.rampLast.push_back(seed);
     }
     return true;
@@ -894,8 +894,14 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
                            ? noteFrame + 1 : -1;
         auto emit_byte = [&](int64_t frame, int b, bool force) {
             if (!force && b == lastValue[i].byte) return;
-            router_.cc(frame, lane, r.ccId, b / 255.0f);
             lastValue[i].byte = b;
+            if (r.kind == RampKind::VIBRATO) {
+                NoteCarry& c = trackState.carry;
+                vibrato_from(b, r.fxCode == FX_PVX, project_->tempo, c.vibSpeed, c.vibDepth);
+                router_.ext_vibrato(frame, trackId, c.vibSpeed, c.vibDepth);
+                return;
+            }
+            router_.cc(frame, lane, r.ccId, b / 255.0f);
             if (perVoice) carry_fade(trackState.carry, r, b);
         };
         auto emit_eq = [&](int64_t frame, const ExtEqMorphPayload& m, bool force) {
@@ -941,7 +947,7 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
             if (r.kind == RampKind::EQ_PRESET)
                 emit_eq(frame, eq_morph_at(*project_, r.startByte, r.destByte, r.curveByte, t), force);
             else
-                emit_byte(frame, automation_value_byte(r.startByte, r.destByte, r.curveByte, t), force);
+                emit_byte(frame, ramp_value(r, t), force);
         }
         if (reassertAt >= 0) reassert_held();
     }
@@ -1192,12 +1198,14 @@ void Sequencer::schedule_step_note(StepPlay& s) {
     carry.vibSpeed = vibratoSpeed;
     carry.vibDepth = vibratoDepth;
     record_voice_commands(carry, params);
-    // A note inside a VOL or PAN fade starts where the fade has got to; the fade's next tic need
-    // not move to correct it.
+    // A note inside a VOL, PAN or vibrato fade starts where the fade has got to; the fade's next tic
+    // need not move to correct it.
     {
         const NoteCarry v = voice_at(ts, s.effectiveTargetFrame);
         carry.phraseVol = v.phraseVol;
         carry.pan = v.pan;
+        carry.vibSpeed = vibratoSpeed = v.vibSpeed;
+        carry.vibDepth = vibratoDepth = v.vibDepth;
     }
 
     NoteArgs a;
@@ -1313,9 +1321,8 @@ void Sequencer::emit_mid_note_pitch_and_volume(StepPlay& s) {
     TrackState& ts = s.ts;
     const ResolvedStepParams& params = s.params;
     const int64_t frame = s.effectiveTargetFrame;
-    // ⚠️ Deliberate: an empty-step pitch rate uses the LIVE tempo during playback but 120 on the
-    // render path (currentProject_ is set only by live starts). The goldens record it.
-    const int tempo = currentProject_ ? currentProject_->tempo : 120;
+    // The song's tempo on every path, so an export bends and vibrates as playback does.
+    const int tempo = project_->tempo;
     if (params.volumeFromVxx) {
         router_.cc(frame, s.trackId, CC_VOLUME, s.phraseVol);
         ts.carry.phraseVol = s.phraseVol;
@@ -1558,9 +1565,10 @@ NoteCarry Sequencer::voice_at(const TrackState& ts, int64_t frame, unsigned* fad
                 mask |= CARRY_EQ;
                 continue;
             }
-            const int b = t >= 1.0 ? r.destByte
-                                   : automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
-            if (r.ccId == CC_VOLUME)   v.phraseVol = b / 255.0f;
+            const int b = t >= 1.0 ? r.destByte : ramp_value(r, t);
+            if (r.kind == RampKind::VIBRATO)
+                vibrato_from(b, r.fxCode == FX_PVX, project_->tempo, v.vibSpeed, v.vibDepth);
+            else if (r.ccId == CC_VOLUME) v.phraseVol = b / 255.0f;
             else if (r.ccId == CC_PAN) v.pan = b / 255.0f;
             else { v.set_cc(r.ccId, b / 255.0f); mask |= 1u << carry_cc_slot(r.ccId); }
         }

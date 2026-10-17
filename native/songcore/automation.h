@@ -20,7 +20,7 @@ namespace songcore {
 // A ramp is the parameter's own CC, emitted more often. To add one: a CC id, an arm in
 // `EngineConsumer::consume`, a queued apply on the audio thread, and a row here.
 // BYTE endpoints are values; EQ_PRESET endpoints are preset slots, and the bands between them move.
-enum class RampKind { BYTE, EQ_PRESET };
+enum class RampKind { BYTE, EQ_PRESET, VIBRATO };
 
 struct AutomatableParam {
     int      fxCode;  // the effect the author types, and where AUS reads the ramp's start value
@@ -47,6 +47,9 @@ inline constexpr AutomatableParam AUTOMATABLE_PARAMS[] = {
     { FX_DRV,    CC_DRIVE,       false, RampKind::BYTE },
     // FIN ramps as a pitch bend: it retunes the sounding note (effects.h).
     { FX_FIN,    CC_FINE_TUNE,   false, RampKind::BYTE },
+    // PVB / PVX: speed and depth in one byte, each nibble ramped on its own; ticks are EV_EXT_VIBRATO.
+    { FX_PVB,    0,              false, RampKind::VIBRATO },
+    { FX_PVX,    0,              false, RampKind::VIBRATO },
     // ⚠️ Global: on a track's own lane, the EXTERNAL-routing gate would swallow the master fade on
     // any track playing a MIDI instrument (event.h).
     { FX_VMV,    CC_MASTER_VOL,  true,  RampKind::BYTE },
@@ -169,9 +172,15 @@ inline bool ramp_moves_voice(const RampSpec& r) {
     return !r.global && r.ccId != CC_TRACK_VOL;
 }
 
-/** …and of those, the two a note-on carries in its own fields rather than as a controller. */
+/** …and of those, the ones a note-on carries in its own fields rather than as a controller. */
 inline bool ramp_rides_note_on(const RampSpec& r) {
-    return r.ccId == CC_VOLUME || r.ccId == CC_PAN;
+    return r.ccId == CC_VOLUME || r.ccId == CC_PAN || r.kind == RampKind::VIBRATO;
+}
+
+/** The byte a BYTE or VIBRATO ramp holds at `t`. */
+inline int ramp_value(const RampSpec& r, double t) {
+    return r.kind == RampKind::VIBRATO ? automation_value_nibbles(r.startByte, r.destByte, r.curveByte, t)
+                                       : automation_value_byte(r.startByte, r.destByte, r.curveByte, t);
 }
 
 /** Does this phrase carry an AUS or AUF cell at all? A cheap skip — never a substitute for pairing. */

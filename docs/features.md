@@ -64,8 +64,8 @@ Write these into any phrase step to shape how a note plays:
   so one table can drive cross-rhythms
 - **Effect automation** — mark a start and a finish step and the value between them glides, on a
   choice of curve; the span may cross into a later phrase of the same chain. Volume, pan, the two
-  sends, both faders and the filter all fade this way — and so do the two EQ effects, which slide
-  the *contents* of one EQ preset into another rather than stepping between preset numbers
+  sends, both faders, the filter and the vibrato all fade this way — and so do the two EQ effects,
+  which slide the *contents* of one EQ preset into another rather than stepping between preset numbers
 - **Track and master faders** — move a mixer fader from a phrase step; the move persists as the song
   plays on, and stopping restores what the mixer had
 

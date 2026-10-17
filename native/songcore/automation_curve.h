@@ -35,6 +35,14 @@ inline int automation_value_byte(int startByte, int destByte, int curveByte, dou
     return b < 0 ? 0 : (b > 255 ? 255 : b);
 }
 
+/** A byte that is two numbers (PVB / PVX: speed, depth): each nibble ramps on its own, so the low one
+ *  never wraps through 0-F on the way. */
+inline int automation_value_nibbles(int startByte, int destByte, int curveByte, double t) {
+    const int hi = automation_value_byte((startByte >> 4) & 0x0F, (destByte >> 4) & 0x0F, curveByte, t);
+    const int lo = automation_value_byte(startByte & 0x0F, destByte & 0x0F, curveByte, t);
+    return (hi << 4) | lo;
+}
+
 // One EQ band in authored hex — the domain both paths interpolate in.
 struct AutomationEqBand {
     int type = 0;     // 0 OFF | 1 LOSHELF | 2 LOWCUT | 3 BELL | 4 HISHELF | 5 HICUT

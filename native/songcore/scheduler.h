@@ -121,7 +121,7 @@ struct NoteCarry {
     }
 };
 
-// Where an AUS/AUF ramp has got to: a BYTE ramp's last byte, or an EQ morph's last band set.
+// Where an AUS/AUF ramp has got to: a BYTE or VIBRATO ramp's last byte, or an EQ morph's band set.
 struct RampLastValue {
     int               byte = 0;
     ExtEqMorphPayload eq{};

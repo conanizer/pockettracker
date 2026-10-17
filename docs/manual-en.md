@@ -2202,6 +2202,7 @@ skipping any that are not:
 | `LPF` `HPF` `BPF` | the cutoff of the filter they switch on |
 | `DRV` | the overdrive amount |
 | `FIN` | the fine tune — end to end is a two-semitone glide |
+| `PVB` `PVX` | the vibrato — its speed and its depth each slide on their own |
 | `EQN` | this track's EQ — **between two presets** (see below) |
 | `EQM` | the master EQ — **between two presets** (see below) |
 
