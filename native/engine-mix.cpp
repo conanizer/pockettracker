@@ -35,7 +35,8 @@ static inline void startNotePitchFx(V& v, const ScheduledNote& note) {
         v.pitchSlideRate   = -note.pslInitialOffset / fmaxf(1.0f, note.pslDuration);
         v.pitchSliding     = true;
     }
-    if (fabsf(note.pbnRate) > 0.0001f) {
+    // Exactly 0 is "no PBN": a rate is per FRAME, so any threshold would drop a slow byte.
+    if (note.pbnRate != 0.0f) {
         v.pitchSlideRate   = note.pbnRate;
         v.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
         v.pitchSliding     = true;

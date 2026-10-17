@@ -74,7 +74,7 @@ PlaybackPosition Sequencer::getPlaybackPosition(int trackId) {
                 if (e.second <= currentFrame && (held == nullptr || e.second >= held->second))
                     held = &e;
             }
-            if (held != nullptr) {
+            if (held != nullptr && held->first.songRow >= 0) {
                 pos.songRow = held->first.songRow;
                 pos.chainRow = held->first.chainRow;
                 pos.phraseStep = stepInForce;
@@ -644,7 +644,7 @@ void Sequencer::schedule_live_unit(const Project& project, int trackId, int64_t 
     // Every unit begins on a phrase boundary; a lap starts where the chain row is 0.
     // ⚠️ "At a lap start", NOT "did the chain just run out" — after a rewind into a chain's last bar
     // the lookahead is already past the end, and the launch would land a lap late.
-    consume_live_queue(trackId, /*chainEnd=*/trackChainRow_[trackId] == 0);
+    const bool launched = consume_live_queue(trackId, /*chainEnd=*/trackChainRow_[trackId] == 0);
 
     const std::vector<int>& refs = project.tracks[static_cast<size_t>(trackId)].chainRefs;
     const int songRow = trackSongRow_[trackId];
@@ -654,6 +654,13 @@ void Sequencer::schedule_live_unit(const Project& project, int trackId, int64_t 
     // ⚠️ A SILENT channel (stopped, or launched on an empty cell) still spends its bar, so its clock
     // stays on the others' grid — and takes its checkpoint.
     if (liveSilent_[trackId] || chainId < 0 || chainId >= 256) {
+        // Falling silent ends the sounding note as an OFF does, or a held MIDI note never stops — and
+        // takes the marker with it (row −1), or the last row stays marked until it ages out.
+        if (launched) {
+            router_.note_off(trackNextFrame_[trackId], trackId, NOTE_OFF_RELEASE);
+            trackState.clearPitchMod();
+            put_song_position(trackId, -1, -1, trackNextFrame_[trackId]);
+        }
         checkpoint_track(trackId, songRow, trackChainRow_[trackId], takeCheckpoint);
         trackNextFrame_[trackId] += framesPerPhrase;
         return;
@@ -1436,10 +1443,10 @@ void Sequencer::schedule_arpeggio_notes(StepPlay& s) {
     int baseMidi = note_to_midi(baseNote);
     if (baseMidi < 0) return;
 
-    int64_t framesPerTic = s.stepDuration / TICS_PER_STEP;
-    int ticInterval = ts.arpeggioSpeed;
-    int64_t framesPerArpNote = static_cast<int64_t>(ticInterval) * framesPerTic;
-    if (framesPerArpNote <= 0) return;  // guard against division by zero
+    // On the exact tic grid, as RPT: a truncated tic runs early and, over a phrase, fits one note too
+    // many just before the next phrase's downbeat.
+    const int64_t gridStep = static_cast<int64_t>(ts.arpeggioSpeed) * s.stepDuration;
+    if (gridStep <= 0) return;
 
     int patternLength = ts.arpeggioMode == 2 ? 4 : 3;
 
@@ -1450,9 +1457,10 @@ void Sequencer::schedule_arpeggio_notes(StepPlay& s) {
     int64_t framesSinceStart = s.targetFrame - ts.arpeggioStartFrame;
     if (framesSinceStart < 0) return;
 
-    int64_t triggerIndex = (framesSinceStart + framesPerArpNote - 1) / framesPerArpNote;
-    int64_t triggerFrame = ts.arpeggioStartFrame + triggerIndex * framesPerArpNote;
-    while (triggerFrame < stepEndFrame) {
+    int64_t triggerIndex = (framesSinceStart * TICS_PER_STEP + gridStep - 1) / gridStep;
+    while (true) {
+        const int64_t triggerFrame = ts.arpeggioStartFrame + triggerIndex * gridStep / TICS_PER_STEP;
+        if (triggerFrame >= stepEndFrame) break;
         if (triggerFrame >= s.targetFrame && triggerFrame != s.scheduledNoteFrame) {
             int patternPosition = static_cast<int>(triggerIndex % patternLength);
             int arpMidi = getArpeggioNote(baseMidi, semi1, semi2, ts.arpeggioMode, patternPosition);
@@ -1466,7 +1474,6 @@ void Sequencer::schedule_arpeggio_notes(StepPlay& s) {
             emit_retrigger(a, baseNote, s.trackId, ts);
         }
         triggerIndex++;
-        triggerFrame += framesPerArpNote;
     }
 }
 
