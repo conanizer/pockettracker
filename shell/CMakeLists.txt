@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.22.1)
 
+# macOS only (ignored elsewhere), and before project(), which reads it. 10.15 is where std::filesystem
+# arrives in Apple's libc++.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Oldest macOS the app runs on")
+
 # C as well as C++: this links the engine (add_subdirectory(../native) below), and the vendored
 # decoder stack under it — stb_vorbis, kissfft, pareq, libopus, libogg — is C.
 project("pockettracker-sdl" LANGUAGES C CXX)
@@ -95,7 +99,12 @@ add_subdirectory(../native native)
 # FetchContent is the fallback, and it is what makes a Windows dev box need zero setup: SDL2 is not
 # installed there, and vendoring ~50 MB of it into the repo — the way ogg/opus/nlohmann are vendored —
 # would cost every clone for a dependency no shipping target actually takes from us.
-find_package(SDL2 QUIET)
+#
+# ⚠️ Never the system one on macOS: a Homebrew SDL2 is one architecture and lives in /opt/homebrew,
+# so the app would start only on the machine that built it.
+if(NOT APPLE)
+    find_package(SDL2 QUIET)
+endif()
 if(NOT SDL2_FOUND)
     message(STATUS "SDL2 not found on the system — fetching it (first configure only)")
     include(FetchContent)
@@ -128,6 +137,32 @@ if(WIN32)
     set(PT_WIN_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/pockettracker.rc")
 endif()
 
+# ─── macOS: the .app bundle's icon ─────────────────────────────────────────────────────────────
+# Made at build time from the same logo the Windows icon is, by the two tools every Mac has, so no
+# binary icon is committed.
+if(APPLE)
+    set(PT_ICONSET "${CMAKE_CURRENT_BINARY_DIR}/PocketTracker.iconset")
+    set(PT_ICNS    "${CMAKE_CURRENT_BINARY_DIR}/PocketTracker.icns")
+    set(PT_LOGO    "${CMAKE_CURRENT_SOURCE_DIR}/../docs/images/logo-plain.png")
+    set(PT_ICON_CMDS)
+    foreach(size 16 32 128 256 512)
+        math(EXPR size2x "${size} * 2")
+        list(APPEND PT_ICON_CMDS
+             COMMAND sips -z ${size} ${size} "${PT_LOGO}" --out "${PT_ICONSET}/icon_${size}x${size}.png"
+             COMMAND sips -z ${size2x} ${size2x} "${PT_LOGO}" --out "${PT_ICONSET}/icon_${size}x${size}@2x.png")
+    endforeach()
+    add_custom_command(
+            OUTPUT "${PT_ICNS}"
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf "${PT_ICONSET}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${PT_ICONSET}"
+            ${PT_ICON_CMDS}
+            COMMAND iconutil -c icns "${PT_ICONSET}" -o "${PT_ICNS}"
+            DEPENDS "${PT_LOGO}"
+            VERBATIM)
+    set_source_files_properties("${PT_ICNS}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set(PT_MAC_RESOURCES "${PT_ICNS}")
+endif()
+
 # app.cpp is the SHARED shell — the boot sequence, the frame loop and the teardown, identical on every
 # platform. main.cpp is the desktop/handheld residue beside it: argv, the signal handler,
 # SDL_Init/SDL_Quit, and the choice of audio backend, root and caps. Android's entry point is
@@ -151,6 +186,8 @@ add_executable(pockettracker-sdl
         linux/midi-in-alsa.cpp
         windows/midi-out-winmm.cpp
         windows/midi-in-winmm.cpp
+        macos/midi-out-coremidi.cpp     # empty TU off macOS
+        macos/midi-in-coremidi.cpp
         windows/asio-audio-engine.cpp   # the ASIO output (SETTINGS > AUDIO OUT)
         windows/audio-outputs-win.cpp   # the switch between the system output and ASIO
         sdl/sdl-audio-engine.cpp
@@ -158,6 +195,7 @@ add_executable(pockettracker-sdl
         sdl/sdl-touch.cpp
         sdl/sdl-video.cpp
         ${PT_WIN_RESOURCES}
+        ${PT_MAC_RESOURCES}
 )
 
 # Shell headers are included by their path from here ("midi/midi-out-base.h").
@@ -230,6 +268,17 @@ endif()
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     find_package(Threads REQUIRED)
     target_link_libraries(pockettracker-sdl PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+endif()
+
+# macOS: a double-clickable PocketTracker.app. SDL's static target brings its own frameworks; MIDI
+# needs CoreMIDI, which is in every macOS.
+if(APPLE)
+    target_link_libraries(pockettracker-sdl PRIVATE "-framework CoreMIDI" "-framework CoreFoundation")
+    configure_file(macos/Info.plist.in "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" @ONLY)
+    set_target_properties(pockettracker-sdl PROPERTIES
+            MACOSX_BUNDLE TRUE
+            OUTPUT_NAME PocketTracker
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist")
 endif()
 
 # ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────
