@@ -13,6 +13,7 @@
 #include <vector>
 #include <algorithm>
 #include <array>
+#include "songcore/device_clock.h"
 #include "songcore/program.h"
 #include "songcore/seqlock.h"
 #include "sampler-voice.h"
@@ -127,9 +128,16 @@ public:
     // Live input (a MIDI keyboard), drained on the audio thread at the top of each block, so a note
     // sounds in the block it arrived in. During an export it is discarded instead.
     // ⚠️ Both calls run on the audio thread. Set before the stream opens, clear after it closes.
+    // `LiveClock`: a point on the device's line (`DeviceClock`) — `frame` was being taken at `us`
+    // (steady_clock µs) — so a byte's arrival stamp can be turned into a frame.
+    struct LiveClock {
+        int64_t frame      = 0;
+        int64_t us         = 0;
+        int     sampleRate = 0;
+    };
     struct LiveInputSource {
         virtual ~LiveInputSource() = default;
-        virtual void drainLiveInput(int64_t blockStartFrame) = 0;
+        virtual void drainLiveInput(int64_t blockStartFrame, const LiveClock& clock) = 0;
         virtual void discardLiveInput() = 0;
     };
     void setLiveInput(LiveInputSource* source) { liveInput.store(source, std::memory_order_release); }
@@ -215,6 +223,15 @@ public:
     BlockTiming getBlockTiming() const;
 
     int64_t getCurrentFrame();
+
+    // The frame the audio device is taking at `steadyUs` — what MIDI is timed against. The counter
+    // until the device has called back (a host with no device).
+    int64_t getDeviceFrame(int64_t steadyUs) const {
+        int64_t f = 0;
+        return deviceClock_.frame_at(steadyUs, f) ? f : globalFrameCounter.load(std::memory_order_relaxed);
+    }
+    // The most frames the device takes at once lately; 0 before it has called back.
+    int getDeviceBlockFrames() const { return deviceClock_.block_frames(); }
 
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
                       float frequency, float baseFrequency, float volume, float phraseVolume = 1.0f, float pan = 0.5f,
@@ -855,6 +872,8 @@ private:
     std::atomic<int64_t> timingLateBlocks{0};
     std::atomic<int> currentTempo{120};
     std::atomic<LiveInputSource*> liveInput{nullptr};
+    songcore::DeviceClock deviceClock_;   // fed by every live callback
+    LiveClock liveClock_;   // audio thread only: the callback the sub-blocks belong to
 
     // ── The metronome ────────────────────────────────────────────────────────────────────────────
     // Written by the UI, read once a block by the audio thread.

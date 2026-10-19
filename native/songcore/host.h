@@ -94,6 +94,20 @@ class SongcoreHost {
     // pulled cable would complete a phantom note. A request, honoured at the drain's next block.
     void reset_midi_in();
 
+    // ── SYNC IN: another device's clock leads (midi_sync_in.h) ──
+    // `MidiSyncInMode`. A take that starts while a clock arrives puts its steps on the clock's ticks
+    // and plays at its tempo; under FULL the clock's Start, Stop and position start and stop the song.
+    // ⚠️ The song's TEMPO is never written: the tempo in force is `Project::clockTempo`, set here.
+    void set_midi_sync_in(int mode) { syncIn_ = mode < SYNC_IN_OFF ? SYNC_IN_OFF : (mode > SYNC_IN_FULL ? SYNC_IN_FULL : mode); }
+    int  midi_sync_in() const { return syncIn_; }
+    // The incoming clock's tempo, 0 while none arrives.
+    double midi_clock_bpm() const;
+    // The clock as the last poll read it, and whether the take's steps sit on it.
+    const MidiClockLine& midi_clock_line() const { return clockLine_; }
+    bool following_clock_now() const { return followTake_ && seq_.is_playing() && sync_in_active(); }
+    // How far the step about to be walked is from where the clock puts it, in frames (+ = early).
+    double follow_error() const { return followError_; }
+
     // ── data ──
     // Replace the project from .ptp JSON, in place: `project_` never moves, so the Sequencer's pointer
     // stays valid. A full parse; the app edits through edit_project() instead.
@@ -436,8 +450,27 @@ class SongcoreHost {
     int64_t after_play();
 
     // Frames per quarter note. ⚠️ Same expression as `ExternalConsumer::frames_per_quarter`, built
-    // from the truncated `frames_per_step`, so the beat stays on the scheduler's grid.
+    // from the truncated `frames_per_step` — or the clock's step while one leads — so the beat stays
+    // on the scheduler's grid.
     int64_t frames_per_quarter() const;
+
+    // ── SYNC IN, the UI thread's half ──
+    // Is SYNC IN on and not listening to this device's own clock coming back?
+    bool    sync_in_active() const;
+    bool    clock_present(const MidiClockLine& line) const;
+    int64_t offset_frames() const;
+    // The poll's part: the transport events (FULL) and the tempo in force.
+    void    follow_midi_clock();
+    // A received Start or Continue: the song from its position.
+    void    start_from_position(const MidiTransportEvent& ev);
+    // Before a take: on the clock — where it starts, and the step its first fill walks.
+    void    plan_follow_start();
+    // Before each fill: the step that puts the grid on the clock's ticks.
+    void    apply_follow_step(int64_t aheadMs);
+    // The step to walk before the clock's tempo is known: the last one walked, or the tempo in force.
+    int64_t guess_step() const;
+    // The tempo in force (0 = the song's), and what follows from it at once.
+    void    set_clock_tempo(int bpm);
 
     // Every SoundFont instrument made to hold the sound it names, as the transport starts.
     // ⚠️ Browsing PATCH while stopped can evict a slot a song instrument points at, and the track
@@ -451,7 +484,9 @@ class SongcoreHost {
         MidiInPipeline* pipeline = nullptr;
         AudioEngine*    engine   = nullptr;
 
-        void drainLiveInput(int64_t blockStartFrame) override { pipeline->run(blockStartFrame, this); }
+        void drainLiveInput(int64_t blockStartFrame, const AudioEngine::LiveClock& clock) override {
+            pipeline->run(blockStartFrame, this, MidiArrivalClock{clock.frame, clock.us, clock.sampleRate});
+        }
         void discardLiveInput() override { pipeline->discard(); }
 
         void apply(const Event& ev, bool external) override;
@@ -510,6 +545,22 @@ class SongcoreHost {
     IMidiInObserver*  midiInObserver_     = nullptr;
     bool              midiInThru_ = true;
     uint64_t          midiInThruSent_ = 0, midiInThruSuppressed_ = 0;
+
+    // SYNC IN. `followLine_` is the take's last usable line: a refit mid-take does not stall it.
+    // How far past the next audio portion a take walks while it or the clock's line is young: a
+    // poll's gap and a margin, short of a step.
+    static constexpr int64_t YOUNG_AHEAD_MS = 20;
+    int                syncIn_ = SYNC_IN_OFF;
+    MidiClockLine      clockLine_{};
+    uint32_t           clockLineSeen_  = 0;
+    MidiClockLine      followLine_{};
+    bool               followTake_     = false;   // the take's step k sits on tick followDownbeat_ + 6k
+    int64_t            followDownbeat_ = 0;
+    int64_t            followLate_     = 0;       // how long after its downbeat a received take is heard
+    int64_t            followStep_     = 0;       // the step last handed to the walk
+    double             followError_    = 0.0;
+    bool               startPending_   = false;   // start_from_position → the take it starts
+    MidiTransportEvent startEvent_{};
 
     TraceWriter   writer_;
     std::string   traceBuf_;

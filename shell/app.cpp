@@ -100,10 +100,15 @@ struct MidiInConsole : songcore::IMidiInObserver {
 
         // Rebuilt from the parsed message, so a line that disagrees with the cable is a parser bug.
         const unsigned status = m.is_channel() ? (m.status | m.channel) : m.status;
-        std::printf("midi ->  %02X", status);
-        if (m.len > 1) std::printf(" %02X", m.data1);
-        if (m.len > 2) std::printf(" %02X", m.data2);
-        std::printf("%*s-> %d event(s)", (m.len > 2 ? 3 : (m.len > 1 ? 6 : 9)), "", n);
+        if (m.status == songcore::MIDI_SYSEX) {
+            std::printf("midi ->  note command ch %d note %02X id %d value %02X %s -> %d event(s)", m.channel + 1,
+                        m.data1, m.id, m.data2, m.kind == songcore::NOTE_COMMAND_WITH_NOTE ? "(with the note)" : "(now)", n);
+        } else {
+            std::printf("midi ->  %02X", status);
+            if (m.len > 1) std::printf(" %02X", m.data1);
+            if (m.len > 2) std::printf(" %02X", m.data2);
+            std::printf("%*s-> %d event(s)", (m.len > 2 ? 3 : (m.len > 1 ? 6 : 9)), "", n);
+        }
         for (int i = 0; i < n; ++i)
             std::printf("  [track %d inst %d]", ev[i].track, static_cast<int>(ev[i].instrument));
         std::printf("\n");
@@ -331,13 +336,19 @@ void apply_midi_overrides(const AppConfig& cfg, ui::AppState& state) {
     if (cfg.midiSyncOut >= 0)       state.settings.midiSyncOut   = cfg.midiSyncOut != 0;
 }
 
-// The OFFSET row's AUTO: the cable leads the speakers by the output latency. Usually only one buffer
-// of it is visible, so this is close rather than exact; ASIO reports it all.
-void derive_midi_auto_offset(AudioBackend& audio, ui::AppState& state) {
+// The OFFSET row's AUTO: how long a frame takes from the device to the ear. ASIO and Oboe measure it;
+// elsewhere only the app's own buffer is known, so the portion the device really takes at once stands
+// in when it is bigger — a sound server can take sound in bigger portions than the app asked for.
+// True if the value changed.
+bool derive_midi_auto_offset(AudioBackend& audio, const AudioEngine& engine, ui::AppState& state) {
     const int rate = audio.sampleRate();
     const AudioBackend::OutputLatency lat = audio.outputLatency();
-    if (rate > 0 && lat.frames > 0)
-        state.midiAutoOffsetMs = (lat.frames * 1000 + rate / 2) / rate;
+    const int frames = lat.measured ? lat.frames : std::max(lat.frames, engine.getDeviceBlockFrames());
+    if (rate <= 0 || frames <= 0) return false;
+    const int ms = (frames * 1000 + rate / 2) / rate;
+    if (ms == state.midiAutoOffsetMs) return false;
+    state.midiAutoOffsetMs = ms;
+    return true;
 }
 
 // Opens the ports the settings name — the same code as the MIDI screen's rows — one console line each.
@@ -623,6 +634,9 @@ class FrameLoop {
 
     Uint64   audioReopenMs = 0;  // when the next reopen attempt may run; 0 = at once
     uint64_t midiSeen      = 0;  // messages the audio thread had handled at the last tick
+    Uint64   midiClockPrintMs = 0;   // the trace's once-a-second clock line
+    uint64_t midiClockTicks   = 0;
+    Uint64   autoOffsetCheckMs = 0;  // when AUTO last looked at the device's portion
 
     int lastOutW = -1, lastOutH = -1, resizeSettle = 0;
 };
@@ -907,7 +921,7 @@ void FrameLoop::sync_audio_output(Uint64 now) {
             state.statusSuccess = false;
         }
         playingAudioOut = active;
-        derive_midi_auto_offset(audio, state);
+        derive_midi_auto_offset(audio, engineRef, state);
         host.set_midi_offset_ms(ui::midi_offset_in_force(sv, state.midiAutoOffsetMs));
     }
     shownAudioOut = sv.audioOutIndex = active;
@@ -1008,7 +1022,7 @@ void FrameLoop::reopen_audio_if_lost(Uint64 now) {
         bg.audioClosed = true;
         if (audio.openStream()) {
             bg.audioClosed = false;
-            derive_midi_auto_offset(audio, state);
+            derive_midi_auto_offset(audio, engineRef, state);
             host.set_midi_offset_ms(ui::midi_offset_in_force(state.settings, state.midiAutoOffsetMs));
             std::printf("audio:   device reopened\n");
         } else {
@@ -1058,6 +1072,35 @@ void FrameLoop::pump_midi_and_sequencer(Uint64 now) {
     if (const uint64_t seen = host.midi_in_messages(); seen != midiSeen) {
         midiSeen    = seen;
         lastInputMs = now;
+    }
+
+    // The trace prints the clock once a second rather than 48 lines of it.
+    if (midiInConsole.trace && now - midiClockPrintMs >= 1000) {
+        const uint64_t ticks = host.midi_in_pipeline().sync().clocks();
+        if (ticks != midiClockTicks) {
+            const songcore::MidiClockLine& l = host.midi_clock_line();
+            const bool follows = host.following_clock_now();
+            std::printf("midi ->  clock %llu ticks, %.2f BPM, transport %s, %s",
+                        static_cast<unsigned long long>(ticks - midiClockTicks), host.midi_clock_bpm(),
+                        l.downbeat >= 0 ? "running" : "stopped", follows ? "followed" : "not followed");
+            if (follows) std::printf(", next step %+.2f ms off its tick", host.follow_error() * 1000.0 / host.sample_rate());
+            std::printf("\n");
+            std::fflush(stdout);
+            midiClockTicks = ticks;
+        }
+        midiClockPrintMs = now;
+    }
+
+    // AUTO follows the device's real portion, which shows only once it plays (and can change under a
+    // sound server). A measured figure is left as the device opened with.
+    if (now - autoOffsetCheckMs >= 1000) {
+        autoOffsetCheckMs = now;
+        if (!audio.outputLatency().measured && derive_midi_auto_offset(audio, engineRef, state)) {
+            host.set_midi_offset_ms(ui::midi_offset_in_force(state.settings, state.midiAutoOffsetMs));
+            std::printf("midi:    OFFSET AUTO now %+d ms (the device takes %d frames at a time)\n",
+                        state.midiAutoOffsetMs, engineRef.getDeviceBlockFrames());
+            std::fflush(stdout);
+        }
     }
 }
 
@@ -1221,6 +1264,11 @@ void print_midi_in_report(MidiInBase* base, SongcoreHost& host, const MidiInCons
                 static_cast<unsigned long long>(host.midi_in_thru_sent()),
                 static_cast<unsigned long long>(host.midi_in_thru_suppressed()));
 
+    // SYNC IN's clock: the ticks never reach the router or the trace.
+    std::printf("         clock: %llu ticks, %llu transport events lost\n",
+                static_cast<unsigned long long>(host.midi_in_pipeline().sync().clocks()),
+                static_cast<unsigned long long>(host.midi_in_pipeline().sync().events_dropped()));
+
     if (midiInConsole.ccTotal > 0) {
         const uint64_t spanMs = midiInConsole.ccLastMs - midiInConsole.ccFirstMs;
         std::printf("         CC: %llu in %.2f s = %.0f/s mean; PEAK %llu/s (busiest second), "
@@ -1279,7 +1327,7 @@ int run(const AppConfig& cfg) {
     if (jitterOn) host.midi_out().set_send_observer(&midiJitter);
 
     // ⚠️ After the host: its thread pumps `host`, so it is joined while the host lives.
-    MidiSender midiSender(engineRef, host, audio.sampleRate());
+    MidiSender midiSender(engineRef, host);
     bool       senderOn = false;
     if (env_is("POCKETTRACKER_MIDI_SENDER", '0')) {
         std::printf("midi:    sender thread DISABLED (POCKETTRACKER_MIDI_SENDER=0) - the 60 Hz frame "
@@ -1332,7 +1380,7 @@ int run(const AppConfig& cfg) {
 
     load_settings_and_config(filesystem, state, input);
     apply_midi_overrides(cfg, state);
-    derive_midi_auto_offset(audio, state);
+    derive_midi_auto_offset(audio, engineRef, state);
 
     // It edits the Project the sequencer reads, so an edit is live at once.
     ui::InputDispatcher dispatch(state, host, filesystem);

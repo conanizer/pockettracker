@@ -7,6 +7,7 @@
 
 #ifdef _WIN32
 
+#include <atomic>
 #include <string>
 
 // NOMINMAX and LEAN before <windows.h>: its min/max macros break <algorithm> with errors that look
@@ -36,8 +37,17 @@ class WinmmMidiIn : public MidiInBase {
     // ⚠️ `CALLBACK`: a calling-convention mismatch corrupts the stack on the first message, it does not
     // fail to link.
     static void CALLBACK midi_in_proc(HMIDIIN in, UINT msg, DWORD_PTR user, DWORD_PTR p1, DWORD_PTR p2);
+    void shut(HMIDIIN h);
 
-    HMIDIIN handle_ = nullptr;
+    // SysEx comes in buffers lent to the driver; each goes back for the next, except while closing.
+    struct SysexBuffer {
+        MIDIHDR hdr{};
+        char    data[64]{};
+    };
+
+    HMIDIIN           handle_ = nullptr;
+    SysexBuffer       sysex_[4];
+    std::atomic<bool> closing_{false};
 };
 
 }  // namespace ptshell

@@ -67,7 +67,7 @@ void AlsaMidiOut::close() {
 }
 
 void AlsaMidiOut::send(const uint8_t* data, int len) {
-    if (!out_ || len <= 0 || len > 3) return;
+    if (!out_ || len <= 0 || len > songcore::NOTE_COMMAND_BYTES) return;
     const ptrdiff_t n   = a_.rawmidi_write(out_, data, static_cast<size_t>(len));
     const bool      bad = n != static_cast<ptrdiff_t>(len);
     if (bad) ++errors_;

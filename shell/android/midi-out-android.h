@@ -26,9 +26,10 @@ class AndroidMidiOut : public MidiOutBase {
     void        send(const uint8_t* data, int len) override;
 
   private:
-    /** The five method ids, resolved together on first use. `ok_` false = the Kotlin side is absent. */
+    /** The method ids, resolved together on first use. `ok_` false = the Kotlin side is absent. */
     struct Hooks {
         jmethodID count = nullptr, name = nullptr, open = nullptr, close = nullptr, send = nullptr;
+        jmethodID sendBytes = nullptr;   // a SysEx, whole
         bool      resolved = false;
         bool      ok       = false;
     };
@@ -39,6 +40,8 @@ class AndroidMidiOut : public MidiOutBase {
     // Whether our last `open` succeeded, so the frame loop never asks Java. A yanked device shows
     // up as `send` failing — counted and marked in the MIDI trace.
     bool open_ = false;
+    // A SysEx goes out of one array kept for it, allocated at open: none per message.
+    jbyteArray longBuf_ = nullptr;
 };
 
 }  // namespace ptshell

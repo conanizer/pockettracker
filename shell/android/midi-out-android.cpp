@@ -37,15 +37,17 @@ AndroidMidiOut::Hooks& AndroidMidiOut::hooks(JNIEnv* env, jobject activity) {
     hooks_.close = env->GetMethodID(cls, "midiCloseDevice", "()V");
     hooks_.send  = env->GetMethodID(cls, "midiSend", "(IIII)Z");
     if (env->ExceptionCheck()) env->ExceptionClear();
+    hooks_.sendBytes = env->GetMethodID(cls, "midiSendBytes", "([BI)Z");
+    if (env->ExceptionCheck()) env->ExceptionClear();
     env->DeleteLocalRef(cls);
 
     hooks_.ok = hooks_.count && hooks_.name && hooks_.open && hooks_.close && hooks_.send;
 
     // ⚠️ Logged both ways: with no device plugged in, "resolved" and "R8 renamed them" look the same.
     __android_log_print(hooks_.ok ? ANDROID_LOG_INFO : ANDROID_LOG_WARN, kLogTag,
-                        "midi: MidiManager hooks %s (count=%p name=%p open=%p close=%p send=%p)",
+                        "midi: MidiManager hooks %s (count=%p name=%p open=%p close=%p send=%p sendBytes=%p)",
                         hooks_.ok ? "resolved" : "NOT FOUND - MIDI out disabled",
-                        hooks_.count, hooks_.name, hooks_.open, hooks_.close, hooks_.send);
+                        hooks_.count, hooks_.name, hooks_.open, hooks_.close, hooks_.send, hooks_.sendBytes);
     return hooks_;
 }
 
@@ -83,6 +85,13 @@ bool AndroidMidiOut::open(int index) {
     if (a.failed()) return false;
     open_ = (ok == JNI_TRUE);
     if (open_) openIndex_ = index;
+    if (open_ && !longBuf_) {
+        jbyteArray local = a.env->NewByteArray(songcore::NOTE_COMMAND_BYTES);
+        if (local) {
+            longBuf_ = static_cast<jbyteArray>(a.env->NewGlobalRef(local));
+            a.env->DeleteLocalRef(local);
+        }
+    }
     return open_;
 }
 
@@ -99,23 +108,35 @@ void AndroidMidiOut::close() {
             a.env->CallVoidMethod(a.activity, h.close);
             a.failed();
         }
+        if (longBuf_) {
+            a.env->DeleteGlobalRef(longBuf_);
+            longBuf_ = nullptr;
+        }
     }
     open_      = false;
     openIndex_ = -1;
 }
 
 void AndroidMidiOut::send(const uint8_t* data, int len) {
-    if (!open_ || len <= 0 || len > 3) return;
+    if (!open_ || len <= 0 || len > songcore::NOTE_COMMAND_BYTES) return;
     Attached a;
     if (!a.ok()) return;
     const Hooks& h = hooks(a.env, a.activity);
     if (!h.ok) return;
 
-    // Three ints, not a byte[]: allocation-free.
-    const jboolean ok =
-            a.env->CallBooleanMethod(a.activity, h.send, static_cast<jint>(len >= 1 ? data[0] : 0),
-                                     static_cast<jint>(len >= 2 ? data[1] : 0),
-                                     static_cast<jint>(len >= 3 ? data[2] : 0), static_cast<jint>(len));
+    jboolean ok = JNI_FALSE;
+    if (len > 3) {
+        // A SysEx whole, not three bytes at a time: a USB packer may not join the pieces.
+        if (h.sendBytes && longBuf_) {
+            a.env->SetByteArrayRegion(longBuf_, 0, len, reinterpret_cast<const jbyte*>(data));
+            ok = a.env->CallBooleanMethod(a.activity, h.sendBytes, longBuf_, static_cast<jint>(len));
+        }
+    } else {
+        // Three ints, not a byte[]: allocation-free.
+        ok = a.env->CallBooleanMethod(a.activity, h.send, static_cast<jint>(len >= 1 ? data[0] : 0),
+                                      static_cast<jint>(len >= 2 ? data[1] : 0),
+                                      static_cast<jint>(len >= 3 ? data[2] : 0), static_cast<jint>(len));
+    }
     const bool bad = a.failed() || ok != JNI_TRUE;
     if (bad) ++errors_;
     trace_message(data, len, bad);

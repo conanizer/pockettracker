@@ -59,9 +59,9 @@ static inline void voiceSetCrush(IAudioVoice& v, int packed) {
 }
 
 // REV / DEL
-static inline void voiceSetSends(IAudioVoice& v, float rev, float dly) {
-    v.reverbSend = rev;
-    v.delaySend  = dly;
+template <typename V> static inline void voiceSetSends(V& v, float rev, float dly) {
+    v.reverbSend.set(rev, v.chain.started);
+    v.delaySend.set(dly, v.chain.started);
 }
 
 // A sounding voice re-reads its instrument: a trigger copied it, so an edit is otherwise silent
@@ -76,8 +76,8 @@ static inline void voiceReloadInstrument(V& v, const InstrumentParams& ip, float
     voiceSetSends(v, ip.reverbSend, ip.delaySend);
 }
 
-// A table PAN glides over PAN_GLIDE_FRAMES — a jump clicks on a low note. (A SoundFont moves in
-// PAN_GLIDE_STEP stairs.)
+// A table PAN glides too, over twice the rule's length — at GLIDE_FRAMES a low note's swing still
+// clicks. (A SoundFont moves in PAN_GLIDE_STEP stairs.)
 inline constexpr int PAN_GLIDE_FRAMES = 256;
 inline constexpr int PAN_GLIDE_STEP   = 64;
 
@@ -97,16 +97,12 @@ template <typename V> static inline bool voiceStepPanGlide(V& v, int frames) {
     return true;
 }
 
-// A table VOL on a sounding note blends; before the first sample it is where the note starts.
-inline constexpr int VOL_GLIDE_FRAMES = 128;
+// A table VOL, by the glide rule (glide.h).
 template <typename V> static inline void voiceGlideVol(V& v) {
     if (!v.chain.started) return;
     v.volGlideFrom = v.volRouteLast;
-    v.volGlideLeft = VOL_GLIDE_FRAMES;
+    v.volGlideLeft = GLIDE_FRAMES;
 }
-
-// A downsample change on a sounding note blends over this many samples.
-inline constexpr int DOWNSAMPLE_FADE_FRAMES = 128;
 
 // FIN writes PARAM_PITCH's base (zeroed at trigger); the mod half carries transpose, slides and
 // vibrato. ⚠️ Both voice types must read it — the SoundFont voice counts it as active pitch.
@@ -119,15 +115,16 @@ static inline int filterByteOf(float value) {
     return std::max(0, std::min(255, (int)(value * 255.0f + 0.5f)));
 }
 
-// One per-voice CC (songcore/event.h), `value` 0-1 — from a cell, a ramp or a mapped knob. A new live
-// parameter is a CC id and a case here. PAN reaches only the current note (applyParamUpdate).
+// One per-voice CC (songcore/event.h), `value` 0-1 — from a cell, a ramp, a mapped knob or another
+// PocketTracker. A new live parameter is a CC id and a case here, and follows the glide rule
+// (glide.h). PAN reaches only the current note (applyParamUpdate).
 template <typename V>
 static inline void applyVoiceCc(V& v, int cc, float value, float sampleRate) {
     using namespace songcore;
     const int byte = filterByteOf(value);
     switch (cc) {
-        case CC_REVERB_SEND: v.reverbSend = value; break;
-        case CC_DELAY_SEND:  v.delaySend  = value; break;
+        case CC_REVERB_SEND: v.reverbSend.set(value, v.chain.started); break;
+        case CC_DELAY_SEND:  v.delaySend.set(value, v.chain.started);  break;
         case CC_FILTER_CUT:  voiceSetFilterCut(v, byte, sampleRate); break;
         case CC_FILTER_RES:  voiceSetFilterRes(v, byte, sampleRate); break;
         // The id is the filter type and the value the cutoff: one record, so both land on one frame.

@@ -228,6 +228,9 @@ struct AppState {
     // The channel of the last CC in, or −1. Copied in `set_now`: the MIDI screen is built in two places.
     int midiInCcChannel = -1;
 
+    // The tempo of an incoming MIDI clock, 0 while none arrives. Copied in `set_now`.
+    double midiClockBpm = 0.0;
+
     // The audio callback's cost, copied in `set_now`.
     AudioLoad audioLoad{};
 

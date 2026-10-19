@@ -17,6 +17,7 @@
     boolean midiOpenDevice(int);
     void midiCloseDevice();
     boolean midiSend(int, int, int, int);
+    boolean midiSendBytes(byte[], int);
     int midiInDeviceCount();
     java.lang.String midiInDeviceName(int);
     boolean midiInOpenDevice(int);

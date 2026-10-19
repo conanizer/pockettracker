@@ -38,6 +38,8 @@ void InputDispatcher::set_now(long long now_ms) {
     keysInstrument = std::min(static_cast<int>(s_.project->instruments.size()) - 1, std::max(0, keysInstrument));
     host_.set_midi_in_play(keysInstrument, pointer_track(s_), s_.settings.midiInVoices,
                            s_.settings.midiVelocity);
+    host_.set_midi_sync_in(s_.settings.midiSyncIn);
+    s_.midiClockBpm = host_.midi_clock_bpm();
     if (rAloneSinceMs_ >= 0 && now_ms_ - rAloneSinceMs_ >= MIDI_LEARN_HOLD_MS)
         host_.set_midi_learn_armed(true);
     run_midi_learn();

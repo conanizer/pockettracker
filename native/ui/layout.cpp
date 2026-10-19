@@ -284,6 +284,7 @@ SettingsState settings_state(const AppState& s) {
 MidiState midi_state(const AppState& s) {
     MidiState ms{*s.project, s.settings, s.midiDeviceNames, s.midiInDeviceNames};
     ms.lastCcChannel = s.midiInCcChannel;
+    ms.clockBpm      = s.midiClockBpm;
     ms.cursorRow     = s.midiCursorRow;
     ms.cursorColumn  = s.midiCursorColumn;
     ms.deviceIndex   = s.midiDeviceIndex;
@@ -428,8 +429,9 @@ void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {
     const int bpmTextY = bpmRowY + TEXT_PADDING;      // 120
 
     c.draw_text("T>", RIGHT_BAR_X + 2, bpmTextY, t.textEmpty, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(std::to_string(p.tempo), RIGHT_BAR_X + 2 + 34, bpmTextY, t.textValue, CHAR_SPACING,
-                FONT_SCALE);
+    // What plays: a leading clock's tempo, else the song's.
+    c.draw_text(std::to_string(songcore::tempo_in_force(p)), RIGHT_BAR_X + 2 + 34, bpmTextY, t.textValue,
+                CHAR_SPACING, FONT_SCALE);
 
     // The note monitor: a blank row, then "1  C-4" per track.
     const int trackRowsStartY = bpmRowY + ROW_HEIGHT + ROW_HEIGHT;  // 159

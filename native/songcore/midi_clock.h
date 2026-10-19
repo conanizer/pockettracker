@@ -32,26 +32,53 @@ constexpr int MIDI_SPP_MAX = 16383;
 
 // ─── Where in the song does a mid-song start LAND? ──────────────────────────────────────────────
 
-// The SPP for a start at song row `startRow`: the phrase steps before it, by the scheduler's row-length
-// rule. Nominal — a groove or HOP makes rows differ, which only simulating the song could tell.
+// A song row's length in steps, by the scheduler's row-length rule: its longest chain, 16 a phrase.
+inline int nominal_row_steps(const Project& p, int row) {
+    int maxChainLength = 0;
+    for (int t = 0; t < 8 && t < static_cast<int>(p.tracks.size()); ++t) {
+        if (row >= static_cast<int>(p.tracks[t].chainRefs.size())) continue;
+        const int chainId = p.tracks[t].chainRefs[row];
+        if (chainId < 0 || chainId >= static_cast<int>(p.chains.size())) continue;
+        const Chain& chain = p.chains[static_cast<size_t>(chainId)];
+        int length = 0;
+        for (int i = 0; i < 16; ++i)
+            if (!chain_is_empty(chain, i)) ++length;
+        maxChainLength = std::max(maxChainLength, length);
+    }
+    return maxChainLength * 16;
+}
+
+// The SPP for a start at song row `startRow`: the phrase steps before it. Nominal — a groove or HOP
+// makes rows differ, which only simulating the song could tell.
 inline int nominal_spp_beats(const Project& p, int startRow) {
     int64_t steps = 0;
     for (int row = 0; row < startRow; ++row) {
-        int maxChainLength = 0;
-        for (int t = 0; t < 8 && t < static_cast<int>(p.tracks.size()); ++t) {
-            if (row >= static_cast<int>(p.tracks[t].chainRefs.size())) continue;
-            const int chainId = p.tracks[t].chainRefs[row];
-            if (chainId < 0 || chainId >= static_cast<int>(p.chains.size())) continue;
-            const Chain& chain = p.chains[static_cast<size_t>(chainId)];
-            int length = 0;
-            for (int i = 0; i < 16; ++i)
-                if (!chain_is_empty(chain, i)) ++length;
-            maxChainLength = std::max(maxChainLength, length);
-        }
-        steps += static_cast<int64_t>(maxChainLength) * 16;
+        steps += nominal_row_steps(p, row);
         if (steps >= MIDI_SPP_MAX) return MIDI_SPP_MAX;
     }
     return static_cast<int>(steps);
+}
+
+// The other way: the row a position of `sppBeats` 16ths falls in, and `offsetSteps` into it. Past the
+// song's last row the rest runs on in that row, whose tracks go on as they would playing.
+inline int nominal_spp_row(const Project& p, int sppBeats, int& offsetSteps) {
+    int songLength = 0;
+    for (int t = 0; t < 8 && t < static_cast<int>(p.tracks.size()); ++t)
+        songLength = std::max(songLength, static_cast<int>(p.tracks[t].chainRefs.size()));
+    int steps = 0, lastRow = 0, lastStart = 0;
+    for (int row = 0; row < songLength; ++row) {
+        const int len = nominal_row_steps(p, row);
+        if (len == 0) continue;
+        if (sppBeats < steps + len) {
+            offsetSteps = sppBeats - steps;
+            return row;
+        }
+        lastRow   = row;
+        lastStart = steps;
+        steps    += len;
+    }
+    offsetSteps = steps > 0 ? sppBeats - lastStart : 0;
+    return lastRow;
 }
 
 // ─── The generator ──────────────────────────────────────────────────────────────────────────────

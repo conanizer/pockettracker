@@ -81,6 +81,7 @@ native/                            The portable program
 ├── oboe-audio-engine.cpp / .h     Android audio backend (the only Oboe-coupled TU)
 ├── mods/                          Modulation: routing, runner, AHD/ADSR/LFO/vibrato/tracking
 ├── effects/                       DSP, three layers:
+│   ├── glide.h                      the one rule for changing a sounding voice's settings
 │   ├── instrument-chain.h           per voice: Crush → Drive → Filter
 │   ├── send-chain.h                 send buses: reverb (DaisySP ReverbSc) + stereo delay
 │   ├── master-chain.h               output bus: masterEq → OTT | DUST → Limiter
@@ -110,6 +111,9 @@ native/                            The portable program
 │   ├── render.h / wav_writer.h      Offline render, WAV output
 │   ├── midi_out.h / midi_in.h       The MIDI seams, serializer, parser, router
 │   ├── midi_clock.h                 24 PPQN clock, transport, song position
+│   ├── midi_sync_in.h               An incoming clock as a line; Start / Stop / position as events
+│   ├── note_command.h               A phrase's voice commands, sent with their note to another PocketTracker
+│   ├── device_clock.h               Which frame the audio device is taking — what MIDI is timed on
 │   ├── trace_writer.h               Conformance trace serializer
 │   └── note_tables.h                Baked pitch tables (bit-exact across toolchains)
 │
@@ -288,6 +292,12 @@ steals a voice from the song.
 
 Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR or
 TRIG voice rings until something explicitly stops it.
+
+**Every setting of a sounding voice follows one rule** (`effects/glide.h`): set before the note's first
+sample, it is where the note starts, or the attack plays with the old one; set while the note sounds,
+it moves there over `GLIDE_FRAMES`, or the jump clicks. The filter, crush and drive modules, the
+sampler's downsample, a table's VOL and the sends all follow it; PAN glides twice as long, since a low
+note's swing still clicks at the shorter length. A new setting follows it too.
 
 **A SoundFont slot holds ONE PRESET, not a file.** `soundfont-trim.h` reads a SoundFont's index —
 the small tables at the end of the file that say which samples each preset reaches — and writes a
@@ -518,7 +528,7 @@ note-on on a track names it. Both consumers use the same resolver, so they canno
 ### MIDI
 
 All three shipping platforms have MIDI in and out (winmm on Windows, ALSA on Linux, the Android MIDI
-API on Android), with a 24 PPQN clock, transport messages and song-position pointer.
+API on Android), with a 24 PPQN clock, transport messages and song-position pointer, sent and followed.
 
 **MIDI in is drained on the audio thread.** A port's bytes land in a lock-free ring; the engine
 empties it at the top of every live block, parses, routes and puts each record into its own queues
@@ -529,6 +539,29 @@ the project — the controller mappings, MIDI thru, the counters a screen shows 
 from a second ring the drain fills, one poll behind the sound. The engine resolves a live note from
 the same copies it resolves a sequenced one from, which is why every table and instrument setting is
 pushed when it changes rather than a note ahead of when it is needed.
+
+**Both directions of MIDI are timed on one line: the frame the audio device is taking now**
+(`DeviceClock`, fed by every live callback). The frame counter is the end of what has been rendered and
+runs up to a whole portion ahead of it — a sound server may fill one portion with several callbacks
+back to back — so MIDI never leaves on the counter. A message leaves when its frame is taken, plus
+OFFSET, which then covers only the device's own delay to the speaker: what every backend's latency
+figure measures.
+
+**SYNC IN follows another device's clock without touching the song.** Each byte is stamped with the
+time it arrived, and the drain turns that into a frame by the same clock;
+`MidiSyncIn` fits a line through the last two beats of ticks and turns Start, Continue, Stop and the
+song position into events. While a clock leads, each fill's step length comes from that line rather
+than from TEMPO — the rows one fill walks share it, so plain tracks stay aligned — and the host closes
+part of the gap between where the walk put a step and where the clock puts it before every fill. Every
+other reader takes the tempo through `tempo_in_force()`: a runtime-only `Project::clockTempo` while a
+clock leads, never saved and cleared for an export; the song's TEMPO otherwise.
+
+**Between two PocketTrackers, a phrase's voice commands travel with their note.** REV, DEL, CUT, RES,
+the filter types, DRV, CRU and LPO shape this app's own voice and mean nothing to other gear, so they
+go out as a *note command* (`note_command.h`) — a SysEx other gear ignores — just ahead of the note-on
+they belong to. The receiver keeps it for that note, plays it from the note's first sample and forgets
+it after, so its next note starts from its own instrument. A command on a step with no note goes as
+one for the note sounding. VOL, PAN and the pitch commands keep MIDI's own forms.
 
 A project also carries the **controller mappings** — which knob moves which parameter. The drain
 withholds a claimed controller from the tracks and the host applies it to the song, neither behind

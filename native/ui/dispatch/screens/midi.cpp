@@ -102,6 +102,7 @@ void InputDispatcher::midi_map_action() {
 CursorContext InputDispatcher::midi_context() const {
     MidiState ms{*s_.project, s_.settings, s_.midiDeviceNames, s_.midiInDeviceNames};
     ms.lastCcChannel  = s_.midiInCcChannel;
+    ms.clockBpm       = s_.midiClockBpm;
     ms.cursorRow      = s_.midiCursorRow;
     ms.cursorColumn   = s_.midiCursorColumn;
     ms.deviceIndex    = s_.midiDeviceIndex;

@@ -245,7 +245,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     const Instrument& ins = project.instruments[instrumentId];
 
     // Keep the engine's tempo current so the table advance stays tempo-locked.
-    const int tempo      = project.tempo;
+    const int tempo      = tempo_in_force(project);
     const int sampleRate = engine.getSampleRate();
     engine.setTempo(tempo);
 

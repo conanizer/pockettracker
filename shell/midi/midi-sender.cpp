@@ -22,14 +22,6 @@ constexpr Uint32 IDLE_MS = 4;
 
 }  // namespace
 
-int64_t monotonic_us() {
-    const Uint64 freq = SDL_GetPerformanceFrequency();
-    const Uint64 c    = SDL_GetPerformanceCounter();
-    if (freq == 0) return static_cast<int64_t>(SDL_GetTicks64()) * 1000;
-    // ⚠️ Split: counter × 1e6 overflows 64 bits after about a fortnight's uptime.
-    return static_cast<int64_t>((c / freq) * 1000000ull + (c % freq) * 1000000ull / freq);
-}
-
 // ─── The instrument ──────────────────────────────────────────────────────────────────────────────
 
 void MidiJitterRecorder::on_released(const songcore::MidiMessage& m, int64_t nowFrame, bool sent) {
@@ -42,7 +34,7 @@ void MidiJitterRecorder::on_released(const songcore::MidiMessage& m, int64_t now
         ++overflow_;
         return;
     }
-    recs_.push_back(Rec{m.frame, monotonic_us(), nowFrame, m.bytes[0], sent});
+    recs_.push_back(Rec{m.frame, songcore::steady_us(), nowFrame, m.bytes[0], sent});
 }
 
 void MidiJitterRecorder::report(const char* label, int sampleRate, int tempo) const {
@@ -179,8 +171,7 @@ void MidiJitterRecorder::report_clock(int sampleRate, int tempo) const {
 
 // ─── The thread ──────────────────────────────────────────────────────────────────────────────────
 
-MidiSender::MidiSender(AudioEngine& engine, songcore::SongcoreHost& host, int sampleRate)
-    : engine_(engine), host_(host), clock_(sampleRate) {}
+MidiSender::MidiSender(AudioEngine& engine, songcore::SongcoreHost& host) : engine_(engine), host_(host) {}
 
 MidiSender::~MidiSender() { stop(); }
 
@@ -196,8 +187,8 @@ bool MidiSender::start() {
         return false;
     }
     // Always printed: a working sender is otherwise invisible.
-    std::printf("midi:    sender thread ready (%u ms busy / %u ms idle tick, %d Hz clock, %lld us lead cap)\n",
-                BUSY_MS, IDLE_MS, clock_.sample_rate(), 30000LL);
+    std::printf("midi:    sender thread ready (%u ms busy / %u ms idle tick, on the device's frame)\n",
+                BUSY_MS, IDLE_MS);
     std::fflush(stdout);
     host_.set_midi_pump_external(true);   // one owner of the release
     return true;
@@ -228,10 +219,9 @@ void MidiSender::run() {
     songcore::ExternalConsumer& ext = host_.midi_out();
     int64_t prevBusyUs = 0;
     while (!quit_.load()) {
-        // Both halves from one instant, or the gap between the reads would count as elapsed time.
-        const int64_t wallUs = monotonic_us();
-        const int64_t frame  = engine_.getCurrentFrame();
-        ext.pump(clock_.estimate(frame, wallUs));
+        // ⚠️ The steady clock, the engine's: SDL's performance counter is another clock on Linux.
+        const int64_t wallUs = songcore::steady_us();
+        ext.pump(engine_.getDeviceFrame(wallUs));
 
         ticks_.fetch_add(1, std::memory_order_relaxed);
         // ⚠️ `needs_fast_pump`, not the queue size: the clock makes its ticks inside `pump` (midi_out.h).

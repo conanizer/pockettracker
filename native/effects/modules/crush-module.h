@@ -1,13 +1,12 @@
 #pragma once
+#include "../glide.h"
 #include "../primitives/daisysp/decimator.h"
 
 // Bit and sample-rate reduction (DaisySP Decimator), one per channel.
 // crush 0-15: bits dropped (0 = off, 15 = 1-bit). downsample 0-15: 0 = off.
 struct BitcrushModule {
-    // A change on a sounding note crossfades over CHANGE_FRAMES: the new setting starts in the idle
-    // pair while the old pair plays out (a Decimator has state and cannot be copied). Anything set
-    // before the note's first sample is instant.
-    static constexpr int CHANGE_FRAMES = 128;
+    // The glide rule (glide.h) as a crossfade: the new setting starts in the idle pair while the old
+    // pair plays out — a Decimator has state and cannot be copied.
 
     int crush      = 0;
     int downsample = 0;
@@ -43,7 +42,7 @@ struct BitcrushModule {
             cur ^= 1;
             bypass(decL[cur]);
             bypass(decR[cur]);
-            fadeLeft = CHANGE_FRAMES;
+            fadeLeft = GLIDE_FRAMES;
         }
         crush      = crushParam;
         downsample = downsampleParam;
@@ -58,7 +57,7 @@ struct BitcrushModule {
         if (!enabled() && fadeLeft == 0) return in;
         float out = enabled() ? decL[cur].Process(in) : in;
         if (fadeLeft > 0) {
-            const float k = static_cast<float>(fadeLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(fadeLeft) / GLIDE_FRAMES;
             out = (prevEnabled ? decL[cur ^ 1].Process(in) : in) * k + out * (1.0f - k);
             --fadeLeft;
         }
@@ -70,7 +69,7 @@ struct BitcrushModule {
         if (!enabled() && fadeLeft == 0) return;
         float outL = enabled() ? decL[cur].Process(L) : L, outR = enabled() ? decR[cur].Process(R) : R;
         if (fadeLeft > 0) {
-            const float k = static_cast<float>(fadeLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(fadeLeft) / GLIDE_FRAMES;
             outL = (prevEnabled ? decL[cur ^ 1].Process(L) : L) * k + outL * (1.0f - k);
             outR = (prevEnabled ? decR[cur ^ 1].Process(R) : R) * k + outR * (1.0f - k);
             --fadeLeft;

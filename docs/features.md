@@ -134,10 +134,12 @@ Record what's currently playing in the sequencer into a new sample — capture a
 ## MIDI
 
 - Sequence outside gear: an EXTERNAL instrument sends its notes to a MIDI device, with its own channel, bank, program, note length and four controller slots
-- Send program changes, pitch bends and controller values from a phrase step; the volume, pan, filter and send commands reach the device as their standard controllers, and slides, bends, vibrato and fine tune as pitch bend
+- Send program changes, pitch bends and controller values from a phrase step; the volume and pan commands reach the device as their standard controllers, and slides, bends, vibrato and fine tune as pitch bend
 - Send a MIDI clock with start and stop, so other gear follows the tempo, and nudge the timing in milliseconds — or let the app work the offset out
+- Follow another device's MIDI clock — its tempo alone, or its start, stop and song position too — with the song's own tempo kept
 - Play any instrument from a MIDI keyboard, one note at a time or as chords spread over up to 8 tracks, with or without velocity
 - Be played by another sequencer, a second PocketTracker included: the pitch wheel bends the notes as far as the sender says, a program change picks the instrument a channel plays, and each channel keeps its volume, pan, filter and sends
+- Play a second PocketTracker like more tracks of the first: a phrase's send, filter, drive, crush and loop commands act on the other copy's notes as on the app's own
 - Map a controller's knobs and faders to the mixer, the reverb, the delay, the master effects and instrument settings: hold R on a value and turn the knob, or edit the list by hand
 - A device is found by itself and reconnected when it is plugged back in
 

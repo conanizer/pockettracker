@@ -171,7 +171,7 @@ struct Voice : public IAudioVoice {
     float panNow       = 0.5f;
     float panGoal      = 0.5f;
     int   panGlideLeft = 0;
-    // …and a table VOL blends from the gain the last sample used, over VOL_GLIDE_FRAMES.
+    // …and a table VOL blends from the gain the last sample used (glide.h).
     float volRouteLast = 0.0f;
     float volGlideFrom = 0.0f;
     int   volGlideLeft = 0;
@@ -179,7 +179,7 @@ struct Voice : public IAudioVoice {
     bool  faderHeld      = false;
     float faderHeldStart = 1.0f, faderHeldEnd = 1.0f;
     // The sampler's downsample is a quantized read, not a chain module: a change on a sounding note
-    // blends the old read into the new one over DOWNSAMPLE_FADE_FRAMES.
+    // blends the old read into the new one (glide.h).
     int   dsLast = 0;
     int   dsPrev = 0;
     int   dsFadeLeft = 0;
@@ -301,8 +301,8 @@ struct Voice : public IAudioVoice {
             }
         }
 
-        reverbSend = instrParams.reverbSend;
-        delaySend  = instrParams.delaySend;
+        reverbSend.set(instrParams.reverbSend, false);
+        delaySend.set(instrParams.delaySend, false);
 
         tableId = tblId;
         tableTranspose = 0.0f;

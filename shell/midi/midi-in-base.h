@@ -5,7 +5,8 @@
 // resolver, and `deliver()`, the one door bytes come through, so they are counted.
 // winmm and ALSA push from their own thread; Android is polled through `pump()`.
 // ⚠️ `deliver()` runs on the platform's callback thread, where winmm forbids printf and malloc
-// (deadlock): it stays an atomic add and a memcpy. Printing happens in `SongcoreHost::poll()`.
+// (deadlock): it stays a clock read, an atomic add and a memcpy. Printing happens in
+// `SongcoreHost::poll()`.
 
 #include <atomic>
 #include <cstdint>

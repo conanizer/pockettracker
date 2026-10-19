@@ -344,6 +344,7 @@ enum class HelpTopic {
     SE_STRETCH_PREVIEW,
     SE_STRETCH_APPLY,
     INST_MIDI_BEND,
+    MIDI_SYNC_IN,
 
     COUNT
 };
@@ -1508,7 +1509,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "A+B goes back to AUTO",
       "START plays the song"}},
     /* MIDI_SYNC */
-    {"SYNC: send a clock out", "24 pulses a beat, plus start", "and stop.",
+    {"SYNC OUT: send a clock out", "24 pulses a beat, plus start", "and stop.",
      {"24 pulses a beat, plus start and",
       "stop, so other gear follows the",
       "tempo."},
@@ -2316,6 +2317,15 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "set it by hand if it ignores it."},
      {"A+←/→ steps 1, A+↑/↓ steps 12",
       "A+B sets it back to 12"}},
+    /* MIDI_SYNC_IN */
+    {"SYNC IN: follow a clock", "Another device sets the tempo", "and when the song plays.",
+     {"TEMPO: its clock sets the tempo",
+      "and the steps land on its beat.",
+      "START and STOP stay yours.",
+      "FULL: its START, STOP and song",
+      "position play and stop the song.",
+      "The song TEMPO is not changed."},
+     {"A+D-PAD picks OFF, TEMPO or FULL"}},
 };
 
 // ─── Rules 2 and 3, as compile errors — at runtime they fail silently ────────────────────────────
@@ -2664,6 +2674,7 @@ inline HelpTopic midi_cell_topic(int row) {
         case MidiRow::INPUT:    return HelpTopic::MIDI_INPUT;
         case MidiRow::OFFSET:   return HelpTopic::MIDI_OFFSET;
         case MidiRow::SYNC:     return HelpTopic::MIDI_SYNC;
+        case MidiRow::SYNC_IN:  return HelpTopic::MIDI_SYNC_IN;
         case MidiRow::CTL_CH:   return HelpTopic::MIDI_CTL_CH;
         case MidiRow::KEYS:     return HelpTopic::MIDI_KEYS;
         case MidiRow::PROG_CHG: return HelpTopic::MIDI_PROG_CHG;

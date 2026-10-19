@@ -97,6 +97,9 @@ struct SettingsValues {
     // sync sits silent without clock.
     bool        midiSyncOut   = false;
 
+    // SYNC IN: `songcore::MidiSyncInMode` — OFF, TEMPO, FULL. Read by the frame loop every tick.
+    int         midiSyncIn    = 0;
+
     // CTL CH: the channel a mapping knob must arrive on (midi_map.h). −1 = OFF, else 0-15.
     // ⚠️ ALL is safe only because a CC is claimed, not reserved: one driving no mapping routes as
     // before.

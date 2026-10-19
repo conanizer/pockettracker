@@ -1,11 +1,11 @@
 #pragma once
+#include "../glide.h"
 #include "../primitives/daisysp/overdrive.h"
 
 // Overdrive (DaisySP), level-compensated. drive 0-255 (0 = off) → SetDrive 0.30..0.60 — below 0.3
 // the DaisySP stage only attenuates. Stateless, so one instance serves both channels.
 struct DriveModule {
-    // A change on a sounding note crossfades over CHANGE_FRAMES; before its first sample it is instant.
-    static constexpr int CHANGE_FRAMES = 128;
+    // The glide rule (glide.h) as a crossfade from the old setting's output.
 
     int drive = 0;
     daisysp::Overdrive od;
@@ -27,7 +27,7 @@ struct DriveModule {
         if (!fresh && d != drive) {
             odPrev    = od;
             prevDrive = drive;
-            fadeLeft  = CHANGE_FRAMES;
+            fadeLeft  = GLIDE_FRAMES;
         }
         drive = d;
         od.SetDrive(0.3f + (d / 255.0f) * 0.3f);
@@ -38,7 +38,7 @@ struct DriveModule {
         if (!enabled() && fadeLeft == 0) return in;
         float out = enabled() ? od.Process(in) : in;
         if (fadeLeft > 0) {
-            const float k = static_cast<float>(fadeLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(fadeLeft) / GLIDE_FRAMES;
             out = (prevDrive > 0 ? odPrev.Process(in) : in) * k + out * (1.0f - k);
             --fadeLeft;
         }
@@ -50,7 +50,7 @@ struct DriveModule {
         if (!enabled() && fadeLeft == 0) return;
         float outL = enabled() ? od.Process(L) : L, outR = enabled() ? od.Process(R) : R;
         if (fadeLeft > 0) {
-            const float k = static_cast<float>(fadeLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(fadeLeft) / GLIDE_FRAMES;
             outL = (prevDrive > 0 ? odPrev.Process(L) : L) * k + outL * (1.0f - k);
             outR = (prevDrive > 0 ? odPrev.Process(R) : R) * k + outR * (1.0f - k);
             --fadeLeft;

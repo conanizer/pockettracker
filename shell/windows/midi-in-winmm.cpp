@@ -1,7 +1,8 @@
 // Windows MIDI input (winmm). A loopback port (loopMIDI) lets the app's OUT feed its own IN.
 // `MIM_DATA` is a packed DWORD that does not say how many bytes are real. ⚠️ Passing three every time
-// turns one program change into two — the length comes from `midi_message_length`. No SysEx (no
-// `midiInAddBuffer`). ⚠️ The callback may not printf or malloc (deadlock): it calls `deliver` only.
+// turns one program change into two — the length comes from `midi_message_length`. SysEx arrives in
+// lent buffers (`MIM_LONGDATA`), handed back for the next one. ⚠️ The callback may not printf or malloc
+// (deadlock): it calls `deliver` and lends the buffer back, nothing else.
 
 #include "windows/midi-in-winmm.h"
 
@@ -21,7 +22,7 @@ std::string WinmmMidiIn::device_name(int index) {
     return std::string(caps.szPname);
 }
 
-void CALLBACK WinmmMidiIn::midi_in_proc(HMIDIIN, UINT msg, DWORD_PTR user, DWORD_PTR p1, DWORD_PTR) {
+void CALLBACK WinmmMidiIn::midi_in_proc(HMIDIIN in, UINT msg, DWORD_PTR user, DWORD_PTR p1, DWORD_PTR) {
     auto* self = reinterpret_cast<WinmmMidiIn*>(user);
     if (!self) return;
 
@@ -38,11 +39,21 @@ void CALLBACK WinmmMidiIn::midi_in_proc(HMIDIIN, UINT msg, DWORD_PTR user, DWORD
         }
         // Bad data — a marginal USB cable. Counted here, printed by the drain's report.
         case MIM_ERROR:
-        case MIM_LONGERROR:
             self->note_port_error();
             break;
+        // A SysEx, or a broken one; either way its buffer goes back for the next.
+        case MIM_LONGDATA:
+        case MIM_LONGERROR: {
+            auto* hdr = reinterpret_cast<MIDIHDR*>(p1);
+            if (msg == MIM_LONGERROR) self->note_port_error();
+            else if (hdr->dwBytesRecorded > 0)
+                self->deliver(reinterpret_cast<const uint8_t*>(hdr->lpData), static_cast<int>(hdr->dwBytesRecorded));
+            // ⚠️ Not while `close` collects them: it unprepares every one.
+            if (!self->closing_.load(std::memory_order_acquire)) ::midiInAddBuffer(in, hdr, sizeof *hdr);
+            break;
+        }
         default:
-            // MIM_OPEN / MIM_CLOSE / MIM_LONGDATA (never) — nothing to do.
+            // MIM_OPEN / MIM_CLOSE — nothing to do.
             break;
     }
 }
@@ -57,9 +68,16 @@ bool WinmmMidiIn::open(int index) {
                      reinterpret_cast<DWORD_PTR>(this), CALLBACK_FUNCTION) != MMSYSERR_NOERROR)
         return false;
 
+    for (SysexBuffer& b : sysex_) {
+        b.hdr                = MIDIHDR{};
+        b.hdr.lpData         = b.data;
+        b.hdr.dwBufferLength = sizeof b.data;
+        if (::midiInPrepareHeader(h, &b.hdr, sizeof b.hdr) == MMSYSERR_NOERROR) ::midiInAddBuffer(h, &b.hdr, sizeof b.hdr);
+    }
+
     // ⚠️ Open is not running: without `midiInStart` the device is held and silent.
     if (::midiInStart(h) != MMSYSERR_NOERROR) {
-        ::midiInClose(h);
+        shut(h);
         return false;
     }
 
@@ -68,13 +86,21 @@ bool WinmmMidiIn::open(int index) {
     return true;
 }
 
+// ⚠️ Order: stop delivery; reset, without which close answers MIDIERR_STILLPLAYING — it hands back the
+// SysEx buffers, unprepared before the close; close, which waits out a callback in flight so the sink
+// may die afterwards.
+void WinmmMidiIn::shut(HMIDIIN h) {
+    closing_.store(true, std::memory_order_release);
+    ::midiInStop(h);
+    ::midiInReset(h);
+    for (SysexBuffer& b : sysex_) ::midiInUnprepareHeader(h, &b.hdr, sizeof b.hdr);
+    ::midiInClose(h);
+    closing_.store(false, std::memory_order_release);
+}
+
 void WinmmMidiIn::close() {
     if (!handle_) return;
-    // ⚠️ Order: stop delivery; reset, without which close answers MIDIERR_STILLPLAYING; close, which
-    // waits out a callback in flight so the sink may die afterwards.
-    ::midiInStop(handle_);
-    ::midiInReset(handle_);
-    ::midiInClose(handle_);
+    shut(handle_);
     handle_    = nullptr;
     openIndex_ = -1;
 }

@@ -1,15 +1,13 @@
 #pragma once
 #include <cmath>
+#include "../glide.h"
 #include "../primitives/daisysp/svf.h"
 
 // A voice's resonant filter (DaisySP's state-variable filter, all outputs at once).
 // Types: 0 off, 1 LP, 2 HP, 3 BP, 4 notch, 5 peak. Cutoff 0-255 → 20 Hz–20 kHz exponential,
 // resonance 0-255 → 0..1, drive 0-255 → SetDrive 0..10. `setParams` once per block when one changes.
 struct FilterModule {
-    // ⚠️ A change on a sounding note glides over CHANGE_FRAMES samples, or it clicks. Anything set
-    // before the note's first sample (`fresh`) lands at once, or the attack would pass unfiltered.
-    static constexpr int CHANGE_FRAMES = 128;
-
+    // The glide rule (glide.h): `fresh` until the note's first sample.
     int   type       = 0;
     int   drive      = 150;
     float sampleRate = 44100.0f;
@@ -74,7 +72,7 @@ struct FilterModule {
             (newFreqL != targetFreqL || newDampL != targetDampL)) {
             fromFreqL = lastFreqL; fromDampL = lastDampL;
             fromFreqR = lastFreqR; fromDampR = lastDampR;
-            glideLeft = CHANGE_FRAMES;
+            glideLeft = GLIDE_FRAMES;
         }
         targetFreqL = newFreqL; targetDampL = newDampL;
         targetFreqR = newFreqR; targetDampR = newDampR;
@@ -84,7 +82,7 @@ struct FilterModule {
         }
         if (!fresh && oldType != filterType) {
             prevType = oldType;
-            typeFadeLeft = CHANGE_FRAMES;
+            typeFadeLeft = GLIDE_FRAMES;
         }
     }
 
@@ -94,7 +92,7 @@ struct FilterModule {
         float fL = prevFreqL + (targetFreqL - prevFreqL) * t, dL = prevDampL + (targetDampL - prevDampL) * t;
         float fR = prevFreqR + (targetFreqR - prevFreqR) * t, dR = prevDampR + (targetDampR - prevDampR) * t;
         if (glideLeft > 0) {
-            const float k = static_cast<float>(glideLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(glideLeft) / GLIDE_FRAMES;
             fL = fromFreqL * k + fL * (1.0f - k); dL = fromDampL * k + dL * (1.0f - k);
             fR = fromFreqR * k + fR * (1.0f - k); dR = fromDampR * k + dR * (1.0f - k);
             --glideLeft;
@@ -123,7 +121,7 @@ struct FilterModule {
         svfL.Process(in);
         float out = tap(svfL, type, in);
         if (typeFadeLeft > 0) {
-            const float k = static_cast<float>(typeFadeLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(typeFadeLeft) / GLIDE_FRAMES;
             out = tap(svfL, prevType, in) * k + out * (1.0f - k);
             --typeFadeLeft;
         }
@@ -137,7 +135,7 @@ struct FilterModule {
         svfR.Process(R);
         float outL = tap(svfL, type, L), outR = tap(svfR, type, R);
         if (typeFadeLeft > 0) {
-            const float k = static_cast<float>(typeFadeLeft) / CHANGE_FRAMES;
+            const float k = static_cast<float>(typeFadeLeft) / GLIDE_FRAMES;
             outL = tap(svfL, prevType, L) * k + outL * (1.0f - k);
             outR = tap(svfR, prevType, R) * k + outR * (1.0f - k);
             --typeFadeLeft;

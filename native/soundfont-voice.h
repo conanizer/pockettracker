@@ -43,7 +43,7 @@ struct SoundfontVoice : public IAudioVoice {
     float panNow           = 0.5f;
     float panGoal          = 0.5f;
     int   panGlideLeft     = 0;
-    // A table VOL glides over VOL_GLIDE_FRAMES.
+    // A table VOL glides (glide.h).
     float volRouteLast     = 0.0f;   // unused: the ramp starts from `volGain`
     float volGlideFrom     = 0.0f;
     int   volGlideLeft     = 0;

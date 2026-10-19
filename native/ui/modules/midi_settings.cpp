@@ -1,6 +1,7 @@
 #include "ui/modules/midi_settings.h"
 
 #include <algorithm>
+#include <cstdio>
 
 #include "ui/helpers.h"
 
@@ -53,6 +54,18 @@ std::string ctl_ch_text(const MidiState& s) {
     return dec2(ch + 1) + "  MAPPED KNOBS";
 }
 
+// The mode, then what arrives: "FULL  128.0 BPM", or NO CLOCK — a follower with nothing to follow
+// looks exactly like one that is broken.
+std::string sync_in_text(int mode, double bpm) {
+    static const char* const NAMES[] = {"OFF", "TEMPO", "FULL"};
+    const int m = clamp(mode, 0, 2);
+    if (m == 0) return NAMES[0];
+    if (bpm <= 0.0) return std::string(NAMES[m]) + "  NO CLOCK";
+    char tempo[16];
+    std::snprintf(tempo, sizeof tempo, "%.1f BPM", bpm);
+    return std::string(NAMES[m]) + "  " + tempo;
+}
+
 // One voice is MONO, more is POLY over that many tracks.
 std::string keys_text(int voices) {
     return voices <= 1 ? "MONO" : "POLY " + std::to_string(voices);
@@ -101,7 +114,8 @@ void MidiModule::draw(Canvas& c, int x, int y, const MidiState& s) const {
     row_of(MidiRow::OFFSET,   "OFFSET",   offset_text(midi_offset_in_force(s.settings, s.autoOffsetMs),
                                                       s.settings.midiOffsetAuto));
     // The value says what the switch does ("ON  24 PPQN").
-    row_of(MidiRow::SYNC,     "SYNC",     s.settings.midiSyncOut ? "ON  24 PPQN" : "OFF");
+    row_of(MidiRow::SYNC,     "SYNC OUT", s.settings.midiSyncOut ? "ON  24 PPQN" : "OFF");
+    row_of(MidiRow::SYNC_IN,  "SYNC IN",  sync_in_text(s.settings.midiSyncIn, s.clockBpm));
     // CTL CH says where arriving knobs are when they miss it: a state the user cannot leave alone.
     row_of(MidiRow::CTL_CH,   "CTL CH", ctl_ch_text(s));
     row_of(MidiRow::PROG_CHG, "PROG CHG", s.project.midiSendProgramChange ? "ON" : "OFF");
@@ -157,6 +171,9 @@ CursorContext MidiModule::cursor_context(const MidiState& s) const {
 
         case MidiRow::SYNC:
             return cc::toggle_binary(s.settings.midiSyncOut);
+
+        case MidiRow::SYNC_IN:
+            return cc::enum_cycle(clamp(s.settings.midiSyncIn, 0, 2), 3);
 
         // Shows 01..16 over a stored 0..15. ⚠️ A cycle of seventeen, not a byte with an empty state —
         // an empty value the write-back rejects leaves A+D-PAD dead.
@@ -240,6 +257,11 @@ MidiInputResult MidiModule::handle_input(songcore::Project& project, SettingsVal
             }
             break;
         }
+
+        // Read by the frame loop every tick, like KEYS.
+        case MidiRow::SYNC_IN:
+            if (isSet) settings.midiSyncIn = clamp(action.value, 0, 2);
+            break;
 
         case MidiRow::CTL_CH: {
             if (!isSet) break;

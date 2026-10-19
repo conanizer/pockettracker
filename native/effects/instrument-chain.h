@@ -14,13 +14,14 @@ struct InstrumentChain {
     FilterModule   filter;
     EqModule       eq;
 
-    // False until the note's first sample: a write before it lands at once, after it glides.
+    // False until sound has passed through the chain: a write before that lands at once, after it glides.
     bool started = false;
 
-    // ⚠️ `keepToneState` keeps the crush, filter and EQ memory: a SoundFont chain belongs to the track,
-    // and zeroing it under the stolen note steps the output.
+    // ⚠️ `keepToneState`: the chain still carries the last note's sound — a SoundFont chain belongs to
+    // the track. It stays started, so a level the new note sets (send, pan, VOL) glides over that tail
+    // instead of jumping; the crush, filter and EQ keep their memory, since zeroing it steps the output.
     void reset(float sampleRate = 44100.0f, bool keepToneState = false) {
-        started = false;
+        started = keepToneState;
         drive.reset();
         if (keepToneState) {
             // Off until the caller sets them; the new note's settings land at once.

@@ -80,7 +80,7 @@ void push_used_instrument_params(Engine& engine, const Project& project, const R
 
     for (int id = 0; id < count && id < POOL_INSTRUMENTS; ++id) {
         if (!wanted[id]) continue;
-        push_instrument_params(engine, project.instruments[id], routing, project.tempo, sampleRate);
+        push_instrument_params(engine, project.instruments[id], routing, tempo_in_force(project), sampleRate);
     }
 }
 
@@ -89,7 +89,7 @@ template <typename Engine>
 void push_all_instrument_params(Engine& engine, const Project& project, const Routing& routing) {
     const int sampleRate = engine.getSampleRate();
     for (const Instrument& ins : project.instruments) {
-        push_instrument_params(engine, ins, routing, project.tempo, sampleRate);
+        push_instrument_params(engine, ins, routing, tempo_in_force(project), sampleRate);
     }
 }
 
@@ -126,7 +126,7 @@ void push_global_effects(Engine& engine, const Project& project, MixerHeld held 
         engine.setDelayFeedbackWet(project.delayFeedback, project.delayWet);
     } else {
         engine.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
-                              static_cast<float>(project.tempo), project.delayWet);
+                              static_cast<float>(tempo_in_force(project)), project.delayWet);
     }
     engine.setDelayCharacter(project.delayPong, project.delayTone, project.delayWobble);
     engine.setDelayInputEq(project.delayInputEq);
@@ -186,7 +186,7 @@ bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scop
         case MapDestId::DLY_FDBK:
         case MapDestId::DLY_WET:
             engine.setDelayParams(p.delayTime, p.delayFeedback, p.delaySync,
-                                  static_cast<float>(p.tempo), p.delayWet);
+                                  static_cast<float>(tempo_in_force(p)), p.delayWet);
             return true;
         case MapDestId::DLY_TONE:
         case MapDestId::DLY_WOBL:
@@ -228,7 +228,7 @@ void push_project_params(Engine& engine, const Project& project, const Routing& 
 // ⚠️ Call it after a load and after any edit to what the engine keeps; no tool sees a missed call.
 template <typename Engine>
 void push_live_params(Engine& engine, const Project& project, const Routing& routing) {
-    engine.setTempo(project.tempo);
+    engine.setTempo(tempo_in_force(project));
     push_mixer(engine, project);
     push_all_instrument_params(engine, project, routing);
 }

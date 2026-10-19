@@ -119,6 +119,19 @@ class MidiOutManager(context: Context) {
         }
     }
 
+    /** A SysEx, whole: a USB packer may not join one sent three bytes at a time. */
+    @Synchronized
+    fun sendBytes(bytes: ByteArray, len: Int): Boolean {
+        val p = port ?: return false
+        if (len < 1 || len > bytes.size) return false
+        return try {
+            p.send(bytes, 0, len)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private companion object {
         const val TAG = "PocketTracker"
     }

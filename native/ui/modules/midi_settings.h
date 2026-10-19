@@ -63,6 +63,9 @@ struct MidiState {
     // The channel the last CC came on, or −1; `CTL CH` prints it so the user learns the number.
     int lastCcChannel = -1;
 
+    // An incoming clock's tempo, 0 while none arrives; `SYNC IN` prints it.
+    double clockBpm = 0.0;
+
     // Debug builds only.
     AudioLoad audioLoad{};
 

@@ -2,6 +2,9 @@
 
 #include "host.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace songcore {
 
 SongcoreHost::SongcoreHost(AudioEngine* engine, int sampleRate)
@@ -84,10 +87,11 @@ void SongcoreHost::stop() {
     const bool table_tim = engine_ && engine_->takeTableDelayTimeTouched();
     if (engine_ && (seq_.delay_time_active() || table_tim) && seq_.has_live_project()) {
         engine_->setDelayTime(project_.delayTime, project_.delaySync,
-                              static_cast<float>(project_.tempo));
+                              static_cast<float>(tempo_in_force(project_)));
     }
     sync_clock();
     seq_.stop();
+    followTake_ = false;
     // Every note the cable holds, ended now; `seq_.stop()` does not reach the router.
     external_.panic();
     // …and the incoming keys, so the next chord does not steal from a note that is over. A
@@ -113,6 +117,7 @@ void SongcoreHost::poll() {
     if (!engine_) midiIn_.run(seq_.clock(), nullptr);
     // What the drain handled since the last poll: mapped knobs, thru, counters, observer.
     drain_midi_in();
+    follow_midi_clock();
     keep_walking();
     // TEMPO is editable while playing, so the beat length is pushed every time.
     if (engine_) engine_->setMetronomeBeat(frames_per_quarter());
@@ -120,6 +125,7 @@ void SongcoreHost::poll() {
 
 void SongcoreHost::keep_walking(int64_t aheadMs) {
     sync_clock();
+    apply_follow_step(aheadMs);
     seq_.updatePlaybackBuffer(aheadMs);
     // ⚠️ The MIDI queue is released here (unless a sender thread owns it), even when stopped: a
     // LEN gate and a panic's note-offs are owed after the last note.
@@ -141,6 +147,8 @@ void SongcoreHost::prepare_render(int startRow, int endRow) {
     // polled, so an attached ExternalConsumer would fire it all at the hardware afterwards.
     external_.panic();
     router_.remove_consumer(&external_);
+    // An export plays the song's own TEMPO; the next poll gives a leading clock's back.
+    project_.clockTempo = 0;
     songcore::prepare_render(*engine_, project_, routing_, startRow, endRow);
     consumer_.clear_track_mask();
     sync_clock();                   // the frame counter is back at 0 — re-read it
@@ -200,7 +208,7 @@ void SongcoreHost::push_params() {
 void SongcoreHost::push_instrument(int id, bool refreshSounding) {
     if (!engine_) return;
     if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
-    push_instrument_params(*engine_, project_.instruments[id], routing_, project_.tempo, sampleRate_);
+    push_instrument_params(*engine_, project_.instruments[id], routing_, tempo_in_force(project_), sampleRate_);
     // `sampleId` is the index the params were written at and the one a voice remembers.
     // ⚠️ Only for an EDIT: the refresh wipes what a table row or phrase command set on the voice.
     if (refreshSounding) engine_->refreshSoundingInstrument(project_.instruments[id].sampleId);
@@ -512,7 +520,7 @@ void SongcoreHost::finish_sample_preview(int id) {
     // The push only reaches the instrument's own slot; a channel audition used the scratch slot.
     engine_->setInstrumentFrameWindow(SOURCE_PREVIEW_SLOT, -1, -1);
     // The three the DRY preview switched off.
-    push_instrument_mod_eq_sends(*engine_, ins, project_.tempo, engine_->getSampleRate());
+    push_instrument_mod_eq_sends(*engine_, ins, tempo_in_force(project_), engine_->getSampleRate());
 }
 
 bool SongcoreHost::save_sample_wav(int id, const std::string& path, const std::vector<int>& cuePoints,
@@ -653,6 +661,7 @@ void SongcoreHost::sync_clock() {
 
 void SongcoreHost::before_play() {
     sync_clock();
+    plan_follow_start();
     if (engine_) engine_->startTake();
 }
 
@@ -665,7 +674,186 @@ int64_t SongcoreHost::after_play() {
 }
 
 int64_t SongcoreHost::frames_per_quarter() const {
-    return frames_per_step(project_.tempo, sampleRate_) * 4;
+    if (following_clock_now() && followStep_ > 0) return followStep_ * 4;
+    return frames_per_step(tempo_in_force(project_), sampleRate_) * 4;
+}
+
+// ─── SYNC IN ─────────────────────────────────────────────────────────────────────────────────────
+
+// ⚠️ With INPUT and OUTPUT on one port (THRU is off there) and SYNC OUT on, the clock coming in is
+// this device's own: following it would chase itself.
+bool SongcoreHost::sync_in_active() const {
+    return syncIn_ != SYNC_IN_OFF && (midiInThru_ || !external_.sync_out());
+}
+
+bool SongcoreHost::clock_present(const MidiClockLine& line) const {
+    return line.usable() &&
+           static_cast<double>(seq_.clock() - line.lastFrame) < MidiSyncIn::STOPPED_TICKS * line.period;
+}
+
+int64_t SongcoreHost::offset_frames() const {
+    return static_cast<int64_t>(external_.offset_ms()) * sampleRate_ / 1000;
+}
+
+double SongcoreHost::midi_clock_bpm() const {
+    return clock_present(clockLine_) ? clockLine_.bpm(sampleRate_) : 0.0;
+}
+
+void SongcoreHost::follow_midi_clock() {
+    midiIn_.sync().read_line(clockLine_, clockLineSeen_);
+    const bool on = sync_in_active();
+
+    MidiTransportEvent ev;
+    while (midiIn_.sync().pop_event(ev)) {
+        if (!on || syncIn_ != SYNC_IN_FULL) continue;
+        if (ev.kind == MidiTransportEvent::STOP) {
+            if (seq_.is_playing()) stop();
+            continue;
+        }
+        start_from_position(ev);
+    }
+
+    // The clock's tempo while it leads: a following take keeps its last when the clock drops out; when
+    // stopped it is what the next START would play at. A take that does not follow keeps the song's.
+    int bpm = 0;
+    if (on) {
+        const bool    leads = following_clock_now();
+        const MidiClockLine& l = leads ? followLine_ : clockLine_;
+        if (leads ? l.usable() : (!seq_.is_playing() && clock_present(l))) {
+            const double exact = l.bpm(sampleRate_);
+            const int    held  = project_.clockTempo;
+            // ±0.6 BPM of hysteresis, so a clock at 127.5 does not flicker between 127 and 128.
+            bpm = (held > 0 && std::fabs(exact - held) < 0.6) ? held
+                                                               : std::clamp(static_cast<int>(std::lround(exact)), 20, 999);
+        }
+    }
+    set_clock_tempo(bpm);
+}
+
+void SongcoreHost::start_from_position(const MidiTransportEvent& ev) {
+    // A take already running is stopped as STOP stops it: its lookahead must not play beside the new.
+    if (seq_.is_playing()) stop();
+    int offset = 0;
+    const int row = nominal_spp_row(project_, ev.position, offset);
+    startPending_ = true;
+    startEvent_   = ev;
+    before_play();
+    if (seq_.live_mode()) {
+        // LIVE launches the row as a scene, as from a standing start.
+        int mask = 0;
+        for (int t = 0; t < 8 && t < static_cast<int>(project_.tracks.size()); ++t) {
+            const std::vector<int>& refs = project_.tracks[static_cast<size_t>(t)].chainRefs;
+            if (row < static_cast<int>(refs.size()) && refs[static_cast<size_t>(row)] >= 0 &&
+                refs[static_cast<size_t>(row)] < 256)
+                mask |= 1 << t;
+        }
+        seq_.playSongLive(row, mask, offset);
+    } else {
+        seq_.playSong(row, offset);
+    }
+    after_play();
+}
+
+void SongcoreHost::plan_follow_start() {
+    const bool received = startPending_;
+    startPending_ = false;
+    followTake_   = false;
+    followLine_   = MidiClockLine{};
+    followLate_   = 0;
+    seq_.set_follow(0, -1);
+    if (!sync_in_active()) return;
+    midiIn_.sync().read_line(clockLine_, clockLineSeen_);
+
+    const int64_t offset = offset_frames();
+    int64_t start = 0;
+    if (received) {
+        // The downbeat is heard where it arrived: the speaker's delay earlier. That has passed by now,
+        // so the first step sounds from the next audio rendered.
+        followDownbeat_ = startEvent_.tick;
+        start           = startEvent_.frame - offset;
+        followLate_     = std::max<int64_t>(0, seq_.clock() - start);
+    } else if (clock_present(clockLine_)) {
+        // This device's own START: on the clock's next step — its transport's steps, if it runs.
+        const MidiClockLine& l = clockLine_;
+        const double ahead = static_cast<double>(seq_.clock() + offset) - l.frame;
+        int64_t n = l.tick + std::max<int64_t>(0, static_cast<int64_t>(std::ceil(ahead / l.period)));
+        if (l.downbeat >= 0) {
+            const int64_t r = ((n - l.downbeat) % 6 + 6) % 6;
+            if (r != 0) n += 6 - r;
+        }
+        followDownbeat_ = n;
+        start           = std::llround(l.frame_of(n)) - offset;
+    } else {
+        return;   // no clock arriving: the song's own tempo
+    }
+    followTake_ = true;
+    seq_.set_start_frame(start);
+    if (clockLine_.usable()) followLine_ = clockLine_;
+}
+
+void SongcoreHost::apply_follow_step(int64_t aheadMs) {
+    if (!following_clock_now()) {
+        seq_.set_follow(0, -1);
+        external_.set_follow(0, 0);
+        return;
+    }
+    midiIn_.sync().read_line(clockLine_, clockLineSeen_);
+    // A take started before the tempo was known walked its first step on a guess, and nothing past it.
+    const bool guessed = !followLine_.usable();
+    if (clockLine_.usable()) followLine_ = clockLine_;
+    if (!followLine_.usable()) {
+        // The tempo is not known yet: walk only the take's first step, from where it is heard. Three
+        // ticks are a third of a step, so it is known before the second step must be walked.
+        const int64_t first = seq_.playback_start_frame() + followLate_;
+        if (seq_.grid_step() == 0) seq_.shift_unwalked(first - seq_.grid_frame());
+        seq_.set_follow(guess_step(), first + 1);
+        return;
+    }
+    // Where the grid's next step is played: on the clock — but a take that started late comes onto it
+    // a quarter of a step at a time, so no early step is cut short.
+    const double nominal = 6.0 * followLine_.period;
+    const double late    = std::max(0.0, static_cast<double>(followLate_) -
+                                             0.25 * nominal * static_cast<double>(seq_.grid_step()));
+    const double target  = followLine_.frame_of(followDownbeat_ + 6 * seq_.grid_step()) -
+                           static_cast<double>(offset_frames()) + late;
+    // While the line is young its period is still rough, and while the take is young it may still be
+    // catching up: walk only what is about to play, and first put the next step's start where it
+    // belongs — nothing has been walked from it. A step walked on a guess ends there too. A long
+    // operation's deep fill is left alone.
+    const bool young = (followLine_.ticks < MidiSyncIn::FIT_TICKS / 2 ||
+                        followLine_.tick - followDownbeat_ < MidiSyncIn::FIT_TICKS / 2) &&
+                       aheadMs <= Sequencer::HORIZON_MS;
+    if (young || guessed) seq_.shift_unwalked(std::llround(target) - seq_.grid_frame());
+    const int64_t gridFrame = seq_.grid_frame();
+    const double  error     = target - static_cast<double>(gridFrame);
+    followError_ = error;
+    const int64_t block = engine_ ? engine_->getDeviceBlockFrames() : 0;
+    const int64_t limit = young ? seq_.clock() + block + YOUNG_AHEAD_MS * sampleRate_ / 1000 : -1;
+    // Half the error closed over the steps this fill walks, each at most a quarter of a step longer
+    // or shorter — a wrong first guess is caught up in a step or two.
+    const int64_t reach = limit >= 0 ? limit : seq_.clock() + aheadMs * sampleRate_ / 1000;
+    const double  steps = gridFrame < reach ? std::ceil(static_cast<double>(reach - gridFrame) / nominal) : 1.0;
+    const double  cap   = 0.25 * nominal;
+    const double  corr  = std::max(-cap, std::min(cap, 0.5 * error / std::max(1.0, steps)));
+    followStep_ = std::max<int64_t>(1, std::llround(nominal + corr));
+    seq_.set_follow(followStep_, limit);
+    external_.set_follow(tempo_in_force(project_), followStep_ * 4);
+}
+
+int64_t SongcoreHost::guess_step() const {
+    return followStep_ > 0 ? followStep_ : frames_per_step(tempo_in_force(project_), sampleRate_);
+}
+
+void SongcoreHost::set_clock_tempo(int bpm) {
+    if (project_.clockTempo == bpm) return;
+    const int before = tempo_in_force(project_);
+    project_.clockTempo = bpm;
+    const int now = tempo_in_force(project_);
+    if (now == before || !engine_) return;
+    engine_->setTempo(now);
+    // A synced delay counts note lengths, so it moves with the tempo — unless a TIM holds it.
+    if (project_.delaySync && !held_by_song().delayTime)
+        engine_->setDelayTime(project_.delayTime, true, static_cast<float>(now));
 }
 
 void SongcoreHost::resync_soundfont_slots() {
@@ -716,7 +904,7 @@ void SongcoreHost::arm_midi_in() {
         const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing_.sampleRateRatio[sid] : 1.0f;
         if (routing_.sfSlot[id] == programRouting_.sfSlot[id] && ratio == programRouting_.sampleRateRatio[id])
             continue;
-        push_instrument_params(*engine_, ins, routing_, project_.tempo, sampleRate_);
+        push_instrument_params(*engine_, ins, routing_, tempo_in_force(project_), sampleRate_);
         programRouting_.sfSlot[id]          = routing_.sfSlot[id];
         programRouting_.sampleRateRatio[id] = ratio;
     }

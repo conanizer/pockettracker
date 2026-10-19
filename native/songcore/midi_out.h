@@ -19,6 +19,7 @@
 
 #include "effects.h"       // fine_tune_semitones
 #include "event.h"
+#include "note_command.h"
 #include "midi_clock.h"    // the 24 PPQN grid and the transport bytes
 #include "model.h"
 #include "note_tables.h"   // f32_from_bits
@@ -81,7 +82,7 @@ struct MidiMessage {
 
     int64_t  frame = 0;
     uint32_t seq   = 0;
-    uint8_t  bytes[3] = {0, 0, 0};
+    uint8_t  bytes[NOTE_COMMAND_BYTES] = {};   // the longest a note command
     uint8_t  len   = 0;
     // A wheel position: its BEND goes first when the channel holds another. A re-send equal to what
     // the channel holds is dropped, unless it is an MPB — a command, sent as written.
@@ -140,6 +141,14 @@ class ExternalConsumer : public IMidiConsumer {
         return clock_.enabled();
     }
 
+    // SYNC IN: while another device's clock leads, the tempo and the quarter note this plays at
+    // (0 = the song's) — the clock it sends on, its LEN gates and its wheel.
+    void set_follow(int bpm, int64_t framesPerQuarter) {
+        std::lock_guard<std::mutex> lk(mu_);
+        followBpm_     = bpm;
+        followQuarter_ = framesPerQuarter;
+    }
+
     // Speaker-to-cable alignment in ms (positive = MIDI later), applied at send time.
     void set_offset_ms(int ms) {
         std::lock_guard<std::mutex> lk(mu_);
@@ -163,10 +172,11 @@ class ExternalConsumer : public IMidiConsumer {
         panic_locked();
         tracks_.reset();
 
-        // Arm the clock at the take's start; only SONG carries a row (`row=` in `detail`).
+        // Arm the clock at the take's start; only SONG carries a row (`row=`), and a step into it.
         const int startRow = kind == "SONG" ? hex_after(detail, "row=") : 0;
+        const int step     = kind == "SONG" ? std::max(0, hex_after(detail, "step=")) : 0;
         const int spp      = (startRow > 0 && project_) ? nominal_spp_beats(*project_, startRow) : 0;
-        clock_.start(startFrame, frames_per_quarter(), spp);
+        clock_.start(startFrame, frames_per_quarter(), spp + step);
     }
 
     // ⚠️ Deliberately empty: `t_stop` ends every scheduling pass, not the transport — a panic here would
@@ -357,6 +367,7 @@ class ExternalConsumer : public IMidiConsumer {
         bool    on       = false;
         uint8_t channel  = 0;
         uint8_t note     = 0;
+        int64_t onFrame  = 0;
         int64_t offFrame = INT64_MAX;   // INT64_MAX = gate-to-next (midiLen 0): no timed off
     };
 
@@ -399,8 +410,9 @@ class ExternalConsumer : public IMidiConsumer {
         a.on = true;
         a.channel = ch;
         a.note = static_cast<uint8_t>(note);
+        a.onFrame = ev.frame;
         // ⚠️ The project's tempo, not `on_play`'s fallback, so a LEN gate is the same in play and render.
-        const int tempo = project_->tempo > 0 ? project_->tempo : tempo_;
+        const int tempo = tempo_now();
         a.offFrame = ins.midiLen > 0
                          ? ev.frame + ins.midiLen * frames_per_tic(frames_per_step(tempo, sampleRate_))
                          : INT64_MAX;
@@ -468,6 +480,10 @@ class ExternalConsumer : public IMidiConsumer {
             wheel_fine(ev, ins);
             return;
         }
+        if (travels_as_note_command(ev.cc.param)) {
+            note_command(ev);
+            return;
+        }
         const int param = resolve_cc_param(ins, ev.cc.param);
         if (param < 0) return;    // an unassigned slot: nothing to move
         const uint8_t ch = chan(ins);
@@ -475,6 +491,33 @@ class ExternalConsumer : public IMidiConsumer {
         send_at(ev.frame, MIDI_CC | ch, static_cast<uint8_t>(param & 0x7F), static_cast<uint8_t>(v7));
         if (param == CC_PAN) lastPan_[ch] = v7;   // keep the note-on de-dup honest
         if (ev.cc.param == CC_VOLUME) volOut_[ch] = live_ ? VOL_UNTOUCHED : v7;
+    }
+
+    // A command a phrase gave the track's note, for another PocketTracker: with the note while its
+    // note-on is still queued — a step's own commands come a frame behind it — else for the note
+    // sounding. Nothing sounding, nothing to change, as in the app's own sound.
+    void note_command(const Event& ev) {
+        if (ev.track >= TrackInstruments::LANES || !active_[ev.track].on) return;
+        const ActiveNote& a = active_[ev.track];
+        NoteCommand c;
+        c.channel = a.channel;
+        c.note    = a.note;
+        c.id      = ev.cc.param;
+        c.value   = static_cast<uint8_t>(std::lround(f32_from_bits(ev.cc.valueBits) * 255.0f));
+        const auto on = std::find_if(pending_.begin(), pending_.end(), [&](const MidiMessage& m) {
+            return m.track == ev.track && m.frame == a.onFrame && (m.bytes[0] & 0xF0) == MIDI_NOTE_ON;
+        });
+        const bool withNote = on != pending_.end() && ev.frame <= a.onFrame + 1;
+        c.kind = withNote ? NOTE_COMMAND_WITH_NOTE : NOTE_COMMAND_NOW;
+        uint8_t bytes[NOTE_COMMAND_BYTES];
+        encode_note_command(c, bytes);
+        if (!withNote) {
+            insert(message(ev.frame, bytes, NOTE_COMMAND_BYTES));
+            return;
+        }
+        MidiMessage m = message(a.onFrame, bytes, NOTE_COMMAND_BYTES);
+        m.seq = on->seq;   // rolled back with its note
+        pending_.insert(on, m);
     }
 
     // MPG. ⚠️ Updates `lastProgram_`, or the next note would stay on the MPG's program; the bank
@@ -617,7 +660,7 @@ class ExternalConsumer : public IMidiConsumer {
         wheel_at(ev.track, ins, ev.frame);
 
         const NoteOnPayload& n = ev.noteOn;
-        const int   tempo = project_->tempo > 0 ? project_->tempo : tempo_;
+        const int   tempo = tempo_now();
         const float tic   = frames_per_tic_f(tempo, sampleRate_);
         const float pslOff = f32_from_bits(n.pslOffBits), pslDur = f32_from_bits(n.pslDurBits);
         if (std::fabs(pslOff) > 0.001f && pslDur > 0.0f) {
@@ -687,15 +730,25 @@ class ExternalConsumer : public IMidiConsumer {
 
     void queue(int64_t frame, uint8_t status, uint8_t d1, uint8_t d2, uint8_t len,
                uint8_t bendRange = 0, bool bendAlways = false) {
-        MidiMessage m;
-        m.frame = frame;
-        m.seq = seq_++;
-        m.bytes[0] = status; m.bytes[1] = d1; m.bytes[2] = d2;
-        m.len = len;
+        const uint8_t bytes[3] = {status, d1, d2};
+        MidiMessage m = message(frame, bytes, len);
         m.bendRange  = bendRange;
         m.bendAlways = bendAlways;
-        m.track      = producer_;
-        // Sorted insert on (frame, seq); usually at the end.
+        insert(m);
+    }
+
+    MidiMessage message(int64_t frame, const uint8_t* bytes, int len) {
+        MidiMessage m;
+        m.frame = frame;
+        m.seq   = seq_++;
+        std::copy(bytes, bytes + len, m.bytes);
+        m.len   = static_cast<uint8_t>(len);
+        m.track = producer_;
+        return m;
+    }
+
+    // Sorted on (frame, seq); usually at the end.
+    void insert(const MidiMessage& m) {
         auto pos = std::upper_bound(pending_.begin(), pending_.end(), m,
                                     [](const MidiMessage& a, const MidiMessage& b) {
                                         return a.frame != b.frame ? a.frame < b.frame : a.seq < b.seq;
@@ -731,10 +784,17 @@ class ExternalConsumer : public IMidiConsumer {
         emit(m, nowFrame);
     }
 
-    // ⚠️ Built from the truncated `frames_per_step`, so the clock stays on the scheduler's grid.
+    // ⚠️ Built from the truncated `frames_per_step`, so the clock stays on the scheduler's grid — and
+    // from the clock's step while one leads, which the walk is on then.
     int64_t frames_per_quarter() const {
-        const int tempo = (project_ && project_->tempo > 0) ? project_->tempo : tempo_;
-        return frames_per_step(tempo, sampleRate_) * 4;
+        if (followQuarter_ > 0) return followQuarter_;
+        return frames_per_step(tempo_now(), sampleRate_) * 4;
+    }
+
+    // The tempo this plays at: a leading clock's, else the song's (`on_play`'s with no project).
+    int tempo_now() const {
+        if (followBpm_ > 0) return followBpm_;
+        return (project_ && project_->tempo > 0) ? project_->tempo : tempo_;
     }
 
     // The hex number after `key` in a `t_play` detail ("row=0A" → 10); −1 if absent.
@@ -825,6 +885,8 @@ class ExternalConsumer : public IMidiConsumer {
     uint32_t seq_ = 0;
 
     int tempo_ = 128, sampleRate_ = 44100, offsetMs_ = 0;
+    int     followBpm_     = 0;   // set_follow's
+    int64_t followQuarter_ = 0;
 
     int  lastBank_[16] = {0}, lastProgram_[16] = {0}, lastPan_[16] = {0};
     bool channelUsed_[16] = {false};

@@ -35,7 +35,17 @@ class WinmmMidiOut : public MidiOutBase {
     bool        is_builtin_synth(int index) override;
 
   private:
-    HMIDIOUT handle_ = nullptr;
+    // A SysEx (a note command) is a long message, and its buffer is the driver's until it is marked
+    // done: a few take turns.
+    struct LongMessage {
+        MIDIHDR hdr{};
+        char    data[songcore::NOTE_COMMAND_BYTES]{};
+        bool    prepared = false;
+    };
+    bool send_long(const uint8_t* data, int len);
+
+    HMIDIOUT    handle_ = nullptr;
+    LongMessage long_[4];
 };
 
 }  // namespace ptshell

@@ -1691,8 +1691,9 @@ Open it from the PROJECT screen (cursor on the **MIDI >** row, press A). Press *
 |---|---|---|
 | OUTPUT | OFF / AUTO / a device | The device EXTERNAL instruments and the clock are sent to. **AUTO** takes the first device it finds, and takes it again when it is plugged back in. While nothing is open the row also says how many ports the system has. |
 | INPUT | OFF / AUTO / a device | The keyboard or controller you play from. AUTO works the same way. |
-| OFFSET | AUTO / −99 to +99 ms | Sends everything earlier (minus) or later (plus), so an outside synth lines up with the app's own sound. **AUTO** works the number out from this device's sound delay and shows it. A + LEFT/RIGHT steps 1 ms, A + UP/DOWN steps 10; A + B goes back to AUTO. |
-| SYNC | ON / OFF | Sends a MIDI clock — 24 pulses per quarter note, with start and stop — so other gear follows the tempo. |
+| OFFSET | AUTO / −99 to +99 ms | Sends everything earlier (minus) or later (plus), so an outside synth — or a device this one follows — lines up with the app's own sound. **AUTO** works the number out from this device's sound delay and shows it. A + LEFT/RIGHT steps 1 ms, A + UP/DOWN steps 10; A + B goes back to AUTO. |
+| SYNC OUT | ON / OFF | Sends a MIDI clock — 24 pulses per quarter note, with start and stop — so other gear follows the tempo. |
+| SYNC IN | OFF / TEMPO / FULL | Follows another device's MIDI clock — see *Following another device* below. The row shows the tempo arriving, or NO CLOCK. |
 | CTL CH | ALL / 01–16 | The channel mapped knobs are listened for on — see *Mapping knobs* below. |
 | PROG CHG | ON / OFF | ON sends each EXTERNAL instrument's BANK and PROG ahead of its notes, so the device is on the right patch. |
 | KEYS | MONO / POLY 2–8 | How many keys of a keyboard can sound at once — see *Playing from a keyboard* below. |
@@ -1716,12 +1717,12 @@ the next note on its track, after the instrument's LEN, at a `KIL` or an `OFF`, 
 | The V column, the instrument's VOL | The note's velocity |
 | `VOL`, beside the note or on a later step | Controller 7 (volume) — ahead of the note it is written with |
 | `PAN`, the instrument's PAN | Controller 10 (pan) |
-| `CUT` · `RES` | Controllers 74 (cutoff) and 71 (resonance) |
-| `REV` · `DEL` | Controllers 91 and 93 |
+| `REV` · `DEL` · `CUT` · `RES` · `LPF` · `HPF` · `BPF` · `DRV` · `CRU` · `LPO` | To another PocketTracker only, in a message other gear ignores: it plays them on that note as on its own, and its next note starts from its instrument again |
 | `PSL` · `PBN` · `PVB` · `PVX` · `FIN` | Pitch bend, moving as the command moves the note, scaled to the instrument's BEND |
 | `MPG` · `MPB` · `CCA`–`CCD` | A program change, a pitch bend, and the instrument's four controller slots — see [section 23](#23-effects-reference) |
 
-Commands that shape the app's own sound — the filter switches, drive, crush, slices — send nothing.
+`VOL` lasts for its own note, as in the app's own sound: the next note sends the volume back to full.
+To move an outside synth's filter or effects, give the instrument a CC A–D slot. Slices send nothing.
 
 > [!NOTE]
 > A pitch bend moves every note on its channel. Give each track that bends its own channel.
@@ -1740,9 +1741,30 @@ the lowest one that is free, and when all are busy the oldest key gives way.
 The pitch wheel bends the notes by up to 2 semitones, or as far as the sender says — another
 PocketTracker sends its BEND. Controllers 7, 10, 74, 71, 91 and 93 (volume, pan, cutoff, resonance,
 reverb and delay) move the notes of their own channel, and that channel's next notes start where they
-were left.
+were left. Cutoff and resonance move a filter the instrument has switched on, as `CUT` and `RES` do.
+Another PocketTracker's `REV`, `CUT` and the other commands above play on the note they came with,
+from its first sound; the next note starts from the instrument again.
 
 Keys are played, not recorded: nothing is written into the phrase.
+
+### Following another device
+
+With **SYNC IN** on, another device's MIDI clock leads — a drum machine, a DAW, or a second
+PocketTracker with SYNC OUT on.
+
+| SYNC IN | What follows |
+|---|---|
+| TEMPO | The tempo: the song plays at the other device's tempo, its steps on that device's beat. START and STOP stay this device's; START begins on the other device's next step. |
+| FULL | The tempo, and the other device's start and stop: when it starts, the song plays from its top — or from the place the other device starts at — wherever the cursor is; when it stops, the song stops. |
+
+`T>` shows the tempo the song plays at. The song's own TEMPO is not changed: a song started with no
+clock coming in plays at its own tempo again. Under FULL, START and STOP on this device still work as
+under TEMPO; STOP stops this device only.
+
+> [!NOTE]
+> The first note after the other device starts comes late by this device's sound delay, and the next
+> few steps catch up: within a beat the two play together. A start partway into a song row begins each track at that
+> point without replaying what came before it — a groove or `HOP` there, or a note still ringing.
 
 ### Mapping knobs
 

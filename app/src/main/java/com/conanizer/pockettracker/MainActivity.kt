@@ -378,6 +378,11 @@ class MainActivity : SDLActivity() {
     fun midiSend(b0: Int, b1: Int, b2: Int, len: Int): Boolean =
         midiOut?.send(b0, b1, b2, len) ?: false
 
+    /** A SysEx — a note command for another PocketTracker — whole, the first [len] bytes. */
+    @Keep
+    fun midiSendBytes(bytes: ByteArray, len: Int): Boolean =
+        midiOut?.sendBytes(bytes, len) ?: false
+
     // ── MIDI IN ──────────────────────────────────────────────────────────────────────────────────
     //
     // The same hooks for input: the list is the devices with an OUTPUT port (to receive, you open

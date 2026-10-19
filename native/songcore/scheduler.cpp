@@ -2,6 +2,8 @@
 
 #include "scheduler.h"
 
+#include <cstdio>
+
 namespace songcore {
 
 Sequencer::Sequencer(MidiRouter& router, const Project& project, int sample_rate)
@@ -19,7 +21,7 @@ void Sequencer::seed_rng(uint64_t s) {
 void Sequencer::finish_phrase_now() {
     if (!isPlaying_ || project_ == nullptr) return;
     if (playbackMode_ != PlaybackMode::PHRASE && playbackMode_ != PlaybackMode::CHAIN) return;
-    nextFrameToSchedule_ += finish_walk(playbackTrack_, frames_per_step(project_->tempo, sampleRate_));
+    nextFrameToSchedule_ += finish_walk(playbackTrack_, frames_per_step(tempo_in_force(*project_), sampleRate_));
 }
 
 PlaybackPosition Sequencer::getPlaybackPosition(int trackId) {
@@ -28,7 +30,7 @@ PlaybackPosition Sequencer::getPlaybackPosition(int trackId) {
     if (trackId >= 0 && playbackMode_ != PlaybackMode::SONG && trackId != playbackTrack_) return pos;
 
     int64_t currentFrame = getCurrentFrame();
-    int tempo = currentProject_ ? currentProject_->tempo : 120;
+    int tempo = currentProject_ ? tempo_in_force(*currentProject_) : 120;
     int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
     if (framesPerStep <= 0) return pos;   // unreachable for a legal tempo; never divide by zero
 
@@ -106,11 +108,11 @@ void Sequencer::playPhrase(int phraseId, int trackId) {
     currentProject_ = project_;
     currentPhraseId_ = phraseId;
     playbackTrack_ = clamp_track(trackId);
-    playbackStartFrame_ = getCurrentFrame();
+    playbackStartFrame_ = take_start_frame();
     if (phraseId < 0 || phraseId > 255) return;
     playbackMode_ = PlaybackMode::PHRASE;
     isPlaying_ = true;
-    int tempo = project_->tempo;
+    int tempo = tempo_in_force(*project_);
     router_.t_play("PHRASE", "id=" + hex2(phraseId), playbackStartFrame_, tempo, sampleRate_);
     nextFrameToSchedule_ = playbackStartFrame_;
     begin_phrase(phraseId, playbackStartFrame_, playbackTrack_, project_transpose_semitones(*project_), 0);
@@ -122,12 +124,12 @@ void Sequencer::playChain(int chainId, int trackId) {
     currentProject_ = project_;
     currentChainId_ = chainId;
     playbackTrack_ = clamp_track(trackId);
-    playbackStartFrame_ = getCurrentFrame();
+    playbackStartFrame_ = take_start_frame();
     if (chainId < 0 || chainId > 255) return;
     const Chain& chain = project_->chains[chainId];
     playbackMode_ = PlaybackMode::CHAIN;
     isPlaying_ = true;
-    int tempo = project_->tempo;
+    int tempo = tempo_in_force(*project_);
     router_.t_play("CHAIN", "id=" + hex2(chainId), playbackStartFrame_, tempo, sampleRate_);
     nextFrameToSchedule_ = playbackStartFrame_;
     nextChainRowToSchedule_ = 0;
@@ -145,14 +147,20 @@ void Sequencer::playChain(int chainId, int trackId) {
     }
 }
 
-void Sequencer::playSong(int startRow) {
+void Sequencer::playSong(int startRow, int offsetSteps, bool live) {
     stop();
     currentProject_ = project_;
-    playbackStartFrame_ = getCurrentFrame();
+    playbackStartFrame_ = take_start_frame();
     playbackMode_ = PlaybackMode::SONG;
     isPlaying_ = true;
-    int tempo = project_->tempo;
-    router_.t_play("SONG", "row=" + hex2(startRow), playbackStartFrame_, tempo, sampleRate_);
+    int tempo = tempo_in_force(*project_);
+    std::string detail = "row=" + hex2(startRow);
+    if (offsetSteps > 0) {
+        char step[16];
+        std::snprintf(step, sizeof step, " step=%X", offsetSteps);
+        detail += step;
+    }
+    router_.t_play("SONG", detail, playbackStartFrame_, tempo, sampleRate_);
     nextFrameToSchedule_ = playbackStartFrame_;
     // ⚠️ All eight start together from the cursor's row — one downbeat. They diverge as their
     // chains end at different lengths. Per-track starting is LIVE mode.
@@ -162,9 +170,57 @@ void Sequencer::playSong(int startRow) {
         trackChainRow_[t]  = 0;
         trackDone_[t]      = false;
         liveLoopFrame_[t]  = playbackStartFrame_;
+        if (offsetSteps > 0) place_track_at(t, startRow, offsetSteps, live);
     }
     songPositionStartFrames_.clear();
     phraseStepStartFrames_.clear();
+}
+
+void Sequencer::place_track_at(int trackId, int startRow, int offsetSteps, bool live) {
+    const Project& project = *project_;
+    int row = startRow;
+    int remaining = offsetSteps;
+    // Bounded: a cell that plays holds a phrase, so each pass spends at least 16 steps.
+    while (remaining > 0 && song_cell_plays(project, trackId, row)) {
+        const Chain& chain = project.chains[static_cast<size_t>(song_cell_chain(project, trackId, row))];
+        int phrases = 0;
+        for (int i = 0; i < CHAIN_ROWS; ++i)
+            if (!chain_is_empty(chain, i)) ++phrases;
+        if (live) remaining %= phrases * 16;   // LIVE loops the row it is on
+        if (remaining < phrases * 16) {
+            int chainRow = next_chain_row_no_wrap(chain, 0);
+            for (int skip = remaining / 16; skip > 0; --skip)
+                chainRow = next_chain_row_no_wrap(chain, chainRow + 1);
+            trackChainRow_[trackId] = chainRow;
+            TrackState& ts = trackStates_[trackId];
+            ts.hopTargetRow = remaining % 16 > 0 ? remaining % 16 : -1;
+            // The groove where its phrase's steps would have left it — exact for a length dividing 16.
+            ts.grooveStep = remaining % 16;
+            break;
+        }
+        remaining -= phrases * 16;
+        // As advance_track_song_row: down the column, or back to the block's top.
+        row = song_cell_plays(project, trackId, row + 1) ? row + 1 : block_start_row(project, trackId, row);
+    }
+    trackSongRow_[trackId] = row;
+}
+
+void Sequencer::shift_unwalked(int64_t delta) {
+    nextFrameToSchedule_ += delta;
+    for (int t = 0; t < 8; ++t) {
+        trackNextFrame_[t] += delta;
+        // A phrase part-way through walks its next row from its own start.
+        if (trackStates_[t].walk.active) trackStates_[t].walk.startFrame += delta;
+    }
+    gridFrame_ += delta;
+}
+
+int64_t Sequencer::take_start_frame() {
+    const int64_t f = nextStartFrame_ >= 0 ? nextStartFrame_ : getCurrentFrame();
+    nextStartFrame_ = -1;
+    gridStep_  = 0;
+    gridFrame_ = f;
+    return f;
 }
 
 void Sequencer::stop() {
@@ -202,8 +258,8 @@ LiveSlot Sequencer::live_queue(int trackId) const {
     return q;
 }
 
-void Sequencer::playSongLive(int songRow, int mask) {
-    playSong(songRow);
+void Sequencer::playSongLive(int songRow, int mask, int offsetSteps) {
+    playSong(songRow, offsetSteps, /*live=*/true);
     liveMode_ = true;
     for (int t = 0; t < 8; ++t) {
         liveQueue_[t]  = LiveSlot{};
@@ -281,19 +337,23 @@ int64_t Sequencer::buffer_head() const {
 void Sequencer::updatePlaybackBuffer(int64_t aheadMs) {
     if (!isPlaying_ || project_ == nullptr) return;
     const Project& project = *project_;
-    int tempo = project.tempo;
-    int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
+    int tempo = tempo_in_force(project);
+    // A leading clock sets the step (SYNC IN).
+    int64_t framesPerStep = followStep_ > 0 ? followStep_ : frames_per_step(tempo, sampleRate_);
     int64_t framesPerPhrase = framesPerStep * 16;
     int64_t currentFrame = getCurrentFrame();
     const int64_t minBuffer = aheadMs * sampleRate_ / 1000;
-    if (buffer_head() - currentFrame >= minBuffer) return;
+    // How far this fill walks: the horizon, or short of the clock's limit.
+    int64_t reach = currentFrame + minBuffer;
+    if (followLimit_ >= 0 && followLimit_ < reach) reach = followLimit_;
+    if (buffer_head() >= reach) return;
     // ⚠️ The cap bounds the work one fill can do.
     const int stepCap = STEPS_PER_PHRASE_OF_DEPTH * static_cast<int>(1 + minBuffer / framesPerPhrase);
 
     switch (playbackMode_) {
         case PlaybackMode::PHRASE: {
             TrackState& trackState = trackStates_[playbackTrack_];
-            for (int step = 0; step < stepCap && nextFrameToSchedule_ - currentFrame < minBuffer; ++step) {
+            for (int step = 0; step < stepCap && nextFrameToSchedule_ < reach; ++step) {
                 if (!trackState.walk.active) {
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
@@ -309,7 +369,7 @@ void Sequencer::updatePlaybackBuffer(int64_t aheadMs) {
         case PlaybackMode::CHAIN: {
             const Chain& chain = project.chains[currentChainId_];
             TrackState& trackState = trackStates_[playbackTrack_];
-            for (int step = 0; step < stepCap && nextFrameToSchedule_ - currentFrame < minBuffer; ++step) {
+            for (int step = 0; step < stepCap && nextFrameToSchedule_ < reach; ++step) {
                 if (trackState.walk.active) {
                     nextFrameToSchedule_ += walk_phrase_row(playbackTrack_, framesPerStep);
                     continue;
@@ -354,12 +414,17 @@ void Sequencer::updatePlaybackBuffer(int64_t aheadMs) {
                 // Nothing left to fill, and the transport keeps running: a block loops for ever,
                 // so all eight done means PLAY landed on an unwritten row. STOP is the only end.
                 if (nextTrack < 0) break;
-                if (earliest - currentFrame >= minBuffer) break;
+                if (earliest >= reach) break;
                 schedule_track_unit(project, nextTrack, framesPerStep, framesPerPhrase);
             }
             break;
         }
         default: break;
+    }
+    // The plain-step grid, to where every track now stands.
+    while (gridFrame_ < reach) {
+        gridFrame_ += framesPerStep;
+        ++gridStep_;
     }
 }
 
@@ -897,7 +962,7 @@ void Sequencer::emit_ramp_ticks(const std::vector<RampSpec>& ramps, std::vector<
             lastValue[i].byte = b;
             if (r.kind == RampKind::VIBRATO) {
                 NoteCarry& c = trackState.carry;
-                vibrato_from(b, r.fxCode == FX_PVX, project_->tempo, c.vibSpeed, c.vibDepth);
+                vibrato_from(b, r.fxCode == FX_PVX, tempo_in_force(*project_), c.vibSpeed, c.vibDepth);
                 router_.ext_vibrato(frame, trackId, c.vibSpeed, c.vibDepth);
                 return;
             }
@@ -1182,11 +1247,11 @@ void Sequencer::schedule_step_note(StepPlay& s) {
         ts.pitchBendActive = true;
     }
     if (params.pvbValue.has_value() && *params.pvbValue != 0) {
-        vibrato_from(*params.pvbValue, false, project_->tempo, vibratoSpeed, vibratoDepth);
+        vibrato_from(*params.pvbValue, false, tempo_in_force(*project_), vibratoSpeed, vibratoDepth);
         ts.vibratoActive = true;
     }
     if (params.pvxValue.has_value() && *params.pvxValue != 0) {
-        vibrato_from(*params.pvxValue, true, project_->tempo, vibratoSpeed, vibratoDepth);
+        vibrato_from(*params.pvxValue, true, tempo_in_force(*project_), vibratoSpeed, vibratoDepth);
         ts.vibratoActive = true;
     }
 
@@ -1321,8 +1386,8 @@ void Sequencer::emit_mid_note_pitch_and_volume(StepPlay& s) {
     TrackState& ts = s.ts;
     const ResolvedStepParams& params = s.params;
     const int64_t frame = s.effectiveTargetFrame;
-    // The song's tempo on every path, so an export bends and vibrates as playback does.
-    const int tempo = project_->tempo;
+    // The tempo in force — an export's is the song's — so an export bends and vibrates as playback does.
+    const int tempo = tempo_in_force(*project_);
     if (params.volumeFromVxx) {
         router_.cc(frame, s.trackId, CC_VOLUME, s.phraseVol);
         ts.carry.phraseVol = s.phraseVol;
@@ -1567,7 +1632,7 @@ NoteCarry Sequencer::voice_at(const TrackState& ts, int64_t frame, unsigned* fad
             }
             const int b = t >= 1.0 ? r.destByte : ramp_value(r, t);
             if (r.kind == RampKind::VIBRATO)
-                vibrato_from(b, r.fxCode == FX_PVX, project_->tempo, v.vibSpeed, v.vibDepth);
+                vibrato_from(b, r.fxCode == FX_PVX, tempo_in_force(*project_), v.vibSpeed, v.vibDepth);
             else if (r.ccId == CC_VOLUME) v.phraseVol = b / 255.0f;
             else if (r.ccId == CC_PAN) v.pan = b / 255.0f;
             else { v.set_cc(r.ccId, b / 255.0f); mask |= 1u << carry_cc_slot(r.ccId); }

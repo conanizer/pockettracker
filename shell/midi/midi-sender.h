@@ -3,7 +3,7 @@
 
 // The MIDI sender thread. Messages are queued against a frame and released late-never-early by
 // `ExternalConsumer::pump`; from the 60 Hz loop a note would leave up to 16.7 ms late. This pumps at
-// ~1 kHz against an interpolated position (`FrameEstimator`) — the raw counter moves once a block.
+// ~1 kHz against the frame the audio device is taking (`AudioEngine::getDeviceFrame`).
 // ⚠️ An SDL thread: on Android it makes JNI calls, and SDL's entry attaches it to the JVM.
 // It may read the frame counter and call `pump`, nothing else. It may block in a port write, so HIGH
 // priority, not TIME_CRITICAL (which would make the audio callback wait).
@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "songcore/frame_estimator.h"
 #include "songcore/midi_out.h"
 
 struct SDL_Thread;
@@ -58,7 +57,7 @@ class MidiJitterRecorder : public songcore::IMidiSendObserver {
 // Built after the port is attached, before the loop starts. Ready line at start, tick counts at stop.
 class MidiSender {
   public:
-    MidiSender(AudioEngine& engine, songcore::SongcoreHost& host, int sampleRate);
+    MidiSender(AudioEngine& engine, songcore::SongcoreHost& host);
     ~MidiSender();
 
     MidiSender(const MidiSender&)            = delete;
@@ -76,7 +75,6 @@ class MidiSender {
 
     AudioEngine&            engine_;
     songcore::SongcoreHost& host_;
-    songcore::FrameEstimator clock_;
 
     SDL_Thread*        thread_ = nullptr;
     std::atomic<bool>  quit_{false};
@@ -84,9 +82,6 @@ class MidiSender {
     std::atomic<long long> busyTicks_{0};
     std::atomic<long long> maxBusyGap_{0};   // µs; the thread's own worst cadence
 };
-
-// Monotonic microseconds, overflow-safe.
-int64_t monotonic_us();
 
 }  // namespace ptshell
 

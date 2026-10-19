@@ -68,6 +68,7 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // ⚠️ After the line above, which its fallback reads: an older file is AUTO only if its offset was 0.
     values.midiOffsetAuto     = get_bool(j, "midi_offset_auto", values.midiOffsetMs == 0);
     values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
+    values.midiSyncIn         = clamp(get_int(j, "midi_sync_in", values.midiSyncIn), 0, 2);
     // 0-15 or `MIDI_CTL_CH_ALL`; out of range (an older build's `-1`) → ALL.
     values.midiControlChannel = get_int(j, "midi_control_channel", values.midiControlChannel);
     if (values.midiControlChannel < 0 || values.midiControlChannel > songcore::MIDI_CTL_CH_ALL)
@@ -130,6 +131,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["midi_offset_ms"]     = values.midiOffsetMs;
     j["midi_offset_auto"]   = values.midiOffsetAuto;
     j["midi_sync_out"]      = values.midiSyncOut;
+    j["midi_sync_in"]       = values.midiSyncIn;
     j["midi_control_channel"] = values.midiControlChannel;   // 0-15 (shown 01-16), or MIDI_CTL_CH_ALL
     j["midi_in_voices"]       = values.midiInVoices;         // 1 = MONO, 2-8 = POLY
     j["midi_velocity"]        = values.midiVelocity;

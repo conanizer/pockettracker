@@ -436,6 +436,9 @@ struct Project {
     int version = 0;
     std::string name = "UNTITLED";
     int tempo = 128;
+    // ⚠️ RUNTIME ONLY, never saved: an incoming MIDI clock's tempo while it leads (SYNC IN); 0 = none.
+    // A playback path reads `tempo_in_force()`, not `tempo`; an export plays `tempo`.
+    int clockTempo = 0;
     int transpose = 0;
     int masterVolume = 0xFF;
     int ottDepth = 0, masterBusFx = 0, dustDepth = 0, limiterPreGain = 0;
@@ -484,6 +487,9 @@ struct Project {
     // Which knob moves which parameter — song content; the knobs' channel is in settings.json.
     std::vector<MidiMapping> midiMappings;
 };
+
+// The tempo the app plays at: a leading clock's, else the song's TEMPO.
+inline int tempo_in_force(const Project& p) { return p.clockTempo > 0 ? p.clockTempo : p.tempo; }
 
 // Which tracks sound. ⚠️ DERIVED, never stored: solo is a property of the set. Mute wins over solo.
 inline bool any_solo(const Project& p) {

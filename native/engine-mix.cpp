@@ -121,8 +121,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
                                            ip.eqBands[i].gainDb, ip.eqBands[i].q);
         }
     }
-    sv.reverbSend = ip.reverbSend;
-    sv.delaySend  = ip.delaySend;
+    voiceSetSends(sv, ip.reverbSend, ip.delaySend);
 
     sv.params.setBase(PARAM_VOL,   note.volume);
     sv.params.setBase(PARAM_PAN,   note.pan);
@@ -328,12 +327,13 @@ float AudioEngine::mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bo
         buf[i * 2 + 1] *= gate;
     }
 
-    if ((stemsMode == 0 || stemsMode >= 9) && (v.reverbSend > 0.0f || v.delaySend > 0.0f)) {
+    if ((stemsMode == 0 || stemsMode >= 9) && (v.reverbSend.audible() || v.delaySend.audible())) {
         for (int i = 0; i < c.numFrames; i++) {
-            revSendBufL[i] += buf[i * 2]     * v.reverbSend;
-            revSendBufR[i] += buf[i * 2 + 1] * v.reverbSend;
-            dlySendBufL[i] += buf[i * 2]     * v.delaySend;
-            dlySendBufR[i] += buf[i * 2 + 1] * v.delaySend;
+            const float rev = v.reverbSend.next(), dly = v.delaySend.next();
+            revSendBufL[i] += buf[i * 2]     * rev;
+            revSendBufR[i] += buf[i * 2 + 1] * rev;
+            dlySendBufL[i] += buf[i * 2]     * dly;
+            dlySendBufR[i] += buf[i * 2 + 1] * dly;
         }
     }
 
@@ -531,7 +531,8 @@ void AudioEngine::takeQueuedWork(BlockMix& b) {
     // A live key's bytes become records here, stamped at this block's first frame, so the drain
     // below takes them. Never during an export: a key is not part of the song.
     if (!b.offlineRender) {
-        if (LiveInputSource* live = liveInput.load(std::memory_order_acquire)) live->drainLiveInput(blockStartFrame);
+        if (LiveInputSource* live = liveInput.load(std::memory_order_acquire))
+            live->drainLiveInput(blockStartFrame, liveClock_);
     }
     paramUpdateQueue.drainUntil(blockEnd, paramBatch);
     killQueue.drainUntil(blockEnd, killBatch);
@@ -828,7 +829,7 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
     if (effDownsample != voice.dsLast) {
         if (voice.chain.started) {   // a change on the sounding note — before it, just where it starts
             voice.dsPrev     = voice.dsLast;
-            voice.dsFadeLeft = DOWNSAMPLE_FADE_FRAMES;
+            voice.dsFadeLeft = GLIDE_FRAMES;
         }
         voice.dsLast = effDownsample;
     }
@@ -938,9 +939,10 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
     bool      ranOut           = false;
 
     const bool   toSends    = stemsMode == 0 || stemsMode >= 9;
-    const float  revLevel   = voice.reverbSend, dlyLevel = voice.delaySend;
-    const bool   toReverb   = toSends && revLevel > 0.0f;
-    const bool   toDelay    = toSends && dlyLevel > 0.0f;
+    GlidedLevel& revLevel   = voice.reverbSend;
+    GlidedLevel& dlyLevel   = voice.delaySend;
+    const bool   toReverb   = toSends && revLevel.audible();
+    const bool   toDelay    = toSends && dlyLevel.audible();
     const bool   toOutput   = stemsMode == 0 || trackId == stemsMode - 1;
     float* const revL = revSendBufL; float* const revR = revSendBufR;
     float* const dlyL = dlySendBufL; float* const dlyR = dlySendBufR;
@@ -984,7 +986,7 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         }
         float volRoute = volRouteFrom + volRouteStep * t;
         if (volGlideLeft > 0) {   // a table VOL on the sounding note: blend in, never step
-            const float k = static_cast<float>(volGlideLeft) / VOL_GLIDE_FRAMES;
+            const float k = static_cast<float>(volGlideLeft) / GLIDE_FRAMES;
             volRoute = volGlideFrom * k + volRoute * (1.0f - k);
             --volGlideLeft;
         }
@@ -995,7 +997,7 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         float procL = Playhead::read(ph.left, idx, frac, effDownsample);
         float procR = stereo ? Playhead::read(ph.right, idx, frac, effDownsample) : procL;
         if (dsFadeLeft > 0) {   // the downsample changed mid-note: the old read fades out
-            const float k = static_cast<float>(dsFadeLeft--) / DOWNSAMPLE_FADE_FRAMES;
+            const float k = static_cast<float>(dsFadeLeft--) / GLIDE_FRAMES;
             procL = Playhead::read(ph.left, idx, frac, dsPrev) * k + procL * (1.0f - k);
             if (stereo) procR = Playhead::read(ph.right, idx, frac, dsPrev) * k + procR * (1.0f - k);
         }
@@ -1034,12 +1036,14 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
 
         if (toReverb || toDelay) {
             if (toReverb) {
-                revL[i] += procL * voiceFade * panL * revLevel;
-                revR[i] += procR * voiceFade * panR * revLevel;
+                const float rev = revLevel.next();
+                revL[i] += procL * voiceFade * panL * rev;
+                revR[i] += procR * voiceFade * panR * rev;
             }
             if (toDelay) {
-                dlyL[i] += procL * voiceFade * panL * dlyLevel;
-                dlyR[i] += procR * voiceFade * panR * dlyLevel;
+                const float dly = dlyLevel.next();
+                dlyL[i] += procL * voiceFade * panL * dly;
+                dlyR[i] += procR * voiceFade * panR * dly;
             }
         }
 
@@ -1437,6 +1441,15 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         if (LiveInputSource* live = liveInput.load(std::memory_order_acquire)) live->discardLiveInput();
         return;
     }
+
+    // One anchor for the whole callback, on the device's line: its sub-blocks run faster than real time.
+    const int64_t startUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                                blockStart.time_since_epoch()).count();
+    deviceClock_.on_callback(globalFrameCounter.load(std::memory_order_relaxed), startUs, numFrames,
+                             static_cast<int>(sampleRate));
+    liveClock_.us         = startUs;
+    liveClock_.frame      = getDeviceFrame(startUs);
+    liveClock_.sampleRate = static_cast<int>(sampleRate);
 
     // ⚠️ Chunked at PROCESS_SUBBLOCK, as renderOffline is: a device period resolves notes too coarsely.
     int processed = 0;

@@ -245,18 +245,19 @@ enum class MidiRow {
     OUTPUT   = 0,   // <device name> | AUTO | OFF — the cable
     INPUT    = 1,   // <device name> | AUTO | OFF — the cable
     OFFSET   = 2,   // -99..+99 MS           — the cable
-    SYNC     = 3,   // ON | OFF              — the cable (24 PPQN clock + transport)
-    CTL_CH   = 4,   // ALL | 01..16          — the cable: which channel carries MAPPING knobs
-    PROG_CHG = 5,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
-    KEYS     = 6,   // MONO | POLY 2..8      — how a live key plays (settings.json)
-    VELOCITY = 7,   // ON | OFF              — OFF plays every live key at full strength (settings.json)
-    MAPPING  = 8,   // A: the mapping list   — the project
-    PANIC    = 9,   // A: ALL NOTES OFF
-    TEST     = 10,  // A: C-4 CH 1
+    SYNC     = 3,   // SYNC OUT: ON | OFF     — the cable (24 PPQN clock + transport)
+    SYNC_IN  = 4,   // OFF | TEMPO | FULL    — the cable: follow another device's clock
+    CTL_CH   = 5,   // ALL | 01..16          — the cable: which channel carries MAPPING knobs
+    PROG_CHG = 6,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
+    KEYS     = 7,   // MONO | POLY 2..8      — how a live key plays (settings.json)
+    VELOCITY = 8,   // ON | OFF              — OFF plays every live key at full strength (settings.json)
+    MAPPING  = 9,   // A: the mapping list   — the project
+    PANIC    = 10,  // A: ALL NOTES OFF
+    TEST     = 11,  // A: C-4 CH 1
 };
 
 // Unlike PROJECT's, these rows may be inserted: nothing stores a MIDI row index.
-constexpr int MIDI_ROW_COUNT = 11;
+constexpr int MIDI_ROW_COUNT = 12;
 
 // A gap before the keyboard's rows, and another before the actions.
 inline bool midi_row_gap_after(MidiRow row) { return row == MidiRow::PROG_CHG || row == MidiRow::VELOCITY; }

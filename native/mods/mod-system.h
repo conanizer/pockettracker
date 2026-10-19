@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdint>
 #include "note-queue.h"
+#include "effects/glide.h"
 
 // A voice's parameters: each slot is a base (set at trigger or by an effect) plus a mod accumulator
 // cleared every block. Value = base + mod, clamped where it is read.
@@ -143,9 +144,9 @@ public:
     float modDestValues[PARAM_COUNT]{};
     float prevModDestValues[PARAM_COUNT]{};
 
-    // The note's send levels, 0-1: seeded from the instrument at trigger, moved by REV / DEL.
-    float reverbSend = 0.0f;
-    float delaySend  = 0.0f;
+    // The note's send levels: seeded from the instrument at trigger, moved by REV / DEL — gliding.
+    GlidedLevel reverbSend;
+    GlidedLevel delaySend;
 
     // A MIDI-in pitch wheel, semitones: zeroed at every trigger, then set by the channel's bend.
     float midiWheel = 0.0f;

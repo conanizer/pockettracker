@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "songcore/device_clock.h"
+
 namespace ptshell {
 
 namespace {
@@ -16,11 +18,13 @@ std::string lower(std::string s) {
 
 void MidiInBase::deliver(const uint8_t* data, int len) {
     if (!data || len <= 0) return;
+    // The arrival time, for SYNC IN: the drain turns it into the frame the bytes came on.
+    const int64_t us = songcore::steady_us();
     callbacks_.fetch_add(1, std::memory_order_relaxed);
     bytes_.fetch_add(static_cast<uint64_t>(len), std::memory_order_relaxed);
     // ⚠️ Loaded once: re-reading between the null test and the call lets `set_sink(nullptr)` slip in.
     songcore::IMidiInSink* sink = sink_.load(std::memory_order_acquire);
-    if (sink) sink->on_bytes(data, len);
+    if (sink) sink->on_bytes_at(data, len, us);
 }
 
 std::string MidiInBase::resolve_spec(const std::string& spec) {

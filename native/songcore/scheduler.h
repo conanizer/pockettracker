@@ -252,6 +252,28 @@ class Sequencer {
     // The frame latched at PLAY — the trace's session base.
     int64_t playback_start_frame() const { return playbackStartFrame_; }
 
+    // ── SYNC IN: a clock from another device leads ──
+
+    // Each fill walks `framesPerStep` (0 = from the tempo in force), and no row starting at or past
+    // `limit` (−1 = none). The host sets both before every fill.
+    void set_follow(int64_t framesPerStep, int64_t limit) {
+        followStep_  = framesPerStep;
+        followLimit_ = limit;
+    }
+
+    // Plain step `grid_step()` of the take begins on `grid_frame()`, the next not yet walked. Every
+    // plain track's rows begin on it: the rows one fill walks share one step length.
+    int64_t grid_step() const { return gridStep_; }
+    int64_t grid_frame() const { return gridFrame_; }
+
+    // The next transport start begins on `frame` instead of the clock — once.
+    void set_start_frame(int64_t frame) { nextStartFrame_ = frame; }
+
+    // Every boundary not yet walked, and the grid, `delta` frames later (or earlier).
+    // ⚠️ Only while every track stands on the same boundary: a take's first step, held there by the
+    // follow limit while the clock's tempo is not yet known.
+    void shift_unwalked(int64_t delta);
+
     // How far past the clock the walk keeps scheduled; an edit is heard from the next row not walked.
     // ⚠️ It must outlast the longest gap between two polls; a longer UI hold fills to
     // LONG_OPERATION_MS first.
@@ -305,7 +327,8 @@ class Sequencer {
 
     void playChain(int chainId, int trackId = 0);
 
-    void playSong(int startRow = 0);
+    // `offsetSteps` into the row: each track that far into its own column (a song position).
+    void playSong(int startRow = 0, int offsetSteps = 0, bool live = false);
 
     void stop();
 
@@ -321,7 +344,7 @@ class Sequencer {
     LiveSlot live_queue(int trackId) const;
 
     // Start LIVE from stopped: `mask` bit N launches track N at `songRow`, the rest start silent.
-    void playSongLive(int songRow, int mask);
+    void playSongLive(int songRow, int mask, int offsetSteps = 0);
 
     // Toggle LIVE under a running transport; every track keeps the row it is on.
     // ⚠️ It rewinds: a chain end in the lookahead is already committed, and the change would land a
@@ -359,6 +382,14 @@ class Sequencer {
                                 int64_t framesPerStep, int64_t framesPerPhrase);
 
     static int clamp_track(int trackId) { return (trackId >= 0 && trackId < 8) ? trackId : 0; }
+
+    // The take's first frame — `set_start_frame`'s, else the clock — where the grid starts too.
+    int64_t take_start_frame();
+
+    // One track `offsetSteps` into its column from `startRow`, counted as the walk goes (chain rows,
+    // block loops; LIVE stays on its row); the phrase is entered at the step through the HOP target.
+    // ⚠️ Nominal, as a song position is: what a GRV, HOP or held note before it did is not replayed.
+    void place_track_at(int trackId, int startRow, int offsetSteps, bool live);
 
     // Rewind ONE SONG track to its earliest boundary past `currentFrame`, so a LIVE launch lands there
     // rather than after the lookahead. Returns the frame to drop queued notes from, or −1.
@@ -699,6 +730,12 @@ class Sequencer {
     // The mixer track PHRASE/CHAIN mode plays through.
     int playbackTrack_ = 0;
     int64_t playbackStartFrame_ = 0;
+    int64_t nextStartFrame_ = -1;   // set_start_frame's, until a start takes it
+    // SYNC IN: the clock's step and limit for the fill, and the plain-step grid as walked.
+    int64_t followStep_  = 0;
+    int64_t followLimit_ = -1;
+    int64_t gridStep_    = 0;
+    int64_t gridFrame_   = 0;
     PlaybackMode playbackMode_ = PlaybackMode::STOPPED;
     bool isPlaying_ = false;
 
