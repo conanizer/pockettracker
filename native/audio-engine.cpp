@@ -880,8 +880,9 @@ void AudioEngine::renderMetronome(float* output, int numFrames, int channelCount
     const int64_t epoch = metronomeEpoch.load(std::memory_order_relaxed);
     const int64_t beat  = metronomeBeatFrames.load(std::memory_order_relaxed);
 
-    if (epoch != metroEpoch_) {
+    if (epoch != metroTake_) {
         // A new take: beat 0, the downbeat, is the transport's start.
+        metroTake_       = epoch;
         metroEpoch_      = epoch;
         metroBeatFrames_ = beat;
         metroIndex_      = 0;

@@ -469,6 +469,8 @@ public:
         float   trackVolStart[SF_VOICE_COUNT], trackVolEnd[SF_VOICE_COUNT];
         float   gateStart[SF_VOICE_COUNT],     gateEnd[SF_VOICE_COUNT];
         float   revGateStart, revGateEnd, dlyGateStart, dlyGateEnd, dryGateStart, dryGateEnd;
+        float   revReturnStart, revReturnEnd, dlyReturnStart, dlyReturnEnd;   // the returns' WET
+        float   dlyToRevStart, dlyToRevEnd;                                   // the delay's feed into the reverb
         float   masterVolStart, masterVolEnd;
         int     previewTrack;         // the track the preview lane borrows its fader from, or -1
         bool    previewBorrows;
@@ -491,8 +493,6 @@ public:
     void captureTrackScopes(const BlockMix& b);
     void mixBuses(const BlockMix& b);
     void mixMaster(const BlockMix& b);
-    template <typename V>
-    void chainTrackPiece(V& v, int t, float* buf, const BlockMix& c, int from, int to);
     template <typename V>
     float mixTrackBuffer(V& v, int t, float* buf, const BlockMix& c, bool& stopFadeDone);
 
@@ -883,6 +883,8 @@ private:
     std::atomic<int64_t> metronomeBeatFrames{0};    // frames in a quarter note at the live tempo
     // Audio thread only. `metroIndex_` counts beats since the epoch (a tempo change rebases it);
     // `metroCount_` since the transport started — the bar accent follows it, so a nudge keeps the downbeat.
+    // ⚠️ `metroTake_` is the take's start as set; `metroEpoch_` moves away from it on every rebase.
+    int64_t metroTake_       = -1;
     int64_t metroEpoch_      = -1;
     int64_t metroBeatFrames_ = 0;
     int64_t metroIndex_      = 0;
@@ -960,9 +962,12 @@ private:
     std::atomic<bool>  revReturnMuted{false}, delayReturnMuted{false}, dryMuted{false};
     float revReturnGate = 1.0f, delayReturnGate = 1.0f, dryGate = 1.0f;
     std::atomic<float> masterVolume{1.0f};
+    // The returns' WET and the delay's feed into the reverb: targets, walked once a block like a fader,
+    // and where each has got to (audio thread only).
     std::atomic<float> reverbReturnGain{0.5f};
     std::atomic<float> delayReturnGain{0.5f};
     std::atomic<float> delayToReverbSend{0.0f};
+    float reverbReturnRamp = 0.5f, delayReturnRamp = 0.5f, delayToReverbRamp = 0.0f;
 
     ReverbModule reverbSend;
     DelayModule  delaySend;

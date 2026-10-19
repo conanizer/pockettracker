@@ -11,13 +11,13 @@ struct DriveModule {
     daisysp::Overdrive od;
     daisysp::Overdrive odPrev;   // the setting fading out
     int  prevDrive = 0;
-    int  fadeLeft  = 0;
+    Ramp oldShare;               // the old setting's share of the output, 1 to 0
     bool fresh     = true;
 
     void reset() {
         drive = 0;
         od.Init();
-        fadeLeft = 0;
+        oldShare = Ramp{};
         fresh = true;
     }
 
@@ -27,7 +27,7 @@ struct DriveModule {
         if (!fresh && d != drive) {
             odPrev    = od;
             prevDrive = drive;
-            fadeLeft  = GLIDE_FRAMES;
+            oldShare.start(1.0f, 0.0f, GLIDE_SAMPLES);
         }
         drive = d;
         od.SetDrive(0.3f + (d / 255.0f) * 0.3f);
@@ -35,25 +35,23 @@ struct DriveModule {
 
     inline float processMono(float in) {
         fresh = false;
-        if (!enabled() && fadeLeft == 0) return in;
+        if (!enabled() && !oldShare.moving()) return in;
         float out = enabled() ? od.Process(in) : in;
-        if (fadeLeft > 0) {
-            const float k = static_cast<float>(fadeLeft) / GLIDE_FRAMES;
+        if (oldShare.moving()) {
+            const float k = oldShare.next();
             out = (prevDrive > 0 ? odPrev.Process(in) : in) * k + out * (1.0f - k);
-            --fadeLeft;
         }
         return out;
     }
 
     inline void processStereo(float& L, float& R) {
         fresh = false;
-        if (!enabled() && fadeLeft == 0) return;
+        if (!enabled() && !oldShare.moving()) return;
         float outL = enabled() ? od.Process(L) : L, outR = enabled() ? od.Process(R) : R;
-        if (fadeLeft > 0) {
-            const float k = static_cast<float>(fadeLeft) / GLIDE_FRAMES;
+        if (oldShare.moving()) {
+            const float k = oldShare.next();
             outL = (prevDrive > 0 ? odPrev.Process(L) : L) * k + outL * (1.0f - k);
             outR = (prevDrive > 0 ? odPrev.Process(R) : R) * k + outR * (1.0f - k);
-            --fadeLeft;
         }
         L = outL;
         R = outR;

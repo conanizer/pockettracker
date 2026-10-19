@@ -1,5 +1,7 @@
 #pragma once
 
+#include "effects/glide.h"   // every fade length
+
 #define LOG_TAG "NativeAudio"
 
 // Logging: Android's log on Android, stderr elsewhere.
@@ -41,15 +43,6 @@ inline const bool debug_enabled = [] {
 
 // One voice per track. Nine lanes (8 = preview) but eight voices: a preview steals a fading one.
 const int MAX_VOICES = 8;
-const int DECLICK_SAMPLES = 64;  // ~1.45 ms: note start, voice steal
-// Deliberate kills (KIL, a preview stop) fade ~5.8 ms — 1.45 ms still ticks. A steal is masked by
-// the new note and stays short.
-const int KILL_FADE_SAMPLES = 256;
-// The MUTE/SOLO gate ramps both ways, so an unmute rides back up too.
-const int MUTE_GATE_SAMPLES = 256;
-// A fader (a hand, VTR, VMV) moves at most one full swing per this many samples. A VTR on a note's
-// own step does not glide (engine-mix.cpp).
-const int FADER_GLIDE_SAMPLES = 256;
 
 // ⚠️ Must match songcore/effects.h, where the codes are defined. Only what the table engine runs.
 const int FX_CHA    = 0x04;  // CHA xy - chance: x for its nearest filled neighbour on the LEFT, y on the RIGHT

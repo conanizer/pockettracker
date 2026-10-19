@@ -76,32 +76,29 @@ static inline void voiceReloadInstrument(V& v, const InstrumentParams& ip, float
     voiceSetSends(v, ip.reverbSend, ip.delaySend);
 }
 
-// A table PAN glides too, over twice the rule's length — at GLIDE_FRAMES a low note's swing still
-// clicks. (A SoundFont moves in PAN_GLIDE_STEP stairs.)
-inline constexpr int PAN_GLIDE_FRAMES = 256;
-inline constexpr int PAN_GLIDE_STEP   = 64;
-
+// A table PAN glides over PAN_GLIDE_SAMPLES (glide.h).
 template <typename V> static inline void voiceGlidePan(V& v, float pan) {
     if (!v.chain.started) { v.setPan(pan); return; }   // the note's own set-up
     v.params.setBase(PARAM_PAN, pan);
-    v.panGoal      = pan;
-    v.panGlideLeft = PAN_GLIDE_FRAMES;
+    v.panGlide.set(pan, true, PAN_GLIDE_SAMPLES);
 }
 
-// Advance a pan glide by `frames`; true when it moved, with the voice's new pan in `panNow`.
+// Advance a pan glide by `frames`; true when it moved, the voice's new pan in `panGlide.value()`.
 template <typename V> static inline bool voiceStepPanGlide(V& v, int frames) {
-    if (v.panGlideLeft <= 0) return false;
-    const float step = frames >= v.panGlideLeft ? 1.0f : static_cast<float>(frames) / static_cast<float>(v.panGlideLeft);
-    v.panNow += (v.panGoal - v.panNow) * step;
-    v.panGlideLeft = frames >= v.panGlideLeft ? 0 : v.panGlideLeft - frames;
+    if (!v.panGlide.moving()) return false;
+    v.panGlide.skip(frames);
     return true;
 }
+
+// The gain a voice's last sample used.
+static inline float lastVolGain(const Voice& v)          { return v.volRouteLast; }
+static inline float lastVolGain(const SoundfontVoice& v) { return v.volGain; }
 
 // A table VOL, by the glide rule (glide.h).
 template <typename V> static inline void voiceGlideVol(V& v) {
     if (!v.chain.started) return;
-    v.volGlideFrom = v.volRouteLast;
-    v.volGlideLeft = GLIDE_FRAMES;
+    v.volGlideFrom = lastVolGain(v);
+    v.volGlide.start(1.0f, 0.0f, GLIDE_SAMPLES);
 }
 
 // FIN writes PARAM_PITCH's base (zeroed at trigger); the mod half carries transpose, slides and

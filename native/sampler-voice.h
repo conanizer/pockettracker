@@ -104,12 +104,8 @@ struct Playhead {
 
 // One output sample's anti-click gain: the fade-in every note starts with (advanced here) and a
 // one-shot's fade into its last frames.
-inline float antiClickGain(int& fadeInRemaining, const Playhead& ph) {
-    float fade = 1.0f;
-    if (fadeInRemaining > 0) {
-        fade = 1.0f - (float)fadeInRemaining / (float)DECLICK_SAMPLES;
-        fadeInRemaining--;
-    }
+inline float antiClickGain(Ramp& fadeIn, const Playhead& ph) {
+    float fade = fadeIn.next();
     if (ph.oneShot) {
         const float remaining = ph.framesLeft();
         if (remaining >= 0.0f && remaining < (float)DECLICK_SAMPLES)
@@ -120,7 +116,7 @@ inline float antiClickGain(int& fadeInRemaining, const Playhead& ph) {
 
 struct Voice : public IAudioVoice {
     bool isActive = false;
-    int fadeInRemaining = 0;           // anti-click: DECLICK_SAMPLES down to 0 from the note's start
+    Ramp fadeIn;                       // 0 to 1 over DECLICK_SAMPLES from the note's start
     float* sampleData = nullptr;
     float* sampleDataRight = nullptr;  // null = mono
     int sampleLength = 0;
@@ -167,14 +163,12 @@ struct Voice : public IAudioVoice {
     // Picked up passing through INS rows; every table pitch / volume write adds / multiplies it.
     float carrySemitones = 0.0f;
     float carryVolume    = 1.0f;
-    // A table PAN glides to its value over PAN_GLIDE_FRAMES…
-    float panNow       = 0.5f;
-    float panGoal      = 0.5f;
-    int   panGlideLeft = 0;
-    // …and a table VOL blends from the gain the last sample used (glide.h).
+    // A table PAN glides to its value over PAN_GLIDE_SAMPLES…
+    Ramp  panGlide;
+    // …and a table VOL blends from the gain the last sample used: `volGlide` is that gain's share.
     float volRouteLast = 0.0f;
     float volGlideFrom = 0.0f;
-    int   volGlideLeft = 0;
+    Ramp  volGlide;
     // A note on its way out keeps the track fader it had when a VTR on the next note changed it.
     bool  faderHeld      = false;
     float faderHeldStart = 1.0f, faderHeldEnd = 1.0f;
@@ -182,7 +176,7 @@ struct Voice : public IAudioVoice {
     // blends the old read into the new one (glide.h).
     int   dsLast = 0;
     int   dsPrev = 0;
-    int   dsFadeLeft = 0;
+    Ramp  dsFade;                      // the old read's share, 1 to 0
 
     // The note, for the note monitor: octave 0-9 (-1 = none) and pitch 0-11, C = 0.
     int noteOctave = -1, notePitch = 0;
@@ -207,8 +201,7 @@ struct Voice : public IAudioVoice {
     float noteRandom   = 0.0f;  // random 0.0–1.0
 
     // Fade-out instead of a hard cut: DECLICK_SAMPLES for a steal, KILL_FADE_SAMPLES for a kill.
-    int fadeOutRemaining = 0;   // fadeOutTotal down to 0
-    int fadeOutTotal = 1;
+    Ramp fadeOut;
     bool isFadingOut = false;
 
     // The frame of the block a note dispatched mid-block starts at. The mix loop skips to it, then
@@ -249,8 +242,8 @@ struct Voice : public IAudioVoice {
         volume = 1.0f;
 
         setPan(pan);
-        volGlideLeft = 0;
-        dsFadeLeft = 0;
+        volGlide = Ramp{};
+        dsFade = Ramp{};
 
         // An override is an Offset effect or a slice start.
         int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : instrParams.startPoint;
@@ -365,9 +358,8 @@ struct Voice : public IAudioVoice {
 
         position = firstFrame();
 
-        fadeInRemaining = DECLICK_SAMPLES;
+        fadeIn.start(0.0f, 1.0f, DECLICK_SAMPLES);
         isFadingOut = false;
-        fadeOutRemaining = 0;
         startDelayFrames = 0;   // the dispatch loop sets the real offset after trigger()
         fadeStartFrame = 0;
         isActive = true;
@@ -376,7 +368,6 @@ struct Voice : public IAudioVoice {
     void stop() {
         isActive = false;
         isFadingOut = false;
-        fadeOutRemaining = 0;
         startDelayFrames = 0;
         fadeStartFrame = 0;
     }
@@ -386,8 +377,7 @@ struct Voice : public IAudioVoice {
     void startFadeOut(int fadeSamples = DECLICK_SAMPLES, int atFrame = 0) {
         if (isFadingOut) return;
         fadeStartFrame = atFrame;
-        fadeOutTotal = (fadeSamples > 0) ? fadeSamples : 1;
-        fadeOutRemaining = fadeOutTotal;
+        fadeOut.start(1.0f, 0.0f, fadeSamples > 0 ? fadeSamples : 1);
         isFadingOut = true;
     }
 
@@ -436,8 +426,7 @@ struct Voice : public IAudioVoice {
 
     void setPan(float pan) override {
         params.setBase(PARAM_PAN, pan);
-        panNow = pan;
-        panGlideLeft = 0;
+        panGlide.set(pan, false);
         setPanGains(pan);
         prevPanLeft  = panLeft;
         prevPanRight = panRight;
@@ -452,7 +441,7 @@ struct Voice : public IAudioVoice {
         } else {
             position = (double)actualStart;
         }
-        fadeInRemaining = DECLICK_SAMPLES;
+        fadeIn.start(0.0f, 1.0f, DECLICK_SAMPLES);
     }
 
     void setMidiNote(int midiNote) override {

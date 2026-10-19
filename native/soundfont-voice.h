@@ -39,14 +39,11 @@ struct SoundfontVoice : public IAudioVoice {
     // Picked up through INS rows; every table pitch/volume write adds/multiplies it.
     float carrySemitones   = 0.0f;
     float carryVolume      = 1.0f;
-    // A table PAN glides over PAN_GLIDE_FRAMES.
-    float panNow           = 0.5f;
-    float panGoal          = 0.5f;
-    int   panGlideLeft     = 0;
-    // A table VOL glides (glide.h).
-    float volRouteLast     = 0.0f;   // unused: the ramp starts from `volGain`
+    // A table PAN glides over PAN_GLIDE_SAMPLES.
+    Ramp  panGlide;
+    // A table VOL blends from the gain it was at: `volGlide` is that gain's share.
     float volGlideFrom     = 0.0f;
-    int   volGlideLeft     = 0;
+    Ramp  volGlide;
     int   noteOctave       = 4;     // for TICFC
     int   notePitch        = 0;     // for TICFE
 
@@ -60,10 +57,9 @@ struct SoundfontVoice : public IAudioVoice {
     float volGainFrom = 1.0f;
     float volGainTo   = 1.0f;
 
-    // The transport-stop ramp: counts down KILL_FADE_SAMPLES in the mute gate; 0 = none. Ours, not
-    // TSF's (it steps per 64 samples), and on the gate so the sends fade with it.
-    int   stopFadeRemaining = 0;
-    int   stopFadeTotal     = 0;
+    // The stop ramp (STOP, KIL, a short release): 1 to 0 on the mute gate, moving while it runs. Ours,
+    // not TSF's (it steps per 64 samples), and on the gate so the sends fade with it.
+    Ramp  stopFade;
     // The frame in this block the ramp starts at, as Voice::fadeStartFrame; zeroed after every block.
     int   stopFadeStartFrame = 0;
 
@@ -73,12 +69,10 @@ struct SoundfontVoice : public IAudioVoice {
 
     // The render pass runs the ramp and calls hardStop() at zero.
     void startStopFade(int fadeSamples, int atFrame = 0) {
-        if (!isActive || stopFadeRemaining > 0) return;
+        if (!isActive || stopFade.moving()) return;
         stopFadeStartFrame = atFrame;
-        // An armed note is discarded, as in hardStop().
-        hasArmedNote     = false;
-        stopFadeTotal    = (fadeSamples > 0) ? fadeSamples : 1;
-        stopFadeRemaining = stopFadeTotal;
+        dropArmedNote();
+        stopFade.start(1.0f, 0.0f, fadeSamples > 0 ? fadeSamples : 1);
     }
 
     // The onset inside the trigger block, as Voice::startDelayFrames.
@@ -95,8 +89,14 @@ struct SoundfontVoice : public IAudioVoice {
     // The fader a stolen note keeps when a VTR on the next step moves it.
     bool  faderHeld      = false;
     float faderHeldStart = 1.0f, faderHeldEnd = 1.0f;
-    // The steal pass already applied the fader; chainTrackPiece skips it.
-    bool  faderInBuf     = false;
+
+    // An armed note will not sound after all (a stop or a note-off came first): the note it would have
+    // cut carries on, through its own chain.
+    void dropArmedNote() {
+        if (hasArmedNote && cutting) chain = cutChain;
+        hasArmedNote = false;
+        cutting      = false;
+    }
 
     // ── IAudioVoice ──
     bool active()     const override { return isActive; }
@@ -137,6 +137,10 @@ struct SoundfontVoice : public IAudioVoice {
 
     // Run on the rendered buffer; its values come from the ParamBus once per piece.
     InstrumentChain chain;
+    // ⚠️ The note a new one cuts plays on under it for the steal's fade, and must not hear the new note's
+    // filter, drive or crush: it finishes through this copy of the chain it had. `cutting` while it does.
+    InstrumentChain cutChain;
+    bool            cutting = false;
 
     // ── Audio thread only ──
 
@@ -170,7 +174,7 @@ struct SoundfontVoice : public IAudioVoice {
         tableVolume      = 1.0f;
         carrySemitones   = 0.0f;
         carryVolume      = 1.0f;
-        volGlideLeft     = 0;
+        volGlide         = Ramp{};
         noteOctave       = octave;
         notePitch        = pitch;
         reset_table_lanes(lanes, ticRates, startRows, octave, pitch);
@@ -191,6 +195,7 @@ struct SoundfontVoice : public IAudioVoice {
         startDelayFrames = 0;
         pendingTsfOffAt = -1;
         hasArmedNote   = false;
+        cutting        = false;
     }
 };
 

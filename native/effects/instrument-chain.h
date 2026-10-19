@@ -17,29 +17,21 @@ struct InstrumentChain {
     // False until sound has passed through the chain: a write before that lands at once, after it glides.
     bool started = false;
 
-    // ⚠️ `keepToneState`: the chain still carries the last note's sound — a SoundFont chain belongs to
-    // the track. It stays started, so a level the new note sets (send, pan, VOL) glides over that tail
-    // instead of jumping; the crush, filter and EQ keep their memory, since zeroing it steps the output.
-    void reset(float sampleRate = 44100.0f, bool keepToneState = false) {
-        started = keepToneState;
+    // `sounding`: the track still carries the last note — a SoundFont voice is the track's. A level the
+    // new note sets (send, pan, VOL) then glides over that tail. The modules start clean either way: the
+    // tail finishes through its own copy of them (SoundfontVoice::cutChain).
+    void reset(float sampleRate = 44100.0f, bool sounding = false) {
+        started = sounding;
+        crush.reset();
         drive.reset();
-        if (keepToneState) {
-            // Off until the caller sets them; the new note's settings land at once.
-            filter.type = 0;
-            filter.fresh = true;
-            crush.fresh = true;
-            eq.active   = false;
-        } else {
-            crush.reset();
-            filter.reset();
-            eq.reset(sampleRate);
-        }
+        filter.reset();
+        eq.reset(sampleRate);
     }
 
     // Nothing on or fading: a sample through is just `touch()`. Holds until the next write.
     bool idle() const {
-        return !crush.enabled() && crush.fadeLeft == 0 && !drive.enabled() && drive.fadeLeft == 0 &&
-               !filter.enabled() && filter.typeFadeLeft == 0 && !eq.active;
+        return !crush.enabled() && !crush.oldShare.moving() && !drive.enabled() && !drive.oldShare.moving() &&
+               !filter.enabled() && !filter.typeFade.moving() && !eq.active;
     }
 
     // What a sample through an idle chain leaves behind.

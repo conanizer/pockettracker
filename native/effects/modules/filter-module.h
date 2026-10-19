@@ -21,18 +21,18 @@ struct FilterModule {
     float targetFreqR = 0.25f, targetDampR = 0.0f;
 
     bool  fresh = true;
-    // The coefficients the last sample used, and a glide away from them.
+    // The coefficients the last sample used, and a glide away from them: their share, 1 to 0.
     float lastFreqL = 0.25f, lastDampL = 0.0f, lastFreqR = 0.25f, lastDampR = 0.0f;
     float fromFreqL = 0.25f, fromDampL = 0.0f, fromFreqR = 0.25f, fromDampR = 0.0f;
-    int   glideLeft = 0;
+    Ramp  glide;
     // A type change crossfades from the old type's output (0 = the dry input) to the new one's.
     int   prevType = 0;
-    int   typeFadeLeft = 0;
+    Ramp  typeFade;
 
     void reset() {
         type = 0;
         fresh = true;
-        glideLeft = typeFadeLeft = 0;
+        glide = typeFade = Ramp{};
         svfL.Init(sampleRate);
         svfR.Init(sampleRate);
         prevFreqL = targetFreqL = svfL.GetFreq();
@@ -72,7 +72,7 @@ struct FilterModule {
             (newFreqL != targetFreqL || newDampL != targetDampL)) {
             fromFreqL = lastFreqL; fromDampL = lastDampL;
             fromFreqR = lastFreqR; fromDampR = lastDampR;
-            glideLeft = GLIDE_FRAMES;
+            glide.start(1.0f, 0.0f, GLIDE_SAMPLES);
         }
         targetFreqL = newFreqL; targetDampL = newDampL;
         targetFreqR = newFreqR; targetDampR = newDampR;
@@ -82,20 +82,19 @@ struct FilterModule {
         }
         if (!fresh && oldType != filterType) {
             prevType = oldType;
-            typeFadeLeft = GLIDE_FRAMES;
+            typeFade.start(1.0f, 0.0f, GLIDE_SAMPLES);
         }
     }
 
     // Per sample, before process*: blends the coefficients without recomputing them.
     inline void setInterpolatedCoeffs(float t) {
-        if (!enabled() && typeFadeLeft == 0) return;
+        if (!enabled() && !typeFade.moving()) return;
         float fL = prevFreqL + (targetFreqL - prevFreqL) * t, dL = prevDampL + (targetDampL - prevDampL) * t;
         float fR = prevFreqR + (targetFreqR - prevFreqR) * t, dR = prevDampR + (targetDampR - prevDampR) * t;
-        if (glideLeft > 0) {
-            const float k = static_cast<float>(glideLeft) / GLIDE_FRAMES;
+        if (glide.moving()) {
+            const float k = glide.next();
             fL = fromFreqL * k + fL * (1.0f - k); dL = fromDampL * k + dL * (1.0f - k);
             fR = fromFreqR * k + fR * (1.0f - k); dR = fromDampR * k + dR * (1.0f - k);
-            --glideLeft;
         }
         lastFreqL = fL; lastDampL = dL; lastFreqR = fR; lastDampR = dR;
         svfL.SetCoeffs(fL, dL);
@@ -117,28 +116,26 @@ struct FilterModule {
 
     inline float processMono(float in) {
         fresh = false;
-        if (!enabled() && typeFadeLeft == 0) return in;
+        if (!enabled() && !typeFade.moving()) return in;
         svfL.Process(in);
         float out = tap(svfL, type, in);
-        if (typeFadeLeft > 0) {
-            const float k = static_cast<float>(typeFadeLeft) / GLIDE_FRAMES;
+        if (typeFade.moving()) {
+            const float k = typeFade.next();
             out = tap(svfL, prevType, in) * k + out * (1.0f - k);
-            --typeFadeLeft;
         }
         return out;
     }
 
     inline void processStereo(float& L, float& R) {
         fresh = false;
-        if (!enabled() && typeFadeLeft == 0) return;
+        if (!enabled() && !typeFade.moving()) return;
         svfL.Process(L);
         svfR.Process(R);
         float outL = tap(svfL, type, L), outR = tap(svfR, type, R);
-        if (typeFadeLeft > 0) {
-            const float k = static_cast<float>(typeFadeLeft) / GLIDE_FRAMES;
+        if (typeFade.moving()) {
+            const float k = typeFade.next();
             outL = tap(svfL, prevType, L) * k + outL * (1.0f - k);
             outR = tap(svfR, prevType, R) * k + outR * (1.0f - k);
-            --typeFadeLeft;
         }
         L = outL;
         R = outR;

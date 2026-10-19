@@ -81,7 +81,7 @@ class Decimator
     inline int GetBitsToCrush() { return bits_to_crush_; }
 
   private:
-    const uint8_t kMaxBitsToCrush = 16;
+    static constexpr uint8_t kMaxBitsToCrush = 16;   // static, so a Decimator can be copied with its state
     float         downsample_factor_, bitcrush_factor_;
     uint32_t      bits_to_crush_;
     float         downsampled_, bitcrushed_;

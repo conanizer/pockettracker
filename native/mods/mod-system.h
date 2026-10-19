@@ -144,9 +144,9 @@ public:
     float modDestValues[PARAM_COUNT]{};
     float prevModDestValues[PARAM_COUNT]{};
 
-    // The note's send levels: seeded from the instrument at trigger, moved by REV / DEL — gliding.
-    GlidedLevel reverbSend;
-    GlidedLevel delaySend;
+    // The note's send levels: from the instrument at trigger, then REV / DEL; they fade, never jump.
+    Ramp reverbSend;
+    Ramp delaySend;
 
     // A MIDI-in pitch wheel, semitones: zeroed at every trigger, then set by the channel's bend.
     float midiWheel = 0.0f;

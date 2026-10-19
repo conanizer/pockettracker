@@ -81,7 +81,7 @@ native/                            The portable program
 ├── oboe-audio-engine.cpp / .h     Android audio backend (the only Oboe-coupled TU)
 ├── mods/                          Modulation: routing, runner, AHD/ADSR/LFO/vibrato/tracking
 ├── effects/                       DSP, three layers:
-│   ├── glide.h                      the one rule for changing a sounding voice's settings
+│   ├── glide.h                      the one rule for every level and setting sound passes through
 │   ├── instrument-chain.h           per voice: Crush → Drive → Filter
 │   ├── send-chain.h                 send buses: reverb (DaisySP ReverbSc) + stereo delay
 │   ├── master-chain.h               output bus: masterEq → OTT | DUST → Limiter
@@ -293,11 +293,19 @@ steals a voice from the song.
 Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR or
 TRIG voice rings until something explicitly stops it.
 
-**Every setting of a sounding voice follows one rule** (`effects/glide.h`): set before the note's first
-sample, it is where the note starts, or the attack plays with the old one; set while the note sounds,
-it moves there over `GLIDE_FRAMES`, or the jump clicks. The filter, crush and drive modules, the
-sampler's downsample, a table's VOL and the sends all follow it; PAN glides twice as long, since a low
-note's swing still clicks at the shorter length. A new setting follows it too.
+**Everything sound passes through follows one rule** (`effects/glide.h`): a setter only says where a
+level or setting should go, and the place that touches the sound gets there over a few milliseconds.
+It jumps only while no sound passes yet, so a note starts on its own settings and its attack never plays
+with the old ones. The rule has two forms. A `Ramp` is read once a sample or once a piece: a note's
+fade-in and fade-out, the filter, crush, drive and downsample, a table's VOL and PAN, the sends. The
+mixer's levels — faders, mutes, the returns' WET, the delay's feed into the reverb — are read by
+several voices in one block, so they move once a block and each reader ramps across it. Each length
+sits beside the rule with its reason; a new level or setting takes one of them.
+
+⚠️ **A SoundFont voice is the track's, so a new note cuts the old one inside the same buffer.** For
+the steal's fade the two are rendered apart, and the old note finishes through a copy of the chain it
+had (`SoundfontVoice::cutChain`). Through one chain the old tail would hear the new note's filter from
+the top of the block, which is a step.
 
 **A SoundFont slot holds ONE PRESET, not a file.** `soundfont-trim.h` reads a SoundFont's index —
 the small tables at the end of the file that say which samples each preset reaches — and writes a

@@ -182,11 +182,11 @@ void SoundfontVoice::hardStop() {
     activeNote      = -1;
     isActive        = false;
     isReleasingOnly = false;
-    // The ramp's counters go with the note, or they scale the next note's first block.
-    stopFadeRemaining = 0;
-    stopFadeTotal     = 0;
+    // The stop ramp goes with the note, or it scales the next note's first block.
+    stopFade = Ramp{};
     // ⚠️ A stop discards an armed note: fired into a stopped voice, nothing would ever end it.
     hasArmedNote = false;
+    cutting      = false;
 }
 
 void SoundfontVoice::noteOff() { noteOffAt(0); }
@@ -194,7 +194,7 @@ void SoundfontVoice::noteOff() { noteOffAt(0); }
 void SoundfontVoice::noteOffAt(int atFrame) {
     isReleasingOnly = true;
     // As in hardStop: an arm this block must not sound after the note-off that superseded it.
-    hasArmedNote = false;
+    dropArmedNote();
 
     // With an ADSR/TRIG on VOL, TSF holds sustain while our envelope fades; hardStop() sends the
     // note-off when they finish. Otherwise TSF's own release (SF REL) plays out — unless it is short.
@@ -254,8 +254,7 @@ void SoundfontVoice::setVolume(float v) {
 void SoundfontVoice::setPan(float pan) {
     // The base too, as the sampler's setPan does: each block recomputes the pan as base + mod.
     params.setBase(PARAM_PAN, pan);
-    panNow = pan;
-    panGlideLeft = 0;
+    panGlide.set(pan, false);
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         tsf* h = soundfonts[slot].handle.load();
@@ -294,8 +293,7 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
     hasArmedNote = true;
     isActive     = true;   // the render pass skips an inactive voice, and it is the one that fires this
     // A stale stop ramp would fade the new note as it starts.
-    stopFadeRemaining = 0;
-    stopFadeTotal     = 0;
+    stopFade = Ramp{};
     return true;
 }
 
@@ -315,8 +313,7 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
         }
     }
     tsf_channel_set_pan(h, _trackId, a.pan);
-    panNow = a.pan;
-    panGlideLeft = 0;
+    panGlide.set(a.pan, false);
     // The channel volume stays at unity: note gain and fader are ramped on the rendered samples.
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
     // The instrument's ADSR override, just before note_on, which captures it per voice. -1 = the file's.

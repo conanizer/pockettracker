@@ -360,7 +360,7 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
     }
 
     // A pan or volume glide keeps the pieces short.
-    if ((voice.panGlideLeft > 0 || voice.volGlideLeft > 0) && frames > PAN_GLIDE_STEP) frames = PAN_GLIDE_STEP;
+    if ((voice.panGlide.moving() || voice.volGlide.moving()) && frames > PAN_GLIDE_STEP) frames = PAN_GLIDE_STEP;
 
     // Each lane's progress through its row at the segment's END — the ramp's target. 0 when held.
     double rowFraction[TABLE_LANES] = {0.0, 0.0, 0.0};
