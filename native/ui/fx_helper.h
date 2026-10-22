@@ -32,6 +32,7 @@ inline constexpr int FX_SEQUENCE_CODES[] = {
     songcore::FX_GRV, songcore::FX_LAT, songcore::FX_CHA, songcore::FX_NTH, songcore::FX_RND, songcore::FX_RNL,
     songcore::FX_INS,   // beside RND/RNL, which drive it
     songcore::FX_ARC, songcore::FX_ARPEGGIO,
+    songcore::FX_CHD,   // beside ARP, which moves the whole chord
     songcore::FX_SCA,   // the track scale; SCG is in GLOBAL
 };
 
@@ -286,7 +287,8 @@ inline void fx_move_right(FxHelperState& s) {
 inline const std::vector<std::vector<std::string>>& effect_descriptions() {
     static const std::vector<std::vector<std::string>> d = {
         /* 00 --- */ {"---: No effect", "Empty FX slot"},
-        /* 1 ARC */ {"ARC: Arpeggio config", "x=mode(0=UP 1=DN 2=PP 3=RND)", "y=speed in ticks"},
+        /* 1 ARC */ {"ARC: Arpeggio config", "x=mode(0=UP 1=DN 2=PP 3=RND)", "y=speed in ticks",
+                     "right of CHD: strums it, y0=no"},
         /* 2 CHA */ {"CHA: Chance for its neighbours", "x=nearest FX left, or the note", "y=nearest FX right",
                      "0=never F=always 8=about half"},
         /* 3 LAT */ {"LAT: Latency (delay trigger)", "xx=ticks before note fires"},
@@ -335,13 +337,15 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
                       "holds till next TIM or stop"},
         /* 45 NTH */ {"NTH: Row for some passes only", "plays on pass x of every y", "y=0: on pass x, then never",
                       "does nothing in a table"},
-        /* 46 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
-        /* 47 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
-        /* 48 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "how far: the instrument BEND", "external only, holds till stop"},
-        /* 49 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
-        /* 50 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
-        /* 51 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
-        /* 52 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
+        /* 46 CHD */ {"CHD: Chord on this note", "x=chord 0=maj 1=min .. F=m11", "y=0-3 inversion, +4 drop-2",
+                      "+8 drop-3, +C spread"},
+        /* 47 LPO */ {"LPO: Loop window slide", "moves the whole loop, both ends", "10=one loop 01=a 16th", "F0=back a loop  adds up"},
+        /* 48 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 49 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "how far: the instrument BEND", "external only, holds till stop"},
+        /* 50 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 51 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 52 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 53 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

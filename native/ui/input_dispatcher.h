@@ -122,6 +122,9 @@ class InputDispatcher {
     // Release of A: commits the FX helper's highlighted effect.
     void on_a_released();
 
+    // A went down or up, whatever it then does.
+    void on_a_held(bool down) { s_.aHeld = down; }
+
     // A+START: audition the instrument on the three instrument screens and TABLE.
     void on_a_start();
 

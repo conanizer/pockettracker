@@ -169,7 +169,7 @@ void SoundfontVoice::hardStop() {
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         tsf* h = soundfonts[slot].handle.load();
         if (h) {
-            if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+            if (activeNote >= 0) keysOff(h, activeNote);
             // ⚠️ Then kill what that left releasing: an inactive voice is never rendered, so its TSF
             // voices would sit frozen and play out at the next trigger.
             struct tsf_voice* v    = h->voices;
@@ -180,6 +180,8 @@ void SoundfontVoice::hardStop() {
         }
     }
     activeNote      = -1;
+    chordKeyCount   = 0;
+    strumCount      = 0;
     isActive        = false;
     isReleasingOnly = false;
     // The stop ramp goes with the note, or it scales the next note's first block.
@@ -187,6 +189,27 @@ void SoundfontVoice::hardStop() {
     // ⚠️ A stop discards an armed note: fired into a stopped voice, nothing would ever end it.
     hasArmedNote = false;
     cutting      = false;
+}
+
+void SoundfontVoice::keysOff(tsf* h, int key) {
+    tsf_channel_note_off(h, _trackId, key);
+    if (key != chordWith) return;
+    for (int k = 0; k < chordKeyCount; ++k) tsf_channel_note_off(h, _trackId, chordKeys[k]);
+    strumCount = 0;
+}
+
+void SoundfontVoice::fireStrumKeys(tsf* h, int atFrame) {
+    int kept = 0;
+    for (int k = 0; k < strumCount; ++k) {
+        if (strumAt[k] > atFrame) {
+            strumKeys[kept] = strumKeys[k];
+            strumAt[kept++] = strumAt[k];
+            continue;
+        }
+        tsf_channel_note_on(h, _trackId, strumKeys[k], strumVel);
+        if (strumKeys[k] != chordWith && chordKeyCount < 3) chordKeys[chordKeyCount++] = strumKeys[k];
+    }
+    strumCount = kept;
 }
 
 void SoundfontVoice::noteOff() { noteOffAt(0); }
@@ -238,7 +261,7 @@ void SoundfontVoice::noteOffAt(int atFrame) {
                     pendingTsfOffAt   = atFrame;
                     pendingTsfOffNote = activeNote;
                 } else {
-                    tsf_channel_note_off(h, _trackId, activeNote);
+                    keysOff(h, activeNote);
                 }
             }
         }
@@ -267,9 +290,11 @@ void SoundfontVoice::setMidiNote(int midiNote) {
     if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
     tsf* h = soundfonts[slot].handle.load();
     if (!h) return;
-    if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+    if (activeNote >= 0) keysOff(h, activeNote);
     tsf_channel_note_on(h, _trackId, midiNote, noteVolume);
-    activeNote = midiNote;
+    activeNote    = midiNote;
+    chordKeyCount = 0;
+    strumCount    = 0;
 }
 
 bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
@@ -297,7 +322,7 @@ bool SoundfontVoice::armNote(int slot, int midiNote, int midiVelocity,
     return true;
 }
 
-void SoundfontVoice::fireArmedNote(tsf* h) {
+void SoundfontVoice::fireArmedNote(tsf* h, int atFrame) {
     hasArmedNote = false;
     pendingTsfOffAt = -1;   // the note it was for is killed below
     if (!h) return;
@@ -318,8 +343,24 @@ void SoundfontVoice::fireArmedNote(tsf* h) {
     tsf_channel_set_bank_preset(h, _trackId, a.bank, a.preset);
     // The instrument's ADSR override, just before note_on, which captures it per voice. -1 = the file's.
     tsf_preset_apply_overrides(h, a.bank, a.preset, a.envAtk, a.envDec, a.envSus, a.envRel);
-    tsf_channel_note_on(h, _trackId, a.midiNote, a.midiVelocity / 127.0f);
-    activeNote = a.midiNote;
+    if (a.keyCount == 0) {
+        tsf_channel_note_on(h, _trackId, a.midiNote, a.midiVelocity / 127.0f);
+        activeNote    = a.midiNote;
+        chordKeyCount = 0;
+        strumCount    = 0;
+    } else {
+        // A strum's later keys wait in `strumKeys`; the render sounds them on their frames.
+        activeNote    = a.keys[0];
+        chordWith     = a.keys[0];
+        chordKeyCount = 0;
+        strumCount    = 0;
+        strumVel      = a.midiVelocity / 127.0f;
+        for (int k = 0; k < a.keyCount; ++k) {
+            strumKeys[strumCount] = a.keys[k];
+            strumAt[strumCount++] = atFrame + a.keyWait[k];
+        }
+        fireStrumKeys(h, atFrame);
+    }
     isActive   = true;
 }
 

@@ -27,6 +27,7 @@ Everything you can do with PocketTracker.
 Write these into any phrase step to shape how a note plays:
 
 - **Arpeggio** — cycle through note intervals automatically (up, down, ping-pong, random)
+- **Chord** — play a note as a four-note chord: 16 chords, with inversions and drop / spread layouts, played together or strummed; a table can change the chord note by note
 - **Volume** — ramp volume within a step
 - **Pan** — set a note's stereo position; the next note reverts to the instrument pan
 - **Kill** — stop the note, immediately or after a set number of ticks

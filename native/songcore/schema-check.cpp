@@ -29,9 +29,11 @@ static_assert(sortRank(EV_NOTE_ON) == 2 && sortRank(EV_NOTE_OFF) == 1 &&
               sortRank(EV_EXT_EQ_MORPH) == 0 && sortRank(EV_EXT_MASTER_EQ_MORPH) == 0,
               "canonical sort ranks are frozen");
 
-// Payload shapes: note(1)+vel(1)+pad(2) + 15 × 4-byte fields = 64. A size change is a field
-// added/removed/reordered — a schema bump with regenerated goldens.
-static_assert(sizeof(NoteOnPayload) == 64, "NoteOnPayload shape changed — schema bump required");
+// Payload shapes: note(1)+vel(1)+pad(2) + 15 × 4-byte fields + the chord (9, padded to 12) + the strum
+// step (4) = 80. A size change is a field added/removed/reordered — a schema bump with regenerated
+// goldens. The chord was added without one: the trace prints it only on a chord, so every trace
+// without one is unchanged.
+static_assert(sizeof(NoteOnPayload) == 80, "NoteOnPayload shape changed — schema bump required");
 static_assert(sizeof(Event) - sizeof(NoteOnPayload) >= 12, "envelope shape changed");
 // 3 bands × (type, freq, gain, q), one authored hex byte each. A size change moves the trace's k=v
 // order — a schema bump.

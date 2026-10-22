@@ -35,6 +35,13 @@ struct NoteArgs {
     float   pbnRate      = 0.0f;
     float   vibSpd       = 0.0f;
     float   vibDep       = 0.0f;
+    int     chord        = -1;  // the CHD byte, or -1; the sequencer turns it into chordNotes
+    int     chordCount   = 0;   // what goes on the bus (event.h)
+    int     chordNotes[4] = {};
+    int     strum        = -1;  // a chord's ARC mode (0 UP, 1 DN, 2 PP, 3 RND), or -1: all at once
+    int64_t strumFrames  = 0;   // between one chord note and the next
+    int     strumOrder[4] = {}; // what goes on the bus: when each of chordNotes sounds, 0 = first
+    int64_t strumStep    = 0;   // …and how far apart; 0 = together
 };
 
 // ─── Consumer interface ─────────────────────────────────────────────────────────────────────────
@@ -127,6 +134,10 @@ struct MidiRouter {
         n.pbnRateBits = bits(a.pbnRate);
         n.vibSpdBits  = bits(a.vibSpd);
         n.vibDepBits  = bits(a.vibDep);
+        n.chordCount  = static_cast<uint8_t>(a.chordCount);
+        for (int i = 0; i < a.chordCount && i < 4; ++i) n.chord[i] = static_cast<int8_t>(a.chordNotes[i]);
+        n.strumStep = static_cast<uint32_t>(a.strumStep);
+        for (int i = 0; i < a.chordCount && i < 4; ++i) n.strumOrder[i] = static_cast<uint8_t>(a.strumOrder[i]);
         emit(ev);
     }
 

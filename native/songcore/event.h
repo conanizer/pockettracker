@@ -147,6 +147,10 @@ constexpr int cc_slot_index(uint8_t param) {
 //    the names.
 //  * transpose, pit and arp stay apart: slice selection needs the transpose alone.
 //  * pslDur in tics, pbnRate the FX byte /16, vibSpd Hz (tempo-scaled), vibDep semitones.
+//  * chordCount 0 = a single note. Otherwise the note sounds as `chord`, in semitones from where the
+//    note itself would sound — which need not be one of them (an inversion moves it up). Already
+//    snapped to the track's scale and merged where two landed on one pitch. A strum delays some of
+//    them: each consumer starts chord[i] strumOrder[i] × strumStep frames after the note-on.
 struct NoteOnPayload {
     uint8_t  note;        // note      MIDI number (octave+1)*12+pitch, 0-131 practical
     int8_t   velocity;    // vel       -1 | 0-127 (phrase V column)
@@ -165,6 +169,10 @@ struct NoteOnPayload {
     uint32_t pbnRateBits; // pbnRate   f32ᵇ raw PBN byte /16, sign = direction
     uint32_t vibSpdBits;  // vibSpd    f32ᵇ Hz, tempo-scaled at emit
     uint32_t vibDepBits;  // vibDep    f32ᵇ semitones
+    uint8_t  chordCount;  // chord     0 | 1-4 notes; the trace prints this field only when non-zero
+    int8_t   chord[4];    //           semitones, ascending; the first chordCount are used
+    uint8_t  strumOrder[4]; // strum   ARC on the chord's row: chord[i] sounds strumOrder[i] × strumStep
+    uint32_t strumStep;   //           frames after the note-on; 0 = all at once (printed only then)
 };
 
 // The note's velocity, 0..1. ⚠️ Every consumer reads it here, or a note and its retriggers differ.

@@ -15,6 +15,17 @@ struct SoundfontVoice : public IAudioVoice {
     int   instrId     = -1;    // -1 = preview; for the instrument spectrum
     bool  isActive    = false;
     int   activeNote  = -1;
+    // A chord's other keys on the channel (CHD); whatever ends the key they sound with ends them.
+    // ⚠️ Not tied to `activeNote`: a deferred note-off outlives it.
+    int   chordWith     = -1;
+    int   chordKeys[3]  = {};
+    int   chordKeyCount = 0;
+    // A strum's keys still to come, each due at `strumAt`, a frame of this block (counted down at
+    // every block's end). Ending the chord drops them.
+    int   strumKeys[4]  = {};
+    int   strumAt[4]    = {};
+    int   strumCount    = 0;
+    float strumVel      = 0.0f;
     float noteVolume  = 1.0f;  // instrument × phrase × V
 
     // The instrument's detune, semitones; set at the trigger, survives slides and resetPitchState.
@@ -83,6 +94,9 @@ struct SoundfontVoice : public IAudioVoice {
         int   slot = -1, midiNote = 0, midiVelocity = 0, bank = 0, preset = 0;
         float noteVol = 1.0f, pan = 0.5f;
         int   envAtk = -1, envDec = -1, envSus = -1, envRel = -1;
+        int   keys[4] = {};      // a chord: every key it plays, `midiNote` unused
+        int   keyWait[4] = {};   // frames after the onset each key sounds (a strum)
+        int   keyCount = 0;      // 0 = the single `midiNote`
     };
     bool      hasArmedNote = false;
     ArmedNote armed;
@@ -103,6 +117,27 @@ struct SoundfontVoice : public IAudioVoice {
     int  getTrackId() const override { return _trackId; }
 
     void hardStop() override;
+
+    // The armed note as a chord: `semis` from its key, `wait` frames after the onset each (a strum),
+    // clamped to MIDI's range, two clamped onto one kept once. Returns how many keys it plays.
+    int armChord(const int* semis, const int* wait, int count) {
+        armed.keyCount = 0;
+        for (int k = 0; k < count && k < 4; ++k) {
+            const int key = std::max(0, std::min(127, armed.midiNote + semis[k]));
+            int again = -1;
+            for (int j = 0; j < armed.keyCount; ++j) if (armed.keys[j] == key) again = j;
+            if (again >= 0) {
+                armed.keyWait[again] = std::min(armed.keyWait[again], wait[k]);
+                continue;
+            }
+            armed.keyWait[armed.keyCount] = wait[k];
+            armed.keys[armed.keyCount++]  = key;
+        }
+        return std::max(1, armed.keyCount);
+    }
+
+    // Note-off for `key`, and for the chord keys when `key` is the note they sound with.
+    void keysOff(tsf* h, int key);
 
     // Starts TSF's release; the render runs until silence, then calls hardStop().
     void noteOff() override;
@@ -152,8 +187,15 @@ struct SoundfontVoice : public IAudioVoice {
                  int bank, int preset, int trackId,
                  int envAtk, int envDec, int envSus, int envRel);
 
-    // Fires into `h`, the handle loaded for this block; clears `hasArmedNote` either way.
-    void fireArmedNote(tsf* h);
+    // Fires into `h`, the handle loaded for this block, at frame `atFrame` of it; clears `hasArmedNote`
+    // either way.
+    void fireArmedNote(tsf* h, int atFrame);
+
+    // Sounds every strummed key due at or before frame `atFrame` of this block.
+    void fireStrumKeys(tsf* h, int atFrame);
+    void strumBlockEnd(int numFrames) {
+        for (int k = 0; k < strumCount; ++k) strumAt[k] = std::max(0, strumAt[k] - numFrames);
+    }
 
     // Also re-centres TSF's wheel next block — a PBN can have left it at an extreme.
     void resetPitchState() {
@@ -187,6 +229,8 @@ struct SoundfontVoice : public IAudioVoice {
     void detach() {
         isActive       = false;
         activeNote     = -1;
+        chordKeyCount  = 0;
+        strumCount     = 0;
         sfSlot         = -1;
         _trackId       = -1;
         noteVolume     = 1.0f;

@@ -483,12 +483,17 @@ public:
     void applyParamUpdate(const ScheduledParamUpdate& upd, BlockMix& b);
     void applyKill(const ScheduledKill& kill, int frame);
     void mixSamplerVoices(BlockMix& b);
-    void storeTic00Cursor(const Voice& voice);
+    void storeTic00Cursor(int trackId, int tableId, const TableLane (&lanes)[TABLE_LANES]);
+    void tableStartRows(const ScheduledNote& note, const TableLane* live, const int (&rates)[TABLE_LANES],
+                        int (&out)[TABLE_LANES]);
     void prepareSamplerPiece(Voice& voice, int frames, float sampleRate);
     void mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to);
+    // ⚠️ Compiled twice: a single note must not pay for a chord's playheads in its loop.
+    template <bool Chord> void mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, int to);
     void mixSoundfontVoices(BlockMix& b);
     void prepareSoundfontPiece(SoundfontVoice& sv, int t, int from, int frames, float sampleRate);
     void renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const BlockMix& b, int from, int to);
+    void renderSoundfontKeys(SoundfontVoice& sv, tsf* h, int t, float* buf, int from, int to);
     void carryFadesToNextBlock();
     void captureTrackScopes(const BlockMix& b);
     void mixBuses(const BlockMix& b);
@@ -522,7 +527,7 @@ public:
 
     // One column's row: lane 0 also carries transpose and volume. Returns true when the row only
     // steered the lane (HOP/THO) and the row it now stands on must play in this same tic.
-    template <typename V> bool processTableRow(V& voice, const TableRow& row, int lane,
+    template <typename V> bool processTableRow(V& voice, const TableRow (&rows)[16], const TableRow& row, int lane,
                                                bool shouldAdvance, int atFrame, float sampleRate,
                                                bool applyNV = true);
 
@@ -666,6 +671,8 @@ private:
     Tic00Cursor tic00Cursor[SF_VOICE_COUNT][TIC00_SLOTS];
     // The table the track's voice last ran, for the TABLE screen. -1 = none (0 is a real table).
     int tic00Sounding[SF_VOICE_COUNT];
+    // Table strums so far per track: a PP strum goes up on the even ones. Zeroed with the cursors.
+    int tableStrumPass[SF_VOICE_COUNT];
 
     Tic00Cursor* tic00Slot(int trackId, int tableId, bool create);
 

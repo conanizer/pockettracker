@@ -84,6 +84,7 @@ private:
     void draw_placeholder(Canvas& c, int x, int y, ScreenType screen, const Theme& t) const;
     void draw_right_bar(Canvas& c, const AppState& s) const;
     void draw_status_line(Canvas& c, const AppState& s) const;
+    bool draw_chord_hint(Canvas& c, const AppState& s) const;
     void draw_selection_clipboard(Canvas& c, const AppState& s) const;
 
     OscilloscopeModule    oscilloscope_;

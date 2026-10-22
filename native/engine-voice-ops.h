@@ -2,12 +2,35 @@
 // Per-voice writes shared by the table walk (engine-tables.cpp) and the block's queue drain
 // (engine-mix.cpp). Private to the engine: one overload per voice type, resolved at compile time.
 #include "audio-engine.h"
+#include "songcore/chords.h"
 
 // A table row's OFFSET. A SoundFont voice has no sample position.
 static inline void tableOffset(Voice& v, uint8_t fxValue) {
-    if (v.sampleLength > 0) v.position = fxValue / 255.0 * (v.sampleLength - 1);
+    if (v.sampleLength > 0) {
+        v.position = fxValue / 255.0 * (v.sampleLength - 1);
+        v.chordFollow();
+    }
 }
 static inline void tableOffset(SoundfontVoice&, uint8_t) {}
+
+// A table row's CHD: the note becomes that chord — `semis` from the note, unsnapped (a table has no
+// scale), `wait` frames before each sounds. It replaces a phrase chord. ⚠️ Only before the note sounds:
+// a chord swapped under a sounding note would click. False when it came too late.
+static inline bool tableChord(Voice& v, const int* semis, int n, const int* wait) {
+    if (!v.fadeIn.moving() || v.fadeIn.value() != 0.0f) return false;   // the fade-in has taken a sample
+    v.setChord(semis, n, wait);
+    return true;
+}
+static inline bool tableChord(SoundfontVoice& sv, const int* semis, int n, const int* wait) {
+    if (!sv.hasArmedNote) return false;
+    // The note's gain was set for the keys it had: ÷√n moves to the new count.
+    const float was = sqrtf((float)std::max(1, sv.armed.keyCount));
+    const float k   = was / sqrtf((float)sv.armChord(semis, wait, n));
+    sv.params.setBase(PARAM_VOL, sv.params.base[PARAM_VOL] * k);
+    sv.modDestValues[PARAM_VOL]     *= k;
+    sv.prevModDestValues[PARAM_VOL] *= k;
+    return true;
+}
 
 // A parameter's base plus its modulation, as the 0..`max` integer a module takes.
 static inline int paramWithMod(const IAudioVoice& v, ParamId p, int max) {
@@ -141,7 +164,10 @@ static inline void applyVoiceCc(V& v, int cc, float value, float sampleRate) {
 // keeps its position, so the flip is continuous.
 static inline void voiceReverse(Voice& vo, bool rev, bool restart) {
     vo.reverse = rev;
-    if (restart) vo.position = vo.firstFrame();
+    if (restart) {
+        vo.position = vo.firstFrame();
+        vo.chordFollow();
+    }
 }
 static inline void voiceReverse(SoundfontVoice&, bool, bool) {}
 

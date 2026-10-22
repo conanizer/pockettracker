@@ -1847,6 +1847,59 @@ Persists across steps. Configure with **ARC**.
 
 - High nibble = mode: `0`=UP, `1`=DOWN, `2`=PINGPONG, `3`=RANDOM
 - Low nibble = speed in ticks (`4` = default)
+- To the right of a **CHD** it strums that chord instead — see CHD.
+
+---
+
+### CHD `XY` — Chord
+
+The row's note plays as a chord of four notes, on its own track and through the instrument's one
+filter and effects. `X` picks the chord, `Y` how its notes are laid out. Hold **A** on the value to
+see the chord's name and notes over the visualizer.
+
+| X | Chord | X | Chord |
+|---|---|---|---|
+| `0` | major | `8` | dominant 7 |
+| `1` | minor | `9` | major 6 |
+| `2` | sus2 | `A` | minor 6 |
+| `3` | sus4 | `B` | add9 |
+| `4` | diminished | `C` | minor add9 |
+| `5` | augmented | `D` | major 9 (no fifth) |
+| `6` | major 7 | `E` | minor 9 (no fifth) |
+| `7` | minor 7 | `F` | minor 11 |
+
+`0`–`5` are three-note chords; their fourth note is the lowest one an octave up.
+
+| Y | Layout |
+|---|---|
+| `0`–`3` | Root position, then inversions: each step moves the lowest note up an octave |
+| `4`–`7` | The same, with the second-highest note dropped an octave (drop-2) |
+| `8`–`B` | The same, with the third-highest note dropped an octave (drop-3) |
+| `C`–`F` | The same, spread: the lowest note down an octave, the highest up an octave |
+
+```
+    00    C-4 00  CHD 00              ← C major: C E G C
+    04    A-3 00  CHD 11              ← A minor, first inversion: C E A C
+    08    F-3 00  CHD 6C              ← F major 7, spread
+    0C    C-4 00  CHD 00  ARC 02      ← C major strummed low to high, 2 ticks apart
+```
+
+- A chord is about as loud as a single note.
+- On a track with a scale, each note of the chord moves into the scale, so a major chord may come out
+  minor; notes that land together play once.
+- It belongs to its own row: the next note is a single note again. ARP and RPT on the same note
+  repeat the whole chord.
+- **Strum:** put **ARC** to the right of the CHD and the notes come in one after another instead of
+  together, each ringing on. ARC's mode is the order — `0` low to high, `1` high to low, `2`
+  alternating each time the chord sounds, `3` random — and its speed the ticks between notes; speed
+  `0` plays the chord all at once. RPT strums every repeat; ARP's notes play the chord all at once.
+- An ARC belongs to the nearest CHD or ARP on its left. With an ARP there, or nothing, it sets the
+  arpeggio and the chord is not strummed.
+- On a phrase row with a note. An EXTERNAL instrument sends one note-on per chord note.
+- **In a table**, CHD works in a column whose TIC is `00`, `FC` or `FE`: each note plays the chord of
+  the row it reads, and the row's transpose moves the whole chord — one note in the phrase, the chords
+  in the table. An ARC in a column to its right strums it — the ARC that column's playhead is on, so
+  the strums can cycle on their own. A table's chord replaces the phrase's and is not moved into a scale.
 
 ---
 
@@ -3211,6 +3264,7 @@ Open with **A** on an EQ cell.
 |---|---|---|---|
 | ARP | Arpeggio | `XY` = intervals | Persists — cancel with `ARP 00` |
 | ARC | Arpeggio Config | `XY` | High nibble=mode (0=UP 1=DN 2=PP 3=RND), low=speed |
+| CHD | Chord | `XY` | X = one of 16 chords, Y = inversion and layout. This row's note only. ARC right of it strums it. In a table: columns at TIC 00, FC, FE |
 | CHA | Chance | `XY` | X = chance of the nearest filled FX to its left (or the note), Y = to its right (0=never F=always) |
 | NTH | Nth Pass | `XY` | The row plays on pass X of every Y passes of its phrase (Y=0: on pass X only). Phrase only |
 | LAT | Latency | `XX` ticks | Delays row trigger |

@@ -38,6 +38,9 @@ static_assert(::FX_LPO    == FX_LPO,    "audio-defs.h FX_LPO has drifted from ef
 static_assert(::FX_TIM    == FX_TIM,    "audio-defs.h FX_TIM has drifted from effects.h");
 static_assert(::FX_RND    == FX_RND,    "audio-defs.h FX_RND has drifted from effects.h");
 static_assert(::FX_PAN    == FX_PAN,    "audio-defs.h FX_PAN has drifted from effects.h");
+static_assert(::FX_CHD    == FX_CHD,    "audio-defs.h FX_CHD has drifted from effects.h");
+static_assert(::FX_ARC    == FX_ARC,    "audio-defs.h FX_ARC has drifted from effects.h");
+static_assert(::FX_ARPEGGIO == FX_ARPEGGIO, "audio-defs.h FX_ARPEGGIO has drifted from effects.h");
 static_assert(::FX_RNL    == FX_RNL,    "audio-defs.h FX_RNL has drifted from effects.h");
 static_assert(::FX_CHA    == FX_CHA,    "audio-defs.h FX_CHA has drifted from effects.h");
 static_assert(::FX_INS    == FX_INS,    "audio-defs.h FX_INS has drifted from effects.h");

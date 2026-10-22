@@ -23,6 +23,7 @@
 #include "rng.h"
 #include "router.h"
 #include "scales.h"      // the quantizer every scheduled note goes through
+#include "chords.h"
 #include "traversal.h"   // chain_at / phrase_at
 
 namespace songcore {
@@ -110,6 +111,9 @@ struct NoteCarry {
     bool    eqMorphed = false;              // …or where an EQN fade left the voice
     ExtEqMorphPayload eqMorph{};
     int     reverse  = -1;                  // BCK: -1 untouched, else the `reverse` flag it sent
+    int     chord    = -1;                  // CHD byte from the note's own row, or -1
+    int     strum    = -1;                  // ARC's mode on that row: the chord is strummed (NoteArgs)
+    int64_t strumFrames = 0;
 
     void set_cc(int id, float v) {
         const int s = carry_cc_slot(id);
@@ -169,6 +173,8 @@ struct TrackState {
     int   arpeggioMode = 0;
     int   arpeggioSpeed = 4;
     int64_t arpeggioStartFrame = 0;
+
+    int   strumPass = 0;   // strummed chords so far: a PP strum goes up on the even ones, down on the odd
 
     int   hopTargetRow = -1;
     bool  trackStopped = false;
@@ -665,18 +671,27 @@ class Sequencer {
     // An ARP or RPT retrigger, handed what the note it repeats is playing with. `velGain` < 0 = the
     // note's own velocity.
     // ⚠️ PBN, PSL and LPO are NOT handed on: each is a movement, and a new voice starts from nowhere.
-    void emit_retrigger(NoteArgs a, const Note& note, int trackId, const TrackState& ts, float velGain = -1.0f);
+    // An ARP's notes play the chord all at once (`strum` false): a strum would outlast the step.
+    void emit_retrigger(NoteArgs a, const Note& note, int trackId, TrackState& ts, float velGain = -1.0f,
+                        bool strum = true);
 
     // A fade tick into the carry, so a later retrigger starts where the fade left it.
     static void carry_fade(NoteCarry& c, const RampSpec& r, int byte);
 
-    void emit_note(NoteArgs a, const Note& note);
+    void emit_note(NoteArgs a, const Note& note, TrackState& ts);
 
     // Pull a scheduled note onto its track's scale (SCA / SCG), quantizing `note + pit + arp`.
     // ⚠️ The correction goes back to the BASE NOTE; pit, arp and transpose are re-applied below.
     // Left alone: a chromatic scale, TRANSP. off, a note selecting a slice, a pitch outside 0..127
     // before or after (skipped, not clamped).
     void apply_track_scale(NoteArgs& a) const;
+    // The scale `apply_track_scale` would pull this note onto, or null where it leaves it alone.
+    const Scale* scale_for_note(const NoteArgs& a) const;
+    // CHD: the chord's notes from where the note sounds, each pulled onto the track's scale on its
+    // own; two that land on one pitch are one note.
+    void apply_chord(NoteArgs& a) const;
+    // ARC on a chord's row: the order its notes come in. RND draws; PP alternates per strummed chord.
+    void apply_strum(NoteArgs& a, TrackState& ts);
 
     // The random draws, from the stream of `schedulingTrack_` (set in `walk_phrase_row`).
     // `rng_range` is half-open at the top (rng.h).

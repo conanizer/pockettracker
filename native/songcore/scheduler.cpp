@@ -1262,6 +1262,13 @@ void Sequencer::schedule_step_note(StepPlay& s) {
     carry.pan = s.notePan;
     carry.vibSpeed = vibratoSpeed;
     carry.vibDepth = vibratoDepth;
+    carry.chord = params.chordValue.value_or(-1);
+    // An ARC right of the CHD strums it: its mode is the order, its speed the tics between notes, and
+    // speed 0 no strum.
+    if (carry.chord >= 0 && params.strumValue.has_value() && (*params.strumValue & 0x0F) > 0) {
+        carry.strum = clampi((*params.strumValue >> 4) & 0x0F, 0, 3);
+        carry.strumFrames = (*params.strumValue & 0x0F) * s.stepDuration / TICS_PER_STEP;
+    }
     record_voice_commands(carry, params);
     // A note inside a VOL, PAN or vibrato fade starts where the fade has got to; the fade's next tic
     // need not move to correct it.
@@ -1282,7 +1289,9 @@ void Sequencer::schedule_step_note(StepPlay& s) {
     a.tableId = s.tableId; a.tableRow = s.tableRow;
     a.pslOff = pslInitialOffset; a.pslDur = pslDuration; a.pbnRate = pbnRate;
     a.vibSpd = vibratoSpeed; a.vibDep = vibratoDepth;
-    emit_note(a, note);
+    a.chord = carry.chord;
+    a.strum = carry.strum; a.strumFrames = carry.strumFrames;
+    emit_note(a, note, ts);
 
     ts.lastNote = note;
     ts.lastInstrument = s.effectiveStep.instrument;
@@ -1543,7 +1552,7 @@ void Sequencer::schedule_arpeggio_notes(StepPlay& s) {
             a.transpose = s.transpose;
             a.arp = arpMidi - baseMidi;
             a.tableId = ts.lastTableOverride; a.tableRow = -1;
-            emit_retrigger(a, baseNote, s.trackId, ts);
+            emit_retrigger(a, baseNote, s.trackId, ts, -1.0f, /*strum=*/false);
         }
         triggerIndex++;
     }
@@ -1660,7 +1669,8 @@ void Sequencer::reapply_voice(int64_t frame, int trackId, const NoteCarry& v, un
     if ((only & CARRY_REVERSE) && v.reverse >= 0) router_.ext_reverse(at, trackId, v.reverse != 0, true);
 }
 
-void Sequencer::emit_retrigger(NoteArgs a, const Note& note, int trackId, const TrackState& ts, float velGain) {
+void Sequencer::emit_retrigger(NoteArgs a, const Note& note, int trackId, TrackState& ts, float velGain,
+                               bool strum) {
     const NoteCarry v = voice_at(ts, a.frame);
     a.velGain = velGain >= 0.0f ? velGain : v.velGain;
     a.volGain = v.phraseVol;
@@ -1669,7 +1679,9 @@ void Sequencer::emit_retrigger(NoteArgs a, const Note& note, int trackId, const 
     a.slice   = v.slice;
     a.vibSpd  = v.vibSpeed;
     a.vibDep  = v.vibDepth;
-    emit_note(a, note);
+    a.chord   = v.chord;
+    if (strum) { a.strum = v.strum; a.strumFrames = v.strumFrames; }
+    emit_note(a, note, ts);
     reapply_voice(a.frame, trackId, v);
 }
 
@@ -1679,28 +1691,51 @@ void Sequencer::carry_fade(NoteCarry& c, const RampSpec& r, int byte) {
     else                       c.set_cc(r.ccId, byte / 255.0f);
 }
 
-void Sequencer::emit_note(NoteArgs a, const Note& note) {
+void Sequencer::emit_note(NoteArgs a, const Note& note, TrackState& ts) {
     if (!note_is_pitch(note)) return;
     apply_track_scale(a);
+    apply_chord(a);
+    apply_strum(a, ts);
     router_.note_on(a);
 }
 
-void Sequencer::apply_track_scale(NoteArgs& a) const {
-    const int track = clampi(a.track, 0, 7);
-    const Scale& scale = scale_at(*project_, track_scale_slot(track));
-    if (scale_is_chromatic(scale)) return;
+const Scale* Sequencer::scale_for_note(const NoteArgs& a) const {
+    const Scale& scale = scale_at(*project_, track_scale_slot(clampi(a.track, 0, 7)));
+    if (scale_is_chromatic(scale)) return nullptr;
 
     if (a.instrument >= 0 && a.instrument < static_cast<int>(project_->instruments.size())) {
         const Instrument& ins = project_->instruments[static_cast<size_t>(a.instrument)];
-        if (!ins.transposeEnabled) return;
-        if (note_selects_slice(ins, a.slice)) return;
+        if (!ins.transposeEnabled) return nullptr;
+        if (note_selects_slice(ins, a.slice)) return nullptr;
     }
+    return &scale;
+}
+
+void Sequencer::apply_chord(NoteArgs& a) const {
+    a.chordCount = 0;
+    if (a.chord < 0) return;
+    const int sounding = (a.noteOctave + 1) * 12 + a.notePitch + a.pit + a.arp;
+    a.chordCount = chord_notes(a.chord, sounding, scale_for_note(a), track_scale_key(clampi(a.track, 0, 7)),
+                               a.chordNotes);
+}
+
+void Sequencer::apply_strum(NoteArgs& a, TrackState& ts) {
+    a.strumStep = 0;
+    const int n = a.chordCount;
+    if (a.strum < 0 || n < 2 || a.strumFrames <= 0) return;
+    strum_order(a.strum, n, ts.strumPass++, [this](int k) { return rng_int(k); }, a.strumOrder);
+    a.strumStep = a.strumFrames;
+}
+
+void Sequencer::apply_track_scale(NoteArgs& a) const {
+    const Scale* scale = scale_for_note(a);
+    if (!scale) return;
 
     const int midi     = (a.noteOctave + 1) * 12 + a.notePitch;
     const int sounding = midi + a.pit + a.arp;
     if (sounding < 0 || sounding > 127) return;
 
-    const int snapped = scale_snap(scale, track_scale_key(track), sounding);
+    const int snapped = scale_snap(*scale, track_scale_key(clampi(a.track, 0, 7)), sounding);
     if (snapped == sounding) return;
 
     const int base = midi + (snapped - sounding);

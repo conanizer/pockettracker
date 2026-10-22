@@ -366,7 +366,10 @@ class ExternalConsumer : public IMidiConsumer {
     struct ActiveNote {
         bool    on       = false;
         uint8_t channel  = 0;
-        uint8_t note     = 0;
+        uint8_t note     = 0;            // a chord's lowest
+        uint8_t chord[3] = {};           // a chord's other notes, each with its own note-off
+        uint8_t chordCount = 0;
+        int64_t keyOn[4] = {};           // when `note`, then each of `chord`, goes on (a strum)
         int64_t onFrame  = 0;
         int64_t offFrame = INT64_MAX;   // INT64_MAX = gate-to-next (midiLen 0): no timed off
     };
@@ -402,20 +405,34 @@ class ExternalConsumer : public IMidiConsumer {
         // Ahead of the note, so a PSL's attack starts on the old pitch.
         start_wheel(ev, ins);
 
-        const int note = midi_note(ev.noteOn);
-        const int vel  = midi_velocity(ev.noteOn, volCmd ? 1.0f : vol);
-        send_at(ev.frame, MIDI_NOTE_ON | ch, static_cast<uint8_t>(note), static_cast<uint8_t>(vel));
-
         ActiveNote& a = active_[ev.track];
         a.on = true;
         a.channel = ch;
-        a.note = static_cast<uint8_t>(note);
         a.onFrame = ev.frame;
         // ⚠️ The project's tempo, not `on_play`'s fallback, so a LEN gate is the same in play and render.
         const int tempo = tempo_now();
         a.offFrame = ins.midiLen > 0
                          ? ev.frame + ins.midiLen * frames_per_tic(frames_per_step(tempo, sampleRate_))
                          : INT64_MAX;
+
+        // A strummed key whose turn comes after the LEN gate is never sent.
+        int keys[4];
+        int64_t wait[4];
+        const int keyCount = midi_keys(ev.noteOn, keys, wait);
+        const int vel  = midi_velocity(ev.noteOn, volCmd ? 1.0f : vol);
+        a.chordCount = 0;
+        for (int k = 0; k < keyCount; ++k) {
+            const int64_t on = ev.frame + wait[k];
+            if (k > 0 && on >= a.offFrame) continue;
+            send_at(on, MIDI_NOTE_ON | ch, static_cast<uint8_t>(keys[k]), static_cast<uint8_t>(vel));
+            if (k == 0) {
+                a.note = static_cast<uint8_t>(keys[0]);
+                a.keyOn[0] = on;
+            } else {
+                a.chord[a.chordCount] = static_cast<uint8_t>(keys[k]);
+                a.keyOn[++a.chordCount] = on;
+            }
+        }
         channelUsed_[ch] = true;
     }
 
@@ -425,15 +442,61 @@ class ExternalConsumer : public IMidiConsumer {
         if (track >= TrackInstruments::LANES) return;
         ActiveNote& a = active_[track];
         if (!a.on) return;
-        send_at(std::min(frame, a.offFrame), MIDI_NOTE_OFF | a.channel, a.note, 0);
+        const int64_t off = std::min(frame, a.offFrame);
+        key_off(track, a, a.note, a.keyOn[0], off);
+        for (int k = 0; k < a.chordCount; ++k) key_off(track, a, a.chord[k], a.keyOn[k + 1], off);
         a.on = false;
         a.offFrame = INT64_MAX;
+    }
+
+    // One key's note-off. A strummed key still waiting for its turn is taken back instead.
+    void key_off(uint8_t track, const ActiveNote& a, uint8_t key, int64_t on, int64_t off) {
+        if (on > off) {
+            const uint8_t status = MIDI_NOTE_ON | a.channel;
+            const auto it = std::find_if(pending_.begin(), pending_.end(), [&](const MidiMessage& m) {
+                return m.track == track && m.frame == on && m.bytes[0] == status && m.bytes[1] == key;
+            });
+            if (it != pending_.end()) {
+                pending_.erase(it);
+                return;
+            }
+        }
+        send_at(std::max(on, off), MIDI_NOTE_OFF | a.channel, key, 0);
     }
 
     // The transpose fields folded in, clamped: B-9 = 131 is a legal phrase note but not MIDI.
     static int midi_note(const NoteOnPayload& n) {
         const int v = static_cast<int>(n.note) + n.transpose + n.pit + n.arp;
         return v < 0 ? 0 : (v > 127 ? 127 : v);
+    }
+
+    // Every key the note plays: itself, or a chord's notes — clamped, and two clamped onto one are one,
+    // at the earlier turn. `wait` = frames after the note-on, ascending: the first key is the first heard.
+    static int midi_keys(const NoteOnPayload& n, int out[4], int64_t wait[4]) {
+        if (n.chordCount == 0) {
+            out[0]  = midi_note(n);
+            wait[0] = 0;
+            return 1;
+        }
+        const int base = static_cast<int>(n.note) + n.transpose + n.pit + n.arp;
+        int count = 0;
+        for (int k = 0; k < n.chordCount && k < 4; ++k) {
+            const int v = base + n.chord[k];
+            const int key = v < 0 ? 0 : (v > 127 ? 127 : v);
+            const int64_t w = static_cast<int64_t>(n.strumOrder[k]) * n.strumStep;
+            if (count > 0 && out[count - 1] == key) {
+                wait[count - 1] = std::min(wait[count - 1], w);
+                continue;
+            }
+            out[count]    = key;
+            wait[count++] = w;
+        }
+        for (int i = 1; i < count; ++i)
+            for (int j = i; j > 0 && wait[j - 1] > wait[j]; --j) {
+                std::swap(wait[j - 1], wait[j]);
+                std::swap(out[j - 1], out[j]);
+            }
+        return count;
     }
 
     // The V column, scaled by the instrument's VOL. At least 1: velocity 0 IS a note-off.

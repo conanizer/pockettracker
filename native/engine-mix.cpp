@@ -77,6 +77,14 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
              note.sfSlot, note.trackId);
         return;     // …and the voice keeps whatever it was already playing
     }
+    // A chord: every key on the channel, at one note's power in all (÷√n).
+    int chordSemis[4] = {}, chordWait[4] = {};
+    const int chordCount = std::min<int>(note.noteOn.chordCount, 4);
+    for (int k = 0; k < chordCount; ++k) {
+        chordSemis[k] = note.noteOn.chord[k];
+        chordWait[k]  = (int)(note.noteOn.strumOrder[k] * note.noteOn.strumStep);
+    }
+    const float chordGain = 1.0f / sqrtf((float)sv.armChord(chordSemis, chordWait, chordCount));
     soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
     trackOnsetFrame[t] = note.targetFrame;   // the authored frame: a late note still pairs with its VTR
     // Mono per track across voice types: an SF note fades a sampler note still sounding here, and
@@ -95,8 +103,10 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     // A TIC in the table's last row overrides the instrument's tic rate, per FX column.
     int effectiveTicRates[TABLE_LANES];
     effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
-    const int sfStartRows[TABLE_LANES] = {note.tableStartRow, note.tableStartRow,
-                                          note.tableStartRow};
+    // ⚠️ `armNote` has not touched the lanes: they are still the previous note's.
+    int sfStartRows[TABLE_LANES];
+    tableStartRows(note, wasSounding && sv.tableId >= 0 && sv.tableId == note.tableId ? sv.lanes : nullptr,
+                   effectiveTicRates, sfStartRows);
     sv.resetTableState(note.tableId, effectiveTicRates,
                        note.noteOctave, note.notePitch, sfStartRows);
 
@@ -132,7 +142,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     }
     voiceSetSends(sv, ip.reverbSend, ip.delaySend);
 
-    sv.params.setBase(PARAM_VOL,   note.volume);
+    sv.params.setBase(PARAM_VOL,   note.volume * chordGain);
     sv.params.setBase(PARAM_PAN,   note.pan);
     sv.params.setBase(PARAM_PITCH, 0.0f);
     // What the setters and the per-piece recompute read.
@@ -147,7 +157,7 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
     memset(sv.prevModDestValues,0, sizeof(sv.prevModDestValues));
     sv.modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;
     sv.modSourceValues[MOD_SRC_PHRASE_VOL] = note.phraseVolume;
-    float initVol = note.volume * note.phraseVolume;
+    float initVol = note.volume * chordGain * note.phraseVolume;
     sv.modDestValues[PARAM_VOL]     = initVol;
     sv.prevModDestValues[PARAM_VOL] = initVol;
     startNotePitchFx(sv, note);
@@ -160,35 +170,13 @@ void AudioEngine::triggerSoundfontNote(const ScheduledNote& note, int frame, int
 // A sampler note into the voice pool, at `frame` inside the current block. Audio thread only.
 void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64_t currentFrame,
                                      float sampleRate) {
-    // TIC00: the table carries on where this track's previous note left it — per column, since one
-    // can be at TIC00 while another free-runs. −1 = nothing to carry.
-    int savedTableRows[TABLE_LANES] = {-1, -1, -1};
-    bool wasTIC00Mode = false;
-    // ⚠️ Only from a voice running THIS table: a chain can hand the track a different one.
+    // ⚠️ Read before the fade-out below: only a voice still running THIS table hands its rows on — a
+    // chain can give the track a different one.
+    const TableLane* liveLanes = nullptr;
     for (int v = 0; v < MAX_VOICES; v++) {
         if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut
-            && voices[v].tableId >= 0 && voices[v].tableId == note.tableId) {
-            for (int l = 0; l < TABLE_LANES; ++l) {
-                if (voices[v].lanes[l].ticRate != 0x00) continue;
-                wasTIC00Mode = true;
-                savedTableRows[l] = tic00RowAfter(voices[v].lanes[l]);
-                LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from voice %d)",
-                     savedTableRows[l], note.trackId, l + 1, v);
-            }
-        }
-    }
-    // No voice left to read the row off (a one-shot ran out): the track's cursor still holds it.
-    if (!wasTIC00Mode && note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
-        note.tableId >= 0) {
-        if (const Tic00Cursor* c = tic00Slot(note.trackId, note.tableId, /*create=*/false)) {
-            for (int l = 0; l < TABLE_LANES; ++l) {
-                if (c->ticRate[l] != 0x00 || !c->active[l]) continue;
-                wasTIC00Mode = true;
-                savedTableRows[l] = tic00RowAfter(c->row[l], c->lastProcessed[l]);
-                LOGT("📋 TIC00: table row %d for track %d column %d retrigger (from table cursor)",
-                     savedTableRows[l], note.trackId, l + 1);
-            }
-        }
+            && voices[v].tableId >= 0 && voices[v].tableId == note.tableId)
+            liveLanes = voices[v].lanes;
     }
 
     // A note with no sample behind it must not touch the track (a preview of an empty slot).
@@ -241,19 +229,21 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
                 sfVoices[note.trackId].noteOffAt(frame);
             }
             float rate = note.frequency / note.baseFrequency;
+            const songcore::NoteOnPayload& on = note.noteOn;
+            const int chordCount = std::min<int>(on.chordCount, 1 + Voice::CHORD_EXTRA);
+            int chordSemis[1 + Voice::CHORD_EXTRA] = {};
+            int strumWait[1 + Voice::CHORD_EXTRA] = {};
+            for (int k = 0; k < chordCount; ++k) {
+                chordSemis[k] = on.chord[k];
+                strumWait[k]  = (int)(on.strumOrder[k] * on.strumStep);
+            }
 
             // A TIC in the table's last row overrides the instrument's tic rate, per FX column.
             int effectiveTicRates[TABLE_LANES];
             effectiveTicRatesFor(note.tableId, note.tableTicRate, effectiveTicRates);
 
-            // A THO-with-note start row places every column; otherwise only a column that is both
-            // at TIC00 and had something to carry resumes, and the rest begin at row 0.
-            int startRows[TABLE_LANES] = {0, 0, 0};
-            for (int l = 0; l < TABLE_LANES; ++l) {
-                if (note.tableStartRow >= 0) startRows[l] = note.tableStartRow % 16;
-                else if (wasTIC00Mode && effectiveTicRates[l] == 0x00 && savedTableRows[l] >= 0)
-                    startRows[l] = savedTableRows[l];
-            }
+            int startRows[TABLE_LANES];
+            tableStartRows(note, liveLanes, effectiveTicRates, startRows);
 
             // The generation BEFORE the buffers: the UI bumps it after storing them, so a
             // mismatch here can only make the mix end the voice, never read a stale pointer.
@@ -263,6 +253,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
                               note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                               sampleRate, note.startPointOverride, note.endPointOverride,
                               note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
+            voices[v].setChord(chordSemis, chordCount, strumWait);
             voices[v].instrId = note.sampleId;
             voices[v].sampleGen = gen;
             voices[v].faderHeld = false;
@@ -747,7 +738,7 @@ void AudioEngine::mixSamplerVoices(BlockMix& b) {
             int to = numFrames;
             if (voice.tableId >= 0) {
                 to = from + processTableTick(voice, from, numFrames - from, b.sampleRate);
-                storeTic00Cursor(voice);
+                if (!voice.isFadingOut) storeTic00Cursor(voice.trackId, voice.tableId, voice.lanes);
             }
             prepareSamplerPiece(voice, to - from, b.sampleRate);
             if (editLock.owns_lock() && voice.isActive) mixSamplerPiece(voice, b, from, to);
@@ -756,24 +747,45 @@ void AudioEngine::mixSamplerVoices(BlockMix& b) {
     }
 }
 
-// The one place a track's TIC00 cursor is written. Only the live (not fading) voice owns it, or
-// the value would depend on slot order.
-void AudioEngine::storeTic00Cursor(const Voice& voice) {
+// The one place a track's TIC00 cursor is written. ⚠️ Only from the voice that owns the track — a
+// sampler voice fading under a new note would make the value depend on slot order.
+void AudioEngine::storeTic00Cursor(int trackId, int tableId, const TableLane (&lanes)[TABLE_LANES]) {
     bool anyTic00 = false;
-    for (int l = 0; l < TABLE_LANES; ++l) anyTic00 |= (voice.lanes[l].ticRate == 0x00);
-    if (anyTic00 && !voice.isFadingOut) {
-        const int t = voice.trackId;
-        if (t >= 0 && t < SF_VOICE_COUNT) {
-            if (Tic00Cursor* c = tic00Slot(t, voice.tableId, /*create=*/true)) {
-                for (int l = 0; l < TABLE_LANES; ++l) {
-                    c->row[l]           = voice.lanes[l].row;
-                    c->lastProcessed[l] = voice.lanes[l].lastProcessed;
-                    c->ticRate[l]       = voice.lanes[l].ticRate;
-                    c->active[l]        = voice.lanes[l].active;
-                }
-                tic00Sounding[t] = voice.tableId;   // what the TABLE screen draws
-            }
+    for (int l = 0; l < TABLE_LANES; ++l) anyTic00 |= (lanes[l].ticRate == 0x00);
+    if (!anyTic00 || trackId < 0 || trackId >= SF_VOICE_COUNT) return;
+    if (Tic00Cursor* c = tic00Slot(trackId, tableId, /*create=*/true)) {
+        for (int l = 0; l < TABLE_LANES; ++l) {
+            c->row[l]           = lanes[l].row;
+            c->lastProcessed[l] = lanes[l].lastProcessed;
+            c->ticRate[l]       = lanes[l].ticRate;
+            c->active[l]        = lanes[l].active;
         }
+        tic00Sounding[trackId] = tableId;   // what the TABLE screen draws
+    }
+}
+
+// Where a new note's table columns start. A THO with a note places every column; a TIC00 column goes on
+// from the row after the track's last note in this table — read off `live`, the lanes of the voice
+// still running it, else off the track's cursor (a voice that ran out); the rest start at the top.
+void AudioEngine::tableStartRows(const ScheduledNote& note, const TableLane* live,
+                                 const int (&rates)[TABLE_LANES], int (&out)[TABLE_LANES]) {
+    int saved[TABLE_LANES] = {-1, -1, -1};
+    bool found = false;
+    for (int l = 0; live && l < TABLE_LANES; ++l) {
+        if (live[l].ticRate != 0x00) continue;
+        saved[l] = tic00RowAfter(live[l]);
+        found = true;
+    }
+    if (!found && note.tableId >= 0) {
+        if (const Tic00Cursor* c = tic00Slot(note.trackId, note.tableId, /*create=*/false)) {
+            for (int l = 0; l < TABLE_LANES; ++l)
+                if (c->ticRate[l] == 0x00 && c->active[l]) saved[l] = tic00RowAfter(c->row[l], c->lastProcessed[l]);
+        }
+    }
+    for (int l = 0; l < TABLE_LANES; ++l) {
+        if (note.tableStartRow >= 0)                 out[l] = note.tableStartRow % 16;
+        else if (rates[l] == 0x00 && saved[l] >= 0)  out[l] = saved[l];
+        else                                         out[l] = 0;
     }
 }
 
@@ -817,6 +829,12 @@ void AudioEngine::prepareSamplerPiece(Voice& voice, int frames, float sampleRate
 
 // One piece of one sampler voice — frames [from, to) of the block — into the output and sends.
 void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int to) {
+    if (voice.chordExtra > 0) mixSamplerPieceAs<true>(voice, b, from, to);
+    else                      mixSamplerPieceAs<false>(voice, b, from, to);
+}
+
+template <bool Chord>
+void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, int to) {
     float* const output    = b.output;
     const int numFrames    = b.numFrames;
     const int channelCount = b.channelCount;
@@ -872,6 +890,9 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
             const int wasEnd   = voice.actualLoopEnd   + voice.loopSlideFrames;
             if (voice.position >= (double)wasStart && voice.position < (double)wasEnd)
                 voice.position += (double)(off - voice.loopSlideFrames);
+            for (int k = 0; k < voice.chordExtra; ++k)
+                if (voice.chordPos[k] >= (double)wasStart && voice.chordPos[k] < (double)wasEnd)
+                    voice.chordPos[k] += (double)(off - voice.loopSlideFrames);
             voice.loopSlideFrames = off;
         }
         voice.actualLoopStart += off;
@@ -896,6 +917,22 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
     Playhead   ph           = playheadOf(voice, modulatedRate);
     const bool stereo       = ph.right != nullptr;
     const int  lastReadable = voice.sampleLength - 1;   // the read needs idx + 1
+
+    // A chord's other playheads: the voice's own, at their own place and rate.
+    const int chordExtra = Chord ? voice.chordExtra : 0;
+    Playhead  chord[Voice::CHORD_EXTRA];
+    bool      chordDone[Voice::CHORD_EXTRA];
+    int       chordWait[1 + Voice::CHORD_EXTRA];
+    if constexpr (Chord) chordWait[0] = voice.chordWait[0];
+    for (int k = 0; k < chordExtra; ++k) {
+        chordWait[k + 1]     = voice.chordWait[k + 1];
+        chord[k]             = ph;
+        chord[k].position    = voice.chordPos[k];
+        chord[k].loopingBack = voice.chordBack[k];
+        chord[k].rate        = modulatedRate * voice.chordRatio[k];
+        chordDone[k]         = voice.chordDone[k];
+    }
+    const float chordIn = voice.chordIn, chordOut = voice.chordOut;
 
     // ⚠️ Two ramps, two clocks: the voice's own params ramp across this PIECE (`t`), the mixer's
     // fader and mute gate across the whole BLOCK (`tBlock`) — or a cut piece would step them.
@@ -999,10 +1036,49 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
 
         float procL = Playhead::read(ph.left, idx, frac, effDownsample);
         float procR = stereo ? Playhead::read(ph.right, idx, frac, effDownsample) : procL;
-        if (dsFade.moving()) {   // the downsample changed mid-note: the old read fades out
-            const float k = dsFade.next();
-            procL = Playhead::read(ph.left, idx, frac, dsPrev) * k + procL * (1.0f - k);
-            if (stereo) procR = Playhead::read(ph.right, idx, frac, dsPrev) * k + procR * (1.0f - k);
+        const bool dsBlend = dsFade.moving();
+        float      dsOld   = 0.0f;
+        if (dsBlend) {   // the downsample changed mid-note: the old read fades out
+            dsOld = dsFade.next();
+            procL = Playhead::read(ph.left, idx, frac, dsPrev) * dsOld + procL * (1.0f - dsOld);
+            if (stereo) procR = Playhead::read(ph.right, idx, frac, dsPrev) * dsOld + procR * (1.0f - dsOld);
+        }
+        // A strum holds the voice's own playhead where it starts until its turn.
+        bool ownWaits = false;
+        if constexpr (Chord) {
+            ownWaits = chordWait[0] > 0;
+            const float own = strumGain(chordWait[0]);
+            procL *= own;
+            procR *= own;
+            for (int k = 0; k < chordExtra; ++k) {
+                if (chordDone[k]) continue;
+                const bool waits  = chordWait[k + 1] > 0;
+                const float strum = strumGain(chordWait[k + 1]);
+                if (waits) continue;
+                Playhead& c = chord[k];
+                const int cIdx = (int)c.position;
+                if (cIdx < 0 || cIdx >= lastReadable) {
+                    chordDone[k] = true;
+                    continue;
+                }
+                const float cFrac = (float)(c.position - (double)cIdx);
+                float g = strum;   // and a one-shot's own fade into its last frames
+                if (c.oneShot) {
+                    const float remaining = c.framesLeft();
+                    if (remaining >= 0.0f && remaining < (float)DECLICK_SAMPLES) g *= remaining / (float)DECLICK_SAMPLES;
+                }
+                float cL = Playhead::read(c.left, cIdx, cFrac, effDownsample);
+                if (dsBlend) cL = Playhead::read(c.left, cIdx, cFrac, dsPrev) * dsOld + cL * (1.0f - dsOld);
+                procL += cL * g;
+                if (stereo) {
+                    float cR = Playhead::read(c.right, cIdx, cFrac, effDownsample);
+                    if (dsBlend) cR = Playhead::read(c.right, cIdx, cFrac, dsPrev) * dsOld + cR * (1.0f - dsOld);
+                    procR += cR * g;
+                }
+                if (!c.advance()) chordDone[k] = true;
+            }
+            procL *= chordIn;
+            procR *= chordIn;
         }
         chainRan = true;
         if (!chainIdle) {
@@ -1019,7 +1095,8 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         if (!stereo) procR = procL;   // a mono sample feeds both lanes
 
         // Sends are tapped below everything on the instrument and ABOVE the track fader.
-        const float scalar = finalVol * volRoute;
+        float scalar = finalVol * volRoute;
+        if constexpr (Chord) scalar *= chordOut;
         procL *= scalar;
         procR *= scalar;
 
@@ -1079,6 +1156,7 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
         }
 
         if (!isActive) break;
+        if (ownWaits) continue;
         if (!ph.advance()) {
             ranOut = true;
             break;
@@ -1087,6 +1165,13 @@ void AudioEngine::mixSamplerPiece(Voice& voice, const BlockMix& b, int from, int
 
     voice.position         = ph.position;
     voice.loopingBack      = ph.loopingBack;
+    if constexpr (Chord) voice.chordWait[0] = chordWait[0];
+    for (int k = 0; k < chordExtra; ++k) {
+        voice.chordWait[k + 1] = chordWait[k + 1];
+        voice.chordPos[k]  = chord[k].position;
+        voice.chordBack[k] = chord[k].loopingBack;
+        voice.chordDone[k] = chordDone[k];
+    }
     voice.volGlide         = volGlide;
     voice.volRouteLast     = volRouteLast;
     voice.dsFade           = dsFade;
@@ -1118,11 +1203,15 @@ void AudioEngine::mixSoundfontVoices(BlockMix& b) {
         if (h) memset(sfBuf, 0, sizeof(float) * numFrames * 2);
         for (int from = 0; from < numFrames; ) {
             int to = numFrames;
-            if (sv.tableId >= 0) to = from + processTableTick(sv, from, numFrames - from, b.sampleRate);
+            if (sv.tableId >= 0) {
+                to = from + processTableTick(sv, from, numFrames - from, b.sampleRate);
+                storeTic00Cursor(t, sv.tableId, sv.lanes);
+            }
             prepareSoundfontPiece(sv, t, from, to - from, b.sampleRate);
             if (h) renderSoundfontPiece(sv, t, h, b, from, to);
             from = to;
         }
+        sv.strumBlockEnd(numFrames);
         if (!h) continue;
 
         bool stopFadeDone = false;
@@ -1209,6 +1298,21 @@ void AudioEngine::prepareSoundfontPiece(SoundfontVoice& sv, int t, int from, int
     sv.applyPitchMod((float)sampleRate, frames);
 }
 
+// Channel t's frames [from, to) into `buf` at the same frames, each strummed key sounded on its own
+// frame: TSF starts a key at a render call's first frame.
+void AudioEngine::renderSoundfontKeys(SoundfontVoice& sv, tsf* h, int t, float* buf, int from, int to) {
+    while (from < to) {
+        int next = to;
+        for (int k = 0; k < sv.strumCount; ++k) next = std::min(next, std::max(from, sv.strumAt[k]));
+        if (next == from) {
+            sv.fireStrumKeys(h, from);
+            continue;
+        }
+        tsf_render_float_channel(h, t, buf + from * 2, next - from, 0 /* overwrite */);
+        from = next;
+    }
+}
+
 // One piece of one SoundFont voice — frames [from, to) of the block — rendered into sfBuf at the
 // same frames, with the note's gain, the track fader and the voice's chain on it.
 void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const BlockMix& b, int from, int to) {
@@ -1228,18 +1332,18 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
         // its frame: TSF steps its envelope from a render call's first frame.
         const int offAt = sv.pendingTsfOffAt;
         if (offAt > from && offAt < to) {
-            tsf_render_float_channel(h, t, sfBuf + from * 2, offAt - from, 0 /* overwrite */);
-            tsf_channel_note_off(h, t, sv.pendingTsfOffNote);
-            tsf_render_float_channel(h, t, sfBuf + offAt * 2, to - offAt, 0 /* overwrite */);
+            renderSoundfontKeys(sv, h, t, sfBuf, from, offAt);
+            sv.keysOff(h, sv.pendingTsfOffNote);
+            renderSoundfontKeys(sv, h, t, sfBuf, offAt, to);
             sv.pendingTsfOffAt = -1;
         } else {
             // Due at or before this piece — or carried over at 0 from a block that did not
             // render this voice.
             if (offAt >= 0 && offAt <= from) {
-                tsf_channel_note_off(h, t, sv.pendingTsfOffNote);
+                sv.keysOff(h, sv.pendingTsfOffNote);
                 sv.pendingTsfOffAt = -1;
             }
-            tsf_render_float_channel(h, t, sfBuf + from * 2, to - from, 0 /* overwrite */);
+            renderSoundfontKeys(sv, h, t, sfBuf, from, to);
         }
         applyGainRamp(sfBuf + from * 2, to - from, sv.volGainFrom, sv.volGainTo);
         faderThenChain(sv.chain, sfBuf, from, to, faderStart, faderEnd, numFrames);
@@ -1266,12 +1370,12 @@ void AudioEngine::renderSoundfontPiece(SoundfontVoice& sv, int t, tsf* h, const 
         sv.cutting   = false;
         sv.faderHeld = false;
         // Now the old voices can be cut: the samples they contributed are already at zero.
-        sv.fireArmedNote(h);
+        sv.fireArmedNote(h, sfStart);
         // sfNoteBuf at the same frames as sfBuf, so the fader's ramp lines up.
         const int noteFrames = to - sfStart;
         if (noteFrames > 0) {
             float* const note = sfNoteBuf;
-            tsf_render_float_channel(h, t, note + sfStart * 2, noteFrames, 0 /* overwrite */);
+            renderSoundfontKeys(sv, h, t, note, sfStart, to);
             applyGainRamp(note + sfStart * 2, noteFrames, sv.volGainFrom, sv.volGainTo);
             faderThenChain(sv.chain, note, sfStart, to, b.trackVolStart[t], b.trackVolEnd[t], numFrames);
             for (int i = sfStart * 2; i < to * 2; i++) sfBuf[i] += note[i];

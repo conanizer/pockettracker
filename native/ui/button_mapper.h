@@ -40,6 +40,8 @@ void handle_button(const ButtonEvent& e, Dispatcher& d, MapperState& ms, uint64_
     if (e.button == Button::R_SHIFT) d.on_r_held(e.action == ButtonAction::PRESSED);
     // A press with R held is a combo (R+DPAD switches screens): that hold never learns.
     else if (e.action == ButtonAction::PRESSED && m.r) d.on_r_combo_press();
+    // A's state for what is drawn while it is held. Above every early return too.
+    if (e.button == Button::A) d.on_a_held(e.action == ButtonAction::PRESSED);
 
     // ── Release ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {

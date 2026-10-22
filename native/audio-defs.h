@@ -68,6 +68,9 @@ const int FX_CRU    = 0x38;  // CRU xy - x = bits crushed, y = downsample; two 4
 const int FX_FIN    = 0x39;  // FIN xx - fine tune; 80 = in tune, one semitone either way
 const int FX_INS    = 0x3C;  // INS xx - play this hit on instrument xx; on a table row it is a SWITCH
 const int FX_TIM    = 0x3D;  // TIM xx - the delay's echo time, free scale (00-FF = 0-2 s); GLOBAL
+const int FX_CHD    = 0x3F;  // CHD xy - the note as a chord; read only in a column that steps per note
+const int FX_ARC    = 0x03;  // ARC xy - right of a CHD, strums it: x the order, y tics between notes
+const int FX_ARPEGGIO = 0x0A;  // ARP - not run in a table; it takes an ARC to its right off a CHD
 
 // The most a random roll may push a table command to — songcore's effect_value_max, pinned in
 // engine_consumer.h.

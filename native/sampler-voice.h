@@ -102,6 +102,14 @@ struct Playhead {
     }
 };
 
+// A strummed chord note's gain for one output sample, counting its wait down: 0 until it starts, then
+// up to 1 over DECLICK_SAMPLES.
+inline float strumGain(int& wait) {
+    if (wait <= -DECLICK_SAMPLES) return 1.0f;
+    const int w = wait--;
+    return w > 0 ? 0.0f : (float)(-w) / (float)DECLICK_SAMPLES;
+}
+
 // One output sample's anti-click gain: the fade-in every note starts with (advanced here) and a
 // one-shot's fade into its last frames.
 inline float antiClickGain(Ramp& fadeIn, const Playhead& ph) {
@@ -152,6 +160,23 @@ struct Voice : public IAudioVoice {
     bool loopingBack = false;          // ping-pong: on the way down
     // An ADSR release began on a looping voice: the loop is abandoned and the tail plays out.
     bool loopReleasing = false;
+
+    // A chord (CHD): its other notes as more playheads in this one voice, summed before the one chain.
+    // The voice's own playhead plays the LOWEST note, so a one-shot's higher notes run out first and
+    // the voice ends with the last of them. ⚠️ Whatever moves `position` moves these too
+    // (`chordFollow`).
+    static constexpr int CHORD_EXTRA = 3;
+    int    chordExtra = 0;                    // 0 = a single note
+    int    chordLow   = 0;                    // the lowest note, semitones from the note: already in the rate
+    float  chordRatio[CHORD_EXTRA] = {};      // each one's rate against the voice's own, > 1
+    double chordPos[CHORD_EXTRA]   = {};
+    bool   chordBack[CHORD_EXTRA]  = {};      // ping-pong: on the way down
+    bool   chordDone[CHORD_EXTRA]  = {};      // a one-shot's note that ran out
+    // A strum: frames until each playhead starts, the voice's own first (`strumGain`).
+    int    chordWait[1 + CHORD_EXTRA] = {};
+    // The sum goes into the chain at 1/n, so drive and filter are hit no harder than by one note,
+    // and comes out at √n: a chord is as loud as one note in power, not n times.
+    float  chordIn = 1.0f, chordOut = 1.0f;
 
     InstrumentChain chain;
 
@@ -270,6 +295,10 @@ struct Voice : public IAudioVoice {
         actualLoopEnd   = std::max(actualLoopStart + 1, std::min(actualLoopEnd, actualEnd));
         loopEndNorm     = instrParams.loopEnd;
         loopReleasing   = false;
+        chordExtra      = 0;
+        chordLow        = 0;
+        chordIn         = 1.0f;
+        chordOut        = 1.0f;
         // The loop slide resets on every note: one LPO cell colours that note only.
         loopSlideSixteenths = 0;
         loopSlideFrames     = 0;
@@ -365,6 +394,34 @@ struct Voice : public IAudioVoice {
         isActive = true;
     }
 
+    // The chord's notes in semitones from the note, ascending (0 or 1 of them = a single note);
+    // `wait` = frames until each one starts. After trigger(), and again only before the note sounds.
+    void setChord(const int* semis, int count, const int* wait) {
+        const int low = count > 0 ? semis[0] : 0;
+        if (low != chordLow) {
+            const float k = powf(2.0f, (float)(low - chordLow) / 12.0f);
+            basePlaybackRate *= k;
+            playbackRate     *= k;
+            chordLow = low;
+        }
+        chordExtra = std::max(0, std::min(count - 1, CHORD_EXTRA));
+        for (int k = 0; k < chordExtra; ++k) chordRatio[k] = powf(2.0f, (float)(semis[k + 1] - low) / 12.0f);
+        // The first to sound starts under the note's own fade-in; a later one ramps in by itself.
+        for (int k = 0; k <= chordExtra; ++k) chordWait[k] = wait[k] > 0 ? wait[k] : -DECLICK_SAMPLES;
+        chordFollow();
+        chordIn  = 1.0f / (float)(chordExtra + 1);
+        chordOut = sqrtf((float)(chordExtra + 1));
+    }
+
+    // Every chord playhead to where the voice's own is: a new start, an OFFSET, a restart.
+    void chordFollow() {
+        for (int k = 0; k < chordExtra; ++k) {
+            chordPos[k]  = position;
+            chordBack[k] = loopingBack;
+            chordDone[k] = false;
+        }
+    }
+
     void stop() {
         isActive = false;
         isFadingOut = false;
@@ -441,6 +498,7 @@ struct Voice : public IAudioVoice {
         } else {
             position = (double)actualStart;
         }
+        chordFollow();
         fadeIn.start(0.0f, 1.0f, DECLICK_SAMPLES);
     }
 

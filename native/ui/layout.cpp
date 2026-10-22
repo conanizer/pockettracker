@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include "songcore/chords.h"
 #include "songcore/scales.h"
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
@@ -398,11 +399,78 @@ bool TrackerLayout::has_falling_meters(const AppState& s) const {
 
 // ─── The status line, top-left of the scope strip ────────────────────────────────────────────────
 void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
+    if (draw_chord_hint(c, s)) return;
     if (s.statusMessage.empty()) return;
 
     const std::string text = Canvas::clip_text(s.statusMessage, STATUS_MAX_CHARS);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
     c.draw_text(text, SIDE_SPACER + 10, SCREEN_SPACER + 10, color, CHAR_SPACING, FONT_SCALE);
+}
+
+// A held on a CHD value: the chord's name and its notes. In a PHRASE, made of this row's note in the
+// track's scale as far as this phrase shows it; in a TABLE, on C-4 moved by the row's transpose, as the
+// table plays it — unsnapped, and named as the note it lands on.
+// False when the cursor is elsewhere.
+bool TrackerLayout::draw_chord_hint(Canvas& c, const AppState& s) const {
+    if (!s.aHeld || s.selection.active) return false;
+    const songcore::Project& p = *s.project;
+    int value = -1, root = 60;
+    const songcore::Scale* scale = nullptr;
+    int key = 0;
+    std::string where;   // the root's name, or why there is none
+    if (s.currentScreen == ScreenType::PHRASE) {
+        const int col = s.cursorColumn;
+        if (col != 5 && col != 7 && col != 9) return false;
+        const songcore::Phrase&     ph   = p.phrases[static_cast<size_t>(s.currentPhrase)];
+        const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s.cursorRow)];
+        const int                   slot = (col - 3) / 2;
+        if (songcore::step_fx_type(step, slot) != songcore::FX_CHD) return false;
+        value = songcore::step_fx_value(step, slot);
+        if (!songcore::note_is_pitch(step.note)) {
+            where = "NEEDS A NOTE ON THIS ROW";
+        } else {
+            const songcore::NoteScale ns = songcore::phrase_note_scale(p, ph, s.cursorRow, step.instrument);
+            root  = ns.snap(songcore::note_to_midi(step.note));
+            scale = ns.scale;
+            key   = ns.key;
+        }
+    } else if (s.currentScreen == ScreenType::TABLE) {
+        const int col = s.tableCursorColumn;
+        if (col != 4 && col != 6 && col != 8) return false;
+        const songcore::TableRow& r =
+            p.tables[static_cast<size_t>(s.currentTable)].rows[static_cast<size_t>(s.tableCursorRow)];
+        const int slot = (col - 4) / 2;
+        const int type = slot == 0 ? r.fx1Type : slot == 1 ? r.fx2Type : r.fx3Type;
+        if (type != songcore::FX_CHD) return false;
+        value = slot == 0 ? r.fx1Value : slot == 1 ? r.fx2Value : r.fx3Value;
+        // The row's transpose moves the note the chord is built on: 00-7F up, 80-FF down.
+        const int tsp = r.transpose < 0x80 ? r.transpose : r.transpose - 256;
+        root = std::max(0, std::min(127, 60 + tsp));
+    } else {
+        return false;
+    }
+
+    std::string head  = std::string(songcore::chord_name(value)) + "  " + songcore::chord_layout_name(value);
+    std::string notes = where;
+    if (where.empty()) {
+        if (s.currentScreen == ScreenType::PHRASE) {
+            const char* name = songcore::NOTE_NAMES[songcore::scale_mod12(root)];
+            head = std::string(name, name[1] == '-' ? 1 : 2) + " " + head;
+        } else {
+            notes = "ON " + songcore::note_name(songcore::note_from_midi(root)) + ":";
+        }
+        int semis[songcore::CHORD_MAX_NOTES];
+        const int n = songcore::chord_notes(value, root, scale, key, semis);
+        for (int i = 0; i < n; ++i) {
+            if (!notes.empty()) notes += ' ';
+            notes += songcore::note_name(songcore::note_from_midi(root + semis[i]));
+        }
+    }
+    const int x = SIDE_SPACER + 10, y = SCREEN_SPACER + 10;
+    c.draw_text(Canvas::clip_text(head, STATUS_MAX_CHARS), x, y, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(Canvas::clip_text(notes, STATUS_MAX_CHARS), x, y + 21, s.theme.textTitle, CHAR_SPACING,
+                FONT_SCALE);
+    return true;
 }
 
 // ─── The selection scope ("SEL:ROW") over the clipboard ("PHR:2x3"), top-right of the strip ──────

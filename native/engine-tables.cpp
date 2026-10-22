@@ -12,6 +12,7 @@ void AudioEngine::resetTic00Cursors() {
     for (int t = 0; t < SF_VOICE_COUNT; ++t) {
         for (int s = 0; s < TIC00_SLOTS; ++s) tic00Cursor[t][s] = Tic00Cursor();
         tic00Sounding[t] = -1;
+        tableStrumPass[t] = 0;
     }
 }
 
@@ -170,43 +171,20 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
             }
         }
 
-        // Each column is read at its own row (at TIC00 they coincide).
+        // Each column is read at its own row, after the dice exactly as a played row rolls them: a CHA
+        // or RNL acts on the cells of ITS row (rollTableRow). A cleared INS is a row with no switch; a
+        // lost N/V stays out of what the hit carries. The N/V belong to FX1's row.
         int type[3], value[3], slotRow[3];
-        for (int s = 0; s < 3; ++s) {
-            int t3[3], v3[3];
-            rowFx(rows[laneRow[s]], t3, v3);
-            type[s] = t3[s]; value[s] = v3[s]; slotRow[s] = laneRow[s];
-        }
-
-        // CHA as on a played row (rollTableRow). A cleared INS is a row with no switch; a lost N/V
-        // stays out of what the hit carries.
+        int rolls[16][3][2];
+        for (auto& row : rolls) for (auto& slot : row) slot[0] = slot[1] = -1;
         bool nvPlays = true;
         for (int s = 0; s < 3; ++s) {
-            if (type[s] != FX_CHA) continue;
-            const int v = value[s];
-            int left = s - 1, right = s + 1;
-            while (left >= 0 && type[left] == 0) --left;
-            while (right <= 2 && type[right] == 0) ++right;
-            if (static_cast<int>(xorshift32(chainRngState) % 15u) >= ((v >> 4) & 0x0F)) {
-                if (left >= 0) type[left] = 0;
-                else           nvPlays = false;
-            }
-            if (right <= 2 && static_cast<int>(xorshift32(chainRngState) % 15u) >= (v & 0x0F)) type[right] = 0;
-        }
-
-        // RND below an INS picks a nearby instrument per hit; below a CUT it moves the carried cutoff.
-        for (int s = 0; s < 3; ++s) {
-            if (type[s] != FX_RND) continue;
-            if (!tableRandomize(rows, slotRow[s], s, value[s], chainRngState, type[s], value[s]))
-                type[s] = 0;
-        }
-
-        // RNL adds 0..xx to the slot on its LEFT — beside an INS, a pool-picker. Read wherever it sits.
-        for (int s = 1; s < 3; ++s) {
-            if (type[s] != FX_RNL || type[s - 1] != FX_INS) continue;
-            const int range = value[s] & 0xFF;
-            if (range > 0) value[s - 1] += static_cast<int>(xorshift32(chainRngState) % (uint32_t)(range + 1));
-            if (value[s - 1] > 127) value[s - 1] = 127;   // INS's own ceiling
+            bool nv = true;
+            const TableRow played = rollTableRow(rows, laneRow[s], s, chainRngState, rolls[laneRow[s]], nv);
+            int t3[3], v3[3];
+            rowFx(played, t3, v3);
+            type[s] = t3[s]; value[s] = v3[s]; slotRow[s] = laneRow[s];
+            if (s == 0) nvPlays = nv;
         }
 
         // ⚠️ The rotation moves on every hit, switch or not — written first, or a row without an INS
@@ -276,6 +254,26 @@ void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_
     if (lastRow.fx3Type == FX_TIC) out[2] = lastRow.fx3Value;
 }
 
+// The ARC that strums a CHD in column `slot`: the nearest to its right before another CHD or ARP, each
+// column read where its own playhead stands. A HOP or THO there is never played — followed, as the
+// column will. -1 when there is none.
+static int strumForChord(const TableRow rows[16], const TableLane (&lanes)[TABLE_LANES], int slot) {
+    for (int s = slot + 1; s < TABLE_LANES; ++s) {
+        if (!lanes[s].active) continue;
+        int r = lanes[s].row, t3[3], v3[3];
+        for (uint16_t seen = 0;;) {
+            seen = static_cast<uint16_t>(seen | (1u << r));
+            rowFx(rows[r], t3, v3);
+            const bool steers = (t3[s] == FX_HOP && v3[s] != 0xFF) || t3[s] == FX_THO;
+            if (!steers || (seen & (1u << (v3[s] & 0x0F)))) break;
+            r = v3[s] & 0x0F;
+        }
+        if (t3[s] == FX_CHD || t3[s] == FX_ARPEGGIO) return -1;
+        if (t3[s] == FX_ARC) return v3[s];
+    }
+    return -1;
+}
+
 // TIC00: a row per note, no advance · TICFC: row = the note's octave · TICFE: row = its pitch class ·
 // TICFF: 200 rows a second.
 // Frames one row lasts on a lane that advances (0 for the three that hold); 12 tics a step.
@@ -340,7 +338,7 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
             const uint16_t bit = static_cast<uint16_t>(1u << L.row);
             if (a3[lane] == table_automation::FX_AUS_CODE && p3[lane] != table_automation::FX_AUS_CODE) L.ausEaten = static_cast<uint16_t>(L.ausEaten | bit);
             else                                          L.ausEaten = static_cast<uint16_t>(L.ausEaten & ~bit);
-            if (!processTableRow(voice, played, lane, shouldAdvance, from, sampleRate, nvPlays)) break;
+            if (!processTableRow(voice, rows, played, lane, shouldAdvance, from, sampleRate, nvPlays)) break;
         }
         // ⚠️ A HOP FF in an earlier lane can have cleared tableId: stop here.
         if (voice.tableId < 0) return maxFrames;
@@ -383,8 +381,8 @@ int AudioEngine::processTableTick(V& voice, int from, int maxFrames, float sampl
 // ⚠️ A HOP or THO row is never heard — playing it would put a tic of table defaults before every loop.
 // The caller re-enters on `true` until a row plays.
 template <typename V>
-bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool shouldAdvance,
-                                  int atFrame, float sampleRate, bool applyNV) {
+bool AudioEngine::processTableRow(V& voice, const TableRow (&rows)[16], const TableRow& row, int lane,
+                                  bool shouldAdvance, int atFrame, float sampleRate, bool applyNV) {
     TableLane& L = voice.lanes[lane];
 
     const uint8_t laneFxType = (lane == 0) ? row.fx1Type : (lane == 1) ? row.fx2Type : row.fx3Type;
@@ -478,6 +476,26 @@ bool AudioEngine::processTableRow(V& voice, const TableRow& row, int lane, bool 
                          fxValue, lane + 1, fxValue);
                 }
                 break;
+
+            // At the note's start, in a column that steps per note (TIC 00, FC, FE): elsewhere the
+            // row comes mid-note.
+            case FX_CHD: {
+                if (L.ticRate != 0x00 && L.ticRate != 0xFC && L.ticRate != 0xFE) break;
+                int semis[songcore::CHORD_MAX_NOTES] = {}, wait[songcore::CHORD_MAX_NOTES] = {};
+                const int n = songcore::chord_notes(fxValue, 0, nullptr, 0, semis);
+                const int arc = strumForChord(rows, voice.lanes, lane);
+                const int t = voice.getTrackId();
+                const bool strum = arc > 0 && (arc & 0x0F) > 0 && n > 1 && t >= 0 && t < SF_VOICE_COUNT;
+                if (strum) {
+                    int order[songcore::CHORD_MAX_NOTES] = {};
+                    songcore::strum_order(std::min((arc >> 4) & 0x0F, 3), n, tableStrumPass[t],
+                        [this](int k) { return static_cast<int>(xorshift32(chainRngState) % (uint32_t)k); }, order);
+                    const double perTic = framesPerTableRow(1, currentTempo.load(std::memory_order_relaxed), sampleRate);
+                    for (int k = 0; k < n; ++k) wait[k] = static_cast<int>(order[k] * (arc & 0x0F) * perTic);
+                }
+                if (tableChord(voice, semis, n, wait) && strum) ++tableStrumPass[t];
+                break;
+            }
 
             case FX_THO:
                 hopExecuted = true;

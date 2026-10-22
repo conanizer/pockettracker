@@ -74,6 +74,21 @@ class TraceWriter : public IMidiConsumer {
                 s += " pbnRate=";   s += fbits(n.pbnRateBits);
                 s += " vibSpd=";    s += fbits(n.vibSpdBits);
                 s += " vibDep=";    s += fbits(n.vibDepBits);
+                if (n.chordCount > 0) {
+                    s += " chord=";
+                    for (int i = 0; i < n.chordCount && i < 4; ++i) {
+                        if (i > 0) s += ',';
+                        s += std::to_string(static_cast<int>(n.chord[i]));
+                    }
+                    if (n.strumStep > 0) {
+                        s += " strum=";
+                        s += std::to_string(n.strumStep);
+                        for (int i = 0; i < n.chordCount && i < 4; ++i) {
+                            s += i == 0 ? ':' : ',';
+                            s += std::to_string(static_cast<int>(n.strumOrder[i]));
+                        }
+                    }
+                }
                 break;
             }
             case EV_NOTE_OFF:

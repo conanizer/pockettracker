@@ -138,6 +138,10 @@ inline constexpr bool nth_plays(int value, int pass) {
 /** True when no pass can hold the row back: `00`, or one of every one. */
 inline constexpr bool nth_always(int value) { return (value & 0xFF) == 0x00 || (value & 0xFF) == 0x11; }
 
+// CHD xy: the note sounds as a chord — x the chord, y how its notes are laid out (chords.h). On a
+// phrase row with a note, or a table row in a column that steps once per note; ARP and RPT repeat it.
+constexpr int FX_CHD      = 0x3F;
+
 /** Every NTH on the row must agree. */
 inline bool step_plays_on_pass(const PhraseStep& s, int pass) {
     for (int slot = 1; slot <= 3; ++slot)
@@ -175,6 +179,7 @@ inline std::string effect_name(int code) {
         case FX_DRV: return "DRV"; case FX_CRU: return "CRU";
         case FX_FIN: return "FIN"; case FX_TSX: return "TSX"; case FX_LPO: return "LPO";
         case FX_INS: return "INS"; case FX_TIM: return "TIM"; case FX_NTH: return "NTH";
+        case FX_CHD: return "CHD";
         case FX_VTR: return "VTR"; case FX_VMV: return "VMV";
         case FX_SCA: return "SCA"; case FX_SCG: return "SCG";
         case FX_AUS: return "AUS"; case FX_AUF: return "AUF";
@@ -217,10 +222,11 @@ inline constexpr int EFFECT_TYPES[] = {
     FX_DRV, FX_CRU,
     FX_FIN,
     FX_TSX,
-    // INS, TIM and NTH sit above LPO because the tail is what a release build trims.
+    // INS, TIM, NTH and CHD sit above LPO because the tail is what a release build trims.
     FX_INS,
     FX_TIM,
     FX_NTH,
+    FX_CHD,
     FX_LPO,
     // The MIDI commands — must stay the LAST six (asserted below)
     FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
@@ -296,7 +302,8 @@ struct ResolvedStepParams {
     bool  volumeFromVxx = false;   // true when set by Vxx, not the step volume column
     std::optional<int64_t> killAtFrame;
     int   killOffsetTicks = 0;     // KIL xx: extra ticks between the KIL row and the actual stop
-    std::optional<int> arcValue;
+    std::optional<int> arcValue;          // ARC that sets the arpeggio
+    std::optional<int> strumValue;        // ARC that strums the chord: the nearest CHD / ARP on its left is a CHD
     std::optional<int> repeatCount;
     std::optional<int> repeatVolRamp;
     std::optional<int> hopValue;
@@ -325,6 +332,7 @@ struct ResolvedStepParams {
     std::optional<int> fineTuneValue;     // FIN — authored byte, turned into semitones at the engine
     std::optional<int> tsxMultiplier;     // TSX — already decoded to a signed multiplier
     std::optional<int> loopSlideValue;    // LPO — already decoded to signed sixteenths of a loop
+    std::optional<int> chordValue;        // CHD — the authored byte (chords.h)
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
     // SCA / SCG: the authored byte, split where it is applied so the key clamp lives in one place.
@@ -345,6 +353,7 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
                                               int64_t base_frame, float default_volume) {
     ResolvedStepParams p;
     p.volume = default_volume;
+    bool arcStrums = false;
 
     for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {
         int type, value;
@@ -358,7 +367,8 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_OFFSET: p.startPoint = value; break;
             case FX_VOLUME: p.volume = value / 255.0f; p.volumeFromVxx = true; break;
             case FX_KILL:   p.killAtFrame = base_frame; p.killOffsetTicks = value; break;
-            case FX_ARC:    p.arcValue = value; break;
+            case FX_ARC:    (arcStrums ? p.strumValue : p.arcValue) = value; break;
+            case FX_ARPEGGIO: arcStrums = false; break;
             case FX_REPEAT: {
                 // RXY: y!=0 → retrig every y ticks + vol ramp x; y=0 → retrig every x ticks.
                 int highNibble = (value >> 4) & 0x0F;
@@ -389,6 +399,7 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             // Sign-decoded here, like PIT, so the scheduler gets a number.
             case FX_TSX:    p.tsxMultiplier = (value < 0x80) ? value : value - 256; break;
             case FX_LPO:    p.loopSlideValue = loop_slide_sixteenths(value); break;
+            case FX_CHD:    p.chordValue = value & 0xFF; arcStrums = true; break;
             case FX_EQN:    p.eqnSlot = value; break;
             case FX_EQM:    p.eqmSlot = value; break;
             case FX_SCA:    p.scaleTrackByte = value; break;

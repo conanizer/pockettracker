@@ -312,6 +312,9 @@ struct AppState {
     int           lastEditedFxType     = 0;
     int           lastEditedFxValue    = 0;
 
+    // A is down. While it is, a CHD value under the cursor names its chord in the status line's place.
+    bool aHeld = false;
+
     // "SAVED", "NO FREE PHRASES"… over the visualizer header on every screen.
     std::string statusMessage{};
     bool        statusSuccess = true;
