@@ -547,15 +547,15 @@ The phrase editor has 16 rows (steps 00–0F) and 5 columns:
 
 ```
      N    V    I    FX1      FX2      FX3
-00   C-4  80   03   ---  00  ---  00  ---  00
+00   C-4  7F   03   ---  00  ---  00  ---  00
 01   ---  --   --   ---  00  ---  00  ---  00
-02   E-4  80   03   ARP  47  ---  00  ---  00
+02   E-4  7F   03   ARP  47  ---  00  ---  00
 ```
 
 | Column | Meaning |
 |---|---|
 | N | Note (`C-4`, `F#3`, etc.). `---` = no note. |
-| V | Volume (`00`–`FF`). Always set — `FF` = full, applied on top of instrument VOL. |
+| V | Velocity — how hard the note is played (`00`–`7F`). Always set — `7F` = full, applied on top of instrument VOL. |
 | I | Instrument ID (`00`–`7F`). Always set — no empty state. |
 | FX1/FX2/FX3 | Effect type + value (e.g., `RPT 03`, `ARP 47`) |
 
@@ -831,7 +831,7 @@ These change playback behaviour without modifying the waveform data:
 | Parameter | Options | Description |
 |---|---|---|
 | SOURCE | LEFT / RIGHT / STEREO / MONO | Which channel(s) of a stereo WAV to use. Non-destructive — never alters the file. SAVE/OVERWRITE applies SOURCE at write time. Opens on **STEREO** whenever the file has a right channel; a mono file reads MONO and the cell cannot be moved. |
-| RATE | HIGH / NORM / LOFI | Sample rate mode. NORM = original. LOFI = 8-bit lo-fi downsampling. |
+| RATE | HIGH / NORM / LOFI | Sample rate. HIGH = the file's own rate, NORM = half of it, LOFI = a quarter — each step down sounds duller and grittier. |
 | BIT | 32 / 24 / 16 / 8 | Bits per sample. Opens at the depth the file came in at, and offers only that depth and lower — a 16-bit file shows 16 / 8, a 24-bit one 24 / 16 / 8. Lower depths round the sound to coarser steps for grit. **SAVE, OVERWRITE and CHOP write the file at the depth shown.** It combines with RATE, and either can be set back while the editor is open. Not the instrument's CRUSH. |
 
 ### Destructive operations
