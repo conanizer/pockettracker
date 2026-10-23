@@ -75,6 +75,17 @@ void InputDispatcher::project_action() {
             }
             break;
 
+        case ProjectRow::COLLECT: {
+            // An existing folder asks first, the cursor on CANCEL: a double press decides nothing.
+            const std::string folder = collect_folder_name(host_);
+            if (collect_folder_exists(fs_, folder))
+                s_.confirm.open(ConfirmDialogState::Kind::COLLECT_EXISTS,
+                                ConfirmDialogState::COLLECT_CANCEL);
+            else
+                collect_song(folder);
+            break;
+        }
+
         case ProjectRow::EXPORT:
             // Both open the RENDER panel; the button picks MIX or STEMS.
             if (s_.projectCursorColumn == 1)      open_render_dialog(RenderDialogState::Output::MIX);

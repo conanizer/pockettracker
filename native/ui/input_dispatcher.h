@@ -697,6 +697,9 @@ class InputDispatcher {
     // EXPORT, synchronously; the render hook repaints the progress from inside it.
     void export_song(bool stems);
 
+    // COLLECT into Songs/<folder>, its percentage on the PROJECT screen while it copies.
+    void collect_song(const std::string& folder);
+
     // ── The RENDER dialog (ui/modules/render_dialog.h) ──────────────────────────────────────────
 
     // PROJECT → EXPORT → MIX / STEMS. The range starts on the SONG cursor's section, SONG END on AUTO.

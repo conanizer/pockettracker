@@ -260,6 +260,8 @@ ProjectState project_state(const AppState& s) {
     prs.cursorColumn   = s.projectCursorColumn;
     prs.isRendering    = s.isRendering;
     prs.renderProgress = s.renderProgress;
+    prs.isCollecting    = s.isCollecting;
+    prs.collectProgress = s.collectProgress;
     prs.sampleRamBytes = s.sampleRamBytes;
     prs.freeRamBytes   = s.freeRamBytes;
     prs.caps           = s.caps;

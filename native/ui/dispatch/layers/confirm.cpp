@@ -1,9 +1,11 @@
-// The confirm dialog ("A=YES  B=NO"): A does the thing it asked about, B doesn't.
+// The confirm dialog ("A=YES  B=NO"): A does the thing it asked about, B doesn't. COLLECT_EXISTS
+// moves between its answers with LEFT/RIGHT, and A takes the one under the cursor.
 
 #include "ui/dispatch/dispatch_common.h"
 
 #include "ui/lifecycle.h"        // the crash-recovery autosave — clear / load
 
+#include <algorithm>
 #include <string>
 
 namespace pt::ui {
@@ -12,6 +14,14 @@ GestureResult InputDispatcher::confirm_layer(Gesture g) {
     switch (g) {
         case Gesture::A: confirm_accept(); break;
         case Gesture::B: confirm_cancel(); break;
+        case Gesture::DPAD_LEFT:
+        case Gesture::DPAD_RIGHT:
+            if (s_.confirm.kind == ConfirmDialogState::Kind::COLLECT_EXISTS) {
+                const int step = (g == Gesture::DPAD_LEFT) ? -1 : 1;
+                s_.confirm.arg = std::clamp(s_.confirm.arg + step, ConfirmDialogState::COLLECT_REPLACE,
+                                            ConfirmDialogState::COLLECT_CANCEL);
+            }
+            break;
         // Silencing a note is not an edit: an audition the dialog opened over must not be left ringing.
         case Gesture::STOP_PREVIEW: return GestureResult::PASS;
         default: break;
@@ -63,6 +73,15 @@ void InputDispatcher::confirm_accept() {
             // A = recover. The document comes back DIRTY and the file STAYS (see recover_from_autosave).
             if (!recover_from_autosave()) autosave_clear(fs_);
             break;
+
+        case ConfirmDialogState::Kind::COLLECT_EXISTS: {
+            const std::string folder = collect_folder_name(host_);
+            if (argv == ConfirmDialogState::COLLECT_REPLACE)
+                collect_song(folder);
+            else if (argv == ConfirmDialogState::COLLECT_NEW_COPY)
+                collect_song(collect_free_folder_name(fs_, folder));
+            break;
+        }
 
         case ConfirmDialogState::Kind::NONE:
             break;

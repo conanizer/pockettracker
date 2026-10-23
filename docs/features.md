@@ -158,6 +158,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Rename files (SELECT+A to enter rename with on-screen QWERTY)
 - Delete files and folders (SELECT+B with confirmation)
 - On-screen QWERTY keyboard for naming projects and files
+- Collect a song and every file it plays into one folder under `Songs/`, to move it to another device or share it
 - Load a project while the sequencer is running — the new song takes over from its first row, so you
   can switch material mid-set
 - Slow loads show progress and can be stopped with B — large compressed soundfonts and long samples

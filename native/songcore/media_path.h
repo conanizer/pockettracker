@@ -122,14 +122,54 @@ inline std::string resolve_media_path(const std::string& path, const std::string
     return resolve_case_insensitive(resolved);
 }
 
-// The two folders a stored media path resolves against. Both empty ⇒ paths are used as written.
+// The app folder's sub-folder COLLECT writes each song's folder into.
+inline constexpr const char* SONGS_FOLDER = "Songs";
+
+// Where COLLECT puts a media file inside a song's folder: its place under the app folder
+// ("Samples/Drums/kick.wav"), or Samples/ or Soundfonts/ and the bare name for a file from outside it.
+// ⚠️ COLLECT and the lookup below must both derive it here, or a collected copy is never found.
+inline std::string collected_media_path(const std::string& path) {
+    std::string tail = path_is_absolute(path) ? app_root_relative_tail(path) : path;
+    // A file from another collected song lands where that song kept it, not under Songs/ again.
+    if (tail.rfind("Songs/", 0) == 0) {
+        const size_t song_end = tail.find('/', 6);
+        tail = (song_end == std::string::npos) ? std::string() : tail.substr(song_end + 1);
+    }
+    if (!tail.empty()) return tail;
+
+    const size_t slash = path.find_last_of("/\\");
+    const std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    const std::string ext = to_lower_ascii(name.substr(name.find_last_of('.') + 1));
+    return (ext == "sf2" || ext == "sf3" ? "Soundfonts/" : "Samples/") + name;
+}
+
+// The folders a stored media path resolves against. All empty ⇒ paths are used as written.
 struct MediaRoots {
-    std::string baseDir;   // the project file's folder — a relative path joins onto it
-    std::string appRoot;   // this install's app folder — where a foreign absolute path is re-rooted
+    std::string baseDir;        // a relative path joins onto it first
+    std::string appRoot;        // this install's app folder — where a foreign absolute path is re-rooted
+    std::string projectDir;     // the opened .ptp's folder — a collected song's own copies
+    std::string collectedDir;   // Songs/<project name> — COLLECT's copies, when the originals are gone
 };
 
+// As above; a file found nowhere there is looked for where a collected song keeps it — beside the
+// project, under the app folder, then in the song's Songs/ folder.
 inline std::string resolve_media_path(const std::string& path, const MediaRoots& roots) {
-    return resolve_media_path(path, roots.baseDir, roots.appRoot);
+    const std::string first = resolve_media_path(path, roots.baseDir, roots.appRoot);
+    if (path.empty() || path_exists(first)) return first;
+
+    const std::string rel = collected_media_path(path);
+    std::vector<std::string> candidates;
+    if (!path_is_absolute(path)) {
+        if (!roots.projectDir.empty()) candidates.push_back(roots.projectDir + "/" + path);
+        if (!roots.appRoot.empty())    candidates.push_back(roots.appRoot + "/" + path);
+    }
+    if (!roots.collectedDir.empty()) candidates.push_back(roots.collectedDir + "/" + rel);
+
+    for (const std::string& c : candidates) {
+        const std::string found = resolve_case_insensitive(c);
+        if (path_exists(found)) return found;
+    }
+    return first;   // the failure names the path as stored
 }
 
 }  // namespace songcore

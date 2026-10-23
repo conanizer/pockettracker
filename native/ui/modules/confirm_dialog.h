@@ -1,7 +1,8 @@
 #pragma once
 
 // The confirm dialog: a question and "A=YES  B=NO" on a dimmed screen. No cursor — the buttons are
-// the answer. ⚠️ One state, not a flag per question: every handler tests `is_open()`.
+// the answer — except COLLECT_EXISTS's three, picked with LEFT/RIGHT. ⚠️ One state, not a flag per
+// question: every handler tests `is_open()`.
 
 #include <string>
 
@@ -22,11 +23,19 @@ struct ConfirmDialogState {
         // RECOVER WORK? at boot, after an autosave survived. ⚠️ The only B that does work: it must
         // delete the autosave, or the question returns every launch.
         RECOVER,
+
+        COLLECT_EXISTS,   // PROJECT → COLLECT, when Songs/<name> is already there
     };
+
+    // COLLECT_EXISTS's answers, left to right; `arg` is the one under the cursor.
+    static constexpr int COLLECT_REPLACE  = 0;
+    static constexpr int COLLECT_NEW_COPY = 1;
+    static constexpr int COLLECT_CANCEL   = 2;
 
     Kind kind = Kind::NONE;
 
-    // What the answer needs beyond its Kind: CHANGE_TYPE's direction (±1). Reset on `close()`.
+    // What the answer needs beyond its Kind: CHANGE_TYPE's direction (±1), COLLECT_EXISTS's choice.
+    // Reset on `close()`.
     int arg = 0;
 
     bool is_open() const     { return kind != Kind::NONE; }

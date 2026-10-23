@@ -61,7 +61,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
         draw_cursor_cell(c, value, valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
     };
 
-    // ── A DOOR row: MIDI, EXIT — the button alone, no label ──────────────────────────────────────
+    // ── A DOOR row: COLLECT, MIDI, EXIT — the button alone, no label ─────────────────────────────
     // The button names where it goes; it sits in the value column, where the cursor lands.
     const auto door_row = [&](ProjectRow row, const char* button) {
         draw_cursor_cell(c, button, valueX, rowY(row) + TEXT_PADDING, on_cell(row, 1), t.textValue, t);
@@ -99,13 +99,20 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // SAVE, LOAD, NEW are cursor columns 1, 2, 3.
     button_row(ProjectRow::PROJECT, "PROJECT", {"SAVE", "LOAD", "NEW"});
 
-    // ── EXPORT — MIX / STEMS, plus a live percentage while a render runs ─────────────────────────
+    // A live percentage beside a row while its job runs.
+    const auto progress = [&](ProjectRow row, float done) {
+        const int percent = clamp(static_cast<int>(done * 100.0f), 0, 100);
+        c.draw_text(std::to_string(percent) + "%", valueX + 170, rowY(row) + TEXT_PADDING, t.textTitle,
+                    CHAR_SPACING, FONT_SCALE);
+    };
+
+    // ── COLLECT — under PROJECT's buttons, as one of them ────────────────────────────────────────
+    door_row(ProjectRow::COLLECT, "COLLECT");
+    if (s.isCollecting) progress(ProjectRow::COLLECT, s.collectProgress);
+
+    // ── EXPORT — MIX / STEMS ─────────────────────────────────────────────────────────────────────
     button_row(ProjectRow::EXPORT, "EXPORT", {"MIX", "STEMS"});
-    if (s.isRendering) {
-        const int percent = clamp(static_cast<int>(s.renderProgress * 100.0f), 0, 100);
-        c.draw_text(std::to_string(percent) + "%", valueX + 170,
-                    rowY(ProjectRow::EXPORT) + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
-    }
+    if (s.isRendering) progress(ProjectRow::EXPORT, s.renderProgress);
 
     button_row(ProjectRow::COMPACT, "COMPACT", {"SEQ", "INST"});
 
@@ -169,6 +176,7 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
         // Everything below is a button: plain A is the dispatcher's.
         case ProjectRow::NAME:
         case ProjectRow::PROJECT:
+        case ProjectRow::COLLECT:
         case ProjectRow::EXPORT:
         case ProjectRow::COMPACT:
         case ProjectRow::SYSTEM:

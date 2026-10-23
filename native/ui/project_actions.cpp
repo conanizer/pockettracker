@@ -1,9 +1,13 @@
 #include "ui/project_actions.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
+#include "common/byte_source.h"   // pt_fopen / pt_remove / pt_rename
 #include "songcore/project_io.h"
 #include "songcore/render.h"
 #include "ui/lifecycle.h"
@@ -37,11 +41,8 @@ std::string unique_render_path(FileSystem& fs, const std::string& dir, const std
 // ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
 
 ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState& s) {
-    // ⚠️ An unnamed project would save as ".ptp", a dotfile the browser never lists.
-    std::string safeName = songcore::safe_project_name(host.project().name);
-    if (safeName.empty()) safeName = "UNTITLED";
-
-    const std::string path = fs.projects_directory() + "/" + safeName + ".ptp";
+    const std::string path =
+        fs.projects_directory() + "/" + songcore::project_file_name(host.project().name) + ".ptp";
 
     if (!write_project(host, fs, path)) return ActionResult{false, "SAVE FAILED"};
 
@@ -51,6 +52,185 @@ ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState
     autosave_clear(fs);
 
     return ActionResult{true, "SAVED"};
+}
+
+// ─── COLLECT ─────────────────────────────────────────────────────────────────────────────────────
+
+std::string collect_folder_name(const songcore::SongcoreHost& host) {
+    return songcore::project_file_name(host.project().name);
+}
+
+bool collect_folder_exists(FileSystem& fs, const std::string& folder) {
+    return fs.file_exists(fs.songs_directory() + "/" + folder);
+}
+
+std::string collect_free_folder_name(FileSystem& fs, const std::string& folder) {
+    for (int n = 2; n < 1000; ++n) {
+        const std::string name = folder + "_" + std::to_string(n);
+        if (!collect_folder_exists(fs, name)) return name;
+    }
+    return folder + "_999";
+}
+
+namespace {
+
+// For comparing two spellings of one path: one kind of slash, one case.
+std::string comparable_path(std::string p) {
+    for (char& c : p)
+        c = (c == '\\') ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return p;
+}
+
+// Bytes in the file, or 0 when it cannot be measured (it then adds nothing to the bar).
+int64_t media_file_bytes(const std::string& path) {
+    std::FILE* f = pt_fopen(path.c_str(), "rb");
+    if (!f) return 0;
+    const bool    seeked = std::fseek(f, 0, SEEK_END) == 0;
+    const int64_t bytes  = seeked ? static_cast<int64_t>(std::ftell(f)) : 0;
+    std::fclose(f);
+    return bytes > 0 ? bytes : 0;
+}
+
+// In pieces, so `onBytes` can move the bar inside a big file, and through "<dest>.tmp" + rename, so a
+// failed copy leaves no partial file. ⚠️ Through pt_fopen, not `FileSystem::copy_file`: on Android
+// that reads the whole file into memory first.
+bool copy_in_pieces(const std::string& from, const std::string& to,
+                    const std::function<void(int64_t)>& onBytes) {
+    std::FILE* in = pt_fopen(from.c_str(), "rb");
+    if (!in) return false;
+    const std::string tmp = to + ".tmp";
+    std::FILE* out = pt_fopen(tmp.c_str(), "wb");
+    if (!out) {
+        std::fclose(in);
+        return false;
+    }
+
+    std::vector<char> buf(256 * 1024);
+    bool ok = true;
+    for (;;) {
+        const size_t n = std::fread(buf.data(), 1, buf.size(), in);
+        if (n == 0) break;
+        if (std::fwrite(buf.data(), 1, n, out) != n) {
+            ok = false;
+            break;
+        }
+        onBytes(static_cast<int64_t>(n));
+    }
+    if (std::ferror(in)) ok = false;
+    std::fclose(in);
+    // ⚠️ `fclose` checked, and on its own line: a full card surfaces in this flush or nowhere.
+    const bool flushed = std::fclose(out) == 0;
+    ok = ok && flushed;
+
+    if (ok) {
+        pt_remove(to.c_str());   // a rename onto a taken name fails (or, on Android, de-duplicates)
+        ok = pt_rename(tmp.c_str(), to.c_str()) == 0;
+    }
+    if (!ok) pt_remove(tmp.c_str());
+    return ok;
+}
+
+}  // namespace
+
+ActionResult collect_project(const songcore::SongcoreHost& host, FileSystem& fs,
+                             const std::string& folder, const std::function<void(float)>& progress) {
+    const std::string songSub = std::string(songcore::SONGS_FOLDER) + "/" + folder;
+    const std::string songDir = fs.make_app_folder(songSub);
+    if (songDir.empty()) return ActionResult{false, "COLLECT FAILED"};
+    const std::string songDirKey = comparable_path(songDir + "/");
+
+    songcore::Project copy = host.project();
+
+    // The one path per instrument the loader opens (engine_setup.h `load_project_media`).
+    std::vector<std::string*> paths;
+    for (songcore::Instrument& ins : copy.instruments) {
+        if (ins.instrumentType == songcore::InstrumentType::SOUNDFONT && ins.soundfontPath)
+            paths.push_back(&*ins.soundfontPath);
+        else if (ins.sampleFilePath)
+            paths.push_back(&*ins.sampleFilePath);
+    }
+
+    // First what to copy, each file once however many instruments play it — so the bar knows the
+    // total before the first byte moves.
+    struct Copy {
+        std::string source;
+        std::string rel;
+        int64_t     bytes = 0;
+        bool        ok    = false;
+        std::vector<std::string*> users;   // the paths that name it once it is copied
+    };
+    std::vector<Copy> copies;
+    int64_t totalBytes = 0;
+    int     missing    = 0;
+    for (std::string* stored : paths) {
+        const std::string source = songcore::resolve_media_path(*stored, host.media_roots());
+        if (!songcore::path_exists(source)) {
+            ++missing;   // keeps its old path: the file may turn up where it was
+            continue;
+        }
+
+        // ⚠️ Already in this folder (the song was opened from here): it IS the copy. Replacing it
+        // would delete the source before reading it.
+        const std::string sourceKey = comparable_path(source);
+        if (sourceKey.rfind(songDirKey, 0) == 0) {
+            *stored = source.substr(songDirKey.size());
+            continue;
+        }
+
+        const std::string rel = songcore::collected_media_path(*stored);
+        auto it = std::find_if(copies.begin(), copies.end(),
+                               [&rel](const Copy& c) { return c.rel == rel; });
+        if (it == copies.end()) {
+            Copy c;
+            c.source = source;
+            c.rel    = rel;
+            c.bytes  = media_file_bytes(source);
+            totalBytes += c.bytes;
+            copies.push_back(std::move(c));
+            it = copies.end() - 1;
+        }
+        it->users.push_back(stored);
+    }
+
+    // Reported only when the whole percent changes: each report is a repaint.
+    int64_t doneBytes   = 0;
+    int     lastPercent = -1;
+    const auto onBytes = [&](int64_t n) {
+        doneBytes += n;
+        if (!progress || totalBytes <= 0) return;
+        const int percent = static_cast<int>(std::min<int64_t>(100, doneBytes * 100 / totalBytes));
+        if (percent == lastPercent) return;
+        lastPercent = percent;
+        progress(static_cast<float>(percent) / 100.0f);
+    };
+    onBytes(0);
+
+    int failed = 0;
+    for (Copy& c : copies) {
+        const int64_t      before = doneBytes;
+        const std::string  dest   = songDir + "/" + c.rel;
+        const size_t       slash  = c.rel.find_last_of('/');
+        c.ok = slash == std::string::npos ||
+               !fs.make_app_folder(songSub + "/" + c.rel.substr(0, slash)).empty();
+        if (c.ok && fs.file_exists(dest)) c.ok = fs.delete_path(dest);
+        c.ok = c.ok && copy_in_pieces(c.source, dest, onBytes);
+        // A file that failed, or measured wrong, still moves the bar by what it was counted as.
+        onBytes(before + c.bytes - doneBytes);
+        if (!c.ok) {
+            ++failed;
+            continue;
+        }
+        for (std::string* stored : c.users) *stored = c.rel;
+    }
+
+    if (!fs.write_file(songDir + "/" + folder + ".ptp", songcore::serialize_project(copy)))
+        return ActionResult{false, "COLLECT FAILED"};
+    fs.forget_listing(fs.songs_directory());
+    fs.forget_listing(songDir);
+
+    if (failed > 0)  return ActionResult{false, "COLLECTED: " + std::to_string(failed) + " NOT COPIED"};
+    if (missing > 0) return ActionResult{false, "COLLECTED: " + std::to_string(missing) + " MISSING"};
+    return ActionResult{true, "COLLECTED: " + songSub};
 }
 
 // ─── EXPORT → MIX ────────────────────────────────────────────────────────────────────────────────

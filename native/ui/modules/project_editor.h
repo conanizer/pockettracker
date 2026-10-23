@@ -26,6 +26,10 @@ struct ProjectState {
     bool  isRendering    = false;
     float renderProgress = 0.0f;
 
+    // …and beside COLLECT while copying.
+    bool  isCollecting    = false;
+    float collectProgress = 0.0f;
+
     // USED RAM: sample + SoundFont PCM the engine holds. Debug builds only.
     int64_t sampleRamBytes = 0;
 

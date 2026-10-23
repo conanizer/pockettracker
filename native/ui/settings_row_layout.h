@@ -145,7 +145,8 @@ inline int settings_content_height(const PlatformCaps& caps, int rowHeight) {
 
 // ─── PROJECT ─────────────────────────────────────────────────────────────────────────────────────
 
-// ⚠️ Append only, and a hidden row is skipped rather than renumbered.
+// ⚠️ Append only, and a hidden row is skipped rather than renumbered. Where a row draws is
+// PROJECT_DISPLAY_ORDER's business.
 enum class ProjectRow {
     TEMPO     = 0,
     TRANSPOSE = 1,
@@ -156,9 +157,24 @@ enum class ProjectRow {
     SYSTEM    = 6,   // SETTINGS >
     MIDI      = 7,   // MIDI >     — only where the MIDI screens are built
     EXIT      = 8,   // EXIT       — only where a launcher takes the process back
+    COLLECT   = 9,   // COLLECT    — the song and its files into Songs/<name>
 };
 
-inline constexpr int PROJECT_ROW_COUNT = 9;
+inline constexpr int PROJECT_ROW_COUNT = 10;
+
+// The order rows are drawn and walked; every ProjectRow exactly once.
+inline constexpr ProjectRow PROJECT_DISPLAY_ORDER[PROJECT_ROW_COUNT] = {
+    ProjectRow::TEMPO,   ProjectRow::TRANSPOSE, ProjectRow::NAME,
+    ProjectRow::PROJECT, ProjectRow::COLLECT,   ProjectRow::EXPORT,  ProjectRow::COMPACT,
+    ProjectRow::SYSTEM,  ProjectRow::MIDI,      ProjectRow::EXIT,
+};
+
+// Where `row` sits in the display order.
+inline int project_display_index(ProjectRow row) {
+    for (int i = 0; i < PROJECT_ROW_COUNT; ++i)
+        if (PROJECT_DISPLAY_ORDER[i] == row) return i;
+    return 0;
+}
 
 inline bool project_row_visible(ProjectRow row, const PlatformCaps& caps) {
     switch (row) {
@@ -170,29 +186,28 @@ inline bool project_row_visible(ProjectRow row, const PlatformCaps& caps) {
 
 inline int project_row_count(const PlatformCaps& caps) {
     int n = 0;
-    for (int i = 0; i < PROJECT_ROW_COUNT; ++i)
-        if (project_row_visible(static_cast<ProjectRow>(i), caps)) ++n;
+    for (const ProjectRow row : PROJECT_DISPLAY_ORDER)
+        if (project_row_visible(row, caps)) ++n;
     return n;
 }
 
 // EXIT, MIDI or SYSTEM, depending on the build.
 inline ProjectRow project_last_row(const PlatformCaps& caps) {
     ProjectRow last = ProjectRow::TEMPO;
-    for (int i = 0; i < PROJECT_ROW_COUNT; ++i) {
-        const auto row = static_cast<ProjectRow>(i);
+    for (const ProjectRow row : PROJECT_DISPLAY_ORDER)
         if (project_row_visible(row, caps)) last = row;
-    }
     return last;
 }
 
-// The next visible row, as on SETTINGS.
+// The next visible row in display order, as on SETTINGS.
 inline int project_next_visible_row(int from, int delta, const PlatformCaps& caps) {
-    int idx = from;
+    int idx = project_display_index(static_cast<ProjectRow>(from));
     for (int guard = 0; guard < PROJECT_ROW_COUNT; ++guard) {
         idx += delta;
         if (idx < 0)                   idx = PROJECT_ROW_COUNT - 1;
         if (idx >= PROJECT_ROW_COUNT)  idx = 0;
-        if (project_row_visible(static_cast<ProjectRow>(idx), caps)) return idx;
+        if (project_row_visible(PROJECT_DISPLAY_ORDER[idx], caps))
+            return static_cast<int>(PROJECT_DISPLAY_ORDER[idx]);
     }
     return from;
 }
@@ -202,8 +217,8 @@ inline int project_clamp_row(int row, const PlatformCaps& caps) {
     if (row >= 0 && row < PROJECT_ROW_COUNT &&
         project_row_visible(static_cast<ProjectRow>(row), caps))
         return row;
-    for (int i = 0; i < PROJECT_ROW_COUNT; ++i)
-        if (project_row_visible(static_cast<ProjectRow>(i), caps)) return i;
+    for (const ProjectRow r : PROJECT_DISPLAY_ORDER)
+        if (project_row_visible(r, caps)) return static_cast<int>(r);
     return 0;
 }
 
@@ -231,8 +246,8 @@ inline bool project_row_gap_after(ProjectRow row) {
 // EXIT closes up under SYSTEM.
 inline int project_row_offset_y(ProjectRow target, const PlatformCaps& caps, int rowHeight) {
     int y = 0;
-    for (int i = 0; i < static_cast<int>(target); ++i) {
-        const ProjectRow row = static_cast<ProjectRow>(i);
+    for (int i = 0; i < project_display_index(target); ++i) {
+        const ProjectRow row = PROJECT_DISPLAY_ORDER[i];
         if (!project_row_visible(row, caps)) continue;
         y += rowHeight * (project_row_gap_after(row) ? 2 : 1);
     }

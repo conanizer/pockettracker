@@ -2,6 +2,8 @@
 
 #include "ui/helpers.h"
 
+#include <algorithm>
+
 namespace pt::ui {
 
 namespace {
@@ -33,6 +35,7 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind) {
         case ConfirmDialogState::Kind::CHANGE_TYPE: return "CHANGE TYPE?";
         case ConfirmDialogState::Kind::EXIT:        return "EXIT?";
         case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";
+        case ConfirmDialogState::Kind::COLLECT_EXISTS: return "ALREADY IN SONGS";
         case ConfirmDialogState::Kind::NONE:        break;
     }
     return "";
@@ -53,10 +56,46 @@ void draw_confirm_box(Canvas& c, const std::string& title, const Theme& t) {
                 DLG_CHAR_SPACING, DLG_FONT_SCALE);
 }
 
+namespace {
+
+// The question, and its answers as cursor cells in place of "A=YES  B=NO". As wide as its text needs.
+void draw_choice_box(Canvas& c, const std::string& question,
+                     std::initializer_list<const char*> answers, int chosen, const Theme& t) {
+    constexpr int GAP = 24;   // between answers
+    constexpr int PAD = 24;   // either side of the widest line
+
+    const auto width_of = [](const std::string& s) {
+        return Canvas::text_width(s, DLG_CHAR_SPACING, DLG_FONT_SCALE);
+    };
+
+    int width = -GAP;
+    for (const char* a : answers) width += width_of(a) + GAP;
+
+    const int boxW = std::max(BOX_W, std::max(width_of(question), width) + 2 * PAD);
+    const int boxX = (DESIGN_W - boxW) / 2;
+    draw_modal_box(c, boxX, BOX_Y, boxW, BOX_H, t);
+
+    c.draw_text(question, boxX + (boxW - width_of(question)) / 2, BOX_Y + DLG_TITLE_Y, t.textTitle,
+                DLG_CHAR_SPACING, DLG_FONT_SCALE);
+
+    int x = boxX + (boxW - width) / 2;
+    int i = 0;
+    for (const char* a : answers) {
+        draw_cursor_cell(c, a, x, BOX_Y + DLG_INSTR_Y, i == chosen, t.textValue, t);
+        x += width_of(a) + GAP;
+        ++i;
+    }
+}
+
+}  // namespace
+
 void draw_confirm_dialog(Canvas& c, const ConfirmDialogState& s, const Theme& t) {
     if (!s.is_open()) return;
     draw_modal_backdrop(c);
-    draw_confirm_box(c, confirm_dialog_title(s.kind), t);
+    if (s.kind == ConfirmDialogState::Kind::COLLECT_EXISTS)
+        draw_choice_box(c, confirm_dialog_title(s.kind), {"REPLACE", "NEW COPY", "CANCEL"}, s.arg, t);
+    else
+        draw_confirm_box(c, confirm_dialog_title(s.kind), t);
 }
 
 }  // namespace pt::ui

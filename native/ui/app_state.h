@@ -331,6 +331,10 @@ struct AppState {
     bool  isRendering    = false;
     float renderProgress = 0.0f;
 
+    // COLLECT copies synchronously too; its percentage is repainted the same way.
+    bool  isCollecting    = false;
+    float collectProgress = 0.0f;
+
     // Which rows go into the file (ui/modules/render_dialog.h).
     RenderDialogState renderDialog{};
 

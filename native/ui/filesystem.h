@@ -75,6 +75,7 @@ class FileSystem {
     virtual std::string grooves_directory()   = 0;
     virtual std::string reverbs_directory()    = 0;
     virtual std::string delays_directory()     = 0;
+    virtual std::string songs_directory()      = 0;   // COLLECT's song folders
 
     // ── The app's own files, never listed by the browser ─────────────────────────────────────────
 
@@ -133,6 +134,10 @@ class FileSystem {
 
     // Returns the new path, or "" if it exists or cannot be made.
     virtual std::string create_folder(const std::string& parent, const std::string& folder_name) = 0;
+
+    // `sub` ("Songs/X/Samples/My Kit") under the app folder, parents included and names kept as
+    // given; its path, existing or new. ⚠️ Unlike `create_folder`, nothing is sanitised.
+    virtual std::string make_app_folder(const std::string& sub) = 0;
 
     // Copy + delete across filesystems.
     virtual bool move_file(const std::string& from, const std::string& to) = 0;

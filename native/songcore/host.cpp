@@ -195,8 +195,11 @@ MediaLoadResult SongcoreHost::load_media(const std::string& baseDir) {
     lastMediaLoad_ = MediaLoadResult();
     if (!engine_) return lastMediaLoad_;
     mediaRoots_.baseDir = baseDir;
-    lastMediaLoad_ =
-        load_project_media(*engine_, project_, baseDir, mediaRoots_.appRoot, routing_);
+    mediaRoots_.collectedDir.clear();
+    if (!mediaRoots_.appRoot.empty())
+        mediaRoots_.collectedDir =
+            mediaRoots_.appRoot + "/" + SONGS_FOLDER + "/" + project_file_name(project_.name);
+    lastMediaLoad_ = load_project_media(*engine_, project_, mediaRoots_, routing_);
     return lastMediaLoad_;
 }
 
@@ -351,6 +354,9 @@ bool SongcoreHost::load_project_file(const std::string& path, const std::string&
     stop();
 
     if (!push_project(blob)) return false;
+
+    const size_t slash = path.find_last_of("/\\");
+    mediaRoots_.projectDir = (slash == std::string::npos) ? std::string() : path.substr(0, slash);
 
     // ⚠️ Both, in this order, or the project you hear is not the one you loaded.
     load_media(baseDir);

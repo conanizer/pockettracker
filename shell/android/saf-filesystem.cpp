@@ -2,6 +2,7 @@
 
 #include "android/android-jni.h"
 #include "common/byte_source.h"
+#include "songcore/media_path.h"   // SONGS_FOLDER
 
 #include <SDL.h>
 
@@ -365,6 +366,7 @@ std::string SafFileSystem::scales_directory()      { return ensure_dir("Presets/
 std::string SafFileSystem::grooves_directory()     { return ensure_dir("Presets/Grooves"); }
 std::string SafFileSystem::reverbs_directory()     { return ensure_dir("Presets/Reverbs"); }
 std::string SafFileSystem::delays_directory()      { return ensure_dir("Presets/Delays"); }
+std::string SafFileSystem::songs_directory()       { return ensure_dir(songcore::SONGS_FOLDER); }
 
 bool SafFileSystem::activate(const std::string& path) {
     if (path != kAddRootPath) return false;

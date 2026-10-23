@@ -171,6 +171,9 @@ class SongcoreHost {
     // re-rooted onto it at load. Unset (the tools) leaves paths as they are.
     void set_app_root(std::string root) { mediaRoots_.appRoot = std::move(root); }
 
+    // Where the open project's media paths resolve (media_path.h).
+    const MediaRoots& media_roots() const { return mediaRoots_; }
+
     // ── the param push (engine_setup.h): what the engine holds across project swaps ──
     // ⚠️ Call push_params() after load_media(), or you hear the previous project's settings.
     void push_params();

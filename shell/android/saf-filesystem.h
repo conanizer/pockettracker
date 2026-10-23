@@ -66,6 +66,7 @@ class SafFileSystem : public pt::ui::FileSystem {
     std::string grooves_directory() override;
     std::string reverbs_directory() override;
     std::string delays_directory() override;
+    std::string songs_directory() override;
 
     // ── The app's own files ─────────────────────────────────────────────────────────────────────
     // Three come off the private root. Only `config.json` is in the granted tree: the user edits it,
@@ -106,6 +107,7 @@ class SafFileSystem : public pt::ui::FileSystem {
     bool delete_path(const std::string& path) override;
     bool rename_file(const std::string& path, const std::string& new_base_name) override;
     std::string create_folder(const std::string& parent, const std::string& folder_name) override;
+    std::string make_app_folder(const std::string& sub) override { return ensure_dir(sub.c_str()); }
     bool move_file(const std::string& from, const std::string& to) override;
     bool copy_file(const std::string& from, const std::string& to) override;
 

@@ -122,6 +122,27 @@ void InputDispatcher::export_song(bool stems) {
     if (render_.suspend_audio) render_.suspend_audio(false);
 }
 
+// ─── COLLECT ─────────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::collect_song(const std::string& folder) {
+    if (s_.isCollecting) return;
+
+    s_.isCollecting    = true;
+    s_.collectProgress = 0.0f;
+    set_status(s_, "COLLECTING...", true);
+    if (render_.repaint) render_.repaint();
+
+    const auto progress = [this](float p) {
+        s_.collectProgress = p;
+        if (render_.repaint) render_.repaint();
+    };
+    const ActionResult r = collect_project(host_, fs_, folder, progress);
+
+    s_.isCollecting    = false;
+    s_.collectProgress = 0.0f;
+    set_status(s_, r.message, r.ok);
+}
+
 void InputDispatcher::resample_selection(const std::string& customBaseName) {
     if (s_.isRendering) return;         // a render is already running — a second APPLY is a mis-press
     if (!s_.selection.active) return;   // the selection lapsed between opening the keyboard and APPLY

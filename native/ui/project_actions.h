@@ -24,6 +24,23 @@ std::string unique_render_path(FileSystem& fs, const std::string& dir, const std
 // Writes `<Projects>/<name>.ptp` and marks the document clean.
 ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState& s);
 
+// ─── COLLECT: the song and every file it plays, copied into one folder under Songs/ ──────────────
+
+// The folder COLLECT writes: the project's file name.
+std::string collect_folder_name(const songcore::SongcoreHost& host);
+
+// Is there already a Songs/<folder>?
+bool collect_folder_exists(FileSystem& fs, const std::string& folder);
+
+// The first free `<folder>_2`, `<folder>_3`… under Songs/.
+std::string collect_free_folder_name(FileSystem& fs, const std::string& folder);
+
+// Songs/<folder>/<folder>.ptp plus a copy of every sample and SoundFont the song plays, the .ptp
+// naming the copies relative to itself. An existing folder is written into, its files replaced.
+// The open document and its file are untouched.
+ActionResult collect_project(const songcore::SongcoreHost& host, FileSystem& fs,
+                             const std::string& folder, const std::function<void(float)>& progress);
+
 // The rows a render covers and how many times. ⚠️ `startRow < 0` is the whole song.
 struct RenderRange {
     int startRow = -1;

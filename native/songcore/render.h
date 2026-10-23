@@ -219,6 +219,13 @@ inline std::string safe_project_name(const std::string& name) {
     return out;
 }
 
+// The project's name as a file or folder name. ⚠️ Never empty: ".ptp" alone is a dotfile the browser
+// never lists.
+inline std::string project_file_name(const std::string& name) {
+    const std::string safe = safe_project_name(name);
+    return safe.empty() ? "UNTITLED" : safe;
+}
+
 /** One pass of a stems render. `stemsMode`: 1-8 = track N, 9 = reverb return, 10 = delay return. */
 struct StemPass {
     int         stemsMode = 0;

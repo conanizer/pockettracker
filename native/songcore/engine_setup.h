@@ -274,8 +274,7 @@ int load_sample_file(Engine& engine, int instrumentId, const std::string& path) 
 // ⚠️ The ratio is keyed by `instrument.id` but read by `sampleId`; they coincide in every factory project.
 // ⚠️ A WAV's `cue ` chunk REPLACES the .ptp's slice markers (hence the non-const `project`).
 template <typename Engine>
-MediaLoadResult load_project_media(Engine& engine, Project& project,
-                                   const std::string& base_dir, const std::string& app_root,
+MediaLoadResult load_project_media(Engine& engine, Project& project, const MediaRoots& roots,
                                    Routing& routing) {
     // A clean slate, so a previous project's PCM and SoundFonts do not accumulate.
     engine.clearAllSamples();
@@ -304,7 +303,7 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
         if (ins.id < 0 || ins.id >= POOL_INSTRUMENTS) continue;
 
         if (ins.instrumentType == InstrumentType::SOUNDFONT && ins.soundfontPath.has_value()) {
-            const std::string path = resolve_media_path(*ins.soundfontPath, base_dir, app_root);
+            const std::string path = resolve_media_path(*ins.soundfontPath, roots);
             const auto span = slice();
             const int slot = engine.loadSoundfont(ins.id, path.c_str(), ins.sfBank, ins.sfPreset);
             loadedSoFar++;
@@ -316,7 +315,7 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
             }
             if (pt::load_cancelled()) break;
         } else if (ins.sampleFilePath.has_value()) {
-            const std::string path = resolve_media_path(*ins.sampleFilePath, base_dir, app_root);
+            const std::string path = resolve_media_path(*ins.sampleFilePath, roots);
             const auto span = slice();
             const int fileRate = load_sample_file(engine, ins.id, path);
             loadedSoFar++;

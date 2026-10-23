@@ -4,6 +4,7 @@
 // ⚠️ The folder names under the root are the same on every platform, so a copied `PocketTracker/`
 // folder is found where the app looks.
 
+#include "songcore/media_path.h"   // SONGS_FOLDER
 #include "ui/filesystem.h"
 
 #include <string>
@@ -36,6 +37,7 @@ class StdFileSystem : public FileSystem {
     std::string grooves_directory() override    { return ensure_dir("Presets/Grooves"); }
     std::string reverbs_directory() override     { return ensure_dir("Presets/Reverbs"); }
     std::string delays_directory() override      { return ensure_dir("Presets/Delays"); }
+    std::string songs_directory() override       { return ensure_dir(songcore::SONGS_FOLDER); }
 
     // ── The app's own files, beside the folders — never inside one the browser lists ─────────────
     std::string template_project_path() override { return privateRoot_ + "/template.ptp"; }
@@ -56,6 +58,7 @@ class StdFileSystem : public FileSystem {
     bool delete_path(const std::string& path) override;
     bool rename_file(const std::string& path, const std::string& new_base_name) override;
     std::string create_folder(const std::string& parent, const std::string& folder_name) override;
+    std::string make_app_folder(const std::string& sub) override { return ensure_dir(sub.c_str()); }
     bool move_file(const std::string& from, const std::string& to) override;
     bool copy_file(const std::string& from, const std::string& to) override;
 

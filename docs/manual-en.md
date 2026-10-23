@@ -1520,12 +1520,15 @@ Navigate here: **R+UP** from SONG or CHAIN.
 |---|---|
 | SAVE | Save project to `.ptp` file (press A to confirm). |
 | LOAD | Open file browser to load a project. |
+| COLLECT | Copy the song and every sample and SoundFont it plays into `<home>/Songs/ProjectName/`. Move or share that folder and the song opens anywhere. If the folder is already there, choose REPLACE, NEW COPY (`ProjectName_2`) or CANCEL. |
 | EXPORT — MIX | Open the RENDER panel, set to a stereo WAV (offline, faster than real-time). |
 | EXPORT — STEMS | Open the RENDER panel, set to one stereo WAV stem per active track, plus reverb and delay send returns. |
 | CLEAN SEQ | Remove unused chains and phrases (with confirmation dialog). |
 | CLEAN INST | Remove unused instruments (with confirmation dialog). |
 | SETTINGS | Open the SETTINGS screen (press A). |
 | MIDI | Open the MIDI screen (press A) — see [section 22](#22-midi-screen). |
+
+A song whose files have gone missing from their own folders plays the copies in its `Songs/` folder, and a collected song whose copies are gone plays the originals.
 
 WAV exports are saved to `<home>/Renders/` — `<home>` being PocketTracker's home folder (section 2) — with auto-incremented filenames (`ProjectName_0001.wav`). Stems are written to a per-project subfolder — `Renders/ProjectName/ProjectName_1.wav`, `_2.wav`, … — plus `_reverb.wav` / `_delay.wav` when those sends are in use.
 

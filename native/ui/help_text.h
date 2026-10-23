@@ -347,6 +347,7 @@ enum class HelpTopic {
     SE_STRETCH_APPLY,
     INST_MIDI_BEND,
     MIDI_SYNC_IN,
+    PROJECT_COLLECT,
 
     COUNT
 };
@@ -2426,6 +2427,15 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "at. The TEMPO of the song is not",
       "changed."},
      {"A+D-PAD picks OFF, TEMPO or FULL"}},
+    /* PROJECT_COLLECT */
+    {"COLLECT: Gather the song", "Copies the song and its sounds", "into one folder in Songs.",
+     {"Copies the song and every sample",
+      "and SoundFont it plays into a",
+      "folder named after it, in Songs.",
+      "Move that folder to share the",
+      "song. Your own files stay put."},
+     {"A collects. If the folder is",
+      "there, it asks what to do."}},
 };
 
 // ─── Rules 2 and 3, as compile errors — at runtime they fail silently ────────────────────────────
@@ -2627,6 +2637,7 @@ inline HelpTopic project_cell_topic(int row, int column) {
         case ProjectRow::SYSTEM:    return HelpTopic::PROJECT_SYSTEM;
         case ProjectRow::MIDI:      return HelpTopic::PROJECT_MIDI;
         case ProjectRow::EXIT:      return HelpTopic::PROJECT_EXIT;
+        case ProjectRow::COLLECT:   return HelpTopic::PROJECT_COLLECT;
     }
     return HelpTopic::NONE;
 }
