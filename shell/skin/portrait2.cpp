@@ -38,50 +38,29 @@ SkinPiece piece_for(const Skin& skin, Button b, bool pressed) {
     }
 }
 
-// A button's label: text or a D-pad arrow (Helvetica has none), large (A/B, arrows) or small, and
-// the wide (shift) or square X offset.
+// A button's label — a word or a D-pad arrow — large (A/B, arrows) or small, and the wide (shift) or
+// square X offset.
 struct Portrait2Label {
     const char* text;
-    bool        arrow;
-    Arrow       dir;
     bool        large;
     bool        wide;
 };
 
 Portrait2Label label_for(Button b) {
     switch (b) {
-        case Button::L_SHIFT:    return {"L Shift", false, Arrow::Up,    false, true};
-        case Button::R_SHIFT:    return {"R Shift", false, Arrow::Up,    false, true};
-        case Button::A:          return {"A",       false, Arrow::Up,    true,  false};
-        case Button::B:          return {"B",       false, Arrow::Up,    true,  false};
-        case Button::SELECT:     return {"Sel",     false, Arrow::Up,    false, false};
-        case Button::START:      return {"Start",   false, Arrow::Up,    false, false};
-        case Button::DPAD_UP:    return {"",        true,  Arrow::Up,    true,  false};
-        case Button::DPAD_DOWN:  return {"",        true,  Arrow::Down,  true,  false};
-        case Button::DPAD_LEFT:  return {"",        true,  Arrow::Left,  true,  false};
-        case Button::DPAD_RIGHT: return {"",        true,  Arrow::Right, true,  false};
-        default:                 return {"?",       false, Arrow::Up,    true,  false};
+        case Button::L_SHIFT:    return {"L Shift",      false, true};
+        case Button::R_SHIFT:    return {"R Shift",      false, true};
+        case Button::A:          return {"A",            true,  false};
+        case Button::B:          return {"B",            true,  false};
+        case Button::SELECT:     return {"Sel",          false, false};
+        case Button::START:      return {"Start",        false, false};
+        case Button::DPAD_UP:    return {"\xE2\x86\x91", true,  false};  // ↑ U+2191
+        case Button::DPAD_DOWN:  return {"\xE2\x86\x93", true,  false};  // ↓ U+2193
+        case Button::DPAD_LEFT:  return {"\xE2\x86\x90", true,  false};  // ← U+2190
+        case Button::DPAD_RIGHT: return {"\xE2\x86\x92", true,  false};  // → U+2192
+        default:                 return {"?",            true,  false};
     }
 }
-
-// ↑↓←→ (U+2190–2193) as UTF-8, from the bundled Linux Biolinum arrow font.
-const char* arrow_utf8(Arrow d) {
-    switch (d) {
-        case Arrow::Up:    return "\xE2\x86\x91";  // ↑ U+2191
-        case Arrow::Down:  return "\xE2\x86\x93";  // ↓ U+2193
-        case Arrow::Left:  return "\xE2\x86\x90";  // ← U+2190
-        case Arrow::Right: return "\xE2\x86\x92";  // → U+2192
-    }
-    return "";
-}
-
-// Biolinum's arrow fills more of the em and reads ~1.7× too tall at letter size; drawn smaller,
-// baseline-anchored.
-constexpr float ARROW_PX_FRAC = 0.6f;
-
-// The line-arrow fallback (no arrow font): about a capital's height, centred on the letters' mid-band.
-constexpr float CAP_HEIGHT_FRAC = 0.72f;  // Helvetica cap height / em
-constexpr float ARROW_BOX_FRAC  = 1.00f;  // arrow box / large-font px (the sprite carries its own margin)
 
 }  // namespace
 
@@ -143,7 +122,7 @@ void PortraitSkin::draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t inner
     skin.draw(r, SkinPiece::ButtonBacking, to_sdl(geom_.buttons));
 }
 
-void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, Font& arrowFont,
+void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font,
                                 const SdlInput& input) const {
     if (!active_) return;
 
@@ -151,7 +130,7 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
     const int oy = geom_.buttons.y;
 
     // In pixels: density cancels, so `portrait2(…, 1)`'s `large_sp` is the pixel size.
-    const bool          useHelv = font.loaded();
+    const bool          useLabelFont = font.loaded();
     const tl::Portrait2 fm = tl::portrait2(geom_.buttons.w, std::max(geom_.buttons.h, 100), 1.0f);
     const auto          R = [](float v) { return static_cast<int>(std::lround(v)); };
 
@@ -169,8 +148,8 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
         if (tinted) skin.draw_tinted(r, piece, dst, ink);
         else        skin.draw(r, piece, dst);
 
-        // No Helvetica → the shared 5×5 label font.
-        if (!useHelv) {
+        // No label font → the shared 5×5 font.
+        if (!useLabelFont) {
             draw_label(r, br.button, dst, ink);
             continue;
         }
@@ -180,23 +159,7 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, F
         const int            offX = R(lab.wide ? fm.wide_off_x_dp : fm.sq_off_x_dp);
         const int            offY = R(fm.off_y_dp) + (pressed ? R(fm.pressed_dp) : 0);
 
-        if (lab.arrow) {
-            // The arrow font's glyph, or the line arrow without it.
-            if (arrowFont.loaded()) {
-                // Smaller than a letter, its baseline where a full-size glyph's would be.
-                const float apx  = px * ARROW_PX_FRAC;
-                const int   yTop = dst.y + offY + arrowFont.ascent_px(px) - arrowFont.ascent_px(apx);
-                arrowFont.draw_text(arrow_utf8(lab.dir), dst.x + offX, yTop, apx, ink);
-            } else {
-                const int      baseline = dst.y + offY + font.ascent_px(px);
-                const int      capH     = R(px * CAP_HEIGHT_FRAC);
-                const int      side     = R(px * ARROW_BOX_FRAC);
-                const SDL_Rect abox{dst.x + offX, baseline - capH / 2 - side / 2, side, side};
-                font.draw_arrow(lab.dir, abox, ink);
-            }
-        } else {
-            font.draw_text(lab.text, dst.x + offX, dst.y + offY, px, ink);
-        }
+        font.draw_text(lab.text, dst.x + offX, dst.y + offY, px, ink);
     }
 }
 

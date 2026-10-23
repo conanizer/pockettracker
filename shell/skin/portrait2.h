@@ -83,11 +83,10 @@ public:
     // shows casing. Draws nothing for a chromeless skin.
     void draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t innerBezelArgb) const;
 
-    // After the frame: the ten buttons in their PNG variants (pressed when held) with labels — letters
-    // from `font`, arrows from `arrowFont` (Helvetica has none), line arrows if it did not load, the
-    // 5×5 font if `font` did not. Fonts are mutable: they cache glyphs. Chromeless tints art and labels.
-    void draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, Font& arrowFont,
-                      const SdlInput& input) const;
+    // After the frame: the ten buttons in their PNG variants (pressed when held) with labels — words
+    // and arrows from `font`, the 5×5 font if it did not load. The font is mutable: it caches glyphs.
+    // Chromeless tints art and labels.
+    void draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, const SdlInput& input) const;
 
     // A fingerprint for the pixel gate: held buttons + output geometry. Non-zero while active, with a
     // marker bit distinct from `SdlTouch`'s.

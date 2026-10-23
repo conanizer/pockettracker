@@ -21,7 +21,8 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | [minimp4](https://github.com/lieff/minimp4) | CC0-1.0 (public domain) | ISO-BMFF container demuxing that feeds FAAD2 |
 | [stb_image](https://github.com/nothings/stb) | Public domain (MIT) | Decoding theme, touch-skin and CRT-overlay PNGs |
 | [stb_truetype](https://github.com/nothings/stb) | Public domain (MIT) | Rasterizing the touch skin's button-label glyphs |
-| [Linux Biolinum](https://www.dafont.com/linux-biolinum.font) | SIL OFL 1.1 | The arrow glyphs on the touch control layout |
+| [Liberation Sans](https://github.com/liberationfonts/liberation-fonts) | SIL OFL 1.1 | The letters and arrows on the touch control layout |
+| [QuinqueFive](https://ggbot.itch.io/quinquefive-font) by GGBotNet | SIL OFL 1.1 | The 5×5 pixel font the interface is drawn in, adapted from it |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Parsing `.ptp` / `.pti` project + instrument JSON |
 | [SDL2](https://www.libsdl.org/) | zlib | Window, renderer, audio device, controller and keyboard input on every platform |
 | [AndroidX Core-KTX](https://developer.android.com/jetpack/androidx/releases/core) | Apache 2.0 | Window-insets handling in the Android launcher activity |

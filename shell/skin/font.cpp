@@ -2,7 +2,6 @@
 
 #include "skin/assets.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -39,64 +38,6 @@ inline std::uint32_t cov_to_argb(std::uint8_t cov) {
     return (static_cast<std::uint32_t>(cov) << 24) | 0x00FFFFFFu;
 }
 
-// Point to segment distance; the clamp gives round caps.
-inline float dist_to_seg(float px, float py, float ax, float ay, float bx, float by) {
-    const float vx = bx - ax, vy = by - ay;
-    const float len2 = vx * vx + vy * vy;
-    float t = len2 > 0.0f ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0.0f;
-    t = std::clamp(t, 0.0f, 1.0f);
-    const float dx = px - (ax + t * vx), dy = py - (ay + t * vy);
-    return std::sqrt(dx * dx + dy * dy);
-}
-
-// An N×N anti-aliased thin-line arrow: a shaft plus an open two-stroke head, with a 1 px coverage ramp.
-void make_arrow_coverage(Arrow dir, int N, std::vector<std::uint8_t>& out) {
-    out.assign(static_cast<std::size_t>(N) * N, 0);
-    const float m    = N * 0.14f;              // margin from the cell edge
-    const float lo   = m;
-    const float hi   = N - m;
-    const float mid  = N * 0.5f;
-    const float half = N * 0.052f;             // half the stroke thickness
-    const float wing = (N * 0.5f - m) * 0.60f; // wing reach along each axis from the apex
-
-    // The shaft (tail → apex) and two wings from the apex.
-    float sx[3], sy[3], ex[3], ey[3];
-    switch (dir) {
-        case Arrow::Up:
-            sx[0] = mid; sy[0] = hi; ex[0] = mid;        ey[0] = lo;
-            sx[1] = mid; sy[1] = lo; ex[1] = mid - wing; ey[1] = lo + wing;
-            sx[2] = mid; sy[2] = lo; ex[2] = mid + wing; ey[2] = lo + wing;
-            break;
-        case Arrow::Down:
-            sx[0] = mid; sy[0] = lo; ex[0] = mid;        ey[0] = hi;
-            sx[1] = mid; sy[1] = hi; ex[1] = mid - wing; ey[1] = hi - wing;
-            sx[2] = mid; sy[2] = hi; ex[2] = mid + wing; ey[2] = hi - wing;
-            break;
-        case Arrow::Left:
-            sx[0] = hi; sy[0] = mid; ex[0] = lo;        ey[0] = mid;
-            sx[1] = lo; sy[1] = mid; ex[1] = lo + wing; ey[1] = mid - wing;
-            sx[2] = lo; sy[2] = mid; ex[2] = lo + wing; ey[2] = mid + wing;
-            break;
-        case Arrow::Right:
-        default:
-            sx[0] = lo; sy[0] = mid; ex[0] = hi;        ey[0] = mid;
-            sx[1] = hi; sy[1] = mid; ex[1] = hi - wing; ey[1] = mid - wing;
-            sx[2] = hi; sy[2] = mid; ex[2] = hi - wing; ey[2] = mid + wing;
-            break;
-    }
-
-    for (int y = 0; y < N; ++y) {
-        for (int x = 0; x < N; ++x) {
-            const float px = x + 0.5f, py = y + 0.5f;
-            float d = static_cast<float>(N) * 2.0f;
-            for (int i = 0; i < 3; ++i)
-                d = std::min(d, dist_to_seg(px, py, sx[i], sy[i], ex[i], ey[i]));
-            const float cov = std::clamp(half + 0.5f - d, 0.0f, 1.0f);
-            out[static_cast<std::size_t>(y) * N + x] = static_cast<std::uint8_t>(cov * 255.0f + 0.5f);
-        }
-    }
-}
-
 }  // namespace
 
 bool Font::load(SDL_Renderer* renderer, const std::string& asset_rel, bool log) {
@@ -131,11 +72,6 @@ std::uint64_t Font::glyph_key(std::uint32_t codepoint, float px) {
     return (static_cast<std::uint64_t>(codepoint) << 12) | bucket;
 }
 
-std::uint64_t Font::arrow_key(Arrow dir) {
-    // Above any glyph key (codepoint ≤ 0x10FFFF, shifted by 12 < 2^33).
-    return (static_cast<std::uint64_t>(1) << 40) | static_cast<std::uint64_t>(dir);
-}
-
 SDL_Texture* Font::make_texture(int w, int h, const std::uint32_t* argb) const {
     SDL_Texture* tex =
         SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, w, h);
@@ -167,25 +103,6 @@ const Font::GlyphTex& Font::glyph_tex(std::uint32_t codepoint, float px) {
     return cache_.emplace(k, t).first->second;
 }
 
-const Font::GlyphTex& Font::arrow_tex(Arrow dir) {
-    const std::uint64_t k  = arrow_key(dir);
-    auto                it = cache_.find(k);
-    if (it != cache_.end()) return it->second;
-
-    // Generated once per direction at 128 px; linear filtering keeps it smooth when scaled down.
-    const int                 N = 128;
-    std::vector<std::uint8_t> cov;
-    make_arrow_coverage(dir, N, cov);
-    std::vector<std::uint32_t> argb(cov.size());
-    for (std::size_t i = 0; i < cov.size(); ++i) argb[i] = cov_to_argb(cov[i]);
-
-    GlyphTex t;
-    t.w   = N;
-    t.h   = N;
-    t.tex = make_texture(N, N, argb.data());
-    return cache_.emplace(k, t).first->second;
-}
-
 void Font::draw_text(const std::string& text, int x_left, int y_top, float px, std::uint32_t rgb) {
     if (!ready_ || renderer_ == nullptr) return;
     const int   baseline = y_top + rast_.ascent_px(px);
@@ -205,15 +122,6 @@ void Font::draw_text(const std::string& text, int x_left, int y_top, float px, s
         }
         pen += g.advance;
     }
-}
-
-void Font::draw_arrow(Arrow dir, const SDL_Rect& box, std::uint32_t rgb) {
-    if (renderer_ == nullptr || box.w <= 0 || box.h <= 0) return;
-    const GlyphTex& a = arrow_tex(dir);
-    if (a.tex == nullptr) return;
-    const Uint8 cr = (rgb >> 16) & 0xFF, cg = (rgb >> 8) & 0xFF, cb = rgb & 0xFF;
-    SDL_SetTextureColorMod(a.tex, cr, cg, cb);
-    SDL_RenderCopy(renderer_, a.tex, nullptr, &box);
 }
 
 }  // namespace ptshell

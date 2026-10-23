@@ -421,11 +421,8 @@ struct Screen {
     // The portrait device skin, reloaded only when the SETTINGS skin column changes.
     Skin skin;
 
-    // Button labels; a failed load falls back to the 5×5 font.
-    Font helvFont;
-
-    // The D-pad arrows Helvetica lacks (Linux Biolinum, SIL OFL); a failed load draws line arrows.
-    Font arrowFont;
+    // Button labels, arrows included (Liberation Sans, SIL OFL); a failed load falls back to the 5×5 font.
+    Font labelFont;
 
     // The CRT overlay, reloaded when the OVERLAY choice changes.
     ScreenOverlay screenOverlay;
@@ -455,7 +452,7 @@ struct Screen {
             };
             const auto buttons = [this, &input, ovOn, ovStr](SDL_Renderer* r) {
                 if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
-                portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
+                portrait.draw_buttons(r, skin, labelFont, input);
             };
             // ⚠️ A modal dims only the bezel glass, never the casing or buttons — a dark skin around a
             // bright cluster reads as a bug.
@@ -473,8 +470,7 @@ struct Screen {
     }
 
     void close() {
-        arrowFont.unload();
-        helvFont.unload();
+        labelFont.unload();
         skin.unload();
         screenOverlay.unload();
         video.close();
@@ -1367,8 +1363,7 @@ int run(const AppConfig& cfg) {
     screen.touch.set_feedback(cfg.buttonFeedback);
 
     if (cfg.touchCapable) {
-        screen.helvFont.load(screen.video.renderer(), "fonts/helvetica_regular.otf", cfg.console);
-        screen.arrowFont.load(screen.video.renderer(), "fonts/LinBiolinum_Rah.ttf", cfg.console);
+        screen.labelFont.load(screen.video.renderer(), "fonts/LiberationSans-Regular.ttf", cfg.console);
     }
 
     // The UI edits the host's live project in place.

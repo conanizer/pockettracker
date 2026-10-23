@@ -140,12 +140,12 @@ cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/pockettracker/li
 cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/pockettracker/licenses/libopus-COPYING"
 cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/licenses/libopus-LICENSE_PLEASE_READ.txt"
 
-# The OFL text ships even though this package bundles no font. THIRD-PARTY-NOTICES.md, which does
-# ship, cites licenses/OFL-1.1-LinuxBiolinum.txt by path — a notices file pointing at a file that is
-# not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
-# handheld build, the OFL's "must accompany the font" clause is already satisfied rather than newly
-# breached.
-cp "$SRC/docs/licenses/OFL-1.1-LinuxBiolinum.txt"       "$STAGE/pockettracker/licenses/OFL-1.1-LinuxBiolinum.txt"
+# The OFL texts ship even though this package bundles no font file. THIRD-PARTY-NOTICES.md, which
+# does ship, cites them by path — a notices file pointing at a file that is not in the artifact
+# is the breach it exists to prevent. QuinqueFive's is owed regardless: the 5×5 UI font compiled
+# into the binary is adapted from it.
+cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"      "$STAGE/pockettracker/licenses/OFL-1.1-LiberationSans.txt"
+cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"         "$STAGE/pockettracker/licenses/OFL-1.1-QuinqueFive.txt"
 ls -1 "$STAGE/pockettracker/licenses/"
 
 echo
@@ -287,7 +287,7 @@ fi
 echo
 echo "licences, read back out of the zip:"
 for L in LICENSE THIRD-PARTY-NOTICES.md CREDITS.md libogg-COPYING libopus-COPYING \
-         libopus-LICENSE_PLEASE_READ.txt OFL-1.1-LinuxBiolinum.txt; do
+         libopus-LICENSE_PLEASE_READ.txt OFL-1.1-LiberationSans.txt OFL-1.1-QuinqueFive.txt; do
     # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
     # unzip exit 11, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
     # line below, so the package is rejected without ever naming the file that is missing. Absent and

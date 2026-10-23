@@ -11,9 +11,8 @@
 
 ## Why it is here, and where it may be used
 
-Vendored for **convergence plan D** — the PORTRAIT2 device skin draws its button labels in the app's
-Helvetica (`helvetica_regular.otf`), and there was no font rasterizer in the C++ tree. Kotlin got the
-font from Compose's `Text`; the shell has to rasterize glyphs itself.
+The PORTRAIT2 device skin draws its button labels, the D-pad arrows included, in Liberation Sans
+(`LiberationSans-Regular.ttf`); the shell rasterizes those glyphs itself.
 
 ⚠️ **It lives under `native/vendor/` for ONE reason: the licence guard.** `shell/build-portmaster.sh`
 derives its notice checklist from `native/vendor/*/`, so a rasterizer vendored anywhere else would be
@@ -26,18 +25,13 @@ like stb_image.
   construction**: `ptshot`/`ptinput`/`ptmapper`/`ptdispatch` link `pt-ui` *without* `font_raster.cpp`,
   so any stb_truetype reference leaking into a screen module breaks *those* tools' link.
 
-## ⚠️ CFF / OpenType — the specific risk this dependency carries
+## ⚠️ Only TrueType outlines are exercised
 
-`helvetica_regular.otf` is **CFF/PostScript-outline OpenType** (`OTTO`), not the commoner TrueType
-(`glyf`) flavour. stb_truetype supports CFF, but that path is the half most likely to regress silently
-on a version bump — and a regression is invisible on device (a blank or tofu label reads as a layout
-bug). `tools/ptfont` (ctest `d-font-raster`) asserts, against the exact shipped `.otf`, that it really
-is `OTTO` and that every letter the labels use produces ink. Re-run it after any bump.
-
-- ⚠️ **Helvetica has no arrow glyphs.** U+2190–2193 return `.notdef` (a tofu box). On Android those
-  D-pad arrows came from SYSTEM FONT FALLBACK, which stb_truetype (one font, no fallback) has not — so
-  the shell draws the D-pad arrows itself as smooth triangles (`shell/skin/font.cpp` `draw_arrow`). ptfont
-  documents this and would flag a future font that shipped real arrows.
+The shipped font is TrueType (`glyf`) outlines. stb_truetype also reads CFF (`OTTO`) OpenType, but
+that half is the one most likely to regress silently on a version bump, and nothing ships through it
+now — a CFF `.otf` added later needs `tools/ptfont` pointed at it. `ptfont` (ctest `d-font-raster`,
+`d-font-arrows`) asserts, against the exact shipped file, that every glyph the labels use produces
+ink. Re-run it after any bump.
 
 ## Verbatim — do not edit
 
@@ -55,4 +49,4 @@ hand-edit the header (the same rule the SDL2, stb_image and codec vendors carry)
   `#include "vendor/stb_truetype/stb_truetype.h"` resolve from a shell TU — no include line is restated.
 - Rasterization is proven by `tools/ptfont` (ctest `d-font-raster`), which compiles `font_raster.cpp`
   and links nothing else — the standing proof the rasterizer needs only stb_truetype + the standard
-  library, and that the CFF font still produces ink.
+  library, and that the shipped font still produces ink.

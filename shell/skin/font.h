@@ -1,8 +1,6 @@
-// The button font: `font_raster.h` rasterizes the .otf, this uploads glyphs to textures cached per
-// (codepoint, size) and blits UTF-8 labels. Glyphs are white with alpha = coverage, tinted per draw,
-// in LINEAR scale mode like the skin around them. ⚠️ `unload()` before `SdlVideo::close()`.
-// D-pad arrows come from a second Font on Linux Biolinum (Helvetica has none); `draw_arrow` is the
-// line-arrow fallback when that font is missing.
+// The button font: `font_raster.h` rasterizes the font file, this uploads glyphs to textures cached
+// per (codepoint, size) and blits UTF-8 labels. Glyphs are white with alpha = coverage, tinted per
+// draw, in LINEAR scale mode like the skin around them. ⚠️ `unload()` before `SdlVideo::close()`.
 
 #ifndef POCKETTRACKER_FONT_H
 #define POCKETTRACKER_FONT_H
@@ -17,9 +15,6 @@
 
 namespace ptshell {
 
-// The four D-pad directions; mapping a Button onto one is the caller's.
-enum class Arrow { Up, Down, Left, Right };
-
 class Font {
 public:
     Font() = default;
@@ -28,8 +23,8 @@ public:
     Font(const Font&)            = delete;  // owns SDL_Texture handles
     Font& operator=(const Font&) = delete;
 
-    // Read and parse the .otf through the asset seam; false (and `loaded()` false) if missing or bad,
-    // so the caller falls back to the 5×5 font. `log` prints one `font:` line.
+    // Read and parse the font file through the asset seam; false (and `loaded()` false) if missing or
+    // bad, so the caller falls back to the 5×5 font. `log` prints one `font:` line.
     bool load(SDL_Renderer* renderer, const std::string& asset_rel, bool log);
     bool loaded() const { return ready_; }
 
@@ -44,27 +39,21 @@ public:
 
     int ascent_px(float px) const { return rast_.ascent_px(px); }
 
-    // A generated line-arrow sprite filling `box`, tinted `rgb`. Independent of the .otf, but the
-    // caller gates it on `loaded()` so a failed load drops the whole cluster to 5×5 labels together.
-    void draw_arrow(Arrow dir, const SDL_Rect& box, uint32_t rgb);
-
 private:
-    // A cached glyph or arrow texture and how to place it; null with an advance = a space.
+    // A cached glyph texture and how to place it; null with an advance = a space.
     struct GlyphTex {
         SDL_Texture* tex     = nullptr;
         int          w       = 0;
         int          h       = 0;
-        int          xoff    = 0;   // pen-x → texture left  (glyphs); 0 for arrows
-        int          yoff    = 0;   // baseline-y → texture top (glyphs); unused for arrows
-        int          advance = 0;   // glyphs only
+        int          xoff    = 0;   // pen-x → texture left
+        int          yoff    = 0;   // baseline-y → texture top
+        int          advance = 0;
     };
 
     const GlyphTex& glyph_tex(std::uint32_t codepoint, float px);   // rasterize + upload on miss
-    const GlyphTex& arrow_tex(Arrow dir);                           // generate + upload on miss
     SDL_Texture*    make_texture(int w, int h, const std::uint32_t* argb) const;
 
     static std::uint64_t glyph_key(std::uint32_t codepoint, float px);
-    static std::uint64_t arrow_key(Arrow dir);
 
     SDL_Renderer*                              renderer_ = nullptr;
     FontRasterizer                             rast_;

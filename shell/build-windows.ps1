@@ -107,12 +107,12 @@ Copy-Item (Join-Path $repo 'native\vendor\ogg\COPYING')                  (Join-P
 Copy-Item (Join-Path $repo 'native\vendor\opus\COPYING')                 (Join-Path $lic 'libopus-COPYING')
 Copy-Item (Join-Path $repo 'native\vendor\opus\LICENSE_PLEASE_READ.txt') (Join-Path $lic 'libopus-LICENSE_PLEASE_READ.txt')
 
-# The OFL text ships even though this package bundles no font. THIRD-PARTY-NOTICES.md, which does
-# ship, cites licenses/OFL-1.1-LinuxBiolinum.txt by path — a notices file pointing at a file that is
-# not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
-# desktop build, the OFL's "must accompany the font" clause is already satisfied rather than newly
-# breached.
-Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-LinuxBiolinum.txt')    (Join-Path $lic 'OFL-1.1-LinuxBiolinum.txt')
+# The OFL texts ship even though this package bundles no font file. THIRD-PARTY-NOTICES.md, which
+# does ship, cites them by path — a notices file pointing at a file that is not in the artifact
+# is the breach it exists to prevent. QuinqueFive's is owed regardless: the 5×5 UI font compiled
+# into the binary is adapted from it.
+Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-LiberationSans.txt')   (Join-Path $lic 'OFL-1.1-LiberationSans.txt')
+Copy-Item (Join-Path $repo 'docs\licenses\OFL-1.1-QuinqueFive.txt')      (Join-Path $lic 'OFL-1.1-QuinqueFive.txt')
 
 # ⚠️ SDL's licence comes out of the SOURCE THAT WAS ACTUALLY COMPILED, not from a copy kept in this
 # repo. FetchContent put it in the build tree, so the licence that ships is the licence of the code
@@ -283,7 +283,8 @@ try {
                           'PocketTracker/licenses/libogg-COPYING',
                           'PocketTracker/licenses/libopus-COPYING',
                           'PocketTracker/licenses/libopus-LICENSE_PLEASE_READ.txt',
-                          'PocketTracker/licenses/OFL-1.1-LinuxBiolinum.txt')) {
+                          'PocketTracker/licenses/OFL-1.1-LiberationSans.txt',
+                          'PocketTracker/licenses/OFL-1.1-QuinqueFive.txt')) {
         $e = $archive.GetEntry($needed)
         if (-not $e)            { throw "$needed is MISSING from the zip" }
         if ($e.Length -lt 100)  { throw "$needed is only $($e.Length) bytes inside the zip" }

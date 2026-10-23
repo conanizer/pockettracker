@@ -1,6 +1,6 @@
 // Glyph rasterization, SDL-free: stb_truetype turns a codepoint into an alpha-coverage bitmap and
-// its metrics; font.h makes textures from it. ⚠️ helvetica_regular.otf is CFF-outline OpenType
-// (`OTTO`), stb_truetype's least-travelled path — check it still produces ink after an update.
+// its metrics; font.h makes textures from it. ⚠️ Only TrueType-outline fonts ship; a CFF `.otf`
+// takes stb_truetype's least-travelled path — check it produces ink before shipping one.
 
 #ifndef POCKETTRACKER_FONT_RASTER_H
 #define POCKETTRACKER_FONT_RASTER_H

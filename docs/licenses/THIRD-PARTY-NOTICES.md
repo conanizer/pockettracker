@@ -18,7 +18,7 @@ this file is the engine, i.e. what ships in *both* the APK and the Linux port. T
 
 | Not engine-compiled | Why it is here anyway | Where it ships |
 |---|---|---|
-| Linux Biolinum (font asset) | The OFL requires its licence to accompany the font | wherever `assets/fonts/` travel |
+| Liberation Sans (font asset) | The OFL requires its licence to accompany the font | wherever `assets/fonts/` travel |
 | Oboe, the AndroidX libraries | Apache-2.0 §4(a) requires supplying a *copy of the License* | the APK only |
 | Steinberg ASIO SDK | Compiled into the Windows shell only (SETTINGS > AUDIO OUT) | the Windows zip only |
 
@@ -280,7 +280,7 @@ same rule every vendored component follows.
 
 ## stb_truetype — public domain **or** MIT (dual, at your option)
 
-Used for: rasterizing the PORTRAIT2 device skin's button-label glyphs from the app's Helvetica
+Used for: rasterizing the PORTRAIT2 device skin's button-label glyphs from Liberation Sans
 (`native/vendor/stb_truetype/stb_truetype.h`, v1.26). Copyright (c) 2017 Sean Barrett. The full
 dual-licence statement is at the end of that file.
 
@@ -383,7 +383,7 @@ in this repo — the licence that ships is then the licence of the code that shi
 (clause 3 is "may not be removed or altered from any **source** distribution"); unlike the
 BSD-3-Clause components in this file, it imposes no reproduce-in-binary-form requirement. So
 shipping `libSDL2.so` in the APK adds no obligation beyond the notice recorded here. The APK carries
-this file, `LICENSE`, `CREDITS.md` and the OFL text as `assets/licenses/`; no in-app screen displays
+this file, `LICENSE`, `CREDITS.md` and the OFL texts as `assets/licenses/`; no in-app screen displays
 them. Stated rather than assumed, because "we now ship one more library" is the kind of change that
 looks like it must have made a compliance problem worse.
 
@@ -458,27 +458,43 @@ everything else of ours. Nothing from that repository is in the package.
 
 ---
 
-## Linux Biolinum — SIL Open Font License 1.1
+## Liberation Sans — SIL Open Font License 1.1
 
-Used for: the D-pad ARROW glyphs (↑↓←→) on the PORTRAIT2 touch skin's virtual buttons
-(`app/src/main/assets/fonts/LinBiolinum_Rah.ttf`). Helvetica, the button-label font, ships no arrow
-glyphs, so this font supplies exactly those four.
+Used for: the labels on the PORTRAIT2 touch skin's virtual buttons — "A", "B", "Sel", "Start",
+"L Shift", "R Shift" and the D-pad arrows (`app/src/main/assets/fonts/LiberationSans-Regular.ttf`,
+the unmodified 2.1.5 release file).
 
 ⚠️ **This is a bundled FONT ASSET, not an engine-compiled component** — unlike everything above it, it
 is not statically linked. It ships wherever the app's `assets/` travel: the **APK** for certain, and
 any desktop/handheld build that bundles `assets/fonts/`. Documented here (the single source of truth
 for shipped notices) rather than in `CREDITS.md`, because the OFL requires its licence to accompany
-the font in binary distributions — the full licence text is `licenses/OFL-1.1-LinuxBiolinum.txt`.
-
-Linux Biolinum is dual-licensed GPL-2.0-or-later (with a font exception) **and** SIL OFL 1.1;
-PocketTracker uses it under the OFL.
+the font in binary distributions — the full licence text is `licenses/OFL-1.1-LiberationSans.txt`.
 
 ```
-Copyright (c) 2003–2012, Philipp H. Poll (www.linuxlibertine.org | gillian at linuxlibertine.org),
-with Reserved Font Name "Linux Libertine" and "Biolinum".
+Digitized data copyright (c) 2010 Google Corporation
+	with Reserved Font Arimo, Tinos and Cousine.
+Copyright (c) 2012 Red Hat, Inc.
+	with Reserved Font Name Liberation.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
-Full text: licenses/OFL-1.1-LinuxBiolinum.txt (and http://scripts.sil.org/OFL).
+Full text: licenses/OFL-1.1-LiberationSans.txt (and http://scripts.sil.org/OFL).
+```
+
+---
+
+## QuinqueFive — SIL Open Font License 1.1
+
+Used for: every piece of text on the tracker screen. The 5×5 bitmap font table
+(`native/ui/font5x5.h`) is adapted from QuinqueFive by GGBotNet, with some glyphs redrawn — a
+Modified Version under the OFL, so it does not carry the Reserved Font Name. ⚠️ **Unlike the font
+asset above, it is compiled into the program**, so its notice and licence ship in **every**
+artifact.
+
+```
+Copyright © 2019-2025 GGBotNet (https://ggbot.net), with Reserved Font Name "QuinqueFive".
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Full text: licenses/OFL-1.1-QuinqueFive.txt (and http://scripts.sil.org/OFL).
 ```
 
 ---
@@ -501,7 +517,7 @@ everything else the project builds on.
 ⚠️ **They are recorded HERE as well because naming a licence is not supplying one.** Apache-2.0 §4(a)
 requires that a redistributor "give any other recipients of the Work or Derivative Works a copy of
 this License" — an obligation `CREDITS.md` cannot discharge by citing it. This is the same reason the
-Linux Biolinum font is documented here rather than there: the scope of this file is *what a recipient
+Liberation Sans font is documented here rather than there: the scope of this file is *what a recipient
 of a binary must receive*, which is a wider set than *what is statically linked*.
 
 ⚠️ **The AndroidX AARs do carry `META-INF/androidx/…/LICENSE.txt`, and it never reached a user** —
