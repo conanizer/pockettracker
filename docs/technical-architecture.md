@@ -210,9 +210,10 @@ a headless tool drive any platform's UI and compare the results.
 
 A sample-accurate queue system in C++.
 
-- **Stereo float, at the device's own rate.** A rate is asked for, never assumed: whatever the device
-  negotiates is what the engine is told, and every pitch ratio and filter coefficient is derived from
-  it rather than from a constant. Android uses Oboe (AAudio Exclusive, which takes the direct MMAP
+- **Stereo float at 48 kHz on every platform.** The stream asks for `AudioEngine::SAMPLE_RATE`; Oboe and SDL
+  convert where the hardware runs another rate, and an ASIO driver is switched to it or refused. The engine is still told the
+  negotiated rate, and every pitch ratio and filter coefficient is derived from it, not from the
+  constant. Android uses Oboe (AAudio Exclusive, which takes the direct MMAP
   path where the device has one, then OpenSL ES Exclusive → Shared → None/Shared); every other
   platform uses SDL audio. A device whose AAudio open ever took over 3 s stays on OpenSL ES — a
   marker file in private storage, written before the attempt, so a hang counts too.

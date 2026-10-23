@@ -38,7 +38,7 @@ class SdlAudioEngine : public AudioBackend {
     // buffer and the driver's queue is left to a microphone.
     OutputLatency outputLatency() const override { return {bufferFrames_, false}; }
 
-    // Open at exactly `hz` from now on, converting if needed; 0 negotiates. For a mid-session reopen:
+    // Open at `hz` from now on; 0 = the engine's rate (or the env override). For a mid-session reopen:
     // loaded samples are pitched for the rate in force.
     void pin_rate(int hz) { pinnedRate_ = hz; }
 

@@ -19,8 +19,8 @@ public:
     explicit OboeAudioEngine(AudioEngine* core);
     ~OboeAudioEngine() override;
 
-    // The device's own rate and burst, before openStream(). ⚠️ OpenSL ES cannot ask the device, so on
-    // that path these alone keep a resampler out. Each independent; <= 0 keeps Oboe's default.
+    // The device's own rate and burst, before openStream(). The rate is only printed; the burst is
+    // OpenSL ES's buffer size, which cannot ask the device. <= 0 keeps Oboe's default.
     void setPlatformDefaults(int sampleRate, int framesPerBurst);
 
     // While this file exists the device stays on OpenSL ES (see openStream). Empty = no guard.

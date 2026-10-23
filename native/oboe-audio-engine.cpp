@@ -17,8 +17,7 @@ OboeAudioEngine::~OboeAudioEngine() {
 void OboeAudioEngine::setPlatformDefaults(int sampleRate, int framesPerBurst) {
     platformRate_  = sampleRate;
     platformBurst_ = framesPerBurst;
-    // Globals Oboe reads for an unspecified value — the only way to reach the OpenSL ES path.
-    if (sampleRate > 0)     oboe::DefaultStreamValues::SampleRate    = sampleRate;
+    // A global Oboe reads for an unspecified value — the only way to reach the OpenSL ES path.
     if (framesPerBurst > 0) oboe::DefaultStreamValues::FramesPerBurst = framesPerBurst;
 }
 
@@ -50,8 +49,9 @@ bool OboeAudioEngine::openStream() {
     builder.setFormat(oboe::AudioFormat::Float);
     builder.setChannelCount(oboe::ChannelCount::Stereo);
 
-    // ⚠️ No setSampleRate: naming a rate the hardware does not run inserts a resampler and loses the
-    // fast path. Every consumer reads the negotiated rate back.
+    // Where the hardware runs another rate, Oboe converts (its default quality). Every consumer still
+    // reads the negotiated rate back.
+    builder.setSampleRate(AudioEngine::SAMPLE_RATE);
 
     // ⚠️ The modern API first (the only way to the low-latency direct path), behind a marker file:
     // one ROM stalls startup for up to 35 s opening it. The marker is removed only after a quick open

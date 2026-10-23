@@ -16,14 +16,6 @@
 #include <sched.h>
 #endif
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#include <mmdeviceapi.h>
-#include <audioclient.h>
-#endif
-
 namespace {
 
 // Frames per callback, 512 @ 48 kHz ≈ 10.7 ms — a latency choice; the engine chunks to its sub-block.
@@ -34,57 +26,19 @@ constexpr int FRAMES_PER_CALLBACK = 512;
 // 128 and 64 do not.
 constexpr int SMALL_FRAMES = 256;
 
-// The fallback rate, asked with SDL_AUDIO_ALLOW_FREQUENCY_CHANGE. 48000, not 44100: ALSA's plug
-// accepts any rate, so 44100 bought a silent conversion into a 48 kHz dmix. On Windows the endpoint's
-// own rate is asked first (`windows_endpoint_rate`).
-constexpr int PREFERRED_RATE = 48000;
-
-#ifdef _WIN32
-// The default output endpoint's rate, or 0. ⚠️ SDL cannot answer this and hides a mismatch behind its
-// own resampler. `eConsole` is the endpoint SDL opens for a null device name.
-int windows_endpoint_rate() {
-    // RPC_E_CHANGED_MODE: COM is up in the other apartment — usable, not ours to shut down.
-    const HRESULT co            = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool    weInitialised = SUCCEEDED(co);
-
-    int                  rate    = 0;
-    IMMDeviceEnumerator* devices = nullptr;
-    if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                                   __uuidof(IMMDeviceEnumerator),
-                                   reinterpret_cast<void**>(&devices)))) {
-        IMMDevice* endpoint = nullptr;
-        if (SUCCEEDED(devices->GetDefaultAudioEndpoint(eRender, eConsole, &endpoint))) {
-            IAudioClient* client = nullptr;
-            if (SUCCEEDED(endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                             reinterpret_cast<void**>(&client)))) {
-                WAVEFORMATEX* mix = nullptr;
-                if (SUCCEEDED(client->GetMixFormat(&mix)) && mix != nullptr) {
-                    rate = int(mix->nSamplesPerSec);
-                    CoTaskMemFree(mix);
-                }
-                client->Release();
-            }
-            endpoint->Release();
-        }
-        devices->Release();
-    }
-
-    if (weInitialised) CoUninitialize();
-    return rate;
-}
-#endif
+// Every platform opens at the engine's one rate; SDL converts where the device runs another.
+constexpr int PREFERRED_RATE = AudioEngine::SAMPLE_RATE;
 
 // Printed on the boot line, so a reading stays attributable.
-enum class RateSource { DEVICE, FALLBACK, ENV, PINNED };
+enum class RateSource { FIXED, ENV, PINNED };
 
 const char* rate_source_text(RateSource s) {
     switch (s) {
         case RateSource::ENV:    return "env";
-        case RateSource::DEVICE: return "the device";
         case RateSource::PINNED: return "the engine's, kept";
-        case RateSource::FALLBACK: break;
+        case RateSource::FIXED:  break;
     }
-    return "fallback";
+    return "fixed";
 }
 
 // POCKETTRACKER_AUDIO_FRAMES (a sweep aid) or the default, rounded down to a power of two in
@@ -104,8 +58,8 @@ int requested_frames() {
     return pow2;
 }
 
-// The rate to ask for: POCKETTRACKER_AUDIO_RATE (forces a conversion on purpose, to measure it), then
-// the platform's answer (only Windows can be asked — SDL's ALSA backend reports zeros), then 48000.
+// The rate to ask for: POCKETTRACKER_AUDIO_RATE (another rate on purpose, to measure it), else the
+// engine's.
 int requested_rate(RateSource& source) {
     if (const char* v = std::getenv("POCKETTRACKER_AUDIO_RATE"); v != nullptr && *v != '\0') {
         const long n = std::strtol(v, nullptr, 10);
@@ -116,14 +70,7 @@ int requested_rate(RateSource& source) {
         std::fprintf(stderr, "POCKETTRACKER_AUDIO_RATE=%s out of range (8000..192000), ignoring\n", v);
     }
 
-#ifdef _WIN32
-    if (const int hw = windows_endpoint_rate(); hw >= 8000 && hw <= 192000) {
-        source = RateSource::DEVICE;
-        return hw;
-    }
-#endif
-
-    source = RateSource::FALLBACK;
+    source = RateSource::FIXED;
     return PREFERRED_RATE;
 }
 
@@ -251,7 +198,7 @@ bool SdlAudioEngine::openStream() {
 #if defined(__linux__) && !defined(__ANDROID__)
     choose_linux_route(askedFrames);
 #endif
-    RateSource rateSource  = RateSource::FALLBACK;
+    RateSource rateSource  = RateSource::FIXED;
     const int  askedRate   = pinnedRate_ > 0 ? pinnedRate_ : requested_rate(rateSource);
     if (pinnedRate_ > 0) rateSource = RateSource::PINNED;
 
@@ -265,9 +212,9 @@ bool SdlAudioEngine::openStream() {
 
     SDL_AudioSpec got{};
 
-    // The device may pick the rate and buffer size. Format and channels are not negotiable — SDL would
-    // slip a converter under the DSP — nor is a pinned rate.
-    const int allow = (pinnedRate_ > 0 ? 0 : SDL_AUDIO_ALLOW_FREQUENCY_CHANGE) | SDL_AUDIO_ALLOW_SAMPLES_CHANGE;
+    // The device may pick the buffer size, nothing else: SDL converts the rate where the device runs
+    // another, and format and channels must match or the open is refused below.
+    const int allow = SDL_AUDIO_ALLOW_SAMPLES_CHANGE;
     device_ = SDL_OpenAudioDevice(nullptr, 0, &want, &got, allow);
 
 #ifndef _WIN32

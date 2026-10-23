@@ -35,6 +35,10 @@ public:
     AudioEngine();
     ~AudioEngine();
 
+    // The rate every platform opens its stream at; where the hardware runs another, the system
+    // converts. One rate everywhere, so a project and its export sound the same on every device.
+    static constexpr int SAMPLE_RATE = 48000;
+
     // The device's rate, set by the shell when the stream opens. Call before the stream is unpaused.
     // ⚠️ A new rate rebuilds the send and master buses at factory defaults; the caller re-pushes the
     // project's FX.
@@ -608,11 +612,11 @@ private:
     // retriggers. Live and offline both chunk here, so the export matches what is heard.
     static constexpr int PROCESS_SUBBLOCK = 256;
 
-    // The device rate; 44100 until the stream opens. Written by the shell, read by the scheduler.
-    std::atomic<int> deviceSampleRate{44100};
+    // The device rate. Written by the shell, read by the scheduler.
+    std::atomic<int> deviceSampleRate{SAMPLE_RATE};
 
     // The rate the buses were last built at, so setDeviceSampleRate knows a rebuild is owed.
-    int effectsSampleRate = 44100;
+    int effectsSampleRate = SAMPLE_RATE;
 
     // ⚠️ A bus setter never touches its module. It records the value here, bumps its group and
     // publishes; the audio thread applies each changed group at its next block (applyBusSettings).

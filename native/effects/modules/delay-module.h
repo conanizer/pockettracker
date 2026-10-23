@@ -7,10 +7,10 @@
 #include <cmath>
 #include <cstring>
 
-// The line's length per channel: 2 s at 44.1 kHz, less at higher rates.
-// ⚠️ A sample count, so both setters clamp silently past it: "00-FF → 0-2 s" holds only at 44.1 kHz,
+// The line's length per channel: 2 s at 48 kHz, plus the frames the read clamps keep clear.
+// ⚠️ A sample count, so both setters clamp silently past it: "00-FF → 0-2 s" holds up to 48 kHz,
 // and the longest sync subdivisions are out of reach at slow tempos.
-static constexpr size_t DELAY_MAX_SAMPLES = 88200;
+static constexpr size_t DELAY_MAX_SAMPLES = 96000 + 4;
 
 // Sync mode's subdivisions, in quarter-note beats:
 // 00=1/1  01=1/2   02=1/4   03=1/8   04=1/16  05=1/32

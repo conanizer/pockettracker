@@ -315,8 +315,8 @@ int audio_manager_property(JNIEnv* env, jobject audioManager, jclass amClass,
     return out;
 }
 
-// The device's own output rate and burst, for Oboe to open at — anything else costs a resampler and
-// usually the fast path. Both 0 when the platform declines; Oboe keeps its defaults.
+// The device's own output rate (printed only) and burst (Oboe's default for OpenSL ES). Both 0 when
+// the platform declines; Oboe keeps its defaults.
 void query_device_audio_defaults(int& sampleRate, int& framesPerBurst) {
     sampleRate = framesPerBurst = 0;
 
