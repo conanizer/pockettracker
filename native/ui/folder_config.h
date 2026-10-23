@@ -37,6 +37,11 @@ std::string resolve_folder_override(const std::string& value, const std::string&
 std::string resolve_browse_dir(FileSystem& fs, const std::optional<std::string>& value,
                                const std::string& def);
 
+// Instruments, Scales, Grooves, Reverbs and Delays once sat in the root; move what an older install
+// left there into Presets/. A name already taken there stays behind, and so does its folder.
+// Returns how many entries moved.
+int move_old_preset_folders(FileSystem& fs);
+
 // Write a starter config.json when none exists: every section filled with what the app does now, so
 // it changes nothing until edited. Never overwrites. True if written.
 bool seed_config_template(FileSystem& fs, const ButtonBindings& keyboardDefaults,

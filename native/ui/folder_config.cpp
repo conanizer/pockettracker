@@ -157,6 +157,38 @@ std::string config_template_text(FileSystem& fs, const ButtonBindings& keyboardD
 
 }  // namespace
 
+int move_old_preset_folders(FileSystem& fs) {
+    struct Moved {
+        const char* name;
+        std::string (FileSystem::*dir)();
+    };
+    static const Moved kMoved[] = {
+        {"Instruments", &FileSystem::instruments_directory},
+        {"Scales",      &FileSystem::scales_directory},
+        {"Grooves",     &FileSystem::grooves_directory},
+        {"Reverbs",     &FileSystem::reverbs_directory},
+        {"Delays",      &FileSystem::delays_directory},
+    };
+
+    const std::string root = fs.parent_path(fs.projects_directory());
+    int moved = 0;
+    for (const Moved& m : kMoved) {
+        const std::string old = root + "/" + m.name;
+        if (!fs.is_directory(old)) continue;
+        // ⚠️ With no folder granted (Android) every accessor answers the same placeholder.
+        const std::string dest = (fs.*m.dir)();
+        if (fs.parent_path(fs.parent_path(dest)) != root) continue;
+
+        for (const FileInfo& f : fs.list_files(old)) {
+            const std::string to = dest + "/" + f.name;
+            if (fs.file_exists(to)) continue;
+            if (fs.move_file(f.path, to)) ++moved;
+        }
+        if (fs.list_files(old).empty()) fs.delete_path(old);
+    }
+    return moved;
+}
+
 bool seed_config_template(FileSystem& fs, const ButtonBindings& keyboardDefaults,
                           const ButtonBindings& gamepadDefaults) {
     const std::string path = fs.config_path();

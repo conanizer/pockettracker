@@ -57,7 +57,7 @@ cd "$GAMEDIR"
 
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
-# The app's six folders (Projects/ Samples/ Soundfonts/ Instruments/ Renders/ Themes/) are created
+# The app's folders (Projects/ Samples/ Soundfonts/ Presets/ Renders/ Themes/) are created
 # under this root at boot rather than lazily, so a user can pull the SD card, put samples in, and
 # put it back. Keeping it under $GAMEDIR is what makes that reachable from a PC.
 export POCKETTRACKER_HOME="$GAMEDIR/data"

@@ -70,11 +70,13 @@ PocketTracker holds no storage permission, so it can only see folders you hand i
 > ADD FOLDER...
 ```
 
-Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its ten sub-folders inside it the moment it needs them:
+Press **A** on it. Android's own folder picker opens; pick a folder and confirm. That folder becomes PocketTracker's home, and the app creates its folders inside it the moment it needs them:
 
 ```
-Projects/  Samples/  Renders/  Soundfonts/  Instruments/  Themes/  Scales/  Grooves/  Reverbs/  Delays/
+Projects/  Samples/  Renders/  Soundfonts/  Themes/  Presets/
 ```
+
+`Presets/` holds what you save from inside a project: `Instruments/`, `Scales/`, `Grooves/`, `Reverbs/` and `Delays/`.
 
 Anything already in the folder is left exactly as it is — so if you have used PocketTracker before, pick your existing `Documents/PocketTracker` and every project, sample and theme is where it was.
 
@@ -1398,8 +1400,8 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 
 | Parameter | Description |
 |---|---|
-| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets: **NORMAL** (the plain reverb), **ROOM** (tight, bright, close), **HALL** (a gap, then a long dark tail), **CAVE** (longest, darkest, widest). Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to NORMAL. |
-| SAVE / LOAD | To the right of the name. **SAVE** names the reverb and writes every cell of the section except EQ to `PocketTracker/Reverbs` as a `.ptr` file; **LOAD** reads one back, into this or any other project. |
+| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets, from **DEFAULT** through small rooms to long halls and plates. Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a reverb set by hand that no built-in matches. **A + B** goes back to DEFAULT, the reverb a new project starts with. |
+| SAVE / LOAD | To the right of the name. **SAVE** names the reverb and writes every cell of the section except EQ to `PocketTracker/Presets/Reverbs` as a `.ptr` file; **LOAD** reads one back, into this or any other project. |
 | ALGO | Which reverb the cells below drive: **OLD** (the original), **HALL** (a large space), **ROOM** (a small one), **PLATE** and **FOIL** (metal plates — they have no room, so they ignore SIZE and MOD). Turning it changes no other cell. |
 | PRE | Pre-delay (`00`–`FF`) — a gap of up to 150 ms before the tail starts, so the sound stays in front of it. `00` starts it immediately. |
 | SIZE | Size of the room (`00`–`FF`) — how far apart its walls are. A bigger room also makes the movement from MOD slower. It does not change how long the tail rings or how loud it is. |
@@ -1415,8 +1417,8 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets: **NORMAL** (the plain delay), **PING** (bouncing), **TAPE** (dark, drifting repeats). A built-in sets PONG, TONE and WOBL together and leaves the rest alone. Turn one of the three afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to NORMAL. |
-| SAVE / LOAD | To the right of the name. **SAVE** names the delay and writes every cell of the section except EQ — TIME and its sync, FDBK and REV included — to `PocketTracker/Delays` as a `.ptd` file; **LOAD** reads one back, into this or any other project. |
+| *preset name* | The first line of the section. **A + D-pad** on the name walks the built-in presets, from **DIGITAL** (a clean echo) to dub and endless repeats. Landing on one sets every cell of the section except EQ. Turn a cell afterwards and a `*` appears in front of the name; `----` is a delay set by hand that no built-in matches. **A + B** goes back to DIGITAL, the delay a new project starts with. |
+| SAVE / LOAD | To the right of the name. **SAVE** names the delay and writes every cell of the section except EQ — TIME and its sync, FDBK and REV included — to `PocketTracker/Presets/Delays` as a `.ptd` file; **LOAD** reads one back, into this or any other project. |
 | PONG | Repeats alternate left and right instead of echoing on their own side (`ON` / `OFF`). |
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` spans 0 to 2 seconds. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). Press **A** on this row to switch between the two. Changing it while the delay is sounding slides the repeats into the new time and bends their pitch on the way, the way a tape delay does; `TIM` (§23) writes the same time from a phrase or a table. |
 | TONE | How bright the repeats stay (`00`–`FF`). Lower darkens each repeat more than the one before it; `FF` leaves them untouched. |

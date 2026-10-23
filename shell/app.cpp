@@ -243,6 +243,9 @@ bool open_boot_project(const AppConfig& cfg, SongcoreHost& host) {
 
 // Creates the app folders at boot: a handheld user's first move is copying samples onto the card.
 void make_app_folders(const AppConfig& cfg, ui::FileSystem& filesystem) {
+    if (const int moved = ui::move_old_preset_folders(filesystem); moved > 0)
+        std::printf("files:   moved %d entries from the old preset folders into Presets/\n", moved);
+
     filesystem.projects_directory();
     filesystem.samples_directory();
     filesystem.renders_directory();

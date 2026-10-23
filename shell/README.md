@@ -178,7 +178,7 @@ pockettracker-sdl [project.ptp] [media-base-dir] [app-root]
 ⚠️ **Every argument is optional, and on the shipping target there are none**: PortMaster launches a
 port by running its `.sh`, which invokes this binary bare. With no project the app opens the same
 blank document NEW PROJECT makes, and the file browser is how a handheld user reaches their songs.
-`app-root` is where `Projects/ Samples/ Soundfonts/ Instruments/` live and defaults to
+`app-root` is where `Projects/ Samples/ Soundfonts/ Presets/` live and defaults to
 `$POCKETTRACKER_HOME`, else the platform's own location.
 
 `media-base-dir` defaults to the project's own directory. A **portable** project — anything the Linux

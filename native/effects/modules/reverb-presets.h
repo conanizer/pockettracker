@@ -2,8 +2,8 @@
 
 // The reverb's built-in presets (names for sets of cell values) and its algorithm list. The DSP
 // never sees a preset's name.
-// ⚠️ NORMAL's row is the struct default (model.h) — change both together, or a new project matches
-// no preset. The other rows may be re-tuned freely.
+// Row 0 is what a new project opens on (songcore::new_project). The struct defaults in model.h are
+// what older files play with and match no row.
 // ⚠️ Only PRE and WIDE are gated out at their defaults; SIZE is neutral at 60 by construction (scale
 // exactly 1). DCAY, DAMP and MOD have no neutral value.
 // Only <cmath>: the UI reads this too, and the reverb module would clash with its EqModule.
@@ -19,20 +19,6 @@ struct ReverbPreset {
     int         width;    // 00-FF, 80 = the stereo image untouched
     int         mod;      // 00-FF, 40 = the wander the algorithm has always had; 00 = none
 };
-
-// The wander (MOD) rises with the tail's length: a short tail heard moving is just detuned, a long
-// still one turns metallic. Its speed follows SIZE (`reverb_mod_rate`).
-inline constexpr ReverbPreset kReverbPresets[] = {
-    // 1.9 s, bright.
-    {"NORMAL", 0, 0x60, 0x60, 0x80, 0x00, 0x80, 0x10},
-    // 0.6 s in a small room, narrow, no wander.
-    {"ROOM",   0, 0x18, 0x20, 0xA0, 0x04, 0x70, 0x00},
-    // 30 ms pre-delay, then 3.6 s of darker, wider tail.
-    {"HALL",   0, 0x88, 0xB0, 0x60, 0x33, 0xC0, 0x20},
-    // 12 s, darkest and widest (DCAY FF would be the freeze).
-    {"CAVE",   0, 0xD0, 0xF0, 0x20, 0x55, 0xFF, 0x40},
-};
-inline constexpr int kReverbPresetCount = 4;
 
 // ALGO, the project's `reverbAlgo`. ⚠️ The number is what a project stores: append, never insert;
 // 0 is the original reverb, which an older project loads as. Each algorithm reads the same cells its
@@ -53,6 +39,18 @@ inline const char* reverb_algo_name(int algo) {
     static constexpr const char* kNames[kReverbAlgoCount] = {"OLD", "HALL", "ROOM", "PLATE", "FOIL"};
     return (algo >= 0 && algo < kReverbAlgoCount) ? kNames[algo] : kNames[0];
 }
+
+inline constexpr ReverbPreset kReverbPresets[] = {
+    //              algo                decay room  damp  pre   width mod
+    {"DEFAULT",     kReverbAlgoOld,     0x80, 0x80, 0x80, 0x20, 0xFF, 0x20},
+    {"ROOM",        kReverbAlgoHall,    0x10, 0x20, 0x40, 0x20, 0x80, 0x00},
+    {"ROOM_GLUE",   kReverbAlgoRoom,    0x10, 0x20, 0x30, 0x10, 0xA0, 0x30},
+    {"HALL_BRIGHT", kReverbAlgoHall,    0x80, 0xA0, 0x80, 0x80, 0xFF, 0x20},
+    {"HALL_WASH",   kReverbAlgoHall,    0xE0, 0x40, 0x20, 0x80, 0xFF, 0x10},
+    {"PLATE_SHORT", kReverbAlgoPlate,   0x60, 0x00, 0x40, 0x20, 0x80, 0x00},
+    {"FOIL_MONO",   kReverbAlgoFoil,    0x40, 0x00, 0xA0, 0x10, 0x00, 0x00},
+};
+inline constexpr int kReverbPresetCount = 7;
 
 // Which built-in preset these cells match, or −1.
 inline int reverb_preset_match(int algo, int decay, int room, int damp, int pre, int width, int mod) {

@@ -121,7 +121,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - True dBFS peak meters per track
 - Two send effects: a reverb and a stereo delay
 - Reverb room size and decay set separately — a small room can ring long, a big one die fast
-- Reverb character: pre-delay, stereo width and tail modulation — with built-in presets (ROOM, HALL, CAVE) that set the whole section at once
+- Reverb character: pre-delay, stereo width and tail modulation — with built-in presets that set the whole section at once
 - Delay character: ping-pong repeats, repeat tone and tape wobble — with built-in presets that set all three at once
 - Save a reverb or a delay you have dialled in as a preset file, and load it into any other project
 - Push the delay's feedback past `E0` and it self-oscillates — the repeats bloom into a steady singing tone that carries on after the input stops
@@ -163,7 +163,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Slow loads show progress and can be stopped with B — large compressed soundfonts and long samples
   report how far along they are; quick loads show nothing
 - Projects saved as .ptp files in `Projects/`, inside PocketTracker's home folder
-- Instruments saved as .pti files in `Instruments/`, beside it
+- Instruments saved as .pti files in `Presets/Instruments/`
 - Samples stored wherever you put them; paths stored in the project
 - File move — move files and folders to a different location from within the browser
 

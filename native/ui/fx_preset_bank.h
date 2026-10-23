@@ -9,8 +9,12 @@
 #include "effects/modules/delay-presets.h"
 #include "effects/modules/reverb-presets.h"
 #include "songcore/model.h"
+#include "songcore/project_ops.h"
 
 namespace pt::ui {
+
+using songcore::delay_apply_bank;
+using songcore::reverb_apply_bank;
 
 // ── Reverb ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -25,19 +29,6 @@ inline int reverb_bank_index_by_name(const std::string& name) {
 inline int reverb_bank_match(const songcore::Project& p) {
     return reverb_preset_match(p.reverbAlgo, p.reverbFeedback, p.reverbSize, p.reverbDamp,
                                p.reverbPreDelay, p.reverbWidth, p.reverbMod);
-}
-
-inline void reverb_apply_bank(songcore::Project& p, int index) {
-    if (index < 0 || index >= kReverbPresetCount) return;
-    const ReverbPreset& r = kReverbPresets[index];
-    p.reverbAlgo     = r.algo;
-    p.reverbFeedback = r.decay;
-    p.reverbSize     = r.room;
-    p.reverbDamp     = r.damp;
-    p.reverbPreDelay = r.pre;
-    p.reverbWidth    = r.width;
-    p.reverbMod      = r.mod;
-    p.reverbPreset   = r.name;
 }
 
 // The stored name, else the built-in the cells match, else empty.
@@ -69,17 +60,8 @@ inline int delay_bank_index_by_name(const std::string& name) {
 }
 
 inline int delay_bank_match(const songcore::Project& p) {
-    return delay_preset_match(p.delayPong, p.delayTone, p.delayWobble);
-}
-
-// TIME, FDBK and REV stay.
-inline void delay_apply_bank(songcore::Project& p, int index) {
-    if (index < 0 || index >= kDelayPresetCount) return;
-    const DelayPreset& d = kDelayPresets[index];
-    p.delayPong   = d.pong;
-    p.delayTone   = d.tone;
-    p.delayWobble = d.wobble;
-    p.delayPreset = d.name;
+    return delay_preset_match(p.delayPong, p.delaySync, p.delayTime, p.delayFeedback, p.delayTone,
+                              p.delayWobble, p.delayReverbSend);
 }
 
 inline std::string delay_preset_display_name(const songcore::Project& p) {

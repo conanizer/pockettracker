@@ -10,7 +10,7 @@ From a fresh install to a playing beat in about ten minutes. This guide covers t
 
 **Manual:** download the latest `.apk` from the [releases page](https://github.com/conanizer/pockettracker/releases), open it on your device, and tap **Install** (allow "install from unknown sources" if asked).
 
-PocketTracker asks for **no permissions**. Instead, the first time you open a file browser it shows one row — `ADD FOLDER...` — and pressing **A** on it opens Android's folder picker. The folder you choose becomes PocketTracker's home, and it creates `Projects/`, `Samples/`, `Renders/`, `Soundfonts/`, `Instruments/` and `Themes/` inside it. `Documents/PocketTracker` is a tidy choice; if you have used PocketTracker before, choose that same folder and everything is where you left it.
+PocketTracker asks for **no permissions**. Instead, the first time you open a file browser it shows one row — `ADD FOLDER...` — and pressing **A** on it opens Android's folder picker. The folder you choose becomes PocketTracker's home, and it creates `Projects/`, `Samples/`, `Renders/`, `Soundfonts/`, `Themes/` and `Presets/` inside it. `Documents/PocketTracker` is a tidy choice; if you have used PocketTracker before, choose that same folder and everything is where you left it.
 
 ---
 

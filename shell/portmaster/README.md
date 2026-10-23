@@ -33,8 +33,8 @@ ports/pockettracker/data/
 ├── Projects/      your songs (.ptp)
 ├── Samples/       .wav .mp3 .flac .ogg .opus
 ├── Soundfonts/    .sf2
-├── Instruments/   saved instrument presets (.pti)
 ├── Themes/        colour themes (.ptt)
+├── Presets/       saved instruments, scales, grooves, reverbs and delays
 └── Renders/       WAV mixes and stems you bounce
 ```
 

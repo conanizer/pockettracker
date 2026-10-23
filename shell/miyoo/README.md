@@ -116,8 +116,8 @@ Everything lives at the top level of the card, so you can pull it and drag files
 ├── Projects/      your songs (.ptp)
 ├── Samples/       .wav .mp3 .flac .ogg .opus
 ├── Soundfonts/    .sf2 .sf3
-├── Instruments/   saved instrument presets (.pti)
 ├── Themes/        colour themes (.ptt)
+├── Presets/       saved instruments, scales, grooves, reverbs and delays
 └── Renders/       WAV mixes and stems you bounce
 ```
 

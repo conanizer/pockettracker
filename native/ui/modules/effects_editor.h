@@ -55,7 +55,7 @@ public:
     static constexpr int ROW_REV_TYPE    = static_cast<int>(EffectsRow::REV_TYPE);     // the reverb preset's name
     static constexpr int ROW_REV_PRE     = static_cast<int>(EffectsRow::REV_PRE);      // pre-delay
     static constexpr int ROW_REV_WIDE    = static_cast<int>(EffectsRow::REV_WIDE);     // 80 = untouched
-    static constexpr int ROW_REV_MOD     = static_cast<int>(EffectsRow::REV_MOD);      // 10 = a new project's
+    static constexpr int ROW_REV_MOD     = static_cast<int>(EffectsRow::REV_MOD);      // 40 = the algorithm's own wander
     static constexpr int ROW_REV_SIZE    = static_cast<int>(EffectsRow::REV_SIZE);     // the room; 60 = as shipped
     static constexpr int ROW_REV_ALGO    = static_cast<int>(EffectsRow::REV_ALGO);     // 0 = as it shipped
     static constexpr int ROW_REV_SAVE    = static_cast<int>(EffectsRow::REV_SAVE);     // a bare A, no value

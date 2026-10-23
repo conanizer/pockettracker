@@ -358,13 +358,13 @@ std::string SafFileSystem::projects_directory()    { return ensure_dir("Projects
 std::string SafFileSystem::samples_directory()     { return ensure_dir("Samples"); }
 std::string SafFileSystem::renders_directory()     { return ensure_dir("Renders"); }
 std::string SafFileSystem::resampled_directory()   { return ensure_dir("Samples/Resampled"); }
-std::string SafFileSystem::instruments_directory() { return ensure_dir("Instruments"); }
+std::string SafFileSystem::instruments_directory() { return ensure_dir("Presets/Instruments"); }
 std::string SafFileSystem::soundfonts_directory()  { return ensure_dir("Soundfonts"); }
 std::string SafFileSystem::themes_directory()      { return ensure_dir("Themes"); }
-std::string SafFileSystem::scales_directory()      { return ensure_dir("Scales"); }
-std::string SafFileSystem::grooves_directory()     { return ensure_dir("Grooves"); }
-std::string SafFileSystem::reverbs_directory()     { return ensure_dir("Reverbs"); }
-std::string SafFileSystem::delays_directory()      { return ensure_dir("Delays"); }
+std::string SafFileSystem::scales_directory()      { return ensure_dir("Presets/Scales"); }
+std::string SafFileSystem::grooves_directory()     { return ensure_dir("Presets/Grooves"); }
+std::string SafFileSystem::reverbs_directory()     { return ensure_dir("Presets/Reverbs"); }
+std::string SafFileSystem::delays_directory()      { return ensure_dir("Presets/Delays"); }
 
 bool SafFileSystem::activate(const std::string& path) {
     if (path != kAddRootPath) return false;

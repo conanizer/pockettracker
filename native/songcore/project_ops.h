@@ -7,6 +7,8 @@
 #include <set>
 
 #include "effects.h"
+#include "effects/modules/delay-presets.h"
+#include "effects/modules/reverb-presets.h"
 #include "model.h"
 #include "traversal.h"
 
@@ -128,10 +130,40 @@ inline void clean_unused_inst(Project& project) {
         if (usedGrooves.count(i) == 0) project.grooves[static_cast<size_t>(i)] = Groove(i);
 }
 
+// A built-in preset onto the section's cells, and its name onto the row. Out of range does nothing.
+inline void reverb_apply_bank(Project& p, int index) {
+    if (index < 0 || index >= kReverbPresetCount) return;
+    const ReverbPreset& r = kReverbPresets[index];
+    p.reverbAlgo     = r.algo;
+    p.reverbFeedback = r.decay;
+    p.reverbSize     = r.room;
+    p.reverbDamp     = r.damp;
+    p.reverbPreDelay = r.pre;
+    p.reverbWidth    = r.width;
+    p.reverbMod      = r.mod;
+    p.reverbPreset   = r.name;
+}
+
+inline void delay_apply_bank(Project& p, int index) {
+    if (index < 0 || index >= kDelayPresetCount) return;
+    const DelayPreset& d = kDelayPresets[index];
+    p.delayPong       = d.pong;
+    p.delaySync       = d.sync;
+    p.delayTime       = d.time;
+    p.delayFeedback   = d.feedback;
+    p.delayTone       = d.tone;
+    p.delayWobble     = d.wobble;
+    p.delayReverbSend = d.reverbSend;
+    p.delayPreset     = d.name;
+}
+
 // NEW: a fresh document. ⚠️ `version = 1`, not the struct's 0 — a 0 would load as a legacy file.
+// It opens on the first built-in reverb and delay; the struct defaults stay what older files play with.
 inline void new_project(Project& project) {
     project         = make_default_project();
     project.version = 1;
+    reverb_apply_bank(project, 0);
+    delay_apply_bank(project, 0);
 }
 
 }  // namespace songcore

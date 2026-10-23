@@ -29,13 +29,13 @@ class StdFileSystem : public FileSystem {
     std::string samples_directory() override     { return ensure_dir("Samples"); }
     std::string renders_directory() override     { return ensure_dir("Renders"); }
     std::string resampled_directory() override   { return ensure_dir("Samples/Resampled"); }
-    std::string instruments_directory() override { return ensure_dir("Instruments"); }
+    std::string instruments_directory() override { return ensure_dir("Presets/Instruments"); }
     std::string soundfonts_directory() override  { return ensure_dir("Soundfonts"); }
     std::string themes_directory() override      { return ensure_dir("Themes"); }
-    std::string scales_directory() override      { return ensure_dir("Scales"); }
-    std::string grooves_directory() override    { return ensure_dir("Grooves"); }
-    std::string reverbs_directory() override     { return ensure_dir("Reverbs"); }
-    std::string delays_directory() override      { return ensure_dir("Delays"); }
+    std::string scales_directory() override      { return ensure_dir("Presets/Scales"); }
+    std::string grooves_directory() override    { return ensure_dir("Presets/Grooves"); }
+    std::string reverbs_directory() override     { return ensure_dir("Presets/Reverbs"); }
+    std::string delays_directory() override      { return ensure_dir("Presets/Delays"); }
 
     // ── The app's own files, beside the folders — never inside one the browser lists ─────────────
     std::string template_project_path() override { return privateRoot_ + "/template.ptp"; }

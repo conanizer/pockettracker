@@ -45,8 +45,8 @@ export SDL_AUDIODRIVER=mmiyoo
 # ── Where songs live ─────────────────────────────────────────────────────────────────────────────
 # ⚠️⚠️ NOT this directory, and not because it could not be: this is where a user's work lives, and
 # the SD card's top level is the one place they can reach it. Plug the card into a PC and Projects/,
-# Samples/, Soundfonts/, Instruments/, Renders/ and Themes/ are right there, rather than four levels
-# down inside a ports folder. The app creates all six at boot, so a card can be pulled, filled and
+# Samples/, Soundfonts/, Presets/, Renders/ and Themes/ are right there, rather than four levels
+# down inside a ports folder. The app creates them all at boot, so a card can be pulled, filled and
 # put back.
 #
 # ⚠️ IT IS ALSO AN UPGRADE PATH. This path is what the App-shelf package used, so a tester who
