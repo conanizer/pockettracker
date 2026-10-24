@@ -202,7 +202,9 @@ void EffectModule::draw(Canvas& c, int x, int y, const EffectState& s) const {
 
     const int firstLineY = y + TEXT_PADDING + ROW_HEIGHT + 14;   // the gap SETTINGS leaves too
     const int viewportH  = HEIGHT - (firstLineY - y);
-    const int contentH   = (lay.lineCount - 1) * ROW_HEIGHT;
+    // A line's cursor cell starts TEXT_PADDING above its text, so the last one ends that much short
+    // of a whole row.
+    const int contentH   = (lay.lineCount - 1) * ROW_HEIGHT - TEXT_PADDING;
     const int cursorTop  = (lay.rowLine[static_cast<size_t>(clamp(s.cursorRow, 0, MAX_CURSOR_ROW))] - 1)
                            * ROW_HEIGHT;
 

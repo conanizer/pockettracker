@@ -73,7 +73,7 @@ inline constexpr int EFFECTS_LINE_COUNT = 11;
 
 // The drawn order. Each send: its preset line, then character on the left, size and colour on the
 // right — except the reverb's INP EQ, on the left to line up with the delay's.
-// The panel holds ten lines and this is eleven, so the screen scrolls by one.
+// With their headers these fill the panel exactly; one line more and the screen scrolls.
 inline constexpr EffectsDisplayLine EFFECTS_DISPLAY_LINES[EFFECTS_LINE_COUNT] = {
     {EffectsRow::MASTER_TYPE},
 
