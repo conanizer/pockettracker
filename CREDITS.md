@@ -13,6 +13,8 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) | MIT | SF2 / SoundFont2 synthesizer (with per-channel rendering fork) |
 | [KissFFT](https://github.com/mborgerding/kissfft) | BSD-3-Clause | FFT for spectrum analyzer and transient detection |
 | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (pareq stub) | MIT | Parametric EQ biquad |
+| [Dragonfly Reverb](https://github.com/michaelwillis/dragonfly-reverb) | GPL-3.0 | The HALL, ROOM, PLATE and FOIL reverbs |
+| [Freeverb3](https://www.nongnu.org/freeverb3/) | GPL-2.0-or-later | The reverb building blocks under Dragonfly Reverb |
 | [skoomaDust](https://github.com/skoomabwoy/skoomaDust) | GPL-3.0 | Lo-fi effect chain; includes APComp FET compressor by Alain Paul (BSD-3-Clause) |
 | [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3 / dr_flac) | Public domain (MIT-0) | Native MP3 / FLAC decoding |
 | [stb_vorbis](https://github.com/nothings/stb) | Public domain (MIT) | Native OGG Vorbis decoding |

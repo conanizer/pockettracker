@@ -9,6 +9,7 @@ This file is the single source of truth for the notices and is shipped verbatim 
 - the **PortMaster zip** → `pockettracker/licenses/THIRD-PARTY-NOTICES.md` (`shell/build-portmaster.sh`)
 - the **Windows zip** → `licenses/THIRD-PARTY-NOTICES.md` (`shell/build-windows.ps1`)
 - the **Linux tarball** → `licenses/THIRD-PARTY-NOTICES.md` (`shell/build-linux.sh`)
+- the **Miyoo Mini zip** → `Roms/PORTS/Games/PocketTracker/licenses/THIRD-PARTY-NOTICES.md` (`shell/build-miyoo.sh`)
 - the **APK** → `assets/licenses/THIRD-PARTY-NOTICES.md` (`app/build.gradle.kts`, `stageLicenseAssets`)
 - the **repo** → `licenses/THIRD-PARTY-NOTICES.md`
 
@@ -213,6 +214,22 @@ Used for: the lo-fi DUST effect chain (`native/effects/modules/dust-chain.{h,cpp
 It embeds the **APComp** FET compressor by **Alain Paul / AP Mastering**, under **BSD-3-Clause**;
 the copyright is preserved in `dust-chain.cpp`. BSD-3-Clause text as in the KissFFT section above,
 substituting that copyright holder.
+
+---
+
+## Dragonfly Reverb — GPL-3.0-or-later, and Freeverb3 — GPL-2.0-or-later
+
+Used for: the HALL, ROOM, PLATE and FOIL reverb algorithms (`native/effects/primitives/dragonfly/`).
+The algorithms are adapted from the **Dragonfly Reverb** plugins, copyright © 2018-2019 Michael Willis
+and Rob van den Berg (https://github.com/michaelwillis/dragonfly-reverb), under **GPL-3.0-or-later**;
+the governing text is `native/effects/primitives/dragonfly/LICENSE-dragonfly`, the same text as
+PocketTracker's own `LICENSE`.
+
+They run on a subset of **Freeverb3**, copyright © 2006-2018 Teru Kamogashira, based on Freeverb,
+copyright © 2000 Jezar at Dreampoint, under **GPL-2.0-or-later**, used here under GPL-3.0. The files
+are in `native/effects/primitives/dragonfly/freeverb/`, each with its copyright notice, and
+`freeverb/AUTHORS` lists the authors of the algorithms it draws on. PocketTracker modifies some of
+them; each modified file says so in its header.
 
 ---
 
