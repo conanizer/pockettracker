@@ -64,9 +64,8 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
 
     switch (s_.currentScreen) {
         case ScreenType::PROJECT:
-            // The NAME row's characters are in-place cells, so A opens the keyboard on the release.
-            if (s_.projectCursorRow == static_cast<int>(ProjectRow::NAME) &&
-                s_.projectCursorColumn >= 1) {
+            // A opens the keyboard on the release, like every cell that opens something.
+            if (s_.projectCursorRow == static_cast<int>(ProjectRow::NAME)) {
                 if (!peek) open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name,
                                        "PROJECT NAME:", "", PROJECT_NAME_MAX_CHARS);
                 return true;

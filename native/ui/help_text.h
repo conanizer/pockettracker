@@ -1051,13 +1051,11 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A+←/→ changes by a semitone",
       "A+↑/↓ changes by an octave"}},
     /* PROJECT_NAME */
-    {"NAME: what the song is called", "A opens the keyboard. Each", "letter is its own cell.",
+    {"NAME: what the song is called", "A opens the keyboard to type", "a new one.",
      {"SAVE uses it as the file name,",
       "and so do the WAV files you",
       "export."},
-     {"A opens the keyboard",
-      "A+←/→ changes this letter",
-      "A+B blanks this letter"}},
+     {"A opens the keyboard"}},
     /* PROJECT_SAVE */
     {"SAVE: write the song to disk", "It uses the name on the NAME", "row above.",
      {"Saves into the Projects folder,",
@@ -2609,7 +2607,7 @@ inline HelpTopic project_cell_topic(int row, int column) {
         case ProjectRow::TEMPO:
             return column == 2 ? HelpTopic::PROJECT_TAP : HelpTopic::PROJECT_TEMPO;
         case ProjectRow::TRANSPOSE: return HelpTopic::PROJECT_TRANSPOSE;
-        case ProjectRow::NAME:      return HelpTopic::PROJECT_NAME;   // every character column
+        case ProjectRow::NAME:      return HelpTopic::PROJECT_NAME;
         case ProjectRow::PROJECT:
             return column == 1   ? HelpTopic::PROJECT_SAVE
                    : column == 2 ? HelpTopic::PROJECT_LOAD

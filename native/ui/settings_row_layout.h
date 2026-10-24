@@ -207,13 +207,12 @@ inline int project_clamp_row(int row, const PlatformCaps& caps) {
     return 0;
 }
 
-// A project name's length: the NAME row's columns, the keyboard's limit. The row shows fewer and scrolls.
+// A project name's length: the keyboard's limit. The NAME row shows fewer.
 inline constexpr int PROJECT_NAME_MAX_CHARS = 20;
 
 // The highest cursor column on a PROJECT row (column 0 is the label).
 inline int project_row_max_column(ProjectRow row) {
     switch (row) {
-        case ProjectRow::NAME:    return PROJECT_NAME_MAX_CHARS;  // one column per character
         case ProjectRow::PROJECT: return 3;   // SAVE | LOAD | NEW
         case ProjectRow::EXPORT:  return 2;   // MIX | STEMS
         case ProjectRow::COMPACT: return 2;   // SEQ | INST

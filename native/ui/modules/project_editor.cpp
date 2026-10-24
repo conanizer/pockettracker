@@ -4,7 +4,6 @@
 #include <initializer_list>
 
 #include "ui/helpers.h"
-#include "ui/modules/qwerty_keyboard.h"
 
 namespace pt::ui {
 
@@ -20,19 +19,6 @@ std::string pad3(int v) {
     while (s.size() < 3) s.insert(s.begin(), '0');
     return s;
 }
-
-/** Drop trailing whitespace, not merely trailing spaces. */
-std::string trim_end(std::string s) {
-    while (!s.empty()) {
-        const char ch = s.back();
-        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v')
-            s.pop_back();
-        else
-            break;
-    }
-    return s;
-}
-
 }  // namespace
 
 // ─── Draw ────────────────────────────────────────────────────────────────────────────────────────
@@ -105,45 +91,10 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     param_row(ProjectRow::TRANSPOSE, "TRANSPOSE", hex2(p.transpose));
 
-    // ── NAME — 20 characters, one per cursor column, scrolling in a 17-column window ─────────────
-    {
-        const ProjectRow row = ProjectRow::NAME;
-        label(row, "NAME");
-
-        const std::string name =
-            p.name.substr(0, std::min<size_t>(p.name.size(), PROJECT_NAME_MAX_CHARS));
-
-        // ⚠️ The window spans the name or the cursor, whichever reaches further — a "…" beside blanks
-        // would claim hidden text. The helper adds a column for an end-of-text cursor: hand it one less.
-        const int cursorChar = on_row(row) ? s.cursorColumn - 1 : 0;
-        const int content    = std::max(static_cast<int>(name.size()), cursorChar + 1);
-        const QwertyTextWindow win =
-            qwerty_text_window(content - 1, cursorChar, ProjectModule::NAME_VISIBLE_CHARS);
-
-        const std::string ELLIPSIS = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
-        const Argb markerColor = darken(t.textValue, 0.5f);
-        const int  textX       = valueX + (win.clipLeft ? CHAR_W : 0);
-
-        if (win.clipLeft)
-            c.draw_text(ELLIPSIS, valueX, rowY(row) + TEXT_PADDING, markerColor, CHAR_SPACING,
-                        FONT_SCALE);
-
-        for (int k = 0; k < win.cols; ++k) {
-            const int  i          = win.first + k;
-            const int  charX      = textX + k * CHAR_W;
-            const bool onThisChar = on_cell(row, i + 1);
-
-            // A space past the end gives the cursor a cell there, which is how a name grows.
-            const std::string ch = (i < static_cast<int>(name.size()))
-                                       ? std::string(1, name[static_cast<size_t>(i)])
-                                       : std::string(" ");
-            draw_cursor_cell(c, ch, charX, rowY(row) + TEXT_PADDING, onThisChar, t.textValue, t);
-        }
-
-        if (win.clipRight)
-            c.draw_text(ELLIPSIS, textX + win.cols * CHAR_W, rowY(row) + TEXT_PADDING, markerColor,
-                        CHAR_SPACING, FONT_SCALE);
-    }
+    // ── NAME — one cell; A opens the keyboard ────────────────────────────────────────────────────
+    param_row(ProjectRow::NAME, "NAME",
+              p.name.empty() ? "______"
+                             : Canvas::clip_text(p.name, ProjectModule::NAME_VISIBLE_CHARS));
 
     // SAVE, LOAD, NEW are cursor columns 1, 2, 3.
     button_row(ProjectRow::PROJECT, "PROJECT", {"SAVE", "LOAD", "NEW"});
@@ -215,17 +166,8 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
             return c;
         }
 
-        case ProjectRow::NAME: {
-            const int charIndex = s.cursorColumn - 1;
-            if (charIndex >= PROJECT_NAME_MAX_CHARS) return cc::none();
-            // Past the end is a space: a character always has a value.
-            const char ch = (charIndex < static_cast<int>(p.name.size()))
-                                ? p.name[static_cast<size_t>(charIndex)]
-                                : ' ';
-            return cc::character(ch);
-        }
-
         // Everything below is a button: plain A is the dispatcher's.
+        case ProjectRow::NAME:
         case ProjectRow::PROJECT:
         case ProjectRow::EXPORT:
         case ProjectRow::COMPACT:
@@ -257,29 +199,6 @@ ProjectInputResult ProjectModule::handle_input(songcore::Project& project, int c
             if (action.type == ActionType::SET_VALUE)
                 project.transpose = clamp(action.value, 0, 255);
             break;
-
-        case ProjectRow::NAME: {
-            const int charIndex = cursor_column - 1;
-            if (charIndex < 0 || charIndex >= PROJECT_NAME_MAX_CHARS) return ProjectInputResult{false};
-
-            if (action.type == ActionType::SET_VALUE) {
-                // Pad to the cursor column, write, trim trailing whitespace.
-                std::string name = project.name;
-                if (name.size() < PROJECT_NAME_MAX_CHARS) name.resize(PROJECT_NAME_MAX_CHARS, ' ');
-                name[static_cast<size_t>(charIndex)] = static_cast<char>(action.value);
-                project.name = trim_end(name);
-
-            } else if (action.type == ActionType::DELETE) {
-                // ⚠️ Deleting past the end does nothing.
-                if (charIndex < static_cast<int>(project.name.size())) {
-                    std::string name = project.name;
-                    if (name.size() < PROJECT_NAME_MAX_CHARS) name.resize(PROJECT_NAME_MAX_CHARS, ' ');
-                    name[static_cast<size_t>(charIndex)] = ' ';
-                    project.name = trim_end(name);
-                }
-            }
-            break;
-        }
 
         // The button rows edit nothing.
         default:

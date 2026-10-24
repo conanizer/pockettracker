@@ -1509,7 +1509,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 
 | Parameter | Description |
 |---|---|
-| NAME | Project name. Tap A to edit it on the keyboard overlay; hold A + LEFT/RIGHT cycles the character under the cursor in place. |
+| NAME | Project name. A opens the keyboard overlay to type it. |
 | TEMPO | BPM. |
 | TEMPO — TAP | Press RIGHT from the tempo value to reach **TAP**, then press A in time with the tempo you want and the number follows your taps. The first tap starts the count and each one after it refines the reading, so tap at least twice. Leave it alone for three seconds and the next press starts a fresh count. |
 | TRANSPOSE | Global semitone offset applied to all tracks. |
