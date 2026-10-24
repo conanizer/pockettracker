@@ -24,7 +24,7 @@ Roms/PORTS/Shortcuts/PocketTracker.port
 Roms/PORTS/Games/PocketTracker/launch.sh
 ```
 
-⚠️ If it lands one folder deeper — `Roms/PocketTracker-0.9.8-miyoo-mini/PORTS/…` — PocketTracker does
+⚠️ If it lands one folder deeper — `Roms/PocketTracker-0.9.9-miyoo-mini/PORTS/…` — PocketTracker does
 not appear in the list at all, and nothing tells you why.
 
 ### A. With the card in a PC
@@ -36,7 +36,7 @@ not appear in the list at all, and nothing tells you why.
    nothing after it.
    - ⚠️ On Windows, *Extract All* fills the destination box in for you and adds a new folder named
      after the zip. Delete that last part so only the drive letter is left (`E:\`, not
-     `E:\PocketTracker-0.9.8-miyoo-mini\`). If that goes wrong, extract anywhere you like and drag the
+     `E:\PocketTracker-0.9.9-miyoo-mini\`). If that goes wrong, extract anywhere you like and drag the
      `Roms` folder onto the card by hand — it merges with the `Roms` folder already there and adds
      PocketTracker to the ports you have.
 4. **Check the path.** Open the card and confirm `Roms\PORTS\Shortcuts\PocketTracker.port` is really

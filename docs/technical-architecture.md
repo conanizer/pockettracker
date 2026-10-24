@@ -27,7 +27,7 @@ How PocketTracker is built. This document describes the system as it currently w
 
 ## Overview
 
-PocketTracker is **one C++17 program with four thin platform shells**. The audio engine, the
+PocketTracker is **one C++17 program with five thin platform shells**. The audio engine, the
 sequencer, the document model, the file formats and the entire user interface are portable C++ with
 no platform dependency at all. A shell provides a window, an audio device, a clock, buttons and a
 filesystem root — and nothing else.
@@ -42,11 +42,11 @@ filesystem root — and nothing else.
                     ├─────────────────────────────────────────────┤
                     │  native/  (the engine)                      │  voices, modulation, DSP
                     └─────────────────────────────────────────────┘
-                       ▲            ▲             ▲            ▲
-            ┌──────────┴──┐  ┌──────┴──────┐  ┌───┴──────┐  ┌──┴──────────┐
-            │ shell/      │  │ shell/      │  │ shell/   │  │ shell/      │
-            │ Android SDL │  │ PortMaster  │  │ Linux    │  │ Windows     │
-            └─────────────┘  └─────────────┘  └──────────┘  └─────────────┘
+                       ▲            ▲            ▲          ▲           ▲
+            ┌──────────┴──┐  ┌──────┴─────┐  ┌───┴────┐  ┌──┴─────┐  ┌──┴──────┐
+            │ shell/      │  │ shell/     │  │ shell/ │  │ shell/ │  │ shell/  │
+            │ Android SDL │  │ PortMaster │  │ Miyoo  │  │ Linux  │  │ Windows │
+            └─────────────┘  └────────────┘  └────────┘  └────────┘  └─────────┘
 ```
 
 \* one file in `pt-ui` includes the engine: `ui/engine_feed.h`, the 60 Hz read-back of scope samples
@@ -801,15 +801,15 @@ actions that render on the spot.
 
 ## Platform Shells
 
-| | Android | PortMaster | Linux desktop | Windows |
-|---|---|---|---|---|
-| Entry | `android-main.cpp` | `main.cpp` | `main.cpp` | `main.cpp` |
-| Audio | Oboe | SDL2 | SDL2 | SDL2 |
-| SDL2 | vendored, built in | **the device's own** | system | vendored, static |
-| MIDI | Android MIDI (JNI) | ALSA (dlopen) | ALSA (dlopen) | winmm |
-| App root | a folder the user grants | the port's `data/` | `$XDG_DATA_HOME/PocketTracker` | `Documents\PocketTracker` |
-| Storage | Storage Access Framework | `std::filesystem` | `std::filesystem` | `std::filesystem` |
-| Exit | — (the launcher owns it) | PROJECT → EXIT | PROJECT → EXIT | PROJECT → EXIT |
+| | Android | PortMaster | Miyoo Mini | Linux desktop | Windows |
+|---|---|---|---|---|---|
+| Entry | `android-main.cpp` | `main.cpp` | `main.cpp` | `main.cpp` | `main.cpp` |
+| Audio | Oboe | SDL2 | SDL2 | SDL2 | SDL2 |
+| SDL2 | vendored, built in | **the device's own** | **ours, the `mmiyoo` fork** | system | vendored, static |
+| MIDI | Android MIDI (JNI) | ALSA (dlopen) | ALSA (dlopen) | ALSA (dlopen) | winmm |
+| App root | a folder the user grants | the port's `data/` | `/mnt/SDCARD/PocketTracker` | `$XDG_DATA_HOME/PocketTracker` | `Documents\PocketTracker` |
+| Storage | Storage Access Framework | `std::filesystem` | `std::filesystem` | `std::filesystem` | `std::filesystem` |
+| Exit | — (the launcher owns it) | PROJECT → EXIT | PROJECT → EXIT | PROJECT → EXIT | PROJECT → EXIT |
 
 **PortMaster links the device's libSDL2, deliberately.** The CFW patched that copy for the hardware's
 display (KMSDRM) and audio (ALSA); shipping our own would shadow the one that actually knows the
@@ -820,6 +820,21 @@ a stranger's handheld.
 **The PortMaster launcher must never run gptokeyb.** The app reads the gamepad itself through SDL's
 GameController API *and* reads the keyboard (the same source builds the desktop binary), so gptokeyb
 delivers every press twice by two paths with conflicting meanings.
+
+**The Miyoo Mini inverts that: it ships its own SDL2.** The device is 32-bit ARM with 128 MB of RAM
+and OnionOS carries no system libSDL2 to link, so the package brings the `mmiyoo` fork — the one that
+talks to the SigmaStar MI GFX and MI AO hardware directly. That fork also `dlopen`s a NEON helper by
+soname (`libneonarmmiyoo.so`) whose upstream ships no source, so the package carries our own version
+of it. ⚠️ **NEON is reached through inline assembly there, which never passes through `-mfpu`** — an
+instruction the Mini's Cortex-A7 cannot execute assembles and links cleanly and only faults on the
+device, so each one is guarded on its ACLE feature macro rather than on a word-size macro.
+
+**It installs as an Onion *port*, not an app, and the install path is the whole reason.** Onion's
+`runtime.sh` decides whether to record play time by matching the launched path against `Roms/`; a
+program under `App/` matches nothing and is recorded nowhere. Nothing about the program itself takes
+part in that decision. ⚠️ **The sound server is the other device-specific seam** — a resident service
+owns the speaker, so the launcher stops it *and waits for the release* before starting the app;
+Onion's own `KillAudioserver` flag stays 0 precisely so that ticking it cannot delete that wait.
 
 **Renderer creation falls back.** `SDL_RENDERER_ACCELERATED` means *require*, not *prefer*, so
 `SDL_CreateRenderer` fails outright on hardware with no accelerated driver. The shell tries
@@ -898,11 +913,13 @@ cmake --build shell/build
 | Windows | `shell/build-windows.ps1` | `build/windows/PocketTracker-<v>-windows-x64.zip` |
 | Linux | `shell/build-linux.sh` | `build/linux/PocketTracker-<v>-linux-x64.tar.gz` |
 | PortMaster | `shell/build-portmaster.sh` (in `Dockerfile.portmaster`) | `build/portmaster/pockettracker.zip` |
+| Miyoo Mini | `shell/build-miyoo.sh` (no container — the device toolchain carries its own sysroot) | `build/miyoo/pockettracker-miyoo.zip` |
 
 Each one verifies the *artifact* — that it is newer than every source file, links what it claims to,
 carries the right version — and then reads the finished archive back out. `.github/workflows/release.yml`
-runs all three on a `v*` tag and opens a draft release. The signed APK is built locally, because CI
-has no access to the signing key and an APK signed with a different key cannot install as an update.
+runs the first three on a `v*` tag and opens a draft release. The Miyoo package and the signed APK are
+built locally and attached to that draft: CI has no access to the signing key, and an APK signed with a
+different key cannot install as an update.
 
 ---
 

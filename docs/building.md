@@ -53,6 +53,26 @@ docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmas
 
 ---
 
+## Miyoo Mini / Mini+ (OnionOS)
+
+Cross-compiled with shauninman's device toolchain, which is downloaded and cached on first run. No
+container: unlike the PortMaster build, the glibc floor arrives with the compiler rather than with
+the image, so any Linux box will do.
+
+```bash
+sudo apt install cmake ninja-build zip qemu-user-static
+bash shell/build-miyoo.sh
+```
+
+The output is `build/miyoo/pockettracker-miyoo.zip`, which extracts at the SD card root. The script
+downloads a pinned SDL2 fork alongside the toolchain — the `mmiyoo` build, which this device needs
+because it has no system SDL2 — and checks the finished zip by reading every member back out of it.
+
+`shell/miyoo/demo/` is an optional starter song staged into the package; it is gitignored, and a
+clone builds a demo-less zip and says so.
+
+---
+
 ## Tests
 
 The engine, sequencer, input layer and renderer are covered by a suite of headless tools that compare

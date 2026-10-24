@@ -132,7 +132,7 @@ Resampled instruments and CHOP exports are saved to:
 <home>/Samples/Chops/{name}/
 ```
 
-On Linux, Windows and PortMaster handhelds there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same ten sub-folders live in it.
+On Linux, Windows, PortMaster handhelds and the Miyoo Mini there is no folder to choose: the app owns a `PocketTracker` folder of its own and the same ten sub-folders live in it.
 
 ---
 

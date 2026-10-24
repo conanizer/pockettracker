@@ -54,6 +54,7 @@ There are a few options to customize the app interface. The top bar has six visu
 |---|---|---|
 | **Android** | `.apk` | Phones and Android gaming handhelds. Touch layout or physical buttons. |
 | **Linux handheld** | PortMaster `.zip` | aarch64 CFW handhelds (ArkOS, muOS, JELOS, Knulli, ROCKNIX…). |
+| **Miyoo Mini / Mini+** | OnionOS `.zip` | armhf, 128 MB RAM. Installs into Onion's Ports list. |
 | **Linux desktop** | `.tar.gz` | x86-64. |
 | **Windows** | `.zip` | x86-64, no installer. |
 
@@ -103,6 +104,24 @@ Let PortMaster unpack it rather than unzipping it yourself — unzipping on a PC
 Your projects, samples and settings live in `ports/pockettracker/data/`, created on first launch — copy samples in there over USB or the network.
 
 The port uses your device's own SDL2, so it follows whatever your firmware already does about the screen and audio.
+
+### Miyoo Mini / Mini+ (OnionOS)
+
+A separate package, because this device is 32-bit ARM with 128 MB of RAM and no system SDL2 — the port above will not run on it. PocketTracker brings its own SDL2 and installs as a **port**, so Onion lists it beside your games and counts the time you spend in it.
+
+⚠️ **Onion's Ports Collection has to be installed first** — it is what provides the Ports list. *Apps → Package Manager → Emu → Ports Collection*. Most setups already have it.
+
+1. Download `PocketTracker-<version>-miyoo-mini.zip`.
+2. Switch the device off, take the SD card out and put it in a PC.
+3. Extract the zip **at the top level of the card** — the drive letter on its own, nothing after it. On Windows, *Extract All* adds a folder named after the zip; delete that part of the destination box.
+4. Check that `Roms\PORTS\Shortcuts\PocketTracker.port` is really on the card, then eject it and switch the device on.
+5. PocketTracker is in the **Ports** list.
+
+A Mini+ on Wi-Fi can skip the card: turn on Samba under *Tweaks → Network*, unzip on the PC and copy the `Roms` folder across, then restart the device. Full instructions, controls and troubleshooting are in the `README.md` inside the package.
+
+Your projects, samples and renders live in `PocketTracker/` at the top level of the card, created on first launch — the same layout the Android app uses, so a folder copied off a phone works as is.
+
+⚠️ **128 MB is the whole machine, firmware included.** A loaded sample costs about twice its file size, so long stereo samples run this device out of memory in a way a phone would not. Short samples and a SoundFont are what it is comfortable with.
 
 ### Linux desktop
 
@@ -192,5 +211,5 @@ MIT, LGPL-2.1, zlib, and public-domain dedications). Their copyright notices and
 reproduced in [`docs/licenses/THIRD-PARTY-NOTICES.md`](docs/licenses/THIRD-PARTY-NOTICES.md).
 
 That file, the GPL text and [`CREDITS.md`](CREDITS.md) ship **inside every release artifact**, not just
-in this repository — `licenses/` in the Windows zip, the Linux tarball and the PortMaster zip, and
+in this repository — `licenses/` in the Windows zip, the Linux tarball, the PortMaster zip and the Miyoo Mini zip, and
 `assets/licenses/` inside the Android APK. If you received only a binary, the notices came with it.
