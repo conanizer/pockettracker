@@ -48,7 +48,6 @@ struct Theme {
     Argb vizWave       = 0xFF00FF00;  // waveform line / bar fill
 
     // ── The EQ editor's panel: CLASSIC's values of `derive_borrowed_colors`, which is the authority ──
-    // `eqBg` has no editor row: it is always a copy of `background` or `vizBackground`.
     Argb eqBg     = 0xFF0A0A0A;  // = vizBackground
     Argb eqFill   = 0xFF222222;  // = darken(textParam, 0.27f)
     Argb eqBorder = 0xFF808080;  // = textParam — the spectrum outline AND the 0 dB line
@@ -99,8 +98,8 @@ inline void derive_borrowed_colors(Theme& t) {
 }
 
 // ─── The theme editor's rows ─────────────────────────────────────────────────────────────────────
-// Five fields have none: `meterBorder`, `rowPlayback` (a seed), `textCursor` and `textSelection`
-// (unused), `eqBg` (a copy). ⚠️ A row's position is its number in the help text and the tests: append.
+// Four fields have none: `meterBorder`, `rowPlayback` (a seed), `textCursor` and `textSelection`
+// (unused). ⚠️ A row's position is its number in the help text and the tests: append.
 
 struct ThemeColorRow {
     const char* label;
@@ -128,6 +127,7 @@ inline const std::vector<ThemeColorRow>& theme_color_rows() {
         {"EQ FILL",    &Theme::eqFill},
         {"EQ BORDER",  &Theme::eqBorder},
         {"EQ TXT",     &Theme::eqTxt},
+        {"EQ BG",      &Theme::eqBg},
     };
     return rows;
 }
@@ -203,9 +203,66 @@ inline Theme theme_mono() {
     return t;
 }
 
+// AMBER on a black ground, for OLED screens.
+inline Theme theme_amber_oled() {
+    Theme t = theme_amber();
+    t.name          = "AMBER OLED";
+    t.background    = 0xFF000000;
+    t.textValue     = 0xFFCC8800;
+    t.vizBackground = 0xFF000000;
+    derive_borrowed_colors(t);
+    return t;
+}
+
+// BLUE on a black ground, for OLED screens.
+inline Theme theme_blue_oled() {
+    Theme t = theme_blue();
+    t.name            = "BLUE OLED";
+    t.background      = 0xFF000000;
+    t.rowEvery4th     = 0xFF0A0A0A;
+    t.vizBackground   = 0xFF000000;
+    t.meterBackground = 0xFF0A0A0A;
+    derive_borrowed_colors(t);
+    // After the derive, which would overwrite these two.
+    t.eqBorder      = 0xFF4488AA;
+    t.textPlayhead  = 0xFF224466;
+    return t;
+}
+
+inline Theme theme_bubblegum() {
+    Theme t;
+    t.name          = "BUBBLEGUM";
+    t.background    = 0xFF0D100F;
+    t.rowEvery4th   = 0xFF081F1C;
+    t.rowCursor     = 0xFF00BBAA;
+    t.rowPlayback   = 0xFF002266;
+    t.rowSelection  = 0xFFFF8DAC;
+    t.textTitle     = 0xFF39B0A1;
+    t.textParam     = 0xFF9C7F85;
+    t.textValue     = 0xFFBC949D;
+    t.textEmpty     = 0xFF5E7A75;
+    t.vizBackground = 0xFF0D100F;
+    t.vizCenterLine = 0xFF213330;
+    t.vizWave       = 0xFFBC6A80;
+    t.meterBackground = 0xFF11201E;
+    t.meterLow      = 0xFF00C3B1;
+    t.meterMid      = 0xFFAF9000;
+    t.meterHigh     = 0xFFC84D74;
+    t.meterBorder   = 0xFF333535;
+    derive_borrowed_colors(t);
+    // After the derive, which would overwrite these.
+    t.eqFill        = 0xFF233935;
+    t.eqBorder      = 0xFFC6788C;
+    t.eqTxt         = 0xFF557772;
+    t.textPlayhead  = 0xFF489086;
+    return t;
+}
+
 // The built-ins, in cycle order. `visualizerType` is the user's, not the theme's: a swap keeps it.
+// ⚠️ A name is what `settings.json` stores, so a renamed built-in reads back as CLASSIC.
 inline std::vector<Theme> theme_builtins() {
-    return {theme_classic(), theme_amber(), theme_blue(), theme_mono()};
+    return {theme_classic(), theme_amber(), theme_blue(), theme_mono(),
+            theme_bubblegum(), theme_blue_oled(), theme_amber_oled()};
 }
 
 // A first launch's look: BLUE with the OCTA bars. (`Theme{}` is CLASSIC.)

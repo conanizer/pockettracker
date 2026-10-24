@@ -171,7 +171,6 @@ inline const char* theme_field_label(Argb Theme::* field) {
     }
     if (field == &Theme::meterBorder) return "MTR BORDER";
     if (field == &Theme::rowPlayback) return "ROW PLAY";
-    if (field == &Theme::eqBg)        return "EQ BG";
     if (field == &Theme::textCursor)  return "TXT CURSOR";
     if (field == &Theme::textSelection) return "TXT SELECT";
     return "?";

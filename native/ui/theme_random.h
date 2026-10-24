@@ -146,7 +146,7 @@ inline PaletteContext theme_context(const Theme& base, const ThemeLocks& locks) 
         if (!locks.locked(static_cast<int>(i))) continue;
         Argb Theme::* const f = rows[i].field;
         if (f == &Theme::background || f == &Theme::rowEvery4th ||
-            f == &Theme::vizBackground || f == &Theme::meterBackground ||
+            f == &Theme::vizBackground || f == &Theme::meterBackground || f == &Theme::eqBg ||
             f == &Theme::meterLow || f == &Theme::meterMid || f == &Theme::meterHigh) {
             continue;
         }
@@ -182,9 +182,9 @@ inline ThemeRollResult theme_roll(const Theme& base, const ThemeLocks& locks, Th
         return false;
     };
 
-    // Beyond the roll's reach: locked, or copied from locked rows (`eqBg` copies one of two grounds).
+    // Beyond the roll's reach: locked, or copied from locked rows (a free `eqBg` copies one of two grounds).
     const auto held = [&](Argb Theme::* f) {
-        if (f == &Theme::eqBg) {
+        if (f == &Theme::eqBg && !locked_field(f)) {
             return locked_field(&Theme::background) && locked_field(&Theme::vizBackground);
         }
         return locked_field(f);
@@ -335,13 +335,19 @@ inline ThemeRollResult theme_roll(const Theme& base, const ThemeLocks& locks, Th
         }
 
         // ── The EQ panel ─────────────────────────────────────────────────────────────────────────
-        // ⚠️ The derive overwrites every borrowed key, so what the roll owns (EQ BG, TXT PLAY) is put back
-        // after it.
-        const Argb eqGround = rng.chance(0.5) ? t.background : t.vizBackground;
+        // ⚠️ The derive overwrites every borrowed key, so what the roll owns (EQ BG, TXT PLAY) and every
+        // locked row are put back after it.
+        const bool eqOnBackground = rng.chance(0.5);
+        const Argb eqGround = locked_field(&Theme::eqBg) ? base.eqBg
+                              : eqOnBackground          ? t.background
+                                                        : t.vizBackground;
         const Argb rolledPlayhead = t.textPlayhead;
         derive_borrowed_colors(t);
         t.eqBg         = eqGround;
         t.textPlayhead = rolledPlayhead;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (locks.locked(static_cast<int>(i))) t.*(rows[i].field) = base.*(rows[i].field);
+        }
         // EQ FILL is also the gridlines; EQ BORDER is drawn over it and the panel.
         if (!locked_field(&Theme::eqFill)) {
             t.eqFill = to_argb(OkLch{away(eqGround, FLOOR_DECOR, rng.range(0.0, 0.04)),

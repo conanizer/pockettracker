@@ -274,6 +274,7 @@ enum class HelpTopic {
     THEME_EQ_FILL,
     THEME_EQ_BORDER,
     THEME_EQ_TXT,
+    THEME_EQ_BG,
 
     // ── The sample editor — the one full-screen module with help (its waveform panel is the strip) ──
     SE_ZOOM,
@@ -1908,6 +1909,13 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"←/→ picks R, G or B",
       "A+←/→ changes by 1",
       "A+↑/↓ changes by 16"}},
+    /* THEME_EQ_BG */
+    {"EQ BG: behind the EQ panel", "The background of the panel", "in the EQ editor.",
+     {"RANDOMIZE makes it the same as",
+      "BACKGROUND or VIZ BG."},
+     {"←/→ picks R, G or B",
+      "A+←/→ changes by 1",
+      "A+↑/↓ changes by 16"}},
 
     // ── The sample editor ────────────────────────────────────────────────────────────────────────
     /* SE_ZOOM */
@@ -2811,7 +2819,7 @@ inline constexpr HelpTopic THEME_COLOR_TOPICS[] = {
     HelpTopic::THEME_VIZ_BG,     HelpTopic::THEME_VIZ_LINE,    HelpTopic::THEME_VIZ_WAVE,
     HelpTopic::THEME_MTR_BG,     HelpTopic::THEME_MTR_LOW,     HelpTopic::THEME_MTR_MID,
     HelpTopic::THEME_MTR_HIGH,   HelpTopic::THEME_EQ_FILL,     HelpTopic::THEME_EQ_BORDER,
-    HelpTopic::THEME_EQ_TXT,
+    HelpTopic::THEME_EQ_TXT,     HelpTopic::THEME_EQ_BG,
 };
 
 // The theme editor: THEME (name, SAVE, LOAD), RANDOMIZE (scheme, ROLL), then one row per colour.

@@ -279,7 +279,7 @@ void EqModule::draw_visualization(Canvas& c, int x, int y, const EqState& s) {
     const int    vy     = y + HEADER_H + ROW_H;
     const int    bottom = VIS_H;  // panel-relative
 
-    // `eqBg`, the panel's own ground (derived from `vizBackground`).
+    // `eqBg`, the panel's own ground.
     c.fill_rect(x, vy, WIDTH, VIS_H, t.eqBg);
 
     // ── The spectrum, one sample per column; fewer than two bins is silence ──────────────────────

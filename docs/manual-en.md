@@ -1625,7 +1625,7 @@ The top row lets you cycle through built-in themes and save or load custom theme
 
 | Cursor position (channel) | Action |
 |---|---|
-| 0 — theme name | A+LEFT/RIGHT to cycle built-in themes: CLASSIC, AMBER, BLUE, MONO |
+| 0 — theme name | A+LEFT/RIGHT to cycle built-in themes: CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED |
 | 1 — SAVE | Press A to save the current theme to a `.ptt` file |
 | 2 — LOAD | Press A to load a theme from a `.ptt` file |
 
@@ -1656,8 +1656,9 @@ Each row edits one color in the theme. The color preview swatch is shown on the 
 | EQ FILL | Shading under the EQ EDITOR's spectrum curve |
 | EQ BORDER | The EQ EDITOR's spectrum outline and its 0 dB line |
 | EQ TXT | Frequency labels on the EQ EDITOR's spectrum |
+| EQ BG | Background of the EQ EDITOR's spectrum panel |
 
-ROW CURSOR and ROW SELECT are the two blocks text is read *against*, so pick them bright enough for BACKGROUND and ROW 4TH to show up on them. A theme file saved by an older version still loads, and keeps every color it named; the three rows that are no longer listed are simply not drawn any more.
+ROW CURSOR and ROW SELECT are the two blocks text is read *against*, so pick them bright enough for BACKGROUND and ROW 4TH to show up on them. A theme file saved by an older version still loads, and keeps every color it named; the two rows that are no longer listed are simply not drawn any more.
 
 ### Controls
 
@@ -2786,7 +2787,7 @@ Swap `VTR` for `VMV` to fade the whole mix instead, or for `REV` to open a rever
 
 1. Navigate to SETTINGS (PROJECT → SETTINGS row → A).
 2. Move to the THEME row and press **A** to open the THEME EDITOR.
-3. On row 0, use A+LEFT/RIGHT on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO).
+3. On row 0, use A+LEFT/RIGHT on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO, BUBBLEGUM, BLUE OLED, AMBER OLED).
 4. Move down to any color row, then LEFT/RIGHT to select R/G/B, and A+LEFT/RIGHT to adjust.
 5. When you are happy with the look, move back to row 0, move RIGHT to SAVE, and press A.
 
