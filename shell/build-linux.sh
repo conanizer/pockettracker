@@ -6,6 +6,9 @@
 #
 #     bash shell/build-linux.sh
 #
+# ⚠️ A package for other people comes out of shell/Dockerfile.linux (the release workflow does);
+# a host build runs only on distros at least as new as the host.
+#
 # This is the DESKTOP x86-64 package. The handheld aarch64 one is shell/build-portmaster.sh, and the
 # two are deliberately different builds rather than one script with a flag — they disagree about the
 # thing that matters most, which is SDL2. The PortMaster package links against the DEVICE's libSDL2

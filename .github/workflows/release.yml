@@ -53,12 +53,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install SDL2
-        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      # ⚠️ IN THE CONTAINER, NOT ON THE RUNNER. The binary needs the glibc of the system that built
+      # it or newer; `ubuntu-latest` moves, and its build runs there and fails to start on older distros.
+      - name: Build the container
+        run: docker build -t pockettracker-linux -f shell/Dockerfile.linux shell/
 
       # The script builds, checks the artifact, stages, tars and reads the tarball back out.
       - name: Build and package
-        run: bash shell/build-linux.sh
+        run: docker run --rm -v "$PWD:/src" pockettracker-linux bash /src/shell/build-linux.sh
+
+      # Read off the shipped tarball: nothing else fails if the floor creeps up.
+      - name: Check the glibc floor
+        run: |
+          set -euo pipefail
+          mkdir floor && tar xzf build/linux/*.tar.gz -C floor
+          NEED=$(readelf -V floor/*/PocketTracker | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)
+          echo "needs $NEED (floor GLIBC_2.31)"
+          if [ "$(printf '%s\nGLIBC_2.31\n' "$NEED" | sort -V | tail -1)" != "GLIBC_2.31" ]; then
+              echo "FAIL: the binary needs a newer glibc than Ubuntu 20.04's"; exit 1
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
