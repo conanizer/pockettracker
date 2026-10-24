@@ -85,13 +85,12 @@ void InputDispatcher::midi_map_action() {
     if (static_cast<int>(p.midiMappings.size()) >= songcore::MIDI_MAP_MAX) return;
 
     // A new row points at the first destination (track 1's fader) over its whole range.
-    songcore::MidiMapping m;
+    songcore::MidiMapping& m = p.midiMappings.emplace_back();
     m.controller = 0;
     m.dest       = static_cast<uint8_t>(songcore::MAP_DESTS[0].id);
     m.scopeIndex = 0;
     m.rangeMin   = songcore::MAP_DESTS[0].min;
     m.rangeMax   = songcore::MAP_DESTS[0].max;
-    p.midiMappings.push_back(m);
 
     // The cursor stays put, so it is now on the new mapping with the ADD row one below.
     mark_modified();
