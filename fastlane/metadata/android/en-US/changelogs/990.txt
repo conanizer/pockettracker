@@ -1,0 +1,9 @@
+What's new:
+
+• MIDI: play external synths, play from a keyboard, map knobs, sync clock in and out
+• Reverbs HALL, ROOM, PLATE, FOIL; delay ping-pong, tone, wobble; presets for both
+• CHD plays a note as a chord, ARC strums it
+• Fill rows from one cell with L + a direction; new NTH, INS and TIM commands; a note OFF
+• Grooves with names, files and built-in swings
+• A song left playing keeps playing in the background
+• TRNS, a new skin that fills the width of a phone screen
