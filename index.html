@@ -83,8 +83,7 @@
   .btn{ --px:12px; --py:12px;
     flex:1; text-align:center; white-space:nowrap; cursor:pointer;
     font-family:var(--mono); font-weight:700; letter-spacing:.05em; text-transform:uppercase;
-    /* vw-scaled so PORTMASTER still fits a half-width tab on a phone; the cap is set by the
-       narrowest a tab gets on the wide layout (a quarter of the frame). */
+    /* vw-scaled so PORTMASTER still fits a half-width tab on a phone. */
     font-size:clamp(1.05rem,2.2vw,1.6rem); line-height:1.1;
     color:var(--btn-tx); background:var(--btn-face); padding:var(--py) var(--px);
     /* em, so the drop shadow keeps its proportion at both button sizes. Offset under one stem
@@ -115,9 +114,11 @@
     color:var(--text); margin-bottom:18px; }
   /* no gaps: the bevels butt into one another and read as one ProTracker button strip */
   .plats{ display:flex; gap:0; flex-wrap:wrap; }
-  /* PORTMASTER is the longest label and a tab is only a fifth of the frame, so the tabs
-     buy their room from the side padding rather than from the type size. */
-  .plats .btn{ --px:8px; flex:1 1 0; min-width:132px; -webkit-appearance:none; appearance:none; }
+  /* PORTMASTER and MIYOO MINI are the longest labels, ten characters in a fifth of the frame: the
+     cap is what still fits there (~152px inside), and the side padding is trimmed for the rest.
+     ⚠️ Too big and the label overflows to the right, so it reads as off-centre. */
+  .plats .btn{ --px:8px; flex:1 1 0; min-width:132px; font-size:clamp(1.05rem,2.2vw,1.4rem);
+    -webkit-appearance:none; appearance:none; }
   /* every tab keeps the standard white label, so the selected one is told apart by depth alone:
      raised idle, pressed on hover, deepest when selected. */
   .plats .btn.on{ background:var(--navy);
