@@ -14,6 +14,8 @@
 # so the only way here is somebody changing the Gradle syntax, and then a three-second regex fix is
 # the right outcome. A default would let a build ship a version string that is quietly a lie.
 
+# A bump re-runs the configure step; without this a build tree keeps the version it was set up with.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../../app/build.gradle.kts")
 file(READ "${CMAKE_CURRENT_LIST_DIR}/../../app/build.gradle.kts" PT_GRADLE)
 if(NOT PT_GRADLE MATCHES "versionName[ \t]*=[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)\"")
     message(FATAL_ERROR
