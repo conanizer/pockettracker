@@ -20,7 +20,7 @@ BIN=$APP/Contents/MacOS/PocketTracker
 
 cd "$SRC"
 
-VERSION=$(sed -n 's/.*versionName[ \t]*=[ \t]*"\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' app/build.gradle.kts | head -1)
+VERSION=$(sed -n 's/.*versionName[ \t]*=[ \t]*"\([0-9]*\.[0-9]*\.[0-9]*\(\.[0-9]*\)\{0,1\}\)".*/\1/p' app/build.gradle.kts | head -1)
 if [ -z "$VERSION" ]; then
     echo "FAIL: could not read versionName from app/build.gradle.kts"
     exit 1
