@@ -379,7 +379,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## SDL2 — zlib licence (**shipped on Windows and in the APK**, linked-not-shipped on the handhelds)
+## SDL2 — zlib licence (**shipped on Windows, macOS and in the APK**, linked-not-shipped on the handhelds)
 
 ⚠️ **The answer differs per artifact**, so "does PocketTracker ship an SDL2 binary?" has no single
 answer — and the question that binds is always about the thing a user actually receives, not about
@@ -389,10 +389,11 @@ the source tree.
 |---|---|---|
 | **PortMaster zip** (`shell/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
 | **Windows zip** (`shell/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `shell/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
+| **macOS zip** (`shell/build-macos.sh`) | **statically, into `PocketTracker.app`** — `shell/CMakeLists.txt` never takes a system SDL2 on macOS, always FetchContent | **yes — inside the app** |
 | **APK** | **dynamically, against a `libSDL2.so` built from the vendored source** (`native/vendor/SDL2/`) and packaged in the APK — F-Droid builds offline from source and rejects prebuilts, so Android is the one target that carries SDL in-tree | **yes — `lib/<abi>/libSDL2.so`, one per ABI** |
 | **Miyoo/OnionOS zip** (`shell/build-miyoo.sh`) | dynamically, against a **prebuilt `mmiyoo` fork we bundle** — this device has no system SDL2 at all, so the PortMaster row's rule inverts and the build asserts `libs/` is **present** | **yes — `libs/libSDL2-2.0.so.0`**, and see the fork's own section below |
 
-So the Windows package carries the notice below, and `build-windows.ps1` copies it out of the SDL
+So the Windows and macOS packages carry the notice below, and `build-windows.ps1` and `build-macos.sh` copy it out of the SDL
 source tree that was actually compiled (`_deps/sdl2-src/LICENSE.txt`) rather than from a stale copy
 in this repo — the licence that ships is then the licence of the code that shipped, by construction.
 
