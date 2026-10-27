@@ -1,0 +1,4 @@
+What's new:
+
+• COLLECT on the PROJECT screen copies a song and every sample and SoundFont it plays into one folder in Songs, ready to move or share
+• Fix: TSTRETCH no longer plays the stretched sample early
