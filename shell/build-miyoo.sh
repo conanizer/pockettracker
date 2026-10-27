@@ -93,7 +93,10 @@ fi
 # ⚠️ `tag $SDL2_TAG`, not the abbreviated sha in the tag's name: GitHub's smart protocol will not
 # serve an abbreviated commit to `fetch`, and the failure — "couldn't find remote ref" — reads like
 # the pin is wrong rather than like the spelling is.
-git -C "$SDL2_SRC" fetch --depth 1 origin tag "$SDL2_TAG"
+# ⚠️ The fork's repository is gone from GitHub (404 since 2026-10), so a cached checkout is the only
+# copy: never fetch when the pinned tag is already here.
+git -C "$SDL2_SRC" rev-parse -q --verify "refs/tags/$SDL2_TAG" > /dev/null \
+    || git -C "$SDL2_SRC" fetch --depth 1 origin tag "$SDL2_TAG"
 git -C "$SDL2_SRC" checkout -q "refs/tags/$SDL2_TAG"
 git -C "$SDL2_SRC" log -1 --format='SDL2 fork      : %H  (%s)'
 
