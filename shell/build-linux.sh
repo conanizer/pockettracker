@@ -28,7 +28,7 @@ cd "$SRC"
 
 # The version is the APK's, read from the one place that holds it. A package whose name and a
 # CHANGELOG disagree is a support question nobody can answer, so it is read rather than passed in.
-VERSION=$(sed -n 's/.*versionName[ \t]*=[ \t]*"\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/p' app/build.gradle.kts | head -1)
+VERSION=$(sed -n 's/.*versionName[ \t]*=[ \t]*"\([0-9]*\.[0-9]*\.[0-9]*\(\.[0-9]*\)\{0,1\}\)".*/\1/p' app/build.gradle.kts | head -1)
 if [ -z "$VERSION" ]; then
     echo "FAIL: could not read versionName from app/build.gradle.kts"
     exit 1

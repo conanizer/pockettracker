@@ -68,7 +68,7 @@ Write-Output "not stale: no source newer than the exe"
 
 # The version, from the same place shell/CMakeLists.txt read it — see the comment there.
 $gradle = Get-Content (Join-Path $repo 'app\build.gradle.kts') -Raw
-if ($gradle -notmatch 'versionName[ \t]*=[ \t]*"([0-9]+\.[0-9]+\.[0-9]+)"') {
+if ($gradle -notmatch 'versionName[ \t]*=[ \t]*"([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)"') {
     throw "could not find versionName in app/build.gradle.kts"
 }
 $version = $Matches[1]

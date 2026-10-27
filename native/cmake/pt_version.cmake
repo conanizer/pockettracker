@@ -9,6 +9,7 @@
 # Sets, in the includer's scope:
 #   PT_VERSION        "0.9.4"     — the Windows .rc, the zip name, and the runtime banner
 #   PT_VERSION_COMMA  "0,9,4,0"   — the Windows VERSIONINFO fields, which take four integers
+# A fourth number ("0.9.9.1", a patch release) is optional and fills VERSIONINFO's last field.
 #
 # FATAL_ERROR rather than a warning-and-a-default: the file is in this repo and cannot be missing,
 # so the only way here is somebody changing the Gradle syntax, and then a three-second regex fix is
@@ -17,11 +18,14 @@
 # A bump re-runs the configure step; without this a build tree keeps the version it was set up with.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../../app/build.gradle.kts")
 file(READ "${CMAKE_CURRENT_LIST_DIR}/../../app/build.gradle.kts" PT_GRADLE)
-if(NOT PT_GRADLE MATCHES "versionName[ \t]*=[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)\"")
+if(NOT PT_GRADLE MATCHES "versionName[ \t]*=[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)(\\.([0-9]+))?\"")
     message(FATAL_ERROR
             "could not find versionName in app/build.gradle.kts - if its syntax changed, update "
             "the regex in native/cmake/pt_version.cmake")
 endif()
-set(PT_VERSION       "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+set(PT_VERSION       "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}${CMAKE_MATCH_4}")
 set(PT_VERSION_COMMA "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
+if(CMAKE_MATCH_5)
+    set(PT_VERSION_COMMA "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},${CMAKE_MATCH_5}")
+endif()
 message(STATUS "PocketTracker ${PT_VERSION} (from app/build.gradle.kts)")
