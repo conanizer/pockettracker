@@ -101,7 +101,8 @@ cp "$SRC/shell/macos/README.txt"                     "$STAGE/README.txt"
 cp "$SRC/LICENSE"                                    "$STAGE/licenses/LICENSE"
 cp "$SRC/docs/licenses/THIRD-PARTY-NOTICES.md"       "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
 cp "$SRC/CREDITS.md"                                 "$STAGE/licenses/CREDITS.md"
-cp "$SRC/docs/licenses/OFL-1.1-LinuxBiolinum.txt"    "$STAGE/licenses/OFL-1.1-LinuxBiolinum.txt"
+cp "$SRC/docs/licenses/OFL-1.1-LiberationSans.txt"   "$STAGE/licenses/OFL-1.1-LiberationSans.txt"
+cp "$SRC/docs/licenses/OFL-1.1-QuinqueFive.txt"      "$STAGE/licenses/OFL-1.1-QuinqueFive.txt"
 cp "$SRC/native/vendor/ogg/COPYING"                  "$STAGE/licenses/libogg-COPYING"
 cp "$SRC/native/vendor/opus/COPYING"                 "$STAGE/licenses/libopus-COPYING"
 cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt" "$STAGE/licenses/libopus-LICENSE_PLEASE_READ.txt"
@@ -122,7 +123,7 @@ ROOT=$CHECK/PocketTracker-$VERSION
 for NEEDED in "PocketTracker.app/Contents/MacOS/PocketTracker" "PocketTracker.app/Contents/Info.plist" \
               "PocketTracker.app/Contents/Resources/PocketTracker.icns" "README.txt" \
               "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" "licenses/CREDITS.md" \
-              "licenses/OFL-1.1-LinuxBiolinum.txt" "licenses/SDL2-LICENSE.txt" \
+              "licenses/OFL-1.1-LiberationSans.txt" "licenses/OFL-1.1-QuinqueFive.txt" "licenses/SDL2-LICENSE.txt" \
               "licenses/libogg-COPYING" "licenses/libopus-COPYING" "licenses/libopus-LICENSE_PLEASE_READ.txt"; do
     BYTES=$(wc -c < "$ROOT/$NEEDED" 2>/dev/null || echo 0)
     echo "  $NEEDED: $BYTES bytes"
