@@ -49,8 +49,7 @@ inline std::vector<float> stretch(const float* input,
 
     // The output advances a fixed hop per chunk, the input that hop / ratio: re-read to slow down,
     // skipped to speed up.
-    int   outputHop = sequenceLen - overlapLen;
-    float inputHop  = (float)outputHop / ratio;
+    int outputHop = sequenceLen - overlapLen;
 
     // Equal-power, so the loudness does not dip mid-fade.
     std::vector<float> fadeOut((size_t)overlapLen), fadeIn((size_t)overlapLen);
@@ -67,20 +66,22 @@ inline std::vector<float> stretch(const float* input,
 
     std::copy(input, input + std::min(sequenceLen, inputLen), output.begin());
 
-    // Fractional, so a non-integer hop keeps the average rate exact.
-    float inputPosFloat = inputHop;
-    int   outputPos     = outputHop;
+    int outputPos = outputHop;
 
     // The output drives the loop, because its length is the contract.
     while (outputPos < targetLen)
     {
-        int inputPos = (int)inputPosFloat;
+        // ⚠️ This chunk is written from outputPos - overlapLen, its crossfade included. Its input is
+        // picked so the chunk's CENTRE lands where the ratio puts it; read from outputPos instead,
+        // everything after the first chunk plays early by the overlap.
+        const double half     = 0.5 * sequenceLen;
+        int          inputPos = (int)std::lround((outputPos - overlapLen + half) / (double)ratio - half);
+
+        if (inputLen < sequenceLen) break;   // input shorter than one chunk
 
         // ⚠️ Clamp to the last full chunk, never stop on it: when slowing down the input runs out
         // first, and stopping would leave the output short.
-        if (inputPos > inputLen - sequenceLen) inputPos = inputLen - sequenceLen;
-
-        if (inputPos < 0)                              break;   // input shorter than one chunk
+        inputPos = std::clamp(inputPos, 0, inputLen - sequenceLen);
         if (outputPos + sequenceLen >= (int)output.size()) break;
 
         float*       out     = &output[(size_t)outputPos];
@@ -93,8 +94,7 @@ inline std::vector<float> stretch(const float* input,
         for (int i = 0; i < sequenceLen - overlapLen; ++i)
             out[i] = newHead[overlapLen + i];
 
-        outputPos     += outputHop;
-        inputPosFloat += inputHop;
+        outputPos += outputHop;
     }
 
     output.resize((size_t)targetLen);
