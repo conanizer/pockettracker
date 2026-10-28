@@ -336,7 +336,7 @@ public:
 
     void setTrackVolume(int trackId, float volume);
 
-    // Mute, apart from the fader; ringing voices go silent within a block. songcore folds solo into it.
+    // Mute, apart from the fader; ringing voices go silent within a block, and so does their send feed.
     void setTrackMuted(int trackId, bool muted);
 
     // The reverb return, delay return and dry-sum gates, set together because a solo is about the set.

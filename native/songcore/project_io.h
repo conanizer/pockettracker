@@ -180,8 +180,27 @@ inline Track parse_track(const json& j, int index) {
     }
     t.volume = get_int(j, "volume", t.volume);
     t.mute   = get_bool(j, "mute",  t.mute);
-    t.solo   = get_bool(j, "solo",  t.solo);
     return t;
+}
+
+// Older files kept a SOLO beside each mute. It becomes the mutes it meant: a solo mutes the rest of
+// its set, and a soloed return turns the tracks' own sound off unless a track was soloed too.
+inline void fold_legacy_solo(const json& j, Project& p) {
+    bool soloed[8] = {};
+    bool anyTrack = false;
+    auto it = j.find("tracks");
+    if (it != j.end() && it->is_array())
+        for (size_t i = 0; i < it->size() && i < 8; ++i)
+            if ((*it)[i].is_object() && get_bool((*it)[i], "solo", false)) soloed[i] = anyTrack = true;
+    if (anyTrack)
+        for (size_t i = 0; i < p.tracks.size() && i < 8; ++i)
+            if (!soloed[i]) p.tracks[i].mute = true;
+
+    const bool revSolo = get_bool(j, "reverbSolo", false), dlySolo = get_bool(j, "delaySolo", false);
+    if (!revSolo && !dlySolo) return;
+    if (!revSolo) p.reverbMute = true;
+    if (!dlySolo) p.delayMute  = true;
+    if (!anyTrack) p.dryMute = true;
 }
 
 inline SFOverrides parse_sf_overrides(const json& j) {
@@ -323,13 +342,13 @@ inline Project parse_project(const json& j) {
     p.delayTone       = get_int(j, "delayTone", p.delayTone);
     p.delayWobble     = get_int(j, "delayWobble", p.delayWobble);
     p.reverbMute      = get_bool(j, "reverbMute", p.reverbMute);
-    p.reverbSolo      = get_bool(j, "reverbSolo", p.reverbSolo);
     p.delayMute       = get_bool(j, "delayMute", p.delayMute);
-    p.delaySolo       = get_bool(j, "delaySolo", p.delaySolo);
+    p.dryMute         = get_bool(j, "dryMute", p.dryMute);
     p.masterEqSlot    = get_int(j, "masterEqSlot", p.masterEqSlot);
     p.phrases     = parse_pool<Phrase>(j, "phrases", parse_phrase);
     p.chains      = parse_pool<Chain>(j, "chains", parse_chain);
     p.tracks      = parse_pool<Track>(j, "tracks", parse_track);
+    fold_legacy_solo(j, p);
     p.instruments = parse_pool<Instrument>(j, "instruments", parse_instrument);
     p.tables      = parse_pool<Table>(j, "tables", parse_table);
     p.grooves     = parse_pool<Groove>(j, "grooves", parse_groove);
@@ -623,7 +642,6 @@ inline void emit_track(JsonWriter& w, const Track& t) {
     }
     if (t.volume != 0xFF) w.field_int("volume", t.volume);
     if (t.mute)           w.field_bool("mute", t.mute);
-    if (t.solo)           w.field_bool("solo", t.solo);
     w.end_object();
 }
 
@@ -750,9 +768,8 @@ inline std::string serialize_project(const Project& p) {
     if (p.delayTone != 0xFF)      w.field_int("delayTone", p.delayTone);
     if (p.delayWobble != 0)       w.field_int("delayWobble", p.delayWobble);
     if (p.reverbMute)             w.field_bool("reverbMute", p.reverbMute);
-    if (p.reverbSolo)             w.field_bool("reverbSolo", p.reverbSolo);
     if (p.delayMute)              w.field_bool("delayMute", p.delayMute);
-    if (p.delaySolo)              w.field_bool("delaySolo", p.delaySolo);
+    if (p.dryMute)                w.field_bool("dryMute", p.dryMute);
     if (p.masterEqSlot != -1)     w.field_int("masterEqSlot", p.masterEqSlot);
     emit_pool(w, "phrases",     p.phrases,     emit_phrase);
     emit_pool(w, "chains",      p.chains,      emit_chain);

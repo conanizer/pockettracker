@@ -1031,7 +1031,8 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
             volRoute = volGlideFrom * k + volRoute * (1.0f - k);
         }
         volRouteLast = volRoute;
-        const float trackVol  = (faderFrom + faderStep * tBlock) * (gateFrom + gateStep * tBlock);
+        const float gate      = gateFrom + gateStep * tBlock;
+        const float trackVol  = (faderFrom + faderStep * tBlock) * gate;
         const float antiClick = antiClickGain(fadeIn, ph);
 
         float procL = Playhead::read(ph.left, idx, frac, effDownsample);
@@ -1094,7 +1095,8 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         }
         if (!stereo) procR = procL;   // a mono sample feeds both lanes
 
-        // Sends are tapped below everything on the instrument and ABOVE the track fader.
+        // Sends are tapped below everything on the instrument and ABOVE the track fader — but below
+        // the mute, so a muted track stops feeding the reverb and delay.
         float scalar = finalVol * volRoute;
         if constexpr (Chord) scalar *= chordOut;
         procL *= scalar;
@@ -1116,12 +1118,12 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
 
         if (toReverb || toDelay) {
             if (toReverb) {
-                const float rev = revLevel.next();
+                const float rev = revLevel.next() * gate;
                 revL[i] += procL * voiceFade * panL * rev;
                 revR[i] += procR * voiceFade * panR * rev;
             }
             if (toDelay) {
-                const float dly = dlyLevel.next();
+                const float dly = dlyLevel.next() * gate;
                 dlyL[i] += procL * voiceFade * panL * dly;
                 dlyR[i] += procR * voiceFade * panR * dly;
             }

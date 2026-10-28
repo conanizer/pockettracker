@@ -310,8 +310,7 @@ struct Track {
     int id = 0;
     std::vector<int> chainRefs;   // empty default
     int  volume = 0xFF;
-    bool mute   = false;
-    bool solo   = false;
+    bool mute   = false;   // the one switch R+B flips and R+A sets; mute and solo are not two states
     Track() = default;
     explicit Track(int id_) : id(id_) {}
 };
@@ -464,10 +463,9 @@ struct Project {
     // ⚠️ Defaults are what older projects play with: TONE FF (filter switched out), WOBL 00.
     bool delayPong = false;
     int  delayTone = 0xFF, delayWobble = 0x00;
-    // The two send RETURNS are mixer channels with their own mute/solo. ⚠️ A return SOLO never stops a
-    // track — its feed must keep sounding — so it is not part of `track_audible` (see `dry_audible`).
-    bool reverbMute = false, reverbSolo = false;
-    bool delayMute  = false, delaySolo  = false;
+    // The two send RETURNS are mixer channels with a mute each. ⚠️ `dryMute` silences the tracks' own
+    // sound but NOT what they feed the returns: muting the tracks instead would starve a return heard alone.
+    bool reverbMute = false, delayMute = false, dryMute = false;
     int masterEqSlot = -1;
     std::vector<Phrase>     phrases;              // 256
     std::vector<Chain>      chains;               // 256
@@ -491,54 +489,21 @@ struct Project {
 // The tempo the app plays at: a leading clock's, else the song's TEMPO.
 inline int tempo_in_force(const Project& p) { return p.clockTempo > 0 ? p.clockTempo : p.tempo; }
 
-// Which tracks sound. ⚠️ DERIVED, never stored: solo is a property of the set. Mute wins over solo.
-inline bool any_solo(const Project& p) {
-    for (const Track& t : p.tracks)
-        if (t.solo) return true;
-    return false;
-}
-
-inline bool track_audible(const Project& p, const Track& t) {
-    return !t.mute && (t.solo || !any_solo(p));
-}
-
 inline bool track_audible(const Project& p, int trackId) {
     if (trackId < 0 || trackId >= static_cast<int>(p.tracks.size())) return false;
-    return track_audible(p, p.tracks[static_cast<size_t>(trackId)]);
+    return !p.tracks[static_cast<size_t>(trackId)].mute;
 }
-
-// …and which send return: a separate solo set. The two meet at the DRY sum, which a soloed return mutes.
-inline bool any_send_solo(const Project& p) { return p.reverbSolo || p.delaySolo; }
-
-inline bool reverb_return_audible(const Project& p) {
-    return !p.reverbMute && (p.reverbSolo || !any_send_solo(p));
-}
-
-inline bool delay_return_audible(const Project& p) {
-    return !p.delayMute && (p.delaySolo || !any_send_solo(p));
-}
-
-/** Is the dry mix heard? A soloed return silences it — unless a TRACK is soloed too, which asks for
- *  that track's dry signal alongside the return. */
-inline bool dry_audible(const Project& p) { return !any_send_solo(p) || any_solo(p); }
 
 // The mixer's ten channels: 0-7 the tracks, 8 and 9 the reverb and delay returns.
 constexpr int MIX_CH_REVERB = 8;
 constexpr int MIX_CH_DELAY  = 9;
 
-struct MixChannelFlags {
-    bool* mute = nullptr;
-    bool* solo = nullptr;
-};
-
-inline MixChannelFlags mix_channel_flags(Project& p, int ch) {
-    if (ch == MIX_CH_REVERB) return {&p.reverbMute, &p.reverbSolo};
-    if (ch == MIX_CH_DELAY)  return {&p.delayMute, &p.delaySolo};
-    if (ch >= 0 && ch < static_cast<int>(p.tracks.size())) {
-        Track& t = p.tracks[static_cast<size_t>(ch)];
-        return {&t.mute, &t.solo};
-    }
-    return {};
+// Null for a channel the project does not have.
+inline bool* mix_channel_mute(Project& p, int ch) {
+    if (ch == MIX_CH_REVERB) return &p.reverbMute;
+    if (ch == MIX_CH_DELAY)  return &p.delayMute;
+    if (ch >= 0 && ch < static_cast<int>(p.tracks.size())) return &p.tracks[static_cast<size_t>(ch)].mute;
+    return nullptr;
 }
 
 struct InstrumentPreset {

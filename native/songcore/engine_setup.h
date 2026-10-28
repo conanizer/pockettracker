@@ -141,12 +141,11 @@ void push_mixer(Engine& engine, const Project& project, MixerHeld held = {}) {
     for (int i = 0; i < 8 && i < tracks; ++i) {
         if (!(held.faderTracks & (1 << i)))
             engine.setTrackVolume(i, hex_to_float(project.tracks[i].volume));
-        // ⚠️ All eight, ungated: SOLO ties each track to the other seven, and this line IS the press.
+        // ⚠️ All eight, ungated: R+A changes the other seven, and this line IS the press.
         engine.setTrackMuted(i, !track_audible(project, i));
     }
-    // The other channels mute/solo can name; ungated for the same reason.
-    engine.setBusMutes(!reverb_return_audible(project), !delay_return_audible(project),
-                       !dry_audible(project));
+    // The other channels the chords can name; ungated for the same reason.
+    engine.setBusMutes(project.reverbMute, project.delayMute, project.dryMute);
     if (!held.masterFader) engine.setMasterVolume(hex_to_float(project.masterVolume));
     engine.setOttDepth(project.ottDepth);
     engine.setMasterFx(project.masterBusFx);

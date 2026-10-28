@@ -22,7 +22,7 @@ inline void for_each_step_in_song_range(const Project& project, int start_row, i
                                         bool include_inaudible, Action action) {
     for (int row = start_row; row <= end_row; ++row) {
         for (const Track& track : project.tracks) {
-            if (!include_inaudible && !track_audible(project, track)) continue;
+            if (!include_inaudible && track.mute) continue;
             if (row >= static_cast<int>(track.chainRefs.size())) continue;
             int chainId = track.chainRefs[row];
             if (chainId < 0 || chainId >= static_cast<int>(project.chains.size())) continue;

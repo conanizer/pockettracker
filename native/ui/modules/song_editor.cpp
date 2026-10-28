@@ -75,7 +75,7 @@ void SongEditorModule::draw_row(Canvas& c, int x, int y, int row_index, int abso
         const bool isCursor   = (absolute_row == s.cursorRow) && (trackId == s.cursorTrack - 1);
         const bool isSelected = s.selectionMode && s.isCellSelected(absolute_row, trackId + 1);
 
-        // A track making no sound draws dim, so SOLO dims the other seven for free.
+        // A muted track draws dim.
         const Argb value_color = track_audible(s.project, trackId) ? t.textValue : t.textEmpty;
 
         cells.cell(chainId == -1 ? "--" : hex2(chainId), trackColumns[trackId], isCursor, isSelected,
