@@ -218,7 +218,7 @@ void push_table(Engine& engine, const Project& project, int tableId) {
     const Table& table = project.tables[static_cast<size_t>(tableId)];
     uint8_t rowData[128] = {0};
     for (int rowIndex = 0; rowIndex < 16 && rowIndex < static_cast<int>(table.rows.size()); ++rowIndex) {
-        const TableRow& row = table.rows[static_cast<size_t>(rowIndex)];
+        const TableRow row = as_played(table.rows[static_cast<size_t>(rowIndex)]);
         uint8_t* p = rowData + rowIndex * 8;
         p[0] = static_cast<uint8_t>(row.transpose);
         p[1] = static_cast<uint8_t>(row.volume);     // -1 → 0xFF

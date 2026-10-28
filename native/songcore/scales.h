@@ -64,7 +64,7 @@ inline ScaleAt phrase_scale_at_row(const Phrase& ph, int row, int projectKey) {
     ScaleAt at{0, projectKey};
     const int last = std::min(row, static_cast<int>(ph.steps.size()) - 1);
     for (int r = 0; r <= last; ++r) {
-        const PhraseStep& step = ph.steps[static_cast<size_t>(r)];
+        const PhraseStep step = as_played(ph.steps[static_cast<size_t>(r)]);
         int sca = -1, scg = -1;
         for (int slot = 1; slot <= 3; ++slot) {
             const int type = step_fx_type(step, slot);

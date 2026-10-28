@@ -101,10 +101,10 @@ void PhraseEditorModule::draw_row(Canvas& c, int x, int y, int index, const Phra
     cells.cell(hex2(step.volume),     volX,  cur(2), sel(2), noNote, t.textParam);
     cells.cell(hex2(step.instrument), instX, cur(3), sel(3), noNote, t.textParam);
 
-    // A pair dims when unset, an AUS/AUF when no ramp uses it.
+    // A pair dims when unset or switched off, an AUS/AUF when no ramp uses it.
     const auto fxDim = [&](int type, int slot) {
         if (cutOff && !(index == hopRow && type == songcore::FX_HOP)) return true;
-        return type == 0x00 || !rampCells.active(type, index, slot);
+        return type == 0x00 || songcore::fx_off(step, slot) || !rampCells.active(type, index, slot);
     };
 
     const bool fx1Dim = fxDim(step.fx1Type, 1);

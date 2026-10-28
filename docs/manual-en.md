@@ -575,6 +575,8 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **
 | A + B | Delete value at cursor |
 | A + B on an empty note | Insert **OFF** — the note sounding on the track is let go |
 | B + LEFT/RIGHT | Switch to previous / next phrase |
+| R + B on a command | Switch it off / on — it stays in its cell, drawn dim, and plays as an empty one. Let go of B before R to switch it back; a selection switches every command in it |
+| L + R | Switch every command in this phrase back on — one thing per press, most recent first, as with muted tracks |
 | L + D-pad | Fill rows from the cell under the cursor — see *Fill* below |
 | START | Play current phrase (loops) |
 
@@ -1056,6 +1058,8 @@ By default, instrument N uses table N. Override per-note with the **TBL** phrase
 | A + B | Delete value |
 | B + LEFT/RIGHT | Previous / next table |
 | B + UP/DOWN | Jump 16 tables |
+| R + B on a command | Switch it off / on (same as phrase) |
+| L + R | Switch every command in this table back on (same as phrase) |
 | L + B / copy / paste | Selection, copy, paste (same as phrase) |
 
 ---

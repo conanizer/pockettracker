@@ -62,6 +62,10 @@ inline PhraseStep parse_phrase_step(const json& j) {
     s.fx1Type = get_int(j, "fx1Type", s.fx1Type);  s.fx1Value = get_int(j, "fx1Value", s.fx1Value);
     s.fx2Type = get_int(j, "fx2Type", s.fx2Type);  s.fx2Value = get_int(j, "fx2Value", s.fx2Value);
     s.fx3Type = get_int(j, "fx3Type", s.fx3Type);  s.fx3Value = get_int(j, "fx3Value", s.fx3Value);
+    s.fx1Off = get_bool(j, "fx1Off", s.fx1Off);
+    s.fx2Off = get_bool(j, "fx2Off", s.fx2Off);
+    s.fx3Off = get_bool(j, "fx3Off", s.fx3Off);
+    drop_off_from_empty(s);
     return s;
 }
 
@@ -101,6 +105,10 @@ inline TableRow parse_table_row(const json& j) {
     r.fx1Type = get_int(j, "fx1Type", r.fx1Type);  r.fx1Value = get_int(j, "fx1Value", r.fx1Value);
     r.fx2Type = get_int(j, "fx2Type", r.fx2Type);  r.fx2Value = get_int(j, "fx2Value", r.fx2Value);
     r.fx3Type = get_int(j, "fx3Type", r.fx3Type);  r.fx3Value = get_int(j, "fx3Value", r.fx3Value);
+    r.fx1Off = get_bool(j, "fx1Off", r.fx1Off);
+    r.fx2Off = get_bool(j, "fx2Off", r.fx2Off);
+    r.fx3Off = get_bool(j, "fx3Off", r.fx3Off);
+    drop_off_from_empty(r);
     return r;
 }
 
@@ -522,6 +530,9 @@ inline void emit_phrase_step(JsonWriter& w, const PhraseStep& s) {
     if (s.fx2Value != 0x00)       w.field_int("fx2Value", s.fx2Value);
     if (s.fx3Type  != 0x00)       w.field_int("fx3Type",  s.fx3Type);
     if (s.fx3Value != 0x00)       w.field_int("fx3Value", s.fx3Value);
+    if (s.fx1Off && s.fx1Type != 0x00) w.field_bool("fx1Off", true);
+    if (s.fx2Off && s.fx2Type != 0x00) w.field_bool("fx2Off", true);
+    if (s.fx3Off && s.fx3Type != 0x00) w.field_bool("fx3Off", true);
     w.end_object();
 }
 
@@ -560,6 +571,9 @@ inline void emit_table_row(JsonWriter& w, const TableRow& r) {
     if (r.fx2Value != 0x00)  w.field_int("fx2Value", r.fx2Value);
     if (r.fx3Type  != 0x00)  w.field_int("fx3Type",  r.fx3Type);
     if (r.fx3Value != 0x00)  w.field_int("fx3Value", r.fx3Value);
+    if (r.fx1Off && r.fx1Type != 0x00) w.field_bool("fx1Off", true);
+    if (r.fx2Off && r.fx2Type != 0x00) w.field_bool("fx2Off", true);
+    if (r.fx3Off && r.fx3Type != 0x00) w.field_bool("fx3Off", true);
     w.end_object();
 }
 

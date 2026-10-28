@@ -167,8 +167,9 @@ struct AppState {
         return selection.is_cell_selected(row, column);
     }
 
-    // What L+R clears first — whichever was touched last; one thing per press.
-    enum class Clearable { NONE, SELECTION, MUTE };
+    // What L+R clears first — whichever was touched last; one thing per press. FX_OFF is the open
+    // phrase's or table's switched-off commands.
+    enum class Clearable { NONE, SELECTION, MUTE, FX_OFF };
     Clearable lastClearable = Clearable::NONE;
 
     // The dispatcher's clipboard, for the readout; null with no input layer.

@@ -683,6 +683,8 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "Let go of A to pick one",
       "A on --- repeats the last one",
       "A+B clears the command",
+      "R+B switches it off and on",
+      "L+R switches them all back on",
       "L+D-PAD fills the rows below"}},
     /* PHRASE_FX_VALUE */
     {"FX VALUE: what it is set to", "What it does depends on the", "command to its left.",
@@ -691,6 +693,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "command list explains each one."},
      {"A+←/→ changes by 1, A+↑/↓ by 16",
       "A+B sets it back to 00",
+      "R+B switches the command off",
       "L+D-PAD fills the rows below",
       "START plays the phrase"}},
 
@@ -725,7 +728,9 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "Keep A held and move to browse",
       "Let go of A to pick one",
       "A on --- repeats the last one",
-      "A+B clears the command"}},
+      "A+B clears the command",
+      "R+B switches it off and on",
+      "L+R switches them all back on"}},
     /* TABLE_FX_VALUE */
     {"FX VALUE: what it is set to", "What it does depends on the", "command to its left.",
      {"What the number does depends on",
@@ -733,6 +738,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "command list explains each one."},
      {"A+←/→ changes by 1, A+↑/↓ by 16",
       "A+B sets it back to 00",
+      "R+B switches the command off",
       "A+START plays the table"}},
 
     // ── INSTRUMENT, on every type ────────────────────────────────────────────────────────────────

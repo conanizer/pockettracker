@@ -185,7 +185,8 @@ inline int ramp_value(const RampSpec& r, double t) {
 
 /** Does this phrase carry an AUS or AUF cell at all? A cheap skip — never a substitute for pairing. */
 inline bool phrase_has_ramp_cell(const Phrase& phrase) {
-    for (const PhraseStep& step : phrase.steps) {
+    for (const PhraseStep& authored : phrase.steps) {
+        const PhraseStep step = as_played(authored);
         for (int slot = 1; slot <= 3; ++slot) {
             const int type = step_fx_type(step, slot);
             if (type == FX_AUS || type == FX_AUF) return true;
@@ -196,7 +197,7 @@ inline bool phrase_has_ramp_cell(const Phrase& phrase) {
 
 // Every ramp `phrase` declares, walking from `startRow`. AUS takes the nearest automatable effect to
 // its LEFT (none: inert); the first AUF on a LATER step closes it; the last AUS wins (no nesting); an
-// AUS open at the phrase end produces nothing. Reads the AUTHORED step, before CHA/RND/RNL.
+// AUS open at the phrase end produces nothing. Reads the step as played, before CHA/RND/RNL.
 inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) {
     std::vector<RampSpec> out;
     RampSpec              open;
@@ -206,7 +207,7 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
     const int first = startRow < 0 ? 0 : (startRow > steps ? steps : startRow);
 
     for (int stepIndex = first; stepIndex < steps; ++stepIndex) {
-        const PhraseStep& step = phrase.steps[stepIndex];
+        const PhraseStep step = as_played(phrase.steps[stepIndex]);
         for (int slot = 1; slot <= 3; ++slot) {
             const int type = step_fx_type(step, slot);
 
@@ -286,7 +287,7 @@ inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const C
         const Phrase& phrase = project.phrases[static_cast<size_t>(chain_phrase_ref(chain, row))];
         const int steps = static_cast<int>(phrase.steps.size());
         for (int stepIndex = 0; stepIndex < steps && stepIndex < 16; ++stepIndex) {
-            const PhraseStep& step = phrase.steps[static_cast<size_t>(stepIndex)];
+            const PhraseStep step = as_played(phrase.steps[static_cast<size_t>(stepIndex)]);
             const int absStep = rowAbs[row] + stepIndex;
             for (int slot = 1; slot <= 3; ++slot) {
                 const int type = step_fx_type(step, slot);
