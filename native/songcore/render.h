@@ -246,7 +246,7 @@ inline std::vector<StemPass> stems_plan(const Project& project, int startRow = -
     std::vector<int> activeTracks;
     for (int id = 0; id < static_cast<int>(project.tracks.size()) && id < 8; ++id) {
         const Track& track = project.tracks[static_cast<size_t>(id)];
-        if (!track_audible(project, track)) continue;
+        if (track.mute) continue;
         bool hasChain = false;
         for (int row = bounds.startRow; row <= bounds.endRow && row < 256 &&
                                         row < static_cast<int>(track.chainRefs.size()); ++row) {

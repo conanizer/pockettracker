@@ -218,32 +218,42 @@ void InputDispatcher::toggle_mute_solo(bool solo) {
 
     // ⚠️ Snapshot on the chord's FIRST toggle only, so a revert undoes the whole chord.
     if (!mixSnapshot_.live) {
-        for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
-            const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
-            if (!f.mute) continue;
-            mixSnapshot_.mute[ch] = *f.mute;
-            mixSnapshot_.solo[ch] = *f.solo;
-        }
+        for (int ch = 0; ch < MIX_CHANNELS; ++ch)
+            if (const bool* m = songcore::mix_channel_mute(p, ch)) mixSnapshot_.mute[ch] = *m;
+        mixSnapshot_.dry  = p.dryMute;
         mixSnapshot_.live = true;
     }
 
-    for (int i = 0; i < count; ++i) {
-        const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, targets[i]);
-        if (!f.mute) continue;   // a channel the project does not have
-        bool& flag = solo ? *f.solo : *f.mute;
-        flag = !flag;
+    if (!solo) {
+        for (int i = 0; i < count; ++i)
+            if (bool* m = songcore::mix_channel_mute(p, targets[i])) *m = !*m;
+    } else {
+        // The targets' kind is the eight tracks, or the two returns. A return heard alone also turns
+        // the tracks' own sound off; they keep feeding it.
+        const bool returns = targets[0] >= songcore::MIX_CH_REVERB;
+        const int  first   = returns ? songcore::MIX_CH_REVERB : 0;
+        const int  last    = returns ? songcore::MIX_CH_DELAY : 7;
+        bool on[MIX_CHANNELS] = {};
+        for (int i = 0; i < count; ++i) on[targets[i]] = true;
+
+        bool already = p.dryMute == returns;
+        for (int ch = first; ch <= last; ++ch)
+            if (const bool* m = songcore::mix_channel_mute(p, ch)) already = already && *m == !on[ch];
+        for (int ch = first; ch <= last; ++ch)
+            if (bool* m = songcore::mix_channel_mute(p, ch)) *m = !already && !on[ch];
+        p.dryMute = !already && returns;
     }
 
     s_.lastClearable = AppState::Clearable::MUTE;
 
-    // ⚠️ Not an edit: no dirty, no autosave. All eight tracks are pushed — a solo changes the others.
+    // ⚠️ Not an edit: no dirty, no autosave. All eight tracks are pushed — R+A changes the others.
     host_.push_globals();
 }
 
 void InputDispatcher::restore_full_playback() {
     Project& p = host_.edit_project();
-    for (songcore::Track& t : p.tracks) { t.mute = false; t.solo = false; }
-    p.reverbMute = p.reverbSolo = p.delayMute = p.delaySolo = false;
+    for (songcore::Track& t : p.tracks) t.mute = false;
+    p.reverbMute = p.delayMute = p.dryMute = false;
     s_.lastClearable = AppState::Clearable::NONE;
     host_.push_globals();
 }
@@ -274,12 +284,9 @@ void InputDispatcher::on_r_combo_commit() {
 void InputDispatcher::on_r_combo_revert() {
     if (!mixSnapshot_.live) return;   // the chord armed on a screen that has no channels
     Project& p = host_.edit_project();
-    for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
-        const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
-        if (!f.mute) continue;
-        *f.mute = mixSnapshot_.mute[ch];
-        *f.solo = mixSnapshot_.solo[ch];
-    }
+    for (int ch = 0; ch < MIX_CHANNELS; ++ch)
+        if (bool* m = songcore::mix_channel_mute(p, ch)) *m = mixSnapshot_.mute[ch];
+    p.dryMute         = mixSnapshot_.dry;
     mixSnapshot_.live = false;
     host_.push_globals();
 }
@@ -314,11 +321,9 @@ void InputDispatcher::on_l_r() {
     // with nothing to clear falls through to the other, or L+R reads as dead.
     const bool mix_touched = [&] {
         Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
-        for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
-            const songcore::MixChannelFlags f = songcore::mix_channel_flags(p, ch);
-            if (f.mute && (*f.mute || *f.solo)) return true;
-        }
-        return false;
+        for (int ch = 0; ch < MIX_CHANNELS; ++ch)
+            if (const bool* m = songcore::mix_channel_mute(p, ch); m && *m) return true;
+        return p.dryMute;
     }();
 
     if (s_.lastClearable == AppState::Clearable::MUTE && mix_touched) {

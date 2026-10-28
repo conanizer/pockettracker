@@ -383,7 +383,7 @@ Works on the SONG and MIXER screens, while playing or stopped.
 | Input | Action |
 |---|---|
 | R + B | Mute / unmute the channel under the cursor |
-| R + A | Solo / unsolo it |
+| R + A | Solo it: it plays and every other track is muted. Again on the same track: everything plays |
 | R + B or R + A over a selection | Applies to every track the selection covers |
 | L + R | Restore full playback — every track and both send returns |
 
@@ -397,15 +397,15 @@ The sound stops the instant you press, notes already ringing included.
 So the same chord gives you a momentary drop you can hold through a bar, and a mute you set and walk
 away from.
 
-Soloing is additive: solo a second track and both play. A track that is muted stays silent even when
-soloed.
+A track is either playing or muted — both chords set the same switch. So after a solo, R + B on
+another track brings it in beside the soloed one, and R + A on another track moves the solo there.
 
-A track that is making no sound draws its numbers dimmed — its chain IDs on SONG, its fader value on
-MIXER — so soloing one track dims the other seven.
+A muted track draws its numbers dimmed — its chain IDs on SONG, its fader value on MIXER — and stops
+feeding the reverb and delay.
 
 **The send returns.** On MIXER the chord also works on the REV and DEL strips. Muting one drops that
 effect out of the mix; soloing one leaves you with just the reverb or just the delay, while the
-tracks go on playing and feeding it.
+tracks go on feeding it. Soloing a track leaves the returns as they are.
 
 ---
 

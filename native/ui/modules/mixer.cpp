@@ -117,8 +117,8 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
         const int  mX    = x + FIRST_METER_X + i * METER_SPACING;
         const bool isSel = (cur == MixerCell::TRACK_VOL && s.cursorColumn == i);
 
-        // Muted, unsoloed under another solo, or under a soloed send: meter and value say so.
-        const bool audible = track_audible(p, i) && dry_audible(p);
+        // Muted, or its own sound off while a return is heard alone: meter and value say so.
+        const bool audible = track_audible(p, i) && !p.dryMute;
 
         draw_stereo_meter(c, mX, y + TRACK_METER_TOP, TRACK_METER_H, peak_at(s.trackPeaks, i * 2),
                           peak_at(s.trackPeaks, i * 2 + 1), isSel, /*is_muted=*/!audible,
@@ -139,9 +139,8 @@ void MixerModule::draw(Canvas& c, int x, int y, const MixerState& s) {
     const bool revSendSel = (cur == MixerCell::REV_WET);
     const bool delSendSel = (cur == MixerCell::DLY_WET);
 
-    // Muted, or unsoloed while the other return is soloed.
-    const bool revAudible = reverb_return_audible(p);
-    const bool delAudible = delay_return_audible(p);
+    const bool revAudible = !p.reverbMute;
+    const bool delAudible = !p.delayMute;
 
     draw_stereo_meter(c, x + FIRST_METER_X, y + SEND_METER_TOP, SEND_METER_H,
                       peak_at(s.reverbPeaks, 0), peak_at(s.reverbPeaks, 1), revSendSel,

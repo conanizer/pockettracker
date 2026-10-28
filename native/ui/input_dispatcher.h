@@ -147,9 +147,10 @@ class InputDispatcher {
 
     // ── R + A/B: MUTE and SOLO (SONG and MIXER) ──────────────────────────────────────────────────
     // Acts on the press; undone if its own button comes up before R.
-    // R+B: toggle MUTE on the cursor's channel, or every channel in the selection.
+    // A channel is on or muted, nothing else. R+B flips the cursor's channel, or every one in the
+    // selection.
     void on_r_b();
-    // R+A: toggle SOLO, same targeting.
+    // R+A: the same targets on, the rest of their kind muted — or, pressed on exactly that, all on.
     void on_r_a();
     // R down or up — the arming half of MIDI learn ("hold R, turn a knob").
     void on_r_held(bool down);
@@ -158,7 +159,7 @@ class InputDispatcher {
 
     // R came up first: the chord's changes stand.
     void on_r_combo_commit();
-    // A/B came up first: every track's mute and solo back the way the chord found them.
+    // A/B came up first: every mute back the way the chord found it.
     void on_r_combo_revert();
 
     // ── L: selection and the clipboard ───────────────────────────────────────────────────────────
@@ -395,7 +396,7 @@ class InputDispatcher {
     struct MixSnapshot {
         bool live = false;
         bool mute[MIX_CHANNELS] = {};
-        bool solo[MIX_CHANNELS] = {};
+        bool dry = false;
     };
     MixSnapshot mixSnapshot_{};
 

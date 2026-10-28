@@ -264,7 +264,7 @@ from the cell under the cursor down to the end of the phrase.
 | Control | Action |
 |---------|--------|
 | **R+B** | Toggle mute on the track under the cursor (SONG, MIXER) |
-| **R+A** | Toggle solo, same targeting |
+| **R+A** | Solo: the targets on, every other track muted; on a set already alone, all back on |
 | **either, over a selection** | Applies to every track the selection's columns cover |
 | **L+R** | Restore full playback |
 
@@ -273,7 +273,7 @@ latches it, and releasing **A** or **B** first undoes everything that chord did.
 therefore both a mute you set and a mute you hold through a bar.
 
 The revert restores all eight tracks, not the one under the cursor: a chord over a selection touches
-several, and a solo changes what every other track is heard doing.
+several, and a solo changes every other track.
 
 On the MIXER, column 8 is the master strip and the chord is a no-op there. On every screen other
 than SONG and MIXER it stays the consumed no-op it has always been.
