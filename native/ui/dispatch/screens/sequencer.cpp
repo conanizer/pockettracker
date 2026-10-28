@@ -136,8 +136,13 @@ GestureResult InputDispatcher::chain_screen(Gesture g) {
             s_.lastEditedChain = s_.currentChain;
             return GestureResult::TAKEN;
         }
-        case Gesture::B_UP:   song_relative_b_vertical(-1); return GestureResult::TAKEN;
-        case Gesture::B_DOWN: song_relative_b_vertical(+1); return GestureResult::TAKEN;
+        // Under NAV = POOL, B+UP/DOWN jumps 16 chains, as on INSTRUMENT and TABLE.
+        case Gesture::B_UP:
+        case Gesture::B_DOWN:
+            if (song_relative_b_vertical((g == Gesture::B_UP) ? -1 : +1)) return GestureResult::TAKEN;
+            s_.currentChain    = page_clamping(s_.currentChain, (g == Gesture::B_UP) ? +1 : -1, 256);
+            s_.lastEditedChain = s_.currentChain;
+            return GestureResult::TAKEN;
 
         case Gesture::L_B_A:
             chain_clone_phrase();
@@ -177,8 +182,12 @@ GestureResult InputDispatcher::phrase_screen(Gesture g) {
             s_.lastEditedPhrase = s_.currentPhrase;
             return GestureResult::TAKEN;
         }
-        case Gesture::B_UP:   song_relative_b_vertical(-1); return GestureResult::TAKEN;
-        case Gesture::B_DOWN: song_relative_b_vertical(+1); return GestureResult::TAKEN;
+        case Gesture::B_UP:
+        case Gesture::B_DOWN:
+            if (song_relative_b_vertical((g == Gesture::B_UP) ? -1 : +1)) return GestureResult::TAKEN;
+            s_.currentPhrase    = page_clamping(s_.currentPhrase, (g == Gesture::B_UP) ? +1 : -1, 256);
+            s_.lastEditedPhrase = s_.currentPhrase;
+            return GestureResult::TAKEN;
 
         case Gesture::A_B:
             if (phrase_put_note_off()) return GestureResult::TAKEN;
@@ -636,9 +645,9 @@ bool InputDispatcher::song_relative_b_horizontal(int delta) {
 }
 
 // On CHAIN it walks the track column to the nearest filled song row, skipping gaps. On PHRASE it walks
-// the chain's own filled rows and never leaves the chain. Off NAV = SONG it does nothing.
-void InputDispatcher::song_relative_b_vertical(int delta) {
-    if (!s_.settings.navSongRelative) return;
+// the chain's own filled rows and never leaves the chain. False off NAV = SONG (the pool pages instead).
+bool InputDispatcher::song_relative_b_vertical(int delta) {
+    if (!s_.settings.navSongRelative) return false;
 
     if (s_.currentScreen == ScreenType::CHAIN) {
         const int track = pointer_track(s_);
@@ -650,6 +659,7 @@ void InputDispatcher::song_relative_b_vertical(int delta) {
         set_pointer_chain_row(s_, row);
     }
     refresh_song_relative_refs(s_);
+    return true;
 }
 
 // ─── LIVE mode ───────────────────────────────────────────────────────────────────────────────────

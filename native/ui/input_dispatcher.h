@@ -884,8 +884,9 @@ class InputDispatcher {
 
     // B+LEFT/RIGHT under NAV = SONG: step along the song row. False off NAV = SONG (the pool steps instead).
     bool song_relative_b_horizontal(int delta);
-    // B+UP/DOWN under NAV = SONG: CHAIN walks the song column, PHRASE the chain's filled rows.
-    void song_relative_b_vertical(int delta);
+    // B+UP/DOWN under NAV = SONG: CHAIN walks the song column, PHRASE the chain's filled rows. False off
+    // NAV = SONG (the pool pages 16 instead).
+    bool song_relative_b_vertical(int delta);
 
     // LIVE on SONG: START launches the cursor's cell, L+START its row, R+START stops its track. A second
     // press promotes the launch from the chain's end to the next phrase boundary.

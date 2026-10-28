@@ -209,6 +209,7 @@ Hold B and press directions to change *which* item the screen is showing, withou
 | **B + LEFT / RIGHT** (EQ EDITOR) | Previous / next EQ preset slot |
 | **B + UP / DOWN** (SONG) | Page up / down 16 rows |
 | **B + UP / DOWN** (INST.POOL, INSTRUMENT, MODULATION, TABLE) | Jump ±16 instruments or tables |
+| **B + UP / DOWN** (CHAIN, PHRASE under `NAV = POOL`) | Jump ±16 chains or phrases |
 
 ### Under `SETTINGS -> NAV = SONG` (the default)
 
@@ -337,7 +338,7 @@ START                   Play / Stop
 
 ```
 B + LEFT/RIGHT          Previous / next phrase, chain, instrument, table, groove
-B + UP/DOWN             Page the SONG screen / jump 16 instruments or tables
+B + UP/DOWN             Page the SONG screen / jump 16 instruments, tables, chains or phrases
 ```
 
 ### Tier 3: L Modifier (Selection & Clipboard)

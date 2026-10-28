@@ -311,7 +311,8 @@ Hold **B** and press LEFT/RIGHT to switch between items of the same type without
 | TABLE | Previous / next table (00–7F) |
 | GROOVE | Previous / next groove (00–7F) |
 
-On INSTRUMENT, MODULATION and TABLE, **B + UP/DOWN** jumps 16 at a time and stops at `00` and `7F`.
+On INSTRUMENT, MODULATION and TABLE, **B + UP/DOWN** jumps 16 at a time and stops at `00` and `7F`;
+with `NAV = POOL` it does the same on CHAIN and PHRASE, stopping at `00` and `FF`.
 
 **`SETTINGS → NAV` is `SONG` by default**, and B + D-pad on CHAIN and PHRASE walks the arrangement instead
 of the pools. The cursor becomes a song cell, and the chain or phrase you are looking at is whichever
