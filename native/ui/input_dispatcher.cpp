@@ -240,6 +240,15 @@ void InputDispatcher::mark_dirty_and_arm_autosave() {
 void InputDispatcher::mark_modified(bool table_touched) {
     mark_dirty_and_arm_autosave();
 
+    // A command deleted while switched off must not leave its slot off for the next one typed there.
+    Project& p = host_.edit_project();
+    if (s_.currentScreen == ScreenType::PHRASE)
+        for (songcore::PhraseStep& st : p.phrases[static_cast<size_t>(s_.currentPhrase)].steps)
+            songcore::drop_off_from_empty(st);
+    if (s_.currentScreen == ScreenType::TABLE)
+        for (songcore::TableRow& r : p.tables[static_cast<size_t>(s_.currentTable)].rows)
+            songcore::drop_off_from_empty(r);
+
     // ⚠️ The engine caches the tables it was given; an in-place edit must invalidate them.
     if (table_touched || s_.currentScreen == ScreenType::TABLE) host_.invalidate_tables();
 

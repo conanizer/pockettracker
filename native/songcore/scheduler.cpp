@@ -835,13 +835,12 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
     schedulingTrack_ = clampi(trackId, 0, 7);
     const Phrase& phrase = project.phrases[w.phraseId];
 
-    static const PhraseStep emptyStep{};
     for (; w.row < 16; ++w.row) {
         const int stepIndex = w.row;
         // A row its NTH holds back this pass is walked as an empty one: it takes its time, and its
         // note, its commands, its GRV and its HOP are not there.
-        const PhraseStep& step = step_plays_on_pass(phrase.steps[stepIndex], w.pass)
-                               ? phrase.steps[stepIndex] : emptyStep;
+        const PhraseStep played = as_played(phrase.steps[stepIndex]);
+        const PhraseStep step   = step_plays_on_pass(played, w.pass) ? played : PhraseStep{};
 
         // Pre-scan GRV so a new groove takes effect on its own step; the last GRV wins.
         for (int fxSlot = 1; fxSlot <= 3; ++fxSlot) {

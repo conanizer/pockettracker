@@ -147,7 +147,8 @@ class InputDispatcher {
 
     // ── R + A/B: MUTE and SOLO (SONG and MIXER) ──────────────────────────────────────────────────
     // Acts on the press; undone if its own button comes up before R.
-    // R+B: toggle MUTE on the cursor's channel, or every channel in the selection.
+    // R+B: toggle MUTE on the cursor's channel, or every channel in the selection. On PHRASE and
+    // TABLE it switches commands off instead (`toggle_fx_off`).
     void on_r_b();
     // R+A: toggle SOLO, same targeting.
     void on_r_a();
@@ -231,7 +232,7 @@ class InputDispatcher {
     bool defer_a_to_release() const;
 
     // Asked by the mapper on every plain B: wait for the release? True in the EQ editor and wherever
-    // R+B is a mute (a B a frame ahead of its R must still become the chord).
+    // R+B is a chord (a B a frame ahead of its R must still become the chord).
     bool defer_b_to_release() const;
 
     // For the top-strip readout ("PHR:2x3").
@@ -407,6 +408,22 @@ class InputDispatcher {
     void restore_full_playback();
     // Do R+A/R+B mean MUTE/SOLO here — and so must B be held?
     bool mute_solo_chord_live() const;
+
+    // ── R+B on PHRASE and TABLE: switch commands off, held like the MUTE chord ──
+    // The undo is the whole phrase's or table's off flags, as the chord found them.
+    struct FxOffSnapshot {
+        bool live  = false;
+        bool table = false;
+        int  id    = -1;
+        bool off[16][3] = {};
+    };
+    FxOffSnapshot fxOffSnapshot_{};
+    bool fx_off_chord_live() const;
+    // Flips every command under the cursor, or in the selection.
+    void toggle_fx_off();
+    // L+R's rung for them: the open phrase or table only, never another one.
+    bool open_grid_has_fx_off() const;
+    void clear_open_grid_fx_off();
     // L+R's recency flag: the selection's state folded into one number, watched for a change. Run from
     // `set_now()` and at the top of `toggle_mute_solo()`, so the order follows the press.
     unsigned selection_signature() const;

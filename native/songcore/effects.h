@@ -273,7 +273,7 @@ inline int effect_type_at(int index) {
 inline int phrase_certain_hop_row(const Phrase& phrase) {
     const auto unused = [](int type) { return type == FX_NONE || type == FX_NTH; };
     for (int row = 0; row < static_cast<int>(phrase.steps.size()); ++row) {
-        const PhraseStep& step = phrase.steps[static_cast<size_t>(row)];
+        const PhraseStep step = as_played(phrase.steps[static_cast<size_t>(row)]);
         bool everyPass = true;
         for (int slot = 1; slot <= 3; ++slot)
             if (step_fx_type(step, slot) == FX_NTH && !nth_always(step_fx_value(step, slot))) everyPass = false;

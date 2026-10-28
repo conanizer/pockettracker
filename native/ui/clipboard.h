@@ -24,6 +24,7 @@ struct PhraseStepClipItem {
     std::optional<int> instrument;
     std::optional<int> fxType;
     std::optional<int> fxValue;
+    bool fxOff = false;   // rides with fxType: a switched-off command pastes switched off
 };
 
 // Columns: 1 phrase, 2 transpose.
@@ -49,6 +50,7 @@ struct TableRowClipItem {
     std::optional<int> volume;
     std::optional<int> fxType;
     std::optional<int> fxValue;
+    bool fxOff = false;   // rides with fxType: a switched-off command pastes switched off
 };
 
 struct PasteResult {

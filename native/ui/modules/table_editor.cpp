@@ -1,5 +1,7 @@
 #include "ui/modules/table_editor.h"
 
+#include <algorithm>
+
 #include "songcore/table_automation.h"
 #include "ui/helpers.h"
 
@@ -50,10 +52,13 @@ void TableModule::draw(Canvas& c, int x, int y, const TableState& s) const {
     c.draw_text("FX2", fx2NameX,   rowY, header_color(cc, 5, 6, t), CHAR_SPACING, FONT_SCALE);
     c.draw_text("FX3", fx3NameX,   rowY, header_color(cc, 7, 8, t), CHAR_SPACING, FONT_SCALE);
 
-    // An AUS/AUF cell no ramp uses draws dimmed — the engine's own pairing walk, asked once per draw.
+    // An AUS/AUF cell no ramp uses draws dimmed — the engine's own pairing walk over the rows as
+    // played, asked once per draw.
+    TableRow  played[16];
+    const int rowCount = std::min(16, static_cast<int>(s.table.rows.size()));
+    for (int i = 0; i < rowCount; ++i) played[i] = songcore::as_played(s.table.rows[static_cast<size_t>(i)]);
     const table_automation::TableRampCells rampCells =
-            table_automation::find_table_ramp_cells(s.table.rows.data(),
-                                                    static_cast<int>(s.table.rows.size()));
+            table_automation::find_table_ramp_cells(played, rowCount);
 
     for (int i = 0; i < static_cast<int>(s.table.rows.size()); ++i) {
         draw_row(c, x, y, i, s.table.rows[static_cast<size_t>(i)], s, rampCells, stepX, transposeX,
@@ -92,9 +97,10 @@ void TableModule::draw_row(Canvas& c, int x, int y, int index, const TableRow& r
     cells.cell(row.volume == -1 ? "--" : hex2(row.volume), volX, cur(2), sel(2),
                /*is_empty=*/row.volume == -1, t.textValue);
 
-    // FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8. A pair dims when unset, an AUS/AUF when no ramp uses it.
+    // FX1 = cols 3/4, FX2 = 5/6, FX3 = 7/8. A pair dims when unset or switched off, an AUS/AUF when
+    // no ramp uses it.
     const auto fxDim = [&](int type, int slot) {
-        return type == 0x00 || !rampCells.active(type, index, slot);
+        return type == 0x00 || songcore::fx_off(row, slot) || !rampCells.active(type, index, slot);
     };
 
     const bool fx1Empty = fxDim(row.fx1Type, 1);

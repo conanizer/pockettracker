@@ -72,7 +72,8 @@ inline bool fill_same_steps(const songcore::Phrase& a, const songcore::Phrase& b
         const songcore::PhraseStep& y = b.steps[i];
         if (x.note != y.note || x.instrument != y.instrument || x.volume != y.volume ||
             x.fx1Type != y.fx1Type || x.fx1Value != y.fx1Value || x.fx2Type != y.fx2Type ||
-            x.fx2Value != y.fx2Value || x.fx3Type != y.fx3Type || x.fx3Value != y.fx3Value)
+            x.fx2Value != y.fx2Value || x.fx3Type != y.fx3Type || x.fx3Value != y.fx3Value ||
+            x.fx1Off != y.fx1Off || x.fx2Off != y.fx2Off || x.fx3Off != y.fx3Off)
             return false;
     }
     return true;
@@ -106,11 +107,13 @@ inline void fill_place(songcore::PhraseStep& dst, const songcore::PhraseStep& sr
         if (type == songcore::FX_NONE || (!hasType && !hasValue)) continue;
 
         const int was = songcore::step_fx_type(dst, slot);
-        if (r.wholeUnit || (hasType && hasValue) || was == songcore::FX_NONE)
+        if (r.wholeUnit || (hasType && hasValue) || was == songcore::FX_NONE) {
             songcore::step_set_fx(dst, slot, type, songcore::step_fx_value(src, slot));
-        else if (hasType)
+            songcore::set_fx_off(dst, slot, songcore::fx_off(src, slot));
+        } else if (hasType) {
             songcore::step_set_fx(dst, slot, type, songcore::step_fx_value(dst, slot));
-        else if (was == type)
+            songcore::set_fx_off(dst, slot, songcore::fx_off(src, slot));
+        } else if (was == type)
             songcore::step_set_fx_value(dst, slot, songcore::step_fx_value(src, slot));
     }
 }

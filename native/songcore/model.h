@@ -156,6 +156,7 @@ struct PhraseStep {
     int  fx1Type = 0x00, fx1Value = 0x00;
     int  fx2Type = 0x00, fx2Value = 0x00;
     int  fx3Type = 0x00, fx3Value = 0x00;
+    bool fx1Off = false, fx2Off = false, fx3Off = false;   // switched off: see `as_played`
 };
 
 // The flat fx{1,2,3}{Type,Value} fields as slots 1..3. Beside the struct because both the scheduler
@@ -217,7 +218,38 @@ struct TableRow {
     int fx1Type = 0x00, fx1Value = 0x00;
     int fx2Type = 0x00, fx2Value = 0x00;
     int fx3Type = 0x00, fx3Value = 0x00;
+    bool fx1Off = false, fx2Off = false, fx3Off = false;   // switched off: see `as_played`
 };
+
+// ─── A command switched off ──────────────────────────────────────────────────────────────────────
+// R+B on a phrase or table command switches it off: it stays in its cell and in the file, and plays
+// as an empty slot. Both row types spell the fields the same way.
+// ⚠️ Playback reads a step or a table row through `as_played`. A reader that takes the raw fields
+// plays a command the user has switched off.
+
+template <typename Row> int row_fx_type(const Row& r, int slot) {
+    return slot == 1 ? r.fx1Type : slot == 2 ? r.fx2Type : slot == 3 ? r.fx3Type : 0x00;
+}
+template <typename Row> bool fx_off(const Row& r, int slot) {
+    return slot == 1 ? r.fx1Off : slot == 2 ? r.fx2Off : slot == 3 ? r.fx3Off : false;
+}
+template <typename Row> void set_fx_off(Row& r, int slot, bool off) {
+    if (slot == 1) r.fx1Off = off;
+    else if (slot == 2) r.fx2Off = off;
+    else if (slot == 3) r.fx3Off = off;
+}
+template <typename Row> Row as_played(Row r) {
+    if (r.fx1Off) { r.fx1Type = 0x00; r.fx1Value = 0x00; r.fx1Off = false; }
+    if (r.fx2Off) { r.fx2Type = 0x00; r.fx2Value = 0x00; r.fx2Off = false; }
+    if (r.fx3Off) { r.fx3Type = 0x00; r.fx3Value = 0x00; r.fx3Off = false; }
+    return r;
+}
+// An empty slot is never off, so a command later typed or pasted into it starts on.
+template <typename Row> void drop_off_from_empty(Row& r) {
+    if (r.fx1Type == 0x00) r.fx1Off = false;
+    if (r.fx2Type == 0x00) r.fx2Off = false;
+    if (r.fx3Type == 0x00) r.fx3Off = false;
+}
 
 struct Table {
     int id = 0;

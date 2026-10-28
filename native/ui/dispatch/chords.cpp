@@ -250,6 +250,7 @@ void InputDispatcher::restore_full_playback() {
 
 void InputDispatcher::on_r_b() {
     if (route(Gesture::R_B)) return;
+    if (fx_off_chord_live()) { toggle_fx_off(); return; }
     if (!mute_solo_chord_live()) return;
     toggle_mute_solo(/*solo=*/false);
 }
@@ -268,10 +269,23 @@ bool InputDispatcher::mute_solo_chord_live() const {
 
 void InputDispatcher::on_r_combo_commit() {
     // R came up first, so what the chord did stands; the next chord takes a fresh snapshot.
-    mixSnapshot_.live = false;
+    mixSnapshot_.live   = false;
+    fxOffSnapshot_.live = false;
 }
 
 void InputDispatcher::on_r_combo_revert() {
+    if (fxOffSnapshot_.live) {
+        fxOffSnapshot_.live = false;
+        Project& p = host_.edit_project();
+        auto restore = [&](auto& rows) {
+            for (size_t r = 0; r < rows.size() && r < 16; ++r)
+                for (int slot = 1; slot <= 3; ++slot)
+                    songcore::set_fx_off(rows[r], slot, fxOffSnapshot_.off[r][slot - 1]);
+        };
+        if (fxOffSnapshot_.table) restore(p.tables[static_cast<size_t>(fxOffSnapshot_.id)].rows);
+        else                      restore(p.phrases[static_cast<size_t>(fxOffSnapshot_.id)].steps);
+        mark_modified(/*table_touched=*/fxOffSnapshot_.table);
+    }
     if (!mixSnapshot_.live) return;   // the chord armed on a screen that has no channels
     Project& p = host_.edit_project();
     for (int ch = 0; ch < MIX_CHANNELS; ++ch) {
@@ -282,6 +296,85 @@ void InputDispatcher::on_r_combo_revert() {
     }
     mixSnapshot_.live = false;
     host_.push_globals();
+}
+
+// ─── R+B on PHRASE / TABLE: switch commands off ──────────────────────────────────────────────────
+
+bool InputDispatcher::fx_off_chord_live() const {
+    if (top_layer()) return false;
+    return s_.currentScreen == ScreenType::PHRASE || s_.currentScreen == ScreenType::TABLE;
+}
+
+void InputDispatcher::toggle_fx_off() {
+    // A selection made earlier in this batch of events must count as older than this toggle.
+    run_selection_recency();
+
+    const bool onTable = s_.currentScreen == ScreenType::TABLE;
+    const int  id      = onTable ? s_.currentTable : s_.currentPhrase;
+    // FX1's name column; each slot is a name and a value column, and either one names the slot.
+    const int  fx1Col  = onTable ? 3 : 4;
+
+    int top  = onTable ? s_.tableCursorRow    : s_.cursorRow;
+    int left = onTable ? s_.tableCursorColumn : s_.cursorColumn;
+    int bottom = top, right = left;
+    if (s_.selection.active) {
+        const SelectionBounds b = s_.selection.bounds();
+        top = b.topLeftRow;  bottom = b.bottomRightRow;
+        left = b.topLeftColumn; right = b.bottomRightColumn;
+    }
+
+    Project& p = host_.edit_project();
+    auto flip = [&](auto& rows) {
+        bool any = false;
+        for (int r = std::max(0, top); r <= bottom && r < static_cast<int>(rows.size()) && r < 16; ++r) {
+            for (int slot = 1; slot <= 3; ++slot) {
+                const int nameCol = fx1Col + 2 * (slot - 1);
+                if (nameCol + 1 < left || nameCol > right) continue;
+                auto& row = rows[static_cast<size_t>(r)];
+                if (songcore::row_fx_type(row, slot) == songcore::FX_NONE) continue;   // nothing to switch
+
+                // ⚠️ Snapshot before the first flip, so the B release can put everything back.
+                if (!fxOffSnapshot_.live) {
+                    fxOffSnapshot_ = FxOffSnapshot{true, onTable, id, {}};
+                    for (size_t k = 0; k < rows.size() && k < 16; ++k)
+                        for (int sl = 1; sl <= 3; ++sl)
+                            fxOffSnapshot_.off[k][sl - 1] = songcore::fx_off(rows[k], sl);
+                }
+                songcore::set_fx_off(row, slot, !songcore::fx_off(row, slot));
+                any = true;
+            }
+        }
+        return any;
+    };
+    const bool any = onTable ? flip(p.tables[static_cast<size_t>(id)].rows)
+                             : flip(p.phrases[static_cast<size_t>(id)].steps);
+    if (!any) return;
+    s_.lastClearable = AppState::Clearable::FX_OFF;
+    mark_modified(/*table_touched=*/onTable);
+}
+
+bool InputDispatcher::open_grid_has_fx_off() const {
+    const auto any_off = [](const auto& rows) {
+        for (const auto& r : rows)
+            if (r.fx1Off || r.fx2Off || r.fx3Off) return true;
+        return false;
+    };
+    const Project& p = *s_.project;
+    if (s_.currentScreen == ScreenType::PHRASE) return any_off(p.phrases[static_cast<size_t>(s_.currentPhrase)].steps);
+    if (s_.currentScreen == ScreenType::TABLE)  return any_off(p.tables[static_cast<size_t>(s_.currentTable)].rows);
+    return false;
+}
+
+void InputDispatcher::clear_open_grid_fx_off() {
+    const auto clear = [](auto& rows) {
+        for (auto& r : rows) r.fx1Off = r.fx2Off = r.fx3Off = false;
+    };
+    Project& p = host_.edit_project();
+    const bool onTable = s_.currentScreen == ScreenType::TABLE;
+    if (onTable) clear(p.tables[static_cast<size_t>(s_.currentTable)].rows);
+    else         clear(p.phrases[static_cast<size_t>(s_.currentPhrase)].steps);
+    s_.lastClearable = AppState::Clearable::NONE;
+    mark_modified(/*table_touched=*/onTable);
 }
 
 unsigned InputDispatcher::selection_signature() const {
@@ -321,6 +414,13 @@ void InputDispatcher::on_l_r() {
         return false;
     }();
 
+    // On PHRASE and TABLE the switched-off commands of the open one; another phrase's stay as they are.
+    const bool fx_touched = open_grid_has_fx_off();
+
+    if (s_.lastClearable == AppState::Clearable::FX_OFF && fx_touched) {
+        clear_open_grid_fx_off();
+        return;
+    }
     if (s_.lastClearable == AppState::Clearable::MUTE && mix_touched) {
         restore_full_playback();
         return;
@@ -335,8 +435,10 @@ void InputDispatcher::on_l_r() {
     const bool had_buffer = !clip_.info().empty();
     clip_.clear();
 
-    // Nothing to clear here, but the mix has something: take it.
-    if (!had_buffer && mix_touched) restore_full_playback();
+    // Nothing to clear here, but the commands or the mix have something: take it, the screen's own first.
+    if (had_buffer) return;
+    if (fx_touched)       clear_open_grid_fx_off();
+    else if (mix_touched) restore_full_playback();
 }
 
 // ─── SELECT + A / B / R: the browser's file chords — only its handler answers them ───────────────

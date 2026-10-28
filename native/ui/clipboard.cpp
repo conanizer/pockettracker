@@ -53,11 +53,11 @@ void Clipboard::copy_phrase_steps(const Project& p, int phraseId, int startRow, 
                 case 1: item.note       = step.note;       break;
                 case 2: item.volume     = step.volume;     break;
                 case 3: item.instrument = step.instrument; break;
-                case 4: item.fxType     = step.fx1Type;    break;
+                case 4: item.fxType     = step.fx1Type;    item.fxOff = step.fx1Off; break;
                 case 5: item.fxValue    = step.fx1Value;   break;
-                case 6: item.fxType     = step.fx2Type;    break;
+                case 6: item.fxType     = step.fx2Type;    item.fxOff = step.fx2Off; break;
                 case 7: item.fxValue    = step.fx2Value;   break;
-                case 8: item.fxType     = step.fx3Type;    break;
+                case 8: item.fxType     = step.fx3Type;    item.fxOff = step.fx3Off; break;
                 case 9: item.fxValue    = step.fx3Value;   break;
                 default: continue;  // outside the editable columns — no item at all
             }
@@ -132,11 +132,11 @@ void Clipboard::copy_table_rows(const Project& p, int tableId, int startRow, int
             switch (col) {
                 case 1: item.transpose = tr.transpose; break;
                 case 2: item.volume    = tr.volume;    break;
-                case 3: item.fxType    = tr.fx1Type;   break;
+                case 3: item.fxType    = tr.fx1Type;   item.fxOff = tr.fx1Off; break;
                 case 4: item.fxValue   = tr.fx1Value;  break;
-                case 5: item.fxType    = tr.fx2Type;   break;
+                case 5: item.fxType    = tr.fx2Type;   item.fxOff = tr.fx2Off; break;
                 case 6: item.fxValue   = tr.fx2Value;  break;
-                case 7: item.fxType    = tr.fx3Type;   break;
+                case 7: item.fxType    = tr.fx3Type;   item.fxOff = tr.fx3Off; break;
                 case 8: item.fxValue   = tr.fx3Value;  break;
                 default: continue;
             }
@@ -198,11 +198,11 @@ PasteResult Clipboard::paste_phrase_steps(Project& p, int phraseId, int cursorRo
             case 1: if (item.note)       { step.note       = *item.note;       ++itemsPasted; } break;
             case 2: if (item.volume)     { step.volume     = *item.volume;     ++itemsPasted; } break;
             case 3: if (item.instrument) { step.instrument = *item.instrument; ++itemsPasted; } break;
-            case 4: if (item.fxType)     { step.fx1Type    = *item.fxType;     ++itemsPasted; } break;
+            case 4: if (item.fxType)     { step.fx1Type    = *item.fxType; step.fx1Off = item.fxOff; ++itemsPasted; } break;
             case 5: if (item.fxValue)    { step.fx1Value   = *item.fxValue;    ++itemsPasted; } break;
-            case 6: if (item.fxType)     { step.fx2Type    = *item.fxType;     ++itemsPasted; } break;
+            case 6: if (item.fxType)     { step.fx2Type    = *item.fxType; step.fx2Off = item.fxOff; ++itemsPasted; } break;
             case 7: if (item.fxValue)    { step.fx2Value   = *item.fxValue;    ++itemsPasted; } break;
-            case 8: if (item.fxType)     { step.fx3Type    = *item.fxType;     ++itemsPasted; } break;
+            case 8: if (item.fxType)     { step.fx3Type    = *item.fxType; step.fx3Off = item.fxOff; ++itemsPasted; } break;
             case 9: if (item.fxValue)    { step.fx3Value   = *item.fxValue;    ++itemsPasted; } break;
             default: break;
         }
@@ -286,11 +286,11 @@ PasteResult Clipboard::paste_table_rows(Project& p, int tableId, int cursorRow, 
         switch (targetCol) {
             case 1: if (item.transpose) { tr.transpose = *item.transpose; ++itemsPasted; } break;
             case 2: if (item.volume)    { tr.volume    = *item.volume;    ++itemsPasted; } break;
-            case 3: if (item.fxType)    { tr.fx1Type   = *item.fxType;    ++itemsPasted; } break;
+            case 3: if (item.fxType)    { tr.fx1Type   = *item.fxType; tr.fx1Off = item.fxOff; ++itemsPasted; } break;
             case 4: if (item.fxValue)   { tr.fx1Value  = *item.fxValue;   ++itemsPasted; } break;
-            case 5: if (item.fxType)    { tr.fx2Type   = *item.fxType;    ++itemsPasted; } break;
+            case 5: if (item.fxType)    { tr.fx2Type   = *item.fxType; tr.fx2Off = item.fxOff; ++itemsPasted; } break;
             case 6: if (item.fxValue)   { tr.fx2Value  = *item.fxValue;   ++itemsPasted; } break;
-            case 7: if (item.fxType)    { tr.fx3Type   = *item.fxType;    ++itemsPasted; } break;
+            case 7: if (item.fxType)    { tr.fx3Type   = *item.fxType; tr.fx3Off = item.fxOff; ++itemsPasted; } break;
             case 8: if (item.fxValue)   { tr.fx3Value  = *item.fxValue;   ++itemsPasted; } break;
             default: break;
         }
