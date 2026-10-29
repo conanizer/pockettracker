@@ -407,17 +407,24 @@ void InputDispatcher::run_selection_recency() {
     s_.lastClearable = AppState::Clearable::SELECTION;
 }
 
+bool InputDispatcher::mix_touched() {
+    Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
+    for (int ch = 0; ch < MIX_CHANNELS; ++ch)
+        if (const bool* m = songcore::mix_channel_mute(p, ch); m && *m) return true;
+    return p.dryMute;
+}
+
+bool InputDispatcher::l_r_has_more() {
+    return !lrRouted_ && (s_.selection.active || mix_touched() || open_grid_has_fx_off());
+}
+
 void InputDispatcher::on_l_r() {
-    if (route(Gesture::L_R)) return;
+    lrRouted_ = route(Gesture::L_R);
+    if (lrRouted_) return;
 
     // One press clears one thing, newest first: the mix, or the selection with its buffer. ⚠️ A rung
     // with nothing to clear falls through to the other, or L+R reads as dead.
-    const bool mix_touched = [&] {
-        Project& p = host_.edit_project();   // the resolver hands out pointers; nothing is written here
-        for (int ch = 0; ch < MIX_CHANNELS; ++ch)
-            if (const bool* m = songcore::mix_channel_mute(p, ch); m && *m) return true;
-        return p.dryMute;
-    }();
+    const bool mix_touched = this->mix_touched();
 
     // On PHRASE and TABLE the switched-off commands of the open one; another phrase's stay as they are.
     const bool fx_touched = open_grid_has_fx_off();

@@ -342,6 +342,8 @@ enum class HelpTopic {
     INST_MIDI_BEND,
     MIDI_SYNC_IN,
     PROJECT_COLLECT,
+    SET_ONE_HAND,
+    SET_ONE_HAND_HOLD,
 
     COUNT
 };
@@ -2436,6 +2438,20 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "where they are. If that folder",
       "is already there, it asks first."},
      {"A collects the song"}},
+    /* SET_ONE_HAND */
+    {"ONE HAND: buttons that stay held", "A, B, L, R or SELECT held alone", "stays down until pressed again.",
+     {"For combinations with one hand:",
+      "lock one button, then press the",
+      "next. It lets go by itself after",
+      "delete, cut, paste, a selection",
+      "or a question. Its letter shows",
+      "at the right."},
+     {"A+D-PAD turns it on or off"}},
+    /* SET_ONE_HAND_HOLD */
+    {"MS: how long until it locks", "Milliseconds a button is held", "alone before it stays down.",
+     {"Shorter locks sooner, but a slow",
+      "tap may then lock by mistake."},
+     {"A+D-PAD picks one"}},
 };
 
 // ─── Line length and font, as compile errors — at runtime they fail silently ─────────────────────
@@ -2764,6 +2780,8 @@ inline HelpTopic settings_cell_topic(int row, int column) {
         case SettingsRow::KB_INSERT:  return HelpTopic::SET_KB_INSERT;
         case SettingsRow::CURSOR:     return HelpTopic::SET_CURSOR;
         case SettingsRow::NAV:        return HelpTopic::SET_NAV;
+        case SettingsRow::ONE_HAND:
+            return second ? HelpTopic::SET_ONE_HAND_HOLD : HelpTopic::SET_ONE_HAND;
         case SettingsRow::FOLDER:     return HelpTopic::SET_FOLDER;
         case SettingsRow::NOTE_PREV:  return HelpTopic::SET_NOTE_PREVIEW;
         case SettingsRow::VISUALIZER: return HelpTopic::SET_VISUALIZER;

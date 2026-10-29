@@ -5,6 +5,7 @@
 
 #include "songcore/chords.h"
 #include "songcore/scales.h"
+#include "ui/buttons.h"
 #include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
@@ -27,6 +28,7 @@ bool editor_overlay_up(const AppState& s) {
 
 void TrackerLayout::draw(Canvas& c, const AppState& s) {
     draw_frame(c, s);
+    if (s.project) draw_button_locks(c, s);
 
     // These two are outside `draw_frame`, which the full-screen modules return from early.
     if (s.helpFull && s.project) helpOverlay_.draw(c, help_topic(s), s.theme);
@@ -488,6 +490,34 @@ void TrackerLayout::draw_selection_clipboard(Canvas& c, const AppState& s) const
         c.draw_text(sel, x, y, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
     if (!clip.empty())
         c.draw_text(clip, x, sel.empty() ? y : y + 21, s.theme.textTitle, CHAR_SPACING, FONT_SCALE);
+}
+
+// ─── ONE HAND: the locked buttons, boxed; one about to lock, plain ──────────────────────────────
+// Each letter has its own place, so a lock never moves the others. Under the note monitor, or at the
+// right on the full-screen modules, which have no right bar: the file browser's path line, the
+// sample editor's empty row under SELECTION.
+void TrackerLayout::draw_button_locks(Canvas& c, const AppState& s) const {
+    if (!s.buttonsLocked && !s.buttonsLocking) return;
+    static constexpr struct { Button button; const char* letter; } SLOTS[] = {
+        {Button::A, "A"}, {Button::B, "B"}, {Button::L_SHIFT, "L"}, {Button::R_SHIFT, "R"},
+        {Button::SELECT, "S"},
+    };
+    static constexpr int SLOT_W = 23;   // five fill the right bar; a box each, with a gap between
+    const bool full = full_screen_module(s);
+    const int  x0   = full ? DESIGN_W - SIDE_SPACER - 5 * SLOT_W : RIGHT_BAR_X;
+    const int  y    = !full ? EDITOR_Y + ROW_HEIGHT + 14 + 10 * ROW_HEIGHT + 10
+                    : s.currentScreen == ScreenType::SAMPLE_EDITOR ? SampleEditorModule::content_y(9)
+                                                                   : SCREEN_SPACER + ROW_HEIGHT;
+    for (int i = 0; i < 5; ++i) {
+        const uint16_t bit = static_cast<uint16_t>(1u << static_cast<int>(SLOTS[i].button));
+        const int      x   = x0 + i * SLOT_W + 3;
+        if (s.buttonsLocked & bit) {
+            c.fill_rect(x - 2, y, CHAR_W + 2, ROW_HEIGHT, s.theme.vizWave);
+            c.draw_text(SLOTS[i].letter, x, y + TEXT_PADDING, s.theme.background, CHAR_SPACING, FONT_SCALE);
+        } else if (s.buttonsLocking & bit) {
+            c.draw_text(SLOTS[i].letter, x, y + TEXT_PADDING, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
+        }
+    }
 }
 
 void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {

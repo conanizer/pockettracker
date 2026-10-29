@@ -316,6 +316,10 @@ struct AppState {
     // A is down. While it is, a CHD value under the cursor names its chord in the status line's place.
     bool aHeld = false;
 
+    // ONE HAND: a bit per Button — locked, and held alone long enough that letting go will lock it.
+    uint16_t buttonsLocked  = 0;
+    uint16_t buttonsLocking = 0;
+
     // "SAVED", "NO FREE PHRASES"… over the visualizer header on every screen.
     std::string statusMessage{};
     bool        statusSuccess = true;
@@ -375,6 +379,13 @@ inline bool modal_backdrop_active(const AppState& s) {
     // A load is not here: its strip dims nothing.
     return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen || s.mapPicker.isOpen ||
            s.helpFull || s.renderDialog.isOpen || send_editor_drawn(s) || stretch_editor_up(s);
+}
+
+// A box that waits for an answer: a confirm, ARE YOU SURE?, the render dialog, the keyboard. ONE HAND
+// lets go of its locks when one opens — a locked A or L would garble the answer.
+inline bool modal_question_up(const AppState& s) {
+    return s.confirm.is_open() || s.renderDialog.isOpen || s.qwerty.isOpen ||
+           (s.currentScreen == ScreenType::SAMPLE_EDITOR && s.sampleEditor.showConfirmClose);
 }
 
 // Does a full-screen module own the frame (no furniture)? ⚠️ `draw` and `has_falling_meters` both ask

@@ -11,6 +11,7 @@
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/button_mapper.h"
+#include "ui/sticky_buttons.h"
 #include "ui/buttons.h"
 #include "ui/canvas.h"
 #include "ui/engine_feed.h"
@@ -422,6 +423,9 @@ struct Screen {
     // The on-screen gamepad; enabled per frame, so plugging a controller switches layouts live.
     SdlTouch touch;
 
+    // ONE HAND, in front of the mapper; here because the on-screen buttons draw its locks.
+    ui::StickyButtons sticky;
+
     // The portrait device skin, reloaded only when the SETTINGS skin column changes.
     Skin skin;
 
@@ -456,20 +460,20 @@ struct Screen {
             };
             const auto buttons = [this, &input, ovOn, ovStr](SDL_Renderer* r) {
                 if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
-                portrait.draw_buttons(r, skin, labelFont, input);
+                portrait.draw_buttons(r, skin, labelFont, input, sticky);
             };
             // ⚠️ A modal dims only the bezel glass, never the casing or buttons — a dark skin around a
             // bright cluster reads as a bug.
             return video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
-                                         chrome, buttons, portrait.signature(input) ^ crtSig, scrim,
+                                         chrome, buttons, portrait.signature(input, sticky) ^ crtSig, scrim,
                                          portrait.screen_rect());
         }
         // Landscape / desktop: the centred frame, the touch panels in the bars beside it.
         const auto overlay = [this, &input, ovOn, ovStr, fr = video.frame_rect()](SDL_Renderer* r) {
             if (ovOn) screenOverlay.draw(r, fr, ovStr);
-            touch.draw(r, input);
+            touch.draw(r, input, sticky);
         };
-        return video.present(canvas, state.theme.background, overlay, touch.signature(input) ^ crtSig,
+        return video.present(canvas, state.theme.background, overlay, touch.signature(input, sticky) ^ crtSig,
                              scrim);
     }
 
@@ -519,7 +523,7 @@ class FrameLoop {
               Screen& window, BackgroundContext& background)
         : cfg(config), engineRef(*config.engine), audio(*config.audio), host(songHost),
           midiInConsole(console), state(appState), dispatch(dispatcher), input(sdlInput),
-          screen(window), bg(background), midiThru(songHost.midi_in_thru()) {}
+          screen(window), sticky(window.sticky), bg(background), midiThru(songHost.midi_in_thru()) {}
 
     // Until a quit, F10, PROJECT > EXIT or `terminate_requested` (desktop's signal flag; the work is
     // saved after this returns). ⚠️ A kill during the synchronous export is seen only when it ends.
@@ -565,11 +569,13 @@ class FrameLoop {
     ui::InputDispatcher& dispatch;
     SdlInput&            input;
     Screen&              screen;
+    ui::StickyButtons&   sticky;   // ONE HAND, in front of the mapper (the screen's)
     BackgroundContext&   bg;
 
     ui::TrackerLayout layout;
     ui::EngineFeed    feed;
     ui::MapperState   mapper;
+    bool              questionWasUp = false;   // `modal_question_up` last frame
 
     // Cleared by a quit; also by load_pump, so a quit during a load is not swallowed.
     bool running = true;
@@ -697,7 +703,7 @@ bool FrameLoop::load_pump() {
             cancel  = true;
         } else if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP ||
                    e.type == SDL_FINGERMOTION) {
-            screen.touch.handle_finger(e, input, now);
+            screen.touch.handle_finger(e, input, sticky, now);
         } else {
             input.handle_event(e, now);
         }
@@ -933,17 +939,46 @@ void FrameLoop::handle_input(Uint64 now) {
     // backspace.
     input.set_b_repeatable(state.qwerty.isOpen);
 
+    // Before the drain: a lifted finger asks the locks whether to click.
+    const bool oneHanded = state.settings.oneHanded;
+    sticky.set_mode(oneHanded, static_cast<uint64_t>(
+        ui::ONE_HAND_HOLD_STEPS[ui::one_hand_hold_index(state.settings.oneHandHoldMs)]));
+
     SDL_Event e;
     while (SDL_PollEvent(&e)) handle_sdl_event(e, now);
     input.tick(now);
 
     dispatch.set_now(static_cast<long long>(now));
 
+    const auto to_mapper    = [&](const ui::ButtonEvent& ev) { ui::handle_button(ev, dispatch, mapper, now); };
+    const auto l_r_has_more = [&] { return dispatch.l_r_has_more(); };
+    // Turned off: what it still holds is let go.
+    if (!oneHanded) sticky.release_all(to_mapper);
+
     ui::ButtonEvent be;
     while (input.poll(be)) {
         // ⚠️ Key repeat comes from input.tick(), with no SDL event behind it.
         sawInput = true;
-        ui::handle_button(be, dispatch, mapper, now);
+        sticky.feed(be, now, to_mapper, l_r_has_more);
+    }
+    sticky.tick(now, to_mapper);
+
+    // A question just opened: its answer wants bare buttons.
+    const bool question = ui::modal_question_up(state);
+    if (question && !questionWasUp) sticky.release_all(to_mapper);
+    questionWasUp = question;
+
+    // The right bar's lock letters. A button crossing the hold time changes them with no event.
+    uint16_t locked = 0, locking = 0;
+    for (int i = 0; i < static_cast<int>(ui::Button::COUNT); ++i) {
+        const auto b = static_cast<ui::Button>(i);
+        if (sticky.locked(b)) locked |= static_cast<uint16_t>(1u << i);
+        if (sticky.will_lock(b, now)) locking |= static_cast<uint16_t>(1u << i);
+    }
+    if (locked != state.buttonsLocked || locking != state.buttonsLocking) {
+        state.buttonsLocked  = locked;
+        state.buttonsLocking = locking;
+        sawInput             = true;
     }
 
     // Somebody is here: keeps the poll rate fast (pace_tick).
@@ -1006,7 +1041,7 @@ void FrameLoop::handle_sdl_event(const SDL_Event& e, Uint64 now) {
         running = false;
     } else if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP || e.type == SDL_FINGERMOTION) {
         // A virtual button feeds SdlInput's own press/release; a finger outside one is ignored.
-        screen.touch.handle_finger(e, input, now);
+        screen.touch.handle_finger(e, input, sticky, now);
     } else {
         input.handle_event(e, now);
     }

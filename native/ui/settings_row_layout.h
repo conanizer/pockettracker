@@ -31,9 +31,10 @@ enum class SettingsRow {
     METRONOME  = 16,   // ON / OFF, + VOL
     HELP       = 17,   // OFF / SHORT / FULL
     AUDIO_OUT  = 18,   // the output device (Windows)
+    ONE_HAND   = 19,   // ON / OFF, + MS (the hold time) — a modifier held alone and let go stays down (sticky_buttons.h)
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 19;
+inline constexpr int SETTINGS_ROW_COUNT = 20;
 
 // The order rows are drawn and walked; every SettingsRow exactly once.
 inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
@@ -42,6 +43,7 @@ inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
     SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO, SettingsRow::ABXY,
     SettingsRow::METRONOME,
     SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::NAV,
+    SettingsRow::ONE_HAND,
     SettingsRow::FOLDER,    SettingsRow::NOTE_PREV,
     SettingsRow::VISUALIZER, SettingsRow::HELP,     SettingsRow::THEME,
     SettingsRow::TEMPLATE,
@@ -106,11 +108,13 @@ inline int settings_first_visible_row(const PlatformCaps& caps) {
     return 0;
 }
 
-// Does this row have a second column? LAYOUT's exists only for a skinned layout.
+// Does this row have a second column? LAYOUT's exists only for a skinned layout, ONE HAND's only
+// while it is on.
 inline bool settings_row_has_second_column(SettingsRow row, const PlatformCaps& caps,
-                                           bool layoutHasSkins) {
+                                           bool layoutHasSkins, bool oneHanded) {
     switch (row) {
         case SettingsRow::LAYOUT:    return caps.touchLayouts && layoutHasSkins;
+        case SettingsRow::ONE_HAND:  return oneHanded;
         case SettingsRow::OVERLAY:   // STR
         case SettingsRow::BTN_SOUND: // VOL
         case SettingsRow::BTN_VIBRO: // POW

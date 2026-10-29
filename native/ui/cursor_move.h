@@ -541,7 +541,8 @@ inline void move_cursor_right(AppState& s) {
         case ScreenType::SETTINGS: {
             const SettingsRow row = static_cast<SettingsRow>(s.settingsCursorRow);
             const bool hasSkins   = s.settings.skinCount > 0;
-            if (settings_row_has_second_column(row, s.caps, hasSkins) && s.settingsCursorColumn < 2)
+            if (settings_row_has_second_column(row, s.caps, hasSkins, s.settings.oneHanded) &&
+                s.settingsCursorColumn < 2)
                 s.settingsCursorColumn = 2;
             return;
         }

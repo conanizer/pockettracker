@@ -12,6 +12,7 @@
 #include "skin/button_feedback.h"
 
 #include "ui/buttons.h"
+#include "ui/sticky_buttons.h"
 #include "ui/touch_layout.h"
 
 #include <cstdint>
@@ -45,14 +46,16 @@ public:
     void layout_portrait2(const SDL_Rect& cluster, const pt::ui::touch_layout::BoxRects& rects,
                           int outW, int outH);
 
-    // Down on a button presses it; up, or sliding off it, releases it.
-    void handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_ms);
+    // Down on a button presses it; up, or sliding off it, releases it. ONE HAND's locks change only
+    // the click: none on the lift that locks, the release click on the press that lets go.
+    void handle_finger(const SDL_Event& e, SdlInput& input, const pt::ui::StickyButtons& sticky,
+                       uint64_t now_ms);
 
-    // After the frame, before the flip; a button held from any source is drawn pressed.
-    void draw(SDL_Renderer* r, const SdlInput& input) const;
+    // After the frame, before the flip; a button held from any source, or locked, is drawn pressed.
+    void draw(SDL_Renderer* r, const SdlInput& input, const pt::ui::StickyButtons& sticky) const;
 
-    // Held buttons + geometry, for the pixel gate (a press highlight lies outside the canvas).
-    uint64_t signature(const SdlInput& input) const;
+    // Pressed buttons + geometry, for the pixel gate (a press highlight lies outside the canvas).
+    uint64_t signature(const SdlInput& input, const pt::ui::StickyButtons& sticky) const;
 
 private:
     // Window pixel → the button under it, if any.
@@ -60,6 +63,12 @@ private:
 
     void emit_feedback(Button b, bool down) const {
         if (feedback_) feedback_->play(b, down, fbSettings_);
+    }
+
+    // A lift clicks unless it locks the button, or ends the press that let it go (that clicked on
+    // its way down). ⚠️ Asked before the lift reaches the lock, with the same `now`, so they agree.
+    static bool lift_clicks(Button b, const pt::ui::StickyButtons& sticky, uint64_t now_ms) {
+        return !sticky.locked(b) && !sticky.will_lock(b, now_ms);
     }
 
     bool enabled_ = false;

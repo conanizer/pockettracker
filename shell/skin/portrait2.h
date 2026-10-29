@@ -18,6 +18,7 @@
 #include <SDL.h>
 
 #include "skin/skin.h"   // SkinArt, stored by value
+#include "ui/sticky_buttons.h"
 #include "ui/touch_layout.h"
 
 #include <cstdint>
@@ -83,14 +84,15 @@ public:
     // shows casing. Draws nothing for a chromeless skin.
     void draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t innerBezelArgb) const;
 
-    // After the frame: the ten buttons in their PNG variants (pressed when held) with labels — words
-    // and arrows from `font`, the 5×5 font if it did not load. The font is mutable: it caches glyphs.
-    // Chromeless tints art and labels.
-    void draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, const SdlInput& input) const;
+    // After the frame: the ten buttons in their PNG variants (pressed when held or locked) with labels
+    // — words and arrows from `font`, the 5×5 font if it did not load. The font is mutable: it caches
+    // glyphs. Chromeless tints art and labels.
+    void draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font, const SdlInput& input,
+                      const pt::ui::StickyButtons& sticky) const;
 
-    // A fingerprint for the pixel gate: held buttons + output geometry. Non-zero while active, with a
-    // marker bit distinct from `SdlTouch`'s.
-    uint64_t signature(const SdlInput& input) const;
+    // A fingerprint for the pixel gate: pressed buttons + output geometry. Non-zero while active, with
+    // a marker bit distinct from `SdlTouch`'s.
+    uint64_t signature(const SdlInput& input, const pt::ui::StickyButtons& sticky) const;
 
 private:
     // ⚠️ Derived from the art, not stored: it decides the bare layout, the ground and the tint together.

@@ -123,7 +123,7 @@ void PortraitSkin::draw_chrome(SDL_Renderer* r, const Skin& skin, uint32_t inner
 }
 
 void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font,
-                                const SdlInput& input) const {
+                                const SdlInput& input, const pt::ui::StickyButtons& sticky) const {
     if (!active_) return;
 
     const int ox = geom_.buttons.x;
@@ -142,7 +142,7 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font,
     for (int i = 0; i < buttons_.count; ++i) {
         const tl::ButtonRect& br = buttons_.r[i];
         const SDL_Rect        dst{br.x + ox, br.y + oy, br.w, br.h};
-        const bool            pressed = input.is_held(br.button);
+        const bool            pressed = sticky.drawn_down(br.button, input.is_held(br.button));
         // Stretched to the cell; a missing piece shows the backing through.
         const SkinPiece piece = piece_for(skin, br.button, pressed);
         if (tinted) skin.draw_tinted(r, piece, dst, ink);
@@ -163,12 +163,12 @@ void PortraitSkin::draw_buttons(SDL_Renderer* r, const Skin& skin, Font& font,
     }
 }
 
-uint64_t PortraitSkin::signature(const SdlInput& input) const {
+uint64_t PortraitSkin::signature(const SdlInput& input, const pt::ui::StickyButtons& sticky) const {
     if (!active_) return 0;
 
     uint64_t bits = 0;
     for (int i = 0; i < buttons_.count; ++i)
-        if (input.is_held(buttons_.r[i].button))
+        if (sticky.drawn_down(buttons_.r[i].button, input.is_held(buttons_.r[i].button)))
             bits |= (1ull << static_cast<int>(buttons_.r[i].button));
 
     // ⚠️ A chromeless skin's ink is applied at blit time, so a TXT VALUE edit changes nothing the pixel

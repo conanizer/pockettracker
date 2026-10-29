@@ -72,7 +72,8 @@ bool SdlTouch::hit_window(int px, int py, Button& out) const {
     return false;
 }
 
-void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_ms) {
+void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, const pt::ui::StickyButtons& sticky,
+                             uint64_t now_ms) {
     if (!active_) return;
 
     // SDL normalises fingers to [0,1] over the window — the output's pixel space on Android.
@@ -84,7 +85,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
         Button b{};
         if (hit_window(px, py, b)) {
             input.touch_press(b, now_ms);
-            emit_feedback(b, /*down=*/true);
+            emit_feedback(b, /*down=*/!sticky.locked(b));
             finger_[t.fingerId] = b;
             if (trace_) std::printf("input:   TOUCH DOWN  %4d,%-4d       -> %s\n", px, py, pt::ui::button_name(b));
         } else if (trace_) {
@@ -95,7 +96,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
         auto it = finger_.find(t.fingerId);
         if (it != finger_.end()) {
             input.touch_release(it->second);
-            emit_feedback(it->second, /*down=*/false);
+            if (lift_clicks(it->second, sticky, now_ms)) emit_feedback(it->second, /*down=*/false);
             if (trace_) std::printf("input:   TOUCH UP                    -> %s\n", pt::ui::button_name(it->second));
             finger_.erase(it);
         }
@@ -107,7 +108,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
             const bool still = hit_window(px, py, b) && b == it->second;
             if (!still) {
                 input.touch_release(it->second);
-                emit_feedback(it->second, /*down=*/false);
+                if (lift_clicks(it->second, sticky, now_ms)) emit_feedback(it->second, /*down=*/false);
                 if (trace_)
                     std::printf("input:   TOUCH SLIDE-OFF             -> %s released\n",
                                 pt::ui::button_name(it->second));
@@ -117,7 +118,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
     }
 }
 
-void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input) const {
+void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input, const pt::ui::StickyButtons& sticky) const {
     if (!active_ || portrait_) return;   // the portrait cluster is PortraitSkin's
 
     fill(r, leftBox_, PANEL_BG);
@@ -127,7 +128,7 @@ void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input) const {
         for (int i = 0; i < box.count; ++i) {
             const tl::ButtonRect& br = box.r[i];
             const SDL_Rect        rc{br.x + ox, br.y + oy, br.w, br.h};
-            fill(r, rc, input.is_held(br.button) ? BTN_PRESSED : BTN_NORMAL);
+            fill(r, rc, sticky.drawn_down(br.button, input.is_held(br.button)) ? BTN_PRESSED : BTN_NORMAL);
             ptshell::draw_label(r, br.button, rc);
         }
     };
@@ -135,14 +136,15 @@ void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input) const {
     draw_box(right_, rightBox_.x, rightBox_.y);
 }
 
-uint64_t SdlTouch::signature(const SdlInput& input) const {
+uint64_t SdlTouch::signature(const SdlInput& input, const pt::ui::StickyButtons& sticky) const {
     if (!active_) return 0;
 
     uint64_t bits = 0;
+    const auto down = [&](Button b) { return sticky.drawn_down(b, input.is_held(b)); };
     for (int i = 0; i < left_.count; ++i)
-        if (input.is_held(left_.r[i].button)) bits |= (1ull << static_cast<int>(left_.r[i].button));
+        if (down(left_.r[i].button)) bits |= (1ull << static_cast<int>(left_.r[i].button));
     for (int i = 0; i < right_.count; ++i)
-        if (input.is_held(right_.r[i].button)) bits |= (1ull << static_cast<int>(right_.r[i].button));
+        if (down(right_.r[i].button)) bits |= (1ull << static_cast<int>(right_.r[i].button));
 
     // Geometry too, so a resize repaints; bit 63 keeps it non-zero while active.
     return bits | (static_cast<uint64_t>(outW_ & 0xFFFF) << 16) |

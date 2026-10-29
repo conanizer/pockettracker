@@ -20,6 +20,17 @@ namespace pt::ui {
 // SETTINGS > HELP. ⚠️ The value is what settings.json stores — append, never reorder.
 enum class HelpMode { OFF = 0, SHORT = 1, FULL = 2 };
 
+// ONE HAND's MS values. The file stores the number, so these may change freely.
+inline constexpr int ONE_HAND_HOLD_STEPS[] = {150, 200, 250, 300, 400, 500, 700, 1000};
+inline constexpr int ONE_HAND_HOLD_COUNT   = sizeof(ONE_HAND_HOLD_STEPS) / sizeof(int);
+
+// The step a stored number reads as: the first at or above it.
+inline int one_hand_hold_index(int ms) {
+    for (int i = 0; i < ONE_HAND_HOLD_COUNT; ++i)
+        if (ms <= ONE_HAND_HOLD_STEPS[i]) return i;
+    return ONE_HAND_HOLD_COUNT - 1;
+}
+
 // Everything SETTINGS edits; the shell round-trips it through settings.json. The counts sit beside
 // the indices because only the platform knows a cycle's range.
 struct SettingsValues {
@@ -69,6 +80,10 @@ struct SettingsValues {
     bool insertBefore       = true;
     bool cursorRemember     = false;
     bool notePreviewEnabled = true;
+    bool oneHanded          = false;
+    // ONE HAND's MS: how long a button is held alone before letting go locks it. Any number loads;
+    // the row steps through ONE_HAND_HOLD_STEPS.
+    int  oneHandHoldMs      = 300;
 
     // FOLDER = REMEMBER / REFRESH: REMEMBER opens a sample load at the last one's folder.
     bool        rememberFolder   = false;

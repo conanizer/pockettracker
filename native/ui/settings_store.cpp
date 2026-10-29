@@ -47,6 +47,8 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.insertBefore       = get_bool(j, "insertBefore",       values.insertBefore);
     values.cursorRemember     = get_bool(j, "cursorRemember",     values.cursorRemember);
     values.notePreviewEnabled = get_bool(j, "notePreview",        values.notePreviewEnabled);
+    values.oneHanded          = get_bool(j, "oneHanded",          values.oneHanded);
+    values.oneHandHoldMs      = clamp(get_int(j, "oneHandHoldMs", values.oneHandHoldMs), 50, 5000);
 
     values.rememberFolder     = get_bool(j, "rememberFolder", values.rememberFolder);   // not the path
     values.navSongRelative    = get_bool(j, "navSongRelative", values.navSongRelative);
@@ -115,6 +117,8 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["insertBefore"]       = values.insertBefore;
     j["cursorRemember"]     = values.cursorRemember;
     j["notePreview"]        = values.notePreviewEnabled;
+    j["oneHanded"]          = values.oneHanded;
+    j["oneHandHoldMs"]      = values.oneHandHoldMs;
     j["rememberFolder"]     = values.rememberFolder;
     j["navSongRelative"]    = values.navSongRelative;
     j["abxy"]               = values.abxyIndex;            // 0 AUTO, 1 XBOX, 2 NINTENDO

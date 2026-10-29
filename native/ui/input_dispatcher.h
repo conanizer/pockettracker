@@ -169,6 +169,9 @@ class InputDispatcher {
     void on_l_a();
     // L+R: leave selection mode.
     void on_l_r();
+    // After an L+R: is there still a mix, a switched-off command or a selection for the next one to
+    // clear? The buffer does not count. False where a screen of its own took it.
+    bool l_r_has_more();
     // L+B+A: deep-clone the chain/phrase under the cursor into free slots.
     void on_l_b_a();
     // L + a direction: fill rows from the selection's top row (or the cursor's cell on PHRASE).
@@ -406,6 +409,10 @@ class InputDispatcher {
     void toggle_mute_solo(bool solo);
     // Every track audible again (L+R's mute rung).
     void restore_full_playback();
+    // Is any channel muted?
+    bool mix_touched();
+    // The last L+R went to a screen's or layer's own handler.
+    bool lrRouted_ = false;
     // Do R+A/R+B mean MUTE/SOLO here — and so must B be held?
     bool mute_solo_chord_live() const;
 

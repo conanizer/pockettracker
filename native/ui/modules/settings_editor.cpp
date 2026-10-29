@@ -120,6 +120,11 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     param_row(SettingsRow::KB_INSERT, "KB INSERT", v.insertBefore ? "BEFORE" : "AFTER");
     param_row(SettingsRow::CURSOR,    "CURSOR",    v.cursorRemember ? "REMEMBER" : "REFRESH");
     param_row(SettingsRow::NAV,       "NAV",       v.navSongRelative ? "SONG" : "POOL");
+    if (v.oneHanded)
+        dual_row(SettingsRow::ONE_HAND, "ONE HAND", on_off(true),
+                 "MS", std::to_string(ONE_HAND_HOLD_STEPS[one_hand_hold_index(v.oneHandHoldMs)]));
+    else
+        param_row(SettingsRow::ONE_HAND, "ONE HAND", on_off(false));
     param_row(SettingsRow::NOTE_PREV, "NOTE PREV", on_off(v.notePreviewEnabled));
 
     {
@@ -206,6 +211,11 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
         case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
         case SettingsRow::NOTE_PREV:  return cc::toggle_binary(v.notePreviewEnabled);
+        case SettingsRow::ONE_HAND:
+            if (s.cursorColumn == 1) return cc::toggle_binary(v.oneHanded);
+            if (!v.oneHanded) return cc::read_only();
+            return cc::enum_cycle(one_hand_hold_index(v.oneHandHoldMs), ONE_HAND_HOLD_COUNT);
+
         case SettingsRow::FOLDER:     return cc::toggle_binary(v.rememberFolder);
         case SettingsRow::NAV:        return cc::toggle_binary(v.navSongRelative);
 
@@ -278,6 +288,10 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         case SettingsRow::KB_INSERT: v.insertBefore       = on; break;
         case SettingsRow::CURSOR:    v.cursorRemember     = on; break;
         case SettingsRow::NOTE_PREV: v.notePreviewEnabled = on; break;
+        case SettingsRow::ONE_HAND:
+            if (cursor_column == 1)      v.oneHanded     = on;
+            else if (cursor_column == 2) v.oneHandHoldMs = ONE_HAND_HOLD_STEPS[index_in(ONE_HAND_HOLD_COUNT)];
+            break;
         case SettingsRow::FOLDER:    v.rememberFolder     = on; break;
         case SettingsRow::NAV:       v.navSongRelative    = on; break;
         case SettingsRow::RESUME:    v.autosaveResumeAuto = on; break;
