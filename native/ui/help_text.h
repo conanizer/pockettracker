@@ -2434,14 +2434,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "changed."},
      {"A+D-PAD picks OFF, TEMPO or FULL"}},
     /* PROJECT_COLLECT */
-    {"COLLECT: Gather the song", "Copies the song and its sounds", "into one folder in Songs.",
-     {"Copies the song and every sample",
-      "and SoundFont it plays into a",
-      "folder named after it, in Songs.",
-      "Move that folder to share the",
-      "song. Your own files stay put."},
-     {"A collects. If the folder is",
-      "there, it asks what to do."}},
+    {"COLLECT: gather the song", "One folder with everything the", "song needs, ready to share.",
+     {"Every sample and SoundFont it",
+      "plays is copied with it into",
+      "Songs, in a folder named after",
+      "the song. Your own files stay",
+      "where they are. If that folder",
+      "is already there, it asks first."},
+     {"A collects the song"}},
 };
 
 // ─── Rules 2 and 3, as compile errors — at runtime they fail silently ────────────────────────────
