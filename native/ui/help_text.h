@@ -2,14 +2,8 @@
 
 // Help on SELECT: a topic for every cell, its text, and the cursor → topic lookup. No drawing.
 //
-// The text's rules:
-//  1. The first line names the thing — "VOL: how loud this step is"; the rest say what it does.
-//  2. At most HELP_MAX_CHARS per line.
-//  3. No apostrophe or semicolon (`font5x5.h` draws them blank). Letters, digits, `: = - ( ) . / , +`
-//     and the four arrows ← ↑ → ↓.
-//  4. Say what the cell does, not why.
-//  5. Whole sentences in everyday words: "how loud the reverb is in the mix", not "the return".
-// 2 and 3 are a `static_assert` over the table; 1, 4 and 5 need a reader.
+// Every line is at most HELP_MAX_CHARS and holds only what the 5×5 font draws: a `static_assert`
+// below checks both.
 // A cell with no entry falls back to its SCREEN_* topic. ⚠️ Append to the enum: it indexes HELP_ENTRIES.
 
 #include <cstddef>
@@ -2444,7 +2438,7 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
      {"A collects the song"}},
 };
 
-// ─── Rules 2 and 3, as compile errors — at runtime they fail silently ────────────────────────────
+// ─── Line length and font, as compile errors — at runtime they fail silently ─────────────────────
 
 namespace detail {
 
