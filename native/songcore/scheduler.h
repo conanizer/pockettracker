@@ -413,6 +413,14 @@ class Sequencer {
     // lap. The slot is stamped, not cleared (LiveSlot).
     bool consume_live_queue(int trackId, bool chainEnd);
 
+    // LIVE's grid. A silent channel has no bars or laps of its own, so its launch lands on the LEAD's
+    // — the sounding channel with the longest chain: its next bar (second press) or its next lap.
+    int  live_lap_rows(int trackId) const;   // filled rows of the chain it is looping; 0 = silent
+    int  live_lead_track() const;            // −1 = nothing is sounding
+    void join_silent_launches(int leadTrack, int64_t frame, bool lapStart);   // at each lead bar
+    void join_scheduled_boundary(int trackId, int64_t currentFrame);          // at the press
+    void join_live_at(int trackId, int64_t frame);
+
     struct ScheduleStepResult {
         bool noteScheduled = false;
         bool hopTriggered = false;
@@ -740,6 +748,8 @@ class Sequencer {
     LiveSlot liveQueue_[8];
     bool     liveSilent_[8] = {false, false, false, false, false, false, false, false};
     int64_t  liveLoopFrame_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    // The lead's bar or lap a silent channel's launch waits for, −1 = not reached yet.
+    int64_t  liveJoinAt_[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
     int currentPhraseId_ = 0;
     int currentChainId_ = 0;
     // The mixer track PHRASE/CHAIN mode plays through.

@@ -249,6 +249,7 @@ void Sequencer::stop() {
         liveQueue_[i] = LiveSlot{};
         liveSilent_[i] = false;
         liveLoopFrame_[i] = 0;
+        liveJoinAt_[i] = -1;
     }
 }
 
@@ -264,6 +265,7 @@ void Sequencer::playSongLive(int songRow, int mask, int offsetSteps) {
     for (int t = 0; t < 8; ++t) {
         liveQueue_[t]  = LiveSlot{};
         liveSilent_[t] = ((mask >> t) & 1) == 0;
+        liveJoinAt_[t] = -1;
     }
 }
 
@@ -271,7 +273,7 @@ RollbackPlan Sequencer::set_live_mode(bool on, int64_t currentFrame) {
     RollbackPlan plan;
     if (liveMode_ == on) return plan;
     liveMode_ = on;
-    for (int t = 0; t < 8; ++t) liveQueue_[t] = LiveSlot{};
+    for (int t = 0; t < 8; ++t) { liveQueue_[t] = LiveSlot{}; liveJoinAt_[t] = -1; }
 
     if (!isPlaying_ || playbackMode_ != PlaybackMode::SONG) {
         for (int t = 0; t < 8; ++t) liveSilent_[t] = false;
@@ -531,13 +533,77 @@ RollbackPlan Sequencer::arm_live_slot(int trackId, LiveSlot slot, int64_t curren
     if (f >= 0) plan.frames[trackId] = f;
     // ⚠️ After the rewind, which un-stamps a launch it rolled back over.
     liveQueue_[trackId] = slot;
+    liveJoinAt_[trackId] = -1;
+    join_scheduled_boundary(trackId, currentFrame);
     return plan;
+}
+
+int Sequencer::live_lap_rows(int trackId) const {
+    if (liveSilent_[trackId] || project_ == nullptr) return 0;
+    const int chainId = song_cell_chain(*project_, trackId, trackSongRow_[trackId]);
+    if (chainId < 0) return 0;
+    int rows = 0;
+    for (int r = 0; r < CHAIN_ROWS; ++r)
+        if (!chain_is_empty(project_->chains[static_cast<size_t>(chainId)], r)) ++rows;
+    return rows;
+}
+
+int Sequencer::live_lead_track() const {
+    int lead = -1, longest = 0;
+    for (int t = 0; t < 8; ++t) {
+        const int rows = live_lap_rows(t);
+        if (rows > longest) { longest = rows; lead = t; }
+    }
+    return lead;
+}
+
+void Sequencer::join_live_at(int trackId, int64_t frame) {
+    liveJoinAt_[trackId] = frame;
+    // A silent channel walks in whole bars and emits nothing, so it simply moves to the frame.
+    std::deque<Checkpoint>& ring = checkpoints_[trackId];
+    while (!ring.empty() && ring.back().frame >= frame) ring.pop_back();
+    drop_positions_from(songPositionStartFrames_, frame,
+                        [&](const SongPos& p) { return p.track == trackId; });
+    trackNextFrame_[trackId] = frame;
+}
+
+void Sequencer::join_silent_launches(int leadTrack, int64_t frame, bool lapStart) {
+    for (int t = 0; t < 8; ++t) {
+        const LiveSlot& q = liveQueue_[t];
+        if (t == leadTrack || live_lap_rows(t) > 0 || !q.armed() || liveJoinAt_[t] >= 0) continue;
+        if (!q.immediate && !lapStart) continue;
+        if (liveLoopFrame_[t] > frame) continue;   // it fell silent only after that frame
+        join_live_at(t, frame);
+    }
+}
+
+void Sequencer::join_scheduled_boundary(int trackId, int64_t currentFrame) {
+    const int lead = live_lead_track();
+    if (lead < 0 || lead == trackId || live_lap_rows(trackId) > 0 || project_ == nullptr) return;
+    // ⚠️ The lead runs ahead of the clock: the boundary this press is aimed at may already be
+    // scheduled, and waiting for the lead to reach it again would cost a bar, or a whole lap.
+    for (const Checkpoint& c : checkpoints_[lead]) {
+        if (c.frame <= currentFrame) continue;
+        const int chainId = song_cell_chain(*project_, lead, c.songRow);
+        const bool lapStart = chainId >= 0 &&
+            next_chain_row_no_wrap(project_->chains[static_cast<size_t>(chainId)], 0) == c.songChainRow;
+        if (!liveQueue_[trackId].immediate && !lapStart) continue;
+        join_live_at(trackId, c.frame);
+        return;
+    }
 }
 
 bool Sequencer::consume_live_queue(int trackId, bool chainEnd) {
     LiveSlot& q = liveQueue_[trackId];
     if (!q.armed()) return false;                    // nothing waiting, or already fired
-    if (!q.immediate && !chainEnd) return false;      // still mid-lap
+    if (live_lap_rows(trackId) == 0 && live_lead_track() >= 0) {
+        // A silent channel keeps the lead's bars and laps, both quantizations (join_silent_launches).
+        if (liveJoinAt_[trackId] < 0 || trackNextFrame_[trackId] < liveJoinAt_[trackId]) return false;
+    } else if (live_lap_rows(trackId) == 0) {
+        // Nothing sounding: any bar will do.
+    } else if (!q.immediate && !chainEnd) {
+        return false;                                 // still mid-lap
+    }
 
     if (q.stop) {
         liveSilent_[trackId] = true;
@@ -549,6 +615,7 @@ bool Sequencer::consume_live_queue(int trackId, bool chainEnd) {
     trackStates_[trackId].trackStopped = false;
     trackStates_[trackId].emptyHops = 0;
     liveLoopFrame_[trackId] = trackNextFrame_[trackId];   // a lap begins here
+    liveJoinAt_[trackId] = -1;
     q.firesAt = trackNextFrame_[trackId];
     return true;
 }
@@ -709,7 +776,9 @@ void Sequencer::schedule_live_unit(const Project& project, int trackId, int64_t 
     // Every unit begins on a phrase boundary; a lap starts where the chain row is 0.
     // ⚠️ "At a lap start", NOT "did the chain just run out" — after a rewind into a chain's last bar
     // the lookahead is already past the end, and the launch would land a lap late.
-    const bool launched = consume_live_queue(trackId, /*chainEnd=*/trackChainRow_[trackId] == 0);
+    const bool lapStart = trackChainRow_[trackId] == 0;
+    if (live_lead_track() == trackId) join_silent_launches(trackId, trackNextFrame_[trackId], lapStart);
+    const bool launched = consume_live_queue(trackId, lapStart);
 
     const std::vector<int>& refs = project.tracks[static_cast<size_t>(trackId)].chainRefs;
     const int songRow = trackSongRow_[trackId];
