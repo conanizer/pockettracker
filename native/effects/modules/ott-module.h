@@ -1,75 +1,91 @@
 #pragma once
+#include <algorithm>
 #include "../primitives/lr-crossover.h"
-#include "../primitives/upward-compressor.h"
-#include "../primitives/daisysp/compressor.h"
+#include "../primitives/daisysp/dsp.h"
 
-// One band of OTT: downward then upward compression, stereo-linked on max(|L|, |R|), then makeup.
+// One band of OTT: downward then upward compression, stereo-linked on the louder channel's RMS, then
+// makeup. Gains are in dB; the attack/release smoothing runs on the gain, not on the level.
 // ⚠️ The upward half is keyed on the downward half's OUTPUT. Keyed on the band input, it swings
 // between notes and throws its boost onto the next note's front.
-// ⚠️ DaisySP's own makeup stays 0 — it pops on the first note; `makeupLin` does the job.
 struct BandCompressor {
-    // The preset's below-threshold ratio, the same on all three bands.
-    static constexpr float UP_RATIO = 4.f;
+    static constexpr float THRESH_DB = -30.f;
+    static constexpr float KNEE_DB   = 6.f;
+    static constexpr float UP_SLOPE  = 0.75f;   // 4:1 below the threshold
+    // Signal further under the threshold than this is left alone: no lifting of fades and noise floors.
+    static constexpr float UP_RANGE_DB = 30.f;
 
-    daisysp::Compressor downward;
-    UpwardCompressor    upward;
-    float sampleRate = 44100.f;
-    float attackSec  = 0.001f;
-    float releaseSec = 0.030f;
-    float threshDb   = -30.f;
-    float downRatio  = 66.7f;
-    float makeupLin  = 1.0f;
+    float slopeDown = 0.985f;
+    float makeupLin = 1.f;
+    float aAtk = 0.f, aRel = 0.f, aRms = 0.f;
+    float msDown[2] = {}, msUp[2] = {};            // running mean square, L / R
+    float downAtk = 0, downRel = 0, upAtk = 0, upRel = 0;
 
-    void applySettings() {
-        downward.SetRatio(downRatio);
-        downward.SetThreshold(threshDb);
-        downward.SetAttack(attackSec);
-        downward.SetRelease(releaseSec);
-        downward.AutoMakeup(false);
-        downward.SetMakeup(0.f);
-        upward.setParams(threshDb, UP_RATIO, attackSec, releaseSec, sampleRate);
+    void init(float sr, float ratio, float makeup) {
+        slopeDown = 1.f - 1.f / ratio;
+        makeupLin = makeup;
+        aAtk = expf(-1.f / (0.005f * sr));
+        aRel = expf(-1.f / (0.050f * sr));
+        aRms = expf(-1.f / (0.0025f * sr));
+        reset();
     }
 
-    void init(float sr, float atk, float rel,
-              float thresh, float ratio, float makeup) {
-        sampleRate = sr;
-        attackSec  = atk;
-        releaseSec = rel;
-        threshDb   = thresh;
-        downRatio  = ratio;
-        makeupLin  = makeup;
-        downward.Init(sr);
-        upward.init(sr);
-        applySettings();
-    }
-
+    // The detectors start AT the threshold: from zero, the first note would meet a full upward boost.
     void reset() {
-        downward.Init(sampleRate);
-        upward.reset();
-        applySettings();
+        const float t = daisysp::pow10f(THRESH_DB / 10.f);
+        msDown[0] = msDown[1] = msUp[0] = msUp[1] = t;
+        downAtk = downRel = upAtk = upRel = 0.f;
     }
 
-    // daisysp::fmax, not fmaxf: on gcc without -ffast-math fmaxf is a libm call, six per frame here.
+    static float downGr(float lvl, float slope) {
+        const float o = lvl - THRESH_DB;
+        if (o <= -KNEE_DB / 2) return 0.f;
+        if (o < KNEE_DB / 2) { const float t = o + KNEE_DB / 2; return 0.5f * slope * t * t / KNEE_DB; }
+        return slope * o;
+    }
+    static float upGr(float lvl) {
+        const float u = THRESH_DB - lvl;
+        if (u <= 0.f || u > UP_RANGE_DB) return 0.f;
+        if (u < KNEE_DB / 2) { const float t = u + KNEE_DB / 2; return -0.5f * UP_SLOPE * t * t / KNEE_DB; }
+        return -UP_SLOPE * u;
+    }
+    // Release follows the target down; a rising target is taken at once, then the attack smooths it.
+    inline float smooth(float target, float& atk, float& rel) const {
+        const float r = aRel * rel + (1.f - aRel) * target;
+        rel = target > r ? target : r;
+        atk = aAtk * atk + (1.f - aAtk) * rel;
+        return std::clamp(atk, -24.f, 60.f);
+    }
+    // 10·log10 of the mean square = the RMS in dB.
+    static inline float levelDb(float a, float b) {
+        return 10.f * daisysp::fastlog10f(daisysp::fmax(a, b) + 1e-20f);
+    }
+
     inline void process(float& L, float& R) {
-        downward.Process(daisysp::fmax(fabsf(L), fabsf(R)));
-        L = downward.Apply(L);
-        R = downward.Apply(R);
-        upward.Process(daisysp::fmax(fabsf(L), fabsf(R)));
-        L = upward.Apply(L) * makeupLin;
-        R = upward.Apply(R) * makeupLin;
+        msDown[0] = aRms * msDown[0] + (1.f - aRms) * L * L;
+        msDown[1] = aRms * msDown[1] + (1.f - aRms) * R * R;
+        float g = daisysp::pow10f(-0.05f * smooth(downGr(levelDb(msDown[0], msDown[1]), slopeDown), downAtk, downRel));
+        L *= g; R *= g;
+        msUp[0] = aRms * msUp[0] + (1.f - aRms) * L * L;
+        msUp[1] = aRms * msUp[1] + (1.f - aRms) * R * R;
+        g = daisysp::pow10f(-0.05f * smooth(upGr(levelDb(msUp[0], msUp[1])), upAtk, upRel)) * makeupLin;
+        L *= g; R *= g;
     }
 };
 
 // OTT on the master bus: three bands (crossover 88.3 Hz / 2.5 kHz), each compressed both ways, summed,
 // then a wet/dry mix by depth (0 = bypass).
 //
-//   band   thresh   above      below   band gain   attack / release
-//   low    -30 dB   66.7:1     4:1     +10.3 dB    2.8 ms / 40 ms
-//   mid    -30 dB   66.7:1     4:1      +5.7 dB    1.4 ms / 28 ms
-//   high   -30 dB   limiter    4:1     +10.3 dB    0.7 ms / 15 ms
+//   band   thresh   above      below   band gain
+//   low    -30 dB   66.7:1     4:1     +10.3 dB
+//   mid    -30 dB   66.7:1     4:1      +5.7 dB
+//   high   -30 dB   limiter    4:1     +10.3 dB
+//   every band: RMS over 2.5 ms, 6 dB knee, attack 5 ms, release 50 ms
 //
-// The outer bands' extra makeup is the scooped tone — a tilt, not a level. The common preset's
-// +5.2 dB input drive is left out: this bus already sits far above the threshold.
+// The outer bands' extra makeup is the scooped tone — a tilt, not a level. The wet path is driven
+// +5.2 dB into the bands. The dry is the raw input, not the summed bands: the crossover's phase
+// against it thins the kick's body at middle depths, which is part of how the hits cut through.
+// The +4 dB at full depth is applied after the mix, scaled by depth, so FF keeps the dry's loudness;
+// inside the wet path it would double the wet's weight at every middle depth.
 // The wet path fades in over WARMUP_SAMPLES when enabled, before a render, and when signal returns
 // after SILENCE_RESET_FRAMES (the DSP restarts from zero then).
 // ⚠️ Silence does not cover a restart: a START soon after STOP meets a tail the upward halves lifted
@@ -79,6 +95,7 @@ struct OttModule {
     BandCompressor bandLow, bandMid, bandHigh;
 
     float depth      = 0.0f;
+    float postGain   = 1.0f;   // follows depth
     float sampleRate = 44100.f;
     bool  enabled    = false;
 
@@ -90,21 +107,20 @@ struct OttModule {
 
     static constexpr float XOVER_LOW     = 88.3f;
     static constexpr float XOVER_HIGH    = 2500.f;
-    static constexpr float THRESH_DB     = -30.f;
     static constexpr float DOWN_RATIO    = 66.7f;
-    // The high band's ∞:1 — DaisySP needs a finite ratio.
-    static constexpr float DOWN_RATIO_HI = 1000.f;
+    static constexpr float DOWN_RATIO_HI = 1e9f;      // the high band's ∞:1
     static constexpr float MAKEUP_LOW    = 3.2734f;   // +10.3 dB
     static constexpr float MAKEUP_MID    = 1.9276f;   //  +5.7 dB
     static constexpr float MAKEUP_HIGH   = 3.2734f;   // +10.3 dB
-    static constexpr float OUTPUT_GAIN   = 2.0f;   // +6 dB
+    static constexpr float DRIVE         = 1.8197f;   // +5.2 dB
+    static constexpr float POST_DB_FULL  = 4.f;
 
     void reset(float sr) {
         sampleRate = sr;
         xover.init(sr, XOVER_LOW, XOVER_HIGH);
-        bandLow.init (sr, 0.0028f, 0.040f, THRESH_DB, DOWN_RATIO,    MAKEUP_LOW);
-        bandMid.init (sr, 0.0014f, 0.028f, THRESH_DB, DOWN_RATIO,    MAKEUP_MID);
-        bandHigh.init(sr, 0.0007f, 0.015f, THRESH_DB, DOWN_RATIO_HI, MAKEUP_HIGH);
+        bandLow.init (sr, DOWN_RATIO,    MAKEUP_LOW);
+        bandMid.init (sr, DOWN_RATIO,    MAKEUP_MID);
+        bandHigh.init(sr, DOWN_RATIO_HI, MAKEUP_HIGH);
         warmupRemaining = 0;
         silenceCounter  = 0;
     }
@@ -112,6 +128,7 @@ struct OttModule {
     void setDepth(float d) {
         bool wasEnabled = enabled;
         depth   = d;
+        postGain = daisysp::pow10f(POST_DB_FULL / 20.f * d);
         enabled = (d > 0.f);
         // Only on switching on: a reset per depth change would keep the compressors from ever
         // building up gain during a sweep.
@@ -130,6 +147,7 @@ struct OttModule {
     // Before an offline render: start from zero behind the warmup fade.
     void resetForRender(float d) {
         depth   = d;
+        postGain = daisysp::pow10f(POST_DB_FULL / 20.f * d);
         enabled = (d > 0.f);
         if (enabled) {
             restart();
@@ -166,21 +184,24 @@ struct OttModule {
             float lowL, lowR, midL, midR, highL, highR;
             xover.split(dryL, dryR, lowL, lowR, midL, midR, highL, highR);
 
+            lowL *= DRIVE; lowR *= DRIVE; midL *= DRIVE; midR *= DRIVE; highL *= DRIVE; highR *= DRIVE;
             bandLow.process(lowL, lowR);
             bandMid.process(midL, midR);
             bandHigh.process(highL, highR);
 
-            float wetL = (lowL + midL + highL) * OUTPUT_GAIN;
-            float wetR = (lowR + midR + highR) * OUTPUT_GAIN;
+            float wetL = lowL + midL + highL;
+            float wetR = lowR + midR + highR;
 
             float pos = depth;
+            float post = postGain;
             if (warmupRemaining > 0) {
                 pos *= (float)(WARMUP_SAMPLES - warmupRemaining) / WARMUP_SAMPLES;
+                post = daisysp::pow10f(POST_DB_FULL / 20.f * pos);
                 warmupRemaining--;
             }
             float dry = 1.0f - pos;
-            buf[i * channelCount]     = dryL * dry + wetL * pos;
-            buf[i * channelCount + 1] = dryR * dry + wetR * pos;
+            buf[i * channelCount]     = (dryL * dry + wetL * pos) * post;
+            buf[i * channelCount + 1] = (dryR * dry + wetR * pos) * post;
         }
     }
 };
