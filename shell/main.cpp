@@ -64,8 +64,9 @@ std::string dir_of(const std::string& path) {
 }
 
 // stdout and stderr → `<app root>/pockettracker-log.txt`, truncated each session. ⚠️ The Windows build
-// has no console, so without this every line goes nowhere. Only a terminal is taken over (a PortMaster
-// script's log is left alone); always on Windows. `PT_CONSOLE=1` keeps the output where it was.
+// has no console, and a Mac app started from Finder has none either, so without this every line goes
+// nowhere. Only a terminal is taken over (a PortMaster script's log is left alone); always on Windows
+// and macOS. `PT_CONSOLE=1` keeps the output where it was.
 // ⚠️ `dup2`, not a second `freopen` — two FILE*s on one path overwrite each other's lines.
 void open_session_log(const std::string& appRoot) {
     if (std::getenv("PT_CONSOLE")) {
@@ -78,7 +79,7 @@ void open_session_log(const std::string& appRoot) {
 #endif
         return;
     }
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     if (!isatty(fileno(stdout))) return;
 #endif
     std::error_code ec;

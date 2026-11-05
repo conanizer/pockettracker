@@ -6,6 +6,7 @@
 
 #include "linux/midi-in-alsa.h"    // compiles to nothing off Linux
 #include "windows/midi-in-winmm.h"   // compiles to nothing off Windows
+#include "macos/midi-in-coremidi.h"   // compiles to nothing off macOS
 
 #if defined(_WIN32)
 #define PT_HAS_PLATFORM_MIDI_IN 1
@@ -13,6 +14,9 @@ namespace ptshell { using PlatformMidiIn = WinmmMidiIn; }
 #elif defined(__linux__) && !defined(__ANDROID__)
 #define PT_HAS_PLATFORM_MIDI_IN 1
 namespace ptshell { using PlatformMidiIn = AlsaMidiIn; }
+#elif defined(__APPLE__)
+#define PT_HAS_PLATFORM_MIDI_IN 1
+namespace ptshell { using PlatformMidiIn = CoreMidiIn; }
 #endif
 
 #endif  // POCKETTRACKER_SHELL_MIDI_IN_H

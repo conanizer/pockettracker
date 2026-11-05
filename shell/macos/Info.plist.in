@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>PocketTracker</string>
+    <key>CFBundleDisplayName</key>
+    <string>PocketTracker</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.conanizer.pockettracker</string>
+    <key>CFBundleExecutable</key>
+    <string>PocketTracker</string>
+    <key>CFBundleIconFile</key>
+    <string>PocketTracker</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@PT_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@PT_VERSION@</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>@CMAKE_OSX_DEPLOYMENT_TARGET@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.music</string>
+    <!-- Without it a Retina screen gets the window at half resolution, scaled up blurry. -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+</dict>
+</plist>
