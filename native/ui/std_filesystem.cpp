@@ -1,6 +1,7 @@
 #include "ui/std_filesystem.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -9,11 +10,14 @@
 #include <fstream>
 #include <system_error>
 
+// Platform headers: "where is Documents" and "sync this file" have no portable answer.
 #if defined(_WIN32)
-// The only platform header in pt-ui: "where is Documents" has no portable answer.
 #define NOMINMAX
 #include <windows.h>
 #include <shlobj.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -28,6 +32,16 @@ int64_t to_unix_millis(fs::file_time_type t) {
     const auto shifted = time_point_cast<system_clock::duration>(
         t - fs::file_time_type::clock::now() + system_clock::now());
     return duration_cast<milliseconds>(shifted.time_since_epoch()).count();
+}
+
+// Pushes the file's bytes onto the disk itself, not just into the OS's write-back cache.
+// A filesystem that cannot sync (EINVAL) is not a failed save.
+bool sync_to_disk(std::FILE* f) {
+#if defined(_WIN32)
+    return _commit(_fileno(f)) == 0;
+#else
+    return fsync(fileno(f)) == 0 || errno == EINVAL;
+#endif
 }
 
 // Forward slashes always — the browser draws the path.
@@ -192,20 +206,19 @@ bool StdFileSystem::write_bytes(const std::string& path, const void* data, size_
     fs::create_directories(fs::path(path).parent_path(), ec);
 
     // Through `<path>.tmp` and a rename, so power loss mid-save leaves the old file whole.
+    // ⚠️ The temp is synced BEFORE the rename: unsynced, a FAT card may store the rename first and
+    // the data seconds later, and a power cut in between leaves an empty project, the old one gone.
+    // Every write is checked too — a full disk shows up only in the flush or the close.
     const std::string tmp = path + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f) return false;
-        if (len > 0) f.write(static_cast<const char*>(data), static_cast<std::streamsize>(len));
-
-        // ⚠️ Closed and checked here: a full disk shows up in this flush, and the destructor would
-        // swallow it — then the rename would put an empty file where the project was.
-        f.close();
-        if (!f) {
-            std::error_code ignored;
-            fs::remove(tmp, ignored);
-            return false;
-        }
+    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+    bool ok = len == 0 || std::fwrite(data, 1, len, f) == len;
+    ok = ok && std::fflush(f) == 0 && sync_to_disk(f);
+    ok = (std::fclose(f) == 0) && ok;
+    if (!ok) {
+        std::error_code ignored;
+        fs::remove(tmp, ignored);
+        return false;
     }
 
     fs::rename(tmp, path, ec);
