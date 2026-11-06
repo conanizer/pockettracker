@@ -152,7 +152,8 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["theme"]    = theme.name;   // for older builds
     j["appTheme"] = json::parse(serialize_theme(theme), nullptr, /*allow_exceptions=*/false);
 
-    return j.dump(2) + "\n";
+    // ⚠️ `replace`: the default handler THROWS on a folder path that is not whole UTF-8.
+    return j.dump(2, ' ', false, json::error_handler_t::replace) + "\n";
 }
 
 }  // namespace

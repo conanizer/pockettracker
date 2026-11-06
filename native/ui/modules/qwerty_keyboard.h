@@ -48,10 +48,10 @@ inline constexpr int QWERTY_ACTION_COLS = 2;
 
 struct QwertyKeyboardState {
     bool        isOpen    = false;
-    std::string text;
-    int         maxLength = 20;
+    std::string text;              // UTF-8: a name from the card can hold any letter
+    int         maxLength = 20;    // in letters
 
-    // The insertion point: 0 is before the first char, text.size() after the last.
+    // The insertion point, in letters: 0 is before the first, letter_count() after the last.
     int textCursor = 0;
 
     int keyCursorRow = 0;
@@ -76,6 +76,7 @@ struct QwertyKeyboardState {
     bool is_on_layout_key() const { return keyCursorRow == space_row_index() && keyCursorCol == 1; }
     int  total_rows() const { return action_row_index() + 1; }
     int  current_row_cols() const;
+    int  letter_count() const { return Canvas::glyph_count(text); }
 
     // ' ' on the action row.
     char current_key() const;

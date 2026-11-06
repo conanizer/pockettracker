@@ -50,6 +50,9 @@ public:
 
     static int glyph_count(const std::string& text);   // code points
 
+    // The byte offset where code point `glyph` starts; `text.size()` at or past the end.
+    static size_t glyph_offset(const std::string& text, int glyph);
+
     // At most `max_glyphs` columns, a cut marked with `…` inside the budget. Never splits a code point.
     static std::string clip_text(const std::string& text, int max_glyphs);
 

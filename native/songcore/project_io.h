@@ -436,6 +436,41 @@ inline void normalize_and_migrate(Project& p) {
 // Same schema either way. No default: MINIFIED for .ptp/.pti, PRETTY for hand-editable .ptt themes.
 enum class JsonLayout { Minified, Pretty };
 
+// ⚠️ The JSON reader refuses the WHOLE file over one ill-formed byte, so a name with half a letter
+// (a cut file name, a Latin-1 card) must never reach a file. 0 = not a well-formed sequence.
+inline size_t utf8_sequence_length(const char* s, size_t n) {
+    const auto b = [&](size_t k) { return (unsigned char)s[k]; };
+    const auto cont = [&](size_t k) { return k < n && (b(k) & 0xC0) == 0x80; };
+    const unsigned char b0 = b(0);
+    if (b0 >= 0xC2 && b0 <= 0xDF) return cont(1) ? 2 : 0;
+    if (b0 >= 0xE0 && b0 <= 0xEF) {
+        if (!cont(1) || !cont(2)) return 0;
+        if (b0 == 0xE0 && b(1) < 0xA0) return 0;   // overlong
+        if (b0 == 0xED && b(1) > 0x9F) return 0;   // a surrogate
+        return 3;
+    }
+    if (b0 >= 0xF0 && b0 <= 0xF4) {
+        if (!cont(1) || !cont(2) || !cont(3)) return 0;
+        if (b0 == 0xF0 && b(1) < 0x90) return 0;   // overlong
+        if (b0 == 0xF4 && b(1) > 0x8F) return 0;   // past U+10FFFF
+        return 4;
+    }
+    return 0;
+}
+
+// Each byte that is not part of a whole letter becomes U+FFFD; well-formed text comes back unchanged.
+inline std::string repair_utf8(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size();) {
+        const auto c = (unsigned char)in[i];
+        const size_t len = c < 0x80 ? 1 : utf8_sequence_length(in.data() + i, in.size() - i);
+        if (len) { out.append(in, i, len); i += len; }
+        else     { out += "\xEF\xBF\xBD"; ++i; }
+    }
+    return out;
+}
+
 class JsonWriter {
 public:
     std::string out;
@@ -504,7 +539,13 @@ private:
                 case '\r': out += "\\r";  break;
                 default:
                     if (c < 0x20) { char buf[8]; std::snprintf(buf, sizeof buf, "\\u%04x", c); out += buf; }
-                    else out += (char)c;  // pass UTF-8 / printable ASCII through
+                    else if (c < 0x80) out += (char)c;
+                    else if (const size_t len = utf8_sequence_length(s + i, n - i)) {
+                        out.append(s + i, len);
+                        i += len - 1;
+                    } else {
+                        out += "\xEF\xBF\xBD";   // U+FFFD for a byte that is not whole UTF-8
+                    }
             }
         }
     }

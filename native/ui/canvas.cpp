@@ -143,6 +143,12 @@ int Canvas::glyph_count(const std::string& text) {
     return n;
 }
 
+size_t Canvas::glyph_offset(const std::string& text, int glyph) {
+    size_t i = 0;
+    for (int n = 0; n < glyph && i < text.size(); ++n) next_codepoint(text, i);
+    return i;
+}
+
 std::string Canvas::clip_text(const std::string& text, int max_glyphs) {
     if (max_glyphs <= 0) return {};
 

@@ -43,9 +43,21 @@ void SongcoreHost::reset_midi_in() {
     if (!engine_) midiIn_.service_requests();
 }
 
+namespace {
+
+// A file saved with half a letter in a name still opens: the reader refuses ill-formed UTF-8
+// outright, so a failed parse is retried once with each broken byte made U+FFFD.
+json parse_repairing_utf8(const std::string& blob) {
+    json j = json::parse(blob, /*cb=*/nullptr, /*allow_exceptions=*/false);
+    if (!j.is_discarded()) return j;
+    return json::parse(repair_utf8(blob), /*cb=*/nullptr, /*allow_exceptions=*/false);
+}
+
+}  // namespace
+
 bool SongcoreHost::push_project(const std::string& blob) {
     // allow_exceptions=false: a malformed blob leaves the previous project intact.
-    json j = json::parse(blob, /*cb=*/nullptr, /*allow_exceptions=*/false);
+    json j = parse_repairing_utf8(blob);
     if (j.is_discarded() || !j.is_object()) return false;
 
     Project parsed = parse_project(j);
@@ -414,7 +426,7 @@ bool SongcoreHost::load_instrument_preset(int id, const std::string& path) {
     std::string blob;
     if (!pt_read_file(path.c_str(), blob)) return false;
 
-    json j = json::parse(blob, /*cb=*/nullptr, /*allow_exceptions=*/false);
+    json j = parse_repairing_utf8(blob);
     if (j.is_discarded() || !j.is_object()) return false;
 
     const InstrumentPreset ip = parse_instrument_preset(j);

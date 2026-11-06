@@ -45,9 +45,9 @@ void InputDispatcher::open_qwerty(QwertyContext context, const std::string& init
                                   int max_length, bool clear_on_first_b) {
     QwertyKeyboardState k{};
     k.isOpen        = true;
-    k.text          = initial_text.substr(0, static_cast<size_t>(max_length));
+    k.text          = initial_text.substr(0, Canvas::glyph_offset(initial_text, max_length));
     k.maxLength     = max_length;
-    k.textCursor    = static_cast<int>(k.text.size());
+    k.textCursor    = k.letter_count();
     k.fieldLabel    = field_label;
     k.contextExtra  = context_extra;
     k.context       = context;

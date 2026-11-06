@@ -86,18 +86,29 @@ void move_key_cursor_right(QwertyKeyboardState& s) {
     s.keyCursorCol = (s.keyCursorCol + 1) % cols;
 }
 
+// The text is UTF-8 and every count here is in letters, so an edit never splits one: half a letter
+// in a name makes the file it is saved into unreadable.
+
 void insert_current_key(QwertyKeyboardState& s) {
     if (s.is_on_action_row() || s.is_on_layout_key()) return;      // these keys type nothing
-    if (static_cast<int>(s.text.size()) >= s.maxLength) return;
+    const int len = s.letter_count();
+    if (len >= s.maxLength) return;
 
-    const char ch = s.current_key();
-    const int  len = static_cast<int>(s.text.size());
     // insertBefore: at the cursor, else one past it; either way the cursor lands after the new char.
     const int insertAt = s.insertBefore ? std::min(std::max(s.textCursor, 0), len)
                                         : std::min(s.textCursor + 1, len);
-    s.text.insert(static_cast<size_t>(insertAt), 1, ch);
+    s.text.insert(Canvas::glyph_offset(s.text, insertAt), 1, s.current_key());
     s.textCursor = insertAt + 1;
 }
+
+namespace {
+
+void erase_letter(std::string& text, int letter) {
+    const size_t from = Canvas::glyph_offset(text, letter);
+    text.erase(from, Canvas::glyph_offset(text, letter + 1) - from);
+}
+
+}  // namespace
 
 void delete_char(QwertyKeyboardState& s) {
     if (s.clearOnFirstB) {
@@ -106,15 +117,15 @@ void delete_char(QwertyKeyboardState& s) {
         s.clearOnFirstB = false;
         return;
     }
-    const int len = static_cast<int>(s.text.size());
+    const int len = s.letter_count();
     if (s.insertBefore) {
         if (s.textCursor <= 0 || len == 0) return;                 // backspace
-        s.text.erase(static_cast<size_t>(s.textCursor - 1), 1);
+        erase_letter(s.text, s.textCursor - 1);
         s.textCursor -= 1;
     } else {
         if (s.textCursor >= len || len == 0) return;               // forward-delete
-        s.text.erase(static_cast<size_t>(s.textCursor), 1);
-        s.textCursor = std::min(s.textCursor, static_cast<int>(s.text.size()));
+        erase_letter(s.text, s.textCursor);
+        s.textCursor = std::min(s.textCursor, len - 1);
     }
 }
 
@@ -123,7 +134,7 @@ void move_text_cursor_left(QwertyKeyboardState& s) {
 }
 
 void move_text_cursor_right(QwertyKeyboardState& s) {
-    if (s.textCursor < static_cast<int>(s.text.size())) s.textCursor += 1;
+    if (s.textCursor < s.letter_count()) s.textCursor += 1;
 }
 
 QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols) {
@@ -214,7 +225,7 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     // Short text is centred; overflowing, it left-aligns and scrolls with a "…" on the hidden side.
     const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
     const int              textRowY   = contentY + TEXTROW_OFF;
-    const int              textLen    = static_cast<int>(s.text.size());
+    const int              textLen    = s.letter_count();
     const int              windowCols = INNERW / CHARW;   // whole character columns the box holds
     const QwertyTextWindow win        = qwerty_text_window(textLen, s.textCursor, windowCols);
 
@@ -230,14 +241,17 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     const Argb markerColor = darken(t.textValue, 0.5f);
     if (win.clipLeft) c.draw_text(ELLIPSIS, startX, textRowY + 3, markerColor, CS, FS);
 
+    size_t at = Canvas::glyph_offset(s.text, win.first);
     for (int k = 0; k < win.cols; ++k) {
         const int  idx      = win.first + k;
         const int  px       = textX + k * CHARW;
         const bool isCursor = (idx == s.textCursor);   // idx can be textLen: the phantom end
         if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, t.rowCursor);
         if (idx < textLen) {
-            c.draw_text(std::string(1, s.text[static_cast<size_t>(idx)]), px, textRowY + 3,
+            const size_t next = Canvas::glyph_offset(s.text, idx + 1);
+            c.draw_text(s.text.substr(at, next - at), px, textRowY + 3,
                         isCursor ? cursor_cell_ink(t) : t.textValue, CS, FS);
+            at = next;
         }
     }
 
