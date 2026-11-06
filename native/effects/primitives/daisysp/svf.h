@@ -87,6 +87,9 @@ class Svf
     float input_;
     float out_low_, out_high_, out_band_, out_peak_, out_notch_;
     float pre_drive_, fc_max_;
+    float band_max_, band_reset_;   // keep the drive term from running away (SetBandMax)
+
+    void SetBandMax();
 };
 } // namespace daisysp
 

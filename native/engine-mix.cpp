@@ -2,6 +2,7 @@
 // master — processAudioBlock, and processLiveBlock, the live entry every backend calls.
 #include "audio-engine.h"
 #include "engine-voice-ops.h"
+#include "effects/primitives/finite.h"
 #include "vendor/tsf/tsf.h"    // TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
 #include <cstdint>
 #include <cstring>
@@ -1423,6 +1424,13 @@ void AudioEngine::mixBuses(const BlockMix& b) {
     const auto at = [numFrames](float start, float end, int i) {
         return start + (end - start) * ((float)(i + 1) / (float)numFrames);
     };
+
+    // ⚠️ Every voice's audio meets here, ahead of everything that keeps state across blocks: the
+    // delay and reverb lines, the master EQ, OTT/DUST and the limiter. A non-finite sample past this
+    // point would stay in them until the app restarts.
+    copy_finite(output, output, numFrames * channelCount);
+    copy_finite(revSendBufL, revSendBufL, numFrames); copy_finite(revSendBufR, revSendBufR, numFrames);
+    copy_finite(dlySendBufL, dlySendBufL, numFrames); copy_finite(dlySendBufR, dlySendBufR, numFrames);
 
     // ⚠️ The dry gate, for soloing a send return: every send has already tapped above this
     // multiply, where eight track mutes would also silence what feeds the reverb.
