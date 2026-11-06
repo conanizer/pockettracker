@@ -22,7 +22,9 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
     }
     voice.modSourceValues[MOD_SRC_NONE] = 0.0f;
 
-    // Mod-to-mod: a slot aimed at MOD_AMT adds to the next slot's amount, MOD_RATE multiplies its rate.
+    // Mod-to-mod: a slot aimed at MOD_AMT adds to the next slot's amount, MOD_RATE multiplies its rate
+    // by 1 + source × AMT — ×1 at AMT 00 or a source at rest, up to ×2, and an LFO's lower half slows
+    // it (to a twentieth at FF).
     {
         float amtOffset[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -35,8 +37,8 @@ inline void runModMatrix(IAudioVoice& voice, int numFrames, float sr) {
                                           : fmaxf(0.0f, src.envValue);
             if (src.dest == 8 || src.dest == 10) amtOffset[target] += norm * src.amount;
             if (src.dest == 9 || src.dest == 10) {
-                float rateScale = fminf(2.0f, norm * src.amount * 2.0f);
-                rateMult[target] *= fmaxf(0.05f, rateScale);
+                const float swing = (src.type == 3) ? src.envValue : fmaxf(0.0f, src.envValue);
+                rateMult[target] *= fmaxf(0.05f, 1.0f + swing * src.amount);
             }
         }
         for (int m = 0; m < 4; m++) {
