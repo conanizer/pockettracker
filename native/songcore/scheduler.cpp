@@ -438,8 +438,10 @@ int64_t Sequencer::scheduleSongRowRange(int startRow, int endRow, const std::set
     router_.t_play("RENDER", "rows=" + hex2(startRow) + "-" + hex2(endRow), 0, project.tempo, sampleRate_);
 
     // ⚠️ Repetitions restart TOGETHER at the longest track's end, or unequal blocks drift further each
-    // pass. A pass that schedules nothing ends the loop.
+    // pass. A pass that schedules nothing ends the loop. The track state is reset once, here: NTH's
+    // count, the groove, the scale and a running ARP or RPT carry across a seam, as on a live loop.
     if (repeat < 1) repeat = 1;
+    for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
     int64_t passStart = 0;
     for (int pass = 0; pass < repeat; ++pass) {
         const int64_t passEnd = schedule_range_pass(project, startRow, endRow, trackFilter,
@@ -455,8 +457,6 @@ int64_t Sequencer::scheduleSongRowRange(int startRow, int endRow, const std::set
 int64_t Sequencer::schedule_range_pass(const Project& project, int startRow, int endRow,
                                        const std::set<int>* trackFilter, int64_t passStart,
                                        int64_t framesPerStep, int64_t framesPerPhrase) {
-    for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
-
     for (int trackId = 0; trackId < 8; ++trackId) {
         trackNextFrame_[trackId] = passStart;
         trackSongRow_[trackId]   = startRow;
