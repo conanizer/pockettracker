@@ -80,7 +80,9 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
 
     std::vector<float> buf(static_cast<size_t>(RENDER_CHUNK_FRAMES) * 2);
 
-    // The range ends, so the notes do; what follows is the tails alone.
+    // The range ends, so the notes do; what follows is the tails alone. A note placed past the
+    // range (a LAT on the last row) is dropped: it would start after this release and ring to the cap.
+    engine.clearScheduledNotesFrom(songFrames);
     engine.scheduleNoteOffAll(songFrames);
 
     // ── the song ──
@@ -95,8 +97,6 @@ RenderStats render_to_wav(Engine& engine, const Project& project, int64_t songFr
     stats.songFrames = songFrames;
 
     // The tail: render until a whole chunk peaks below −90 dBFS, and drop that chunk.
-    // ⚠️ A late note (a DEL or retrig on the final step) starts after the release; if it loops it
-    // rings until the cap.
     if (progress) progress(1.0f);
     const int64_t maxTail = static_cast<int64_t>(TAIL_MAX_SECONDS) * sampleRate;
     int64_t tail = 0;
