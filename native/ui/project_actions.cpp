@@ -92,7 +92,7 @@ int64_t media_file_bytes(const std::string& path) {
 }
 
 // In pieces, so `onBytes` can move the bar inside a big file, and through "<dest>.tmp" + rename, so a
-// failed copy leaves no partial file. ⚠️ Through pt_fopen, not `FileSystem::copy_file`: on Android
+// failed copy leaves no partial file and an old `to` stays until the new one is whole. ⚠️ Through pt_fopen, not `FileSystem::copy_file`: on Android
 // that reads the whole file into memory first.
 bool copy_in_pieces(const std::string& from, const std::string& to,
                     const std::function<void(int64_t)>& onBytes) {
@@ -212,7 +212,6 @@ ActionResult collect_project(const songcore::SongcoreHost& host, FileSystem& fs,
         const size_t       slash  = c.rel.find_last_of('/');
         c.ok = slash == std::string::npos ||
                !fs.make_app_folder(songSub + "/" + c.rel.substr(0, slash)).empty();
-        if (c.ok && fs.file_exists(dest)) c.ok = fs.delete_path(dest);
         c.ok = c.ok && copy_in_pieces(c.source, dest, onBytes);
         // A file that failed, or measured wrong, still moves the bar by what it was counted as.
         onBytes(before + c.bytes - doneBytes);
