@@ -253,6 +253,7 @@ void AudioEngine::triggerSamplerNote(const ScheduledNote& note, int frame, int64
                               note.trackId, rate, note.baseFrequency,
                               note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                               sampleRate, note.startPointOverride, note.endPointOverride,
+                              note.sliceStartFrame, note.sliceEndFrame,
                               note.tableId, effectiveTicRates, note.noteOctave, note.notePitch, startRows);
             voices[v].setChord(chordSemis, chordCount, strumWait);
             voices[v].instrId = note.sampleId;
@@ -864,6 +865,10 @@ void AudioEngine::mixSamplerPieceAs(Voice& voice, const BlockMix& b, int from, i
         if (voice.windowStartFrame >= 0) {
             voice.actualStart = std::max(0, std::min(voice.windowStartFrame, sl - 2));
             voice.actualEnd   = std::max(voice.actualStart + 1, std::min(voice.windowEndFrame, sl - 1));
+        } else if (voice.sliceStartFrame >= 0) {
+            derive_slice_window(voice.sliceStartFrame, voice.sliceEndFrame,
+                                voice.modDestValues[PARAM_SAMPLE_START], voice.modDestValues[PARAM_SAMPLE_END],
+                                voice.params.base[PARAM_SAMPLE_END], sl, voice.actualStart, voice.actualEnd);
         } else {
             float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
             float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];

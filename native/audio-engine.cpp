@@ -260,6 +260,8 @@ bool AudioEngine::resolveScheduledNote(ScheduledNote& note) {
         note.phraseVolume       = a.phraseVolume;
         note.startPointOverride = a.startPointOverride;
         note.endPointOverride   = a.endPointOverride;
+        note.sliceStartFrame    = a.sliceStartFrame;
+        note.sliceEndFrame      = a.sliceEndFrame;
     }
     return true;
 }

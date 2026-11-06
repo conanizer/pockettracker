@@ -97,6 +97,8 @@ struct SamplerNoteArgs {
     float pan = 0.5f;
     int   startPointOverride = -1;
     int   endPointOverride = -1;
+    int   sliceStartFrame = -1;  // a slice's window in frames; -1 = none. End -1 = the END cell's
+    int   sliceEndFrame = -1;
     int   tableId = -1;
     int   tableTicRate = 6;
     int   noteOctave = 4;
@@ -196,6 +198,7 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
         if (sampleLength > 0) {
             const int64_t sliceStart = (sliceIndex == 0) ? 0 : p.sliceMarkers[sliceIndex - 1];
             effStart = clampi(static_cast<int>((sliceStart * 255LL) / sampleLength), 0, 255);
+            a.sliceStartFrame = static_cast<int>(sliceStart);
 
             const int rootMidi = clampi(p.rootMidi + n.transpose, 0, 127);
             notePitch  = rootMidi % 12;
@@ -210,6 +213,7 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
                 const int64_t sliceEnd = (sliceIndex < markerCount) ? p.sliceMarkers[sliceIndex]
                                                                     : sampleLength;
                 effEnd = clampi(static_cast<int>((sliceEnd * 255LL) / sampleLength), 0, 255);
+                a.sliceEndFrame = static_cast<int>(sliceEnd);
             }
         }
     }

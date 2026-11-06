@@ -49,6 +49,10 @@ struct ScheduledNote {
     float pan;               // 0 left, 0.5 centre, 1 right
     int startPointOverride;  // -1 = the instrument's
     int endPointOverride;    // CUT slice end; -1 = the instrument's
+    // A slice's exact window, which the 0-255 overrides above only approximate. -1 = none; an end of
+    // -1 = the END cell's. ⚠️ Defaulted: `ScheduledNote{}` must not read as a slice at frame 0.
+    int sliceStartFrame = -1;
+    int sliceEndFrame   = -1;
 
     int tableId;             // -1 = none
     int tableTicRate;        // ticks per table row

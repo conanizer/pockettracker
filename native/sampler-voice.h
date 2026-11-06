@@ -10,18 +10,35 @@
 // START and END are two free 0-255 cells, so an inverted pair is typeable. It means "from START to
 // the end of the sample". ⚠️ Derived in ONE place: the window is computed at note-on and again every
 // piece, and two repairs that disagree give a note that starts by one and stops by the other.
-// The result is never empty, which the loop bounds and the mix loop assume.
-inline void derive_sample_window(float startNorm, float endNorm, int length,
-                                 int& outStart, int& outEnd) {
+// The result is never empty, which the loop bounds and the mix loop assume. In frames.
+inline void derive_sample_window_frames(double startFrame, double endFrame, int length,
+                                        int& outStart, int& outEnd) {
     if (length < 2) { outStart = 0; outEnd = std::max(0, length - 1); return; }
-    // double: the endpoints carry a modulation offset, and float loses whole frames past 2^24.
-    int s = (int)((double)startNorm * (double)length / 255.0);
-    int e = (int)((double)endNorm   * (double)length / 255.0);
+    int s = (int)startFrame;
+    int e = (int)endFrame;
     s = std::max(0, std::min(s, length - 2));
     e = std::min(e, length - 1);
     if (e <= s) e = length - 1;
     outStart = s;
     outEnd   = e;
+}
+
+// double: the endpoints carry a modulation offset, and float loses whole frames past 2^24.
+inline void derive_sample_window(float startNorm, float endNorm, int length,
+                                 int& outStart, int& outEnd) {
+    derive_sample_window_frames((double)startNorm * (double)length / 255.0,
+                                (double)endNorm   * (double)length / 255.0, length, outStart, outEnd);
+}
+
+// A slice's window: its markers' frames, moved by START/END mods in 255ths of the sample.
+// `sliceEnd` -1 = the END value instead (a TRU slice plays on to it).
+inline void derive_slice_window(int sliceStart, int sliceEnd, float startMod, float endMod,
+                                float endNorm, int length, int& outStart, int& outEnd) {
+    const double unit = (double)length / 255.0;
+    const double s = (double)sliceStart + (double)startMod * unit;
+    const double e = (sliceEnd >= 0) ? (double)sliceEnd + (double)endMod * unit
+                                     : ((double)endNorm + (double)endMod) * unit;
+    derive_sample_window_frames(s, e, length, outStart, outEnd);
 }
 
 // Where one note is in its sample and how it moves on. ⚠️ A copy, not a view: the mix loop fills
@@ -147,6 +164,9 @@ struct Voice : public IAudioVoice {
     // The exact-frame window this note was triggered with, or -1/-1. ⚠️ Carried, because the mix
     // loop re-derives actualStart/End from the 0-255 pair, which cannot express it.
     int windowStartFrame = -1, windowEndFrame = -1;
+    // A slice's markers in frames (-1 = not a slice; end -1 = the END value). The mix loop derives
+    // the window from these, not from the 0-255 override, which can start a slice early.
+    int sliceStartFrame = -1, sliceEndFrame = -1;
     // ⚠️ LPO's position is a running COUNT of sixteenths of the loop's own length; the bounds above
     // are frames. The frame offset is derived from the count every piece, so sixteen steps of `01`
     // land where one step of `10` does. Clamped: the window stops at the sample's ends.
@@ -252,6 +272,7 @@ struct Voice : public IAudioVoice {
                  float instrVol, float phraseVol, float pan,
                  const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
                  int endPointOverride = -1,
+                 int sliceStart = -1, int sliceEnd = -1,
                  int tblId = -1,
                  const int (&tblTicRates)[TABLE_LANES] = TABLE_TICS_DEFAULT,
                  int octave = 4, int pitch = 0,
@@ -273,8 +294,14 @@ struct Voice : public IAudioVoice {
         // An override is an Offset effect or a slice start.
         int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : instrParams.startPoint;
         int effectiveEndPoint   = (endPointOverride   >= 0) ? endPointOverride   : instrParams.endPoint;
-        derive_sample_window((float)effectiveStartPoint, (float)effectiveEndPoint, length,
-                             actualStart, actualEnd);
+        sliceStartFrame = sliceStart;
+        sliceEndFrame   = (sliceStart >= 0) ? sliceEnd : -1;
+        if (sliceStartFrame >= 0)
+            derive_slice_window(sliceStartFrame, sliceEndFrame, 0.0f, 0.0f,
+                                (float)effectiveEndPoint, length, actualStart, actualEnd);
+        else
+            derive_sample_window((float)effectiveStartPoint, (float)effectiveEndPoint, length,
+                                 actualStart, actualEnd);
         // The exact-frame window replaces the pair when armed — unless this NOTE carries an override.
         const bool frameWindow = (startPointOverride < 0 && endPointOverride < 0 &&
                                   length >= 2 &&
