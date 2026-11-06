@@ -78,6 +78,12 @@ std::string call_string0(const char* name) {
     return e.take(r);
 }
 
+// The document's URI after the rename — it may change — or "" on failure.
+std::string rename_doc(const std::string& uri, const std::string& name) {
+    return call_string("safRename", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", uri,
+                       &name);
+}
+
 }  // namespace
 
 // ─── construction, and the hooks ─────────────────────────────────────────────────────────────────
@@ -615,28 +621,51 @@ int SafFileSystem::hook_rename(const std::string& from, const std::string& to) {
     // `<path>.tmp` onto `<path>`.
     if (parent_path(from) != parent_path(to)) return move_file(from, to) ? 0 : -1;
 
-    const std::string name = leaf_name(to);
-    if (name.empty()) return -1;
-
     const std::string uri = resolve(from);
     if (uri.empty()) return -1;
+    return replace(from, uri, to) ? 0 : -1;
+}
 
-    // ⚠️ The target must be gone: a rename onto a taken name de-duplicates. Callers `pt_remove` it
-    // first; this is the backstop.
-    const std::string targetUri = resolve(to);
-    if (!targetUri.empty()) {
-        delete_uri(targetUri);
+bool SafFileSystem::replace(const std::string& from, const std::string& fromUri, const std::string& to) {
+    const std::string name = leaf_name(to);
+    if (name.empty()) return false;
+
+    // ⚠️ SAF has no replace, and a rename onto a taken name de-duplicates (`song (1).ptp`). So the old
+    // file steps aside, the new one takes the name, and only then is the old one deleted. Every step
+    // is checked, and a failure puts the old file back: a save never costs the last good copy.
+    const std::string asidePath = to + ".bak";
+    std::string       asideUri;
+    if (const std::string oldUri = resolve(to); !oldUri.empty()) {
+        // A `.bak` an earlier save failed to delete is older than `to`.
+        if (const std::string stale = resolve(asidePath); !stale.empty()) {
+            delete_uri(stale);
+            forget(asidePath);
+        }
+        asideUri = rename_doc(oldUri, leaf_name(asidePath));
         forget(to);
+        if (asideUri.empty()) return false;   // nothing has moved yet
     }
 
-    const std::string renamed = call_string("safRename",
-                                            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                            uri, &name);
+    const std::string renamed = rename_doc(fromUri, name);
     forget(from);
-    if (renamed.empty()) return -1;
+    if (renamed.empty()) {
+        if (!asideUri.empty() && rename_doc(asideUri, name).empty()) {
+            __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                                "saf: could not put %s back - the old file is %s", to.c_str(),
+                                asidePath.c_str());
+        }
+        forget(asidePath);
+        return false;
+    }
     uriCache_[to] = renamed;
     invalidate(parent_path(to));
-    return 0;
+
+    if (!asideUri.empty() && !delete_uri(asideUri)) {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag, "saf: %s saved, but %s is left behind",
+                            to.c_str(), asidePath.c_str());
+    }
+    forget(asidePath);
+    return true;
 }
 
 // ─── writing ─────────────────────────────────────────────────────────────────────────────────────
@@ -663,21 +692,7 @@ bool SafFileSystem::write_bytes(const std::string& path, const void* data, size_
         return false;
     }
 
-    // The target goes first, or the rename de-duplicates into `song (1).ptp`.
-    const std::string targetUri = resolve(path);
-    if (!targetUri.empty()) {
-        delete_uri(targetUri);
-        forget(path);
-    }
-
-    const std::string renamed = call_string("safRename",
-                                            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                            tmpUri, &name);
-    forget(tmpPath);
-    if (renamed.empty()) return false;
-    uriCache_[path] = renamed;
-    invalidate(parent_path(path));
-    return true;
+    return replace(tmpPath, tmpUri, path);
 }
 
 bool SafFileSystem::is_granted_tree(const std::string& path) {
@@ -724,9 +739,7 @@ bool SafFileSystem::rename_file(const std::string& path, const std::string& new_
     const std::string uri = resolve(path);
     if (uri.empty()) return false;
 
-    const std::string renamed = call_string("safRename",
-                                            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                            uri, &finalName);
+    const std::string renamed = rename_doc(uri, finalName);
     if (renamed.empty()) return false;
 
     // ⚠️ The URI may change (the provider may encode the name in the id), so the old path and all

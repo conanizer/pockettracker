@@ -92,7 +92,12 @@ int pt_rename(const char* from, const char* to) {
 
     const bool fromUri = pt_path_is_uri(from);
     const bool toUri   = pt_path_is_uri(to);
-    if (!fromUri && !toUri) return std::rename(from, to);
+    if (!fromUri && !toUri) {
+#if defined(_WIN32)
+        std::remove(to);   // Windows' rename refuses a taken name; POSIX replaces it in one step
+#endif
+        return std::rename(from, to);
+    }
 
     // Both callers rename `<path>.tmp` onto `<path>`; a mixed pair is a bug somewhere, not a copy.
     if (fromUri != toUri) return -1;

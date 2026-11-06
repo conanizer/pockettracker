@@ -92,9 +92,6 @@ class WavStreamWriter {
             return false;
         }
 
-        // ⚠️ The target goes FIRST: `rename()` fails on an existing target on Windows, and SAF's
-        // `renameDocument` de-duplicates (leaving `song (1).wav` beside the old render).
-        pt_remove(path_.c_str());
         if (pt_rename(tmpPath_.c_str(), path_.c_str()) != 0) {
             pt_remove(tmpPath_.c_str());
             return false;
@@ -226,7 +223,6 @@ inline bool wav_write_atomic(const std::string& path, const std::vector<uint8_t>
         pt_remove(tmp.c_str());
         return false;
     }
-    pt_remove(path.c_str());   // see WavStreamWriter::finish — the target must go before the rename
     if (pt_rename(tmp.c_str(), path.c_str()) != 0) {
         pt_remove(tmp.c_str());
         return false;

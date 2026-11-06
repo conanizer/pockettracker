@@ -19,7 +19,7 @@ using PtOpenHook = int (*)(const char* path, const char* mode);
 // Delete a URI. 0 on success, as `std::remove`.
 using PtRemoveHook = int (*)(const char* path);
 
-// Rename a URI to another URI. 0 on success, as `std::rename`. Never handed a mixed pair.
+// Rename a URI onto another, replacing what is there. 0 on success. Never handed a mixed pair.
 using PtRenameHook = int (*)(const char* from, const char* to);
 
 // What a host installs. A null member: this host cannot do that to a URI.
@@ -47,7 +47,9 @@ bool pt_read_file(const char* path, std::string& out);
 // `std::remove`, or the host hook for a URI. 0 on success.
 int pt_remove(const char* path);
 
-// `std::rename`, or the host hook when either end is a URI. 0 on success.
+// `std::rename`, or the host hook when either end is a URI. 0 on success. An existing `to` is replaced.
+// ⚠️ Never `pt_remove` the target first: on Android that delete would come before a rename that can
+// still fail, and the hook replaces it safely.
 // ⚠️ A URI and a plain path fail rather than quietly becoming a whole-file copy.
 int pt_rename(const char* from, const char* to);
 

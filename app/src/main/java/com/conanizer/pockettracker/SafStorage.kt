@@ -274,12 +274,12 @@ class SafStorage(private val context: Context) {
 
     /**
      * Renames a document, returning its URI afterwards, or "" on failure.
-     * ⚠️ The URI may change (a provider may encode the name in the id). A null return is a rename in
-     * place, so it keeps the old URI.
+     * ⚠️ The URI may change (a provider may encode the name in the id). A null return is the failure:
+     * a rename in place already comes back as the old URI.
      */
     fun renameDoc(docUri: String, newName: String): String = runCatching {
         DocumentsContract.renameDocument(context.contentResolver, Uri.parse(docUri), newName)
-            ?.toString() ?: docUri
+            ?.toString() ?: ""
     }.getOrElse {
         Log.w(TAG, "saf: renameDoc('$newName') failed on $docUri: $it")
         ""

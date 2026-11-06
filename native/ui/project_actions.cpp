@@ -122,10 +122,7 @@ bool copy_in_pieces(const std::string& from, const std::string& to,
     const bool flushed = std::fclose(out) == 0;
     ok = ok && flushed;
 
-    if (ok) {
-        pt_remove(to.c_str());   // a rename onto a taken name fails (or, on Android, de-duplicates)
-        ok = pt_rename(tmp.c_str(), to.c_str()) == 0;
-    }
+    if (ok) ok = pt_rename(tmp.c_str(), to.c_str()) == 0;
     if (!ok) pt_remove(tmp.c_str());
     return ok;
 }

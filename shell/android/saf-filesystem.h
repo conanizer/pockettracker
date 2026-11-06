@@ -160,6 +160,10 @@ class SafFileSystem : public pt::ui::FileSystem {
     // Deletes by URI (the writers hold a URI, not a path).
     bool delete_uri(const std::string& uri);
 
+    // Renames `from` (document `fromUri`) onto `to` in the same folder, replacing what is there. False
+    // leaves `to` as it was.
+    bool replace(const std::string& from, const std::string& fromUri, const std::string& to);
+
     // Drops `path` and everything beneath it from both caches. ⚠️ Every mutation calls it: a renamed
     // or deleted folder leaves its children's URIs cached, and a stale one fails as "file is corrupt".
     void forget(const std::string& path);
