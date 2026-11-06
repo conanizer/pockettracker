@@ -886,7 +886,8 @@ void InputDispatcher::sample_editor_chop() {
     fs_.create_folder(chops, base);
     const std::string dir = chops + "/" + base;
 
-    const int written = host_.chop_sample(se.instrumentId, dir, base, slices, se.bitDepth);
+    const int written = host_.chop_sample(se.instrumentId, dir, base, slices, se.sourceMode,
+                                          se.hasStereoData, se.bitDepth);
     set_status(s_, written > 0 ? ("CHOPPED " + std::to_string(written)) : "CHOP FAILED", written > 0);
 }
 

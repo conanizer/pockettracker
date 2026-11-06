@@ -379,7 +379,8 @@ class SongcoreHost {
 
     // Every slice → its own WAV in `dir`. Returns how many were written.
     int chop_sample(int id, const std::string& dir, const std::string& baseName,
-                    const std::vector<std::pair<int64_t, int64_t>>& slices, int bits = 0);
+                    const std::vector<std::pair<int64_t, int64_t>>& slices, int sourceMode,
+                    bool hasStereo, int bits = 0);
 
     // ── live editing: the Sequencer reads this same object, so an edit is heard from the next row ──
     // ⚠️ A TABLE edit must call invalidate_tables(): the consumer caches what it pushed.

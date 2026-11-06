@@ -551,9 +551,11 @@ void SongcoreHost::adopt_saved_sample(int id, int bits) {
 }
 
 int SongcoreHost::chop_sample(int id, const std::string& dir, const std::string& baseName,
-                              const std::vector<std::pair<int64_t, int64_t>>& slices, int bits) {
+                              const std::vector<std::pair<int64_t, int64_t>>& slices, int sourceMode,
+                              bool hasStereo, int bits) {
     if (!engine_) return 0;
-    return songcore::chop_sample(*engine_, routing_, id, dir, baseName, slices, bits);
+    return songcore::chop_sample(*engine_, routing_, id, dir, baseName, slices, sourceMode, hasStereo,
+                                 bits);
 }
 
 void SongcoreHost::preview_note(int instrumentId, const Note& note, int64_t durationFrames,

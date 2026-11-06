@@ -240,12 +240,12 @@ bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::
     }
 }
 
-// CHOP: every slice to `<base>_NN.wav` in `dir`; returns how many (out of memory stops it, as SAVE).
-// ⚠️ The LEFT channel only, through `write_wav_mono` (both channels hold it — a shipped format).
+// CHOP: every slice to `<base>_NN.wav` in `dir`, channels per SOURCE as SAVE; returns how many
+// (out of memory stops it, as SAVE).
 template <typename Engine>
 int chop_sample(Engine& engine, const Routing& routing, int id, const std::string& dir,
                 const std::string& base_name, const std::vector<std::pair<int64_t, int64_t>>& slices,
-                int bits = 0) {
+                int sourceMode, bool hasStereo, int bits = 0) {
     const int len = engine.getSampleLength(id);
     if (len <= 0 || slices.empty()) return 0;
     const int  depth   = resolve_save_bits(engine, id, bits);   // the slices come out at SAVE's depth
@@ -254,21 +254,22 @@ int chop_sample(Engine& engine, const Routing& routing, int id, const std::strin
 
     int written = 0;
     try {
-        std::vector<float> pcm(static_cast<size_t>(len));
-        engine.getSampleData(id, pcm.data());
+        const SaveChannels ch = resolve_save_channels(engine, id, sourceMode, hasStereo);
+        const auto cut = [](const std::vector<float>& pcm, int64_t start, int64_t end) {
+            if (pcm.empty()) return std::vector<float>();
+            return std::vector<float>(pcm.begin() + static_cast<ptrdiff_t>(start),
+                                      pcm.begin() + static_cast<ptrdiff_t>(end));
+        };
 
         for (size_t i = 0; i < slices.size(); ++i) {
             const int64_t start = std::clamp<int64_t>(slices[i].first, 0, len);
             const int64_t end   = std::clamp<int64_t>(slices[i].second, start, len);
             if (end <= start) continue;   // an empty slice is not a file
 
-            const std::vector<float> slice(pcm.begin() + static_cast<ptrdiff_t>(start),
-                                           pcm.begin() + static_cast<ptrdiff_t>(end));
-
             char suffix[8];
             std::snprintf(suffix, sizeof(suffix), "%02d", static_cast<int>(i));
-            if (write_wav_mono(dir + "/" + base_name + "_" + suffix + ".wav", slice, rate, {}, depth,
-                               isFloat))
+            if (write_wav(dir + "/" + base_name + "_" + suffix + ".wav", cut(ch.left, start, end),
+                          cut(ch.right, start, end), rate, {}, ch.channels, depth, isFloat))
                 written++;
         }
     } catch (const std::bad_alloc&) {}
