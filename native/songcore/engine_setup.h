@@ -181,11 +181,13 @@ bool push_mapped_dest(Engine& engine, const Project& p, MapDestId dest, int scop
             engine.setReverbCharacter(p.reverbPreDelay, p.reverbWidth, p.reverbMod);
             return true;
 
+        // ⚠️ FDBK and WET leave the TIME alone: a TIM may own it, and only a TIME knob takes it back.
         case MapDestId::DLY_TIME:
+            engine.setDelayTime(p.delayTime, p.delaySync, static_cast<float>(tempo_in_force(p)));
+            return true;
         case MapDestId::DLY_FDBK:
         case MapDestId::DLY_WET:
-            engine.setDelayParams(p.delayTime, p.delayFeedback, p.delaySync,
-                                  static_cast<float>(tempo_in_force(p)), p.delayWet);
+            engine.setDelayFeedbackWet(p.delayFeedback, p.delayWet);
             return true;
         case MapDestId::DLY_TONE:
         case MapDestId::DLY_WOBL:
