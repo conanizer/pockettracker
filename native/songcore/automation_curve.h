@@ -1,7 +1,8 @@
 #ifndef POCKETTRACKER_SONGCORE_AUTOMATION_CURVE_H
 #define POCKETTRACKER_SONGCORE_AUTOMATION_CURVE_H
 
-// The ramp's curve and the EQ-morph band rule, shared by phrases and the engine's tables.
+// The ramp's curve, the AUS/AUF pairing and the EQ-morph band rule, shared by phrases and the
+// engine's tables.
 // ⚠️ `<cstdint>` only, ever — the engine must not see model.h.
 
 #include <cstdint>
@@ -61,6 +62,80 @@ inline AutomationEqBand automation_eq_band_at(const AutomationEqBand& from, cons
     m.gain = automation_value_byte(from.gain, to.gain, curveByte, t);
     m.q    = automation_value_byte(from.q,    to.q,    curveByte, t);
     return m;
+}
+
+// ─── The pairing: one walk for a phrase, a chain and a table ─────────────────────────────────────
+
+constexpr int RAMP_AUS_CODE        = 0x2D;   // xx = the curve
+constexpr int RAMP_AUF_CODE        = 0x2E;   // xx = the destination
+constexpr int RAMP_EQ_PRESET_SLOTS = 128;
+
+// What the effect to the left of an AUS is to a ramp.
+enum class RampArm { NONE, VALUE, EQ_SLOT };   // EQ_SLOT: its endpoints are EQ preset slots
+
+// One row's or step's three FX slots, as 1-3 ([0] unused).
+struct RampRowFx {
+    int type[4]  = {};
+    int value[4] = {};
+};
+
+template <typename Row> inline RampRowFx ramp_row_fx(const Row& r) {
+    RampRowFx fx;
+    fx.type[1] = r.fx1Type;  fx.value[1] = r.fx1Value;
+    fx.type[2] = r.fx2Type;  fx.value[2] = r.fx2Value;
+    fx.type[3] = r.fx3Type;  fx.value[3] = r.fx3Value;
+    return fx;
+}
+
+// One paired ramp, in the walk's positions.
+struct RampPair {
+    int     paramType = 0;   // the effect being ramped
+    RampArm arm       = RampArm::NONE;
+    int     ausPos = -1, paramSlot = 0, ausSlot = 0, startByte = 0, curveByte = AUS_CURVE_LINEAR;
+    int     aufPos = -1, aufSlot = 0, destByte = 0;
+};
+
+// AUS takes the nearest ramp-able effect to its LEFT (none: inert); the first AUF on a LATER position
+// closes it; the last AUS wins (no nesting); an AUS still open at the end produces nothing. On one
+// row the AUFs close before the AUSes open, whatever their columns, so a fade can start where one
+// ends. An EQ endpoint that is not a slot ends the search at the AUS, and at an AUF leaves the AUS
+// open for a later one. `row_at(pos)` → RampRowFx, `arm_of(type)` → RampArm, `emit(const RampPair&)`.
+template <typename RowAt, typename ArmOf, typename Emit>
+inline void pair_ramps(int count, RowAt row_at, ArmOf arm_of, Emit emit) {
+    const auto endpoint_ok = [](RampArm a, int v) {
+        return a != RampArm::EQ_SLOT || (v >= 0 && v < RAMP_EQ_PRESET_SLOTS);
+    };
+    RampPair open;
+    bool     isOpen = false;
+    for (int pos = 0; pos < count; ++pos) {
+        const RampRowFx fx = row_at(pos);
+        for (int slot = 1; slot <= 3 && isOpen; ++slot) {
+            if (fx.type[slot] != RAMP_AUF_CODE || !endpoint_ok(open.arm, fx.value[slot])) continue;
+            open.aufPos   = pos;
+            open.aufSlot  = slot;
+            open.destByte = fx.value[slot];
+            emit(static_cast<const RampPair&>(open));
+            isOpen = false;
+        }
+        for (int slot = 1; slot <= 3; ++slot) {
+            if (fx.type[slot] != RAMP_AUS_CODE) continue;
+            for (int left = slot - 1; left >= 1; --left) {
+                const RampArm arm = arm_of(fx.type[left]);
+                if (arm == RampArm::NONE) continue;
+                if (!endpoint_ok(arm, fx.value[left])) break;   // the nearest one IS the parameter
+                open           = RampPair{};
+                open.paramType = fx.type[left];
+                open.arm       = arm;
+                open.ausPos    = pos;
+                open.paramSlot = left;
+                open.ausSlot   = slot;
+                open.startByte = fx.value[left];
+                open.curveByte = fx.value[slot];
+                isOpen         = true;
+                break;
+            }
+        }
+    }
 }
 
 }  // namespace songcore

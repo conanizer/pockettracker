@@ -2328,6 +2328,9 @@ a long, obvious EQ sweep, use `EQM`.
 fade longer than one phrase is written — up to the sixteen rows of the chain. It does **not** cross into
 the next chain: pairing stops at the end of the chain the `AUS` was written in.
 
+**One fade may start where another ends.** Put the `AUF` and the next `AUS` on the same step, in any
+columns: the `AUF` closes the old fade first, then the `AUS` opens the new one.
+
 **A fade may also be written in a TABLE**, over rows rather than steps and with a smaller set of
 parameters — see §12 → *Fades in a table*.
 

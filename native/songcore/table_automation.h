@@ -44,9 +44,9 @@ inline constexpr Arm ARMS[] = {
 };
 inline constexpr int ARM_COUNT = static_cast<int>(sizeof(ARMS) / sizeof(Arm));
 
-inline constexpr int FX_AUS_CODE = 0x2D;   // xx = the curve
-inline constexpr int FX_AUF_CODE = 0x2E;   // xx = the destination
-inline constexpr int EQ_PRESET_SLOTS = 128;
+inline constexpr int FX_AUS_CODE     = songcore::RAMP_AUS_CODE;
+inline constexpr int FX_AUF_CODE     = songcore::RAMP_AUF_CODE;
+inline constexpr int EQ_PRESET_SLOTS = songcore::RAMP_EQ_PRESET_SLOTS;
 
 inline constexpr const Arm* arm_for(int fxCode) {
     for (int i = 0; i < ARM_COUNT; ++i)
@@ -82,64 +82,32 @@ struct TableRampSet {
     int       count = 0;
 };
 
-// A table row's three FX slots, from either side's row type. Both spell the fields the same way and
-// differ only in width, so one accessor covers both.
-template <typename RowT> inline int fx_type(const RowT& r, int slot) {
-    return slot == 1 ? static_cast<int>(r.fx1Type)
-         : slot == 2 ? static_cast<int>(r.fx2Type)
-                     : static_cast<int>(r.fx3Type);
-}
-template <typename RowT> inline int fx_value(const RowT& r, int slot) {
-    return slot == 1 ? static_cast<int>(r.fx1Value)
-         : slot == 2 ? static_cast<int>(r.fx2Value)
-                     : static_cast<int>(r.fx3Value);
-}
-
-// Every ramp `rows` declares, by `songcore::find_ramps`' rules: AUS takes the nearest ramp-able effect
-// to its LEFT (none: inert), the first AUF on a LATER row closes, the last AUS wins, an unclosed AUS
-// produces nothing.
+// Every ramp `rows` declares, by `songcore::pair_ramps`.
 template <typename RowT>
 inline TableRampSet find_table_ramps(const RowT* rows, int rowCount) {
     TableRampSet out;
-    TableRamp    open;
-    bool         isOpen = false;
-
-    const int last = rowCount < 16 ? rowCount : 16;
-    for (int row = 0; row < last; ++row) {
-        for (int slot = 1; slot <= 3; ++slot) {
-            const int type = fx_type(rows[row], slot);
-
-            if (type == FX_AUS_CODE) {
-                for (int left = slot - 1; left >= 1; --left) {
-                    const Arm* a = arm_for(fx_type(rows[row], left));
-                    if (a == nullptr || !a->rampable) continue;
-                    const int startValue = fx_value(rows[row], left);
-                    // The nearest ramp-able effect IS the parameter, so an endpoint it cannot
-                    // express ends the search rather than continuing it.
-                    if (a->eqPreset && !is_eq_slot(startValue)) break;
-                    open           = TableRamp{};
-                    open.fxCode    = a->code;
-                    open.eqPreset  = a->eqPreset;
-                    open.ausRow    = row;
-                    open.paramSlot = left;
-                    open.ausSlot   = slot;
-                    open.startByte = startValue;
-                    open.curveByte = fx_value(rows[row], slot);
-                    isOpen         = true;
-                    break;
-                }
-            } else if (type == FX_AUF_CODE && isOpen && row > open.ausRow) {
-                // ⚠️ Before anything that closes the ramp: an endpoint that is not a slot leaves the
-                // AUS open for a later AUF, and this cell unused (so the editor dims it).
-                if (open.eqPreset && !is_eq_slot(fx_value(rows[row], slot))) continue;
-                open.aufRow  = row;
-                open.aufSlot = slot;
-                open.destByte = fx_value(rows[row], slot);
-                if (out.count < TableRampSet::CAPACITY) out.items[out.count++] = open;
-                isOpen = false;
-            }
-        }
-    }
+    songcore::pair_ramps(
+            rowCount < 16 ? rowCount : 16,
+            [&](int row) { return songcore::ramp_row_fx(rows[row]); },
+            [](int type) {
+                const Arm* a = arm_for(type);
+                if (a == nullptr || !a->rampable) return songcore::RampArm::NONE;
+                return a->eqPreset ? songcore::RampArm::EQ_SLOT : songcore::RampArm::VALUE;
+            },
+            [&](const songcore::RampPair& p) {
+                if (out.count >= TableRampSet::CAPACITY) return;
+                TableRamp& r = out.items[out.count++];
+                r.fxCode    = p.paramType;
+                r.eqPreset  = p.arm == songcore::RampArm::EQ_SLOT;
+                r.ausRow    = p.ausPos;
+                r.aufRow    = p.aufPos;
+                r.paramSlot = p.paramSlot;
+                r.ausSlot   = p.ausSlot;
+                r.aufSlot   = p.aufSlot;
+                r.startByte = p.startByte;
+                r.destByte  = p.destByte;
+                r.curveByte = p.curveByte;
+            });
     return out;
 }
 

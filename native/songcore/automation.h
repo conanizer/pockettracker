@@ -131,12 +131,10 @@ inline bool eq_morph_equal(const ExtEqMorphPayload& a, const ExtEqMorphPayload& 
     return true;
 }
 
-/** Is this byte a slot an EQ_PRESET ramp may use as an endpoint? */
-inline constexpr bool is_eq_preset_slot(int value) {
-    return value >= 0 && value < POOL_EQPRESETS;
-}
-
 // ─── The pairing ─────────────────────────────────────────────────────────────────────────────────
+
+static_assert(RAMP_AUS_CODE == FX_AUS && RAMP_AUF_CODE == FX_AUF, "automation_curve.h's AUS/AUF");
+static_assert(RAMP_EQ_PRESET_SLOTS == POOL_EQPRESETS, "automation_curve.h's EQ preset slots");
 
 // One ramp as seen from ONE phrase: `span` and `stepOffset` are the whole ramp's; `ausStep`/`aufStep`
 // and the slots are this phrase's, −1/0 when that end is elsewhere.
@@ -195,59 +193,56 @@ inline bool phrase_has_ramp_cell(const Phrase& phrase) {
     return false;
 }
 
-// Every ramp `phrase` declares, walking from `startRow`. AUS takes the nearest automatable effect to
-// its LEFT (none: inert); the first AUF on a LATER step closes it; the last AUS wins (no nesting); an
-// AUS open at the phrase end produces nothing. Reads the step as played, before CHA/RND/RNL.
+// How a phrase's effect answers the pairing.
+inline RampArm ramp_arm(int fxType) {
+    const AutomatableParam* p = automatable_param(fxType);
+    if (p == nullptr) return RampArm::NONE;
+    return p->kind == RampKind::EQ_PRESET ? RampArm::EQ_SLOT : RampArm::VALUE;
+}
+
+// A step as the walk reads it: as played, before CHA/RND/RNL. `ausHere` false hides its AUS cells —
+// a HOP entered the phrase below them.
+inline RampRowFx ramp_step_fx(const PhraseStep& step, bool ausHere) {
+    RampRowFx fx = ramp_row_fx(as_played(step));
+    if (!ausHere)
+        for (int slot = 1; slot <= 3; ++slot)
+            if (fx.type[slot] == FX_AUS) fx.type[slot] = FX_NONE;
+    return fx;
+}
+
+// The parameter and both ends of a pair; the caller places it in its phrase.
+inline RampSpec ramp_spec(const RampPair& p) {
+    const AutomatableParam* param = automatable_param(p.paramType);   // non-null: `ramp_arm` let it in
+    RampSpec r;
+    r.fxCode     = param->fxCode;
+    r.ccId       = param->ccId;
+    r.global     = param->global;
+    r.kind       = param->kind;
+    r.paramSlot  = p.paramSlot;
+    r.ausSlot    = p.ausSlot;
+    r.aufSlot    = p.aufSlot;
+    r.startByte  = p.startByte;
+    r.destByte   = p.destByte;
+    r.curveByte  = p.curveByte;
+    r.span       = p.aufPos - p.ausPos;
+    r.originAbs  = p.ausPos;
+    r.originSlot = p.ausSlot;
+    return r;
+}
+
+// Every ramp `phrase` declares, by `pair_ramps`. An AUS above `startRow` (a HOP entry) is skipped.
 inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) {
     std::vector<RampSpec> out;
-    RampSpec              open;
-    bool                  isOpen = false;
-
-    const int steps = static_cast<int>(phrase.steps.size());
-    const int first = startRow < 0 ? 0 : (startRow > steps ? steps : startRow);
-
-    for (int stepIndex = first; stepIndex < steps; ++stepIndex) {
-        const PhraseStep step = as_played(phrase.steps[stepIndex]);
-        for (int slot = 1; slot <= 3; ++slot) {
-            const int type = step_fx_type(step, slot);
-
-            if (type == FX_AUS) {
-                for (int left = slot - 1; left >= 1; --left) {
-                    const AutomatableParam* p = automatable_param(step_fx_type(step, left));
-                    if (p == nullptr) continue;
-                    const int startValue = step_fx_value(step, left);
-                    // The nearest automatable effect is the parameter, so a bad endpoint ends the search.
-                    if (p->kind == RampKind::EQ_PRESET && !is_eq_preset_slot(startValue)) break;
-                    open           = RampSpec{};
-                    open.fxCode    = p->fxCode;
-                    open.ccId      = p->ccId;
-                    open.global    = p->global;
-                    open.kind      = p->kind;
-                    open.ausStep   = stepIndex;
-                    open.paramSlot = left;
-                    open.ausSlot   = slot;
-                    open.startByte = startValue;
-                    open.curveByte = step_fx_value(step, slot);
-                    isOpen         = true;
-                    break;
-                }
-            } else if (type == FX_AUF && isOpen && stepIndex > open.ausStep) {
-                // ⚠️ Before the close: an endpoint that is not a slot leaves the AUS open and this
-                // cell unused (so `RampCells` dims it).
-                if (open.kind == RampKind::EQ_PRESET && !is_eq_preset_slot(step_fx_value(step, slot)))
-                    continue;
-                open.aufStep    = stepIndex;
-                open.aufSlot    = slot;
-                open.destByte   = step_fx_value(step, slot);
-                open.span       = open.aufStep - open.ausStep;
-                open.stepOffset = -open.ausStep;   // see RampSpec: elapsed = stepOffset + stepIndex
-                open.originAbs  = open.ausStep;
-                open.originSlot = open.ausSlot;
-                out.push_back(open);
-                isOpen = false;
-            }
-        }
-    }
+    pair_ramps(static_cast<int>(phrase.steps.size()),
+               [&](int step) { return ramp_step_fx(phrase.steps[static_cast<size_t>(step)], step >= startRow); },
+               ramp_arm,
+               [&](const RampPair& p) {
+                   RampSpec r   = ramp_spec(p);
+                   r.ausStep    = p.ausPos;
+                   r.aufStep    = p.aufPos;
+                   r.stepOffset = -p.ausPos;   // see RampSpec: elapsed = stepOffset + stepIndex
+                   out.push_back(r);
+               });
     return out;
 }
 
@@ -255,90 +250,47 @@ inline std::vector<RampSpec> find_ramps(const Phrase& phrase, int startRow = 0) 
 // ⚠️ The chain is the boundary, and pairs are re-derived from (chain, chainRow) on every call, never
 // carried — a chain can be re-entered and a LIVE rewind schedules a phrase twice.
 
-// Every ramp playing over the phrase at `chainRow`, opened there or earlier. `startRow` (a HOP entry)
-// applies only to ramps opening here. Steps are authored ones: a HOP inside the span runs the middle
-// of the fade slightly ahead; both ends stay exact.
+// Every ramp playing over the phrase at `chainRow`, opened there or earlier: one walk over the rows
+// that play, end to end, PHRASE_ROWS absolute steps each. `startRow` (a HOP entry) applies only to
+// ramps opening here. Steps are authored ones: a HOP inside the span runs the middle of the fade
+// slightly ahead; both ends stay exact.
 inline std::vector<RampSpec> find_ramps_in_chain(const Project& project, const Chain& chain,
                                                  int chainRow, int startRow = 0) {
     std::vector<RampSpec> out;
-    if (chainRow < 0 || chainRow >= 16) return out;
+    if (chainRow < 0 || chainRow >= CHAIN_ROWS || chain_phrase_ref(chain, chainRow) < 0) return out;
 
-    // Absolute step of each row's step 0; −1 for a row that never plays.
-    int rowAbs[CHAIN_ROWS];
-    int walked = 0;
+    const Phrase* played[CHAIN_ROWS];
+    int           count = 0;
+    int           here  = 0;
     for (int row = 0; row < CHAIN_ROWS; ++row) {
-        const bool played = chain_phrase_ref(chain, row) >= 0;
-        rowAbs[row] = played ? walked : -1;
-        if (played) walked += PHRASE_ROWS;
+        const int ref = chain_phrase_ref(chain, row);
+        if (ref < 0) continue;
+        if (row == chainRow) here = count;
+        played[count++] = &project.phrases[static_cast<size_t>(ref)];
     }
-    if (rowAbs[chainRow] < 0) return out;
+    const int hereAbs = here * PHRASE_ROWS;
+    const int hereEnd = hereAbs + PHRASE_ROWS - 1;
+    const auto inHere = [&](int abs) { return abs >= hereAbs && abs <= hereEnd; };
 
-    const int hereAbs = rowAbs[chainRow];
-    const int hereEnd = hereAbs + 15;
-
-    // Same rules as `find_ramps`, over the whole chain in absolute steps.
-    RampSpec open;
-    bool     isOpen    = false;
-    int      openAbs   = 0;   // absolute step the open AUS sits on
-    int      openRow   = -1;  // and the row, so a HOP entry can be applied to the right phrase
-
-    for (int row = 0; row < CHAIN_ROWS; ++row) {
-        if (rowAbs[row] < 0) continue;
-        const Phrase& phrase = project.phrases[static_cast<size_t>(chain_phrase_ref(chain, row))];
-        const int steps = static_cast<int>(phrase.steps.size());
-        for (int stepIndex = 0; stepIndex < steps && stepIndex < 16; ++stepIndex) {
-            const PhraseStep step = as_played(phrase.steps[static_cast<size_t>(stepIndex)]);
-            const int absStep = rowAbs[row] + stepIndex;
-            for (int slot = 1; slot <= 3; ++slot) {
-                const int type = step_fx_type(step, slot);
-
-                if (type == FX_AUS) {
-                    // A HOP into this phrase below the AUS skips it.
-                    if (row == chainRow && stepIndex < startRow) continue;
-                    for (int left = slot - 1; left >= 1; --left) {
-                        const AutomatableParam* p = automatable_param(step_fx_type(step, left));
-                        if (p == nullptr) continue;
-                        const int startValue = step_fx_value(step, left);
-                        if (p->kind == RampKind::EQ_PRESET && !is_eq_preset_slot(startValue)) break;
-                        open           = RampSpec{};
-                        open.fxCode    = p->fxCode;
-                        open.ccId      = p->ccId;
-                        open.global    = p->global;
-                        open.kind      = p->kind;
-                        open.paramSlot = left;
-                        open.ausSlot   = slot;
-                        open.startByte = startValue;
-                        open.curveByte = step_fx_value(step, slot);
-                        openAbs        = absStep;
-                        openRow        = row;
-                        isOpen         = true;
-                        break;
-                    }
-                } else if (type == FX_AUF && isOpen && absStep > openAbs) {
-                    // ⚠️ Must stay above `isOpen = false`: written below it, a bad endpoint would
-                    // close the ramp and emit nothing.
-                    if (open.kind == RampKind::EQ_PRESET &&
-                        !is_eq_preset_slot(step_fx_value(step, slot))) continue;
-                    const int aufAbs = absStep;
-                    isOpen = false;
-                    // Only spans overlapping this phrase are returned.
-                    if (aufAbs < hereAbs || openAbs > hereEnd) break;
-                    RampSpec r   = open;
-                    r.destByte   = step_fx_value(step, slot);
-                    r.span       = aufAbs - openAbs;
-                    r.stepOffset = hereAbs - openAbs;
-                    r.ausStep    = (openRow == chainRow) ? openAbs - hereAbs : -1;
-                    r.aufStep    = (row == chainRow)     ? aufAbs  - hereAbs : -1;
-                    r.aufSlot    = (row == chainRow)     ? slot              : 0;
-                    r.originAbs  = openAbs;
-                    r.originSlot = open.ausSlot;
-                    if (r.ausStep < 0) r.ausSlot = 0;    // the AUS cell is not in this phrase
-                    out.push_back(r);
-                    break;
-                }
-            }
-        }
-    }
+    pair_ramps(count * PHRASE_ROWS,
+               [&](int abs) {
+                   const Phrase& phrase = *played[abs / PHRASE_ROWS];
+                   const int     step   = abs % PHRASE_ROWS;
+                   if (step >= static_cast<int>(phrase.steps.size())) return RampRowFx{};
+                   return ramp_step_fx(phrase.steps[static_cast<size_t>(step)],
+                                       !inHere(abs) || step >= startRow);
+               },
+               ramp_arm,
+               [&](const RampPair& p) {
+                   if (p.aufPos < hereAbs || p.ausPos > hereEnd) return;   // not over this phrase
+                   RampSpec r   = ramp_spec(p);
+                   r.stepOffset = hereAbs - p.ausPos;
+                   r.ausStep    = inHere(p.ausPos) ? p.ausPos - hereAbs : -1;
+                   r.aufStep    = inHere(p.aufPos) ? p.aufPos - hereAbs : -1;
+                   if (r.ausStep < 0) r.ausSlot = 0;   // that cell is in another phrase
+                   if (r.aufStep < 0) r.aufSlot = 0;
+                   out.push_back(r);
+               });
     return out;
 }
 
