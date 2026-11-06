@@ -327,15 +327,16 @@ class SongcoreHost {
 
     int clipboard_length() const { return engine_ ? engine_->getClipboardLength() : 0; }
 
-    void backup_sample(int id) { if (engine_) engine_->backupSample(id); }
-    void undo_sample(int id) { if (engine_) engine_->undoSample(id); }
+    // The ops that rebuild a buffer return false only when memory was refused; nothing then changed.
+    bool backup_sample(int id) { return !engine_ || engine_->backupSample(id); }
+    bool undo_sample(int id) { return !engine_ || engine_->undoSample(id); }
     // The editor is closing: drop its undo copy.
     void free_sample_undo(int id) { if (engine_) engine_->freeSampleUndo(id); }
 
-    void crop_sample(int id, int start, int end) { if (engine_) engine_->cropSample(id, start, end); }
-    void delete_sample_region(int id, int start, int end) { if (engine_) engine_->deleteSampleRegion(id, start, end); }
-    void copy_region(int id, int start, int end) { if (engine_) engine_->copyRegion(id, start, end); }
-    void paste_region(int id, int insertAt) { if (engine_) engine_->pasteRegion(id, insertAt); }
+    bool crop_sample(int id, int start, int end) { return !engine_ || engine_->cropSample(id, start, end); }
+    bool delete_sample_region(int id, int start, int end) { return !engine_ || engine_->deleteSampleRegion(id, start, end); }
+    bool copy_region(int id, int start, int end) { return !engine_ || engine_->copyRegion(id, start, end); }
+    bool paste_region(int id, int insertAt) { return !engine_ || engine_->pasteRegion(id, insertAt); }
 
     void normalize_sample(int id, int start, int end) { if (engine_) engine_->normalizeSample(id, start, end); }
     void fade_in_sample(int id, int start, int end) { if (engine_) engine_->fadeInSample(id, start, end); }
@@ -345,17 +346,17 @@ class SongcoreHost {
 
     // The FX row: START applies for real and plays, the next gesture restores this backup; only APPLY
     // keeps it. Separate from the undo slot.
-    void save_fx_preview_backup(int id) { if (engine_) engine_->saveFxPreviewBackup(id); }
+    bool save_fx_preview_backup(int id) { return !engine_ || engine_->saveFxPreviewBackup(id); }
     void restore_fx_preview_backup() { if (engine_) engine_->restoreFxPreviewBackup(); }
 
     void apply_sample_fx(int id, int fxType, int fxValue);
 
     // The three that change the rate ratio, so live in songcore (sample_edit.h).
-    void apply_rate_and_bits(int id, int factor, int bits);
-    void pitch_shift_sample(int id, float semitones);
-    void time_stretch_sample(int id, float ratio, float grainMs = sola::DEFAULT_GRAIN_MS);
-    // The FX row's SYNC, for good.
-    void sync_sample(int id, const SampleSync& sync);
+    bool apply_rate_and_bits(int id, int factor, int bits);
+    bool pitch_shift_sample(int id, float semitones);
+    bool time_stretch_sample(int id, float ratio, float grainMs = sola::DEFAULT_GRAIN_MS);
+    // The FX row's SYNC, for good. ⚠️ False can follow a pitch that went through (`run_sample_sync`).
+    bool sync_sample(int id, const SampleSync& sync);
 
     // The editor's START: the sample dry at its root, through the SOURCE channel, windowed to the
     // selection. `sync` previews the FX row's SYNC from a copy.

@@ -159,8 +159,11 @@ void InputDispatcher::sample_editor_audition() {
     host_.restore_fx_preview_backup();
     if (se.fx_armed()) {
         before_long_operation();
-        host_.save_fx_preview_backup(se.instrumentId);
-        host_.apply_sample_fx(se.instrumentId, se.fxType, se.fx_param());
+        // ⚠️ No clean copy, no audition: the effect would stay in the sample.
+        if (host_.save_fx_preview_backup(se.instrumentId))
+            host_.apply_sample_fx(se.instrumentId, se.fxType, se.fx_param());
+        else
+            set_status(s_, "OUT OF MEMORY", false);
     }
 
     // SYNC is auditioned from a copy (it changes the length), taking the pending PITCH with it.
@@ -453,14 +456,17 @@ void InputDispatcher::tap_slice_marker() {
 
 // ─── RATE and BIT: the two cells that rebuild the audio ──────────────────────────────────────────
 
-void InputDispatcher::apply_sample_rate_and_bits() {
+bool InputDispatcher::apply_sample_rate_and_bits() {
     before_long_operation();
     SampleEditorState& se     = s_.sampleEditor;
     const int          factor = (se.rateMode == 1) ? 2 : (se.rateMode == 2) ? 4 : 1;
     const int          oldLen = se.totalFrames;
 
     // ⚠️ Notes already scheduled (up to LONG_OPERATION_MS) keep the old base frequency.
-    host_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth);
+    if (!host_.apply_rate_and_bits(se.instrumentId, factor, se.bitDepth)) {
+        set_status(s_, "OUT OF MEMORY", false);
+        return false;
+    }
 
     const int newLen = host_.sample_length(se.instrumentId);
     rescale_positions(se, oldLen, newLen);
@@ -469,6 +475,7 @@ void InputDispatcher::apply_sample_rate_and_bits() {
     se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
                                             waveform_channel(se.sourceMode));
     se.isModified = true;
+    return true;
 }
 
 // ─── The view, after an op ───────────────────────────────────────────────────────────────────────
@@ -524,16 +531,19 @@ void InputDispatcher::sample_editor_confirm() {
     const int          startF = static_cast<int>(se.selectionStart);
     const int          endF   = static_cast<int>(se.selectionEnd);
 
-    auto begin_destructive = [&] { host_.backup_sample(instId); };
+    // Memory refused: the sample is as it was, so the view, the selection and the markers stay too.
+    auto out_of_memory = [&] { set_status(s_, "OUT OF MEMORY", false); return false; };
+    // ⚠️ No undo copy, no op: the user could not take it back.
+    auto begin_destructive = [&] { return host_.backup_sample(instId) || out_of_memory(); };
     auto in_place = [&](auto&& op) {   // an op that does NOT change the length
-        begin_destructive();
+        if (!begin_destructive()) return;
         op();
         refresh_sample_view(/*reset_selection=*/false);
         se.isModified = true;
     };
-    auto resizing = [&](auto&& op) {   // an op that DOES
-        begin_destructive();
-        op();
+    auto resizing = [&](auto&& op) {   // an op that DOES; `op` returns false when memory was refused
+        if (!begin_destructive()) return;
+        if (!op()) { out_of_memory(); return; }
         refresh_sample_view(/*reset_selection=*/true);
         se.isModified = true;
     };
@@ -549,30 +559,30 @@ void InputDispatcher::sample_editor_confirm() {
         case 13:
             switch (se.cursorCol) {
                 case 0:   // CROP — keep the selection, discard the rest
-                    if (startF < endF) resizing([&] { host_.crop_sample(instId, startF, endF); });
+                    if (startF < endF) resizing([&] { return host_.crop_sample(instId, startF, endF); });
                     break;
                 case 1:   // COPY — the ONE op on this row that changes nothing, so it takes no backup
-                    host_.copy_region(instId, startF, endF);
+                    if (!host_.copy_region(instId, startF, endF)) out_of_memory();
                     break;
                 case 2:   // CUT = copy, then delete
                     if (startF < endF) resizing([&] {
-                        host_.copy_region(instId, startF, endF);
-                        host_.delete_sample_region(instId, startF, endF);
+                        return host_.copy_region(instId, startF, endF) &&
+                               host_.delete_sample_region(instId, startF, endF);
                     });
                     break;
                 case 3:   // DUPL = copy the selection and paste it at the END
                     if (startF < endF) resizing([&] {
-                        host_.copy_region(instId, startF, endF);
-                        host_.paste_region(instId, se.totalFrames);
+                        return host_.copy_region(instId, startF, endF) &&
+                               host_.paste_region(instId, se.totalFrames);
                     });
                     break;
                 case 4:   // PASTE — inserts at the selection's START
                     if (host_.clipboard_length() > 0)
-                        resizing([&] { host_.paste_region(instId, startF); });
+                        resizing([&] { return host_.paste_region(instId, startF); });
                     break;
                 case 5:   // DEL
                     if (startF < endF)
-                        resizing([&] { host_.delete_sample_region(instId, startF, endF); });
+                        resizing([&] { return host_.delete_sample_region(instId, startF, endF); });
                     break;
                 default: break;
             }
@@ -590,7 +600,7 @@ void InputDispatcher::sample_editor_confirm() {
                 case 5: {   // UNDO — one level. Resets the window, loop and markers only when the
                             // length changed: after NORM, a fade or REV they still fit the audio.
                     const int lenBefore = se.totalFrames;
-                    host_.undo_sample(instId);
+                    if (!host_.undo_sample(instId)) { out_of_memory(); break; }
                     refresh_sample_view(host_.sample_length(instId) != lenBefore);
                     // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
                     se.slicePosition = std::clamp<int64_t>(se.slicePosition, 0, se.totalFrames);
@@ -607,7 +617,7 @@ void InputDispatcher::sample_editor_confirm() {
             if (se.fxType <= SampleEditorModule::FX_EQ) {
                 if (!se.fx_armed()) break;
 
-                begin_destructive();
+                if (!begin_destructive()) break;
                 host_.apply_sample_fx(instId, se.fxType, se.fx_param());
                 refresh_sample_view(/*reset_selection=*/false);
                 se.isModified = true;
@@ -642,7 +652,7 @@ void InputDispatcher::sample_editor_confirm() {
                 case 1: {   // SAVE — to <name>.wav, or ask for a name if that one is taken
                     const std::string base = se.sampleName.empty() ? "SAMPLE" : se.sampleName;
                     const std::string dir  = fs_.samples_directory();
-                    bake_pending_pitch();
+                    if (!bake_pending_pitch()) break;
 
                     // Taken: suggest the next free name — SAVE is not OVERWRITE.
                     const std::string stem = free_wav_stem(fs_, dir, base);
@@ -656,7 +666,7 @@ void InputDispatcher::sample_editor_confirm() {
 
                 case 2: {   // OVERWRITE — back over the file it came from. Nothing to do if it has none.
                     if (se.sampleFilePath.empty()) break;
-                    bake_pending_pitch();
+                    if (!bake_pending_pitch()) break;
                     if (to_lower(path_extension(se.sampleFilePath)) == "wav") {
                         save_sample_to(se.sampleFilePath, /*adopt_name=*/false);
                         break;
@@ -733,8 +743,15 @@ void InputDispatcher::apply_sample_sync() {
     const int oldLen = se.totalFrames;
 
     host_.restore_fx_preview_backup();   // act on the clean audio
-    host_.backup_sample(instId);
-    host_.sync_sample(instId, sync);
+    if (!host_.backup_sample(instId)) {   // no undo copy, no op
+        set_status(s_, "OUT OF MEMORY", false);
+        return;
+    }
+    if (!host_.sync_sample(instId, sync)) {
+        set_status(s_, "OUT OF MEMORY", false);
+        // ⚠️ Refused after its pitch went through? Then the length moved: show what is there.
+        if (host_.sample_length(instId) == oldLen) return;
+    }
     // Spent either way: TSTRETCH has baked the pending shift in, RPITCH has replaced it.
     se.pitchSemitones = 0;
 
@@ -747,12 +764,15 @@ void InputDispatcher::apply_sample_sync() {
 
 // ─── The pending pitch shift ─────────────────────────────────────────────────────────────────────
 
-void InputDispatcher::bake_pending_pitch() {
+bool InputDispatcher::bake_pending_pitch() {
     SampleEditorState& se = s_.sampleEditor;
-    if (se.pitchSemitones == 0) return;
+    if (se.pitchSemitones == 0) return true;
 
     const int oldLen = se.totalFrames;
-    host_.pitch_shift_sample(se.instrumentId, static_cast<float>(se.pitchSemitones));
+    if (!host_.pitch_shift_sample(se.instrumentId, static_cast<float>(se.pitchSemitones))) {
+        set_status(s_, "OUT OF MEMORY", false);
+        return false;
+    }
     const int newLen = host_.sample_length(se.instrumentId);
     // Everything frame-measured moves with the audio; the selection is scaled, not reset.
     rescale_positions(se, oldLen, newLen);
@@ -766,6 +786,7 @@ void InputDispatcher::bake_pending_pitch() {
     // The instrument's playback params were derived from the old buffer's length.
     host_.push_instrument(se.instrumentId);
     mark_modified();
+    return true;
 }
 
 // ─── The slices ──────────────────────────────────────────────────────────────────────────────────
@@ -886,8 +907,15 @@ CursorContext InputDispatcher::sample_editor_context() const {
 }
 
 bool InputDispatcher::sample_editor_edit(const InputAction& action) {
-    const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
-    if (r.rateModeChanged || r.bitDepthChanged) apply_sample_rate_and_bits();
+    SampleEditorState& se       = s_.sampleEditor;
+    const int          rateMode = se.rateMode;
+    const int          bitDepth = se.bitDepth;
+    const SampleEditorInputResult r = sample_.handle_input(se, action);
+    // Refused: the cells go back to what the audio still is.
+    if ((r.rateModeChanged || r.bitDepthChanged) && !apply_sample_rate_and_bits()) {
+        se.rateMode = rateMode;
+        se.bitDepth = bitDepth;
+    }
 
     // ⚠️ false: the editor's session is not the document (a held A+UP on ZOOM would arm an autosave).
     // RATE and BIT push for themselves.

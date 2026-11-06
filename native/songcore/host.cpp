@@ -479,23 +479,22 @@ void SongcoreHost::apply_sample_fx(int id, int fxType, int fxValue) {
                            static_cast<float>(sample_rate_of(id)), project_.limiterPreGain);
 }
 
-void SongcoreHost::apply_rate_and_bits(int id, int factor, int bits) {
-    songcore::apply_rate_and_bits(engine_, routing_, rateCache_, id, factor, bits);
+bool SongcoreHost::apply_rate_and_bits(int id, int factor, int bits) {
+    return songcore::apply_rate_and_bits(engine_, routing_, rateCache_, id, factor, bits);
 }
 
-void SongcoreHost::pitch_shift_sample(int id, float semitones) {
-    songcore::pitch_shift_sample(engine_, rateCache_, id, semitones);
+bool SongcoreHost::pitch_shift_sample(int id, float semitones) {
+    return songcore::pitch_shift_sample(engine_, rateCache_, id, semitones);
 }
 
-void SongcoreHost::time_stretch_sample(int id, float ratio, float grainMs) {
-    songcore::time_stretch_sample(engine_, rateCache_, id, ratio, grainMs,
-                                  static_cast<float>(sample_rate_of(id)));
+bool SongcoreHost::time_stretch_sample(int id, float ratio, float grainMs) {
+    return songcore::time_stretch_sample(engine_, rateCache_, id, ratio, grainMs,
+                                         static_cast<float>(sample_rate_of(id)));
 }
 
-void SongcoreHost::sync_sample(int id, const SampleSync& sync) {
-    if (!engine_) return;
-    rateCache_.clear(id);   // the rewritten buffer is the new original, as for the two resamplers
-    run_sample_sync(*engine_, id, sync, static_cast<float>(sample_rate_of(id)));
+bool SongcoreHost::sync_sample(int id, const SampleSync& sync) {
+    if (!engine_) return true;
+    return run_sample_sync(*engine_, rateCache_, id, sync, static_cast<float>(sample_rate_of(id)));
 }
 
 void SongcoreHost::preview_sample_editor(int id, int sourceMode, int64_t selStart, int64_t selEnd,

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,11 +49,13 @@ int original_sample_rate(Engine* engine, const Routing& routing, int id) {
 }
 
 // RATE: HIGH (1×) / NORM (2×) / LOFI (4×), a destructive decimation relative to the ORIGINAL. `bits`
-// travels along: the engine rebuilds both from one cached original.
+// travels along: the engine rebuilds both from one cached original. These return false only when the
+// engine was refused memory; the ratio then stays with the audio, which is unchanged.
 template <typename Engine>
-void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int id, int factor,
+bool apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int id, int factor,
                          int bits) {
-    if (!engine || !RateCache::in_range(id)) return;
+    if (!engine || !RateCache::in_range(id)) return true;
+    if (!engine->applyRateAndBits(id, factor, bits)) return false;
 
     if (factor <= 1) {
         // Back to HIGH: restore the ratio the file was loaded with, and forget it.
@@ -64,25 +67,26 @@ void apply_rate_and_bits(Engine* engine, Routing& routing, RateCache& cache, int
         if (!cache.has(id)) cache.orig[id] = routing.sampleRateRatio[id];   // first departure from HIGH
         routing.sampleRateRatio[id] = cache.orig[id] * static_cast<float>(factor);
     }
-
-    // The base frequency is derived from the ratio at schedule time, so this write IS the pitch fix.
-    engine->applyRateAndBits(id, factor, bits);
+    // The base frequency is derived from the ratio at schedule time, so the write above IS the pitch fix.
+    return true;
 }
 
 // The destructive resamplers. The result is the new original, so the cache entry is dropped.
 template <typename Engine>
-void pitch_shift_sample(Engine* engine, RateCache& cache, int id, float semitones) {
-    if (!engine) return;
+bool pitch_shift_sample(Engine* engine, RateCache& cache, int id, float semitones) {
+    if (!engine) return true;
+    if (!engine->pitchShiftSample(id, semitones)) return false;
     cache.clear(id);
-    engine->pitchShiftSample(id, semitones);
+    return true;
 }
 
 template <typename Engine>
-void time_stretch_sample(Engine* engine, RateCache& cache, int id, float ratio, float grainMs,
+bool time_stretch_sample(Engine* engine, RateCache& cache, int id, float ratio, float grainMs,
                          float sampleRate) {
-    if (!engine) return;
+    if (!engine) return true;
+    if (!engine->timeStretchSample(id, ratio, grainMs, sampleRate)) return false;
     cache.clear(id);
-    engine->timeStretchSample(id, ratio, grainMs, sampleRate);
+    return true;
 }
 
 // What SYNC does: nothing, a resample (RPITCH) or a stretch (TSTRETCH) — one value for APPLY and the
@@ -96,16 +100,19 @@ struct SampleSync {
 };
 
 // ⚠️ The pitch goes first (it changes the length); the stretch after it lands on `frames`.
+// False when memory was refused — ⚠️ possibly after the pitch went through.
 template <typename Engine>
-void run_sample_sync(Engine& engine, int id, const SampleSync& sync, float sampleRate) {
-    if (sync.kind == SampleSync::Kind::NONE) return;
-    if (sync.semitones != 0.0f) engine.pitchShiftSample(id, sync.semitones);
-    if (sync.kind != SampleSync::Kind::STRETCH) return;
+bool run_sample_sync(Engine& engine, RateCache& cache, int id, const SampleSync& sync,
+                     float sampleRate) {
+    if (sync.kind == SampleSync::Kind::NONE) return true;
+    if (sync.semitones != 0.0f && !pitch_shift_sample(&engine, cache, id, sync.semitones)) return false;
+    if (sync.kind != SampleSync::Kind::STRETCH) return true;
 
     const int len = engine.getSampleLength(id);
-    if (len <= 0) return;
-    engine.timeStretchSample(id, static_cast<float>(static_cast<double>(sync.frames) / len),
-                             sync.grainMs, sampleRate);
+    if (len <= 0) return true;
+    return time_stretch_sample(&engine, cache, id,
+                               static_cast<float>(static_cast<double>(sync.frames) / len),
+                               sync.grainMs, sampleRate);
 }
 
 // The slot the audition plays from: the instrument's own, or for LEFT/RIGHT/MONO on a stereo sample,
@@ -124,7 +131,8 @@ int prepare_sync_preview(Engine& engine, int id, int sourceMode, const SampleSyn
                          float sampleRate) {
     if (sync.kind == SampleSync::Kind::NONE) return prepare_source_preview(engine, id, sourceMode);
     engine.prepareSourcePreview(SOURCE_PREVIEW_SLOT, id, sourceMode);
-    run_sample_sync(engine, SOURCE_PREVIEW_SLOT, sync, sampleRate);
+    RateCache none;   // the scratch slot has no RATE original
+    run_sample_sync(engine, none, SOURCE_PREVIEW_SLOT, sync, sampleRate);
     return SOURCE_PREVIEW_SLOT;
 }
 
@@ -216,18 +224,23 @@ int resolve_save_bits(Engine& engine, int id, int bits) {
 }
 
 // The edited sample as a WAV at the file's own rate, slices in the `cue ` chunk. `bits` 0 = the
-// loaded depth; 32 is float only if the source was.
+// loaded depth; 32 is float only if the source was. Out of memory is a failed save, not a throw
+// through the frame loop: the copies and the file image are each the sample's size.
 template <typename Engine>
 bool save_sample_wav(Engine& engine, const Routing& routing, int id, const std::string& path,
                      const std::vector<int>& cuePoints, int sourceMode, bool hasStereo, int bits = 0) {
-    const SaveChannels ch = resolve_save_channels(engine, id, sourceMode, hasStereo);
-    if (ch.left.empty()) return false;
-    const int depth = resolve_save_bits(engine, id, bits);
-    return write_wav(path, ch.left, ch.right, original_sample_rate(&engine, routing, id), cuePoints,
-                     ch.channels, depth, depth == 32 && engine.isSampleFloat(id));
+    try {
+        const SaveChannels ch = resolve_save_channels(engine, id, sourceMode, hasStereo);
+        if (ch.left.empty()) return false;
+        const int depth = resolve_save_bits(engine, id, bits);
+        return write_wav(path, ch.left, ch.right, original_sample_rate(&engine, routing, id),
+                         cuePoints, ch.channels, depth, depth == 32 && engine.isSampleFloat(id));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
 }
 
-// CHOP: every slice to `<base>_NN.wav` in `dir`; returns how many.
+// CHOP: every slice to `<base>_NN.wav` in `dir`; returns how many (out of memory stops it, as SAVE).
 // ⚠️ The LEFT channel only, through `write_wav_mono` (both channels hold it — a shipped format).
 template <typename Engine>
 int chop_sample(Engine& engine, const Routing& routing, int id, const std::string& dir,
@@ -237,25 +250,28 @@ int chop_sample(Engine& engine, const Routing& routing, int id, const std::strin
     if (len <= 0 || slices.empty()) return 0;
     const int  depth   = resolve_save_bits(engine, id, bits);   // the slices come out at SAVE's depth
     const bool isFloat = depth == 32 && engine.isSampleFloat(id);
-
-    std::vector<float> pcm(static_cast<size_t>(len));
-    engine.getSampleData(id, pcm.data());
-    const int rate = original_sample_rate(&engine, routing, id);
+    const int  rate    = original_sample_rate(&engine, routing, id);
 
     int written = 0;
-    for (size_t i = 0; i < slices.size(); ++i) {
-        const int64_t start = std::clamp<int64_t>(slices[i].first, 0, len);
-        const int64_t end   = std::clamp<int64_t>(slices[i].second, start, len);
-        if (end <= start) continue;   // an empty slice is not a file
+    try {
+        std::vector<float> pcm(static_cast<size_t>(len));
+        engine.getSampleData(id, pcm.data());
 
-        const std::vector<float> slice(pcm.begin() + static_cast<ptrdiff_t>(start),
-                                       pcm.begin() + static_cast<ptrdiff_t>(end));
+        for (size_t i = 0; i < slices.size(); ++i) {
+            const int64_t start = std::clamp<int64_t>(slices[i].first, 0, len);
+            const int64_t end   = std::clamp<int64_t>(slices[i].second, start, len);
+            if (end <= start) continue;   // an empty slice is not a file
 
-        char suffix[8];
-        std::snprintf(suffix, sizeof(suffix), "%02d", static_cast<int>(i));
-        if (write_wav_mono(dir + "/" + base_name + "_" + suffix + ".wav", slice, rate, {}, depth, isFloat))
-            written++;
-    }
+            const std::vector<float> slice(pcm.begin() + static_cast<ptrdiff_t>(start),
+                                           pcm.begin() + static_cast<ptrdiff_t>(end));
+
+            char suffix[8];
+            std::snprintf(suffix, sizeof(suffix), "%02d", static_cast<int>(i));
+            if (write_wav_mono(dir + "/" + base_name + "_" + suffix + ".wav", slice, rate, {}, depth,
+                               isFloat))
+                written++;
+        }
+    } catch (const std::bad_alloc&) {}
     return written;
 }
 

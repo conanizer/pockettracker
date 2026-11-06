@@ -177,27 +177,29 @@ public:
     void fadeOutSample(int id, int startFrame, int endFrame);
     void silenceRegion(int id, int startFrame, int endFrame);
     void reverseSample(int id, int startFrame, int endFrame);
-    void backupSample(int id);
-    void undoSample(int id);
+    // The ops below that rebuild a buffer return false only when memory was refused, and then change
+    // nothing (backup, clipboard and RATE original included).
+    bool backupSample(int id);
+    bool undoSample(int id);
     // Free the undo copy when the editor closes — nothing can reach it after that.
     void freeSampleUndo(int id);
     // FX preview keeps its own clean copy, apart from undo.
-    void saveFxPreviewBackup(int id);
+    bool saveFxPreviewBackup(int id);
     void restoreFxPreviewBackup();
-    void cropSample(int id, int startFrame, int endFrame);
-    void deleteSampleRegion(int id, int startFrame, int endFrame);
-    void copyRegion(int id, int startFrame, int endFrame);
-    void pasteRegion(int id, int insertAt);
+    bool cropSample(int id, int startFrame, int endFrame);
+    bool deleteSampleRegion(int id, int startFrame, int endFrame);
+    bool copyRegion(int id, int startFrame, int endFrame);
+    bool pasteRegion(int id, int insertAt);
     // The editor's audition copy of srcId into dstId. mode: 0=L, 1=R, 2=both, 3=avg.
     void prepareSourcePreview(int dstId, int srcId, int mode);
     int  getClipboardLength();
     // RATE and BIT: rebuilt from the cached original, decimated by `factor` (1/2/4) and quantised to
     // `bits`. One derive for both, so changing one keeps the other. (1, own depth) restores it.
-    void applyRateAndBits(int id, int factor, int bits);
+    bool applyRateAndBits(int id, int factor, int bits);
     // Destructive; clears the RATE original.
-    void pitchShiftSample(int id, float semitones);
+    bool pitchShiftSample(int id, float semitones);
     // SOLA stretch: ratio > 1 is longer. `grainMs` is in the buffer's own `sampleRate`.
-    void timeStretchSample(int id, float ratio, float grainMs, float sampleRate);
+    bool timeStretchSample(int id, float ratio, float grainMs, float sampleRate);
     // fxType 0=OTT, 1=DUST, 2=DRIVE, 3=EQ.
     // ⚠️ `fxValue` is the amount (0-255) for the first three but an EQ preset slot for EQ.
     void applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain = 0);

@@ -1025,8 +1025,8 @@ class InputDispatcher {
     // A on row 11 under MANUAL: cut a boundary at the playhead — START, listen, tap on each hit.
     void tap_slice_marker();
 
-    // RATE and BIT rebuild the buffer.
-    void apply_sample_rate_and_bits();
+    // RATE and BIT rebuild the buffer; false (with a message) when memory was refused.
+    bool apply_sample_rate_and_bits();
 
     // A on rows 13/14/16/18/19 — the ops, the FX apply, the name, the save buttons.
     void sample_editor_confirm();
@@ -1046,8 +1046,8 @@ class InputDispatcher {
     void stretch_editor_edit(InputAction (*fn)(const CursorContext&));
 
     // Bake the pending pitch into the buffer and rescale everything in frames — every save calls it,
-    // since a sample is saved as it sounds.
-    void bake_pending_pitch();
+    // since a sample is saved as it sounds. False (with a message) when memory was refused: no save.
+    bool bake_pending_pitch();
 
     // The slice boundaries as WAV cue points: the markers, or DIVIDE's computed cuts.
     std::vector<int> compute_slice_cue_points() const;
