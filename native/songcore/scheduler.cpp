@@ -916,6 +916,7 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
             if (step_fx_type(step, fxSlot) == FX_GRV) {
                 trackState.grooveId = step_fx_value(step, fxSlot);
                 w.localGrooveStep = 0;
+                trackState.grooveCarry = 0;
             }
         }
 
@@ -925,7 +926,8 @@ int64_t Sequencer::walk_phrase_row(int trackId, int64_t framesPerStep) {
 
         // The length comes from `timing.h` — one definition, the one the tools measure.
         if (currentGrooveActive) w.anyGrooveActive = true;
-        int64_t stepDuration = groove_step_duration(currentGroove, w.localGrooveStep, framesPerStep);
+        int64_t stepDuration = groove_step_duration(currentGroove, w.localGrooveStep, framesPerStep,
+                                                    &trackState.grooveCarry);
 
         if (stepDuration == 0) {
             w.rowsScheduled++;

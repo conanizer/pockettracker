@@ -195,6 +195,7 @@ struct TrackState {
 
     int   grooveId = 0;
     int   grooveStep = 0;
+    int64_t grooveCarry = 0;   // `groove_step_duration`'s remainder; a new groove starts it at 0
 
     // Where SCA / SCG put this track; `scaleKey = -1` is the project's KEY, so a reset lands there.
     int   scaleSlot = 0;

@@ -86,12 +86,16 @@ inline bool groove_set_ruler(Groove& g, int ticks_per_step) {
 }
 
 // A step's length in frames: scaled by an active groove's tics (0 skips the row).
-// ⚠️ MULTIPLY THEN DIVIDE: the scheduler accumulates these, and dividing first drifts a grooved track
-// against an ungrooved one. (`frames_per_tic` is an effect's unit inside a step, not this.)
+// ⚠️ The scheduler adds these up, so `carry` takes what the division dropped (in 1/ruler frames) into
+// the next step; without it a swung track runs ahead of a straight one, further every bar.
+// (`frames_per_tic` is an effect's unit inside a step, not this.)
 inline int64_t groove_step_duration(const Groove& g, int groove_step,
-                                    int64_t frames_per_step_value) {
+                                    int64_t frames_per_step_value, int64_t* carry = nullptr) {
     if (groove_active_length(g) == 0) return frames_per_step_value;
-    return frames_per_step_value * groove_ticks_for_step(g, groove_step) / groove_ticks_per_step(g);
+    const int64_t ruler = groove_ticks_per_step(g);
+    const int64_t exact = frames_per_step_value * groove_ticks_for_step(g, groove_step) + (carry ? *carry : 0);
+    if (carry) *carry = exact % ruler;
+    return exact / ruler;
 }
 
 }  // namespace songcore
