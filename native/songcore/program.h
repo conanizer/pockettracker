@@ -259,7 +259,7 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
     const int notePitch  = n.note % 12;
     const int noteOctave = n.note / 12 - 1;
 
-    const int baseMidi = n.note + n.arp;
+    const int baseMidi = n.note + n.pit + n.arp;
     // ROOT acts as a transpose. ⚠️ Not for a root audition, which plays note == root.
     const int transpose = rootAudition ? 0 : 60 - p.rootMidi;
 
