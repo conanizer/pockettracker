@@ -85,6 +85,7 @@ struct VoiceModSlot {
     float lfoRandValue = 0.0f;   // LFO RND/DRNK: current sample-&-hold / drunk-walk level
     uint32_t lfoRngState = 1u;   // LFO RND/DRNK: per-slot xorshift32 state (seeded at trigger, never 0)
     int releaseSamples = 0;      // ADSR/TRIG: release duration in audio samples
+    float releaseFrom = 0.0f;    // ADSR/TRIG: envValue when the release began — it falls from there
 
     // Mod-to-mod, recomputed every block
     float effectiveAmt = 0.5f;        // amount + incoming MOD_AMT/BOTH
@@ -101,6 +102,23 @@ inline void tickAttack(VoiceModSlot& mod, int effAttack) {
     }
     mod.envValue = 1.0f;
     mod.stage = 2; mod.stageCounter = 0;
+}
+
+// ADSR and TRIG: the kinds with a release stage.
+inline bool has_release_stage(const VoiceModSlot& m) { return m.type == 2 || m.type == 5; }
+
+// Into the release, falling from wherever the envelope stands — an OFF mid-attack included.
+inline void enter_release(VoiceModSlot& m) {
+    m.stage        = 4;
+    m.stageCounter = 0;
+    m.releaseFrom  = m.envValue;
+}
+
+// At an OFF, every live envelope aimed anywhere but VOL falls. The VOL ones are the voice's own
+// call: they decide whether it has a release to run at all.
+inline void release_non_vol_envelopes(VoiceModSlot (&mods)[4]) {
+    for (VoiceModSlot& m : mods)
+        if (m.dest != 1 && has_release_stage(m) && m.stage >= 1 && m.stage <= 3) enter_release(m);
 }
 
 // One source → one destination: dest += source × ((1 − viaAmount) + via × viaAmount) × depth.

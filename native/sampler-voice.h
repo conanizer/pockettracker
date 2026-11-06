@@ -472,15 +472,15 @@ struct Voice : public IAudioVoice {
 
     void hardStop() override { stop(); }
 
-    // Every live ADSR/TRIG VOL mod to its release stage. True when the voice has a release to run.
+    // Every live ADSR/TRIG to its release stage. True when a VOL one has a release to run.
     bool releaseVolMods() {
+        release_non_vol_envelopes(voiceMods);
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& vmod = voiceMods[m];
-            if (vmod.dest == 1 && (vmod.type == 2 || vmod.type == 5)) {
+            if (vmod.dest == 1 && has_release_stage(vmod)) {
                 if (vmod.stage >= 1 && vmod.stage <= 3 && vmod.releaseSamples > 0) {
-                    vmod.stage = 4;   // release
-                    vmod.stageCounter = 0;
+                    enter_release(vmod);
                     hasRelease = true;
                 } else if (vmod.stage == 4) {
                     hasRelease = true;

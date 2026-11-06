@@ -30,10 +30,10 @@ inline void tickADSR(VoiceModSlot& mod, int numFrames, float rMult) {
         case 3: // Sustain: hold at sustainLevel (until triggerNoteOff)
             mod.envValue = mod.sustainLevel;
             break;
-        case 4: // Release: ramp sustainLevel → 0
+        case 4: // Release: ramp releaseFrom → 0
             if (effRelease > 0) {
                 mod.envValue = fmaxf(0.0f,
-                    mod.sustainLevel * (1.0f - (float)mod.stageCounter / effRelease));
+                    mod.releaseFrom * (1.0f - (float)mod.stageCounter / effRelease));
                 if (mod.stageCounter >= effRelease) {
                     mod.envValue = 0.0f;
                     mod.stage = 5;

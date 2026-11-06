@@ -221,6 +221,7 @@ void SoundfontVoice::noteOffAt(int atFrame) {
 
     // With an ADSR/TRIG on VOL, TSF holds sustain while our envelope fades; hardStop() sends the
     // note-off when they finish. Otherwise TSF's own release (SF REL) plays out — unless it is short.
+    release_non_vol_envelopes(voiceMods);
     bool hasActiveAdsrVolMod = false;
     for (int m = 0; m < 4; m++) {
         const VoiceModSlot& mod = voiceMods[m];
@@ -235,11 +236,8 @@ void SoundfontVoice::noteOffAt(int atFrame) {
         // activeNote stays for hardStop()'s deferred note-off.
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& mod = voiceMods[m];
-            if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)
-                    && mod.stage >= 1 && mod.stage <= 3) {
-                mod.stage        = 4;
-                mod.stageCounter = 0;
-            }
+            if (mod.dest == 1 && has_release_stage(mod) && mod.stage >= 1 && mod.stage <= 3)
+                enter_release(mod);
         }
     } else {
         // Ending on our ramp: its end calls hardStop(), which sends the note-off.
