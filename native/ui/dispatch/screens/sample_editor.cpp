@@ -587,9 +587,11 @@ void InputDispatcher::sample_editor_confirm() {
                 case 3: in_place([&] { host_.silence_region(instId, startF, endF); }); break;
                 case 4: in_place([&] { host_.reverse_sample(instId, startF, endF); }); break;
 
-                case 5: {   // UNDO — one level, and it may restore a DIFFERENT length
+                case 5: {   // UNDO — one level. Resets the window, loop and markers only when the
+                            // length changed: after NORM, a fade or REV they still fit the audio.
+                    const int lenBefore = se.totalFrames;
                     host_.undo_sample(instId);
-                    refresh_sample_view(/*reset_selection=*/true);
+                    refresh_sample_view(host_.sample_length(instId) != lenBefore);
                     // ⚠️ `isModified` is NOT cleared: one undo is one step back, not back to the file.
                     se.slicePosition = std::clamp<int64_t>(se.slicePosition, 0, se.totalFrames);
                     break;
