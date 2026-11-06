@@ -649,10 +649,7 @@ inline InstrumentPreset make_instrument_preset(const Project& project, int id) {
     if (tableId < 0 || tableId >= static_cast<int>(project.tables.size())) return ip;
 
     const std::vector<TableRow>& rows = project.tables[static_cast<size_t>(tableId)].rows;
-    bool hasContent = false;
-    for (const TableRow& r : rows)
-        if (r.transpose != 0 || r.volume != -1 || r.fx1Type != 0) { hasContent = true; break; }
-    if (hasContent) ip.tableRows = rows;
+    if (table_rows_have_content(rows)) ip.tableRows = rows;
 
     return ip;
 }

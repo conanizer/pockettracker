@@ -543,6 +543,14 @@ struct InstrumentPreset {
     std::optional<std::vector<TableRow>> tableRows;
 };
 
+// A table worth putting in a .pti: any row that transposes, sets a volume or runs an FX in any slot.
+inline bool table_rows_have_content(const std::vector<TableRow>& rows) {
+    for (const TableRow& r : rows)
+        if (r.transpose != 0 || r.volume != -1 || r.fx1Type != 0 || r.fx2Type != 0 || r.fx3Type != 0)
+            return true;
+    return false;
+}
+
 // A fresh default Project.
 inline Project make_default_project() {
     Project p;
