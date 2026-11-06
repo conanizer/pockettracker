@@ -69,13 +69,25 @@ inline PhraseStep parse_phrase_step(const json& j) {
     return s;
 }
 
+// An array of fixed length — a phrase's steps, a table's rows, the EQ bands, the mod slots — read
+// at the length `v` already has: screens index these by cursor row, and a hand-edited file can hold
+// short or long ones.
+template <class T, class Parse>
+inline void parse_fixed_array(const json& j, const char* k, std::vector<T>& v, Parse parse) {
+    auto it = j.find(k);
+    if (it == j.end() || !it->is_array()) return;
+    const size_t n = v.size();
+    v.clear();
+    for (const auto& e : *it) {
+        if (v.size() == n) break;
+        v.push_back(parse(e));
+    }
+    v.resize(n);
+}
+
 inline Phrase parse_phrase(const json& j, int index) {
     Phrase p(get_int(j, "id", index));
-    auto it = j.find("steps");
-    if (it != j.end() && it->is_array()) {
-        p.steps.clear();
-        for (const auto& e : *it) p.steps.push_back(parse_phrase_step(e));
-    }
+    parse_fixed_array(j, "steps", p.steps, parse_phrase_step);
     return p;
 }
 
@@ -115,11 +127,7 @@ inline TableRow parse_table_row(const json& j) {
 inline Table parse_table(const json& j, int index) {
     Table t(get_int(j, "id", index));
     t.name = get_str(j, "name", t.name);
-    auto it = j.find("rows");
-    if (it != j.end() && it->is_array()) {
-        t.rows.clear();
-        for (const auto& e : *it) t.rows.push_back(parse_table_row(e));
-    }
+    parse_fixed_array(j, "rows", t.rows, parse_table_row);
     return t;
 }
 
@@ -171,11 +179,7 @@ inline EqBand parse_eq_band(const json& j) {
 
 inline EqPreset parse_eq_preset(const json& j, int index) {
     EqPreset e(get_int(j, "id", index));
-    auto it = j.find("bands");
-    if (it != j.end() && it->is_array()) {
-        e.bands.clear();
-        for (const auto& b : *it) e.bands.push_back(parse_eq_band(b));
-    }
+    parse_fixed_array(j, "bands", e.bands, parse_eq_band);
     return e;
 }
 
@@ -244,11 +248,7 @@ inline Instrument parse_instrument(const json& j, int index) {
     i.sampleFilePath = get_opt_str(j, "sampleFilePath");
     i.tableId        = get_int(j, "tableId", i.tableId);
     i.tableTicRate   = get_int(j, "tableTicRate", i.tableTicRate);
-    { auto it = j.find("modSlots");
-      if (it != j.end() && it->is_array()) {
-          i.modSlots.clear();
-          for (const auto& m : *it) i.modSlots.push_back(parse_mod_slot(m));
-      } }
+    parse_fixed_array(j, "modSlots", i.modSlots, parse_mod_slot);
     { auto it = j.find("instrumentType"); if (it != j.end() && it->is_string()) instrument_type_from_name(it->get<std::string>(), i.instrumentType); }
     i.soundfontPath  = get_opt_str(j, "soundfontPath");
     i.sfBank         = get_int(j, "sfBank", i.sfBank);
