@@ -42,6 +42,26 @@ static inline void rowFx(const TableRow& r, int type[3], int value[3]) {
     type[2] = r.fx3Type; value[2] = r.fx3Value;
 }
 
+// Where a HOP or THO in column `lane` sends it, a HOP's count aside; -1 = the row does not steer
+// (HOP FF stops the column instead). The player steers by the same rule, with the count.
+static int steerTarget(const TableRow& r, int lane) {
+    int t3[3], v3[3];
+    rowFx(r, t3, v3);
+    if ((t3[lane] == FX_HOP && v3[lane] != 0xFF) || t3[lane] == FX_THO) return v3[lane] & 0x0F;
+    return -1;
+}
+
+// The row column `lane` really starts on from `row`: steering rows are never played, so they are
+// followed. A loop of them stands where it closes.
+static int followSteering(const TableRow rows[16], int row, int lane) {
+    for (uint16_t seen = 0;;) {
+        seen = static_cast<uint16_t>(seen | (1u << row));
+        const int to = steerTarget(rows[row], lane);
+        if (to < 0 || (seen & (1u << to))) return row;
+        row = to;
+    }
+}
+
 // RND re-fires the nearest command ABOVE it in its column with 0..xx added. The base is always the
 // typed cell, never an earlier roll, so rolls spread instead of wandering. False when nothing is above.
 static bool tableRandomize(const TableRow rows[16], int row, int slot, int range, uint32_t& rng,
@@ -157,19 +177,9 @@ int AudioEngine::resolveChain(int trackId, int instrumentId, int tableIdOverride
             }
         }
 
-        // Follow HOPs per column before reading the row. A counted HOP jumps on every hit:
+        // Follow HOPs and THOs per column before reading the row. A counted HOP jumps on every hit:
         // `reset_table_lanes` places each lane fresh at the trigger, so no count carries.
-        for (int l = 0; l < TABLE_LANES; ++l) {
-            uint16_t seen = 0;
-            for (;;) {
-                if (seen & (uint16_t)(1u << laneRow[l])) break;   // round again: stand where we are
-                seen |= (uint16_t)(1u << laneRow[l]);
-                int t3[3], v3[3];
-                rowFx(rows[laneRow[l]], t3, v3);
-                if (t3[l] != FX_HOP || v3[l] == 0xFF) break;
-                laneRow[l] = v3[l] & 0x0F;
-            }
-        }
+        for (int l = 0; l < TABLE_LANES; ++l) laneRow[l] = followSteering(rows, laneRow[l], l);
 
         // Each column is read at its own row, after the dice exactly as a played row rolls them: a CHA
         // or RNL acts on the cells of ITS row (rollTableRow). A cleared INS is a row with no switch; a
@@ -260,14 +270,8 @@ void AudioEngine::effectiveTicRatesFor(int tableId, int fallback, int out[TABLE_
 static int strumForChord(const TableRow rows[16], const TableLane (&lanes)[TABLE_LANES], int slot) {
     for (int s = slot + 1; s < TABLE_LANES; ++s) {
         if (!lanes[s].active) continue;
-        int r = lanes[s].row, t3[3], v3[3];
-        for (uint16_t seen = 0;;) {
-            seen = static_cast<uint16_t>(seen | (1u << r));
-            rowFx(rows[r], t3, v3);
-            const bool steers = (t3[s] == FX_HOP && v3[s] != 0xFF) || t3[s] == FX_THO;
-            if (!steers || (seen & (1u << (v3[s] & 0x0F)))) break;
-            r = v3[s] & 0x0F;
-        }
+        int t3[3], v3[3];
+        rowFx(rows[followSteering(rows, lanes[s].row, s)], t3, v3);
         if (t3[s] == FX_CHD || t3[s] == FX_ARPEGGIO) return -1;
         if (t3[s] == FX_ARC) return v3[s];
     }
