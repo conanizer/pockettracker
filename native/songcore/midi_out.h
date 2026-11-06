@@ -464,9 +464,10 @@ class ExternalConsumer : public IMidiConsumer {
         send_at(std::max(on, off), MIDI_NOTE_OFF | a.channel, key, 0);
     }
 
-    // The transpose fields folded in, clamped: B-9 = 131 is a legal phrase note but not MIDI.
+    // PIT and ARP folded in, clamped: B-9 = 131 is a legal phrase note but not MIDI.
+    // ⚠️ `note` already carries the chain and song transpose; `transpose` rides beside it for slices.
     static int midi_note(const NoteOnPayload& n) {
-        const int v = static_cast<int>(n.note) + n.transpose + n.pit + n.arp;
+        const int v = static_cast<int>(n.note) + n.pit + n.arp;
         return v < 0 ? 0 : (v > 127 ? 127 : v);
     }
 
@@ -478,7 +479,7 @@ class ExternalConsumer : public IMidiConsumer {
             wait[0] = 0;
             return 1;
         }
-        const int base = static_cast<int>(n.note) + n.transpose + n.pit + n.arp;
+        const int base = static_cast<int>(n.note) + n.pit + n.arp;
         int count = 0;
         for (int k = 0; k < n.chordCount && k < 4; ++k) {
             const int v = base + n.chord[k];
