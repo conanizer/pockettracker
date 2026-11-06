@@ -41,7 +41,7 @@ inline Program make_program(const Instrument& ins, float sampleRateRatio, int sf
                                                                          : PROGRAM_SAMPLER;
     p.hasSample       = ins.sampleFilePath.has_value();
     p.hasSoundfont    = ins.soundfontPath.has_value();
-    p.sampleId        = ins.sampleId;
+    p.sampleId        = ins.id;
     p.rootMidi        = note_to_midi(ins.root);
     p.detune          = ins.detune;
     p.sampleRateRatio = sampleRateRatio;
@@ -59,9 +59,7 @@ inline Program make_program(const Instrument& ins, float sampleRateRatio, int sf
 inline Program make_program(const Project& project, const Routing& routing, int id) {
     if (id < 0 || id >= static_cast<int>(project.instruments.size())) return Program{};
     const Instrument& ins = project.instruments[static_cast<size_t>(id)];
-    const int sid = ins.sampleId;
-    const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing.sampleRateRatio[sid] : 1.0f;
-    return make_program(ins, ratio, routing.sfSlot[id]);
+    return make_program(ins, routing.sampleRateRatio[id], routing.sfSlot[id]);
 }
 
 // One modulation slot's push. `type == 0` is a real "clear this slot" call, made for NONE and
@@ -124,7 +122,7 @@ inline int filter_type_code(const std::string& type) {
 inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleRate) {
     ModPushes out;
     const float framesPerTic = frames_per_tic_f(tempo, sampleRate);
-    const int   sampleId     = ins.sampleId;
+    const int   sampleId     = ins.id;
 
     for (int i = 0; i < 4; ++i) {
         ModPush& p = out.slots[i];
@@ -195,16 +193,17 @@ void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tem
                                        p.sustainLevel, p.lfoHz, p.oscShape,
                                        p.releaseSamples, p.lfoTrigMode);
     }
-    if (!m.anyActive) engine.clearInstrumentModulation(ins.sampleId);
-    engine.setInstrumentEqSlot(ins.sampleId, ins.eqSlot);
-    engine.setInstrumentSendLevels(ins.sampleId, ins.reverbSend, ins.delaySend);
+    if (!m.anyActive) engine.clearInstrumentModulation(ins.id);
+    engine.setInstrumentEqSlot(ins.id, ins.eqSlot);
+    engine.setInstrumentSendLevels(ins.id, ins.reverbSend, ins.delaySend);
 }
 
-// The sample-playback window, loop, drive/crush/downsample and filter. SoundFont and sampler
-// instruments push the same params.
+// The sample-playback window, loop, drive/crush/downsample and filter, to engine slot `slot` (the
+// instrument's id but for the sample editor's scratch slot). SoundFont and sampler instruments push the
+// same params.
 template <typename Engine>
-void push_instrument_playback_params(Engine& engine, const Instrument& ins) {
-    engine.setInstrumentParams(ins.sampleId, ins.sampleStart, ins.sampleEnd, ins.reverse,
+void push_instrument_playback_params(Engine& engine, const Instrument& ins, int slot) {
+    engine.setInstrumentParams(slot, ins.sampleStart, ins.sampleEnd, ins.reverse,
                                loop_mode_code(ins.loopMode), ins.loopStart, ins.loopEnd,
                                ins.drive, ins.crush, ins.downsample,
                                filter_type_code(ins.filterType), ins.filterCut, ins.filterRes);
@@ -300,7 +299,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
         // Every trigger: the user's ATK/DEC/SUS/REL, keyed by instrument so two sharing one SF2 stay apart.
         const SFOverrides& ov = ins.sfOverrides;
         engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
-        push_instrument_playback_params(engine, ins);
+        push_instrument_playback_params(engine, ins, ins.id);
 
         ensure_table_loaded(tableId);
         engine.requestResume();

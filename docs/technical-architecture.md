@@ -616,8 +616,11 @@ Project
 
 **`-1` is the empty value everywhere** — chain references, table volume, every EQ slot. Not `0xFF`.
 
-**An instrument is empty iff `sampleFilePath` is null.** Not `sampleId < 0`, not an empty name. A
-note-on on an empty instrument is still a valid *event*; the consumer is what drops it.
+**An instrument is empty iff `sampleFilePath` is null.** Not an empty name. A note-on on an empty
+instrument is still a valid *event*; the consumer is what drops it.
+
+**An instrument's engine slot is its `id`.** Nothing stores a copy: the `.ptp`'s `sampleId` key is
+written for older builds and never read.
 
 ### Files
 

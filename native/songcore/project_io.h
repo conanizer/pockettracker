@@ -225,7 +225,6 @@ inline SFOverrides parse_sf_overrides(const json& j) {
 inline Instrument parse_instrument(const json& j, int index) {
     Instrument i(get_int(j, "id", index));
     i.name           = get_str(j, "name", i.name);
-    i.sampleId       = get_int(j, "sampleId", i.sampleId);   // absent → -1 (field default), not the index
     i.volume         = get_int(j, "volume", i.volume);
     i.pan            = get_int(j, "pan", i.pan);
     { auto it = j.find("root"); if (it != j.end() && it->is_object()) i.root = parse_note(*it); }
@@ -715,7 +714,7 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
     w.begin_object();
     w.field_int("id", i.id);
     if (i.name != default_instrument_name(i.id)) w.field_string("name", i.name);
-    if (i.sampleId != -1)   w.field_int("sampleId", i.sampleId);
+    w.field_int("sampleId", i.id);   // not read back; older builds take the engine slot from it
     if (i.volume != 0xFF)   w.field_int("volume", i.volume);
     if (i.pan != 0x80)      w.field_int("pan", i.pan);
     if (i.root != Note::C4()) { w.key("root"); emit_note(w, i.root); }

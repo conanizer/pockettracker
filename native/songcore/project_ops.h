@@ -118,8 +118,6 @@ inline void clean_unused_inst(Project& project) {
         }
     }
 
-    // ⚠️ `Instrument(i)` keeps `sampleId = -1` where a fresh project has `i` — they differ on disk, and
-    // the round-trip tests pin it.
     for (int i = 0; i < static_cast<int>(project.instruments.size()); ++i)
         if (used.instruments.count(i) == 0) project.instruments[static_cast<size_t>(i)] = Instrument(i);
 

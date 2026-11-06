@@ -3,8 +3,8 @@
 
 // The song data model behind the .ptp / .pti JSON (project_io.h).
 // ⚠️ Field defaults, order and pool sizes are part of the file format: a key equal to its member
-// initializer is omitted on save and a missing one loads as it. A FACTORY value differs only for
-// Instrument.sampleId (the slot index). No floating point, so a .ptp round-trips exactly.
+// initializer is omitted on save and a missing one loads as it. No floating point, so a .ptp
+// round-trips exactly.
 
 #include <cstddef>
 #include <cstdint>
@@ -389,7 +389,6 @@ struct MidiMapping {
 struct Instrument {
     int id = 0;
     std::string name = default_instrument_name(0);
-    int sampleId = -1;                       // FIELD default -1; the factory sets the slot index
     int volume = 0xFF;
     int pan = 0x80;
     Note root = Note::C4();
@@ -502,7 +501,7 @@ struct Project {
     std::vector<Phrase>     phrases;              // 256
     std::vector<Chain>      chains;               // 256
     std::vector<Track>      tracks;               // 8
-    std::vector<Instrument> instruments;          // 128, sampleId = slot index
+    std::vector<Instrument> instruments;          // 128; an instrument's engine slot is its id
     std::vector<Table>      tables;               // 128
     std::vector<Groove>     grooves;              // 128
     std::vector<Scale>      scales;               // 16 — slot 00 is every track's default
@@ -544,7 +543,7 @@ struct InstrumentPreset {
     std::optional<std::vector<TableRow>> tableRows;
 };
 
-// A fresh default Project. The one factory-vs-field difference: sampleId = slot index.
+// A fresh default Project.
 inline Project make_default_project() {
     Project p;
     p.eqPresets.reserve(POOL_EQPRESETS);
@@ -556,11 +555,7 @@ inline Project make_default_project() {
     p.tracks.reserve(POOL_TRACKS);
     for (int i = 0; i < POOL_TRACKS; ++i) p.tracks.emplace_back(i);
     p.instruments.reserve(POOL_INSTRUMENTS);
-    for (int i = 0; i < POOL_INSTRUMENTS; ++i) {
-        Instrument ins(i);
-        ins.sampleId = i;  // factory value
-        p.instruments.push_back(std::move(ins));
-    }
+    for (int i = 0; i < POOL_INSTRUMENTS; ++i) p.instruments.emplace_back(i);
     p.tables.reserve(POOL_TABLES);
     for (int i = 0; i < POOL_TABLES; ++i) p.tables.emplace_back(i);
     p.grooves.reserve(POOL_GROOVES);

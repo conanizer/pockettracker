@@ -224,9 +224,8 @@ void SongcoreHost::push_instrument(int id, bool refreshSounding) {
     if (!engine_) return;
     if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
     push_instrument_params(*engine_, project_.instruments[id], routing_, tempo_in_force(project_), sampleRate_);
-    // `sampleId` is the index the params were written at and the one a voice remembers.
     // ⚠️ Only for an EDIT: the refresh wipes what a table row or phrase command set on the voice.
-    if (refreshSounding) engine_->refreshSoundingInstrument(project_.instruments[id].sampleId);
+    if (refreshSounding) engine_->refreshSoundingInstrument(id);
 }
 
 void SongcoreHost::push_globals() {
@@ -514,9 +513,7 @@ void SongcoreHost::preview_sample_editor(int id, int sourceMode, int64_t selStar
 
     // A voice's window is keyed on the SLOT it plays from, so the params go to the scratch slot
     // when there is one.
-    const int savedSampleId = ins.sampleId;
-    if (slot != id) ins.sampleId = slot;
-    push_instrument_playback_params(*engine_, ins);
+    push_instrument_playback_params(*engine_, ins, slot);
     // After the push, which clears any previous window. A channel copy is frame-for-frame, so the
     // selection indexes it as it is; a synced one is scaled onto its new length.
     if (totalFrames > 0 && selEnd > selStart) {
@@ -526,7 +523,6 @@ void SongcoreHost::preview_sample_editor(int id, int sourceMode, int64_t selStar
         if (b > a) engine_->setInstrumentFrameWindow(slot, static_cast<int>(a), static_cast<int>(b));
     }
     preview_instrument_dry(*engine_, ins, slot, routing_.sampleRateRatio[id]);
-    if (slot != id) ins.sampleId = savedSampleId;
 
     ins.root = savedRoot;   // read at SCHEDULE time, so it can go back at once
 }
@@ -534,7 +530,7 @@ void SongcoreHost::preview_sample_editor(int id, int sourceMode, int64_t selStar
 void SongcoreHost::finish_sample_preview(int id) {
     if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
     Instrument& ins = project_.instruments[static_cast<size_t>(id)];
-    push_instrument_playback_params(*engine_, ins);
+    push_instrument_playback_params(*engine_, ins, id);
     // The push only reaches the instrument's own slot; a channel audition used the scratch slot.
     engine_->setInstrumentFrameWindow(SOURCE_PREVIEW_SLOT, -1, -1);
     // The three the DRY preview switched off.
@@ -918,8 +914,7 @@ void SongcoreHost::arm_midi_in() {
     const int count = std::min(static_cast<int>(project_.instruments.size()), POOL_INSTRUMENTS);
     for (int id = 0; id < count; ++id) {
         const Instrument& ins = project_.instruments[static_cast<size_t>(id)];
-        const int   sid   = ins.sampleId;
-        const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing_.sampleRateRatio[sid] : 1.0f;
+        const float ratio = routing_.sampleRateRatio[id];
         if (routing_.sfSlot[id] == programRouting_.sfSlot[id] && ratio == programRouting_.sampleRateRatio[id])
             continue;
         push_instrument_params(*engine_, ins, routing_, tempo_in_force(project_), sampleRate_);

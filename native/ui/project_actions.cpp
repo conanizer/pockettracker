@@ -389,7 +389,6 @@ int create_resampled_instrument(songcore::SongcoreHost& host, const std::string&
     ins.instrumentType = songcore::InstrumentType::SAMPLER;
     ins.soundfontPath.reset();
     ins.sampleFilePath = wavPath;
-    ins.sampleId       = slot;
     ins.root           = songcore::Note::C4();
     ins.volume         = 0xFF;
     ins.pan            = 0x80;

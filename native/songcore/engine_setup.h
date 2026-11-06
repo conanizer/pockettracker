@@ -30,15 +30,15 @@ namespace songcore {
 template <typename Engine>
 void push_instrument_params(Engine& engine, const Instrument& ins, const Routing& routing,
                             int tempo, int sampleRate) {
-    push_instrument_playback_params(engine, ins);
+    push_instrument_playback_params(engine, ins, ins.id);
     push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate);
     // The SF ADSR override — a live key is scheduled with no push, so the engine's copy must be current.
     const SFOverrides& ov = ins.sfOverrides;
     engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
 
-    const int   sid   = ins.sampleId;
-    const float ratio = (sid >= 0 && sid < POOL_INSTRUMENTS) ? routing.sampleRateRatio[sid] : 1.0f;
-    const int   slot  = (ins.id >= 0 && ins.id < POOL_INSTRUMENTS) ? routing.sfSlot[ins.id] : -1;
+    const bool  inPool = ins.id >= 0 && ins.id < POOL_INSTRUMENTS;
+    const float ratio  = inPool ? routing.sampleRateRatio[ins.id] : 1.0f;
+    const int   slot   = inPool ? routing.sfSlot[ins.id] : -1;
     const Program p = make_program(ins, ratio, slot);
     engine.setProgram(ins.id, p, p.sliceMarkers, p.sliceCount);
 }
@@ -270,7 +270,6 @@ int load_sample_file(Engine& engine, int instrumentId, const std::string& path) 
 }
 
 // Load every instrument's media and fill the Routing: each sample's rate ratio and SoundFont slot.
-// ⚠️ The ratio is keyed by `instrument.id` but read by `sampleId`; they coincide in every factory project.
 // ⚠️ A WAV's `cue ` chunk REPLACES the .ptp's slice markers (hence the non-const `project`).
 template <typename Engine>
 MediaLoadResult load_project_media(Engine& engine, Project& project, const MediaRoots& roots,
@@ -492,7 +491,6 @@ void clear_instrument(Engine* engine, Project& project, int id, Routing& routing
     const InstrumentType keepType = project.instruments[id].instrumentType;
 
     Instrument fresh(id);
-    fresh.sampleId       = id;   // the factory value
     fresh.instrumentType = keepType;
     project.instruments[id] = std::move(fresh);
 
@@ -551,7 +549,6 @@ bool load_instrument_sample(Engine* engine, Project& project, int id, const std:
 
     Instrument& ins   = project.instruments[static_cast<size_t>(id)];
     ins.sampleFilePath = path;
-    ins.sampleId       = id;
     ins.sliceMarkers   = is_native_compressed(path_extension_lower(path))
                              ? std::vector<int64_t>{}
                              : read_cue_markers(path);
@@ -603,7 +600,6 @@ bool apply_instrument_preset(Engine* engine, Project& project, int id, const Ins
     const int keepId = dst.id;
     dst = src;
     dst.id       = keepId;
-    dst.sampleId = keepId;
     dst.sampleFilePath.reset();
     dst.soundfontPath.reset();
 
