@@ -862,7 +862,7 @@ These modify the waveform in memory (UNDO is available after each operation).
 > **UNDO** reverts only the **last single operation** — it is not a full history. If you apply NORMALIZE then FADE OUT, pressing UNDO reverts only the FADE OUT.
 
 > [!WARNING]
-> **OVERWRITE** writes to disk immediately and **cannot be undone**. Once you overwrite, the previous file content is permanently gone. Use **SAVE** (which creates a new numbered file) while experimenting, and only OVERWRITE when you are certain of the result.
+> **OVERWRITE** writes to disk immediately and **cannot be undone**. Once you overwrite, the previous file content is permanently gone. Use **SAVE** (which creates a new numbered file) while experimenting, and only OVERWRITE when you are certain of the result. A sample loaded from an MP3, FLAC or any other non-WAV file keeps that file: OVERWRITE writes a WAV beside it, and the instrument plays the WAV from then on.
 
 ### SYNC mode
 

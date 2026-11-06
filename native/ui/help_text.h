@@ -2130,10 +2130,14 @@ inline constexpr HelpEntry HELP_ENTRIES[] = {
       "file."},
      {"A saves, or asks for a new name"}},
     /* SE_OVERWRITE */
-    {"OVERWRITE: replace the file", "Writes over the file this", "sample came from.",
-     {"Writes over the file this sample",
-      "came from, straight away. The",
-      "old file is gone for good."},
+    {"OVERWRITE: replace the file", "Writes over the WAV this", "sample came from.",
+     {"At once - the old WAV is gone",
+      "for good.",
+      "",
+      "From an MP3 or any other kind",
+      "of file, the old file stays: a",
+      "new WAV goes beside it, and the",
+      "instrument plays that one."},
      {"A overwrites, with no undo"}},
     /* SE_CHOP */
     {"CHOP: every slice as a file", "Writes them into a Chops", "folder named after the sample.",

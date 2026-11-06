@@ -652,12 +652,21 @@ void InputDispatcher::sample_editor_confirm() {
                     break;
                 }
 
-                case 2:   // OVERWRITE — back over the file it came from. Nothing to do if it has none.
-                    if (!se.sampleFilePath.empty()) {
-                        bake_pending_pitch();
+                case 2: {   // OVERWRITE — back over the file it came from. Nothing to do if it has none.
+                    if (se.sampleFilePath.empty()) break;
+                    bake_pending_pitch();
+                    if (to_lower(path_extension(se.sampleFilePath)) == "wav") {
                         save_sample_to(se.sampleFilePath, /*adopt_name=*/false);
+                        break;
                     }
+                    // ⚠️ What is written is a WAV, and the loader picks its decoder by extension: an MP3
+                    // overwritten in place would never load again. Keep it; the WAV goes beside it.
+                    const std::string dir  = fs_.parent_path(se.sampleFilePath);
+                    const std::string stem = free_wav_stem(fs_, dir, path_stem(se.sampleFilePath));
+                    if (save_sample_to(dir + "/" + stem + ".wav", /*adopt_name=*/false))
+                        set_status(s_, "SAVED: " + stem + ".wav", true);
                     break;
+                }
 
                 case 3:   // CHOP
                     sample_editor_chop();
@@ -802,7 +811,7 @@ std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const
 
 // ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
 
-void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
+bool InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
     before_long_operation();
     SampleEditorState& se   = s_.sampleEditor;
     const std::vector<int> cues = compute_slice_cue_points();
@@ -810,7 +819,7 @@ void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
     if (!host_.save_sample_wav(se.instrumentId, path, cues, se.sourceMode, se.hasStereoData,
                                se.bitDepth)) {
         set_status(s_, "SAVE FAILED", false);
-        return;
+        return false;
     }
     host_.adopt_saved_sample(se.instrumentId, se.bitDepth);
 
@@ -832,6 +841,7 @@ void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
 
     mark_modified();
     s_.currentScreen = s_.previousScreen;   // a save LEAVES the editor, as it does on Android
+    return true;
 }
 
 // ─── CHOP ────────────────────────────────────────────────────────────────────────────────────────

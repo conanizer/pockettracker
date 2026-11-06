@@ -1056,8 +1056,8 @@ class InputDispatcher {
     // the sample and loop windows and ⚠️ every slice marker are reset, not clamped.
     void refresh_sample_view(bool reset_selection);
 
-    // SAVE / SAVE-AS / OVERWRITE: write the WAV, adopt it, leave the editor.
-    void save_sample_to(const std::string& path, bool adopt_name);
+    // SAVE / SAVE-AS / OVERWRITE: write the WAV, adopt it, leave the editor. False: nothing written.
+    bool save_sample_to(const std::string& path, bool adopt_name);
 
     // CHOP: every slice to `Samples/Chops/<name>/` as its own WAV.
     void sample_editor_chop();
