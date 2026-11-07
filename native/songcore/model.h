@@ -306,12 +306,10 @@ struct Groove {
 
 // One of the 16 scales: which of the twelve intervals from the key are in it.
 // ⚠️ All twelve (the default) means chromatic — no quantizing, which every consumer must keep.
-// `offset` (centi-semitones per degree, microtuning) is saved but not yet read.
 struct Scale {
     int id = 0;
     std::string name;                                        // "" = never named
     std::vector<int> enabled = std::vector<int>(12, 1);      // 1 = the degree is in the scale
-    std::vector<int> offset  = std::vector<int>(12, 0);      // ⏸️ centi-semitones, −2400..+2400
     Scale() = default;
     explicit Scale(int id_) : id(id_) {}
 };

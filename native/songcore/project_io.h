@@ -161,10 +161,8 @@ inline Scale parse_scale(const json& j, int index) {
     Scale s(get_int(j, "id", index));
     s.name    = get_str(j, "name", s.name);
     s.enabled = parse_int_array(j, "enabled", s.enabled);
-    s.offset  = parse_int_array(j, "offset",  s.offset);
     // A hand-edited or truncated array must not leave a 12-degree consumer reading past its end.
     s.enabled.resize(12, 1);
-    s.offset.resize(12, 0);
     return s;
 }
 
@@ -659,10 +657,7 @@ inline void emit_scale(JsonWriter& w, const Scale& s) {
     w.begin_object();
     w.field_int("id", s.id);
     if (!s.name.empty()) w.field_string("name", s.name);
-    // ⏸️ `offset` is written once non-default although nothing reads it yet, so microtuning will need
-    // no migration.
     if (s.enabled != std::vector<int>(12, 1)) emit_int_array(w, "enabled", s.enabled);
-    if (s.offset  != std::vector<int>(12, 0)) emit_int_array(w, "offset",  s.offset);
     w.end_object();
 }
 
@@ -836,8 +831,7 @@ inline std::string serialize_project(const Project& p) {
     {
         bool anyAuthored = (int)p.scales.size() != POOL_SCALES;
         for (const Scale& s : p.scales)
-            if (!s.name.empty() || s.enabled != std::vector<int>(12, 1) ||
-                s.offset != std::vector<int>(12, 0)) { anyAuthored = true; break; }
+            if (!s.name.empty() || s.enabled != std::vector<int>(12, 1)) { anyAuthored = true; break; }
         if (anyAuthored) emit_pool(w, "scales", p.scales, emit_scale);
     }
     if (p.scaleKey != 0) w.field_int("scaleKey", p.scaleKey);

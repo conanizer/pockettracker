@@ -81,8 +81,7 @@ inline int scale_bank_index_by_mask(unsigned mask) {
     return -1;
 }
 
-/** Overwrite `s`'s degrees and name from entry `index`. ⚠️ Its `id` and microtuning `offset` stay —
- *  they are not part of the shape a name describes. */
+/** Overwrite `s`'s degrees and name from entry `index`. Its `id` stays. */
 inline void scale_apply_bank(Scale& s, int index) {
     const std::vector<ScaleBankEntry>& bank = scale_bank();
     if (index < 0 || index >= static_cast<int>(bank.size())) return;

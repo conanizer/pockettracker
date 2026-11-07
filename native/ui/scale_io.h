@@ -22,8 +22,6 @@ inline std::string serialize_scale(const songcore::Scale& s) {
     w.begin_object();
     if (!s.name.empty()) w.field_string("name", s.name);
     songcore::detail::emit_int_array(w, "enabled", s.enabled);
-    if (s.offset != std::vector<int>(12, 0))
-        songcore::detail::emit_int_array(w, "offset", s.offset);
     w.end_object();
     return std::move(w.out);
 }
@@ -36,11 +34,9 @@ inline bool parse_scale_text(const std::string& text, songcore::Scale& out) {
     songcore::Scale s = out;
     s.name    = songcore::detail::get_str(j, "name", s.name);
     s.enabled = songcore::detail::parse_int_array(j, "enabled", s.enabled);
-    s.offset  = songcore::detail::parse_int_array(j, "offset",  s.offset);
 
     // A short hand-edited array must not leave a 12-degree reader running off its end.
     s.enabled.resize(12, 1);
-    s.offset.resize(12, 0);
 
     out = s;
     return true;
