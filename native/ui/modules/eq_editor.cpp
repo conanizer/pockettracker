@@ -5,13 +5,13 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "effects/modules/eq-band-math.h"
 #include "ui/helpers.h"
 
 namespace pt::ui {
 
 namespace {
 
-constexpr float kPi         = 3.14159265358979323846f;
 constexpr double kPiD       = 3.14159265358979323846;
 // ⚠️ Only a fallback: the curve must use the rate the engine's bands were built at.
 constexpr float kDefaultSampleRate = 44100.0f;
@@ -101,68 +101,17 @@ double svf_gain_db(int type, float fc, float q, float viz_freq, float sample_rat
                     std::max(-static_cast<double>(EqModule::VIS_DB), db));
 }
 
-// Type 0 (OFF) contributes nothing.
+// Type 0 (OFF) contributes nothing. The shelves and bell from the engine's own coefficients.
 float band_gain_db(const songcore::EqBand& band, float freq, float sample_rate) {
-    const float fc     = 20.0f * std::pow(1000.0f, static_cast<float>(band.freq) / 255.0f);
-    const float gainDb = static_cast<float>(band.gain) / 10.0f - 12.0f;
-    const float q      = 0.1f * std::pow(100.0f, static_cast<float>(band.q) / 255.0f);
-
-    // LOWCUT / HICUT run through the SVF.
-    if (band.type == 2 || band.type == 5)
-        return static_cast<float>(svf_gain_db(band.type, fc, q, freq, sample_rate));
-
-    const float w0    = 2.0f * kPi * fc / sample_rate;
-    const float w     = 2.0f * kPi * freq / sample_rate;
-    const float cosW0 = std::cos(w0);
-    const float sinW0 = std::sin(w0);
-    const float alpha = sinW0 / (2.0f * q);
-    const float cosW  = std::cos(w);
-    const float cos2W = std::cos(2.0f * w);
-    const float sinW  = std::sin(w);
-    const float sin2W = std::sin(2.0f * w);
-
-    const float A = std::pow(10.0f, gainDb / 40.0f);
-
-    float b0, b1, b2, a0, a1, a2;
+    const float fc     = eqFreqHzFromHex(band.freq);
+    const float gainDb = eqGainDbFromHex(band.gain);
+    const float q      = eqQFromHex(band.q);
     switch (band.type) {
-        case 1: {  // LOSHELF
-            const float sqA = std::sqrt(A);
-            b0 = A * ((A + 1) - (A - 1) * cosW0 + 2 * sqA * alpha);
-            b1 = 2 * A * ((A - 1) - (A + 1) * cosW0);
-            b2 = A * ((A + 1) - (A - 1) * cosW0 - 2 * sqA * alpha);
-            a0 = (A + 1) + (A - 1) * cosW0 + 2 * sqA * alpha;
-            a1 = -2.0f * ((A - 1) + (A + 1) * cosW0);
-            a2 = (A + 1) + (A - 1) * cosW0 - 2 * sqA * alpha;
-            break;
-        }
-        case 3: {  // BELL (peaking)
-            b0 = 1 + alpha * A;  b1 = -2 * cosW0;  b2 = 1 - alpha * A;
-            a0 = 1 + alpha / A;  a1 = -2 * cosW0;  a2 = 1 - alpha / A;
-            break;
-        }
-        case 4: {  // HISHELF
-            const float sqA = std::sqrt(A);
-            b0 = A * ((A + 1) + (A - 1) * cosW0 + 2 * sqA * alpha);
-            b1 = -2 * A * ((A - 1) + (A + 1) * cosW0);
-            b2 = A * ((A + 1) + (A - 1) * cosW0 - 2 * sqA * alpha);
-            a0 = (A + 1) - (A - 1) * cosW0 + 2 * sqA * alpha;
-            a1 = 2.0f * ((A - 1) - (A + 1) * cosW0);
-            a2 = (A + 1) - (A - 1) * cosW0 - 2 * sqA * alpha;
-            break;
-        }
-        default:
-            return 0.0f;
+        case 2: case 5: return static_cast<float>(svf_gain_db(band.type, fc, q, freq, sample_rate));
+        case 1: case 3: case 4:
+            return static_cast<float>(eqPareqGainDb(band.type, fc, gainDb, q, sample_rate, freq));
+        default: return 0.0f;
     }
-
-    // |H(e^{jω})|, from the complex numerator and denominator.
-    const float numRe = b0 + b1 * cosW + b2 * cos2W;
-    const float numIm = -(b1 * sinW + b2 * sin2W);
-    const float denRe = a0 + a1 * cosW + a2 * cos2W;
-    const float denIm = -(a1 * sinW + a2 * sin2W);
-
-    const float magSq =
-        (numRe * numRe + numIm * numIm) / (denRe * denRe + denIm * denIm + 1e-30f);
-    return 10.0f * std::log10(magSq + 1e-30f);
 }
 
 // An EqBand is edited in place, so only its contents can say the curve is stale.
@@ -186,9 +135,7 @@ const std::vector<std::string>& eq_band_type_names() {
 
 // ─── The math the header exposes ─────────────────────────────────────────────────────────────────
 
-float EqModule::freq_hz_from_hex(int hex) {
-    return 20.0f * std::pow(1000.0f, static_cast<float>(hex) / 255.0f);
-}
+float EqModule::freq_hz_from_hex(int hex) { return eqFreqHzFromHex(hex); }
 
 std::string EqModule::format_freq_hz(float hz) {
     const int rounded = static_cast<int>(hz);

@@ -2,6 +2,7 @@
 #include <cmath>
 #include "../soundpipe/soundpipe.h"
 #include "../primitives/daisysp/svf.h"
+#include "eq-band-math.h"
 #include "../glide.h"
 
 // The 3-band parametric EQ. Band types — the number is stored in projects, append only:
@@ -65,9 +66,8 @@ struct EqBandFilter {
             svfR.SetFreq(hz); svfR.SetRes(res); svfR.SetDrive(0.0f);
         } else {
             if (cold) { sp_pareq_init(&sp, &pL); sp_pareq_init(&sp, &pR); }
-            int pareqMode = (type == 1) ? 1 : (type == 4) ? 2 : 0;   // 0 bell, 1 low shelf, 2 high shelf
             float v    = powf(10.0f, gainDb / 20.0f);
-            float mode = (float)pareqMode;
+            float mode = (float)eqPareqMode(type);
             pL.fc = freqHz; pL.v = v; pL.q = q; pL.mode = mode;
             pL.prv_fc = pL.prv_v = pL.prv_q = -1.0f;
             pR.fc = freqHz; pR.v = v; pR.q = q; pR.mode = mode;

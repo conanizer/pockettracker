@@ -684,9 +684,9 @@ void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainH
     if (slot < 0 || slot >= 128 || band < 0 || band >= 3) return;
     auto& b = eqPresets.edit(slot).bands[band];
     b.type   = type;
-    b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
-    b.gainDb = gainHex / 10.0f - 12.0f;   // gainHex 0..240 → −12.0..+12.0 dB (0.1 dB/step)
-    b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
+    b.freqHz = eqFreqHzFromHex(freqHex);
+    b.gainDb = eqGainDbFromHex(gainHex);
+    b.q      = eqQFromHex(qHex);
     // The authored bytes too — a table morph interpolates them. The only writer of either array.
     auto& h = eqPresetHex.edit(slot);
     h.type[band] = type;

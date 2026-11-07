@@ -357,9 +357,9 @@ void AudioEngine::scheduleMasterEqBands(int64_t targetFrame, const EqBandsHex& b
 static EqBandData eqBandFromHex(int type, int freqHex, int gainHex, int qHex) {
     EqBandData b;
     b.type   = type;
-    b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
-    b.gainDb = gainHex / 10.0f - 12.0f;
-    b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
+    b.freqHz = eqFreqHzFromHex(freqHex);
+    b.gainDb = eqGainDbFromHex(gainHex);
+    b.q      = eqQFromHex(qHex);
     return b;
 }
 
