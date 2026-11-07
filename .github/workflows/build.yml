@@ -378,6 +378,15 @@ jobs:
       - name: Build
         run: cmake --build shell/build --config Release
 
+      # The handheld's own code (the SCHED_FIFO thread, the exclusive ALSA open) is compiled only with
+      # PT_HANDHELD, which only the PortMaster release turns on — compiled here too, so it is not first
+      # built on release day.
+      - name: Build the handheld variant (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S shell -B shell/build-handheld -DCMAKE_BUILD_TYPE=Release -DPT_WERROR=ON -DPT_HANDHELD=ON
+          cmake --build shell/build-handheld
+
       # `error` rather than `warn` on no match — a shell that silently stopped being produced is
       # exactly the failure this job exists to catch, and a green job with an empty artifact would
       # hide it.
