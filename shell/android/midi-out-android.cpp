@@ -30,15 +30,19 @@ AndroidMidiOut::Hooks& AndroidMidiOut::hooks(JNIEnv* env, jobject activity) {
     if (hooks_.resolved) return hooks_;
     hooks_.resolved = true;
 
-    jclass cls = env->GetObjectClass(activity);
-    hooks_.count = env->GetMethodID(cls, "midiDeviceCount", "()I");
-    hooks_.name  = env->GetMethodID(cls, "midiDeviceName", "(I)Ljava/lang/String;");
-    hooks_.open  = env->GetMethodID(cls, "midiOpenDevice", "(I)Z");
-    hooks_.close = env->GetMethodID(cls, "midiCloseDevice", "()V");
-    hooks_.send  = env->GetMethodID(cls, "midiSend", "(IIII)Z");
-    if (env->ExceptionCheck()) env->ExceptionClear();
-    hooks_.sendBytes = env->GetMethodID(cls, "midiSendBytes", "([BI)Z");
-    if (env->ExceptionCheck()) env->ExceptionClear();
+    // ⚠️ Each miss cleared at once: under CheckJNI a pending exception aborts the next JNI call.
+    jclass     cls  = env->GetObjectClass(activity);
+    const auto find = [&](const char* name, const char* sig) -> jmethodID {
+        const jmethodID m = env->GetMethodID(cls, name, sig);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
+        return m;
+    };
+    hooks_.count     = find("midiDeviceCount", "()I");
+    hooks_.name      = find("midiDeviceName", "(I)Ljava/lang/String;");
+    hooks_.open      = find("midiOpenDevice", "(I)Z");
+    hooks_.close     = find("midiCloseDevice", "()V");
+    hooks_.send      = find("midiSend", "(IIII)Z");
+    hooks_.sendBytes = find("midiSendBytes", "([BI)Z");
     env->DeleteLocalRef(cls);
 
     hooks_.ok = hooks_.count && hooks_.name && hooks_.open && hooks_.close && hooks_.send;

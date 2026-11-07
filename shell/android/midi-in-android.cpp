@@ -36,13 +36,18 @@ AndroidMidiIn::Hooks& AndroidMidiIn::hooks(JNIEnv* env, jobject activity) {
     if (hooks_.resolved) return hooks_;
     hooks_.resolved = true;
 
-    jclass cls   = env->GetObjectClass(activity);
-    hooks_.count = env->GetMethodID(cls, "midiInDeviceCount", "()I");
-    hooks_.name  = env->GetMethodID(cls, "midiInDeviceName", "(I)Ljava/lang/String;");
-    hooks_.open  = env->GetMethodID(cls, "midiInOpenDevice", "(I)Z");
-    hooks_.close = env->GetMethodID(cls, "midiInCloseDevice", "()V");
-    hooks_.read  = env->GetMethodID(cls, "midiInRead", "([B)I");
-    if (env->ExceptionCheck()) env->ExceptionClear();
+    // ⚠️ Each miss cleared at once: under CheckJNI a pending exception aborts the next JNI call.
+    jclass     cls  = env->GetObjectClass(activity);
+    const auto find = [&](const char* name, const char* sig) -> jmethodID {
+        const jmethodID m = env->GetMethodID(cls, name, sig);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
+        return m;
+    };
+    hooks_.count = find("midiInDeviceCount", "()I");
+    hooks_.name  = find("midiInDeviceName", "(I)Ljava/lang/String;");
+    hooks_.open  = find("midiInOpenDevice", "(I)Z");
+    hooks_.close = find("midiInCloseDevice", "()V");
+    hooks_.read  = find("midiInRead", "([B)I");
     env->DeleteLocalRef(cls);
 
     hooks_.ok = hooks_.count && hooks_.name && hooks_.open && hooks_.close && hooks_.read;
